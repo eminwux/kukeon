@@ -143,30 +143,10 @@ func TestDaemonStart(t *testing.T) {
 			// dial-unix error. New behaviour: log the staleness and fall
 			// through to StartCell so the cell actually comes back up.
 			name: "metadata says Ready but socket is unreachable falls through to StartCell",
-			fake: &fakeClient{
-				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
-					return kukeonv1.GetCellResult{
-						Cell: v1beta1.CellDoc{
-							Status: v1beta1.CellStatus{
-								State: v1beta1.CellStateReady,
-								Containers: []v1beta1.ContainerStatus{
-									{State: v1beta1.ContainerStateReady},
-								},
-							},
-						},
-						MetadataExists: true,
-					}, nil
-				},
-				// Surviving root/pause containers from the killed daemon are
-				// stopped before the restart so StartCell's running-containers
-				// precondition does not refuse (#1184).
-				stopCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
-					return kukeonv1.StopCellResult{Cell: doc, Stopped: true}, nil
-				},
-				startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
-					return kukeonv1.StartCellResult{Cell: doc, Started: true}, nil
-				},
-			},
+			// Surviving root/pause containers from the killed daemon are
+			// reconciled through StopPhase before the restart so StartCell's
+			// running-containers precondition does not refuse (#1184).
+			fake:       newStaleReadyFake(),
 			probe:      fixedProbe(false),
 			wantOutput: "metadata reports Ready but socket",
 		},
@@ -249,22 +229,14 @@ func TestDaemonStart(t *testing.T) {
 // survivors) before StartCell, and only after printing the divergence notice.
 func TestDaemonStart_StaleReadyStopsRunningContainersBeforeStart(t *testing.T) {
 	var calls []string
+	running := true
 	fake := &fakeClient{
 		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
-			return kukeonv1.GetCellResult{
-				Cell: v1beta1.CellDoc{
-					Status: v1beta1.CellStatus{
-						State: v1beta1.CellStateReady,
-						Containers: []v1beta1.ContainerStatus{
-							{State: v1beta1.ContainerStateReady},
-						},
-					},
-				},
-				MetadataExists: true,
-			}, nil
+			return runningOrStopped(running), nil
 		},
 		stopCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
 			calls = append(calls, "stop")
+			running = false
 			return kukeonv1.StopCellResult{Cell: doc, Stopped: true}, nil
 		},
 		startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
@@ -284,6 +256,73 @@ func TestDaemonStart_StaleReadyStopsRunningContainersBeforeStart(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), `kukeond started (cell "kukeond" in realm "kuke-system")`) {
 		t.Errorf("missing started confirmation\nGot:\n%s", buf.String())
+	}
+}
+
+// TestDaemonStart_StaleReadyEscalatesWhenStopReportsSuccessButTaskSurvives is
+// the path the PR review flagged: routing the stale-Ready heal through
+// StopPhase (not a raw StopCell) means a StopCell that returns Stopped=true
+// while a root/pause task keeps running — the runner's per-container stop
+// errors are logged-and-continue, not aggregated (#868) — is caught by
+// StopPhase's post-stop verify, which escalates to KillCell before StartCell
+// runs. A raw StopCell would have reported success and left StartCell to refuse
+// on the same running-containers precondition this heal targets.
+func TestDaemonStart_StaleReadyEscalatesWhenStopReportsSuccessButTaskSurvives(t *testing.T) {
+	var calls []string
+	running := true
+	fake := &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return runningOrStopped(running), nil
+		},
+		// StopCell claims success but the task survives — `running` stays true,
+		// so StopPhase's post-stop verify still sees a Ready container.
+		stopCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
+			calls = append(calls, "stop")
+			return kukeonv1.StopCellResult{Cell: doc, Stopped: true}, nil
+		},
+		// The escalation actually clears the survivor.
+		killCellFn: func(doc v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
+			calls = append(calls, "kill")
+			running = false
+			return kukeonv1.KillCellResult{Cell: doc, Killed: true}, nil
+		},
+		startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+			calls = append(calls, "start")
+			return kukeonv1.StartCellResult{Cell: doc, Started: true}, nil
+		},
+	}
+
+	buf := runStartWithFake(t, fake, fixedProbe(false))
+
+	if want := []string{"stop", "kill", "start"}; len(calls) != len(want) ||
+		calls[0] != want[0] || calls[1] != want[1] || calls[2] != want[2] {
+		t.Fatalf("call order: want %v, got %v", want, calls)
+	}
+	if !strings.Contains(buf.String(), "metadata reports Ready but socket") {
+		t.Errorf("missing stale-Ready divergence notice\nGot:\n%s", buf.String())
+	}
+	if !strings.Contains(buf.String(), `kukeond started (cell "kukeond" in realm "kuke-system")`) {
+		t.Errorf("missing started confirmation\nGot:\n%s", buf.String())
+	}
+}
+
+// newStaleReadyFake builds a fakeClient for the stale-Ready heal happy path:
+// GetCell reports a Ready cell with a running container until StopCell cleans
+// it, after which GetCell reports Stopped so StopPhase's post-stop verify
+// (#868) passes without escalating to KillCell. StartCell then succeeds.
+func newStaleReadyFake() *fakeClient {
+	running := true
+	return &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return runningOrStopped(running), nil
+		},
+		stopCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
+			running = false
+			return kukeonv1.StopCellResult{Cell: doc, Stopped: true}, nil
+		},
+		startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+			return kukeonv1.StartCellResult{Cell: doc, Started: true}, nil
+		},
 	}
 }
 
@@ -423,6 +462,7 @@ type fakeClient struct {
 	getCellFn   func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error)
 	startCellFn func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error)
 	stopCellFn  func(doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error)
+	killCellFn  func(doc v1beta1.CellDoc) (kukeonv1.KillCellResult, error)
 }
 
 func (f *fakeClient) GetCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
@@ -444,4 +484,38 @@ func (f *fakeClient) StopCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.
 		return kukeonv1.StopCellResult{}, errors.New("unexpected StopCell call")
 	}
 	return f.stopCellFn(doc)
+}
+
+func (f *fakeClient) KillCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
+	if f.killCellFn == nil {
+		return kukeonv1.KillCellResult{}, errors.New("unexpected KillCell call")
+	}
+	return f.killCellFn(doc)
+}
+
+// runningOrStopped builds the GetCellResult the stale-Ready fakes return: a
+// Ready cell with a running container while `running`, otherwise a Stopped
+// cell with none. StopPhase's post-stop verify (#868) re-reads the cell after
+// StopCell, so the stop/kill fakes flip `running` to drive whether that verify
+// passes cleanly or escalates to KillCell.
+func runningOrStopped(running bool) kukeonv1.GetCellResult {
+	if running {
+		return kukeonv1.GetCellResult{
+			Cell: v1beta1.CellDoc{
+				Status: v1beta1.CellStatus{
+					State: v1beta1.CellStateReady,
+					Containers: []v1beta1.ContainerStatus{
+						{State: v1beta1.ContainerStateReady},
+					},
+				},
+			},
+			MetadataExists: true,
+		}
+	}
+	return kukeonv1.GetCellResult{
+		Cell: v1beta1.CellDoc{
+			Status: v1beta1.CellStatus{State: v1beta1.CellStateStopped},
+		},
+		MetadataExists: true,
+	}
 }

@@ -129,10 +129,16 @@ func runStart(cmd *cobra.Command, _ []string) error {
 		// refuses on its "has running containers and must first be stopped"
 		// precondition while those survive, so the documented heal — `daemon
 		// start` brings an externally-killed daemon back up — needs the
-		// surviving containers cleaned first. Stop the cell (the same
-		// reconcile the manual `kuke daemon stop` workaround performed) before
-		// starting fresh (#1184).
-		if _, stopErr := client.StopCell(cmd.Context(), doc); stopErr != nil {
+		// surviving containers cleaned first. Route through the same StopPhase
+		// reconcile `kuke daemon stop` runs (stop.go), not a raw StopCell: the
+		// runner's per-container stop errors are logged-and-continue rather
+		// than aggregated, so StopCell can return Stopped=true while a
+		// root/pause task ignores SIGTERM and survives — at which point a bare
+		// StopCell would report success and StartCell would refuse on the very
+		// precondition this heal targets. StopPhase adds the #868
+		// verify-or-escalate-to-KillCell guard and the grace-period→SIGKILL
+		// timeout fallback so a stubborn survivor is actually cleaned (#1184).
+		if stopErr := lifecycle.StopPhase(cmd, client, doc, lifecycle.DefaultTimeout); stopErr != nil {
 			return fmt.Errorf("stop stale kukeond cell: %w", stopErr)
 		}
 	}
