@@ -127,6 +127,16 @@ func (r *Exec) DeleteRealm(realm intmodel.Realm) error {
 		return fmt.Errorf("%w: failed to delete containerd namespace: %w", errdefs.ErrDeleteRealm, err)
 	}
 
+	// Tear down the BuildKit history-store companion (<namespace>_history) with
+	// the same drain-then-delete the realm namespace got. A `kuke build` into
+	// this realm leaves the companion behind; without this `kuke delete realm`
+	// strands exactly the residue `kuke status` now flags (issue #1183). The
+	// same "a deleted realm's build history should not survive" rationale that
+	// folds this into the purge path applies verbatim here.
+	if err = r.purgeBuildKitHistoryNamespace(internalRealm.Spec.Namespace); err != nil {
+		return fmt.Errorf("%w: %w", errdefs.ErrDeleteRealm, err)
+	}
+
 	// Delete realm metadata file
 	metadataFilePath := fs.RealmMetadataPath(r.opts.RunPath, internalRealm.Metadata.Name)
 	if err = metadata.DeleteMetadata(r.ctx, r.logger, metadataFilePath); err != nil {

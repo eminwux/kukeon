@@ -165,41 +165,14 @@ func (r *Exec) PurgeRealm(realm intmodel.Realm) (bool, error) {
 	}
 
 	// Drain and delete the BuildKit history-store companion namespace
-	// (<namespace>_history). kukebuild (BuildKit-as-library) creates it for
-	// BuildKit's history store — solver/llbsolver/history.go derives it as
-	// ns + "_history" — so a `kuke build` into this realm leaves the companion
-	// behind. Tear it down with the same drain-then-delete the realm namespace
+	// (<namespace>_history) with the same drain-then-delete the realm namespace
 	// gets so a full uninstall leaves no `*.kukeon.io*` namespaces (issue
-	// #1183). DeleteNamespace is idempotent (a no-op when the companion never
-	// existed, i.e. the realm was never built into), so this is safe on every
-	// purge. A companion that survives folds into namespaceRemoved so the
+	// #1183). A companion that survives folds into namespaceRemoved so the
 	// uninstall half-cleaned-host gate still sees residual containerd state.
-	if realmForOps.Spec.Namespace != "" {
-		historyNS := consts.BuildKitHistoryNamespace(realmForOps.Spec.Namespace)
-		if err = r.ctrClient.CleanupNamespaceResources(historyNS, ""); err != nil {
-			r.logger.WarnContext(
-				r.ctx,
-				"failed to cleanup buildkit history namespace resources",
-				"namespace",
-				historyNS,
-				"error",
-				err,
-			)
-			// Continue with namespace deletion attempt anyway.
-		}
-		if err = r.ctrClient.DeleteNamespace(historyNS); err != nil {
-			namespaceRemoved = false
-			if nsErr == nil {
-				nsErr = fmt.Errorf("failed to delete buildkit history namespace %q: %w", historyNS, err)
-			}
-			r.logger.WarnContext(
-				r.ctx,
-				"failed to delete buildkit history namespace",
-				"namespace",
-				historyNS,
-				"error",
-				err,
-			)
+	if histErr := r.purgeBuildKitHistoryNamespace(realmForOps.Spec.Namespace); histErr != nil {
+		namespaceRemoved = false
+		if nsErr == nil {
+			nsErr = histErr
 		}
 	}
 
@@ -223,4 +196,46 @@ func (r *Exec) PurgeRealm(realm intmodel.Realm) (bool, error) {
 	}
 
 	return namespaceRemoved, nsErr
+}
+
+// purgeBuildKitHistoryNamespace drains and deletes the BuildKit history-store
+// companion namespace (<namespace>_history) belonging to the realm namespace
+// ns. kukebuild (BuildKit-as-library) creates it for BuildKit's history store
+// — solver/llbsolver/history.go derives it as ns + "_history" — so a
+// `kuke build` into a realm leaves the companion behind, and every
+// namespace-teardown seam (uninstall/purge via PurgeRealm, and DeleteRealm)
+// must tear it down too or it strands the exact residue `kuke status` now
+// flags (issue #1183). DeleteNamespace is idempotent (a no-op when the
+// companion never existed, i.e. the realm was never built into), so this is
+// safe to call on every teardown. An empty ns is a no-op. Returns a non-nil
+// error only when DeleteNamespace itself fails; resource-drain failures are
+// logged best-effort like the realm namespace's own drain.
+func (r *Exec) purgeBuildKitHistoryNamespace(ns string) error {
+	if ns == "" {
+		return nil
+	}
+	historyNS := consts.BuildKitHistoryNamespace(ns)
+	if err := r.ctrClient.CleanupNamespaceResources(historyNS, ""); err != nil {
+		r.logger.WarnContext(
+			r.ctx,
+			"failed to cleanup buildkit history namespace resources",
+			"namespace",
+			historyNS,
+			"error",
+			err,
+		)
+		// Continue with namespace deletion attempt anyway.
+	}
+	if err := r.ctrClient.DeleteNamespace(historyNS); err != nil {
+		r.logger.WarnContext(
+			r.ctx,
+			"failed to delete buildkit history namespace",
+			"namespace",
+			historyNS,
+			"error",
+			err,
+		)
+		return fmt.Errorf("failed to delete buildkit history namespace %q: %w", historyNS, err)
+	}
+	return nil
 }

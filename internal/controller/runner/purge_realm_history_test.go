@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/consts"
+	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
@@ -103,6 +104,83 @@ func TestPurgeRealm_HistoryCompanionFailureFoldsIntoNamespaceRemoved(t *testing.
 	}
 	if err == nil {
 		t.Fatal("expected an error naming the stranded history companion")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("error chain should wrap the delete failure; got %v", err)
+	}
+}
+
+// TestDeleteRealm_DrainsAndDeletesBuildKitHistoryCompanion pins the sibling
+// teardown seam flagged in PR #1205 review: `kuke delete realm` must tear down
+// the realm namespace's BuildKit history-store companion (<namespace>_history)
+// with the same drain-then-delete PurgeRealm gives it, or it strands exactly
+// the residue `kuke status`'s #1183 check now WARNs on.
+func TestDeleteRealm_DrainsAndDeletesBuildKitHistoryCompanion(t *testing.T) {
+	var deleted, drained []string
+	fake := &deleteCellFakeClient{
+		deleteNamespaceFn: func(ns string) error {
+			deleted = append(deleted, ns)
+			return nil
+		},
+		cleanupNamespaceFn: func(ns, _ string) error {
+			drained = append(drained, ns)
+			return nil
+		},
+	}
+	r := newDeleteCellTestExec(t, fake)
+
+	const realmName = "kuke-system"
+	// seedDeleteCellRealm writes Spec.Namespace = realmName + ".kukeon.io", which
+	// is what DeleteRealm reads back via GetRealm and tears down.
+	seedDeleteCellRealm(t, r, realmName)
+	namespace := realmName + ".kukeon.io"
+	historyNS := consts.BuildKitHistoryNamespace(namespace)
+
+	if err := r.DeleteRealm(intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{Name: realmName},
+	}); err != nil {
+		t.Fatalf("DeleteRealm returned error: %v", err)
+	}
+
+	if !slices.Contains(deleted, namespace) {
+		t.Errorf("realm namespace %q not deleted; deleted=%v", namespace, deleted)
+	}
+	if !slices.Contains(deleted, historyNS) {
+		t.Errorf("history companion %q not deleted; deleted=%v", historyNS, deleted)
+	}
+	if !slices.Contains(drained, historyNS) {
+		t.Errorf("history companion %q not drained before delete; drained=%v", historyNS, drained)
+	}
+}
+
+// TestDeleteRealm_HistoryCompanionFailureSurfacesError confirms a stranded
+// history companion fails the delete: DeleteRealm wraps the companion delete
+// failure under ErrDeleteRealm rather than reporting a clean teardown.
+func TestDeleteRealm_HistoryCompanionFailureSurfacesError(t *testing.T) {
+	const realmName = "kuke-system"
+	namespace := realmName + ".kukeon.io"
+	historyNS := consts.BuildKitHistoryNamespace(namespace)
+	wantErr := errors.New("namespace not empty")
+
+	fake := &deleteCellFakeClient{
+		deleteNamespaceFn: func(ns string) error {
+			if ns == historyNS {
+				return wantErr
+			}
+			return nil
+		},
+	}
+	r := newDeleteCellTestExec(t, fake)
+	seedDeleteCellRealm(t, r, realmName)
+
+	err := r.DeleteRealm(intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{Name: realmName},
+	})
+	if err == nil {
+		t.Fatal("expected an error naming the stranded history companion")
+	}
+	if !errors.Is(err, errdefs.ErrDeleteRealm) {
+		t.Errorf("error should wrap ErrDeleteRealm; got %v", err)
 	}
 	if !errors.Is(err, wantErr) {
 		t.Errorf("error chain should wrap the delete failure; got %v", err)
