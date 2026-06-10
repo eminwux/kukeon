@@ -194,9 +194,32 @@ func ChownAndChmod(path string, uid, gid int, mode os.FileMode) error {
 // symlinks, and os.Chmod follows the link, which would mutate the wrong
 // file.
 func ChownTreeAndChmod(root string, uid, gid int, dirMode, fileMode os.FileMode) error {
+	return ChownTreeAndChmodSkip(root, uid, gid, dirMode, fileMode, nil)
+}
+
+// ChownTreeAndChmodSkip is ChownTreeAndChmod with an optional skip predicate.
+// When skip is non-nil and returns true for an entry, that entry is left
+// untouched — its owner and mode are preserved. Returning true for a
+// directory prunes the entire subtree (filepath.SkipDir), so live state that
+// a different code path owns is never re-chowned/chmodded by a tree-wide
+// sweep. `kuke init` uses this to keep its idempotent ownership pass out of
+// per-container kuketty tty directories, whose socket the daemon binds at
+// 0o660 owned by the container's runtime uid (issue #1207).
+func ChownTreeAndChmodSkip(
+	root string,
+	uid, gid int,
+	dirMode, fileMode os.FileMode,
+	skip func(path string, info os.FileInfo) bool,
+) error {
 	return filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
+		}
+		if skip != nil && skip(path, info) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		if err := os.Lchown(path, uid, gid); err != nil {
 			return fmt.Errorf("chown %q: %w", path, err)

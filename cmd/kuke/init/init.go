@@ -363,13 +363,39 @@ func applyKukeonOwnership(
 		return r, fmt.Errorf("apply kukeon ownership to %q: %w", runDir, err)
 	}
 	r.RunDirApplied = true
-	if err := sysuser.ChownTreeAndChmod(
+	if err := sysuser.ChownTreeAndChmodSkip(
 		runPath, 0, ensure.GID, kukeonRunPathDirMode, kukeonRunPathFileMode,
+		skipLiveCellState,
 	); err != nil {
 		return r, fmt.Errorf("apply kukeon ownership to %q: %w", runPath, err)
 	}
 	r.RunPathApplied = true
 	return r, nil
+}
+
+// skipLiveCellState reports whether the recursive `kuke init` ownership sweep
+// must leave a path untouched. Per-container kuketty state is provisioned and
+// owned by the runner at the container's resolved process uid
+// (attachableBuildOpts + attachablePostCreateChown + kuketty), not by init:
+//
+//   - the tty directory (consts.KukeonContainerTTYDir) and everything inside
+//     it — the live attach socket bound 0o660, the capture transcript, the
+//     kuketty log, and kuketty's own runtime metadata it rewrites in place;
+//   - the rendered per-container kuketty metadata file
+//     (ctr.AttachableMetadataFile), chown'd to the container uid so the
+//     in-container wrapper can read it through the bind mount.
+//
+// The blanket sweep treated a live socket as "just a file": it chmodded it
+// 0o660 → 0o640 (stripping group-write, so every kukeon-group operator got
+// EACCES on `kuke attach`) and chown'd it back to root, undoing
+// attachablePostCreateChown. Because `make dev-init` runs `kuke init` on every
+// iteration, the sweep re-broke attach for every pre-existing cell each time
+// (issue #1207). Returning true for the tty directory prunes the whole subtree.
+func skipLiveCellState(_ string, info os.FileInfo) bool {
+	if info.IsDir() {
+		return info.Name() == consts.KukeonContainerTTYDir
+	}
+	return info.Name() == ctr.AttachableMetadataFile
 }
 
 // stageKukepause copies the kukepause binary into <runPath>/bin/kukepause and

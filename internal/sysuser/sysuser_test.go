@@ -261,6 +261,88 @@ func TestChownTreeAndChmod_SGIDBit(t *testing.T) {
 	}
 }
 
+// TestChownTreeAndChmodSkip_PrunesSubtreeAndFile confirms the skip predicate
+// both prunes a whole directory subtree and leaves a single matched file
+// untouched, while still sweeping every non-skipped entry. This is the
+// mechanism `kuke init` relies on to keep its ownership sweep out of live
+// per-container kuketty tty directories (issue #1207).
+func TestChownTreeAndChmodSkip_PrunesSubtreeAndFile(t *testing.T) {
+	root := t.TempDir()
+	// A directory that must be swept and a file inside it.
+	swept := filepath.Join(root, "swept")
+	if err := os.MkdirAll(swept, 0o700); err != nil {
+		t.Fatalf("mkdir swept: %v", err)
+	}
+	sweptFile := filepath.Join(swept, "data.json")
+	if err := os.WriteFile(sweptFile, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("write swept file: %v", err)
+	}
+	// A directory whose basename is skipped, with a file inside it that must
+	// be pruned (never visited) along with the subtree.
+	skippedDir := filepath.Join(root, "tty")
+	if err := os.MkdirAll(skippedDir, 0o700); err != nil {
+		t.Fatalf("mkdir skipped dir: %v", err)
+	}
+	prunedFile := filepath.Join(skippedDir, "socket")
+	if err := os.WriteFile(prunedFile, []byte("x"), 0o660); err != nil {
+		t.Fatalf("write pruned file: %v", err)
+	}
+	// os.WriteFile honors the umask, so chmod to the intended mode explicitly
+	// (chmod is not umask-masked) — the socket must be a genuine 0o660 going
+	// in for the "untouched" assertion to mean anything.
+	if err := os.Chmod(prunedFile, 0o660); err != nil {
+		t.Fatalf("chmod pruned file: %v", err)
+	}
+	// A single file (not a directory) that is skipped by basename.
+	skippedFile := filepath.Join(root, "kuketty-metadata.json")
+	if err := os.WriteFile(skippedFile, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("write skipped file: %v", err)
+	}
+
+	skip := func(_ string, info os.FileInfo) bool {
+		if info.IsDir() {
+			return info.Name() == "tty"
+		}
+		return info.Name() == "kuketty-metadata.json"
+	}
+
+	uid, gid := os.Getuid(), os.Getgid()
+	if err := sysuser.ChownTreeAndChmodSkip(root, uid, gid, 0o750, 0o640, skip); err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+
+	// Swept entries get the sweep modes.
+	if info, err := os.Stat(swept); err != nil {
+		t.Fatalf("stat swept: %v", err)
+	} else if got := info.Mode().Perm(); got != 0o750 {
+		t.Errorf("swept dir mode: got %#o want 0o750", got)
+	}
+	if info, err := os.Stat(sweptFile); err != nil {
+		t.Fatalf("stat swept file: %v", err)
+	} else if got := info.Mode().Perm(); got != 0o640 {
+		t.Errorf("swept file mode: got %#o want 0o640", got)
+	}
+
+	// The pruned subtree keeps its original modes — the walk never descended.
+	if info, err := os.Stat(skippedDir); err != nil {
+		t.Fatalf("stat skipped dir: %v", err)
+	} else if got := info.Mode().Perm(); got != 0o700 {
+		t.Errorf("skipped dir mode: got %#o want 0o700 (untouched)", got)
+	}
+	if info, err := os.Stat(prunedFile); err != nil {
+		t.Fatalf("stat pruned file: %v", err)
+	} else if got := info.Mode().Perm(); got != 0o660 {
+		t.Errorf("pruned socket mode: got %#o want 0o660 (untouched)", got)
+	}
+
+	// The skipped single file keeps its original mode.
+	if info, err := os.Stat(skippedFile); err != nil {
+		t.Fatalf("stat skipped file: %v", err)
+	} else if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("skipped file mode: got %#o want 0o600 (untouched)", got)
+	}
+}
+
 // runnerFunc adapts a function value to the CommandRunner interface for tests.
 type runnerFunc func(ctx context.Context, name string, args ...string) error
 

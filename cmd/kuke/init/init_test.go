@@ -22,6 +22,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -32,8 +33,11 @@ import (
 	initpkg "github.com/eminwux/kukeon/cmd/kuke/init"
 	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/cmd/types"
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/controller"
+	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/sysuser"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -78,6 +82,9 @@ func printCgroupAction(cmd *cobra.Command, label string, existedPre bool, exists
 
 //go:linkname printContainerAction github.com/eminwux/kukeon/cmd/kuke/init.printContainerAction
 func printContainerAction(cmd *cobra.Command, label string, existedPre bool, existsPost bool, created bool)
+
+//go:linkname skipLiveCellState github.com/eminwux/kukeon/cmd/kuke/init.skipLiveCellState
+func skipLiveCellState(path string, info os.FileInfo) bool
 
 //go:linkname printStartAction github.com/eminwux/kukeon/cmd/kuke/init.printStartAction
 func printStartAction(cmd *cobra.Command, label string, startedPre bool, startedPost bool, started bool)
@@ -1003,4 +1010,83 @@ func newOutputCommand() (*cobra.Command, *bytes.Buffer) {
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
 	return cmd, buf
+}
+
+// TestSkipLiveCellState_PreservesLiveSocketUnderInitSweep builds a RunPath
+// resembling the real `/opt/kukeon` layout — a per-container kuketty tty
+// directory holding a live attach socket at 0o660, a rendered
+// kuketty-metadata.json, and a swept cell metadata file — then drives the
+// init ownership sweep through skipLiveCellState (the predicate
+// applyKukeonOwnership wires into sysuser.ChownTreeAndChmodSkip). It asserts
+// the live socket and the rendered metadata file keep their modes while the
+// daemon metadata file is swept to the file mode, the regression guard for
+// issue #1207. uid/gid stay the current process so the test runs unprivileged
+// in CI (the production sweep targets root:kukeon).
+func TestSkipLiveCellState_PreservesLiveSocketUnderInitSweep(t *testing.T) {
+	runPath := t.TempDir()
+	// data/<realm>/<space>/<stack>/<cell>/<container>/{tty/,kuketty-metadata.json}
+	containerDir := filepath.Join(
+		runPath, consts.KukeonMetadataSubdir,
+		"default.kukeon.io", "kukeon", "kukeon", "kukeond", "kukeond",
+	)
+	ttyDir := filepath.Join(containerDir, consts.KukeonContainerTTYDir)
+	if err := os.MkdirAll(ttyDir, 0o2750); err != nil {
+		t.Fatalf("mkdir tty dir: %v", err)
+	}
+	socket := filepath.Join(ttyDir, consts.KukeonContainerSocketFile)
+	if err := os.WriteFile(socket, []byte("x"), 0o660); err != nil {
+		t.Fatalf("write socket: %v", err)
+	}
+	// os.WriteFile honors the umask; chmod explicitly so the live socket is a
+	// genuine 0o660 (group-writable) before the sweep, matching how the daemon
+	// binds it.
+	if err := os.Chmod(socket, 0o660); err != nil {
+		t.Fatalf("chmod socket: %v", err)
+	}
+	renderedMeta := filepath.Join(containerDir, ctr.AttachableMetadataFile)
+	if err := os.WriteFile(renderedMeta, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("write rendered metadata: %v", err)
+	}
+	// A daemon metadata file the sweep SHOULD touch (cell metadata.json).
+	cellDir := filepath.Dir(containerDir)
+	cellMeta := filepath.Join(cellDir, consts.KukeonMetadataFile)
+	if err := os.WriteFile(cellMeta, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("write cell metadata: %v", err)
+	}
+
+	const (
+		dirMode  = os.ModeSetgid | os.FileMode(0o750)
+		fileMode = os.FileMode(0o640)
+	)
+	uid, gid := os.Getuid(), os.Getgid()
+	if err := sysuser.ChownTreeAndChmodSkip(
+		runPath, uid, gid, dirMode, fileMode, skipLiveCellState,
+	); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+
+	// Live socket: untouched (still group-writable, attach stays reachable).
+	if info, err := os.Stat(socket); err != nil {
+		t.Fatalf("stat socket: %v", err)
+	} else if got := info.Mode().Perm(); got != 0o660 {
+		t.Errorf("live socket mode: got %#o want 0o660 (untouched by sweep)", got)
+	}
+	// Rendered per-container metadata: untouched.
+	if info, err := os.Stat(renderedMeta); err != nil {
+		t.Fatalf("stat rendered metadata: %v", err)
+	} else if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("rendered metadata mode: got %#o want 0o600 (untouched by sweep)", got)
+	}
+	// tty directory itself: pruned, keeps its provisioned mode.
+	if info, err := os.Stat(ttyDir); err != nil {
+		t.Fatalf("stat tty dir: %v", err)
+	} else if got := info.Mode().Perm(); got != 0o750 {
+		t.Errorf("tty dir mode: got %#o want 0o750 (untouched by sweep)", got)
+	}
+	// Daemon cell metadata: swept to the file mode.
+	if info, err := os.Stat(cellMeta); err != nil {
+		t.Fatalf("stat cell metadata: %v", err)
+	} else if got := info.Mode().Perm(); got != 0o640 {
+		t.Errorf("cell metadata mode: got %#o want 0o640 (swept)", got)
+	}
 }
