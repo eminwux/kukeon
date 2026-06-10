@@ -474,9 +474,24 @@ kuke <subcommand> --help
 
 **Invariants.** Exit code 0 in all three forms. No subcommand prints the help text rather than failing — this is intentional so a bare `kuke` is discoverable.
 
-### Status snapshot — TODO (#202)
+### Status snapshot (`kuke status`)
 
-A single command that prints the daemon's view of every realm/space/stack/cell in one screen will land with issue #202. Until then, compose `kuke get realms && kuke get spaces && kuke get stacks && kuke get cells` for the same picture, or `kuke daemon logs -f` for live activity.
+**Intent.** Run a single post-`kuke init` health walk that covers daemon liveness, host pre-flight, run-dir state, per-realm storage footprint, and the daemon-vs-in-process parity check across every resource kind — the consolidated equivalent of the manual `kuke get realms` vs `kuke get realms --no-daemon` diff ritual. Full reference: [`docs/site/cli/kuke-status.md`](site/cli/kuke-status.md).
+
+**Sequence.**
+
+```bash
+sudo kuke status                                 # human-readable health table
+sudo kuke status --json                          # machine-readable shape for CI
+sudo kuke status --verbose                       # remediation hint on OK rows too
+```
+
+**Invariants.**
+
+- Exit code 0 when every check is OK (or OK mixed with WARN); non-zero when any row is FAIL. The structured report on stdout is the operator-visible failure marker; the non-zero exit is the CI-visible one.
+- Sections, in fixed order: `DAEMON` (socket dialable, RPC round-trip, version), `HOST` (containerd reachable, cgroup-v2 mounted with required controllers delegated, CNI plugins under `/opt/cni/bin`), `STATE` (no orphan run-dir sockets, no residual containerd namespaces), `STORAGE` (per-realm snapshot / lease / content-blob counts + summed bytes), `PARITY` (daemon view matches in-process view for `realm`, `space`, `stack`, `cell`, `container`, `secret`, `blueprint`, `config`).
+- The `PARITY` section is the cross-kind generalization of the two-line `kuke get realms` daemon-parity diff the `make dev-init` smoke pins — a divergence on any kind is the same regression class.
+- `--json` emits the `Report` shape (top-level `ok` bool plus a flat `checks` array; each row carries `section`, `name`, `status` as the `"OK"`/`"WARN"`/`"FAIL"` label, `detail`, optional `remediation`, and on storage rows an optional `storage` payload). `--verbose` prints the remediation hint on OK rows too, not just WARN/FAIL.
 
 ### `--no-daemon` future
 
