@@ -668,7 +668,18 @@ func (b *Exec) bootstrapCell(section *CellSection, cellDoc *v1beta1.CellDoc) err
 			return fmt.Errorf("failed to check if root container exists: %w", rootErr)
 		}
 		section.CellRootContainerExistsPre = rootExistsPre
-		section.CellStartedPre = false
+		// Probe whether the cell's containers were already running before the
+		// EnsureCell+StartCell pass below. GetCell populated live container
+		// statuses off containerd, so this distinguishes a healthy idempotent
+		// re-run (containers already up → StartCell is a no-op, report "already
+		// running") from a re-run after a crash/stop (containers down → StartCell
+		// genuinely transitions them, report "started"). Without this the phase
+		// always reported a bare "started", misstating a no-op re-run as a
+		// (re)start of the daemon's containers. Issue #1186. The image-drift
+		// recreate branch overrides this back to false below — there the running
+		// containers are torn down and rebuilt, so "started" is the correct
+		// wording even though they were running pre.
+		section.CellStartedPre = cellContainersRunning(internalCellPre)
 	}
 
 	// When the cell record survives from a prior `kuke init` (or a
@@ -729,6 +740,11 @@ func (b *Exec) bootstrapCell(section *CellSection, cellDoc *v1beta1.CellDoc) err
 		}
 		section.CellRecreatedDueToImageDrift = true
 		startCellAfterEnsure = false
+		// RecreateCell tore down the running container and started a fresh one,
+		// so the container-start phase genuinely transitioned — render "started",
+		// not "already running", regardless of the pre-StartCell probe. Issue
+		// #1186.
+		section.CellStartedPre = false
 	case section.CellMetadataExistsPre:
 		ensuredCell, err = b.runner.EnsureCell(internalCellPre)
 		if err != nil {
@@ -796,6 +812,41 @@ func (b *Exec) bootstrapCell(section *CellSection, cellDoc *v1beta1.CellDoc) err
 	section.CellStarted = !section.CellStartedPre && section.CellStartedPost
 
 	return nil
+}
+
+// cellContainersRunning reports whether every container in the cell's spec is
+// observed running in the cell's populated live status. It mirrors the runner's
+// cellTasksAllRunningFn idempotency guard (issue #149): StartCell no-ops only
+// when every task is already running, so the bootstrap container-start phase
+// must report "already running" rather than "started" exactly in that case
+// (issue #1186). An empty container spec returns false — there is nothing whose
+// running-ness could make StartCell a no-op. A spec container missing from the
+// status slice (or in any non-running state) returns false so a partial /
+// stopped cell renders "started" once StartCell transitions it.
+func cellContainersRunning(cell intmodel.Cell) bool {
+	if len(cell.Spec.Containers) == 0 {
+		return false
+	}
+	for _, spec := range cell.Spec.Containers {
+		if !containerStatusRunning(spec.ID, cell.Status.Containers) {
+			return false
+		}
+	}
+	return true
+}
+
+// containerStatusRunning reports whether the status carrying id is in a running
+// state. Only ContainerStateReady counts — that is the intmodel mapping of
+// containerd.Running, the state cellTasksAllRunningFn tests, so the
+// "already running" verdict tracks StartCell's no-op condition exactly. A
+// missing id (status not populated) is treated as not-running.
+func containerStatusRunning(id string, statuses []intmodel.ContainerStatus) bool {
+	for i := range statuses {
+		if statuses[i].ID == id {
+			return statuses[i].State == intmodel.ContainerStateReady
+		}
+	}
+	return false
 }
 
 // lookupContainerImage returns the Image of the container in cell whose ID
