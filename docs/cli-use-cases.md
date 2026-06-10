@@ -463,7 +463,7 @@ sudo kuke refresh
 kuke version
 ```
 
-**Invariants.** Exit code 0. Prints a single line. Format is the build's resolved version (`vMAJOR.MINOR.PATCH[-<offset>-g<sha>][-dirty]`). Suitable for `kuke version | grep` in CI.
+**Invariants.** Exit code 0 by default (including when the daemon is unreachable). Prints `Client: <version>` on stdout always, and — when the daemon is reachable — `Daemon: <version>` on stdout, each version in the build's resolved format (`vMAJOR.MINOR.PATCH[-<offset>-g<sha>][-dirty]`). When the daemon is unreachable the `Daemon:` line is replaced by a `Warning: daemon unreachable: <err>` on stderr while the `Client:` line still prints. A `Warning: version mismatch (…)` line is emitted on stderr when the two versions differ; passing `--strict` makes a mismatch exit non-zero. `--no-daemon` skips the daemon query and prints only the `Client:` line. Both warnings go to stderr, so `kuke version | grep '^Client:'` is suitable for CI.
 
 ### Top-level help / no-args invocation
 
