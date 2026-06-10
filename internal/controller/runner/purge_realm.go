@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/cni"
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
@@ -161,6 +162,45 @@ func (r *Exec) PurgeRealm(realm intmodel.Realm) (bool, error) {
 		)
 		// Continue with other cleanup so a single failure does not strand
 		// metadata/cgroup state on disk.
+	}
+
+	// Drain and delete the BuildKit history-store companion namespace
+	// (<namespace>_history). kukebuild (BuildKit-as-library) creates it for
+	// BuildKit's history store — solver/llbsolver/history.go derives it as
+	// ns + "_history" — so a `kuke build` into this realm leaves the companion
+	// behind. Tear it down with the same drain-then-delete the realm namespace
+	// gets so a full uninstall leaves no `*.kukeon.io*` namespaces (issue
+	// #1183). DeleteNamespace is idempotent (a no-op when the companion never
+	// existed, i.e. the realm was never built into), so this is safe on every
+	// purge. A companion that survives folds into namespaceRemoved so the
+	// uninstall half-cleaned-host gate still sees residual containerd state.
+	if realmForOps.Spec.Namespace != "" {
+		historyNS := consts.BuildKitHistoryNamespace(realmForOps.Spec.Namespace)
+		if err = r.ctrClient.CleanupNamespaceResources(historyNS, ""); err != nil {
+			r.logger.WarnContext(
+				r.ctx,
+				"failed to cleanup buildkit history namespace resources",
+				"namespace",
+				historyNS,
+				"error",
+				err,
+			)
+			// Continue with namespace deletion attempt anyway.
+		}
+		if err = r.ctrClient.DeleteNamespace(historyNS); err != nil {
+			namespaceRemoved = false
+			if nsErr == nil {
+				nsErr = fmt.Errorf("failed to delete buildkit history namespace %q: %w", historyNS, err)
+			}
+			r.logger.WarnContext(
+				r.ctx,
+				"failed to delete buildkit history namespace",
+				"namespace",
+				historyNS,
+				"error",
+				err,
+			)
+		}
 	}
 
 	// Remove all metadata directories for realm and children

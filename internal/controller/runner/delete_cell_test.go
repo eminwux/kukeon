@@ -57,19 +57,33 @@ type deleteCellFakeClient struct {
 	loadCgroupFn        func(group, mountpoint string) (*cgroup2.Manager, error)
 	newCgroupFn         func(spec ctr.CgroupSpec) (*cgroup2.Manager, error)
 	enableCellSubtreeFn func(group, mountpoint string, controllers []string) ([]string, error)
+	// Namespace teardown hooks: the PurgeRealm history-companion test (#1183)
+	// records which namespaces were drained and deleted so it can assert the
+	// <ns>_history companion is torn down alongside the realm namespace.
+	deleteNamespaceFn  func(namespace string) error
+	cleanupNamespaceFn func(namespace, snapshotter string) error
 }
 
 func (c *deleteCellFakeClient) Connect() error { return nil }
 func (c *deleteCellFakeClient) Close() error   { return nil }
 
 func (c *deleteCellFakeClient) CreateNamespace(string) error { return nil }
-func (c *deleteCellFakeClient) DeleteNamespace(string) error { return nil }
+func (c *deleteCellFakeClient) DeleteNamespace(namespace string) error {
+	if c.deleteNamespaceFn != nil {
+		return c.deleteNamespaceFn(namespace)
+	}
+	return nil
+}
+
 func (c *deleteCellFakeClient) ListNamespaces() ([]string, error) {
 	return nil, nil
 }
 func (c *deleteCellFakeClient) GetNamespace(string) (string, error)  { return "", nil }
 func (c *deleteCellFakeClient) ExistsNamespace(string) (bool, error) { return false, nil }
-func (c *deleteCellFakeClient) CleanupNamespaceResources(string, string) error {
+func (c *deleteCellFakeClient) CleanupNamespaceResources(namespace, snapshotter string) error {
+	if c.cleanupNamespaceFn != nil {
+		return c.cleanupNamespaceFn(namespace, snapshotter)
+	}
 	return nil
 }
 
@@ -446,7 +460,11 @@ func TestDeleteCell_SweepsOrphansWhenMetadataAbsent(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Errorf("orphan container %q was not swept on the metadata-absent path; DeleteContainer called for %v", want, deletedIDs)
+			t.Errorf(
+				"orphan container %q was not swept on the metadata-absent path; DeleteContainer called for %v",
+				want,
+				deletedIDs,
+			)
 		}
 	}
 }

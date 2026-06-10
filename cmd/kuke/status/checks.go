@@ -358,10 +358,14 @@ func checkStateNamespaces(ctx context.Context, rc *runCtx) Result {
 	// Filter to namespaces under the kukeon suffix — that's what
 	// `kuke init` provisions and what `kuke uninstall` removes. Other
 	// namespaces on the same containerd (e.g. user docker namespaces)
-	// are not ours to police.
+	// are not ours to police. BuildKit history-store companions
+	// (<realm-ns>_history, created by `kuke build`) are included so a
+	// companion stranded by a half-cleaned uninstall surfaces as residue
+	// (issue #1183) — when its owning realm is still live the companion is
+	// added to the expected set below and renders clean.
 	var kukeonNS []string
 	for _, ns := range nsList {
-		if consts.IsKukeonNamespace(ns) {
+		if consts.IsKukeonNamespace(ns) || consts.IsBuildKitHistoryNamespace(ns) {
 			kukeonNS = append(kukeonNS, ns)
 		}
 	}
@@ -382,9 +386,15 @@ func checkStateNamespaces(ctx context.Context, rc *runCtx) Result {
 		return r
 	}
 
+	// A live realm is expected to carry both its namespace and — if it has
+	// ever been built into — that namespace's BuildKit history companion, so
+	// add both forms. A <realm-ns>_history whose owning realm is gone is not
+	// in this set and falls through to the residual list below (issue #1183).
 	expectedNS := make(map[string]bool, len(realms))
 	for i := range realms {
-		expectedNS[consts.RealmNamespace(realms[i].Metadata.Name)] = true
+		ns := consts.RealmNamespace(realms[i].Metadata.Name)
+		expectedNS[ns] = true
+		expectedNS[consts.BuildKitHistoryNamespace(ns)] = true
 	}
 
 	var residual []string
