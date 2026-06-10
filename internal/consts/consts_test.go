@@ -58,6 +58,56 @@ func TestRealmNamespaceRoundTripDefault(t *testing.T) {
 	}
 }
 
+func TestBuildKitHistoryNamespaceRoundTripDefault(t *testing.T) {
+	ns := consts.RealmNamespace("kuke-system")
+	historyNS := consts.BuildKitHistoryNamespace(ns)
+	if want := "kuke-system.kukeon.io_history"; historyNS != want {
+		t.Fatalf("BuildKitHistoryNamespace(%q): got %q, want %q", ns, historyNS, want)
+	}
+	if !consts.IsBuildKitHistoryNamespace(historyNS) {
+		t.Errorf("IsBuildKitHistoryNamespace(%q) = false, want true", historyNS)
+	}
+	// The realm namespace itself is not a history companion.
+	if consts.IsBuildKitHistoryNamespace(ns) {
+		t.Errorf("IsBuildKitHistoryNamespace(%q) = true, want false (realm ns, not companion)", ns)
+	}
+}
+
+func TestIsBuildKitHistoryNamespaceRejectsForeignAndBare(t *testing.T) {
+	cases := map[string]bool{
+		"kuke-system.kukeon.io_history": true,  // kukeon companion
+		"default.kukeon.io_history":     true,  // kukeon companion
+		"moby_history":                  false, // foreign base, not a kukeon ns
+		"example.com_history":           false, // foreign suffix base
+		"_history":                      false, // empty base
+		"kuke-system.kukeon.io":         false, // realm ns, no _history suffix
+		"history":                       false, // not even the suffix
+	}
+	for ns, want := range cases {
+		if got := consts.IsBuildKitHistoryNamespace(ns); got != want {
+			t.Errorf("IsBuildKitHistoryNamespace(%q) = %v, want %v", ns, got, want)
+		}
+	}
+}
+
+func TestBuildKitHistoryNamespaceHonorsCustomSuffix(t *testing.T) {
+	withRuntime(t, "dev.kukeon.io", "/kukeon-dev", func(t *testing.T) {
+		ns := consts.RealmNamespace("default")
+		historyNS := consts.BuildKitHistoryNamespace(ns)
+		if want := "default.dev.kukeon.io_history"; historyNS != want {
+			t.Fatalf("BuildKitHistoryNamespace(%q) under dev suffix: got %q, want %q",
+				ns, historyNS, want)
+		}
+		if !consts.IsBuildKitHistoryNamespace(historyNS) {
+			t.Errorf("IsBuildKitHistoryNamespace(%q) under dev suffix: got false, want true", historyNS)
+		}
+		// A default-instance companion must be rejected under the dev suffix.
+		if consts.IsBuildKitHistoryNamespace("default.kukeon.io_history") {
+			t.Errorf("IsBuildKitHistoryNamespace default-instance companion accepted under dev suffix")
+		}
+	})
+}
+
 func TestRealmNamespaceRoundTripCustomSuffix(t *testing.T) {
 	withRuntime(t, "dev.kukeon.io", "/kukeon-dev", func(t *testing.T) {
 		const realm = "default"

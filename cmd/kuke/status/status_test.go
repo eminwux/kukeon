@@ -144,6 +144,48 @@ func TestCheckParity_DaemonDownIsWARN(t *testing.T) {
 	}
 }
 
+// TestCheckStateNamespaces_StrayHistoryIsResidual pins issue #1183: a
+// BuildKit history-store companion (<realm-ns>_history) whose owning realm is
+// gone — the post-uninstall leak — surfaces as residue, even though it does
+// not carry the bare .kukeon.io suffix the residual check used to filter on.
+func TestCheckStateNamespaces_StrayHistoryIsResidual(t *testing.T) {
+	rc := &runCtx{
+		// No realms: mirrors a host after `kuke uninstall` removed the realm
+		// namespaces but left kuke-system.kukeon.io_history behind.
+		daemonClient: newFakeClient(),
+		ctrClient:    &fakeCtrClient{namespaces: []string{"kuke-system.kukeon.io_history"}},
+		logger:       testLogger(),
+	}
+
+	r := checkStateNamespaces(context.Background(), rc)
+	if r.Status != StatusWARN {
+		t.Fatalf("expected WARN on stray history namespace; got %s (%q)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "kuke-system.kukeon.io_history") {
+		t.Errorf("Detail should name the stray history namespace; got %q", r.Detail)
+	}
+}
+
+// TestCheckStateNamespaces_LiveRealmHistoryIsClean confirms the companion is
+// not noise during normal operation: while the owning realm is live, its
+// <realm-ns>_history build byproduct is expected and renders OK.
+func TestCheckStateNamespaces_LiveRealmHistoryIsClean(t *testing.T) {
+	rc := &runCtx{
+		daemonClient: newFakeClient().withDefaultRealms(),
+		ctrClient: &fakeCtrClient{namespaces: []string{
+			"default.kukeon.io",
+			"kuke-system.kukeon.io",
+			"kuke-system.kukeon.io_history",
+		}},
+		logger: testLogger(),
+	}
+
+	r := checkStateNamespaces(context.Background(), rc)
+	if r.Status != StatusOK {
+		t.Fatalf("expected OK with a live realm's history companion; got %s (%q)", r.Status, r.Detail)
+	}
+}
+
 // TestCheckParity_NestedDescent confirms the walk recurses into the
 // realm-set intersection (spaces / stacks / cells / containers) — a
 // regression in the descent loop would silently stop reporting nested

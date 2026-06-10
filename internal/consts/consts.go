@@ -318,3 +318,30 @@ func RealmFromNamespace(ns string) string {
 	}
 	return ns[:len(ns)-len(RealmNamespaceSuffix)]
 }
+
+// BuildKitHistoryNamespaceSuffix is the suffix BuildKit (driven by kukebuild,
+// BuildKit-as-library) appends to a containerd namespace to form its companion
+// history-store namespace. BuildKit's solver/llbsolver/history.go derives it as
+// ns + "_history", so a `kuke build` into realm R leaves both R's namespace and
+// <R-namespace>_history on the host. `kuke uninstall` drains and removes the
+// companion alongside the realm namespace, and `kuke status` flags a stray one
+// as residue (issue #1183).
+const BuildKitHistoryNamespaceSuffix = "_history"
+
+// BuildKitHistoryNamespace returns the BuildKit history-store companion
+// namespace for a containerd namespace (the realm namespace -> <ns>_history).
+func BuildKitHistoryNamespace(ns string) string {
+	return ns + BuildKitHistoryNamespaceSuffix
+}
+
+// IsBuildKitHistoryNamespace reports whether ns is a BuildKit history-store
+// companion of a kukeon-managed namespace — i.e. it carries the _history suffix
+// and, with that suffix stripped, the remainder is itself a kukeon namespace.
+// Non-kukeon companions (e.g. "moby_history") are excluded so this path never
+// claims a co-tenant's namespace.
+func IsBuildKitHistoryNamespace(ns string) bool {
+	if !strings.HasSuffix(ns, BuildKitHistoryNamespaceSuffix) {
+		return false
+	}
+	return IsKukeonNamespace(ns[:len(ns)-len(BuildKitHistoryNamespaceSuffix)])
+}
