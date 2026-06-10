@@ -348,16 +348,80 @@ func TestDeriveCellStateFromNonRootContainerStatuses(t *testing.T) {
 			want: intmodel.CellStateStopped,
 		},
 		{
-			name: "all_workloads_failed_also_stopped",
+			name: "workload_in_failed_state_settles_cell_failed",
 			specs: []intmodel.ContainerSpec{
 				{ID: "root", Root: true},
 				{ID: "work", Root: false},
 			},
+			// A non-root workload observed in ContainerStateFailed is a crash,
+			// not a clean stop — the cell settles Failed so callers can tell a
+			// failed run from a completed one (#1206).
 			statuses: []intmodel.ContainerStatus{
 				{ID: "root", State: intmodel.ContainerStateReady},
 				{ID: "work", State: intmodel.ContainerStateFailed},
 			},
-			want: intmodel.CellStateStopped,
+			want: intmodel.CellStateFailed,
+		},
+		{
+			name: "workload_exited_nonzero_settles_cell_failed",
+			specs: []intmodel.ContainerSpec{
+				{ID: "root", Root: true},
+				{ID: "work", Root: false},
+			},
+			// The headline #1206 case: a stopped workload carrying a non-zero
+			// exit code is a crash, distinct from a clean Stopped completion.
+			statuses: []intmodel.ContainerStatus{
+				{ID: "root", State: intmodel.ContainerStateReady},
+				{ID: "work", State: intmodel.ContainerStateStopped, ExitCode: 127},
+			},
+			want: intmodel.CellStateFailed,
+		},
+		{
+			name: "reaped_workload_preserved_nonzero_exit_settles_failed",
+			specs: []intmodel.ContainerSpec{
+				{ID: "root", Root: true},
+				{ID: "work", Root: false},
+			},
+			// A failed workload whose containerd task was reaped reads back
+			// NotCreated, but populateCellContainerStatuses preserves the
+			// non-zero ExitCode — the cell must still settle Failed (#1206).
+			statuses: []intmodel.ContainerStatus{
+				{ID: "root", State: intmodel.ContainerStateReady},
+				{ID: "work", State: intmodel.ContainerStateNotCreated, ExitCode: 1},
+			},
+			want: intmodel.CellStateFailed,
+		},
+		{
+			name: "mixed_clean_and_failed_workloads_settle_failed",
+			specs: []intmodel.ContainerSpec{
+				{ID: "root", Root: true},
+				{ID: "work-a", Root: false},
+				{ID: "work-b", Root: false},
+			},
+			// One clean exit, one crash → Failed wins: any failure among the
+			// terminal workloads marks the cell Failed (#1206).
+			statuses: []intmodel.ContainerStatus{
+				{ID: "root", State: intmodel.ContainerStateReady},
+				{ID: "work-a", State: intmodel.ContainerStateStopped, ExitCode: 0},
+				{ID: "work-b", State: intmodel.ContainerStateStopped, ExitCode: 2},
+			},
+			want: intmodel.CellStateFailed,
+		},
+		{
+			name: "active_workload_outranks_a_failed_sibling",
+			specs: []intmodel.ContainerSpec{
+				{ID: "root", Root: true},
+				{ID: "work-a", Root: false},
+				{ID: "work-b", Root: false},
+			},
+			// A still-running workload keeps the cell Ready even when a sibling
+			// crashed — the cell is not terminal yet, so no Failed verdict.
+			statuses: []intmodel.ContainerStatus{
+				{ID: "root", State: intmodel.ContainerStateReady},
+				{ID: "work-a", State: intmodel.ContainerStateReady},
+				{ID: "work-b", State: intmodel.ContainerStateStopped, ExitCode: 1},
+			},
+			want: intmodel.CellStateReady,
 		},
 		{
 			name: "absent_workload_counts_as_terminal_like_stopped",
@@ -446,6 +510,129 @@ func TestDeriveCellStateFromNonRootContainerStatuses(t *testing.T) {
 					got, tc.want)
 			}
 		})
+	}
+}
+
+// TestContainerExitedNonZero pins the failure predicate that flips a terminal
+// cell from Stopped to Failed (#1206): non-zero exit code or an explicit
+// ContainerStateFailed observation, but never a clean (code 0) exit.
+func TestContainerExitedNonZero(t *testing.T) {
+	cases := []struct {
+		name   string
+		status intmodel.ContainerStatus
+		want   bool
+	}{
+		{"clean_stop_is_not_a_failure",
+			intmodel.ContainerStatus{State: intmodel.ContainerStateStopped, ExitCode: 0}, false},
+		{"reaped_clean_exit_is_not_a_failure",
+			intmodel.ContainerStatus{State: intmodel.ContainerStateNotCreated, ExitCode: 0}, false},
+		{"nonzero_exit_is_a_failure",
+			intmodel.ContainerStatus{State: intmodel.ContainerStateStopped, ExitCode: 1}, true},
+		{"reaped_nonzero_exit_is_a_failure",
+			intmodel.ContainerStatus{State: intmodel.ContainerStateNotCreated, ExitCode: 137}, true},
+		{"failed_state_is_a_failure_even_with_zero_code",
+			intmodel.ContainerStatus{State: intmodel.ContainerStateFailed, ExitCode: 0}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := containerExitedNonZero(tc.status); got != tc.want {
+				t.Errorf("containerExitedNonZero(%+v) = %v, want %v", tc.status, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDescribeCellFailure verifies the operator-facing breadcrumb names the
+// failing container and surfaces the exit code/signal, mirroring
+// deriveCellState's root-vs-non-root dispatch (#1206).
+func TestDescribeCellFailure(t *testing.T) {
+	t.Run("non_root_workload_with_signal", func(t *testing.T) {
+		cell := intmodel.Cell{
+			Spec: intmodel.CellSpec{Containers: []intmodel.ContainerSpec{
+				{ID: "root", Root: true},
+				{ID: "agent", Root: false},
+			}},
+			Status: intmodel.CellStatus{Containers: []intmodel.ContainerStatus{
+				{ID: "root", State: intmodel.ContainerStateReady},
+				{ID: "agent", State: intmodel.ContainerStateStopped, ExitCode: 139, ExitSignal: "SIGSEGV"},
+			}},
+		}
+		got := describeCellFailure(cell)
+		want := `container "agent" terminated by SIGSEGV (exit code 139)`
+		if got != want {
+			t.Errorf("describeCellFailure() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("non_root_workload_plain_exit_code", func(t *testing.T) {
+		cell := intmodel.Cell{
+			Spec: intmodel.CellSpec{Containers: []intmodel.ContainerSpec{
+				{ID: "root", Root: true},
+				{ID: "agent", Root: false},
+			}},
+			Status: intmodel.CellStatus{Containers: []intmodel.ContainerStatus{
+				{ID: "root", State: intmodel.ContainerStateReady},
+				{ID: "agent", State: intmodel.ContainerStateStopped, ExitCode: 127},
+			}},
+		}
+		got := describeCellFailure(cell)
+		want := `container "agent" exited with code 127`
+		if got != want {
+			t.Errorf("describeCellFailure() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("root_only_cell_reports_root", func(t *testing.T) {
+		cell := intmodel.Cell{
+			Spec: intmodel.CellSpec{Containers: []intmodel.ContainerSpec{
+				{ID: "root", Root: true},
+			}},
+			Status: intmodel.CellStatus{Containers: []intmodel.ContainerStatus{
+				{ID: "root", State: intmodel.ContainerStateStopped, ExitCode: 1},
+			}},
+		}
+		got := describeCellFailure(cell)
+		want := `container "root" exited with code 1`
+		if got != want {
+			t.Errorf("describeCellFailure() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("falls_back_to_generic_when_no_failure_found", func(t *testing.T) {
+		cell := intmodel.Cell{
+			Spec: intmodel.CellSpec{Containers: []intmodel.ContainerSpec{
+				{ID: "root", Root: true},
+				{ID: "agent", Root: false},
+			}},
+			Status: intmodel.CellStatus{Containers: []intmodel.ContainerStatus{
+				{ID: "root", State: intmodel.ContainerStateReady},
+				{ID: "agent", State: intmodel.ContainerStateStopped, ExitCode: 0},
+			}},
+		}
+		if got := describeCellFailure(cell); got != "" {
+			t.Errorf("describeCellFailure() = %q, want empty", got)
+		}
+		reason, msg := cellFailureBreadcrumb(cell)
+		if reason != reasonWorkloadFailed {
+			t.Errorf("reason = %q, want %q", reason, reasonWorkloadFailed)
+		}
+		if msg != "workload exited with a non-zero status" {
+			t.Errorf("message = %q, want generic fallback", msg)
+		}
+	})
+}
+
+// TestRootContainerExitedNonZero pins the root snapshot lookup: a missing root
+// status must read false so a partial populate can't flip the cell to Failed.
+func TestRootContainerExitedNonZero(t *testing.T) {
+	statuses := []intmodel.ContainerStatus{
+		{ID: "root", State: intmodel.ContainerStateStopped, ExitCode: 5},
+	}
+	if !rootContainerExitedNonZero("root", statuses) {
+		t.Errorf("rootContainerExitedNonZero(root) = false, want true")
+	}
+	if rootContainerExitedNonZero("missing", statuses) {
+		t.Errorf("rootContainerExitedNonZero(missing) = true, want false (absent status)")
 	}
 }
 
