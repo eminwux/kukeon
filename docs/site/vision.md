@@ -34,7 +34,7 @@ This is also why it's containerd directly and not Docker. Docker's daemon model 
 
 The runtime runs cells. But how do you *describe* one? This evolved through three generations, and the path is instructive.
 
-The first version, `CellProfile`, was client-side only — the CLI expanded a profile into a cell locally and ran it. It worked, but it duplicated the same machinery into every profile: cloning the repo, setting up git identity, injecting secrets. The lifecycle was invisible to the daemon.
+The first version was client-side only — the CLI expanded a template into a cell locally and ran it. It worked, but it duplicated the same machinery into every template: cloning the repo, setting up git identity, injecting secrets. The lifecycle was invisible to the daemon.
 
 The current model splits the concern in two, and both are daemon-stored:
 
@@ -178,7 +178,7 @@ Which, finally, is why the name is what it is. Heraclitus wrote that the *kykeon
 
 ## Where it stands
 
-Kukeon is beta. The runtime, daemon, and hierarchy are stable for single-host use. The agent organization and Loops A and B run today, through human-merged PRs. The Blueprint/Config model is actively replacing CellProfile. Leases, the projection/cache layer, the typed plan-graph, and Loop C are the active frontier. The autonomous approver — the one that would remove the human merge gate — is deliberately on the far side of "prove the fixpoint first."
+Kukeon is beta. The runtime, daemon, and hierarchy are stable for single-host use. The agent organization and Loops A and B run today, through human-merged PRs. The Blueprint/Config model is the daemon-stored cell-description layer. Leases, the projection/cache layer, the typed plan-graph, and Loop C are the active frontier. The autonomous approver — the one that would remove the human merge gate — is deliberately on the far side of "prove the fixpoint first."
 
 Built so far: the runtime and hierarchy; daemon lifecycle; the agent roles and skills; reflection-on-hook; process learning (Loop A) and product-defect feedback (Loop B). In flight: Blueprint/Config, leases, the projection layer, the plan-graph as a typed object, runtime feedback (Loop C). Deliberately not built yet: anything that takes the human off the merge.
 

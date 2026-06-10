@@ -2,7 +2,7 @@
 
 `kuke run` is the fused docker-model verb: `docker create` → `kuke create cell`, `docker start` → `kuke start`, `docker run` → `kuke run` (create? + start + attach).
 
-Four source paths:
+Five source paths:
 
 - `kuke run <cell>` — start + attach an **existing** cell (≈ `kuke start <cell>` + `kuke attach <cell>`). The cell must already exist; a missing name errors with a pointer at the create paths.
 - `kuke run -f <file>` — a single-cell YAML doc (or `-` for stdin). Create-or-attach by `metadata.name`.
@@ -69,7 +69,7 @@ The fused form is always create + start + attach: a `--name X` collision against
 
 To reconcile a live cell against its lineage Config/Blueprint after the source has changed, run [`kuke restart <name>`](kuke-restart.md) (#983); the daemon's reconcile (P7) applies Compatible OutOfSync diffs in place and recreates on Breaking diffs. `kuke run` itself never mutates a live cell on any source path.
 
-See [`kind: CellBlueprint`](../manifests/blueprint.md) and [`kind: CellConfig`](../manifests/config.md) for the full manifest reference, and the [profile → blueprint migration guide](../guides/migrate-cellprofile-to-blueprint.md) for the cutover recipe.
+See [`kind: CellBlueprint`](../manifests/blueprint.md) and [`kind: CellConfig`](../manifests/config.md) for the full manifest reference.
 
 ## Cleanup with `--rm`
 
@@ -121,4 +121,3 @@ sudo kuke run --from-blueprint batch --rm
 - [kuke attach](kuke-attach.md) — attach to an already-running cell
 - [kuke create cell](kuke-create.md#kuke-create-cell) — un-fused create-only primitive (Blueprint/Config/Clone sources)
 - [kuke restart](kuke-restart.md) — reconcile a live cell against its lineage Config/Blueprint
-- [Migrate from `CellProfile` to `CellBlueprint`](../guides/migrate-cellprofile-to-blueprint.md) — the #626 cutover recipe

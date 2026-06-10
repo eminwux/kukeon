@@ -100,11 +100,11 @@ To run individual phases by hand — typically while debugging a single phase:
 
 ## Running without the daemon
 
-When iterating on controller code you often don't need the daemon up at all. In-process mode runs every `kuke` command against your freshly built binary without the socket round-trip. Reach it by passing `--run-path /opt/kukeon` (which auto-promotes) or by exporting `KUKEON_NO_DAEMON=true`; the `--no-daemon` flag itself still works on `kuke init`, `kuke uninstall`, `kuke purge`, and every `kuke get <kind>`:
+When iterating on controller code you often don't need the daemon up at all. In-process mode runs the **promotable** `kuke` commands against your freshly built binary without the socket round-trip — `get *`, `purge *`, `log`, `refresh`, `restart`, `start`, `stop`, `doctor cgroups`, plus the bootstrap `init`/`uninstall`. After #566/#588 the workload verbs (`apply`, `create *`, `run`, `attach`, `delete *`, `kill *`) route through the daemon-only client and ignore these knobs, so they always require the daemon. Reach in-process mode by passing `--run-path /opt/kukeon` (which auto-promotes) or by exporting `KUKEON_NO_DAEMON=true`; the `--no-daemon` flag itself still works on `kuke init`, `kuke uninstall`, `kuke purge`, and every `kuke get <kind>`:
 
 ```bash
 sudo kuke get realms --no-daemon
-sudo kuke apply -f my-cell.yaml --run-path /opt/kukeon
+sudo kuke purge realm myrealm --cascade --force --run-path /opt/kukeon
 sudo KUKEON_NO_DAEMON=true kuke get cells --realm default --space default --stack default
 ```
 

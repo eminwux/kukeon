@@ -30,7 +30,7 @@ default:
 
 - The CLI and the daemon share most of their code (the controller, the apischeme conversion, the error types). Shipping one binary means shipping half the bytes and testing one build.
 - Installers only need to copy one file; the hard link is a one-liner.
-- The CLI can fall back to "be the daemon for one command" — in-process mode, reached via an explicit `--run-path` or `KUKEON_NO_DAEMON=true` — without duplicating any logic.
+- The CLI can fall back to "be the daemon for one command" — in-process mode, reached via an explicit `--run-path` or `KUKEON_NO_DAEMON=true` on the promotable callers — without duplicating any logic. (After #566/#588 the true workload verbs route through the daemon-only client and no longer promote; see below.)
 
 ## The daemon process
 
@@ -49,7 +49,7 @@ The daemon does **not** fork or daemonize itself. When you run `kuke init`, the 
 Every `kuke` invocation is a short-lived process:
 
 1. Parse flags, load config.
-2. If promoted to in-process mode (explicit `--run-path`, `KUKEON_NO_DAEMON=true`, or `--no-daemon` on one of the commands that still ship it — `init`, `uninstall`, `purge`, every `get <kind>`), run the operation in-process.
+2. If promoted to in-process mode (explicit `--run-path`, `KUKEON_NO_DAEMON=true`, or `--no-daemon` on one of the commands that still ship it — `init`, `uninstall`, `purge`, every `get <kind>`), run the operation in-process. Promotion only applies to the commands that route through the promotable client — `get *`, `purge *`, `log`, `refresh`, `restart`, `start`, `stop`, `doctor cgroups`, plus `init`/`uninstall`. The true workload verbs (`apply`, `create *`, `run`, `attach`, `delete *`, `kill *`) route through the daemon-only client after #566/#588: they ignore the promotion knobs and always dial the daemon.
 3. Otherwise, dial the daemon socket, send one `kukeonv1` request, print the response, exit.
 
 Clients do not hold persistent connections. Each command opens a new socket, sends, receives, closes. There's no keepalive or session state.

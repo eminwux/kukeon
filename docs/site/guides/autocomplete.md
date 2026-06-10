@@ -6,6 +6,9 @@ All three shells use cobra's V2 dispatcher model: the generated script is small 
 
 ## bash
 
+!!! note "Prerequisite: the `bash-completion` package"
+    Loading the generated bash script requires the OS `bash-completion` package to be present on the host (`apt install bash-completion` on Debian/Ubuntu, `dnf install bash-completion` on Fedora/RHEL). On a fresh host without it, the `source` lines below have no effect.
+
 ```bash
 # One-time, for the current shell:
 source <(kuke autocomplete bash)

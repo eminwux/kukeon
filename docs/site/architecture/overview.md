@@ -10,7 +10,7 @@ flowchart TB
     end
 
     kuke -->|unix socket<br/>kukeonv1 API| kukeond
-    kuke -.->|in-process<br/>(--run-path / KUKEON_NO_DAEMON)| externals
+    kuke -.->|in-process, promotable callers only<br/>(--run-path / KUKEON_NO_DAEMON)| externals
 
     kukeond --> externals
 
@@ -34,7 +34,7 @@ A thin cobra CLI. It:
 - sends `kukeonv1` API requests;
 - formats the response as a table, YAML, or JSON.
 
-The only time `kuke` does real work itself is when it's promoted into in-process mode — by an explicit `--run-path`, by `KUKEON_NO_DAEMON=true`, or (on the commands that still expose the flag: `init`, `uninstall`, `purge`, every `get <kind>`) by `--no-daemon`. In that mode it runs the same controller code that `kukeond` would.
+The only time `kuke` does real work itself is when it's promoted into in-process mode — by an explicit `--run-path`, by `KUKEON_NO_DAEMON=true`, or (on the commands that still expose the flag: `init`, `uninstall`, `purge`, every `get <kind>`) by `--no-daemon`. In that mode it runs the same controller code that `kukeond` would. Promotion only reaches the commands routed through the promotable client (`get *`, `purge *`, `log`, `refresh`, `restart`, `start`, `stop`, `doctor cgroups`, plus `init`/`uninstall`); the true workload verbs (`apply`, `create *`, `run`, `attach`, `delete *`, `kill *`) route through the daemon-only client after #566/#588 and always require the daemon.
 
 ## kukeond (daemon)
 

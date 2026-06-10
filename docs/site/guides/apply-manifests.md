@@ -99,17 +99,11 @@ or multi-doc:
 cat realm.yaml space.yaml stack.yaml cell.yaml | sudo kuke apply -f -
 ```
 
-## In-process escape hatch
+## `kuke apply` always requires the daemon
 
-`kuke apply` routes through `kukeond` by default. When the daemon is down or you need to debug locally, reach the in-process path via `KUKEON_NO_DAEMON=true` in the env or an explicit `--run-path` (which auto-promotes to in-process mode):
+`kuke apply` routes through `kukeond` and has **no in-process fallback**. After #566/#588 the workload verbs (`apply`, `create *`, `run`, `attach`, `delete *`, `kill *`) route through the daemon-only client, which ignores `kukeon/noDaemon` — so `KUKEON_NO_DAEMON=true` and the `--run-path` promotion do **not** reach an in-process branch for `apply`. If the daemon is down, bring it back with `kuke daemon start` (or `kuke init` from scratch) before applying.
 
-```bash
-sudo KUKEON_NO_DAEMON=true kuke apply -f cell.yaml
-# or
-sudo kuke apply -f cell.yaml --run-path /opt/kukeon
-```
-
-The `--no-daemon` flag itself was retired from workload commands by #222; see [Client and daemon](../concepts/client-and-daemon.md) for the broader story.
+The in-process escape hatch survives only for the promotable callers — `get *`, `purge *`, `log`, `refresh`, `restart`, `start`, `stop`, `doctor cgroups`, plus the bootstrap `init`/`uninstall`. See [Client and daemon](../concepts/client-and-daemon.md) for the broader story.
 
 ## Parameterized cell blueprints
 
@@ -174,5 +168,4 @@ See [kuke run](../cli/kuke-run.md) for the full flag surface.
 - [Manifest Reference](../manifests/overview.md) — the full schema of every resource
 - [CLI Reference → apply](../cli/kuke-apply.md) — every flag on `kuke apply`
 - [CLI Reference → run](../cli/kuke-run.md) — `-f` (file), `--from-blueprint`, and `--from-config` modes, including parameter handling
-- [Migrate from `CellProfile` to `CellBlueprint`](migrate-cellprofile-to-blueprint.md) — the #626 cutover recipe
 - [Tutorials → Hello-world cell](../tutorials/hello-world.md) — a worked example end-to-end

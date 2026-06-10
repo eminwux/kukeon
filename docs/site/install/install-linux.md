@@ -90,7 +90,7 @@ sudo usermod -aG kukeon $USER
 kuke get realms
 ```
 
-Operations that bypass the daemon still need root: `kuke init`, `kuke daemon reset`, `kuke image load` (in-process by design — image commands run in-process regardless of flags), `kuke doctor cgroups --probe`, and any command that runs in-process (`kuke get <kind> --no-daemon`, `kuke purge ... --no-daemon`, or any command with `KUKEON_NO_DAEMON=true` / an explicit `--run-path`).
+Operations that bypass the daemon still need root: `kuke init`, `kuke daemon reset`, `kuke image load` (in-process by design — image commands run in-process regardless of flags), `kuke doctor cgroups --probe`, and any promotable caller that runs in-process (`kuke get <kind> --no-daemon`, `kuke purge ... --no-daemon`, or a promotable caller — `get *`, `purge *`, `log`, `refresh`, `restart`, `start`, `stop`, `doctor cgroups` — with `KUKEON_NO_DAEMON=true` / an explicit `--run-path`). The workload verbs (`apply`, `create *`, `run`, `attach`, `delete *`, `kill *`) route through the daemon-only client after #566/#588 and never run in-process.
 
 ## Host supervisor
 
