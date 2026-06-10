@@ -29,28 +29,28 @@ sudo kuke init --kukeond-image docker.io/library/<img>:<tag>
 **Invariants.**
 
 - Exit code 0 on success; non-zero with a message naming the failed phase otherwise.
-- Side effect: `/opt/kukeon/{default,kuke-system}/...` populated; `/run/kukeon/{kukeond.sock,kukeond.pid}` created; containerd namespaces `default.kukeon.io` and `kuke-system.kukeon.io` exist; cgroup subtree `/kukeon/...` populated.
+- Side effect: `/opt/kukeon/data/{default,kuke-system}/...` populated; `/run/kukeon/{kukeond.sock,kukeond.pid}` created; containerd namespaces `default.kukeon.io` and `kuke-system.kukeon.io` exist; cgroup subtree `/kukeon/...` populated.
 - After success, `kuke get realms` and `kuke get realms --no-daemon` both list **at least** `default` and `kuke-system` in `Ready` state with their canonical namespaces. The two outputs must agree — divergence indicates the daemon's view of `/opt/kukeon` is stale (the bind-mount regression AGENTS.md guards against).
 - Second invocation on a healthy host is idempotent: every phase reports "already existed", exit code 0, the daemon stays up.
 - `kuke doctor cgroups` on the same host exits 0 once cgroup controllers are delegated; non-zero output names which controller is missing and whether the kernel lacks support or the parent didn't delegate.
 
 ### Lightweight teardown (dev loop)
 
-**Intent.** Stop the running daemon and clear its socket/pidfile so the next `kuke init` produces a clean re-bootstrap, **without** touching user-realm data under `/opt/kukeon/default`.
+**Intent.** Stop the running daemon and clear its socket/pidfile so the next `kuke init` produces a clean re-bootstrap, **without** touching user-realm data under `/opt/kukeon/data/default`.
 
 **Sequence.**
 
 ```bash
 sudo kuke daemon reset
-sudo kuke daemon reset --purge-system    # also wipes /opt/kukeon/kuke-system
+sudo kuke daemon reset --purge-system    # also wipes /opt/kukeon/data/kuke-system
 ```
 
 **Invariants.**
 
 - Exit code 0 on success.
 - Side effect: kukeond cell stopped + deleted; `/run/kukeon/kukeond.{sock,pid}` removed.
-- `/opt/kukeon/default/**` is **never** touched by `daemon reset` (with or without `--purge-system`). This is the invariant that lets `daemon reset` be safe in a dev loop.
-- `--purge-system` additionally removes `/opt/kukeon/kuke-system`; without it, the system-realm tree is preserved.
+- `/opt/kukeon/data/default/**` is **never** touched by `daemon reset` (with or without `--purge-system`). This is the invariant that lets `daemon reset` be safe in a dev loop.
+- `--purge-system` additionally removes `/opt/kukeon/data/kuke-system`; without it, the system-realm tree is preserved.
 - Idempotent: re-running on a host with no daemon succeeds.
 
 ### Full per-host teardown
@@ -215,7 +215,7 @@ sudo kuke purge cell <name> --realm r --space s --stack st
 
 - Without `--cascade` or `--force`, purging a parent that still has children exits non-zero with a message naming the child count: `Use --cascade to purge them or --force to skip validation`.
 - Side effect on success: realm metadata removed; containerd namespace dropped; cgroup subtree torn down; orphaned CNI resources cleaned.
-- Purging the `default` realm with `--cascade` is **safe**: `/opt/kukeon/default` is wiped but the daemon cell (in `kuke-system`) is untouched, so the daemon stays up. Re-creating the realm restores the user-facing tree.
+- Purging the `default` realm with `--cascade` is **safe**: `/opt/kukeon/data/default` is wiped but the daemon cell (in `kuke-system`) is untouched, so the daemon stays up. Re-creating the realm restores the user-facing tree.
 - Purging the `kuke-system` realm with `--cascade` **takes down the daemon** mid-RPC (it lives there). The CLI surfaces this as a connection-closed error (e.g. `Error: unexpected EOF`) on the issuing command and the daemon socket disappears. Recovery: re-run `kuke init` to rebuild the cell. Treat this as a destructive operator action — there is no in-band guard.
 - `kuke purge realm kuke-system` without `--cascade` refuses cleanly (child-resources error); the daemon survives.
 
@@ -276,7 +276,7 @@ sudo kuke run --clone <cell> --name custom                               # same,
 **Invariants.**
 
 - Exit code 0 once the cell is started (after create on the fused / `-f` paths) and, in attach mode, the attach loop has exited cleanly.
-- Side effect on success: the cell appears in `kuke get cells` in the `Ready` state with metadata under `/opt/kukeon/<realm>/<space>/<stack>/<cell>/metadata.json`.
+- Side effect on success: the cell appears in `kuke get cells` in the `Ready` state with metadata under `/opt/kukeon/data/<realm>/<space>/<stack>/<cell>/metadata.json`.
 - **Exactly one source is required:** the `<cell>` positional, `-f/--file`, or one of `--from-blueprint`/`--from-config`/`--clone`. The four are mutually exclusive at parse time; missing all four exits non-zero with `a source is required: <cell> (start an existing cell), -f/--file, or --from-blueprint/--from-config/--clone (create+start+attach a new one)`.
 - `kuke run <cell>` is the start+attach-existing path. The cell must already exist; a missing name exits non-zero with a pointer at `kuke create cell` / `kuke run --from-...`. The transition follows the live state: a Stopped cell is started then attached; a Ready cell is attached as a no-op; an error / partial cell (`Pending`, `Failed`, `Unknown`) is refused with a `kuke delete cell <name>` pointer.
 - `kuke run -f` is **create-or-attach keyed by `metadata.name`**. Against a cell whose on-disk spec matches the file, the runtime state selects the transition:
