@@ -5,9 +5,13 @@
 ![license: apache2](https://img.shields.io/badge/license-Apache%202.0-green)
 [![Test](https://github.com/eminwux/kukeon/actions/workflows/test.yaml/badge.svg?branch=main)](https://github.com/eminwux/kukeon/actions/workflows/test.yaml)
 
-_A goal compiler for AI-built software. Self-hosted. Every diff inspectable._
+_Self-hosted runtime for AI coding agents on your own Linux host._
 
-Kukeon is a self-hosted system where a team of AI agents — a planner, developers, a reviewer, and a meta-agent that improves the others — takes a goal, builds it, reviews it, ships it, and refines both the product and itself. It runs on a single Linux host you own, from a cloud VM down to a Raspberry Pi. A human states the goal and merges the PRs; everything in between runs on its own.
+Kukeon runs Claude Code and other agent workloads as isolated [containerd](https://containerd.io/) cells on a single Linux host you own — from a cloud VM down to a Raspberry Pi. Each agent gets an attachable terminal, logs, scoped secrets, and reproducible blueprints/configs, with the Git forge as the system of record. No SaaS sandbox, no Kubernetes cluster, every action inspectable.
+
+Start with one agent cell; grow into per-project agent teams declared with `kuketeam.yaml`.
+
+**The longer arc.** Agent isolation is the practical starting point. The long-term direction is a *goal compiler*: a self-hosted system where a team of AI agents — a planner, developers, a reviewer, and a meta-agent that improves the others — takes a goal, builds it, reviews it, ships it, and refines both the product and itself. A human states the goal and merges the PRs; everything in between runs on its own.
 
 Under the hood: a containerd-native runtime (`kukeond` + `kuke`) gives each agent real isolation with primitives you can inspect (`ctr`, `ip link`, `ls /sys/fs/cgroup`). A `CellBlueprint` + `CellConfig` model describes agent roles as templates and instantiates them as concrete cells. A daemon-owned **lease** mechanism makes work-claims atomic across concurrent cells. The Git forge is the system of record — every plan, PR, and audit-trail entry lives in infrastructure you already trust.
 
@@ -139,6 +143,27 @@ The agents — planner, devs, reviewer, meta — run as cells under `kukeond`, w
 - **Isolated** — realm/space/cell backed by real Linux primitives (containerd namespaces, CNI networks, cgroups)
 - **Self-hosted** — no cluster, no etcd, no scheduler, no SaaS
 - **Transparent** — inspect what the daemon did with `ctr`, `ip link`, `ls /sys/fs/cgroup`
+
+## What it is good for today
+
+Kukeon is useful right now as a single-host runtime for AI coding agents:
+
+- **Run Claude Code in an isolated cell** — the canonical first workflow, from zero to a live prompt. → See [docs/site/guides/run-claude-code.md](docs/site/guides/run-claude-code.md).
+- **Run one-shot agent jobs from a `CellBlueprint`** — parametrized prompts driven with `kuke run --from-blueprint`.
+- **Define repeatable agent environments** with `CellBlueprint` + `CellConfig`.
+- **Compose a per-project agent roster** with `kuke team init` from a committed `kuketeam.yaml` — the next-level path once one cell isn't enough. → See [docs/site/cli/kuke-team-init.md](docs/site/cli/kuke-team-init.md).
+- **Operate a lightweight single-host agent runtime** without Kubernetes.
+
+## What it is not (yet)
+
+Setting expectations before you install:
+
+- **Not a Kubernetes replacement** for multi-node clusters or cross-region orchestration.
+- **Not a SaaS sandbox** — execution stays on infrastructure you own.
+- **Not yet a fully autonomous software company** — the human merge gate is a deliberate stage-0, not a missing feature.
+- **Pre-v1** — manifests, CLI verbs, and daemon semantics can still change between minor releases.
+
+See [Non-Goals](#non-goals) below for the full design boundaries.
 
 ## Usage Examples
 
