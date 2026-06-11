@@ -1,6 +1,6 @@
 # Install on Linux
 
-Kukeon (v0.5.0 beta) ships a single static binary per platform. The same binary behaves as `kuke` (the CLI) or `kukeond` (the daemon) depending on the name it is invoked under: you install the binary once and create a hard link for the second name. The one-line installer below does both for you.
+Kukeon (v0.6.0 beta) ships a single static binary per platform. The same binary behaves as `kuke` (the CLI) or `kukeond` (the daemon) depending on the name it is invoked under: you install the binary once and create a hard link for the second name. The one-line installer below does both for you.
 
 Before installing, confirm cgroups v2 and containerd are in place — see [Prerequisites](prerequisites.md). The installer also checks them and exits with a distro-aware hint on any miss.
 
@@ -42,7 +42,7 @@ If you would rather drive each step yourself — e.g. installing onto an air-gap
 # Pick your platform
 export OS=linux             # Options: linux
 export ARCH=amd64           # Options: amd64, arm64
-export KUKE_VERSION=v0.5.0  # Or the release you want to pin
+export KUKE_VERSION=v0.6.0  # Or the release you want to pin
 
 # Download, install, and hard-link
 curl -L -o kuke "https://github.com/eminwux/kukeon/releases/download/${KUKE_VERSION}/kuke-${OS}-${ARCH}"
@@ -60,7 +60,7 @@ The hard link is required: `main.go` dispatches to `kuke` or `kukeond` by lookin
 
 ```bash
 $ kuke version
-v0.5.0
+v0.6.0
 
 $ kukeond --help
 Kukeon daemon: hosts the kukeonv1 API over a unix socket

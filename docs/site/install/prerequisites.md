@@ -1,6 +1,6 @@
 # Prerequisites
 
-Kukeon (v0.5.0 beta) runs on a single Linux host and relies on two things being present before you install the binary:
+Kukeon (v0.6.0 beta) runs on a single Linux host and relies on two things being present before you install the binary:
 
 1. A kernel with **cgroups v2** enabled
 2. A running **containerd** daemon

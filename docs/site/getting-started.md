@@ -1,6 +1,6 @@
 # Getting Started
 
-This guide walks you through installing Kukeon (v0.5.0 beta) on a Linux host, bootstrapping the runtime, and running a simple cell.
+This guide walks you through installing Kukeon (v0.6.0 beta) on a Linux host, bootstrapping the runtime, and running a simple cell.
 
 ## 1. Check prerequisites
 
@@ -33,6 +33,8 @@ sudo kuke init
 
 `kuke init` provisions the two default realms (`default` for user workloads, `kuke-system` for the `kukeond` daemon cell), sets up CNI dirs, pulls the `kukeond` image into the `kuke-system` realm's containerd namespace, and starts the daemon. It touches `/opt/kukeon`, cgroups, and containerd, so it needs root.
 
+Once `kuke init` returns, run [`kuke status`](cli/kuke-status.md) to confirm the daemon is healthy and both realms are Ready.
+
 Expected tail of the output:
 
 ```
@@ -40,12 +42,12 @@ Initialized Kukeon runtime
 Realm: default (namespace: default.kukeon.io)
 System realm: kuke-system (namespace: kuke-system.kukeon.io)
 Run path: /opt/kukeon
-Kukeond image: ghcr.io/eminwux/kukeon:v0.5.0
+Kukeond image: ghcr.io/eminwux/kukeon:v0.6.0
 Actions:
   ...
   System hierarchy:
     - realm "kuke-system": created
-    - cell "kukeond": created (image ghcr.io/eminwux/kukeon:v0.5.0)
+    - cell "kukeond": created (image ghcr.io/eminwux/kukeon:v0.6.0)
     - cell cgroup: created
     - cell root container: created
     - cell containers: started
