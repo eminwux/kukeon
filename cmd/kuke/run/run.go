@@ -33,6 +33,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/eminwux/kukeon/cmd/config"
@@ -954,16 +955,16 @@ func divergedContainerFields(actual, desired v1beta1.ContainerSpec) []string {
 		fields = append(fields, scalarDiff("image", actual.Image, desired.Image))
 	}
 	if actual.Command != desired.Command {
-		fields = append(fields, scalarDiff("command", actual.Command, desired.Command))
+		fields = append(fields, focusedScalarDiff("command", actual.Command, desired.Command))
 	}
 	if !stringSlicesEqual(actual.Args, desired.Args) {
-		fields = append(fields, sliceDiff("args", actual.Args, desired.Args))
+		fields = append(fields, focusedSliceDiff("args", actual.Args, desired.Args))
 	}
 	if actual.WorkingDir != desired.WorkingDir {
 		fields = append(fields, scalarDiff("workingDir", actual.WorkingDir, desired.WorkingDir))
 	}
 	if !stringSlicesEqual(actual.Env, desired.Env) {
-		fields = append(fields, sliceDiff("env", actual.Env, desired.Env))
+		fields = append(fields, focusedSliceDiff("env", actual.Env, desired.Env))
 	}
 	if !stringSlicesEqual(actual.Ports, desired.Ports) {
 		fields = append(fields, sliceDiff("ports", actual.Ports, desired.Ports))
@@ -1029,6 +1030,142 @@ func sliceDiff(name string, actual, desired []string) string {
 // the divergence, not a bare positional `{[…] …}`.
 func valueDiff(name string, actual, desired interface{}) string {
 	return fmt.Sprintf("%s (actual=%+v, desired=%+v)", name, actual, desired)
+}
+
+// Focused-diff tuning (issue #1193). diffElemMax is the rune length at or under
+// which a single element prints verbatim; longer elements are windowed to
+// diffContext runes on each side of the first character that differs, so a
+// one-token change inside a multi-line `sh -c` script stays visible instead of
+// drowning in escaped shell text.
+const (
+	diffContext = 24
+	diffElemMax = 56
+)
+
+// focusedScalarDiff is scalarDiff's focused sibling for long scalar fields
+// (command). A short value renders verbatim (`actual=%q desired=%q`); a long
+// one is truncated around the first differing rune so the changed token stays
+// visible. The full spec remains inspectable via `kuke get cell -o yaml`.
+func focusedScalarDiff(name, actual, desired string) string {
+	a, d := truncateAroundDiff(actual, desired)
+	return fmt.Sprintf("%s (actual=%s desired=%s)", name, a, d)
+}
+
+// focusedSliceDiff renders a string-slice divergence (args, env) as a focused
+// diff rather than dumping both sides verbatim. With multi-line script args a
+// full `%q` of both slices buries the one changed token in a wall of escaped
+// shell text (issue #1193); this elides identical leading/trailing elements,
+// names only the differing indices, and truncates long individual elements
+// around the first character that differs so the changed token stays visible.
+// The full spec remains inspectable via `kuke get cell -o yaml`.
+func focusedSliceDiff(name string, actual, desired []string) string {
+	// Identical leading elements.
+	p := 0
+	for p < len(actual) && p < len(desired) && actual[p] == desired[p] {
+		p++
+	}
+	// Identical trailing elements (not overlapping the common prefix).
+	s := 0
+	for s < len(actual)-p && s < len(desired)-p &&
+		actual[len(actual)-1-s] == desired[len(desired)-1-s] {
+		s++
+	}
+
+	actMid := actual[p : len(actual)-s]
+	desMid := desired[p : len(desired)-s]
+
+	var b strings.Builder
+	b.WriteString(name)
+	b.WriteString(" (")
+	if p > 0 || s > 0 {
+		fmt.Fprintf(&b, "%d leading, %d trailing identical; ", p, s)
+	}
+
+	if len(actMid) == len(desMid) {
+		// Same-length window: report each differing index pairwise so the
+		// reader sees only the elements that actually changed.
+		parts := make([]string, 0, len(actMid))
+		for i := range actMid {
+			if actMid[i] == desMid[i] {
+				continue
+			}
+			a, d := truncateAroundDiff(actMid[i], desMid[i])
+			parts = append(parts, fmt.Sprintf("[%d] actual=%s desired=%s", p+i, a, d))
+		}
+		// Defensive: a same-length window with no differing element can only
+		// arise if the slices were equal, which the caller already excluded.
+		if len(parts) == 0 {
+			parts = append(parts, "elements reordered")
+		}
+		b.WriteString(strings.Join(parts, "; "))
+	} else {
+		// Add/remove: the differing windows have different lengths, so name
+		// the index range and the (per-element truncated) contents of each.
+		fmt.Fprintf(&b, "actual[%d:%d]=%s desired[%d:%d]=%s",
+			p, len(actual)-s, quoteSliceTrunc(actMid),
+			p, len(desired)-s, quoteSliceTrunc(desMid))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// truncateAroundDiff quotes two strings, windowing each to diffContext runes on
+// either side of the first rune that differs when either side exceeds
+// diffElemMax. Short strings print verbatim. An elided side is marked with a
+// `…` ellipsis so the truncation is visible.
+func truncateAroundDiff(a, b string) (string, string) {
+	ra, rb := []rune(a), []rune(b)
+	if len(ra) <= diffElemMax && len(rb) <= diffElemMax {
+		return strconv.Quote(a), strconv.Quote(b)
+	}
+	i := 0
+	for i < len(ra) && i < len(rb) && ra[i] == rb[i] {
+		i++
+	}
+	return windowAround(ra, i), windowAround(rb, i)
+}
+
+// windowAround quotes the diffContext-rune neighbourhood of index i in r,
+// prefixing/suffixing a `…` ellipsis when content was elided on that side.
+func windowAround(r []rune, i int) string {
+	lo := i - diffContext
+	hi := i + diffContext
+	prefixElided := lo > 0
+	suffixElided := hi < len(r)
+	if lo < 0 {
+		lo = 0
+	}
+	if hi > len(r) {
+		hi = len(r)
+	}
+	q := strconv.Quote(string(r[lo:hi]))
+	if prefixElided {
+		q = "…" + q
+	}
+	if suffixElided {
+		q += "…"
+	}
+	return q
+}
+
+// quoteSliceTrunc renders a string slice as a space-joined list of quoted
+// elements, truncating any element longer than diffElemMax to its leading
+// diffElemMax runes with a `…` ellipsis. Used for the add/remove branch of
+// focusedSliceDiff where there is no per-element diff partner to window around.
+func quoteSliceTrunc(elems []string) string {
+	if len(elems) == 0 {
+		return "[]"
+	}
+	parts := make([]string, len(elems))
+	for i, e := range elems {
+		r := []rune(e)
+		if len(r) <= diffElemMax {
+			parts[i] = strconv.Quote(e)
+			continue
+		}
+		parts[i] = strconv.Quote(string(r[:diffElemMax])) + "…"
+	}
+	return "[" + strings.Join(parts, " ") + "]"
 }
 
 // containerSecretsEqual compares two ContainerSecret slices field-by-field.
