@@ -134,6 +134,15 @@ time. When unset, the clone dir falls back to `metadata.name`. The value is
 validated as a safe path basename that does not collide with the reserved
 `agents` slot directory.
 
+### Scoping the team's cells
+
+`ProjectTeam.spec.realm`, `spec.space`, and `spec.stack` (in the committed
+`kuketeam.yaml`) are the optional scope coordinates the team's rendered cells
+bind to. Each **defaults to `default`** when omitted, and the renderer stamps
+the defaulted value onto every rendered Blueprint/Config so the persisted
+Config scope matches the live cell. Set them to place a project's team cells
+under a non-`default` realm/space/stack.
+
 ## Secrets: two `secrets.env` layers render to `kind: Secret`
 
 Team secret material is composed from two `secrets.env` layers and rendered as
@@ -161,6 +170,9 @@ kind: ProjectTeam
 metadata: { name: sbsh }
 spec:
   source: { repo: github.com/eminwux/agents, tag: v1.4.0 } # pinned (tag)
+  realm: default # optional scope coords; each defaults to `default` when omitted
+  space: default
+  stack: default
   defaults: { harnesses: [claude, opencode] }
   roles:
     - { ref: dev, needs: { image: [go] } }
