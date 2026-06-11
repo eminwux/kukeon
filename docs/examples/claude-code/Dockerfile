@@ -1,9 +1,9 @@
 # Claude Code image used by the run-claude-code guide.
 #
-# Derived verbatim from eminwux/crew images/claude/Dockerfile so the example
-# tracks what is actually running at fleet scale. The companion guide at
+# Tracks what runs at fleet scale so the example stays drop-in usable on a
+# full agent-runner host. The companion guide at
 # docs/site/guides/run-claude-code.md explains which pieces are kukeon-cell
-# essentials (Node + the npm package, the `claude` user) versus crew-fleet
+# essentials (Node + the npm package, the `claude` user) versus fleet-runner
 # extras carried over for parity (gh, git signing tooling, golang, jq/yq,
 # the `kukeon` gid 988 stanza). Trim freely for your own image — the bits
 # the guide's smoke path needs are Node, the `@anthropic-ai/claude-code`
@@ -41,9 +41,9 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # Non-root claude user. The `kukeon` gid 988 stanza matches the host
-# containerd-socket group on crew's fleet hosts; on a freshly-`kuke init`-ed
+# containerd-socket group on a fleet host; on a freshly-`kuke init`-ed
 # host you don't need it for the smoke path in the companion guide. Left in
-# verbatim so this Dockerfile stays usable on a fleet host without edits —
+# so this Dockerfile stays usable on a fleet host without edits —
 # the guide explains the tradeoff and how to drop it when you don't.
 RUN useradd --create-home --shell /bin/bash claude \
  && groupadd -g 988 kukeon \
