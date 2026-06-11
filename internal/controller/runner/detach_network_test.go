@@ -32,6 +32,7 @@ import (
 	"github.com/containerd/containerd/v2/pkg/cio"
 	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
 // deadTaskContainer is a near-empty containerd.Container whose Task() reports
@@ -160,5 +161,157 @@ func TestDetachRootContainerFromNetwork_DeadTaskReleasesReservation(t *testing.T
 			"reservation %s not released on the dead-task path (stat err=%v); CNI DEL was not issued with an empty netns",
 			reservation, err,
 		)
+	}
+}
+
+// liveTaskContainer is a containerd.Container whose Task() reports a live root
+// task pinned to a chosen PID, driving rootContainerNetnsPath to resolve a
+// /proc/<pid>/ns/net path (the live-task path issue #1219 is about). Reuses the
+// recreateCellTask Pid()-only fake from recreate_cell_test.go.
+type liveTaskContainer struct {
+	containerd.Container
+	pid uint32
+}
+
+func (c liveTaskContainer) Task(context.Context, cio.Attach) (containerd.Task, error) {
+	return recreateCellTask{pid: c.pid}, nil
+}
+
+// liveTaskClient returns a live container record whose root task PID is fixed,
+// so rootContainerNetnsPath resolves to /proc/<pid>/ns/net.
+type liveTaskClient struct {
+	deleteCellFakeClient
+	pid uint32
+}
+
+func (c *liveTaskClient) GetContainer(string, string) (containerd.Container, error) {
+	return liveTaskContainer{pid: c.pid}, nil
+}
+
+// writeNetnsRecordingCNIPlugin drops an executable CNI plugin that records the
+// CNI_NETNS it was invoked with on DEL into markerPath (empty content when the
+// DEL carries no netns), so a test can assert exactly which netns a plugin-chain
+// DEL targeted.
+func writeNetnsRecordingCNIPlugin(t *testing.T, binDir, pluginType, markerPath string) {
+	t.Helper()
+	script := fmt.Sprintf(`#!/bin/sh
+case "$CNI_COMMAND" in
+  DEL) printf '%%s' "$CNI_NETNS" > "%s"; exit 0 ;;
+  VERSION) echo '{"cniVersion":"1.0.0","supportedVersions":["0.1.0","0.2.0","0.3.0","0.3.1","0.4.0","1.0.0"]}'; exit 0 ;;
+  *) echo '{"cniVersion":"0.4.0"}'; exit 0 ;;
+esac
+`, markerPath)
+	path := filepath.Join(binDir, pluginType)
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil { //nolint:gosec // test-only executable fake plugin
+		t.Fatalf("write fake CNI plugin: %v", err)
+	}
+}
+
+// TestDetachRootContainerFromNetwork_DropsRunnerOwnNetns is the issue #1219
+// guard: when a cell's root task shares the daemon's own netns (the HostNetwork
+// kukeond case — here modeled by pinning the root task PID to this test process,
+// so rootContainerNetnsPath resolves to /proc/<self>/ns/net == /proc/self/ns/net),
+// detach must NOT run the plugin-chain DEL against that netns. The sanitize
+// chokepoint drops it to an empty netns, so the recorded CNI_NETNS must be empty
+// — proving the bridge plugin's `ip link del eth0` and the loopback plugin's
+// `lo` DOWN never fire in the runner's netns.
+func TestDetachRootContainerFromNetwork_DropsRunnerOwnNetns(t *testing.T) {
+	tmp := t.TempDir()
+	binDir := filepath.Join(tmp, "bin")
+	confDir := filepath.Join(tmp, "conf")
+	cacheDir := filepath.Join(tmp, "cache")
+	for _, d := range []string{binDir, confDir, cacheDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+
+	const pluginType = "kukeon-netns-rec"
+	marker := filepath.Join(tmp, "del-netns")
+	writeNetnsRecordingCNIPlugin(t, binDir, pluginType, marker)
+
+	confPath := filepath.Join(confDir, "kukeon-test.conflist")
+	conflist := fmt.Sprintf(`{"cniVersion":"0.4.0","name":"kukeon-test","plugins":[{"type":"%s"}]}`, pluginType)
+	if err := os.WriteFile(confPath, []byte(conflist), 0o600); err != nil {
+		t.Fatalf("write conflist: %v", err)
+	}
+
+	// Root task PID == this process: rootContainerNetnsPath resolves to
+	// /proc/<self>/ns/net, which is the runner's own netns by inode.
+	r := &Exec{
+		ctx:       context.Background(),
+		logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+		ctrClient: &liveTaskClient{pid: uint32(os.Getpid())}, //nolint:gosec // PID fits uint32
+		cniConf:   &cni.Conf{CniBinDir: binDir, CniConfigDir: confDir, CniCacheDir: cacheDir},
+	}
+
+	r.detachRootContainerFromNetwork(
+		"kukeon_kukeon_kukeond_root", confPath, "kuke-system.kukeon.io",
+		"kukeond", "kukeond", "kukeon", "kuke-system",
+	)
+
+	got, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("CNI DEL was not invoked (marker absent): %v", err)
+	}
+	if string(got) != "" {
+		t.Fatalf(
+			"CNI DEL ran against netns %q; want empty — the runner's own netns must be dropped (issue #1219)",
+			string(got),
+		)
+	}
+}
+
+// TestDelNetnsIsRunnerOwn pins the inode-identity check the sanitize chokepoint
+// relies on: the runner's own netns (by /proc/self and by /proc/<self-pid>)
+// matches; an empty path, a missing path, and an unrelated regular file do not.
+func TestDelNetnsIsRunnerOwn(t *testing.T) {
+	if !delNetnsIsRunnerOwn("/proc/self/ns/net") {
+		t.Error("delNetnsIsRunnerOwn(/proc/self/ns/net) = false, want true")
+	}
+	if !delNetnsIsRunnerOwn(fmt.Sprintf("/proc/%d/ns/net", os.Getpid())) {
+		t.Error("delNetnsIsRunnerOwn(/proc/<self-pid>/ns/net) = false, want true")
+	}
+	if delNetnsIsRunnerOwn("") {
+		t.Error(`delNetnsIsRunnerOwn("") = true, want false`)
+	}
+	if delNetnsIsRunnerOwn(filepath.Join(t.TempDir(), "missing")) {
+		t.Error("delNetnsIsRunnerOwn(nonexistent) = true, want false")
+	}
+	other := filepath.Join(t.TempDir(), "regular")
+	if err := os.WriteFile(other, nil, 0o600); err != nil {
+		t.Fatalf("write regular file: %v", err)
+	}
+	if delNetnsIsRunnerOwn(other) {
+		t.Error("delNetnsIsRunnerOwn(regular file) = true, want false")
+	}
+}
+
+// TestRootContainerHostNetwork pins the call-site predicate that mirrors the
+// ADD-side rootContainerWantsCNI guard: stop/kill skip CNI detach when the
+// cell's root container is host-network (issue #1219).
+func TestRootContainerHostNetwork(t *testing.T) {
+	hostNet := intmodel.Cell{Spec: intmodel.CellSpec{
+		RootContainerID: "root",
+		Containers: []intmodel.ContainerSpec{
+			{ID: "root", Root: true, HostNetwork: true},
+			{ID: "web"},
+		},
+	}}
+	if !rootContainerHostNetwork(hostNet) {
+		t.Error("rootContainerHostNetwork = false for a host-network root, want true")
+	}
+
+	bridged := intmodel.Cell{Spec: intmodel.CellSpec{
+		RootContainerID: "root",
+		Containers:      []intmodel.ContainerSpec{{ID: "root", Root: true, HostNetwork: false}},
+	}}
+	if rootContainerHostNetwork(bridged) {
+		t.Error("rootContainerHostNetwork = true for a bridged root, want false")
+	}
+
+	noRoot := intmodel.Cell{Spec: intmodel.CellSpec{RootContainerID: "root"}}
+	if rootContainerHostNetwork(noRoot) {
+		t.Error("rootContainerHostNetwork = true when the root spec is absent, want false")
 	}
 }

@@ -47,7 +47,10 @@ func (r *Exec) detachRootContainerFromCNI(
 			// Task exists, get PID and detach from CNI
 			rootPID := rootTask.Pid()
 			if rootPID > 0 {
-				netnsPath := fmt.Sprintf("/proc/%d/ns/net", rootPID)
+				// Drop the netns when it resolves to the daemon's own (a
+				// host-network root shares it); a plugin-chain DEL there would
+				// delete eth0 / down lo in the runner's netns (issue #1219).
+				netnsPath := r.sanitizeDELNetns(fmt.Sprintf("/proc/%d/ns/net", rootPID))
 
 				// Create CNI manager and detach from network
 				cniMgr, mgrErr := cni.NewManager(

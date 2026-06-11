@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/containerd/containerd/v2/pkg/namespaces"
@@ -41,6 +42,11 @@ import (
 // It always attempts cleanup even if the container is already deleted or network namespace is invalid.
 func (r *Exec) purgeCNIForContainer(containerID, netnsPath, networkName string) error {
 	var purged []string
+
+	// Never run the plugin-chain DEL against the daemon's own netns (issue
+	// #1219); the IPAM-file purge below is unaffected and still releases the
+	// lease.
+	netnsPath = r.sanitizeDELNetns(netnsPath)
 
 	// Always try to call CNI DEL if network name is available
 	// Some CNI plugins may handle empty/invalid netns gracefully
@@ -489,7 +495,7 @@ func (r *Exec) buildRootCNINetworkName(realmName, spaceName string) string {
 func (r *Exec) detachRootContainerFromNetwork(
 	rootContainerID, cniConfigPath, namespace, cellID, cellName, spaceID, realmID string,
 ) {
-	netnsPath := r.rootContainerNetnsPath(namespace, rootContainerID)
+	netnsPath := r.sanitizeDELNetns(r.rootContainerNetnsPath(namespace, rootContainerID))
 
 	cniMgr, mgrErr := cni.NewManager(
 		r.cniConf.CniBinDir,
@@ -536,6 +542,67 @@ func (r *Exec) rootContainerNetnsPath(namespace, rootContainerID string) string 
 		return fmt.Sprintf("/proc/%d/ns/net", rootPID)
 	}
 	return ""
+}
+
+// sanitizeDELNetns drops a CNI DEL target netns that resolves to the daemon's
+// own network namespace, returning "" so libcni issues its netns-optional DEL
+// (which still releases the host-local IPAM lease and any chained-plugin
+// resources from the cached ADD result) instead of running the plugin chain
+// against the runner's own netns.
+//
+// A HostNetwork root container (kukeond, and any future host-scope cell) shares
+// the daemon host's netns, so its live-task netns path resolves to the runner's
+// own. Running the conflist's DEL there makes the bridge plugin delete the
+// interface hard-coded as IfName ("eth0") in that netns and the loopback plugin
+// set "lo" DOWN — on a bare host that is latent, but in nested mode (the agent's
+// `make dev-init` inside a kukeon-dev-root cell) the "host netns" is the parent
+// cell's, whose uplink veth is literally named eth0, so `kuke daemon reset`
+// severs the parent cell's network (issue #1219). This is defense in depth
+// behind the call-site HostNetwork skip: it also guards every other teardown
+// path (purge/delete/recreate) and any future caller that resolves a self netns.
+func (r *Exec) sanitizeDELNetns(netnsPath string) string {
+	if delNetnsIsRunnerOwn(netnsPath) {
+		r.logger.WarnContext(
+			r.ctx,
+			"refusing CNI DEL against the daemon's own netns; issuing a netns-less DEL instead",
+			"netns", netnsPath,
+		)
+		return ""
+	}
+	return netnsPath
+}
+
+// delNetnsIsRunnerOwn reports whether netnsPath refers to the same network
+// namespace as the daemon's own (/proc/self/ns/net), compared by (device,
+// inode) — the canonical way to test two /proc/<pid>/ns/net handles for
+// namespace identity. Returns false on an empty path or any stat error: an
+// unstattable path cannot be confirmed equal to self, and preserving the
+// resolved netns keeps the pre-existing DEL behavior for every non-self path.
+func delNetnsIsRunnerOwn(netnsPath string) bool {
+	if netnsPath == "" {
+		return false
+	}
+	var target, self syscall.Stat_t
+	if err := syscall.Stat(netnsPath, &target); err != nil {
+		return false
+	}
+	if err := syscall.Stat("/proc/self/ns/net", &self); err != nil {
+		return false
+	}
+	return target.Dev == self.Dev && target.Ino == self.Ino
+}
+
+// rootContainerHostNetwork reports whether the cell's root container runs on the
+// host netns. It mirrors the ADD-side rootContainerWantsCNI guard for the DEL
+// side: the stop/kill teardown paths skip CNI detach for a host-network root so
+// the DEL never targets the daemon's own netns (issue #1219).
+func rootContainerHostNetwork(cell intmodel.Cell) bool {
+	for i := range cell.Spec.Containers {
+		if cell.Spec.Containers[i].ID == cell.Spec.RootContainerID {
+			return cell.Spec.Containers[i].HostNetwork
+		}
+	}
+	return false
 }
 
 func appendCellLogFields(fields []any, cellID, cellName string) []any {
