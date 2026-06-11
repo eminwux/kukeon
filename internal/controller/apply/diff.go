@@ -794,7 +794,18 @@ func diffContainerSpec(desired, actual *intmodel.ContainerSpec, rootContainer bo
 		)
 	}
 
-	if desired.CNIConfigPath != actual.CNIConfigPath {
+	// Only a *non-empty* desired cniConfigPath counts as a change — same
+	// guard the cell-level spec.cniConfigPath diff above applies. The runner
+	// stamps every container's cniConfigPath at provision time
+	// (ResolveSpaceCNIConfigPath, #1136), so the persisted/actual container
+	// carries it while a user-authored YAML omits it. Without this guard the
+	// omitted (empty) desired value reads as "clear the path", reporting a
+	// spurious `cniConfigPath` change on every `kuke apply -f` of an unchanged
+	// file. That phantom diff routes a post-`kuke kill` apply through UpdateCell
+	// instead of the re-materialize branch, which recreates the workload
+	// container against the dead root's namespaces and fails the cell
+	// (lstat /proc/<dead-pid>/ns/ipc) — issue #1185.
+	if desired.CNIConfigPath != "" && desired.CNIConfigPath != actual.CNIConfigPath {
 		result.HasChanges = true
 		if result.ChangeType == ChangeTypeNone {
 			result.ChangeType = ChangeTypeCompatible

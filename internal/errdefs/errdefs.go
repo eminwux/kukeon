@@ -158,6 +158,17 @@ var (
 	// of the misleading Ready→Stopped→reaped cycle. Issue #851.
 	ErrCellWindDownImmediate = errors.New("cell wound down immediately after start")
 
+	// ErrCellReconcileFailed is the apply-layer sentinel raised when a cell's
+	// reconcile completed without a runner-level error yet left the cell in
+	// CellStateFailed. A compatible-change apply that routes through UpdateCell
+	// (or the spec-in-sync "unchanged" branch over an already-Failed cell)
+	// persists the desired spec without bringing the workload up, so it would
+	// otherwise return success and exit 0 while the cell stays dead. Converting
+	// that end-state into this sentinel makes ApplyDocuments stamp the resource
+	// `failed` and `kuke apply` exit non-zero — apply must never report
+	// `updated`/`unchanged` over a Failed cell. Issue #1185.
+	ErrCellReconcileFailed = errors.New("cell reconciled to Failed state")
+
 	// ErrCellSpecHashDrift is the StartCell sentinel raised when the
 	// existing containerd container record carries a `kukeon.io/spec-hash`
 	// label whose value disagrees with the SHA-256 over the on-disk

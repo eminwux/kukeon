@@ -337,6 +337,115 @@ func TestDiffCell_SynthesizedRoot_NoChange(t *testing.T) {
 	}
 }
 
+// TestDiffCell_RunnerInjectedCNIConfigPath_NoChange pins issue #1185: the
+// runner stamps every container's cniConfigPath at provision time
+// (ResolveSpaceCNIConfigPath, #1136), so the persisted/actual container carries
+// it while a user-authored YAML omits it (empty). An omitted desired value must
+// NOT read as a change — same guard the cell-level spec.cniConfigPath diff
+// applies. Without it, every `kuke apply -f` of an unchanged file reports a
+// spurious `cniConfigPath` diff, which (post-`kuke kill`) routes apply through
+// UpdateCell instead of the re-materialize branch and fails the cell against
+// the dead root's namespaces.
+func TestDiffCell_RunnerInjectedCNIConfigPath_NoChange(t *testing.T) {
+	desired := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: "hello-world"},
+		Spec: intmodel.CellSpec{
+			RealmName: "default",
+			SpaceName: "default",
+			StackName: "default",
+			Containers: []intmodel.ContainerSpec{
+				{ID: "root", Root: true, Image: "busybox:latest"},
+				{ID: "web", Image: "busybox:latest"},
+			},
+		},
+	}
+
+	actual := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: "hello-world"},
+		Spec: intmodel.CellSpec{
+			RealmName: "default",
+			SpaceName: "default",
+			StackName: "default",
+			Containers: []intmodel.ContainerSpec{
+				{
+					ID:            "root",
+					Root:          true,
+					Image:         "busybox:latest",
+					CNIConfigPath: "/opt/kukeon/data/default/default/network.conflist",
+				},
+				{
+					ID:            "web",
+					Image:         "busybox:latest",
+					CNIConfigPath: "/opt/kukeon/data/default/default/network.conflist",
+				},
+			},
+		},
+	}
+
+	diff := apply.DiffCell(desired, actual)
+	if diff.HasChanges {
+		t.Errorf("runner-injected cniConfigPath must not register as a change on an unchanged apply; got %+v", diff)
+	}
+	for _, cd := range diff.Containers {
+		for _, f := range cd.ChangedFields {
+			if f == "cniConfigPath" {
+				t.Errorf("container %q reported spurious cniConfigPath drift", cd.Name)
+			}
+		}
+	}
+}
+
+// TestDiffCell_ExplicitCNIConfigPath_StillDetectsDrift makes sure the
+// empty-desired guard above does not mask a genuine, user-authored
+// cniConfigPath change: when desired carries a non-empty value that differs
+// from actual, the diff must still surface it.
+func TestDiffCell_ExplicitCNIConfigPath_StillDetectsDrift(t *testing.T) {
+	desired := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: "hello-world"},
+		Spec: intmodel.CellSpec{
+			RealmName: "default",
+			SpaceName: "default",
+			StackName: "default",
+			Containers: []intmodel.ContainerSpec{
+				{ID: "root", Root: true, Image: "busybox:latest"},
+				{ID: "web", Image: "busybox:latest", CNIConfigPath: "/custom/new.conflist"},
+			},
+		},
+	}
+
+	actual := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: "hello-world"},
+		Spec: intmodel.CellSpec{
+			RealmName: "default",
+			SpaceName: "default",
+			StackName: "default",
+			Containers: []intmodel.ContainerSpec{
+				{ID: "root", Root: true, Image: "busybox:latest", CNIConfigPath: "/custom/old.conflist"},
+				{ID: "web", Image: "busybox:latest", CNIConfigPath: "/custom/old.conflist"},
+			},
+		},
+	}
+
+	diff := apply.DiffCell(desired, actual)
+	if !diff.HasChanges {
+		t.Fatal("expected a genuine non-empty cniConfigPath change to be detected")
+	}
+	found := false
+	for _, cd := range diff.Containers {
+		if cd.Name != "web" {
+			continue
+		}
+		for _, f := range cd.ChangedFields {
+			if f == "cniConfigPath" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected web container to report cniConfigPath drift, got %+v", diff.Containers)
+	}
+}
+
 // TestDiffCell_NonRootContainerImage_InPlaceUpdate pins issue #485: a
 // non-root container `image` change must NOT classify as breaking — the
 // runner's UpdateCell path stops, removes, recreates, and starts the

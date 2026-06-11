@@ -252,8 +252,92 @@ func ReconcileStack(r runner.Runner, desired intmodel.Stack) (ReconcileResult, e
 	return result, nil
 }
 
-// ReconcileCell reconciles a desired cell state with the actual state.
+// failedCellReconcileError converts a Failed end-state into a terminal error
+// so apply never reports a success action over a dead cell (#1185). A
+// compatible change (cniConfigPath, labels, …) routes through UpdateCell,
+// which persists the desired spec without restarting a killed/dead cell; and
+// the spec-in-sync "unchanged" branch walks away from an already-Failed cell.
+// Both would otherwise return a nil error and exit 0 while the workload stays
+// dead. Returning the wrapped sentinel makes ApplyDocuments stamp the resource
+// `failed` and `kuke apply` exit non-zero with an actionable message.
+// StartCell/RecreateCell failures already surface their own error (passed
+// through here unchanged); this is the net for the success-action-but-Failed
+// gap. Pulled out of ReconcileCell so the guard's branches don't inflate that
+// function's cyclomatic complexity.
+func failedCellReconcileError(result ReconcileResult, cellName string, err error) error {
+	if err != nil {
+		return err
+	}
+	cell, ok := result.Resource.(intmodel.Cell)
+	if !ok || cell.Status.State != intmodel.CellStateFailed {
+		return err
+	}
+	return fmt.Errorf(
+		"%w: cell %q — inspect with `kuke get cell %s -o yaml` and `kuke log`",
+		errdefs.ErrCellReconcileFailed, cellName, cellName,
+	)
+}
+
+// ensureCellParents idempotently materializes the realm, space, and stack a
+// cell hangs off of, creating each that is absent and surfacing every other
+// get/create failure as a wrapped error. Pulled out of ReconcileCell so the
+// three near-identical get-or-create blocks don't inflate that function's
+// length and cyclomatic complexity.
+func ensureCellParents(r runner.Runner, desired intmodel.Cell) error {
+	realm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{Name: desired.Spec.RealmName},
+	}
+	if _, err := r.GetRealm(realm); err != nil {
+		if !errors.Is(err, errdefs.ErrRealmNotFound) {
+			return fmt.Errorf("failed to get parent realm %q: %w", desired.Spec.RealmName, err)
+		}
+		if _, createErr := r.CreateRealm(realm); createErr != nil {
+			return fmt.Errorf("failed to create parent realm %q: %w", desired.Spec.RealmName, createErr)
+		}
+	}
+
+	space := intmodel.Space{
+		Metadata: intmodel.SpaceMetadata{Name: desired.Spec.SpaceName},
+		Spec:     intmodel.SpaceSpec{RealmName: desired.Spec.RealmName},
+	}
+	if _, err := r.GetSpace(space); err != nil {
+		if !errors.Is(err, errdefs.ErrSpaceNotFound) {
+			return fmt.Errorf("failed to get parent space %q: %w", desired.Spec.SpaceName, err)
+		}
+		if _, createErr := r.CreateSpace(space); createErr != nil {
+			return fmt.Errorf("failed to create parent space %q: %w", desired.Spec.SpaceName, createErr)
+		}
+	}
+
+	stack := intmodel.Stack{
+		Metadata: intmodel.StackMetadata{Name: desired.Spec.StackName},
+		Spec: intmodel.StackSpec{
+			RealmName: desired.Spec.RealmName,
+			SpaceName: desired.Spec.SpaceName,
+		},
+	}
+	if _, err := r.GetStack(stack); err != nil {
+		if !errors.Is(err, errdefs.ErrStackNotFound) {
+			return fmt.Errorf("failed to get parent stack %q: %w", desired.Spec.StackName, err)
+		}
+		if _, createErr := r.CreateStack(stack); createErr != nil {
+			return fmt.Errorf("failed to create parent stack %q: %w", desired.Spec.StackName, createErr)
+		}
+	}
+
+	return nil
+}
+
+// ReconcileCell reconciles a desired cell state with the actual state. AC2
+// (#1185): apply must never report a success action (created/updated/unchanged)
+// for a cell whose reconcile left it Failed, so the inner result is run through
+// failedCellReconcileError before returning — see its doc for the rationale.
 func ReconcileCell(r runner.Runner, desired intmodel.Cell) (ReconcileResult, error) {
+	result, err := reconcileCell(r, desired)
+	return result, failedCellReconcileError(result, desired.Metadata.Name, err)
+}
+
+func reconcileCell(r runner.Runner, desired intmodel.Cell) (ReconcileResult, error) {
 	result := ReconcileResult{
 		Action: "unchanged",
 		Kind:   "Cell",
@@ -261,82 +345,18 @@ func ReconcileCell(r runner.Runner, desired intmodel.Cell) (ReconcileResult, err
 	}
 
 	// Ensure parent resources exist
-	realm := intmodel.Realm{
-		Metadata: intmodel.RealmMetadata{
-			Name: desired.Spec.RealmName,
-		},
-	}
-	_, err := r.GetRealm(realm)
-	if err != nil {
-		if errors.Is(err, errdefs.ErrRealmNotFound) {
-			_, createErr := r.CreateRealm(realm)
-			if createErr != nil {
-				return result, fmt.Errorf("failed to create parent realm %q: %w", desired.Spec.RealmName, createErr)
-			}
-		} else {
-			return result, fmt.Errorf("failed to get parent realm %q: %w", desired.Spec.RealmName, err)
-		}
-	}
-
-	space := intmodel.Space{
-		Metadata: intmodel.SpaceMetadata{
-			Name: desired.Spec.SpaceName,
-		},
-		Spec: intmodel.SpaceSpec{
-			RealmName: desired.Spec.RealmName,
-		},
-	}
-	_, err = r.GetSpace(space)
-	if err != nil {
-		if errors.Is(err, errdefs.ErrSpaceNotFound) {
-			_, createErr := r.CreateSpace(space)
-			if createErr != nil {
-				return result, fmt.Errorf("failed to create parent space %q: %w", desired.Spec.SpaceName, createErr)
-			}
-		} else {
-			return result, fmt.Errorf("failed to get parent space %q: %w", desired.Spec.SpaceName, err)
-		}
-	}
-
-	stack := intmodel.Stack{
-		Metadata: intmodel.StackMetadata{
-			Name: desired.Spec.StackName,
-		},
-		Spec: intmodel.StackSpec{
-			RealmName: desired.Spec.RealmName,
-			SpaceName: desired.Spec.SpaceName,
-		},
-	}
-	_, err = r.GetStack(stack)
-	if err != nil {
-		if errors.Is(err, errdefs.ErrStackNotFound) {
-			_, createErr := r.CreateStack(stack)
-			if createErr != nil {
-				return result, fmt.Errorf("failed to create parent stack %q: %w", desired.Spec.StackName, createErr)
-			}
-		} else {
-			return result, fmt.Errorf("failed to get parent stack %q: %w", desired.Spec.StackName, err)
-		}
+	if err := ensureCellParents(r, desired); err != nil {
+		return result, err
 	}
 
 	// Get actual state
 	actual, err := r.GetCell(desired)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
-			// Cell doesn't exist, create it
-			created, createErr := r.CreateCell(desired)
+			// Cell doesn't exist, create and start it.
+			started, createErr := createAndStartCell(r, desired)
 			if createErr != nil {
-				return result, fmt.Errorf("failed to create cell: %w", createErr)
-			}
-			// Start the newly created cell (containers are created but not started)
-			// This matches the behavior of controller.CreateCell which also starts cells
-			started, startErr := r.StartCell(created)
-			if startErr != nil {
-				return result, fmt.Errorf("failed to start cell after creation: %w", startErr)
-			}
-			// Update cell metadata (status already set by runner)
-			if updateErr := r.UpdateCellMetadata(started); updateErr != nil {
-				return result, fmt.Errorf("failed to update cell metadata after start: %w", updateErr)
+				return result, createErr
 			}
 			result.Action = actionCreated
 			result.Resource = started
@@ -409,37 +429,61 @@ func ReconcileCell(r runner.Runner, desired intmodel.Cell) (ReconcileResult, err
 
 	result.Action = "updated"
 	result.Resource = updated
-	result.Changes = diff.ChangedFields
+	result.Changes = appendContainerChangeSummaries(diff.ChangedFields, diff)
 	result.Details = diff.Details
 
-	// Add container change details. The update branch surfaces the changed
-	// fields so `kuke apply -f` of an image bump reports
-	// `container "web" updated: image` instead of an opaque
-	// `container "web" updated` — the issue-#485 per-component summary the
-	// docs/cli-use-cases.md "apply updates a divergent existing cell" claim
-	// promises.
+	return result, nil
+}
+
+// createAndStartCell materializes a not-yet-existing cell: CreateCell stages
+// its containers, StartCell brings them up (matching controller.CreateCell,
+// which also starts cells), and UpdateCellMetadata persists the runner-set
+// status. Pulled out of ReconcileCell to keep that function under the funlen
+// budget.
+func createAndStartCell(r runner.Runner, desired intmodel.Cell) (intmodel.Cell, error) {
+	created, createErr := r.CreateCell(desired)
+	if createErr != nil {
+		return intmodel.Cell{}, fmt.Errorf("failed to create cell: %w", createErr)
+	}
+	started, startErr := r.StartCell(created)
+	if startErr != nil {
+		return intmodel.Cell{}, fmt.Errorf("failed to start cell after creation: %w", startErr)
+	}
+	if updateErr := r.UpdateCellMetadata(started); updateErr != nil {
+		return intmodel.Cell{}, fmt.Errorf("failed to update cell metadata after start: %w", updateErr)
+	}
+	return started, nil
+}
+
+// appendContainerChangeSummaries renders the per-component update summary onto
+// the running change list. The update branch surfaces the changed fields so
+// `kuke apply -f` of an image bump reports `container "web" updated: image`
+// instead of an opaque `container "web" updated` — the issue-#485 per-component
+// summary the docs/cli-use-cases.md "apply updates a divergent existing cell"
+// claim promises. Pulled out of ReconcileCell to keep that function under the
+// funlen budget.
+func appendContainerChangeSummaries(changes []string, diff CellDiffResult) []string {
 	for _, containerDiff := range diff.Containers {
 		switch containerDiff.Action {
 		case "add":
-			result.Changes = append(result.Changes, fmt.Sprintf("container %q added", containerDiff.Name))
+			changes = append(changes, fmt.Sprintf("container %q added", containerDiff.Name))
 		case "update":
 			fields := append([]string{}, containerDiff.ChangedFields...)
 			fields = append(fields, containerDiff.BreakingChanges...)
 			if len(fields) > 0 {
-				result.Changes = append(
-					result.Changes,
+				changes = append(
+					changes,
 					fmt.Sprintf("container %q updated: %s", containerDiff.Name, strings.Join(fields, ", ")),
 				)
 			} else {
-				result.Changes = append(result.Changes, fmt.Sprintf("container %q updated", containerDiff.Name))
+				changes = append(changes, fmt.Sprintf("container %q updated", containerDiff.Name))
 			}
 		}
 	}
 	for _, orphan := range diff.Orphans {
-		result.Changes = append(result.Changes, fmt.Sprintf("container %q removed", orphan))
+		changes = append(changes, fmt.Sprintf("container %q removed", orphan))
 	}
-
-	return result, nil
+	return changes
 }
 
 // ReconcileContainer reconciles a desired container state with the actual state.
