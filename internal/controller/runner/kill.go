@@ -174,16 +174,26 @@ func (r *Exec) killCellLocked(cell intmodel.Cell) (intmodel.Cell, error) {
 	// corrupt (issue #685). The name is a pure function of (realm, space).
 	networkName := r.buildRootCNINetworkName(realmID, spaceID)
 
-	// Detach root container from CNI network before killing (needed for CNI detach)
-	r.detachRootContainerFromNetwork(
-		rootContainerID,
-		cniConfigPath,
-		internalRealm.Spec.Namespace,
-		cellID,
-		cellName,
-		spaceID,
-		realmID,
-	)
+	// Detach root container from CNI network before killing (needed for CNI
+	// detach). Skip it for a host-network root: that cell shares the daemon's
+	// own netns (no per-veth, no IPAM lease — CNI ADD was skipped by
+	// rootContainerWantsCNI), so issuing the conflist DEL there would delete
+	// eth0 / down lo in the runner's netns (issue #1219).
+	if rootContainerHostNetwork(internalCell) {
+		fields := appendCellLogFields([]any{"id", rootContainerID}, cellID, cellName)
+		fields = append(fields, "space", spaceID, "realm", realmID)
+		r.logger.InfoContext(r.ctx, "skipping CNI detach for host-network root cell", fields...)
+	} else {
+		r.detachRootContainerFromNetwork(
+			rootContainerID,
+			cniConfigPath,
+			internalRealm.Spec.Namespace,
+			cellID,
+			cellName,
+			spaceID,
+			realmID,
+		)
+	}
 
 	// Kill root container
 	err = r.killContainerTask(internalRealm.Spec.Namespace, rootContainerID)

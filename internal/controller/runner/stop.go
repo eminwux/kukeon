@@ -196,16 +196,26 @@ func (r *Exec) stopCellLocked(cell intmodel.Cell) (intmodel.Cell, error) {
 	// corrupt (issue #685). The name is a pure function of (realm, space).
 	networkName := r.buildRootCNINetworkName(realmName, spaceName)
 
-	// Detach root container from CNI network before stopping (needed for CNI detach)
-	r.detachRootContainerFromNetwork(
-		rootContainerID,
-		cniConfigPath,
-		namespace,
-		cellID,
-		cellName,
-		spaceName,
-		realmName,
-	)
+	// Detach root container from CNI network before stopping (needed for CNI
+	// detach). Skip it for a host-network root: that cell shares the daemon's
+	// own netns (no per-veth, no IPAM lease — CNI ADD was skipped by
+	// rootContainerWantsCNI), so issuing the conflist DEL there would delete
+	// eth0 / down lo in the runner's netns (issue #1219).
+	if rootContainerHostNetwork(internalCell) {
+		fields := appendCellLogFields([]any{"id", rootContainerID}, cellID, cellName)
+		fields = append(fields, "space", spaceName, "realm", realmName)
+		r.logger.InfoContext(r.ctx, "skipping CNI detach for host-network root cell", fields...)
+	} else {
+		r.detachRootContainerFromNetwork(
+			rootContainerID,
+			cniConfigPath,
+			namespace,
+			cellID,
+			cellName,
+			spaceName,
+			realmName,
+		)
+	}
 
 	// Stop root container
 	timeout := 5 * time.Second

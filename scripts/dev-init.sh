@@ -191,6 +191,60 @@ verify_parent_attach_intact() {
     return 0
 }
 
+# detect_uplink_state reports the dev cell's uplink as "<eth0> <default>", each
+# 0|1, using `ip` when present and falling back to sysfs + /proc/net/route. The
+# fallback matters because the #1219 incident saw `ip` missing inside the cell
+# *after* the break, which masked diagnosis — the guard must not itself depend
+# on a tool the break can leave absent.
+detect_uplink_state() {
+    local have_eth0=0 have_default=0
+    if command -v ip >/dev/null 2>&1; then
+        if ip -4 addr show eth0 >/dev/null 2>&1; then have_eth0=1; fi
+        if [ -n "$(ip -4 route show default 2>/dev/null)" ]; then have_default=1; fi
+    else
+        if [ -e /sys/class/net/eth0 ]; then have_eth0=1; fi
+        # /proc/net/route: the default route is the row whose Destination
+        # (column 2) is 00000000.
+        if awk 'NR>1 && $2=="00000000"{f=1} END{exit !f}' /proc/net/route 2>/dev/null; then have_default=1; fi
+    fi
+    printf '%s %s' "${have_eth0}" "${have_default}"
+}
+
+# verify_parent_uplink_intact is the nested-mode regression guard for issue
+# #1219. Before #1219's fix, `kuke daemon reset` on a prior HostNetwork kukeond
+# cell issued a CNI DEL against the daemon's own netns — which nested is *this*
+# dev cell's netns, whose uplink veth is named eth0 — deleting eth0 and downing
+# lo and severing the cell's network. The break otherwise surfaces two phases
+# later as a confusing `kukebuild: ... network is unreachable`; this asserts the
+# uplink survived the reset and fails fast with the real cause. It mirrors the
+# existing `verify_parent_attach_intact` post-flight and only fires nested (bare
+# hosts rarely name their primary NIC eth0). Only the present->absent transition
+# is a regression — an uplink already absent pre-reset is a pre-existing
+# condition.
+verify_parent_uplink_intact() {
+    [ -e "${NESTED_PROBE}" ] || return 0
+    local pre_eth0 pre_def post_eth0 post_def
+    read -r pre_eth0 pre_def <<<"$1"
+    read -r post_eth0 post_def <<<"$(detect_uplink_state)"
+    local broke=0
+    if [ "${pre_eth0}" = "1" ] && [ "${post_eth0}" != "1" ]; then broke=1; fi
+    if [ "${pre_def}" = "1" ] && [ "${post_def}" != "1" ]; then broke=1; fi
+    if [ "${broke}" -eq 1 ]; then
+        cat >&2 <<EOF
+
+POST-RESET: 'kuke daemon reset' severed this dev cell's uplink
+            (eth0 ${pre_eth0}->${post_eth0}, default route ${pre_def}->${post_def}).
+            This is the issue #1219 signature: a HostNetwork-cell CNI DEL ran
+            against this cell's own netns, deleting eth0 and/or downing lo. The
+            break would otherwise surface two phases later as a confusing
+            'kukebuild: ... network is unreachable'. Re-plumb the uplink (see
+            issue #1219's manual-recovery steps) before re-running.
+EOF
+        exit 1
+    fi
+    echo "post-reset: dev cell uplink (eth0 + default route) survived the reset"
+}
+
 # Register the post-flight check BEFORE any state-mutating step so an
 # early failure (e.g. during `make kuke`, `kuke build`, or the first
 # `kuke init`) still surfaces a disturbance of the parent's attach
@@ -337,9 +391,15 @@ fi
 # is the same anti-pattern but doesn't bite today — its first-pass init
 # is idempotent on a pre-bootstrapped host.
 if sudo test -d "${KUKEOND_CELL_DIR}"; then
+    # Snapshot the dev cell's uplink before the reset so the post-reset guard
+    # below can fail loud if `kuke daemon reset` severed it (issue #1219). Only
+    # the prior-cell branch can hit the bug — the detach only fires destructively
+    # against a previously-inited HostNetwork kukeond cell with a live root task.
+    UPLINK_PRE="$(detect_uplink_state)"
     step "Reset prior kukeond cell"
     sudo --preserve-env="${PRESERVE_ENV_ADMIN}" ./kuke daemon reset \
         "${SERVER_CONFIG_FLAGS[@]}"
+    verify_parent_uplink_intact "${UPLINK_PRE}"
 else
     step "No prior kukeond cell at ${KUKEOND_CELL_DIR}; skipping reset"
 fi
