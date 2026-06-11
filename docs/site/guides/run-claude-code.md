@@ -9,22 +9,28 @@ The example does **not** bake API keys into the image and does not configure aut
 ## Prerequisites
 
 - A host that has been bootstrapped with [`kuke init`](init-and-reset.md). `kuke get realms` shows both `default` and `kuke-system` Ready.
-- A local Docker (or `nerdctl build`) install for building the image.
+- The `kukebuild` binary on `PATH` — `kuke build` exec's it. It is not part of the release artifacts yet; build it from a checkout with `make kukebuild` (see [Build from source](../install/build-from-source.md#build-kukebuild-for-kuke-build)).
 - A copy of the three files under `docs/examples/claude-code/`:
   - [`Dockerfile`](https://github.com/eminwux/kukeon/blob/main/docs/examples/claude-code/Dockerfile)
   - [`cell.yaml`](https://github.com/eminwux/kukeon/blob/main/docs/examples/claude-code/cell.yaml)
   - [`blueprint.yaml`](https://github.com/eminwux/kukeon/blob/main/docs/examples/claude-code/blueprint.yaml) (the daemon-stored replacement for the pre-#626 `profile.yaml`)
 
-## Step 1 — Build the image
+## Step 1 — Build the image into the `default` realm
 
-The example `Dockerfile` installs `nodejs` + `npm` + the `@anthropic-ai/claude-code` package as a non-root `claude` user on `debian:trixie-slim`:
+The example `Dockerfile` installs `nodejs` + `npm` + the `@anthropic-ai/claude-code` package as a non-root `claude` user on `debian:trixie-slim`. [`kuke build`](../cli/kuke-build.md) builds it with kukeon's native builder and writes the result straight into the `default` realm's containerd namespace — no docker daemon and no separate load step:
 
 ```bash
 cd docs/examples/claude-code
-docker build -t claude-code:latest .
+sudo kuke build -t claude-code:latest .
 ```
 
-`nerdctl build -t claude-code:latest .` works the same way if you don't run Docker.
+`--realm default` is the default, so it can be omitted. The tag normalizes to `docker.io/library/claude-code:latest` — the exact reference `cell.yaml` and `blueprint.yaml` use. Verify:
+
+```bash
+sudo kuke get images | grep claude-code
+```
+
+If you already have a pre-built image tarball instead, load it with `kuke image load` — see [`kuke image`](../cli/kuke-image.md) for the `kuke image load --from-docker <name:tag>` and `… save | sudo kuke image load -` forms.
 
 ### What's in the image that the smoke path doesn't need
 
@@ -35,23 +41,7 @@ The `Dockerfile` carries a handful of fleet-runner extras the Claude Code smoke 
 
 The smoke path needs only `nodejs`, `npm`, the `@anthropic-ai/claude-code` package, and the non-root `claude` user.
 
-## Step 2 — Load the image into the `default` realm
-
-Every realm maps to its own containerd namespace ([Containerd namespaces](../concepts/containerd-namespaces.md)). User workloads live in `default.kukeon.io`, so the cell's image has to be loaded into that namespace before `kuke apply` / `kuke run` can pull it:
-
-```bash
-sudo kuke image load --from-docker claude-code:latest
-```
-
-`--realm default` is the default, so it can be omitted. Verify:
-
-```bash
-sudo kuke get images | grep claude-code
-```
-
-If you don't run Docker, use the `nerdctl save … | sudo kuke image load -` form documented in [`kuke image`](../cli/kuke-image.md).
-
-## Step 3 — Apply and attach the Cell
+## Step 2 — Apply and attach the Cell
 
 `cell.yaml` is a single Attachable `Cell` with two containers: a `busybox` root keeping the cell alive (`sleep infinity`) and a `work` container running the Claude Code image, marked `attachable: true` so `kuke attach` can connect a TTY to it.
 
@@ -98,7 +88,7 @@ The smoke path above keeps Claude Code's per-user state inside the cell's overla
 
 This is optional — the smoke flow above does not need it.
 
-## Step 4 — One-shot prompts via a `CellBlueprint`
+## Step 3 — One-shot prompts via a `CellBlueprint`
 
 For "fire one prompt, tear the cell down on exit" jobs, apply the example blueprint to the daemon and drive it with `kuke run --from-blueprint`. A [CellBlueprint](../manifests/blueprint.md) is a daemon-stored, scoped cell template.
 

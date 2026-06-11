@@ -4,9 +4,7 @@
 kuke build [-f Dockerfile] [-t name:tag] [--realm <name>] [--build-arg K=V]... [--secret id=NAME,src=PATH]... [--cache-to type=local,dest=PATH]... [--cache-from type=local,src=PATH]... [--platform os/arch,...] [--push] <context>
 ```
 
-Build an OCI image from a Dockerfile into a realm's containerd namespace.
-
-Build an OCI image from a Dockerfile using kukeon's native builder.
+Build an OCI image from a Dockerfile into a realm's containerd namespace using kukeon's native builder.
 
 `kuke build` is a thin shim: it locates the `kukebuild` binary on PATH and exec's it. `kukebuild` embeds BuildKit, builds the context with the Dockerfile frontend, and writes the resulting image into the containerd namespace mapped to `--realm` (`<realm>.kukeon.io`), ready for `kuke get image` and `kuke create`.
 

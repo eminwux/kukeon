@@ -51,6 +51,26 @@ sudo ctr version
 
 Kukeon uses its own containerd namespaces (one per realm: `<realm>.kukeon.io`). `kuke init` provisions two by default — `default.kukeon.io` for user workloads and `kuke-system.kukeon.io` for the `kukeond` daemon. Kukeon does not interfere with existing containerd namespaces used by Docker, nerdctl, or other tools.
 
+## Raspberry Pi
+
+arm64 is a first-class release target: every release ships `kuke-linux-arm64`, `kukeond-linux-arm64`, and `kukepause-linux-arm64` binaries plus multi-arch (`linux/amd64`, `linux/arm64`) container images, and the [one-line installer](install-linux.md) auto-detects `aarch64`/`arm64` via `uname -m` — no Pi-specific install flags needed.
+
+Raspberry Pi OS is Debian-based, so containerd installs the same way as the Debian/Ubuntu line above:
+
+```bash
+sudo apt-get install -y containerd
+sudo systemctl enable --now containerd
+```
+
+!!! warning "Untested on real hardware — verify with `kuke doctor cgroups`"
+    The boot-parameter steps below are documented from upstream Raspberry Pi OS conventions and have **not** been verified on a physical Pi. Raspberry Pi OS historically ships with the cgroup **memory controller disabled** by default. If `sudo kuke doctor cgroups` reports `memory` missing from the delegated controllers, append the following to the single line in `/boot/firmware/cmdline.txt` (`/boot/cmdline.txt` on older releases) and reboot:
+
+    ```
+    cgroup_enable=memory cgroup_memory=1
+    ```
+
+    After the reboot, `sudo kuke doctor cgroups` should pass and `sudo kuke init` should complete normally. If your results differ, please [open an issue](https://github.com/eminwux/kukeon/issues).
+
 ## CNI plugins (for in-process mode only)
 
 The `kukeond` container image bundles the CNI reference plugins at `/opt/cni/bin` inside the container, and the daemon invokes them from there. The standard install path (`kuke init` → daemon-mediated operations) therefore does **not** require host-side CNI plugins.
@@ -86,8 +106,9 @@ See [Getting Started → Daily use without sudo](../getting-started.md#daily-use
 | `/run/kukeon/kukeond.pid`   | Daemon PID file.                                                                                          |
 | `/etc/cni/net.d`            | Generated CNI conflists for each space.                                                                   |
 | `/sys/fs/cgroup/kukeon/...` | Kukeon's cgroup subtree.                                                                                  |
+| `/var/lib/kukebuild/<namespace>/` | BuildKit build cache, written by `kuke build` — one subdirectory per realm containerd namespace. Swept per-namespace by `kuke uninstall`. |
 
-Nothing is written outside those paths without an explicit flag.
+Nothing is written outside the paths in this table without an explicit flag.
 
 ## Next
 

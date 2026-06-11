@@ -24,6 +24,17 @@ ln -sf kuke kukeond
 
 `make kuke` writes the binary into the repository root.
 
+## Build `kukebuild` (for `kuke build`)
+
+[`kuke build`](../cli/kuke-build.md) is a thin shim that locates the `kukebuild` binary on `PATH` and exec's it. `kukebuild` is **not** part of the release artifacts — building it from source is currently the only way to obtain it, and a `kuke build` without it on `PATH` fails fast with `errdefs.ErrKukebuildNotFound`:
+
+```bash
+make kukebuild
+sudo ln -sf "$(pwd)/kukebuild" /usr/local/bin/kukebuild
+```
+
+`make kukebuild` writes the binary into the repository root (it lives in its own Go module under `cmd/kukebuild/`); the symlink puts it on `PATH` so `sudo kuke build` can resolve it.
+
 ## Run against a local binary
 
 For one-off tests you can run the binaries from the checkout:
