@@ -51,20 +51,14 @@ Each level is a real Linux primitive, not an invented abstraction. See [Concepts
 ## Quick start
 
 ```bash
-# Install the binary (CLI also dispatches as kukeond based on argv[0])
-export OS=linux
-export ARCH=amd64
-curl -L -o kuke https://github.com/eminwux/kukeon/releases/download/v0.1.0/kuke-${OS}-${ARCH} && \
-  chmod +x kuke && \
-  sudo install -m 0755 kuke /usr/local/bin/kuke && \
-  sudo ln -f /usr/local/bin/kuke /usr/local/bin/kukeond
-
-# Bootstrap the runtime (creates realms, spaces, stacks, CNI config, and starts kukeond)
-sudo kuke init
+# Install the latest release and bootstrap the runtime (runs `sudo kuke init`)
+curl -fsSL https://kukeon.io/install.sh | bash
 
 # List what was created
 sudo kuke get realms
 ```
+
+The installer verifies the prerequisites, checks the release's `sha256` checksum, installs `kuke` + `kukeond` to `/usr/local/bin`, and brings the daemon up. For an air-gapped host or to pin a specific release, follow the [manual install steps](install/install-linux.md).
 
 See [Getting Started](getting-started.md) for a walk-through, or jump directly to the [Hello-world tutorial](tutorials/hello-world.md).
 
