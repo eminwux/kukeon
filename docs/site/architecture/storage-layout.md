@@ -87,6 +87,18 @@ Kukeon does **not** mirror containerd state into its own layout. Images, snapsho
 
 If you want to inspect what Kukeon pushed into containerd, use `ctr -n kukeon-<realm>` — see [containerd namespaces](../concepts/containerd-namespaces.md).
 
+## Build cache
+
+[`kuke build`](../cli/kuke-build.md) keeps its BuildKit state (layer cache, snapshot and content mappings) under `/var/lib/kukebuild`, one subdirectory per realm containerd namespace:
+
+```
+/var/lib/kukebuild/
+├── default.kukeon.io/
+└── kuke-system.kukeon.io/
+```
+
+The cache is namespace-scoped because it holds references into that namespace's snapshots and content store. `kuke uninstall` sweeps each realm's cache directory in the same pass that removes its containerd namespace — a stale cache left behind strands the next `kuke build` with "parent snapshot does not exist" or "content digest … not found" (see the full per-host teardown notes in [`docs/cli-use-cases.md`](https://github.com/eminwux/kukeon/blob/main/docs/cli-use-cases.md)).
+
 ## What gets cleaned up, and when
 
 | Operation                     | Removes                                                          |
@@ -95,7 +107,8 @@ If you want to inspect what Kukeon pushed into containerd, use `ctr -n kukeon-<r
 | `kuke delete space --cascade` | The space subtree, cgroups, CNI conflist                         |
 | `kuke delete cell --cascade`  | The cell subtree, cgroups, containerd containers                 |
 | `kuke purge <resource>`       | Same as delete but more aggressive: force-removes residual state |
-| Reboot                        | `/run/kukeon/*` disappears (tmpfs). `/opt/kukeon/*` persists.    |
+| `kuke uninstall`              | Everything above, plus `/var/lib/kukebuild/<namespace>/` for every realm whose containerd namespace was removed |
+| Reboot                        | `/run/kukeon/*` disappears (tmpfs). `/opt/kukeon/*` and `/var/lib/kukebuild/*` persist. |
 
 In-process runs of the same commands do exactly the same thing on disk — they just skip the socket and execute the controller in-process (reach in-process mode via `--run-path`, `KUKEON_NO_DAEMON=true`, or `--no-daemon` on the commands that still ship it: `init`, `uninstall`, `purge`, every `get <kind>`).
 
