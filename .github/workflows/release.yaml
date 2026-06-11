@@ -23,11 +23,32 @@ jobs:
       - name: Check out the repo
         uses: actions/checkout@v4
 
+      # kukebuild lives in its own Go module (cmd/kukebuild/go.mod, issue #655)
+      # pinned to a newer Go than the root module; `make release-build-kukebuild`
+      # cds into that module and lets GOTOOLCHAIN auto-fetch the pinned
+      # toolchain. setup-go with go-version-file: go.mod gives a known base Go
+      # for that auto-fetch — mirrors the test.yaml job's proven pattern.
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
       - name: Build artifacts
         run: |
           make release-build \
             KUKEON_VERSION=$KUKEON_VERSION \
             KUKEON_IMAGE_REPO=$KUKEON_IMAGE_REPO
+
+      # kukebuild is the docker-free image builder `kuke build` execs (embeds
+      # BuildKit as a library, writes straight into the realm's containerd
+      # namespace). It is built from its own Go module via a separate target so
+      # the installer can ship it on PATH alongside `kuke` — without it a fresh
+      # installer user hits errdefs.ErrKukebuildNotFound on `kuke build`
+      # (issue #1227).
+      - name: Build kukebuild artifacts
+        run: |
+          make release-build-kukebuild
 
       # The one-line installer (https://kukeon.io/install.sh, issue #62)
       # downloads the per-arch `.sha256` companion file and verifies it
@@ -38,7 +59,8 @@ jobs:
         run: |
           for f in kuke-linux-amd64 kuke-linux-arm64 \
                    kukeond-linux-amd64 kukeond-linux-arm64 \
-                   kukepause-linux-amd64 kukepause-linux-arm64; do
+                   kukepause-linux-amd64 kukepause-linux-arm64 \
+                   kukebuild-linux-amd64 kukebuild-linux-arm64; do
             sha256sum "$f" > "$f.sha256"
           done
 
@@ -50,9 +72,11 @@ jobs:
           ./kuke-linux-amd64 ./kuke-linux-arm64 \
           ./kukeond-linux-amd64 ./kukeond-linux-arm64 \
           ./kukepause-linux-amd64 ./kukepause-linux-arm64 \
+          ./kukebuild-linux-amd64 ./kukebuild-linux-arm64 \
           ./kuke-linux-amd64.sha256 ./kuke-linux-arm64.sha256 \
           ./kukeond-linux-amd64.sha256 ./kukeond-linux-arm64.sha256 \
           ./kukepause-linux-amd64.sha256 ./kukepause-linux-arm64.sha256 \
+          ./kukebuild-linux-amd64.sha256 ./kukebuild-linux-arm64.sha256 \
           --title "${GITHUB_REF#refs/tags/}" \
           --generate-notes \
           --notes "Container images (multi-arch: linux/amd64, linux/arm64):
