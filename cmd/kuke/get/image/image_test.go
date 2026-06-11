@@ -169,6 +169,15 @@ func TestImageCmd_DescribeSingleImageYAMLDefault(t *testing.T) {
 	if !strings.Contains(out, "digest: "+want.Digest) {
 		t.Errorf("expected yaml describe to carry digest, got:\n%s", out)
 	}
+	// camelCase keys must match the CLI's convention (#1194): the default
+	// yaml.v3 struct-name lowering would otherwise collapse these to
+	// `createdat:` / `mediatype:`, which breaks `yq .createdAt`.
+	if !strings.Contains(out, "mediaType: "+want.MediaType) {
+		t.Errorf("expected camelCase mediaType key, got:\n%s", out)
+	}
+	if strings.Contains(out, "mediatype:") || strings.Contains(out, "createdat:") {
+		t.Errorf("collapsed lowercase keys must not appear, got:\n%s", out)
+	}
 }
 
 func TestImageCmd_DescribeSingleImageJSON(t *testing.T) {
@@ -183,8 +192,8 @@ func TestImageCmd_DescribeSingleImageJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if !strings.Contains(out, "\"Name\":") || !strings.Contains(out, want.Name) {
-		t.Errorf("expected json describe to carry Name field, got:\n%s", out)
+	if !strings.Contains(out, "\"name\":") || !strings.Contains(out, want.Name) {
+		t.Errorf("expected json describe to carry camelCase name field, got:\n%s", out)
 	}
 }
 
