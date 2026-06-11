@@ -72,11 +72,11 @@ Per-project scope: the value is the team-label / on-disk source-tree path /
 agents-source path the current `kuke team init` invocation is composing
 for.
 
-| Key           | Source                                               | Default               |
-| ------------- | ---------------------------------------------------- | --------------------- |
-| `NAME`        | `kuketeam.yaml` `metadata.name`                      | empty (validated)     |
-| `PROJECT_DIR` | `composeTeam`'s `projectDir` argument (`os.Getwd()`) | the calling cwd       |
-| `AGENTS_REPO` | resolved agents source's `<owner>/<repo>` path       | empty when unresolved |
+| Key           | Source                                                                         | Default                                               |
+| ------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------- |
+| `NAME`        | `kuketeam.yaml` `spec.projectDir`, falling back to `metadata.name` when unset  | `metadata.name` (the team label; validated non-empty) |
+| `PROJECT_DIR` | `composeTeam`'s `projectDir` argument (`os.Getwd()`)                           | the calling cwd                                       |
+| `AGENTS_REPO` | resolved agents source's `<owner>/<repo>` path                                 | empty when unresolved                                 |
 
 ## Exit codes
 
