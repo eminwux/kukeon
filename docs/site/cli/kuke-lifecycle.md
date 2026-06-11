@@ -13,12 +13,14 @@ All three take the same shape: `<verb> <name> <scope flags>`. The `<name>` posit
 ## kuke start
 
 ```
-kuke start <name> --realm <r> --space <s> --stack <t>
+kuke start (<name> | -l <selector>) --realm <r> --space <s> --stack <t>
 ```
 
 Aliases: `kuke start` → `kuke sta`.
 
 `start` starts the cell's root container first, then every non-root container in the cell.
+
+With `-l <selector>` (mutually exclusive with the positional `<name>`) the start fans out across **every** cell in scope whose labels match, reconciling each matched cell individually. Unmatched cells are untouched.
 
 ## kuke stop
 
@@ -49,6 +51,8 @@ All three verbs share the same scope flags:
 | `--realm` | `default` | Required for cell |
 | `--space` | `default` | Required for cell |
 | `--stack` | `default` | Required for cell |
+
+`kuke start` additionally accepts `-l`, `--selector` (start-only among the three verbs): `Label selector (e.g. kukeon.io/config=<name>); starts every matched cell in scope. Mutually exclusive with <name>`.
 
 Plus all [global flags](kuke.md).
 

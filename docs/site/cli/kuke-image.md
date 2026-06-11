@@ -18,6 +18,7 @@ Listing and describing images moved to the `kuke get` family in #824 — use [`k
 | ------------------- | ---------------------------------------------------------------------- |
 | `kuke image load`   | Import an OCI/docker image tarball into a realm's containerd namespace |
 | `kuke image delete` | Remove an image from a realm's containerd namespace                    |
+| `kuke image prune`  | Reclaim dangling image layers and orphaned leases in a realm           |
 
 ## kuke image load
 
@@ -66,6 +67,36 @@ sudo kuke image delete docker.io/library/nginx:alpine
 
 # Remove an image from kuke-system
 sudo kuke image delete docker.io/library/kukeon-local:dev --realm kuke-system
+```
+
+## kuke image prune
+
+```
+kuke image prune [flags]
+```
+
+Reclaim dangling image layers and orphaned leases in a realm.
+
+`kuke image prune` reclaims dangling image layers and orphaned content leases in the target realm's containerd namespace, then reports how many leases were released versus retained. It takes no positional arguments.
+
+| Flag      | Default   | Description                                          |
+| --------- | --------- | ---------------------------------------------------- |
+| `--realm` | `default` | Target realm; the prune runs in `<realm>.kukeon.io`  |
+
+### Examples
+
+```bash
+# Prune the default realm
+sudo kuke image prune
+
+# Prune kuke-system
+sudo kuke image prune --realm kuke-system
+```
+
+Sample output:
+
+```
+pruned realm "default" (namespace "default.kukeon.io"): released 3 lease(s), retained 12
 ```
 
 ## Related

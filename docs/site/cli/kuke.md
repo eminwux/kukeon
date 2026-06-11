@@ -30,7 +30,7 @@ The daemon endpoint. Today only the `unix://` scheme is supported. The `ssh://us
 
 Bypass `kukeond` and run the operation in-process. Requires root: the client now directly touches containerd, CNI, and cgroups.
 
-`--no-daemon` is **not** a root-persistent flag — it is only accepted on `kuke init`, `kuke uninstall`, `kuke purge`, and every `kuke get <kind>` (see #222; the `get` kinds were retained per a user override on the original AC so the in-process escape hatch stays available for every resource lookup, not just `get realm`). For the remaining daemon-routed workload commands (`apply`, `create`, `run`, `attach`, `delete`, `kill`, `start`, `stop`, `log`, `refresh`), reach the in-process path via `KUKEON_NO_DAEMON=true` in the environment or via an explicit `--run-path /path` (which auto-promotes to in-process mode so a caller-supplied run-path is never silently sent to the wrong daemon).
+`--no-daemon` is **not** a root-persistent flag — it is only accepted on `kuke init`, `kuke uninstall`, `kuke purge`, and every `kuke get <kind>` (see #222; the `get` kinds were retained per a user override on the original AC so the in-process escape hatch stays available for every resource lookup, not just `get realm`). For the other promotable callers that don't carry the flag — `log`, `refresh`, `restart`, `start`, `stop`, `doctor cgroups` — reach the in-process path via `KUKEON_NO_DAEMON=true` in the environment or via an explicit `--run-path /path` (which auto-promotes to in-process mode so a caller-supplied run-path is never silently sent to the wrong daemon). The true workload verbs (`apply`, `create *`, `run`, `attach`, `delete *`, `kill *`) route through the daemon-only client after #566/#588: they ignore `kukeon/noDaemon`, so neither `KUKEON_NO_DAEMON=true` nor `--run-path` promotes them — they always require the daemon.
 
 `kuke image *` is daemon-independent by design and is always in-process regardless of any of these knobs.
 
@@ -54,11 +54,11 @@ Every flag also has a corresponding `KUKE_*` environment variable (check via `--
 # Talk to a non-default socket
 kuke --host unix:///tmp/kukeond.sock get realms
 
-# Bypass the daemon (in-process via env var)
-sudo KUKEON_NO_DAEMON=true kuke apply -f cell.yaml
+# Bypass the daemon (in-process via env var) — surviving promotable callers only
+sudo KUKEON_NO_DAEMON=true kuke get cells --realm default --space default --stack default
 
 # Bypass the daemon (in-process via --run-path promotion)
-sudo kuke apply -f cell.yaml --run-path /opt/kukeon
+sudo kuke purge realm myrealm --cascade --force --run-path /opt/kukeon
 
 # Verbose debug of a single apply
 sudo kuke apply -f cell.yaml --verbose --log-level debug

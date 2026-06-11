@@ -59,7 +59,7 @@ If you don't run Docker, use the `nerdctl save … | sudo kuke image load -` for
 sudo kuke apply -f docs/examples/claude-code/cell.yaml
 ```
 
-`kuke apply` creates the cell. If you hit a daemon issue, [retry in-process](apply-manifests.md#in-process-escape-hatch).
+`kuke apply` creates the cell. `kuke apply` has no in-process fallback (it always routes through `kukeond`); if you hit a daemon issue, bring the daemon back with `kuke daemon start` — see [`kuke apply` always requires the daemon](apply-manifests.md#kuke-apply-always-requires-the-daemon).
 
 Then connect a terminal to the `work` container:
 
@@ -77,7 +77,7 @@ Press `^]^]` (two consecutive `Ctrl-]` keystrokes) to detach cleanly. The cell k
 sudo kuke delete cell claude-code --cascade
 ```
 
-`--cascade` removes the cell's containers in the same call. If `kuke delete` fails because the daemon is down, fall back to in-process mode the same way `kuke apply` does — see [Applying manifests](apply-manifests.md#in-process-escape-hatch).
+`--cascade` removes the cell's containers in the same call. `kuke delete` is a workload verb with no in-process fallback (same as `kuke apply`); if it fails because the daemon is down, bring the daemon back with `kuke daemon start` — see [`kuke apply` always requires the daemon](apply-manifests.md#kuke-apply-always-requires-the-daemon).
 
 ### Optional: persist `~/.claude` across restarts
 
@@ -100,7 +100,7 @@ This is optional — the smoke flow above does not need it.
 
 ## Step 4 — One-shot prompts via a `CellBlueprint`
 
-For "fire one prompt, tear the cell down on exit" jobs, apply the example blueprint to the daemon and drive it with `kuke run --from-blueprint`. A [CellBlueprint](../manifests/blueprint.md) is a daemon-stored, scoped cell template — the replacement for the legacy client-side `CellProfile` removed in [#626](https://github.com/eminwux/kukeon/issues/626) (see the [migration guide](migrate-cellprofile-to-blueprint.md)).
+For "fire one prompt, tear the cell down on exit" jobs, apply the example blueprint to the daemon and drive it with `kuke run --from-blueprint`. A [CellBlueprint](../manifests/blueprint.md) is a daemon-stored, scoped cell template.
 
 ```bash
 sudo kuke apply -f docs/examples/claude-code/blueprint.yaml
@@ -129,5 +129,4 @@ See [`kuke run`](../cli/kuke-run.md) for the full flag surface, including `--nam
 
 - **The full crew agent-runner shape.** [`eminwux/crew`](https://github.com/eminwux/crew) — SSH bind, GPG-signed commits, agents-repo clone, project-repo clone, the orchestrator that dispatches per-call cells. Two layers up from this guide.
 - **Cell teardown verbs.** [`docs/cli-use-cases.md`](https://github.com/eminwux/kukeon/blob/main/docs/cli-use-cases.md) — the full operator workflow reference, including `stop` / `kill` / `delete` / `purge --cascade` for cells.
-- **Manifest reference.** [Applying manifests](apply-manifests.md) — multi-doc manifests, the in-process escape hatch, blueprint parameter resolution order.
-- **CellProfile → CellBlueprint migration.** [The cutover recipe](migrate-cellprofile-to-blueprint.md) — for hosts that used to drive workloads via the legacy client-side `CellProfile` loader.
+- **Manifest reference.** [Applying manifests](apply-manifests.md) — multi-doc manifests, why `kuke apply` always requires the daemon, blueprint parameter resolution order.

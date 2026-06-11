@@ -69,7 +69,7 @@ Beta is the "ready to use, not yet a SemVer promise" tier between alpha and v1.0
 
 There is no calendar date. v1.0 is gated on closing the in-flight tracks that would otherwise force a breaking v2 a few months later:
 
-- **[#423](https://github.com/eminwux/kukeon/issues/423)** — crew-layers absorption: daemon-stored `CellBlueprint`, `CellConfig`, and `Secret` (the client-side `CellProfile` they replaced was removed in [#626](https://github.com/eminwux/kukeon/issues/626)). Schema reshape; cannot be SemVer-stable until the remaining phases land.
+- **[#423](https://github.com/eminwux/kukeon/issues/423)** — crew-layers absorption: daemon-stored `CellBlueprint`, `CellConfig`, and `Secret`. Schema reshape; cannot be SemVer-stable until the remaining phases land.
 - **[#217](https://github.com/eminwux/kukeon/issues/217)** — `kuke daemon` subcommand group and `--no-daemon` retirement. CLI surface is still moving; the persistent flag exits the user-facing API at v1.0.
 - **[#224](https://github.com/eminwux/kukeon/issues/224)** — reconciler-driven `create`/`delete` convergence. Changes runtime semantics for create/delete to a desired-state model.
 

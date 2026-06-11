@@ -28,19 +28,22 @@ It runs as the root container of the `kukeond` cell inside the [system realm](sy
 
 ## In-process mode
 
-`kuke` can bypass the socket and execute the operation in-process. The `--no-daemon` flag used to live on every subcommand; #222 retired it from the remaining daemon-routed workload commands (`apply`, `create`, `run`, `attach`, `delete`, `kill`, `start`, `stop`, `log`, `refresh`). On those commands the in-process path is now reached via:
+`kuke` can bypass the socket and execute the operation in-process — but only for the commands that route through the promotable client. After #566/#588 the true workload verbs (`apply`, `create *`, `run`, `attach`, `delete *`, `kill *`) route through the daemon-only client, which ignores `kukeon/noDaemon`: for them neither `KUKEON_NO_DAEMON=true` nor `--run-path` reaches an in-process branch, and they always require the daemon.
 
+The in-process path stays reachable for the surviving promotable callers — `get *`, `purge *`, `log`, `refresh`, `restart`, `start`, `stop`, `doctor cgroups`, plus the bootstrap commands `init` and `uninstall`. Reach it via:
+
+- `--no-daemon` directly, on the commands that carry the flag (`init`, `uninstall`, `purge`, every `get <kind>`), or
 - `KUKEON_NO_DAEMON=true` in the environment, or
 - an explicit `--run-path /some/path` (which auto-promotes to in-process mode — the daemon ignores client-supplied run-paths, so a caller passing a non-default `--run-path` would otherwise silently read/write the daemon's path instead).
 
-`--no-daemon` itself stays accepted on `kuke init`, `kuke uninstall`, `kuke purge`, and every `kuke get <kind>` (the `get` kinds were retained per a user override on the original #222 AC so the in-process escape hatch stays available for every resource lookup, not just `get realm`). `kuke image *` is daemon-independent by design (always in-process regardless of any of these knobs).
+`--no-daemon` stays accepted on `kuke init`, `kuke uninstall`, `kuke purge`, and every `kuke get <kind>` (the `get` kinds were retained per a user override on the original #222 AC so the in-process escape hatch stays available for every resource lookup, not just `get realm`). `kuke image *` is daemon-independent by design (always in-process regardless of any of these knobs).
 
 ```bash
-# Workload command via env var
-sudo KUKEON_NO_DAEMON=true kuke apply -f cell.yaml
+# Surviving promotable caller via env var
+sudo KUKEON_NO_DAEMON=true kuke get cells --realm default --space default --stack default
 
-# Workload command via --run-path promotion
-sudo kuke apply -f cell.yaml --run-path /opt/kukeon
+# Surviving promotable caller via --run-path promotion
+sudo kuke purge realm myrealm --cascade --force --run-path /opt/kukeon
 
 # Commands that still expose --no-daemon directly
 sudo kuke get realms --no-daemon

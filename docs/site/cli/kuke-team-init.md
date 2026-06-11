@@ -22,8 +22,11 @@ declarative-surface contract behind the verb.
 
 | Flag        | Default | Description                                                              |
 | ----------- | ------- | ------------------------------------------------------------------------ |
-| `--dry-run` | `false` | print the rendered objects to stdout instead of applying them to kukeond |
-| `--build`   | `false` | build each selected image locally before apply; bind the local tag       |
+| `--dry-run`  | `false` | print the rendered objects to stdout instead of applying them to kukeond |
+| `--build`    | `false` | build each selected image locally before apply; bind the local tag       |
+| `--validate` | `false` | run every render-contract check (catalog, templates, partials, facts) once, print a single gap report, and exit 1 on any gap; applies nothing and writes nothing |
+
+`--build` and `--validate` are mutually exclusive.
 
 Plus all [global flags](kuke.md).
 

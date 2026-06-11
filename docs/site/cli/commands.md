@@ -47,7 +47,7 @@ Every `kuke` subcommand inherits these persistent flags from the root command:
 | `--verbose`, `-v`     | `false`                           | Enable verbose logging on stderr                     |
 | `--log-level`         | `info`                            | Log level (`debug`, `info`, `warn`, `error`)         |
 
-`--no-daemon` is **not** a root-persistent flag — it is only accepted on `kuke init`, `kuke uninstall`, `kuke purge`, and every `kuke get <kind>` (see #222; the `get` kinds were retained per a user override on the original AC). For the remaining daemon-routed workload commands (`apply`, `create`, `run`, `attach`, `delete`, `kill`, `start`, `stop`, `log`, `refresh`), the in-process path is reached via `KUKEON_NO_DAEMON=true` or an explicit `--run-path` (which auto-promotes to in-process mode).
+`--no-daemon` is **not** a root-persistent flag — it is only accepted on `kuke init`, `kuke uninstall`, `kuke purge`, and every `kuke get <kind>` (see #222; the `get` kinds were retained per a user override on the original AC). The other promotable callers that don't carry the flag — `log`, `refresh`, `restart`, `start`, `stop`, `doctor cgroups` — reach the in-process path via `KUKEON_NO_DAEMON=true` or an explicit `--run-path` (which auto-promotes to in-process mode). The true workload verbs (`apply`, `create *`, `run`, `attach`, `delete *`, `kill *`) route through the daemon-only client after #566/#588 and ignore both knobs — they have no in-process fallback and always require the daemon.
 
 ### In-process mode host prerequisites
 
@@ -56,9 +56,6 @@ In in-process mode, the `kuke` binary runs the controllers itself instead of rou
 - CNI plugins on the host at `/opt/cni/bin` (e.g. `containernetworking-plugins` on Debian/Ubuntu, then symlinked from `/usr/lib/cni` since that distro packages them there)
 
 The default daemon path does **not** need host CNI plugins — `kukeond`'s image bundles them and only state dirs (`/opt/cni/net.d`, `/var/lib/cni`, `/opt/cni/cache`) are bind-mounted from the host.
-
-!!! warning "In-process mode is transitional"
-    `KUKEON_NO_DAEMON=true` / the `--run-path` promotion path is slated for full removal once `ClientFromCmd`'s in-process branch is retired (#566). Treat it as a debugging escape hatch rather than a supported deployment mode.
 
 ## Convention: positional arg + flags
 

@@ -1,5 +1,4 @@
-# CellBlueprint for one-shot Claude Code prompts (replaces the legacy
-# CellProfile of the same shape; #626 removed the CellProfile kind).
+# CellBlueprint for one-shot Claude Code prompts.
 #
 # Apply once into the daemon:
 #
@@ -19,9 +18,7 @@
 # to the same fused form (`kuke run --from-blueprint claude-code --name X`).
 # For a recurring workflow whose values + slot fills live in the daemon, wrap
 # this Blueprint in a kind: CellConfig and use
-# `kuke run --from-config <name>` instead. See
-# docs/site/guides/migrate-cellprofile-to-blueprint.md for the cutover
-# guidance and the Blueprint-vs-Config decision.
+# `kuke run --from-config <name>` instead.
 apiVersion: v1beta1
 kind: CellBlueprint
 metadata:

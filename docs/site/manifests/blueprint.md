@@ -21,7 +21,7 @@ spec:
         # ... full container template ...
 ```
 
-A `CellBlueprint` is a daemon-stored, parametrized cell template. It is written to daemon storage by `kuke apply` and run with `kuke run --from-blueprint`, so it can be applied, scoped, listed, and referenced by a [`CellConfig`](config.md). A blueprint declares the cell template plus two fill channels — scalar `${KEY}` parameters resolved at run time and structural repo/secret slots a Config fills. (Until [#626](https://github.com/eminwux/kukeon/issues/626) the user-local `CellProfile` kind covered the scalar-only slice client-side; CellBlueprint and CellConfig replaced it — see the [migration guide](../guides/migrate-cellprofile-to-blueprint.md) for the cutover recipe.)
+A `CellBlueprint` is a daemon-stored, parametrized cell template. It is written to daemon storage by `kuke apply` and run with `kuke run --from-blueprint`, so it can be applied, scoped, listed, and referenced by a [`CellConfig`](config.md). A blueprint declares the cell template plus two fill channels — scalar `${KEY}` parameters resolved at run time and structural repo/secret slots a Config fills.
 
 See [`kuke run --from-blueprint`](../cli/kuke-run.md) for the run-side verb and [`CellConfig`](config.md) for the binding that additionally fills a blueprint's structural repo/secret slots. Both stamp a fresh `<prefix>-<6hex>` cell per invocation — a blueprint with **required** slots can only run through a Config.
 
