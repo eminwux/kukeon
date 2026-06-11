@@ -755,6 +755,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#raspberry-pi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Raspberry Pi
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#cni-plugins-for-in-process-mode-only" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3244,6 +3255,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#raspberry-pi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Raspberry Pi
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#cni-plugins-for-in-process-mode-only" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3342,14 +3364,27 @@
 <a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>sudo<span class="w"> </span>ctr<span class="w"> </span>version
 </code></pre></div>
 <p>Kukeon uses its own containerd namespaces (one per realm: <code>&lt;realm&gt;.kukeon.io</code>). <code>kuke init</code> provisions two by default — <code>default.kukeon.io</code> for user workloads and <code>kuke-system.kukeon.io</code> for the <code>kukeond</code> daemon. Kukeon does not interfere with existing containerd namespaces used by Docker, nerdctl, or other tools.</p>
+<h2 id="raspberry-pi">Raspberry Pi<a class="headerlink" href="#raspberry-pi" title="Permanent link">&para;</a></h2>
+<p>arm64 is a first-class release target: every release ships <code>kuke-linux-arm64</code>, <code>kukeond-linux-arm64</code>, and <code>kukepause-linux-arm64</code> binaries plus multi-arch (<code>linux/amd64</code>, <code>linux/arm64</code>) container images, and the <a href="../install-linux/">one-line installer</a> auto-detects <code>aarch64</code>/<code>arm64</code> via <code>uname -m</code> — no Pi-specific install flags needed.</p>
+<p>Raspberry Pi OS is Debian-based, so containerd installs the same way as the Debian/Ubuntu line above:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>sudo<span class="w"> </span>apt-get<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span>containerd
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span><span class="nb">enable</span><span class="w"> </span>--now<span class="w"> </span>containerd
+</code></pre></div>
+<div class="admonition warning">
+<p class="admonition-title">Untested on real hardware — verify with <code>kuke doctor cgroups</code></p>
+<p>The boot-parameter steps below are documented from upstream Raspberry Pi OS conventions and have <strong>not</strong> been verified on a physical Pi. Raspberry Pi OS historically ships with the cgroup <strong>memory controller disabled</strong> by default. If <code>sudo kuke doctor cgroups</code> reports <code>memory</code> missing from the delegated controllers, append the following to the single line in <code>/boot/firmware/cmdline.txt</code> (<code>/boot/cmdline.txt</code> on older releases) and reboot:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>cgroup_enable=memory cgroup_memory=1
+</code></pre></div>
+<p>After the reboot, <code>sudo kuke doctor cgroups</code> should pass and <code>sudo kuke init</code> should complete normally. If your results differ, please <a href="https://github.com/eminwux/kukeon/issues">open an issue</a>.</p>
+</div>
 <h2 id="cni-plugins-for-in-process-mode-only">CNI plugins (for in-process mode only)<a class="headerlink" href="#cni-plugins-for-in-process-mode-only" title="Permanent link">&para;</a></h2>
 <p>The <code>kukeond</code> container image bundles the CNI reference plugins at <code>/opt/cni/bin</code> inside the container, and the daemon invokes them from there. The standard install path (<code>kuke init</code> → daemon-mediated operations) therefore does <strong>not</strong> require host-side CNI plugins.</p>
 <p>You only need to install plugins on the host if you plan to run a promotable caller in in-process mode (<code>kuke get &lt;kind&gt; --no-daemon</code>, <code>kuke purge ... --no-daemon</code>, or any promotable caller — <code>get *</code>, <code>purge *</code>, <code>log</code>, <code>refresh</code>, <code>restart</code>, <code>start</code>, <code>stop</code>, <code>doctor cgroups</code> — run with <code>KUKEON_NO_DAEMON=true</code> or an explicit <code>--run-path</code>), which executes controllers in-process via the <code>kuke</code> binary instead of routing through <code>kukeond</code>. The workload verbs (<code>apply</code>, <code>create *</code>, <code>run</code>, <code>attach</code>, <code>delete *</code>, <code>kill *</code>) route through the daemon-only client after #566/#588 and never run in-process. In that mode <code>kuke</code> shells out to plugin binaries at the host's <code>/opt/cni/bin</code>. See <a href="../../cli/commands/#in-process-mode-host-prerequisites">in-process mode host prerequisites</a> for the canonical reference. The in-process path itself is slated for retirement once <code>ClientFromCmd</code>'s in-process branch is removed (#566).</p>
 <p>If you do need it, install from <a href="https://github.com/containernetworking/plugins">containernetworking/plugins</a>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nv">CNI_VERSION</span><span class="o">=</span>v1.4.1
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>sudo<span class="w"> </span>mkdir<span class="w"> </span>-p<span class="w"> </span>/opt/cni/bin
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>curl<span class="w"> </span>-L<span class="w"> </span>https://github.com/containernetworking/plugins/releases/download/<span class="si">${</span><span class="nv">CNI_VERSION</span><span class="si">}</span>/cni-plugins-linux-amd64-<span class="si">${</span><span class="nv">CNI_VERSION</span><span class="si">}</span>.tgz<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span><span class="p">|</span><span class="w"> </span>sudo<span class="w"> </span>tar<span class="w"> </span>-C<span class="w"> </span>/opt/cni/bin<span class="w"> </span>-xz
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nv">CNI_VERSION</span><span class="o">=</span>v1.4.1
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>sudo<span class="w"> </span>mkdir<span class="w"> </span>-p<span class="w"> </span>/opt/cni/bin
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>curl<span class="w"> </span>-L<span class="w"> </span>https://github.com/containernetworking/plugins/releases/download/<span class="si">${</span><span class="nv">CNI_VERSION</span><span class="si">}</span>/cni-plugins-linux-amd64-<span class="si">${</span><span class="nv">CNI_VERSION</span><span class="si">}</span>.tgz<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span><span class="p">|</span><span class="w"> </span>sudo<span class="w"> </span>tar<span class="w"> </span>-C<span class="w"> </span>/opt/cni/bin<span class="w"> </span>-xz
 </code></pre></div>
 <p>At minimum Kukeon needs <code>bridge</code>, <code>host-local</code>, <code>loopback</code>, and <code>portmap</code>.</p>
 <h2 id="root-privileges">Root / privileges<a class="headerlink" href="#root-privileges" title="Permanent link">&para;</a></h2>
@@ -3388,9 +3423,13 @@
 <td><code>/sys/fs/cgroup/kukeon/...</code></td>
 <td>Kukeon's cgroup subtree.</td>
 </tr>
+<tr>
+<td><code>/var/lib/kukebuild/&lt;namespace&gt;/</code></td>
+<td>BuildKit build cache, written by <code>kuke build</code> — one subdirectory per realm containerd namespace. Swept per-namespace by <code>kuke uninstall</code>.</td>
+</tr>
 </tbody>
 </table>
-<p>Nothing is written outside those paths without an explicit flag.</p>
+<p>Nothing is written outside the paths in this table without an explicit flag.</p>
 <h2 id="next">Next<a class="headerlink" href="#next" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../install-linux/">Install on Linux</a> — download the release binary</li>
@@ -3418,7 +3457,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 11, 2026 21:12:13 UTC">June 11, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 11, 2026 22:35:25 UTC">June 11, 2026</span>
   </span>
 
     

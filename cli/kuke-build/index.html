@@ -3222,8 +3222,7 @@
 <h1 id="kuke-build">kuke build<a class="headerlink" href="#kuke-build" title="Permanent link">&para;</a></h1>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke build [-f Dockerfile] [-t name:tag] [--realm &lt;name&gt;] [--build-arg K=V]... [--secret id=NAME,src=PATH]... [--cache-to type=local,dest=PATH]... [--cache-from type=local,src=PATH]... [--platform os/arch,...] [--push] &lt;context&gt;
 </code></pre></div>
-<p>Build an OCI image from a Dockerfile into a realm's containerd namespace.</p>
-<p>Build an OCI image from a Dockerfile using kukeon's native builder.</p>
+<p>Build an OCI image from a Dockerfile into a realm's containerd namespace using kukeon's native builder.</p>
 <p><code>kuke build</code> is a thin shim: it locates the <code>kukebuild</code> binary on PATH and exec's it. <code>kukebuild</code> embeds BuildKit, builds the context with the Dockerfile frontend, and writes the resulting image into the containerd namespace mapped to <code>--realm</code> (<code>&lt;realm&gt;.kukeon.io</code>), ready for <code>kuke get image</code> and <code>kuke create</code>.</p>
 <p>No docker or standalone buildkitd is required — only a running host containerd.</p>
 <p>Build-time secrets: <code>--secret id=NAME,src=PATH</code> mounts a host file into the build at <code>/run/secrets/NAME</code>, consumed by a Dockerfile <code>RUN --mount=type=secret,id=NAME</code>. File-based secrets only; the flag is repeatable.</p>
@@ -3326,7 +3325,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 30, 2026 11:44:39 UTC">May 30, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 11, 2026 22:35:25 UTC">June 11, 2026</span>
   </span>
 
     

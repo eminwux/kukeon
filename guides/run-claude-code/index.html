@@ -1515,15 +1515,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#step-1-build-the-image" class="md-nav__link">
+  <a href="#step-1-build-the-image-into-the-default-realm" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 1 — Build the image
+        Step 1 — Build the image into the default realm
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Step 1 — Build the image">
+    <nav class="md-nav" aria-label="Step 1 — Build the image into the default realm">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1543,26 +1543,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#step-2-load-the-image-into-the-default-realm" class="md-nav__link">
+  <a href="#step-2-apply-and-attach-the-cell" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 2 — Load the image into the default realm
+        Step 2 — Apply and attach the Cell
       
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#step-3-apply-and-attach-the-cell" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Step 3 — Apply and attach the Cell
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Step 3 — Apply and attach the Cell">
+    <nav class="md-nav" aria-label="Step 2 — Apply and attach the Cell">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1593,10 +1582,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#step-4-one-shot-prompts-via-a-cellblueprint" class="md-nav__link">
+  <a href="#step-3-one-shot-prompts-via-a-cellblueprint" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 4 — One-shot prompts via a CellBlueprint
+        Step 3 — One-shot prompts via a CellBlueprint
       
     </span>
   </a>
@@ -3278,15 +3267,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#step-1-build-the-image" class="md-nav__link">
+  <a href="#step-1-build-the-image-into-the-default-realm" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 1 — Build the image
+        Step 1 — Build the image into the default realm
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Step 1 — Build the image">
+    <nav class="md-nav" aria-label="Step 1 — Build the image into the default realm">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -3306,26 +3295,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#step-2-load-the-image-into-the-default-realm" class="md-nav__link">
+  <a href="#step-2-apply-and-attach-the-cell" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 2 — Load the image into the default realm
+        Step 2 — Apply and attach the Cell
       
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#step-3-apply-and-attach-the-cell" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Step 3 — Apply and attach the Cell
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Step 3 — Apply and attach the Cell">
+    <nav class="md-nav" aria-label="Step 2 — Apply and attach the Cell">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -3356,10 +3334,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#step-4-one-shot-prompts-via-a-cellblueprint" class="md-nav__link">
+  <a href="#step-3-one-shot-prompts-via-a-cellblueprint" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 4 — One-shot prompts via a CellBlueprint
+        Step 3 — One-shot prompts via a CellBlueprint
       
     </span>
   </a>
@@ -3404,18 +3382,21 @@
 <h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
 <ul>
 <li>A host that has been bootstrapped with <a href="../init-and-reset/"><code>kuke init</code></a>. <code>kuke get realms</code> shows both <code>default</code> and <code>kuke-system</code> Ready.</li>
-<li>A local Docker (or <code>nerdctl build</code>) install for building the image.</li>
+<li>The <code>kukebuild</code> binary on <code>PATH</code> — <code>kuke build</code> exec's it. It is not part of the release artifacts yet; build it from a checkout with <code>make kukebuild</code> (see <a href="../../install/build-from-source/#build-kukebuild-for-kuke-build">Build from source</a>).</li>
 <li>A copy of the three files under <code>docs/examples/claude-code/</code>:</li>
 <li><a href="https://github.com/eminwux/kukeon/blob/main/docs/examples/claude-code/Dockerfile"><code>Dockerfile</code></a></li>
 <li><a href="https://github.com/eminwux/kukeon/blob/main/docs/examples/claude-code/cell.yaml"><code>cell.yaml</code></a></li>
 <li><a href="https://github.com/eminwux/kukeon/blob/main/docs/examples/claude-code/blueprint.yaml"><code>blueprint.yaml</code></a> (the daemon-stored replacement for the pre-#626 <code>profile.yaml</code>)</li>
 </ul>
-<h2 id="step-1-build-the-image">Step 1 — Build the image<a class="headerlink" href="#step-1-build-the-image" title="Permanent link">&para;</a></h2>
-<p>The example <code>Dockerfile</code> installs <code>nodejs</code> + <code>npm</code> + the <code>@anthropic-ai/claude-code</code> package as a non-root <code>claude</code> user on <code>debian:trixie-slim</code>:</p>
+<h2 id="step-1-build-the-image-into-the-default-realm">Step 1 — Build the image into the <code>default</code> realm<a class="headerlink" href="#step-1-build-the-image-into-the-default-realm" title="Permanent link">&para;</a></h2>
+<p>The example <code>Dockerfile</code> installs <code>nodejs</code> + <code>npm</code> + the <code>@anthropic-ai/claude-code</code> package as a non-root <code>claude</code> user on <code>debian:trixie-slim</code>. <a href="../../cli/kuke-build/"><code>kuke build</code></a> builds it with kukeon's native builder and writes the result straight into the <code>default</code> realm's containerd namespace — no docker daemon and no separate load step:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nb">cd</span><span class="w"> </span>docs/examples/claude-code
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>claude-code:latest<span class="w"> </span>.
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>claude-code:latest<span class="w"> </span>.
 </code></pre></div>
-<p><code>nerdctl build -t claude-code:latest .</code> works the same way if you don't run Docker.</p>
+<p><code>--realm default</code> is the default, so it can be omitted. The tag normalizes to <code>docker.io/library/claude-code:latest</code> — the exact reference <code>cell.yaml</code> and <code>blueprint.yaml</code> use. Verify:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>images<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>claude-code
+</code></pre></div>
+<p>If you already have a pre-built image tarball instead, load it with <code>kuke image load</code> — see <a href="../../cli/kuke-image/"><code>kuke image</code></a> for the <code>kuke image load --from-docker &lt;name:tag&gt;</code> and <code>… save | sudo kuke image load -</code> forms.</p>
 <h3 id="whats-in-the-image-that-the-smoke-path-doesnt-need">What's in the image that the smoke path doesn't need<a class="headerlink" href="#whats-in-the-image-that-the-smoke-path-doesnt-need" title="Permanent link">&para;</a></h3>
 <p>The <code>Dockerfile</code> carries a handful of fleet-runner extras the Claude Code smoke does not exercise; they are kept so this Dockerfile remains drop-in usable on a full agent-runner host:</p>
 <ul>
@@ -3423,55 +3404,47 @@
 <li><strong><code>groupadd -g 988 kukeon</code> / <code>usermod -aG kukeon claude</code></strong> — fleet-specific. On a fleet host where gid 988 matches the host containerd socket group, the <code>claude</code> user inside the cell can talk to a host-mounted socket. On a freshly-<code>kuke init</code>-ed host you do not bind-mount the containerd socket into the cell, so the supplementary group is inert. Leave it in if you ever expect to bind the socket; drop it for a strictly-Claude-Code image.</li>
 </ul>
 <p>The smoke path needs only <code>nodejs</code>, <code>npm</code>, the <code>@anthropic-ai/claude-code</code> package, and the non-root <code>claude</code> user.</p>
-<h2 id="step-2-load-the-image-into-the-default-realm">Step 2 — Load the image into the <code>default</code> realm<a class="headerlink" href="#step-2-load-the-image-into-the-default-realm" title="Permanent link">&para;</a></h2>
-<p>Every realm maps to its own containerd namespace (<a href="../../concepts/containerd-namespaces/">Containerd namespaces</a>). User workloads live in <code>default.kukeon.io</code>, so the cell's image has to be loaded into that namespace before <code>kuke apply</code> / <code>kuke run</code> can pull it:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>image<span class="w"> </span>load<span class="w"> </span>--from-docker<span class="w"> </span>claude-code:latest
-</code></pre></div>
-<p><code>--realm default</code> is the default, so it can be omitted. Verify:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>images<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>claude-code
-</code></pre></div>
-<p>If you don't run Docker, use the <code>nerdctl save … | sudo kuke image load -</code> form documented in <a href="../../cli/kuke-image/"><code>kuke image</code></a>.</p>
-<h2 id="step-3-apply-and-attach-the-cell">Step 3 — Apply and attach the Cell<a class="headerlink" href="#step-3-apply-and-attach-the-cell" title="Permanent link">&para;</a></h2>
+<h2 id="step-2-apply-and-attach-the-cell">Step 2 — Apply and attach the Cell<a class="headerlink" href="#step-2-apply-and-attach-the-cell" title="Permanent link">&para;</a></h2>
 <p><code>cell.yaml</code> is a single Attachable <code>Cell</code> with two containers: a <code>busybox</code> root keeping the cell alive (<code>sleep infinity</code>) and a <code>work</code> container running the Claude Code image, marked <code>attachable: true</code> so <code>kuke attach</code> can connect a TTY to it.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>docs/examples/claude-code/cell.yaml
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>docs/examples/claude-code/cell.yaml
 </code></pre></div>
 <p><code>kuke apply</code> creates the cell. <code>kuke apply</code> has no in-process fallback (it always routes through <code>kukeond</code>); if you hit a daemon issue, bring the daemon back with <code>kuke daemon start</code> — see <a href="../apply-manifests/#kuke-apply-always-requires-the-daemon"><code>kuke apply</code> always requires the daemon</a>.</p>
 <p>Then connect a terminal to the <code>work</code> container:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>attach<span class="w"> </span>claude-code
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>attach<span class="w"> </span>claude-code
 </code></pre></div>
 <p>You should land at a <code>claude&gt;</code> prompt inside the cell. From there, run <code>claude</code> to enter the upstream Claude Code REPL (you'll need to complete the upstream auth flow the first time — the example does not pre-bake an API key).</p>
 <p>Press <code>^]^]</code> (two consecutive <code>Ctrl-]</code> keystrokes) to detach cleanly. The cell keeps running; re-attach later with the same command.</p>
 <h3 id="tear-down">Tear-down<a class="headerlink" href="#tear-down" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>delete<span class="w"> </span>cell<span class="w"> </span>claude-code<span class="w"> </span>--cascade
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>delete<span class="w"> </span>cell<span class="w"> </span>claude-code<span class="w"> </span>--cascade
 </code></pre></div>
 <p><code>--cascade</code> removes the cell's containers in the same call. <code>kuke delete</code> is a workload verb with no in-process fallback (same as <code>kuke apply</code>); if it fails because the daemon is down, bring the daemon back with <code>kuke daemon start</code> — see <a href="../apply-manifests/#kuke-apply-always-requires-the-daemon"><code>kuke apply</code> always requires the daemon</a>.</p>
 <h3 id="optional-persist-claude-across-restarts">Optional: persist <code>~/.claude</code> across restarts<a class="headerlink" href="#optional-persist-claude-across-restarts" title="Permanent link">&para;</a></h3>
 <p>The smoke path above keeps Claude Code's per-user state inside the cell's overlay. To survive <code>kuke delete cell</code> + re-apply, bind-mount a host directory under the <code>work</code> container:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">work</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="nt">attachable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker.io/library/claude-code:latest</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">  </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/bin/bash</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">  </span><span class="nt">workingDir</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/home/claude</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">  </span><span class="nt">volumes</span><span class="p">:</span>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/var/lib/claude-code/state</span>
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="w">      </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/home/claude/.claude</span>
-<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="w">  </span><span class="nt">tty</span><span class="p">:</span>
-<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="w">    </span><span class="nt">prompt</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;claude&gt;</span><span class="nv"> </span><span class="s">&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">work</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">attachable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker.io/library/claude-code:latest</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/bin/bash</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">  </span><span class="nt">workingDir</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/home/claude</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">  </span><span class="nt">volumes</span><span class="p">:</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/var/lib/claude-code/state</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">      </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/home/claude/.claude</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">  </span><span class="nt">tty</span><span class="p">:</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="w">    </span><span class="nt">prompt</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;claude&gt;</span><span class="nv"> </span><span class="s">&quot;</span>
 </code></pre></div>
 <p>This is optional — the smoke flow above does not need it.</p>
-<h2 id="step-4-one-shot-prompts-via-a-cellblueprint">Step 4 — One-shot prompts via a <code>CellBlueprint</code><a class="headerlink" href="#step-4-one-shot-prompts-via-a-cellblueprint" title="Permanent link">&para;</a></h2>
+<h2 id="step-3-one-shot-prompts-via-a-cellblueprint">Step 3 — One-shot prompts via a <code>CellBlueprint</code><a class="headerlink" href="#step-3-one-shot-prompts-via-a-cellblueprint" title="Permanent link">&para;</a></h2>
 <p>For "fire one prompt, tear the cell down on exit" jobs, apply the example blueprint to the daemon and drive it with <code>kuke run --from-blueprint</code>. A <a href="../../manifests/blueprint/">CellBlueprint</a> is a daemon-stored, scoped cell template.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>docs/examples/claude-code/blueprint.yaml
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>docs/examples/claude-code/blueprint.yaml
 </code></pre></div>
 <p>The blueprint declares two parameters: <code>IMAGE</code> (defaults to <code>docker.io/library/claude-code:latest</code>) and <code>PROMPT</code> (required). Its <code>tty.onInit</code> runs <code>claude --print "${PROMPT}" &amp;&amp; exit</code>, so the attach loop closes after the prompt's reply prints. <code>spec.cell.autoDelete: true</code> then deletes the materialized cell — no <code>--rm</code> flag required.</p>
 <p>Run it:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>--from-blueprint<span class="w"> </span>claude-code<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">    </span>--param<span class="w"> </span><span class="nv">PROMPT</span><span class="o">=</span><span class="s2">&quot;explain the kukeon architecture in one sentence&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>--from-blueprint<span class="w"> </span>claude-code<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">    </span>--param<span class="w"> </span><span class="nv">PROMPT</span><span class="o">=</span><span class="s2">&quot;explain the kukeon architecture in one sentence&quot;</span>
 </code></pre></div>
 <p><code>kuke run --from-blueprint</code> materializes a cell named <code>claude-code-&lt;6hex&gt;</code>, attaches to the <code>work</code> container, runs the onInit script, prints Claude Code's reply, and exits. Override <code>IMAGE</code> to pin a tag:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>--from-blueprint<span class="w"> </span>claude-code<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">    </span>--param<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>docker.io/library/claude-code:2026-05-14<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span>--param<span class="w"> </span><span class="nv">PROMPT</span><span class="o">=</span><span class="s2">&quot;…&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>--from-blueprint<span class="w"> </span>claude-code<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">    </span>--param<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>docker.io/library/claude-code:2026-05-14<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span>--param<span class="w"> </span><span class="nv">PROMPT</span><span class="o">=</span><span class="s2">&quot;…&quot;</span>
 </code></pre></div>
 <p>See <a href="../../cli/kuke-run/"><code>kuke run</code></a> for the full flag surface, including <code>--name</code>, <code>--param-file</code>, and the <code>-d</code>/<code>--detach</code> mode. To additionally fill structural repo/secret slots, wrap the blueprint in a <code>kind: CellConfig</code> and use <code>kuke run --from-config &lt;cfg&gt;</code>.</p>
 <h2 id="where-to-go-next">Where to go next<a class="headerlink" href="#where-to-go-next" title="Permanent link">&para;</a></h2>
@@ -3501,7 +3474,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 11, 2026 06:53:01 UTC">June 11, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 11, 2026 22:35:25 UTC">June 11, 2026</span>
   </span>
 
     

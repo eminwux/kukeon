@@ -1414,6 +1414,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#build-cache" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build cache
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-gets-cleaned-up-and-when" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3288,6 +3299,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#build-cache" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build cache
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-gets-cleaned-up-and-when" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3390,6 +3412,13 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>/var/lib/containerd/         (containerd&#39;s own layout; not Kukeon&#39;s business)
 </code></pre></div>
 <p>If you want to inspect what Kukeon pushed into containerd, use <code>ctr -n kukeon-&lt;realm&gt;</code> — see <a href="../../concepts/containerd-namespaces/">containerd namespaces</a>.</p>
+<h2 id="build-cache">Build cache<a class="headerlink" href="#build-cache" title="Permanent link">&para;</a></h2>
+<p><a href="../../cli/kuke-build/"><code>kuke build</code></a> keeps its BuildKit state (layer cache, snapshot and content mappings) under <code>/var/lib/kukebuild</code>, one subdirectory per realm containerd namespace:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>/var/lib/kukebuild/
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>├── default.kukeon.io/
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>└── kuke-system.kukeon.io/
+</code></pre></div>
+<p>The cache is namespace-scoped because it holds references into that namespace's snapshots and content store. <code>kuke uninstall</code> sweeps each realm's cache directory in the same pass that removes its containerd namespace — a stale cache left behind strands the next <code>kuke build</code> with "parent snapshot does not exist" or "content digest … not found" (see the full per-host teardown notes in <a href="https://github.com/eminwux/kukeon/blob/main/docs/cli-use-cases.md"><code>docs/cli-use-cases.md</code></a>).</p>
 <h2 id="what-gets-cleaned-up-and-when">What gets cleaned up, and when<a class="headerlink" href="#what-gets-cleaned-up-and-when" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -3416,8 +3445,12 @@
 <td>Same as delete but more aggressive: force-removes residual state</td>
 </tr>
 <tr>
+<td><code>kuke uninstall</code></td>
+<td>Everything above, plus <code>/var/lib/kukebuild/&lt;namespace&gt;/</code> for every realm whose containerd namespace was removed</td>
+</tr>
+<tr>
 <td>Reboot</td>
-<td><code>/run/kukeon/*</code> disappears (tmpfs). <code>/opt/kukeon/*</code> persists.</td>
+<td><code>/run/kukeon/*</code> disappears (tmpfs). <code>/opt/kukeon/*</code> and <code>/var/lib/kukebuild/*</code> persist.</td>
 </tr>
 </tbody>
 </table>
@@ -3449,7 +3482,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 17, 2026 17:44:44 UTC">May 17, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 11, 2026 22:35:25 UTC">June 11, 2026</span>
   </span>
 
     
