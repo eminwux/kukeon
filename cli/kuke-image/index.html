@@ -2220,6 +2220,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#kuke-image-prune" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        kuke image prune
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="kuke image prune">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#examples_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Examples
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#related" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3301,6 +3329,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#kuke-image-prune" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        kuke image prune
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="kuke image prune">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#examples_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Examples
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#related" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3354,6 +3410,10 @@
 <tr>
 <td><code>kuke image delete</code></td>
 <td>Remove an image from a realm's containerd namespace</td>
+</tr>
+<tr>
+<td><code>kuke image prune</code></td>
+<td>Reclaim dangling image layers and orphaned leases in a realm</td>
 </tr>
 </tbody>
 </table>
@@ -3420,6 +3480,37 @@
 <a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># Remove an image from kuke-system</span>
 <a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>image<span class="w"> </span>delete<span class="w"> </span>docker.io/library/kukeon-local:dev<span class="w"> </span>--realm<span class="w"> </span>kuke-system
 </code></pre></div>
+<h2 id="kuke-image-prune">kuke image prune<a class="headerlink" href="#kuke-image-prune" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>kuke image prune [flags]
+</code></pre></div>
+<p>Reclaim dangling image layers and orphaned leases in a realm.</p>
+<p><code>kuke image prune</code> reclaims dangling image layers and orphaned content leases in the target realm's containerd namespace, then reports how many leases were released versus retained. It takes no positional arguments.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--realm</code></td>
+<td><code>default</code></td>
+<td>Target realm; the prune runs in <code>&lt;realm&gt;.kukeon.io</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="examples_2">Examples<a class="headerlink" href="#examples_2" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># Prune the default realm</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>image<span class="w"> </span>prune
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="c1"># Prune kuke-system</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>image<span class="w"> </span>prune<span class="w"> </span>--realm<span class="w"> </span>kuke-system
+</code></pre></div>
+<p>Sample output:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>pruned realm &quot;default&quot; (namespace &quot;default.kukeon.io&quot;): released 3 lease(s), retained 12
+</code></pre></div>
 <h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../kuke-init/">kuke init</a> — uses <code>kuke image load --from-docker</code> in the local-dev bootstrap path</li>
@@ -3447,7 +3538,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 30, 2026 11:44:39 UTC">May 30, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 11, 2026 05:39:09 UTC">June 11, 2026</span>
   </span>
 
     

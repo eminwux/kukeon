@@ -3360,17 +3360,19 @@
 </ul>
 <p>It runs as the root container of the <code>kukeond</code> cell inside the <a href="../system-realm/">system realm</a>, so it's managed by the same primitives as any other workload.</p>
 <h2 id="in-process-mode">In-process mode<a class="headerlink" href="#in-process-mode" title="Permanent link">&para;</a></h2>
-<p><code>kuke</code> can bypass the socket and execute the operation in-process. The <code>--no-daemon</code> flag used to live on every subcommand; #222 retired it from the remaining daemon-routed workload commands (<code>apply</code>, <code>create</code>, <code>run</code>, <code>attach</code>, <code>delete</code>, <code>kill</code>, <code>start</code>, <code>stop</code>, <code>log</code>, <code>refresh</code>). On those commands the in-process path is now reached via:</p>
+<p><code>kuke</code> can bypass the socket and execute the operation in-process — but only for the commands that route through the promotable client. After #566/#588 the true workload verbs (<code>apply</code>, <code>create *</code>, <code>run</code>, <code>attach</code>, <code>delete *</code>, <code>kill *</code>) route through the daemon-only client, which ignores <code>kukeon/noDaemon</code>: for them neither <code>KUKEON_NO_DAEMON=true</code> nor <code>--run-path</code> reaches an in-process branch, and they always require the daemon.</p>
+<p>The in-process path stays reachable for the surviving promotable callers — <code>get *</code>, <code>purge *</code>, <code>log</code>, <code>refresh</code>, <code>restart</code>, <code>start</code>, <code>stop</code>, <code>doctor cgroups</code>, plus the bootstrap commands <code>init</code> and <code>uninstall</code>. Reach it via:</p>
 <ul>
+<li><code>--no-daemon</code> directly, on the commands that carry the flag (<code>init</code>, <code>uninstall</code>, <code>purge</code>, every <code>get &lt;kind&gt;</code>), or</li>
 <li><code>KUKEON_NO_DAEMON=true</code> in the environment, or</li>
 <li>an explicit <code>--run-path /some/path</code> (which auto-promotes to in-process mode — the daemon ignores client-supplied run-paths, so a caller passing a non-default <code>--run-path</code> would otherwise silently read/write the daemon's path instead).</li>
 </ul>
-<p><code>--no-daemon</code> itself stays accepted on <code>kuke init</code>, <code>kuke uninstall</code>, <code>kuke purge</code>, and every <code>kuke get &lt;kind&gt;</code> (the <code>get</code> kinds were retained per a user override on the original #222 AC so the in-process escape hatch stays available for every resource lookup, not just <code>get realm</code>). <code>kuke image *</code> is daemon-independent by design (always in-process regardless of any of these knobs).</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Workload command via env var</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>sudo<span class="w"> </span><span class="nv">KUKEON_NO_DAEMON</span><span class="o">=</span><span class="nb">true</span><span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>cell.yaml
+<p><code>--no-daemon</code> stays accepted on <code>kuke init</code>, <code>kuke uninstall</code>, <code>kuke purge</code>, and every <code>kuke get &lt;kind&gt;</code> (the <code>get</code> kinds were retained per a user override on the original #222 AC so the in-process escape hatch stays available for every resource lookup, not just <code>get realm</code>). <code>kuke image *</code> is daemon-independent by design (always in-process regardless of any of these knobs).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Surviving promotable caller via env var</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>sudo<span class="w"> </span><span class="nv">KUKEON_NO_DAEMON</span><span class="o">=</span><span class="nb">true</span><span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>cells<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>default<span class="w"> </span>--stack<span class="w"> </span>default
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># Workload command via --run-path promotion</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>cell.yaml<span class="w"> </span>--run-path<span class="w"> </span>/opt/kukeon
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># Surviving promotable caller via --run-path promotion</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>purge<span class="w"> </span>realm<span class="w"> </span>myrealm<span class="w"> </span>--cascade<span class="w"> </span>--force<span class="w"> </span>--run-path<span class="w"> </span>/opt/kukeon
 <a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
 <a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1"># Commands that still expose --no-daemon directly</span>
 <a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>realms<span class="w"> </span>--no-daemon
@@ -3422,7 +3424,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 25, 2026 19:26:31 UTC">May 25, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 11, 2026 05:39:09 UTC">June 11, 2026</span>
   </span>
 
     

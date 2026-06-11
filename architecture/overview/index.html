@@ -3316,7 +3316,7 @@
     end
 
     kuke --&gt;|unix socket&lt;br/&gt;kukeonv1 API| kukeond
-    kuke -.-&gt;|in-process&lt;br/&gt;(--run-path / KUKEON_NO_DAEMON)| externals
+    kuke -.-&gt;|in-process, promotable callers only&lt;br/&gt;(--run-path / KUKEON_NO_DAEMON)| externals
 
     kukeond --&gt; externals
 
@@ -3335,7 +3335,7 @@
 <li>sends <code>kukeonv1</code> API requests;</li>
 <li>formats the response as a table, YAML, or JSON.</li>
 </ul>
-<p>The only time <code>kuke</code> does real work itself is when it's promoted into in-process mode — by an explicit <code>--run-path</code>, by <code>KUKEON_NO_DAEMON=true</code>, or (on the commands that still expose the flag: <code>init</code>, <code>uninstall</code>, <code>purge</code>, every <code>get &lt;kind&gt;</code>) by <code>--no-daemon</code>. In that mode it runs the same controller code that <code>kukeond</code> would.</p>
+<p>The only time <code>kuke</code> does real work itself is when it's promoted into in-process mode — by an explicit <code>--run-path</code>, by <code>KUKEON_NO_DAEMON=true</code>, or (on the commands that still expose the flag: <code>init</code>, <code>uninstall</code>, <code>purge</code>, every <code>get &lt;kind&gt;</code>) by <code>--no-daemon</code>. In that mode it runs the same controller code that <code>kukeond</code> would. Promotion only reaches the commands routed through the promotable client (<code>get *</code>, <code>purge *</code>, <code>log</code>, <code>refresh</code>, <code>restart</code>, <code>start</code>, <code>stop</code>, <code>doctor cgroups</code>, plus <code>init</code>/<code>uninstall</code>); the true workload verbs (<code>apply</code>, <code>create *</code>, <code>run</code>, <code>attach</code>, <code>delete *</code>, <code>kill *</code>) route through the daemon-only client after #566/#588 and always require the daemon.</p>
 <h2 id="kukeond-daemon">kukeond (daemon)<a class="headerlink" href="#kukeond-daemon" title="Permanent link">&para;</a></h2>
 <p>A single long-lived process that serves the <code>kukeonv1</code> API on a unix socket. It holds three managers:</p>
 <ul>
@@ -3405,7 +3405,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 17, 2026 17:44:44 UTC">May 17, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 11, 2026 05:39:09 UTC">June 11, 2026</span>
   </span>
 
     

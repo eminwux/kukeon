@@ -1197,10 +1197,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#the-five-kinds" class="md-nav__link">
+  <a href="#the-six-kinds" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The five kinds
+        The six kinds
       
     </span>
   </a>
@@ -1284,6 +1284,34 @@
     <span class="md-ellipsis">
       
         The project is cloned, not mounted
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The project is cloned, not mounted">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#overriding-the-in-cell-clone-directory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overriding the in-cell clone directory
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#secrets-two-secretsenv-layers-render-to-kind-secret" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secrets: two secrets.env layers render to kind: Secret
       
     </span>
   </a>
@@ -3283,10 +3311,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#the-five-kinds" class="md-nav__link">
+  <a href="#the-six-kinds" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The five kinds
+        The six kinds
       
     </span>
   </a>
@@ -3374,6 +3402,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="The project is cloned, not mounted">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#overriding-the-in-cell-clone-directory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overriding the in-cell clone directory
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#secrets-two-secretsenv-layers-render-to-kind-secret" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secrets: two secrets.env layers render to kind: Secret
+      
+    </span>
+  </a>
+  
 </li>
       
         <li class="md-nav__item">
@@ -3412,7 +3468,7 @@
 pinned <strong>agents source</strong>. Kukeon's runtime owns the <em>schemas</em> of the
 team-distribution contract; the <em>contents</em> (roles, harnesses, images) live in a
 separate, version-pinned agents repository. This page describes the contract —
-the five document kinds, where each lives, and the disciplines the parser
+the six document kinds, where each lives, and the disciplines the parser
 enforces. The CLI verb that renders and applies a team (<code>kuke team init</code>) is a
 later step; this page covers the declarative surface only.</p>
 <h2 id="where-the-files-live">Where the files live<a class="headerlink" href="#where-the-files-live" title="Permanent link">&para;</a></h2>
@@ -3445,7 +3501,14 @@ later step; this page covers the declarative surface only.</p>
 <td><code>~/.kuke/kuketeams.yaml</code></td>
 <td>host</td>
 <td>operator</td>
-<td>git identity + signing, registry, secret sources, source URLs + composed <code>teams[]</code></td>
+<td>git identity + signing, registry, secret sources, source URLs. Operator-global facts only.</td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>~/.kuke/kuketeam.d/&lt;project&gt;.yaml</code></td>
+<td>host</td>
+<td>operator</td>
+<td>one file per composed project: <code>name</code>, <code>path</code>, <code>source</code>. Written by each <code>kuke team init</code>.</td>
 <td>no</td>
 </tr>
 </tbody>
@@ -3453,8 +3516,8 @@ later step; this page covers the declarative surface only.</p>
 <p>The agents source contributes three more kinds — <code>role.yaml</code>, <code>harness.yaml</code>,
 and <code>harnesses/images.yaml</code> — authored in the agents repo but deserialized by
 kukeon's parser.</p>
-<h2 id="the-five-kinds">The five kinds<a class="headerlink" href="#the-five-kinds" title="Permanent link">&para;</a></h2>
-<p>All five are GVK objects under one API group, <code>kuketeams.io/v1</code>, matching
+<h2 id="the-six-kinds">The six kinds<a class="headerlink" href="#the-six-kinds" title="Permanent link">&para;</a></h2>
+<p>All six are GVK objects under one API group, <code>kuketeams.io/v1</code>, matching
 kukeon's parsed-document convention (every document carries <code>apiVersion</code> +
 <code>kind</code>). An unknown or empty <code>apiVersion</code>/<code>kind</code> pair is a parse error.</p>
 <ul>
@@ -3462,8 +3525,17 @@ kukeon's parsed-document convention (every document carries <code>apiVersion</co
   per-project roster. Pins the agents <code>source</code>, declares harness defaults, lists
   the roles the project runs.</li>
 <li><strong><code>TeamsConfig</code></strong> (<code>~/.kuke/kuketeams.yaml</code>, host, operator-owned) — operator
-  facts (git identity + signing, registry, source clone URLs, secret sources)
-  and the list of composed teams.</li>
+  facts (git identity + signing, registry, source clone URLs, secret sources).
+  Operator-global only — the per-project composition records moved out into the
+  <code>kuketeam.d/</code> drop-in directory below.</li>
+<li><strong><code>TeamEntry</code></strong> (<code>~/.kuke/kuketeam.d/&lt;project&gt;.yaml</code>, host, operator-owned) —
+  one document per composed project, written by each <code>kuke team init</code>. Carries
+  the per-project init-time locator <code>spec.path</code>, the structured agents
+  <code>spec.source</code> pin copied from the project's <code>kuketeam.yaml</code>, and an optional
+  <code>spec.teamDir</code> host-state root. It replaces the former
+  <code>TeamsConfig.spec.teams[]</code> array: a drop-in directory keeps each project
+  isolated, so a corrupt write touches one project and two concurrent inits
+  never race on a shared array.</li>
 <li><strong><code>Role</code></strong> (<code>role.yaml</code>, in agents) — a role's skills, per-harness native
   config, and <code>needs</code> (image capabilities, repos to clone, mounts to bind,
   params, secrets).</li>
@@ -3518,7 +3590,7 @@ host is expressible. <code>TeamsConfig.spec.sources</code> is <strong>optional</
 to override the transport (HTTPS/token, an internal mirror, a non-standard port);
 the common case needs no <code>sources</code> entry.</p>
 <h2 id="the-project-is-cloned-not-mounted">The project is cloned, not mounted<a class="headerlink" href="#the-project-is-cloned-not-mounted" title="Permanent link">&para;</a></h2>
-<p><code>TeamsConfig.teams[].path</code> is an <strong>init-time locator</strong>, not a bind-mount source.
+<p>The per-project entry's <code>path</code> (in <code>~/.kuke/kuketeam.d/&lt;project&gt;.yaml</code>) is an <strong>init-time locator</strong>, not a bind-mount source.
 At <code>init</code> time kukeon reads the project's committed <code>kuketeam.yaml</code> from that
 path and resolves the project's clone URL from its <code>git remote</code>; the cell then
 clones the project fresh as a <code>ContainerRepo</code>. Consequences:</p>
@@ -3532,6 +3604,31 @@ clones the project fresh as a <code>ContainerRepo</code>. Consequences:</p>
 <li>The operator's working tree is <strong>not</strong> mounted — uncommitted local work is
   invisible in the cell.</li>
 </ul>
+<h3 id="overriding-the-in-cell-clone-directory">Overriding the in-cell clone directory<a class="headerlink" href="#overriding-the-in-cell-clone-directory" title="Permanent link">&para;</a></h3>
+<p><code>ProjectTeam.spec.projectDir</code> (in the committed <code>kuketeam.yaml</code>) overrides the
+in-cell project clone-dir basename, decoupling it from <code>metadata.name</code> (the team
+<em>label</em>). It exists for self-referential teams — the agents repo managing
+itself, where a role declares both the <code>project</code> and <code>agents</code> repo slots:
+without the override both resolve to <code>/home/&lt;user&gt;/agents</code> and collide at clone
+time. When unset, the clone dir falls back to <code>metadata.name</code>. The value is
+validated as a safe path basename that does not collide with the reserved
+<code>agents</code> slot directory.</p>
+<h2 id="secrets-two-secretsenv-layers-render-to-kind-secret">Secrets: two <code>secrets.env</code> layers render to <code>kind: Secret</code><a class="headerlink" href="#secrets-two-secretsenv-layers-render-to-kind-secret" title="Permanent link">&para;</a></h2>
+<p>Team secret material is composed from two <code>secrets.env</code> layers and rendered as
+<code>kind: Secret</code> documents the daemon-side apply pipeline consumes alongside the
+project's CellBlueprints and CellConfigs:</p>
+<ul>
+<li>a <strong>shared</strong> host-wide default at <code>~/.kuke/teams/secrets.env</code>, and</li>
+<li>a <strong>per-team</strong> override at <code>&lt;teamDir&gt;/secrets.env</code>.</li>
+</ul>
+<p>Per-key per-team values win over the shared default; per-team-only keys join the
+set; shared-only keys carry through. The keys come from the union of secret
+names every role in the team references (each role's <code>needs.secrets</code>). On first
+run both files are scaffolded in place with one empty <code>KEY=</code> line per referenced
+secret (mode <code>0600</code>), leaving values for the operator to fill in by hand;
+populated files are never overwritten on re-run. Values are never logged or
+echoed — the empty-value warning names keys only, and the rendered Secret
+documents are the sole channel through which the values reach the daemon.</p>
 <h2 id="example">Example<a class="headerlink" href="#example" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># kuketeam.yaml — committed in each project repo</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuketeams.io/v1</span>
@@ -3561,52 +3658,54 @@ clones the project fresh as a <code>ContainerRepo</code>. Consequences:</p>
 <a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a><span class="w">  </span><span class="nt">sources</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> eminwux/agents</span><span class="p">:</span><span class="w"> </span><span class="nv">git@github.com</span><span class="p p-Indicator">:</span><span class="nv">eminwux/agents.git</span><span class="w"> </span><span class="p p-Indicator">}</span>
 <a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a><span class="w">  </span><span class="nt">secrets</span><span class="p">:</span>
 <a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a><span class="w">    </span><span class="nt">claude-code-oauth-token</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> from</span><span class="p">:</span><span class="w"> </span><span class="nv">env</span><span class="p p-Indicator">,</span><span class="nt"> key</span><span class="p">:</span><span class="w"> </span><span class="nv">CLAUDE_CODE_OAUTH_TOKEN</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a><span class="w">  </span><span class="nt">teams</span><span class="p">:</span>
-<a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span>
-<a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a><span class="nt">        name</span><span class="p">:</span><span class="w"> </span><span class="nv">sbsh</span><span class="p p-Indicator">,</span>
-<a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a><span class="nt">        path</span><span class="p">:</span><span class="w"> </span><span class="nv">~/src/sbsh</span><span class="p p-Indicator">,</span>
-<a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a><span class="nt">        source</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> repo</span><span class="p">:</span><span class="w"> </span><span class="nv">github.com/eminwux/agents</span><span class="p p-Indicator">,</span><span class="nt"> tag</span><span class="p">:</span><span class="w"> </span><span class="nv">v1.4.0</span><span class="w"> </span><span class="p p-Indicator">},</span>
-<a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a><span class="w">      </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a><span class="nn">---</span>
-<a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a><span class="c1"># role.yaml — in agents, per role</span>
-<a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuketeams.io/v1</span>
-<a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Role</span>
-<a id="__codelineno-0-39" name="__codelineno-0-39" href="#__codelineno-0-39"></a><span class="nt">metadata</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">dev</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-0-40" name="__codelineno-0-40" href="#__codelineno-0-40"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-0-41" name="__codelineno-0-41" href="#__codelineno-0-41"></a><span class="w">  </span><span class="nt">skills</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">skills/</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">../common/skills/</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-0-42" name="__codelineno-0-42" href="#__codelineno-0-42"></a><span class="w">  </span><span class="nt">harnesses</span><span class="p">:</span>
-<a id="__codelineno-0-43" name="__codelineno-0-43" href="#__codelineno-0-43"></a><span class="w">    </span><span class="nt">claude</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> settings</span><span class="p">:</span><span class="w"> </span><span class="nv">config/claude.settings.json</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-0-44" name="__codelineno-0-44" href="#__codelineno-0-44"></a><span class="w">    </span><span class="nt">codex</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> sandbox</span><span class="p">:</span><span class="w"> </span><span class="nv">workspace-write</span><span class="p p-Indicator">,</span><span class="nt"> approval</span><span class="p">:</span><span class="w"> </span><span class="nv">on-request</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-0-45" name="__codelineno-0-45" href="#__codelineno-0-45"></a><span class="w">    </span><span class="nt">opencode</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> permissions</span><span class="p">:</span><span class="w"> </span><span class="nv">skip</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-0-46" name="__codelineno-0-46" href="#__codelineno-0-46"></a><span class="w">  </span><span class="nt">needs</span><span class="p">:</span>
-<a id="__codelineno-0-47" name="__codelineno-0-47" href="#__codelineno-0-47"></a><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">git</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">gh</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="c1"># capability NAMES (selector input)</span>
-<a id="__codelineno-0-48" name="__codelineno-0-48" href="#__codelineno-0-48"></a><span class="w">    </span><span class="nt">repos</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">project</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">agents</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="c1"># git clones → ContainerRepo</span>
-<a id="__codelineno-0-49" name="__codelineno-0-49" href="#__codelineno-0-49"></a><span class="w">    </span><span class="nt">mounts</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">ssh</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="c1"># bind mounts → VolumeMount</span>
-<a id="__codelineno-0-50" name="__codelineno-0-50" href="#__codelineno-0-50"></a><span class="w">    </span><span class="nt">params</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">PROJECT_DIR</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ANTHROPIC_MODEL</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-0-51" name="__codelineno-0-51" href="#__codelineno-0-51"></a><span class="w">    </span><span class="nt">secrets</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">claude-code-oauth-token</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-0-52" name="__codelineno-0-52" href="#__codelineno-0-52"></a><span class="nn">---</span>
-<a id="__codelineno-0-53" name="__codelineno-0-53" href="#__codelineno-0-53"></a><span class="c1"># harness.yaml — in agents, per harness</span>
-<a id="__codelineno-0-54" name="__codelineno-0-54" href="#__codelineno-0-54"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuketeams.io/v1</span>
-<a id="__codelineno-0-55" name="__codelineno-0-55" href="#__codelineno-0-55"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Harness</span>
-<a id="__codelineno-0-56" name="__codelineno-0-56" href="#__codelineno-0-56"></a><span class="nt">metadata</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">claude</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-0-57" name="__codelineno-0-57" href="#__codelineno-0-57"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-0-58" name="__codelineno-0-58" href="#__codelineno-0-58"></a><span class="w">  </span><span class="p p-Indicator">{</span>
-<a id="__codelineno-0-59" name="__codelineno-0-59" href="#__codelineno-0-59"></a><span class="nt">    baseImage</span><span class="p">:</span><span class="w"> </span><span class="nv">claude</span><span class="p p-Indicator">,</span>
-<a id="__codelineno-0-60" name="__codelineno-0-60" href="#__codelineno-0-60"></a><span class="nt">    skillPath</span><span class="p">:</span><span class="w"> </span><span class="nv">/home/claude/.claude/skills</span><span class="p p-Indicator">,</span>
-<a id="__codelineno-0-61" name="__codelineno-0-61" href="#__codelineno-0-61"></a><span class="nt">    makeTarget</span><span class="p">:</span><span class="w"> </span><span class="nv">claude</span><span class="p p-Indicator">,</span>
-<a id="__codelineno-0-62" name="__codelineno-0-62" href="#__codelineno-0-62"></a><span class="nt">    template</span><span class="p">:</span><span class="w"> </span><span class="nv">blueprint.tmpl.yaml</span><span class="p p-Indicator">,</span>
-<a id="__codelineno-0-63" name="__codelineno-0-63" href="#__codelineno-0-63"></a><span class="w">  </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-0-64" name="__codelineno-0-64" href="#__codelineno-0-64"></a><span class="nn">---</span>
-<a id="__codelineno-0-65" name="__codelineno-0-65" href="#__codelineno-0-65"></a><span class="c1"># harnesses/images.yaml — prebuilt image → capabilities</span>
-<a id="__codelineno-0-66" name="__codelineno-0-66" href="#__codelineno-0-66"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuketeams.io/v1</span>
-<a id="__codelineno-0-67" name="__codelineno-0-67" href="#__codelineno-0-67"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ImageCatalog</span>
-<a id="__codelineno-0-68" name="__codelineno-0-68" href="#__codelineno-0-68"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-0-69" name="__codelineno-0-69" href="#__codelineno-0-69"></a><span class="w">  </span><span class="nt">images</span><span class="p">:</span>
-<a id="__codelineno-0-70" name="__codelineno-0-70" href="#__codelineno-0-70"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">ref</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude</span>
-<a id="__codelineno-0-71" name="__codelineno-0-71" href="#__codelineno-0-71"></a><span class="w">      </span><span class="nt">harness</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude</span>
-<a id="__codelineno-0-72" name="__codelineno-0-72" href="#__codelineno-0-72"></a><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">registry.eminwux.com/claude:latest</span><span class="w"> </span><span class="c1"># registry-qualified</span>
-<a id="__codelineno-0-73" name="__codelineno-0-73" href="#__codelineno-0-73"></a><span class="w">      </span><span class="nt">build</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> context</span><span class="p">:</span><span class="w"> </span><span class="nv">harnesses/claude</span><span class="p p-Indicator">,</span><span class="nt"> dockerfile</span><span class="p">:</span><span class="w"> </span><span class="nv">Dockerfile</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-0-74" name="__codelineno-0-74" href="#__codelineno-0-74"></a><span class="w">      </span><span class="nt">capabilities</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">git</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">gh</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">go</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">node</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">make</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a><span class="nn">---</span>
+<a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a><span class="c1"># ~/.kuke/kuketeam.d/sbsh.yaml — host, one file per composed project</span>
+<a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuketeams.io/v1</span>
+<a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">TeamEntry</span>
+<a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a><span class="nt">metadata</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">sbsh</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a><span class="w">  </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/src/sbsh</span><span class="w"> </span><span class="c1"># init-time locator (clone URL resolved from its git remote)</span>
+<a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a><span class="w">  </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> repo</span><span class="p">:</span><span class="w"> </span><span class="nv">github.com/eminwux/agents</span><span class="p p-Indicator">,</span><span class="nt"> tag</span><span class="p">:</span><span class="w"> </span><span class="nv">v1.4.0</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a><span class="nn">---</span>
+<a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a><span class="c1"># role.yaml — in agents, per role</span>
+<a id="__codelineno-0-39" name="__codelineno-0-39" href="#__codelineno-0-39"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuketeams.io/v1</span>
+<a id="__codelineno-0-40" name="__codelineno-0-40" href="#__codelineno-0-40"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Role</span>
+<a id="__codelineno-0-41" name="__codelineno-0-41" href="#__codelineno-0-41"></a><span class="nt">metadata</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">dev</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-0-42" name="__codelineno-0-42" href="#__codelineno-0-42"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-0-43" name="__codelineno-0-43" href="#__codelineno-0-43"></a><span class="w">  </span><span class="nt">skills</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">skills/</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">../common/skills/</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-0-44" name="__codelineno-0-44" href="#__codelineno-0-44"></a><span class="w">  </span><span class="nt">harnesses</span><span class="p">:</span>
+<a id="__codelineno-0-45" name="__codelineno-0-45" href="#__codelineno-0-45"></a><span class="w">    </span><span class="nt">claude</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> settings</span><span class="p">:</span><span class="w"> </span><span class="nv">config/claude.settings.json</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-0-46" name="__codelineno-0-46" href="#__codelineno-0-46"></a><span class="w">    </span><span class="nt">codex</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> sandbox</span><span class="p">:</span><span class="w"> </span><span class="nv">workspace-write</span><span class="p p-Indicator">,</span><span class="nt"> approval</span><span class="p">:</span><span class="w"> </span><span class="nv">on-request</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-0-47" name="__codelineno-0-47" href="#__codelineno-0-47"></a><span class="w">    </span><span class="nt">opencode</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> permissions</span><span class="p">:</span><span class="w"> </span><span class="nv">skip</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-0-48" name="__codelineno-0-48" href="#__codelineno-0-48"></a><span class="w">  </span><span class="nt">needs</span><span class="p">:</span>
+<a id="__codelineno-0-49" name="__codelineno-0-49" href="#__codelineno-0-49"></a><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">git</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">gh</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="c1"># capability NAMES (selector input)</span>
+<a id="__codelineno-0-50" name="__codelineno-0-50" href="#__codelineno-0-50"></a><span class="w">    </span><span class="nt">repos</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">project</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">agents</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="c1"># git clones → ContainerRepo</span>
+<a id="__codelineno-0-51" name="__codelineno-0-51" href="#__codelineno-0-51"></a><span class="w">    </span><span class="nt">mounts</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">ssh</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="c1"># bind mounts → VolumeMount</span>
+<a id="__codelineno-0-52" name="__codelineno-0-52" href="#__codelineno-0-52"></a><span class="w">    </span><span class="nt">params</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">PROJECT_DIR</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ANTHROPIC_MODEL</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-0-53" name="__codelineno-0-53" href="#__codelineno-0-53"></a><span class="w">    </span><span class="nt">secrets</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">claude-code-oauth-token</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-0-54" name="__codelineno-0-54" href="#__codelineno-0-54"></a><span class="nn">---</span>
+<a id="__codelineno-0-55" name="__codelineno-0-55" href="#__codelineno-0-55"></a><span class="c1"># harness.yaml — in agents, per harness</span>
+<a id="__codelineno-0-56" name="__codelineno-0-56" href="#__codelineno-0-56"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuketeams.io/v1</span>
+<a id="__codelineno-0-57" name="__codelineno-0-57" href="#__codelineno-0-57"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Harness</span>
+<a id="__codelineno-0-58" name="__codelineno-0-58" href="#__codelineno-0-58"></a><span class="nt">metadata</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">claude</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-0-59" name="__codelineno-0-59" href="#__codelineno-0-59"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-0-60" name="__codelineno-0-60" href="#__codelineno-0-60"></a><span class="w">  </span><span class="p p-Indicator">{</span>
+<a id="__codelineno-0-61" name="__codelineno-0-61" href="#__codelineno-0-61"></a><span class="nt">    baseImage</span><span class="p">:</span><span class="w"> </span><span class="nv">claude</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-0-62" name="__codelineno-0-62" href="#__codelineno-0-62"></a><span class="nt">    skillPath</span><span class="p">:</span><span class="w"> </span><span class="nv">/home/claude/.claude/skills</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-0-63" name="__codelineno-0-63" href="#__codelineno-0-63"></a><span class="nt">    makeTarget</span><span class="p">:</span><span class="w"> </span><span class="nv">claude</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-0-64" name="__codelineno-0-64" href="#__codelineno-0-64"></a><span class="nt">    template</span><span class="p">:</span><span class="w"> </span><span class="nv">blueprint.tmpl.yaml</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-0-65" name="__codelineno-0-65" href="#__codelineno-0-65"></a><span class="w">  </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-0-66" name="__codelineno-0-66" href="#__codelineno-0-66"></a><span class="nn">---</span>
+<a id="__codelineno-0-67" name="__codelineno-0-67" href="#__codelineno-0-67"></a><span class="c1"># harnesses/images.yaml — prebuilt image → capabilities</span>
+<a id="__codelineno-0-68" name="__codelineno-0-68" href="#__codelineno-0-68"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuketeams.io/v1</span>
+<a id="__codelineno-0-69" name="__codelineno-0-69" href="#__codelineno-0-69"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ImageCatalog</span>
+<a id="__codelineno-0-70" name="__codelineno-0-70" href="#__codelineno-0-70"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-0-71" name="__codelineno-0-71" href="#__codelineno-0-71"></a><span class="w">  </span><span class="nt">images</span><span class="p">:</span>
+<a id="__codelineno-0-72" name="__codelineno-0-72" href="#__codelineno-0-72"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">ref</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude</span>
+<a id="__codelineno-0-73" name="__codelineno-0-73" href="#__codelineno-0-73"></a><span class="w">      </span><span class="nt">harness</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude</span>
+<a id="__codelineno-0-74" name="__codelineno-0-74" href="#__codelineno-0-74"></a><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">registry.eminwux.com/claude:latest</span><span class="w"> </span><span class="c1"># registry-qualified</span>
+<a id="__codelineno-0-75" name="__codelineno-0-75" href="#__codelineno-0-75"></a><span class="w">      </span><span class="nt">build</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> context</span><span class="p">:</span><span class="w"> </span><span class="nv">harnesses/claude</span><span class="p p-Indicator">,</span><span class="nt"> dockerfile</span><span class="p">:</span><span class="w"> </span><span class="nv">Dockerfile</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-0-76" name="__codelineno-0-76" href="#__codelineno-0-76"></a><span class="w">      </span><span class="nt">capabilities</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">git</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">gh</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">go</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">node</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">make</span><span class="p p-Indicator">]</span>
 </code></pre></div>
 
 
@@ -3630,7 +3729,7 @@ clones the project fresh as a <code>ContainerRepo</code>. Consequences:</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 5, 2026 08:48:07 UTC">June 5, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 11, 2026 05:39:09 UTC">June 11, 2026</span>
   </span>
 
     

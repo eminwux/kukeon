@@ -1531,10 +1531,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#in-process-escape-hatch" class="md-nav__link">
+  <a href="#kuke-apply-always-requires-the-daemon" class="md-nav__link">
     <span class="md-ellipsis">
       
-        In-process escape hatch
+        kuke apply always requires the daemon
       
     </span>
   </a>
@@ -3299,10 +3299,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#in-process-escape-hatch" class="md-nav__link">
+  <a href="#kuke-apply-always-requires-the-daemon" class="md-nav__link">
     <span class="md-ellipsis">
       
-        In-process escape hatch
+        kuke apply always requires the daemon
       
     </span>
   </a>
@@ -3422,37 +3422,33 @@
 <p>or multi-doc:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>cat<span class="w"> </span>realm.yaml<span class="w"> </span>space.yaml<span class="w"> </span>stack.yaml<span class="w"> </span>cell.yaml<span class="w"> </span><span class="p">|</span><span class="w"> </span>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>-
 </code></pre></div>
-<h2 id="in-process-escape-hatch">In-process escape hatch<a class="headerlink" href="#in-process-escape-hatch" title="Permanent link">&para;</a></h2>
-<p><code>kuke apply</code> routes through <code>kukeond</code> by default. When the daemon is down or you need to debug locally, reach the in-process path via <code>KUKEON_NO_DAEMON=true</code> in the env or an explicit <code>--run-path</code> (which auto-promotes to in-process mode):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>sudo<span class="w"> </span><span class="nv">KUKEON_NO_DAEMON</span><span class="o">=</span><span class="nb">true</span><span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>cell.yaml
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="c1"># or</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>cell.yaml<span class="w"> </span>--run-path<span class="w"> </span>/opt/kukeon
-</code></pre></div>
-<p>The <code>--no-daemon</code> flag itself was retired from workload commands by #222; see <a href="../../concepts/client-and-daemon/">Client and daemon</a> for the broader story.</p>
+<h2 id="kuke-apply-always-requires-the-daemon"><code>kuke apply</code> always requires the daemon<a class="headerlink" href="#kuke-apply-always-requires-the-daemon" title="Permanent link">&para;</a></h2>
+<p><code>kuke apply</code> routes through <code>kukeond</code> and has <strong>no in-process fallback</strong>. After #566/#588 the workload verbs (<code>apply</code>, <code>create *</code>, <code>run</code>, <code>attach</code>, <code>delete *</code>, <code>kill *</code>) route through the daemon-only client, which ignores <code>kukeon/noDaemon</code> — so <code>KUKEON_NO_DAEMON=true</code> and the <code>--run-path</code> promotion do <strong>not</strong> reach an in-process branch for <code>apply</code>. If the daemon is down, bring it back with <code>kuke daemon start</code> (or <code>kuke init</code> from scratch) before applying.</p>
+<p>The in-process escape hatch survives only for the promotable callers — <code>get *</code>, <code>purge *</code>, <code>log</code>, <code>refresh</code>, <code>restart</code>, <code>start</code>, <code>stop</code>, <code>doctor cgroups</code>, plus the bootstrap <code>init</code>/<code>uninstall</code>. See <a href="../../concepts/client-and-daemon/">Client and daemon</a> for the broader story.</p>
 <h2 id="parameterized-cell-blueprints">Parameterized cell blueprints<a class="headerlink" href="#parameterized-cell-blueprints" title="Permanent link">&para;</a></h2>
 <p><code>kuke apply -f</code> consumes a <strong>fixed</strong> manifest — the file you ship is the spec the daemon reconciles to, with no substitution layer in between. When you need the same cell shape with different values per invocation (image tag, command, mount paths), apply a <strong>CellBlueprint</strong> to the daemon and run it with <code>kuke run --from-blueprint</code> instead of editing the YAML each time.</p>
 <p>A blueprint is a daemon-stored, scoped resource. It declares its variable inputs alongside the cell template:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellBlueprint</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="nt">metadata</span><span class="p">:</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">shell</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">  </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">  </span><span class="nt">parameters</span><span class="p">:</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">IMAGE</span>
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="w">      </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">container image to run</span>
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="w">      </span><span class="nt">default</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">alpine:latest</span>
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CMD</span>
-<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="w">      </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">command to exec</span>
-<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="w">      </span><span class="nt">required</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="w">  </span><span class="nt">cell</span><span class="p">:</span>
-<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="w">    </span><span class="nt">containers</span><span class="p">:</span>
-<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">shell</span>
-<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a><span class="w">        </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${IMAGE}</span>
-<a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a><span class="w">        </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;/bin/sh&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;-c&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;${CMD}&quot;</span><span class="p p-Indicator">]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellBlueprint</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">shell</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">  </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">  </span><span class="nt">parameters</span><span class="p">:</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">IMAGE</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="w">      </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">container image to run</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="w">      </span><span class="nt">default</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">alpine:latest</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CMD</span>
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="w">      </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">command to exec</span>
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="w">      </span><span class="nt">required</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="w">  </span><span class="nt">cell</span><span class="p">:</span>
+<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="w">    </span><span class="nt">containers</span><span class="p">:</span>
+<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">shell</span>
+<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a><span class="w">        </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${IMAGE}</span>
+<a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a><span class="w">        </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;/bin/sh&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;-c&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;${CMD}&quot;</span><span class="p p-Indicator">]</span>
 </code></pre></div>
 <p>Apply it once:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>shell.blueprint.yaml
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>shell.blueprint.yaml
 </code></pre></div>
 <p>Then <code>kuke run --from-blueprint shell</code> materializes one cell with a unique name (<code>&lt;prefix&gt;-&lt;6hex&gt;</code> by default, prefix = <code>spec.prefix</code> or <code>metadata.name</code>; override with <code>--name</code>) and resolves each <code>${KEY}</code> reference in the body. Resolution order, highest first:</p>
 <ol>
@@ -3462,14 +3458,14 @@
 <li>The <code>kuke</code> process env (<code>os.LookupEnv</code>)</li>
 <li>Required + unset → error; non-required + unset → empty string</li>
 </ol>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># Use defaults / env / required errors</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>kuke<span class="w"> </span>run<span class="w"> </span>--from-blueprint<span class="w"> </span>shell<span class="w"> </span>--param<span class="w"> </span><span class="nv">CMD</span><span class="o">=</span><span class="s2">&quot;echo hi&quot;</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="c1"># Override the image too</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>kuke<span class="w"> </span>run<span class="w"> </span>--from-blueprint<span class="w"> </span>shell<span class="w"> </span>--param<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>alpine:edge<span class="w"> </span>--param<span class="w"> </span><span class="nv">CMD</span><span class="o">=</span><span class="s2">&quot;/bin/sh&quot;</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="c1"># Load a batch of values from a file, with a CLI override on top</span>
-<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>kuke<span class="w"> </span>run<span class="w"> </span>--from-blueprint<span class="w"> </span>shell<span class="w"> </span>--param-file<span class="w"> </span>./shell.env<span class="w"> </span>--param<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>alpine:edge
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># Use defaults / env / required errors</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>kuke<span class="w"> </span>run<span class="w"> </span>--from-blueprint<span class="w"> </span>shell<span class="w"> </span>--param<span class="w"> </span><span class="nv">CMD</span><span class="o">=</span><span class="s2">&quot;echo hi&quot;</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="c1"># Override the image too</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>kuke<span class="w"> </span>run<span class="w"> </span>--from-blueprint<span class="w"> </span>shell<span class="w"> </span>--param<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>alpine:edge<span class="w"> </span>--param<span class="w"> </span><span class="nv">CMD</span><span class="o">=</span><span class="s2">&quot;/bin/sh&quot;</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="c1"># Load a batch of values from a file, with a CLI override on top</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>kuke<span class="w"> </span>run<span class="w"> </span>--from-blueprint<span class="w"> </span>shell<span class="w"> </span>--param-file<span class="w"> </span>./shell.env<span class="w"> </span>--param<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>alpine:edge
 </code></pre></div>
 <p><code>--param</code>, <code>--param-file</code>, and <code>--name</code> are rejected when combined with <code>-f</code> (file mode is not a blueprint and has no parameter declarations); <code>--param</code>/<code>--param-file</code> are also rejected with <code>--from-config</code> (a CellConfig already binds its own values — use <code>--env</code> for a per-cell override there). The substituted body is what reaches the daemon — there is no parameter layer in the manifest API itself.</p>
 <p>To additionally fill a blueprint's structural repo/secret slots, wrap it in a <code>kind: CellConfig</code> and use <code>kuke run --from-config &lt;cfg&gt;</code>; see <a href="../../manifests/config/"><code>kind: CellConfig</code></a>. Both <code>--from-blueprint</code> and <code>--from-config</code> stamp a fresh <code>&lt;prefix&gt;-&lt;6hex&gt;</code> cell per invocation (pin one with <code>--name</code>).</p>
@@ -3479,7 +3475,6 @@
 <li><a href="../../manifests/overview/">Manifest Reference</a> — the full schema of every resource</li>
 <li><a href="../../cli/kuke-apply/">CLI Reference → apply</a> — every flag on <code>kuke apply</code></li>
 <li><a href="../../cli/kuke-run/">CLI Reference → run</a> — <code>-f</code> (file), <code>--from-blueprint</code>, and <code>--from-config</code> modes, including parameter handling</li>
-<li><a href="../migrate-cellprofile-to-blueprint/">Migrate from <code>CellProfile</code> to <code>CellBlueprint</code></a> — the #626 cutover recipe</li>
 <li><a href="../../tutorials/hello-world/">Tutorials → Hello-world cell</a> — a worked example end-to-end</li>
 </ul>
 
@@ -3504,7 +3499,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 6, 2026 02:13:32 UTC">June 6, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 11, 2026 05:39:09 UTC">June 11, 2026</span>
   </span>
 
     

@@ -3500,7 +3500,7 @@
 <hr />
 <h2 id="how-you-describe-a-cell-and-why-this-took-three-tries">How you describe a cell (and why this took three tries)<a class="headerlink" href="#how-you-describe-a-cell-and-why-this-took-three-tries" title="Permanent link">&para;</a></h2>
 <p>The runtime runs cells. But how do you <em>describe</em> one? This evolved through three generations, and the path is instructive.</p>
-<p>The first version, <code>CellProfile</code>, was client-side only — the CLI expanded a profile into a cell locally and ran it. It worked, but it duplicated the same machinery into every profile: cloning the repo, setting up git identity, injecting secrets. The lifecycle was invisible to the daemon.</p>
+<p>The first version was client-side only — the CLI expanded a template into a cell locally and ran it. It worked, but it duplicated the same machinery into every template: cloning the repo, setting up git identity, injecting secrets. The lifecycle was invisible to the daemon.</p>
 <p>The current model splits the concern in two, and both are daemon-stored:</p>
 <ul>
 <li>A <strong><code>CellBlueprint</code></strong> is a parametrized <em>template</em> — the structure, containers, and setup work, with slots.</li>
@@ -3587,7 +3587,7 @@
 <p>Which, finally, is why the name is what it is. Heraclitus wrote that the <em>kykeon</em> — a barley drink — separates if it isn't stirred. He meant it as an image of the <em>logos</em>: order isn't a static state, it's a process held together by motion. A bootstrapping compiler has exactly that nature. It isn't an artifact; it's a process that stays itself only by continuously running on itself. Kukeon is order through motion — it becomes what it is only while it keeps building and refining itself.</p>
 <hr />
 <h2 id="where-it-stands">Where it stands<a class="headerlink" href="#where-it-stands" title="Permanent link">&para;</a></h2>
-<p>Kukeon is beta. The runtime, daemon, and hierarchy are stable for single-host use. The agent organization and Loops A and B run today, through human-merged PRs. The Blueprint/Config model is actively replacing CellProfile. Leases, the projection/cache layer, the typed plan-graph, and Loop C are the active frontier. The autonomous approver — the one that would remove the human merge gate — is deliberately on the far side of "prove the fixpoint first."</p>
+<p>Kukeon is beta. The runtime, daemon, and hierarchy are stable for single-host use. The agent organization and Loops A and B run today, through human-merged PRs. The Blueprint/Config model is the daemon-stored cell-description layer. Leases, the projection/cache layer, the typed plan-graph, and Loop C are the active frontier. The autonomous approver — the one that would remove the human merge gate — is deliberately on the far side of "prove the fixpoint first."</p>
 <p>Built so far: the runtime and hierarchy; daemon lifecycle; the agent roles and skills; reflection-on-hook; process learning (Loop A) and product-defect feedback (Loop B). In flight: Blueprint/Config, leases, the projection layer, the plan-graph as a typed object, runtime feedback (Loop C). Deliberately not built yet: anything that takes the human off the merge.</p>
 <p>If the design has a single thesis, it's this: <strong>autonomy and accountability aren't in tension if every action the system takes — including the actions it takes to improve itself — is an owned, inspectable, human-approved diff.</strong> The agents do the work. The forge holds the truth. The human holds the seed. And the whole thing is itself only while it's being stirred.</p>
 <hr />
@@ -3614,7 +3614,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 30, 2026 01:14:14 UTC">May 30, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 11, 2026 05:39:09 UTC">June 11, 2026</span>
   </span>
 
     

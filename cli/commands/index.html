@@ -3455,17 +3455,13 @@
 </tr>
 </tbody>
 </table>
-<p><code>--no-daemon</code> is <strong>not</strong> a root-persistent flag — it is only accepted on <code>kuke init</code>, <code>kuke uninstall</code>, <code>kuke purge</code>, and every <code>kuke get &lt;kind&gt;</code> (see #222; the <code>get</code> kinds were retained per a user override on the original AC). For the remaining daemon-routed workload commands (<code>apply</code>, <code>create</code>, <code>run</code>, <code>attach</code>, <code>delete</code>, <code>kill</code>, <code>start</code>, <code>stop</code>, <code>log</code>, <code>refresh</code>), the in-process path is reached via <code>KUKEON_NO_DAEMON=true</code> or an explicit <code>--run-path</code> (which auto-promotes to in-process mode).</p>
+<p><code>--no-daemon</code> is <strong>not</strong> a root-persistent flag — it is only accepted on <code>kuke init</code>, <code>kuke uninstall</code>, <code>kuke purge</code>, and every <code>kuke get &lt;kind&gt;</code> (see #222; the <code>get</code> kinds were retained per a user override on the original AC). The other promotable callers that don't carry the flag — <code>log</code>, <code>refresh</code>, <code>restart</code>, <code>start</code>, <code>stop</code>, <code>doctor cgroups</code> — reach the in-process path via <code>KUKEON_NO_DAEMON=true</code> or an explicit <code>--run-path</code> (which auto-promotes to in-process mode). The true workload verbs (<code>apply</code>, <code>create *</code>, <code>run</code>, <code>attach</code>, <code>delete *</code>, <code>kill *</code>) route through the daemon-only client after #566/#588 and ignore both knobs — they have no in-process fallback and always require the daemon.</p>
 <h3 id="in-process-mode-host-prerequisites">In-process mode host prerequisites<a class="headerlink" href="#in-process-mode-host-prerequisites" title="Permanent link">&para;</a></h3>
 <p>In in-process mode, the <code>kuke</code> binary runs the controllers itself instead of routing the request to <code>kukeond</code>. Operations that touch networking (cell apply, network create) then shell out to CNI plugins from <strong>the host's</strong> <code>/opt/cni/bin</code> — the daemon's container image is not in the picture. So in-process workflows additionally require:</p>
 <ul>
 <li>CNI plugins on the host at <code>/opt/cni/bin</code> (e.g. <code>containernetworking-plugins</code> on Debian/Ubuntu, then symlinked from <code>/usr/lib/cni</code> since that distro packages them there)</li>
 </ul>
 <p>The default daemon path does <strong>not</strong> need host CNI plugins — <code>kukeond</code>'s image bundles them and only state dirs (<code>/opt/cni/net.d</code>, <code>/var/lib/cni</code>, <code>/opt/cni/cache</code>) are bind-mounted from the host.</p>
-<div class="admonition warning">
-<p class="admonition-title">In-process mode is transitional</p>
-<p><code>KUKEON_NO_DAEMON=true</code> / the <code>--run-path</code> promotion path is slated for full removal once <code>ClientFromCmd</code>'s in-process branch is retired (#566). Treat it as a debugging escape hatch rather than a supported deployment mode.</p>
-</div>
 <h2 id="convention-positional-arg-flags">Convention: positional arg + flags<a class="headerlink" href="#convention-positional-arg-flags" title="Permanent link">&para;</a></h2>
 <p>Resource commands follow a uniform shape:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke &lt;verb&gt; &lt;resource&gt; [NAME] --realm &lt;r&gt; --space &lt;s&gt; --stack &lt;t&gt; --cell &lt;c&gt; [flags]
@@ -3518,7 +3514,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 4, 2026 11:51:07 UTC">June 4, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 11, 2026 05:39:09 UTC">June 11, 2026</span>
   </span>
 
     
