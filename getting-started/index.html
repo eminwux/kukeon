@@ -3349,7 +3349,7 @@
 
 
 <h1 id="getting-started">Getting Started<a class="headerlink" href="#getting-started" title="Permanent link">&para;</a></h1>
-<p>This guide walks you through installing Kukeon (v0.5.0 beta) on a Linux host, bootstrapping the runtime, and running a simple cell.</p>
+<p>This guide walks you through installing Kukeon (v0.6.0 beta) on a Linux host, bootstrapping the runtime, and running a simple cell.</p>
 <h2 id="1-check-prerequisites">1. Check prerequisites<a class="headerlink" href="#1-check-prerequisites" title="Permanent link">&para;</a></h2>
 <p>Kukeon needs:</p>
 <ul>
@@ -3368,17 +3368,18 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>init
 </code></pre></div>
 <p><code>kuke init</code> provisions the two default realms (<code>default</code> for user workloads, <code>kuke-system</code> for the <code>kukeond</code> daemon cell), sets up CNI dirs, pulls the <code>kukeond</code> image into the <code>kuke-system</code> realm's containerd namespace, and starts the daemon. It touches <code>/opt/kukeon</code>, cgroups, and containerd, so it needs root.</p>
+<p>Once <code>kuke init</code> returns, run <a href="../cli/kuke-status/"><code>kuke status</code></a> to confirm the daemon is healthy and both realms are Ready.</p>
 <p>Expected tail of the output:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Initialized Kukeon runtime
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>Realm: default (namespace: default.kukeon.io)
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>System realm: kuke-system (namespace: kuke-system.kukeon.io)
 <a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>Run path: /opt/kukeon
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>Kukeond image: ghcr.io/eminwux/kukeon:v0.5.0
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>Kukeond image: ghcr.io/eminwux/kukeon:v0.6.0
 <a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>Actions:
 <a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>  ...
 <a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>  System hierarchy:
 <a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    - realm &quot;kuke-system&quot;: created
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    - cell &quot;kukeond&quot;: created (image ghcr.io/eminwux/kukeon:v0.5.0)
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    - cell &quot;kukeond&quot;: created (image ghcr.io/eminwux/kukeon:v0.6.0)
 <a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>    - cell cgroup: created
 <a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>    - cell root container: created
 <a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>    - cell containers: started
@@ -3488,7 +3489,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 25, 2026 18:32:04 UTC">May 25, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 11, 2026 21:12:13 UTC">June 11, 2026</span>
   </span>
 
     

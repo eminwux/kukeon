@@ -3330,7 +3330,7 @@
 
 
 <h1 id="install-on-linux">Install on Linux<a class="headerlink" href="#install-on-linux" title="Permanent link">&para;</a></h1>
-<p>Kukeon (v0.5.0 beta) ships a single static binary per platform. The same binary behaves as <code>kuke</code> (the CLI) or <code>kukeond</code> (the daemon) depending on the name it is invoked under: you install the binary once and create a hard link for the second name. The one-line installer below does both for you.</p>
+<p>Kukeon (v0.6.0 beta) ships a single static binary per platform. The same binary behaves as <code>kuke</code> (the CLI) or <code>kukeond</code> (the daemon) depending on the name it is invoked under: you install the binary once and create a hard link for the second name. The one-line installer below does both for you.</p>
 <p>Before installing, confirm cgroups v2 and containerd are in place — see <a href="../prerequisites/">Prerequisites</a>. The installer also checks them and exits with a distro-aware hint on any miss.</p>
 <h2 id="one-line-install-recommended">One-line install (recommended)<a class="headerlink" href="#one-line-install-recommended" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://kukeon.io/install.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span>bash
@@ -3382,7 +3382,7 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Pick your platform</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OS</span><span class="o">=</span>linux<span class="w">             </span><span class="c1"># Options: linux</span>
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">ARCH</span><span class="o">=</span>amd64<span class="w">           </span><span class="c1"># Options: amd64, arm64</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="nb">export</span><span class="w"> </span><span class="nv">KUKE_VERSION</span><span class="o">=</span>v0.5.0<span class="w">  </span><span class="c1"># Or the release you want to pin</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="nb">export</span><span class="w"> </span><span class="nv">KUKE_VERSION</span><span class="o">=</span>v0.6.0<span class="w">  </span><span class="c1"># Or the release you want to pin</span>
 <a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
 <a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="c1"># Download, install, and hard-link</span>
 <a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>curl<span class="w"> </span>-L<span class="w"> </span>-o<span class="w"> </span>kuke<span class="w"> </span><span class="s2">&quot;https://github.com/eminwux/kukeon/releases/download/</span><span class="si">${</span><span class="nv">KUKE_VERSION</span><span class="si">}</span><span class="s2">/kuke-</span><span class="si">${</span><span class="nv">OS</span><span class="si">}</span><span class="s2">-</span><span class="si">${</span><span class="nv">ARCH</span><span class="si">}</span><span class="s2">&quot;</span>
@@ -3396,7 +3396,7 @@
 <p>The hard link is required: <code>main.go</code> dispatches to <code>kuke</code> or <code>kukeond</code> by looking at <code>argv[0]</code> (see <a href="../../architecture/process-model/">Architecture → Process Model</a>). Running <code>kuke kukeond …</code> does <strong>not</strong> enter the daemon tree.</p>
 <h2 id="verify-the-install">Verify the install<a class="headerlink" href="#verify-the-install" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>$<span class="w"> </span>kuke<span class="w"> </span>version
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>v0.5.0
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>v0.6.0
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
 <a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>$<span class="w"> </span>kukeond<span class="w"> </span>--help
 <a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>Kukeon<span class="w"> </span>daemon:<span class="w"> </span>hosts<span class="w"> </span>the<span class="w"> </span>kukeonv1<span class="w"> </span>API<span class="w"> </span>over<span class="w"> </span>a<span class="w"> </span>unix<span class="w"> </span>socket
@@ -3455,7 +3455,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 11, 2026 05:39:09 UTC">June 11, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 11, 2026 21:12:13 UTC">June 11, 2026</span>
   </span>
 
     
