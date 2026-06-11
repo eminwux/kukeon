@@ -815,12 +815,12 @@ type LoadImageResult struct {
 // effort: -1 is emitted when containerd cannot resolve the size locally so
 // the CLI renders "-" rather than "0 B".
 type ImageInfo struct {
-	Name      string
-	Size      int64
-	CreatedAt time.Time
-	Digest    string
-	MediaType string
-	Labels    map[string]string
+	Name      string            `json:"name"      yaml:"name"`
+	Size      int64             `json:"size"      yaml:"size"`
+	CreatedAt time.Time         `json:"createdAt" yaml:"createdAt"`
+	Digest    string            `json:"digest"    yaml:"digest"`
+	MediaType string            `json:"mediaType" yaml:"mediaType"`
+	Labels    map[string]string `json:"labels"    yaml:"labels"`
 }
 
 // ListImagesResult lists the images present in a realm's containerd
