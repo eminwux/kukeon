@@ -11,49 +11,6 @@ Kukeon runs Claude Code and other agent workloads as isolated [containerd](https
 
 Start with one agent cell; grow into per-project agent teams declared with `kuketeam.yaml`.
 
-**The longer arc.** Agent isolation is the practical starting point. The long-term direction is a *goal compiler*: a self-hosted system where a team of AI agents — a planner, developers, a reviewer, and a meta-agent that improves the others — takes a goal, builds it, reviews it, ships it, and refines both the product and itself. A human states the goal and merges the PRs; everything in between runs on its own.
-
-Under the hood: a containerd-native runtime (`kukeond` + `kuke`) gives each agent real isolation with primitives you can inspect (`ctr`, `ip link`, `ls /sys/fs/cgroup`). A `CellBlueprint` + `CellConfig` model describes agent roles as templates and instantiates them as concrete cells. A daemon-owned **lease** mechanism makes work-claims atomic across concurrent cells. The Git forge is the system of record — every plan, PR, and audit-trail entry lives in infrastructure you already trust.
-
-Three feedback loops close the system back on itself: a **work loop** that ships PRs; **Loop A** that refines the agents' own playbooks through reflected lessons; **Loop B** that surfaces verified product defects from running operation back into the work queue. The whole shape is a **bootstrapping compiler** — the system that ultimately builds and improves itself, with the human as the trusted stage-0 on the merge gate.
-
-See **[docs/site/vision.md](docs/site/vision.md)** — *Building a Goal Compiler: The Design of Kukeon* — for the full design essay.
-
-## Philosophy
-
-«καὶ ὁ κυκεὼν διίσταται μὴ κινούμενος»
-"The barley-drink separates if it isn't stirred"
-
-Fragment DK 22B125
-Heraclitus, circa 500 BC
-
-Heraclitus used the kykeon, a simple barley drink, as an analogy for the logos, the hidden principle of order in the cosmos. The drink becomes itself only when its ingredients are mixed and kept in motion. Without movement, it separates and loses its identity.
-
-Kukeon applies the same metaphor to computing:
-
-- containers, networks, and cgroups are the ingredients
-- `kukeond` is the stirring motion that brings them together
-- the running system is the order that emerges through interaction
-
-Kukeon brings coherence and structure to low-level Linux primitives that normally remain scattered and disconnected. It unifies them into a living, dynamic system.
-
-## Status
-
-Kukeon is in **v0.5.0 beta**. The operator surface — realms, spaces, stacks, cells, containers, the daemon, `kuke init` / `apply` / `get` / `attach` / `log`, the one-line installer, and v0.4.0 manifest fields — is shipping and usable today. "Beta" means what's released works reliably; "pre-v1" means SemVer API stability isn't promised yet — minor releases can still introduce breaking changes to manifests, CLI verbs, and daemon semantics.
-
-Still pre-v1, gated by:
-
-- **Agent-native primitives** — Session (#46) and Interactive UC2 (#57) are the gate for the agent-native story.
-- **Schema rework** — crew-layers absorption into `CellBlueprint` / `CellConfig` / `Secret` (#423) is a breaking change.
-- **Daemon-only verbs** — `--no-daemon` retirement (#217) is mid-flight; the CLI surface is still moving. The flag is already gone from workload commands (`apply`, `create`, `run`, `attach`, `delete`, `kill`, `get` of non-realm kinds); in-process mode is still reachable via `KUKEON_NO_DAEMON=true` or an explicit `--run-path`.
-- **Reconciler-driven lifecycle** — convergent create/delete (#224) changes runtime semantics.
-
-References:
-
-- Umbrella: #48
-- v0.5.0 release tracker: #440
-- Library substrate (sbsh): sbsh#118 ✅
-
 ## Quick Start
 
 Get kukeon running on a single Linux host in minutes.
@@ -62,6 +19,8 @@ Get kukeon running on a single Linux host in minutes.
 
 - Linux with cgroups v2
 - [containerd](https://containerd.io/) running at `/run/containerd/containerd.sock`
+
+Release binaries are published for `amd64` and `arm64`.
 
 ### Install
 
@@ -85,24 +44,7 @@ Run path: /opt/kukeon
 kukeond is ready (unix:///run/kukeon/kukeond.sock)
 ```
 
-#### Manual install
-
-If you would rather drive each step yourself (e.g. installing onto an air-gapped host, or pinning a non-default release tag):
-
-```bash
-# Set your platform (defaults shown)
-export OS=linux        # Options: linux
-export ARCH=amd64      # Options: amd64, arm64
-
-# Install kuke (the CLI also dispatches as kukeond based on argv[0])
-curl -L -o kuke https://github.com/eminwux/kukeon/releases/download/v0.5.0/kuke-${OS}-${ARCH} && \
-chmod +x kuke && \
-sudo install -m 0755 kuke /usr/local/bin/kuke && \
-sudo ln -f /usr/local/bin/kuke /usr/local/bin/kukeond
-
-# Provision the default realm/space/stack hierarchy and start the daemon.
-sudo kuke init
-```
+If you would rather drive each step yourself — installing onto an air-gapped host, or pinning a non-default release tag — see the [manual install steps](docs/site/install/install-linux.md).
 
 ### Daily use without sudo
 
@@ -116,6 +58,21 @@ kuke get realms
 
 Operations that bypass the daemon still need root: `kuke init`, `kuke daemon reset`, `kuke image load` (in-process by design — every `kuke image *` subcommand runs in-process), `kuke purge` / `kuke uninstall` with `--no-daemon`, and any command run with `KUKEON_NO_DAEMON=true` or an explicit `--run-path`.
 
+### Your first cell: Claude Code
+
+Build the example Claude Code image and run it as a cell — no Docker required. `kuke build` writes the image straight into the realm's containerd namespace:
+
+```bash
+sudo kuke build -t claude-code:latest docs/examples/claude-code/
+sudo kuke run -f docs/examples/claude-code/cell.yaml
+# detach with ^]^] — the cell keeps running
+kuke run claude-code   # reattach any time
+```
+
+`kuke run -f` is create-or-attach, keyed by the manifest's `metadata.name`: the first invocation creates the cell and attaches your terminal; running it again — or `kuke run <name>` — reattaches to a Ready cell as a no-op, and starts a Stopped cell before attaching. You land at a `claude> ` prompt inside the cell; run `claude` to enter the Claude Code REPL (bring your own auth — the example image bakes in no API keys).
+
+→ See [docs/site/guides/run-claude-code.md](docs/site/guides/run-claude-code.md) for the full walkthrough, or [docs/site/tutorials/hello-world.md](docs/site/tutorials/hello-world.md) for a plain-container first cell.
+
 ### Autocomplete
 
 ```bash
@@ -128,23 +85,7 @@ EOF
 
 Completions are dynamic: every tab dispatches through `kuke __complete`, so newly added blueprints, configs, realms, and cells are picked up on the next tab without re-sourcing the script.
 
-## Documentation
-
-Complete documentation is available at [https://kukeon.io](https://kukeon.io), including concepts, architecture, CLI reference, manifest reference, guides, and tutorials.
-
-## Why kukeon
-
-**Your agents, your machines, your rules.** SaaS agent sandboxes (E2B, Daytona, Modal) force your agents to run on their cloud. Kukeon runs them on yours — a cloud VM, a homelab, a single Linux box with containerd. No vendor lock-in, no data leaving your infrastructure, no credit card.
-
-The agents — planner, devs, reviewer, meta — run as cells under `kukeond`, with separation-of-powers enforced by the runtime: no agent merges its own work, and the merge gate stays with the human.
-
-- **Sovereign** — every byte of agent state lives on hosts you own
-- **Declarative** — Session + Interactive + onEnd.persist as first-class YAML
-- **Isolated** — realm/space/cell backed by real Linux primitives (containerd namespaces, CNI networks, cgroups)
-- **Self-hosted** — no cluster, no etcd, no scheduler, no SaaS
-- **Transparent** — inspect what the daemon did with `ctr`, `ip link`, `ls /sys/fs/cgroup`
-
-## What it is good for today
+## What you can do today
 
 Kukeon is useful right now as a single-host runtime for AI coding agents:
 
@@ -154,136 +95,29 @@ Kukeon is useful right now as a single-host runtime for AI coding agents:
 - **Compose a per-project agent roster** with `kuke team init` from a committed `kuketeam.yaml` — the next-level path once one cell isn't enough. → See [docs/site/cli/kuke-team-init.md](docs/site/cli/kuke-team-init.md).
 - **Operate a lightweight single-host agent runtime** without Kubernetes.
 
+It is also a good fit beyond agents: if you have outgrown `docker compose` but don't want to stand up a Kubernetes cluster, kukeon gives a single Linux host an explicit `Realm → Space → Stack → Cell → Container` hierarchy — one CNI network per space, one cgroup subtree per layer, no distributed control plane. Homelab and VPS users, and systems engineers who prefer containerd over Docker, are first-class audiences.
+
+## Why kukeon
+
+**Your agents, your machines, your rules.** SaaS agent sandboxes (E2B, Daytona, Modal) force your agents to run on their cloud. Kukeon runs them on yours — a cloud VM, a homelab, a single Linux box with containerd. No vendor lock-in, no data leaving your infrastructure, no credit card.
+
+- **Sovereign** — every byte of agent state lives on hosts you own
+- **Declarative** — Session + Interactive + onEnd.persist as first-class YAML
+- **Isolated** — realm/space/cell backed by real Linux primitives (containerd namespaces, CNI networks, cgroups)
+- **Self-hosted** — no cluster, no etcd, no scheduler, no SaaS
+- **Transparent** — inspect what the daemon did with `ctr`, `ip link`, `ls /sys/fs/cgroup`
+- **Coexists with Docker** — kukeon drives the system containerd under its own `*.kukeon.io` namespaces; an existing Docker install on the same host is untouched. → See the [FAQ](docs/site/faq.md).
+
 ## What it is not (yet)
 
 Setting expectations before you install:
 
 - **Not a Kubernetes replacement** for multi-node clusters or cross-region orchestration.
 - **Not a SaaS sandbox** — execution stays on infrastructure you own.
-- **Not yet a fully autonomous software company** — the human merge gate is a deliberate stage-0, not a missing feature.
+- **Not yet a fully autonomous software company** — the human merge gate is a deliberate stage-0, not a missing feature (see [vision.md](docs/site/vision.md)).
+- **Not its own audit-trail database** — every action is a Git object in your forge.
+- **Not a layer that hides low-level primitives** behind opaque abstractions.
 - **Pre-v1** — manifests, CLI verbs, and daemon semantics can still change between minor releases.
-
-See [Non-Goals](#non-goals) below for the full design boundaries.
-
-## Usage Examples
-
-Common workflows for working with realms, spaces, stacks, and cells.
-
-### List the default hierarchy
-
-```bash
-$ sudo kuke get realms
-NAME           STATE    AGE
-default        Ready    <age>
-kukeon-system  Ready    <age>
-
-$ sudo kuke get spaces
-NAME     REALM    STATE
-default  default  Ready
-```
-
-Add `-o wide` for the per-kind extra columns (realm's wide appends `NAMESPACE`), or `-o yaml` / `-o json` for full resource details (including `cgroupPath`).
-
-### Run a hello-world cell
-
-A minimal example that brings up a single container serving a static HTML page with busybox httpd lives at [`docs/examples/hello-world.yaml`](docs/examples/hello-world.yaml):
-
-```yaml
-apiVersion: v1beta1
-kind: Cell
-metadata:
-  name: hello-world
-spec:
-  id: hello-world
-  realmId: default
-  spaceId: default
-  stackId: default
-  containers:
-    - id: web
-      image: docker.io/library/busybox:latest
-      command: /bin/sh
-      args:
-        - -c
-        - |
-          mkdir -p /www && \
-          cat > /www/index.html <<'HTML'
-          <!doctype html>
-          <html>
-            <head><meta charset="utf-8"><title>kukeon hello-world</title></head>
-            <body style="font-family: sans-serif">
-              <h1>Hello, world from kukeon!</h1>
-            </body>
-          </html>
-          HTML
-          exec busybox httpd -f -v -p 8080 -h /www
-```
-
-Apply it and verify the cell is running. Cell creation currently goes in-process because the `kukeond` container image does not yet bind-mount `/run/containerd/containerd.sock`; pass `--run-path /opt/kukeon` (or set `KUKEON_NO_DAEMON=true`) to skip the daemon round-trip:
-
-```bash
-# Create the cell (containers auto-start).
-sudo kuke apply -f docs/examples/hello-world.yaml --run-path /opt/kukeon
-
-# Confirm the cell is Ready.
-sudo kuke get cells --realm default --space default --stack default
-
-# Find the root container's IP on the default-default bridge (10.88.0.0/16) and curl it.
-ROOT_PID=$(sudo ctr -n kukeon.io task ls | awk '/hello-world_root/ {print $2}')
-CELL_IP=$(sudo nsenter -t "${ROOT_PID}" -n ip -4 -o addr show eth0 | awk '{print $4}' | cut -d/ -f1)
-curl http://${CELL_IP}:8080/
-```
-
-Tear it down with:
-
-```bash
-sudo kuke delete cell hello-world \
-    --realm default --space default --stack default --cascade --run-path /opt/kukeon
-```
-
-### Development environment
-
-Iterating on `kuke`/`kukeond` without a registry push: build from source, load the image into containerd by hand, then `kuke init` against it.
-
-**Prerequisite — create the `kuke-system.kukeon.io` namespace first.** `ctr images import` needs the target namespace to already exist; if it doesn't, the import succeeds silently but nothing lands in the namespace and the next `kuke init` will fail to find the image. The simplest bootstrap order is to let `kuke init` create the namespace first, then import, then re-run `kuke init` with your local image:
-
-```bash
-# 1. First bootstrap: creates the kuke-system.kukeon.io containerd namespace
-#    (and the rest of the hierarchy). The kukeond cell will fail to pull the
-#    default ghcr.io image without network — that's fine, we only need the
-#    namespace to exist. Alternatively create it directly:
-sudo ctr namespaces create kuke-system.kukeon.io
-
-# 2. Build the binaries. kukeond is argv[0]-dispatched from the kuke binary.
-rm -f kuke kukeond
-make kuke
-ln -sf kuke kukeond
-
-# 3. Build the container image and import it into the kuke-system namespace.
-#    VERSION only affects the embedded kuke --version string.
-docker build --build-arg VERSION=v0.0.0-dev -t kukeon-local:dev .
-docker save kukeon-local:dev | \
-    sudo ctr -n kuke-system.kukeon.io images import -
-
-# 4. Verify the image is present in the namespace.
-sudo ctr -n kuke-system.kukeon.io images ls | grep kukeon-local
-
-# 5. Run (or re-run) kuke init pointed at the locally-loaded image.
-sudo ./kuke init --kukeond-image docker.io/library/kukeon-local:dev
-```
-
-To iterate after a change, tear down just the kukeond cell (user data under `/opt/kukeon/default` is left intact) and repeat steps 2–5:
-
-```bash
-sudo kuke kill kukeond \
-    --realm kuke-system --space kukeon --stack kukeon --run-path /opt/kukeon
-sudo kuke delete cell kukeond \
-    --realm kuke-system --space kukeon --stack kukeon --run-path /opt/kukeon
-sudo rm -f /run/kukeon/kukeond.sock /run/kukeon/kukeond.pid
-```
-
-The `--run-path` promotion runs these commands in-process — required here because the daemon is what's being torn down.
-
-→ See [docs/site/guides/local-dev.md](docs/site/guides/local-dev.md) for the full dev loop.
 
 ## Core Concepts
 
@@ -302,94 +136,39 @@ flowchart LR
 
 Each layer is a real Linux primitive, not an invented abstraction. This structure avoids Docker's ambiguity and Kubernetes-level complexity.
 
-→ See [docs/site/concepts/overview.md](docs/site/concepts/overview.md) for the full concept guide.
+→ See [docs/site/concepts/overview.md](docs/site/concepts/overview.md) for the full concept guide, [docs/site/architecture/overview.md](docs/site/architecture/overview.md) for how `kuke`, `kukeond`, containerd, and CNI fit together, and [docs/site/cli/commands.md](docs/site/cli/commands.md) for the complete CLI reference.
 
-## Understanding kukeon Commands
+## Documentation
 
-Two commands, one binary: kukeon uses hard links to provide different behaviors.
+Complete documentation is available at [https://kukeon.io](https://kukeon.io), including concepts, architecture, CLI reference, manifest reference, guides, and tutorials.
 
-| Command   | Purpose                          | Run by             |
-| --------- | -------------------------------- | ------------------ |
-| `kuke`    | Client CLI — talks to the daemon | Users              |
-| `kukeond` | The daemon process itself        | Process supervisor |
+## Philosophy
 
-Both are the same binary; behavior is determined by the executable name at runtime.
+«καὶ ὁ κυκεὼν διίσταται μὴ κινούμενος»
+"The barley-drink separates if it isn't stirred"
 
-### `kuke` — the client
+Fragment DK 22B125
+Heraclitus, circa 500 BC
 
-Manages realms, spaces, stacks, cells, and containers through the daemon:
+Heraclitus used the kykeon, a simple barley drink, as an analogy for the logos, the hidden principle of order in the cosmos. The drink becomes itself only when its ingredients are mixed and kept in motion. Without movement, it separates and loses its identity.
+
+Kukeon applies the same metaphor to computing:
+
+- containers, networks, and cgroups are the ingredients
+- `kukeond` is the stirring motion that brings them together
+- the running system is the order that emerges through interaction
+
+Kukeon brings coherence and structure to low-level Linux primitives that normally remain scattered and disconnected. It unifies them into a living, dynamic system.
+
+## Uninstall
+
+`kuke uninstall` removes everything kukeon put on the host — every realm and its workloads, the `*.kukeon.io` containerd namespaces, `/opt/kukeon`, `/run/kukeon`, and the `kukeon` system user and group. Only the `kuke`/`kukeond` binary is left behind:
 
 ```bash
-$ sudo kuke get realms          # List realms
-$ sudo kuke get cells --realm main --space default --stack default
-$ sudo kuke apply -f cell.yaml  # Apply a manifest
-$ sudo kuke delete cell mycell --realm ... --cascade
+sudo kuke uninstall
 ```
 
-Everything `kuke` does goes through the daemon by default. Set `KUKEON_NO_DAEMON=true` (or pass `--run-path /opt/kukeon` to trigger the same promotion) to run the operation in-process — required when the daemon is down or being torn down (requires root).
-
-### `kukeond` — the daemon
-
-Runs as the root container of the `kukeond` cell inside the dedicated `kukeon-system` realm. You don't normally run `kukeond` by hand; `kuke init` sets it up as a managed cell.
-
-→ See [docs/site/cli/commands.md](docs/site/cli/commands.md) for the complete CLI reference.
-
-## Components
-
-### kukeond
-
-A lightweight daemon responsible for:
-
-- containerd operations
-- creating network namespaces
-- running CNI plugins
-- managing cgroups
-- handling metadata and state
-- serving the API used by clients
-
-### kuke (CLI)
-
-A thin remote client that interacts with `kukeond`.
-
-### Web UI (future)
-
-A browser interface backed by the same API.
-
-## Dependencies
-
-- containerd
-- CNI plugins
-- Linux with cgroups v2
-
-## How It Works
-
-Kukeon sits between containerd and the user, translating declarative YAML into the right Linux primitives.
-
-1. A manifest defines a resource: YAML specifies realm, space, stack, cell, or container
-2. `kuke apply` sends the manifest to `kukeond` over a unix socket
-3. `kukeond` reconciles: creates containerd namespace, cgroup subtree, CNI network, containers
-4. State is persisted to `/opt/kukeon` for durability across daemon restarts
-5. `kuke get` and `kuke refresh` read live state back from containerd/CNI/cgroups
-
-## Goals
-
-Kukeon aims to be:
-
-- a substrate for running a team of AI agents on a single Linux host you own
-- structured around separation-of-powers across agent roles (planner / dev / reviewer / meta), enforced by the runtime rather than by convention
-- a **work loop** that closes on human-merged PRs as the accountability gate — no agent merges its own work
-- self-improving through **Loop A**: the agents' own playbooks and skills are diffable artifacts, refined by reflected lessons from each completed task
-- self-correcting through **Loop B**: verified product defects observed in running operation feed back into the work queue
-- grounded in real Linux primitives (containerd namespaces, CNI, cgroups) — sovereignty you can inspect, not a control plane you have to trust
-- fully self-hosted, with no SaaS, no cluster, no etcd, and no API server on port 6443
-
-### Non-Goals
-
-- Not a hosted SaaS — kukeon does not run a control plane you don't own
-- Not an autonomous-merger system today — the human merge gate is the deliberate stage-0 of the bootstrapping compiler (see [vision.md](docs/site/vision.md) "Trusting-trust")
-- Not its own audit-trail database — every action is a Git object in your forge
-- Not a Kubernetes replacement for multi-node clusters or cross-region orchestration
-- Not a layer that hides low-level primitives behind opaque abstractions
+→ See [docs/site/cli/kuke-uninstall.md](docs/site/cli/kuke-uninstall.md) for details, and [docs/site/architecture/storage-layout.md](docs/site/architecture/storage-layout.md) for everything kukeon writes on a host.
 
 ## Roadmap
 
@@ -400,6 +179,8 @@ Kukeon is under active development, with a focus on correctness, clear abstracti
 ## Contribute
 
 Kukeon is open to thoughtful contributions. The focus is on a simple and reliable foundation for structured container environments, not on building a giant platform. Ideas, discussions, and clean code are welcome, especially when they improve clarity, correctness, or safety without adding unnecessary complexity.
+
+→ See [docs/site/guides/local-dev.md](docs/site/guides/local-dev.md) for the local development loop (`make dev-init`, building `kuke`/`kukeond` from source, iterating on the daemon).
 
 ## License
 

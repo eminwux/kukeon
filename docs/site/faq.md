@@ -39,7 +39,7 @@ Not directly. Kukeon needs Linux-specific primitives: cgroup v2, netlink, contai
 - CNI conflists in `/etc/cni/net.d` persist.
 - Running containers do not persist — containerd tasks don't survive reboot.
 
-Currently, there is no auto-start: you need to run `kuke init` (or start the daemon cell explicitly) after reboot to bring the system back up. Systemd unit integration is on the roadmap.
+On systemd hosts the installer installs `/etc/systemd/system/kukeond.service`, so kukeond comes back automatically after a reboot. On systemd-less hosts (or installs that skipped the unit), bring the daemon up manually with `sudo kuke daemon start`.
 
 ## Does Kukeon have a web UI?
 
