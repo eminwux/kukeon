@@ -469,6 +469,11 @@ func TestSpecHashDomainVersionPinsToPayload(t *testing.T) {
 			"readOnlyRootFilesystem", "resources", "secrets", "securityOpts",
 			"tmpfs", "user", "volumes", "workingDir",
 		},
+		"4": {
+			"args", "capabilities", "command", "devices", "image", "privileged",
+			"readOnlyRootFilesystem", "resources", "secrets", "securityOpts",
+			"tmpfs", "user", "volumes", "workingDir",
+		},
 	}
 
 	want, ok := domainFieldSets[SpecHashDomainVersion]

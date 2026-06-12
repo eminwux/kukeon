@@ -55,10 +55,10 @@ const SpecHashVersionLabelKey = "kukeon.io/spec-hash-version"
 // the same edit by pinning the version to the payload's reflected field set.
 // History: "1" (issue #867, original domain) → "2" (#1001, widened the
 // root-container diff to all spec fields) → "3" (#1155, added Volumes,
-// Secrets, WorkingDir, SecurityOpts). A cell stamped under an older version
-// is re-stamped from its authoritative on-disk spec on the next start rather
-// than refused. Issue #1171.
-const SpecHashDomainVersion = "3"
+// Secrets, WorkingDir, SecurityOpts) → "4" (#1252, added Devices). A cell
+// stamped under an older version is re-stamped from its authoritative on-disk
+// spec on the next start rather than refused. Issue #1171.
+const SpecHashDomainVersion = "4"
 
 // containerSpecHashPayload is the deterministic projection of an
 // intmodel.ContainerSpec that ComputeContainerSpecHash hashes. The field set
@@ -89,6 +89,7 @@ type containerSpecHashPayload struct {
 	ReadOnlyRootFilesystem bool                    `json:"readOnlyRootFilesystem"`
 	Capabilities           capabilitiesHashPayload `json:"capabilities"`
 	SecurityOpts           []string                `json:"securityOpts"`
+	Devices                []string                `json:"devices"`
 	Tmpfs                  []tmpfsHashPayload      `json:"tmpfs"`
 	Resources              resourcesHashPayload    `json:"resources"`
 	Volumes                []volumeHashPayload     `json:"volumes"`
@@ -157,6 +158,7 @@ func ComputeContainerSpecHash(spec intmodel.ContainerSpec) string {
 		ReadOnlyRootFilesystem: spec.ReadOnlyRootFilesystem,
 		Capabilities:           projectCapabilities(spec.Capabilities),
 		SecurityOpts:           normalizeStrings(spec.SecurityOpts),
+		Devices:                normalizeStrings(spec.Devices),
 		Tmpfs:                  projectTmpfs(spec.Tmpfs),
 		Resources:              projectResources(spec.Resources),
 		Volumes:                projectVolumes(spec.Volumes),

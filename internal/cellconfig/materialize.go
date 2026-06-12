@@ -212,6 +212,7 @@ func materializeContainer(
 		ReadOnlyRootFilesystem: bc.ReadOnlyRootFilesystem,
 		Capabilities:           bc.Capabilities,
 		SecurityOpts:           bc.SecurityOpts,
+		Devices:                bc.Devices,
 		Tmpfs:                  bc.Tmpfs,
 		Resources:              bc.Resources,
 		Repos:                  repos,

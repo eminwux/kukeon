@@ -79,7 +79,8 @@ See [Concepts → Container](../concepts/container.md) for what a container is.
 | `volumes`         | array of `VolumeMount`     | no       | Bind-mount host paths into the container (see [VolumeMount](#volumemount))                                                                                                                      |
 | `networks`        | array of string            | no       | Additional CNI networks to join beyond the cell's default                                                                                                                                       |
 | `networksAliases` | array of string            | no       | DNS aliases for the container within its CNI networks                                                                                                                                           |
-| `privileged`      | bool                       | no       | Run privileged (full capabilities, access to `/dev`, etc.)                                                                                                                                      |
+| `privileged`      | bool                       | no       | Run privileged (full capabilities, **all** host devices, open device cgroup). For just one or two devices prefer the least-privilege [`devices`](#devices) field instead.                       |
+| `devices`         | array of string            | no       | Per-device host passthrough — grant only the named device nodes (e.g. `/dev/kvm`) instead of all of `/dev` (see [devices](#devices))                                                            |
 | `hostCgroup`      | bool                       | no       | Opt the container into its parent's cgroup namespace (see [Host cgroup mode](#host-cgroup-mode))                                                                                                |
 | `secrets`         | array of `ContainerSecret` | no       | Inject credentials resolved by the daemon — never written to status or YAML (see [ContainerSecret](#containersecret))                                                                           |
 | `repos`           | array of `ContainerRepo`   | no       | Git repos the kuketty wrapper clones before the workload starts — requires `attachable: true` (see [ContainerRepo](#containerrepo))                                                             |
@@ -127,6 +128,33 @@ volumes:
     sizeBytes: 268435456 # 256 MiB
     mode: 0755
 ```
+
+### devices
+
+`spec.devices` grants the container access to individual host device nodes — the least-privilege alternative to `privileged: true`, which exposes **every** host device. Each entry materialises as an OCI `Linux.Devices` entry (the node, visible inside the container) plus a matching `Linux.Resources.Devices` allow rule (so `open()` is not denied by the device cgroup) — the same pair Docker's `--device` emits.
+
+```yaml
+containers:
+  - id: runner
+    image: ghcr.io/example/actions-runner:latest
+    devices:
+      - /dev/kvm # short form: same path in the container, default `rwm` access
+```
+
+This phase supports the **short form** only: each entry is a host device path that is replicated at the same path inside the container with read/write/mknod (`rwm`) access. (The long form `hostPath:containerPath:perms` is a planned follow-up.)
+
+`privileged: true` grants all host devices; `devices:` grants exactly the ones you name. Reach for `devices:` first — `/dev/kvm` for emulators and nested VMs, `/dev/fuse`, `/dev/net/tun` for VPNs, GPU nodes — and only fall back to `privileged` when a workload genuinely needs the full set.
+
+!!! warning "Create-time snapshot — a later-appearing device needs a recreate"
+The host node is stat'd (type, major, minor) when the container is **created**, not on every start. If a device node appears on the host _after_ the cell was created — e.g. enabling nested virtualization adds `/dev/kvm` after a power-cycle — the running container will keep seeing `ENOENT` for it. Recreate the cell (`kuke stop` → `delete` → `apply` → `start`, or `kuke apply` once spec-hash divergence is detected) to pick it up. A device edit is a spec change the diff detects: it forces a recreate on the cell root and an in-place stop-remove-recreate on a non-root container.
+
+!!! warning "Visibility ≠ openability — mode and owner carry over from the host"
+The replicated node keeps the **host's mode and owner** (e.g. `crw-rw---- root:kvm`). A device cgroup allow rule makes the node _openable by the cgroup_, but a non-root container process still needs filesystem permission on the node itself. If the in-container user is not `root` and not in the owning group, open the host node up (e.g. a udev rule `KERNEL=="kvm", MODE="0666"`) — visibility and openability are separate failure modes.
+
+!!! warning "`volumes:` is not a substitute for `devices:`"
+Bind-mounting a device node via `spec.volumes` makes the node _visible_ but **not openable**: containerd's default OCI spec carries a deny-all device-cgroup wildcard (`{allow: false, access: "rwm"}`), so `open()` fails with `EPERM` even when the node is present. Only a `devices:` entry (or `privileged: true`) adds the device-cgroup allow rule that lets `open()` succeed.
+
+A `devices:` entry whose host node does not exist fails container create with a clear error (the node is stat'd at create time).
 
 ### ContainerSecret
 

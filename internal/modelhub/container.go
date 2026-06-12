@@ -64,9 +64,17 @@ type ContainerSpec struct {
 	ReadOnlyRootFilesystem bool
 	Capabilities           *ContainerCapabilities
 	SecurityOpts           []string
-	Tmpfs                  []ContainerTmpfsMount
-	Resources              *ContainerResources
-	Secrets                []ContainerSecret
+	// Devices mirrors the v1beta1 ContainerSpec.Devices payload — individual
+	// host device nodes granted to the container (least-privilege alternative
+	// to Privileged). Each entry is a host device path (short form, e.g.
+	// "/dev/kvm") replicated at the same in-container path with "rwm" access.
+	// BuildContainerSpec emits a Linux.Devices entry + Linux.Resources.Devices
+	// allow rule per entry, stat'd from the host node at create time. Issue
+	// #1252.
+	Devices   []string
+	Tmpfs     []ContainerTmpfsMount
+	Resources *ContainerResources
+	Secrets   []ContainerSecret
 	// Repos mirrors the v1beta1 ContainerSpec.Repos payload — git
 	// repositories kuketty clones/fetches in its pre-Serve step. See the
 	// v1beta1 type for field semantics. Issue #617.

@@ -432,6 +432,14 @@ func BuildContainerSpec(
 		specOpts = append(specOpts, oci.WithMounts(mounts))
 	}
 
+	// Per-device passthrough: each entry replicates a host device node into the
+	// container (Linux.Devices) and adds a matching device-cgroup allow rule
+	// (Linux.Resources.Devices), the same pair Docker's --device emits. The
+	// least-privilege alternative to Privileged. The host node is stat'd at
+	// this point (create time) via oci.WithLinuxDevice → DeviceFromPath, which
+	// returns a clear error for a missing node so container create fails fast.
+	specOpts = append(specOpts, deviceSpecOpts(containerSpec.Devices)...)
+
 	// Linux.CgroupsPath: place the container task inside the cell's cgroup
 	// subtree so cell-level resource accounting and limits actually constrain
 	// it. Without this, containerd's runc-shim default places the task under
@@ -732,6 +740,32 @@ func tmpfsVolumeMount(v intmodel.VolumeMount) (runtimespec.Mount, bool) {
 		Type:        "tmpfs",
 		Options:     options,
 	}, true
+}
+
+// deviceAccessRWM is the default device-cgroup access granted to a short-form
+// devices[] entry — read, write, mknod — matching Docker's --device default.
+const deviceAccessRWM = "rwm"
+
+// deviceSpecOpts builds one OCI spec option per short-form devices[] entry.
+// Each entry is a host device path (e.g. "/dev/kvm"); oci.WithLinuxDevice
+// stat's the node at create time and appends both a Linux.Devices entry (so
+// the node is visible in the container at the same path) and a matching
+// Linux.Resources.Devices allow rule (so open() is not denied by the default
+// deny-all device cgroup). A missing host node surfaces as a create-time error
+// from DeviceFromPath. Empty/blank entries are skipped. Issue #1252.
+func deviceSpecOpts(devices []string) []oci.SpecOpts {
+	if len(devices) == 0 {
+		return nil
+	}
+	opts := make([]oci.SpecOpts, 0, len(devices))
+	for _, d := range devices {
+		path := strings.TrimSpace(d)
+		if path == "" {
+			continue
+		}
+		opts = append(opts, oci.WithLinuxDevice(path, deviceAccessRWM))
+	}
+	return opts
 }
 
 // securitySpecOpts translates the security/isolation fields on the internal

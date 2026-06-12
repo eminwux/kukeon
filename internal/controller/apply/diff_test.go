@@ -731,6 +731,9 @@ func TestDiffCell_RootContainerWorkingDirVolumesSecurityOpts_Breaking(t *testing
 		{"securityOpts", func(s *intmodel.ContainerSpec) {
 			s.SecurityOpts = []string{"no-new-privileges"}
 		}, "rootContainer.securityOpts"},
+		{"devices", func(s *intmodel.ContainerSpec) {
+			s.Devices = []string{"/dev/kvm"}
+		}, "rootContainer.devices"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

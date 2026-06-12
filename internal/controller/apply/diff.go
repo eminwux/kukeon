@@ -393,7 +393,7 @@ func DiffCell(desired, actual intmodel.Cell) CellDiffResult {
 	// this, the root path checked only image/command/args via a dedicated
 	// 3-field comparator and silently dropped every other user-authored
 	// edit (Env, Volumes, Privileged, User, ReadOnlyRootFilesystem,
-	// Capabilities, SecurityOpts, Tmpfs, Resources, Secrets, Repos).
+	// Capabilities, SecurityOpts, Devices, Tmpfs, Resources, Secrets, Repos).
 	// `diffContainerSpec` carries per-field Breaking-vs-Compatible
 	// classification keyed off the `rootContainer` flag — see the inline
 	// classification comments at each field call site.
@@ -691,6 +691,15 @@ func diffContainerSpec(desired, actual *intmodel.ContainerSpec, rootContainer bo
 	// non-root, where UpdateCell recreates the child. Issue #1154.
 	if !slicesEqual(desired.SecurityOpts, actual.SecurityOpts) {
 		recordSpecFieldChange(&result, rootContainer, true, "securityOpts", "securityOpts changed")
+	}
+
+	// devices — Breaking on root. Per-device passthrough bakes into the cell
+	// root's OCI Linux.Devices + Linux.Resources.Devices at StartCell, stat'd
+	// from the host node at create; a change only reaches the running container
+	// via RecreateCell. Compatible on non-root, where UpdateCell stop-removes
+	// and recreates the child with the new device set. Issue #1252.
+	if !slicesEqual(desired.Devices, actual.Devices) {
+		recordSpecFieldChange(&result, rootContainer, true, "devices", "devices changed")
 	}
 
 	// tmpfs — Breaking on root (OCI Mounts table is fixed at create).
