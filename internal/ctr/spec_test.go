@@ -403,6 +403,113 @@ func TestBuildRootContainerSpec_WorkingDir(t *testing.T) {
 	}
 }
 
+// applyOCISpecOpts builds a minimal base OCI spec and applies every SpecOpt
+// from a built kukeon spec, returning the generated runtime spec — the same
+// shape (*client).applySpecOpts produces against containerd's default spec.
+func applyOCISpecOpts(t *testing.T, opts []oci.SpecOpts) *runtimespec.Spec {
+	t.Helper()
+	ociSpec := &runtimespec.Spec{
+		Process: &runtimespec.Process{},
+		Linux:   &runtimespec.Linux{},
+	}
+	for _, opt := range opts {
+		if err := opt(context.Background(), nil, nil, ociSpec); err != nil {
+			t.Fatalf("apply SpecOpts: %v", err)
+		}
+	}
+	return ociSpec
+}
+
+// hasAllowAllDeviceCgroup reports whether the OCI spec's device cgroup carries
+// the WithAllDevicesAllowed wildcard ({Allow: true, Access: rwm, nil major/minor})
+// — i.e. open(2) on a host device node is permitted by the cgroup.
+func hasAllowAllDeviceCgroup(s *runtimespec.Spec) bool {
+	if s.Linux == nil || s.Linux.Resources == nil {
+		return false
+	}
+	for _, d := range s.Linux.Resources.Devices {
+		if d.Allow && d.Major == nil && d.Minor == nil && d.Access == "rwm" {
+			return true
+		}
+	}
+	return false
+}
+
+// TestBuildContainerSpec_PrivilegedDevices verifies that privileged: true on a
+// user container exposes host device nodes (Linux.Devices populated) and opens
+// the device cgroup allow-all, so a privileged container can open(2) host
+// devices such as /dev/kvm. Without privileged, neither is present. Regression
+// guard for #1255 (oci.WithPrivileged alone grants no devices).
+func TestBuildContainerSpec_PrivilegedDevices(t *testing.T) {
+	base := intmodel.ContainerSpec{
+		ID:        "test-id",
+		Image:     "registry.eminwux.com/busybox:latest",
+		CellName:  "c",
+		SpaceName: "s",
+		RealmName: "r",
+		StackName: "st",
+	}
+
+	t.Run("privileged exposes host devices + allow-all cgroup", func(t *testing.T) {
+		priv := base
+		priv.Privileged = true
+		ociSpec := applyOCISpecOpts(t, ctr.BuildContainerSpec(priv).SpecOpts)
+
+		if len(ociSpec.Linux.Devices) == 0 {
+			t.Error("Linux.Devices is empty; privileged should snapshot host device nodes")
+		}
+		if !hasAllowAllDeviceCgroup(ociSpec) {
+			t.Error("device cgroup is not allow-all; privileged should permit open(2) on host devices")
+		}
+	})
+
+	t.Run("non-privileged exposes no devices", func(t *testing.T) {
+		ociSpec := applyOCISpecOpts(t, ctr.BuildContainerSpec(base).SpecOpts)
+
+		if len(ociSpec.Linux.Devices) != 0 {
+			t.Errorf("Linux.Devices = %v, want empty for non-privileged", ociSpec.Linux.Devices)
+		}
+		if hasAllowAllDeviceCgroup(ociSpec) {
+			t.Error("device cgroup is allow-all for a non-privileged container; should not be")
+		}
+	})
+}
+
+// TestBuildRootContainerSpec_PrivilegedDevices mirrors the user-container test
+// for the root-container builder: privileged on a root spec gets the same host
+// device exposure + allow-all device cgroup (#1255 AC, root-container path).
+func TestBuildRootContainerSpec_PrivilegedDevices(t *testing.T) {
+	base := intmodel.ContainerSpec{
+		ID:           "root",
+		ContainerdID: "root-id",
+		Image:        "registry.eminwux.com/busybox:latest",
+	}
+
+	t.Run("privileged exposes host devices + allow-all cgroup", func(t *testing.T) {
+		priv := base
+		priv.Privileged = true
+		ociSpec := applyOCISpecOpts(t, ctr.BuildRootContainerSpec(priv, nil).SpecOpts)
+
+		if len(ociSpec.Linux.Devices) == 0 {
+			t.Error("Linux.Devices is empty; privileged should snapshot host device nodes")
+		}
+		if !hasAllowAllDeviceCgroup(ociSpec) {
+			t.Error("device cgroup is not allow-all; privileged should permit open(2) on host devices")
+		}
+	})
+
+	t.Run("non-privileged exposes no devices", func(t *testing.T) {
+		ociSpec := applyOCISpecOpts(t, ctr.BuildRootContainerSpec(base, nil).SpecOpts)
+
+		if len(ociSpec.Linux.Devices) != 0 {
+			t.Errorf("Linux.Devices = %v, want empty for non-privileged", ociSpec.Linux.Devices)
+		}
+		if hasAllowAllDeviceCgroup(ociSpec) {
+			t.Error("device cgroup is allow-all for a non-privileged root container; should not be")
+		}
+	})
+}
+
 // TestBuildContainerSpec_HostNetwork verifies the OCI spec produced by
 // BuildContainerSpec drops the network LinuxNamespace entry exactly when
 // HostNetwork is true. The runner relies on this — a remaining network entry

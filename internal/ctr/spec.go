@@ -380,9 +380,16 @@ func BuildContainerSpec(
 		specOpts = append(specOpts, oci.WithEnv(env))
 	}
 
-	// Set privileged mode if specified
+	// Set privileged mode if specified. oci.WithPrivileged composes
+	// capabilities, masked/readonly path clearing, writable sysfs/cgroupfs,
+	// and seccomp/apparmor unconfinement, but does NOT expose host devices or
+	// open the device cgroup. Match `ctr run --privileged` (and Docker) by
+	// also adding the host device nodes and an allow-all device cgroup so a
+	// privileged container can open(2) host devices such as /dev/kvm. Devices
+	// are snapshotted into Linux.Devices at create time; host devices that
+	// appear later require a container recreate.
 	if containerSpec.Privileged {
-		specOpts = append(specOpts, oci.WithPrivileged)
+		specOpts = append(specOpts, oci.WithPrivileged, oci.WithAllDevicesAllowed, oci.WithHostDevices)
 	}
 
 	// Host network: drop the network LinuxNamespace entry from the OCI spec so

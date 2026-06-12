@@ -167,8 +167,13 @@ func BuildRootContainerSpec(
 		specOpts = append(specOpts, oci.WithEnv(env))
 	}
 
+	// Privileged on the root container gets the same device exposure as the
+	// BuildContainerSpec path: oci.WithPrivileged alone does not expose host
+	// devices or open the device cgroup, so pair it with WithAllDevicesAllowed
+	// + WithHostDevices to match `ctr run --privileged` / Docker. Devices are
+	// snapshotted at create time (recreate to pick up newly-appeared nodes).
 	if rootSpec.Privileged {
-		specOpts = append(specOpts, oci.WithPrivileged)
+		specOpts = append(specOpts, oci.WithPrivileged, oci.WithAllDevicesAllowed, oci.WithHostDevices)
 	}
 
 	// Host network: drop the network LinuxNamespace entry from the OCI spec so
