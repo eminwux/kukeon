@@ -15,7 +15,7 @@ The installer:
 1. Detects your platform (`linux/amd64` or `linux/arm64`) and refuses anything else.
 2. Verifies cgroups v2 is mounted and `/run/containerd/containerd.sock` is responsive. On any miss it prints a distro-aware hint and exits non-zero without touching the system.
 3. Downloads the latest release binary from GitHub, verifies its `.sha256` checksum, installs it to `/usr/local/bin/kuke`, and hard-links `kukeond` next to it.
-4. Runs `sudo kuke init` to bring up the daemon. Skipped on a host that already has a healthy `kukeond` listening on `/run/kukeon/kukeond.sock`.
+4. Runs `sudo kuke init` to bring up the daemon. On a host that already has a `kukeond` listening on `/run/kukeon/kukeond.sock`, init is skipped — but the installer first compares the running daemon's version against the binaries it just installed. A version-matched daemon is skipped silently as before; an **older** daemon prints the exact `kuke daemon recreate` command to finish the upgrade and exits non-zero rather than declaring an unqualified success over a client/daemon skew (see [Upgrade](#upgrade)). Set `KUKE_SKIP_DAEMON_UPGRADE=1` to keep an intentionally pinned older daemon.
 5. Installs `/etc/systemd/system/kukeond.service` and runs `systemctl enable --now kukeond.service` so the daemon comes back automatically after a host or containerd restart. Skipped with a notice on systemd-less hosts — bring kukeond up manually with `sudo kuke daemon start` after each reboot in that case.
 
 Pass `--check` to run the prereq checks only without touching the system:
@@ -33,6 +33,7 @@ Environment overrides the installer honors:
 | `KUKE_INSTALL_PREFIX`  | Install dir (default: `/usr/local/bin`).                         |
 | `KUKE_SKIP_INIT=1`     | Skip the post-install `kuke init` step.                          |
 | `KUKE_SKIP_CHECKSUM=1` | Skip `.sha256` verification (not recommended).                   |
+| `KUKE_SKIP_DAEMON_UPGRADE=1` | On a live host, skip the running-daemon version check and keep an intentionally pinned older daemon (preserves the historical silent-skip on an already-running socket). |
 
 ## Manual install (fallback)
 
@@ -101,6 +102,29 @@ If your host has no systemd (some minimal container images, dev sandboxes), the 
 ```bash
 sudo kuke daemon start
 ```
+
+## Upgrade
+
+The canonical upgrade procedure is **re-run the installer, then recreate the daemon** so the running `kukeond` matches the new binaries:
+
+```bash
+curl -fsSL https://kukeon.io/install.sh | bash
+```
+
+Re-running the one-liner installs the latest `kuke` / `kukeond` / `kukebuild` / `kukepause` binaries. Because `kuke init` already ran on this host, the installer skips it — but it now checks the **running** daemon's version against the binaries it just installed:
+
+- **Version-matched daemon** — skipped silently, no daemon churn.
+- **Older daemon** — the installer does **not** auto-cycle it (a recreate tears down and re-provisions the daemon cell, too aggressive to do unprompted from a piped `curl | bash`). Instead it prints the exact command and exits non-zero:
+
+  ```bash
+  sudo kuke daemon recreate --kukeond-image ghcr.io/eminwux/kukeon:<installed-version>
+  ```
+
+  Run it to finish the upgrade. `kuke daemon recreate` cycles **only** the `kuke-system` kukeond cell — your workload cells in the `default` realm are untouched. Confirm the result with `kuke version` (the `Client:` and `Daemon:` lines should match).
+
+To keep an intentionally pinned older daemon while still upgrading the CLI binaries, set `KUKE_SKIP_DAEMON_UPGRADE=1` — the installer then preserves the historical silent-skip on an already-running socket.
+
+> Pin a specific target version with `KUKE_VERSION=vX.Y.Z` (see the [environment overrides](#one-line-install-recommended) table). The `--kukeond-image` tag the installer prints always matches the binaries it installed.
 
 ## Uninstall
 
