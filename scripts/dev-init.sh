@@ -29,6 +29,17 @@ cd "${REPO_ROOT}"
 # unchanged — only the local dev-loop ref moves.
 KUKEOND_VERSION="v0.0.0-dev"
 KUKEOND_IMAGE_REF="kukeon.internal/kukeond:${KUKEOND_VERSION}"
+# Daemon build-arg version. Kept DISTINCT from the image-tag sentinel above:
+# `KUKEOND_VERSION` is a *ref label* (the tag `kuke init --kukeond-image`
+# resolves), whereas this value is compiled into the daemon binary's
+# `cmd/config.Version` (Dockerfile's `make release-build KUKEON_VERSION=…`)
+# and surfaces on `kuke version`'s `Daemon:` line. The client `kuke` binary
+# `make kuke` builds earlier derives its `config.Version` from the SAME
+# `git describe` the Makefile uses (Makefile § "Version sourcing"), so the
+# build-arg must match it — otherwise every dev bootstrap manufactures a
+# false client/daemon version skew (client `vX.Y.Z` vs daemon `v0.0.0-dev`)
+# that `kuke version` / `kuke status` flag as a mismatch (#1263 detection).
+KUKEOND_BUILD_VERSION="${KUKEON_VERSION:-$(git describe --tags --always --dirty --match 'v*')}"
 # The on-disk metadata layout lives under /opt/kukeon/data/ — see
 # internal/consts.KukeonMetadataSubdir. Siblings of the data root (e.g.
 # /opt/kukeon/bin/kuketty staged by `kuke init`) intentionally fall outside
@@ -411,7 +422,7 @@ step "Build ${KUKEOND_IMAGE_REF} into the kuke-system realm"
 # tag is fully qualified (`kukeon.internal/kukeond:<version>`), so kukebuild's
 # normalizeImageName preserves it verbatim — no docker.io/library/ rewrite —
 # matching the exact ref `kuke init --kukeond-image` resolves below.
-sudo --preserve-env="${PRESERVE_ENV_WORKLOAD}" ./kuke build --build-arg VERSION="${KUKEOND_VERSION}" \
+sudo --preserve-env="${PRESERVE_ENV_WORKLOAD}" ./kuke build --build-arg VERSION="${KUKEOND_BUILD_VERSION}" \
     -t "${KUKEOND_IMAGE_REF}" \
     --realm kuke-system .
 
