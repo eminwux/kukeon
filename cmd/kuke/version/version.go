@@ -38,8 +38,10 @@ type MockDaemonClientKey struct{}
 
 func NewVersionCmd() *cobra.Command {
 	versionCmd := &cobra.Command{
-		Use:   "version",
-		Short: "Print the version number",
+		Use:           "version",
+		Short:         "Print the version number",
+		SilenceUsage:  true,
+		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			clientVersion := config.Version
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Client: %s\n", clientVersion)
