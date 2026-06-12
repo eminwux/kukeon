@@ -177,12 +177,17 @@ func TestCellLifecycleLock_StartCellWaitsForReconcile(t *testing.T) {
 	fake := &deleteCellFakeClient{existsContainerFn: gateExistsContainer(entered, release)}
 	r := newDeleteCellTestExec(t, fake)
 	seedDeleteCellRealm(t, r, realm)
-	// The cell metadata is deliberately NOT seeded: ReconcileCell reaches the
-	// gated ExistsContainer off the in-memory cell arg (it needs only the
-	// realm), while StartCell fails fast at its early GetCell (a filesystem
-	// read, not gated) the moment it acquires the lock. That makes "StartCell
-	// returned" a clean signal that it got past lock acquisition — without the
-	// lock it would return near-instantly rather than waiting on ReconcileCell.
+	// The cell metadata IS seeded but the space metadata is deliberately not:
+	// since #1251 ReconcileCell re-reads the cell from disk after acquiring the
+	// per-cell lock (GetCell) and short-circuits when it is gone, so it must
+	// find the cell metadata to proceed to the gated ExistsContainer off the
+	// in-memory cell arg. StartCell still fails fast the moment it acquires the
+	// lock — now one step later, at ResolveSpaceCNIConfigPath's GetSpace (a
+	// filesystem read, not gated), since the space is unseeded. That keeps
+	// "StartCell returned" a clean signal that it got past lock acquisition —
+	// without the lock it would return near-instantly rather than waiting on
+	// ReconcileCell.
+	seedDeleteCellCell(t, r, realm, space, stack, cellName)
 
 	cell := oneContainerCell(realm, space, stack, cellName)
 

@@ -651,6 +651,30 @@ func (r *Exec) refreshContainerStatus(cell intmodel.Cell, containerSpec *intmode
 func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcome, error) {
 	defer r.lockCell(cell)()
 
+	// Post-lock existence recheck (#1251). ReconcileCells snapshots the
+	// cell list once per tick and iterates with the in-memory value
+	// captured at list time. A `kuke delete cell` that completed while this
+	// tick was blocked on the per-cell lock leaves us holding a pre-delete
+	// snapshot whose ReadyObserved latch is still true — the cgroup-heal
+	// branch below (#855) would then "heal" the missing cgroup and rewrite
+	// the just-deleted metadata.json, silently resurrecting the cell. The
+	// lock the #714 work added serializes the mutations but never re-read
+	// disk after acquiring it; re-read now and short-circuit when the
+	// metadata is gone. The post-reboot heal (#855) is unaffected: on a
+	// genuine reboot the metadata survives, so GetCell succeeds here.
+	if _, err := r.GetCell(cell); err != nil {
+		if errors.Is(err, errdefs.ErrCellNotFound) {
+			r.logger.DebugContext(r.ctx, "reconcile: cell metadata gone, skipping",
+				"cell", cell.Metadata.Name,
+				"realm", cell.Spec.RealmName,
+				"space", cell.Spec.SpaceName,
+				"stack", cell.Spec.StackName)
+			return cell, ReconcileOutcome{Vanished: true}, nil
+		}
+		r.logger.DebugContext(r.ctx, "reconcile: failed to re-read cell after lock",
+			"cell", cell.Metadata.Name, "error", err)
+	}
+
 	originalStatus := cell.Status
 
 	// CellStateFailed is terminal (issue #407): once a cell has been marked

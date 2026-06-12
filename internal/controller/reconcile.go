@@ -109,7 +109,15 @@ func (b *Exec) ReconcileCells() (ReconcileResult, error) {
 					// them) and cells without the kukeon.io/config label.
 					// A persisted write counts toward CellsUpdated so the
 					// reconcile summary reflects the metadata flip.
-					if outcome.Deleted {
+					//
+					// Vanished cells (#1251) short-circuit the same way: the
+					// metadata is already gone, so re-deriving OutOfSync and
+					// persisting it would rewrite the just-deleted
+					// metadata.json — the very resurrection the post-lock
+					// recheck exists to prevent. Unlike Deleted, a Vanished
+					// outcome is left out of CellsDeleted (the reconciler
+					// observed an external delete, it did not perform one).
+					if outcome.Deleted || outcome.Vanished {
 						continue
 					}
 					syncUpdated, syncErr := reconcileCellOutOfSync(b.runner, reconciled)

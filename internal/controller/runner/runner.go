@@ -42,6 +42,16 @@ type ReconcileOutcome struct {
 	// part of honoring Spec.AutoDelete. When true the input cell no
 	// longer exists in metadata.
 	Deleted bool
+	// Vanished is true if the reconciler found the cell's metadata already
+	// gone after acquiring the per-cell lock — an operator `kuke delete
+	// cell` (or a stack/space teardown) completed while this tick was
+	// blocked on the lock holding a pre-delete snapshot (#1251). Unlike
+	// Deleted, the reconciler did not perform the removal, so it must not
+	// count toward the auto-delete metric; the flag exists purely to make
+	// the loop short-circuit the cell as a no-op (no status write, no
+	// OutOfSync re-derivation) instead of healing it back into existence
+	// from the stale snapshot.
+	Vanished bool
 }
 
 type Runner interface {
