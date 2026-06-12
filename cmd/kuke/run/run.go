@@ -616,16 +616,19 @@ func warnDivergentNamedCell(w io.Writer, cellDoc v1beta1.CellDoc, changed []stri
 //     Re-entering the daemon's CreateCell→StartCell path on a healthy cell trips
 //     the runner's CNI duplicate-allocation bug (#630), so the short-circuit is
 //     mandatory, not just an optimisation.
-//   - Stopped → StartCell, then attach. The routing is the correct verb (the
-//     prior fall-through to CreateCell was itself an unsafe re-entry). The
-//     live start+attach is gated on the same CNI fix (#630): StartCell re-ADDs
-//     the root container to its bridge network, which the daemon rejects with
-//     `duplicate allocation` until it releases the prior allocation on
-//     teardown. The path converges with no further CLI change once #630 lands.
-//   - error / partial (Pending, Failed, Unknown) → refuse with a
+//   - Stopped / Exited / Error / Failed → StartCell, then attach (#1268). The
+//     routing is the correct verb (the prior fall-through to CreateCell was
+//     itself an unsafe re-entry). The live start+attach is gated on the same CNI
+//     fix (#630): StartCell re-ADDs the root container to its bridge network,
+//     which the daemon rejects with `duplicate allocation` until it releases the
+//     prior allocation on teardown. Stopped/Exited/Error re-run from their intact
+//     container records; Failed (kukeon bring-up fault) is routed by the daemon's
+//     StartCell through a recreate-style recovery (stop -> recreate containers ->
+//     start) so a half-created cell recovers without delete-then-recreate.
+//   - error / partial (Pending, Unknown) → refuse with a
 //     `kuke delete cell <name>` pointer (parity with the `-c` identity contract
-//     in #625). `run` does not reconcile a degraded cell in place; the operator
-//     deletes and re-runs.
+//     in #625). `run` does not reconcile a genuinely-unrecoverable cell in place;
+//     the operator deletes and re-runs.
 func runExistingCell(
 	cmd *cobra.Command,
 	client kukeonv1.Client,
@@ -657,11 +660,15 @@ func runExistingCell(
 		if printErr := printRunResult(cmd, noOpResultFromGet(pre), flags.output); printErr != nil {
 			return printErr
 		}
-	case v1beta1.CellStateStopped, v1beta1.CellStateExited:
-		// Stopped (operator stop/kill) and Exited (clean self-exit, #1267) both
-		// have no live root task by design, so re-running starts the cell back
-		// up. A crashed cell (Error) is refused below alongside the other
-		// degraded states.
+	case v1beta1.CellStateStopped, v1beta1.CellStateExited, v1beta1.CellStateError, v1beta1.CellStateFailed:
+		// All four terminal/degraded states are operator-restartable without a
+		// delete (#1268): Stopped (operator stop/kill), Exited (clean self-exit,
+		// #1267) and Error (workload crash) re-run from their intact container
+		// records, while Failed (kukeon bring-up fault) is recovered by the
+		// daemon's StartCell, which routes it through a recreate-style recovery
+		// (stop -> recreate containers -> start). StartCell is called directly
+		// (no stop-first) so the daemon observes the persisted Failed state and
+		// picks the recreate path rather than a plain start.
 		startRes, err := client.StartCell(cmd.Context(), cellDoc)
 		if err != nil {
 			return err
@@ -669,11 +676,11 @@ func runExistingCell(
 		if printErr := printRunResult(cmd, startedResultFromGet(pre, startRes.Started), flags.output); printErr != nil {
 			return printErr
 		}
-	case v1beta1.CellStatePending, v1beta1.CellStateFailed, v1beta1.CellStateError, v1beta1.CellStateUnknown:
-		// error / partial: no clean start path. Refuse and point the operator
-		// at delete-then-rerun. Listing the states explicitly (rather than a
-		// default) keeps the exhaustive linter as a forward guard: a new
-		// CellState must be categorised here deliberately.
+	case v1beta1.CellStatePending, v1beta1.CellStateUnknown:
+		// Genuinely-unrecoverable / mid-transition: no clean start path. Refuse
+		// and point the operator at delete-then-rerun. Listing the states
+		// explicitly (rather than a default) keeps the exhaustive linter as a
+		// forward guard: a new CellState must be categorised here deliberately.
 		return fmt.Errorf(
 			"cell %q exists in %s state; delete it with `kuke delete cell %s` before re-running",
 			cellDoc.Metadata.Name,

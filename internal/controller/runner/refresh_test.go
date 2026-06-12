@@ -151,6 +151,30 @@ func TestMarkCellReady(t *testing.T) {
 	}
 }
 
+// TestMarkCellReady_ClearsFailureBreadcrumb pins the #1268 contract: a Ready
+// transition supersedes any prior failure breadcrumb, so an operator restart of
+// an Error/Failed cell lands Ready with a clean Status.Reason/Message instead of
+// a stale crash record. Every runner start/recreate path funnels through
+// markCellReady, so this is the single clear point.
+func TestMarkCellReady_ClearsFailureBreadcrumb(t *testing.T) {
+	cell := intmodel.Cell{Status: intmodel.CellStatus{
+		State:         intmodel.CellStateFailed,
+		ReadyObserved: true,
+		Reason:        reasonWorkloadFailed,
+		Message:       "container \"work\" exited with code 1",
+	}}
+	markCellReady(&cell)
+	if cell.Status.State != intmodel.CellStateReady {
+		t.Errorf("State = %v, want Ready", cell.Status.State)
+	}
+	if cell.Status.Reason != "" {
+		t.Errorf("Reason = %q, want empty (breadcrumb must clear on Ready)", cell.Status.Reason)
+	}
+	if cell.Status.Message != "" {
+		t.Errorf("Message = %q, want empty (breadcrumb must clear on Ready)", cell.Status.Message)
+	}
+}
+
 // TestAutoDeleteSurvivesKillCellRace is the end-to-end invariant for
 // #275: after a synchronous Ready write followed by a synchronous
 // KillCell that flips state to Stopped (without touching the latch),
@@ -564,7 +588,7 @@ func TestDeriveCellStateFromNonRootContainerStatuses(t *testing.T) {
 			// durable, since Stopped is non-sticky and ReconcileCell re-derives
 			// it on the next tick; durable operator-stop preservation is #1268.)
 			if got == intmodel.CellStateStopped {
-				t.Errorf("deriveCellStateFromNonRootContainerStatuses(...) = Stopped; "+
+				t.Errorf("deriveCellStateFromNonRootContainerStatuses(...) = Stopped; " +
 					"the reconciler must never derive Stopped (reserved for operator stop/kill)")
 			}
 		})

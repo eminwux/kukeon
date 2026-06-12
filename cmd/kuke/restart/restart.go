@@ -35,9 +35,11 @@ import (
 type MockControllerKey struct{}
 
 // NewRestartCmd builds the `kuke restart <name>` leaf. Cell is the only
-// resource this verb targets. The verb is dual mode: a Ready cell is
-// stop+start; a Stopped cell is equivalent to `kuke start <name>`; an
-// error/partial-state cell is refused with a `kuke delete cell` pointer.
+// resource this verb targets. A Ready cell is stop+start; a terminal/degraded
+// cell (Stopped/Exited/Error/Failed) is equivalent to `kuke start <name>` (the
+// daemon recovers a Failed cell via a recreate-style path, #1268); a
+// genuinely-unrecoverable Pending/Unknown cell is refused with a
+// `kuke delete cell` pointer.
 //
 // For a Config-lineage cell whose live spec has diverged from the daemon-stored
 // Config (Status.OutOfSync = true), the start step automatically re-materialises
@@ -199,10 +201,11 @@ func filterCellsBySelector(cells []v1beta1.CellDoc, selector *getshared.LabelSel
 	return out
 }
 
-// restartOne runs the dual-mode restart state machine for a single cell
-// described by doc: a Ready cell is stop+start, a Stopped cell is start, and a
-// degraded cell is refused with a delete pointer. Shared by the positional-name
-// path and the per-match loop in restartBySelector.
+// restartOne runs the restart state machine for a single cell described by doc:
+// a Ready cell is stop+start; a Stopped/Exited/Error/Failed cell is start (the
+// daemon recovers a Failed cell via a recreate-style path, #1268); a
+// Pending/Unknown cell is refused with a delete pointer. Shared by the
+// positional-name path and the per-match loop in restartBySelector.
 func restartOne(cmd *cobra.Command, client kukeonv1.Client, doc v1beta1.CellDoc) error {
 	name := doc.Metadata.Name
 	realm := doc.Spec.RealmID
@@ -221,15 +224,20 @@ func restartOne(cmd *cobra.Command, client kukeonv1.Client, doc v1beta1.CellDoc)
 	switch pre.Cell.Status.State {
 	case v1beta1.CellStateReady:
 		return restartInPlace(cmd, client, doc)
-	case v1beta1.CellStateStopped, v1beta1.CellStateExited:
-		// Stopped (operator stop/kill) and Exited (clean self-exit, #1267) both
-		// restart from a clean terminal — bring the cell back up. A crashed
-		// cell (Error) is refused below alongside the other degraded states.
+	case v1beta1.CellStateStopped, v1beta1.CellStateExited, v1beta1.CellStateError, v1beta1.CellStateFailed:
+		// All four terminal/degraded states restart without a delete (#1268):
+		// Stopped (operator stop/kill), Exited (clean self-exit, #1267) and Error
+		// (workload crash) bring the cell back up from intact container records,
+		// while Failed (kukeon bring-up fault) is recovered by the daemon's
+		// StartCell via a recreate-style recovery (stop -> recreate containers ->
+		// start). restartStopped calls StartCell directly (no stop-first) so the
+		// daemon observes the persisted Failed state and picks the recreate path —
+		// a stop-first would flip Failed to Stopped and skip the recovery.
 		return restartStopped(cmd, client, doc)
-	case v1beta1.CellStatePending, v1beta1.CellStateFailed, v1beta1.CellStateError, v1beta1.CellStateUnknown:
-		// Same delete-then-rerun pointer as `kuke run` on a degraded cell
-		// (cmd/kuke/run/run.go:505-516). Restart does not reconcile a
-		// degraded cell in place; the operator deletes and re-runs.
+	case v1beta1.CellStatePending, v1beta1.CellStateUnknown:
+		// Same delete-then-rerun pointer as `kuke run` on a genuinely-
+		// unrecoverable cell. Restart does not reconcile a Pending/Unknown cell
+		// in place; the operator deletes and re-runs.
 		return fmt.Errorf(
 			"cell %q exists in %s state; delete it with `kuke delete cell %s` before restarting",
 			name, pre.Cell.Status.State.String(), name,

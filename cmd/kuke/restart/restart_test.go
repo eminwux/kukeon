@@ -219,7 +219,12 @@ func TestRestartCmd(t *testing.T) {
 			},
 		},
 		{
-			name: "failed cell: refused with kuke delete pointer",
+			// #1268: Failed is now operator-restartable. From the CLI's view it
+			// routes through restartStopped (StartCell only, no stop-first) — the
+			// daemon observes the persisted Failed state and recovers it via a
+			// recreate-style path. A stop-first would flip Failed -> Stopped and
+			// skip that recovery, so this asserts stop=0.
+			name: "failed cell: restarts via StartCell (daemon recreate recovery)",
 			args: []string{"broken"},
 			setup: func() {
 				viper.Set(config.KUKE_RESTART_CELL_REALM.ViperKey, "r1")
@@ -232,12 +237,108 @@ func TestRestartCmd(t *testing.T) {
 						MetadataExists: true,
 						Cell: v1beta1.CellDoc{
 							Metadata: v1beta1.CellMetadata{Name: "broken"},
+							Spec:     v1beta1.CellSpec{ID: "broken", RealmID: "r1", SpaceID: "s1", StackID: "st1"},
 							Status:   v1beta1.CellStatus{State: v1beta1.CellStateFailed},
 						},
 					}, nil
 				},
+				startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+					return kukeonv1.StartCellResult{Cell: doc, Started: true}, nil
+				},
 			},
-			wantErr: "kuke delete cell broken",
+			wantOutput: `Started cell "broken" from stack "st1"`,
+			validate: func(t *testing.T, f *fakeClient) {
+				if f.stopCalls != 0 || f.startCalls != 1 {
+					t.Fatalf("Failed restart must call StartCell only (no stop-first), got stop=%d start=%d",
+						f.stopCalls, f.startCalls)
+				}
+			},
+		},
+		{
+			// #1268: Error (workload crash) re-runs from intact records via
+			// restartStopped — StartCell only, no stop-first.
+			name: "error cell: restarts via StartCell",
+			args: []string{"crashed"},
+			setup: func() {
+				viper.Set(config.KUKE_RESTART_CELL_REALM.ViperKey, "r1")
+				viper.Set(config.KUKE_RESTART_CELL_SPACE.ViperKey, "s1")
+				viper.Set(config.KUKE_RESTART_CELL_STACK.ViperKey, "st1")
+			},
+			fake: &fakeClient{
+				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+					return kukeonv1.GetCellResult{
+						MetadataExists: true,
+						Cell: v1beta1.CellDoc{
+							Metadata: v1beta1.CellMetadata{Name: "crashed"},
+							Spec:     v1beta1.CellSpec{ID: "crashed", RealmID: "r1", SpaceID: "s1", StackID: "st1"},
+							Status:   v1beta1.CellStatus{State: v1beta1.CellStateError},
+						},
+					}, nil
+				},
+				startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+					return kukeonv1.StartCellResult{Cell: doc, Started: true}, nil
+				},
+			},
+			wantOutput: `Started cell "crashed" from stack "st1"`,
+			validate: func(t *testing.T, f *fakeClient) {
+				if f.stopCalls != 0 || f.startCalls != 1 {
+					t.Fatalf("Error restart must call StartCell only, got stop=%d start=%d",
+						f.stopCalls, f.startCalls)
+				}
+			},
+		},
+		{
+			// #1267/#1268: Exited (clean self-exit) re-runs like Stopped.
+			name: "exited cell: restarts via StartCell",
+			args: []string{"done"},
+			setup: func() {
+				viper.Set(config.KUKE_RESTART_CELL_REALM.ViperKey, "r1")
+				viper.Set(config.KUKE_RESTART_CELL_SPACE.ViperKey, "s1")
+				viper.Set(config.KUKE_RESTART_CELL_STACK.ViperKey, "st1")
+			},
+			fake: &fakeClient{
+				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+					return kukeonv1.GetCellResult{
+						MetadataExists: true,
+						Cell: v1beta1.CellDoc{
+							Metadata: v1beta1.CellMetadata{Name: "done"},
+							Spec:     v1beta1.CellSpec{ID: "done", RealmID: "r1", SpaceID: "s1", StackID: "st1"},
+							Status:   v1beta1.CellStatus{State: v1beta1.CellStateExited},
+						},
+					}, nil
+				},
+				startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+					return kukeonv1.StartCellResult{Cell: doc, Started: true}, nil
+				},
+			},
+			wantOutput: `Started cell "done" from stack "st1"`,
+			validate: func(t *testing.T, f *fakeClient) {
+				if f.stopCalls != 0 || f.startCalls != 1 {
+					t.Fatalf("Exited restart must call StartCell only, got stop=%d start=%d",
+						f.stopCalls, f.startCalls)
+				}
+			},
+		},
+		{
+			name: "unknown cell: refused with kuke delete pointer",
+			args: []string{"weird"},
+			setup: func() {
+				viper.Set(config.KUKE_RESTART_CELL_REALM.ViperKey, "r1")
+				viper.Set(config.KUKE_RESTART_CELL_SPACE.ViperKey, "s1")
+				viper.Set(config.KUKE_RESTART_CELL_STACK.ViperKey, "st1")
+			},
+			fake: &fakeClient{
+				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+					return kukeonv1.GetCellResult{
+						MetadataExists: true,
+						Cell: v1beta1.CellDoc{
+							Metadata: v1beta1.CellMetadata{Name: "weird"},
+							Status:   v1beta1.CellStatus{State: v1beta1.CellStateUnknown},
+						},
+					}, nil
+				},
+			},
+			wantErr: "kuke delete cell weird",
 		},
 		{
 			name: "pending cell: refused with kuke delete pointer",
