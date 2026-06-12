@@ -491,6 +491,30 @@ var (
 		"blueprint secret slot with mode \"file\" requires an absolute mountPath",
 	)
 
+	// Volume kind (kind: Volume) storage-primitive errors (issue #1018, step 1
+	// of the volumes epic #1015).
+
+	ErrVolumeNameRequired  = errors.New("volume metadata.name is required")
+	ErrVolumeRealmRequired = errors.New("volume metadata.realm is required")
+	// ErrVolumeScopeIncomplete fires when a deeper scope coordinate is set
+	// without every shallower one. A Volume is scopable at realm/space/stack
+	// only, so a set cell coordinate is itself a violation.
+	ErrVolumeScopeIncomplete = errors.New(
+		"volume scope is incomplete: a deeper scope coordinate requires all shallower ones (and a Volume may not be cell-scoped)",
+	)
+	// ErrVolumeCoordUnsafe rejects a volume name or scope coordinate that would
+	// escape the volumes tree once fs.VolumePath filepath.Join's it into a host
+	// path — a "/" or "\" separator, a "." or ".." element, or a NUL byte
+	// (mirrors the Secret-coordinate guard from #673). A Volume provisions a
+	// real directory, so an unguarded name is a path-traversal risk.
+	ErrVolumeCoordUnsafe   = errors.New("volume name or scope coordinate is unsafe")
+	ErrVolumeScopeNotFound = errors.New("volume scope does not exist")
+	ErrWriteVolume         = errors.New("failed to write volume")
+	ErrVolumeNotFound      = errors.New("volume not found")
+	ErrGetVolume           = errors.New("failed to get volume")
+	ErrListVolumes         = errors.New("failed to list volumes")
+	ErrDeleteVolume        = errors.New("failed to delete volume")
+
 	// CellConfig kind (kind: CellConfig) errors (issue #624, phase 4b-i of #423).
 
 	ErrConfigNameRequired  = errors.New("config metadata.name is required")

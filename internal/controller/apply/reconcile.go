@@ -746,6 +746,81 @@ func blueprintScopeLookupError(err error, level, name string) error {
 	}
 }
 
+// ReconcileVolume reconciles a desired `kind: Volume` by verifying its scope
+// exists and provisioning its directory under the daemon-managed metadata tree
+// (issue #1018). Like ReconcileBlueprint it never auto-creates a missing scope:
+// a Volume targets an existing realm/space/stack, so an unreachable scope is an
+// apply-time error. The directory is provisioned idempotently — re-applying an
+// existing volume re-asserts the mode/owner and reports "updated".
+func ReconcileVolume(r runner.Runner, desired intmodel.Volume) (ReconcileResult, error) {
+	result := ReconcileResult{
+		Action: "unchanged",
+		Kind:   "Volume",
+		Name:   desired.Metadata.Name,
+	}
+
+	if err := ensureVolumeScopeExists(r, desired.Metadata); err != nil {
+		return result, err
+	}
+
+	created, writeErr := r.WriteVolume(desired)
+	if writeErr != nil {
+		return result, writeErr
+	}
+	if created {
+		result.Action = actionCreated
+	} else {
+		result.Action = actionUpdated
+	}
+	return result, nil
+}
+
+// ensureVolumeScopeExists verifies every scope coordinate the volume names is
+// reachable, deepest-first. A Volume is scopable at realm/space/stack only
+// (never cell), so the walk stops at the stack. A NotFound is translated to
+// errdefs.ErrVolumeScopeNotFound.
+func ensureVolumeScopeExists(r runner.Runner, md intmodel.VolumeMetadata) error {
+	if _, err := r.GetRealm(intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{Name: md.Realm},
+	}); err != nil {
+		return volumeScopeLookupError(err, "realm", md.Realm)
+	}
+
+	if md.Space != "" {
+		if _, err := r.GetSpace(intmodel.Space{
+			Metadata: intmodel.SpaceMetadata{Name: md.Space},
+			Spec:     intmodel.SpaceSpec{RealmName: md.Realm},
+		}); err != nil {
+			return volumeScopeLookupError(err, "space", md.Space)
+		}
+	}
+
+	if md.Stack != "" {
+		if _, err := r.GetStack(intmodel.Stack{
+			Metadata: intmodel.StackMetadata{Name: md.Stack},
+			Spec:     intmodel.StackSpec{RealmName: md.Realm, SpaceName: md.Space},
+		}); err != nil {
+			return volumeScopeLookupError(err, "stack", md.Stack)
+		}
+	}
+
+	return nil
+}
+
+// volumeScopeLookupError maps a scope Get failure to a stable error. A NotFound
+// at any level becomes ErrVolumeScopeNotFound; any other error is propagated
+// with context so it is not masked as a missing scope.
+func volumeScopeLookupError(err error, level, name string) error {
+	switch {
+	case errors.Is(err, errdefs.ErrRealmNotFound),
+		errors.Is(err, errdefs.ErrSpaceNotFound),
+		errors.Is(err, errdefs.ErrStackNotFound):
+		return fmt.Errorf("%w: %s %q", errdefs.ErrVolumeScopeNotFound, level, name)
+	default:
+		return fmt.Errorf("failed to verify volume scope %s %q: %w", level, name, err)
+	}
+}
+
 // ReconcileConfig reconciles a desired `kind: CellConfig` by verifying its own
 // scope exists, resolving the referenced CellBlueprint from daemon storage,
 // validating the config's structural slot fills against that blueprint's

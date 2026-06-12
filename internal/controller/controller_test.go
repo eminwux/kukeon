@@ -72,6 +72,12 @@ type fakeRunner struct {
 	ListBlueprintsFn  func(realmName, spaceName, stackName string) ([]intmodel.CellBlueprint, error)
 	DeleteBlueprintFn func(bp intmodel.CellBlueprint) error
 
+	// Volume methods
+	WriteVolumeFn  func(volume intmodel.Volume) (bool, error)
+	GetVolumeFn    func(volume intmodel.Volume) (intmodel.Volume, error)
+	ListVolumesFn  func(realmName, spaceName, stackName string) ([]intmodel.Volume, error)
+	DeleteVolumeFn func(volume intmodel.Volume) error
+
 	// Config methods
 	WriteConfigFn         func(config intmodel.CellConfig) (bool, error)
 	WriteConfigIfAbsentFn func(config intmodel.CellConfig) error
@@ -344,6 +350,36 @@ func (f *fakeRunner) DeleteBlueprint(bp intmodel.CellBlueprint) error {
 		return f.DeleteBlueprintFn(bp)
 	}
 	return errors.New("unexpected call to DeleteBlueprint")
+}
+
+// Volume methods
+
+func (f *fakeRunner) WriteVolume(volume intmodel.Volume) (bool, error) {
+	if f.WriteVolumeFn != nil {
+		return f.WriteVolumeFn(volume)
+	}
+	return false, errors.New("unexpected call to WriteVolume")
+}
+
+func (f *fakeRunner) GetVolume(volume intmodel.Volume) (intmodel.Volume, error) {
+	if f.GetVolumeFn != nil {
+		return f.GetVolumeFn(volume)
+	}
+	return intmodel.Volume{}, errors.New("unexpected call to GetVolume")
+}
+
+func (f *fakeRunner) ListVolumes(realmName, spaceName, stackName string) ([]intmodel.Volume, error) {
+	if f.ListVolumesFn != nil {
+		return f.ListVolumesFn(realmName, spaceName, stackName)
+	}
+	return nil, errors.New("unexpected call to ListVolumes")
+}
+
+func (f *fakeRunner) DeleteVolume(volume intmodel.Volume) error {
+	if f.DeleteVolumeFn != nil {
+		return f.DeleteVolumeFn(volume)
+	}
+	return errors.New("unexpected call to DeleteVolume")
 }
 
 // Config methods

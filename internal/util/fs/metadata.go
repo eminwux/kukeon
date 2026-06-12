@@ -347,6 +347,44 @@ func ConfigPath(baseRunPath, realmName, spaceName, stackName, configName string)
 	)
 }
 
+// VolumeScopeDir returns the metadata directory of the scope a `kind: Volume`
+// is bound to (issue #1018). Like a CellBlueprint a Volume is scopable at
+// realm/space/stack only — never cell — so the deepest coordinate this resolves
+// is the stack dir. The caller is responsible for having validated coordinate
+// completeness.
+func VolumeScopeDir(baseRunPath, realmName, spaceName, stackName string) string {
+	switch {
+	case stackName != "":
+		return StackMetadataDir(baseRunPath, realmName, spaceName, stackName)
+	case spaceName != "":
+		return SpaceMetadataDir(baseRunPath, realmName, spaceName)
+	default:
+		return RealmMetadataDir(baseRunPath, realmName)
+	}
+}
+
+// VolumesDir returns the per-scope volumes directory — the root-owned,
+// world-traversable container directory under the scope's metadata tree that
+// owns daemon-managed volume directories (issue #1018). Nested inside the scope
+// dir so owning-scope cascade purge reclaims it.
+func VolumesDir(baseRunPath, realmName, spaceName, stackName string) string {
+	return filepath.Join(
+		VolumeScopeDir(baseRunPath, realmName, spaceName, stackName),
+		consts.KukeonVolumesSubdir,
+	)
+}
+
+// VolumePath returns the host-side path of a single daemon-managed volume:
+// <scope>/volumes/<name>. Unlike SecretPath/BlueprintPath — which resolve a
+// single file — this resolves the volume's own directory, the resource a
+// container mounts and writes into.
+func VolumePath(baseRunPath, realmName, spaceName, stackName, volumeName string) string {
+	return filepath.Join(
+		VolumesDir(baseRunPath, realmName, spaceName, stackName),
+		volumeName,
+	)
+}
+
 type metadataHeader struct {
 	APIVersion string `json:"apiVersion"`
 	Kind       string `json:"kind"`

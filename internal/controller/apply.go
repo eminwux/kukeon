@@ -290,6 +290,28 @@ func (b *Exec) ApplyDocuments(docs []parser.Document, team string) (ApplyResult,
 				))
 			}
 
+		case v1beta1.KindVolume:
+			if doc.VolumeDoc == nil {
+				resourceResult.Action = actionFailed
+				resourceResult.Error = errors.New("volume document is nil")
+				result.Resources = append(result.Resources, resourceResult)
+				continue
+			}
+			// A Volume is deliberately not team-label-stamped or pruned: it is
+			// decoupled from any cell and outlives the apply that created it, so
+			// `kuke apply --prune` removing a volume would wipe persistent data.
+			// Volume reclaim is owning-scope cascade purge only (#1018); the
+			// `kukeon.io/team` lifecycle stays with the blueprint/config kinds.
+			volume, _, err := apischeme.NormalizeVolume(*doc.VolumeDoc)
+			if err != nil {
+				resourceResult.Action = actionFailed
+				resourceResult.Error = fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+				result.Resources = append(result.Resources, resourceResult)
+				continue
+			}
+			resourceResult.Name = volume.Metadata.Name
+			reconcileResult, reconcileErr = applypkg.ReconcileVolume(b.runner, volume)
+
 		default:
 			resourceResult.Action = actionFailed
 			resourceResult.Error = fmt.Errorf("%w: %s", errdefs.ErrUnknownKind, doc.Kind)

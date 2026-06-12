@@ -59,6 +59,14 @@ func SortDocumentsByKind(docs []parser.Document, reverse bool) []parser.Document
 	// exist). Evaluated after the CellBlueprint line so it lands one slot
 	// further out.
 	kindOrder[v1beta1.KindCellConfig] = len(kindOrder) + 1
+	// Volumes, like Secrets and CellBlueprints, target an existing scope
+	// (realm/space/stack) rather than creating one, so they sort after the
+	// hierarchy kinds: any scope bundled in the same apply file is materialized
+	// before a volume that targets it (reconcile rejects a volume whose scope
+	// does not yet exist). Evaluated after the CellConfig line so it lands one
+	// slot further out; the relative order among the scope-targeting kinds is
+	// immaterial since none reference another.
+	kindOrder[v1beta1.KindVolume] = len(kindOrder) + 1
 
 	// Sort by kind order, then by original index
 	sort.Slice(sorted, func(i, j int) bool {

@@ -160,6 +160,29 @@ type Runner interface {
 	// errdefs.ErrBlueprintNotFound when the file is absent.
 	DeleteBlueprint(blueprint intmodel.CellBlueprint) error
 
+	// WriteVolume provisions a `kind: Volume`'s directory under the scope's
+	// metadata tree, root-owned and container-writable (issue #1018). Unlike the
+	// blueprint/secret writers — which write a single file — the resource is the
+	// directory itself, so MkdirAll is idempotent: re-applying re-asserts the
+	// mode/owner and reports created=false. The caller (ReconcileVolume) is
+	// responsible for having verified the scope exists.
+	WriteVolume(volume intmodel.Volume) (created bool, err error)
+	// GetVolume reports the metadata-only view of a single named, scoped
+	// `kind: Volume` and whether its directory exists on disk (issue #1018). A
+	// Volume carries no body, so the scope and name come from the path. Returns
+	// errdefs.ErrVolumeNotFound when the directory is absent.
+	GetVolume(volume intmodel.Volume) (intmodel.Volume, error)
+	// ListVolumes enumerates the metadata of every Volume bound to the filter
+	// scope or any scope nested within it (issue #1018). An empty realmName
+	// lists across all realms; the filter is a subtree prefix bounded at stack
+	// depth (a Volume is never cell-scoped). The returned carriers are
+	// metadata-only.
+	ListVolumes(realmName, spaceName, stackName string) ([]intmodel.Volume, error)
+	// DeleteVolume removes the daemon-provisioned directory for a single named,
+	// scoped Volume (issue #1018). Returns errdefs.ErrVolumeNotFound when the
+	// directory is absent.
+	DeleteVolume(volume intmodel.Volume) error
+
 	// WriteConfig persists a `kind: CellConfig`'s serialized document to the
 	// daemon-managed, root-owned, world-readable file under the scope's metadata
 	// tree (issue #624). Returns whether the file was newly created (vs.
