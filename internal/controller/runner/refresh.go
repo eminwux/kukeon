@@ -1228,8 +1228,9 @@ func deriveCellStateFromNonRootContainerStatuses(
 	// the cell in CellStateError (a workload crash); an all-clean set settles
 	// CellStateExited (a clean self-exit). The reconciler never yields
 	// CellStateStopped here — Stopped is reserved for operator `kuke stop`/
-	// `kill`, so a self-exited cell stays distinguishable from an operator-
-	// stopped one without a new persisted field (#1267).
+	// `kill` (#1267). Note this is the derived label only: a persisted Stopped
+	// is non-sticky, so the next tick re-derives an operator-stopped cell to
+	// Exited — durable operator-stop preservation is deferred to #1268.
 	if anyFailed {
 		return intmodel.CellStateError
 	}

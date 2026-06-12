@@ -557,11 +557,12 @@ func TestDeriveCellStateFromNonRootContainerStatuses(t *testing.T) {
 					got, tc.want)
 			}
 			// #1267 invariant: the reconciler derivation must never produce
-			// CellStateStopped. That label is reserved for the operator
-			// stop/kill verbs (stop.go / kill.go), which is what keeps an
-			// operator stop distinguishable from a clean self-exit (Exited)
-			// without a new persisted field — a derived Stopped would re-collapse
-			// the two.
+			// CellStateStopped. That label is set only by the operator
+			// stop/kill verbs (stop.go / kill.go); the derivation maps a
+			// terminal cell to Exited/Error/Ready. (This is a property of the
+			// derivation in isolation — it does not make a persisted Stopped
+			// durable, since Stopped is non-sticky and ReconcileCell re-derives
+			// it on the next tick; durable operator-stop preservation is #1268.)
 			if got == intmodel.CellStateStopped {
 				t.Errorf("deriveCellStateFromNonRootContainerStatuses(...) = Stopped; "+
 					"the reconciler must never derive Stopped (reserved for operator stop/kill)")
@@ -570,15 +571,21 @@ func TestDeriveCellStateFromNonRootContainerStatuses(t *testing.T) {
 	}
 }
 
-// TestDeriveCellState_SelfExitDistinctFromOperatorStop is the headline #1267
-// invariant: a cell whose workloads all exit cleanly derives CellStateExited,
-// never CellStateStopped. Operator stop/kill is the only writer of
-// CellStateStopped (stop.go:293, kill.go:267), so the two terminal causes —
-// "operator interrupted it" and "it finished on its own" — are distinguishable
-// from the persisted state alone, without the new field the issue explicitly
-// rules out. The crash case (non-zero exit) derives the third, distinct
-// terminal CellStateError.
-func TestDeriveCellState_SelfExitDistinctFromOperatorStop(t *testing.T) {
+// TestDeriveCellState_SelfExitDerivesExitedNeverStopped pins the #1267
+// derivation invariant: a cell whose workloads all exit cleanly derives
+// CellStateExited (never CellStateStopped), and a non-zero exit derives the
+// third, distinct terminal CellStateError. CellStateStopped is written only by
+// the operator stop/kill verbs (stop.go:293, kill.go:267), so a *derived* state
+// is never Stopped.
+//
+// Scope note: this asserts the derivation function in isolation. It does NOT
+// assert that an operator stop is durably distinguishable from a clean
+// self-exit in steady state — it is not, because CellStateStopped is non-sticky
+// (cellStateIsSticky) and ReconcileCell re-derives an operator-stopped cell to
+// Exited on the next tick. Durable operator-stop preservation (#1267
+// conflation #2) is deferred to #1268, which keys restart guards on a persisted
+// terminal state and is where the stickiness/new-field trade-off is resolved.
+func TestDeriveCellState_SelfExitDerivesExitedNeverStopped(t *testing.T) {
 	specs := []intmodel.ContainerSpec{
 		{ID: "root", Root: true},
 		{ID: "work", Root: false},
