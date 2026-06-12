@@ -89,6 +89,7 @@ nav:
       - guides/apply-manifests.md
       - guides/run-claude-code.md
       - guides/local-dev.md
+      - guides/private-registry.md
       - guides/autocomplete.md
       - guides/troubleshooting.md
   - CLI Reference:

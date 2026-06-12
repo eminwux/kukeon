@@ -227,6 +227,32 @@ sudo rmdir /sys/fs/cgroup/kukeon/<realm>/<space>/<stack>/<cell> 2>/dev/null || t
 sudo ip link delete kuke-<realm>-<space> 2>/dev/null || true
 ```
 
+## `pull access denied` / `403` on a private image
+
+**Symptom.** A cell fails to start and the containerd resolver reports:
+
+```
+pull access denied, repository does not exist or may require authorization
+```
+
+(or a bare `403 Forbidden`) when pulling an image from a private registry.
+
+**What it means.** The realm has no credential for that registry. Registry
+credentials are scoped to the realm, so even if another realm can pull the same
+image, the realm running this cell needs its own entry.
+
+**Fix.** Attach a credential to the realm:
+
+```bash
+echo "$REGISTRY_TOKEN" | sudo kuke create registry-credential <realm> \
+    --server <host> --username <user> --password-stdin
+```
+
+The reconciler converges the change without recreating the realm or disrupting
+cells, so the pull succeeds on the next attempt. See
+[Private registry credentials](private-registry.md) for the imperative and
+declarative setups in full.
+
 ## Verbose logging
 
 Add `--verbose` (or `-v`) to any `kuke` command to get structured slog output on stderr. Pair with `--log-level debug` for the most detail:
