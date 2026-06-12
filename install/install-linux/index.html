@@ -816,6 +816,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#upgrade" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrade
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#uninstall" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3316,6 +3327,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#upgrade" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrade
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#uninstall" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3368,7 +3390,7 @@
 <li>Detects your platform (<code>linux/amd64</code> or <code>linux/arm64</code>) and refuses anything else.</li>
 <li>Verifies cgroups v2 is mounted and <code>/run/containerd/containerd.sock</code> is responsive. On any miss it prints a distro-aware hint and exits non-zero without touching the system.</li>
 <li>Downloads the latest release binary from GitHub, verifies its <code>.sha256</code> checksum, installs it to <code>/usr/local/bin/kuke</code>, and hard-links <code>kukeond</code> next to it.</li>
-<li>Runs <code>sudo kuke init</code> to bring up the daemon. Skipped on a host that already has a healthy <code>kukeond</code> listening on <code>/run/kukeon/kukeond.sock</code>.</li>
+<li>Runs <code>sudo kuke init</code> to bring up the daemon. On a host that already has a <code>kukeond</code> listening on <code>/run/kukeon/kukeond.sock</code>, init is skipped — but the installer first compares the running daemon's version against the binaries it just installed. A version-matched daemon is skipped silently as before; an <strong>older</strong> daemon prints the exact <code>kuke daemon recreate</code> command to finish the upgrade and exits non-zero rather than declaring an unqualified success over a client/daemon skew (see <a href="#upgrade">Upgrade</a>). Set <code>KUKE_SKIP_DAEMON_UPGRADE=1</code> to keep an intentionally pinned older daemon.</li>
 <li>Installs <code>/etc/systemd/system/kukeond.service</code> and runs <code>systemctl enable --now kukeond.service</code> so the daemon comes back automatically after a host or containerd restart. Skipped with a notice on systemd-less hosts — bring kukeond up manually with <code>sudo kuke daemon start</code> after each reboot in that case.</li>
 </ol>
 <p>Pass <code>--check</code> to run the prereq checks only without touching the system:</p>
@@ -3402,6 +3424,10 @@
 <tr>
 <td><code>KUKE_SKIP_CHECKSUM=1</code></td>
 <td>Skip <code>.sha256</code> verification (not recommended).</td>
+</tr>
+<tr>
+<td><code>KUKE_SKIP_DAEMON_UPGRADE=1</code></td>
+<td>On a live host, skip the running-daemon version check and keep an intentionally pinned older daemon (preserves the historical silent-skip on an already-running socket).</td>
 </tr>
 </tbody>
 </table>
@@ -3450,10 +3476,26 @@
 <p>If your host has no systemd (some minimal container images, dev sandboxes), the installer prints a notice and skips the unit. Bring kukeond up manually after each reboot:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>daemon<span class="w"> </span>start
 </code></pre></div>
+<h2 id="upgrade">Upgrade<a class="headerlink" href="#upgrade" title="Permanent link">&para;</a></h2>
+<p>The canonical upgrade procedure is <strong>re-run the installer, then recreate the daemon</strong> so the running <code>kukeond</code> matches the new binaries:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://kukeon.io/install.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span>bash
+</code></pre></div>
+<p>Re-running the one-liner installs the latest <code>kuke</code> / <code>kukeond</code> / <code>kukebuild</code> / <code>kukepause</code> binaries. Because <code>kuke init</code> already ran on this host, the installer skips it — but it now checks the <strong>running</strong> daemon's version against the binaries it just installed:</p>
+<ul>
+<li><strong>Version-matched daemon</strong> — skipped silently, no daemon churn.</li>
+<li><strong>Older daemon</strong> — the installer does <strong>not</strong> auto-cycle it (a recreate tears down and re-provisions the daemon cell, too aggressive to do unprompted from a piped <code>curl | bash</code>). Instead it prints the exact command and exits non-zero:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>daemon<span class="w"> </span>recreate<span class="w"> </span>--kukeond-image<span class="w"> </span>ghcr.io/eminwux/kukeon:&lt;installed-version&gt;
+</code></pre></div>
+<p>Run it to finish the upgrade. <code>kuke daemon recreate</code> cycles <strong>only</strong> the <code>kuke-system</code> kukeond cell — your workload cells in the <code>default</code> realm are untouched. Confirm the result with <code>kuke version</code> (the <code>Client:</code> and <code>Daemon:</code> lines should match).</p>
+<p>To keep an intentionally pinned older daemon while still upgrading the CLI binaries, set <code>KUKE_SKIP_DAEMON_UPGRADE=1</code> — the installer then preserves the historical silent-skip on an already-running socket.</p>
+<blockquote>
+<p>Pin a specific target version with <code>KUKE_VERSION=vX.Y.Z</code> (see the <a href="#one-line-install-recommended">environment overrides</a> table). The <code>--kukeond-image</code> tag the installer prints always matches the binaries it installed.</p>
+</blockquote>
 <h2 id="uninstall">Uninstall<a class="headerlink" href="#uninstall" title="Permanent link">&para;</a></h2>
 <p><code>kuke uninstall</code> removes all kukeon runtime state from the host — stops, disables, and removes the <code>kukeond</code> systemd unit (if installed), then stops and deletes the <code>kukeond</code> cell, clears <code>/run/kukeon</code>, and wipes <code>/opt/kukeon</code> and the kukeon-generated CNI conflists. It prompts for interactive confirmation by default; pass <code>-y</code> to skip the prompt in scripts:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>uninstall<span class="w"> </span>-y
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>sudo<span class="w"> </span>rm<span class="w"> </span>-f<span class="w"> </span>/usr/local/bin/kuke<span class="w"> </span>/usr/local/bin/kukeond
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>uninstall<span class="w"> </span>-y
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>sudo<span class="w"> </span>rm<span class="w"> </span>-f<span class="w"> </span>/usr/local/bin/kuke<span class="w"> </span>/usr/local/bin/kukeond
 </code></pre></div>
 <p><code>uninstall</code> only touches CNI conflists Kukeon itself generated; other files under <code>/etc/cni/net.d</code> are left alone. If you want to remove the <code>kukeon</code> system group too, finish with <code>sudo groupdel kukeon</code>.</p>
 <h2 id="next">Next<a class="headerlink" href="#next" title="Permanent link">&para;</a></h2>
@@ -3483,7 +3525,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 11, 2026 21:12:13 UTC">June 11, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 12, 2026 17:35:48 UTC">June 12, 2026</span>
   </span>
 
     
