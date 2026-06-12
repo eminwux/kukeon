@@ -55,7 +55,7 @@ usage() {
     cat <<EOF
 Usage: install.sh [--check] [--help]
 
-Installs kukeon (kuke + kukeond + kukebuild) on a Linux host.
+Installs kukeon (kuke + kukeond + kukebuild + kukepause) on a Linux host.
 
   --check    Run prerequisite checks only; do not touch the system.
   --help     Show this help.
@@ -308,7 +308,7 @@ fetch_verified() {
 }
 
 do_install() {
-    local arch kuke_path kukebuild_path
+    local arch kuke_path kukebuild_path kukepause_path
     arch="$(detect_platform)"
 
     step "Resolving release version"
@@ -321,17 +321,25 @@ do_install() {
     trap cleanup_tmpdir EXIT
     kuke_path="${INSTALL_TMPDIR}/kuke"
     kukebuild_path="${INSTALL_TMPDIR}/kukebuild"
+    kukepause_path="${INSTALL_TMPDIR}/kukepause"
 
     # kuke is the CLI + daemon (argv[0]-dispatched to kukeond); kukebuild is the
-    # docker-free image builder `kuke build` execs. Ship both so a fresh
-    # installer host can build images without a source checkout (issue #1227) —
-    # without kukebuild, `kuke build` fails with errdefs.ErrKukebuildNotFound.
+    # docker-free image builder `kuke build` execs; kukepause is the static PID 1
+    # `kuke init` stages to /opt/kukeon/bin/kukepause and bind-mounts into every
+    # cell's root container. Ship all three so a fresh installer host can build
+    # images and bootstrap the runtime without a source checkout (issues #1227,
+    # #1241) — without kukebuild, `kuke build` fails with
+    # errdefs.ErrKukebuildNotFound; without kukepause, `kuke init` aborts at its
+    # "stage kukepause" step.
     #
-    # Both assets are downloaded + verified into the tmpdir before anything is
+    # All assets are downloaded + verified into the tmpdir before anything is
     # placed on the system, so a fetch/verify failure leaves the host untouched.
     # KUKE_SKIP_KUKEBUILD skips kukebuild entirely — release tags predating its
     # asset (#1227) have no kukebuild-linux-* to fetch, so an old KUKE_VERSION
     # pin sets it to install kuke alone rather than 404 on the missing asset.
+    # kukepause has no skip flag: it is mandatory for `kuke init`, so a release
+    # pin too old to ship kukepause-linux-* fails loudly here rather than
+    # installing a runtime that cannot bootstrap.
     fetch_verified "kuke-linux-${arch}" "$kuke_path"
     chmod +x "$kuke_path"
     if [ -n "$KUKE_SKIP_KUKEBUILD" ]; then
@@ -340,6 +348,8 @@ do_install() {
         fetch_verified "kukebuild-linux-${arch}" "$kukebuild_path"
         chmod +x "$kukebuild_path"
     fi
+    fetch_verified "kukepause-linux-${arch}" "$kukepause_path"
+    chmod +x "$kukepause_path"
 
     step "Installing to ${KUKE_INSTALL_PREFIX}"
     $SUDO install -m 0755 "$kuke_path" "${KUKE_INSTALL_PREFIX}/kuke"
@@ -347,14 +357,18 @@ do_install() {
     # basename and we want `kukeond` resolved as a real path, not as
     # `kuke -> kukeond` indirection that some shells resolve.
     $SUDO ln -f "${KUKE_INSTALL_PREFIX}/kuke" "${KUKE_INSTALL_PREFIX}/kukeond"
+    # kukepause is a distinct static binary (not an argv[0] alias of kuke) that
+    # `kuke init` resolves on $PATH / alongside kuke to stage as every cell's
+    # PID 1 — install it as a real file so init finds it (issue #1241).
+    $SUDO install -m 0755 "$kukepause_path" "${KUKE_INSTALL_PREFIX}/kukepause"
     if [ -n "$KUKE_SKIP_KUKEBUILD" ]; then
-        ok "installed kuke + kukeond at ${KUKE_INSTALL_PREFIX}"
+        ok "installed kuke + kukeond + kukepause at ${KUKE_INSTALL_PREFIX}"
     else
         # kukebuild is a distinct binary (its own Go module embedding BuildKit),
         # not an argv[0] alias of kuke — install it as a real file so `kuke
         # build` resolves it on PATH.
         $SUDO install -m 0755 "$kukebuild_path" "${KUKE_INSTALL_PREFIX}/kukebuild"
-        ok "installed kuke + kukeond + kukebuild at ${KUKE_INSTALL_PREFIX}"
+        ok "installed kuke + kukeond + kukebuild + kukepause at ${KUKE_INSTALL_PREFIX}"
     fi
 
     if [ -n "$KUKE_SKIP_INIT" ]; then

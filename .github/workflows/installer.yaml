@@ -95,24 +95,21 @@ jobs:
       - name: Run installer --check
         run: bash scripts/install.sh --check
 
-  # End-to-end smoke: download a real release binary, install it to
+  # End-to-end smoke: download real release binaries, install them to
   # /usr/local/bin, and skip the kuke-init step (which would need root,
   # cgroup writes, and a healthy containerd). Pinned to a known-good tag so
-  # the test doesn't drift with future releases. Checksum verification is
-  # skipped because pre-issue-#62 releases shipped without .sha256 assets;
-  # once a release lands with .sha256 published, drop the skip.
-  # KUKE_SKIP_KUKEBUILD is set for the same reason: v0.4.0 predates the
-  # kukebuild release asset (issue #1227), so the installer would 404 fetching
-  # it. Once the pinned tag ships kukebuild-linux-*, bump KUKE_VERSION and drop
-  # this skip to exercise the kukebuild install path here.
+  # the test doesn't drift with future releases. v0.6.1 ships kuke, kukebuild,
+  # and kukepause assets plus their .sha256 sums, so this job exercises the
+  # full multi-binary download + checksum-verify + install path (no
+  # KUKE_SKIP_CHECKSUM, no KUKE_SKIP_KUKEBUILD). kukepause is fetched
+  # unconditionally because `kuke init` cannot bootstrap without it (issue
+  # #1241).
   install-skip-init:
     name: full install (KUKE_SKIP_INIT=1) against a real release
     runs-on: ubuntu-latest
     env:
-      KUKE_VERSION: v0.4.0
+      KUKE_VERSION: v0.6.1
       KUKE_SKIP_INIT: "1"
-      KUKE_SKIP_CHECKSUM: "1"
-      KUKE_SKIP_KUKEBUILD: "1"
     steps:
       - uses: actions/checkout@v4
       - name: Run installer (download + install, skip init)
@@ -121,4 +118,6 @@ jobs:
         run: |
           test -x /usr/local/bin/kuke
           test -x /usr/local/bin/kukeond
+          test -x /usr/local/bin/kukebuild
+          test -x /usr/local/bin/kukepause
           /usr/local/bin/kuke version
