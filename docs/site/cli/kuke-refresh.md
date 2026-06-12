@@ -12,7 +12,7 @@ Walks every realm / space / stack / cell / container that Kukeon has metadata fo
 
 Use it when:
 
-- A container crashed and Kukeon's `status` is still `Ready` — `refresh` will update it to `Failed`/`Stopped`.
+- A container crashed and Kukeon's `status` is still `Ready` — `refresh` will update it to `Error` (a non-zero workload exit) or `Exited` (a clean exit). `Failed` stays reserved for Kukeon's own bring-up faults.
 - You rebooted the host (or restarted containerd) and `kuke get` still shows pre-reboot state.
 - You intervened outside Kukeon (`ctr tasks kill`, `ip link delete`) and want the metadata to catch up.
 

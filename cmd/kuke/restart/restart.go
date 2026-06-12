@@ -221,9 +221,12 @@ func restartOne(cmd *cobra.Command, client kukeonv1.Client, doc v1beta1.CellDoc)
 	switch pre.Cell.Status.State {
 	case v1beta1.CellStateReady:
 		return restartInPlace(cmd, client, doc)
-	case v1beta1.CellStateStopped:
+	case v1beta1.CellStateStopped, v1beta1.CellStateExited:
+		// Stopped (operator stop/kill) and Exited (clean self-exit, #1267) both
+		// restart from a clean terminal — bring the cell back up. A crashed
+		// cell (Error) is refused below alongside the other degraded states.
 		return restartStopped(cmd, client, doc)
-	case v1beta1.CellStatePending, v1beta1.CellStateFailed, v1beta1.CellStateUnknown:
+	case v1beta1.CellStatePending, v1beta1.CellStateFailed, v1beta1.CellStateError, v1beta1.CellStateUnknown:
 		// Same delete-then-rerun pointer as `kuke run` on a degraded cell
 		// (cmd/kuke/run/run.go:505-516). Restart does not reconcile a
 		// degraded cell in place; the operator deletes and re-runs.

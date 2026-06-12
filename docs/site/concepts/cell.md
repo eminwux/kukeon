@@ -65,8 +65,10 @@ A cell's **identity is its own document** — the `CellDoc`. The CellDoc owns th
 | --------- | --------------------------------------------------------------- |
 | `Pending` | Cell metadata exists; containers not yet created                |
 | `Ready`   | Root container is running; non-root containers are running      |
-| `Stopped` | All containers have exited cleanly (every exit code zero)       |
-| `Failed`  | Startup failed, or a workload exited non-zero / crashed; `reason` + `message` carry the failing container and its exit code/signal. Preserved (not auto-deleted) so the failure can be inspected — clear with `kuke delete cell` |
+| `Stopped` | Operator-initiated stop: `kuke stop` (SIGTERM) or `kuke kill` (SIGKILL) tore the cell's containers down. Set only by those verbs — the reconciler never *derives* it. The label is transient: `Stopped` is non-sticky, so the next reconcile tick re-derives a stopped-but-terminal cell to `Exited`/`Error`. Durable preservation of the operator-stop distinction across reconcile ticks is tracked in #1268 (#1267). |
+| `Exited`  | Every workload exited cleanly on its own (every exit code zero) — a clean self-exit. Auto-delete-eligible, so `kuke run --rm` reaps a finished job (#1267). |
+| `Error`   | A workload exited non-zero / crashed; `reason` + `message` carry the failing container and its exit code/signal. Preserved (not auto-deleted) so the failure can be inspected — clear with `kuke delete cell` (#1267). |
+| `Failed`  | A kukeon bring-up fault (create/start/recreate failed). Reserved for kukeon's own faults — a crashed workload is `Error`, not `Failed`. Preserved like `Error`. |
 | `Unknown` | The daemon can't determine the state (e.g., containerd offline) |
 
 ## Operations

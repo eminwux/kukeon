@@ -252,16 +252,18 @@ func ReconcileStack(r runner.Runner, desired intmodel.Stack) (ReconcileResult, e
 	return result, nil
 }
 
-// failedCellReconcileError converts a Failed end-state into a terminal error
-// so apply never reports a success action over a dead cell (#1185). A
+// failedCellReconcileError converts a fault end-state into a terminal error
+// so apply never reports a success action over a dead cell (#1185). Both
+// CellStateFailed (a kukeon bring-up fault) and CellStateError (a workload
+// crash, #1267 — the rename of the old Failed workload-exit case) qualify: a
 // compatible change (cniConfigPath, labels, …) routes through UpdateCell,
 // which persists the desired spec without restarting a killed/dead cell; and
-// the spec-in-sync "unchanged" branch walks away from an already-Failed cell.
+// the spec-in-sync "unchanged" branch walks away from an already-dead cell.
 // Both would otherwise return a nil error and exit 0 while the workload stays
 // dead. Returning the wrapped sentinel makes ApplyDocuments stamp the resource
 // `failed` and `kuke apply` exit non-zero with an actionable message.
 // StartCell/RecreateCell failures already surface their own error (passed
-// through here unchanged); this is the net for the success-action-but-Failed
+// through here unchanged); this is the net for the success-action-but-dead
 // gap. Pulled out of ReconcileCell so the guard's branches don't inflate that
 // function's cyclomatic complexity.
 func failedCellReconcileError(result ReconcileResult, cellName string, err error) error {
@@ -269,7 +271,7 @@ func failedCellReconcileError(result ReconcileResult, cellName string, err error
 		return err
 	}
 	cell, ok := result.Resource.(intmodel.Cell)
-	if !ok || cell.Status.State != intmodel.CellStateFailed {
+	if !ok || (cell.Status.State != intmodel.CellStateFailed && cell.Status.State != intmodel.CellStateError) {
 		return err
 	}
 	return fmt.Errorf(
@@ -933,15 +935,17 @@ type ReconcileResult struct {
 }
 
 // cellNeedsRematerialize reports whether a spec-equal cell still needs
-// runtime work because its containers were torn down out of band. Today
-// this fires for CellStateStopped — the state runner.KillCell persists
-// after `kuke kill` removes the cell's containers. Failed, Pending,
-// and Unknown intentionally do not trigger re-materialize: Failed is
-// sticky and signals a startup problem the user should investigate;
-// Pending and Unknown are mid-lifecycle states the daemon reconciler
-// loop normalizes on its own.
+// runtime work because its containers were torn down out of band. Fires for
+// the two restartable clean terminals: CellStateStopped (operator `kuke kill`
+// persists it after removing the cell's containers) and CellStateExited (a
+// clean self-exit, #1267 — the rename of the old Stopped self-exit case).
+// Error, Failed, Pending, and Unknown intentionally do not trigger
+// re-materialize: Error (a workload crash) and Failed (a startup problem) are
+// sticky and signal something the user should investigate; Pending and Unknown
+// are mid-lifecycle states the daemon reconciler loop normalizes on its own.
 func cellNeedsRematerialize(cell intmodel.Cell) bool {
-	return cell.Status.State == intmodel.CellStateStopped
+	return cell.Status.State == intmodel.CellStateStopped ||
+		cell.Status.State == intmodel.CellStateExited
 }
 
 // rematerializeChanges builds the per-component summary printed under

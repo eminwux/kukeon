@@ -331,7 +331,7 @@ Set this only for cells that hosts a nested runtime (containerd, runc, dockerd, 
 | -------------- | ----------------------------------------------------------------------- | -------------------------------------------------- |
 | `name`         | string                                                                  | Matches `metadata.name`                            |
 | `id`           | string                                                                  | Containerd container id                            |
-| `state`        | `Pending`, `Ready`, `Stopped`, `Paused`, `Pausing`, `Failed`, `Unknown` | Lifecycle state                                    |
+| `state`        | `Pending`, `Ready`, `Stopped`, `Paused`, `Pausing`, `Failed`, `Unknown`, `NotCreated`, `Exited`, `Error` | Lifecycle state. `Exited` = task exited 0; `Error` = task exited non-zero; `Failed` = kukeon container bring-up fault. |
 | `restartCount` | int                                                                     | Times the container has restarted                  |
 | `restartTime`  | RFC3339 timestamp                                                       | Last restart                                       |
 | `startTime`    | RFC3339 timestamp                                                       | Current (or last) start                            |

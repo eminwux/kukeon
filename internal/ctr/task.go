@@ -68,12 +68,21 @@ func (c *client) TaskMetrics(namespace, id string) (*apitypes.Metric, error) {
 }
 
 // ConvertContainerdStatusToContainerState converts a containerd task status to internal ContainerState.
+//
+// A stopped task is split by its exit code (#1267): a clean exit (0) maps to
+// ContainerStateExited, a non-zero exit to ContainerStateError. This mirrors
+// the cell-level Exited/Error split so the container view distinguishes a
+// completed workload from a crashed one. ContainerStateFailed stays reserved
+// for kukeon's own container bring-up failures and is never produced here.
 func ConvertContainerdStatusToContainerState(status containerd.Status) intmodel.ContainerState {
 	switch status.Status {
 	case containerd.Running:
 		return intmodel.ContainerStateReady
 	case containerd.Stopped:
-		return intmodel.ContainerStateStopped
+		if status.ExitStatus != 0 {
+			return intmodel.ContainerStateError
+		}
+		return intmodel.ContainerStateExited
 	case containerd.Created:
 		return intmodel.ContainerStatePending
 	case containerd.Unknown:

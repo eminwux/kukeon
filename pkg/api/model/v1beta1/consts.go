@@ -94,4 +94,13 @@ const (
 	// StateNotCreatedStr is the display label for a container with no
 	// containerd record at all (see ContainerStateNotCreated).
 	StateNotCreatedStr = "NotCreated"
+	// StateExitedStr is the display label for a clean self-exit terminal — a
+	// cell whose workloads all exited 0, or a container task that exited 0
+	// (see CellStateExited / ContainerStateExited, #1267).
+	StateExitedStr = "Exited"
+	// StateErrorStr is the display label for a workload-crash terminal — a
+	// cell with a non-zero workload exit, or a container task that exited
+	// non-zero (see CellStateError / ContainerStateError, #1267). Distinct
+	// from StateFailedStr, which is reserved for kukeon's own bring-up faults.
+	StateErrorStr = "Error"
 )

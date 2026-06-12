@@ -657,7 +657,11 @@ func runExistingCell(
 		if printErr := printRunResult(cmd, noOpResultFromGet(pre), flags.output); printErr != nil {
 			return printErr
 		}
-	case v1beta1.CellStateStopped:
+	case v1beta1.CellStateStopped, v1beta1.CellStateExited:
+		// Stopped (operator stop/kill) and Exited (clean self-exit, #1267) both
+		// have no live root task by design, so re-running starts the cell back
+		// up. A crashed cell (Error) is refused below alongside the other
+		// degraded states.
 		startRes, err := client.StartCell(cmd.Context(), cellDoc)
 		if err != nil {
 			return err
@@ -665,7 +669,7 @@ func runExistingCell(
 		if printErr := printRunResult(cmd, startedResultFromGet(pre, startRes.Started), flags.output); printErr != nil {
 			return printErr
 		}
-	case v1beta1.CellStatePending, v1beta1.CellStateFailed, v1beta1.CellStateUnknown:
+	case v1beta1.CellStatePending, v1beta1.CellStateFailed, v1beta1.CellStateError, v1beta1.CellStateUnknown:
 		// error / partial: no clean start path. Refuse and point the operator
 		// at delete-then-rerun. Listing the states explicitly (rather than a
 		// default) keeps the exhaustive linter as a forward guard: a new

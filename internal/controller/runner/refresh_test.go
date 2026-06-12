@@ -26,18 +26,20 @@ import (
 )
 
 // TestCellStateAutoDeleteTriggers locks down the predicate the reconciler
-// uses to decide when Spec.AutoDelete=true should kick off cleanup. Stopped
-// is the only trigger — Unknown is excluded so a transient containerd
-// hiccup doesn't nuke the cell, Failed is excluded per the issue #407
-// contract (the terminal Error state is sticky and preserves diagnostic
-// surface — `--rm` does not auto-clean it), and the running states stay
+// uses to decide when Spec.AutoDelete=true should kick off cleanup. Exited
+// (a clean self-exit) is the only trigger post-#1267 — Stopped is now an
+// operator-initiated state that `--rm` leaves alone, Error/Failed are sticky
+// and preserve diagnostic surface, Unknown is excluded so a transient
+// containerd hiccup doesn't nuke the cell, and the running states stay
 // untouched.
 func TestCellStateAutoDeleteTriggers(t *testing.T) {
 	cases := []struct {
 		state intmodel.CellState
 		want  bool
 	}{
-		{intmodel.CellStateStopped, true},
+		{intmodel.CellStateExited, true},
+		{intmodel.CellStateStopped, false},
+		{intmodel.CellStateError, false},
 		{intmodel.CellStateFailed, false},
 		{intmodel.CellStateReady, false},
 		{intmodel.CellStatePending, false},
@@ -172,23 +174,24 @@ func TestAutoDeleteSurvivesKillCellRace(t *testing.T) {
 
 	persisted := cell.Status
 
-	// Reconciler tick: derive newState=Stopped from a not-yet-existing
-	// containerd task, run the latch over the persisted snapshot.
-	newState := intmodel.CellStateStopped
+	// Reconciler tick: Stopped is non-sticky (#1267), so the reconciler
+	// re-derives the now-terminal cell (workloads exited 0) to Exited — the
+	// auto-delete trigger — and runs the latch over the persisted snapshot.
+	newState := intmodel.CellStateExited
 	latched := latchReadyObserved(persisted.ReadyObserved, persisted.State, newState)
 	if !latched {
 		t.Fatalf("latchReadyObserved = false; AutoDelete gate would never fire")
 	}
 	if !shouldAutoDeleteCell(true, newState, latched) {
-		t.Errorf("shouldAutoDeleteCell = false; cell would be stranded in Stopped")
+		t.Errorf("shouldAutoDeleteCell = false; cell would be stranded after the KillCell race")
 	}
 }
 
 // TestShouldAutoDeleteCell is the complete gate guarding AutoDelete
-// cleanup: AutoDelete=true AND newState is a trigger (Stopped/Failed)
-// AND the ReadyObserved latch is set. The Ready-gate row is the
-// regression #269 calls out — without it, an in-flight CreateCell that
-// has not yet registered its root container resolves to Stopped and the
+// cleanup: AutoDelete=true AND newState is the Exited trigger (a clean
+// self-exit, #1267) AND the ReadyObserved latch is set. The Ready-gate row is
+// the regression #269 calls out — without it, an in-flight CreateCell that
+// has not yet registered its root container resolves to Exited and the
 // pre-fix code reaped the cell.
 func TestShouldAutoDeleteCell(t *testing.T) {
 	cases := []struct {
@@ -201,16 +204,24 @@ func TestShouldAutoDeleteCell(t *testing.T) {
 		{
 			name:          "fires_when_all_three_satisfied",
 			autoDelete:    true,
-			newState:      intmodel.CellStateStopped,
+			newState:      intmodel.CellStateExited,
 			readyObserved: true,
 			want:          true,
 		},
 		{
-			// Issue #407: Failed is the terminal Error state and must
-			// NOT trigger AutoDelete. `kuke run --rm` only auto-cleans
-			// on a *successful* run that subsequently exits cleanly;
-			// a startup-path failure preserves the cell so the operator
-			// has a diagnostic surface to inspect.
+			// Error (the workload-crash terminal, #1267, inheriting #407's
+			// Failed contract) must NOT trigger AutoDelete. `kuke run --rm`
+			// only auto-cleans on a *successful* run that exits cleanly
+			// (Exited); a crash preserves the cell so the operator has a
+			// diagnostic surface to inspect.
+			name:          "blocked_on_error_state",
+			autoDelete:    true,
+			newState:      intmodel.CellStateError,
+			readyObserved: true,
+			want:          false,
+		},
+		{
+			// Failed (a kukeon bring-up fault, #407) is likewise excluded.
 			name:          "blocked_on_failed_state_per_issue_407",
 			autoDelete:    true,
 			newState:      intmodel.CellStateFailed,
@@ -218,9 +229,18 @@ func TestShouldAutoDeleteCell(t *testing.T) {
 			want:          false,
 		},
 		{
+			// Stopped (operator stop/kill, #1267) is not a job that "ran its
+			// course" — `--rm` leaves it for explicit delete.
+			name:          "blocked_on_operator_stopped",
+			autoDelete:    true,
+			newState:      intmodel.CellStateStopped,
+			readyObserved: true,
+			want:          false,
+		},
+		{
 			name:          "blocked_when_autoDelete_false",
 			autoDelete:    false,
-			newState:      intmodel.CellStateStopped,
+			newState:      intmodel.CellStateExited,
 			readyObserved: true,
 			want:          false,
 		},
@@ -241,7 +261,7 @@ func TestShouldAutoDeleteCell(t *testing.T) {
 		{
 			name:          "blocked_when_never_ready_regression_269",
 			autoDelete:    true,
-			newState:      intmodel.CellStateStopped,
+			newState:      intmodel.CellStateExited,
 			readyObserved: false,
 			want:          false,
 		},
@@ -297,21 +317,26 @@ func TestHasNonRootContainerSpec(t *testing.T) {
 }
 
 // TestDeriveCellStateFromNonRootContainerStatuses pins the union-of-non-root
-// derivation introduced for #302. Five invariants:
+// derivation introduced for #302 and split into Exited/Error terminals by
+// #1267. Invariants:
 //   - Any non-root in an active state ⇒ Ready (the cell is hosting work).
-//   - Every non-root in a terminal state (Stopped/Failed/non-existent which
-//     GetContainerState maps to Stopped) ⇒ Stopped (cell shell is no longer
-//     hosting any workload — the wind-down trigger).
-//   - Any non-root reading back Unknown blocks the Stopped derivation: a
+//   - Every non-root terminal and all clean (exit 0 / Exited / reaped) ⇒
+//     Exited (the clean self-exit terminal — the wind-down / auto-delete
+//     trigger). The derivation never yields Stopped: that label is reserved
+//     for operator stop/kill, so a self-exit stays distinct from an operator
+//     stop without a new persisted field.
+//   - Any non-root terminal with a non-zero exit (Error / Failed / preserved
+//     non-zero ExitCode) ⇒ Error (a workload crash, sticky and preserved).
+//   - Any non-root reading back Unknown blocks the terminal derivation: a
 //     transient containerd hiccup or namespace-race misread (#301) on a
-//     workload container must not flip the cell to Stopped and reap a
+//     workload container must not flip the cell to a terminal and reap a
 //     healthy host.
 //   - Root containers in cell.Status.Containers are ignored — the whole
 //     point of this derivation is that the root is no longer the lifecycle
 //     anchor for cells that have non-root workloads.
 //   - When populate skipped or didn't reach every non-root spec (seen <
-//     expected), the derivation stays Unknown rather than declaring
-//     Stopped on a partial snapshot.
+//     expected), the derivation stays Unknown rather than declaring a
+//     terminal on a partial snapshot.
 func TestDeriveCellStateFromNonRootContainerStatuses(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -334,78 +359,99 @@ func TestDeriveCellStateFromNonRootContainerStatuses(t *testing.T) {
 			want: intmodel.CellStateReady,
 		},
 		{
-			name: "all_workloads_stopped_winds_cell_to_stopped",
+			name: "all_workloads_exited_clean_winds_cell_to_exited",
 			specs: []intmodel.ContainerSpec{
 				{ID: "root", Root: true},
 				{ID: "work-a", Root: false},
 				{ID: "work-b", Root: false},
 			},
+			// Every non-root workload exited cleanly (ContainerStateExited /
+			// exit 0) → the cell settles Exited, the clean self-exit terminal
+			// (#1267). The derivation never yields Stopped — that label is
+			// reserved for operator stop/kill — so a self-exited cell stays
+			// distinct from an operator-stopped one.
 			statuses: []intmodel.ContainerStatus{
 				{ID: "root", State: intmodel.ContainerStateReady},
-				{ID: "work-a", State: intmodel.ContainerStateStopped},
-				{ID: "work-b", State: intmodel.ContainerStateStopped},
+				{ID: "work-a", State: intmodel.ContainerStateExited},
+				{ID: "work-b", State: intmodel.ContainerStateExited},
 			},
-			want: intmodel.CellStateStopped,
+			want: intmodel.CellStateExited,
 		},
 		{
-			name: "workload_in_failed_state_settles_cell_failed",
+			name: "workload_in_error_state_settles_cell_error",
 			specs: []intmodel.ContainerSpec{
 				{ID: "root", Root: true},
 				{ID: "work", Root: false},
 			},
-			// A non-root workload observed in ContainerStateFailed is a crash,
-			// not a clean stop — the cell settles Failed so callers can tell a
-			// failed run from a completed one (#1206).
+			// A non-root workload observed in ContainerStateError is a crash,
+			// not a clean exit — the cell settles Error so callers can tell a
+			// failed run from a completed one (#1206, #1267).
+			statuses: []intmodel.ContainerStatus{
+				{ID: "root", State: intmodel.ContainerStateReady},
+				{ID: "work", State: intmodel.ContainerStateError},
+			},
+			want: intmodel.CellStateError,
+		},
+		{
+			name: "workload_in_failed_state_settles_cell_error",
+			specs: []intmodel.ContainerSpec{
+				{ID: "root", Root: true},
+				{ID: "work", Root: false},
+			},
+			// ContainerStateFailed (kukeon's own container bring-up fault) still
+			// counts as a workload-terminal failure for the cell-level
+			// derivation — the cell settles Error (#1267).
 			statuses: []intmodel.ContainerStatus{
 				{ID: "root", State: intmodel.ContainerStateReady},
 				{ID: "work", State: intmodel.ContainerStateFailed},
 			},
-			want: intmodel.CellStateFailed,
+			want: intmodel.CellStateError,
 		},
 		{
-			name: "workload_exited_nonzero_settles_cell_failed",
+			name: "workload_exited_nonzero_settles_cell_error",
 			specs: []intmodel.ContainerSpec{
 				{ID: "root", Root: true},
 				{ID: "work", Root: false},
 			},
-			// The headline #1206 case: a stopped workload carrying a non-zero
-			// exit code is a crash, distinct from a clean Stopped completion.
+			// The headline #1206 case, renamed in #1267: a stopped workload
+			// carrying a non-zero exit code is a crash, distinct from a clean
+			// Exited completion → CellStateError.
 			statuses: []intmodel.ContainerStatus{
 				{ID: "root", State: intmodel.ContainerStateReady},
 				{ID: "work", State: intmodel.ContainerStateStopped, ExitCode: 127},
 			},
-			want: intmodel.CellStateFailed,
+			want: intmodel.CellStateError,
 		},
 		{
-			name: "reaped_workload_preserved_nonzero_exit_settles_failed",
+			name: "reaped_workload_preserved_nonzero_exit_settles_error",
 			specs: []intmodel.ContainerSpec{
 				{ID: "root", Root: true},
 				{ID: "work", Root: false},
 			},
 			// A failed workload whose containerd task was reaped reads back
 			// NotCreated, but populateCellContainerStatuses preserves the
-			// non-zero ExitCode — the cell must still settle Failed (#1206).
+			// non-zero ExitCode — the cell must still settle Error (#1206, #1267).
 			statuses: []intmodel.ContainerStatus{
 				{ID: "root", State: intmodel.ContainerStateReady},
 				{ID: "work", State: intmodel.ContainerStateNotCreated, ExitCode: 1},
 			},
-			want: intmodel.CellStateFailed,
+			want: intmodel.CellStateError,
 		},
 		{
-			name: "mixed_clean_and_failed_workloads_settle_failed",
+			name: "mixed_clean_and_failed_workloads_settle_error",
 			specs: []intmodel.ContainerSpec{
 				{ID: "root", Root: true},
 				{ID: "work-a", Root: false},
 				{ID: "work-b", Root: false},
 			},
-			// One clean exit, one crash → Failed wins: any failure among the
-			// terminal workloads marks the cell Failed (#1206).
+			// One clean exit, one crash → Error wins: any failure among the
+			// terminal workloads marks the cell Error (#1206, #1267).
 			statuses: []intmodel.ContainerStatus{
 				{ID: "root", State: intmodel.ContainerStateReady},
-				{ID: "work-a", State: intmodel.ContainerStateStopped, ExitCode: 0},
-				{ID: "work-b", State: intmodel.ContainerStateStopped, ExitCode: 2},
+				{ID: "work-a", State: intmodel.ContainerStateExited, ExitCode: 0},
+				{ID: "work-b", State: intmodel.ContainerStateError, ExitCode: 2},
 			},
-			want: intmodel.CellStateFailed,
+			want: intmodel.CellStateError,
 		},
 		{
 			name: "active_workload_outranks_a_failed_sibling",
@@ -415,31 +461,32 @@ func TestDeriveCellStateFromNonRootContainerStatuses(t *testing.T) {
 				{ID: "work-b", Root: false},
 			},
 			// A still-running workload keeps the cell Ready even when a sibling
-			// crashed — the cell is not terminal yet, so no Failed verdict.
+			// crashed — the cell is not terminal yet, so no Error verdict.
 			statuses: []intmodel.ContainerStatus{
 				{ID: "root", State: intmodel.ContainerStateReady},
 				{ID: "work-a", State: intmodel.ContainerStateReady},
-				{ID: "work-b", State: intmodel.ContainerStateStopped, ExitCode: 1},
+				{ID: "work-b", State: intmodel.ContainerStateError, ExitCode: 1},
 			},
 			want: intmodel.CellStateReady,
 		},
 		{
-			name: "absent_workload_counts_as_terminal_like_stopped",
+			name: "absent_workload_counts_as_terminal_clean_exit",
 			specs: []intmodel.ContainerSpec{
 				{ID: "root", Root: true},
 				{ID: "work", Root: false},
 			},
-			// The workload's containerd record vanished (#670/#671) — the
-			// reconciler must still wind the cell down, exactly as for a
-			// clean stop. NotCreated is terminal here.
+			// The workload's containerd record vanished (#670/#671) with no
+			// non-zero exit preserved — the reconciler must still wind the cell
+			// down, exactly as for a clean exit. NotCreated is terminal here →
+			// CellStateExited (#1267).
 			statuses: []intmodel.ContainerStatus{
 				{ID: "root", State: intmodel.ContainerStateReady},
 				{ID: "work", State: intmodel.ContainerStateNotCreated},
 			},
-			want: intmodel.CellStateStopped,
+			want: intmodel.CellStateExited,
 		},
 		{
-			name: "workload_reads_back_unknown_blocks_stopped_defensive_against_301",
+			name: "workload_reads_back_unknown_blocks_terminal_defensive_against_301",
 			specs: []intmodel.ContainerSpec{
 				{ID: "root", Root: true},
 				{ID: "work-a", Root: false},
@@ -447,13 +494,13 @@ func TestDeriveCellStateFromNonRootContainerStatuses(t *testing.T) {
 			},
 			statuses: []intmodel.ContainerStatus{
 				{ID: "root", State: intmodel.ContainerStateReady},
-				{ID: "work-a", State: intmodel.ContainerStateStopped},
+				{ID: "work-a", State: intmodel.ContainerStateExited},
 				{ID: "work-b", State: intmodel.ContainerStateUnknown},
 			},
 			want: intmodel.CellStateUnknown,
 		},
 		{
-			name: "running_root_is_ignored_when_workloads_are_all_stopped",
+			name: "running_root_is_ignored_when_workloads_are_all_exited",
 			specs: []intmodel.ContainerSpec{
 				{ID: "root", Root: true},
 				{ID: "work", Root: false},
@@ -464,9 +511,9 @@ func TestDeriveCellStateFromNonRootContainerStatuses(t *testing.T) {
 				// the long-lived root must NOT keep the cell open after
 				// every workload exited.
 				{ID: "root", State: intmodel.ContainerStateReady},
-				{ID: "work", State: intmodel.ContainerStateStopped},
+				{ID: "work", State: intmodel.ContainerStateExited},
 			},
-			want: intmodel.CellStateStopped,
+			want: intmodel.CellStateExited,
 		},
 		{
 			name: "pending_workload_is_active",
@@ -509,13 +556,71 @@ func TestDeriveCellStateFromNonRootContainerStatuses(t *testing.T) {
 				t.Errorf("deriveCellStateFromNonRootContainerStatuses(...) = %v, want %v",
 					got, tc.want)
 			}
+			// #1267 invariant: the reconciler derivation must never produce
+			// CellStateStopped. That label is set only by the operator
+			// stop/kill verbs (stop.go / kill.go); the derivation maps a
+			// terminal cell to Exited/Error/Ready. (This is a property of the
+			// derivation in isolation — it does not make a persisted Stopped
+			// durable, since Stopped is non-sticky and ReconcileCell re-derives
+			// it on the next tick; durable operator-stop preservation is #1268.)
+			if got == intmodel.CellStateStopped {
+				t.Errorf("deriveCellStateFromNonRootContainerStatuses(...) = Stopped; "+
+					"the reconciler must never derive Stopped (reserved for operator stop/kill)")
+			}
 		})
 	}
 }
 
-// TestContainerExitedNonZero pins the failure predicate that flips a terminal
-// cell from Stopped to Failed (#1206): non-zero exit code or an explicit
-// ContainerStateFailed observation, but never a clean (code 0) exit.
+// TestDeriveCellState_SelfExitDerivesExitedNeverStopped pins the #1267
+// derivation invariant: a cell whose workloads all exit cleanly derives
+// CellStateExited (never CellStateStopped), and a non-zero exit derives the
+// third, distinct terminal CellStateError. CellStateStopped is written only by
+// the operator stop/kill verbs (stop.go:293, kill.go:267), so a *derived* state
+// is never Stopped.
+//
+// Scope note: this asserts the derivation function in isolation. It does NOT
+// assert that an operator stop is durably distinguishable from a clean
+// self-exit in steady state — it is not, because CellStateStopped is non-sticky
+// (cellStateIsSticky) and ReconcileCell re-derives an operator-stopped cell to
+// Exited on the next tick. Durable operator-stop preservation (#1267
+// conflation #2) is deferred to #1268, which keys restart guards on a persisted
+// terminal state and is where the stickiness/new-field trade-off is resolved.
+func TestDeriveCellState_SelfExitDerivesExitedNeverStopped(t *testing.T) {
+	specs := []intmodel.ContainerSpec{
+		{ID: "root", Root: true},
+		{ID: "work", Root: false},
+	}
+
+	cleanExit := []intmodel.ContainerStatus{
+		{ID: "root", State: intmodel.ContainerStateReady},
+		{ID: "work", State: intmodel.ContainerStateExited, ExitCode: 0},
+	}
+	if got := deriveCellStateFromNonRootContainerStatuses(specs, cleanExit); got != intmodel.CellStateExited {
+		t.Errorf("clean self-exit derived %v, want Exited (and never Stopped)", got)
+	}
+
+	crash := []intmodel.ContainerStatus{
+		{ID: "root", State: intmodel.ContainerStateReady},
+		{ID: "work", State: intmodel.ContainerStateError, ExitCode: 1},
+	}
+	if got := deriveCellStateFromNonRootContainerStatuses(specs, crash); got != intmodel.CellStateError {
+		t.Errorf("workload crash derived %v, want Error", got)
+	}
+
+	// The three terminals are mutually distinct values, so a persisted Stopped
+	// can only have come from the operator verbs.
+	if intmodel.CellStateExited == intmodel.CellStateStopped ||
+		intmodel.CellStateError == intmodel.CellStateStopped ||
+		intmodel.CellStateExited == intmodel.CellStateError {
+		t.Fatal("Exited / Error / Stopped must be three distinct CellState values")
+	}
+}
+
+// TestContainerExitedNonZero pins the failure predicate that decides the
+// terminal cell split between Exited and Error (#1206, #1267): a non-zero exit
+// code, an explicit ContainerStateError (a non-zero stopped task), or
+// ContainerStateFailed (a kukeon bring-up fault), but never a clean (code 0 /
+// ContainerStateExited) exit.
 func TestContainerExitedNonZero(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -524,12 +629,16 @@ func TestContainerExitedNonZero(t *testing.T) {
 	}{
 		{"clean_stop_is_not_a_failure",
 			intmodel.ContainerStatus{State: intmodel.ContainerStateStopped, ExitCode: 0}, false},
+		{"exited_state_is_not_a_failure",
+			intmodel.ContainerStatus{State: intmodel.ContainerStateExited, ExitCode: 0}, false},
 		{"reaped_clean_exit_is_not_a_failure",
 			intmodel.ContainerStatus{State: intmodel.ContainerStateNotCreated, ExitCode: 0}, false},
 		{"nonzero_exit_is_a_failure",
 			intmodel.ContainerStatus{State: intmodel.ContainerStateStopped, ExitCode: 1}, true},
 		{"reaped_nonzero_exit_is_a_failure",
 			intmodel.ContainerStatus{State: intmodel.ContainerStateNotCreated, ExitCode: 137}, true},
+		{"error_state_is_a_failure_even_with_zero_code",
+			intmodel.ContainerStatus{State: intmodel.ContainerStateError, ExitCode: 0}, true},
 		{"failed_state_is_a_failure_even_with_zero_code",
 			intmodel.ContainerStatus{State: intmodel.ContainerStateFailed, ExitCode: 0}, true},
 	}
@@ -767,8 +876,17 @@ func TestShouldWindDownCell(t *testing.T) {
 		{
 			name:     "fires_when_all_three_satisfied",
 			cell:     cell(specsWithWork, rootRunningStatus, true),
-			newState: intmodel.CellStateStopped,
+			newState: intmodel.CellStateExited,
 			want:     true,
+		},
+		{
+			// Error (the workload-crash terminal, #1267, inheriting #407's
+			// Failed contract) is sticky and left for the operator — the
+			// wind-down predicate must NOT fire on it (only Exited triggers).
+			name:     "blocked_on_error_state",
+			cell:     cell(specsWithWork, rootRunningStatus, true),
+			newState: intmodel.CellStateError,
+			want:     false,
 		},
 		{
 			// Issue #407: Failed cells are already torn down at the
@@ -778,6 +896,14 @@ func TestShouldWindDownCell(t *testing.T) {
 			name:     "blocked_on_failed_state_per_issue_407",
 			cell:     cell(specsWithWork, rootRunningStatus, true),
 			newState: intmodel.CellStateFailed,
+			want:     false,
+		},
+		{
+			// Stopped (operator stop/kill, #1267) is no longer a wind-down
+			// trigger — only the self-exit terminal Exited is.
+			name:     "blocked_on_operator_stopped",
+			cell:     cell(specsWithWork, rootRunningStatus, true),
+			newState: intmodel.CellStateStopped,
 			want:     false,
 		},
 		{
@@ -795,19 +921,19 @@ func TestShouldWindDownCell(t *testing.T) {
 		{
 			name:     "blocked_when_never_ready",
 			cell:     cell(specsWithWork, rootRunningStatus, false),
-			newState: intmodel.CellStateStopped,
+			newState: intmodel.CellStateExited,
 			want:     false,
 		},
 		{
 			name:     "blocked_for_kukeond_style_cell_root_only",
 			cell:     cell(specsRootOnly, []intmodel.ContainerStatus{{ID: "root", State: intmodel.ContainerStateReady}}, true),
-			newState: intmodel.CellStateStopped,
+			newState: intmodel.CellStateExited,
 			want:     false,
 		},
 		{
 			name:     "blocked_when_root_already_dead_idempotency_guard",
 			cell:     cell(specsWithWork, rootDeadStatus, true),
-			newState: intmodel.CellStateStopped,
+			newState: intmodel.CellStateExited,
 			want:     false,
 		},
 	}
@@ -820,18 +946,22 @@ func TestShouldWindDownCell(t *testing.T) {
 	}
 }
 
-// TestCellStateIsSticky locks down the issue-#407 contract that the terminal
-// Error state must be preserved across reconcile ticks. Failed is sticky;
-// every other state is re-derivable. Pairs with the auto-delete/wind-down
-// predicate tests above: together they ensure a Failed cell stays Failed
-// until the operator runs `kuke delete cell`.
+// TestCellStateIsSticky locks down the contract that the two crash/fault
+// terminals are preserved across reconcile ticks: CellStateFailed (a kukeon
+// bring-up fault, #407) and CellStateError (a workload crash, #1267). Every
+// other state — including Stopped (operator stop/kill) and Exited (clean
+// self-exit) — is re-derivable, so the `--rm` / wind-down reap paths that reach
+// Stopped via KillCell still settle to Exited on the next tick. Pairs with the
+// auto-delete/wind-down predicate tests above.
 func TestCellStateIsSticky(t *testing.T) {
 	cases := []struct {
 		state intmodel.CellState
 		want  bool
 	}{
 		{intmodel.CellStateFailed, true},
+		{intmodel.CellStateError, true},
 		{intmodel.CellStateStopped, false},
+		{intmodel.CellStateExited, false},
 		{intmodel.CellStateReady, false},
 		{intmodel.CellStatePending, false},
 		{intmodel.CellStateUnknown, false},

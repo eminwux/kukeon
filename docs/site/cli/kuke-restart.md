@@ -35,8 +35,8 @@ Plus all [global flags](kuke.md). Realm/space/stack are required (no default fal
 | State                            | Behavior                                                                                                                                                                                                                                                  |
 | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Ready`                          | Pure bounce: `StopCell` then `StartCell`. The daemon's `StartCell` re-materialises and rebuilds the cell from the lineage Config when `Status.OutOfSync` is set on a Config-lineage cell — otherwise it just starts the on-disk spec.                       |
-| `Stopped`                        | Equivalent to `kuke start <name>`. The daemon-side OutOfSync reapply also fires here, so `kuke stop` + `kuke start` produces the same end state as `kuke restart` on the same cell (#983).                                                                |
-| `Pending` / `Failed` / `Unknown` | Refused with `cell "<name>" exists in <state> state; delete it with \`kuke delete cell <name>\` before restarting`. Exit code non-zero. Restart does not reconcile a degraded cell in place.                                                                  |
+| `Stopped` / `Exited`             | Equivalent to `kuke start <name>`. `Stopped` is an operator stop/kill; `Exited` is a clean self-exit (#1267) — both restart in place. The daemon-side OutOfSync reapply also fires here, so `kuke stop` + `kuke start` produces the same end state as `kuke restart` on the same cell (#983). |
+| `Pending` / `Failed` / `Error` / `Unknown` | Refused with `cell "<name>" exists in <state> state; delete it with \`kuke delete cell <name>\` before restarting`. Exit code non-zero. Restart does not reconcile a degraded cell in place. `Error` is the #1267 workload-crash terminal. |
 
 ### OutOfSync detection
 

@@ -393,14 +393,14 @@ func (r *Exec) RefreshCell(cell intmodel.Cell) (intmodel.Cell, int, error) {
 		newStatus.State = r.deriveCellState(cell)
 	}
 
-	// Stamp the runtime-failure breadcrumb on a fresh transition to
-	// CellStateFailed (#1206), same contract as ReconcileCell. carryCellLifecycle
-	// above already copied any prior Reason/Message forward, so an
-	// already-Failed cell (e.g. a startup markCellFailed) keeps its original
-	// reason; only a Stopped/Ready → Failed transition restamps here. cell's
-	// container snapshot was populated above, so the breadcrumb resolves the
-	// failing container even though the final write target is newStatus.
-	if newStatus.State == intmodel.CellStateFailed && originalStatus.State != intmodel.CellStateFailed {
+	// Stamp the runtime workload-failure breadcrumb on a fresh transition to
+	// CellStateError (#1206, renamed from Failed in #1267), same contract as
+	// ReconcileCell. carryCellLifecycle above already copied any prior
+	// Reason/Message forward, so an already-Error cell keeps its original
+	// reason; only a fresh Ready/Exited → Error transition restamps here.
+	// cell's container snapshot was populated above, so the breadcrumb resolves
+	// the failing container even though the final write target is newStatus.
+	if newStatus.State == intmodel.CellStateError && originalStatus.State != intmodel.CellStateError {
 		newStatus.Reason, newStatus.Message = cellFailureBreadcrumb(cell)
 	}
 
@@ -609,32 +609,35 @@ func (r *Exec) refreshContainerStatus(cell intmodel.Cell, containerSpec *intmode
 //     (the legacy behavior; root *is* the workload here)
 //   - cgroup present, at least one non-root container in spec → derived
 //     from the union of non-root container task states (Ready if any
-//     non-root is active; Stopped if every non-root is Stopped/Failed/
-//     non-existent; Unknown if any non-root reads back Unknown — the
-//     defensive read-side check that pairs with #301)
+//     non-root is active; Exited if every non-root exited cleanly; Error
+//     if any non-root exited non-zero; Unknown if any non-root reads back
+//     Unknown — the defensive read-side check that pairs with #301). The
+//     derivation never yields Stopped: that label is reserved for the
+//     operator stop/kill verbs (#1267).
 //
 // Container statuses are populated up front so the derivation reads
 // them straight from the snapshot instead of re-querying containerd
 // (and so `kuke get cell` sees the same per-container view the
 // reconciler decided on).
 //
-// Wind-down side-effects: when the derivation flips to Stopped/Failed
-// and the cell has at least one non-root container in spec and the
-// root container task is still running, the reconciler kills the cell
-// so the root container shell stops too. Two flavors:
+// Wind-down side-effects: when the derivation flips to Exited and the
+// cell has at least one non-root container in spec and the root
+// container task is still running, the reconciler kills the cell so the
+// root container shell stops too (a crash → Error is sticky and left for
+// the operator, so it does not wind down). Two flavors:
 //
 //   - AutoDelete=true: autoDeleteCell runs (KillCell + DeleteCell) and
 //     the cell metadata is removed. Subsumes the per-cell
 //     `kuke run --rm` watcher.
 //   - AutoDelete=false: windDownCell runs (KillCell only). The cell
-//     metadata is preserved in Stopped state for the operator to
+//     metadata is preserved in Exited state for the operator to
 //     `kuke delete` explicitly — a long-lived `sleep infinity` root
 //     does not get to hold the cell open after every workload has
 //     exited.
 //
 // Both flavors are gated by the ReadyObserved latch so an in-flight
 // CreateCell (cgroup created, non-root containers not yet registered
-// → derivation reads Stopped from "container does not exist") is not
+// → derivation reads Exited from "container does not exist") is not
 // reaped before it ever reached Ready.
 //
 // Errors during kill/delete are returned to the caller so the loop's
@@ -677,15 +680,15 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 
 	originalStatus := cell.Status
 
-	// CellStateFailed is terminal (issue #407): once a cell has been marked
-	// Failed by a startup-path error in StartCell / StartContainer, the
-	// reconciler must keep the state sticky so a subsequent populate that
-	// reads back "no task" doesn't quietly downgrade Failed to Unknown or
-	// Stopped — and so cellStateAutoDeleteTriggers (which excludes Failed)
-	// cannot be bypassed via a re-derivation tick. Container statuses are
-	// still refreshed below so `kuke get cell -o yaml` shows the latest
-	// per-container view, but the cell-level state is left alone until the
-	// operator runs `kuke delete cell`.
+	// Sticky terminal states are preserved instead of re-derived
+	// (cellStateIsSticky): CellStateFailed (a kukeon bring-up fault, #407) and
+	// CellStateError (a workload crash, #1267). Keeping these sticky stops a
+	// subsequent populate that reads back "no task" from quietly downgrading
+	// them via a re-derivation tick — and so cellStateAutoDeleteTriggers (which
+	// excludes both) cannot be bypassed. Container statuses are still refreshed
+	// below so `kuke get cell -o yaml` shows the latest per-container view, but
+	// the cell-level state is left alone until the operator runs
+	// `kuke delete cell`.
 	if cellStateIsSticky(originalStatus.State) {
 		if err := r.populateCellContainerStatuses(&cell); err != nil {
 			r.logger.DebugContext(r.ctx, "populate container statuses failed",
@@ -775,13 +778,13 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 	cell.Status.ReadyObserved = latchReadyObserved(
 		originalStatus.ReadyObserved, originalStatus.State, newState)
 
-	// Surface the workload exit that drove a fresh runtime CellStateFailed
-	// (#1206) so `kuke get cell -o yaml` carries the failing container + exit
-	// code/signal, mirroring the startup-path breadcrumb markCellFailed
-	// writes. Only stamp on the fresh transition: an already-Failed cell is
-	// short-circuited by the cellStateIsSticky guard above and never reaches
-	// here, so its original Reason/Message is preserved.
-	if newState == intmodel.CellStateFailed && originalStatus.State != intmodel.CellStateFailed {
+	// Surface the workload exit that drove a fresh runtime CellStateError
+	// (#1206, renamed from Failed in #1267) so `kuke get cell -o yaml` carries
+	// the failing container + exit code/signal, mirroring the startup-path
+	// breadcrumb markCellFailed writes. Only stamp on the fresh transition: an
+	// already-Error cell is short-circuited by the cellStateIsSticky guard
+	// above and never reaches here, so its original Reason/Message is preserved.
+	if newState == intmodel.CellStateError && originalStatus.State != intmodel.CellStateError {
 		stampCellFailure(&cell)
 	}
 
@@ -839,6 +842,13 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 // KillCell is best-effort and idempotent (workload containers that
 // are already gone are no-ops); errors surface so the next reconcile
 // pass retries.
+//
+// KillCell stamps CellStateStopped, but the cell got here because its
+// workloads self-exited cleanly (the reconciler derived CellStateExited, the
+// only state that fires shouldWindDownCell). Stopped is non-sticky (#1267), so
+// the next reconcile tick re-derives the now-root-dead cell back to Exited —
+// the operator-stop-vs-self-exit label settles correctly without a second
+// write here.
 func (r *Exec) windDownCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcome, error) {
 	r.logger.InfoContext(r.ctx, "reconcile: winding down cell after non-root workloads exited",
 		"cell", cell.Metadata.Name,
@@ -880,31 +890,50 @@ func (r *Exec) autoDeleteCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutco
 
 // cellStateIsSticky reports whether the reconciler must preserve the cell's
 // persisted state instead of re-deriving from cgroup + container task state.
-// Currently a single state qualifies — CellStateFailed (the terminal Error
-// state introduced for issue #407). A Failed cell stays Failed across every
-// reconcile tick until the operator runs `kuke delete cell`, regardless of
-// what containerd reports for its (now-killed) containers. Extracted as a
-// pure function so the stickiness predicate is unit-testable without spinning
-// up a runner + containerd fake.
+// Two states qualify:
+//
+//   - CellStateFailed (#407): a kukeon bring-up fault. Stays Failed until the
+//     operator runs `kuke delete cell`, regardless of what containerd reports
+//     for its (now-killed) containers.
+//   - CellStateError (#1267): a workload crash. Inherits Failed's stickiness so
+//     the crashed cell is preserved with its exit code intact for the operator
+//     rather than being re-derived away on a later tick.
+//
+// CellStateStopped is deliberately NOT sticky: the `kuke run --rm` reap and the
+// non-AutoDelete wind-down both reach Stopped via KillCell, then rely on the
+// next reconcile tick re-deriving the now-terminal cell to Exited (so `--rm`
+// auto-deletes and a wound-down cell settles at the clean-exit label). Making
+// Stopped sticky would freeze those paths. The operator-stop-vs-self-exit
+// distinction is carried by the derivation never *producing* Stopped (#1267) —
+// a persisted Stopped originates only from the operator stop/kill verbs.
+//
+// Extracted as a pure function so the stickiness predicate is unit-testable
+// without spinning up a runner + containerd fake.
 func cellStateIsSticky(s intmodel.CellState) bool {
-	return s == intmodel.CellStateFailed
+	return s == intmodel.CellStateFailed ||
+		s == intmodel.CellStateError
 }
 
 // cellStateAutoDeleteTriggers returns true for the post-reconcile cell
 // states that mean "the root container is no longer running and the cell
 // has run its course successfully", which is the trigger AutoDelete cares
-// about. Excluded states:
+// about. Only CellStateExited qualifies (#1267) — a cell whose workloads all
+// exited 0 of their own accord, so `kuke run --rm` reaps a cleanly-finished
+// job. Excluded states:
 //
 //   - Unknown: a transient containerd hiccup that flips a cell to Unknown
 //     should not nuke the cell — wait for the next pass.
-//   - Failed (issue #407): the terminal Error state is reserved for
-//     startup-path failures and is deliberately sticky. `kuke run --rm`
-//     does not auto-clean a Failed cell — `--rm` only takes effect on a
-//     *successful* run that subsequently exits cleanly (i.e. Stopped).
-//     Preserving the cell on failure keeps the diagnostic surface (spec,
-//     captured logs) intact until the operator runs `kuke delete cell`.
+//   - Error (#1267, inheriting #407's Failed contract): a workload crash is
+//     sticky and preserved. `kuke run --rm` does not auto-clean it — `--rm`
+//     only reaps a *successful* run that exited cleanly (Exited). Preserving
+//     the cell on a crash keeps the diagnostic surface (spec, captured logs,
+//     exit code) intact until the operator runs `kuke delete cell`.
+//   - Failed (#407): a kukeon bring-up fault, sticky for the same reason.
+//   - Stopped (#1267): an operator-initiated stop is not a job that "ran its
+//     course" — the operator chose to interrupt it, so `--rm` leaves it for
+//     explicit `kuke delete cell`.
 func cellStateAutoDeleteTriggers(s intmodel.CellState) bool {
-	return s == intmodel.CellStateStopped
+	return s == intmodel.CellStateExited
 }
 
 // latchReadyObserved is the one-way latch the reconciler uses to decide
@@ -1041,6 +1070,8 @@ func restartPolicyPermitsContainerReap(policy string, exitCode int) bool {
 func containerStateIsTerminal(s intmodel.ContainerState) bool {
 	switch s {
 	case intmodel.ContainerStateStopped,
+		intmodel.ContainerStateExited,
+		intmodel.ContainerStateError,
 		intmodel.ContainerStateFailed,
 		intmodel.ContainerStateNotCreated:
 		return true
@@ -1066,6 +1097,8 @@ func rootContainerStillRunning(rootID string, statuses []intmodel.ContainerStatu
 			intmodel.ContainerStatePausing:
 			return true
 		case intmodel.ContainerStateStopped,
+			intmodel.ContainerStateExited,
+			intmodel.ContainerStateError,
 			intmodel.ContainerStateFailed,
 			intmodel.ContainerStateNotCreated,
 			intmodel.ContainerStateUnknown:
@@ -1125,15 +1158,18 @@ func (r *Exec) deriveCellState(cell intmodel.Cell) intmodel.CellState {
 // stopped" here.
 //
 // Once every non-root workload is terminal, the exit triple decides between
-// the two terminal cell states (#1206): a workload that exited non-zero (or
-// landed in ContainerStateFailed) settles the cell in CellStateFailed so a
-// crash is distinguishable from a clean completion, which stays
-// CellStateStopped. ExitCode is preserved across task reaping by
-// populateCellContainerStatuses, so a failed-then-reaped (NotCreated)
-// workload still carries its non-zero code here. CellStateFailed is sticky
-// and excluded from auto-delete / wind-down (cellStateIsSticky,
-// cellStateAutoDeleteTriggers), so the crashed cell is preserved with its
-// exit code intact for the operator instead of being reaped to Stopped.
+// the two self-observed terminal cell states (#1206, refined by #1267): a
+// workload that exited non-zero (or landed in ContainerStateError /
+// ContainerStateFailed) settles the cell in CellStateError so a crash is
+// distinguishable from a clean completion, which settles CellStateExited.
+// Neither path yields CellStateStopped — that label is reserved for the
+// operator stop/kill verbs, so a clean self-exit (Exited) stays distinct from
+// an operator stop (Stopped). ExitCode is preserved across task reaping by
+// populateCellContainerStatuses, so a failed-then-reaped (NotCreated) workload
+// still carries its non-zero code here. CellStateError is sticky and excluded
+// from auto-delete / wind-down (cellStateIsSticky, cellStateAutoDeleteTriggers),
+// so the crashed cell is preserved with its exit code intact for the operator
+// instead of being reaped.
 func deriveCellStateFromNonRootContainerStatuses(
 	specs []intmodel.ContainerSpec,
 	statuses []intmodel.ContainerStatus,
@@ -1163,6 +1199,8 @@ func deriveCellStateFromNonRootContainerStatuses(
 		case intmodel.ContainerStateUnknown:
 			anyUnknown = true
 		case intmodel.ContainerStateStopped,
+			intmodel.ContainerStateExited,
+			intmodel.ContainerStateError,
 			intmodel.ContainerStateFailed,
 			intmodel.ContainerStateNotCreated:
 			// terminal — does not contribute to active. A reaped/absent
@@ -1186,21 +1224,32 @@ func deriveCellStateFromNonRootContainerStatuses(
 	if anyUnknown {
 		return intmodel.CellStateUnknown
 	}
+	// Every non-root workload is terminal. A non-zero exit among them settles
+	// the cell in CellStateError (a workload crash); an all-clean set settles
+	// CellStateExited (a clean self-exit). The reconciler never yields
+	// CellStateStopped here — Stopped is reserved for operator `kuke stop`/
+	// `kill` (#1267). Note this is the derived label only: a persisted Stopped
+	// is non-sticky, so the next tick re-derives an operator-stopped cell to
+	// Exited — durable operator-stop preservation is deferred to #1268.
 	if anyFailed {
-		return intmodel.CellStateFailed
+		return intmodel.CellStateError
 	}
-	return intmodel.CellStateStopped
+	return intmodel.CellStateExited
 }
 
 // containerExitedNonZero reports whether a terminal container's observed exit
-// indicates a workload failure rather than a clean completion (#1206): a
-// non-zero exit code (the common case — populateCellContainerStatuses
-// preserves it across task reaping) or the explicit ContainerStateFailed
-// observation. A clean exit (code 0) — including a never-started container
-// reaped to NotCreated with a zero code — is not a failure. Callers must only
-// consult this for containers already known to be terminal.
+// indicates a workload failure rather than a clean completion (#1206, #1267):
+// a non-zero exit code (the common case — populateCellContainerStatuses
+// preserves it across task reaping), the explicit ContainerStateError
+// observation (a stopped task whose code was non-zero), or ContainerStateFailed
+// (kukeon's own container bring-up fault). A clean exit (code 0) — including a
+// never-started container reaped to NotCreated with a zero code, or an explicit
+// ContainerStateExited — is not a failure. Callers must only consult this for
+// containers already known to be terminal.
 func containerExitedNonZero(status intmodel.ContainerStatus) bool {
-	return status.State == intmodel.ContainerStateFailed || status.ExitCode != 0
+	return status.State == intmodel.ContainerStateFailed ||
+		status.State == intmodel.ContainerStateError ||
+		status.ExitCode != 0
 }
 
 // hasNonRootContainerSpec reports whether the cell has at least one
@@ -1220,9 +1269,10 @@ func hasNonRootContainerSpec(specs []intmodel.ContainerSpec) bool {
 // cgroup-only cell counts as Ready by cgroup existence).
 //
 // When the root has terminally exited, the exit triple chooses between the
-// two terminal cell states the same way the non-root path does (#1206): a
-// non-zero root exit settles the cell Failed (preserving the crash + exit
-// code), a clean exit stays Stopped. The exit triple is read from the
+// two self-observed terminal cell states the same way the non-root path does
+// (#1206, #1267): a non-zero root exit settles the cell Error (preserving the
+// crash + exit code), a clean exit settles Exited. Neither yields Stopped —
+// that label is reserved for the operator stop/kill verbs. The exit triple is read from the
 // container-status snapshot populateCellContainerStatuses just wrote (both
 // callers populate before deriving), which preserves the exit code across
 // task reaping.
@@ -1244,12 +1294,14 @@ func (r *Exec) deriveCellStateFromRootContainer(cell intmodel.Cell) intmodel.Cel
 		intmodel.ContainerStatePausing:
 		return intmodel.CellStateReady
 	case intmodel.ContainerStateStopped,
+		intmodel.ContainerStateExited,
+		intmodel.ContainerStateError,
 		intmodel.ContainerStateFailed,
 		intmodel.ContainerStateNotCreated:
 		if rootContainerExitedNonZero(rootSpec.ID, cell.Status.Containers) {
-			return intmodel.CellStateFailed
+			return intmodel.CellStateError
 		}
-		return intmodel.CellStateStopped
+		return intmodel.CellStateExited
 	default:
 		return intmodel.CellStateUnknown
 	}
@@ -1295,12 +1347,12 @@ func stampCellFailure(cell *intmodel.Cell) {
 }
 
 // describeCellFailure builds the operator-facing Status.Message for a cell that
-// derived CellStateFailed from a workload exit (#1206), naming the first
-// failing container and its exit code/signal. Mirrors deriveCellState's
-// dispatch so the reported container matches the one that drove the state:
-// non-root workloads for cells that have them, otherwise the root. Returns ""
-// when no failing container is found (defensive — callers only invoke this
-// after derivation returned Failed).
+// derived CellStateError from a workload exit (#1206, renamed from Failed in
+// #1267), naming the first failing container and its exit code/signal. Mirrors
+// deriveCellState's dispatch so the reported container matches the one that
+// drove the state: non-root workloads for cells that have them, otherwise the
+// root. Returns "" when no failing container is found (defensive — callers only
+// invoke this after derivation returned Error).
 func describeCellFailure(cell intmodel.Cell) string {
 	statusByID := make(map[string]intmodel.ContainerStatus, len(cell.Status.Containers))
 	for i := range cell.Status.Containers {

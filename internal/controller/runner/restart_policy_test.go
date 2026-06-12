@@ -267,8 +267,9 @@ func TestGetContainerObservation_PopulatesExitCode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetContainerObservation: unexpected error: %v", err)
 	}
-	if obs.State != intmodel.ContainerStateStopped {
-		t.Errorf("GetContainerObservation State = %v, want Stopped", obs.State)
+	// ExitStatus 42 is non-zero, so the stopped task maps to Error (#1267).
+	if obs.State != intmodel.ContainerStateError {
+		t.Errorf("GetContainerObservation State = %v, want Error", obs.State)
 	}
 	if obs.ExitCode != 42 {
 		t.Errorf(

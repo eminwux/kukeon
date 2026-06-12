@@ -210,7 +210,10 @@ func TestStackState_StringRoundTrip(t *testing.T) {
 }
 
 func TestCellState_StringRoundTrip(t *testing.T) {
-	for _, s := range []CellState{CellStatePending, CellStateReady, CellStateStopped, CellStateFailed, CellStateUnknown} {
+	for _, s := range []CellState{
+		CellStatePending, CellStateReady, CellStateStopped, CellStateFailed, CellStateUnknown,
+		CellStateExited, CellStateError, // #1267
+	} {
 		out, marshalErr := json.Marshal(s)
 		if marshalErr != nil {
 			t.Fatalf("json.Marshal(%v): %v", s, marshalErr)
@@ -229,6 +232,7 @@ func TestContainerState_StringRoundTrip(t *testing.T) {
 	for _, s := range []ContainerState{
 		ContainerStatePending, ContainerStateReady, ContainerStateStopped,
 		ContainerStatePaused, ContainerStatePausing, ContainerStateFailed, ContainerStateUnknown,
+		ContainerStateNotCreated, ContainerStateExited, ContainerStateError, // #1267
 	} {
 		out, marshalErr := json.Marshal(s)
 		if marshalErr != nil {

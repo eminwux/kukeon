@@ -62,13 +62,16 @@ See [Manifest Reference → Container](../manifests/container.md) for the comple
 
 | State     | What it means                                                   |
 | --------- | --------------------------------------------------------------- |
-| `Pending` | Container metadata exists; containerd container not yet created |
-| `Ready`   | Task is running                                                 |
-| `Stopped` | Task has exited                                                 |
-| `Paused`  | Task is paused (cgroup-frozen)                                  |
-| `Pausing` | Task is in the process of being paused                          |
-| `Failed`  | Task exited non-zero or was signalled                           |
-| `Unknown` | Daemon can't determine state                                    |
+| `Pending`    | Container metadata exists; containerd container not yet created |
+| `Ready`      | Task is running                                                 |
+| `Stopped`    | Task record exists but its task is gone, with no exit info (e.g. reaped post-reboot) |
+| `Exited`     | Task exited 0 — a clean completion (#1267)                      |
+| `Error`      | Task exited non-zero — a crash (#1267)                          |
+| `Paused`     | Task is paused (cgroup-frozen)                                  |
+| `Pausing`    | Task is in the process of being paused                          |
+| `Failed`     | A kukeon container bring-up fault (reserved for kukeon's own faults — a non-zero task exit is `Error`) |
+| `NotCreated` | No containerd record at all                                    |
+| `Unknown`    | Daemon can't determine state                                    |
 
 ## Operations
 

@@ -502,6 +502,16 @@ const (
 	// gone). Appended last to keep the ordinals in lockstep with the internal
 	// modelhub.ContainerState enum, which scheme.go converts by direct int cast.
 	ContainerStateNotCreated
+	// ContainerStateExited is a containerd-stopped task that exited 0 — a
+	// clean completion (#1267). Mirrors the cell-level CellStateExited split:
+	// ContainerStateStopped no longer conflates a clean exit with a crash.
+	// Appended last to keep the ordinals in lockstep with the internal enum.
+	ContainerStateExited
+	// ContainerStateError is a containerd-stopped task that exited non-zero —
+	// a workload crash (#1267). Distinct from ContainerStateFailed, which
+	// stays reserved for kukeon's own container bring-up failures. Appended
+	// last (after ContainerStateExited) for the same ordinal-lockstep reason.
+	ContainerStateError
 )
 
 func (c *ContainerState) String() string {
@@ -522,6 +532,10 @@ func (c *ContainerState) String() string {
 		return StateUnknownStr
 	case ContainerStateNotCreated:
 		return StateNotCreatedStr
+	case ContainerStateExited:
+		return StateExitedStr
+	case ContainerStateError:
+		return StateErrorStr
 	}
 	return StateUnknownStr
 }

@@ -193,4 +193,16 @@ const (
 	CellStateStopped
 	CellStateFailed
 	CellStateUnknown
+	// CellStateExited is the clean self-exit terminal: every workload in the
+	// cell exited 0 of its own accord (#1267). Distinct from CellStateStopped
+	// (operator `kuke stop`/`kill`) and from CellStateError (a workload
+	// crashed). Appended last to keep the ordinals in lockstep with the
+	// v1beta1 CellState enum, which scheme.go converts by direct int cast.
+	CellStateExited
+	// CellStateError is the workload-crash terminal: at least one workload
+	// exited non-zero (#1267). Inherits CellStateFailed's sticky / no-auto-
+	// delete behavior, but reserves CellStateFailed for kukeon's own bring-up
+	// failures. Appended last (after CellStateExited) for the same ordinal-
+	// lockstep reason.
+	CellStateError
 )
