@@ -223,3 +223,40 @@ func TestVersionCmdRun_MismatchStderr(t *testing.T) {
 		t.Errorf("stderr should contain daemon version; got: %q", errBuf.String())
 	}
 }
+
+// TestVersionCmdRun_StrictMismatchNoUsage verifies that the --strict error path
+// emits neither cobra's usage/help block nor its duplicate "Error:" line, leaving
+// only the command's own "Warning: version mismatch" on stderr. Regression guard
+// for the installer skew handler (scripts/install.sh handle_running_daemon), which
+// captures `kuke version --strict 2>&1` and re-prints it verbatim.
+func TestVersionCmdRun_StrictMismatchNoUsage(t *testing.T) {
+	cmd := version.NewVersionCmd()
+	outBuf := &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
+	cmd.SetOut(outBuf)
+	cmd.SetErr(errBuf)
+	ctx := context.WithValue(context.Background(), version.MockDaemonClientKey{}, &fakeDaemonClient{
+		pingVersionFn: func(_ context.Context) (string, error) {
+			return "dummy", nil
+		},
+	})
+	cmd.SetContext(ctx)
+	cmd.SetArgs([]string{"--strict"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error on --strict mismatch, got nil")
+	}
+
+	// The command's own warning must still be present.
+	if !strings.Contains(errBuf.String(), "Warning: version mismatch") {
+		t.Errorf("expected version mismatch warning on stderr; got: %q", errBuf.String())
+	}
+	// No cobra usage/help dump (SilenceUsage) and no duplicate "Error:" line
+	// (SilenceErrors).
+	for _, unwanted := range []string{"Usage:", "Global Flags:", "help for version", "Error:"} {
+		if strings.Contains(errBuf.String(), unwanted) {
+			t.Errorf("stderr should not contain %q on --strict error path; got: %q", unwanted, errBuf.String())
+		}
+	}
+}
