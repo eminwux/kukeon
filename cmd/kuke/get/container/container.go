@@ -475,6 +475,10 @@ func containerStateToString(state v1beta1.ContainerState) string {
 		return "Failed"
 	case v1beta1.ContainerStateNotCreated:
 		return "NotCreated"
+	case v1beta1.ContainerStateExited:
+		return "Exited"
+	case v1beta1.ContainerStateError:
+		return "Error"
 	default:
 		return "Unknown"
 	}

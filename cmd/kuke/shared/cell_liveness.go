@@ -76,11 +76,14 @@ func GuardCellTaskLiveness(get kukeonv1.GetCellResult, cellName string) error {
 			cellName,
 			cellName,
 		)
-	case v1beta1.CellStateStopped:
+	case v1beta1.CellStateStopped, v1beta1.CellStateExited:
+		// Stopped (operator stop/kill) and Exited (clean self-exit, #1267) both
+		// leave no live work container — point the operator at `kuke start`.
+		// A crashed cell (Error) falls through to the delete-then-rerun default.
 		return fmt.Errorf(
-			"cell %q is in state Stopped (no work container is running); "+
+			"cell %q is in state %s (no work container is running); "+
 				"start it first with `kuke start %s`",
-			cellName, cellName,
+			cellName, get.Cell.Status.State.String(), cellName,
 		)
 	default:
 		return fmt.Errorf(

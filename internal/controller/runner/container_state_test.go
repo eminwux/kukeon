@@ -156,17 +156,21 @@ func TestGetContainerState_TransientErrorStaysUnknown(t *testing.T) {
 	}
 }
 
-// TestReconcileCell_PostReboot_TransitionsToStopped is the headline #543
+// TestReconcileCell_PostReboot_TransitionsToExited is the headline #543
 // end-to-end: a cell that was Ready before a host reboot (latch already
-// closed, containerd container records survive) must transition to
-// Stopped within one reconcile pass once the daemon comes back, even
+// closed, containerd container records survive) must transition to a
+// terminal state within one reconcile pass once the daemon comes back, even
 // though the cgroup is gone (tmpfs-backed cgroups don't persist across
 // reboot). Without the Layer 1 fix (drop the cgroup-existence gate
 // around deriveCellState) AND the Layer 2 fix (TaskStatus failing with
-// ErrTaskNotFound after ExistsContainer succeeded ⇒ Stopped, not
+// ErrTaskNotFound after ExistsContainer succeeded ⇒ Stopped sentinel, not
 // Unknown), the cell stays parked at Unknown and the operator must
-// manually `kuke purge cell <name>` for each orphan.
-func TestReconcileCell_PostReboot_TransitionsToStopped(t *testing.T) {
+// manually `kuke purge cell <name>` for each orphan. Post-#1267 the
+// reboot-wiped tasks (no exit info ⇒ exit 0) derive CellStateExited rather
+// than the old Stopped label — Stopped is now reserved for operator stop/
+// kill — but the auto-delete/wind-down eligibility this test protects is
+// unchanged (Exited is the new auto-delete trigger).
+func TestReconcileCell_PostReboot_TransitionsToExited(t *testing.T) {
 	realm, space, stack, cellName := "default", "kukeon", "kukeon", "web"
 	rootID := "root"
 	workloadID := "workload"
@@ -220,12 +224,12 @@ func TestReconcileCell_PostReboot_TransitionsToStopped(t *testing.T) {
 	}
 	if !outcome.Updated {
 		t.Errorf(
-			"ReconcileCell outcome.Updated = false; want true (post-reboot state transition Ready → Stopped must be reported as an update)",
+			"ReconcileCell outcome.Updated = false; want true (post-reboot state transition Ready → Exited must be reported as an update)",
 		)
 	}
-	if updatedCell.Status.State != intmodel.CellStateStopped {
+	if updatedCell.Status.State != intmodel.CellStateExited {
 		t.Errorf(
-			"ReconcileCell cell.Status.State = %v, want Stopped (post-reboot cells must transition out of Unknown so cellStateAutoDeleteTriggers and shouldWindDownCell become eligible)",
+			"ReconcileCell cell.Status.State = %v, want Exited (post-reboot cells must transition out of Unknown so cellStateAutoDeleteTriggers and shouldWindDownCell become eligible)",
 			updatedCell.Status.State,
 		)
 	}
@@ -301,7 +305,7 @@ func seedPostRebootCell(
 // `kuke status`'s state-consistency check is silently bypassed.
 //
 // The complement (re-set to true once the cgroup re-materializes) is
-// already covered by TestReconcileCell_PostReboot_TransitionsToStopped
+// already covered by TestReconcileCell_PostReboot_TransitionsToExited
 // taking the cgroup-present branch elsewhere; here we exercise the
 // true → false direction the bug allowed to leak.
 func TestReconcileCell_PostReboot_FalsifiesCgroupReady(t *testing.T) {

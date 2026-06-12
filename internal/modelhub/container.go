@@ -329,6 +329,16 @@ const (
 	// gone). Appended last to keep the ordinals in lockstep with the v1beta1
 	// ContainerState enum, which scheme.go converts by direct int cast.
 	ContainerStateNotCreated
+	// ContainerStateExited is a containerd-stopped task that exited 0 — a
+	// clean completion (#1267). Mirrors the cell-level CellStateExited split:
+	// ContainerStateStopped no longer conflates a clean exit with a crash.
+	// Appended last to keep the ordinals in lockstep with the v1beta1 enum.
+	ContainerStateExited
+	// ContainerStateError is a containerd-stopped task that exited non-zero —
+	// a workload crash (#1267). Distinct from ContainerStateFailed, which
+	// stays reserved for kukeon's own container bring-up failures. Appended
+	// last (after ContainerStateExited) for the same ordinal-lockstep reason.
+	ContainerStateError
 )
 
 // RestartPolicy values for ContainerSpec.RestartPolicy. Empty/unset is

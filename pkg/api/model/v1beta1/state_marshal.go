@@ -272,6 +272,10 @@ func parseCellState(in string, out *CellState) error {
 		*out = CellStateFailed
 	case StateUnknownStr:
 		*out = CellStateUnknown
+	case StateExitedStr:
+		*out = CellStateExited
+	case StateErrorStr:
+		*out = CellStateError
 	default:
 		return fmt.Errorf("cell state: unknown label %q", in)
 	}
@@ -280,7 +284,7 @@ func parseCellState(in string, out *CellState) error {
 
 func assignCellStateInt(i int, out *CellState) error {
 	v := CellState(i)
-	if v < CellStatePending || v > CellStateUnknown {
+	if v < CellStatePending || v > CellStateError {
 		return fmt.Errorf("cell state: int %d out of range", i)
 	}
 	*out = v
@@ -341,6 +345,10 @@ func parseContainerState(in string, out *ContainerState) error {
 		*out = ContainerStateUnknown
 	case StateNotCreatedStr:
 		*out = ContainerStateNotCreated
+	case StateExitedStr:
+		*out = ContainerStateExited
+	case StateErrorStr:
+		*out = ContainerStateError
 	default:
 		return fmt.Errorf("container state: unknown label %q", in)
 	}
@@ -349,7 +357,7 @@ func parseContainerState(in string, out *ContainerState) error {
 
 func assignContainerStateInt(i int, out *ContainerState) error {
 	v := ContainerState(i)
-	if v < ContainerStatePending || v > ContainerStateNotCreated {
+	if v < ContainerStatePending || v > ContainerStateError {
 		return fmt.Errorf("container state: int %d out of range", i)
 	}
 	*out = v
