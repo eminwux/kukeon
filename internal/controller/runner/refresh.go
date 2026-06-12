@@ -899,6 +899,14 @@ func (r *Exec) autoDeleteCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutco
 //     the crashed cell is preserved with its exit code intact for the operator
 //     rather than being re-derived away on a later tick.
 //
+// Stickiness is a *derivation* contract, not a restart gate: it only stops the
+// background reconcile loop from re-deriving the persisted state away. An
+// operator-initiated restart (`kuke run`/`restart`/`start` -> controller.StartCell
+// -> runner.RecreateCell/StartCell) drives the cell straight to Ready under the
+// per-cell lock the reconciler also takes, so a sticky Error/Failed cell is
+// terminal-for-derivation but still operator-restartable (#1268). markCellReady
+// then clears the failure breadcrumb on that transition.
+//
 // CellStateStopped is deliberately NOT sticky: the `kuke run --rm` reap and the
 // non-AutoDelete wind-down both reach Stopped via KillCell, then rely on the
 // next reconcile tick re-deriving the now-terminal cell to Exited (so `--rm`
@@ -1118,6 +1126,15 @@ func rootContainerStillRunning(rootID string, statuses []intmodel.ContainerStatu
 func markCellReady(cell *intmodel.Cell) {
 	cell.Status.State = intmodel.CellStateReady
 	cell.Status.ReadyObserved = true
+	// A successful Ready transition supersedes any prior failure breadcrumb
+	// (WorkloadFailed from a runtime crash, or StartCellFailed /
+	// CreateCellFailed / RecreateCellFailed from a bring-up fault). Clearing it
+	// here means an operator restart of an Error/Failed cell lands Ready with a
+	// clean Status.Reason/Message instead of a stale crash record — every
+	// runner start/recreate path funnels through startCellLocked -> markCellReady,
+	// so this is the single point that owns the clear (#1268).
+	cell.Status.Reason = ""
+	cell.Status.Message = ""
 }
 
 // deriveCellState dispatches between the two derivation strategies

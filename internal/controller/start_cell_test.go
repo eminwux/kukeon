@@ -46,7 +46,7 @@ func TestStartCell_SuccessfulStart(t *testing.T) {
 			stackName: "test-stack",
 			setupRunner: func(f *fakeRunner) {
 				existingCell := buildTestCell("test-cell", "test-realm", "test-space", "test-stack")
-				existingCell.Status.State = intmodel.CellStatePending
+				existingCell.Status.State = intmodel.CellStateStopped
 				existingCell.Spec.Containers = []intmodel.ContainerSpec{
 					{ID: "container1", Image: "alpine:latest"},
 					{ID: "container2", Image: "alpine:latest"},
@@ -93,7 +93,7 @@ func TestStartCell_SuccessfulStart(t *testing.T) {
 			stackName: "test-stack",
 			setupRunner: func(f *fakeRunner) {
 				existingCell := buildTestCell("test-cell", "test-realm", "test-space", "test-stack")
-				existingCell.Status.State = intmodel.CellStatePending
+				existingCell.Status.State = intmodel.CellStateStopped
 				existingCell.Spec.Containers = []intmodel.ContainerSpec{}
 				// Mock GetCell (called by validateAndGetCell via controller.GetCell)
 				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
@@ -314,7 +314,11 @@ func TestStartCell_ReadyStateValidation(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:      "cell in Pending state can be started",
+			// #1268: Pending is genuinely unrecoverable (a create that never
+			// completed). StartCell — the single funnel for kuke start/run/restart
+			// — refuses it with the delete-then-rerun pointer so all three verbs
+			// agree (previously kuke start had no such guard and tried to start).
+			name:      "cell in Pending state is rejected with delete pointer",
 			cellName:  "pending-cell",
 			realmName: "test-realm",
 			spaceName: "test-space",
@@ -334,7 +338,100 @@ func TestStartCell_ReadyStateValidation(t *testing.T) {
 				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
 					return true, nil
 				}
+			},
+			wantErr:     true,
+			errContains: "delete it with `kuke delete cell pending-cell` before restarting",
+		},
+		{
+			// #1268: Unknown (transient containerd misread) is rejected alongside
+			// Pending, matching the run/restart CLI guards.
+			name:      "cell in Unknown state is rejected with delete pointer",
+			cellName:  "unknown-cell",
+			realmName: "test-realm",
+			spaceName: "test-space",
+			stackName: "test-stack",
+			setupRunner: func(f *fakeRunner) {
+				existingCell := buildTestCell("unknown-cell", "test-realm", "test-space", "test-stack")
+				existingCell.Status.State = intmodel.CellStateUnknown
+				existingCell.Spec.Containers = []intmodel.ContainerSpec{
+					{ID: "container1", Image: "alpine:latest"},
+				}
+				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+					return existingCell, nil
+				}
+				f.ExistsCgroupFn = func(_ any) (bool, error) {
+					return true, nil
+				}
+				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
+					return true, nil
+				}
+			},
+			wantErr:     true,
+			errContains: "delete it with `kuke delete cell unknown-cell` before restarting",
+		},
+		{
+			// #1268: Error (workload crash, intact container records) re-runs via
+			// the plain StartCell path — no recreate needed.
+			name:      "cell in Error state can be started",
+			cellName:  "error-cell",
+			realmName: "test-realm",
+			spaceName: "test-space",
+			stackName: "test-stack",
+			setupRunner: func(f *fakeRunner) {
+				existingCell := buildTestCell("error-cell", "test-realm", "test-space", "test-stack")
+				existingCell.Status.State = intmodel.CellStateError
+				existingCell.Spec.Containers = []intmodel.ContainerSpec{
+					{ID: "container1", Image: "alpine:latest"},
+				}
+				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+					return existingCell, nil
+				}
+				f.ExistsCgroupFn = func(_ any) (bool, error) {
+					return true, nil
+				}
+				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
+					return true, nil
+				}
 				f.StartCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
+				}
+				f.RecreateCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+					return intmodel.Cell{}, errors.New("Error must not route through RecreateCell")
+				}
+				f.UpdateCellMetadataFn = func(_ intmodel.Cell) error {
+					return nil
+				}
+			},
+			wantErr: false,
+		},
+		{
+			// #1268: Failed (kukeon bring-up fault, possibly half-created records)
+			// is recovered through RecreateCell, not a plain StartCell.
+			name:      "cell in Failed state routes through RecreateCell",
+			cellName:  "failed-cell",
+			realmName: "test-realm",
+			spaceName: "test-space",
+			stackName: "test-stack",
+			setupRunner: func(f *fakeRunner) {
+				existingCell := buildTestCell("failed-cell", "test-realm", "test-space", "test-stack")
+				existingCell.Status.State = intmodel.CellStateFailed
+				existingCell.Spec.Containers = []intmodel.ContainerSpec{
+					{ID: "container1", Image: "alpine:latest"},
+				}
+				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+					return existingCell, nil
+				}
+				f.ExistsCgroupFn = func(_ any) (bool, error) {
+					return true, nil
+				}
+				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
+					return true, nil
+				}
+				f.StartCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+					return intmodel.Cell{}, errors.New("Failed must route through RecreateCell, not StartCell")
+				}
+				f.RecreateCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
 					cell.Status.State = intmodel.CellStateReady
 					return cell, nil
 				}

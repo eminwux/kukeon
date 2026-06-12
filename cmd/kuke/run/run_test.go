@@ -678,71 +678,15 @@ func TestRun_ExistingCell_RecordedReady_TaskGone_Refuses(t *testing.T) {
 	}
 }
 
-func TestRun_ExistingCell_MatchingSpec_Stopped_StartsAndAttaches(t *testing.T) {
+func TestRun_ExistingCell_TerminalStates_StartsAndAttaches(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
-	// Cell exists with matching spec but is Stopped. Run must call StartCell
-	// (not CreateCell — that was an unsafe re-entry per #630) and then attach.
-	existing := v1beta1.CellDoc{
-		Metadata: v1beta1.CellMetadata{Name: "my-cell"},
-		Spec: v1beta1.CellSpec{
-			RealmID: "my-realm",
-			SpaceID: "my-space",
-			StackID: "my-stack",
-			Containers: []v1beta1.ContainerSpec{
-				{
-					ID:      "root",
-					Root:    true,
-					Image:   "registry.eminwux.com/busybox:latest",
-					Command: "sleep",
-					Args:    []string{"3600"},
-				},
-				{
-					ID:      "work",
-					Image:   "registry.eminwux.com/busybox:latest",
-					Command: "sleep",
-					Args:    []string{"3600"},
-				},
-			},
-		},
-		Status: v1beta1.CellStatus{State: v1beta1.CellStateStopped},
-	}
-	fc := &fakeClient{
-		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
-			return kukeonv1.GetCellResult{
-				Cell:                existing,
-				MetadataExists:      true,
-				CgroupExists:        true,
-				RootContainerExists: true,
-			}, nil
-		},
-		startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
-			return kukeonv1.StartCellResult{Cell: doc, Started: true}, nil
-		},
-	}
-	cmd, out := newCmd(t, fc)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-d"})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if fc.createCalls != 0 {
-		t.Fatalf("CreateCell calls=%d want 0 (Stopped must start, not re-create)", fc.createCalls)
-	}
-	if fc.startCalls != 1 {
-		t.Fatalf("StartCell calls=%d want 1 (Stopped must start)", fc.startCalls)
-	}
-	if !strings.Contains(out.String(), "  - containers: started") {
-		t.Errorf("output missing 'containers: started' marker:\n%s", out.String())
-	}
-}
-
-func TestRun_ExistingCell_MatchingSpec_ErrorPartial_Refuses(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	// A cell in an error / partial state has no clean start path. Run must
-	// refuse with a `kuke delete cell <name>` pointer (parity with the `-c`
-	// identity contract in #625) rather than re-create or start.
+	// Cell exists with matching spec but is in a terminal/degraded state. Run
+	// must call StartCell (not CreateCell — that was an unsafe re-entry per #630)
+	// and then attach. Stopped/Exited/Error re-run from intact records; Failed
+	// (kukeon bring-up fault) is recovered daemon-side via a recreate-style path
+	// reached through the same StartCell RPC (#1268). All four route identically
+	// from the CLI's perspective: a single StartCell call, no CreateCell.
 	base := v1beta1.CellDoc{
 		Metadata: v1beta1.CellMetadata{Name: "my-cell"},
 		Spec: v1beta1.CellSpec{
@@ -771,7 +715,82 @@ func TestRun_ExistingCell_MatchingSpec_ErrorPartial_Refuses(t *testing.T) {
 		name  string
 		state v1beta1.CellState
 	}{
+		{"stopped", v1beta1.CellStateStopped},
+		{"exited", v1beta1.CellStateExited},
+		{"error", v1beta1.CellStateError},
 		{"failed", v1beta1.CellStateFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+			existing := base
+			existing.Status = v1beta1.CellStatus{State: tc.state}
+			fc := &fakeClient{
+				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+					return kukeonv1.GetCellResult{
+						Cell:                existing,
+						MetadataExists:      true,
+						CgroupExists:        true,
+						RootContainerExists: true,
+					}, nil
+				},
+				startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+					return kukeonv1.StartCellResult{Cell: doc, Started: true}, nil
+				},
+			}
+			cmd, out := newCmd(t, fc)
+			cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-d"})
+
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			if fc.createCalls != 0 {
+				t.Fatalf("CreateCell calls=%d want 0 (%s must start, not re-create)", fc.createCalls, tc.state.String())
+			}
+			if fc.startCalls != 1 {
+				t.Fatalf("StartCell calls=%d want 1 (%s must start)", fc.startCalls, tc.state.String())
+			}
+			if !strings.Contains(out.String(), "  - containers: started") {
+				t.Errorf("output missing 'containers: started' marker:\n%s", out.String())
+			}
+		})
+	}
+}
+
+func TestRun_ExistingCell_MatchingSpec_ErrorPartial_Refuses(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	// A cell in a genuinely-unrecoverable / mid-transition state (Pending,
+	// Unknown) has no clean start path. Run must refuse with a `kuke delete cell
+	// <name>` pointer rather than re-create or start. Failed/Error are no longer
+	// refused (#1268) — see TestRun_ExistingCell_TerminalStates_StartsAndAttaches.
+	base := v1beta1.CellDoc{
+		Metadata: v1beta1.CellMetadata{Name: "my-cell"},
+		Spec: v1beta1.CellSpec{
+			RealmID: "my-realm",
+			SpaceID: "my-space",
+			StackID: "my-stack",
+			Containers: []v1beta1.ContainerSpec{
+				{
+					ID:      "root",
+					Root:    true,
+					Image:   "registry.eminwux.com/busybox:latest",
+					Command: "sleep",
+					Args:    []string{"3600"},
+				},
+				{
+					ID:      "work",
+					Image:   "registry.eminwux.com/busybox:latest",
+					Command: "sleep",
+					Args:    []string{"3600"},
+				},
+			},
+		},
+	}
+
+	for _, tc := range []struct {
+		name  string
+		state v1beta1.CellState
+	}{
 		{"pending", v1beta1.CellStatePending},
 		{"unknown", v1beta1.CellStateUnknown},
 	} {
@@ -2840,7 +2859,12 @@ func TestRun_FromConfig_LiveStoppedCell_StartsThenAttaches(t *testing.T) {
 	}
 }
 
-func TestRun_FromConfig_LiveFailedCell_RefusesWithDeletePointer(t *testing.T) {
+// TestRun_FromConfig_LiveFailedCell_StartsThenAttaches pins the #1268 contract:
+// a Failed live cell materialised from a config is now operator-restartable
+// rather than refused. From the CLI's view it routes through StartCell (the
+// daemon recovers a Failed cell via a recreate-style path); no delete-then-rerun
+// pointer, no CreateCell re-entry.
+func TestRun_FromConfig_LiveFailedCell_StartsThenAttaches(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	fc := &fakeClient{
@@ -2855,19 +2879,24 @@ func TestRun_FromConfig_LiveFailedCell_RefusesWithDeletePointer(t *testing.T) {
 			live.Status.State = v1beta1.CellStateFailed
 			return kukeonv1.GetCellResult{Cell: live, MetadataExists: true}, nil
 		},
+		startCellFn: func(v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+			return kukeonv1.StartCellResult{Started: true}, nil
+		},
 	}
 	cmd, _ := newCmd(t, fc)
 	cmd.SetArgs([]string{"prod", "--realm", "cfg-realm", "-d"})
 
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatalf("Execute err=nil want refusal on Failed state")
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
 	}
-	if !strings.Contains(err.Error(), "kuke delete cell prod") {
-		t.Errorf("err=%q want `kuke delete cell prod` pointer", err)
+	if fc.createCalls != 0 {
+		t.Errorf("CreateCell calls=%d want 0 (Failed cell recovers via StartCell)", fc.createCalls)
 	}
-	if fc.createCalls != 0 || fc.startCalls != 0 {
-		t.Errorf("CreateCell=%d StartCell=%d want both 0", fc.createCalls, fc.startCalls)
+	if fc.startCalls != 1 {
+		t.Errorf("StartCell calls=%d want 1", fc.startCalls)
+	}
+	if got := fc.startDoc.Metadata.Name; got != "prod" {
+		t.Errorf("StartCell name=%q want prod", got)
 	}
 }
 
