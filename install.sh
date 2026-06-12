@@ -19,6 +19,8 @@
 #   KUKE_INSTALL_PREFIX    install dir (default: /usr/local/bin)
 #   KUKE_SKIP_INIT=1       skip the `kuke init` step
 #   KUKE_SKIP_CHECKSUM=1   skip .sha256 verification (NOT recommended)
+#   KUKE_SKIP_KUKEBUILD=1  skip downloading/installing kukebuild (disables
+#                          `kuke build`; for release tags predating its asset)
 
 set -euo pipefail
 
@@ -27,6 +29,7 @@ KUKE_INSTALL_PREFIX="${KUKE_INSTALL_PREFIX:-/usr/local/bin}"
 KUKE_VERSION="${KUKE_VERSION:-}"
 KUKE_SKIP_INIT="${KUKE_SKIP_INIT:-}"
 KUKE_SKIP_CHECKSUM="${KUKE_SKIP_CHECKSUM:-}"
+KUKE_SKIP_KUKEBUILD="${KUKE_SKIP_KUKEBUILD:-}"
 
 MODE="install"
 
@@ -52,7 +55,7 @@ usage() {
     cat <<EOF
 Usage: install.sh [--check] [--help]
 
-Installs kukeon (kuke + kukeond) on a Linux host.
+Installs kukeon (kuke + kukeond + kukebuild) on a Linux host.
 
   --check    Run prerequisite checks only; do not touch the system.
   --help     Show this help.
@@ -63,6 +66,7 @@ Env overrides:
   KUKE_INSTALL_PREFIX    Install dir (default: /usr/local/bin).
   KUKE_SKIP_INIT=1       Skip the post-install \`kuke init\` step.
   KUKE_SKIP_CHECKSUM=1   Skip .sha256 verification (NOT recommended).
+  KUKE_SKIP_KUKEBUILD=1  Skip kukebuild (disables \`kuke build\`).
 EOF
 }
 
@@ -253,48 +257,41 @@ cleanup_tmpdir() {
     fi
 }
 
-do_install() {
-    local arch asset_url sha_url bin_path sha_path
-    arch="$(detect_platform)"
-
-    step "Resolving release version"
-    if [ -z "$KUKE_VERSION" ]; then
-        KUKE_VERSION="$(resolve_latest_version)"
-    fi
-    ok "version: ${KUKE_VERSION}"
-
-    asset_url="https://github.com/${KUKE_REPO}/releases/download/${KUKE_VERSION}/kuke-linux-${arch}"
+# fetch_verified <asset-name> <dest-path>
+# Downloads the per-arch release asset to <dest-path>, fetches its `.sha256`
+# companion and verifies the digest (honoring KUKE_SKIP_CHECKSUM). Factored out
+# of do_install so `kuke` and `kukebuild` share one download+verify path rather
+# than duplicating the checksum logic per binary.
+fetch_verified() {
+    local asset="$1" dest="$2"
+    local asset_url sha_url sha_path
+    asset_url="https://github.com/${KUKE_REPO}/releases/download/${KUKE_VERSION}/${asset}"
     sha_url="${asset_url}.sha256"
+    sha_path="${dest}.sha256"
 
-    INSTALL_TMPDIR="$(mktemp -d -t kuke-install.XXXXXX)"
-    trap cleanup_tmpdir EXIT
-    bin_path="${INSTALL_TMPDIR}/kuke"
-    sha_path="${INSTALL_TMPDIR}/kuke.sha256"
-
-    step "Downloading kuke ${KUKE_VERSION} (linux/${arch})"
-    if ! curl -fsSL -o "$bin_path" "$asset_url"; then
+    step "Downloading ${asset} ${KUKE_VERSION}"
+    if ! curl -fsSL -o "$dest" "$asset_url"; then
         fail "download failed: ${asset_url}"
         printf '    Confirm KUKE_VERSION=%s exists at\n' "$KUKE_VERSION" >&2
         printf '      https://github.com/%s/releases\n' "$KUKE_REPO" >&2
         exit 1
     fi
-    ok "downloaded $(wc -c <"$bin_path" | tr -d ' ') bytes"
+    ok "downloaded $(wc -c <"$dest" | tr -d ' ') bytes"
 
-    step "Verifying checksum"
+    step "Verifying checksum (${asset})"
     if [ -n "$KUKE_SKIP_CHECKSUM" ]; then
         warn "KUKE_SKIP_CHECKSUM=1 set — skipping verification (not recommended)."
     elif curl -fsSL -o "$sha_path" "$sha_url" 2>/dev/null; then
         # Releases publish the .sha256 in `sha256sum` format ("<hex>  <name>"),
-        # so we substitute our local path and let `sha256sum -c` do the
-        # comparison rather than hand-rolling the parser.
-        local expected
+        # so we take the first field and compare it to a local digest rather
+        # than hand-rolling the parser.
+        local expected actual
         expected="$(awk '{print $1}' "$sha_path")"
         if [ -z "$expected" ]; then
             fail ".sha256 asset at ${sha_url} is empty or malformed."
             exit 1
         fi
-        local actual
-        actual="$(sha256sum "$bin_path" | awk '{print $1}')"
+        actual="$(sha256sum "$dest" | awk '{print $1}')"
         if [ "$expected" != "$actual" ]; then
             fail "checksum mismatch for ${asset_url}"
             printf '    expected: %s\n' "$expected" >&2
@@ -308,16 +305,57 @@ do_install() {
         printf '    that ships a checksum.\n' >&2
         exit 1
     fi
+}
 
-    chmod +x "$bin_path"
+do_install() {
+    local arch kuke_path kukebuild_path
+    arch="$(detect_platform)"
+
+    step "Resolving release version"
+    if [ -z "$KUKE_VERSION" ]; then
+        KUKE_VERSION="$(resolve_latest_version)"
+    fi
+    ok "version: ${KUKE_VERSION}"
+
+    INSTALL_TMPDIR="$(mktemp -d -t kuke-install.XXXXXX)"
+    trap cleanup_tmpdir EXIT
+    kuke_path="${INSTALL_TMPDIR}/kuke"
+    kukebuild_path="${INSTALL_TMPDIR}/kukebuild"
+
+    # kuke is the CLI + daemon (argv[0]-dispatched to kukeond); kukebuild is the
+    # docker-free image builder `kuke build` execs. Ship both so a fresh
+    # installer host can build images without a source checkout (issue #1227) —
+    # without kukebuild, `kuke build` fails with errdefs.ErrKukebuildNotFound.
+    #
+    # Both assets are downloaded + verified into the tmpdir before anything is
+    # placed on the system, so a fetch/verify failure leaves the host untouched.
+    # KUKE_SKIP_KUKEBUILD skips kukebuild entirely — release tags predating its
+    # asset (#1227) have no kukebuild-linux-* to fetch, so an old KUKE_VERSION
+    # pin sets it to install kuke alone rather than 404 on the missing asset.
+    fetch_verified "kuke-linux-${arch}" "$kuke_path"
+    chmod +x "$kuke_path"
+    if [ -n "$KUKE_SKIP_KUKEBUILD" ]; then
+        warn "KUKE_SKIP_KUKEBUILD=1 set — skipping kukebuild (\`kuke build\` will be unavailable)."
+    else
+        fetch_verified "kukebuild-linux-${arch}" "$kukebuild_path"
+        chmod +x "$kukebuild_path"
+    fi
 
     step "Installing to ${KUKE_INSTALL_PREFIX}"
-    $SUDO install -m 0755 "$bin_path" "${KUKE_INSTALL_PREFIX}/kuke"
+    $SUDO install -m 0755 "$kuke_path" "${KUKE_INSTALL_PREFIX}/kuke"
     # Hardlink — not symlink — because the binary dispatches on argv[0]
     # basename and we want `kukeond` resolved as a real path, not as
     # `kuke -> kukeond` indirection that some shells resolve.
     $SUDO ln -f "${KUKE_INSTALL_PREFIX}/kuke" "${KUKE_INSTALL_PREFIX}/kukeond"
-    ok "installed kuke + kukeond at ${KUKE_INSTALL_PREFIX}"
+    if [ -n "$KUKE_SKIP_KUKEBUILD" ]; then
+        ok "installed kuke + kukeond at ${KUKE_INSTALL_PREFIX}"
+    else
+        # kukebuild is a distinct binary (its own Go module embedding BuildKit),
+        # not an argv[0] alias of kuke — install it as a real file so `kuke
+        # build` resolves it on PATH.
+        $SUDO install -m 0755 "$kukebuild_path" "${KUKE_INSTALL_PREFIX}/kukebuild"
+        ok "installed kuke + kukeond + kukebuild at ${KUKE_INSTALL_PREFIX}"
+    fi
 
     if [ -n "$KUKE_SKIP_INIT" ]; then
         warn "KUKE_SKIP_INIT=1 set — skipping \`kuke init\`. Run it manually:"
