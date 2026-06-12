@@ -1500,6 +1500,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../private-registry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Private registry credentials
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../autocomplete/" class="md-nav__link">
         
   
@@ -1702,6 +1730,17 @@
     <span class="md-ellipsis">
       
         Leftover state after delete
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pull-access-denied-403-on-a-private-image" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        pull access denied / 403 on a private image
       
     </span>
   </a>
@@ -3420,6 +3459,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#pull-access-denied-403-on-a-private-image" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        pull access denied / 403 on a private image
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#verbose-logging" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3627,9 +3677,25 @@
 <a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="c1"># Dangling bridge (only if the space is gone too)</span>
 <a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a>sudo<span class="w"> </span>ip<span class="w"> </span>link<span class="w"> </span>delete<span class="w"> </span>kuke-&lt;realm&gt;-&lt;space&gt;<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
 </code></pre></div>
+<h2 id="pull-access-denied-403-on-a-private-image"><code>pull access denied</code> / <code>403</code> on a private image<a class="headerlink" href="#pull-access-denied-403-on-a-private-image" title="Permanent link">&para;</a></h2>
+<p><strong>Symptom.</strong> A cell fails to start and the containerd resolver reports:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>pull access denied, repository does not exist or may require authorization
+</code></pre></div>
+<p>(or a bare <code>403 Forbidden</code>) when pulling an image from a private registry.</p>
+<p><strong>What it means.</strong> The realm has no credential for that registry. Registry
+credentials are scoped to the realm, so even if another realm can pull the same
+image, the realm running this cell needs its own entry.</p>
+<p><strong>Fix.</strong> Attach a credential to the realm:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$REGISTRY_TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>registry-credential<span class="w"> </span>&lt;realm&gt;<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="w">    </span>--server<span class="w"> </span>&lt;host&gt;<span class="w"> </span>--username<span class="w"> </span>&lt;user&gt;<span class="w"> </span>--password-stdin
+</code></pre></div>
+<p>The reconciler converges the change without recreating the realm or disrupting
+cells, so the pull succeeds on the next attempt. See
+<a href="../private-registry/">Private registry credentials</a> for the imperative and
+declarative setups in full.</p>
 <h2 id="verbose-logging">Verbose logging<a class="headerlink" href="#verbose-logging" title="Permanent link">&para;</a></h2>
 <p>Add <code>--verbose</code> (or <code>-v</code>) to any <code>kuke</code> command to get structured slog output on stderr. Pair with <code>--log-level debug</code> for the most detail:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>init<span class="w"> </span>--verbose<span class="w"> </span>--log-level<span class="w"> </span>debug
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>init<span class="w"> </span>--verbose<span class="w"> </span>--log-level<span class="w"> </span>debug
 </code></pre></div>
 <p>The daemon's log level is set separately via <code>kukeond --log-level</code> in the cell spec.</p>
 <h2 id="when-all-else-fails">When all else fails<a class="headerlink" href="#when-all-else-fails" title="Permanent link">&para;</a></h2>
@@ -3660,7 +3726,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 17, 2026 17:44:44 UTC">May 17, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 12, 2026 17:11:09 UTC">June 12, 2026</span>
   </span>
 
     

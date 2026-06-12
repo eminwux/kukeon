@@ -12,13 +12,13 @@
         <meta name="author" content="Emiliano Spinella (eminwux)">
       
       
-        <link rel="canonical" href="https://kukeon.io/cli/kuke-lifecycle/">
+        <link rel="canonical" href="https://kukeon.io/guides/private-registry/">
       
       
-        <link rel="prev" href="../kuke-delete/">
+        <link rel="prev" href="../local-dev/">
       
       
-        <link rel="next" href="../kuke-purge/">
+        <link rel="next" href="../autocomplete/">
       
       
         
@@ -29,7 +29,7 @@
     
     
       
-        <title>kuke start / stop / kill - kukeon</title>
+        <title>Private registry credentials - kukeon</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#kuke-start-stop-kill" class="md-skip">
+        <a href="#private-registry-credentials" class="md-skip">
           Skip to content
         </a>
       
@@ -118,7 +118,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              kuke start / stop / kill
+              Private registry credentials
             
           </span>
         </div>
@@ -346,11 +346,13 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
-        <a href="../../guides/init-and-reset/" class="md-tabs__link">
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../init-and-reset/" class="md-tabs__link">
           
   
   
@@ -366,13 +368,11 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
-        <a href="../commands/" class="md-tabs__link">
+      <li class="md-tabs__item">
+        <a href="../../cli/commands/" class="md-tabs__link">
           
   
   
@@ -1328,28 +1328,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
-        
-          
-          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
             
   
   
@@ -1367,7 +1370,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_7">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1385,7 +1388,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guides/init-and-reset/" class="md-nav__link">
+      <a href="../init-and-reset/" class="md-nav__link">
         
   
   
@@ -1413,7 +1416,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guides/apply-manifests/" class="md-nav__link">
+      <a href="../apply-manifests/" class="md-nav__link">
         
   
   
@@ -1441,7 +1444,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guides/run-claude-code/" class="md-nav__link">
+      <a href="../run-claude-code/" class="md-nav__link">
         
   
   
@@ -1469,7 +1472,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guides/local-dev/" class="md-nav__link">
+      <a href="../local-dev/" class="md-nav__link">
         
   
   
@@ -1477,462 +1480,6 @@
     
   
     Local development
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../guides/private-registry/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Private registry credentials
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../guides/autocomplete/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Autocomplete
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../guides/troubleshooting/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Troubleshooting
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-    
-  
-  
-  
-    
-    
-    
-    
-      
-        
-        
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
-      
-        
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" checked>
-        
-          
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
-            
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    CLI Reference
-  
-
-    
-  </span>
-  
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_8">
-            <span class="md-nav__icon md-icon"></span>
-            
-  
-    CLI Reference
-  
-
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../commands/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    CLI commands overview
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../kuke/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    kuke (root)
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../kuke-init/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    kuke init
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../kuke-doctor/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    kuke doctor
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../kuke-status/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    kuke status
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../kuke-get/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    kuke get
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../kuke-build/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    kuke build
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../kuke-create/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    kuke create
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../kuke-apply/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    kuke apply
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../kuke-run/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    kuke run
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../kuke-delete/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    kuke delete
   
 
     
@@ -1969,7 +1516,7 @@
   <span class="md-ellipsis">
     
   
-    kuke start / stop / kill
+    Private registry credentials
   
 
     
@@ -1987,7 +1534,7 @@
   <span class="md-ellipsis">
     
   
-    kuke start / stop / kill
+    Private registry credentials
   
 
     
@@ -2013,10 +1560,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#kuke-start" class="md-nav__link">
+  <a href="#credentials-are-realm-scoped" class="md-nav__link">
     <span class="md-ellipsis">
       
-        kuke start
+        Credentials are realm-scoped
       
     </span>
   </a>
@@ -2024,10 +1571,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#kuke-stop" class="md-nav__link">
+  <a href="#imperative-kuke-create-registry-credential" class="md-nav__link">
     <span class="md-ellipsis">
       
-        kuke stop
+        Imperative: kuke create registry-credential
       
     </span>
   </a>
@@ -2035,10 +1582,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#kuke-kill" class="md-nav__link">
+  <a href="#declarative-specregistrycredentials" class="md-nav__link">
     <span class="md-ellipsis">
       
-        kuke kill
+        Declarative: spec.registryCredentials
       
     </span>
   </a>
@@ -2046,32 +1593,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#common-flags" class="md-nav__link">
+  <a href="#pushing-images-build-time-credentials" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Common flags
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#examples" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Examples
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#exit-semantics" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Exit semantics
+        Pushing images: build-time credentials
       
     </span>
   </a>
@@ -2105,7 +1630,460 @@
   
   
     <li class="md-nav__item">
-      <a href="../kuke-purge/" class="md-nav__link">
+      <a href="../autocomplete/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Autocomplete
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    CLI Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI commands overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/kuke/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke (root)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/kuke-init/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke init
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/kuke-doctor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke doctor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/kuke-status/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke status
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/kuke-get/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke get
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/kuke-build/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke build
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/kuke-create/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke create
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/kuke-apply/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke apply
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/kuke-run/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke run
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/kuke-delete/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke delete
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/kuke-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke start / stop / kill
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/kuke-purge/" class="md-nav__link">
         
   
   
@@ -2133,7 +2111,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../kuke-refresh/" class="md-nav__link">
+      <a href="../../cli/kuke-refresh/" class="md-nav__link">
         
   
   
@@ -2161,7 +2139,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../kuke-restart/" class="md-nav__link">
+      <a href="../../cli/kuke-restart/" class="md-nav__link">
         
   
   
@@ -2189,7 +2167,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../kuke-log/" class="md-nav__link">
+      <a href="../../cli/kuke-log/" class="md-nav__link">
         
   
   
@@ -2217,7 +2195,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../kuke-attach/" class="md-nav__link">
+      <a href="../../cli/kuke-attach/" class="md-nav__link">
         
   
   
@@ -2245,7 +2223,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../kuke-image/" class="md-nav__link">
+      <a href="../../cli/kuke-image/" class="md-nav__link">
         
   
   
@@ -2273,7 +2251,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../kuke-daemon/" class="md-nav__link">
+      <a href="../../cli/kuke-daemon/" class="md-nav__link">
         
   
   
@@ -2301,7 +2279,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../kuke-uninstall/" class="md-nav__link">
+      <a href="../../cli/kuke-uninstall/" class="md-nav__link">
         
   
   
@@ -2329,7 +2307,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../kuke-autocomplete/" class="md-nav__link">
+      <a href="../../cli/kuke-autocomplete/" class="md-nav__link">
         
   
   
@@ -2357,7 +2335,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../kuke-version/" class="md-nav__link">
+      <a href="../../cli/kuke-version/" class="md-nav__link">
         
   
   
@@ -2385,7 +2363,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../kukeond/" class="md-nav__link">
+      <a href="../../cli/kukeond/" class="md-nav__link">
         
   
   
@@ -3261,10 +3239,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#kuke-start" class="md-nav__link">
+  <a href="#credentials-are-realm-scoped" class="md-nav__link">
     <span class="md-ellipsis">
       
-        kuke start
+        Credentials are realm-scoped
       
     </span>
   </a>
@@ -3272,10 +3250,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#kuke-stop" class="md-nav__link">
+  <a href="#imperative-kuke-create-registry-credential" class="md-nav__link">
     <span class="md-ellipsis">
       
-        kuke stop
+        Imperative: kuke create registry-credential
       
     </span>
   </a>
@@ -3283,10 +3261,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#kuke-kill" class="md-nav__link">
+  <a href="#declarative-specregistrycredentials" class="md-nav__link">
     <span class="md-ellipsis">
       
-        kuke kill
+        Declarative: spec.registryCredentials
       
     </span>
   </a>
@@ -3294,32 +3272,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#common-flags" class="md-nav__link">
+  <a href="#pushing-images-build-time-credentials" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Common flags
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#examples" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Examples
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#exit-semantics" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Exit semantics
+        Pushing images: build-time credentials
       
     </span>
   </a>
@@ -3357,101 +3313,107 @@
   
 
 
-<h1 id="kuke-start-stop-kill">kuke start / stop / kill<a class="headerlink" href="#kuke-start-stop-kill" title="Permanent link">&para;</a></h1>
-<p>Runtime lifecycle for cells. These commands don't touch metadata — they operate on the containerd task under the resource.</p>
-<table>
-<thead>
-<tr>
-<th>Command</th>
-<th>Signal</th>
-<th>What it does</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>kuke start</code></td>
-<td>(create/start task)</td>
-<td>Launch the container(s); no-op if already running</td>
-</tr>
-<tr>
-<td><code>kuke stop</code></td>
-<td><code>SIGTERM</code></td>
-<td>Request graceful shutdown; container exits on its own terms</td>
-</tr>
-<tr>
-<td><code>kuke kill</code></td>
-<td><code>SIGKILL</code></td>
-<td>Immediate termination; no graceful shutdown window</td>
-</tr>
-</tbody>
-</table>
-<p>All three take the same shape: <code>&lt;verb&gt; &lt;name&gt; &lt;scope flags&gt;</code>. The <code>&lt;name&gt;</code> positional resolves to a cell within the named realm/space/stack — cells are the only lifecycle subject.</p>
-<h2 id="kuke-start">kuke start<a class="headerlink" href="#kuke-start" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke start (&lt;name&gt; | -l &lt;selector&gt;) --realm &lt;r&gt; --space &lt;s&gt; --stack &lt;t&gt;
+<h1 id="private-registry-credentials">Private registry credentials<a class="headerlink" href="#private-registry-credentials" title="Permanent link">&para;</a></h1>
+<p>When a realm pulls an image from a registry that requires authentication, the
+pull fails with <code>403 Forbidden</code> (containerd surfaces it as <code>pull access denied,
+repository does not exist or may require authorization</code>) unless that realm
+carries a credential for the registry. This guide covers how to attach those
+credentials — imperatively for quick setup, or declaratively as part of a Realm
+manifest.</p>
+<h2 id="credentials-are-realm-scoped">Credentials are realm-scoped<a class="headerlink" href="#credentials-are-realm-scoped" title="Permanent link">&para;</a></h2>
+<p>Registry credentials live on the <strong>realm</strong>, not the host. Each realm carries its
+own <code>spec.registryCredentials</code> list, so two realms can use the same image
+reference with different credentials — different teams can pull from different
+private registries without sharing a login. See
+<a href="../../concepts/realm/">Concepts → Realm</a> for the full realm model.</p>
+<p>A credential is keyed by its registry host (<code>serverAddress</code>). A realm can hold
+credentials for multiple registries at once; each entry applies to the registry
+it names.</p>
+<h2 id="imperative-kuke-create-registry-credential">Imperative: <code>kuke create registry-credential</code><a class="headerlink" href="#imperative-kuke-create-registry-credential" title="Permanent link">&para;</a></h2>
+<p>The quickest way to attach a credential to an <strong>existing</strong> realm:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Pipe a token in from stdin (keeps it out of shell history)</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$GHCR_TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>registry-credential<span class="w"> </span>default<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span>--server<span class="w"> </span>ghcr.io<span class="w"> </span>--username<span class="w"> </span>my-user<span class="w"> </span>--password-stdin
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="c1"># Or read the token from a file</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>registry-credential<span class="w"> </span>default<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">    </span>--server<span class="w"> </span>ghcr.io<span class="w"> </span>--username<span class="w"> </span>my-user<span class="w"> </span>--from-file<span class="w"> </span>./ghcr-token.txt
 </code></pre></div>
-<p>Aliases: <code>kuke start</code> → <code>kuke sta</code>.</p>
-<p><code>start</code> starts the cell's root container first, then every non-root container in the cell.</p>
-<p>With <code>-l &lt;selector&gt;</code> (mutually exclusive with the positional <code>&lt;name&gt;</code>) the start fans out across <strong>every</strong> cell in scope whose labels match, reconciling each matched cell individually. Unmatched cells are untouched.</p>
-<h2 id="kuke-stop">kuke stop<a class="headerlink" href="#kuke-stop" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>kuke stop &lt;name&gt; --realm &lt;r&gt; --space &lt;s&gt; --stack &lt;t&gt;
-</code></pre></div>
-<p>Aliases: <code>kuke stop</code> → <code>kuke sto</code>.</p>
-<p>Sends SIGTERM to the task. If the container has a shutdown handler, it gets a chance to run. There is no explicit grace period flag today — whatever the task does before exiting, it does.</p>
-<h2 id="kuke-kill">kuke kill<a class="headerlink" href="#kuke-kill" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>kuke kill &lt;name&gt; --realm &lt;r&gt; --space &lt;s&gt; --stack &lt;t&gt;
-</code></pre></div>
-<p>Aliases: <code>kuke kill</code> → <code>kuke k</code>.</p>
-<p>Sends SIGKILL. Useful when a cell is unresponsive. For the daemon itself, prefer the dedicated <a href="../kuke-daemon/"><code>kuke daemon kill</code></a> shortcut — it knows the daemon's static coordinates.</p>
-<h2 id="common-flags">Common flags<a class="headerlink" href="#common-flags" title="Permanent link">&para;</a></h2>
-<p>All three verbs share the same scope flags:</p>
-<table>
-<thead>
-<tr>
-<th>Flag</th>
-<th>Default</th>
-<th>Scope</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>--realm</code></td>
-<td><code>default</code></td>
-<td>Required for cell</td>
-</tr>
-<tr>
-<td><code>--space</code></td>
-<td><code>default</code></td>
-<td>Required for cell</td>
-</tr>
-<tr>
-<td><code>--stack</code></td>
-<td><code>default</code></td>
-<td>Required for cell</td>
-</tr>
-</tbody>
-</table>
-<p><code>kuke start</code> additionally accepts <code>-l</code>, <code>--selector</code> (start-only among the three verbs): <code>Label selector (e.g. kukeon.io/config=&lt;name&gt;); starts every matched cell in scope. Mutually exclusive with &lt;name&gt;</code>.</p>
-<p>Plus all <a href="../kuke/">global flags</a>.</p>
-<h2 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Start a cell</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>start<span class="w"> </span>web<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1"># Graceful stop</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>stop<span class="w"> </span>web<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="c1"># Force-kill an unresponsive cell</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>sudo<span class="w"> </span>kuke<span class="w"> </span><span class="nb">kill</span><span class="w"> </span>web<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
-</code></pre></div>
-<h2 id="exit-semantics">Exit semantics<a class="headerlink" href="#exit-semantics" title="Permanent link">&para;</a></h2>
+<p>The command reads the realm, upserts an entry onto its
+<code>spec.registryCredentials</code> keyed by <code>--server</code>, and re-applies the realm. The
+reconciler converges the change as a <em>compatible</em> update — no realm recreate and
+no cell disruption — so cells in the realm can immediately pull images that
+previously returned <code>403 Forbidden</code>.</p>
+<p>A few behaviors worth knowing:</p>
 <ul>
-<li>Exit 0: signal delivered (or cell already in desired state for <code>start</code>).</li>
-<li>Exit non-zero: the daemon couldn't find the resource, the resource is in a state that doesn't allow the transition, or the underlying containerd/runtime call failed.</li>
+<li><strong>The token never enters argv.</strong> Supply it via <code>--password-stdin</code> (read from
+  stdin, docker-login style) or <code>--from-file</code> (read from a file). Exactly one of
+  the two is required.</li>
+<li><strong>Re-running upserts.</strong> Re-running with the same <code>--server</code> updates that entry
+  in place (username + token) rather than appending a duplicate; a different
+  <code>--server</code> appends a new entry. Existing entries for other servers are
+  preserved.</li>
+<li><strong><code>--server</code> defaults to the image's host.</strong> Leave <code>--server</code> empty and the
+  credential matches the registry extracted from the image reference at pull
+  time; set it explicitly (e.g. <code>ghcr.io</code>) to scope the credential to one host.</li>
 </ul>
-<p>After <code>stop</code>/<code>kill</code>, the cell is in <code>Stopped</code> state. <code>start</code> moves it to <code>Ready</code>. See <a href="../../concepts/cell/#lifecycle">Cell</a> and <a href="../../concepts/container/#lifecycle">Container</a> for the full state tables.</p>
+<p>See <a href="../../cli/kuke-create/#kuke-create-registry-credential">kuke create → registry-credential</a>
+for the full flag table.</p>
+<h2 id="declarative-specregistrycredentials">Declarative: <code>spec.registryCredentials</code><a class="headerlink" href="#declarative-specregistrycredentials" title="Permanent link">&para;</a></h2>
+<p>For anything you want to commit, diff, or apply repeatedly, put the credentials
+in a Realm manifest and use <a href="../../cli/kuke-apply/"><code>kuke apply</code></a>. Manifests are
+the unit of version control; imperative commands are not.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Realm</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">myrealm</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span><span class="nt">registryCredentials</span><span class="p">:</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">username</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">eminwux</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">      </span><span class="nt">password</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${{ GHCR_TOKEN }}</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">      </span><span class="nt">serverAddress</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ghcr.io</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>username</code></td>
+<td>yes</td>
+<td>Registry username</td>
+</tr>
+<tr>
+<td><code>password</code></td>
+<td>yes</td>
+<td>Registry password or token</td>
+</tr>
+<tr>
+<td><code>serverAddress</code></td>
+<td>no</td>
+<td>Registry server (e.g. <code>docker.io</code>, <code>ghcr.io</code>). If omitted, applies to the registry in the image reference.</td>
+</tr>
+</tbody>
+</table>
+<p>See <a href="../../manifests/realm/#specregistrycredentials-array-optional">Manifests → Realm</a> for the
+full field reference.</p>
+<h2 id="pushing-images-build-time-credentials">Pushing images: build-time credentials<a class="headerlink" href="#pushing-images-build-time-credentials" title="Permanent link">&para;</a></h2>
+<p>The credentials above authenticate image <strong>pulls</strong> for cells in a realm. Pushing
+an image you built with <a href="../../cli/kuke-build/"><code>kuke build --push</code></a> is a separate
+path with its own credential resolution: <code>$DOCKER_CONFIG/config.json</code> (when
+<code>DOCKER_CONFIG</code> is set), then <code>~/.docker/config.json</code>, then the
+<code>KUKEON_REGISTRY_AUTH</code> env var (base64 <code>user:pass</code>). The push tag must be a
+fully qualified <code>REGISTRY/REPO:TAG</code>.</p>
 <h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="../kuke-run/">kuke run</a> — create + start a cell from a file or profile</li>
-<li><a href="../kuke-daemon/">kuke daemon</a> — start/stop/restart/kill the <code>kukeond</code> daemon cell</li>
+<li><a href="../../cli/kuke-create/">kuke create</a> — imperative resource creation</li>
+<li><a href="../../manifests/realm/">Manifests → Realm</a> — declarative Realm schema</li>
+<li><a href="../../cli/kuke-build/">kuke build</a> — build and push images</li>
+<li><a href="../troubleshooting/#pull-access-denied--403-on-a-private-image">Troubleshooting → pull access denied</a></li>
 </ul>
 
 
@@ -3475,7 +3437,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 11, 2026 05:39:09 UTC">June 11, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 12, 2026 17:11:09 UTC">June 12, 2026</span>
   </span>
 
     
@@ -3485,7 +3447,7 @@
     <span class="md-icon" title="Created">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M14.47 15.08 11 13V7h1.5v5.25l3.08 1.83c-.41.28-.79.62-1.11 1m-1.39 4.84c-.36.05-.71.08-1.08.08-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8c0 .37-.03.72-.08 1.08.69.1 1.33.32 1.92.64.1-.56.16-1.13.16-1.72 0-5.5-4.5-10-10-10S2 6.5 2 12s4.47 10 10 10c.59 0 1.16-.06 1.72-.16-.32-.59-.54-1.23-.64-1.92M18 15v3h-3v2h3v3h2v-3h3v-2h-3v-3z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="April 21, 2026 12:22:34 UTC">April 21, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 12, 2026 17:11:09 UTC">June 12, 2026</span>
   </span>
 
     
