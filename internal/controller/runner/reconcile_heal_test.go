@@ -249,3 +249,177 @@ func seedNeverReadyCell(t *testing.T, r *Exec, realm, space, stack, cellName str
 		t.Fatalf("write cell metadata: %v", err)
 	}
 }
+
+// TestReconcileCell_DoesNotResurrectDeletedCell is the headline #1251 guard:
+// the delete-while-reconcile-blocked-on-lock race. ReconcileCells snapshots
+// the cell list once per tick and iterates with the in-memory value captured
+// at list time (ReadyObserved=true). A `kuke delete cell` that completes
+// while this tick is blocked on the per-cell lock leaves the reconciler
+// holding a pre-delete snapshot whose cgroup is now absent — pre-fix the
+// #855 heal branch fired (`!cgroupExists && ReadyObserved`) and
+// ensureCellCgroup recreated the cgroup AND rewrote the just-deleted
+// metadata.json, silently resurrecting the cell. The post-lock GetCell
+// recheck must short-circuit on ErrCellNotFound: no NewCgroup, no metadata
+// rewrite, and a Vanished outcome (not Deleted — the reconciler observed an
+// external delete, it did not perform one).
+func TestReconcileCell_DoesNotResurrectDeletedCell(t *testing.T) {
+	realm, space, stack, cellName := "default", "kukeon", "kukeon", "github-runner"
+	rootID := "root"
+	workloadID := "workload"
+	rootContainerdID := space + "_" + stack + "_" + cellName + "_" + rootID
+	workloadContainerdID := space + "_" + stack + "_" + cellName + "_" + workloadID
+
+	fake := &deleteCellFakeClient{
+		// Cgroup absent: DeleteCell removed it as part of the teardown
+		// the reconcile tick was blocked behind. This is the same probe
+		// result the post-reboot heal keys off — the bug is that the
+		// heal can't tell "metadata survives" from "metadata just deleted".
+		loadCgroupFn: func(string, string) (*cgroup2.Manager, error) {
+			return nil, errors.New("cgroup path does not exist")
+		},
+		// Any NewCgroup / subtree-controller call is the resurrection
+		// regression — fail loudly so the recheck reads as a behavior
+		// change in the test surface, not a silent log-only divergence.
+		newCgroupFn: func(ctr.CgroupSpec) (*cgroup2.Manager, error) {
+			t.Errorf("NewCgroup called on a deleted cell — the post-lock recheck must short-circuit before the #855 heal (#1251)")
+			return nil, errors.New("must not be called")
+		},
+		enableCellSubtreeFn: func(string, string, []string) ([]string, error) {
+			t.Errorf("EnableCellSubtreeControllers called on a deleted cell — same recheck gate as NewCgroup (#1251)")
+			return nil, errors.New("must not be called")
+		},
+	}
+	r := newDeleteCellTestExec(t, fake)
+	seedDeleteCellRealm(t, r, realm)
+	// Seed the cell, then remove its metadata to model the just-completed
+	// DeleteCell: the snapshot below is the pre-delete value, the on-disk
+	// metadata is gone.
+	seedPostRebootCell(t, r, realm, space, stack, cellName, rootID, workloadID, rootContainerdID, workloadContainerdID)
+	metadataPath := fs.CellMetadataPath(r.opts.RunPath, realm, space, stack, cellName)
+	if err := os.Remove(metadataPath); err != nil {
+		t.Fatalf("remove cell metadata (simulate completed DeleteCell): %v", err)
+	}
+
+	// The stale pre-delete snapshot the reconcile tick still holds:
+	// ReadyObserved=true is what drives the heal branch pre-fix.
+	cell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: cellName},
+		Spec: intmodel.CellSpec{
+			ID:        cellName,
+			RealmName: realm,
+			SpaceName: space,
+			StackName: stack,
+			Containers: []intmodel.ContainerSpec{
+				{ID: rootID, ContainerdID: rootContainerdID, Root: true},
+				{ID: workloadID, ContainerdID: workloadContainerdID, Root: false},
+			},
+		},
+		Status: intmodel.CellStatus{
+			State:         intmodel.CellStateReady,
+			ReadyObserved: true,
+		},
+	}
+
+	_, outcome, err := r.ReconcileCell(cell)
+	if err != nil {
+		t.Fatalf("ReconcileCell: unexpected error: %v", err)
+	}
+	if !outcome.Vanished {
+		t.Errorf("ReconcileOutcome.Vanished = false, want true (the cell's metadata is gone — the reconciler must report it vanished, not heal it)")
+	}
+	if outcome.Deleted {
+		t.Errorf("ReconcileOutcome.Deleted = true, want false (the reconciler observed an external delete, it did not perform one — Deleted is reserved for the AutoDelete path)")
+	}
+	if outcome.Updated {
+		t.Errorf("ReconcileOutcome.Updated = true, want false (a vanished cell is a pure no-op — no status write)")
+	}
+	// The resurrection signature: metadata.json must stay gone. Pre-fix
+	// ensureCellCgroup's UpdateCellMetadata rewrote it.
+	if _, statErr := os.Stat(metadataPath); !os.IsNotExist(statErr) {
+		t.Errorf("cell metadata.json exists after reconcile (stat err = %v), want still-absent — the reconciler resurrected the deleted cell (#1251)", statErr)
+	}
+}
+
+// TestReconcileCell_HealVsDeletedMetadata pins the AC #4 distinction the
+// post-lock recheck draws: a missing cgroup on a Ready cell heals only when
+// the metadata survives (genuine post-reboot, #855), and is left alone when
+// the metadata is gone (just-deleted, #1251). Both share the identical
+// absent-cgroup + ReadyObserved=true snapshot — the on-disk metadata is the
+// only discriminator, which is exactly why the pre-fix heal branch
+// (keyed only on cgroup-absent + ReadyObserved) could not tell them apart.
+func TestReconcileCell_HealVsDeletedMetadata(t *testing.T) {
+	realm, space, stack := "default", "kukeon", "kukeon"
+	rootID, workloadID := "root", "workload"
+
+	makeCell := func(cellName string) intmodel.Cell {
+		return intmodel.Cell{
+			Metadata: intmodel.CellMetadata{Name: cellName},
+			Spec: intmodel.CellSpec{
+				ID:        cellName,
+				RealmName: realm,
+				SpaceName: space,
+				StackName: stack,
+				Containers: []intmodel.ContainerSpec{
+					{ID: rootID, ContainerdID: space + "_" + stack + "_" + cellName + "_" + rootID, Root: true},
+					{ID: workloadID, ContainerdID: space + "_" + stack + "_" + cellName + "_" + workloadID, Root: false},
+				},
+			},
+			Status: intmodel.CellStatus{State: intmodel.CellStateReady, ReadyObserved: true},
+		}
+	}
+
+	t.Run("metadata survives -> heals", func(t *testing.T) {
+		cellName := "survivor"
+		var newCgroupCalls int32
+		fake := &deleteCellFakeClient{
+			loadCgroupFn: func(string, string) (*cgroup2.Manager, error) {
+				return nil, errors.New("cgroup path does not exist")
+			},
+			newCgroupFn: func(ctr.CgroupSpec) (*cgroup2.Manager, error) {
+				atomic.AddInt32(&newCgroupCalls, 1)
+				return &cgroup2.Manager{}, nil
+			},
+			enableCellSubtreeFn: func(string, string, []string) ([]string, error) { return nil, nil },
+			existsContainerFn:   func(_, _ string) (bool, error) { return true, nil },
+			taskStatusFn: func(_, _ string) (containerd.Status, error) {
+				return containerd.Status{}, fmt.Errorf("%w: %w", errdefs.ErrTaskNotFound, errors.New("task: not found"))
+			},
+		}
+		r := newDeleteCellTestExec(t, fake)
+		seedDeleteCellRealm(t, r, realm)
+		seedPostRebootCell(t, r, realm, space, stack, cellName, rootID, workloadID,
+			space+"_"+stack+"_"+cellName+"_"+rootID, space+"_"+stack+"_"+cellName+"_"+workloadID)
+
+		if _, _, err := r.ReconcileCell(makeCell(cellName)); err != nil {
+			t.Fatalf("ReconcileCell: unexpected error: %v", err)
+		}
+		if got := atomic.LoadInt32(&newCgroupCalls); got != 1 {
+			t.Errorf("NewCgroup call count = %d, want 1 (metadata survives, so the #855 heal must still fire)", got)
+		}
+	})
+
+	t.Run("metadata deleted -> no heal", func(t *testing.T) {
+		cellName := "deleted"
+		fake := &deleteCellFakeClient{
+			loadCgroupFn: func(string, string) (*cgroup2.Manager, error) {
+				return nil, errors.New("cgroup path does not exist")
+			},
+			newCgroupFn: func(ctr.CgroupSpec) (*cgroup2.Manager, error) {
+				t.Errorf("NewCgroup called on a cell whose metadata is gone — the recheck must skip the heal (#1251)")
+				return nil, errors.New("must not be called")
+			},
+			enableCellSubtreeFn: func(string, string, []string) ([]string, error) { return nil, nil },
+		}
+		r := newDeleteCellTestExec(t, fake)
+		seedDeleteCellRealm(t, r, realm)
+		// Intentionally do NOT seed the cell metadata — GetCell returns
+		// ErrCellNotFound, the deleted-metadata arm of the distinction.
+		_, outcome, err := r.ReconcileCell(makeCell(cellName))
+		if err != nil {
+			t.Fatalf("ReconcileCell: unexpected error: %v", err)
+		}
+		if !outcome.Vanished {
+			t.Errorf("ReconcileOutcome.Vanished = false, want true (metadata is gone)")
+		}
+	})
+}
