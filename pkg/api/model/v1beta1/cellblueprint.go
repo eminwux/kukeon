@@ -142,14 +142,18 @@ type BlueprintContainer struct {
 	ReadOnlyRootFilesystem bool                   `json:"readOnlyRootFilesystem,omitempty" yaml:"readOnlyRootFilesystem,omitempty"`
 	Capabilities           *ContainerCapabilities `json:"capabilities,omitempty"           yaml:"capabilities,omitempty"`
 	SecurityOpts           []string               `json:"securityOpts,omitempty"           yaml:"securityOpts,omitempty"`
-	Tmpfs                  []ContainerTmpfsMount  `json:"tmpfs,omitempty"                  yaml:"tmpfs,omitempty"`
-	Resources              *ContainerResources    `json:"resources,omitempty"              yaml:"resources,omitempty"`
-	Repos                  []ContainerRepo        `json:"repos,omitempty"                  yaml:"repos,omitempty"`
-	Git                    *ContainerGit          `json:"git,omitempty"                    yaml:"git,omitempty"`
-	RestartPolicy          string                 `json:"restartPolicy,omitempty"          yaml:"restartPolicy,omitempty"`
-	Attachable             bool                   `json:"attachable,omitempty"             yaml:"attachable,omitempty"`
-	Tty                    *ContainerTty          `json:"tty,omitempty"                    yaml:"tty,omitempty"`
-	Secrets                []BlueprintSecretSlot  `json:"secrets,omitempty"                yaml:"secrets,omitempty"`
+	// Devices grants per-host-device passthrough (short form, e.g. "/dev/kvm")
+	// — the least-privilege alternative to Privileged. Mirrors
+	// ContainerSpec.Devices; see that field for semantics. Issue #1252.
+	Devices       []string              `json:"devices,omitempty"                yaml:"devices,omitempty"`
+	Tmpfs         []ContainerTmpfsMount `json:"tmpfs,omitempty"                  yaml:"tmpfs,omitempty"`
+	Resources     *ContainerResources   `json:"resources,omitempty"              yaml:"resources,omitempty"`
+	Repos         []ContainerRepo       `json:"repos,omitempty"                  yaml:"repos,omitempty"`
+	Git           *ContainerGit         `json:"git,omitempty"                    yaml:"git,omitempty"`
+	RestartPolicy string                `json:"restartPolicy,omitempty"          yaml:"restartPolicy,omitempty"`
+	Attachable    bool                  `json:"attachable,omitempty"             yaml:"attachable,omitempty"`
+	Tty           *ContainerTty         `json:"tty,omitempty"                    yaml:"tty,omitempty"`
+	Secrets       []BlueprintSecretSlot `json:"secrets,omitempty"                yaml:"secrets,omitempty"`
 }
 
 // BlueprintSecretSlot is a structural secret slot declared on a blueprint

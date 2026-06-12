@@ -88,9 +88,20 @@ type ContainerSpec struct {
 	ReadOnlyRootFilesystem bool                   `json:"readOnlyRootFilesystem,omitempty" yaml:"readOnlyRootFilesystem,omitempty"`
 	Capabilities           *ContainerCapabilities `json:"capabilities,omitempty"           yaml:"capabilities,omitempty"`
 	SecurityOpts           []string               `json:"securityOpts,omitempty"           yaml:"securityOpts,omitempty"`
-	Tmpfs                  []ContainerTmpfsMount  `json:"tmpfs,omitempty"                  yaml:"tmpfs,omitempty"`
-	Resources              *ContainerResources    `json:"resources,omitempty"              yaml:"resources,omitempty"`
-	Secrets                []ContainerSecret      `json:"secrets,omitempty"                yaml:"secrets,omitempty"`
+	// Devices grants the container access to individual host device nodes —
+	// the least-privilege alternative to Privileged (which exposes every host
+	// device). Each entry is a host device path (short form, e.g. "/dev/kvm");
+	// the node is replicated into the container at the same path with default
+	// "rwm" cgroup access. The host node is stat'd at container *create* time
+	// (type/major/minor snapshot) and materialises as a Linux.Devices entry
+	// plus a matching Linux.Resources.Devices allow rule — the same pair
+	// Docker's --device emits. A device that appears on the host after the cell
+	// is created needs a cell recreate to be picked up; a missing host node
+	// fails container create with a clear error. Issue #1252.
+	Devices   []string              `json:"devices,omitempty"                yaml:"devices,omitempty"`
+	Tmpfs     []ContainerTmpfsMount `json:"tmpfs,omitempty"                  yaml:"tmpfs,omitempty"`
+	Resources *ContainerResources   `json:"resources,omitempty"              yaml:"resources,omitempty"`
+	Secrets   []ContainerSecret     `json:"secrets,omitempty"                yaml:"secrets,omitempty"`
 	// Repos declares git repositories the container depends on. The kuketty
 	// wrapper clones (or fetches) each one in a pre-Serve step using the
 	// container's own git identity (~/.ssh, ~/.gitconfig, GIT_SSH_COMMAND),
@@ -580,6 +591,7 @@ func NewContainerDoc(from *ContainerDoc) *ContainerDoc {
 	out.Spec.Networks = cloneSlice(out.Spec.Networks)
 	out.Spec.NetworksAliases = cloneSlice(out.Spec.NetworksAliases)
 	out.Spec.SecurityOpts = cloneSlice(out.Spec.SecurityOpts)
+	out.Spec.Devices = cloneSlice(out.Spec.Devices)
 	out.Spec.Secrets = cloneSecrets(out.Spec.Secrets)
 	out.Spec.Repos = cloneRepos(out.Spec.Repos)
 	out.Spec.Git = cloneGit(out.Spec.Git)

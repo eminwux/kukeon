@@ -284,7 +284,8 @@ func (r *Exec) UpdateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 // runner fixes at container create and never re-resolves on the in-place
 // task-restart path: image/command/args (snapshot + Process), workingDir
 // (Process.Cwd), securityOpts (Process.NoNewPrivileges / Linux.Seccomp),
-// volumes (OCI Mounts), and secrets (env-injected Process.Env via
+// devices (Linux.Devices + Linux.Resources.Devices, stat'd from the host node
+// at create), volumes (OCI Mounts), and secrets (env-injected Process.Env via
 // resolveSecrets, plus file-form Mounts). Without recreating, a secrets edit
 // on a workload container never reaches the running OCI Process.Env — the
 // defect issue #1154 fixes on the non-root side (the root side routes through
@@ -299,6 +300,7 @@ func containerSpecChanged(desired, actual *intmodel.ContainerSpec) bool {
 		!stringSlicesEqual(desired.Args, actual.Args) ||
 		desired.WorkingDir != actual.WorkingDir ||
 		!stringSlicesEqual(desired.SecurityOpts, actual.SecurityOpts) ||
+		!stringSlicesEqual(desired.Devices, actual.Devices) ||
 		!volumeMountsEqual(desired.Volumes, actual.Volumes) ||
 		!containerSecretsEqual(desired.Secrets, actual.Secrets)
 }

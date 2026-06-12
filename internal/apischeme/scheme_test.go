@@ -1067,6 +1067,7 @@ func TestContainerRoundTripSecurityFieldsV1Beta1(t *testing.T) {
 				Add:  []string{"NET_ADMIN"},
 			},
 			SecurityOpts: []string{"no-new-privileges", "seccomp=unconfined"},
+			Devices:      []string{"/dev/kvm", "/dev/fuse"},
 			Tmpfs: []ext.ContainerTmpfsMount{
 				{Path: "/tmp", SizeBytes: 64 * 1024 * 1024, Options: []string{"mode=1777"}},
 			},
@@ -1094,6 +1095,9 @@ func TestContainerRoundTripSecurityFieldsV1Beta1(t *testing.T) {
 	if len(internal.Spec.SecurityOpts) != 2 || internal.Spec.SecurityOpts[0] != "no-new-privileges" {
 		t.Fatalf("securityOpts not carried: %+v", internal.Spec.SecurityOpts)
 	}
+	if len(internal.Spec.Devices) != 2 || internal.Spec.Devices[0] != "/dev/kvm" {
+		t.Fatalf("devices not carried: %+v", internal.Spec.Devices)
+	}
 	if len(internal.Spec.Tmpfs) != 1 || internal.Spec.Tmpfs[0].Path != "/tmp" ||
 		internal.Spec.Tmpfs[0].SizeBytes != 64*1024*1024 {
 		t.Fatalf("tmpfs not carried: %+v", internal.Spec.Tmpfs)
@@ -1117,6 +1121,9 @@ func TestContainerRoundTripSecurityFieldsV1Beta1(t *testing.T) {
 	}
 	if len(output.Spec.SecurityOpts) != 2 {
 		t.Fatalf("securityOpts did not round-trip: %+v", output.Spec.SecurityOpts)
+	}
+	if len(output.Spec.Devices) != 2 || output.Spec.Devices[0] != "/dev/kvm" {
+		t.Fatalf("devices did not round-trip: %+v", output.Spec.Devices)
 	}
 	if len(output.Spec.Tmpfs) != 1 || output.Spec.Tmpfs[0].Path != "/tmp" ||
 		output.Spec.Tmpfs[0].SizeBytes != 64*1024*1024 {

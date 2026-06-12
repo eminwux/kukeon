@@ -238,6 +238,7 @@ func TestSpecHashDomainPinsToDiffCellBreakingFields(t *testing.T) {
 		// must change the hash so the bare-start drift guard catches them too.
 		{"workingDir", func(s *intmodel.ContainerSpec) { s.WorkingDir = "/opt/app" }, true},
 		{"securityOpts", func(s *intmodel.ContainerSpec) { s.SecurityOpts = []string{"no-new-privileges"} }, true},
+		{"devices", func(s *intmodel.ContainerSpec) { s.Devices = []string{"/dev/kvm"} }, true},
 		{"volumes", func(s *intmodel.ContainerSpec) {
 			s.Volumes = []intmodel.VolumeMount{{Source: "/host", Target: "/cell"}}
 		}, true},
