@@ -101,6 +101,10 @@ jobs:
   # the test doesn't drift with future releases. Checksum verification is
   # skipped because pre-issue-#62 releases shipped without .sha256 assets;
   # once a release lands with .sha256 published, drop the skip.
+  # KUKE_SKIP_KUKEBUILD is set for the same reason: v0.4.0 predates the
+  # kukebuild release asset (issue #1227), so the installer would 404 fetching
+  # it. Once the pinned tag ships kukebuild-linux-*, bump KUKE_VERSION and drop
+  # this skip to exercise the kukebuild install path here.
   install-skip-init:
     name: full install (KUKE_SKIP_INIT=1) against a real release
     runs-on: ubuntu-latest
@@ -108,6 +112,7 @@ jobs:
       KUKE_VERSION: v0.4.0
       KUKE_SKIP_INIT: "1"
       KUKE_SKIP_CHECKSUM: "1"
+      KUKE_SKIP_KUKEBUILD: "1"
     steps:
       - uses: actions/checkout@v4
       - name: Run installer (download + install, skip init)
