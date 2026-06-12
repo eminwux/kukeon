@@ -380,9 +380,16 @@ func BuildContainerSpec(
 		specOpts = append(specOpts, oci.WithEnv(env))
 	}
 
-	// Set privileged mode if specified
+	// Set privileged mode if specified. oci.WithPrivileged handles
+	// capabilities, masked/readonly paths, writable sysfs/cgroupfs and
+	// seccomp/apparmor unconfinement but no device exposure, so a privileged
+	// cell could not open() any host node. Pair it with an allow-all device
+	// cgroup and a host-root-aware enumeration of the host's /dev to restore
+	// `docker run --privileged` device parity; privilegedHostDevicesOpt
+	// resolves against the host root so a containerized kukeond replicates the
+	// host's nodes, not the daemon cell's minimal devtmpfs (issue #1261).
 	if containerSpec.Privileged {
-		specOpts = append(specOpts, oci.WithPrivileged)
+		specOpts = append(specOpts, oci.WithPrivileged, oci.WithAllDevicesAllowed, privilegedHostDevicesOpt())
 	}
 
 	// Host network: drop the network LinuxNamespace entry from the OCI spec so
@@ -436,8 +443,10 @@ func BuildContainerSpec(
 	// container (Linux.Devices) and adds a matching device-cgroup allow rule
 	// (Linux.Resources.Devices), the same pair Docker's --device emits. The
 	// least-privilege alternative to Privileged. The host node is stat'd at
-	// this point (create time) via oci.WithLinuxDevice → DeviceFromPath, which
-	// returns a clear error for a missing node so container create fails fast.
+	// this point (create time), resolved against the host root when kukeond is
+	// containerized so a host path like /dev/kvm is found in the host's /dev
+	// rather than the daemon cell's minimal devtmpfs (issue #1261), and a
+	// missing node returns a clear path-named error so create fails fast.
 	specOpts = append(specOpts, deviceSpecOpts(containerSpec.Devices)...)
 
 	// Linux.CgroupsPath: place the container task inside the cell's cgroup
@@ -747,12 +756,13 @@ func tmpfsVolumeMount(v intmodel.VolumeMount) (runtimespec.Mount, bool) {
 const deviceAccessRWM = "rwm"
 
 // deviceSpecOpts builds one OCI spec option per short-form devices[] entry.
-// Each entry is a host device path (e.g. "/dev/kvm"); oci.WithLinuxDevice
-// stat's the node at create time and appends both a Linux.Devices entry (so
-// the node is visible in the container at the same path) and a matching
+// Each entry is a host device path (e.g. "/dev/kvm"); hostLinuxDeviceOpt stat's
+// the node at create time — against the host root when kukeond is containerized
+// (issue #1261) — and appends both a Linux.Devices entry (so the node is
+// visible in the container at the same path) and a matching
 // Linux.Resources.Devices allow rule (so open() is not denied by the default
 // deny-all device cgroup). A missing host node surfaces as a create-time error
-// from DeviceFromPath. Empty/blank entries are skipped. Issue #1252.
+// naming the path. Empty/blank entries are skipped. Issue #1252.
 func deviceSpecOpts(devices []string) []oci.SpecOpts {
 	if len(devices) == 0 {
 		return nil
@@ -763,7 +773,7 @@ func deviceSpecOpts(devices []string) []oci.SpecOpts {
 		if path == "" {
 			continue
 		}
-		opts = append(opts, oci.WithLinuxDevice(path, deviceAccessRWM))
+		opts = append(opts, hostLinuxDeviceOpt(path, deviceAccessRWM))
 	}
 	return opts
 }
