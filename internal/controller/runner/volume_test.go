@@ -317,3 +317,31 @@ func TestVolumeDirInitialPerms(t *testing.T) {
 		t.Errorf("fallback mode must not set setgid: %v", mode)
 	}
 }
+
+// TestVolume_NotMistakenForChildScope confirms a scope's volumes/ subdir is in
+// the shared reservedScopeSubdirs set, so no childScopeNames consumer mistakes
+// it for a phantom child space/stack. A realm-scoped volume creates
+// default/volumes/; ListBlueprints walks the realm subtree via childScopeNames
+// and must not recurse into volumes/ as a phantom space (which would read the
+// daemon into the container-writable volume tree). Same invariant the configs/
+// omission tripped in #734 — exercised here for the volumes/ subdir added in
+// #1018.
+func TestVolume_NotMistakenForChildScope(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+
+	seedBlueprint(t, r, "realm-bp", "default", "", "")
+	// A realm-scoped volume creates default/volumes/; it must not surface as a
+	// child space when the blueprint walker enumerates the realm subtree.
+	if _, err := r.WriteVolume(intmodel.Volume{
+		Metadata: intmodel.VolumeMetadata{Name: "data", Realm: "default"},
+	}); err != nil {
+		t.Fatalf("seed WriteVolume error = %v", err)
+	}
+
+	got := listedKeys(t, r, "", "", "")
+	want := []string{"default///realm-bp"}
+	if !equalStrings(got, want) {
+		t.Errorf("ListBlueprints(all) = %v, want %v (volumes/ subdir must be ignored, not traversed as a phantom space)", got, want)
+	}
+}
