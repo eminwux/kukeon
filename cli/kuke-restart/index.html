@@ -3431,12 +3431,12 @@
 <td>Pure bounce: <code>StopCell</code> then <code>StartCell</code>. The daemon's <code>StartCell</code> re-materialises and rebuilds the cell from the lineage Config when <code>Status.OutOfSync</code> is set on a Config-lineage cell — otherwise it just starts the on-disk spec.</td>
 </tr>
 <tr>
-<td><code>Stopped</code></td>
-<td>Equivalent to <code>kuke start &lt;name&gt;</code>. The daemon-side OutOfSync reapply also fires here, so <code>kuke stop</code> + <code>kuke start</code> produces the same end state as <code>kuke restart</code> on the same cell (#983).</td>
+<td><code>Stopped</code> / <code>Exited</code></td>
+<td>Equivalent to <code>kuke start &lt;name&gt;</code>. <code>Stopped</code> is an operator stop/kill; <code>Exited</code> is a clean self-exit (#1267) — both restart in place. The daemon-side OutOfSync reapply also fires here, so <code>kuke stop</code> + <code>kuke start</code> produces the same end state as <code>kuke restart</code> on the same cell (#983).</td>
 </tr>
 <tr>
-<td><code>Pending</code> / <code>Failed</code> / <code>Unknown</code></td>
-<td>Refused with <code>cell "&lt;name&gt;" exists in &lt;state&gt; state; delete it with \</code>kuke delete cell <name>` before restarting`. Exit code non-zero. Restart does not reconcile a degraded cell in place.</td>
+<td><code>Pending</code> / <code>Failed</code> / <code>Error</code> / <code>Unknown</code></td>
+<td>Refused with <code>cell "&lt;name&gt;" exists in &lt;state&gt; state; delete it with \</code>kuke delete cell <name>` before restarting<code>. Exit code non-zero. Restart does not reconcile a degraded cell in place.</code>Error` is the #1267 workload-crash terminal.</td>
 </tr>
 </tbody>
 </table>
@@ -3499,7 +3499,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 6, 2026 02:13:32 UTC">June 6, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 12, 2026 22:09:33 UTC">June 12, 2026</span>
   </span>
 
     
