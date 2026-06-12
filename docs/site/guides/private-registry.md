@@ -79,7 +79,7 @@ spec:
 | `password`      | yes      | Registry password or token                                                                          |
 | `serverAddress` | no       | Registry server (e.g. `docker.io`, `ghcr.io`). If omitted, applies to the registry in the image reference. |
 
-See [Manifests → Realm](../manifests/realm.md#specregistrycredentials) for the
+See [Manifests → Realm](../manifests/realm.md#specregistrycredentials-array-optional) for the
 full field reference.
 
 ## Pushing images: build-time credentials
