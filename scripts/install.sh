@@ -21,6 +21,10 @@
 #   KUKE_SKIP_CHECKSUM=1   skip .sha256 verification (NOT recommended)
 #   KUKE_SKIP_KUKEBUILD=1  skip downloading/installing kukebuild (disables
 #                          `kuke build`; for release tags predating its asset)
+#   KUKE_SKIP_DAEMON_UPGRADE=1
+#                          on a live host, skip the daemon version check and
+#                          keep an intentionally pinned older daemon (preserves
+#                          the historical silent-skip behavior)
 
 set -euo pipefail
 
@@ -30,6 +34,12 @@ KUKE_VERSION="${KUKE_VERSION:-}"
 KUKE_SKIP_INIT="${KUKE_SKIP_INIT:-}"
 KUKE_SKIP_CHECKSUM="${KUKE_SKIP_CHECKSUM:-}"
 KUKE_SKIP_KUKEBUILD="${KUKE_SKIP_KUKEBUILD:-}"
+KUKE_SKIP_DAEMON_UPGRADE="${KUKE_SKIP_DAEMON_UPGRADE:-}"
+
+# Set by handle_running_daemon when a live host's daemon is older than the
+# binaries just installed; main exits non-zero on this so the installer never
+# prints an unqualified success banner over a client/daemon version skew.
+KUKE_DAEMON_SKEW=""
 
 MODE="install"
 
@@ -67,6 +77,9 @@ Env overrides:
   KUKE_SKIP_INIT=1       Skip the post-install \`kuke init\` step.
   KUKE_SKIP_CHECKSUM=1   Skip .sha256 verification (NOT recommended).
   KUKE_SKIP_KUKEBUILD=1  Skip kukebuild (disables \`kuke build\`).
+  KUKE_SKIP_DAEMON_UPGRADE=1
+                         On a live host, skip the daemon version check and keep
+                         an intentionally pinned older daemon.
 EOF
 }
 
@@ -381,14 +394,54 @@ do_install() {
     # Idempotency: if the daemon socket exists, init already ran. Skip
     # rather than re-running, because `kuke init` on a healthy host is a
     # no-op only if the prior bootstrap left consistent state — and we
-    # cannot reliably detect that from a shell script.
+    # cannot reliably detect that from a shell script. But a live daemon
+    # older than the binaries we just installed must NOT be declared a
+    # success — handle_running_daemon compares versions and surfaces the
+    # skew + recreate command instead of an unqualified skip (issue #1260).
     if [ -S /run/kukeon/kukeond.sock ]; then
-        ok "kukeond already running at /run/kukeon/kukeond.sock — skipping \`kuke init\`"
+        handle_running_daemon
     else
         $SUDO kuke init
     fi
 
     install_systemd_unit
+}
+
+# --- Running-daemon version gate ---------------------------------------------
+# A binary upgrade on a live host leaves the old kukeond running. The previous
+# liveness-only skip (socket present → skip) declared that a success even when
+# the daemon predated the new binaries, ending in a client/daemon version skew
+# the installer just called done (issue #1260). This compares the live daemon's
+# version against the just-installed client and, on a mismatch, surfaces the
+# exact `kuke daemon recreate` command rather than a silent skip.
+#
+# `kuke version --strict` prints the Client/Daemon lines and exits non-zero
+# only on a real version mismatch; an unreachable daemon (socket present but
+# dead) prints a warning and exits 0, so it falls through to the historical
+# skip rather than a spurious recreate prompt. The installer does not auto-cycle
+# the daemon — a recreate tears down and re-provisions the kuke-system kukeond
+# cell, too aggressive to do unprompted from a piped curl|bash — so it prints
+# the copy-pasteable command and lets main exit non-zero on the skew.
+handle_running_daemon() {
+    if [ -n "$KUKE_SKIP_DAEMON_UPGRADE" ]; then
+        ok "kukeond already running at /run/kukeon/kukeond.sock — skipping \`kuke init\` (KUKE_SKIP_DAEMON_UPGRADE=1)"
+        return 0
+    fi
+
+    local version_out
+    if version_out="$($SUDO kuke version --strict 2>&1)"; then
+        ok "kukeond already running at /run/kukeon/kukeond.sock (version-matched) — skipping \`kuke init\`"
+        return 0
+    fi
+
+    KUKE_DAEMON_SKEW=1
+    fail "kukeond is older than the binaries just installed (client ${KUKE_VERSION}) — leaving a client/daemon version skew."
+    printf '%s\n' "$version_out" | sed 's/^/    /' >&2
+    printf '\n    Upgrade the daemon to match. Workload cells are untouched — recreate\n' >&2
+    printf '    only cycles the kuke-system kukeond cell:\n\n' >&2
+    printf '      %ssudo kuke daemon recreate --kukeond-image ghcr.io/%s:%s%s\n\n' "$C_BOLD" "$KUKE_REPO" "$KUKE_VERSION" "$C_RESET" >&2
+    printf '    To keep an intentionally pinned older daemon, re-run with KUKE_SKIP_DAEMON_UPGRADE=1.\n' >&2
+    return 0
 }
 
 # --- systemd unit ------------------------------------------------------------
@@ -485,4 +538,15 @@ if [ "$MODE" = "check" ]; then
 fi
 
 do_install
+
+# A live host with a daemon older than the just-installed binaries is left in a
+# version skew (handle_running_daemon already printed the recreate command).
+# Exit non-zero with a qualified message instead of the rosy "installed and
+# initialized" banner — the installer must never claim an unqualified success
+# over a skew it just declared (issue #1260).
+if [ -n "$KUKE_DAEMON_SKEW" ]; then
+    fail "binaries installed, but the running daemon is older — run the recreate command above to finish the upgrade."
+    exit 1
+fi
+
 print_next_steps
