@@ -35,9 +35,11 @@ import (
 type MockControllerKey struct{}
 
 // NewRestartCmd builds the `kuke restart <name>` leaf. Cell is the only
-// resource this verb targets. The verb is dual mode: a Ready cell is
-// stop+start; a Stopped cell is equivalent to `kuke start <name>`; an
-// error/partial-state cell is refused with a `kuke delete cell` pointer.
+// resource this verb targets. A Ready cell is stop+start; a terminal/degraded
+// cell (Stopped/Exited/Error/Failed) is equivalent to `kuke start <name>` (the
+// daemon recovers a Failed cell via a recreate-style path, #1268); a
+// genuinely-unrecoverable Pending/Unknown cell is refused with a
+// `kuke delete cell` pointer.
 //
 // For a Config-lineage cell whose live spec has diverged from the daemon-stored
 // Config (Status.OutOfSync = true), the start step automatically re-materialises
