@@ -167,8 +167,13 @@ func BuildRootContainerSpec(
 		specOpts = append(specOpts, oci.WithEnv(env))
 	}
 
+	// Mirror BuildContainerSpec's privileged path: oci.WithPrivileged grants no
+	// device access, so pair it with an allow-all device cgroup and a
+	// host-root-aware enumeration of the host's /dev (resolved against the host
+	// root when kukeond is containerized) to restore `docker run --privileged`
+	// device parity (issue #1261).
 	if rootSpec.Privileged {
-		specOpts = append(specOpts, oci.WithPrivileged)
+		specOpts = append(specOpts, oci.WithPrivileged, oci.WithAllDevicesAllowed, privilegedHostDevicesOpt())
 	}
 
 	// Host network: drop the network LinuxNamespace entry from the OCI spec so
