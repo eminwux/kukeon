@@ -645,6 +645,67 @@ func CompleteBlueprintNames(cmd *cobra.Command, args []string, toComplete string
 	return names, cobra.ShellCompDirectiveNoFileComp
 }
 
+// CompleteVolumeNames provides shell completion for volume name args by listing
+// every Volume visible in the active scope filter (issue #1236). A Volume is
+// never cell-scoped, so the filter bottoms out at stack. Errors swallow to an
+// empty list so a down daemon never surfaces a noisy completion.
+//
+// /CompleteConfigNames by the same convention every get/<kind> completer follows.
+//
+//nolint:dupl // per-kind completer; structurally mirrors CompleteBlueprintNames
+func CompleteVolumeNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) >= 1 && toComplete == "" {
+		if cmd.ValidArgsFunction != nil {
+			testArgs := make([]string, len(args), len(args)+1)
+			copy(testArgs, args)
+			testArgs = append(testArgs, "test")
+			if cmd.Args != nil {
+				if err := cmd.Args(cmd, testArgs); err != nil {
+					return []string{}, cobra.ShellCompDirectiveNoFileComp
+				}
+			}
+		}
+	}
+
+	client, err := completionClient(cmd)
+	if err != nil {
+		return []string{}, cobra.ShellCompDirectiveNoFileComp
+	}
+	defer func() { _ = client.Close() }()
+
+	realmName := getFlagValueWithDefault(cmd, "realm", "default")
+	spaceName := getFlagValueWithDefault(cmd, "space", "")
+	stackName := getFlagValueWithDefault(cmd, "stack", "")
+
+	if cmd.ValidArgsFunction != nil && len(args) == 0 {
+		if realmName == "" {
+			return []string{}, cobra.ShellCompDirectiveNoFileComp
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(cmd.Context(), completionTimeout)
+	defer cancel()
+
+	volumes, err := client.ListVolumes(ctx, realmName, spaceName, stackName)
+	if err != nil {
+		return []string{}, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	seen := make(map[string]bool)
+	names := make([]string, 0, len(volumes))
+	for _, vol := range volumes {
+		name := vol.Metadata.Name
+		if toComplete == "" || strings.HasPrefix(name, toComplete) {
+			if !seen[name] {
+				seen[name] = true
+				names = append(names, name)
+			}
+		}
+	}
+
+	return names, cobra.ShellCompDirectiveNoFileComp
+}
+
 // CompleteConfigNames provides shell completion for config name args by listing
 // every CellConfig visible in the active scope filter (issue #644). A Config is
 // never cell-scoped, so the filter bottoms out at stack. Errors swallow to an

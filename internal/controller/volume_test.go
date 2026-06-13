@@ -149,6 +149,64 @@ func TestListVolumes_PassesThrough(t *testing.T) {
 	}
 }
 
+// TestCreateVolume_Provisions confirms the imperative create path routes
+// through ReconcileVolume → WriteVolume and reports created=true.
+func TestCreateVolume_Provisions(t *testing.T) {
+	var wrote []intmodel.Volume
+	mock := &fakeRunner{
+		GetRealmFn: func(r intmodel.Realm) (intmodel.Realm, error) { return r, nil },
+		GetSpaceFn: func(s intmodel.Space) (intmodel.Space, error) { return s, nil },
+		WriteVolumeFn: func(v intmodel.Volume) (bool, error) {
+			wrote = append(wrote, v)
+			return true, nil
+		},
+	}
+	ctrl := setupTestController(t, mock)
+
+	res, err := ctrl.CreateVolume(intmodel.Volume{
+		Metadata: intmodel.VolumeMetadata{Name: "data", Realm: "default", Space: "agents"},
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume() error = %v", err)
+	}
+	if !res.Created {
+		t.Errorf("Created = false, want true")
+	}
+	if len(wrote) != 1 || wrote[0].Metadata.Name != "data" {
+		t.Errorf("WriteVolume calls = %+v, want one volume named data", wrote)
+	}
+}
+
+// TestCreateVolume_ReReportsUpdated confirms re-creating an existing volume
+// reports created=false (WriteVolume is idempotent).
+func TestCreateVolume_ReReportsUpdated(t *testing.T) {
+	mock := &fakeRunner{
+		GetRealmFn:    func(r intmodel.Realm) (intmodel.Realm, error) { return r, nil },
+		WriteVolumeFn: func(intmodel.Volume) (bool, error) { return false, nil },
+	}
+	ctrl := setupTestController(t, mock)
+
+	res, err := ctrl.CreateVolume(intmodel.Volume{
+		Metadata: intmodel.VolumeMetadata{Name: "data", Realm: "default"},
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume() error = %v", err)
+	}
+	if res.Created {
+		t.Errorf("Created = true, want false for re-create")
+	}
+}
+
+// TestCreateVolume_NameRequired confirms the lookup scope guard fires before
+// the runner is touched.
+func TestCreateVolume_NameRequired(t *testing.T) {
+	ctrl := setupTestController(t, &fakeRunner{})
+	_, err := ctrl.CreateVolume(intmodel.Volume{Metadata: intmodel.VolumeMetadata{Realm: "default"}})
+	if !errors.Is(err, errdefs.ErrVolumeNameRequired) {
+		t.Errorf("CreateVolume(no name) = %v, want ErrVolumeNameRequired", err)
+	}
+}
+
 // TestApplyDocuments_VolumeRoutesToReconcile pins the AC end-to-end: a parsed
 // `kind: Volume` document routes through ApplyDocuments → ReconcileVolume →
 // WriteVolume and surfaces a "created" resource result.

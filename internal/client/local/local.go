@@ -337,6 +337,21 @@ func (c *Client) GetSecret(_ context.Context, doc v1beta1.SecretDoc) (kukeonv1.G
 	}, nil
 }
 
+func (c *Client) GetVolume(_ context.Context, doc v1beta1.VolumeDoc) (kukeonv1.GetVolumeResult, error) {
+	internal, _, err := apischeme.NormalizeVolume(doc)
+	if err != nil {
+		return kukeonv1.GetVolumeResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+	res, err := c.ctrl.GetVolume(internal)
+	if err != nil {
+		return kukeonv1.GetVolumeResult{}, err
+	}
+	return kukeonv1.GetVolumeResult{
+		Volume:         apischeme.ConvertVolumeToExternal(res.Volume),
+		MetadataExists: res.MetadataExists,
+	}, nil
+}
+
 func (c *Client) GetBlueprint(
 	_ context.Context, doc v1beta1.CellBlueprintDoc,
 ) (kukeonv1.GetBlueprintResult, error) {
@@ -396,6 +411,23 @@ func (c *Client) CreateSecret(
 	ext := apischeme.ConvertSecretToExternal(res.Secret)
 	return kukeonv1.CreateSecretResult{
 		Secret:  ext,
+		Created: res.Created,
+	}, nil
+}
+
+func (c *Client) CreateVolume(
+	_ context.Context, doc v1beta1.VolumeDoc,
+) (kukeonv1.CreateVolumeResult, error) {
+	internal, _, err := apischeme.NormalizeVolume(doc)
+	if err != nil {
+		return kukeonv1.CreateVolumeResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+	res, err := c.ctrl.CreateVolume(internal)
+	if err != nil {
+		return kukeonv1.CreateVolumeResult{}, err
+	}
+	return kukeonv1.CreateVolumeResult{
+		Volume:  apischeme.ConvertVolumeToExternal(res.Volume),
 		Created: res.Created,
 	}, nil
 }
@@ -498,6 +530,17 @@ func (c *Client) ListSecrets(
 		return nil, err
 	}
 	return apischeme.ConvertSecretListToExternal(secrets), nil
+}
+
+func (c *Client) ListVolumes(
+	_ context.Context,
+	realmName, spaceName, stackName string,
+) ([]v1beta1.VolumeDoc, error) {
+	volumes, err := c.ctrl.ListVolumes(realmName, spaceName, stackName)
+	if err != nil {
+		return nil, err
+	}
+	return apischeme.ConvertVolumeListToExternal(volumes), nil
 }
 
 func (c *Client) ListBlueprints(
@@ -702,6 +745,21 @@ func (c *Client) DeleteSecret(_ context.Context, doc v1beta1.SecretDoc) (kukeonv
 	}
 	return kukeonv1.DeleteSecretResult{
 		Secret:  apischeme.ConvertSecretToExternal(res.Secret),
+		Deleted: res.Deleted,
+	}, nil
+}
+
+func (c *Client) DeleteVolume(_ context.Context, doc v1beta1.VolumeDoc) (kukeonv1.DeleteVolumeResult, error) {
+	internal, _, err := apischeme.NormalizeVolume(doc)
+	if err != nil {
+		return kukeonv1.DeleteVolumeResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+	res, err := c.ctrl.DeleteVolume(internal)
+	if err != nil {
+		return kukeonv1.DeleteVolumeResult{}, err
+	}
+	return kukeonv1.DeleteVolumeResult{
+		Volume:  apischeme.ConvertVolumeToExternal(res.Volume),
 		Deleted: res.Deleted,
 	}, nil
 }

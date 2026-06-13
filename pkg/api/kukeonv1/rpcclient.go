@@ -276,6 +276,19 @@ func (c *UnixClient) GetSecret(ctx context.Context, doc v1beta1.SecretDoc) (GetS
 	return reply.Result, nil
 }
 
+// GetVolume implements Client (#1236).
+func (c *UnixClient) GetVolume(ctx context.Context, doc v1beta1.VolumeDoc) (GetVolumeResult, error) {
+	args := &GetVolumeArgs{Doc: doc}
+	reply := &GetVolumeReply{}
+	if err := c.call(ctx, MethodGetVolume, args, reply); err != nil {
+		return GetVolumeResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
 // GetBlueprint implements Client.
 func (c *UnixClient) GetBlueprint(
 	ctx context.Context, doc v1beta1.CellBlueprintDoc,
@@ -329,6 +342,21 @@ func (c *UnixClient) CreateSecret(
 	reply := &CreateSecretReply{}
 	if err := c.call(ctx, MethodCreateSecret, args, reply); err != nil {
 		return CreateSecretResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
+// CreateVolume implements Client (#1236).
+func (c *UnixClient) CreateVolume(
+	ctx context.Context, doc v1beta1.VolumeDoc,
+) (CreateVolumeResult, error) {
+	args := &CreateVolumeArgs{Doc: doc}
+	reply := &CreateVolumeReply{}
+	if err := c.call(ctx, MethodCreateVolume, args, reply); err != nil {
+		return CreateVolumeResult{}, err
 	}
 	if reply.Err != nil {
 		return reply.Result, FromAPIError(reply.Err)
@@ -418,6 +446,22 @@ func (c *UnixClient) ListSecrets(
 		return reply.Secrets, FromAPIError(reply.Err)
 	}
 	return reply.Secrets, nil
+}
+
+// ListVolumes implements Client (#1236).
+func (c *UnixClient) ListVolumes(
+	ctx context.Context,
+	realmName, spaceName, stackName string,
+) ([]v1beta1.VolumeDoc, error) {
+	args := &ListVolumesArgs{RealmName: realmName, SpaceName: spaceName, StackName: stackName}
+	reply := &ListVolumesReply{}
+	if err := c.call(ctx, MethodListVolumes, args, reply); err != nil {
+		return nil, err
+	}
+	if reply.Err != nil {
+		return reply.Volumes, FromAPIError(reply.Err)
+	}
+	return reply.Volumes, nil
 }
 
 // ListBlueprints implements Client.
@@ -593,6 +637,19 @@ func (c *UnixClient) DeleteSecret(ctx context.Context, doc v1beta1.SecretDoc) (D
 	reply := &DeleteSecretReply{}
 	if err := c.call(ctx, MethodDeleteSecret, args, reply); err != nil {
 		return DeleteSecretResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
+// DeleteVolume implements Client (#1236).
+func (c *UnixClient) DeleteVolume(ctx context.Context, doc v1beta1.VolumeDoc) (DeleteVolumeResult, error) {
+	args := &DeleteVolumeArgs{Doc: doc}
+	reply := &DeleteVolumeReply{}
+	if err := c.call(ctx, MethodDeleteVolume, args, reply); err != nil {
+		return DeleteVolumeResult{}, err
 	}
 	if reply.Err != nil {
 		return reply.Result, FromAPIError(reply.Err)

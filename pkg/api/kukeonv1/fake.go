@@ -65,6 +65,10 @@ func (FakeClient) CreateSecret(context.Context, v1beta1.SecretDoc) (CreateSecret
 	return CreateSecretResult{}, ErrUnexpectedCall
 }
 
+func (FakeClient) CreateVolume(context.Context, v1beta1.VolumeDoc) (CreateVolumeResult, error) {
+	return CreateVolumeResult{}, ErrUnexpectedCall
+}
+
 func (FakeClient) GetRealm(context.Context, v1beta1.RealmDoc) (GetRealmResult, error) {
 	return GetRealmResult{}, ErrUnexpectedCall
 }
@@ -91,6 +95,10 @@ func (FakeClient) GetSecret(context.Context, v1beta1.SecretDoc) (GetSecretResult
 
 func (FakeClient) GetBlueprint(context.Context, v1beta1.CellBlueprintDoc) (GetBlueprintResult, error) {
 	return GetBlueprintResult{}, ErrUnexpectedCall
+}
+
+func (FakeClient) GetVolume(context.Context, v1beta1.VolumeDoc) (GetVolumeResult, error) {
+	return GetVolumeResult{}, ErrUnexpectedCall
 }
 
 func (FakeClient) GetConfig(context.Context, v1beta1.CellConfigDoc) (GetConfigResult, error) {
@@ -122,6 +130,10 @@ func (FakeClient) ListSecrets(context.Context, string, string, string, string) (
 }
 
 func (FakeClient) ListBlueprints(context.Context, string, string, string) ([]v1beta1.CellBlueprintDoc, error) {
+	return nil, ErrUnexpectedCall
+}
+
+func (FakeClient) ListVolumes(context.Context, string, string, string) ([]v1beta1.VolumeDoc, error) {
 	return nil, ErrUnexpectedCall
 }
 
@@ -171,6 +183,10 @@ func (FakeClient) DeleteSecret(context.Context, v1beta1.SecretDoc) (DeleteSecret
 
 func (FakeClient) DeleteBlueprint(context.Context, v1beta1.CellBlueprintDoc) (DeleteBlueprintResult, error) {
 	return DeleteBlueprintResult{}, ErrUnexpectedCall
+}
+
+func (FakeClient) DeleteVolume(context.Context, v1beta1.VolumeDoc) (DeleteVolumeResult, error) {
+	return DeleteVolumeResult{}, ErrUnexpectedCall
 }
 
 func (FakeClient) DeleteConfig(context.Context, v1beta1.CellConfigDoc) (DeleteConfigResult, error) {
