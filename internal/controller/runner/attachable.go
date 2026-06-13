@@ -17,6 +17,8 @@
 package runner
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -335,11 +337,14 @@ func kukettyMetadataLabels(spec intmodel.ContainerSpec) map[string]string {
 // daemon binary — see Dockerfile); for --no-daemon mode the function falls
 // back to a sibling of the running binary and then $PATH.
 //
-// The stage is idempotent: once the destination exists with non-zero size
-// and the executable bit, subsequent calls return its path without
-// re-copying. This is the hot path for every attachable container start,
-// so doing the lstat early avoids re-reading and re-writing a multi-MiB
-// binary per container.
+// The stage is idempotent on content: a subsequent call returns the
+// destination path without re-copying only when the staged copy is usable
+// (non-zero size, executable bit) AND byte-identical to the source. A
+// rebuilt kukeond image ships a newer kuketty, so a content mismatch re-
+// stages — the existence-only gate this replaced left an existing host
+// pinned to its first staged copy forever (#1277). The size short-circuit in
+// sameFileContent keeps the common up-to-date path off the multi-MiB hash on
+// every attachable container start.
 //
 // Atomicity is handled with a tmp-file rename so two concurrent provisions
 // never see a partial binary at the destination. The rename is on the same
@@ -348,25 +353,106 @@ func stageKukettyBinary(runPath string) (string, error) {
 	dstDir := filepath.Join(runPath, kukettyBinaryStagedSubdir)
 	dst := filepath.Join(dstDir, "kuketty")
 
-	if ok, err := stagedBinaryUsable(dst); err != nil {
-		return "", err
-	} else if ok {
-		return dst, nil
-	}
-
 	src, err := resolveKukettyBinary()
 	if err != nil {
+		// The source can no longer be resolved (dev / --no-daemon path where
+		// the source binary moved out from under us). Fall back to a usable
+		// staged copy if one exists rather than failing — this preserves the
+		// prior existence-only reuse for that path. Only when nothing usable
+		// is staged do we surface the resolve error.
+		if ok, uErr := stagedBinaryUsable(dst); uErr == nil && ok {
+			return dst, nil
+		}
 		return "", err
 	}
 
-	if err = os.MkdirAll(dstDir, 0o755); err != nil {
-		return "", fmt.Errorf("mkdir %q: %w", dstDir, err)
-	}
-
-	if err = copyBinaryAtomic(src, dst, "kuketty"); err != nil {
+	if _, err := ensureStagedBinary(src, dst, "kuketty"); err != nil {
 		return "", err
 	}
 	return dst, nil
+}
+
+// ensureStagedBinary makes dst a byte-identical, executable copy of src,
+// copying via copyBinaryAtomic only when dst is missing, defective (zero-byte
+// or non-exec, per stagedBinaryUsable), or holds content that differs from
+// src. It returns true when a copy was performed.
+//
+// The content check is the #1277 fix: the prior existence-only gate pinned an
+// existing host to its first-ever staged copy forever, so a rebuilt kukeond
+// image's newer kuketty never reached newly-created cells on `kuke daemon
+// recreate` until an operator manually rm'd the staged file. Comparing source
+// against dest re-stages on mismatch without needing a `kuketty version`
+// subcommand, version wiring, or an exec — the daemon already holds both
+// files. The zero-byte / non-exec defensive rejections in stagedBinaryUsable
+// are preserved: a defective dest is treated as unusable and re-staged.
+func ensureStagedBinary(src, dst, label string) (bool, error) {
+	usable, err := stagedBinaryUsable(dst)
+	if err != nil {
+		return false, err
+	}
+	if usable {
+		same, err := sameFileContent(src, dst)
+		if err != nil {
+			return false, err
+		}
+		if same {
+			return false, nil
+		}
+	}
+
+	dstDir := filepath.Dir(dst)
+	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+		return false, fmt.Errorf("mkdir %q: %w", dstDir, err)
+	}
+	if err := copyBinaryAtomic(src, dst, label); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// sameFileContent reports whether the files at a and b hold byte-identical
+// content. It short-circuits on a size mismatch — the cheap discriminator —
+// before hashing, so the common "already up to date" path hashes only when
+// sizes coincide, and a rebuild that changed the binary's size is caught by
+// the stat alone.
+func sameFileContent(a, b string) (bool, error) {
+	ai, err := os.Stat(a)
+	if err != nil {
+		return false, fmt.Errorf("stat %q: %w", a, err)
+	}
+	bi, err := os.Stat(b)
+	if err != nil {
+		return false, fmt.Errorf("stat %q: %w", b, err)
+	}
+	if ai.Size() != bi.Size() {
+		return false, nil
+	}
+
+	ah, err := sha256File(a)
+	if err != nil {
+		return false, err
+	}
+	bh, err := sha256File(b)
+	if err != nil {
+		return false, err
+	}
+	return bytes.Equal(ah, bh), nil
+}
+
+// sha256File returns the SHA-256 digest of the file at path, streaming the
+// read so a multi-MiB binary never lands fully in memory.
+func sha256File(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open %q: %w", path, err)
+	}
+	defer func() { _ = f.Close() }()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return nil, fmt.Errorf("hash %q: %w", path, err)
+	}
+	return h.Sum(nil), nil
 }
 
 // stagedBinaryUsable reports whether the destination already holds an

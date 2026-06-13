@@ -317,6 +317,145 @@ func TestStageKukettyBinary_ReusesExisting(t *testing.T) {
 	}
 }
 
+// TestEnsureStagedBinary_RestagesOnMismatch locks the #1277 content-aware
+// cache invalidation: ensureStagedBinary re-copies whenever the staged dest
+// is missing, defective (zero-byte / non-exec, per stagedBinaryUsable), or
+// holds content that differs from the source, and reuses it without a copy
+// only when the dest is usable AND byte-identical to the source. The
+// existence-only predecessor pinned an existing host to its first staged copy
+// forever, so a rebuilt kukeond image's newer kuketty never reached newly
+// created cells without a manual rm of the staged file.
+func TestEnsureStagedBinary_RestagesOnMismatch(t *testing.T) {
+	const srcContent = "\x7fELF new-kuketty"
+
+	cases := []struct {
+		name string
+		// seed prepares the dest before the call. A nil seed leaves the dest
+		// missing; the staged dir is created first either way so seeds that
+		// write a file have a parent.
+		seed       func(t *testing.T, dst string)
+		wantCopied bool
+	}{
+		{
+			name:       "missing dest re-stages",
+			seed:       nil,
+			wantCopied: true,
+		},
+		{
+			name: "zero-byte dest re-stages",
+			seed: func(t *testing.T, dst string) {
+				if err := os.WriteFile(dst, nil, 0o755); err != nil {
+					t.Fatalf("seed zero-byte: %v", err)
+				}
+			},
+			wantCopied: true,
+		},
+		{
+			name: "non-exec dest re-stages",
+			seed: func(t *testing.T, dst string) {
+				if err := os.WriteFile(dst, []byte(srcContent), 0o644); err != nil {
+					t.Fatalf("seed non-exec: %v", err)
+				}
+			},
+			wantCopied: true,
+		},
+		{
+			name: "stale-content dest re-stages",
+			seed: func(t *testing.T, dst string) {
+				if err := os.WriteFile(dst, []byte("\x7fELF old-stale-kuketty"), 0o755); err != nil {
+					t.Fatalf("seed stale: %v", err)
+				}
+			},
+			wantCopied: true,
+		},
+		{
+			name: "identical dest reuses without copy",
+			seed: func(t *testing.T, dst string) {
+				if err := os.WriteFile(dst, []byte(srcContent), 0o755); err != nil {
+					t.Fatalf("seed identical: %v", err)
+				}
+			},
+			wantCopied: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			src := filepath.Join(dir, "src-kuketty")
+			if err := os.WriteFile(src, []byte(srcContent), 0o755); err != nil {
+				t.Fatalf("write src: %v", err)
+			}
+			dstDir := filepath.Join(dir, kukettyBinaryStagedSubdir)
+			if err := os.MkdirAll(dstDir, 0o755); err != nil {
+				t.Fatalf("mkdir dstDir: %v", err)
+			}
+			dst := filepath.Join(dstDir, "kuketty")
+			if tc.seed != nil {
+				tc.seed(t, dst)
+			}
+
+			copied, err := ensureStagedBinary(src, dst, "kuketty")
+			if err != nil {
+				t.Fatalf("ensureStagedBinary: %v", err)
+			}
+			if copied != tc.wantCopied {
+				t.Fatalf("copied = %v, want %v", copied, tc.wantCopied)
+			}
+
+			// Regardless of branch, the dest must end byte-identical to src
+			// and stay executable.
+			got, err := os.ReadFile(dst)
+			if err != nil {
+				t.Fatalf("read dst: %v", err)
+			}
+			if string(got) != srcContent {
+				t.Fatalf("dst content = %q, want %q", got, srcContent)
+			}
+			info, err := os.Stat(dst)
+			if err != nil {
+				t.Fatalf("stat dst: %v", err)
+			}
+			if info.Mode()&0o111 == 0 {
+				t.Fatalf("dst mode = %v, want executable", info.Mode())
+			}
+		})
+	}
+}
+
+// TestSameFileContent locks the size-short-circuit + hash discriminator:
+// equal content reports true, content of a different size reports false
+// without hashing, and same-size-but-different content reports false via the
+// hash.
+func TestSameFileContent(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+		return p
+	}
+
+	a := write("a", "\x7fELF identical-bytes")
+	b := write("b", "\x7fELF identical-bytes")
+	cDiffSize := write("c", "short")
+	dSameSize := write("d", "\x7fELF differing-bytez") // same length as a, differing content
+
+	if same, err := sameFileContent(a, b); err != nil || !same {
+		t.Fatalf("sameFileContent(identical) = (%v, %v), want (true, nil)", same, err)
+	}
+	if same, err := sameFileContent(a, cDiffSize); err != nil || same {
+		t.Fatalf("sameFileContent(different size) = (%v, %v), want (false, nil)", same, err)
+	}
+	if len("\x7fELF identical-bytes") != len("\x7fELF differing-bytez") {
+		t.Fatalf("test setup: same-size fixtures differ in length")
+	}
+	if same, err := sameFileContent(a, dSameSize); err != nil || same {
+		t.Fatalf("sameFileContent(same size, differing content) = (%v, %v), want (false, nil)", same, err)
+	}
+}
+
 // TestEnsureAttachableSocketSymlink_RefusesOverflow locks the provision-
 // time fail-fast added in #521 AC #2: when the resolved symlink path would
 // exceed consts.KukeonMaxSocketPath bytes, ensureAttachableSocketSymlink
