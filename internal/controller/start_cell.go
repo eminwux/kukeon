@@ -56,9 +56,64 @@ func (b *Exec) StartCell(cell intmodel.Cell) (StartCellResult, error) {
 	// bare `kuke start <cell>` never sets RuntimeEnv).
 	internalCell.Spec.RuntimeEnv = cell.Spec.RuntimeEnv
 
+	// Recovery routing for the terminal-by-derivation states, evaluated BEFORE
+	// the "already running" guard below. The ordering is load-bearing (#1274): a
+	// sticky Error/Failed cell keeps its root container alive — cell state is
+	// derived from non-root containers only (deriveCellStateFromNonRootContainer-
+	// Statuses ignores the root) and neither Error nor Failed is wound down (only
+	// Exited fires shouldWindDownCell) — so the leftover root reads back
+	// ContainerStateReady. If the running-container guard ran first it would
+	// refuse with "has running containers and must first be stopped" before
+	// recovery could run, which is the exact #1268 acceptance criterion that
+	// stayed unmet after #1272. Centralising the decision here also keeps the
+	// startable-state set in agreement across the three operator verbs (`kuke
+	// start` reaches this method with no CLI-side state guard, while `kuke run
+	// <cell>` and `kuke restart` pre-filter before calling StartCell):
+	//
+	//   - Pending / Unknown: genuinely unrecoverable / mid-transition. Refuse
+	//     with the same delete-then-rerun pointer the CLI verbs print.
+	//   - Failed (kukeon bring-up fault, container records may be half-created)
+	//     and Error (workload crash whose sticky root is still running): a plain
+	//     StartCell cannot recover either — Failed's records may be incomplete,
+	//     and Error's live root trips the running-container guard. Both route
+	//     through RecreateCell (stop -> delete -> recreate containers -> start,
+	//     including the leftover root), the same recovery the OutOfSync
+	//     breaking-diff reapply already uses. Routed here (before the OutOfSync
+	//     reapply) so the cell is recovered from its on-disk spec regardless of
+	//     lineage; the next reconcile re-flags OutOfSync if it still diverges
+	//     from a lineage Config. RecreateCell's start phase funnels through
+	//     markCellReady, which clears the failure breadcrumb (Status.Reason /
+	//     Message) on the Ready transition (#1268).
+	//   - Ready (stale metadata, no live task) / Stopped / Exited: fall through
+	//     to the running-container guard and the regular start path below — their
+	//     container records are intact and not running, so runner.StartCell
+	//     re-runs them without a recreate.
+	switch internalCell.Status.State {
+	case intmodel.CellStatePending, intmodel.CellStateUnknown:
+		state := v1beta1.CellState(internalCell.Status.State)
+		return res, fmt.Errorf(
+			"cell %q exists in %s state; delete it with `kuke delete cell %s` before restarting",
+			internalCell.Metadata.Name,
+			state.String(),
+			internalCell.Metadata.Name,
+		)
+	case intmodel.CellStateFailed, intmodel.CellStateError:
+		state := v1beta1.CellState(internalCell.Status.State)
+		recreated, recreateErr := b.runner.RecreateCell(internalCell)
+		if recreateErr != nil {
+			return res, fmt.Errorf("failed to recover %s cell: %w", state.String(), recreateErr)
+		}
+		res.Cell = recreated
+		res.Started = true
+		return res, nil
+	}
+
 	// Check if containers are actually running by examining Status.Containers
 	// which is freshly populated from containerd by validateAndGetCell -> GetCell -> populateCellContainerStatuses
-	// This prevents blocking starts when containers have crashed externally but metadata still shows Ready state
+	// This prevents blocking starts when containers have crashed externally but metadata still shows Ready state.
+	// Only Ready / Stopped / Exited reach here — the recovery switch above already
+	// claimed Pending / Unknown (refused) and Failed / Error (recreate), so a
+	// leftover-running root on a recoverable terminal cell no longer trips this guard.
 	if len(internalCell.Status.Containers) > 0 {
 		// Check if any container is actually running
 		hasRunningContainer := false
@@ -82,44 +137,6 @@ func (b *Exec) StartCell(cell intmodel.Cell) (StartCellResult, error) {
 			"cell %q is already in Ready state and must first be stopped",
 			internalCell.Metadata.Name,
 		)
-	}
-
-	// Single source of truth for the startable-state set across the three
-	// operator verbs (#1268). `kuke start` reaches this method with no CLI-side
-	// state guard, while `kuke run <cell>` and `kuke restart` pre-filter before
-	// calling StartCell; centralising the decision here keeps all three in
-	// agreement instead of diverging (the pre-#1268 `kuke start` had no Failed
-	// guard at all, so it tried to start a Failed cell the other two refused):
-	//
-	//   - Pending / Unknown: genuinely unrecoverable / mid-transition. Refuse
-	//     with the same delete-then-rerun pointer the CLI verbs print.
-	//   - Failed: a kukeon bring-up fault whose container records may be
-	//     half-created, so a plain StartCell can't recover them. Route through
-	//     RecreateCell (stop -> delete -> recreate containers -> start), the same
-	//     recovery the OutOfSync breaking-diff reapply already uses. Routed here
-	//     (before the OutOfSync reapply) so a Failed cell is recovered from its
-	//     on-disk spec regardless of lineage; the next reconcile re-flags
-	//     OutOfSync if it still diverges from a lineage Config.
-	//   - Ready (stale metadata, no live task) / Stopped / Exited / Error: fall
-	//     through to the regular start path below — their container records are
-	//     intact, so runner.StartCell re-runs them without a recreate.
-	switch internalCell.Status.State {
-	case intmodel.CellStatePending, intmodel.CellStateUnknown:
-		state := v1beta1.CellState(internalCell.Status.State)
-		return res, fmt.Errorf(
-			"cell %q exists in %s state; delete it with `kuke delete cell %s` before restarting",
-			internalCell.Metadata.Name,
-			state.String(),
-			internalCell.Metadata.Name,
-		)
-	case intmodel.CellStateFailed:
-		recreated, recreateErr := b.runner.RecreateCell(internalCell)
-		if recreateErr != nil {
-			return res, fmt.Errorf("failed to recover failed cell: %w", recreateErr)
-		}
-		res.Cell = recreated
-		res.Started = true
-		return res, nil
 	}
 
 	// Reapply the lineage Config when the persisted OutOfSync flag is set, so

@@ -42,11 +42,11 @@ import (
 //     Ready but containerd has lost the backing task. Recovery is a
 //     delete-then-rerun so the next CreateCell starts from a clean
 //     containerd slate.
-//   - Stopped → the reconciler's wind-down (`refresh.go windDownCell`)
-//     has reaped the work container after its kuketty exited, so the
-//     attach socket inode is orphaned. Recovery is `kuke start` —
-//     the cell metadata is intact, so a restart re-binds kuketty
-//     against a fresh inode.
+//   - Stopped / Exited / Error → the work container is not running
+//     (wind-down reaped it, it exited cleanly, or the workload crashed),
+//     so the attach socket inode is orphaned. Recovery is `kuke start` —
+//     the cell metadata is intact, and Error is restartable without a
+//     delete (#1274), so a restart re-binds kuketty against a fresh inode.
 //   - Pending / Failed / Unknown → no clean attach path. Same recovery
 //     as Ready+task-dead (delete-then-rerun); a Failed cell is sticky
 //     per the reconciler so only a delete clears it.
@@ -76,10 +76,14 @@ func GuardCellTaskLiveness(get kukeonv1.GetCellResult, cellName string) error {
 			cellName,
 			cellName,
 		)
-	case v1beta1.CellStateStopped, v1beta1.CellStateExited:
-		// Stopped (operator stop/kill) and Exited (clean self-exit, #1267) both
-		// leave no live work container — point the operator at `kuke start`.
-		// A crashed cell (Error) falls through to the delete-then-rerun default.
+	case v1beta1.CellStateStopped, v1beta1.CellStateExited, v1beta1.CellStateError:
+		// Stopped (operator stop/kill), Exited (clean self-exit, #1267) and Error
+		// (workload crash, #1267) all leave no live work container — point the
+		// operator at `kuke start`. Error is restartable without a delete (#1274):
+		// the daemon's StartCell recovers it through a recreate-style path (stop ->
+		// recreate containers -> start) that also winds down the sticky leftover
+		// root, so the delete-then-rerun pointer the default branch prints would be
+		// stale advice for a crashed cell.
 		return fmt.Errorf(
 			"cell %q is in state %s (no work container is running); "+
 				"start it first with `kuke start %s`",

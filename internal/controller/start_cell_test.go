@@ -370,9 +370,14 @@ func TestStartCell_ReadyStateValidation(t *testing.T) {
 			errContains: "delete it with `kuke delete cell unknown-cell` before restarting",
 		},
 		{
-			// #1268: Error (workload crash, intact container records) re-runs via
-			// the plain StartCell path — no recreate needed.
-			name:      "cell in Error state can be started",
+			// #1274: Error (workload crash) is recovered through RecreateCell, not
+			// a plain StartCell. The crashed cell's root container is sticky and
+			// not wound down, so it stays alive — a plain StartCell would trip the
+			// "has running containers" guard. RecreateCell stops/deletes the
+			// leftover root and rebuilds, which is the only path that brings the
+			// cell back up. This reverses #1272's plain-StartCell routing for
+			// Error, which could not recover a cell whose root was still live.
+			name:      "cell in Error state routes through RecreateCell",
 			cellName:  "error-cell",
 			realmName: "test-realm",
 			spaceName: "test-space",
@@ -392,12 +397,58 @@ func TestStartCell_ReadyStateValidation(t *testing.T) {
 				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
 					return true, nil
 				}
-				f.StartCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+				f.StartCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+					return intmodel.Cell{}, errors.New("Error must route through RecreateCell, not StartCell")
+				}
+				f.RecreateCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
 					cell.Status.State = intmodel.CellStateReady
 					return cell, nil
 				}
-				f.RecreateCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
-					return intmodel.Cell{}, errors.New("Error must not route through RecreateCell")
+				f.UpdateCellMetadataFn = func(_ intmodel.Cell) error {
+					return nil
+				}
+			},
+			wantErr: false,
+		},
+		{
+			// #1274: an Error cell with a leftover-running ROOT container must
+			// still recover — the running-container guard must NOT fire for it,
+			// because the recovery switch claims Error before the guard is
+			// reached. Before the fix this returned "has running containers and
+			// must first be stopped" instead of recovering.
+			name:      "cell in Error state with leftover-running root recovers via RecreateCell",
+			cellName:  "error-cell-live-root",
+			realmName: "test-realm",
+			spaceName: "test-space",
+			stackName: "test-stack",
+			setupRunner: func(f *fakeRunner) {
+				existingCell := buildTestCell("error-cell-live-root", "test-realm", "test-space", "test-stack")
+				existingCell.Status.State = intmodel.CellStateError
+				existingCell.Spec.Containers = []intmodel.ContainerSpec{
+					{ID: "root", Image: "alpine:latest"},
+					{ID: "container1", Image: "alpine:latest"},
+				}
+				// Root container still running (sticky Error is not wound down),
+				// non-root workload crashed.
+				existingCell.Status.Containers = []intmodel.ContainerStatus{
+					{ID: "root", State: intmodel.ContainerStateReady},
+					{ID: "container1", State: intmodel.ContainerStateError},
+				}
+				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+					return existingCell, nil
+				}
+				f.ExistsCgroupFn = func(_ any) (bool, error) {
+					return true, nil
+				}
+				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
+					return true, nil
+				}
+				f.StartCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+					return intmodel.Cell{}, errors.New("Error must route through RecreateCell, not StartCell")
+				}
+				f.RecreateCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 				f.UpdateCellMetadataFn = func(_ intmodel.Cell) error {
 					return nil

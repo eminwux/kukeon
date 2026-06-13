@@ -621,10 +621,11 @@ func warnDivergentNamedCell(w io.Writer, cellDoc v1beta1.CellDoc, changed []stri
 //     itself an unsafe re-entry). The live start+attach is gated on the same CNI
 //     fix (#630): StartCell re-ADDs the root container to its bridge network,
 //     which the daemon rejects with `duplicate allocation` until it releases the
-//     prior allocation on teardown. Stopped/Exited/Error re-run from their intact
-//     container records; Failed (kukeon bring-up fault) is routed by the daemon's
-//     StartCell through a recreate-style recovery (stop -> recreate containers ->
-//     start) so a half-created cell recovers without delete-then-recreate.
+//     prior allocation on teardown. Stopped/Exited re-run from their intact
+//     container records; Error (workload crash) and Failed (kukeon bring-up fault)
+//     are routed by the daemon's StartCell through a recreate-style recovery (stop
+//     -> recreate containers -> start) so a crashed cell whose sticky root is still
+//     live, or a half-created cell, recovers without delete-then-recreate (#1274).
 //   - error / partial (Pending, Unknown) → refuse with a
 //     `kuke delete cell <name>` pointer (parity with the `-c` identity contract
 //     in #625). `run` does not reconcile a genuinely-unrecoverable cell in place;
@@ -662,13 +663,14 @@ func runExistingCell(
 		}
 	case v1beta1.CellStateStopped, v1beta1.CellStateExited, v1beta1.CellStateError, v1beta1.CellStateFailed:
 		// All four terminal/degraded states are operator-restartable without a
-		// delete (#1268): Stopped (operator stop/kill), Exited (clean self-exit,
-		// #1267) and Error (workload crash) re-run from their intact container
-		// records, while Failed (kukeon bring-up fault) is recovered by the
-		// daemon's StartCell, which routes it through a recreate-style recovery
-		// (stop -> recreate containers -> start). StartCell is called directly
-		// (no stop-first) so the daemon observes the persisted Failed state and
-		// picks the recreate path rather than a plain start.
+		// delete (#1268): Stopped (operator stop/kill) and Exited (clean self-exit,
+		// #1267) re-run from their intact container records, while Error (workload
+		// crash whose sticky root is still live) and Failed (kukeon bring-up fault)
+		// are recovered by the daemon's StartCell, which routes both through a
+		// recreate-style recovery (stop -> recreate containers -> start, including
+		// the leftover root) (#1274). StartCell is called directly (no stop-first)
+		// so the daemon observes the persisted Error/Failed state and picks the
+		// recreate path rather than a plain start.
 		startRes, err := client.StartCell(cmd.Context(), cellDoc)
 		if err != nil {
 			return err
