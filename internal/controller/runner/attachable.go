@@ -342,9 +342,9 @@ func kukettyMetadataLabels(spec intmodel.ContainerSpec) map[string]string {
 // (non-zero size, executable bit) AND byte-identical to the source. A
 // rebuilt kukeond image ships a newer kuketty, so a content mismatch re-
 // stages — the existence-only gate this replaced left an existing host
-// pinned to its first staged copy forever (#1277). The size short-circuit in
-// sameFileContent keeps the common up-to-date path off the multi-MiB hash on
-// every attachable container start.
+// pinned to its first staged copy forever (#1277). sameFileContent hashes the
+// common up-to-date path because equal content has equal size, but its size
+// short-circuit avoids hashing when a re-stage changed the binary's size.
 //
 // Atomicity is handled with a tmp-file rename so two concurrent provisions
 // never see a partial binary at the destination. The rename is on the same
