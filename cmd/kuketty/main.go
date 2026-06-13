@@ -92,13 +92,24 @@ func (e *workloadExitError) Error() string {
 }
 
 // workloadExitCode reports whether err is sbsh's "workload child exited"
-// terminating cause and, if so, the child's exit code. sbsh v0.13.0 (the
+// terminating cause and, if so, the child's exit code. sbsh v0.13.1 (the
 // pinned release) has no machine-readable exit-code field on EvCmdExited — it
 // embeds the code in the terminating error: an *exec.ExitError on the non-init
 // cmd.Wait path, a "(code 0)" literal on a non-init clean exit, or a "code=N"
 // string on the PID-1 reaper path (internal/terminal/terminalrunner/
 // lifecycle.go). This recognizes all three carriers. ok=false means err is a
 // genuine kuketty-internal failure that should map to exitCodeInternal.
+//
+// Before sbsh v0.13.1 a clean PID-1 exit could surface here as the benign
+// PTY-master read EIO ("read /dev/ptmx: input/output error") instead of the
+// "code=N" carrier: the EIO is the immediate kernel side-effect of the child
+// closing its tty and it reliably preempted the reaper's EvCmdExited inside
+// sbsh's runLoop, so Serve returned the EIO as its cause and kuketty flipped a
+// clean exit to exitCodeInternal (issue #1282). sbsh v0.13.1's server.Serve now
+// waits briefly for the authoritative EvCmdExited before returning a PTY-read
+// EvError (eminwux/sbsh#439), so the benign race no longer reaches here — a
+// raw PTY-read EIO that *does* surface now means a genuine error with the child
+// still alive, and ok=false / exitCodeInternal is the correct mapping for it.
 func workloadExitCode(err error) (code int, ok bool) {
 	if err == nil {
 		return 0, true
