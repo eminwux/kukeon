@@ -73,10 +73,11 @@ type fakeRunner struct {
 	DeleteBlueprintFn func(bp intmodel.CellBlueprint) error
 
 	// Volume methods
-	WriteVolumeFn  func(volume intmodel.Volume) (bool, error)
-	GetVolumeFn    func(volume intmodel.Volume) (intmodel.Volume, error)
-	ListVolumesFn  func(realmName, spaceName, stackName string) ([]intmodel.Volume, error)
-	DeleteVolumeFn func(volume intmodel.Volume) error
+	WriteVolumeFn             func(volume intmodel.Volume) (bool, error)
+	GetVolumeFn               func(volume intmodel.Volume) (intmodel.Volume, error)
+	ListVolumesFn             func(realmName, spaceName, stackName string) ([]intmodel.Volume, error)
+	DeleteVolumeFn            func(volume intmodel.Volume) error
+	VolumeMountedByLiveCellFn func(volume intmodel.Volume) (string, bool, error)
 
 	// Config methods
 	WriteConfigFn         func(config intmodel.CellConfig) (bool, error)
@@ -380,6 +381,15 @@ func (f *fakeRunner) DeleteVolume(volume intmodel.Volume) error {
 		return f.DeleteVolumeFn(volume)
 	}
 	return errors.New("unexpected call to DeleteVolume")
+}
+
+func (f *fakeRunner) VolumeMountedByLiveCell(volume intmodel.Volume) (string, bool, error) {
+	if f.VolumeMountedByLiveCellFn != nil {
+		return f.VolumeMountedByLiveCellFn(volume)
+	}
+	// Default: nothing mounts it, so the delete gate is a no-op unless a test
+	// opts in by setting VolumeMountedByLiveCellFn.
+	return "", false, nil
 }
 
 // Config methods

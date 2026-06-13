@@ -556,7 +556,7 @@ func (c *client) CreateContainerFromSpec(
 	for _, apply := range opts {
 		apply(&bo)
 	}
-	resolved, err := resolveSecrets(containerdID, containerSpec.Secrets, DefaultSecretsStagingDir, bo.secretRunPath)
+	resolved, err := resolveSecrets(containerdID, containerSpec.Secrets, DefaultSecretsStagingDir, bo.runPath)
 	if err != nil {
 		c.logger.ErrorContext(
 			c.ctx,
@@ -572,6 +572,28 @@ func (c *client) CreateContainerFromSpec(
 	}
 	if len(resolved.MountAdds) > 0 {
 		containerSpec.Volumes = append(containerSpec.Volumes, resolved.MountAdds...)
+	}
+
+	// Resolve kind: volume mounts to their on-disk Volume directories before
+	// building the OCI spec, so the downstream bind emitter sees a plain host
+	// path. A same-scope `source: <name>` walks the container's own scope; a
+	// `volumeRef:` resolves cross-scope. An unknown reference is a hard error
+	// (no auto-create). Specs with no volume reference are returned untouched.
+	volScope := VolumeScope{
+		Realm: containerSpec.RealmName,
+		Space: containerSpec.SpaceName,
+		Stack: containerSpec.StackName,
+	}
+	containerSpec.Volumes, err = resolveVolumeMounts(bo.runPath, volScope, containerSpec.Volumes)
+	if err != nil {
+		c.logger.ErrorContext(
+			c.ctx,
+			"failed to resolve container volume references",
+			"id", containerSpec.ID,
+			"cell", cellID,
+			"err", formatError(err),
+		)
+		return nil, fmt.Errorf("failed to resolve volume references: %w", err)
 	}
 
 	// Convert to ctr.ContainerSpec using BuildContainerSpec

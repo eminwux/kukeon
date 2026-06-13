@@ -113,14 +113,22 @@ type DeleteVolumeResult struct {
 
 // DeleteVolume removes a single named, scoped Volume's daemon-provisioned
 // directory. Returns a "not found" error when the volume does not exist,
-// matching the DeleteBlueprint contract. There is no live-reference gate in
-// step 1: the container-side mount kind that would reference a Volume lands in
-// step 4 (#1016), where the delete gate against a live mount is exercised.
+// matching the DeleteBlueprint contract. A running cell that mounts the Volume
+// via a kind: volume mount gates the delete (issue #1016): the request is
+// refused with ErrVolumeInUse naming the mounting cell so the directory is
+// never pulled out from under a live mount. A Volume mounted only by stopped
+// cells, or by none, deletes cleanly.
 func (b *Exec) DeleteVolume(volume intmodel.Volume) (DeleteVolumeResult, error) {
 	var res DeleteVolumeResult
 
 	if err := validateVolumeLookup(volume.Metadata); err != nil {
 		return res, err
+	}
+
+	if cellRef, mounted, err := b.runner.VolumeMountedByLiveCell(volume); err != nil {
+		return res, err
+	} else if mounted {
+		return res, fmt.Errorf("%w: mounted by cell %q", errdefs.ErrVolumeInUse, cellRef)
 	}
 
 	if err := b.runner.DeleteVolume(volume); err != nil {

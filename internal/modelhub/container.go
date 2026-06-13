@@ -191,17 +191,33 @@ const (
 	// Source is implicit ("tmpfs"). SizeBytes and Mode tune the standard
 	// tmpfs size= and mode= options when non-zero.
 	VolumeKindTmpfs VolumeKind = "tmpfs"
+	// VolumeKindVolume references a daemon-managed kind: Volume (issue #1018) by
+	// name (Source, same-scope) or by VolumeRef (cross-scope) and bind-mounts
+	// its resolved on-disk directory at Target. Resolved at container-create
+	// time; the referenced Volume's directory survives container recreation and
+	// the mounting cell's deletion. Step 4 (#1016).
+	VolumeKindVolume VolumeKind = "volume"
 )
 
 // VolumeMount is a mount entry attached to a container. The Kind discriminator
 // selects the OCI mount type the runtime emits: bind (host path → container
-// path) or tmpfs (in-memory directory). Empty Kind means bind for back-compat
-// with call sites that predate the discriminator.
+// path), tmpfs (in-memory directory), or volume (a reference to a kind: Volume
+// resolved to its on-disk directory and bind-mounted). Empty Kind means bind
+// for back-compat with call sites that predate the discriminator.
 type VolumeMount struct {
-	Kind     VolumeKind
-	Source   string
-	Target   string
-	ReadOnly bool
+	Kind VolumeKind
+	// Source is the host path for a bind mount, or — when Kind is
+	// VolumeKindVolume — the name of a same-scope Volume (mutually exclusive
+	// with VolumeRef). Empty for tmpfs. The volume-reference resolver rewrites
+	// Source to the resolved Volume directory at container-create time so the
+	// downstream bind-mount emitter needs no Volume awareness.
+	Source string
+	Target string
+	// VolumeRef references a kind: Volume in another scope. Only honored when
+	// Kind == VolumeKindVolume and mutually exclusive with a same-scope Source.
+	// Step 4 (#1016).
+	VolumeRef *VolumeRef
+	ReadOnly  bool
 	// SizeBytes is the tmpfs size= option in bytes. Only honored when
 	// Kind == VolumeKindTmpfs; zero leaves the kernel default.
 	SizeBytes int64
@@ -209,6 +225,17 @@ type VolumeMount struct {
 	// Only honored when Kind == VolumeKindTmpfs; zero leaves the kernel
 	// default (01777).
 	Mode uint32
+}
+
+// VolumeRef mirrors the v1beta1 VolumeRef payload — a name + scope pointing at
+// a daemon-managed kind: Volume (issue #1018). Unlike ContainerSecretRef there
+// is no Cell coordinate; a Volume is never cell-scoped. See the v1beta1 type
+// for the scope-coordinate contract. Step 4 (#1016).
+type VolumeRef struct {
+	Name  string
+	Realm string
+	Space string
+	Stack string
 }
 
 // ContainerRepo mirrors the v1beta1 ContainerRepo payload — a git repository
