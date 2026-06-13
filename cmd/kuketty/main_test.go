@@ -20,7 +20,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"syscall"
 	"testing"
@@ -278,6 +280,96 @@ func TestIsCleanShutdown(t *testing.T) {
 	}
 	if isCleanShutdown(errors.New("something went wrong")) {
 		t.Errorf("opaque err: reported clean")
+	}
+}
+
+// TestWorkloadExitCode covers the carriers sbsh v0.13.0 embeds the workload
+// child's exit code in (issue #1273): the *exec.ExitError on the non-init
+// cmd.Wait path, the "(code 0)" literal on a non-init clean exit, the
+// init-mode "code=N" string from the PID-1 reaper, and the abnormal
+// no-recoverable-code teardown paths. A genuine kuketty-internal failure must
+// report ok=false so it maps to exitCodeInternal.
+func TestWorkloadExitCode(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		wantCode int
+		wantOK   bool
+	}{
+		{name: "nil is clean", err: nil, wantCode: 0, wantOK: true},
+		{
+			name:     "non-init clean exit literal",
+			err:      errors.New("shell process exited (code 0)"),
+			wantCode: 0,
+			wantOK:   true,
+		},
+		{
+			name:     "init-mode clean exit",
+			err:      errors.New("shell process exited: code=0"),
+			wantCode: 0,
+			wantOK:   true,
+		},
+		{
+			name:     "init-mode non-zero exit",
+			err:      errors.New("shell process exited: code=7"),
+			wantCode: 7,
+			wantOK:   true,
+		},
+		{
+			name:     "init-mode wraps via fmt.Errorf",
+			err:      fmt.Errorf("server.Serve: %w", errors.New("shell process exited: code=137")),
+			wantCode: 137,
+			wantOK:   true,
+		},
+		{
+			name:     "no recoverable code is treated clean",
+			err:      errors.New("shell process exited"),
+			wantCode: 0,
+			wantOK:   true,
+		},
+		{
+			name:     "close-cancelled tracked-exit wait is treated clean",
+			err:      errors.New("shell process exited (close cancelled tracked-exit wait)"),
+			wantCode: 0,
+			wantOK:   true,
+		},
+		{
+			name:     "internal failure is not a workload exit",
+			err:      errors.New("server.New: bind failed"),
+			wantCode: 0,
+			wantOK:   false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			code, ok := workloadExitCode(tc.err)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
+			}
+			if code != tc.wantCode {
+				t.Errorf("code = %d, want %d", code, tc.wantCode)
+			}
+		})
+	}
+}
+
+// TestWorkloadExitCode_ExecExitError pins the non-init cmd.Wait carrier: sbsh
+// wraps the *exec.ExitError from cmd.Wait with %w, so errors.As must recover
+// the child's real exit code (here a non-zero status).
+func TestWorkloadExitCode_ExecExitError(t *testing.T) {
+	cmd := exec.Command("sh", "-c", "exit 3")
+	runErr := cmd.Run()
+	var exitErr *exec.ExitError
+	if !errors.As(runErr, &exitErr) {
+		t.Fatalf("expected *exec.ExitError, got %v", runErr)
+	}
+	wrapped := fmt.Errorf("shell process exited: %w", exitErr)
+	code, ok := workloadExitCode(wrapped)
+	if !ok {
+		t.Fatalf("ok = false, want true")
+	}
+	if code != 3 {
+		t.Errorf("code = %d, want 3", code)
 	}
 }
 

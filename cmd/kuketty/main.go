@@ -39,8 +39,12 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
+	"regexp"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -63,19 +67,84 @@ const defaultConfigPath = "/.kukeon/kuketty/metadata.json"
 const exitCodeUsage = 64
 
 // exitCodeInternal is returned when kuketty itself fails (config parse,
-// socket listen, server bring-up). 70 is BSD EX_SOFTWARE. The workload's
-// own exit code is not surfaced through kuketty — the sbsh server reports
-// terminal-exit via its event loop and the attached client sees the
-// workload's status through the RPC, not the wrapper's exit code.
+// socket listen, server bring-up). 70 is BSD EX_SOFTWARE. It is reserved for
+// genuine wrapper failures: the *workload's* own exit is surfaced separately
+// through kuketty's exit code (see workloadExitCode / workloadExitError and
+// issue #1273), so the daemon's task-exit-code → container/cell-state
+// derivation (#1267/#1269) reflects the workload's fate rather than mapping
+// every clean workload exit to this internal-error code.
 const exitCodeInternal = 70
+
+// codeRe extracts the workload child's numeric exit code from sbsh's PID-1
+// (init-mode) EvCmdExited cause, which embeds it as "code=N"
+// (sbsh internal/terminal/terminalrunner/lifecycle.go).
+var codeRe = regexp.MustCompile(`code=(-?\d+)`)
+
+// workloadExitError carries the workload child's non-zero exit code up to
+// main() so it can propagate it as kuketty's own exit code. It is distinct
+// from a kuketty-internal failure (exitCodeInternal): a non-zero workload
+// exit is the workload's fate, not a wrapper bug, and must reach the daemon
+// verbatim so the container/cell lands in Error with the workload's status.
+type workloadExitError struct{ code int }
+
+func (e *workloadExitError) Error() string {
+	return fmt.Sprintf("workload exited with status %d", e.code)
+}
+
+// workloadExitCode reports whether err is sbsh's "workload child exited"
+// terminating cause and, if so, the child's exit code. sbsh v0.13.0 (the
+// pinned release) has no machine-readable exit-code field on EvCmdExited — it
+// embeds the code in the terminating error: an *exec.ExitError on the non-init
+// cmd.Wait path, a "(code 0)" literal on a non-init clean exit, or a "code=N"
+// string on the PID-1 reaper path (internal/terminal/terminalrunner/
+// lifecycle.go). This recognizes all three carriers. ok=false means err is a
+// genuine kuketty-internal failure that should map to exitCodeInternal.
+func workloadExitCode(err error) (code int, ok bool) {
+	if err == nil {
+		return 0, true
+	}
+	// Non-init cmd.Wait path: the *exec.ExitError carries the real code (and
+	// signal info on signaled deaths), wrapped by sbsh with %w.
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode(), true
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "shell process exited") {
+		return 0, false
+	}
+	// Non-init clean exit: errors.New("shell process exited (code 0)").
+	if strings.Contains(msg, "(code 0)") {
+		return 0, true
+	}
+	// PID-1 init mode: fmt.Errorf("shell process exited: code=%d", code).
+	if m := codeRe.FindStringSubmatch(msg); m != nil {
+		if c, perr := strconv.Atoi(m[1]); perr == nil {
+			return c, true
+		}
+	}
+	// "shell process exited" with no recoverable code — an abnormal reaper or
+	// shutdown-race path (sbsh #398: reaper channel closed, or the tracked-exit
+	// wait was cancelled by Close). These arise during teardown, not a workload
+	// crash, so treat them as a clean termination rather than flipping a
+	// stopped cell to Error.
+	return 0, true
+}
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		var usageErr *usageError
+		var wlErr *workloadExitError
 		switch {
 		case errors.As(err, &usageErr):
 			fmt.Fprintf(os.Stderr, "kuketty: %v\n", err)
 			os.Exit(exitCodeUsage)
+		case errors.As(err, &wlErr):
+			// The workload itself exited non-zero. Propagate its code so the
+			// daemon records the container/cell as Error with the workload's
+			// real status (#1273) — this is the workload's fate, not a kuketty
+			// failure, so it gets no "kuketty:" diagnostic.
+			os.Exit(wlErr.code)
 		default:
 			fmt.Fprintf(os.Stderr, "kuketty: %v\n", err)
 			os.Exit(exitCodeInternal)
@@ -172,10 +241,26 @@ func run(args []string) error {
 	if err != nil {
 		return fmt.Errorf("server.New: %w", err)
 	}
-	if serveErr := srv.Serve(ctx, listener); serveErr != nil && !isCleanShutdown(serveErr) {
-		return fmt.Errorf("server.Serve: %w", serveErr)
+	// The workload's exit is surfaced through kuketty's own exit code so the
+	// daemon's task-exit-code → container/cell-state derivation (#1267/#1269)
+	// reflects the workload's fate, not the wrapper's (issue #1273). sbsh
+	// reports terminal exit as the Serve terminating cause:
+	//   - a clean operator-initiated shutdown (ctx cancel / Stop) → exit 0;
+	//   - a workload that exited carries the child's code: 0 → Exited (return
+	//     nil), non-zero → Error (return *workloadExitError so main() exits
+	//     with that code);
+	//   - anything else is a genuine kuketty-internal failure → exitCodeInternal.
+	serveErr := srv.Serve(ctx, listener)
+	if isCleanShutdown(serveErr) {
+		return nil
 	}
-	return nil
+	if code, ok := workloadExitCode(serveErr); ok {
+		if code == 0 {
+			return nil
+		}
+		return &workloadExitError{code: code}
+	}
+	return fmt.Errorf("server.Serve: %w", serveErr)
 }
 
 // parseArgs accepts a single optional `--config <path>` override. Any other
