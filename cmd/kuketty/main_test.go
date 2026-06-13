@@ -283,12 +283,18 @@ func TestIsCleanShutdown(t *testing.T) {
 	}
 }
 
-// TestWorkloadExitCode covers the carriers sbsh v0.13.0 embeds the workload
+// TestWorkloadExitCode covers the carriers sbsh v0.13.1 embeds the workload
 // child's exit code in (issue #1273): the *exec.ExitError on the non-init
 // cmd.Wait path, the "(code 0)" literal on a non-init clean exit, the
 // init-mode "code=N" string from the PID-1 reaper, and the abnormal
 // no-recoverable-code teardown paths. A genuine kuketty-internal failure must
 // report ok=false so it maps to exitCodeInternal.
+//
+// The "pty-EIO race resolves to code=N" case pins the issue #1282 contract:
+// sbsh v0.13.1 prefers the authoritative EvCmdExited over the benign PTY-master
+// read EIO (eminwux/sbsh#439), so a clean PID-1 exit surfaces as "code=0" here
+// rather than the EIO error — and a raw PTY-read EIO that still surfaces means
+// a genuine error (child alive), which must map to exitCodeInternal (ok=false).
 func TestWorkloadExitCode(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -336,6 +342,24 @@ func TestWorkloadExitCode(t *testing.T) {
 		{
 			name:     "internal failure is not a workload exit",
 			err:      errors.New("server.New: bind failed"),
+			wantCode: 0,
+			wantOK:   false,
+		},
+		{
+			// #1282: under sbsh v0.13.1 a clean PID-1 exit racing the
+			// PTY-master EIO surfaces as the authoritative "code=N" carrier
+			// (sbsh#439), not the EIO — so it decodes to a clean exit.
+			name:     "pty-EIO race resolves to init-mode code=N",
+			err:      fmt.Errorf("server.Serve: %w", errors.New("shell process exited: code=0")),
+			wantCode: 0,
+			wantOK:   true,
+		},
+		{
+			// A raw PTY-read EIO that still surfaces means a genuine error with
+			// the child alive (sbsh v0.13.1 only returns it after waiting in
+			// vain for EvCmdExited), so it is a kuketty-internal failure.
+			name:     "raw pty-read EIO is an internal failure",
+			err:      fmt.Errorf("terminalManagerReader pty read error: could not read pipe->pipe: %w", errors.New("read /dev/ptmx: input/output error")),
 			wantCode: 0,
 			wantOK:   false,
 		},
