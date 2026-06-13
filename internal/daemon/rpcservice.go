@@ -167,6 +167,13 @@ func (s *KukeonV1Service) GetBlueprint(args *kukeonv1.GetBlueprintArgs, reply *k
 	return nil
 }
 
+func (s *KukeonV1Service) GetVolume(args *kukeonv1.GetVolumeArgs, reply *kukeonv1.GetVolumeReply) error {
+	result, err := s.core.GetVolume(s.ctx, args.Doc)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
 func (s *KukeonV1Service) GetConfig(args *kukeonv1.GetConfigArgs, reply *kukeonv1.GetConfigReply) error {
 	result, err := s.core.GetConfig(s.ctx, args.Doc)
 	reply.Result = result
@@ -187,6 +194,16 @@ func (s *KukeonV1Service) CreateSecret(args *kukeonv1.CreateSecretArgs, reply *k
 	reply.Err = kukeonv1.ToAPIError(err)
 	if err != nil {
 		s.logger.DebugContext(s.ctx, "CreateSecret returned error", "error", err)
+	}
+	return nil
+}
+
+func (s *KukeonV1Service) CreateVolume(args *kukeonv1.CreateVolumeArgs, reply *kukeonv1.CreateVolumeReply) error {
+	result, err := s.core.CreateVolume(s.ctx, args.Doc)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	if err != nil {
+		s.logger.DebugContext(s.ctx, "CreateVolume returned error", "error", err)
 	}
 	return nil
 }
@@ -240,6 +257,15 @@ func (s *KukeonV1Service) ListBlueprints(
 ) error {
 	blueprints, err := s.core.ListBlueprints(s.ctx, args.RealmName, args.SpaceName, args.StackName)
 	reply.Blueprints = blueprints
+	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
+func (s *KukeonV1Service) ListVolumes(
+	args *kukeonv1.ListVolumesArgs, reply *kukeonv1.ListVolumesReply,
+) error {
+	volumes, err := s.core.ListVolumes(s.ctx, args.RealmName, args.SpaceName, args.StackName)
+	reply.Volumes = volumes
 	reply.Err = kukeonv1.ToAPIError(err)
 	return nil
 }
@@ -348,6 +374,15 @@ func (s *KukeonV1Service) DeleteBlueprint(
 	args *kukeonv1.DeleteBlueprintArgs, reply *kukeonv1.DeleteBlueprintReply,
 ) error {
 	result, err := s.core.DeleteBlueprint(s.ctx, args.Doc)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
+func (s *KukeonV1Service) DeleteVolume(
+	args *kukeonv1.DeleteVolumeArgs, reply *kukeonv1.DeleteVolumeReply,
+) error {
+	result, err := s.core.DeleteVolume(s.ctx, args.Doc)
 	reply.Result = result
 	reply.Err = kukeonv1.ToAPIError(err)
 	return nil

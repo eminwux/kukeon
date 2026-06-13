@@ -21,9 +21,38 @@ import (
 	"fmt"
 	"strings"
 
+	applypkg "github.com/eminwux/kukeon/internal/controller/apply"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
+
+// CreateVolumeResult reports the outcome of provisioning a Volume's directory.
+type CreateVolumeResult struct {
+	Volume  intmodel.Volume
+	Created bool
+}
+
+// CreateVolume provisions a Volume's daemon-managed directory via the apply
+// reconciler (issue #1236). It mirrors CreateSecret: the scope coordinates are
+// validated first, then ReconcileVolume verifies the scope exists and writes
+// the directory idempotently (re-creating reports created=false). A Volume is
+// never cell-scoped — VolumeMetadata has no cell coordinate — so the AC's "cell
+// scope rejected" holds by construction (there is no --cell flag to set).
+func (b *Exec) CreateVolume(volume intmodel.Volume) (CreateVolumeResult, error) {
+	var res CreateVolumeResult
+
+	if err := validateVolumeLookup(volume.Metadata); err != nil {
+		return res, err
+	}
+
+	reconcile, err := applypkg.ReconcileVolume(b.runner, volume)
+	if err != nil {
+		return res, err
+	}
+	res.Created = reconcile.Action == "created"
+	res.Volume = volume
+	return res, nil
+}
 
 // GetVolumeResult reports the metadata-only view of a single `kind: Volume`
 // (issue #1018). A Volume carries no body, so this is scope coordinates and

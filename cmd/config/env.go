@@ -256,6 +256,15 @@ var (
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_CREATE_SECRET_STACK = DefineKV("KUKE_CREATE_SECRET_STACK", "kuke/create/secret/stack")
 
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_VOLUME_NAME = DefineKV("KUKE_CREATE_VOLUME_NAME", "kuke/create/volume/name")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_VOLUME_REALM = DefineKV("KUKE_CREATE_VOLUME_REALM", "kuke/create/volume/realm", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_VOLUME_SPACE = DefineKV("KUKE_CREATE_VOLUME_SPACE", "kuke/create/volume/space")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_VOLUME_STACK = DefineKV("KUKE_CREATE_VOLUME_STACK", "kuke/create/volume/stack")
+
 	// Get command variables
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_GET_REALM_NAME = DefineKV("KUKE_GET_REALM_NAME", "kuke/get/realm/name")
@@ -306,6 +315,14 @@ var (
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_GET_BLUEPRINT_STACK = DefineKV("KUKE_GET_BLUEPRINT_STACK", "kuke/get/blueprint/stack", "default")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_GET_VOLUME_NAME = DefineKV("KUKE_GET_VOLUME_NAME", "kuke/get/volume/name")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_GET_VOLUME_REALM = DefineKV("KUKE_GET_VOLUME_REALM", "kuke/get/volume/realm", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_GET_VOLUME_SPACE = DefineKV("KUKE_GET_VOLUME_SPACE", "kuke/get/volume/space")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_GET_VOLUME_STACK = DefineKV("KUKE_GET_VOLUME_STACK", "kuke/get/volume/stack")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_GET_CONFIG_NAME = DefineKV("KUKE_GET_CONFIG_NAME", "kuke/get/config/name")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_GET_CONFIG_REALM = DefineKV("KUKE_GET_CONFIG_REALM", "kuke/get/config/realm", "default")
@@ -355,6 +372,14 @@ var (
 	KUKE_DELETE_BLUEPRINT_SPACE = DefineKV("KUKE_DELETE_BLUEPRINT_SPACE", "kuke/delete/blueprint/space")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_DELETE_BLUEPRINT_STACK = DefineKV("KUKE_DELETE_BLUEPRINT_STACK", "kuke/delete/blueprint/stack")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_DELETE_VOLUME_NAME = DefineKV("KUKE_DELETE_VOLUME_NAME", "kuke/delete/volume/name")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_DELETE_VOLUME_REALM = DefineKV("KUKE_DELETE_VOLUME_REALM", "kuke/delete/volume/realm", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_DELETE_VOLUME_SPACE = DefineKV("KUKE_DELETE_VOLUME_SPACE", "kuke/delete/volume/space")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_DELETE_VOLUME_STACK = DefineKV("KUKE_DELETE_VOLUME_STACK", "kuke/delete/volume/stack")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_DELETE_CONFIG_NAME = DefineKV("KUKE_DELETE_CONFIG_NAME", "kuke/delete/config/name")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable

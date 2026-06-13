@@ -501,6 +501,68 @@ type CreateSecretResult struct {
 	Created bool
 }
 
+// CreateVolumeArgs is the wire request for CreateVolume (issue #1236).
+type CreateVolumeArgs struct {
+	Doc v1beta1.VolumeDoc
+}
+
+// CreateVolumeReply is the wire response for CreateVolume.
+type CreateVolumeReply struct {
+	Result CreateVolumeResult
+	Err    *APIError
+}
+
+// CreateVolumeResult reports the outcome of provisioning a Volume's directory.
+type CreateVolumeResult struct {
+	Volume  v1beta1.VolumeDoc
+	Created bool
+}
+
+type GetVolumeArgs struct {
+	Doc v1beta1.VolumeDoc
+}
+
+type GetVolumeReply struct {
+	Result GetVolumeResult
+	Err    *APIError
+}
+
+// GetVolumeResult carries the metadata-only view of a Volume (issue #1236). A
+// Volume has no body, so this is its scope coordinates and name only.
+type GetVolumeResult struct {
+	Volume         v1beta1.VolumeDoc
+	MetadataExists bool
+}
+
+type ListVolumesArgs struct {
+	RealmName string
+	SpaceName string
+	StackName string
+}
+
+// ListVolumesReply carries metadata-only VolumeDocs — a Volume is never
+// cell-scoped, so the filter bottoms out at stack (issue #1236).
+type ListVolumesReply struct {
+	Volumes []v1beta1.VolumeDoc
+	Err     *APIError
+}
+
+type DeleteVolumeArgs struct {
+	Doc v1beta1.VolumeDoc
+}
+
+type DeleteVolumeReply struct {
+	Result DeleteVolumeResult
+	Err    *APIError
+}
+
+// DeleteVolumeResult reports the removed Volume (metadata only) and whether the
+// directory existed to delete.
+type DeleteVolumeResult struct {
+	Volume  v1beta1.VolumeDoc
+	Deleted bool
+}
+
 type DeleteBlueprintArgs struct {
 	Doc v1beta1.CellBlueprintDoc
 }

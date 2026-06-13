@@ -60,6 +60,12 @@ type Client interface {
 	// write-through). The resulting SecretDoc is metadata-only (Spec.Data
 	// is never echoed back).
 	CreateSecret(ctx context.Context, doc v1beta1.SecretDoc) (CreateSecretResult, error)
+	// CreateVolume provisions a new Volume's daemon-managed directory (issue
+	// #1236). The write is idempotent (the daemon's runner.WriteVolume re-
+	// asserts the directory mode/owner), and the resulting VolumeDoc is
+	// metadata-only. A Volume is never cell-scoped, so the doc carries
+	// realm/space/stack coordinates only — cell scope is unrepresentable.
+	CreateVolume(ctx context.Context, doc v1beta1.VolumeDoc) (CreateVolumeResult, error)
 
 	GetRealm(ctx context.Context, doc v1beta1.RealmDoc) (GetRealmResult, error)
 	GetSpace(ctx context.Context, doc v1beta1.SpaceDoc) (GetSpaceResult, error)
@@ -76,6 +82,10 @@ type Client interface {
 	// so `kuke run -b` can materialize it. The input doc carries the name and
 	// scope coordinates only; the spec is ignored.
 	GetBlueprint(ctx context.Context, doc v1beta1.CellBlueprintDoc) (GetBlueprintResult, error)
+	// GetVolume reports the metadata-only view of a single named, scoped
+	// `kind: Volume` (issue #1236). A Volume carries no body, so only its
+	// scope coordinates and name are returned.
+	GetVolume(ctx context.Context, doc v1beta1.VolumeDoc) (GetVolumeResult, error)
 	// GetConfig reads one named, scoped `kind: CellConfig`'s full document
 	// from daemon storage (issue #644). Like GetBlueprint the whole document
 	// is returned — a Config carries no credential bytes — so the blueprint
@@ -100,6 +110,11 @@ type Client interface {
 	// realmName lists across all realms. A Blueprint is never cell-scoped, so
 	// there is no cell coordinate. The spec is not populated for a list.
 	ListBlueprints(ctx context.Context, realmName, spaceName, stackName string) ([]v1beta1.CellBlueprintDoc, error)
+	// ListVolumes enumerates the metadata of every Volume bound to the filter
+	// scope or any scope nested within it (issue #1236). An empty realmName
+	// lists across all realms. A Volume is never cell-scoped, so there is no
+	// cell coordinate.
+	ListVolumes(ctx context.Context, realmName, spaceName, stackName string) ([]v1beta1.VolumeDoc, error)
 	// ListConfigs enumerates the metadata of every CellConfig bound to the
 	// filter scope or any scope nested within it (issue #644). An empty
 	// realmName lists across all realms. A Config is never cell-scoped, so
@@ -131,6 +146,11 @@ type Client interface {
 	// daemon-stored document (issue #643). No live-reference gate: cells
 	// materialized from a blueprint are independent copies (#620).
 	DeleteBlueprint(ctx context.Context, doc v1beta1.CellBlueprintDoc) (DeleteBlueprintResult, error)
+	// DeleteVolume removes a single named, scoped Volume's daemon-provisioned
+	// directory (issue #1236). No live-mount gate yet: the container-side mount
+	// kind that would reference a Volume lands in step 4 (#1016), where the
+	// delete gate against a live mount is exercised.
+	DeleteVolume(ctx context.Context, doc v1beta1.VolumeDoc) (DeleteVolumeResult, error)
 	// DeleteConfig removes a single named, scoped CellConfig's daemon-stored
 	// document (issue #644). No live-reference gate: deleting a Config never
 	// deletes the cell it materialized. The result reports any live cells that
@@ -248,6 +268,7 @@ const (
 	MethodMaterializeCell = ServiceName + ".MaterializeCell"
 	MethodCreateConfig    = ServiceName + ".CreateConfig"
 	MethodCreateSecret    = ServiceName + ".CreateSecret"
+	MethodCreateVolume    = ServiceName + ".CreateVolume"
 
 	MethodGetRealm     = ServiceName + ".GetRealm"
 	MethodGetSpace     = ServiceName + ".GetSpace"
@@ -257,6 +278,7 @@ const (
 	MethodGetSecret    = ServiceName + ".GetSecret"
 	MethodGetBlueprint = ServiceName + ".GetBlueprint"
 	MethodGetConfig    = ServiceName + ".GetConfig"
+	MethodGetVolume    = ServiceName + ".GetVolume"
 
 	MethodListRealms     = ServiceName + ".ListRealms"
 	MethodListSpaces     = ServiceName + ".ListSpaces"
@@ -266,6 +288,7 @@ const (
 	MethodListSecrets    = ServiceName + ".ListSecrets"
 	MethodListBlueprints = ServiceName + ".ListBlueprints"
 	MethodListConfigs    = ServiceName + ".ListConfigs"
+	MethodListVolumes    = ServiceName + ".ListVolumes"
 
 	MethodStartCell       = ServiceName + ".StartCell"
 	MethodAttachContainer = ServiceName + ".AttachContainer"
@@ -280,11 +303,12 @@ const (
 	MethodDeleteSecret    = ServiceName + ".DeleteSecret"
 	MethodDeleteBlueprint = ServiceName + ".DeleteBlueprint"
 	MethodDeleteConfig    = ServiceName + ".DeleteConfig"
+	MethodDeleteVolume    = ServiceName + ".DeleteVolume"
 
-	MethodPurgeRealm     = ServiceName + ".PurgeRealm"
-	MethodPurgeSpace     = ServiceName + ".PurgeSpace"
-	MethodPurgeStack     = ServiceName + ".PurgeStack"
-	MethodPurgeCell      = ServiceName + ".PurgeCell"
+	MethodPurgeRealm = ServiceName + ".PurgeRealm"
+	MethodPurgeSpace = ServiceName + ".PurgeSpace"
+	MethodPurgeStack = ServiceName + ".PurgeStack"
+	MethodPurgeCell  = ServiceName + ".PurgeCell"
 
 	MethodRefreshAll      = ServiceName + ".RefreshAll"
 	MethodApplyDocuments  = ServiceName + ".ApplyDocuments"
