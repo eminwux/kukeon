@@ -19,6 +19,7 @@ package controller
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	applypkg "github.com/eminwux/kukeon/internal/controller/apply"
@@ -142,11 +143,42 @@ func validateVolumeLookup(md intmodel.VolumeMetadata) error {
 	if strings.TrimSpace(md.Name) == "" {
 		return errdefs.ErrVolumeNameRequired
 	}
-	if strings.TrimSpace(md.Realm) == "" {
+	name := strings.TrimSpace(md.Name)
+	realm := strings.TrimSpace(md.Realm)
+	space := strings.TrimSpace(md.Space)
+	stack := strings.TrimSpace(md.Stack)
+
+	if realm == "" {
 		return errdefs.ErrVolumeRealmRequired
 	}
-	if strings.TrimSpace(md.Stack) != "" && strings.TrimSpace(md.Space) == "" {
+	if stack != "" && space == "" {
 		return fmt.Errorf("%w (stack set without space)", errdefs.ErrVolumeScopeIncomplete)
+	}
+	for _, seg := range []struct{ field, value string }{
+		{"metadata.name", name},
+		{"metadata.realm", realm},
+		{"metadata.space", space},
+		{"metadata.stack", stack},
+	} {
+		if err := validateVolumeSegment(seg.value); err != nil {
+			return fmt.Errorf("%w (%s)", err, seg.field)
+		}
+	}
+	return nil
+}
+
+func validateVolumeSegment(value string) error {
+	if value == "" {
+		return nil
+	}
+	if value == "." || value == ".." {
+		return errdefs.ErrVolumeCoordUnsafe
+	}
+	if strings.ContainsRune(value, 0) ||
+		strings.ContainsRune(value, '/') ||
+		strings.ContainsRune(value, '\\') ||
+		strings.ContainsRune(value, filepath.Separator) {
+		return errdefs.ErrVolumeCoordUnsafe
 	}
 	return nil
 }
