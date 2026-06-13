@@ -226,13 +226,14 @@ func restartOne(cmd *cobra.Command, client kukeonv1.Client, doc v1beta1.CellDoc)
 		return restartInPlace(cmd, client, doc)
 	case v1beta1.CellStateStopped, v1beta1.CellStateExited, v1beta1.CellStateError, v1beta1.CellStateFailed:
 		// All four terminal/degraded states restart without a delete (#1268):
-		// Stopped (operator stop/kill), Exited (clean self-exit, #1267) and Error
-		// (workload crash) bring the cell back up from intact container records,
-		// while Failed (kukeon bring-up fault) is recovered by the daemon's
-		// StartCell via a recreate-style recovery (stop -> recreate containers ->
-		// start). restartStopped calls StartCell directly (no stop-first) so the
-		// daemon observes the persisted Failed state and picks the recreate path —
-		// a stop-first would flip Failed to Stopped and skip the recovery.
+		// Stopped (operator stop/kill) and Exited (clean self-exit, #1267) bring
+		// the cell back up from intact container records, while Error (workload
+		// crash whose sticky root is still live) and Failed (kukeon bring-up fault)
+		// are recovered by the daemon's StartCell via a recreate-style recovery
+		// (stop -> recreate containers -> start, including the leftover root)
+		// (#1274). restartStopped calls StartCell directly (no stop-first) so the
+		// daemon observes the persisted Error/Failed state and picks the recreate
+		// path — a stop-first would flip it to Stopped and skip the recovery.
 		return restartStopped(cmd, client, doc)
 	case v1beta1.CellStatePending, v1beta1.CellStateUnknown:
 		// Same delete-then-rerun pointer as `kuke run` on a genuinely-

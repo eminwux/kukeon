@@ -104,6 +104,27 @@ func TestGuardCellTaskLiveness_Stopped_PointsAtStart(t *testing.T) {
 	}
 }
 
+// TestGuardCellTaskLiveness_Error_PointsAtStart pins #1274: an Error cell
+// (workload crash) is restartable without a delete, so the attach guard
+// must surface the `kuke start` recovery pointer rather than the stale
+// delete-then-rerun advice the default branch prints.
+func TestGuardCellTaskLiveness_Error_PointsAtStart(t *testing.T) {
+	get := readyGet()
+	get.Cell.Status.State = v1beta1.CellStateError
+	get.RootContainerTaskRunning = false
+
+	err := kukeshared.GuardCellTaskLiveness(get, "kukeon-pm-0")
+	if err == nil {
+		t.Fatal("guard returned nil on Error cell, want start-it-first error")
+	}
+	if got := err.Error(); !strings.Contains(got, "Error") {
+		t.Errorf("error %q missing %q state name", got, "Error")
+	}
+	if got := err.Error(); !strings.Contains(got, "kuke start kukeon-pm-0") {
+		t.Errorf("error %q missing `kuke start kukeon-pm-0` recovery pointer", got)
+	}
+}
+
 // TestGuardCellTaskLiveness_Failed_PointsAtDelete covers the Failed
 // branch's delete-then-rerun pointer (parity with Ready+task-dead). A
 // Failed cell is sticky per the reconciler so only a delete clears it.
