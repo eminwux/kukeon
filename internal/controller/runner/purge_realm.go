@@ -176,9 +176,14 @@ func (r *Exec) PurgeRealm(realm intmodel.Realm) (bool, error) {
 		}
 	}
 
-	// Remove all metadata directories for realm and children
+	// Remove all metadata directories for realm and children, preserving any
+	// reclaimPolicy: Retain volume in the realm subtree (step 3, #1237). With no
+	// retained volume this is the same blunt RemoveAll as before.
 	metadataRunPath := fs.RealmMetadataDir(r.opts.RunPath, realmForOps.Metadata.Name)
-	_ = os.RemoveAll(metadataRunPath)
+	if reclaimErr := r.reclaimScopeMetadata(metadataRunPath); reclaimErr != nil {
+		r.logger.WarnContext(r.ctx, "selective scope reclaim failed during realm purge",
+			"path", metadataRunPath, "error", reclaimErr)
+	}
 
 	// Force remove realm cgroup
 	// Try to use stored CgroupPath first, fallback to DefaultRealmSpec if not available

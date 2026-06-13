@@ -17,16 +17,35 @@
 package modelhub
 
 // Volume is the internal carrier for a standalone, daemon-managed storage
-// volume (kind: Volume, issue #1018). Unlike CellBlueprint/CellConfig it
-// carries no Document: a Volume's spec is empty in step 1, and the resource
-// itself is the on-host directory the daemon provisions — not a serialized
-// document round-tripped back out. Like a Secret's metadata-only view, the
-// carrier holds only the scope coordinates and name, which the storage runner
-// resolves to (and derives from) the on-disk path. When `reclaimPolicy` lands
-// (step 3, #1237) a Spec field will join the carrier.
+// volume (kind: Volume, issue #1018). The resource itself is the on-host
+// directory the daemon provisions — not a serialized document round-tripped
+// back out — so the carrier holds the scope coordinates and name (which the
+// storage runner resolves to, and derives from, the on-disk path) plus the
+// small Spec introduced in step 3 (#1237): the reclaim policy a cascade purge
+// consults. Unlike CellBlueprint/CellConfig there is still no Document.
 type Volume struct {
 	Metadata VolumeMetadata
+	Spec     VolumeSpec
 }
+
+// VolumeSpec carries the volume's declarative configuration. Its only field is
+// the reclaim policy (step 3, #1237); an empty ReclaimPolicy means the step-1
+// delete-with-scope behavior. See external v1beta1.VolumeSpec for the contract.
+type VolumeSpec struct {
+	ReclaimPolicy ReclaimPolicy
+}
+
+// ReclaimPolicy mirrors v1beta1.ReclaimPolicy: the per-Volume policy a cascade
+// purge consults to decide whether the volume is reclaimed with its owning
+// scope (ReclaimDelete, the empty-value default) or preserved (ReclaimRetain).
+type ReclaimPolicy string
+
+const (
+	// ReclaimDelete reclaims the volume with its owning scope on cascade purge.
+	ReclaimDelete ReclaimPolicy = "Delete"
+	// ReclaimRetain preserves the volume across its owning scope's cascade purge.
+	ReclaimRetain ReclaimPolicy = "Retain"
+)
 
 // VolumeMetadata identifies a Volume by name and the scope it binds to. A
 // Volume is scopable at realm, space, or stack only — never cell. The scope is

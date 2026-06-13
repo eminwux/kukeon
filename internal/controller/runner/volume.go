@@ -110,6 +110,14 @@ func (r *Exec) WriteVolume(volume intmodel.Volume) (bool, error) {
 		}
 	}
 
+	// Reconcile the reclaim manifest after the volume dir is in place: a Retain
+	// policy writes the root-only marker cascade purge consults; any other value
+	// drops a stale marker so re-applying with the policy flipped to Delete loses
+	// protection (step 3, #1237).
+	if err := r.persistVolumeReclaimPolicy(volume); err != nil {
+		return false, err
+	}
+
 	action := "updated"
 	if created {
 		action = "created"
@@ -119,6 +127,7 @@ func (r *Exec) WriteVolume(volume intmodel.Volume) (bool, error) {
 		"realm", md.Realm,
 		"space", md.Space,
 		"stack", md.Stack,
+		"reclaimPolicy", string(volume.Spec.ReclaimPolicy),
 	)
 	return created, nil
 }
@@ -143,7 +152,15 @@ func (r *Exec) GetVolume(volume intmodel.Volume) (intmodel.Volume, error) {
 		return intmodel.Volume{}, errdefs.ErrVolumeNotFound
 	}
 
-	return intmodel.Volume{Metadata: md}, nil
+	policy, err := r.readVolumeReclaimPolicy(md)
+	if err != nil {
+		return intmodel.Volume{}, fmt.Errorf("%w: %w", errdefs.ErrGetVolume, err)
+	}
+
+	return intmodel.Volume{
+		Metadata: md,
+		Spec:     intmodel.VolumeSpec{ReclaimPolicy: policy},
+	}, nil
 }
 
 // ListVolumes enumerates the metadata of every Volume bound to the scope
@@ -227,13 +244,19 @@ func (r *Exec) collectVolumesInScope(out *[]intmodel.Volume, realm, space, stack
 		if !entry.IsDir() {
 			continue
 		}
+		vmd := intmodel.VolumeMetadata{
+			Name:  entry.Name(),
+			Realm: realm,
+			Space: space,
+			Stack: stack,
+		}
+		policy, err := r.readVolumeReclaimPolicy(vmd)
+		if err != nil {
+			return err
+		}
 		*out = append(*out, intmodel.Volume{
-			Metadata: intmodel.VolumeMetadata{
-				Name:  entry.Name(),
-				Realm: realm,
-				Space: space,
-				Stack: stack,
-			},
+			Metadata: vmd,
+			Spec:     intmodel.VolumeSpec{ReclaimPolicy: policy},
 		})
 	}
 	return nil
@@ -262,6 +285,11 @@ func (r *Exec) DeleteVolume(volume intmodel.Volume) error {
 
 	if err := os.RemoveAll(path); err != nil {
 		return fmt.Errorf("%w: %w", errdefs.ErrDeleteVolume, err)
+	}
+	// Drop the reclaim manifest too so deleting a retained volume leaves no
+	// orphan marker behind (step 3, #1237).
+	if err := r.removeVolumeReclaimManifest(md); err != nil {
+		return fmt.Errorf("%w: remove reclaim manifest: %w", errdefs.ErrDeleteVolume, err)
 	}
 
 	r.logger.InfoContext(r.ctx, "volume deleted",

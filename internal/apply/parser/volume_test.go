@@ -106,3 +106,33 @@ func TestValidateDocument_Volume_UnsafeNameRejected(t *testing.T) {
 	doc := parseVolume(t, "apiVersion: v1beta1\nkind: Volume\nmetadata:\n  name: ../escape\n  realm: default\n")
 	requireValidationErr(t, parser.ValidateDocument(doc), errdefs.ErrVolumeCoordUnsafe)
 }
+
+// TestValidateDocument_Volume_ReclaimPolicy covers the step-3 spec field: an
+// omitted policy and the two named policies validate, and a typo is rejected so
+// it cannot silently degrade to delete-with-scope (#1237).
+func TestValidateDocument_Volume_ReclaimPolicy(t *testing.T) {
+	base := "apiVersion: v1beta1\nkind: Volume\nmetadata:\n  name: data\n  realm: default\n"
+
+	for _, policy := range []string{"Retain", "Delete"} {
+		doc := parseVolume(t, base+"spec:\n  reclaimPolicy: "+policy+"\n")
+		if err := parser.ValidateDocument(doc); err != nil {
+			t.Fatalf("reclaimPolicy %q should be valid, got: %v", policy, err)
+		}
+		if got := doc.VolumeDoc.Spec.ReclaimPolicy; string(got) != policy {
+			t.Errorf("parsed reclaimPolicy = %q, want %q", got, policy)
+		}
+	}
+
+	// Omitted spec ⇒ empty policy, still valid (delete-with-scope default).
+	doc := parseVolume(t, base)
+	if err := parser.ValidateDocument(doc); err != nil {
+		t.Fatalf("omitted reclaimPolicy should be valid, got: %v", err)
+	}
+	if doc.VolumeDoc.Spec.ReclaimPolicy != "" {
+		t.Errorf("omitted reclaimPolicy = %q, want empty", doc.VolumeDoc.Spec.ReclaimPolicy)
+	}
+
+	// A typo is rejected.
+	bad := parseVolume(t, base+"spec:\n  reclaimPolicy: retainn\n")
+	requireValidationErr(t, parser.ValidateDocument(bad), errdefs.ErrVolumeReclaimPolicyInvalid)
+}

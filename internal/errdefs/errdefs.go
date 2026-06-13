@@ -514,6 +514,12 @@ var (
 	ErrGetVolume           = errors.New("failed to get volume")
 	ErrListVolumes         = errors.New("failed to list volumes")
 	ErrDeleteVolume        = errors.New("failed to delete volume")
+	// ErrVolumeReclaimPolicyInvalid rejects a spec.reclaimPolicy that is neither
+	// "Retain" nor "Delete" (an empty value is allowed and means Delete). The
+	// selective cascade reclaim lands in step 3 (#1237).
+	ErrVolumeReclaimPolicyInvalid = errors.New(
+		`volume spec.reclaimPolicy must be "Retain" or "Delete" (or omitted)`,
+	)
 
 	// CellConfig kind (kind: CellConfig) errors (issue #624, phase 4b-i of #423).
 
