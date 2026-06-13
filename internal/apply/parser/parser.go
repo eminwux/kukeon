@@ -44,6 +44,7 @@ type Document struct {
 	SecretDoc        *v1beta1.SecretDoc
 	CellBlueprintDoc *v1beta1.CellBlueprintDoc
 	CellConfigDoc    *v1beta1.CellConfigDoc
+	VolumeDoc        *v1beta1.VolumeDoc
 }
 
 // ValidationError represents a validation error for a specific document.
@@ -188,6 +189,14 @@ func ParseDocument(index int, raw []byte) (*Document, error) {
 		doc.CellConfigDoc = &configDoc
 		doc.APIVersion = configDoc.APIVersion
 
+	case v1beta1.KindVolume:
+		var volumeDoc v1beta1.VolumeDoc
+		if unmarshalErr := yaml.Unmarshal(raw, &volumeDoc); unmarshalErr != nil {
+			return nil, fmt.Errorf("document %d: failed to parse Volume: %w", index, unmarshalErr)
+		}
+		doc.VolumeDoc = &volumeDoc
+		doc.APIVersion = volumeDoc.APIVersion
+
 	default:
 		// kind: CellProfile was removed in #626. Give the operator an
 		// explicit migration pointer instead of the generic unknown-kind
@@ -228,7 +237,7 @@ func ValidateDocument(doc *Document) *ValidationError {
 	switch doc.Kind {
 	case v1beta1.KindRealm, v1beta1.KindSpace, v1beta1.KindStack, v1beta1.KindCell,
 		v1beta1.KindContainer, v1beta1.KindSecret, v1beta1.KindCellBlueprint,
-		v1beta1.KindCellConfig:
+		v1beta1.KindCellConfig, v1beta1.KindVolume:
 		// Valid kind
 	default:
 		return &ValidationError{
@@ -474,6 +483,11 @@ func ValidateDocument(doc *Document) *ValidationError {
 		if validationErr := validateConfig(doc); validationErr != nil {
 			return validationErr
 		}
+
+	case v1beta1.KindVolume:
+		if validationErr := validateVolume(doc); validationErr != nil {
+			return validationErr
+		}
 	}
 
 	return nil
@@ -545,6 +559,80 @@ func validateBlueprintScope(md v1beta1.CellBlueprintMetadata) error {
 	}
 	if stack != "" && space == "" {
 		return fmt.Errorf("%w (stack set without space)", errdefs.ErrBlueprintScopeIncomplete)
+	}
+	return nil
+}
+
+// validateVolume enforces the structural contract for a kind: Volume document
+// (issue #1018): name + scope coordinates, with cell scope structurally
+// rejected. The scope reachability gate (the named realm/space/stack must
+// exist) runs at reconcile time against the runner — the same split the Secret
+// and Blueprint kinds use, since only the daemon can read /opt/kukeon.
+func validateVolume(doc *Document) *ValidationError {
+	if doc.VolumeDoc == nil {
+		return &ValidationError{Index: doc.Index, Kind: doc.Kind, Err: errors.New("volume document is nil")}
+	}
+	vol := doc.VolumeDoc
+	if strings.TrimSpace(vol.Metadata.Name) == "" {
+		return &ValidationError{Index: doc.Index, Kind: doc.Kind, Err: errdefs.ErrVolumeNameRequired}
+	}
+	if scopeErr := validateVolumeScope(vol.Metadata); scopeErr != nil {
+		return &ValidationError{Index: doc.Index, Kind: doc.Kind, Name: vol.Metadata.Name, Err: scopeErr}
+	}
+	return nil
+}
+
+// validateVolumeScope enforces the Volume scope-coordinate contract:
+// metadata.realm is always required, a deeper coordinate may only be set when
+// every shallower one is, and — like a CellBlueprint, unlike a Secret — a
+// Volume may not be cell-scoped (a `cell:` coordinate is structurally absent
+// from VolumeMetadata, so this guards the realm/space/stack chain). Each
+// non-empty coordinate plus the name is additionally checked for path-segment
+// safety: a Volume provisions a real directory, so a "/" or ".." in any segment
+// would escape the volumes tree once fs.VolumePath joins it (mirrors the
+// Secret-coordinate guard from #673).
+func validateVolumeScope(md v1beta1.VolumeMetadata) error {
+	realm := strings.TrimSpace(md.Realm)
+	space := strings.TrimSpace(md.Space)
+	stack := strings.TrimSpace(md.Stack)
+
+	if realm == "" {
+		return errdefs.ErrVolumeRealmRequired
+	}
+	if stack != "" && space == "" {
+		return fmt.Errorf("%w (stack set without space)", errdefs.ErrVolumeScopeIncomplete)
+	}
+	for _, seg := range []struct{ field, value string }{
+		{"metadata.name", strings.TrimSpace(md.Name)},
+		{"metadata.realm", realm},
+		{"metadata.space", space},
+		{"metadata.stack", stack},
+	} {
+		if err := validateVolumeSegment(seg.value); err != nil {
+			return fmt.Errorf("%w (%s)", err, seg.field)
+		}
+	}
+	return nil
+}
+
+// validateVolumeSegment rejects a single volume name or scope coordinate that
+// would escape the volumes tree once fs.VolumePath filepath.Join's it into a
+// host path: a "/" or "\" separator, a "." or ".." element, or a NUL byte.
+// Empty values are the caller's concern (a missing coordinate is legal; an
+// empty name is rejected separately), so this only guards non-empty segments.
+// Mirrors validateSecretSegment (#673).
+func validateVolumeSegment(value string) error {
+	if value == "" {
+		return nil
+	}
+	if value == "." || value == ".." {
+		return errdefs.ErrVolumeCoordUnsafe
+	}
+	if strings.ContainsRune(value, 0) ||
+		strings.ContainsRune(value, '/') ||
+		strings.ContainsRune(value, '\\') ||
+		strings.ContainsRune(value, filepath.Separator) {
+		return errdefs.ErrVolumeCoordUnsafe
 	}
 	return nil
 }

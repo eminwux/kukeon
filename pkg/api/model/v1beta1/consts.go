@@ -57,6 +57,16 @@ const (
 	// scope's metadata tree; the `kuke run -c` verb + identity state machine
 	// that runs it land in #625, and the get/delete verbs in #644.
 	KindCellConfig Kind = "CellConfig"
+	// KindVolume identifies a standalone, daemon-managed storage volume
+	// (issue #1018, step 1 of the volumes epic #1015). A Volume is decoupled
+	// from any cell: `kuke apply` creates a root-owned, container-writable
+	// directory under the scope's metadata tree, scopable at realm/space/stack
+	// only — never cell — so it outlives the cells that mount it. Reclaimed by
+	// owning-scope (stack/space/realm) cascade purge, not by cell deletion. The
+	// imperative create/get/delete verbs are step 2 (#1236), `reclaimPolicy:
+	// Retain` is step 3 (#1237), and the container-side mount kind that
+	// references a Volume is step 4 (#1016).
+	KindVolume Kind = "Volume"
 	// KindServerConfiguration identifies the kukeond daemon's configuration
 	// document loaded via `kukeond --configuration` (and consumed by
 	// `kuke init --server-configuration`). Not a server-side resource —

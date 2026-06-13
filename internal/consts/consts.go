@@ -64,6 +64,17 @@ const (
 	// root-owned but world-readable (0o755 / 0o644).
 	KukeonConfigsSubdir = "configs"
 
+	// KukeonVolumesSubdir is the basename of the per-scope subdirectory that
+	// owns daemon-managed `kind: Volume` directories (issue #1018). Like the
+	// secrets/blueprints/configs subdirs it lives inside the scope's metadata
+	// directory (e.g. <RunPath>/data/<realm>/volumes/) so the same os.RemoveAll
+	// that owning-scope cascade purge already runs on a scope's metadata dir
+	// reclaims its volumes too. Unlike those kinds — which store a single file
+	// per resource — each entry here is itself a directory the daemon
+	// provisions container-writable (root-owned, setgid to the kukeon group
+	// when configured) so a mounting container can write into it (#1016).
+	KukeonVolumesSubdir = "volumes"
+
 	// KukeonContainerTTYDir is the basename of the per-container directory
 	// that owns the sbsh terminal socket plus its capture and log siblings.
 	// kukeon bind-mounts this directory (not a single file) into the
