@@ -24,9 +24,9 @@ import (
 )
 
 // ConvertVolumeDocToInternal converts an external VolumeDoc to the internal hub
-// carrier (issue #1018). Unlike a CellBlueprint there is no body to serialize —
-// a Volume's spec is empty and the resource is the on-host directory — so this
-// is a flat copy of the scope coordinates onto the metadata.
+// carrier (issue #1018). The resource is the on-host directory, so this is a
+// flat copy of the scope coordinates onto the metadata, plus the reclaim policy
+// from the spec (step 3, #1237) — the one declarative field a Volume carries.
 func ConvertVolumeDocToInternal(in ext.VolumeDoc) (intmodel.Volume, error) {
 	switch in.APIVersion {
 	case VersionV1Beta1, "": // default/empty treated as v1beta1
@@ -36,6 +36,9 @@ func ConvertVolumeDocToInternal(in ext.VolumeDoc) (intmodel.Volume, error) {
 				Realm: in.Metadata.Realm,
 				Space: in.Metadata.Space,
 				Stack: in.Metadata.Stack,
+			},
+			Spec: intmodel.VolumeSpec{
+				ReclaimPolicy: intmodel.ReclaimPolicy(in.Spec.ReclaimPolicy),
 			},
 		}, nil
 	default:
@@ -54,9 +57,12 @@ func NormalizeVolume(req ext.VolumeDoc) (intmodel.Volume, ext.Version, error) {
 	return internal, version, nil
 }
 
-// ConvertVolumeToExternal builds a metadata-only external VolumeDoc from the
-// internal carrier (issue #1018). A Volume has no body, so the external doc is
-// its canonical apiVersion/kind plus the scope coordinates and name.
+// ConvertVolumeToExternal builds an external VolumeDoc from the internal
+// carrier (issue #1018). A Volume has no body, so the external doc is its
+// canonical apiVersion/kind plus the scope coordinates and name, plus the
+// reclaim policy the runner reads back from the volume's on-disk manifest
+// (step 3, #1237) so `kuke get volume -o yaml` surfaces a retained volume's
+// policy.
 func ConvertVolumeToExternal(in intmodel.Volume) ext.VolumeDoc {
 	return ext.VolumeDoc{
 		APIVersion: ext.APIVersionV1Beta1,
@@ -66,6 +72,9 @@ func ConvertVolumeToExternal(in intmodel.Volume) ext.VolumeDoc {
 			Realm: in.Metadata.Realm,
 			Space: in.Metadata.Space,
 			Stack: in.Metadata.Stack,
+		},
+		Spec: ext.VolumeSpec{
+			ReclaimPolicy: ext.ReclaimPolicy(in.Spec.ReclaimPolicy),
 		},
 	}
 }

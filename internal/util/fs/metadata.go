@@ -385,6 +385,31 @@ func VolumePath(baseRunPath, realmName, spaceName, stackName, volumeName string)
 	)
 }
 
+// VolumeMetaDir returns the per-scope volume-meta directory — the root-owned
+// sibling of the volumes/ dir that holds daemon-owned reclaim manifests, one
+// per Retain volume (step 3, #1237). Kept outside the volume's own directory
+// because that directory is the container-writable mount target (#1016): a
+// reclaim manifest stored there would leak into the container mount and be
+// tamperable by the mounting container.
+func VolumeMetaDir(baseRunPath, realmName, spaceName, stackName string) string {
+	return filepath.Join(
+		VolumeScopeDir(baseRunPath, realmName, spaceName, stackName),
+		consts.KukeonVolumeMetaSubdir,
+	)
+}
+
+// VolumeMetaPath returns the host-side path of a single volume's reclaim
+// manifest: <scope>/volume-meta/<name>.json. The ".json" suffix keeps the
+// manifest a file (volumes are directories), so the volumes/ enumerator — which
+// collects directories — never sees it, and it can never collide with a volume
+// directory of the same scope.
+func VolumeMetaPath(baseRunPath, realmName, spaceName, stackName, volumeName string) string {
+	return filepath.Join(
+		VolumeMetaDir(baseRunPath, realmName, spaceName, stackName),
+		volumeName+".json",
+	)
+}
+
 type metadataHeader struct {
 	APIVersion string `json:"apiVersion"`
 	Kind       string `json:"kind"`

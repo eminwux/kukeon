@@ -53,11 +53,31 @@ type VolumeMetadata struct {
 	Stack string `json:"stack,omitempty" yaml:"stack,omitempty"`
 }
 
-// VolumeSpec carries the volume's declarative configuration. It is empty in
-// step 1 (#1018): the volume's identity is its scope plus its name, and the
-// resource is the directory the daemon provisions. The first spec field —
-// `reclaimPolicy: Retain` — lands in step 3 (#1237), where it reworks cascade
-// purge from the blunt scope-dir RemoveAll to enumerate-and-selectively-
-// preserve. The struct exists now so that addition is a field append rather
-// than a schema reshape.
-type VolumeSpec struct{}
+// VolumeSpec carries the volume's declarative configuration. The first — and so
+// far only — field is `reclaimPolicy` (step 3, #1237), which decides whether an
+// owning-scope cascade purge reclaims the volume with its scope or preserves it.
+// It is optional: an omitted reclaimPolicy keeps step 1's delete-with-scope
+// behavior, so existing specs are unaffected.
+type VolumeSpec struct {
+	// ReclaimPolicy decides what an owning-scope cascade purge does with the
+	// volume. Omitted (or "Delete") ⇒ the volume is reclaimed with its scope,
+	// the step-1 behavior. "Retain" ⇒ the volume survives the cascade and stays
+	// discoverable and deletable at its original scope coordinates.
+	ReclaimPolicy ReclaimPolicy `json:"reclaimPolicy,omitempty" yaml:"reclaimPolicy,omitempty"`
+}
+
+// ReclaimPolicy is the per-Volume policy a stack/space/realm cascade purge
+// consults to decide whether a volume is reclaimed with its owning scope or
+// preserved. The values mirror the Kubernetes PersistentVolume reclaim-policy
+// vocabulary (Retain/Delete) the issue's `reclaimPolicy: Retain` spelling
+// adopts. An empty value is treated as ReclaimDelete.
+type ReclaimPolicy string
+
+const (
+	// ReclaimDelete reclaims the volume with its owning scope on cascade purge.
+	// It is the default an omitted reclaimPolicy resolves to.
+	ReclaimDelete ReclaimPolicy = "Delete"
+	// ReclaimRetain preserves the volume across its owning scope's cascade
+	// purge; everything else in the scope is still reclaimed.
+	ReclaimRetain ReclaimPolicy = "Retain"
+)

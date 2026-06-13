@@ -579,7 +579,23 @@ func validateVolume(doc *Document) *ValidationError {
 	if scopeErr := validateVolumeScope(vol.Metadata); scopeErr != nil {
 		return &ValidationError{Index: doc.Index, Kind: doc.Kind, Name: vol.Metadata.Name, Err: scopeErr}
 	}
+	if policyErr := validateReclaimPolicy(vol.Spec.ReclaimPolicy); policyErr != nil {
+		return &ValidationError{Index: doc.Index, Kind: doc.Kind, Name: vol.Metadata.Name, Err: policyErr}
+	}
 	return nil
+}
+
+// validateReclaimPolicy accepts an empty value (omitted ⇒ Delete) or one of the
+// two named policies; anything else is rejected so a typo'd reclaimPolicy
+// surfaces at apply time rather than silently degrading to delete-with-scope
+// (step 3, #1237).
+func validateReclaimPolicy(p v1beta1.ReclaimPolicy) error {
+	switch p {
+	case "", v1beta1.ReclaimRetain, v1beta1.ReclaimDelete:
+		return nil
+	default:
+		return fmt.Errorf("%w (got %q)", errdefs.ErrVolumeReclaimPolicyInvalid, p)
+	}
 }
 
 // validateVolumeScope enforces the Volume scope-coordinate contract:

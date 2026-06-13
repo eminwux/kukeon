@@ -19,7 +19,6 @@ package runner
 import (
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/ctr"
@@ -103,13 +102,18 @@ func (r *Exec) PurgeSpace(space intmodel.Space) error {
 		_ = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
 	}
 
-	// Remove metadata directory completely
+	// Remove metadata directory, preserving any reclaimPolicy: Retain volume in
+	// the space or its stacks (step 3, #1237). With no retained volume this is
+	// the same blunt RemoveAll as before.
 	metadataRunPath := fs.SpaceMetadataDir(
 		r.opts.RunPath,
 		spaceForOps.Spec.RealmName,
 		spaceForOps.Metadata.Name,
 	)
-	_ = os.RemoveAll(metadataRunPath)
+	if reclaimErr := r.reclaimScopeMetadata(metadataRunPath); reclaimErr != nil {
+		r.logger.WarnContext(r.ctx, "selective scope reclaim failed during space purge",
+			"path", metadataRunPath, "error", reclaimErr)
+	}
 
 	return nil
 }

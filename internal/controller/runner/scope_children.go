@@ -28,7 +28,8 @@ import (
 // reservedScopeSubdirs is the single source of truth for the per-scope
 // subdirectory names that hold resources (not child scopes) under
 // <RunPath>/data/<realm>/[<space>/[<stack>/[<cell>/]]]: secrets/ (#619),
-// blueprints/ (#620), configs/ (#624), and volumes/ (#1018). The subtree-list
+// blueprints/ (#620), configs/ (#624), volumes/ (#1018), and volume-meta/
+// (#1237, the daemon-owned reclaim manifests for volumes). The subtree-list
 // walkers in secret.go / blueprint.go / config.go / volume.go enumerate child
 // scopes by reading the scope dir and must skip every entry in this set,
 // otherwise a reserved resource subdir would be mistaken for a phantom
@@ -44,6 +45,7 @@ var reservedScopeSubdirs = map[string]struct{}{
 	consts.KukeonBlueprintsSubdir: {},
 	consts.KukeonConfigsSubdir:    {},
 	consts.KukeonVolumesSubdir:    {},
+	consts.KukeonVolumeMetaSubdir: {},
 }
 
 // childScopeNames returns the child-scope subdirectory names directly under

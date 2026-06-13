@@ -75,6 +75,20 @@ const (
 	// when configured) so a mounting container can write into it (#1016).
 	KukeonVolumesSubdir = "volumes"
 
+	// KukeonVolumeMetaSubdir is the basename of the per-scope subdirectory that
+	// holds daemon-owned reclaim manifests for `kind: Volume` resources (step 3,
+	// #1237). It is a sibling of KukeonVolumesSubdir under the same scope
+	// metadata directory (e.g. <RunPath>/data/<realm>/volume-meta/<name>.json)
+	// rather than living inside the volume's own directory: that directory is the
+	// container-writable mount target (#1016), so a manifest stored there would
+	// both leak into the container mount and be tamperable by the mounting
+	// container — neither acceptable for a retention guarantee. A manifest is
+	// written only for a `Retain` volume, so a scope with none keeps the step-1
+	// blunt-RemoveAll cascade unchanged. Like the other reserved resource
+	// subdirs it is excluded from child-scope enumeration (see
+	// runner.reservedScopeSubdirs) so it is never mistaken for a phantom scope.
+	KukeonVolumeMetaSubdir = "volume-meta"
+
 	// KukeonContainerTTYDir is the basename of the per-container directory
 	// that owns the sbsh terminal socket plus its capture and log siblings.
 	// kukeon bind-mounts this directory (not a single file) into the
