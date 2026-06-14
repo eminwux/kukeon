@@ -353,7 +353,22 @@ func TestNormalizeImageReference(t *testing.T) {
 		{
 			name:  "user image without tag",
 			image: "user/image",
-			want:  "docker.io/user/image",
+			want:  "docker.io/user/image:latest",
+		},
+		{
+			name:  "bare library image with tag",
+			image: "busybox:latest",
+			want:  "docker.io/library/busybox:latest",
+		},
+		{
+			name:  "docker.io single-name needs library namespace",
+			image: "docker.io/busybox:latest",
+			want:  "docker.io/library/busybox:latest",
+		},
+		{
+			name:  "internal registry ref unchanged",
+			image: "kukeon.internal/kukeond:v0.0.0-dev",
+			want:  "kukeon.internal/kukeond:v0.0.0-dev",
 		},
 		{
 			name:  "already fully qualified docker.io",
