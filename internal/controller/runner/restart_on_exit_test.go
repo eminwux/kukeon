@@ -31,11 +31,12 @@ import (
 )
 
 // TestRestartPolicyRequiresRestart pins the per-container restart-trigger table
-// (#1233): the flipped rows of the #1003 reap gate.
+// (#1233): the restart-side rows of the #1003 reap gate.
 //
-//   - "" or "always"  → restart on any exit (empty is the back-compat default).
+//   - "always"        → restart on any exit.
 //   - "on-failure"    → restart iff the exit code is non-zero.
-//   - "never"         → never restart.
+//   - "" or "never"   → never restart (empty/unset defaults to never, matching
+//     the Kubernetes default restartPolicy).
 //   - unknown values  → permissive fallback (a typo/future value must not
 //     silently strand a workload).
 func TestRestartPolicyRequiresRestart(t *testing.T) {
@@ -45,8 +46,8 @@ func TestRestartPolicyRequiresRestart(t *testing.T) {
 		exitCode int
 		want     bool
 	}{
-		{"empty_clean_exit_restarts", "", 0, true},
-		{"empty_failed_exit_restarts", "", 1, true},
+		{"empty_default_clean_exit_no_restart", "", 0, false},
+		{"empty_default_failed_exit_no_restart", "", 1, false},
 		{"always_clean_exit_restarts", intmodel.RestartPolicyAlways, 0, true},
 		{"always_failed_exit_restarts", intmodel.RestartPolicyAlways, 137, true},
 		{"on_failure_clean_exit_no_restart", intmodel.RestartPolicyOnFailure, 0, false},
@@ -113,8 +114,8 @@ func recordingRestarter(now time.Time, fail error) (*Exec, *[]string) {
 
 // TestMaybeRestartExitedContainers_FiresPerPolicyRow drives the restart pass
 // end-to-end (minus the real StartContainer) across the policy table: it must
-// relaunch always/empty on any exit and on-failure on a failed exit, and leave
-// never / on-failure-clean alone.
+// relaunch always on any exit and on-failure on a failed exit, and leave
+// never / empty-default / on-failure-clean alone.
 func TestMaybeRestartExitedContainers_FiresPerPolicyRow(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0).UTC()
 	cases := []struct {
@@ -127,7 +128,7 @@ func TestMaybeRestartExitedContainers_FiresPerPolicyRow(t *testing.T) {
 	}{
 		{"always_clean_fires", intmodel.RestartPolicyAlways, intmodel.ContainerStateExited, 0, true, restartFired},
 		{"always_failed_fires", intmodel.RestartPolicyAlways, intmodel.ContainerStateStopped, 1, true, restartFired},
-		{"empty_failed_fires", "", intmodel.ContainerStateStopped, 1, true, restartFired},
+		{"empty_default_failed_no_fire", "", intmodel.ContainerStateStopped, 1, false, restartNone},
 		{"on_failure_failed_fires", intmodel.RestartPolicyOnFailure, intmodel.ContainerStateStopped, 137, true, restartFired},
 		{"on_failure_clean_no_fire", intmodel.RestartPolicyOnFailure, intmodel.ContainerStateStopped, 0, false, restartNone},
 		{"never_failed_no_fire", intmodel.RestartPolicyNever, intmodel.ContainerStateStopped, 1, false, restartNone},

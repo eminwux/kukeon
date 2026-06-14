@@ -1167,15 +1167,15 @@ type containerRestartState struct {
 
 // restartPolicyRequiresRestart is the per-container restart-trigger half of the
 // reconciler's restart-on-exit pass (#1233), sibling to
-// restartPolicyPermitsContainerReap. It encodes the flipped policy rows:
+// restartPolicyPermitsContainerReap. It encodes the policy rows:
 //
-//   - "" or "always"  → restart on any exit. Empty is the documented
-//     back-compat default (modelhub/container.go), so every non-root cell that
-//     never set the field now restarts its workload on exit instead of winding
-//     down — the ratified back-compat-visible flip (#1151 decision 1).
+//   - "always"        → restart on any exit.
 //   - "on-failure"    → restart only on a non-zero exit; a clean exit (0) means
 //     the workload completed successfully and is not restarted.
-//   - "never"         → never restart.
+//   - "" or "never"   → never restart. Empty/unset defaults to `never`,
+//     matching the Kubernetes default restartPolicy (modelhub/container.go):
+//     a non-root cell that never set the field is NOT restarted on exit, it is
+//     left for the reap gate (preserved in Stopped, or deleted under `--rm`).
 //
 // Unknown values fall through to the permissive default for the same reason
 // restartPolicyPermitsContainerReap does — a typo or future-spec value should
@@ -1186,11 +1186,11 @@ type containerRestartState struct {
 // them.
 func restartPolicyRequiresRestart(policy string, exitCode int) bool {
 	switch policy {
-	case "", intmodel.RestartPolicyAlways:
+	case intmodel.RestartPolicyAlways:
 		return true
 	case intmodel.RestartPolicyOnFailure:
 		return exitCode != 0
-	case intmodel.RestartPolicyNever:
+	case "", intmodel.RestartPolicyNever:
 		return false
 	default:
 		return true
