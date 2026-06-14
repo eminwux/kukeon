@@ -405,6 +405,7 @@ do_install() {
     fi
 
     install_systemd_unit
+    grant_group_membership
 }
 
 # --- Running-daemon version gate ---------------------------------------------
@@ -442,6 +443,50 @@ handle_running_daemon() {
     printf '      %ssudo kuke daemon recreate --kukeond-image ghcr.io/%s:%s%s\n\n' "$C_BOLD" "$KUKE_REPO" "$KUKE_VERSION" "$C_RESET" >&2
     printf '    To keep an intentionally pinned older daemon, re-run with KUKE_SKIP_DAEMON_UPGRADE=1.\n' >&2
     return 0
+}
+
+# --- kukeon group membership -------------------------------------------------
+# `kuke init` creates the `kukeon` group and lands the daemon socket
+# root:kukeon 0o660, so dialing it requires membership in that group. Init
+# never touches the invoking user's groups, so the operator who just drove the
+# install — the obvious first client — would hit `dial kukeond ... permission
+# denied` on the very next command. Grant it here while we still hold root.
+#
+# Scoped to a non-root $SUDO_USER: a direct-root install has no invoking user to
+# grant, and we never silently add other accounts (group membership confers
+# daemon access — a real privilege grant, intended only for the operator).
+# Idempotent: an already-member user is a clean no-op, not an error.
+#
+# Group changes only take effect in a NEW login session; KUKE_GROUP_GRANT
+# records the outcome so print_next_steps can tell the operator to start one
+# (newgrp / re-login) before the first client command.
+KUKE_GROUP="kukeon"
+KUKE_GROUP_GRANT="skipped" # skipped | added | already
+
+grant_group_membership() {
+    # No invoking user to grant when run directly as root (no sudo wrapper).
+    if [ -z "${SUDO_USER:-}" ] || [ "$SUDO_USER" = "root" ]; then
+        return 0
+    fi
+    # The group is created by `kuke init`. If it is somehow absent (init was
+    # skipped via KUKE_SKIP_INIT, or a partial bootstrap), skip rather than
+    # fail the whole install — there is nothing to join yet.
+    if ! getent group "$KUKE_GROUP" >/dev/null 2>&1; then
+        return 0
+    fi
+    step "Granting ${SUDO_USER} access to the ${KUKE_GROUP} group"
+    if id -nG "$SUDO_USER" 2>/dev/null | tr ' ' '\n' | grep -qxF "$KUKE_GROUP"; then
+        KUKE_GROUP_GRANT="already"
+        ok "${SUDO_USER} is already a member of the ${KUKE_GROUP} group"
+        return 0
+    fi
+    if $SUDO usermod -aG "$KUKE_GROUP" "$SUDO_USER"; then
+        KUKE_GROUP_GRANT="added"
+        ok "added ${SUDO_USER} to the ${KUKE_GROUP} group"
+    else
+        warn "could not add ${SUDO_USER} to the ${KUKE_GROUP} group — add it manually:"
+        printf '      sudo usermod -aG %s %s\n' "$KUKE_GROUP" "$SUDO_USER" >&2
+    fi
 }
 
 # --- systemd unit ------------------------------------------------------------
@@ -511,7 +556,40 @@ EOF
 }
 
 # --- Next steps --------------------------------------------------------------
+# Surface the kukeon-group requirement before the first client command. After
+# grant_group_membership, $SUDO_USER is in the group on disk, but the current
+# shell still carries the old group set — so the next `kuke` command would hit
+# `dial kukeond ... permission denied`. Tell the operator to start a fresh
+# session (newgrp / re-login) first, and state whether we just added them or
+# they were already a member so the message stays honest on a re-run.
+print_group_note() {
+    case "$KUKE_GROUP_GRANT" in
+        added)
+            cat <<EOF
+
+${C_BOLD}Added ${SUDO_USER} to the ${KUKE_GROUP} group${C_RESET} — this grants access to the kukeon
+daemon socket. Group membership only takes effect in a new login session, so
+start one before the commands below (log out and back in), or use the no-logout
+shortcut:
+  ${C_BOLD}newgrp ${KUKE_GROUP}${C_RESET}
+EOF
+            ;;
+        already)
+            cat <<EOF
+
+${SUDO_USER} is already in the ${KUKE_GROUP} group. If the commands below fail with
+${C_BOLD}dial kukeond ... permission denied${C_RESET}, your shell predates the group grant —
+start a new login session or run ${C_BOLD}newgrp ${KUKE_GROUP}${C_RESET} first.
+EOF
+            ;;
+        *)
+            : # direct-root install or group not yet created — nothing to surface.
+            ;;
+    esac
+}
+
 print_next_steps() {
+    print_group_note
     cat <<EOF
 
 ${C_GREEN}${C_BOLD}✓ kukeon installed and initialized${C_RESET}
