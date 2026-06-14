@@ -434,7 +434,43 @@ func RenderBlueprint(
 		bp.Metadata.Labels = map[string]string{}
 	}
 	bp.Metadata.Labels[v1beta1.LabelTeam] = project
+	ensureTeamVolumeMounts(&bp)
 	return &bp, nil
+}
+
+// ensureTeamVolumeMounts marks every own-scope kind: volume mount in the
+// rendered blueprint Ensure=true, so the daemon auto-provisions the referenced
+// Volume at the cell's own realm/space/stack on first `kuke run --from-config`
+// instead of hard-erroring on a missing reference (step 4's default, #1290).
+// This closes the team-init half of the volume auto-create gap (#1301, Option
+// B): `kuke team init` renders the (project, role) state-volume *reference* but
+// provisions no Volume, so the very first run of a freshly-rendered config used
+// to fail until the operator hand-ran `kuke create volume`. Flipping Ensure
+// here reuses the already-shipped opt-in primitive (the VolumeMount.Ensure
+// field + controller.ensurePerCellVolumes, #1294/#1017) rather than eagerly
+// minting kind: Volume documents into the apply bundle — the daemon's ensure
+// path is idempotent (an already-bound cell re-binds its existing Volume), so a
+// re-init re-renders the same Ensure mount with no duplicate or error, and the
+// state volumes stay outside the per-team prune lifecycle (#1029) so removing a
+// role from the roster never deletes the operator's persisted state.
+//
+// Only own-scope (`source:`) mounts are flipped. A cross-scope `volumeRef`
+// mount is left as authored — you can't implicitly create a Volume in another
+// scope, so a missing cross-scope reference stays the hard error step 4 makes
+// it (mirrors the issue's auto-create caution). Hand-written blueprints applied
+// outside team init are likewise untouched: this flip lives only on the
+// team-render path, so a typo'd volume name in a `kuke run -f` config still
+// fails fast.
+func ensureTeamVolumeMounts(bp *v1beta1.CellBlueprintDoc) {
+	for ci := range bp.Spec.Cell.Containers {
+		vols := bp.Spec.Cell.Containers[ci].Volumes
+		for vi := range vols {
+			if vols[vi].Kind != v1beta1.VolumeKindVolume || vols[vi].VolumeRef != nil {
+				continue
+			}
+			vols[vi].Ensure = true
+		}
+	}
 }
 
 // scopeToProject prefixes name with `<project>-` so the rendered
