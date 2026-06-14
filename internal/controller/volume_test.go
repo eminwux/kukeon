@@ -83,6 +83,43 @@ func TestGetVolume_NameRequired(t *testing.T) {
 	}
 }
 
+// TestGetVolume_RejectsUnsafeLookupSegments confirms imperative lookups apply
+// the same path-segment guard as the apply parser before reaching the runner.
+func TestGetVolume_RejectsUnsafeLookupSegments(t *testing.T) {
+	ctrl := setupTestController(t, &fakeRunner{})
+
+	tests := []struct {
+		name string
+		md   intmodel.VolumeMetadata
+	}{
+		{
+			name: "name slash",
+			md:   intmodel.VolumeMetadata{Name: "data/escape", Realm: "default"},
+		},
+		{
+			name: "realm dotdot",
+			md:   intmodel.VolumeMetadata{Name: "data", Realm: ".."},
+		},
+		{
+			name: "space backslash",
+			md:   intmodel.VolumeMetadata{Name: "data", Realm: "default", Space: `bad\space`},
+		},
+		{
+			name: "stack nul",
+			md:   intmodel.VolumeMetadata{Name: "data", Realm: "default", Space: "agents", Stack: "stack\x00bad"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ctrl.GetVolume(intmodel.Volume{Metadata: tc.md})
+			if !errors.Is(err, errdefs.ErrVolumeCoordUnsafe) {
+				t.Fatalf("GetVolume() error = %v, want ErrVolumeCoordUnsafe", err)
+			}
+		})
+	}
+}
+
 // TestDeleteVolume_NotFound confirms an absent volume surfaces a clear "not
 // found" error rather than a silent success.
 func TestDeleteVolume_NotFound(t *testing.T) {
@@ -117,6 +154,18 @@ func TestDeleteVolume_Success(t *testing.T) {
 	}
 	if !res.Deleted {
 		t.Errorf("Deleted = false, want true")
+	}
+}
+
+// TestDeleteVolume_RejectsUnsafeLookupSegment confirms delete uses the shared
+// lookup guard before a raw name can reach fs.VolumePath via the runner.
+func TestDeleteVolume_RejectsUnsafeLookupSegment(t *testing.T) {
+	ctrl := setupTestController(t, &fakeRunner{})
+	_, err := ctrl.DeleteVolume(intmodel.Volume{
+		Metadata: intmodel.VolumeMetadata{Name: "..", Realm: "default"},
+	})
+	if !errors.Is(err, errdefs.ErrVolumeCoordUnsafe) {
+		t.Errorf("DeleteVolume(unsafe name) = %v, want ErrVolumeCoordUnsafe", err)
 	}
 }
 
@@ -204,6 +253,18 @@ func TestCreateVolume_NameRequired(t *testing.T) {
 	_, err := ctrl.CreateVolume(intmodel.Volume{Metadata: intmodel.VolumeMetadata{Realm: "default"}})
 	if !errors.Is(err, errdefs.ErrVolumeNameRequired) {
 		t.Errorf("CreateVolume(no name) = %v, want ErrVolumeNameRequired", err)
+	}
+}
+
+// TestCreateVolume_RejectsUnsafeLookupSegment confirms create also shares the
+// daemon-side segment guard before ReconcileVolume reaches WriteVolume.
+func TestCreateVolume_RejectsUnsafeLookupSegment(t *testing.T) {
+	ctrl := setupTestController(t, &fakeRunner{})
+	_, err := ctrl.CreateVolume(intmodel.Volume{
+		Metadata: intmodel.VolumeMetadata{Name: "data", Realm: "default", Space: "."},
+	})
+	if !errors.Is(err, errdefs.ErrVolumeCoordUnsafe) {
+		t.Errorf("CreateVolume(unsafe space) = %v, want ErrVolumeCoordUnsafe", err)
 	}
 }
 
