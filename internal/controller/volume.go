@@ -194,7 +194,10 @@ func validateVolumeSegment(value string) error {
 // validateVolumeScopeFilter enforces the scope contract for a list filter:
 // realm is optional (an empty realm lists across all realms), but a set deeper
 // coordinate still requires every shallower one. A Volume is never cell-scoped,
-// so the filter bottoms out at stack.
+// so the filter bottoms out at stack. Each set coordinate is also segment-guarded
+// (issue #1289) so a `..` filter can't traverse out of the scope dir downstream
+// in childScopeNames/resolveRealmDirs; empty coordinates are legal and skipped
+// by validateVolumeSegment, bringing the list path to parity with the lookup path.
 func validateVolumeScopeFilter(realm, space, stack string) error {
 	realm = strings.TrimSpace(realm)
 	space = strings.TrimSpace(space)
@@ -205,6 +208,15 @@ func validateVolumeScopeFilter(realm, space, stack string) error {
 	}
 	if stack != "" && space == "" {
 		return fmt.Errorf("%w (stack set without space)", errdefs.ErrVolumeScopeIncomplete)
+	}
+	for _, seg := range []struct{ field, value string }{
+		{"realm", realm},
+		{"space", space},
+		{"stack", stack},
+	} {
+		if err := validateVolumeSegment(seg.value); err != nil {
+			return fmt.Errorf("%w (%s)", err, seg.field)
+		}
 	}
 	return nil
 }
