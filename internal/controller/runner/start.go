@@ -1150,6 +1150,11 @@ func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr erro
 				"failed to chown attachable tty dir for %s: %w", ctrContainerID, attachErr,
 			)
 		}
+		if volErr := r.volumePostCreateChown(namespace, containerSpec); volErr != nil {
+			return intmodel.Cell{}, fmt.Errorf(
+				"failed to chown volume dir for %s: %w", ctrContainerID, volErr,
+			)
+		}
 
 		// Use container name with UUID for containerd operations
 		specWithNamespaces := ctr.JoinContainerNamespaces(
@@ -1450,6 +1455,11 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (_ intmode
 	if attachErr = r.attachablePostCreateChown(namespace, *foundContainerSpec); attachErr != nil {
 		return intmodel.Cell{}, fmt.Errorf(
 			"failed to chown attachable tty dir for %s: %w", containerdID, attachErr,
+		)
+	}
+	if volErr := r.volumePostCreateChown(namespace, *foundContainerSpec); volErr != nil {
+		return intmodel.Cell{}, fmt.Errorf(
+			"failed to chown volume dir for %s: %w", containerdID, volErr,
 		)
 	}
 
