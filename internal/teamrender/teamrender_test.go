@@ -299,6 +299,77 @@ func TestRenderBlueprintSubstitutesAndStampsTeamLabel(t *testing.T) {
 	}
 }
 
+// TestRenderBlueprintMarksOwnScopeVolumesEnsure pins the team-init auto-create
+// fix (#1301, Option B): a rendered blueprint's own-scope kind: volume mounts
+// are flipped Ensure=true so the daemon auto-provisions the (project, role)
+// state Volume on first `kuke run --from-config`, while a cross-scope volumeRef
+// mount and a bind mount are left exactly as authored.
+func TestRenderBlueprintMarksOwnScopeVolumesEnsure(t *testing.T) {
+	t.Parallel()
+	cacheDir := t.TempDir()
+	body := `apiVersion: v1beta1
+kind: CellBlueprint
+metadata:
+  name: {{ .role.name }}-{{ .harness }}
+spec:
+  cell:
+    containers:
+      - id: {{ .role.name }}
+        image: {{ .image }}
+        volumes:
+          - kind: volume
+            source: {{ .project.NAME }}-{{ .role.name }}
+            target: /home/agent/.claude
+          - kind: volume
+            target: /shared
+            volumeRef:
+              name: shared
+              realm: default
+          - kind: bind
+            source: /host/path
+            target: /mnt
+`
+	writeHarnessFile(t, cacheDir, "claude", "blueprint.tmpl.yaml", body)
+	r := minimalRole()
+	h := &model.Harness{
+		APIVersion: model.APIVersionV1,
+		Kind:       model.KindHarness,
+		Metadata:   model.Metadata{Name: "claude"},
+		Spec:       model.HarnessSpec{Template: "blueprint.tmpl.yaml"},
+	}
+	image := &model.ImageCatalogEntry{
+		Ref:     "claude-base",
+		Harness: "claude",
+		Image:   "registry.local/claude:latest",
+	}
+	bp, err := RenderBlueprint(
+		cacheDir, h, r, "claude", "dev", nil, image, nil,
+		teamsource.Source{}, Inputs{}, "kukeon", "default", "default", "default",
+	)
+	if err != nil {
+		t.Fatalf("RenderBlueprint: %v", err)
+	}
+	if len(bp.Spec.Cell.Containers) == 0 {
+		t.Fatalf("no containers in rendered blueprint")
+	}
+	vols := bp.Spec.Cell.Containers[0].Volumes
+	if len(vols) != 3 {
+		t.Fatalf("got %d volume mounts, want 3", len(vols))
+	}
+	// Own-scope kind: volume → auto-provisioned.
+	if own := vols[0]; own.Source != "kukeon-dev" || !own.Ensure {
+		t.Errorf("own-scope volume: source=%q ensure=%v, want source=kukeon-dev ensure=true", own.Source, own.Ensure)
+	}
+	// Cross-scope volumeRef → left a hard error (Ensure stays false).
+	if ref := vols[1]; ref.VolumeRef == nil || ref.Ensure {
+		t.Errorf("cross-scope volumeRef: ensure=%v, want false (must not implicitly create in another scope)", ref.Ensure)
+	}
+	// Non-volume kind → untouched.
+	if bind := vols[2]; bind.Kind != v1beta1.VolumeKindBind || bind.Ensure {
+		t.Errorf("bind mount: kind=%q ensure=%v, want kind=bind ensure=false", bind.Kind, bind.Ensure)
+	}
+}
+
 // TestRenderBlueprintRangesPerHarnessSecrets pins the agents#750 fix: a
 // blueprint ranging `(index .harnesses .harness).secrets` renders a secret
 // slot for each per-harness secret name. Before this change harnessesView
