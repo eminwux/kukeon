@@ -20,6 +20,7 @@ package controller_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/apply/parser"
@@ -166,6 +167,62 @@ func TestDeleteVolume_RejectsUnsafeLookupSegment(t *testing.T) {
 	})
 	if !errors.Is(err, errdefs.ErrVolumeCoordUnsafe) {
 		t.Errorf("DeleteVolume(unsafe name) = %v, want ErrVolumeCoordUnsafe", err)
+	}
+}
+
+// TestDeleteVolume_InUseRefused pins AC #7 (the delete gate): a Volume mounted
+// by a running cell cannot be deleted. The controller refuses with
+// ErrVolumeInUse naming the mounting cell, and the runner's DeleteVolume is
+// never reached — the directory is left intact under the live mount.
+func TestDeleteVolume_InUseRefused(t *testing.T) {
+	deleteCalled := false
+	mockRunner := &fakeRunner{
+		VolumeMountedByLiveCellFn: func(intmodel.Volume) (string, bool, error) {
+			return "default/app/web/db", true, nil
+		},
+		DeleteVolumeFn: func(intmodel.Volume) error {
+			deleteCalled = true
+			return nil
+		},
+	}
+	ctrl := setupTestController(t, mockRunner)
+
+	res, err := ctrl.DeleteVolume(intmodel.Volume{
+		Metadata: intmodel.VolumeMetadata{Name: "data", Realm: "default"},
+	})
+	if !errors.Is(err, errdefs.ErrVolumeInUse) {
+		t.Fatalf("DeleteVolume(in-use) error = %v, want ErrVolumeInUse", err)
+	}
+	if !strings.Contains(err.Error(), "default/app/web/db") {
+		t.Errorf("error %q does not name the mounting cell", err)
+	}
+	if res.Deleted {
+		t.Errorf("Deleted = true for an in-use volume")
+	}
+	if deleteCalled {
+		t.Errorf("runner.DeleteVolume was called despite the live-mount gate")
+	}
+}
+
+// TestDeleteVolume_NotMountedDeletes confirms the gate is a no-op when no
+// running cell mounts the volume — the delete proceeds to the runner.
+func TestDeleteVolume_NotMountedDeletes(t *testing.T) {
+	mockRunner := &fakeRunner{
+		VolumeMountedByLiveCellFn: func(intmodel.Volume) (string, bool, error) {
+			return "", false, nil
+		},
+		DeleteVolumeFn: func(intmodel.Volume) error { return nil },
+	}
+	ctrl := setupTestController(t, mockRunner)
+
+	res, err := ctrl.DeleteVolume(intmodel.Volume{
+		Metadata: intmodel.VolumeMetadata{Name: "data", Realm: "default"},
+	})
+	if err != nil {
+		t.Fatalf("DeleteVolume() error = %v", err)
+	}
+	if !res.Deleted {
+		t.Errorf("Deleted = false, want true")
 	}
 }
 

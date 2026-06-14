@@ -18,6 +18,8 @@ package apischeme
 
 import (
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
@@ -389,6 +391,9 @@ func ConvertContainerDocToInternal(in ext.ContainerDoc) (intmodel.Container, err
 		if err := validateContainerGit(in.Spec); err != nil {
 			return intmodel.Container{}, err
 		}
+		if err := validateContainerVolumes(in.Spec); err != nil {
+			return intmodel.Container{}, err
+		}
 		return intmodel.Container{
 			Metadata: intmodel.ContainerMetadata{
 				Name:   in.Metadata.Name,
@@ -747,6 +752,114 @@ func validateContainerCreateStagePersistence(spec ext.ContainerSpec) error {
 			"survive container recreate, or move the work into a runOn: %q stage",
 		spec.ID, ext.RunOnCreate, ext.RunOnStart,
 	)
+}
+
+// validateContainerVolumes enforces the per-kind VolumeMount contract, with the
+// volume-reference (kind: volume) case the focus of step 4 (#1016). The bind
+// and tmpfs kinds keep their historical lenient handling — an empty/relative
+// bind source is still skipped downstream rather than rejected here, so existing
+// specs are unaffected — except that a volumeRef block is only ever valid on a
+// volume-kind mount. The volume kind requires exactly one of a same-scope
+// `source: <name>` or a cross-scope `volumeRef:`, a name (not an absolute path)
+// for the same-scope form, a complete-and-safe ref scope for the cross-scope
+// form, and an absolute Target.
+func validateContainerVolumes(spec ext.ContainerSpec) error {
+	for i, v := range spec.Volumes {
+		if v.VolumeRef != nil && v.Kind != ext.VolumeKindVolume {
+			return fmt.Errorf(
+				"container %q volume %d: volumeRef is only valid on a kind: volume mount",
+				spec.ID, i,
+			)
+		}
+		switch v.Kind {
+		case ext.VolumeKindVolume:
+			if err := validateVolumeKindMount(v); err != nil {
+				return fmt.Errorf("container %q volume %d: %w", spec.ID, i, err)
+			}
+		case ext.VolumeKindTmpfs:
+			if v.Source != "" {
+				return fmt.Errorf("container %q volume %d: %w", spec.ID, i, errdefs.ErrVolumeTmpfsSourceForbidden)
+			}
+		case "", ext.VolumeKindBind:
+			// Lenient: an empty/relative bind source is skipped by the OCI
+			// mount builder, not rejected — preserving pre-#1016 behavior.
+		default:
+			return fmt.Errorf("container %q volume %d: %w (got %q)", spec.ID, i, errdefs.ErrVolumeKindUnknown, v.Kind)
+		}
+	}
+	return nil
+}
+
+// validateVolumeKindMount validates a single kind: volume VolumeMount: exactly
+// one of Source (same-scope name) or VolumeRef (cross-scope) is set, a same-
+// scope Source is a name rather than an absolute path, a VolumeRef carries a
+// complete and path-safe scope, and the Target is absolute.
+func validateVolumeKindMount(v ext.VolumeMount) error {
+	hasSource := strings.TrimSpace(v.Source) != ""
+	hasRef := v.VolumeRef != nil
+	switch {
+	case hasSource && hasRef:
+		return errdefs.ErrVolumeRefSourceExclusive
+	case !hasSource && !hasRef:
+		return errdefs.ErrVolumeRefSourceMissing
+	}
+	if hasSource {
+		if filepath.IsAbs(v.Source) {
+			return errdefs.ErrVolumeSourceNotName
+		}
+		if !volumeSegmentSafe(v.Source) {
+			return errdefs.ErrVolumeCoordUnsafe
+		}
+	}
+	if hasRef {
+		if err := validateVolumeRefScope(*v.VolumeRef); err != nil {
+			return err
+		}
+	}
+	if strings.TrimSpace(v.Target) == "" {
+		return errdefs.ErrVolumeTargetRequired
+	}
+	if !filepath.IsAbs(v.Target) {
+		return errdefs.ErrVolumeTargetNotAbsolute
+	}
+	return nil
+}
+
+// validateVolumeRefScope enforces the VolumeRef scope contract: Name and Realm
+// are mandatory, a deeper coordinate requires every shallower one, and every
+// coordinate must be path-safe (no "/", "..", or NUL that would escape the
+// volumes tree once fs.VolumePath joins it). Mirrors the parser's
+// validateVolumeScope, bounded at stack depth — a Volume is never cell-scoped.
+func validateVolumeRefScope(ref ext.VolumeRef) error {
+	name := strings.TrimSpace(ref.Name)
+	realm := strings.TrimSpace(ref.Realm)
+	space := strings.TrimSpace(ref.Space)
+	stack := strings.TrimSpace(ref.Stack)
+	if name == "" {
+		return errdefs.ErrVolumeRefNameRequired
+	}
+	if realm == "" {
+		return errdefs.ErrVolumeRefRealmRequired
+	}
+	if stack != "" && space == "" {
+		return errdefs.ErrVolumeRefScopeIncomplete
+	}
+	for _, seg := range []string{name, realm, space, stack} {
+		if seg != "" && !volumeSegmentSafe(seg) {
+			return errdefs.ErrVolumeCoordUnsafe
+		}
+	}
+	return nil
+}
+
+// volumeSegmentSafe reports whether a volume name or scope coordinate is safe to
+// filepath.Join into the volumes tree — no path separator, parent-dir token, or
+// NUL that would let the resolved mount escape its scope.
+func volumeSegmentSafe(seg string) bool {
+	if seg == "." || seg == ".." {
+		return false
+	}
+	return !strings.ContainsAny(seg, "/\x00") && !strings.Contains(seg, "..")
 }
 
 // validateTtyLogLevel accepts the empty string (the daemon defaults to
@@ -1317,6 +1430,7 @@ func volumeMountsToInternal(in []ext.VolumeMount) []intmodel.VolumeMount {
 			Kind:      intmodel.VolumeKind(v.Kind),
 			Source:    v.Source,
 			Target:    v.Target,
+			VolumeRef: volumeRefToInternal(v.VolumeRef),
 			ReadOnly:  v.ReadOnly,
 			SizeBytes: v.SizeBytes,
 			Mode:      v.Mode,
@@ -1335,12 +1449,40 @@ func volumeMountsToExternal(in []intmodel.VolumeMount) []ext.VolumeMount {
 			Kind:      ext.VolumeKind(v.Kind),
 			Source:    v.Source,
 			Target:    v.Target,
+			VolumeRef: volumeRefToExternal(v.VolumeRef),
 			ReadOnly:  v.ReadOnly,
 			SizeBytes: v.SizeBytes,
 			Mode:      v.Mode,
 		}
 	}
 	return out
+}
+
+// volumeRefToInternal converts an external VolumeRef to the internal hub type,
+// preserving nil so a same-scope (bare-source) mount stays ref-less.
+func volumeRefToInternal(in *ext.VolumeRef) *intmodel.VolumeRef {
+	if in == nil {
+		return nil
+	}
+	return &intmodel.VolumeRef{
+		Name:  in.Name,
+		Realm: in.Realm,
+		Space: in.Space,
+		Stack: in.Stack,
+	}
+}
+
+// volumeRefToExternal is the inverse of volumeRefToInternal.
+func volumeRefToExternal(in *intmodel.VolumeRef) *ext.VolumeRef {
+	if in == nil {
+		return nil
+	}
+	return &ext.VolumeRef{
+		Name:  in.Name,
+		Realm: in.Realm,
+		Space: in.Space,
+		Stack: in.Stack,
+	}
 }
 
 // convertContainerStatusesToInternal converts a slice of external ContainerStatus to internal ContainerStatus.
@@ -1398,6 +1540,9 @@ func ConvertCellDocToInternal(in ext.CellDoc) (intmodel.Cell, error) {
 				return intmodel.Cell{}, err
 			}
 			if err := validateContainerGit(c); err != nil {
+				return intmodel.Cell{}, err
+			}
+			if err := validateContainerVolumes(c); err != nil {
 				return intmodel.Cell{}, err
 			}
 		}

@@ -179,9 +179,12 @@ type BuildOption func(*buildOpts)
 type buildOpts struct {
 	attachable              AttachableInjection
 	defaultMemoryLimitBytes int64
-	secretRunPath           string
-	extraLabels             map[string]string
-	kukeonGroupGID          uint32
+	// runPath is the daemon's RunPath, used to resolve scoped references off
+	// disk: a ContainerSecret.secretRef from its scope's secrets tree (#623)
+	// and a kind: volume VolumeMount from its scope's volumes tree (#1016).
+	runPath        string
+	extraLabels    map[string]string
+	kukeonGroupGID uint32
 }
 
 // WithAttachableInjection configures the host-side paths used when wrapping
@@ -275,16 +278,18 @@ func withKukeonGroupGIDSpecOpt(gid uint32) oci.SpecOpts {
 }
 
 // WithSecretRunPath carries the daemon's RunPath into CreateContainerFromSpec
-// so a ContainerSecret with a secretRef can be resolved from the referenced
-// scope's secrets tree (<RunPath>/data/<scope>/secrets/<name>, issue #619).
-// Has no effect on BuildContainerSpec itself — the value is consumed by
-// resolveSecrets before the OCI spec is built. An empty argument is a no-op so
-// callers can pass it unconditionally; specs that declare no secretRef never
-// touch the path. Issue #623.
+// so scoped references can be resolved off disk before the OCI spec is built: a
+// ContainerSecret with a secretRef from the referenced scope's secrets tree
+// (<RunPath>/data/<scope>/secrets/<name>, issue #619) and a kind: volume
+// VolumeMount from its scope's volumes tree (issue #1016). Has no effect on
+// BuildContainerSpec itself — the value is consumed by resolveSecrets and
+// resolveVolumeMounts. An empty argument is a no-op so callers can pass it
+// unconditionally; specs that declare no scoped reference never touch the path.
+// Issue #623.
 func WithSecretRunPath(runPath string) BuildOption {
 	return func(o *buildOpts) {
 		if runPath != "" {
-			o.secretRunPath = runPath
+			o.runPath = runPath
 		}
 	}
 }
@@ -679,9 +684,12 @@ func cellCgroupsPath(cellCgroupPath, containerdID string) string {
 // VolumeMount.Kind discriminator selects the emitted mount type: empty or
 // VolumeKindBind produces a host bind mount (Source → Target), VolumeKindTmpfs
 // produces an in-memory tmpfs mount at Target with the runtime's standard
-// tmpfs Source. Entries are expected to be already validated (absolute paths
-// for the bind kind; absolute Target for the tmpfs kind). Unknown kinds are
-// skipped silently — validation belongs upstream.
+// tmpfs Source, and VolumeKindVolume — once resolveVolumeMounts has rewritten
+// its Source to the referenced Volume's on-disk directory — emits the same host
+// bind mount as the bind kind (the daemon-managed Volume directory bound
+// read-write at Target). Entries are expected to be already validated and (for
+// the volume kind) already resolved. Unknown kinds are skipped silently —
+// validation belongs upstream.
 func buildVolumeMounts(volumes []intmodel.VolumeMount) []runtimespec.Mount {
 	if len(volumes) == 0 {
 		return nil
@@ -693,7 +701,7 @@ func buildVolumeMounts(volumes []intmodel.VolumeMount) []runtimespec.Mount {
 			if m, ok := tmpfsVolumeMount(v); ok {
 				mounts = append(mounts, m)
 			}
-		case "", intmodel.VolumeKindBind:
+		case "", intmodel.VolumeKindBind, intmodel.VolumeKindVolume:
 			if m, ok := bindVolumeMount(v); ok {
 				mounts = append(mounts, m)
 			}

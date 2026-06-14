@@ -21,7 +21,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
@@ -299,4 +301,63 @@ func (r *Exec) DeleteVolume(volume intmodel.Volume) error {
 		"stack", md.Stack,
 	)
 	return nil
+}
+
+// VolumeMountedByLiveCell scans every cell across all realms for a running cell
+// that mounts the given Volume through a kind: volume mount, the live-reference
+// gate `kuke delete volume` consults (issue #1016). A cell counts as a live
+// mounter when its last-reconciled state is Ready and one of its container
+// specs declares a kind: volume mount that resolves — via the same scope walk
+// the create path uses — to this Volume's exact scope + name. The first match
+// short-circuits and returns the cell's scoped reference (realm/space/stack/
+// cell); a mount that fails to resolve is skipped rather than failing the gate
+// (it cannot be referencing the still-present target). Returns ("", false, nil)
+// when no running cell mounts the Volume.
+func (r *Exec) VolumeMountedByLiveCell(volume intmodel.Volume) (string, bool, error) {
+	cells, err := r.ListCells("", "", "")
+	if err != nil {
+		return "", false, fmt.Errorf("%w: enumerate cells: %w", errdefs.ErrDeleteVolume, err)
+	}
+	target := volume.Metadata
+	for i := range cells {
+		cell := cells[i]
+		if cell.Status.State != intmodel.CellStateReady {
+			continue
+		}
+		scope := ctr.VolumeScope{
+			Realm: cell.Spec.RealmName,
+			Space: cell.Spec.SpaceName,
+			Stack: cell.Spec.StackName,
+		}
+		for ci := range cell.Spec.Containers {
+			for _, m := range cell.Spec.Containers[ci].Volumes {
+				if m.Kind != intmodel.VolumeKindVolume {
+					continue
+				}
+				resolved, rerr := ctr.ResolveVolumeMount(r.opts.RunPath, scope, m)
+				if rerr != nil {
+					continue
+				}
+				if resolved.Realm == target.Realm &&
+					resolved.Space == target.Space &&
+					resolved.Stack == target.Stack &&
+					resolved.Name == target.Name {
+					return cellScopedRef(scope, cell.Metadata.Name), true, nil
+				}
+			}
+		}
+	}
+	return "", false, nil
+}
+
+// cellScopedRef renders a cell's realm/space/stack/name as a slash-joined
+// reference for the in-use error message, skipping empty scope coordinates.
+func cellScopedRef(scope ctr.VolumeScope, cellName string) string {
+	parts := make([]string, 0, 4)
+	for _, p := range []string{scope.Realm, scope.Space, scope.Stack, cellName} {
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+	return strings.Join(parts, "/")
 }

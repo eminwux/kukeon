@@ -897,6 +897,165 @@ func TestContainerRoundTripVolumeKindTmpfsV1Beta1(t *testing.T) {
 	}
 }
 
+// TestContainerRoundTripVolumeKindVolumeV1Beta1 pins the step-4 (#1016) volume
+// reference surface through Normalize → controller → Build: a same-scope
+// `source: <name>` and a cross-scope `volumeRef:` both survive the round trip
+// with Kind, Source, and the VolumeRef scope coordinates intact.
+func TestContainerRoundTripVolumeKindVolumeV1Beta1(t *testing.T) {
+	input := ext.ContainerDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindContainer,
+		Metadata:   ext.ContainerMetadata{Name: "container-vol"},
+		Spec: ext.ContainerSpec{
+			ID:      "container-vol",
+			RealmID: "realm0",
+			SpaceID: "space0",
+			StackID: "stack0",
+			CellID:  "cell0",
+			Image:   "alpine:latest",
+			Volumes: []ext.VolumeMount{
+				{Kind: ext.VolumeKindVolume, Source: "data", Target: "/data"},
+				{
+					Kind:      ext.VolumeKindVolume,
+					Target:    "/cache",
+					ReadOnly:  true,
+					VolumeRef: &ext.VolumeRef{Name: "cache", Realm: "shared", Space: "team"},
+				},
+			},
+		},
+	}
+
+	internal, version, err := apischeme.NormalizeContainer(input)
+	if err != nil {
+		t.Fatalf("NormalizeContainer: %v", err)
+	}
+	if internal.Spec.Volumes[0].Kind != intmodel.VolumeKindVolume ||
+		internal.Spec.Volumes[0].Source != "data" {
+		t.Errorf("internal volume[0] = %+v, want same-scope volume kind data", internal.Spec.Volumes[0])
+	}
+	ref := internal.Spec.Volumes[1].VolumeRef
+	if ref == nil || ref.Name != "cache" || ref.Realm != "shared" || ref.Space != "team" {
+		t.Errorf("internal volume[1].VolumeRef = %+v, want shared/team/cache", ref)
+	}
+
+	output, err := apischeme.BuildContainerExternalFromInternal(internal, version)
+	if err != nil {
+		t.Fatalf("BuildContainerExternalFromInternal: %v", err)
+	}
+	if output.Spec.Volumes[0] != input.Spec.Volumes[0] {
+		t.Errorf("volume[0] round trip = %+v, want %+v", output.Spec.Volumes[0], input.Spec.Volumes[0])
+	}
+	gotRef := output.Spec.Volumes[1].VolumeRef
+	if gotRef == nil || *gotRef != *input.Spec.Volumes[1].VolumeRef {
+		t.Errorf("volume[1].VolumeRef round trip = %+v, want %+v", gotRef, input.Spec.Volumes[1].VolumeRef)
+	}
+	if gotRef == input.Spec.Volumes[1].VolumeRef {
+		t.Error("VolumeRef round trip shares the pointer with the input — conversion must deep-copy")
+	}
+}
+
+func TestValidateContainerVolumes(t *testing.T) {
+	mk := func(v ext.VolumeMount) ext.ContainerDoc {
+		return ext.ContainerDoc{
+			APIVersion: ext.APIVersionV1Beta1,
+			Kind:       ext.KindContainer,
+			Metadata:   ext.ContainerMetadata{Name: "c"},
+			Spec: ext.ContainerSpec{
+				ID: "c", RealmID: "r", SpaceID: "s", StackID: "st", CellID: "cl",
+				Image: "alpine", Volumes: []ext.VolumeMount{v},
+			},
+		}
+	}
+	tests := []struct {
+		name    string
+		mount   ext.VolumeMount
+		wantErr error
+	}{
+		{
+			name:  "same-scope source ok",
+			mount: ext.VolumeMount{Kind: ext.VolumeKindVolume, Source: "data", Target: "/data"},
+		},
+		{
+			name:  "cross-scope ref ok",
+			mount: ext.VolumeMount{Kind: ext.VolumeKindVolume, Target: "/c", VolumeRef: &ext.VolumeRef{Name: "n", Realm: "r"}},
+		},
+		{
+			name:    "source and ref exclusive",
+			mount:   ext.VolumeMount{Kind: ext.VolumeKindVolume, Source: "data", Target: "/d", VolumeRef: &ext.VolumeRef{Name: "n", Realm: "r"}},
+			wantErr: errdefs.ErrVolumeRefSourceExclusive,
+		},
+		{
+			name:    "neither source nor ref",
+			mount:   ext.VolumeMount{Kind: ext.VolumeKindVolume, Target: "/d"},
+			wantErr: errdefs.ErrVolumeRefSourceMissing,
+		},
+		{
+			name:    "absolute source rejected",
+			mount:   ext.VolumeMount{Kind: ext.VolumeKindVolume, Source: "/abs/path", Target: "/d"},
+			wantErr: errdefs.ErrVolumeSourceNotName,
+		},
+		{
+			name:    "unsafe source rejected",
+			mount:   ext.VolumeMount{Kind: ext.VolumeKindVolume, Source: "../escape", Target: "/d"},
+			wantErr: errdefs.ErrVolumeCoordUnsafe,
+		},
+		{
+			name:    "missing target",
+			mount:   ext.VolumeMount{Kind: ext.VolumeKindVolume, Source: "data"},
+			wantErr: errdefs.ErrVolumeTargetRequired,
+		},
+		{
+			name:    "relative target rejected",
+			mount:   ext.VolumeMount{Kind: ext.VolumeKindVolume, Source: "data", Target: "rel"},
+			wantErr: errdefs.ErrVolumeTargetNotAbsolute,
+		},
+		{
+			name:    "ref missing realm",
+			mount:   ext.VolumeMount{Kind: ext.VolumeKindVolume, Target: "/d", VolumeRef: &ext.VolumeRef{Name: "n"}},
+			wantErr: errdefs.ErrVolumeRefRealmRequired,
+		},
+		{
+			name:    "ref incomplete scope",
+			mount:   ext.VolumeMount{Kind: ext.VolumeKindVolume, Target: "/d", VolumeRef: &ext.VolumeRef{Name: "n", Realm: "r", Stack: "st"}},
+			wantErr: errdefs.ErrVolumeRefScopeIncomplete,
+		},
+		{
+			name:    "volumeRef on bind kind rejected",
+			mount:   ext.VolumeMount{Kind: ext.VolumeKindBind, Source: "/a", Target: "/b", VolumeRef: &ext.VolumeRef{Name: "n", Realm: "r"}},
+			wantErr: nil, // distinct inline error, asserted as non-nil below
+		},
+		{
+			name:    "tmpfs with source forbidden",
+			mount:   ext.VolumeMount{Kind: ext.VolumeKindTmpfs, Source: "/x", Target: "/t"},
+			wantErr: errdefs.ErrVolumeTmpfsSourceForbidden,
+		},
+		{
+			name:    "unknown kind",
+			mount:   ext.VolumeMount{Kind: "bogus", Target: "/t"},
+			wantErr: errdefs.ErrVolumeKindUnknown,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := apischeme.NormalizeContainer(mk(tc.mount))
+			switch {
+			case tc.name == "volumeRef on bind kind rejected":
+				if err == nil {
+					t.Errorf("expected error for volumeRef on bind kind, got nil")
+				}
+			case tc.wantErr == nil:
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			default:
+				if !errors.Is(err, tc.wantErr) {
+					t.Errorf("err = %v, want %v", err, tc.wantErr)
+				}
+			}
+		})
+	}
+}
+
 // TestCellRoundTripVolumeKindTmpfsV1Beta1 mirrors the standalone Container
 // test for the nested-container path that `apply -f cell.yaml` and the
 // CellProfile materializer travel: a tmpfs entry inside CellSpec.Containers[]

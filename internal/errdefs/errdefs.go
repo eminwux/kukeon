@@ -189,15 +189,32 @@ var (
 	ErrVolumeSourceNotAbsolute = errors.New("volume source must be an absolute host path")
 	ErrVolumeTargetNotAbsolute = errors.New("volume target must be an absolute container path")
 	ErrVolumeSourceNotFound    = errors.New("volume source does not exist on the host")
-	ErrVolumeNamedNotSupported = errors.New(
-		"named or managed volumes are not supported; use an absolute host path as source",
-	)
-	ErrVolumeKindUnknown = errors.New(
-		"volume kind is not recognized; expected \"\", \"bind\", or \"tmpfs\"",
+	ErrVolumeKindUnknown       = errors.New(
+		"volume kind is not recognized; expected \"\", \"bind\", \"tmpfs\", or \"volume\"",
 	)
 	ErrVolumeTmpfsSourceForbidden = errors.New(
 		"tmpfs volume must not set a source; tmpfs is in-memory and has no host backing",
 	)
+	// Volume-reference (kind: volume) mount errors — step 4 (#1016).
+	ErrVolumeRefSourceExclusive = errors.New(
+		"volume mount must set exactly one of source (same-scope name) or volumeRef (cross-scope)",
+	)
+	ErrVolumeRefSourceMissing = errors.New(
+		"volume mount must set either source (same-scope name) or volumeRef (cross-scope)",
+	)
+	ErrVolumeSourceNotName = errors.New(
+		"volume mount source must be a Volume name, not an absolute path",
+	)
+	ErrVolumeRefNameRequired    = errors.New("volumeRef.name is required")
+	ErrVolumeRefRealmRequired   = errors.New("volumeRef.realm is required")
+	ErrVolumeRefScopeIncomplete = errors.New(
+		"volumeRef scope is incomplete; a deeper coordinate requires every shallower one",
+	)
+	// ErrVolumeInUse gates `kuke delete volume` against a live mount: a Volume
+	// referenced by a volume-kind mount on a running cell cannot be deleted out
+	// from under it. The wrapping message names the mounting cell. Step 4
+	// (#1016).
+	ErrVolumeInUse = errors.New("volume is in use by a running cell")
 
 	// CNI-related errors.
 

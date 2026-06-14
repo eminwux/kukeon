@@ -302,19 +302,58 @@ const (
 	// Source must be empty. SizeBytes and Mode tune the standard tmpfs
 	// size= and mode= options when non-zero.
 	VolumeKindTmpfs VolumeKind = "tmpfs"
+	// VolumeKindVolume references a daemon-managed kind: Volume (issue #1018)
+	// by name and bind-mounts its on-disk directory read-write at Target. The
+	// reference is resolved at container-create time: a bare `source: <name>`
+	// names a Volume in the container's own scope (resolved by walking
+	// realm/space/stack, most-specific first); a `volumeRef:` block names one
+	// cross-scope. The referenced Volume's directory survives both container
+	// recreation and the mounting cell's deletion — the cell references the
+	// Volume, it does not own it. Step 4 of the volumes epic (#1016).
+	VolumeKindVolume VolumeKind = "volume"
 )
 
 // VolumeMount is a mount entry attached to a container. The Kind discriminator
 // selects the OCI mount type the runtime emits: bind (host path → container
-// path) or tmpfs (in-memory directory). Empty Kind means bind for back-compat
-// with YAML authored before the discriminator existed.
+// path), tmpfs (in-memory directory), or volume (a reference to a daemon-
+// managed kind: Volume resolved to its on-disk directory and bind-mounted).
+// Empty Kind means bind for back-compat with YAML authored before the
+// discriminator existed.
 type VolumeMount struct {
-	Kind      VolumeKind `json:"kind,omitempty"      yaml:"kind,omitempty"`
-	Source    string     `json:"source,omitempty"    yaml:"source,omitempty"`
-	Target    string     `json:"target"              yaml:"target"`
+	Kind VolumeKind `json:"kind,omitempty"      yaml:"kind,omitempty"`
+	// Source is the host path for a bind mount, or — when Kind is volume — the
+	// name of a Volume in the container's own scope (mutually exclusive with
+	// VolumeRef). Empty for tmpfs.
+	Source string `json:"source,omitempty"    yaml:"source,omitempty"`
+	Target string `json:"target"              yaml:"target"`
+	// VolumeRef references a kind: Volume in another scope by name + scope
+	// coordinates (mirrors ContainerSecretRef, minus the cell coordinate a
+	// Volume can never carry). Only honored when Kind is volume, and mutually
+	// exclusive with Source. Step 4 (#1016).
+	VolumeRef *VolumeRef `json:"volumeRef,omitempty" yaml:"volumeRef,omitempty"`
 	ReadOnly  bool       `json:"readOnly,omitempty"  yaml:"readOnly,omitempty"`
 	SizeBytes int64      `json:"sizeBytes,omitempty" yaml:"sizeBytes,omitempty"`
 	Mode      uint32     `json:"mode,omitempty"      yaml:"mode,omitempty"`
+}
+
+// VolumeRef points at a daemon-managed kind: Volume (issue #1018) by name and
+// scope, the cross-scope companion to a bare `source: <name>` on a volume-kind
+// VolumeMount. The scope follows the Volume coordinate contract: Realm is
+// always required and a deeper coordinate may only be set when every shallower
+// one is. Unlike ContainerSecretRef there is no Cell coordinate — a Volume is
+// never cell-scoped. The reference resolves to the same on-disk directory the
+// Volume was provisioned at, so a container in one scope may mount a Volume
+// owned by another (e.g. a workload reading a realm-scoped shared volume).
+// Step 4 (#1016).
+type VolumeRef struct {
+	// Name is the referenced Volume's name within its scope. Required.
+	Name string `json:"name"            yaml:"name"`
+	// Realm is the always-required top-level scope coordinate.
+	Realm string `json:"realm"           yaml:"realm"`
+	// Space, when set, scopes the reference to a space within Realm.
+	Space string `json:"space,omitempty" yaml:"space,omitempty"`
+	// Stack, when set, scopes the reference to a stack within Space.
+	Stack string `json:"stack,omitempty" yaml:"stack,omitempty"`
 }
 
 // ContainerRepo declares a git repository the container depends on. kuketty
@@ -653,6 +692,14 @@ func cloneVolumeMounts(in []VolumeMount) []VolumeMount {
 
 	out := make([]VolumeMount, len(in))
 	copy(out, in)
+	// copy() is shallow: deep-copy the VolumeRef pointer so a clone never
+	// shares the referent struct with the original (mirrors cloneSecrets).
+	for i := range out {
+		if in[i].VolumeRef != nil {
+			ref := *in[i].VolumeRef
+			out[i].VolumeRef = &ref
+		}
+	}
 	return out
 }
 

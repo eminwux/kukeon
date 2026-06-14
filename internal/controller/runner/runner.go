@@ -192,6 +192,12 @@ type Runner interface {
 	// scoped Volume (issue #1018). Returns errdefs.ErrVolumeNotFound when the
 	// directory is absent.
 	DeleteVolume(volume intmodel.Volume) error
+	// VolumeMountedByLiveCell reports the scoped reference of the first running
+	// cell that mounts the given Volume via a kind: volume mount, gating
+	// `kuke delete volume` against a live mount (issue #1016). Returns
+	// (ref, true, nil) naming the mounting cell when one is found, ("", false,
+	// nil) when no running cell mounts it.
+	VolumeMountedByLiveCell(volume intmodel.Volume) (cellRef string, mounted bool, err error)
 
 	// WriteConfig persists a `kind: CellConfig`'s serialized document to the
 	// daemon-managed, root-owned, world-readable file under the scope's metadata

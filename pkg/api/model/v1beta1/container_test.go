@@ -71,3 +71,36 @@ func TestContainerSpec_HostPIDDefault(t *testing.T) {
 		}
 	})
 }
+
+// TestNewContainerDoc_DeepCopiesVolumeRef pins the step-4 (#1016) clone
+// contract: cloneVolumeMounts deep-copies each VolumeMount's VolumeRef pointer
+// so a cloned ContainerDoc never shares the referent struct with its source —
+// the same guarantee cloneSecrets gives ContainerSecretRef. Mutating the
+// clone's VolumeRef must not bleed back into the original.
+func TestNewContainerDoc_DeepCopiesVolumeRef(t *testing.T) {
+	in := &ContainerDoc{
+		Spec: ContainerSpec{
+			Volumes: []VolumeMount{
+				{
+					Kind:      VolumeKindVolume,
+					Target:    "/cache",
+					VolumeRef: &VolumeRef{Name: "cache", Realm: "shared"},
+				},
+			},
+		},
+	}
+	out := NewContainerDoc(in)
+
+	if out.Spec.Volumes[0].VolumeRef == in.Spec.Volumes[0].VolumeRef {
+		t.Fatal("clone shares the VolumeRef pointer with the source")
+	}
+	if *out.Spec.Volumes[0].VolumeRef != *in.Spec.Volumes[0].VolumeRef {
+		t.Fatalf("clone VolumeRef = %+v, want equal value to source",
+			out.Spec.Volumes[0].VolumeRef)
+	}
+	out.Spec.Volumes[0].VolumeRef.Realm = "mutated"
+	if in.Spec.Volumes[0].VolumeRef.Realm != "shared" {
+		t.Errorf("mutating clone VolumeRef bled into source: realm = %q",
+			in.Spec.Volumes[0].VolumeRef.Realm)
+	}
+}
