@@ -516,9 +516,13 @@ print_next_steps() {
 
 ${C_GREEN}${C_BOLD}✓ kukeon installed and initialized${C_RESET}
 
-Try your first session:
+Try your first session — create a cell from an image, list it, start it:
   ${C_BOLD}kuke create cell my-first --image docker.io/library/alpine:3${C_RESET}
   ${C_BOLD}kuke get cells${C_RESET}
+  ${C_BOLD}kuke start my-first${C_RESET}
+
+Or, for a one-shot interactive session (create + start + attach):
+  ${C_BOLD}kuke run --image docker.io/library/alpine:3${C_RESET}
 
 Or apply a manifest:
   ${C_BOLD}kuke apply -f my-stack.yaml${C_RESET}

@@ -3500,17 +3500,19 @@
 </code></pre></div>
 <h2 id="kuke-create-cell">kuke create cell<a class="headerlink" href="#kuke-create-cell" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>kuke create cell [NAME] --realm &lt;r&gt; --space &lt;s&gt; --stack &lt;t&gt;
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>                       ( --from-blueprint &lt;bp&gt; [--param K=V]... [--param-file &lt;path&gt;]
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>                       | --from-config &lt;cfg&gt; [--env K=V]...
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>                       | --clone &lt;cell&gt; [--param K=V]... [--env K=V]... )
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>                       ( --image &lt;ref&gt; [--command &lt;cmd&gt;]
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>                       | --from-blueprint &lt;bp&gt; [--param K=V]... [--param-file &lt;path&gt;]
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>                       | --from-config &lt;cfg&gt; [--env K=V]...
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>                       | --clone &lt;cell&gt; [--param K=V]... [--env K=V]... )
 </code></pre></div>
-<p>Three source modes (exactly one of <code>--from-blueprint</code> / <code>--from-config</code> / <code>--clone</code> is required):</p>
+<p>Four source modes (exactly one of <code>--image</code> / <code>--from-blueprint</code> / <code>--from-config</code> / <code>--clone</code> is required):</p>
 <ul>
+<li><code>kuke create cell [name] --image &lt;ref&gt; [--command &lt;cmd&gt;]</code> — synthesizes a single attachable container from a bare image ref and persists it in a <strong>stopped</strong> state (the quick-start source, the create-side mirror of <a href="../kuke-run/"><code>kuke run --image</code></a>). Pair with <code>kuke start &lt;name&gt;</code>. <code>--command</code> overrides the synthesized entrypoint (default <code>/bin/sh</code>). No daemon-stored binding is resolved, so the binding render-time/override knobs <code>--param</code>/<code>--param-file</code>/<code>--env</code> are rejected with <code>--image</code> (use <code>--from-blueprint</code>/<code>--from-config</code> to parameterise or layer env). Mutually exclusive with <code>--from-blueprint</code>/<code>--from-config</code>/<code>--clone</code>.</li>
 <li><code>kuke create cell [name] --from-blueprint &lt;bp&gt; [--param K=V]... [--param-file &lt;path&gt;]</code> — resolves the daemon-stored CellBlueprint, applies scalar params, materialises the full Cell record (containers and all), and persists it in a <strong>stopped</strong> state. Pair with <code>kuke start &lt;name&gt;</code>. Differs from <a href="../kuke-run/"><code>kuke run --from-blueprint</code></a> (materialise + start + attach) by leaving the cell stopped for inspection or hand-off; Blueprint-lineage cells reach the recreate branch of <code>kuke restart</code>'s daemon-side reconcile (P7) — updates flow through restart, not in-place mutation.</li>
 <li><code>kuke create cell [name] --from-config &lt;cfg&gt; [--env K=V]...</code> — resolves the daemon-stored CellConfig and its referenced Blueprint, applies the Config's <code>spec.values</code> + repo/secret slot fills, materialises the Cell record, persists in <strong>stopped</strong> state. Pair with <code>kuke start &lt;name&gt;</code>. Later reconcile against the lineage Config flows through <a href="../kuke-restart/"><code>kuke restart &lt;name&gt;</code></a> (OutOfSync-driven, #821) once the cell is started.</li>
 <li><code>kuke create cell [name] --clone &lt;cell&gt; [--param K=V]... | [--env K=V]...</code> — forks an existing cell's recipe: reads the source cell's <code>Spec.Provenance</code> (the Blueprint/Config binding it was materialised from plus any recorded per-cell overrides) and re-materialises from that same binding. The clone copies the source's provenance verbatim, inherits its <code>kukeon.io/config</code> / <code>kukeon.io/blueprint</code> lineage label, and is stamped with a <code>kukeon.io/source-cell=&lt;src&gt;</code> annotation. Additional <code>--param</code> (Blueprint-lineage source) or <code>--env</code> (Config-lineage source) <strong>stack on top</strong> of the source's recorded overrides, last-write-wins; the per-source symmetry below applies to the stacked overrides. A source cell with no provenance (a hand-built cell never materialised from a binding) cannot be cloned.</li>
 </ul>
-<p><strong>Cell name (unified <code>&lt;prefix&gt;-&lt;6hex&gt;</code> rule).</strong> <code>NAME</code> is optional. When omitted, the cell name is generated: <code>&lt;prefix&gt;-&lt;6hex&gt;</code> for <code>--from-blueprint</code>/<code>--from-config</code> (prefix = the blueprint's <code>spec.prefix</code>, defaulting to its <code>metadata.name</code>), and <code>&lt;source-name&gt;-&lt;6hex&gt;</code> for <code>--clone</code>. An explicit <code>NAME</code> is used verbatim. The Config / Blueprint name is <strong>not</strong> the cell name — it survives only as the <code>kukeon.io/{config,blueprint}</code> lineage label (epic:cell-identity).</p>
+<p><strong>Cell name (unified <code>&lt;prefix&gt;-&lt;6hex&gt;</code> rule).</strong> <code>NAME</code> is optional. When omitted, the cell name is generated: <code>&lt;prefix&gt;-&lt;6hex&gt;</code> for <code>--from-blueprint</code>/<code>--from-config</code> (prefix = the blueprint's <code>spec.prefix</code>, defaulting to its <code>metadata.name</code>), <code>&lt;source-name&gt;-&lt;6hex&gt;</code> for <code>--clone</code>, and <code>&lt;image-short-name&gt;-&lt;6hex&gt;</code> for <code>--image</code> (e.g. <code>docker.io/library/alpine:3</code> → <code>alpine-&lt;6hex&gt;</code>). An explicit <code>NAME</code> is used verbatim. The Config / Blueprint name is <strong>not</strong> the cell name — it survives only as the <code>kukeon.io/{config,blueprint}</code> lineage label (epic:cell-identity).</p>
 <p><strong><code>--param</code> / <code>--env</code> symmetry.</strong> Blueprints take render-time <code>--param</code>; Configs take persisted per-cell <code>--env</code>. <code>--param</code>/<code>--param-file</code> are valid with <code>--from-blueprint</code> and rejected with <code>--from-config</code> (a Config carries its own <code>spec.values</code> — edit the Config instead); symmetrically, <code>--env KEY=VALUE</code> is valid with <code>--from-config</code> (a per-cell override layered on the Config's resolved values, baked into the CellDoc and recorded in <code>Spec.Provenance.envOverrides</code>) and rejected with <code>--from-blueprint</code>. On <code>--clone</code>, the source's lineage decides which applies: <code>--param</code> on a Blueprint-lineage source, <code>--env</code> on a Config-lineage source. The same <code>cell.ValidateOverrideSymmetry</code> gate enforces this on <code>kuke run</code> and <code>kuke create cell</code> alike.</p>
 <table>
 <thead>
@@ -3542,14 +3544,24 @@
 <td>Stack that owns the cell</td>
 </tr>
 <tr>
+<td><code>--image</code></td>
+<td><code>""</code></td>
+<td>Image ref to synthesize a single attachable container from. A fourth source; mutually exclusive with <code>--from-blueprint</code>/<code>--from-config</code>/<code>--clone</code>. Rejects <code>--param</code>/<code>--param-file</code>/<code>--env</code></td>
+</tr>
+<tr>
+<td><code>--command</code></td>
+<td><code>""</code></td>
+<td>With <code>--image</code>: override the synthesized container's entrypoint (default <code>/bin/sh</code>). Only valid with <code>--image</code></td>
+</tr>
+<tr>
 <td><code>--from-blueprint</code></td>
 <td><code>""</code></td>
-<td>Daemon-stored CellBlueprint name. Exactly one of <code>--from-blueprint</code>/<code>--from-config</code>/<code>--clone</code> is required; the three are mutually exclusive</td>
+<td>Daemon-stored CellBlueprint name. Exactly one of <code>--image</code>/<code>--from-blueprint</code>/<code>--from-config</code>/<code>--clone</code> is required; the four are mutually exclusive</td>
 </tr>
 <tr>
 <td><code>--from-config</code></td>
 <td><code>""</code></td>
-<td>Daemon-stored CellConfig name. Exactly one of <code>--from-blueprint</code>/<code>--from-config</code>/<code>--clone</code> is required; the three are mutually exclusive</td>
+<td>Daemon-stored CellConfig name. Exactly one of <code>--image</code>/<code>--from-blueprint</code>/<code>--from-config</code>/<code>--clone</code> is required; the four are mutually exclusive</td>
 </tr>
 <tr>
 <td><code>--clone</code></td>
@@ -3573,23 +3585,27 @@
 </tr>
 </tbody>
 </table>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Materialise from Blueprint, stopped (generated name web-template-&lt;6hex&gt;)</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>cell<span class="w"> </span>--from-blueprint<span class="w"> </span>web-template<span class="w"> </span>--param<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>nginx:1.27<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Synthesize a single-container cell from an image, stopped (the quick-start path)</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>cell<span class="w"> </span>my-first<span class="w"> </span>--image<span class="w"> </span>docker.io/library/alpine:3
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>start<span class="w"> </span>my-first
 <a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="c1"># Same, pin the cell name &quot;web&quot;</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>cell<span class="w"> </span>web<span class="w"> </span>--from-blueprint<span class="w"> </span>web-template<span class="w"> </span>--param<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>nginx:1.27<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="c1"># Materialise from Blueprint, stopped (generated name web-template-&lt;6hex&gt;)</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>cell<span class="w"> </span>--from-blueprint<span class="w"> </span>web-template<span class="w"> </span>--param<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>nginx:1.27<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">    </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>start<span class="w"> </span>web<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="c1"># Materialise from Config, stopped, with a persisted per-cell env override</span>
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>cell<span class="w"> </span>prod<span class="w"> </span>--from-config<span class="w"> </span>prod-config<span class="w"> </span>--env<span class="w"> </span><span class="nv">LOG_LEVEL</span><span class="o">=</span>debug<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="w">    </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
-<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>start<span class="w"> </span>prod<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
-<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>
-<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="c1"># Fork an existing cell&#39;s recipe into a sibling (generated name prod-&lt;6hex&gt;)</span>
-<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>cell<span class="w"> </span>--clone<span class="w"> </span>prod<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a><span class="w">    </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="c1"># Same, pin the cell name &quot;web&quot;</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>cell<span class="w"> </span>web<span class="w"> </span>--from-blueprint<span class="w"> </span>web-template<span class="w"> </span>--param<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>nginx:1.27<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="w">    </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>start<span class="w"> </span>web<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="c1"># Materialise from Config, stopped, with a persisted per-cell env override</span>
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>cell<span class="w"> </span>prod<span class="w"> </span>--from-config<span class="w"> </span>prod-config<span class="w"> </span>--env<span class="w"> </span><span class="nv">LOG_LEVEL</span><span class="o">=</span>debug<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="w">    </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
+<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>start<span class="w"> </span>prod<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
+<a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a>
+<a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a><span class="c1"># Fork an existing cell&#39;s recipe into a sibling (generated name prod-&lt;6hex&gt;)</span>
+<a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>cell<span class="w"> </span>--clone<span class="w"> </span>prod<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a><span class="w">    </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
 </code></pre></div>
 <h2 id="kuke-create-blueprint">kuke create blueprint<a class="headerlink" href="#kuke-create-blueprint" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>kuke create blueprint [NAME] [--realm &lt;r&gt;] [--space &lt;s&gt;] [--stack &lt;t&gt;]
@@ -3822,7 +3838,7 @@ is required.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 7, 2026 17:27:42 UTC">June 7, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 14, 2026 21:26:46 UTC">June 14, 2026</span>
   </span>
 
     
