@@ -3337,17 +3337,18 @@
 
 <h1 id="kuke-run">kuke run<a class="headerlink" href="#kuke-run" title="Permanent link">&para;</a></h1>
 <p><code>kuke run</code> is the fused docker-model verb: <code>docker create</code> → <code>kuke create cell</code>, <code>docker start</code> → <code>kuke start</code>, <code>docker run</code> → <code>kuke run</code> (create? + start + attach).</p>
-<p>Five source paths:</p>
+<p>Six source paths:</p>
 <ul>
 <li><code>kuke run &lt;cell&gt;</code> — start + attach an <strong>existing</strong> cell (≈ <code>kuke start &lt;cell&gt;</code> + <code>kuke attach &lt;cell&gt;</code>). The cell must already exist; a missing name errors with a pointer at the create paths.</li>
 <li><code>kuke run -f &lt;file&gt;</code> — a single-cell YAML doc (or <code>-</code> for stdin). Create-or-attach by <code>metadata.name</code>.</li>
+<li><code>kuke run --image &lt;ref&gt; [--command &lt;cmd&gt;]</code> — synthesize a single-container cell from a bare image ref and create + start + attach it (the quick-start path). The container is <code>attachable: true</code> with entrypoint <code>/bin/sh</code> (overridable via <code>--command</code>); the runner synthesizes the root container at create time.</li>
 <li><code>kuke run --from-blueprint &lt;bp&gt; [--param K=V]...</code> — create + start + attach a fresh cell from a daemon-stored CellBlueprint.</li>
 <li><code>kuke run --from-config &lt;cfg&gt; [--env K=V]...</code> — create + start + attach a fresh cell from a daemon-stored CellConfig.</li>
 <li><code>kuke run --clone &lt;cell&gt;</code> — fork an existing cell's recipe (its materialised <code>CellDoc</code>) into a fresh cell. Lineage and provenance binding are preserved; the source cell's runtime overlay is <strong>not</strong> copied.</li>
 </ul>
 <p>The fused <code>--from-*</code>/<code>--clone</code> form delegates its create half to the same <code>cell.Materialize</code> function <code>kuke create cell</code> runs (shared FlagSet, no drift): the produced <code>CellDoc</code> is identical to <code>kuke create cell --from-...</code> followed by <code>kuke start</code>. The cell name is <code>--name X</code> when given, else a generated <code>&lt;prefix&gt;-&lt;6hex&gt;</code> probed free against the daemon at the cell's scope.</p>
 <p>Drift between the live cell's spec and the materialisation of the requested source — for the <code>-f</code> path only — defaults to <strong>warn-and-attach</strong> (post-#986): a one-line <code>notice:</code> cites the diverging fields and the <code>kuke apply -f</code> pointer, then the operator is dropped into the live cell. Pass <code>--require-synced</code> for the opt-in strict mode that CI/scripted callers want — drift then refuses to attach with the same error shape the pre-#986 default emitted. The fused <code>--from-*</code>/<code>--clone</code> paths always materialise a fresh cell (refuse on <code>--name</code> collision rather than diverge), and the <code>&lt;cell&gt;</code> positional has no source to compare against, so <code>--require-synced</code> is a <code>-f</code>-only knob.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke run (&lt;cell&gt; | -f &lt;file&gt; | --from-blueprint &lt;bp&gt; | --from-config &lt;cfg&gt; | --clone &lt;cell&gt;) [flags]
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke run (&lt;cell&gt; | -f &lt;file&gt; | --image &lt;ref&gt; | --from-blueprint &lt;bp&gt; | --from-config &lt;cfg&gt; | --clone &lt;cell&gt;) [flags]
 </code></pre></div>
 <p>To re-attach to an already-running cell without bouncing it, use <a href="../kuke-attach/"><code>kuke attach &lt;cell&gt;</code></a>.</p>
 <h2 id="flags">Flags<a class="headerlink" href="#flags" title="Permanent link">&para;</a></h2>
@@ -3368,7 +3369,17 @@
 <tr>
 <td><code>--file</code>, <code>-f</code></td>
 <td><em>(one source)</em></td>
-<td>YAML to read (path or <code>-</code> for stdin); mutually exclusive with the <code>&lt;cell&gt;</code> positional and <code>--from-blueprint</code>/<code>--from-config</code>/<code>--clone</code></td>
+<td>YAML to read (path or <code>-</code> for stdin); mutually exclusive with the <code>&lt;cell&gt;</code> positional and <code>--image</code>/<code>--from-blueprint</code>/<code>--from-config</code>/<code>--clone</code></td>
+</tr>
+<tr>
+<td><code>--image</code></td>
+<td><em>(one source)</em></td>
+<td>Image ref to synthesize a single-container cell from (the quick-start path): create + start + attach a one-container cell running <code>&lt;ref&gt;</code> (<code>attachable: true</code>, entrypoint overridable via <code>--command</code>). Names the cell via <code>--name</code>, else a generated <code>&lt;prefix&gt;-&lt;6hex&gt;</code> derived from the image. Mutually exclusive with the <code>&lt;cell&gt;</code> positional and <code>-f</code>/<code>--from-blueprint</code>/<code>--from-config</code>/<code>--clone</code></td>
+</tr>
+<tr>
+<td><code>--command</code></td>
+<td>(<code>/bin/sh</code>)</td>
+<td>With <code>--image</code>: override the synthesized container's entrypoint. Only valid with <code>--image</code></td>
 </tr>
 <tr>
 <td><code>--from-blueprint</code></td>
@@ -3388,7 +3399,7 @@
 <tr>
 <td><code>--name</code></td>
 <td><em>(generated <code>&lt;prefix&gt;-&lt;6hex&gt;</code>)</em></td>
-<td>Name the cell materialised by <code>--from-blueprint</code>/<code>--from-config</code>/<code>--clone</code>. Rejected with the <code>&lt;cell&gt;</code> positional (the positional IS the cell name) and with <code>-f</code> (where <code>metadata.name</code> is authoritative). A <code>--name X</code> collision against a live cell exits non-zero with a <code>kuke run X</code> pointer for the start+attach-existing path</td>
+<td>Name the cell created by <code>--image</code>/<code>--from-blueprint</code>/<code>--from-config</code>/<code>--clone</code>. Rejected with the <code>&lt;cell&gt;</code> positional (the positional IS the cell name) and with <code>-f</code> (where <code>metadata.name</code> is authoritative). A <code>--name X</code> collision against a live cell exits non-zero with a <code>kuke run X</code> pointer for the start+attach-existing path</td>
 </tr>
 <tr>
 <td><code>--param</code></td>
@@ -3540,7 +3551,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 11, 2026 05:39:09 UTC">June 11, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 14, 2026 19:42:23 UTC">June 14, 2026</span>
   </span>
 
     
