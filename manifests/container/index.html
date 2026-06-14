@@ -2581,6 +2581,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="VolumeMount">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#auto-provisioning-ensure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto-provisioning (ensure)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#per-cell-volumes-cell_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-cell volumes (${CELL_NAME})
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -3381,6 +3409,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="VolumeMount">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#auto-provisioning-ensure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto-provisioning (ensure)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#per-cell-volumes-cell_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-cell volumes (${CELL_NAME})
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -3836,6 +3892,12 @@
 <td>no (<code>tmpfs</code> only)</td>
 <td>Tmpfs root-directory mode (e.g. <code>0755</code>). When non-zero, the standard tmpfs <code>mode=</code> option is set. Ignored for <code>bind</code>.</td>
 </tr>
+<tr>
+<td><code>ensure</code></td>
+<td>bool</td>
+<td>no (<code>volume</code> only)</td>
+<td>When <code>true</code> on a <code>kind: volume</code> mount, the daemon auto-provisions the referenced Volume at cell create/start if it does not already exist — Docker's "create on first reference" semantics, the opt-in counterpart to the default "missing volume is a hard error". Idempotent: an already-bound cell re-binds its existing Volume rather than minting a fresh one, so recreate and reconcile preserve the Volume's contents. Ignored for <code>bind</code>/<code>tmpfs</code>. Set automatically on any mount whose name embeds the <code>${CELL_NAME}</code> template (see below).</td>
+</tr>
 </tbody>
 </table>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">volumes</span><span class="p">:</span>
@@ -3854,6 +3916,13 @@
 <a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">    </span><span class="nt">volumeRef</span><span class="p">:</span>
 <a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">assets</span>
 <a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="w">      </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuke-system</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">volume</span><span class="w"> </span><span class="c1"># auto-provisioned on first reference</span>
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">scratch</span>
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/scratch</span>
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a><span class="w">    </span><span class="nt">ensure</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">volume</span><span class="w"> </span><span class="c1"># per-cell Volume, minted per stamped cell</span>
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a><span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mem-${CELL_NAME}</span>
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a><span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/var/lib/agent</span>
 </code></pre></div>
 <p>A <code>kind: volume</code> mount references a daemon-managed <code>kind: Volume</code> and bind-mounts its on-disk directory at <code>target</code>. The referenced Volume's directory survives both container recreation and the mounting cell's deletion — the cell references the Volume, it does not own it. Exactly one of <code>source</code> (same-scope name) or <code>volumeRef</code> (cross-scope) must be set.</p>
 <p><code>volumeRef</code> carries the referenced Volume's <code>name</code> plus its scope coordinates, following the same contract as <code>kind: Secret</code>'s <code>secretRef</code> minus the <code>cell</code> coordinate (a Volume is never cell-scoped): <code>realm</code> is always required, and a deeper coordinate (<code>space</code> → <code>stack</code>) may only be set when every shallower one is.</p>
@@ -3893,6 +3962,11 @@
 </tr>
 </tbody>
 </table>
+<h4 id="auto-provisioning-ensure">Auto-provisioning (<code>ensure</code>)<a class="headerlink" href="#auto-provisioning-ensure" title="Permanent link">&para;</a></h4>
+<p>By default a <code>kind: volume</code> mount whose Volume does not exist fails the cell at create/start — the Volume must be created first (<code>kuke create volume …</code>). Set <code>ensure: true</code> to opt into Docker-style "create on first reference": the daemon provisions the referenced Volume at the mount's scope (the cell's realm/space/stack for a bare <code>source</code>, or <code>volumeRef</code>'s coordinates for a cross-scope reference) before the container starts. Auto-create is idempotent — an already-bound cell re-binds its existing Volume rather than minting a fresh one, so the Volume's contents survive container recreation and cell reconcile.</p>
+<h4 id="per-cell-volumes-cell_name">Per-cell volumes (<code>${CELL_NAME}</code>)<a class="headerlink" href="#per-cell-volumes-cell_name" title="Permanent link">&para;</a></h4>
+<p>A <code>kind: volume</code> mount may embed the reserved <code>${CELL_NAME}</code> template variable in its <code>source</code> (or <code>volumeRef.name</code>). When the cell is materialized — including each cell stamped from a 1:N binding — the token expands to the concrete cell name, so <code>source: mem-${CELL_NAME}</code> yields a distinct Volume per cell (<code>mem-&lt;cellA&gt;</code>, <code>mem-&lt;cellB&gt;</code>, …); isolation comes from the name, not the scope. Any mount whose template expands is automatically marked <code>ensure: true</code>, since a per-cell Volume cannot be pre-created for a not-yet-named cell. Re-materializing a cell with the same identity re-expands to the same Volume name, so recreate re-binds the existing Volume rather than minting a new one.</p>
+<p><code>${CELL_NAME}</code> is resolved later than the scalar <code>${KEY}</code> blueprint parameters (it needs the generated cell name, which a 1:N binding does not supply as a parameter), so <code>CELL_NAME</code> is reserved — do not declare a blueprint parameter by that name.</p>
 <h3 id="devices">devices<a class="headerlink" href="#devices" title="Permanent link">&para;</a></h3>
 <p><code>spec.devices</code> grants the container access to individual host device nodes — the least-privilege alternative to <code>privileged: true</code>, which exposes <strong>every</strong> host device. Each entry materialises as an OCI <code>Linux.Devices</code> entry (the node, visible inside the container) plus a matching <code>Linux.Resources.Devices</code> allow rule (so <code>open()</code> is not denied by the device cgroup) — the same pair Docker's <code>--device</code> emits.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">containers</span><span class="p">:</span>
@@ -4376,7 +4450,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 14, 2026 12:19:36 UTC">June 14, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 14, 2026 12:46:24 UTC">June 14, 2026</span>
   </span>
 
     
