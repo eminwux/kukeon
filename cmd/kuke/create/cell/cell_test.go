@@ -259,10 +259,10 @@ func TestNewCellCmdRunE_RequiresSourceFlag(t *testing.T) {
 
 			err := cmd.Execute()
 			if err == nil {
-				t.Fatal("expected error when no source flag (--from-blueprint/--from-config/--clone) is set")
+				t.Fatal("expected error when no source flag (--image/--from-blueprint/--from-config/--clone) is set")
 			}
-			if !strings.Contains(err.Error(), "requires --from-blueprint, --from-config, or --clone") {
-				t.Errorf("err=%v want 'requires --from-blueprint, --from-config, or --clone'", err)
+			if !strings.Contains(err.Error(), "requires --image, --from-blueprint, --from-config, or --clone") {
+				t.Errorf("err=%v want 'requires --image, --from-blueprint, --from-config, or --clone'", err)
 			}
 			if !strings.Contains(err.Error(), "kuke apply -f") {
 				t.Errorf("err=%v should point at `kuke apply -f <file>`", err)
@@ -1113,6 +1113,186 @@ func TestCreateCell_EnvMalformed_Errors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--env requires KEY=VALUE") {
 		t.Errorf("err=%v want '--env requires KEY=VALUE'", err)
+	}
+}
+
+// TestCreateCell_FromImage_HappyPath exercises the imperative --image source:
+// MaterializeCell (not CreateCell) is called with a single attachable container
+// synthesized from the ref, the explicit positional name is pinned, and the
+// printed result reports the cell left stopped ("containers: not started").
+func TestCreateCell_FromImage_HappyPath(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	var materializeCalled bool
+	var materializeDoc v1beta1.CellDoc
+	fc := &fakeClient{
+		createCellFn: func(v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			t.Fatal("CreateCell must not be called on the --image path (create persists stopped)")
+			return kukeonv1.CreateCellResult{}, nil
+		},
+		materializeCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			materializeCalled = true
+			materializeDoc = doc
+			return successResultFromDoc(doc), nil
+		},
+	}
+
+	cmd, out := newTestExecCmd(t, fc)
+	setFlag(t, cmd, "realm", "realm-a")
+	setFlag(t, cmd, "space", "space-a")
+	setFlag(t, cmd, "stack", "stack-a")
+	setFlag(t, cmd, "image", "docker.io/library/alpine:3")
+	cmd.SetArgs([]string{"my-first"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !materializeCalled {
+		t.Fatal("MaterializeCell was not called")
+	}
+	if materializeDoc.Metadata.Name != "my-first" || materializeDoc.Spec.ID != "my-first" {
+		t.Errorf("name=%q id=%q want my-first (pinned to positional arg)",
+			materializeDoc.Metadata.Name, materializeDoc.Spec.ID)
+	}
+	if materializeDoc.Spec.RealmID != "realm-a" || materializeDoc.Spec.SpaceID != "space-a" ||
+		materializeDoc.Spec.StackID != "stack-a" {
+		t.Errorf("scope=%q/%q/%q want realm-a/space-a/stack-a",
+			materializeDoc.Spec.RealmID, materializeDoc.Spec.SpaceID, materializeDoc.Spec.StackID)
+	}
+	if len(materializeDoc.Spec.Containers) != 1 {
+		t.Fatalf("containers=%d want 1 (single synthesized user container)", len(materializeDoc.Spec.Containers))
+	}
+	c := materializeDoc.Spec.Containers[0]
+	if c.ID != cell.ImageContainerID || c.Image != "docker.io/library/alpine:3" ||
+		c.Command != cell.ImageDefaultCommand || !c.Attachable {
+		t.Errorf("synthesized container=%+v want id=%q image=alpine:3 command=%q attachable=true",
+			c, cell.ImageContainerID, cell.ImageDefaultCommand)
+	}
+	if !strings.Contains(out.String(), "containers: not started") {
+		t.Errorf("expected 'containers: not started' (materialise-but-don't-start); got:\n%s", out.String())
+	}
+}
+
+// TestCreateCell_FromImage_GeneratedName confirms an omitted name resolves to a
+// generated <prefix>-<6hex> derived from the image ref (no positional, no viper
+// name) and that --command overrides the synthesized entrypoint.
+func TestCreateCell_FromImage_GeneratedName(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	var materializeDoc v1beta1.CellDoc
+	fc := &fakeClient{
+		materializeCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			materializeDoc = doc
+			return successResultFromDoc(doc), nil
+		},
+	}
+
+	cmd, _ := newTestExecCmd(t, fc)
+	setFlag(t, cmd, "image", "nginx:1.27")
+	setFlag(t, cmd, "command", "/usr/sbin/nginx")
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := materializeDoc.Metadata.Name; !strings.HasPrefix(got, "nginx-") || len(got) != len("nginx-")+6 {
+		t.Errorf("generated name=%q want nginx-<6hex>", got)
+	}
+	if got := materializeDoc.Spec.Containers[0].Command; got != "/usr/sbin/nginx" {
+		t.Errorf("command=%q want /usr/sbin/nginx (override)", got)
+	}
+}
+
+// TestCreateCell_FromImage_SourceMutex confirms --image is rejected when
+// combined with each from-* source (the cobra mutex registered in NewCellCmd).
+func TestCreateCell_FromImage_SourceMutex(t *testing.T) {
+	for _, other := range []struct{ flag, value string }{
+		{"from-blueprint", "web"},
+		{"from-config", "prod"},
+		{"clone", "src"},
+	} {
+		t.Run(other.flag, func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+
+			fc := &fakeClient{
+				materializeCellFn: func(v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+					t.Fatal("MaterializeCell must not be called when --image conflicts with a from-* source")
+					return kukeonv1.CreateCellResult{}, nil
+				},
+			}
+			cmd, _ := newTestExecCmd(t, fc)
+			setFlag(t, cmd, "image", "alpine")
+			setFlag(t, cmd, other.flag, other.value)
+			cmd.SetArgs([]string{"x"})
+
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatalf("expected error for --image + --%s combination", other.flag)
+			}
+			// Anchor on the stable substrings rather than cobra's verbatim mutex
+			// wording (parity with TestCreateCell_MutualExclusion_*).
+			if !strings.Contains(err.Error(), "image") || !strings.Contains(err.Error(), other.flag) {
+				t.Errorf("err=%v should name both --image and --%s", err, other.flag)
+			}
+		})
+	}
+}
+
+// TestCreateCell_CommandRejectedWithoutImage confirms --command is rejected
+// when --image is absent (it only shapes the synthesized container).
+func TestCreateCell_CommandRejectedWithoutImage(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			t.Fatal("GetBlueprint must not be called when --command without --image is rejected")
+			return kukeonv1.GetBlueprintResult{}, nil
+		},
+	}
+	cmd, _ := newTestExecCmd(t, fc)
+	setFlag(t, cmd, "from-blueprint", "web")
+	setFlag(t, cmd, "command", "/bin/sh")
+	cmd.SetArgs([]string{"x"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for --command without --image")
+	}
+	if !strings.Contains(err.Error(), "--command is only valid with --image") {
+		t.Errorf("err=%v want '--command is only valid with --image'", err)
+	}
+}
+
+// TestCreateCell_FromImage_RejectsBindingKnobs confirms --param/--param-file/
+// --env are rejected with --image (a synthesized single-image cell resolves no
+// binding for them to act on).
+func TestCreateCell_FromImage_RejectsBindingKnobs(t *testing.T) {
+	for _, tc := range []struct{ flag, value, want string }{
+		{"param", "K=V", "--param is not valid with --image"},
+		{"param-file", "/tmp/params", "--param-file is not valid with --image"},
+		{"env", "K=V", "--env is not valid with --image"},
+	} {
+		t.Run(tc.flag, func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+
+			fc := &fakeClient{
+				materializeCellFn: func(v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+					t.Fatalf("MaterializeCell must not be called when --%s + --image is rejected", tc.flag)
+					return kukeonv1.CreateCellResult{}, nil
+				},
+			}
+			cmd, _ := newTestExecCmd(t, fc)
+			setFlag(t, cmd, "image", "alpine")
+			setFlag(t, cmd, tc.flag, tc.value)
+			cmd.SetArgs([]string{"x"})
+
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatalf("expected error for --%s + --image", tc.flag)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err=%v want %q", err, tc.want)
+			}
+		})
 	}
 }
 

@@ -32,16 +32,27 @@ import (
 // "materialise-but-don't-start" semantics.
 func TestMaterializeCell_NewCell_SkipsStart(t *testing.T) {
 	var startCalled bool
+	var persisted intmodel.Cell
+	var persistCalled bool
 	mockRunner := &fakeRunner{
 		GetCellFn: func(_ intmodel.Cell) (intmodel.Cell, error) {
 			return intmodel.Cell{}, errdefs.ErrCellNotFound
 		},
 		CreateCellFn: func(_ intmodel.Cell) (intmodel.Cell, error) {
+			// buildTestCell carries Status.State == Ready, mirroring what the
+			// real runner.provisionNewCell -> markCellReady persists for a
+			// freshly-created cell. MaterializeCell must correct this to Stopped
+			// (issue #1306) since no start step follows.
 			return buildTestCell("mz-cell", "test-realm", "test-space", "test-stack"), nil
 		},
 		StartCellFn: func(cell intmodel.Cell) (intmodel.Cell, error) {
 			startCalled = true
 			return cell, nil
+		},
+		UpdateCellMetadataFn: func(cell intmodel.Cell) error {
+			persistCalled = true
+			persisted = cell
+			return nil
 		},
 	}
 
@@ -67,6 +78,19 @@ func TestMaterializeCell_NewCell_SkipsStart(t *testing.T) {
 	}
 	if !result.MetadataExistsPost {
 		t.Error("expected MetadataExistsPost to be true")
+	}
+	// #1306: a never-started materialised cell must persist as Stopped, not the
+	// Ready that provisionNewCell stamped — otherwise `kuke run <cell>` reads
+	// Ready, finds no live root task, and refuses with a spurious divergence
+	// error. The corrected state must be both persisted and reflected in the result.
+	if !persistCalled {
+		t.Fatal("expected MaterializeCell to persist the corrected (Stopped) state via UpdateCellMetadata")
+	}
+	if persisted.Status.State != intmodel.CellStateStopped {
+		t.Errorf("persisted state = %v, want Stopped", persisted.Status.State)
+	}
+	if result.Cell.Status.State != intmodel.CellStateStopped {
+		t.Errorf("result cell state = %v, want Stopped", result.Cell.Status.State)
 	}
 }
 
@@ -111,5 +135,14 @@ func TestMaterializeCell_ExistingCell_SkipsStart(t *testing.T) {
 	}
 	if result.Started {
 		t.Error("expected Started to be false (start step was skipped)")
+	}
+	// #1306: the Stopped correction is scoped to freshly-created cells. An
+	// existing cell goes through EnsureCell (which never re-marks Ready), so its
+	// live state must be left untouched — not clobbered to Stopped. existingCell
+	// is Ready (buildTestCell), and no UpdateCellMetadataFn is wired, so a
+	// stray controller-side persist would fail the fakeRunner's unexpected-call
+	// guard.
+	if result.Cell.Status.State != intmodel.CellStateReady {
+		t.Errorf("existing-cell state = %v, want Ready (left untouched)", result.Cell.Status.State)
 	}
 }

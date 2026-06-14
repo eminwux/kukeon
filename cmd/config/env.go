@@ -229,6 +229,17 @@ var (
 		"KUKE_CREATE_CELL_IGNORE_DISK_PRESSURE", "kuke/create/cell/ignore-disk-pressure", "false",
 	)
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	// KUKE_CREATE_CELL_IMAGE is the env-var twin of `kuke create cell --image
+	// <ref>` (epic:first-run #1245): the imperative single-image source that
+	// synthesizes a one-container cell from a bare image ref and persists it
+	// stopped (the create-side mirror of `kuke run --image`).
+	KUKE_CREATE_CELL_IMAGE = DefineKV("KUKE_CREATE_CELL_IMAGE", "kuke/create/cell/image")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	// KUKE_CREATE_CELL_COMMAND is the env-var twin of `kuke create cell
+	// --command`: overrides the entrypoint of the container synthesized by
+	// --image (default cell.ImageDefaultCommand).
+	KUKE_CREATE_CELL_COMMAND = DefineKV("KUKE_CREATE_CELL_COMMAND", "kuke/create/cell/command")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_CREATE_CONFIG_NAME = DefineKV("KUKE_CREATE_CONFIG_NAME", "kuke/create/config/name")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_CREATE_CONFIG_REALM = DefineKV("KUKE_CREATE_CONFIG_REALM", "kuke/create/config/realm", "default")

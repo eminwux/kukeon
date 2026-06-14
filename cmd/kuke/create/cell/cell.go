@@ -41,10 +41,17 @@ func NewCellCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "cell [name]",
 		Aliases: []string{"ce"},
-		Short:   "Create a cell within a stack from a Blueprint or Config",
-		Long: "Create a cell within a stack. Exactly one of --from-blueprint or " +
-			"--from-config is required; use `kuke apply -f <file>` to materialise " +
-			"a cell from a full manifest. Two modes:\n\n" +
+		Short:   "Create a cell within a stack from an image, Blueprint, or Config",
+		Long: "Create a cell within a stack. Exactly one of --image, --from-blueprint, " +
+			"--from-config, or --clone is required; use `kuke apply -f <file>` to " +
+			"materialise a cell from a full manifest. Like every `create` verb the cell " +
+			"is persisted **stopped** — run `kuke start <name>` to start it. Modes:\n\n" +
+			"  - `kuke create cell [name] --image <ref> [--command <cmd>]` — synthesize a " +
+			"single attachable container from a bare image ref (the quick-start source, " +
+			"the create-side mirror of `kuke run --image`). The cell name is the positional " +
+			"when given, else a generated `<prefix>-<6hex>` derived from the image. " +
+			"--command overrides the synthesized entrypoint (default /bin/sh). Mutually " +
+			"exclusive with --from-blueprint/--from-config/--clone.\n" +
 			"  - `kuke create cell <name> --from-blueprint <bp> [--param k=v] [--param-file path]` — " +
 			"resolves the daemon-stored CellBlueprint, applies scalar params, " +
 			"materialises the full Cell record (containers and all), and " +
@@ -108,6 +115,28 @@ func NewCellCmd() *cobra.Command {
 		config.KUKE_CREATE_CELL_IGNORE_DISK_PRESSURE.ViperKey,
 		cmd.Flags().Lookup("ignore-disk-pressure"),
 	)
+
+	// --image is itself a cell source (the imperative single-image quick-start,
+	// epic:first-run #1245). It is registered directly on `kuke create cell`
+	// rather than in RegisterSourceFlags — `kuke run` likewise binds its own
+	// --image/--command copies (no viper-key collision) — and is mutually
+	// exclusive with the from-* sources via the cobra mutex below.
+	cmd.Flags().String("image", "",
+		"Imperative single-image source: synthesize a one-container cell from the given "+
+			"image ref and persist it stopped (the create-side mirror of `kuke run --image`). "+
+			"Names the cell via the positional, else a generated <prefix>-<6hex> derived from "+
+			"the image. Mutually exclusive with --from-blueprint/--from-config/--clone.")
+	_ = viper.BindPFlag(config.KUKE_CREATE_CELL_IMAGE.ViperKey, cmd.Flags().Lookup("image"))
+	cmd.Flags().String("command", "",
+		"With --image: override the synthesized container's entrypoint (default /bin/sh). "+
+			"Only valid with --image.")
+	_ = viper.BindPFlag(config.KUKE_CREATE_CELL_COMMAND.ViperKey, cmd.Flags().Lookup("command"))
+
+	// --image is a source: mutually exclusive with every from-* source (the
+	// trio's own mutex is registered in RegisterSourceFlags).
+	cmd.MarkFlagsMutuallyExclusive("image", "from-blueprint")
+	cmd.MarkFlagsMutuallyExclusive("image", "from-config")
+	cmd.MarkFlagsMutuallyExclusive("image", "clone")
 
 	// Register autocomplete functions for the scope flags. The source flags'
 	// completions are registered by RegisterSourceFlags.
@@ -236,7 +265,7 @@ func parseCreateCellFlags(cmd *cobra.Command, args []string) (SourceFlags, error
 
 	if flags.BlueprintName == "" && flags.ConfigName == "" && flags.CloneSource == "" {
 		return SourceFlags{}, errors.New(
-			"kuke create cell requires --from-blueprint, --from-config, or --clone " +
+			"kuke create cell requires --image, --from-blueprint, --from-config, or --clone " +
 				"(use 'kuke apply -f <file>' for a full manifest)",
 		)
 	}
@@ -353,9 +382,14 @@ type ScopeVars struct {
 }
 
 func runCreateCell(cmd *cobra.Command, args []string) error {
-	flags, err := parseCreateCellFlags(cmd, args)
-	if err != nil {
-		return err
+	image := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_IMAGE.ViperKey))
+	command := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_COMMAND.ViperKey))
+
+	// --command shapes the synthesized container, so it is meaningful only on
+	// the --image path; reject it elsewhere rather than silently dropping it
+	// (parity with `kuke run`'s validateSourceFlagCompat).
+	if command != "" && image == "" {
+		return errors.New("--command is only valid with --image")
 	}
 
 	client, err := resolveClient(cmd)
@@ -363,6 +397,15 @@ func runCreateCell(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer func() { _ = client.Close() }()
+
+	if image != "" {
+		return createFromImage(cmd, client, args, image, command)
+	}
+
+	flags, err := parseCreateCellFlags(cmd, args)
+	if err != nil {
+		return err
+	}
 
 	// The scope-Var bundle `kuke create cell` feeds Materialize (built inline
 	// rather than as a package global per the gochecknoglobals lint).
@@ -375,6 +418,84 @@ func runCreateCell(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	return materialiseAndPersist(cmd, client, cellDoc)
+}
+
+// createFromImage implements the imperative `--image <ref>` source for
+// `kuke create cell` (epic:first-run #1245): synthesize a single-container
+// CellDoc from the ref (SynthesizeFromImage — the shared helper `kuke run
+// --image` reuses, step 1 #1244), resolve scope + name, then persist it
+// **stopped** via materialiseAndPersist. It is the create-side mirror of
+// run.runFromImage, but leaves the cell stopped (MaterializeCell) rather than
+// create+start+attaching (CreateCell) — the `create` verb's
+// materialise-without-start contract (epic:create #814).
+//
+// --image is mutually exclusive with --from-blueprint/--from-config/--clone
+// (cobra mutex in NewCellCmd); the blueprint render-time knobs --param/
+// --param-file and the config per-cell override --env are rejected here (a
+// synthesized single-image cell carries no binding to parameterise or layer
+// env onto — edit a Blueprint/Config for that).
+func createFromImage(
+	cmd *cobra.Command, client kukeonv1.Client, args []string, image, command string,
+) error {
+	if err := rejectBindingKnobsWithImage(cmd); err != nil {
+		return err
+	}
+
+	cellDoc, err := SynthesizeFromImage(image, command)
+	if err != nil {
+		return err
+	}
+
+	// The --image source supports an omitted name (auto-generated
+	// `<prefix>-<6hex>` derived from the image), so it does not require the
+	// positional/viper name the --from-blueprint / --from-config paths demand.
+	flags := SourceFlags{
+		Name:  optionalNameArgOrDefault(args, viper.GetString(config.KUKE_CREATE_CELL_NAME.ViperKey)),
+		Realm: scopeOrDefault(&config.KUKE_CREATE_CELL_REALM),
+		Space: scopeOrDefault(&config.KUKE_CREATE_CELL_SPACE),
+		Stack: scopeOrDefault(&config.KUKE_CREATE_CELL_STACK),
+	}
+	overlayScope(&cellDoc, flags)
+	if err = finalizeCellName(cmd, client, &cellDoc, flags.Name, ImageNamePrefix(image)); err != nil {
+		return err
+	}
+	return materialiseAndPersist(cmd, client, cellDoc)
+}
+
+// rejectBindingKnobsWithImage rejects the binding render-time/override knobs
+// (--param/--param-file/--env) when paired with --image. A synthesized
+// single-image cell resolves no Blueprint/Config, so these flags have nothing
+// to act on; rejecting them is clearer than silently ignoring them (parity
+// with `kuke run`'s --image flag-compat checks).
+func rejectBindingKnobsWithImage(cmd *cobra.Command) error {
+	paramArgs, err := cmd.Flags().GetStringArray("param")
+	if err != nil {
+		return err
+	}
+	if len(paramArgs) > 0 {
+		return errors.New("--param is not valid with --image; parameterise via --from-blueprint instead")
+	}
+	if strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_PARAM_FILE.ViperKey)) != "" {
+		return errors.New("--param-file is not valid with --image; parameterise via --from-blueprint instead")
+	}
+	envArgs, err := cmd.Flags().GetStringArray("env")
+	if err != nil {
+		return err
+	}
+	if len(envArgs) > 0 {
+		return errors.New("--env is not valid with --image; layer env overrides via --from-config instead")
+	}
+	return nil
+}
+
+// scopeOrDefault resolves a realm/space/stack coordinate from the command's
+// viper key, falling back to the Var's env → default chain when unset. Mirrors
+// the per-coordinate resolution parseCreateCellFlags runs for the from-* paths.
+func scopeOrDefault(kv *config.Var) string {
+	if v := strings.TrimSpace(viper.GetString(kv.ViperKey)); v != "" {
+		return v
+	}
+	return strings.TrimSpace(kv.ValueOrDefault())
 }
 
 // Materialize resolves the source binding named by flags (--from-blueprint /

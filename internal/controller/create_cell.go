@@ -268,6 +268,24 @@ func (b *Exec) createCellInternal(cell intmodel.Cell, startAfterCreate bool) (Cr
 		if err != nil {
 			return res, fmt.Errorf("failed to start cell containers: %w", err)
 		}
+	} else if wasCreated {
+		// MaterializeCell on a freshly-provisioned cell. provisionNewCell
+		// unconditionally marks every new cell Ready (markCellReady); the
+		// CreateCell path then corrects that by running StartCell, but the
+		// materialise path has no start step. Left as-is, a never-started cell
+		// persists as Ready with no running task — `kuke run <cell>` reads that
+		// Ready state, finds the root task absent, and refuses with a spurious
+		// "metadata and containerd have diverged" error (issue #1306). Persist
+		// the not-started cell as Stopped (mirroring `kuke stop` / runner.StopCell,
+		// which leaves ReadyObserved latched) so `kuke run <cell>` reaches the
+		// Stopped->start branch and `kuke get cells` reports it Stopped. Only the
+		// freshly-created path is corrected: an existing cell (wasCreated=false)
+		// went through EnsureCell, which never re-marks Ready, so its live state
+		// must be left untouched.
+		resultCell.Status.State = intmodel.CellStateStopped
+		if err = b.runner.UpdateCellMetadata(resultCell); err != nil {
+			return res, fmt.Errorf("%w: %w", errdefs.ErrUpdateCellMetadata, err)
+		}
 	}
 
 	// Build post-container existence map from resultCell directly
