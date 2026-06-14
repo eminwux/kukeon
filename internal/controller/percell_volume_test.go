@@ -20,13 +20,27 @@
 package controller
 
 import (
+	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/controller/runner"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
+
+// newReapplyTestExec builds an *Exec with a discard logger + context for the
+// reapply-helper tests, whose success paths log via b.logger/b.ctx (the
+// ensure-only tests above use a bare &Exec{runner: stub} because they never log).
+func newReapplyTestExec(r runner.Runner) *Exec {
+	return &Exec{
+		ctx:    context.Background(),
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		runner: r,
+	}
+}
 
 // ensureStubRunner satisfies runner.Runner (via the embedded interface) but
 // implements only the scope-lookup + WriteVolume methods ReconcileVolume
@@ -191,5 +205,99 @@ func TestEnsurePerCellVolumes_PropagatesError(t *testing.T) {
 	}
 	if !errors.Is(err, sentinel) {
 		t.Errorf("error = %v, want to wrap the underlying cause", err)
+	}
+}
+
+// reapplyStubRunner records the order of the runner calls the reapply helpers
+// make — WriteVolume (via ReconcileVolume), RecreateCell, StartCell, UpdateCell —
+// so the per-cell-volume tests can assert provisioning precedes the container
+// rebuild. Scope getters return their input (the scope exists); the embedded
+// runner.Runner panics on any other method, asserting nothing else is touched.
+type reapplyStubRunner struct {
+	runner.Runner
+	order *[]string
+	out   intmodel.Cell
+}
+
+func (s *reapplyStubRunner) GetRealm(r intmodel.Realm) (intmodel.Realm, error)  { return r, nil }
+func (s *reapplyStubRunner) GetSpace(sp intmodel.Space) (intmodel.Space, error) { return sp, nil }
+func (s *reapplyStubRunner) GetStack(st intmodel.Stack) (intmodel.Stack, error) { return st, nil }
+
+func (s *reapplyStubRunner) WriteVolume(v intmodel.Volume) (bool, error) {
+	*s.order = append(*s.order, "WriteVolume:"+v.Metadata.Name)
+	return true, nil
+}
+
+func (s *reapplyStubRunner) RecreateCell(_ intmodel.Cell) (intmodel.Cell, error) {
+	*s.order = append(*s.order, "RecreateCell")
+	return s.out, nil
+}
+
+func (s *reapplyStubRunner) StartCell(_ intmodel.Cell) (intmodel.Cell, error) {
+	*s.order = append(*s.order, "StartCell")
+	return s.out, nil
+}
+
+func (s *reapplyStubRunner) UpdateCell(_ intmodel.Cell) (intmodel.Cell, error) {
+	*s.order = append(*s.order, "UpdateCell")
+	return s.out, nil
+}
+
+// desiredWithEnsureMount builds a re-materialised `desired` cell carrying a
+// single bare-source ensure mount — the shape ExpandPerCellVolumes stamps when a
+// Config edit adds a ${CELL_NAME} mount.
+func desiredWithEnsureMount() intmodel.Cell {
+	return cellWith([3]string{"default", "agents", "team"}, intmodel.VolumeMount{
+		Kind:   intmodel.VolumeKindVolume,
+		Source: "mem-agent-a1b2c3",
+		Target: "/memory",
+		Ensure: true,
+	})
+}
+
+// TestReapplyBreaking_ProvisionsDesiredBeforeRecreate is the #1294 reconcile-gap
+// regression: an OutOfSync breaking reapply re-materialises a `desired` spec that
+// may add a new per-cell ${CELL_NAME} mount the StartCell-level ensure pass (run
+// against the on-disk spec) never saw. reapplyBreaking must provision `desired`'s
+// ensure volumes *before* RecreateCell rebuilds containers against it, or step
+// 4's resolver hard-errors on the unprovisioned Volume and OutOfSync never
+// converges.
+func TestReapplyBreaking_ProvisionsDesiredBeforeRecreate(t *testing.T) {
+	var order []string
+	out := desiredWithEnsureMount()
+	out.Status.State = intmodel.CellStateReady
+	b := newReapplyTestExec(&reapplyStubRunner{order: &order, out: out})
+
+	cell := desiredWithEnsureMount()
+	_, started, ok := b.reapplyBreaking(cell, desiredWithEnsureMount(), "cfg")
+	if !ok || !started {
+		t.Fatalf("reapplyBreaking() = (_, started=%v, ok=%v), want both true", started, ok)
+	}
+	want := []string{"WriteVolume:mem-agent-a1b2c3", "RecreateCell"}
+	if len(order) != 2 || order[0] != want[0] || order[1] != want[1] {
+		t.Errorf("call order = %v, want %v (provision before recreate)", order, want)
+	}
+}
+
+// TestReapplyCompatibleInPlace_ProvisionsDesiredBeforeUpdate is the in-place
+// counterpart of the #1294 gap: a compatible/additive reapply that adds a new
+// per-cell mount must provision `desired`'s ensure volumes before UpdateCell
+// stop-removes-recreates the affected child against it. StartCell (on the on-disk
+// spec) runs first and needs no new Volume; the provision lands between StartCell
+// and UpdateCell.
+func TestReapplyCompatibleInPlace_ProvisionsDesiredBeforeUpdate(t *testing.T) {
+	var order []string
+	out := desiredWithEnsureMount()
+	out.Status.State = intmodel.CellStateReady
+	b := newReapplyTestExec(&reapplyStubRunner{order: &order, out: out})
+
+	cell := desiredWithEnsureMount()
+	_, started, ok := b.reapplyCompatibleInPlace(cell, desiredWithEnsureMount(), "cfg")
+	if !ok || !started {
+		t.Fatalf("reapplyCompatibleInPlace() = (_, started=%v, ok=%v), want both true", started, ok)
+	}
+	want := []string{"StartCell", "WriteVolume:mem-agent-a1b2c3", "UpdateCell"}
+	if len(order) != 3 || order[0] != want[0] || order[1] != want[1] || order[2] != want[2] {
+		t.Errorf("call order = %v, want %v (provision between start and update)", order, want)
 	}
 }
