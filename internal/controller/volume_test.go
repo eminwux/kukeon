@@ -236,6 +236,18 @@ func TestListVolumes_FilterGuard(t *testing.T) {
 	}
 }
 
+// TestListVolumes_UnsafeFilterSegment confirms an unsafe filter segment (a
+// path-traversal "..") is rejected before the runner is touched, closing the
+// info-disclosure surface where childScopeNames would filepath.Join the raw
+// segment onto a parent scope dir (issue #1293).
+func TestListVolumes_UnsafeFilterSegment(t *testing.T) {
+	ctrl := setupTestController(t, &fakeRunner{})
+	_, err := ctrl.ListVolumes("default", "..", "")
+	if !errors.Is(err, errdefs.ErrVolumeCoordUnsafe) {
+		t.Errorf("ListVolumes(unsafe space) = %v, want ErrVolumeCoordUnsafe", err)
+	}
+}
+
 // TestListVolumes_PassesThrough confirms a valid filter reaches the runner and
 // returns its result.
 func TestListVolumes_PassesThrough(t *testing.T) {
