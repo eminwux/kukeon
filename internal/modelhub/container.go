@@ -86,13 +86,16 @@ type ContainerSpec struct {
 	Git           *ContainerGit
 	CNIConfigPath string
 	// RestartPolicy is the user-authored restart policy applied to the
-	// container when its task exits. See the RestartPolicy* constants
-	// below for the canonical values; the runner's wind-down/auto-delete
-	// gate (refresh.go:restartPolicyPermitsCellReap) is the only consumer
-	// today. Empty/unset is treated as RestartPolicyNever — an exited
-	// non-root container preserves the cell in Stopped (kept for restart)
-	// rather than triggering a cell-level wind-down, matching the
-	// Kubernetes default restartPolicy.
+	// container when its task exits. See the RestartPolicy* constants below
+	// for the canonical values; consumed by the runner's restart-on-exit pass
+	// (refresh.go:restartPolicyRequiresRestart) and its wind-down reap gate
+	// (refresh.go:restartPolicyPermitsCellReap). Empty/unset is treated as
+	// RestartPolicyNever — an exited non-root container is not restarted and
+	// preserves the cell in Stopped rather than triggering a cell-level
+	// wind-down, matching the Kubernetes default restartPolicy. Exception: a
+	// cell that opted into auto-delete (`--rm` / Spec.AutoDelete) is deleted on
+	// exit regardless of restartPolicy — `--rm` is an unconditional teardown
+	// directive (cf. `docker run --rm`).
 	RestartPolicy string
 	Attachable    bool
 	Tty           *ContainerTty

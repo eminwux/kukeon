@@ -20,9 +20,13 @@
 package runner
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 
+	cgroup2 "github.com/containerd/cgroups/v2/cgroup2"
 	containerd "github.com/containerd/containerd/v2/client"
+	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
@@ -62,6 +66,87 @@ func TestRestartPolicyPermitsContainerReap(t *testing.T) {
 					tc.policy, tc.exitCode, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestReconcileCell_AutoDeleteOverridesRestartPolicyNever is the end-to-end
+// pin for the rule that `--rm` / Spec.AutoDelete overrides restartPolicy
+// entirely: a cell that opted into auto-delete is reaped on exit even when its
+// non-root container carries an explicit `restartPolicy: never` (which would
+// otherwise block the wind-down path). This is what keeps `kuke run --rm`
+// deterministic regardless of the cell's restart policy — matching
+// `docker run --rm`. Modeled on TestReconcileCell_PostReboot_TransitionsToExited:
+// the reboot-wiped tasks (no exit info ⇒ exit 0) derive CellStateExited, the
+// auto-delete trigger, and the latched ReadyObserved opens the gate. An
+// explicit `never` also keeps the restart-on-exit pass from firing, so the
+// reconcile reaches the auto-delete branch.
+func TestReconcileCell_AutoDeleteOverridesRestartPolicyNever(t *testing.T) {
+	realm, space, stack, cellName := "default", "kukeon", "kukeon", "web"
+	rootID, workloadID := "root", "workload"
+	rootContainerdID := space + "_" + stack + "_" + cellName + "_" + rootID
+	workloadContainerdID := space + "_" + stack + "_" + cellName + "_" + workloadID
+
+	fake := &deleteCellFakeClient{
+		loadCgroupFn: func(string, string) (*cgroup2.Manager, error) {
+			return nil, errors.New("cgroup path does not exist")
+		},
+		existsContainerFn: func(_, _ string) (bool, error) { return true, nil },
+		taskStatusFn: func(_, _ string) (containerd.Status, error) {
+			return containerd.Status{}, fmt.Errorf("%w: %w", errdefs.ErrTaskNotFound, errors.New("task: not found"))
+		},
+	}
+	r := newDeleteCellTestExec(t, fake)
+	seedDeleteCellRealm(t, r, realm)
+	seedStopKillSpace(t, r, realm, space) // killCellLocked resolves the space CNI config
+	seedPostRebootCell(t, r, realm, space, stack, cellName, rootID, workloadID, rootContainerdID, workloadContainerdID)
+
+	cell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: cellName},
+		Spec: intmodel.CellSpec{
+			ID:         cellName,
+			RealmName:  realm,
+			SpaceName:  space,
+			StackName:  stack,
+			AutoDelete: true, // --rm
+			Containers: []intmodel.ContainerSpec{
+				{ID: rootID, ContainerdID: rootContainerdID, Root: true},
+				// Explicit never would block the wind-down path — but --rm must win.
+				{
+					ID:            workloadID,
+					ContainerdID:  workloadContainerdID,
+					Root:          false,
+					RestartPolicy: intmodel.RestartPolicyNever,
+				},
+			},
+		},
+		Status: intmodel.CellStatus{
+			State:         intmodel.CellStateReady,
+			ReadyObserved: true,
+		},
+	}
+
+	_, outcome, err := r.ReconcileCell(cell)
+	if err != nil {
+		t.Fatalf("ReconcileCell: unexpected error: %v", err)
+	}
+	if !outcome.Deleted {
+		t.Errorf(
+			"ReconcileOutcome.Deleted = false, want true (--rm/AutoDelete must reap an exited cell regardless of an explicit restartPolicy: never)",
+		)
+	}
+
+	// Sanity: the same cell WITHOUT AutoDelete must be preserved by the
+	// explicit never (the wind-down path still honors restartPolicy).
+	cell.Spec.AutoDelete = false
+	seedPostRebootCell(t, r, realm, space, stack, cellName, rootID, workloadID, rootContainerdID, workloadContainerdID)
+	_, outcome, err = r.ReconcileCell(cell)
+	if err != nil {
+		t.Fatalf("ReconcileCell (no --rm): unexpected error: %v", err)
+	}
+	if outcome.Deleted {
+		t.Errorf(
+			"ReconcileOutcome.Deleted = true, want false (without --rm, an explicit restartPolicy: never must preserve the cell)",
+		)
 	}
 }
 

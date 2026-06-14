@@ -105,6 +105,8 @@ See [Concepts → Container](../concepts/container.md) for what a container is.
 
 Only the root container is exempt: the root's exit drives cell-level lifecycle decisions independently and is not subject to this gate.
 
+**Auto-delete (`--rm`) exception.** A cell that opted into auto-delete (`kuke run --rm`, or `spec.autoDelete: true`) is deleted on exit **regardless of `restartPolicy`** — `--rm` is an unconditional teardown directive (cf. `docker run --rm`, which removes the container on any exit). `restartPolicy` governs only the restart-on-exit decision and the non-auto-delete wind-down/preserve path described above.
+
 ### VolumeMount
 
 Each entry in `spec.volumes` is a mount attached to the container. The `kind` discriminator selects which OCI mount type the runtime emits.

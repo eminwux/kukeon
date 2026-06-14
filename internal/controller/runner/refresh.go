@@ -827,20 +827,24 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 		cell.Status.Reason = originalStatus.Reason
 		cell.Status.Message = originalStatus.Message
 	case restartNone:
-		// RestartPolicy gate (#1003): per-container restartPolicy can veto both
-		// the auto-delete and the wind-down kill so a workload authored with
-		// `restartPolicy: never` (or `on-failure` that exited cleanly) is left
-		// in Stopped state instead of disappearing under the next tick.
-		// Empty/unset defaults to `never` — an exited non-root container
-		// preserves the cell, matching the Kubernetes default restartPolicy.
-		// See restartPolicyPermitsCellReap.
-		restartReap := restartPolicyPermitsCellReap(cell)
-
-		if restartReap && shouldAutoDeleteCell(cell.Spec.AutoDelete, newState, cell.Status.ReadyObserved) {
+		// Auto-delete (`--rm` / Spec.AutoDelete) is an explicit "delete the cell
+		// once the workload exits" directive that overrides restartPolicy
+		// entirely — matching `docker run --rm`, which removes the container on
+		// any exit. So the auto-delete branch is NOT gated on the RestartPolicy
+		// reap check.
+		if shouldAutoDeleteCell(cell.Spec.AutoDelete, newState, cell.Status.ReadyObserved) {
 			return r.autoDeleteCell(cell)
 		}
 
-		if restartReap && shouldWindDownCell(cell, newState) {
+		// RestartPolicy gate (#1003): per-container restartPolicy vetoes the
+		// wind-down kill so a workload authored with `restartPolicy: never`
+		// (or `on-failure` that exited cleanly) is left in Stopped state instead
+		// of disappearing under the next tick. Empty/unset defaults to `never` —
+		// an exited non-root container preserves the cell, matching the
+		// Kubernetes default restartPolicy. This governs only the non-auto-delete
+		// path; a `--rm` cell is already handled above. See
+		// restartPolicyPermitsCellReap.
+		if restartPolicyPermitsCellReap(cell) && shouldWindDownCell(cell, newState) {
 			return r.windDownCell(cell)
 		}
 	}
@@ -1046,11 +1050,12 @@ func shouldWindDownCell(cell intmodel.Cell, newState intmodel.CellState) bool {
 
 // restartPolicyPermitsCellReap reports whether every terminally-exited
 // non-root container in the cell carries a RestartPolicy that permits
-// the cell-level wind-down / auto-delete to fire (#1003). The reconciler
-// asks this gate before both shouldAutoDeleteCell and shouldWindDownCell —
-// a single container's `never` (or `on-failure` with a clean exit) blocks
-// the cell-level reap, preserving the workload in Stopped state so the
-// operator can decide explicitly.
+// the cell-level wind-down kill to fire (#1003). The reconciler asks this
+// gate before shouldWindDownCell — a single container's `never` (or
+// `on-failure` with a clean exit) blocks the cell-level reap, preserving
+// the workload in Stopped state so the operator can decide explicitly. The
+// auto-delete (`--rm`) branch is NOT gated on this — an explicit
+// AutoDelete overrides restartPolicy entirely (see ReconcileCell).
 //
 // Decision per terminally-exited non-root container, keyed on its
 // ContainerStatus.ExitCode (populated by GetContainerObservation):
