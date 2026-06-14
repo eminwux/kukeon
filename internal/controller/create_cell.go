@@ -226,6 +226,13 @@ func (b *Exec) createCellInternal(cell intmodel.Cell, startAfterCreate bool) (Cr
 		return res, err
 	}
 
+	// Auto-provision per-cell (ensure) volumes before any container spec is
+	// built, so the volume-reference resolver finds the on-disk directory at
+	// container-create time (#1017).
+	if err = b.ensurePerCellVolumes(cell); err != nil {
+		return res, err
+	}
+
 	preContainerExists := make(map[string]bool)
 
 	// Build minimal internal cell for GetCell lookup

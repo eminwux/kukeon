@@ -56,6 +56,18 @@ func (b *Exec) StartCell(cell intmodel.Cell) (StartCellResult, error) {
 	// bare `kuke start <cell>` never sets RuntimeEnv).
 	internalCell.Spec.RuntimeEnv = cell.Spec.RuntimeEnv
 
+	// Auto-provision the on-disk spec's per-cell (ensure) volumes before any
+	// start/recreate path rebuilds a container OCI spec, so the volume-reference
+	// resolver finds the on-disk directory. Idempotent, so a restart re-binds the
+	// cell's existing Volume and preserves its contents (#1017). The OutOfSync
+	// reapply below re-materialises a fresh `desired` spec whose newly-added
+	// ${CELL_NAME} mounts this pass cannot see; reapplyBreaking /
+	// reapplyCompatibleInPlace provision `desired` separately before handing it to
+	// the runner (#1294 review).
+	if err = b.ensurePerCellVolumes(internalCell); err != nil {
+		return res, err
+	}
+
 	// Recovery routing for the terminal-by-derivation states, evaluated BEFORE
 	// the "already running" guard below. The ordering is load-bearing (#1274): a
 	// sticky Error/Failed cell keeps its root container alive — cell state is
@@ -278,6 +290,24 @@ func (b *Exec) reapplyOutOfSyncFromConfig(cell intmodel.Cell) (intmodel.Cell, bo
 // Ready. Mirrors the restart CLI's ApplyDocuments+StopCell+StartCell sequence
 // for a Stopped cell. On failure the caller falls back to the on-disk spec.
 func (b *Exec) reapplyBreaking(cell, desired intmodel.Cell, configName string) (intmodel.Cell, bool, bool) {
+	// Provision the re-materialised spec's per-cell (ensure) volumes before
+	// RecreateCell rebuilds containers against `desired`. The StartCell-level
+	// ensurePerCellVolumes pass ran against the pre-reapply on-disk spec, so a
+	// Config edit that *adds* a new ${CELL_NAME} mount has no provisioned Volume
+	// yet — RecreateCell would then build a container against a Volume step 4's
+	// resolver hard-errors on, and OutOfSync never converges (#1017, #1294
+	// review). Idempotent, so an already-bound cell re-binds in place. On
+	// failure, fall back to the on-disk spec like the RecreateCell path below.
+	if err := b.ensurePerCellVolumes(desired); err != nil {
+		b.logger.WarnContext(b.ctx,
+			"OutOfSync reapply ensure-volumes failed; falling back to on-disk spec",
+			"cell", cell.Metadata.Name,
+			"config", configName,
+			"error", err,
+		)
+		return intmodel.Cell{}, false, false
+	}
+
 	recreated, err := b.runner.RecreateCell(desired)
 	if err != nil {
 		b.logger.WarnContext(b.ctx,
@@ -320,6 +350,26 @@ func (b *Exec) reapplyCompatibleInPlace(
 			"error", err,
 		)
 		return intmodel.Cell{}, false, false
+	}
+
+	// Provision the re-materialised spec's per-cell (ensure) volumes before
+	// UpdateCell stop-removes-recreates any child whose spec changed against
+	// `desired`. The StartCell-level ensurePerCellVolumes pass ran against the
+	// pre-reapply on-disk spec, so a Config edit that *adds* a new ${CELL_NAME}
+	// mount has no provisioned Volume yet — UpdateCell would rebuild the affected
+	// child against a Volume step 4's resolver hard-errors on (#1017, #1294
+	// review). Idempotent, so an already-bound cell re-binds in place. StartCell
+	// above already restarted the root on its on-disk snapshot (no new mount), so
+	// a failure here mirrors the UpdateCell-failure path: the cell is Ready on the
+	// on-disk spec, OutOfSync stays set, and the next start retries.
+	if err := b.ensurePerCellVolumes(desired); err != nil {
+		b.logger.WarnContext(b.ctx,
+			"OutOfSync reapply ensure-volumes failed; cell started on the on-disk spec but not reconciled",
+			"cell", cell.Metadata.Name,
+			"config", configName,
+			"error", err,
+		)
+		return started, true, true
 	}
 
 	updated, err := b.runner.UpdateCell(desired)
