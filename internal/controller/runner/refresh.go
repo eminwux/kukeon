@@ -792,8 +792,9 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 	// the auto-delete and the wind-down kill so a workload authored with
 	// `restartPolicy: never` (or `on-failure` that exited cleanly) is left
 	// in Stopped state instead of disappearing under the next tick.
-	// Permissive default (empty/Always) preserves the pre-#1003 behavior
-	// for cells that never set the field. See restartPolicyPermitsCellReap.
+	// Empty/unset defaults to `never` — an exited non-root container
+	// preserves the cell (kept for restart), matching the Kubernetes default
+	// restartPolicy. See restartPolicyPermitsCellReap.
 	restartReap := restartPolicyPermitsCellReap(cell)
 
 	if restartReap && shouldAutoDeleteCell(cell.Spec.AutoDelete, newState, cell.Status.ReadyObserved) {
@@ -1014,11 +1015,12 @@ func shouldWindDownCell(cell intmodel.Cell, newState intmodel.CellState) bool {
 // Decision per terminally-exited non-root container, keyed on its
 // ContainerStatus.ExitCode (populated by GetContainerObservation):
 //
-//   - "" or "always"  → permit reap. Empty is the back-compat default so
-//     cells that pre-date #1003 keep the wind-down behavior they have today.
+//   - "always"        → permit reap regardless of exit code.
 //   - "on-failure"    → permit reap only when ExitCode != 0; a clean exit
 //     (0) means the workload completed successfully and the cell stays.
-//   - "never"         → never permit reap.
+//   - "" or "never"   → never permit reap. Empty is the default: an exited
+//     non-root container preserves the cell in Stopped (kept for restart),
+//     matching the Kubernetes default restartPolicy.
 //
 // Unknown values fall through to the permissive default to mirror the
 // pre-#1003 behavior — typos and future-spec values do not silently
@@ -1058,11 +1060,11 @@ func restartPolicyPermitsCellReap(cell intmodel.Cell) bool {
 // restartPolicyPermitsCellReap for the policy table.
 func restartPolicyPermitsContainerReap(policy string, exitCode int) bool {
 	switch policy {
-	case "", intmodel.RestartPolicyAlways:
+	case intmodel.RestartPolicyAlways:
 		return true
 	case intmodel.RestartPolicyOnFailure:
 		return exitCode != 0
-	case intmodel.RestartPolicyNever:
+	case "", intmodel.RestartPolicyNever:
 		return false
 	default:
 		return true

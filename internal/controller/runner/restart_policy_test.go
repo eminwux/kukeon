@@ -29,11 +29,12 @@ import (
 // TestRestartPolicyPermitsContainerReap pins the per-container half of
 // the #1003 reap gate. The decision table:
 //
-//   - "" or "always"  → permit reap regardless of exit code (back-compat
-//     and explicit Always both default to today's wind-down behavior).
+//   - "always"        → permit reap regardless of exit code.
 //   - "on-failure"    → permit reap iff exit code is non-zero; clean exits
 //     (0) preserve the cell.
-//   - "never"         → never permit reap.
+//   - "" or "never"   → never permit reap. Empty is the default: an exited
+//     non-root container preserves the cell, matching the Kubernetes
+//     default restartPolicy.
 //   - unknown values  → permissive fallback so a typo or a future spec
 //     value does not silently strand cells.
 func TestRestartPolicyPermitsContainerReap(t *testing.T) {
@@ -43,8 +44,8 @@ func TestRestartPolicyPermitsContainerReap(t *testing.T) {
 		exitCode int
 		want     bool
 	}{
-		{"empty_back_compat_clean_exit_permits", "", 0, true},
-		{"empty_back_compat_failed_exit_permits", "", 1, true},
+		{"empty_default_clean_exit_blocks", "", 0, false},
+		{"empty_default_failed_exit_blocks", "", 1, false},
 		{"always_clean_exit_permits", intmodel.RestartPolicyAlways, 0, true},
 		{"always_failed_exit_permits", intmodel.RestartPolicyAlways, 137, true},
 		{"on_failure_clean_exit_blocks", intmodel.RestartPolicyOnFailure, 0, false},
@@ -107,7 +108,7 @@ func TestRestartPolicyPermitsCellReap(t *testing.T) {
 		want bool
 	}{
 		{
-			name: "empty_policy_terminal_stopped_permits_back_compat",
+			name: "empty_policy_terminal_stopped_blocks_default",
 			cell: cell(
 				[]intmodel.ContainerSpec{
 					{ID: "root", Root: true},
@@ -118,7 +119,7 @@ func TestRestartPolicyPermitsCellReap(t *testing.T) {
 					{ID: "work", State: intmodel.ContainerStateStopped, ExitCode: 0},
 				},
 			),
-			want: true,
+			want: false,
 		},
 		{
 			name: "never_policy_terminal_blocks",
@@ -197,7 +198,7 @@ func TestRestartPolicyPermitsCellReap(t *testing.T) {
 			cell: cell(
 				[]intmodel.ContainerSpec{
 					{ID: "root", Root: true, RestartPolicy: intmodel.RestartPolicyNever},
-					{ID: "work", Root: false, RestartPolicy: ""},
+					{ID: "work", Root: false, RestartPolicy: intmodel.RestartPolicyAlways},
 				},
 				[]intmodel.ContainerStatus{
 					{ID: "root", State: intmodel.ContainerStateStopped, ExitCode: 0},

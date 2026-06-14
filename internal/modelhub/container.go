@@ -89,9 +89,10 @@ type ContainerSpec struct {
 	// container when its task exits. See the RestartPolicy* constants
 	// below for the canonical values; the runner's wind-down/auto-delete
 	// gate (refresh.go:restartPolicyPermitsCellReap) is the only consumer
-	// today. Empty/unset is treated as RestartPolicyAlways for
-	// back-compat — the pre-#1003 wind-down behavior, where every
-	// non-root container exit can trigger a cell-level wind-down.
+	// today. Empty/unset is treated as RestartPolicyNever — an exited
+	// non-root container preserves the cell in Stopped (kept for restart)
+	// rather than triggering a cell-level wind-down, matching the
+	// Kubernetes default restartPolicy.
 	RestartPolicy string
 	Attachable    bool
 	Tty           *ContainerTty
@@ -381,8 +382,8 @@ const (
 )
 
 // RestartPolicy values for ContainerSpec.RestartPolicy. Empty/unset is
-// treated as RestartPolicyAlways at the runner gate — see ContainerSpec
-// for the back-compat contract.
+// treated as RestartPolicyNever at the runner gate — see ContainerSpec
+// for the default contract.
 const (
 	RestartPolicyAlways    = "always"
 	RestartPolicyOnFailure = "on-failure"
