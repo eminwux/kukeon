@@ -118,6 +118,7 @@ Each entry in `spec.volumes` is a mount attached to the container. The `kind` di
 | `readOnly`  | bool                     | no                   | Mount read-only when `true` (writes fail with `EROFS`). Defaults to `false`.                                                                                                                                                                |
 | `sizeBytes` | int                      | no (`tmpfs` only)    | Tmpfs size in bytes. When non-zero, the standard tmpfs `size=` option is set. Ignored for `bind`.                                                                                                                                           |
 | `mode`      | uint                     | no (`tmpfs` only)    | Tmpfs root-directory mode (e.g. `0755`). When non-zero, the standard tmpfs `mode=` option is set. Ignored for `bind`.                                                                                                                       |
+| `ensure`    | bool                     | no (`volume` only)   | When `true` on a `kind: volume` mount, the daemon auto-provisions the referenced Volume at cell create/start if it does not already exist — Docker's "create on first reference" semantics, the opt-in counterpart to the default "missing volume is a hard error". Idempotent: an already-bound cell re-binds its existing Volume rather than minting a fresh one, so recreate and reconcile preserve the Volume's contents. Ignored for `bind`/`tmpfs`. Set automatically on any mount whose name embeds the `${CELL_NAME}` template (see below). |
 
 ```yaml
 volumes:
@@ -136,6 +137,13 @@ volumes:
     volumeRef:
       name: assets
       realm: kuke-system
+  - kind: volume # auto-provisioned on first reference
+    source: scratch
+    target: /scratch
+    ensure: true
+  - kind: volume # per-cell Volume, minted per stamped cell
+    source: mem-${CELL_NAME}
+    target: /var/lib/agent
 ```
 
 A `kind: volume` mount references a daemon-managed `kind: Volume` and bind-mounts its on-disk directory at `target`. The referenced Volume's directory survives both container recreation and the mounting cell's deletion — the cell references the Volume, it does not own it. Exactly one of `source` (same-scope name) or `volumeRef` (cross-scope) must be set.
@@ -148,6 +156,16 @@ A `kind: volume` mount references a daemon-managed `kind: Volume` and bind-mount
 | `realm`           | string | yes      | Always-required top-level scope coordinate     |
 | `space`           | string | no       | Scopes the reference to a space within `realm` |
 | `stack`           | string | no       | Scopes the reference to a stack within `space` |
+
+#### Auto-provisioning (`ensure`)
+
+By default a `kind: volume` mount whose Volume does not exist fails the cell at create/start — the Volume must be created first (`kuke create volume …`). Set `ensure: true` to opt into Docker-style "create on first reference": the daemon provisions the referenced Volume at the mount's scope (the cell's realm/space/stack for a bare `source`, or `volumeRef`'s coordinates for a cross-scope reference) before the container starts. Auto-create is idempotent — an already-bound cell re-binds its existing Volume rather than minting a fresh one, so the Volume's contents survive container recreation and cell reconcile.
+
+#### Per-cell volumes (`${CELL_NAME}`)
+
+A `kind: volume` mount may embed the reserved `${CELL_NAME}` template variable in its `source` (or `volumeRef.name`). When the cell is materialized — including each cell stamped from a 1:N binding — the token expands to the concrete cell name, so `source: mem-${CELL_NAME}` yields a distinct Volume per cell (`mem-<cellA>`, `mem-<cellB>`, …); isolation comes from the name, not the scope. Any mount whose template expands is automatically marked `ensure: true`, since a per-cell Volume cannot be pre-created for a not-yet-named cell. Re-materializing a cell with the same identity re-expands to the same Volume name, so recreate re-binds the existing Volume rather than minting a new one.
+
+`${CELL_NAME}` is resolved later than the scalar `${KEY}` blueprint parameters (it needs the generated cell name, which a 1:N binding does not supply as a parameter), so `CELL_NAME` is reserved — do not declare a blueprint parameter by that name.
 
 ### devices
 
