@@ -344,6 +344,28 @@ type Exec struct {
 	// override it to exercise the guard's block/allow branches without a real
 	// full volume.
 	diskSampler func(string) (diskpressure.Usage, error)
+
+	// restartStates holds the reconciler's in-memory restart-on-exit
+	// bookkeeping (#1233, phase 1 of the #1151 epic): per non-root container,
+	// the attempt count and last-attempt time the restart pass uses to enforce
+	// the per-container backoff floor and the on-failure retry cap. Keyed by
+	// cellLockKey + container ID. Deliberately NOT the persisted user-visible
+	// RestartCount / RestartTime on ContainerStatus — that bookkeeping is
+	// #1234's scope (documented intentionally-zero in #1303); this is
+	// runner-local gate state only, reset whenever the container is observed
+	// running again. Guarded by restartStatesMu; lazily initialized so *Exec
+	// values built directly in tests participate without fixture wiring.
+	restartStates   map[string]*containerRestartState
+	restartStatesMu sync.Mutex
+
+	// restartContainerFn is the relaunch action the reconciler's restart pass
+	// invokes for a terminally-exited container that its RestartPolicy says
+	// must restart. nil falls through to (*Exec).StartContainer (the real
+	// delete-stale-task + recreate + start path, #867); tests override it with
+	// a recording stub so the restart-pass gating can be exercised without
+	// reconstructing the full containerd fake StartContainer needs — the same
+	// injection pattern nowFn / diskSampler use.
+	restartContainerFn func(cell intmodel.Cell, containerID string) (intmodel.Cell, error)
 }
 
 type Options struct {
