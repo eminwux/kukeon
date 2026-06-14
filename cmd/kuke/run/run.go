@@ -71,7 +71,7 @@ type MockControllerKey struct{}
 func NewRunCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "run [<cell>]",
-		Short: "Start and attach an existing cell, or create+start+attach a new one (--from-blueprint/--from-config/--clone/-f)",
+		Short: "Start and attach an existing cell, or create+start+attach a new one (--image/--from-blueprint/--from-config/--clone/-f)",
 		Long: "Start and attach a cell. `kuke run` is the fused docker-model verb: " +
 			"`docker create` -> `kuke create cell`, `docker start` -> `kuke start`, " +
 			"`docker run` -> `kuke run` (create? + start + attach).\n\n" +
@@ -85,6 +85,10 @@ func NewRunCmd() *cobra.Command {
 			"`kuke create cell` runs (shared FlagSet, no drift): the produced CellDoc is " +
 			"identical to `kuke create cell --from-...` followed by `kuke start`. The cell " +
 			"name is `--name X` when given, else a generated `<prefix>-<6hex>`.\n" +
+			"  - `kuke run --image <ref> [--command <cmd>]` synthesizes a single-container " +
+			"cell from a bare image ref and create+start+attaches it — the quick-start path. " +
+			"The cell name is `--name X` when given, else a generated `<prefix>-<6hex>` " +
+			"derived from the image. The positional is rejected (it names an existing cell).\n" +
 			"  - `kuke run -f <file>` create-or-attaches by metadata.name: a missing cell " +
 			"is created and attached; a Ready cell is attached as a no-op; a Stopped cell " +
 			"is started then attached; a divergent on-disk spec is refused (use `kuke " +
@@ -133,7 +137,7 @@ func NewRunCmd() *cobra.Command {
 	_ = viper.BindPFlag(config.KUKE_RUN_FILE.ViperKey, cmd.Flags().Lookup("file"))
 
 	cmd.Flags().String("name", "",
-		"Name the cell materialised by --from-blueprint/--from-config/--clone "+
+		"Name the cell created by --image/--from-blueprint/--from-config/--clone "+
 			"(default: a generated <prefix>-<6hex>). Rejected with the <cell> positional "+
 			"(the positional IS the cell name) and with -f (metadata.name is authoritative).")
 	_ = viper.BindPFlag(config.KUKE_RUN_NAME.ViperKey, cmd.Flags().Lookup("name"))
@@ -163,6 +167,17 @@ func NewRunCmd() *cobra.Command {
 			"that need a hard fail on divergence.")
 	_ = viper.BindPFlag(config.KUKE_RUN_REQUIRE_SYNCED.ViperKey, cmd.Flags().Lookup("require-synced"))
 
+	cmd.Flags().String("image", "",
+		"Imperative single-image source: synthesize a one-container cell from the given "+
+			"image ref and create+start+attach it (the quick-start path). Names the created "+
+			"cell via --name, else a generated <prefix>-<6hex> derived from the image. "+
+			"Mutually exclusive with the <cell> positional and --from-blueprint/--from-config/--clone/-f.")
+	_ = viper.BindPFlag(config.KUKE_RUN_IMAGE.ViperKey, cmd.Flags().Lookup("image"))
+	cmd.Flags().String("command", "",
+		"With --image: override the synthesized container's entrypoint (default /bin/sh). "+
+			"Only valid with --image.")
+	_ = viper.BindPFlag(config.KUKE_RUN_COMMAND.ViperKey, cmd.Flags().Lookup("command"))
+
 	cmd.Flags().Bool("rm", false,
 		"Best-effort delete the cell after it is no longer needed "+
 			"(any rc). With -d/--detach, the trigger is the root "+
@@ -185,6 +200,14 @@ func NewRunCmd() *cobra.Command {
 	cmd.MarkFlagsMutuallyExclusive("file", "from-blueprint")
 	cmd.MarkFlagsMutuallyExclusive("file", "from-config")
 	cmd.MarkFlagsMutuallyExclusive("file", "clone")
+
+	// --image is itself a cell source: mutually exclusive with -f and every
+	// from-* source. The positional-vs-image mutex is hand-rolled in
+	// validateSourceMutex (cobra's mutex machinery spans flags only).
+	cmd.MarkFlagsMutuallyExclusive("image", "file")
+	cmd.MarkFlagsMutuallyExclusive("image", "from-blueprint")
+	cmd.MarkFlagsMutuallyExclusive("image", "from-config")
+	cmd.MarkFlagsMutuallyExclusive("image", "clone")
 
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
 	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
@@ -211,6 +234,15 @@ type runFlags struct {
 	blueprintName string
 	configName    string
 	cloneSource   string
+	// image is the imperative `--image <ref>` source: synthesize a
+	// single-container cell from the ref and create+start+attach it. A fourth
+	// create source alongside the from-* trio, but synthesized in-process
+	// (cell.SynthesizeFromImage) rather than resolved from a daemon-stored
+	// binding, so it is not part of fused() (the Materialize-delegating path).
+	image string
+	// command is `--command`: overrides the synthesized container's entrypoint.
+	// Only valid with --image.
+	command string
 
 	output        string
 	detach        bool
@@ -257,11 +289,15 @@ func validateSourceMutex(flags runFlags) error {
 			return errors.New(
 				"the <cell> positional (start an existing cell) is mutually exclusive with " +
 					"--from-blueprint/--from-config/--clone (create a new one)")
+		case flags.image != "":
+			return errors.New(
+				"the <cell> positional (start an existing cell) is mutually exclusive with " +
+					"--image (create a new one); name the created cell with --name")
 		}
 	}
-	if flags.cellName == "" && flags.file == "" && !flags.fused() {
+	if flags.cellName == "" && flags.file == "" && !flags.fused() && flags.image == "" {
 		return errors.New(
-			"a source is required: <cell> (start an existing cell), -f/--file, or " +
+			"a source is required: <cell> (start an existing cell), -f/--file, --image, or " +
 				"--from-blueprint/--from-config/--clone (create+start+attach a new one)")
 	}
 	return nil
@@ -275,6 +311,8 @@ func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
 		autoDelete:    viper.GetBool(config.KUKE_RUN_RM.ViperKey),
 		name:          strings.TrimSpace(viper.GetString(config.KUKE_RUN_NAME.ViperKey)),
 		requireSynced: viper.GetBool(config.KUKE_RUN_REQUIRE_SYNCED.ViperKey),
+		image:         strings.TrimSpace(viper.GetString(config.KUKE_RUN_IMAGE.ViperKey)),
+		command:       strings.TrimSpace(viper.GetString(config.KUKE_RUN_COMMAND.ViperKey)),
 	}
 
 	// The fused-source flags share their definitions with `kuke create cell`
@@ -369,7 +407,23 @@ func validateSourceFlagCompat(flags runFlags) error {
 			"--require-synced is only valid with -f/--file (the only path that " +
 				"compares the live cell against a source manifest)")
 	}
+	// --command shapes the synthesized container, so it is meaningful only on
+	// the --image path; reject it elsewhere rather than silently dropping it.
+	if flags.command != "" && flags.image == "" {
+		return errors.New("--command is only valid with --image")
+	}
 	if flags.fused() {
+		return nil
+	}
+	// --image is a create source: it takes --name (the cell it creates) but not
+	// the blueprint render-time knobs --param/--param-file.
+	if flags.image != "" {
+		if len(flags.paramArgs) > 0 {
+			return errors.New("--param is only valid with --from-blueprint, not --image")
+		}
+		if flags.paramFile != "" {
+			return errors.New("--param-file is only valid with --from-blueprint, not --image")
+		}
 		return nil
 	}
 	// Non-fused sources: the <cell> positional or -f.
@@ -378,7 +432,7 @@ func validateSourceFlagCompat(flags runFlags) error {
 		target = "-f/--file"
 	}
 	if flags.name != "" {
-		return fmt.Errorf("--name is only valid with --from-blueprint/--from-config/--clone, not %s", target)
+		return fmt.Errorf("--name is only valid with --image/--from-blueprint/--from-config/--clone, not %s", target)
 	}
 	if len(flags.paramArgs) > 0 {
 		return fmt.Errorf("--param is only valid with --from-blueprint, not %s", target)
@@ -404,11 +458,70 @@ func runRun(cmd *cobra.Command, args []string) error {
 	switch {
 	case flags.fused():
 		return runFused(cmd, client, flags)
+	case flags.image != "":
+		return runFromImage(cmd, client, flags)
 	case flags.file != "":
 		return runFromFile(cmd, client, flags)
 	default:
 		return runExisting(cmd, client, flags)
 	}
+}
+
+// runFromImage implements the imperative `--image <ref>` source: synthesize a
+// single-container CellDoc from the ref (cell.SynthesizeFromImage — the shared
+// helper `kuke create cell --image` reuses), resolve scope + name, then
+// create+start+attach it. Structurally the create-side mirror of runFused: an
+// existence pre-check guards an explicit --name collision (the generated
+// <prefix>-<6hex> name is probed free), CreateCell create+starts, and the
+// default attach mode drops the operator into the cell.
+func runFromImage(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) error {
+	cellDoc, err := cell.SynthesizeFromImage(flags.image, flags.command)
+	if err != nil {
+		return err
+	}
+	resolveCellLocation(&cellDoc)
+
+	name, err := kukshared.ResolveCellName(
+		cmd.Context(), client, flags.name, cell.ImageNamePrefix(flags.image),
+		cellDoc.Spec.RealmID, cellDoc.Spec.SpaceID, cellDoc.Spec.StackID,
+	)
+	if err != nil {
+		return err
+	}
+	cellDoc.Metadata.Name = name
+	cellDoc.Spec.ID = name
+
+	// --rm / --env (runtime injection) / --ignore-disk-pressure thread on the
+	// same transport-only fields as the -f and existing-cell paths.
+	applyRuntimeKnobs(&cellDoc, flags)
+
+	// The --image form is a create: refuse if a cell already lives at the
+	// resolved name (parity with runFused / `kuke create cell`; the generated
+	// name is probed free, so this only fires for an explicit --name collision).
+	pre, getErr := client.GetCell(cmd.Context(), cellDoc)
+	switch {
+	case getErr == nil && pre.MetadataExists:
+		return fmt.Errorf(
+			"cell %q already exists in realm=%q space=%q stack=%q; run `kuke run %s` to "+
+				"start+attach it, or `kuke delete cell %s` before re-creating",
+			cellDoc.Metadata.Name, cellDoc.Spec.RealmID, cellDoc.Spec.SpaceID,
+			cellDoc.Spec.StackID, cellDoc.Metadata.Name, cellDoc.Metadata.Name,
+		)
+	case getErr != nil && !errors.Is(getErr, errdefs.ErrCellNotFound):
+		return getErr
+	}
+
+	result, err := client.CreateCell(cmd.Context(), cellDoc)
+	if err != nil {
+		return err
+	}
+	if printErr := printRunResult(cmd, result, flags.output); printErr != nil {
+		return printErr
+	}
+	if !flags.detach {
+		return attachAndMaybeAutoDelete(cmd, client, cellDoc, flags)
+	}
+	return nil
 }
 
 // applyRuntimeKnobs threads the imperative run flags onto the cell doc handed to

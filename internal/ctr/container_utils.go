@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/containerd/containerd/v2/pkg/oci"
+	"github.com/distribution/reference"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 )
@@ -292,40 +293,41 @@ func copyLabels(src map[string]string) map[string]string {
 	return dst
 }
 
-// NormalizeImageReference normalizes an image reference to a fully qualified format.
+// NormalizeImageReference canonicalizes an image reference to the fully
+// qualified docker.io/library form containerd's resolver requires, the same way
+// `docker` and kukebuild's -t normalization do (see normalizeImageName in
+// cmd/kukebuild/build.go). Bare references that omit the registry, the
+// docker.io/library namespace, or the tag would otherwise reach the resolver as
+// `dummy://busybox:latest` and fail to parse, so every pull path runs the ref
+// through here first.
+//
 // Examples:
-//   - "debian:latest" -> "docker.io/library/debian:latest"
-//   - "alpine" -> "docker.io/library/alpine:latest"
-//   - "user/image:tag" -> "docker.io/user/image:tag"
-//   - "docker.io/library/debian:latest" -> "docker.io/library/debian:latest" (unchanged)
-//   - "registry.example.com/image:tag" -> "registry.example.com/image:tag" (unchanged)
+//   - "debian:latest"                    -> "docker.io/library/debian:latest"
+//   - "alpine"                           -> "docker.io/library/alpine:latest"
+//   - "busybox"                          -> "docker.io/library/busybox:latest"
+//   - "docker.io/busybox:latest"         -> "docker.io/library/busybox:latest"
+//   - "user/image"                       -> "docker.io/user/image:latest"
+//   - "docker.io/library/debian:latest"  -> "docker.io/library/debian:latest" (unchanged)
+//   - "registry.example.com/image:tag"   -> "registry.example.com/image:tag" (unchanged)
+//   - "kukeon.internal/kukeond:v0.0.0"   -> "kukeon.internal/kukeond:v0.0.0" (unchanged)
+//
+// A reference that cannot be parsed (genuinely malformed) is returned unchanged
+// so the downstream containerd resolver surfaces the error, preserving prior
+// behavior for invalid input.
 func NormalizeImageReference(image string) string {
 	if image == "" {
 		return image
 	}
 
-	// If it already contains a registry (has "://" or starts with a known registry), return as-is
+	// References carrying an explicit URL scheme are not containerd image refs
+	// (distribution/reference rejects them); leave them untouched.
 	if strings.Contains(image, "://") {
 		return image
 	}
 
-	// Check if it starts with a known registry (contains a dot before the first slash, or is a known registry)
-	firstSlash := strings.Index(image, "/")
-	if firstSlash > 0 {
-		// Check if the part before the first slash looks like a registry (contains a dot or is a known registry)
-		registryPart := image[:firstSlash]
-		if strings.Contains(registryPart, ".") || strings.Contains(registryPart, ":") {
-			// Already has a registry, return as-is
-			return image
-		}
-		// No registry, add docker.io prefix
-		return "docker.io/" + image
+	named, err := reference.ParseNormalizedNamed(image)
+	if err != nil {
+		return image
 	}
-
-	// No slash means it's a library image
-	// Add default tag if not present
-	if !strings.Contains(image, ":") {
-		image += ":latest"
-	}
-	return "docker.io/library/" + image
+	return reference.TagNameOnly(named).String()
 }

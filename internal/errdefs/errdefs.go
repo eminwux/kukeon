@@ -299,6 +299,11 @@ var (
 	// containerd namespace.
 	ErrImageTagRequired = errors.New("image tag is required (-t name:tag)")
 
+	// ErrImageRequired is returned when the imperative `--image` cell source
+	// (`kuke run --image` / `kuke create cell --image`, epic:first-run) is asked
+	// to synthesize a cell from an empty image ref.
+	ErrImageRequired = errors.New("image ref is required (--image <ref>)")
+
 	// ErrKukebuildNotFound is returned by `kuke build` when the standalone
 	// `kukebuild` binary (which embeds BuildKit, issue #522) is not on PATH.
 	// `kuke build` is a thin shim that exec's kukebuild; without it the build

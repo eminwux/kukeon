@@ -468,6 +468,16 @@ var (
 	KUKE_RUN_IGNORE_DISK_PRESSURE = DefineKV(
 		"KUKE_RUN_IGNORE_DISK_PRESSURE", "kuke/run/ignore-disk-pressure", "false",
 	)
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	// KUKE_RUN_IMAGE is the env-var twin of `kuke run --image <ref>`
+	// (epic:first-run): the imperative single-image cell source that
+	// synthesizes a one-container cell from a bare image ref.
+	KUKE_RUN_IMAGE = DefineKV("KUKE_RUN_IMAGE", "kuke/run/image")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	// KUKE_RUN_COMMAND is the env-var twin of `kuke run --command`: overrides
+	// the entrypoint of the container synthesized by --image (default
+	// cell.ImageDefaultCommand).
+	KUKE_RUN_COMMAND = DefineKV("KUKE_RUN_COMMAND", "kuke/run/command")
 
 	// Attach command variables
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable

@@ -3902,12 +3902,12 @@ func TestRun_Name_RejectedWithPositionalAndFile(t *testing.T) {
 		{
 			"positional",
 			[]string{"mycell", "--name", "foo", "-d"},
-			"--name is only valid with --from-blueprint/--from-config/--clone, not the <cell> positional",
+			"--name is only valid with --image/--from-blueprint/--from-config/--clone, not the <cell> positional",
 		},
 		{
 			"file",
 			[]string{"-f", "/tmp/never-read.yaml", "--name", "foo", "-d"},
-			"--name is only valid with --from-blueprint/--from-config/--clone, not -f/--file",
+			"--name is only valid with --image/--from-blueprint/--from-config/--clone, not -f/--file",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -3920,6 +3920,242 @@ func TestRun_Name_RejectedWithPositionalAndFile(t *testing.T) {
 				t.Fatalf("err=%v want substring %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// --- epic:first-run (--image imperative source) tests --------------------
+
+// imageCreateResult is the CreateCell stub for the --image path: a single
+// synthesized user container ("main"), root synthesized by the runner.
+func imageCreateResult(doc v1beta1.CellDoc) kukeonv1.CreateCellResult {
+	return kukeonv1.CreateCellResult{
+		Cell:                    doc,
+		Created:                 true,
+		MetadataExistsPost:      true,
+		CgroupCreated:           true,
+		CgroupExistsPost:        true,
+		RootContainerCreated:    true,
+		RootContainerExistsPost: true,
+		Started:                 true,
+		Containers: []kukeonv1.ContainerCreationOutcome{
+			{Name: "main", ExistsPost: true, Created: true},
+		},
+	}
+}
+
+// TestRun_FromImage_GeneratesNameAndSynthesizes covers the quick-start happy
+// path: `kuke run --image <ref>` synthesizes a single attachable container from
+// the ref, allocates a generated <prefix>-<6hex> name derived from the image,
+// and create+starts it.
+func TestRun_FromImage_GeneratesNameAndSynthesizes(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return imageCreateResult(doc), nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"--image", "docker.io/library/alpine:3", "-d"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if fc.createCalls != 1 {
+		t.Fatalf("CreateCell calls=%d want 1", fc.createCalls)
+	}
+	// Generated name: prefix derived from the image's short name.
+	if got := fc.createDoc.Metadata.Name; !regexp.MustCompile(`^alpine-[0-9a-f]{6}$`).MatchString(got) {
+		t.Errorf("cell name=%q want alpine-<6hex> (generated from image)", got)
+	}
+	if got := fc.createDoc.Spec.ID; got != fc.createDoc.Metadata.Name {
+		t.Errorf("Spec.ID=%q want = metadata.name %q", got, fc.createDoc.Metadata.Name)
+	}
+	if len(fc.createDoc.Spec.Containers) != 1 {
+		t.Fatalf("containers=%d want 1 (single synthesized user container)", len(fc.createDoc.Spec.Containers))
+	}
+	c := fc.createDoc.Spec.Containers[0]
+	if c.Image != "docker.io/library/alpine:3" {
+		t.Errorf("image=%q want docker.io/library/alpine:3", c.Image)
+	}
+	if c.Command != "/bin/sh" {
+		t.Errorf("command=%q want default /bin/sh", c.Command)
+	}
+	if !c.Attachable {
+		t.Error("synthesized container must be attachable")
+	}
+	// Scope falls back to session defaults when no --realm/--space/--stack given.
+	for _, got := range []string{fc.createDoc.Spec.RealmID, fc.createDoc.Spec.SpaceID, fc.createDoc.Spec.StackID} {
+		if got != "default" {
+			t.Errorf("scope=%q want default", got)
+		}
+	}
+}
+
+// TestRun_FromImage_ExplicitName names the created cell via --name.
+func TestRun_FromImage_ExplicitName(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return imageCreateResult(doc), nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"--image", "docker.io/library/alpine:3", "--name", "my-first", "-d"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := fc.createDoc.Metadata.Name; got != "my-first" {
+		t.Errorf("cell name=%q want my-first (explicit --name)", got)
+	}
+}
+
+// TestRun_FromImage_NameCollision_Refuses: an explicit --name that collides
+// with a live cell refuses (parity with the from-* create paths), pointing at
+// `kuke run <cell>` and `kuke delete cell`. CreateCell must not fire.
+func TestRun_FromImage_NameCollision_Refuses(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		getCellFn: func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			live := doc
+			live.Status.State = v1beta1.CellStateReady
+			return kukeonv1.GetCellResult{Cell: live, MetadataExists: true}, nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"--image", "docker.io/library/alpine:3", "--name", "taken", "-d"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("Execute err=nil want collision refusal")
+	}
+	for _, want := range []string{`cell "taken" already exists`, "kuke run taken", "kuke delete cell taken"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err=%q missing substring %q", err, want)
+		}
+	}
+	if fc.createCalls != 0 {
+		t.Errorf("CreateCell calls=%d want 0 (refuse on collision)", fc.createCalls)
+	}
+}
+
+// TestRun_FromImage_Positional_Rejected: the positional names an existing cell,
+// so it is mutually exclusive with the --image create source; the error points
+// the operator at --name.
+func TestRun_FromImage_Positional_Rejected(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"mycell", "--image", "docker.io/library/alpine:3", "-d"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("Execute err=nil want positional/--image mutex error")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive with --image") {
+		t.Errorf("err=%q missing the --image mutex wording", err)
+	}
+	if !strings.Contains(err.Error(), "--name") {
+		t.Errorf("err=%q should point the operator at --name", err)
+	}
+	if fc.createCalls != 0 {
+		t.Errorf("CreateCell calls=%d want 0", fc.createCalls)
+	}
+}
+
+// TestRun_FromImage_MutexWithOtherSources: --image is itself a source, mutually
+// exclusive with -f and every from-* source (cobra mutex).
+func TestRun_FromImage_MutexWithOtherSources(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"from-blueprint", []string{"--image", "alpine", "--from-blueprint", "web", "-d"}},
+		{"from-config", []string{"--image", "alpine", "--from-config", "prod", "-d"}},
+		{"clone", []string{"--image", "alpine", "--clone", "src", "-d"}},
+		{"file", []string{"--image", "alpine", "-f", "/tmp/never-read.yaml", "-d"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+			fc := &fakeClient{}
+			cmd, _ := newCmd(t, fc)
+			cmd.SetArgs(tc.args)
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatalf("Execute err=nil want source-mutex error for %v", tc.args)
+			}
+			if fc.createCalls != 0 || fc.startCalls != 0 {
+				t.Errorf("CreateCell=%d StartCell=%d want both 0", fc.createCalls, fc.startCalls)
+			}
+		})
+	}
+}
+
+// TestRun_FromImage_CommandOverride: --command overrides the synthesized
+// container's entrypoint.
+func TestRun_FromImage_CommandOverride(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return imageCreateResult(doc), nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"--image", "docker.io/library/alpine:3", "--command", "/bin/bash", "-d"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := fc.createDoc.Spec.Containers[0].Command; got != "/bin/bash" {
+		t.Errorf("command=%q want /bin/bash (override)", got)
+	}
+}
+
+// TestRun_Command_RejectedWithoutImage: --command is meaningful only with
+// --image; combined with any other source it is rejected rather than dropped.
+func TestRun_Command_RejectedWithoutImage(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"mycell", "--command", "/bin/bash", "-d"})
+
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "--command is only valid with --image") {
+		t.Fatalf("err=%v want `--command is only valid with --image`", err)
+	}
+	if fc.createCalls != 0 {
+		t.Errorf("CreateCell calls=%d want 0", fc.createCalls)
+	}
+}
+
+// TestRun_FromImage_ComposesWithEnvAndRm: --image threads --env onto the
+// transport-only RuntimeEnv and --rm onto AutoDelete, the same way the -f path
+// does.
+func TestRun_FromImage_ComposesWithEnvAndRm(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return imageCreateResult(doc), nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"--image", "docker.io/library/alpine:3", "--env", "LABEL=bug", "--rm", "-d"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !reflect.DeepEqual(fc.createDoc.Spec.RuntimeEnv, []string{"LABEL=bug"}) {
+		t.Errorf("RuntimeEnv=%v want [LABEL=bug]", fc.createDoc.Spec.RuntimeEnv)
+	}
+	if !fc.createDoc.Spec.AutoDelete {
+		t.Error("AutoDelete=false want true (--rm)")
 	}
 }
 
