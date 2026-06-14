@@ -853,16 +853,20 @@ func (r *Exec) populateCellContainerStatuses(cell *intmodel.Cell) error {
 			exitCode = obs.ExitCode
 		}
 
-		// RestartCount/RestartTime require restart bookkeeping the runner does
-		// not yet track; deferred to #1146 per issue #1137's "scope that part
-		// separately". They stay at their zero values for now.
+		// RestartCount/RestartTime require restart bookkeeping, but the runner has
+		// no reconciler-driven container restart-on-exit mechanism today
+		// (restartPolicy is reap-veto only, #1003) — nothing re-creates or
+		// re-starts an exited container task, so there is nothing to count from.
+		// The fields are therefore intentionally always-zero. Building the
+		// restart-on-exit mechanism and populating these counters is tracked by
+		// #1151.
 		status := intmodel.ContainerStatus{
 			Name:         containerSpec.ID,
 			ID:           containerSpec.ID,
 			CreatedAt:    createdAt,
 			State:        obs.State,
-			RestartCount: 0,           // TODO(#1146): restart bookkeeping
-			RestartTime:  time.Time{}, // TODO(#1146): restart bookkeeping
+			RestartCount: 0,           // intentionally zero — see comment above (#1151)
+			RestartTime:  time.Time{}, // intentionally zero — see comment above (#1151)
 			StartTime:    startTime,
 			FinishTime:   finishTime,
 			ExitCode:     exitCode,
