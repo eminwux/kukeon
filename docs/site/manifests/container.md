@@ -109,14 +109,15 @@ Only the root container is exempt: the root's exit drives cell-level lifecycle d
 
 Each entry in `spec.volumes` is a mount attached to the container. The `kind` discriminator selects which OCI mount type the runtime emits.
 
-| Field       | Type            | Required          | Description                                                                                                               |
-| ----------- | --------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `kind`      | `bind`\|`tmpfs` | no                | Mount type. Empty means `bind` for back-compat with YAML authored before the discriminator existed.                       |
-| `source`    | string          | yes for `bind`    | Absolute host path. Must exist at apply time. Named / managed volumes are not supported. Must be empty for `kind: tmpfs`. |
-| `target`    | string          | yes               | Absolute path inside the container                                                                                        |
-| `readOnly`  | bool            | no                | Mount read-only when `true` (writes fail with `EROFS`). Defaults to `false`.                                              |
-| `sizeBytes` | int             | no (`tmpfs` only) | Tmpfs size in bytes. When non-zero, the standard tmpfs `size=` option is set. Ignored for `bind`.                         |
-| `mode`      | uint            | no (`tmpfs` only) | Tmpfs root-directory mode (e.g. `0755`). When non-zero, the standard tmpfs `mode=` option is set. Ignored for `bind`.     |
+| Field       | Type                     | Required             | Description                                                                                                                                                                                                                                  |
+| ----------- | ------------------------ | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kind`      | `bind`\|`tmpfs`\|`volume` | no                   | Mount type. Empty means `bind` for back-compat with YAML authored before the discriminator existed.                                                                                                                                          |
+| `source`    | string                   | see `kind`           | For `kind: bind` (the default): absolute host path. For `kind: volume`: the name of a Volume in the container's **own** scope, resolved by walking realm/space/stack most-specific first (mutually exclusive with `volumeRef`). Must be empty for `kind: tmpfs`. |
+| `volumeRef` | `VolumeRef`              | one of for `volume`  | Cross-scope reference to a daemon-managed `kind: Volume` by name + scope coordinates. Only honored when `kind: volume`, and mutually exclusive with `source` (exactly one of the two must be set). See the sub-table below.                    |
+| `target`    | string                   | yes                  | Absolute path inside the container                                                                                                                                                                                                          |
+| `readOnly`  | bool                     | no                   | Mount read-only when `true` (writes fail with `EROFS`). Defaults to `false`.                                                                                                                                                                |
+| `sizeBytes` | int                      | no (`tmpfs` only)    | Tmpfs size in bytes. When non-zero, the standard tmpfs `size=` option is set. Ignored for `bind`.                                                                                                                                           |
+| `mode`      | uint                     | no (`tmpfs` only)    | Tmpfs root-directory mode (e.g. `0755`). When non-zero, the standard tmpfs `mode=` option is set. Ignored for `bind`.                                                                                                                       |
 
 ```yaml
 volumes:
@@ -127,7 +128,26 @@ volumes:
     target: /tmp
     sizeBytes: 268435456 # 256 MiB
     mode: 0755
+  - kind: volume # same-scope Volume by name
+    source: cache
+    target: /var/cache
+  - kind: volume # cross-scope Volume by reference
+    target: /shared
+    volumeRef:
+      name: assets
+      realm: kuke-system
 ```
+
+A `kind: volume` mount references a daemon-managed `kind: Volume` and bind-mounts its on-disk directory at `target`. The referenced Volume's directory survives both container recreation and the mounting cell's deletion — the cell references the Volume, it does not own it. Exactly one of `source` (same-scope name) or `volumeRef` (cross-scope) must be set.
+
+`volumeRef` carries the referenced Volume's `name` plus its scope coordinates, following the same contract as `kind: Secret`'s `secretRef` minus the `cell` coordinate (a Volume is never cell-scoped): `realm` is always required, and a deeper coordinate (`space` → `stack`) may only be set when every shallower one is.
+
+| `VolumeRef` field | Type   | Required | Description                                    |
+| ----------------- | ------ | -------- | ---------------------------------------------- |
+| `name`            | string | yes      | The referenced Volume's name within its scope  |
+| `realm`           | string | yes      | Always-required top-level scope coordinate     |
+| `space`           | string | no       | Scopes the reference to a space within `realm` |
+| `stack`           | string | no       | Scopes the reference to a stack within `space` |
 
 ### devices
 
