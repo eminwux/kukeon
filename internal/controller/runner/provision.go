@@ -1612,6 +1612,11 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 					"failed to chown attachable tty dir for %s: %w", containerdID, chownErr,
 				)
 			}
+			if volErr := r.volumePostCreateChown(namespace, containerSpec); volErr != nil {
+				return nil, fmt.Errorf(
+					"failed to chown volume dir for %s: %w", containerdID, volErr,
+				)
+			}
 		}
 	}
 
@@ -2109,6 +2114,11 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 				if chownErr := r.attachablePostCreateChown(internalRealm.Spec.Namespace, containerSpec); chownErr != nil {
 					return nil, fmt.Errorf(
 						"failed to chown attachable tty dir for %s: %w", containerdID, chownErr,
+					)
+				}
+				if volErr := r.volumePostCreateChown(internalRealm.Spec.Namespace, containerSpec); volErr != nil {
+					return nil, fmt.Errorf(
+						"failed to chown volume dir for %s: %w", containerdID, volErr,
 					)
 				}
 			}

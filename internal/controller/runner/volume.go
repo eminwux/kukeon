@@ -41,8 +41,9 @@ const volumesDirMode os.FileMode = 0o755
 // inside inherit the kukeon group, mirroring attachableTTYDirRootMode's
 // model — the directory is owned root:kukeon so the daemon and kuke-group
 // operators can manage it without exposing volume contents world-wide. The
-// mounting container's own uid is wired in at mount time in step 4 (#1016),
-// the same two-phase shape as attachablePostCreateChown.
+// mounting container's own uid is wired in as the directory owner at container
+// create by volumePostCreateChown, the same two-phase shape as
+// attachablePostCreateChown (step 4 follow-up, #1291).
 const volumeDirRootMode os.FileMode = os.ModeSetgid | 0o0770
 
 // volumeDirFallbackMode is the mode used when no kukeon group GID is
@@ -70,6 +71,22 @@ func volumeDirInitialPerms(kukeonGroupGID int) (os.FileMode, int) {
 // MkdirAll is idempotent, so re-applying an existing volume re-asserts the
 // mode/owner and reports created=false. The caller (ReconcileVolume) is
 // responsible for having verified the scope exists.
+//
+// Cross-uid sharing contract. At container create the mounting container's
+// resolved process uid is granted *owner* write on the resolved directory by
+// volumePostCreateChown, so a non-root workload can write into the Volume even
+// without kukeon-group membership. Only the owner is reset — the setgid
+// root:kukeon group is preserved — so two cells that mount the same Volume as
+// different non-root uids each re-own it at their own create and the last
+// writer wins the owner bit. Cross-uid *shared* write therefore relies on the
+// kukeon group (setgid group-write), not the owner chown. Two consequences of
+// the WriteVolume re-apply make this durable rather than racy: when the kukeon
+// group is configured a reconcile re-apply chowns the owner back to root, but
+// group-write persists; in the no-group fallback WriteVolume issues no chown at
+// all, so the mount-time owner grant survives reconcile. Per-cell volume
+// identity (step 5, #1294 — ${CELL_NAME} claims) gives each cell its own Volume
+// directory and is the supported pattern when distinct uids each need exclusive
+// owner-write. Step 4 follow-up (#1291).
 func (r *Exec) WriteVolume(volume intmodel.Volume) (bool, error) {
 	md := volume.Metadata
 	dir := fs.VolumesDir(r.opts.RunPath, md.Realm, md.Space, md.Stack)
@@ -132,6 +149,99 @@ func (r *Exec) WriteVolume(volume intmodel.Volume) (bool, error) {
 		"reclaimPolicy", string(volume.Spec.ReclaimPolicy),
 	)
 	return created, nil
+}
+
+// volumePostCreateChown grants the mounting container's resolved process uid
+// owner write on every writable kind: volume directory the container mounts,
+// mirroring attachablePostCreateChown's two-phase shape: containerd resolves
+// the image USER (and any container.user override) only when the runtime spec
+// is built during container create, so the uid is unknowable before
+// CreateContainerFromSpec. Without this a non-root workload that carries
+// neither uid 0 nor the kukeon group GID cannot write into a Volume it mounts
+// on a host where no kukeon group is configured (the fallback dir is root:root
+// 0o770).
+//
+// A no-op when the container declares no kind: volume mount (the common case
+// pays no containerd round-trip) and when the resolved uid is 0 (a root
+// container already owns the root-owned dir). Read-only mounts are skipped —
+// the container cannot write through them, so re-owning the directory away from
+// another mounter would be pointless. The mount references are re-resolved from
+// the stored spec via the same ResolveVolumeMount walk the create path uses;
+// CreateContainerFromSpec rewrites only its own by-value copy of the spec, so
+// the runner's spec still carries the kind: volume reference here.
+//
+// Multi-mounter contract: only the *owner* is reset, so cross-uid shared write
+// relies on the kukeon group (setgid group-write), not this chown — see the
+// WriteVolume godoc for the full cross-uid sharing contract. Step 4 follow-up
+// (#1291).
+func (r *Exec) volumePostCreateChown(namespace string, spec intmodel.ContainerSpec) error {
+	scope := ctr.VolumeScope{
+		Realm: spec.RealmName,
+		Space: spec.SpaceName,
+		Stack: spec.StackName,
+	}
+	var targets []string
+	for i := range spec.Volumes {
+		m := spec.Volumes[i]
+		if m.Kind != intmodel.VolumeKindVolume || m.ReadOnly {
+			continue
+		}
+		resolved, err := ctr.ResolveVolumeMount(r.opts.RunPath, scope, m)
+		if err != nil {
+			// The mount already resolved when the container was created, so a
+			// miss here is unexpected — surface it rather than silently leaving
+			// a directory the workload expects to be writable owned by root.
+			return fmt.Errorf("resolve volume mount for target %q: %w", m.Target, err)
+		}
+		targets = append(targets, resolved.HostPath)
+	}
+	if len(targets) == 0 {
+		return nil
+	}
+
+	containerdID := spec.ContainerdID
+	if containerdID == "" {
+		containerdID = spec.ID
+	}
+	container, err := r.ctrClient.GetContainer(namespace, containerdID)
+	if err != nil {
+		return fmt.Errorf("get container %q: %w", containerdID, err)
+	}
+	uid, err := r.ctrClient.ContainerProcessUID(namespace, container)
+	if err != nil {
+		return fmt.Errorf("resolve process uid for %q: %w", containerdID, err)
+	}
+	if uid == 0 {
+		// Root container: it already owns the root-owned volume dir, and a
+		// reconcile re-apply would chown it back to root anyway. Nothing to grant.
+		return nil
+	}
+
+	for _, path := range targets {
+		if chownErr := r.chownVolumeDirToUID(path, int(uid)); chownErr != nil {
+			return chownErr
+		}
+	}
+	return nil
+}
+
+// chownVolumeDirToUID resets a provisioned Volume directory's owner to uid while
+// preserving the group and the setgid + 0o770 contract WriteVolume established.
+// The gid is left untouched (Chown -1) so the kukeon group survives the owner
+// flip and the kukeon-group-write path is never regressed; the mode is then
+// re-asserted from volumeDirInitialPerms so the setgid bit is explicitly
+// guaranteed (root's chown preserves it via CAP_FSETID, but the re-chmod makes
+// the group-inheritance guarantee independent of that, matching WriteVolume's
+// "assert the contract unconditionally" stance).
+func (r *Exec) chownVolumeDirToUID(path string, uid int) error {
+	if err := os.Chown(path, uid, -1); err != nil {
+		return fmt.Errorf("%w: chown volume dir %q to uid %d: %w", errdefs.ErrWriteVolume, path, uid, err)
+	}
+	mode, _ := volumeDirInitialPerms(r.opts.KukeonGroupGID)
+	if err := os.Chmod(path, mode); err != nil {
+		return fmt.Errorf("%w: chmod volume dir %q: %w", errdefs.ErrWriteVolume, path, err)
+	}
+	return nil
 }
 
 // GetVolume reports whether a single named, scoped Volume exists on disk and

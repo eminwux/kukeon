@@ -20,13 +20,18 @@
 package runner
 
 import (
+	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"os"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
+	containerd "github.com/containerd/containerd/v2/client"
+	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
@@ -344,4 +349,182 @@ func TestVolume_NotMistakenForChildScope(t *testing.T) {
 	if !equalStrings(got, want) {
 		t.Errorf("ListBlueprints(all) = %v, want %v (volumes/ subdir must be ignored, not traversed as a phantom space)", got, want)
 	}
+}
+
+// volumeChownFakeClient makes ContainerProcessUID configurable on top of the
+// near-empty specHashFakeClient so volumePostCreateChown's uid-resolution hop
+// can be driven without a real containerd container. getContainerFn (set by the
+// caller) returns a nil Container — the fake's ContainerProcessUID ignores the
+// container argument, so a nil value is sufficient.
+type volumeChownFakeClient struct {
+	*specHashFakeClient
+
+	uid uint32
+}
+
+func (c *volumeChownFakeClient) ContainerProcessUID(string, containerd.Container) (uint32, error) {
+	return c.uid, nil
+}
+
+var _ ctr.Client = (*volumeChownFakeClient)(nil)
+
+func newVolumeChownExec(runPath string, kukeonGID int, uid uint32) *Exec {
+	return &Exec{
+		ctx:    context.Background(),
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		opts:   Options{RunPath: runPath, KukeonGroupGID: kukeonGID},
+		ctrClient: &volumeChownFakeClient{
+			specHashFakeClient: &specHashFakeClient{
+				getContainerFn: func(string, string) (containerd.Container, error) {
+					return nil, nil
+				},
+			},
+			uid: uid,
+		},
+	}
+}
+
+// TestVolumePostCreateChown_GrantsOwnerWriteToNonRootUID locks AC #1/#4 (#1291):
+// a kind: volume mount's resolved directory is chowned to the mounting
+// container's resolved process uid at container create, so a non-root workload
+// with no kukeon-group membership owns — and can write into — the Volume. Runs
+// in the no-kukeon-group fallback (0o770) the test Exec uses so it needs no
+// privilege: when the suite runs as root the chown to a non-root uid is
+// observable; otherwise it self-chowns and the uid assertion is skipped (the
+// path still exercises end-to-end), mirroring the attachable chown tests.
+func TestVolumePostCreateChown_GrantsOwnerWriteToNonRootUID(t *testing.T) {
+	runPath := t.TempDir()
+
+	// Provision the volume dir owned by the current user; WriteVolume's
+	// chown-to-root path is gid-gated and a no-op in this fallback config.
+	seed := newMetadataTestExec(t, runPath, time.Now())
+	if _, err := seed.WriteVolume(intmodel.Volume{
+		Metadata: intmodel.VolumeMetadata{Name: "data", Realm: "default"},
+	}); err != nil {
+		t.Fatalf("WriteVolume() error = %v", err)
+	}
+	volPath := fs.VolumePath(runPath, "default", "", "", "data")
+
+	root := os.Geteuid() == 0
+	targetUID := os.Geteuid()
+	if root {
+		targetUID = 1000
+	}
+
+	exec := newVolumeChownExec(runPath, 0, uint32(targetUID))
+	spec := intmodel.ContainerSpec{
+		ID:        "c1",
+		RealmName: "default",
+		Volumes: []intmodel.VolumeMount{
+			{Kind: intmodel.VolumeKindVolume, Source: "data", Target: "/data"},
+		},
+	}
+	if err := exec.volumePostCreateChown("default.kukeon.io", spec); err != nil {
+		t.Fatalf("volumePostCreateChown() error = %v", err)
+	}
+
+	// Owner is the mounting container's uid (observable only as root); the
+	// directory stays group-writable 0o770 so the owner-write grant is real.
+	assertOwnedBy(t, volPath, targetUID, root)
+	info, err := os.Stat(volPath)
+	if err != nil {
+		t.Fatalf("stat volume dir: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o770 {
+		t.Errorf("volume dir mode = %o, want 770 (owner+group writable)", perm)
+	}
+}
+
+// TestVolumePostCreateChown_PreservesKukeonGroupWrite locks AC #2 (#1291): the
+// owner flip must not regress the kukeon-group-write path — the setgid bit and
+// the kukeon group survive the chown, so attachable cells (and any other
+// kukeon-group member) keep group-write on a shared Volume. Requires root to
+// provision a setgid root:<gid> dir and to chown across uids.
+func TestVolumePostCreateChown_PreservesKukeonGroupWrite(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("requires root to provision a setgid root:kukeon volume dir and chown across uids")
+	}
+	const kukeonGID = 1000
+	const targetUID = 1001
+	runPath := t.TempDir()
+
+	r := newVolumeChownExec(runPath, kukeonGID, targetUID)
+	if _, err := r.WriteVolume(intmodel.Volume{
+		Metadata: intmodel.VolumeMetadata{Name: "data", Realm: "default"},
+	}); err != nil {
+		t.Fatalf("WriteVolume() error = %v", err)
+	}
+	volPath := fs.VolumePath(runPath, "default", "", "", "data")
+
+	if err := r.chownVolumeDirToUID(volPath, targetUID); err != nil {
+		t.Fatalf("chownVolumeDirToUID() error = %v", err)
+	}
+
+	stat := statSys(t, volPath)
+	if int(stat.Uid) != targetUID {
+		t.Errorf("owner uid = %d, want %d", stat.Uid, targetUID)
+	}
+	if int(stat.Gid) != kukeonGID {
+		t.Errorf("group gid = %d, want %d (kukeon group must survive the owner flip)", stat.Gid, kukeonGID)
+	}
+	info, err := os.Stat(volPath)
+	if err != nil {
+		t.Fatalf("stat volume dir: %v", err)
+	}
+	if info.Mode()&os.ModeSetgid == 0 {
+		t.Errorf("setgid bit lost after owner chown: %v (group inheritance regressed)", info.Mode())
+	}
+	if perm := info.Mode().Perm(); perm != 0o770 {
+		t.Errorf("volume dir mode = %o, want 770 (group-write preserved)", perm)
+	}
+}
+
+// TestVolumePostCreateChown_Skips locks the two no-op branches (#1291): a spec
+// with no kind: volume mount never reaches containerd (so a failing GetContainer
+// would be a bug surfacing as an error), and a root-uid container leaves the
+// root-owned dir untouched — the early return means chownVolumeDirToUID(path, 0)
+// (which a non-root daemon could not even perform) never runs.
+func TestVolumePostCreateChown_Skips(t *testing.T) {
+	runPath := t.TempDir()
+	seed := newMetadataTestExec(t, runPath, time.Now())
+	if _, err := seed.WriteVolume(intmodel.Volume{
+		Metadata: intmodel.VolumeMetadata{Name: "data", Realm: "default"},
+	}); err != nil {
+		t.Fatalf("WriteVolume() error = %v", err)
+	}
+
+	t.Run("no volume mount: no containerd round-trip", func(t *testing.T) {
+		// GetContainer is left at the specHashFakeClient default (NotFound); if
+		// the function reached it the call would error.
+		exec := &Exec{
+			ctx:       context.Background(),
+			logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+			opts:      Options{RunPath: runPath},
+			ctrClient: &volumeChownFakeClient{specHashFakeClient: &specHashFakeClient{}, uid: 1000},
+		}
+		spec := intmodel.ContainerSpec{
+			ID:        "c1",
+			RealmName: "default",
+			Volumes: []intmodel.VolumeMount{
+				{Kind: intmodel.VolumeKindBind, Source: "/host", Target: "/in"},
+			},
+		}
+		if err := exec.volumePostCreateChown("default.kukeon.io", spec); err != nil {
+			t.Errorf("want nil (no kind: volume mount, ctrClient untouched), got %v", err)
+		}
+	})
+
+	t.Run("root container uid: dir left root-owned", func(t *testing.T) {
+		exec := newVolumeChownExec(runPath, 0, 0)
+		spec := intmodel.ContainerSpec{
+			ID:        "c1",
+			RealmName: "default",
+			Volumes: []intmodel.VolumeMount{
+				{Kind: intmodel.VolumeKindVolume, Source: "data", Target: "/data"},
+			},
+		}
+		if err := exec.volumePostCreateChown("default.kukeon.io", spec); err != nil {
+			t.Errorf("want nil (root uid short-circuits the chown), got %v", err)
+		}
+	})
 }

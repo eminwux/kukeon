@@ -195,7 +195,14 @@ const (
 	// name (Source, same-scope) or by VolumeRef (cross-scope) and bind-mounts
 	// its resolved on-disk directory at Target. Resolved at container-create
 	// time; the referenced Volume's directory survives container recreation and
-	// the mounting cell's deletion. Step 4 (#1016).
+	// the mounting cell's deletion. At create the resolved directory's owner is
+	// chowned to the mounting container's process uid so a non-root workload can
+	// write into it even without kukeon-group membership; only the owner is
+	// reset, so cross-uid sharing of one Volume by cells running as different
+	// uids relies on the kukeon group (setgid group-write), and per-cell volume
+	// identity (${CELL_NAME}, step 5 #1294) is the pattern for distinct
+	// owner-write. See runner.WriteVolume's "Cross-uid sharing contract" godoc.
+	// Step 4 (#1016), owner chown #1291.
 	VolumeKindVolume VolumeKind = "volume"
 )
 
