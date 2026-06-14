@@ -236,6 +236,17 @@ func TestListVolumes_FilterGuard(t *testing.T) {
 	}
 }
 
+// TestListVolumes_RejectsUnsafeFilterSegment confirms a `..` filter coordinate
+// is rejected before the runner is touched (issue #1289), bringing the list
+// path to parity with the single-volume lookup path.
+func TestListVolumes_RejectsUnsafeFilterSegment(t *testing.T) {
+	ctrl := setupTestController(t, &fakeRunner{})
+	_, err := ctrl.ListVolumes("default", "..", "")
+	if !errors.Is(err, errdefs.ErrVolumeCoordUnsafe) {
+		t.Errorf("ListVolumes(unsafe space) = %v, want ErrVolumeCoordUnsafe", err)
+	}
+}
+
 // TestListVolumes_PassesThrough confirms a valid filter reaches the runner and
 // returns its result.
 func TestListVolumes_PassesThrough(t *testing.T) {
