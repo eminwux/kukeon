@@ -222,6 +222,11 @@ func MaterializeWithName(
 		)
 	}
 
+	// Resolve the per-cell ${CELL_NAME} volume template now that the cell name
+	// exists, so a 1:N binding mints a distinct private Volume per stamped cell
+	// (#1017).
+	ExpandPerCellVolumes(cellName, containers)
+
 	return v1beta1.CellDoc{
 		APIVersion: v1beta1.APIVersionV1Beta1,
 		Kind:       v1beta1.KindCell,

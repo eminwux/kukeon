@@ -1434,6 +1434,7 @@ func volumeMountsToInternal(in []ext.VolumeMount) []intmodel.VolumeMount {
 			ReadOnly:  v.ReadOnly,
 			SizeBytes: v.SizeBytes,
 			Mode:      v.Mode,
+			Ensure:    v.Ensure,
 		}
 	}
 	return out
@@ -1453,6 +1454,7 @@ func volumeMountsToExternal(in []intmodel.VolumeMount) []ext.VolumeMount {
 			ReadOnly:  v.ReadOnly,
 			SizeBytes: v.SizeBytes,
 			Mode:      v.Mode,
+			Ensure:    v.Ensure,
 		}
 	}
 	return out

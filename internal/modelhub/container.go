@@ -225,6 +225,11 @@ type VolumeMount struct {
 	// Only honored when Kind == VolumeKindTmpfs; zero leaves the kernel
 	// default (01777).
 	Mode uint32
+	// Ensure auto-provisions the referenced kind: Volume at cell create/start
+	// when absent (opt-in "create on first reference"). Set by materialization
+	// on per-cell (${CELL_NAME}) volume claims; idempotent so an already-bound
+	// cell re-binds its existing Volume. Step 5 (#1017).
+	Ensure bool
 }
 
 // VolumeRef mirrors the v1beta1 VolumeRef payload — a name + scope pointing at

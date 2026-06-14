@@ -85,6 +85,11 @@ func MaterializeWithName(
 	}
 
 	cellName := strings.TrimSpace(name)
+	// Resolve the per-cell ${CELL_NAME} volume template against the cell's name
+	// so a Config 1:N binding mints a distinct private Volume per stamped cell
+	// (#1017). Shares cellblueprint's expansion so blueprint and config bindings
+	// behave identically.
+	cellblueprint.ExpandPerCellVolumes(cellName, containers)
 	return v1beta1.CellDoc{
 		APIVersion: v1beta1.APIVersionV1Beta1,
 		Kind:       v1beta1.KindCell,

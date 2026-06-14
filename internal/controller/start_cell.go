@@ -56,6 +56,14 @@ func (b *Exec) StartCell(cell intmodel.Cell) (StartCellResult, error) {
 	// bare `kuke start <cell>` never sets RuntimeEnv).
 	internalCell.Spec.RuntimeEnv = cell.Spec.RuntimeEnv
 
+	// Auto-provision per-cell (ensure) volumes before any start/recreate path
+	// rebuilds a container OCI spec, so the volume-reference resolver finds the
+	// on-disk directory. Idempotent, so a restart re-binds the cell's existing
+	// Volume and preserves its contents (#1017).
+	if err = b.ensurePerCellVolumes(internalCell); err != nil {
+		return res, err
+	}
+
 	// Recovery routing for the terminal-by-derivation states, evaluated BEFORE
 	// the "already running" guard below. The ordering is load-bearing (#1274): a
 	// sticky Error/Failed cell keeps its root container alive — cell state is

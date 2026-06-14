@@ -334,6 +334,18 @@ type VolumeMount struct {
 	ReadOnly  bool       `json:"readOnly,omitempty"  yaml:"readOnly,omitempty"`
 	SizeBytes int64      `json:"sizeBytes,omitempty" yaml:"sizeBytes,omitempty"`
 	Mode      uint32     `json:"mode,omitempty"      yaml:"mode,omitempty"`
+	// Ensure, when true on a kind: volume mount, auto-provisions the referenced
+	// Volume at cell create/start if it does not already exist — Docker's
+	// "create on first reference" semantics (umbrella #1015), the opt-in
+	// counterpart to step 4's default "missing volume is a hard error". It is
+	// the provisioning half of the per-cell volume claim: materialization sets
+	// Ensure on any volume mount whose source embeds the ${CELL_NAME} template
+	// (cellblueprint.ExpandPerCellVolumes), since a per-cell Volume cannot be
+	// pre-created for a not-yet-named cell. Auto-create is idempotent (an
+	// already-bound cell re-binds its existing Volume, never minting a fresh
+	// one) so reconcile and recreate preserve the Volume's contents. Step 5
+	// (#1017).
+	Ensure bool `json:"ensure,omitempty"    yaml:"ensure,omitempty"`
 }
 
 // VolumeRef points at a daemon-managed kind: Volume (issue #1018) by name and
