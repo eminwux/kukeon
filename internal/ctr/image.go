@@ -107,6 +107,14 @@ func (c *client) pullImage(namespace string, imageRef string, creds []RegistryCr
 	nsCtx := c.namespaceCtx(namespace)
 	cc := c.conn()
 
+	// Canonicalize bare references (e.g. "busybox:latest",
+	// "docker.io/busybox:latest") to the fully qualified docker.io/library form
+	// before either the local lookup or the network pull — containerd's resolver
+	// parses the raw ref as a URL and rejects "dummy://busybox:latest" otherwise.
+	// kukebuild stores images under this same normalized name, so the local
+	// GetImage hit below stays consistent with built/loaded images.
+	imageRef = NormalizeImageReference(imageRef)
+
 	// Try to get the image locally first
 	image, err := cc.GetImage(nsCtx, imageRef)
 	if err == nil {
