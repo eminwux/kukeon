@@ -70,12 +70,15 @@ func TestRestartPolicyPermitsContainerReap(t *testing.T) {
 }
 
 // TestReconcileCell_AutoDeleteOverridesRestartPolicyNever is the end-to-end
-// pin for the rule that `--rm` / Spec.AutoDelete overrides restartPolicy
-// entirely: a cell that opted into auto-delete is reaped on exit even when its
-// non-root container carries an explicit `restartPolicy: never` (which would
-// otherwise block the wind-down path). This is what keeps `kuke run --rm`
-// deterministic regardless of the cell's restart policy — matching
-// `docker run --rm`. Modeled on TestReconcileCell_PostReboot_TransitionsToExited:
+// pin for the rule that `--rm` / Spec.AutoDelete overrides the restartPolicy
+// *preserve* gate: a cell that opted into auto-delete is reaped on exit even
+// when its non-root container carries an explicit `restartPolicy: never` (which
+// would otherwise block the wind-down path). `--rm` does NOT override a
+// restart-requiring policy — that case is pinned by
+// TestReconcileCell_RestartFiresAndSuppressesWindDown (`--rm` + `always`) and
+// TestReconcileCell_AutoDeleteWithOnFailureRestartWins (`--rm` + `on-failure`
+// on a non-zero exit), where the restart fires first and the cell is preserved.
+// Modeled on TestReconcileCell_PostReboot_TransitionsToExited:
 // the reboot-wiped tasks (no exit info ⇒ exit 0) derive CellStateExited, the
 // auto-delete trigger, and the latched ReadyObserved opens the gate. An
 // explicit `never` also keeps the restart-on-exit pass from firing, so the

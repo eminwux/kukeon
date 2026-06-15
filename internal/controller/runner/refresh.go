@@ -827,11 +827,17 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 		cell.Status.Reason = originalStatus.Reason
 		cell.Status.Message = originalStatus.Message
 	case restartNone:
-		// Auto-delete (`--rm` / Spec.AutoDelete) is an explicit "delete the cell
-		// once the workload exits" directive that overrides restartPolicy
-		// entirely — matching `docker run --rm`, which removes the container on
-		// any exit. So the auto-delete branch is NOT gated on the RestartPolicy
-		// reap check.
+		// No restart is owed for this exit — the restartFired/restartDeferred
+		// cases above already returned. Auto-delete (`--rm` / Spec.AutoDelete) is
+		// an explicit "delete the cell once the workload exits" directive that
+		// overrides the restartPolicy *preserve* gate: a `never` (or clean-exit
+		// `on-failure`) container that restartPolicyPermitsCellReap would
+		// otherwise keep in Stopped is reaped here instead. It does NOT override a
+		// restart-requiring policy — `always` (any exit) and `on-failure`
+		// (non-zero exit) fire the restart pass above and win this tick, so the
+		// cell is relaunched, not deleted. The auto-delete branch is therefore NOT
+		// gated on the RestartPolicy reap check, but it is reached only once no
+		// restart is owed (cf. `docker run --rm` cleaning up a finished workload).
 		if shouldAutoDeleteCell(cell.Spec.AutoDelete, newState, cell.Status.ReadyObserved) {
 			return r.autoDeleteCell(cell)
 		}
@@ -1054,8 +1060,10 @@ func shouldWindDownCell(cell intmodel.Cell, newState intmodel.CellState) bool {
 // gate before shouldWindDownCell — a single container's `never` (or
 // `on-failure` with a clean exit) blocks the cell-level reap, preserving
 // the workload in Stopped state so the operator can decide explicitly. The
-// auto-delete (`--rm`) branch is NOT gated on this — an explicit
-// AutoDelete overrides restartPolicy entirely (see ReconcileCell).
+// auto-delete (`--rm`) branch is NOT gated on this — an explicit AutoDelete
+// reaps such a preserved exit anyway. It does not override a restart-requiring
+// policy, which fires earlier in ReconcileCell and wins the tick (see
+// ReconcileCell).
 //
 // Decision per terminally-exited non-root container, keyed on its
 // ContainerStatus.ExitCode (populated by GetContainerObservation):

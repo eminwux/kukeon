@@ -423,3 +423,89 @@ func TestReconcileCell_RestartFiresAndSuppressesWindDown(t *testing.T) {
 		t.Errorf("relaunched %v, want a single relaunch of %q", fired, workloadID)
 	}
 }
+
+// TestReconcileCell_AutoDeleteWithOnFailureRestartWins pins the corrected
+// precedence for `--rm` + `restartPolicy: on-failure` on a non-zero exit: the
+// exit owes a restart, so the restart pass fires first and the cell is
+// preserved for the tick — `--rm` does NOT reap it. (A clean-exit `on-failure`
+// owes no restart and is reaped by `--rm`, the same restartNone → autoDelete
+// path pinned by TestReconcileCell_AutoDeleteOverridesRestartPolicyNever.)
+// Companion to TestReconcileCell_RestartFiresAndSuppressesWindDown, which pins
+// the `always` case; together they pin that `--rm` overrides only the
+// restartPolicy *preserve* gate, never an owed restart.
+func TestReconcileCell_AutoDeleteWithOnFailureRestartWins(t *testing.T) {
+	realm, space, stack, cellName := "default", "kukeon", "kukeon", "web"
+	rootID, workloadID := "root", "workload"
+	rootContainerdID := space + "_" + stack + "_" + cellName + "_" + rootID
+	workloadContainerdID := space + "_" + stack + "_" + cellName + "_" + workloadID
+
+	fake := &deleteCellFakeClient{
+		// Cgroup present — the normal (non-heal) reconcile path.
+		loadCgroupFn: func(string, string) (*cgroup2.Manager, error) {
+			return &cgroup2.Manager{}, nil
+		},
+		existsContainerFn: func(_, _ string) (bool, error) { return true, nil },
+		// Root still running; workload exited non-zero (Stopped, code 1) — an
+		// on-failure exit that owes a restart. A non-zero ExitTime is required for
+		// the fresh exit code to propagate into ContainerStatus.ExitCode (the
+		// FinishTime/ExitCode lockstep in buildContainerStatuses, #1137).
+		taskStatusFn: func(_, id string) (containerd.Status, error) {
+			if id == workloadContainerdID {
+				return containerd.Status{
+					Status:     containerd.Stopped,
+					ExitStatus: 1,
+					ExitTime:   time.Date(2026, 6, 7, 20, 35, 4, 0, time.UTC),
+				}, nil
+			}
+			return containerd.Status{Status: containerd.Running}, nil
+		},
+		// Neither wind-down nor auto-delete may fire while the restart is owed.
+		stopContainerFn: func(_, _ string, _ ctr.StopContainerOptions) (*containerd.ExitStatus, error) {
+			t.Errorf("stopContainer called — reap must be suppressed by the fired restart")
+			return nil, nil
+		},
+		deleteContainerFn: func(_, _ string, _ ctr.ContainerDeleteOptions) error {
+			t.Errorf("deleteContainer called — auto-delete must be suppressed by the fired restart")
+			return nil
+		},
+	}
+	r := newDeleteCellTestExec(t, fake)
+	seedDeleteCellRealm(t, r, realm)
+	seedPostRebootCell(t, r, realm, space, stack, cellName, rootID, workloadID, rootContainerdID, workloadContainerdID)
+
+	var fired []string
+	r.restartContainerFn = func(cell intmodel.Cell, containerID string) (intmodel.Cell, error) {
+		fired = append(fired, containerID)
+		return cell, nil
+	}
+
+	cell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: cellName},
+		Spec: intmodel.CellSpec{
+			ID:         cellName,
+			RealmName:  realm,
+			SpaceName:  space,
+			StackName:  stack,
+			AutoDelete: true, // --rm must NOT win against an owed on-failure restart
+			Containers: []intmodel.ContainerSpec{
+				{ID: rootID, ContainerdID: rootContainerdID, Root: true},
+				{ID: workloadID, ContainerdID: workloadContainerdID, Root: false, RestartPolicy: intmodel.RestartPolicyOnFailure},
+			},
+		},
+		Status: intmodel.CellStatus{State: intmodel.CellStateReady, ReadyObserved: true},
+	}
+
+	_, outcome, err := r.ReconcileCell(cell)
+	if err != nil {
+		t.Fatalf("ReconcileCell: unexpected error: %v", err)
+	}
+	if !outcome.Updated {
+		t.Errorf("outcome.Updated = false, want true (a fired restart reports Updated)")
+	}
+	if outcome.Deleted {
+		t.Errorf("outcome.Deleted = true, want false (--rm must not reap an on-failure workload that owes a restart)")
+	}
+	if len(fired) != 1 || fired[0] != workloadID {
+		t.Errorf("relaunched %v, want a single relaunch of %q", fired, workloadID)
+	}
+}

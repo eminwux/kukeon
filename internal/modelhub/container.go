@@ -92,10 +92,13 @@ type ContainerSpec struct {
 	// (refresh.go:restartPolicyPermitsCellReap). Empty/unset is treated as
 	// RestartPolicyNever — an exited non-root container is not restarted and
 	// preserves the cell in Stopped rather than triggering a cell-level
-	// wind-down, matching the Kubernetes default restartPolicy. Exception: a
-	// cell that opted into auto-delete (`--rm` / Spec.AutoDelete) is deleted on
-	// exit regardless of restartPolicy — `--rm` is an unconditional teardown
-	// directive (cf. `docker run --rm`).
+	// wind-down, matching the Kubernetes default restartPolicy. Interaction with
+	// auto-delete: a cell that opted into `--rm` / Spec.AutoDelete is reaped on a
+	// no-restart-required exit (a `never`, or a clean-exit `on-failure`, that
+	// would otherwise be preserved) instead of being kept in Stopped. `--rm` does
+	// not defeat a restart-requiring policy (`always`, or `on-failure` on a
+	// non-zero exit) — that relaunch fires first and the cell is restarted, not
+	// deleted, for that tick (cf. `docker run --rm`).
 	RestartPolicy string
 	Attachable    bool
 	Tty           *ContainerTty

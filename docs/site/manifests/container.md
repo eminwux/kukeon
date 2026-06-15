@@ -105,7 +105,7 @@ See [Concepts → Container](../concepts/container.md) for what a container is.
 
 Only the root container is exempt: the root's exit drives cell-level lifecycle decisions independently and is not subject to this gate.
 
-**Auto-delete (`--rm`) exception.** A cell that opted into auto-delete (`kuke run --rm`, or `spec.autoDelete: true`) is deleted on exit **regardless of `restartPolicy`** — `--rm` is an unconditional teardown directive (cf. `docker run --rm`, which removes the container on any exit). `restartPolicy` governs only the restart-on-exit decision and the non-auto-delete wind-down/preserve path described above.
+**Auto-delete (`--rm`) interaction.** A cell that opted into auto-delete (`kuke run --rm`, or `spec.autoDelete: true`) is reaped on a **no-restart-required exit** — an exit a `never` policy (or a clean-exit `on-failure`) would otherwise preserve in `Stopped` is deleted instead. `--rm` does **not** defeat a restart-requiring policy: with `restartPolicy: always` (any exit) or `on-failure` (non-zero exit) the restart fires first and the workload is relaunched, not deleted, for that tick — so a `--rm` + `always` workload restarts on exit rather than being cleaned up. In short, `--rm` cleans up a workload once it reaches a terminal, no-restart exit; it does not override an active restart loop.
 
 ### VolumeMount
 
