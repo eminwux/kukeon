@@ -3795,7 +3795,7 @@
 <td><code>restartPolicy</code></td>
 <td>string</td>
 <td>no</td>
-<td>Per-container reap policy at the cell wind-down / auto-delete gate. One of <code>always</code>, <code>on-failure</code>, <code>never</code>. Empty defaults to <code>always</code> for back-compat (see <a href="#restart-policy">Restart policy</a>).</td>
+<td>Per-container reap policy at the cell wind-down / auto-delete gate. One of <code>always</code>, <code>on-failure</code>, <code>never</code>. Empty defaults to <code>never</code> (matches the Kubernetes default restartPolicy; see <a href="#restart-policy">Restart policy</a>).</td>
 </tr>
 <tr>
 <td><code>tty</code></td>
@@ -3821,7 +3821,7 @@
 <tbody>
 <tr>
 <td>empty/unset</td>
-<td>Treated as <code>always</code> for back-compat. Pre-#1003 wind-down behavior — every non-root container exit can trigger a cell-level wind-down.</td>
+<td>Treated as <code>never</code> (the default). An exited non-root container preserves the cell in <code>Stopped</code> rather than triggering a wind-down — matches the Kubernetes default restartPolicy.</td>
 </tr>
 <tr>
 <td><code>always</code></td>
@@ -3838,6 +3838,7 @@
 </tbody>
 </table>
 <p>Only the root container is exempt: the root's exit drives cell-level lifecycle decisions independently and is not subject to this gate.</p>
+<p><strong>Auto-delete (<code>--rm</code>) interaction.</strong> A cell that opted into auto-delete (<code>kuke run --rm</code>, or <code>spec.autoDelete: true</code>) is reaped on a <strong>no-restart-required exit</strong> — an exit a <code>never</code> policy (or a clean-exit <code>on-failure</code>) would otherwise preserve in <code>Stopped</code> is deleted instead. <code>--rm</code> does <strong>not</strong> defeat a restart-requiring policy: with <code>restartPolicy: always</code> (any exit) or <code>on-failure</code> (non-zero exit) the restart fires first and the workload is relaunched, not deleted, for that tick — so a <code>--rm</code> + <code>always</code> workload restarts on exit rather than being cleaned up. In short, <code>--rm</code> cleans up a workload once it reaches a terminal, no-restart exit; it does not override an active restart loop.</p>
 <h3 id="volumemount">VolumeMount<a class="headerlink" href="#volumemount" title="Permanent link">&para;</a></h3>
 <p>Each entry in <code>spec.volumes</code> is a mount attached to the container. The <code>kind</code> discriminator selects which OCI mount type the runtime emits.</p>
 <table>
@@ -4450,7 +4451,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 14, 2026 12:46:24 UTC">June 14, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 15, 2026 18:17:02 UTC">June 15, 2026</span>
   </span>
 
     
