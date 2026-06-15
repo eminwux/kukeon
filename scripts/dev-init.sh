@@ -73,6 +73,11 @@ DEV_PROFILE_CLIENT_CONFIG="${REPO_ROOT}/kuke-dev.yaml"
 # guarded too) overrides these.
 KUKEOND_NS="kuke-system.kukeon.io"
 SERVER_CONFIG_FLAGS=()
+# kuke build resolves the realm's containerd-namespace suffix from
+# --kukeond-config (path to kukeond.yaml), not from KUKE_CONFIGURATION. The
+# default profile leaves this empty so kuke build falls back to its default
+# /etc/kukeon/kukeond.yaml suffix (.kukeon.io), matching KUKEOND_NS above.
+BUILD_KUKEOND_CONFIG_FLAGS=()
 PRESERVE_ENV_WORKLOAD="KUKEON_HOST"
 PRESERVE_ENV_ADMIN="KUKEON_HOST,KUKEOND_SOCKET"
 
@@ -336,6 +341,12 @@ EOF
     # flag for admin commands.
     KUKEOND_NS="kuke-system.dev.kukeon.io"
     SERVER_CONFIG_FLAGS=(--server-configuration "${DEV_PROFILE_SERVER_CONFIG}")
+    # kuke build reads the namespace suffix only from --kukeond-config (the
+    # server config), never from KUKE_CONFIGURATION (the client config). Without
+    # this it falls back to the default .kukeon.io suffix and writes the built
+    # image into the wrong namespace, so kuke init/apply (which use the dev
+    # suffix) can never find it. Mirrors SERVER_CONFIG_FLAGS for admin commands.
+    BUILD_KUKEOND_CONFIG_FLAGS=(--kukeond-config "${DEV_PROFILE_SERVER_CONFIG}")
     PRESERVE_ENV_WORKLOAD="KUKEON_HOST,KUKE_CONFIGURATION"
     PRESERVE_ENV_ADMIN="KUKEON_HOST,KUKEOND_SOCKET,KUKE_CONFIGURATION"
 fi
@@ -424,6 +435,7 @@ step "Build ${KUKEOND_IMAGE_REF} into the kuke-system realm"
 # matching the exact ref `kuke init --kukeond-image` resolves below.
 sudo --preserve-env="${PRESERVE_ENV_WORKLOAD}" ./kuke build --build-arg VERSION="${KUKEOND_BUILD_VERSION}" \
     -t "${KUKEOND_IMAGE_REF}" \
+    "${BUILD_KUKEOND_CONFIG_FLAGS[@]}" \
     --realm kuke-system .
 
 step "Run kuke init with --kukeond-image ${KUKEOND_IMAGE_REF}"
@@ -623,6 +635,7 @@ sudo --preserve-env="${PRESERVE_ENV_WORKLOAD}" ./kuke create stack "${ATTACH_SMO
 step "Build ${ATTACH_SMOKE_IMAGE_REF} into the ${ATTACH_SMOKE_REALM} realm"
 sudo --preserve-env="${PRESERVE_ENV_WORKLOAD}" ./kuke build \
     -t "${ATTACH_SMOKE_IMAGE_REF}" \
+    "${BUILD_KUKEOND_CONFIG_FLAGS[@]}" \
     --realm "${ATTACH_SMOKE_REALM}" hack/attach-smoke
 
 cat > "${ATTACH_SMOKE_TMP}/cell.yaml" <<EOF
