@@ -20,20 +20,25 @@
 package runner
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 
+	cgroup2 "github.com/containerd/cgroups/v2/cgroup2"
 	containerd "github.com/containerd/containerd/v2/client"
+	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
 // TestRestartPolicyPermitsContainerReap pins the per-container half of
 // the #1003 reap gate. The decision table:
 //
-//   - "" or "always"  → permit reap regardless of exit code (back-compat
-//     and explicit Always both default to today's wind-down behavior).
+//   - "always"        → permit reap regardless of exit code.
 //   - "on-failure"    → permit reap iff exit code is non-zero; clean exits
 //     (0) preserve the cell.
-//   - "never"         → never permit reap.
+//   - "" or "never"   → never permit reap. Empty is the default: an exited
+//     non-root container preserves the cell, matching the Kubernetes
+//     default restartPolicy.
 //   - unknown values  → permissive fallback so a typo or a future spec
 //     value does not silently strand cells.
 func TestRestartPolicyPermitsContainerReap(t *testing.T) {
@@ -43,8 +48,8 @@ func TestRestartPolicyPermitsContainerReap(t *testing.T) {
 		exitCode int
 		want     bool
 	}{
-		{"empty_back_compat_clean_exit_permits", "", 0, true},
-		{"empty_back_compat_failed_exit_permits", "", 1, true},
+		{"empty_default_clean_exit_blocks", "", 0, false},
+		{"empty_default_failed_exit_blocks", "", 1, false},
 		{"always_clean_exit_permits", intmodel.RestartPolicyAlways, 0, true},
 		{"always_failed_exit_permits", intmodel.RestartPolicyAlways, 137, true},
 		{"on_failure_clean_exit_blocks", intmodel.RestartPolicyOnFailure, 0, false},
@@ -61,6 +66,90 @@ func TestRestartPolicyPermitsContainerReap(t *testing.T) {
 					tc.policy, tc.exitCode, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestReconcileCell_AutoDeleteOverridesRestartPolicyNever is the end-to-end
+// pin for the rule that `--rm` / Spec.AutoDelete overrides the restartPolicy
+// *preserve* gate: a cell that opted into auto-delete is reaped on exit even
+// when its non-root container carries an explicit `restartPolicy: never` (which
+// would otherwise block the wind-down path). `--rm` does NOT override a
+// restart-requiring policy — that case is pinned by
+// TestReconcileCell_RestartFiresAndSuppressesWindDown (`--rm` + `always`) and
+// TestReconcileCell_AutoDeleteWithOnFailureRestartWins (`--rm` + `on-failure`
+// on a non-zero exit), where the restart fires first and the cell is preserved.
+// Modeled on TestReconcileCell_PostReboot_TransitionsToExited:
+// the reboot-wiped tasks (no exit info ⇒ exit 0) derive CellStateExited, the
+// auto-delete trigger, and the latched ReadyObserved opens the gate. An
+// explicit `never` also keeps the restart-on-exit pass from firing, so the
+// reconcile reaches the auto-delete branch.
+func TestReconcileCell_AutoDeleteOverridesRestartPolicyNever(t *testing.T) {
+	realm, space, stack, cellName := "default", "kukeon", "kukeon", "web"
+	rootID, workloadID := "root", "workload"
+	rootContainerdID := space + "_" + stack + "_" + cellName + "_" + rootID
+	workloadContainerdID := space + "_" + stack + "_" + cellName + "_" + workloadID
+
+	fake := &deleteCellFakeClient{
+		loadCgroupFn: func(string, string) (*cgroup2.Manager, error) {
+			return nil, errors.New("cgroup path does not exist")
+		},
+		existsContainerFn: func(_, _ string) (bool, error) { return true, nil },
+		taskStatusFn: func(_, _ string) (containerd.Status, error) {
+			return containerd.Status{}, fmt.Errorf("%w: %w", errdefs.ErrTaskNotFound, errors.New("task: not found"))
+		},
+	}
+	r := newDeleteCellTestExec(t, fake)
+	seedDeleteCellRealm(t, r, realm)
+	seedStopKillSpace(t, r, realm, space) // killCellLocked resolves the space CNI config
+	seedPostRebootCell(t, r, realm, space, stack, cellName, rootID, workloadID, rootContainerdID, workloadContainerdID)
+
+	cell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: cellName},
+		Spec: intmodel.CellSpec{
+			ID:         cellName,
+			RealmName:  realm,
+			SpaceName:  space,
+			StackName:  stack,
+			AutoDelete: true, // --rm
+			Containers: []intmodel.ContainerSpec{
+				{ID: rootID, ContainerdID: rootContainerdID, Root: true},
+				// Explicit never would block the wind-down path — but --rm must win.
+				{
+					ID:            workloadID,
+					ContainerdID:  workloadContainerdID,
+					Root:          false,
+					RestartPolicy: intmodel.RestartPolicyNever,
+				},
+			},
+		},
+		Status: intmodel.CellStatus{
+			State:         intmodel.CellStateReady,
+			ReadyObserved: true,
+		},
+	}
+
+	_, outcome, err := r.ReconcileCell(cell)
+	if err != nil {
+		t.Fatalf("ReconcileCell: unexpected error: %v", err)
+	}
+	if !outcome.Deleted {
+		t.Errorf(
+			"ReconcileOutcome.Deleted = false, want true (--rm/AutoDelete must reap an exited cell regardless of an explicit restartPolicy: never)",
+		)
+	}
+
+	// Sanity: the same cell WITHOUT AutoDelete must be preserved by the
+	// explicit never (the wind-down path still honors restartPolicy).
+	cell.Spec.AutoDelete = false
+	seedPostRebootCell(t, r, realm, space, stack, cellName, rootID, workloadID, rootContainerdID, workloadContainerdID)
+	_, outcome, err = r.ReconcileCell(cell)
+	if err != nil {
+		t.Fatalf("ReconcileCell (no --rm): unexpected error: %v", err)
+	}
+	if outcome.Deleted {
+		t.Errorf(
+			"ReconcileOutcome.Deleted = true, want false (without --rm, an explicit restartPolicy: never must preserve the cell)",
+		)
 	}
 }
 
@@ -107,7 +196,7 @@ func TestRestartPolicyPermitsCellReap(t *testing.T) {
 		want bool
 	}{
 		{
-			name: "empty_policy_terminal_stopped_permits_back_compat",
+			name: "empty_policy_terminal_stopped_blocks_default",
 			cell: cell(
 				[]intmodel.ContainerSpec{
 					{ID: "root", Root: true},
@@ -118,7 +207,7 @@ func TestRestartPolicyPermitsCellReap(t *testing.T) {
 					{ID: "work", State: intmodel.ContainerStateStopped, ExitCode: 0},
 				},
 			),
-			want: true,
+			want: false,
 		},
 		{
 			name: "never_policy_terminal_blocks",
@@ -197,7 +286,7 @@ func TestRestartPolicyPermitsCellReap(t *testing.T) {
 			cell: cell(
 				[]intmodel.ContainerSpec{
 					{ID: "root", Root: true, RestartPolicy: intmodel.RestartPolicyNever},
-					{ID: "work", Root: false, RestartPolicy: ""},
+					{ID: "work", Root: false, RestartPolicy: intmodel.RestartPolicyAlways},
 				},
 				[]intmodel.ContainerStatus{
 					{ID: "root", State: intmodel.ContainerStateStopped, ExitCode: 0},

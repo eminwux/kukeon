@@ -19,6 +19,7 @@ package runner
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -788,20 +789,70 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 		stampCellFailure(&cell)
 	}
 
-	// RestartPolicy gate (#1003): per-container restartPolicy can veto both
-	// the auto-delete and the wind-down kill so a workload authored with
-	// `restartPolicy: never` (or `on-failure` that exited cleanly) is left
-	// in Stopped state instead of disappearing under the next tick.
-	// Permissive default (empty/Always) preserves the pre-#1003 behavior
-	// for cells that never set the field. See restartPolicyPermitsCellReap.
-	restartReap := restartPolicyPermitsCellReap(cell)
-
-	if restartReap && shouldAutoDeleteCell(cell.Spec.AutoDelete, newState, cell.Status.ReadyObserved) {
-		return r.autoDeleteCell(cell)
+	// Restart-on-exit pass (#1233, phase 1 of the #1151 epic). Before the
+	// wind-down / auto-delete reap gate, relaunch any non-root container whose
+	// task exited in a way its RestartPolicy says must restart. Placed here so
+	// it sees the freshly derived state and freshly populated container
+	// statuses, but short-circuits the reap gate below for the cells it acts on.
+	//
+	// A non-zero exit derives CellStateError, which is sticky — once persisted,
+	// the cellStateIsSticky short-circuit at the top of ReconcileCell would make
+	// this pass unreachable. The restart therefore fires on the first tick that
+	// observes the exit (before Error persists), and a backoff-deferred restart
+	// deliberately avoids persisting the sticky Error transition so a later tick
+	// can still fire. Failed cells (a kukeon bring-up fault) are already excluded
+	// by that same short-circuit; never-Ready cells are excluded by the
+	// ReadyObserved gate inside maybeRestartExitedContainers.
+	cell, restartResult, restartErr := r.maybeRestartExitedContainers(cell)
+	if restartErr != nil {
+		// StartContainer already flipped the cell to Failed (sticky) via its
+		// own markCellFailed defer (#407); surface the error so the reconcile
+		// loop records it for this cell and retries on the next tick.
+		return cell, ReconcileOutcome{}, restartErr
 	}
+	switch restartResult {
+	case restartFired:
+		// A fired restart suppresses wind-down / auto-delete for this tick; the
+		// next tick re-derives the cell with the relaunched container Ready.
+		return cell, ReconcileOutcome{Updated: true}, nil
+	case restartDeferred:
+		// A restart is required but the per-container backoff has not elapsed.
+		// Suppress the reap gate AND hold the cell-level status at its
+		// pre-derivation value so the (sticky) Error transition is not
+		// persisted — otherwise the cellStateIsSticky short-circuit would
+		// strand the cell and this pass could never fire once the backoff
+		// clears. The refreshed container-status view below still persists.
+		cell.Status.State = originalStatus.State
+		cell.Status.ReadyObserved = originalStatus.ReadyObserved
+		cell.Status.Reason = originalStatus.Reason
+		cell.Status.Message = originalStatus.Message
+	case restartNone:
+		// No restart is owed for this exit — the restartFired/restartDeferred
+		// cases above already returned. Auto-delete (`--rm` / Spec.AutoDelete) is
+		// an explicit "delete the cell once the workload exits" directive that
+		// overrides the restartPolicy *preserve* gate: a `never` (or clean-exit
+		// `on-failure`) container that restartPolicyPermitsCellReap would
+		// otherwise keep in Stopped is reaped here instead. It does NOT override a
+		// restart-requiring policy — `always` (any exit) and `on-failure`
+		// (non-zero exit) fire the restart pass above and win this tick, so the
+		// cell is relaunched, not deleted. The auto-delete branch is therefore NOT
+		// gated on the RestartPolicy reap check, but it is reached only once no
+		// restart is owed (cf. `docker run --rm` cleaning up a finished workload).
+		if shouldAutoDeleteCell(cell.Spec.AutoDelete, newState, cell.Status.ReadyObserved) {
+			return r.autoDeleteCell(cell)
+		}
 
-	if restartReap && shouldWindDownCell(cell, newState) {
-		return r.windDownCell(cell)
+		// RestartPolicy gate (#1003): per-container restartPolicy vetoes the
+		// wind-down kill so a workload authored with `restartPolicy: never`
+		// (or `on-failure` that exited cleanly) is left in Stopped state instead
+		// of disappearing under the next tick. Empty/unset defaults to `never` —
+		// an exited non-root container preserves the cell, matching the
+		// Kubernetes default restartPolicy. This governs only the non-auto-delete
+		// path; a `--rm` cell is already handled above. See
+		// restartPolicyPermitsCellReap.
+		if restartPolicyPermitsCellReap(cell) && shouldWindDownCell(cell, newState) {
+			return r.windDownCell(cell)
+		}
 	}
 
 	updated := false
@@ -1005,20 +1056,24 @@ func shouldWindDownCell(cell intmodel.Cell, newState intmodel.CellState) bool {
 
 // restartPolicyPermitsCellReap reports whether every terminally-exited
 // non-root container in the cell carries a RestartPolicy that permits
-// the cell-level wind-down / auto-delete to fire (#1003). The reconciler
-// asks this gate before both shouldAutoDeleteCell and shouldWindDownCell —
-// a single container's `never` (or `on-failure` with a clean exit) blocks
-// the cell-level reap, preserving the workload in Stopped state so the
-// operator can decide explicitly.
+// the cell-level wind-down kill to fire (#1003). The reconciler asks this
+// gate before shouldWindDownCell — a single container's `never` (or
+// `on-failure` with a clean exit) blocks the cell-level reap, preserving
+// the workload in Stopped state so the operator can decide explicitly. The
+// auto-delete (`--rm`) branch is NOT gated on this — an explicit AutoDelete
+// reaps such a preserved exit anyway. It does not override a restart-requiring
+// policy, which fires earlier in ReconcileCell and wins the tick (see
+// ReconcileCell).
 //
 // Decision per terminally-exited non-root container, keyed on its
 // ContainerStatus.ExitCode (populated by GetContainerObservation):
 //
-//   - "" or "always"  → permit reap. Empty is the back-compat default so
-//     cells that pre-date #1003 keep the wind-down behavior they have today.
+//   - "always"        → permit reap regardless of exit code.
 //   - "on-failure"    → permit reap only when ExitCode != 0; a clean exit
 //     (0) means the workload completed successfully and the cell stays.
-//   - "never"         → never permit reap.
+//   - "" or "never"   → never permit reap. Empty is the default: an exited
+//     non-root container preserves the cell in Stopped (kept for restart),
+//     matching the Kubernetes default restartPolicy.
 //
 // Unknown values fall through to the permissive default to mirror the
 // pre-#1003 behavior — typos and future-spec values do not silently
@@ -1058,11 +1113,11 @@ func restartPolicyPermitsCellReap(cell intmodel.Cell) bool {
 // restartPolicyPermitsCellReap for the policy table.
 func restartPolicyPermitsContainerReap(policy string, exitCode int) bool {
 	switch policy {
-	case "", intmodel.RestartPolicyAlways:
+	case intmodel.RestartPolicyAlways:
 		return true
 	case intmodel.RestartPolicyOnFailure:
 		return exitCode != 0
-	case intmodel.RestartPolicyNever:
+	case "", intmodel.RestartPolicyNever:
 		return false
 	default:
 		return true
@@ -1085,6 +1140,252 @@ func containerStateIsTerminal(s intmodel.ContainerState) bool {
 		return true
 	}
 	return false
+}
+
+// Restart-on-exit tuning (#1233, phase 1 of the #1151 epic). Hardcoded named
+// constants this phase; the user-authored knobs are #1235's scope.
+const (
+	// restartBackoff is the minimum wall-clock interval between successive
+	// reconciler-driven restarts of the same non-root container. It matches the
+	// default KUKEOND_RECONCILE_INTERVAL (30s) so under the default cadence the
+	// restart fires on the next reconcile tick that observes the terminal state,
+	// while still flooring sub-interval thrash when the interval is configured
+	// shorter than the backoff. The runner has no view of the configured
+	// interval, so this is a fixed floor rather than a multiple of it.
+	restartBackoff = 30 * time.Second
+
+	// onFailureMaxRestarts caps how many times the reconciler relaunches an
+	// `on-failure` container that keeps exiting non-zero before giving up and
+	// leaving it terminal for the operator (#1233 ratified decision 2 — no
+	// infinite retry). `always` / empty policies are uncapped: they restart on
+	// every exit by contract. The counter is per restart attempt and resets
+	// whenever the container is next observed running, so the cap bites a tight
+	// crash loop (re-exits before a reconcile tick can observe it Ready) but not
+	// a workload that runs for a while between crashes.
+	onFailureMaxRestarts = 5
+)
+
+// containerRestartState is the runner-local bookkeeping the reconciler's
+// restart-on-exit pass keeps per non-root container to enforce the backoff
+// floor and the on-failure retry cap. See Exec.restartStates for why this is
+// deliberately separate from the persisted ContainerStatus counters.
+type containerRestartState struct {
+	// attempts counts reconciler-driven restart attempts since the container
+	// was last observed running. Drives the on-failure cap.
+	attempts int
+	// lastAttempt is when the restart pass last fired a relaunch for this
+	// container. Drives the backoff floor.
+	lastAttempt time.Time
+}
+
+// restartPolicyRequiresRestart is the per-container restart-trigger half of the
+// reconciler's restart-on-exit pass (#1233), sibling to
+// restartPolicyPermitsContainerReap. It encodes the policy rows:
+//
+//   - "always"        → restart on any exit.
+//   - "on-failure"    → restart only on a non-zero exit; a clean exit (0) means
+//     the workload completed successfully and is not restarted.
+//   - "" or "never"   → never restart. Empty/unset defaults to `never`,
+//     matching the Kubernetes default restartPolicy (modelhub/container.go):
+//     a non-root cell that never set the field is NOT restarted on exit, it is
+//     left for the reap gate (preserved in Stopped, or deleted under `--rm`).
+//
+// Unknown values fall through to the permissive default for the same reason
+// restartPolicyPermitsContainerReap does — a typo or future-spec value should
+// not silently strand a workload. The truth table currently coincides with
+// restartPolicyPermitsContainerReap (both encode "this policy + exit triggers an
+// action"), but the two are kept as named siblings: the restart pass and the
+// reap gate are distinct decisions, and #1235's user-authored knobs will diverge
+// them.
+func restartPolicyRequiresRestart(policy string, exitCode int) bool {
+	switch policy {
+	case intmodel.RestartPolicyAlways:
+		return true
+	case intmodel.RestartPolicyOnFailure:
+		return exitCode != 0
+	case "", intmodel.RestartPolicyNever:
+		return false
+	default:
+		return true
+	}
+}
+
+// restartPassResult is the outcome of a single maybeRestartExitedContainers
+// pass over a cell's non-root containers.
+type restartPassResult int
+
+const (
+	// restartNone — nothing to restart this tick (no container requires a
+	// restart, the cell never reached Ready, or every candidate's on-failure
+	// cap is exhausted). The caller runs the normal reap gate.
+	restartNone restartPassResult = iota
+	// restartFired — at least one container was relaunched. The caller
+	// suppresses the reap gate and returns Updated for this tick.
+	restartFired
+	// restartDeferred — at least one container requires a restart but its
+	// backoff has not elapsed, and none fired. The caller suppresses the reap
+	// gate and must avoid persisting the (sticky) Error transition so a later
+	// tick can fire once the backoff clears.
+	restartDeferred
+)
+
+// restartDecisionFor decides whether a terminally-exited container that its
+// policy says must restart should fire now, wait for backoff, or give up
+// against the on-failure cap. Reads (does not mutate) the per-container restart
+// state under the lock.
+func (r *Exec) restartDecisionFor(cell intmodel.Cell, containerID, policy string) restartPassResult {
+	r.restartStatesMu.Lock()
+	defer r.restartStatesMu.Unlock()
+
+	st := r.restartStates[r.restartStateKey(cell, containerID)]
+	if st == nil {
+		// First observation of this exit: fire immediately, no prior backoff.
+		return restartFired
+	}
+	if policy == intmodel.RestartPolicyOnFailure && st.attempts >= onFailureMaxRestarts {
+		// on-failure cap exhausted: stop retrying. Reported as restartNone so
+		// the caller falls through to the reap gate (the crashed workload
+		// settles as Error and is preserved for the operator).
+		return restartNone
+	}
+	if !st.lastAttempt.IsZero() && r.nowUTC().Sub(st.lastAttempt) < restartBackoff {
+		return restartDeferred
+	}
+	return restartFired
+}
+
+// maybeRestartExitedContainers is the reconciler's restart-on-exit pass (#1233).
+// For each non-root container whose task is terminally exited and whose
+// RestartPolicy requires a restart, it relaunches the container via the
+// restartContainer action (StartContainer in production) subject to the
+// per-container backoff floor and the on-failure retry cap.
+//
+// Returns the (possibly relaunched) cell and a restartPassResult the caller uses
+// to suppress the reap gate and decide persistence. Containers observed running
+// have their restart bookkeeping cleared so a future exit starts from a clean
+// slate (and the on-failure cap counts consecutive thrash, not lifetime
+// restarts). A failed relaunch returns the error: restartContainer
+// (StartContainer) has already flipped the cell to Failed (sticky) via its own
+// markCellFailed defer, which stops further restarts.
+//
+// The caller (ReconcileCell) holds the per-cell lifecycle lock; StartContainer
+// does not re-acquire it, matching the UpdateCell recreate path (#485).
+func (r *Exec) maybeRestartExitedContainers(cell intmodel.Cell) (intmodel.Cell, restartPassResult, error) {
+	// Never restart a cell that never came up (#1233 ReadyObserved gate). The
+	// Failed-sticky short-circuit at the top of ReconcileCell already excludes
+	// Failed cells before this pass runs.
+	if !cell.Status.ReadyObserved {
+		return cell, restartNone, nil
+	}
+
+	// A non-root workload can only be relaunched into a live cell: StartContainer
+	// joins it to the root container's net/IPC/UTS namespaces and reads the root
+	// task's PID. If the root is not running — e.g. post-reboot before the cgroup
+	// heal / operator start brings the cell back up — leave the workloads alone;
+	// cell-level recovery owns that path, not the per-container restart. Mirrors
+	// the same root-liveness precondition shouldWindDownCell already enforces.
+	if rootSpec := findRootContainerSpec(cell); rootSpec != nil &&
+		!rootContainerStillRunning(rootSpec.ID, cell.Status.Containers) {
+		return cell, restartNone, nil
+	}
+
+	statusByID := make(map[string]intmodel.ContainerStatus, len(cell.Status.Containers))
+	for i := range cell.Status.Containers {
+		statusByID[cell.Status.Containers[i].ID] = cell.Status.Containers[i]
+	}
+
+	result := restartNone
+	for i := range cell.Spec.Containers {
+		spec := cell.Spec.Containers[i]
+		if spec.Root {
+			continue
+		}
+		status, ok := statusByID[spec.ID]
+		if !ok {
+			continue
+		}
+		if !containerStateIsTerminal(status.State) {
+			// Running (again): clear the backoff/cap bookkeeping so a later exit
+			// is treated as fresh.
+			r.clearRestartState(cell, spec.ID)
+			continue
+		}
+		if !restartPolicyRequiresRestart(spec.RestartPolicy, status.ExitCode) {
+			continue
+		}
+
+		switch r.restartDecisionFor(cell, spec.ID, spec.RestartPolicy) {
+		case restartFired:
+			started, startErr := r.restartContainer(cell, spec.ID)
+			// Record the attempt regardless of outcome: a failed relaunch still
+			// advances the cap so a permanently-unstartable container can't be
+			// retried forever, and StartContainer's defer already marked the
+			// cell Failed which ends the loop anyway.
+			r.recordRestartAttempt(cell, spec.ID)
+			if startErr != nil {
+				return cell, result, fmt.Errorf("restart container %q: %w", spec.ID, startErr)
+			}
+			cell = started
+			result = restartFired
+		case restartDeferred:
+			// A fired restart in the same pass takes precedence; only downgrade
+			// to deferred when nothing has fired yet.
+			if result == restartNone {
+				result = restartDeferred
+			}
+		case restartNone:
+			// on-failure cap exhausted for this container — leave it terminal
+			// and let the reap gate settle the cell.
+		}
+	}
+	return cell, result, nil
+}
+
+// restartContainer invokes the relaunch action for a container the restart pass
+// decided to restart. Falls through to (*Exec).StartContainer unless a test
+// injected restartContainerFn.
+func (r *Exec) restartContainer(cell intmodel.Cell, containerID string) (intmodel.Cell, error) {
+	if r.restartContainerFn != nil {
+		return r.restartContainerFn(cell, containerID)
+	}
+	return r.StartContainer(cell, containerID)
+}
+
+// restartStateKey derives the per-container key for the restart bookkeeping map
+// from the cell's lock identity plus the container ID.
+func (r *Exec) restartStateKey(cell intmodel.Cell, containerID string) string {
+	return cellLockKey(cell) + "\x00" + containerID
+}
+
+// recordRestartAttempt bumps the attempt count and stamps the last-attempt time
+// for a container the restart pass just relaunched.
+func (r *Exec) recordRestartAttempt(cell intmodel.Cell, containerID string) {
+	r.restartStatesMu.Lock()
+	defer r.restartStatesMu.Unlock()
+
+	if r.restartStates == nil {
+		r.restartStates = make(map[string]*containerRestartState)
+	}
+	key := r.restartStateKey(cell, containerID)
+	st := r.restartStates[key]
+	if st == nil {
+		st = &containerRestartState{}
+		r.restartStates[key] = st
+	}
+	st.attempts++
+	st.lastAttempt = r.nowUTC()
+}
+
+// clearRestartState drops a container's restart bookkeeping — called when the
+// container is observed running again so the backoff and on-failure cap reset.
+func (r *Exec) clearRestartState(cell intmodel.Cell, containerID string) {
+	r.restartStatesMu.Lock()
+	defer r.restartStatesMu.Unlock()
+
+	if r.restartStates == nil {
+		return
+	}
+	delete(r.restartStates, r.restartStateKey(cell, containerID))
 }
 
 // rootContainerStillRunning answers the "is the root task still
