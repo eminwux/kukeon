@@ -51,12 +51,17 @@ func TestBuildRules_DenyDefaultHasTerminalDrop(t *testing.T) {
 	if !strings.Contains(firstJoined, "RELATED,ESTABLISHED") {
 		t.Fatalf("first rule must allow RELATED,ESTABLISHED; got %q", firstJoined)
 	}
-	if !strings.Contains(firstJoined, "-j RETURN") {
-		t.Fatalf("first rule must RETURN; got %q", firstJoined)
+	// Since #1076 the per-space chain is self-terminating: established traffic
+	// is ACCEPTed here, not RETURNed to a host-global blanket (which is gone).
+	if !strings.Contains(firstJoined, "-j ACCEPT") {
+		t.Fatalf("first rule must ACCEPT established traffic; got %q", firstJoined)
+	}
+	if strings.Contains(firstJoined, "-j RETURN") {
+		t.Fatalf("established rule must not RETURN (no host-global blanket to fall through to); got %q", firstJoined)
 	}
 }
 
-func TestBuildRules_AllowDefaultHasTerminalReturn(t *testing.T) {
+func TestBuildRules_AllowDefaultHasTerminalAccept(t *testing.T) {
 	// An explicit allow default with at least one allow rule (otherwise
 	// FromInternal collapses to nil).
 	p, err := netpolicy.FromInternal("main", "blog", "br", &intmodel.EgressPolicy{
@@ -71,8 +76,13 @@ func TestBuildRules_AllowDefaultHasTerminalReturn(t *testing.T) {
 	rules := netpolicy.BuildRules(p)
 	last := rules[len(rules)-1]
 	joined := strings.Join(last.Args, " ")
-	if !strings.Contains(joined, "-j RETURN") {
-		t.Fatalf("allow default must terminate in RETURN; got %q", joined)
+	// Since #1076 the chain admits its own egress: a default=allow terminal
+	// ACCEPTs rather than RETURNing to a (now-removed) host-global blanket.
+	if !strings.Contains(joined, "-j ACCEPT") {
+		t.Fatalf("allow default must terminate in ACCEPT; got %q", joined)
+	}
+	if strings.Contains(joined, "-j RETURN") {
+		t.Fatalf("allow default must not RETURN post-#1076; got %q", joined)
 	}
 }
 
@@ -103,8 +113,8 @@ func TestBuildRules_CIDRAllowExpandsByPort(t *testing.T) {
 		if !strings.Contains(joined, "--dport") {
 			t.Errorf("rule %d: missing --dport: %q", i, joined)
 		}
-		if !strings.Contains(joined, "-j RETURN") {
-			t.Errorf("rule %d: missing -j RETURN: %q", i, joined)
+		if !strings.Contains(joined, "-j ACCEPT") {
+			t.Errorf("rule %d: missing -j ACCEPT: %q", i, joined)
 		}
 	}
 }
@@ -167,6 +177,74 @@ func TestBuildRules_NoPortsMeansAnyDest(t *testing.T) {
 	}
 	if !strings.Contains(joined, "-d 172.16.0.0/12") {
 		t.Fatalf("missing -d target: %q", joined)
+	}
+}
+
+// TestBuildRules_DenyChainIsSelfTerminating is the fail-closed contract for
+// #1076: a Default=deny per-space chain must terminate every packet itself
+// (ACCEPT on established/allow, DROP otherwise) and never RETURN. A RETURN
+// would fall the packet through to FORWARD — and since the host-global egress
+// blanket is gone, that is no longer an ACCEPT. The single space-owned chain
+// is the whole egress decision; if it is missing the space fails closed.
+func TestBuildRules_DenyChainIsSelfTerminating(t *testing.T) {
+	p, err := netpolicy.FromInternal("main", "blog", "br", &intmodel.EgressPolicy{
+		Default: intmodel.EgressDefaultDeny,
+		Allow: []intmodel.EgressAllowRule{
+			{CIDR: "10.0.0.0/8", Ports: []int{443}},
+			{Host: "api.example.com"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	p.Allow[1].IPs = []net.IP{net.ParseIP("192.0.2.10")}
+
+	rules := netpolicy.BuildRules(p)
+	for i, r := range rules {
+		joined := strings.Join(r.Args, " ")
+		if strings.Contains(joined, "-j RETURN") {
+			t.Errorf("rule %d must not RETURN (chain must self-terminate); got %q", i, joined)
+		}
+	}
+	// Terminal must DROP — the fail-closed default.
+	last := strings.Join(rules[len(rules)-1].Args, " ")
+	if !strings.Contains(last, "-j DROP") {
+		t.Fatalf("deny terminal must DROP; got %q", last)
+	}
+	// Every non-terminal rule (established + allow entries) must ACCEPT.
+	for i := 0; i < len(rules)-1; i++ {
+		joined := strings.Join(rules[i].Args, " ")
+		if !strings.Contains(joined, "-j ACCEPT") {
+			t.Errorf("rule %d (non-terminal) must ACCEPT; got %q", i, joined)
+		}
+	}
+}
+
+// TestNewAdmitAllPolicy_BuildsAdmitAllChain pins the per-space admit-all chain
+// installed for spaces with no operator egress restriction (#1076): a single
+// established-ACCEPT followed by a terminal ACCEPT, so the bridge keeps full
+// egress through its own chain now that the host-global blanket is gone.
+func TestNewAdmitAllPolicy_BuildsAdmitAllChain(t *testing.T) {
+	p := netpolicy.NewAdmitAllPolicy("main", "blog", "k-deadbeef")
+	if p == nil {
+		t.Fatal("NewAdmitAllPolicy must not return nil")
+	}
+	if p.Bridge != "k-deadbeef" {
+		t.Errorf("bridge: got %q, want k-deadbeef", p.Bridge)
+	}
+	rules := netpolicy.BuildRules(p)
+	// established + terminal = 2, both ACCEPT, no DROP, no RETURN.
+	if len(rules) != 2 {
+		t.Fatalf("admit-all chain must have exactly 2 rules (established + terminal); got %d: %+v", len(rules), rules)
+	}
+	for i, r := range rules {
+		joined := strings.Join(r.Args, " ")
+		if !strings.Contains(joined, "-j ACCEPT") {
+			t.Errorf("rule %d must ACCEPT in an admit-all chain; got %q", i, joined)
+		}
+		if strings.Contains(joined, "-j DROP") {
+			t.Errorf("admit-all chain must not DROP; got %q", joined)
+		}
 	}
 }
 

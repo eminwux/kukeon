@@ -27,27 +27,37 @@ import (
 )
 
 // applySpaceEgressPolicy realizes space.Spec.Network.Egress on the host
-// firewall. It is a no-op when the space has no egress policy or when the
-// policy effectively matches current behavior (default=allow with no
-// allowlist entries).
+// firewall as the space's own admission+egress chain.
+//
+// Since #1076 admission is per-space: the host-global `-i k-+ ACCEPT` blanket
+// is gone, so every space's bridge needs its own chain to ACCEPT egress on a
+// FORWARD-DROP host. A space with no explicit policy (or a default=allow policy
+// with an empty allowlist, which FromInternal collapses to nil) therefore still
+// gets an admit-all chain rather than a no-op — admission and the per-space
+// KUKEON-EGRESS chain are installed as one unit so they can't drift, and a
+// Default=deny space whose chain is missing fails closed (no path to ACCEPT)
+// instead of leaking egress through a blanket rule.
 func (r *Exec) applySpaceEgressPolicy(space intmodel.Space) error {
-	if space.Spec.Network == nil || space.Spec.Network.Egress == nil {
-		return nil
-	}
 	networkName, err := naming.BuildSpaceNetworkName(space.Spec.RealmName, space.Metadata.Name)
 	if err != nil {
 		return fmt.Errorf("%w: %w", errdefs.ErrEgressApply, err)
 	}
 	bridge := cni.SafeBridgeName(networkName)
 
+	var egress *intmodel.EgressPolicy
+	if space.Spec.Network != nil {
+		egress = space.Spec.Network.Egress
+	}
 	policy, err := netpolicy.FromInternal(
-		space.Spec.RealmName, space.Metadata.Name, bridge, space.Spec.Network.Egress,
+		space.Spec.RealmName, space.Metadata.Name, bridge, egress,
 	)
 	if err != nil {
 		return fmt.Errorf("%w: %w", errdefs.ErrEgressApply, err)
 	}
 	if policy == nil {
-		return nil
+		// No restriction requested: install a per-space admit-all chain so the
+		// bridge keeps full egress now that the host-global blanket is gone.
+		policy = netpolicy.NewAdmitAllPolicy(space.Spec.RealmName, space.Metadata.Name, bridge)
 	}
 	if err = policy.Resolve(r.ctx, nil); err != nil {
 		return fmt.Errorf("%w: %w", errdefs.ErrEgressApply, err)

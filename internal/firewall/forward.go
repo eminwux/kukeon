@@ -15,35 +15,48 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package firewall manages host-level iptables state owned by kukeon — the
-// FORWARD admission chain that admits traffic to/from kukeon bridges. It is
-// distinct from internal/netpolicy, which installs per-space egress filters:
-// admission lives at host scope and is set up once at `kuke init`, while
-// egress is per-space and applied by the runner when a Space carries an
-// EgressPolicy.
+// FORWARD admission chain that admits *ingress* (and stateful return traffic)
+// to/from kukeon bridges. It is distinct from internal/netpolicy, which
+// installs the per-space chains that now own *egress* admission as well as
+// egress filtering: this host-scope chain is set up once at `kuke init` (and
+// re-asserted by the daemon), while each space's chain is applied per-space by
+// the runner. Since #1076 egress is no longer admitted by a host-global
+// blanket here — that fails open — so egress admission lives entirely in the
+// per-space chains, which fail closed when missing.
 package firewall
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os/exec"
-	"strconv"
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
-	"github.com/eminwux/kukeon/internal/netpolicy"
 )
 
-// ForwardChainName is the kukeon-owned FORWARD admission chain.
+// ForwardChainName is the kukeon-owned FORWARD admission chain. It now carries
+// only ingress admission (`! -i k-+ -o k-+ ACCEPT`, scoped to non-bridge
+// sources) plus the stateful return-traffic ACCEPT; egress admission moved
+// per-space in #1076.
 //
-// Relative ordering with KUKEON-EGRESS (netpolicy.MasterChainName) is
-// enforced by ensureForwardJump: when KUKEON-EGRESS already lives in
-// FORWARD, the jump to KUKEON-FORWARD is placed immediately after it so
-// per-space egress DROP rules win over the blanket admission. When
-// KUKEON-EGRESS is absent the jump goes to position 1; a later
-// netpolicy.Apply() will insert KUKEON-EGRESS at 1, pushing this jump
-// to 2 (still correct).
+// There is no longer any ordering contract with KUKEON-EGRESS
+// (netpolicy.MasterChainName). Egress is decided entirely within each space's
+// own KUKEON-EGRESS chain, which terminates every packet itself (ACCEPT/DROP)
+// rather than RETURNing to a blanket admission here — so this chain's position
+// relative to KUKEON-EGRESS is immaterial to correctness. ensureForwardJump
+// only guarantees the jump *exists* (re-inserting it after a reboot flush or
+// Docker churn); it no longer reorders it.
+//
+// The one rule here that *could* shadow an egress decision is the ingress
+// `-o k-+ ACCEPT`: an inter-bridge packet (`-i k-A -o k-B`) is both ingress to
+// B and egress from A, so a bare `-o k-+` would ACCEPT a deny-space A's egress
+// to B before A's chain runs — fail-open whenever this chain sits ahead of
+// KUKEON-EGRESS. The ingress rule is therefore scoped `! -i k-+`: it admits
+// only traffic that did *not* originate on a kukeon bridge (true external
+// ingress), so a space's egress (always bridge-sourced) can never match it and
+// always falls through to KUKEON-EGRESS. That is what keeps the position
+// genuinely immaterial — including for the inter-bridge case.
 const ForwardChainName = "KUKEON-FORWARD"
 
 // BridgeIfaceMatch is the iptables -i / -o interface match that scopes the
@@ -56,7 +69,9 @@ const BridgeIfaceMatch = "k-+"
 // commentTagPrefix is the --comment prefix on every rule the installer
 // owns so `iptables -S` is self-documenting and any future cleanup-by-grep
 // cannot collide with user-added rules in the same chain. Roles appended
-// to the prefix: ":established", ":egress", ":ingress".
+// to the prefix: ":established", ":ingress". The retired ":egress" role
+// (host-global egress blanket, removed in #1076) is pruned from upgraded
+// hosts by pruneObsoleteEgressAdmission.
 const commentTagPrefix = "kukeon-forward"
 
 // AdmissionRules returns the ordered iptables rules that populate
@@ -71,8 +86,26 @@ const commentTagPrefix = "kukeon-forward"
 // Rule order:
 //  1. RELATED,ESTABLISHED ACCEPT — return-traffic for already-admitted flows
 //     so reply packets cannot be dropped by FORWARD's default policy.
-//  2. -i k-+ ACCEPT — admit egress originating on a kukeon bridge.
-//  3. -o k-+ ACCEPT — admit ingress destined to a kukeon bridge.
+//  2. ! -i k-+ -o k-+ ACCEPT — admit *external* ingress destined to a kukeon
+//     bridge. The `! -i k-+` qualifier scopes this to traffic that did not
+//     originate on a kukeon bridge, so it admits the internet/host→bridge case
+//     without ever matching a space's egress.
+//
+// Why the `! -i k-+` scope matters: an inter-bridge packet (`-i k-A -o k-B`)
+// is simultaneously ingress to B and egress from A. A bare `-o k-+ ACCEPT`
+// would admit it here before A's KUKEON-EGRESS chain ever runs — fail-open for
+// cross-space egress whenever this chain sits ahead of KUKEON-EGRESS in
+// FORWARD, which nothing orders post-#1076. Excluding bridge-sourced traffic
+// (`! -i k-+`) sends every space's egress — internet-bound and inter-bridge
+// alike — through KUKEON-EGRESS, so the deny-space decision is never shadowed.
+//
+// Egress admission (`-i k-+ ACCEPT`) is deliberately absent since #1076: a
+// host-global egress blanket fails *open* — a Default=deny space whose
+// per-space KUKEON-EGRESS chain went missing (e.g. post-reboot, pre-reconcile)
+// would have its traffic ACCEPTed here. Egress is now admitted per-space inside
+// each space's own KUKEON-EGRESS chain (see internal/netpolicy.BuildRules), so
+// a missing chain fails *closed*. pruneObsoleteEgressAdmission strips a
+// leftover `:egress` rule from upgraded hosts.
 func AdmissionRules() [][]string {
 	return [][]string{
 		{
@@ -83,12 +116,7 @@ func AdmissionRules() [][]string {
 		},
 		{
 			"-A", ForwardChainName,
-			"-i", BridgeIfaceMatch,
-			"-m", "comment", "--comment", commentTagPrefix + ":egress",
-			"-j", "ACCEPT",
-		},
-		{
-			"-A", ForwardChainName,
+			"!", "-i", BridgeIfaceMatch,
 			"-o", BridgeIfaceMatch,
 			"-m", "comment", "--comment", commentTagPrefix + ":ingress",
 			"-j", "ACCEPT",
@@ -157,7 +185,13 @@ func NewInstallerWithRunner(logger *slog.Logger, runner CommandRunner) *Installe
 // Upgrade-path migration: when the chain already exists with untagged rules
 // from an older kukeon version, Install flushes it once before re-installing
 // the tagged rules so the chain does not end up carrying both the bare and
-// the tagged variants side by side.
+// the tagged variants side by side. A host upgraded from a pre-#1076 layout
+// also carries the retired `:egress` blanket rule; pruneObsoleteEgressAdmission
+// strips it so the fail-open hole #1076 closes does not survive the upgrade.
+// A host upgraded from an intermediate #1076 layout carries the *unscoped*
+// ingress rule (`-o k-+ ...:ingress`, no `! -i k-+`); pruneUnscopedIngressAdmission
+// strips that one so the inter-bridge fail-open it allowed does not survive
+// either — leaving only the scoped `! -i k-+ -o k-+` ingress rule.
 func (i *Installer) Install(ctx context.Context) error {
 	if err := i.ensureChain(ctx, ForwardChainName); err != nil {
 		return fmt.Errorf("%w: %w", errdefs.ErrForwardAdmissionApply, err)
@@ -170,6 +204,8 @@ func (i *Installer) Install(ctx context.Context) error {
 			return fmt.Errorf("%w: %w", errdefs.ErrForwardAdmissionApply, err)
 		}
 	}
+	i.pruneObsoleteEgressAdmission(ctx)
+	i.pruneUnscopedIngressAdmission(ctx)
 	if err := i.ensureForwardJump(ctx); err != nil {
 		return fmt.Errorf("%w: %w", errdefs.ErrForwardAdmissionApply, err)
 	}
@@ -264,135 +300,121 @@ func (i *Installer) migrateUntaggedRules(ctx context.Context) error {
 }
 
 // ensureForwardJump idempotently self-asserts the FORWARD → KUKEON-FORWARD
-// jump and its ordering relative to the per-space egress dispatch chain
-// KUKEON-EGRESS (netpolicy.MasterChainName). It is the per-tick self-assert
-// the daemon's network reconcile pass drives via Install (#1074/#1075): a
-// reboot wipes the jump and Docker churn reorders it, and this re-claims it
-// on the next tick without ever touching a Docker-owned chain.
+// jump. It is the per-tick self-assert the daemon's network reconcile pass
+// drives via Install (#1074/#1075): a reboot wipes the jump and Docker churn
+// can shuffle it, and this re-inserts it on the next tick without ever
+// touching a Docker-owned chain.
 //
-// Three states, mirroring AC #1 of #1075 ("re-insert when missing or
-// displaced; no churn on a healthy host"):
+// Since #1076 the jump only needs to *exist* — its position relative to
+// KUKEON-EGRESS no longer matters. Egress is decided entirely within each
+// space's own KUKEON-EGRESS chain (self-terminating ACCEPT/DROP), and this
+// chain now carries only stateful admission and ingress *scoped to non-bridge
+// sources* (`! -i k-+`). Neither can shadow a per-space egress decision: the
+// stateful rule only matches flows a per-space chain already admitted (a denied
+// NEW packet creates no conntrack entry), and the `! -i k-+` ingress rule
+// excludes all bridge-sourced traffic, so a space's egress — internet-bound or
+// inter-bridge — always reaches KUKEON-EGRESS. So the three-way missing/
+// displaced/healthy dance the pre-#1076 ordering contract required collapses to:
 //
-//   - Missing — the jump is absent (fresh host or post-reboot flush): insert
-//     it after KUKEON-EGRESS when that dispatch jump exists, else at
-//     position 1. A later netpolicy.Apply() that inserts KUKEON-EGRESS at 1
-//     pushes this jump to 2, preserving the invariant.
-//   - Displaced — the jump exists but sits at or ahead of KUKEON-EGRESS, so
-//     its blanket ACCEPT would shadow per-space egress DROP rules: delete the
-//     misplaced jump and re-insert it after KUKEON-EGRESS.
-//   - Healthy — the jump exists after KUKEON-EGRESS (or KUKEON-EGRESS is
-//     absent): no-op. Position relative to Docker's own chains is immaterial
-//     (KUKEON-FORWARD is ACCEPT-only and is reached before FORWARD's implicit
-//     policy DROP wherever it lands, because Docker's isolation chains RETURN
-//     for non-Docker interfaces), so only a precedence inversion against
-//     KUKEON-EGRESS counts as "displaced" — Docker pushing the jump down the
-//     chain is not churn-worthy.
+//   - Present (anywhere in FORWARD): no-op, no churn.
+//   - Absent (fresh host or post-reboot flush): insert at position 1.
 func (i *Installer) ensureForwardJump(ctx context.Context) error {
-	forwardPos, egressPos := i.forwardJumpPositions(ctx)
-
-	// Healthy: present and correctly ordered after the egress dispatch jump
-	// (or that jump is absent). No rule churn.
-	if forwardPos > 0 && (egressPos == 0 || forwardPos > egressPos) {
+	if _, err := i.runner.Run(ctx, "-C", "FORWARD", "-j", ForwardChainName); err == nil {
 		return nil
 	}
-
-	// Displaced: present but at/ahead of KUKEON-EGRESS. Drop the misplaced
-	// jump, then re-read the egress position — the delete shifts every lower
-	// rule (KUKEON-EGRESS included) up by one — before computing the slot.
-	if forwardPos > 0 {
-		if _, err := i.runner.Run(ctx, "-D", "FORWARD", "-j", ForwardChainName); err != nil {
-			return err
-		}
-		_, egressPos = i.forwardJumpPositions(ctx)
-	}
-
-	insertAt := "1"
-	if egressPos > 0 {
-		insertAt = strconv.Itoa(egressPos + 1)
-	}
-	_, err := i.runner.Run(ctx, "-I", "FORWARD", insertAt, "-j", ForwardChainName)
+	_, err := i.runner.Run(ctx, "-I", "FORWARD", "1", "-j", ForwardChainName)
 	return err
 }
 
-// forwardJumpPositions returns the 1-based positions of the KUKEON-FORWARD
-// admission jump and the KUKEON-EGRESS dispatch jump within the builtin
-// FORWARD chain, read in a single `-S FORWARD` pass. A position of 0 means
-// the jump is absent (or FORWARD was unreadable). Failures are non-fatal —
-// callers fall back to the safe position-1 default.
+// pruneObsoleteEgressAdmission deletes the retired host-global egress blanket
+// (`-i k-+ ... kukeon-forward:egress -j ACCEPT`) from ForwardChainName. Before
+// #1076 that rule admitted all kukeon-bridge egress; leaving it on an upgraded
+// host would re-open the fail-open hole #1076 closes (a Default=deny space
+// whose per-space chain is missing would be ACCEPTed here). Egress admission is
+// now per-space, so this rule must go.
 //
-// The token-aware match prevents a sibling chain named like
-// "KUKEON-EGRESS-FOO" from being mistaken for "KUKEON-EGRESS".
-func (i *Installer) forwardJumpPositions(ctx context.Context) (forwardPos, egressPos int) {
-	out, err := i.runner.Run(ctx, "-S", "FORWARD")
+// It reads `-S ForwardChainName` once and issues one canonical -D per matching
+// line — never an unbounded delete-until-absent loop, so a runner that reports
+// the rule present cannot livelock. Best-effort: a -S read failure or a -D
+// failure is logged at debug and tolerated, mirroring migrateUntaggedRules; the
+// chain converges on a later tick.
+func (i *Installer) pruneObsoleteEgressAdmission(ctx context.Context) {
+	out, err := i.runner.Run(ctx, "-S", ForwardChainName)
 	if err != nil {
-		return 0, 0
+		i.logger.DebugContext(ctx, "list chain for egress-prune check (skipping)",
+			"chain", ForwardChainName, "err", err)
+		return
 	}
-	pos := 0
+	del := []string{
+		"-D", ForwardChainName,
+		"-i", BridgeIfaceMatch,
+		"-m", "comment", "--comment", commentTagPrefix + ":egress",
+		"-j", "ACCEPT",
+	}
+	prefix := "-A " + ForwardChainName
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "-A FORWARD") {
+		if !strings.HasPrefix(line, prefix) {
 			continue
 		}
-		pos++
-		switch {
-		case forwardPos == 0 && lineJumpsTo(line, ForwardChainName):
-			forwardPos = pos
-		case egressPos == 0 && lineJumpsTo(line, netpolicy.MasterChainName):
-			egressPos = pos
+		if !strings.Contains(line, "-i "+BridgeIfaceMatch) ||
+			!strings.Contains(line, commentTagPrefix+":egress") {
+			continue
 		}
-	}
-	return forwardPos, egressPos
-}
-
-// lineJumpsTo reports whether an `iptables -S` line jumps to exactly the
-// named chain. Token-aware so a chain like "KUKEON-EGRESS-FOO" doesn't
-// match "KUKEON-EGRESS" the way a plain substring check would. A parse
-// failure is treated as a non-match — the caller falls back to its safe
-// default rather than aborting.
-func lineJumpsTo(line, target string) bool {
-	tokens, err := parseRuleLine(line)
-	if err != nil {
-		return false
-	}
-	for i := 0; i+1 < len(tokens); i++ {
-		if tokens[i] == "-j" && tokens[i+1] == target {
-			return true
-		}
-	}
-	return false
-}
-
-// parseRuleLine splits an "-A <chain> ..." line from `iptables -S` into
-// its argument vector. Double-quoted substrings (iptables emits comment
-// values in quotes when they contain spaces) are preserved as a single
-// arg with the quotes stripped.
-func parseRuleLine(line string) ([]string, error) {
-	var (
-		out     []string
-		cur     strings.Builder
-		inQuote bool
-	)
-	flush := func() {
-		if cur.Len() == 0 {
+		i.logger.InfoContext(ctx, "pruning obsolete host-global egress admission rule",
+			"chain", ForwardChainName)
+		if _, delErr := i.runner.Run(ctx, del...); delErr != nil {
+			i.logger.DebugContext(ctx, "prune obsolete egress admission (delete failed)",
+				"chain", ForwardChainName, "err", delErr)
 			return
 		}
-		out = append(out, cur.String())
-		cur.Reset()
 	}
-	for i := range len(line) {
-		c := line[i]
-		switch {
-		case c == '"':
-			inQuote = !inQuote
-		case c == ' ' && !inQuote:
-			flush()
-		default:
-			cur.WriteByte(c)
+}
+
+// pruneUnscopedIngressAdmission deletes the *unscoped* ingress rule
+// (`-o k-+ ... kukeon-forward:ingress -j ACCEPT`, with no `! -i k-+` qualifier)
+// from ForwardChainName. That shape shipped in the intermediate #1076 layout
+// before the ingress rule was scoped to exclude bridge-sourced traffic; leaving
+// it on an upgraded host re-opens the inter-bridge fail-open hole (a deny-space
+// A's egress to bridge B matches the bare `-o k-+` ACCEPT before A's
+// KUKEON-EGRESS chain runs). The current scoped rule (`! -i k-+ -o k-+ ...`) is
+// deliberately left in place — it is matched and skipped below.
+//
+// Same shape as pruneObsoleteEgressAdmission: one `-S` read, one canonical -D
+// per matching line, no delete-until-absent loop, all failures tolerated at
+// debug so the chain converges on a later tick.
+func (i *Installer) pruneUnscopedIngressAdmission(ctx context.Context) {
+	out, err := i.runner.Run(ctx, "-S", ForwardChainName)
+	if err != nil {
+		i.logger.DebugContext(ctx, "list chain for ingress-prune check (skipping)",
+			"chain", ForwardChainName, "err", err)
+		return
+	}
+	del := []string{
+		"-D", ForwardChainName,
+		"-o", BridgeIfaceMatch,
+		"-m", "comment", "--comment", commentTagPrefix + ":ingress",
+		"-j", "ACCEPT",
+	}
+	prefix := "-A " + ForwardChainName
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		// Match the ingress rule, but skip the current scoped form: a line
+		// carrying the `! -i k-+` negation is the rule we want to keep.
+		if !strings.Contains(line, "-o "+BridgeIfaceMatch) ||
+			!strings.Contains(line, commentTagPrefix+":ingress") ||
+			strings.Contains(line, "! -i "+BridgeIfaceMatch) {
+			continue
+		}
+		i.logger.InfoContext(ctx, "pruning obsolete unscoped ingress admission rule",
+			"chain", ForwardChainName)
+		if _, delErr := i.runner.Run(ctx, del...); delErr != nil {
+			i.logger.DebugContext(ctx, "prune unscoped ingress admission (delete failed)",
+				"chain", ForwardChainName, "err", delErr)
+			return
 		}
 	}
-	flush()
-	if inQuote {
-		return nil, errors.New("unterminated quote in iptables -S line")
-	}
-	return out, nil
 }

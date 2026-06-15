@@ -44,10 +44,20 @@ type Rule struct {
 // per-space chain. The caller is responsible for ensuring the chain exists
 // (flushed) and for wiring the dispatch jump from the master chain.
 //
+// Since #1076 the per-space chain is the *single space-owned chain* that both
+// admits and filters that bridge's egress — it terminates every packet itself
+// (ACCEPT or DROP) rather than RETURNing to a host-global blanket
+// KUKEON-FORWARD `-i k-+ ACCEPT`. That blanket is gone, so a RETURN here would
+// drop the packet to FORWARD's default policy: egress admission must live in
+// this chain. The fail-closed payoff: if this chain is missing (e.g. after a
+// reboot, before the reconcile loop re-applies it) a Default=deny space has no
+// path to ACCEPT, so traffic dies at FORWARD's policy — loud no-connectivity
+// instead of the old silent unrestricted egress.
+//
 // Rule ordering matters:
-//  1. Return on RELATED/ESTABLISHED so reply traffic is never dropped.
-//  2. Each allowlist entry emits one or more RETURN rules.
-//  3. Final action: DROP (when Default=deny) or RETURN (when Default=allow).
+//  1. ACCEPT on RELATED/ESTABLISHED so reply traffic is never dropped.
+//  2. Each allowlist entry emits one or more ACCEPT rules.
+//  3. Final action: DROP (when Default=deny) or ACCEPT (when Default=allow).
 //
 // The generator is pure: no I/O, no iptables invocations.
 func BuildRules(p *Policy) []Rule {
@@ -61,7 +71,7 @@ func BuildRules(p *Policy) []Rule {
 		Args: []string{
 			"-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED",
 			"-m", "comment", "--comment", tag + ":established",
-			"-j", "RETURN",
+			"-j", "ACCEPT",
 		},
 	})
 
@@ -79,7 +89,7 @@ func BuildRules(p *Policy) []Rule {
 	if p.Default == intmodel.EgressDefaultDeny {
 		terminal.Args = append(terminal.Args, "-j", "DROP")
 	} else {
-		terminal.Args = append(terminal.Args, "-j", "RETURN")
+		terminal.Args = append(terminal.Args, "-j", "ACCEPT")
 	}
 	rules = append(rules, terminal)
 
@@ -109,7 +119,7 @@ func buildAllowRules(chain, tag string, idx int, r ResolvedRule) []Rule {
 				Args: []string{
 					"-d", dst,
 					"-m", "comment", "--comment", tag + ":" + allowComment(idx, r),
-					"-j", "RETURN",
+					"-j", "ACCEPT",
 				},
 			})
 			continue
@@ -123,7 +133,7 @@ func buildAllowRules(chain, tag string, idx int, r ResolvedRule) []Rule {
 					"-p", "tcp",
 					"--dport", strconv.Itoa(port),
 					"-m", "comment", "--comment", tag + ":" + allowComment(idx, r),
-					"-j", "RETURN",
+					"-j", "ACCEPT",
 				},
 			})
 		}
