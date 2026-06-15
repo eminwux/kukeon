@@ -263,35 +263,69 @@ func (i *Installer) migrateUntaggedRules(ctx context.Context) error {
 	return flushErr
 }
 
-// ensureForwardJump idempotently inserts the FORWARD → KUKEON-FORWARD
-// jump. When KUKEON-EGRESS (netpolicy.MasterChainName) already lives in
-// FORWARD, the jump is placed at that position + 1 so per-space egress
-// DROP rules win over the blanket admission KUKEON-FORWARD provides.
-// Otherwise the jump goes to position 1; a later netpolicy.Apply() will
-// push it to position 2 by inserting KUKEON-EGRESS at 1.
+// ensureForwardJump idempotently self-asserts the FORWARD → KUKEON-FORWARD
+// jump and its ordering relative to the per-space egress dispatch chain
+// KUKEON-EGRESS (netpolicy.MasterChainName). It is the per-tick self-assert
+// the daemon's network reconcile pass drives via Install (#1074/#1075): a
+// reboot wipes the jump and Docker churn reorders it, and this re-claims it
+// on the next tick without ever touching a Docker-owned chain.
+//
+// Three states, mirroring AC #1 of #1075 ("re-insert when missing or
+// displaced; no churn on a healthy host"):
+//
+//   - Missing — the jump is absent (fresh host or post-reboot flush): insert
+//     it after KUKEON-EGRESS when that dispatch jump exists, else at
+//     position 1. A later netpolicy.Apply() that inserts KUKEON-EGRESS at 1
+//     pushes this jump to 2, preserving the invariant.
+//   - Displaced — the jump exists but sits at or ahead of KUKEON-EGRESS, so
+//     its blanket ACCEPT would shadow per-space egress DROP rules: delete the
+//     misplaced jump and re-insert it after KUKEON-EGRESS.
+//   - Healthy — the jump exists after KUKEON-EGRESS (or KUKEON-EGRESS is
+//     absent): no-op. Position relative to Docker's own chains is immaterial
+//     (KUKEON-FORWARD is ACCEPT-only and is reached before FORWARD's implicit
+//     policy DROP wherever it lands, because Docker's isolation chains RETURN
+//     for non-Docker interfaces), so only a precedence inversion against
+//     KUKEON-EGRESS counts as "displaced" — Docker pushing the jump down the
+//     chain is not churn-worthy.
 func (i *Installer) ensureForwardJump(ctx context.Context) error {
-	if _, err := i.runner.Run(ctx, "-C", "FORWARD", "-j", ForwardChainName); err == nil {
+	forwardPos, egressPos := i.forwardJumpPositions(ctx)
+
+	// Healthy: present and correctly ordered after the egress dispatch jump
+	// (or that jump is absent). No rule churn.
+	if forwardPos > 0 && (egressPos == 0 || forwardPos > egressPos) {
 		return nil
 	}
+
+	// Displaced: present but at/ahead of KUKEON-EGRESS. Drop the misplaced
+	// jump, then re-read the egress position — the delete shifts every lower
+	// rule (KUKEON-EGRESS included) up by one — before computing the slot.
+	if forwardPos > 0 {
+		if _, err := i.runner.Run(ctx, "-D", "FORWARD", "-j", ForwardChainName); err != nil {
+			return err
+		}
+		_, egressPos = i.forwardJumpPositions(ctx)
+	}
+
 	insertAt := "1"
-	if pos := i.findEgressPosition(ctx); pos > 0 {
-		insertAt = strconv.Itoa(pos + 1)
+	if egressPos > 0 {
+		insertAt = strconv.Itoa(egressPos + 1)
 	}
 	_, err := i.runner.Run(ctx, "-I", "FORWARD", insertAt, "-j", ForwardChainName)
 	return err
 }
 
-// findEgressPosition returns the 1-based position of the
-// `-j KUKEON-EGRESS` rule in FORWARD, or 0 when absent / unparseable.
-// Failures are non-fatal — callers fall back to position 1, which is
-// safe when KUKEON-EGRESS is not yet installed.
+// forwardJumpPositions returns the 1-based positions of the KUKEON-FORWARD
+// admission jump and the KUKEON-EGRESS dispatch jump within the builtin
+// FORWARD chain, read in a single `-S FORWARD` pass. A position of 0 means
+// the jump is absent (or FORWARD was unreadable). Failures are non-fatal —
+// callers fall back to the safe position-1 default.
 //
 // The token-aware match prevents a sibling chain named like
 // "KUKEON-EGRESS-FOO" from being mistaken for "KUKEON-EGRESS".
-func (i *Installer) findEgressPosition(ctx context.Context) int {
+func (i *Installer) forwardJumpPositions(ctx context.Context) (forwardPos, egressPos int) {
 	out, err := i.runner.Run(ctx, "-S", "FORWARD")
 	if err != nil {
-		return 0
+		return 0, 0
 	}
 	pos := 0
 	for _, line := range strings.Split(string(out), "\n") {
@@ -300,11 +334,14 @@ func (i *Installer) findEgressPosition(ctx context.Context) int {
 			continue
 		}
 		pos++
-		if lineJumpsTo(line, netpolicy.MasterChainName) {
-			return pos
+		switch {
+		case forwardPos == 0 && lineJumpsTo(line, ForwardChainName):
+			forwardPos = pos
+		case egressPos == 0 && lineJumpsTo(line, netpolicy.MasterChainName):
+			egressPos = pos
 		}
 	}
-	return 0
+	return forwardPos, egressPos
 }
 
 // lineJumpsTo reports whether an `iptables -S` line jumps to exactly the
