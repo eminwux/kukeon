@@ -58,14 +58,15 @@ func newInstaller(runner *fakeRunner) *firewall.Installer {
 	return firewall.NewInstallerWithRunner(logger, runner)
 }
 
-// TestAdmissionRules_Order locks in the rule order and content. The chain
-// must start with a stateful ACCEPT for return-traffic, then admit -i and -o
-// kukeon-bridge traffic. Catching a future reorder here is the regression
-// guard for the silent-egress-loss bug fixed by #293.
+// TestAdmissionRules_Order locks in the rule order and content. Since #1076
+// the chain carries only the stateful return-traffic ACCEPT and the ingress
+// admission — the host-global egress blanket (`-i k-+ ACCEPT`) is gone because
+// it fails open (a Default=deny space whose per-space chain is missing would be
+// ACCEPTed here). Egress admission is now per-space (internal/netpolicy).
 func TestAdmissionRules_Order(t *testing.T) {
 	rules := firewall.AdmissionRules()
-	if len(rules) != 3 {
-		t.Fatalf("want 3 admission rules; got %d: %v", len(rules), rules)
+	if len(rules) != 2 {
+		t.Fatalf("want 2 admission rules; got %d: %v", len(rules), rules)
 	}
 
 	// Rule 0: established/related ACCEPT, tagged "kukeon-forward:established".
@@ -79,26 +80,32 @@ func TestAdmissionRules_Order(t *testing.T) {
 		t.Errorf("rule 0: want %v; got %v", want0, rules[0])
 	}
 
-	// Rule 1: -i k-+ ACCEPT, tagged "kukeon-forward:egress".
+	// Rule 1: -o k-+ ACCEPT, tagged "kukeon-forward:ingress".
 	want1 := []string{
-		"-A", firewall.ForwardChainName,
-		"-i", firewall.BridgeIfaceMatch,
-		"-m", "comment", "--comment", "kukeon-forward:egress",
-		"-j", "ACCEPT",
-	}
-	if !sliceEq(rules[1], want1) {
-		t.Errorf("rule 1: want %v; got %v", want1, rules[1])
-	}
-
-	// Rule 2: -o k-+ ACCEPT, tagged "kukeon-forward:ingress".
-	want2 := []string{
 		"-A", firewall.ForwardChainName,
 		"-o", firewall.BridgeIfaceMatch,
 		"-m", "comment", "--comment", "kukeon-forward:ingress",
 		"-j", "ACCEPT",
 	}
-	if !sliceEq(rules[2], want2) {
-		t.Errorf("rule 2: want %v; got %v", want2, rules[2])
+	if !sliceEq(rules[1], want1) {
+		t.Errorf("rule 1: want %v; got %v", want1, rules[1])
+	}
+}
+
+// TestAdmissionRules_NoEgressBlanket is the fail-closed guard for #1076: the
+// host-global egress admission rule must never reappear in AdmissionRules. A
+// blanket `-i k-+ ACCEPT` here is exactly the fail-open hole the per-space
+// admission model closes, so its absence is a contract, not an accident.
+func TestAdmissionRules_NoEgressBlanket(t *testing.T) {
+	for _, r := range firewall.AdmissionRules() {
+		joined := strings.Join(r, " ")
+		if strings.Contains(joined, "-i "+firewall.BridgeIfaceMatch) {
+			t.Errorf("admission rules must not carry a host-global egress (-i %s) blanket; got %v",
+				firewall.BridgeIfaceMatch, r)
+		}
+		if strings.Contains(joined, "kukeon-forward:egress") {
+			t.Errorf("admission rules must not carry the retired :egress role; got %v", r)
+		}
 	}
 }
 
@@ -109,7 +116,6 @@ func TestAdmissionRules_Order(t *testing.T) {
 func TestAdmissionRules_CommentTags(t *testing.T) {
 	wantRoles := []string{
 		"kukeon-forward:established",
-		"kukeon-forward:egress",
 		"kukeon-forward:ingress",
 	}
 	rules := firewall.AdmissionRules()
@@ -196,27 +202,26 @@ func TestInstall_OnFreshHost(t *testing.T) {
 	}
 }
 
-// TestInstall_IsIdempotent verifies a second install on a healthy host
-// performs zero -N, -A, -I, or -F operations — only the read checks
-// (-L/-C/-S). This is the "no rule churn" guarantee the issue calls out.
+// TestInstall_IsIdempotent verifies a second install on a healthy post-#1076
+// host performs zero -N, -A, -I, -D, or -F operations — only the read checks
+// (-L/-C/-S). This is the "no rule churn" guarantee the issue calls out. The
+// chain carries the new two-rule layout (established + ingress, no egress
+// blanket), so the egress-prune finds nothing to delete.
 func TestInstall_IsIdempotent(t *testing.T) {
 	runner := &fakeRunner{
 		respond: map[string]fakeResp{
 			// -L succeeds → chain present.
-			// Migration check: chain populated with already-tagged rules → no flush.
+			// Migration + prune check: chain populated with the already-tagged
+			// post-#1076 rules (no :egress) → no flush, no -D.
 			"-S KUKEON-FORWARD": {out: []byte(
 				"-N KUKEON-FORWARD\n" +
 					"-A KUKEON-FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -m comment --comment \"kukeon-forward:established\" -j ACCEPT\n" +
-					"-A KUKEON-FORWARD -i k-+ -m comment --comment \"kukeon-forward:egress\" -j ACCEPT\n" +
 					"-A KUKEON-FORWARD -o k-+ -m comment --comment \"kukeon-forward:ingress\" -j ACCEPT\n",
 			)},
-			// FORWARD jump present and correctly ordered after KUKEON-EGRESS →
-			// ensureForwardJump finds it healthy and re-claims nothing.
-			"-S FORWARD": {out: []byte(
-				"-P FORWARD DROP\n" +
-					"-A FORWARD -j KUKEON-EGRESS\n" +
-					"-A FORWARD -j KUKEON-FORWARD\n",
-			)},
+			// FORWARD jump present → ensureForwardJump's -C succeeds and it
+			// re-inserts nothing. Position relative to KUKEON-EGRESS no longer
+			// matters post-#1076.
+			"-C FORWARD -j KUKEON-FORWARD": {},
 		},
 	}
 	i := newInstaller(runner)
@@ -227,7 +232,7 @@ func TestInstall_IsIdempotent(t *testing.T) {
 
 	for _, c := range runner.calls {
 		switch c[0] {
-		case "-N", "-I", "-A", "-F":
+		case "-N", "-I", "-A", "-D", "-F":
 			t.Errorf("idempotent install must not invoke %s; got call %v", c[0], c)
 		}
 	}
@@ -317,82 +322,23 @@ func TestInstall_ChainCreateFailureWrapsSentinel(t *testing.T) {
 	}
 }
 
-// TestInstall_JumpAfterEgressChain is the regression guard for the ordering
-// interaction with netpolicy: when KUKEON-EGRESS already lives in FORWARD,
-// KUKEON-FORWARD must be inserted at position EGRESS+1 so per-space DROP
-// rules win over the blanket admission. This guards the scenario where the
-// runner restart path reapplies netpolicy before forward admission.
-func TestInstall_JumpAfterEgressChain(t *testing.T) {
+// TestInstall_JumpInsertedAtPositionOneWhenAbsent is the post-#1076 jump
+// contract: when the FORWARD → KUKEON-FORWARD jump is absent (fresh host or
+// post-reboot flush), it is inserted at position 1 — unconditionally, with no
+// regard for where KUKEON-EGRESS sits. The ordering contract that once pinned
+// it after KUKEON-EGRESS is gone, because egress is now decided inside each
+// space's self-terminating chain.
+func TestInstall_JumpInsertedAtPositionOneWhenAbsent(t *testing.T) {
 	runner := &fakeRunner{
 		respond: map[string]fakeResp{
 			"-L KUKEON-FORWARD -n":         {err: errors.New("absent")},
 			"-C FORWARD -j KUKEON-FORWARD": {err: errors.New("absent")},
 			"-S KUKEON-FORWARD":            {out: []byte("-N KUKEON-FORWARD\n")},
+			// KUKEON-EGRESS already at FORWARD position 1 — pre-#1076 this would
+			// have forced the jump to position 2; now it must not.
 			"-S FORWARD": {out: []byte(
 				"-P FORWARD DROP\n" +
 					"-A FORWARD -j KUKEON-EGRESS\n",
-			)},
-		},
-	}
-	for _, rule := range firewall.AdmissionRules() {
-		check := strings.Join(append([]string{"-C"}, rule[1:]...), " ")
-		runner.respond[check] = fakeResp{err: errors.New("absent")}
-	}
-
-	if err := newInstaller(runner).Install(context.Background()); err != nil {
-		t.Fatalf("Install: %v", err)
-	}
-	if !wasCalled(runner, []string{"-I", "FORWARD", "2", "-j", "KUKEON-FORWARD"}) {
-		t.Errorf("expected jump at position 2 (after KUKEON-EGRESS); calls = %v", runner.calls)
-	}
-	if wasCalled(runner, []string{"-I", "FORWARD", "1", "-j", "KUKEON-FORWARD"}) {
-		t.Errorf("must not insert at position 1 when KUKEON-EGRESS already holds it")
-	}
-}
-
-// TestInstall_JumpAtPositionNplus1 covers the deeper case: KUKEON-EGRESS
-// at a non-1 position (after some unrelated rules) must still anchor the
-// KUKEON-FORWARD jump immediately after it.
-func TestInstall_JumpAtPositionNplus1(t *testing.T) {
-	runner := &fakeRunner{
-		respond: map[string]fakeResp{
-			"-L KUKEON-FORWARD -n":         {err: errors.New("absent")},
-			"-C FORWARD -j KUKEON-FORWARD": {err: errors.New("absent")},
-			"-S KUKEON-FORWARD":            {out: []byte("-N KUKEON-FORWARD\n")},
-			"-S FORWARD": {out: []byte(
-				"-P FORWARD DROP\n" +
-					"-A FORWARD -i docker0 -j ACCEPT\n" +
-					"-A FORWARD -j KUKEON-EGRESS\n",
-			)},
-		},
-	}
-	for _, rule := range firewall.AdmissionRules() {
-		check := strings.Join(append([]string{"-C"}, rule[1:]...), " ")
-		runner.respond[check] = fakeResp{err: errors.New("absent")}
-	}
-
-	if err := newInstaller(runner).Install(context.Background()); err != nil {
-		t.Fatalf("Install: %v", err)
-	}
-	if !wasCalled(runner, []string{"-I", "FORWARD", "3", "-j", "KUKEON-FORWARD"}) {
-		t.Errorf("expected jump at position 3 (after KUKEON-EGRESS at 2); calls = %v", runner.calls)
-	}
-}
-
-// TestInstall_DoesNotMatchEgressLikeSiblingChain pins the token-aware
-// match in findEgressPosition: a chain named like KUKEON-EGRESS-FOO must
-// not be mistaken for KUKEON-EGRESS. With only the sibling chain at
-// FORWARD pos 1 and KUKEON-EGRESS absent, the installer must insert
-// KUKEON-FORWARD at position 1, not 2.
-func TestInstall_DoesNotMatchEgressLikeSiblingChain(t *testing.T) {
-	runner := &fakeRunner{
-		respond: map[string]fakeResp{
-			"-L KUKEON-FORWARD -n":         {err: errors.New("absent")},
-			"-C FORWARD -j KUKEON-FORWARD": {err: errors.New("absent")},
-			"-S KUKEON-FORWARD":            {out: []byte("-N KUKEON-FORWARD\n")},
-			"-S FORWARD": {out: []byte(
-				"-P FORWARD DROP\n" +
-					"-A FORWARD -j KUKEON-EGRESS-FOO\n",
 			)},
 		},
 	}
@@ -405,36 +351,27 @@ func TestInstall_DoesNotMatchEgressLikeSiblingChain(t *testing.T) {
 		t.Fatalf("Install: %v", err)
 	}
 	if !wasCalled(runner, []string{"-I", "FORWARD", "1", "-j", "KUKEON-FORWARD"}) {
-		t.Errorf("expected jump at position 1 when only a sibling chain is present; calls = %v", runner.calls)
+		t.Errorf("expected jump at position 1 regardless of KUKEON-EGRESS; calls = %v", runner.calls)
 	}
 	if wasCalled(runner, []string{"-I", "FORWARD", "2", "-j", "KUKEON-FORWARD"}) {
-		t.Errorf("must not match KUKEON-EGRESS-FOO as KUKEON-EGRESS")
+		t.Errorf("must not anchor the jump to KUKEON-EGRESS's position anymore; calls = %v", runner.calls)
 	}
 }
 
-// TestInstall_SurvivesDockerChurnWithoutReorder is #1075 AC #4: when Docker
-// re-asserts its own chains (DOCKER-USER / DOCKER-FORWARD) at the top of
-// FORWARD it pushes kukeon's jumps down but never deletes them and never
-// inverts their relative order. Because KUKEON-FORWARD is ACCEPT-only and
-// position relative to Docker is immaterial to correctness, the self-assert
-// must treat this as healthy — no delete, no re-insert, no churn.
-func TestInstall_SurvivesDockerChurnWithoutReorder(t *testing.T) {
+// TestInstall_JumpNoChurnWhenPresent verifies the jump is left untouched
+// wherever it already sits. With egress decided per-space, the jump only needs
+// to *exist* — Docker pushing it down the chain (DOCKER-USER / DOCKER-FORWARD
+// at the top) or sitting it ahead of KUKEON-EGRESS is no longer churn-worthy,
+// so the self-assert must neither delete nor re-insert it.
+func TestInstall_JumpNoChurnWhenPresent(t *testing.T) {
 	runner := &fakeRunner{
 		respond: map[string]fakeResp{
-			// Docker pushed kukeon's jumps down the chain; KUKEON-EGRESS is
-			// still ahead of KUKEON-FORWARD, so the ordering invariant holds.
-			"-S FORWARD": {out: []byte(
-				"-P FORWARD DROP\n" +
-					"-A FORWARD -j DOCKER-USER\n" +
-					"-A FORWARD -j DOCKER-FORWARD\n" +
-					"-A FORWARD -j KUKEON-EGRESS\n" +
-					"-A FORWARD -j KUKEON-FORWARD\n",
-			)},
-			// Chain + tagged rules already present → no migration/rule churn.
+			// `-C FORWARD -j KUKEON-FORWARD` not canned → default success →
+			// jump present → ensureForwardJump no-ops. Chain carries the
+			// post-#1076 two-rule layout so prune finds nothing.
 			"-S KUKEON-FORWARD": {out: []byte(
 				"-N KUKEON-FORWARD\n" +
 					"-A KUKEON-FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -m comment --comment \"kukeon-forward:established\" -j ACCEPT\n" +
-					"-A KUKEON-FORWARD -i k-+ -m comment --comment \"kukeon-forward:egress\" -j ACCEPT\n" +
 					"-A KUKEON-FORWARD -o k-+ -m comment --comment \"kukeon-forward:ingress\" -j ACCEPT\n",
 			)},
 		},
@@ -443,89 +380,66 @@ func TestInstall_SurvivesDockerChurnWithoutReorder(t *testing.T) {
 	if err := newInstaller(runner).Install(context.Background()); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
-	if wasCalledWithVerb(runner, "-D") {
-		t.Errorf("must not delete the jump when Docker merely reordered it; calls = %v", runner.calls)
-	}
 	if wasCalledWithVerb(runner, "-I") {
-		t.Errorf("must not re-insert the jump under harmless Docker churn; calls = %v", runner.calls)
+		t.Errorf("must not re-insert the jump when it is already present; calls = %v", runner.calls)
+	}
+	if wasCalledWithVerb(runner, "-D") {
+		t.Errorf("must not delete the jump when it is already present; calls = %v", runner.calls)
 	}
 }
 
-// invertedForwardRunner simulates a FORWARD chain where KUKEON-FORWARD sits
-// *ahead* of KUKEON-EGRESS — the displacement that lets the blanket admission
-// shadow per-space egress DROP rules. After the self-assert deletes the
-// misplaced jump, the second `-S FORWARD` read reflects the post-delete state
-// (KUKEON-EGRESS shifted up to position 1) so the re-insert lands in the
-// correct slot. The stateless fakeRunner cannot model that shift, hence this
-// purpose-built stateful runner.
-type invertedForwardRunner struct {
-	calls   [][]string
-	deleted bool
-}
-
-func (r *invertedForwardRunner) Run(_ context.Context, args ...string) ([]byte, error) {
-	r.calls = append(r.calls, append([]string(nil), args...))
-	joined := strings.Join(args, " ")
-	switch {
-	case joined == "-S FORWARD":
-		if r.deleted {
-			// KUKEON-FORWARD removed; KUKEON-EGRESS now at position 1.
-			return []byte("-P FORWARD DROP\n-A FORWARD -j KUKEON-EGRESS\n"), nil
-		}
-		// Inverted: KUKEON-FORWARD (1) ahead of KUKEON-EGRESS (2).
-		return []byte(
-			"-P FORWARD DROP\n" +
-				"-A FORWARD -j KUKEON-FORWARD\n" +
-				"-A FORWARD -j KUKEON-EGRESS\n",
-		), nil
-	case joined == "-D FORWARD -j KUKEON-FORWARD":
-		r.deleted = true
-		return nil, nil
-	default:
-		// All existence probes (-L chain, -C rule, -S KUKEON-FORWARD) report
-		// "present/empty" so Install skips migration and rule churn and
-		// exercises only the jump self-assert.
-		return nil, nil
+// TestInstall_PrunesObsoleteEgressAdmission is the upgrade-path guard for
+// #1076: a host upgraded from the pre-#1076 layout still carries the
+// host-global egress blanket (`-i k-+ ... :egress -j ACCEPT`) in
+// KUKEON-FORWARD. Leaving it would re-open the fail-open hole, so Install must
+// -D it. The established + ingress rules already present must not be touched.
+func TestInstall_PrunesObsoleteEgressAdmission(t *testing.T) {
+	runner := &fakeRunner{
+		respond: map[string]fakeResp{
+			// Healthy chain carrying the retired :egress rule alongside the
+			// current tagged rules → migration sees only tagged rules (no
+			// flush), the ensureRule loop finds established+ingress present,
+			// and the prune deletes the egress blanket.
+			"-S KUKEON-FORWARD": {out: []byte(
+				"-N KUKEON-FORWARD\n" +
+					"-A KUKEON-FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -m comment --comment \"kukeon-forward:established\" -j ACCEPT\n" +
+					"-A KUKEON-FORWARD -i k-+ -m comment --comment \"kukeon-forward:egress\" -j ACCEPT\n" +
+					"-A KUKEON-FORWARD -o k-+ -m comment --comment \"kukeon-forward:ingress\" -j ACCEPT\n",
+			)},
+			"-C FORWARD -j KUKEON-FORWARD": {},
+		},
 	}
-}
 
-func (r *invertedForwardRunner) ran(prefix ...string) bool {
-	for _, got := range r.calls {
-		if len(got) < len(prefix) {
-			continue
-		}
-		match := true
-		for i := range prefix {
-			if got[i] != prefix[i] {
-				match = false
-				break
-			}
-		}
-		if match {
-			return true
-		}
-	}
-	return false
-}
-
-// TestInstall_ReclaimsDisplacedJump is #1075 AC #1 (the "displaced" arm):
-// when KUKEON-FORWARD is present but ahead of KUKEON-EGRESS, the self-assert
-// deletes the misplaced jump and re-inserts it immediately after
-// KUKEON-EGRESS so per-space egress DROP rules win over the blanket admission.
-func TestInstall_ReclaimsDisplacedJump(t *testing.T) {
-	runner := &invertedForwardRunner{}
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	installer := firewall.NewInstallerWithRunner(logger, runner)
-	if err := installer.Install(context.Background()); err != nil {
+	if err := newInstaller(runner).Install(context.Background()); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
-	if !runner.ran("-D", "FORWARD", "-j", "KUKEON-FORWARD") {
-		t.Errorf("expected the displaced jump to be deleted; calls = %v", runner.calls)
+	wantDel := []string{
+		"-D", firewall.ForwardChainName,
+		"-i", firewall.BridgeIfaceMatch,
+		"-m", "comment", "--comment", "kukeon-forward:egress",
+		"-j", "ACCEPT",
 	}
-	// After the delete, KUKEON-EGRESS is at position 1, so the jump must be
-	// re-inserted at position 2 (immediately after it).
-	if !runner.ran("-I", "FORWARD", "2", "-j", "KUKEON-FORWARD") {
-		t.Errorf("expected re-insert at position 2 (after KUKEON-EGRESS); calls = %v", runner.calls)
+	if !wasCalled(runner, wantDel) {
+		t.Errorf("expected the obsolete egress blanket to be pruned via %v; calls = %v",
+			wantDel, runner.calls)
+	}
+	// The chain must not be flushed (the current rules are tagged) and the jump
+	// is present so nothing is re-inserted.
+	if wasCalledWithVerb(runner, "-F") {
+		t.Errorf("must not flush a chain carrying current tagged rules; calls = %v", runner.calls)
+	}
+}
+
+// TestInstall_PruneNoopWhenNoEgressRule confirms the prune is a no-op on a
+// host that never carried (or already shed) the egress blanket: no -D against
+// KUKEON-FORWARD.
+func TestInstall_PruneNoopWhenNoEgressRule(t *testing.T) {
+	runner := installFreshHostRunner()
+	if err := newInstaller(runner).Install(context.Background()); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if wasCalledWithVerb(runner, "-D") {
+		t.Errorf("prune must not -D when no egress blanket is present; calls = %v", runner.calls)
 	}
 }
 

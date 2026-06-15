@@ -106,6 +106,27 @@ func FromInternal(realmName, spaceName, bridge string, in *intmodel.EgressPolicy
 	}, nil
 }
 
+// NewAdmitAllPolicy returns a default-allow admission policy for a space's
+// bridge that carries no operator-supplied egress restriction.
+//
+// Since #1076 egress admission is per-space: the host-global `-i k-+ ACCEPT`
+// blanket in KUKEON-FORWARD is gone, so a space with no EgressPolicy (or a
+// default=allow policy with an empty allowlist, which FromInternal collapses to
+// nil) would otherwise have no path to ACCEPT its egress on a host whose
+// FORWARD policy is DROP. Installing this admit-all chain — established + a
+// terminal ACCEPT, via BuildRules — keeps such a space's egress fully open
+// while still routing it through its own space-owned chain, so the per-space
+// install/remove-as-one-unit invariant holds for every space uniformly.
+func NewAdmitAllPolicy(realmName, spaceName, bridge string) *Policy {
+	return &Policy{
+		Bridge:    bridge,
+		RealmName: realmName,
+		SpaceName: spaceName,
+		Default:   intmodel.EgressDefaultAllow,
+		Allow:     nil,
+	}
+}
+
 func normalizeDefault(d intmodel.EgressDefault) (intmodel.EgressDefault, error) {
 	switch strings.ToLower(strings.TrimSpace(string(d))) {
 	case "", string(intmodel.EgressDefaultAllow):
