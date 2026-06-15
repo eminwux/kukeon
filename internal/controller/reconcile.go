@@ -39,6 +39,62 @@ type ReconcileResult struct {
 	Errors       []string
 }
 
+// SpaceNetReconcileResult summarizes a single pass of the daemon's
+// background Space network reconciliation loop (#1074, foundation of the
+// #953 spacenet epic). Counts are scoped to spaces; per-pass errors are
+// collected so the loop can keep ticking.
+type SpaceNetReconcileResult struct {
+	SpacesScanned int
+	SpacesErrored int
+	Errors        []string
+}
+
+// ReconcileSpaceNetworks walks every realm/space and re-asserts each space's
+// network desired-state — the CNI conflist/bridge and the egress policy from
+// space.Spec.Network — via the idempotent EnsureSpace helper (which fans out
+// to ensureSpaceCNIConfig in provision.go and applySpaceEgressPolicy in
+// egress.go). It is the per-tick sibling of ReconcileCells: a reboot wipes
+// the host's iptables and CNI state, and without continuous re-assertion a
+// Default=deny space whose KUKEON-EGRESS chain went missing silently allows
+// all egress. The global KUKEON-FORWARD admission chain is re-asserted by the
+// daemon layer (one chain covers every bridge), not here.
+//
+// Errors at any level are recorded in Errors; the walk continues so a single
+// bad space does not silence the rest of the host. The returned error is
+// always nil — failures surface through Errors so the loop keeps ticking,
+// matching ReconcileCells.
+func (b *Exec) ReconcileSpaceNetworks() (SpaceNetReconcileResult, error) {
+	result := SpaceNetReconcileResult{Errors: []string{}}
+
+	realms, err := b.runner.ListRealms()
+	if err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("list realms: %v", err))
+		return result, nil
+	}
+
+	for _, realm := range realms {
+		realmName := realm.Metadata.Name
+		spaces, listErr := b.runner.ListSpaces(realmName)
+		if listErr != nil {
+			result.Errors = append(result.Errors,
+				fmt.Sprintf("list spaces in realm %q: %v", realmName, listErr))
+			continue
+		}
+		for _, space := range spaces {
+			result.SpacesScanned++
+			if _, ensureErr := b.runner.EnsureSpace(space); ensureErr != nil {
+				result.SpacesErrored++
+				result.Errors = append(result.Errors,
+					fmt.Sprintf("reconcile space network %s/%s: %v",
+						realmName, space.Metadata.Name, ensureErr))
+				continue
+			}
+		}
+	}
+
+	return result, nil
+}
+
 // ReconcileCells walks every realm/space/stack and reconciles each cell's
 // status against observed container state. Errors at any level are logged
 // and recorded in Errors; the walk continues so a single bad cell does not

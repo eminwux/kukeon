@@ -73,9 +73,17 @@ type Server struct {
 	// it before Serve so they exercise the ticker without a real controller.
 	reconcileFn func() (controller.ReconcileResult, error)
 
-	// forwardAdmissionFn re-asserts the host FORWARD admission chain once on
-	// Serve startup. Defaults to reassertForwardAdmission; tests overwrite it
-	// before Serve so they exercise the startup hook without touching iptables.
+	// spaceNetReconcileFn is the per-tick callable for the Space network
+	// reconciliation pass (#1074): it re-asserts each space's CNI
+	// conflist/bridge + egress policy from space.Spec.Network. Defaults to
+	// core.ReconcileSpaceNetworks; tests overwrite it before Serve so they
+	// exercise the ticker without a real controller.
+	spaceNetReconcileFn func() (controller.SpaceNetReconcileResult, error)
+
+	// forwardAdmissionFn re-asserts the host FORWARD admission chain on Serve
+	// startup and on every reconcile tick (folded into the Space network pass,
+	// #1074). Defaults to reassertForwardAdmission; tests overwrite it before
+	// Serve so they exercise the hook without touching iptables.
 	forwardAdmissionFn func() error
 
 	// stopCh is closed by Stop to terminate the reconcile loop independently
@@ -103,6 +111,7 @@ func NewServer(ctx context.Context, logger *slog.Logger, opts Options) *Server {
 		stopCh: make(chan struct{}),
 	}
 	srv.reconcileFn = srv.core.ReconcileCells
+	srv.spaceNetReconcileFn = srv.core.ReconcileSpaceNetworks
 	srv.forwardAdmissionFn = srv.reassertForwardAdmission
 	return srv
 }
@@ -153,16 +162,14 @@ func (s *Server) Serve() error {
 	}
 
 	s.logger.InfoContext(s.ctx, "kukeond listening", "socket", s.opts.SocketPath)
-	// NewServer always wires forwardAdmissionFn; call it unguarded to match the
-	// reconcileFn pattern (runReconcileOnce dereferences s.reconcileFn directly).
-	if err := s.forwardAdmissionFn(); err != nil {
-		// Best-effort: a flushed/unavailable FORWARD admission chain must
-		// not block the daemon from serving. The next reboot self-heals
-		// here; durable per-space egress + Docker-churn handling is #953.
-		s.logger.WarnContext(s.ctx,
-			"forward admission re-assert failed on startup; continuing",
-			"error", err)
-	}
+	// Re-assert the full host network desired-state once before the loop
+	// begins (#1074) so a reboot — which flushes iptables and strips the
+	// KUKEON-FORWARD/KUKEON-EGRESS chains — heals immediately rather than on
+	// the first tick. This folds in the FORWARD admission re-assert that
+	// previously ran standalone here and adds the per-space CNI/egress
+	// re-assert. Best-effort throughout: a flushed/unavailable chain or a
+	// single bad space must not block the daemon from serving.
+	s.runSpaceNetworkReconcileOnce()
 	s.startReconcileLoop()
 	s.acceptLoop(listener)
 	return nil
@@ -250,6 +257,7 @@ func (s *Server) runReconcileLoop(interval time.Duration) {
 			return
 		case <-ticker.C:
 			s.runReconcileOnce()
+			s.runSpaceNetworkReconcileOnce()
 		}
 	}
 }
@@ -283,6 +291,53 @@ func (s *Server) runReconcileOnce() {
 			"cells_scanned", res.CellsScanned,
 			"cells_updated", res.CellsUpdated,
 			"cells_deleted", res.CellsDeleted)
+	}
+}
+
+// runSpaceNetworkReconcileOnce re-asserts the host's network desired-state in
+// one pass (#1074): the global KUKEON-FORWARD admission chain (idempotent;
+// its k-+ iface match covers every kukeon bridge, so one re-assert per pass
+// suffices for all spaces) followed by the per-Space CNI conflist/bridge +
+// egress policy from space.Spec.Network. All underlying ops are idempotent,
+// so a healthy host sees no rule churn. Best-effort and panic-guarded like
+// runReconcileOnce: a failed FORWARD re-assert or a single bad space is
+// logged and the pass continues — nothing here may wedge the loop or take
+// the daemon down. Called once on Serve startup before the loop and on every
+// ticker tick.
+func (s *Server) runSpaceNetworkReconcileOnce() {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.ErrorContext(s.ctx,
+				"space network reconcile pass panicked; loop continues",
+				"panic", r)
+		}
+	}()
+
+	if err := s.forwardAdmissionFn(); err != nil {
+		// Best-effort: a flushed/unavailable FORWARD admission chain must
+		// not block the per-space pass or the daemon. The next tick (or a
+		// reboot) self-heals here.
+		s.logger.WarnContext(s.ctx,
+			"forward admission re-assert failed; continuing",
+			"error", err)
+	}
+
+	res, err := s.spaceNetReconcileFn()
+	switch {
+	case err != nil:
+		s.logger.ErrorContext(s.ctx, "space network reconcile pass failed",
+			"error", err,
+			"spaces_scanned", res.SpacesScanned,
+			"spaces_errored", res.SpacesErrored,
+			"errors", res.Errors)
+	case len(res.Errors) > 0:
+		s.logger.WarnContext(s.ctx, "space network reconcile pass completed with errors",
+			"spaces_scanned", res.SpacesScanned,
+			"spaces_errored", res.SpacesErrored,
+			"errors", res.Errors)
+	default:
+		s.logger.InfoContext(s.ctx, "space network reconcile ok",
+			"spaces_scanned", res.SpacesScanned)
 	}
 }
 

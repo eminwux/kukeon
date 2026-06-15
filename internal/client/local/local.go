@@ -922,6 +922,14 @@ func (c *Client) ReconcileCells() (controller.ReconcileResult, error) {
 	return c.ctrl.ReconcileCells()
 }
 
+// ReconcileSpaceNetworks runs one pass of the daemon-side Space network
+// reconciliation loop (#1074): re-asserts each space's CNI conflist/bridge
+// and egress policy from space.Spec.Network. Daemon-internal: not surfaced
+// over the kukeonv1 wire.
+func (c *Client) ReconcileSpaceNetworks() (controller.SpaceNetReconcileResult, error) {
+	return c.ctrl.ReconcileSpaceNetworks()
+}
+
 // ---- Refresh ----
 
 func (c *Client) RefreshAll(_ context.Context) (kukeonv1.RefreshAllResult, error) {

@@ -158,11 +158,21 @@ func newTestServerWithCtx(t *testing.T, ctx context.Context, interval time.Durat
 	dir := t.TempDir()
 	socketPath := filepath.Join(dir, "kukeond.sock")
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return NewServer(ctx, logger, Options{
+	srv := NewServer(ctx, logger, Options{
 		SocketPath:        socketPath,
 		SocketMode:        0o600,
 		ReconcileInterval: interval,
 	})
+	// The reconcile loop now drives a Space network pass (FORWARD admission +
+	// per-space CNI/egress) alongside the cell pass (#1074). Loop tests assert
+	// only on reconcileFn, so stub these hooks to keep the ticker hermetic —
+	// otherwise the default wiring would shell out to real iptables on every
+	// tick. Tests that exercise the Space network pass set them explicitly.
+	srv.forwardAdmissionFn = func() error { return nil }
+	srv.spaceNetReconcileFn = func() (controller.SpaceNetReconcileResult, error) {
+		return controller.SpaceNetReconcileResult{}, nil
+	}
+	return srv
 }
 
 func startServer(t *testing.T, srv *Server) {
