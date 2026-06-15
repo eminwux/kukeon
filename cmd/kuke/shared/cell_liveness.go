@@ -65,15 +65,20 @@ func GuardCellTaskLiveness(get kukeonv1.GetCellResult, cellName string) error {
 		)
 	}
 	switch get.Cell.Status.State {
-	case v1beta1.CellStateReady:
+	case v1beta1.CellStateReady, v1beta1.CellStateDegraded:
+		// Degraded (#1233 follow-up) is a live cell — root/sandbox up, a non-root
+		// workload down or restarting — so it guards the same as Ready: the root
+		// task must still be present in containerd. Attaching to a down workload
+		// container then fails at the container level with its own diagnostic.
 		if get.RootContainerTaskRunning {
 			return nil
 		}
 		return fmt.Errorf(
-			"cell %q is recorded Ready but its containers are gone from containerd "+
+			"cell %q is recorded %s but its containers are gone from containerd "+
 				"(kukeon metadata and containerd have diverged); "+
 				"delete it with `kuke delete cell %s` before re-running",
 			cellName,
+			get.Cell.Status.State.String(),
 			cellName,
 		)
 	case v1beta1.CellStateStopped, v1beta1.CellStateExited, v1beta1.CellStateError:

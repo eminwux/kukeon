@@ -205,4 +205,14 @@ const (
 	// failures. Appended last (after CellStateExited) for the same ordinal-
 	// lockstep reason.
 	CellStateError
+	// CellStateDegraded is the partial-health, non-terminal state: the cell's
+	// root/sandbox is up but at least one non-root workload is down in a
+	// non-clean way (crashed, or exited under a policy that should keep it
+	// running) — either alongside other still-running workloads, or while the
+	// reconciler is restarting it. Unlike CellStateError it is NOT sticky and
+	// NOT terminal: the reconciler keeps re-deriving it, so it returns to Ready
+	// when the workload recovers and settles to Error once a crash-looper
+	// exhausts its restart budget. Appended last (after CellStateError) for the
+	// same ordinal-lockstep reason.
+	CellStateDegraded
 )

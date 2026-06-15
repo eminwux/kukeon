@@ -113,4 +113,8 @@ const (
 	// non-zero (see CellStateError / ContainerStateError, #1267). Distinct
 	// from StateFailedStr, which is reserved for kukeon's own bring-up faults.
 	StateErrorStr = "Error"
+	// StateDegradedStr is the display label for a cell whose root/sandbox is up
+	// but at least one non-root workload is down in a non-clean way — partial
+	// health, non-terminal (see CellStateDegraded).
+	StateDegradedStr = "Degraded"
 )

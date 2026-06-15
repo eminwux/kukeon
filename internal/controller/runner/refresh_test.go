@@ -44,6 +44,10 @@ func TestCellStateAutoDeleteTriggers(t *testing.T) {
 		{intmodel.CellStateReady, false},
 		{intmodel.CellStatePending, false},
 		{intmodel.CellStateUnknown, false},
+		// #1233 follow-up: Degraded must NOT auto-delete — a cell with a
+		// workload still restarting must not be reaped out from under the
+		// restart pass.
+		{intmodel.CellStateDegraded, false},
 	}
 	for _, tc := range cases {
 		if got := cellStateAutoDeleteTriggers(tc.state); got != tc.want {
@@ -113,6 +117,16 @@ func TestLatchReadyObserved(t *testing.T) {
 			prior:         true,
 			originalState: intmodel.CellStateUnknown,
 			newState:      intmodel.CellStateUnknown,
+			want:          true,
+		},
+		{
+			// #1233 follow-up: a cell whose first observed state is Degraded
+			// (a sibling crashed before it ever derived Ready) has still come
+			// up — the latch must close so the restart pass is not gated off.
+			name:          "first_degraded_observation_flips_true",
+			prior:         false,
+			originalState: intmodel.CellStatePending,
+			newState:      intmodel.CellStateDegraded,
 			want:          true,
 		},
 	}
@@ -478,20 +492,22 @@ func TestDeriveCellStateFromNonRootContainerStatuses(t *testing.T) {
 			want: intmodel.CellStateError,
 		},
 		{
-			name: "active_workload_outranks_a_failed_sibling",
+			name: "active_workload_with_a_failed_sibling_is_degraded",
 			specs: []intmodel.ContainerSpec{
 				{ID: "root", Root: true},
 				{ID: "work-a", Root: false},
 				{ID: "work-b", Root: false},
 			},
-			// A still-running workload keeps the cell Ready even when a sibling
-			// crashed — the cell is not terminal yet, so no Error verdict.
+			// #1233 follow-up: a still-running workload keeps the cell out of the
+			// terminal Error verdict (not all workloads are down), but a crashed
+			// sibling means the cell is only partially healthy — Degraded, not the
+			// pre-#1233 Ready that masked the crash behind the live sibling.
 			statuses: []intmodel.ContainerStatus{
 				{ID: "root", State: intmodel.ContainerStateReady},
 				{ID: "work-a", State: intmodel.ContainerStateReady},
 				{ID: "work-b", State: intmodel.ContainerStateError, ExitCode: 1},
 			},
-			want: intmodel.CellStateReady,
+			want: intmodel.CellStateDegraded,
 		},
 		{
 			name: "absent_workload_counts_as_terminal_clean_exit",
@@ -571,6 +587,48 @@ func TestDeriveCellStateFromNonRootContainerStatuses(t *testing.T) {
 				{ID: "work-a", State: intmodel.ContainerStateStopped},
 			},
 			want: intmodel.CellStateUnknown,
+		},
+		{
+			// #1233 follow-up: one workload up, another crashed → partial
+			// health, Degraded (not Ready: a crash is not clean).
+			name: "active_plus_crashed_workload_is_degraded",
+			specs: []intmodel.ContainerSpec{
+				{ID: "work-a", Root: false},
+				{ID: "work-b", Root: false},
+			},
+			statuses: []intmodel.ContainerStatus{
+				{ID: "work-a", State: intmodel.ContainerStateReady},
+				{ID: "work-b", State: intmodel.ContainerStateError, ExitCode: 1},
+			},
+			want: intmodel.CellStateDegraded,
+		},
+		{
+			// always-policy workload that exited cleanly is still "supposed to
+			// be running", so the cell is Degraded while a peer is up.
+			name: "active_plus_always_clean_exit_is_degraded",
+			specs: []intmodel.ContainerSpec{
+				{ID: "work-a", Root: false},
+				{ID: "work-b", Root: false, RestartPolicy: intmodel.RestartPolicyAlways},
+			},
+			statuses: []intmodel.ContainerStatus{
+				{ID: "work-a", State: intmodel.ContainerStateReady},
+				{ID: "work-b", State: intmodel.ContainerStateExited, ExitCode: 0},
+			},
+			want: intmodel.CellStateDegraded,
+		},
+		{
+			// A completed oneshot (never / clean exit) is NOT degraded: a
+			// sidecar+job cell stays Ready once the job finishes successfully.
+			name: "active_plus_completed_oneshot_is_ready",
+			specs: []intmodel.ContainerSpec{
+				{ID: "work-a", Root: false},
+				{ID: "work-b", Root: false, RestartPolicy: intmodel.RestartPolicyNever},
+			},
+			statuses: []intmodel.ContainerStatus{
+				{ID: "work-a", State: intmodel.ContainerStateReady},
+				{ID: "work-b", State: intmodel.ContainerStateExited, ExitCode: 0},
+			},
+			want: intmodel.CellStateReady,
 		},
 	}
 	for _, tc := range cases {
@@ -989,11 +1047,49 @@ func TestCellStateIsSticky(t *testing.T) {
 		{intmodel.CellStateReady, false},
 		{intmodel.CellStatePending, false},
 		{intmodel.CellStateUnknown, false},
+		// #1233 follow-up: Degraded MUST be non-sticky — the restart pass holds
+		// the cell at Degraded while converging, and a sticky Degraded would
+		// short-circuit ReconcileCell and strand the restart loop (the exact
+		// trap that rules out a sticky Error here).
+		{intmodel.CellStateDegraded, false},
 	}
 	for _, tc := range cases {
 		if got := cellStateIsSticky(tc.state); got != tc.want {
 			t.Errorf("cellStateIsSticky(%v) = %v, want %v",
 				tc.state, got, tc.want)
 		}
+	}
+}
+
+// TestNonRootWorkloadDegraded pins the per-container degraded predicate that
+// both derivation sites and the restart pass agree on: a terminal workload is
+// degraded on a non-zero exit, or on a clean exit under a policy that should
+// keep it running; a cleanly-completed never / on-failure oneshot is not.
+func TestNonRootWorkloadDegraded(t *testing.T) {
+	terminal := intmodel.ContainerStateStopped
+	cases := []struct {
+		name     string
+		policy   string
+		exitCode int
+		want     bool
+	}{
+		{"always_clean_exit_degraded", intmodel.RestartPolicyAlways, 0, true},
+		{"always_failed_exit_degraded", intmodel.RestartPolicyAlways, 1, true},
+		{"on_failure_clean_exit_not_degraded", intmodel.RestartPolicyOnFailure, 0, false},
+		{"on_failure_failed_exit_degraded", intmodel.RestartPolicyOnFailure, 1, true},
+		{"never_clean_exit_not_degraded", intmodel.RestartPolicyNever, 0, false},
+		{"never_failed_exit_degraded", intmodel.RestartPolicyNever, 1, true},
+		{"empty_clean_exit_not_degraded", "", 0, false},
+		{"empty_failed_exit_degraded", "", 1, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := intmodel.ContainerSpec{ID: "work", RestartPolicy: tc.policy}
+			status := intmodel.ContainerStatus{ID: "work", State: terminal, ExitCode: tc.exitCode}
+			if got := nonRootWorkloadDegraded(spec, status); got != tc.want {
+				t.Errorf("nonRootWorkloadDegraded(policy=%q, exit=%d) = %v, want %v",
+					tc.policy, tc.exitCode, got, tc.want)
+			}
+		})
 	}
 }

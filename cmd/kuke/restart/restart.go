@@ -222,7 +222,10 @@ func restartOne(cmd *cobra.Command, client kukeonv1.Client, doc v1beta1.CellDoc)
 	}
 
 	switch pre.Cell.Status.State {
-	case v1beta1.CellStateReady:
+	case v1beta1.CellStateReady, v1beta1.CellStateDegraded:
+		// Degraded (#1233 follow-up) is a live cell (root/sandbox up, a non-root
+		// workload down or restarting), so restart runs in place like Ready
+		// rather than the recreate path the terminal states take.
 		return restartInPlace(cmd, client, doc)
 	case v1beta1.CellStateStopped, v1beta1.CellStateExited, v1beta1.CellStateError, v1beta1.CellStateFailed:
 		// All four terminal/degraded states restart without a delete (#1268):

@@ -431,7 +431,13 @@ func (r *Exec) VolumeMountedByLiveCell(volume intmodel.Volume) (string, bool, er
 	target := volume.Metadata
 	for i := range cells {
 		cell := cells[i]
-		if cell.Status.State != intmodel.CellStateReady {
+		// Ready and Degraded both mean the cell is live (root/sandbox up) and may
+		// hold a running container that mounts this volume (#1233 follow-up) — a
+		// Degraded cell is only partially unhealthy, not stopped. Treating it as
+		// live here keeps `kuke delete volume` from yanking a mount out from under
+		// a still-running container.
+		if cell.Status.State != intmodel.CellStateReady &&
+			cell.Status.State != intmodel.CellStateDegraded {
 			continue
 		}
 		scope := ctr.VolumeScope{

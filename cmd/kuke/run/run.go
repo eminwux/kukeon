@@ -751,7 +751,13 @@ func runExistingCell(
 	flags runFlags,
 ) error {
 	switch pre.Cell.Status.State {
-	case v1beta1.CellStateReady:
+	case v1beta1.CellStateReady, v1beta1.CellStateDegraded:
+		// Degraded (#1233 follow-up) is a live cell (root/sandbox up, a non-root
+		// workload down or restarting), so `kuke run` treats it like Ready: no-op
+		// after the divergence guard, leaving the reconciler to recover the
+		// workload. Re-entering StartCell here would risk the #630 CNI
+		// duplicate-allocation re-entry the Ready short-circuit avoids.
+		//
 		// Divergence guard (#654, #683): the metadata records this cell as
 		// Ready, but its root-container task is gone from containerd — typically
 		// a daemon/host restart (#648) dropped the cell's tasks while the

@@ -213,6 +213,7 @@ func TestCellState_StringRoundTrip(t *testing.T) {
 	for _, s := range []CellState{
 		CellStatePending, CellStateReady, CellStateStopped, CellStateFailed, CellStateUnknown,
 		CellStateExited, CellStateError, // #1267
+		CellStateDegraded, // #1233 follow-up
 	} {
 		out, marshalErr := json.Marshal(s)
 		if marshalErr != nil {
@@ -225,6 +226,12 @@ func TestCellState_StringRoundTrip(t *testing.T) {
 		if back != s {
 			t.Errorf("round-trip cell %v -> %s -> %v", s, out, back)
 		}
+	}
+	// Degraded must marshal to its label, not a bare int — the new max ordinal
+	// is also the assignCellStateInt upper bound, so a regression there surfaces
+	// as a round-trip failure above.
+	if out, _ := json.Marshal(CellStateDegraded); string(out) != `"Degraded"` {
+		t.Errorf("CellStateDegraded marshalled to %s, want \"Degraded\"", out)
 	}
 }
 

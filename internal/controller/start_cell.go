@@ -123,9 +123,12 @@ func (b *Exec) StartCell(cell intmodel.Cell) (StartCellResult, error) {
 	// Check if containers are actually running by examining Status.Containers
 	// which is freshly populated from containerd by validateAndGetCell -> GetCell -> populateCellContainerStatuses
 	// This prevents blocking starts when containers have crashed externally but metadata still shows Ready state.
-	// Only Ready / Stopped / Exited reach here — the recovery switch above already
-	// claimed Pending / Unknown (refused) and Failed / Error (recreate), so a
-	// leftover-running root on a recoverable terminal cell no longer trips this guard.
+	// Only Ready / Degraded / Stopped / Exited reach here — the recovery switch
+	// above already claimed Pending / Unknown (refused) and Failed / Error
+	// (recreate), so a leftover-running root on a recoverable terminal cell no
+	// longer trips this guard. Degraded (root up, a non-root workload down or
+	// restarting) falls through like Ready: it is a live cell the reconciler is
+	// already recovering, not a recreate candidate.
 	if len(internalCell.Status.Containers) > 0 {
 		// Check if any container is actually running
 		hasRunningContainer := false

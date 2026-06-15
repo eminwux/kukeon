@@ -276,6 +276,8 @@ func parseCellState(in string, out *CellState) error {
 		*out = CellStateExited
 	case StateErrorStr:
 		*out = CellStateError
+	case StateDegradedStr:
+		*out = CellStateDegraded
 	default:
 		return fmt.Errorf("cell state: unknown label %q", in)
 	}
@@ -284,7 +286,7 @@ func parseCellState(in string, out *CellState) error {
 
 func assignCellStateInt(i int, out *CellState) error {
 	v := CellState(i)
-	if v < CellStatePending || v > CellStateError {
+	if v < CellStatePending || v > CellStateDegraded {
 		return fmt.Errorf("cell state: int %d out of range", i)
 	}
 	*out = v

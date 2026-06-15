@@ -66,7 +66,10 @@ func IsCellRunning(cell v1beta1.CellDoc) bool {
 			return true
 		}
 	}
-	return cell.Status.State == v1beta1.CellStateReady
+	// Degraded (#1233 follow-up) is a live cell — root/sandbox up with a non-root
+	// workload down or restarting — so it counts as running alongside Ready.
+	return cell.Status.State == v1beta1.CellStateReady ||
+		cell.Status.State == v1beta1.CellStateDegraded
 }
 
 // ReachableProbe reports whether a kukeond socket at socketPath answers a

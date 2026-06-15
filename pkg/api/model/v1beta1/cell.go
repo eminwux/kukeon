@@ -260,6 +260,14 @@ const (
 	// failures. Appended last (after CellStateExited) for the same ordinal-
 	// lockstep reason.
 	CellStateError
+	// CellStateDegraded is the partial-health, non-terminal state: the cell's
+	// root/sandbox is up but at least one non-root workload is down in a
+	// non-clean way (crashed, or exited under a policy that should keep it
+	// running) — either alongside other still-running workloads, or while the
+	// reconciler is restarting it. Unlike CellStateError it is NOT sticky and
+	// NOT terminal. Appended last (after CellStateError) to keep the ordinals in
+	// lockstep with the internal modelhub.CellState enum (direct int cast).
+	CellStateDegraded
 )
 
 func (c *CellState) String() string {
@@ -278,6 +286,8 @@ func (c *CellState) String() string {
 		return StateExitedStr
 	case CellStateError:
 		return StateErrorStr
+	case CellStateDegraded:
+		return StateDegradedStr
 	}
 	return StateUnknownStr
 }
