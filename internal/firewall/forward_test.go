@@ -80,9 +80,13 @@ func TestAdmissionRules_Order(t *testing.T) {
 		t.Errorf("rule 0: want %v; got %v", want0, rules[0])
 	}
 
-	// Rule 1: -o k-+ ACCEPT, tagged "kukeon-forward:ingress".
+	// Rule 1: ! -i k-+ -o k-+ ACCEPT, tagged "kukeon-forward:ingress". The
+	// `! -i k-+` scope excludes bridge-sourced traffic so a space's egress
+	// (always bridge-sourced) can never be admitted here — only true external
+	// ingress destined to a kukeon bridge.
 	want1 := []string{
 		"-A", firewall.ForwardChainName,
+		"!", "-i", firewall.BridgeIfaceMatch,
 		"-o", firewall.BridgeIfaceMatch,
 		"-m", "comment", "--comment", "kukeon-forward:ingress",
 		"-j", "ACCEPT",
@@ -94,18 +98,66 @@ func TestAdmissionRules_Order(t *testing.T) {
 
 // TestAdmissionRules_NoEgressBlanket is the fail-closed guard for #1076: the
 // host-global egress admission rule must never reappear in AdmissionRules. A
-// blanket `-i k-+ ACCEPT` here is exactly the fail-open hole the per-space
-// admission model closes, so its absence is a contract, not an accident.
+// *positive* blanket `-i k-+ ACCEPT` here is exactly the fail-open hole the
+// per-space admission model closes, so its absence is a contract, not an
+// accident. The *negated* `! -i k-+` qualifier on the ingress rule is the
+// opposite — it excludes bridge-sourced traffic so a space's egress can never
+// be admitted — and must be allowed.
 func TestAdmissionRules_NoEgressBlanket(t *testing.T) {
 	for _, r := range firewall.AdmissionRules() {
 		joined := strings.Join(r, " ")
-		if strings.Contains(joined, "-i "+firewall.BridgeIfaceMatch) {
+		// A positive `-i k-+` match (not the negated `! -i k-+` scope) is the
+		// fail-open blanket. The negated form admits the inter-bridge fix, so
+		// only flag `-i k-+` when it is not preceded by the `!` negation.
+		if strings.Contains(joined, "-i "+firewall.BridgeIfaceMatch) &&
+			!strings.Contains(joined, "! -i "+firewall.BridgeIfaceMatch) {
 			t.Errorf("admission rules must not carry a host-global egress (-i %s) blanket; got %v",
 				firewall.BridgeIfaceMatch, r)
 		}
 		if strings.Contains(joined, "kukeon-forward:egress") {
 			t.Errorf("admission rules must not carry the retired :egress role; got %v", r)
 		}
+	}
+}
+
+// TestAdmissionRules_IngressExcludesBridgeSources is the inter-bridge
+// fail-closed guard. The ingress ACCEPT must carry the `! -i k-+` scope so it
+// admits only traffic that did *not* originate on a kukeon bridge. Without it,
+// an inter-bridge packet (`-i k-A -o k-B`) — egress from deny-space A, ingress
+// to B — would match a bare `-o k-+ ACCEPT` and be admitted here before A's
+// KUKEON-EGRESS chain runs, a fail-open hole whenever KUKEON-FORWARD sits ahead
+// of KUKEON-EGRESS (nothing orders them post-#1076). The negation routes every
+// space's egress through KUKEON-EGRESS instead, so its position stays immaterial.
+func TestAdmissionRules_IngressExcludesBridgeSources(t *testing.T) {
+	var ingress []string
+	for _, r := range firewall.AdmissionRules() {
+		if strings.Contains(strings.Join(r, " "), "kukeon-forward:ingress") {
+			ingress = r
+			break
+		}
+	}
+	if ingress == nil {
+		t.Fatal("no ingress rule found in AdmissionRules")
+	}
+	// The rule must negate the bridge-source match: the tokens "!", "-i",
+	// "k-+" must appear in that order so a space's (bridge-sourced) egress
+	// cannot be admitted by the ingress ACCEPT.
+	found := false
+	for i := 0; i+2 < len(ingress); i++ {
+		if ingress[i] == "!" && ingress[i+1] == "-i" && ingress[i+2] == firewall.BridgeIfaceMatch {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("ingress rule must scope ingress with `! -i %s` to exclude bridge-sourced (egress) traffic; got %v",
+			firewall.BridgeIfaceMatch, ingress)
+	}
+	// And it must still admit the external→bridge ingress it exists for.
+	joined := strings.Join(ingress, " ")
+	if !strings.Contains(joined, "-o "+firewall.BridgeIfaceMatch) || !strings.Contains(joined, "-j ACCEPT") {
+		t.Errorf("ingress rule must still ACCEPT external traffic destined to a kukeon bridge (-o %s); got %v",
+			firewall.BridgeIfaceMatch, ingress)
 	}
 }
 
@@ -216,7 +268,7 @@ func TestInstall_IsIdempotent(t *testing.T) {
 			"-S KUKEON-FORWARD": {out: []byte(
 				"-N KUKEON-FORWARD\n" +
 					"-A KUKEON-FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -m comment --comment \"kukeon-forward:established\" -j ACCEPT\n" +
-					"-A KUKEON-FORWARD -o k-+ -m comment --comment \"kukeon-forward:ingress\" -j ACCEPT\n",
+					"-A KUKEON-FORWARD ! -i k-+ -o k-+ -m comment --comment \"kukeon-forward:ingress\" -j ACCEPT\n",
 			)},
 			// FORWARD jump present → ensureForwardJump's -C succeeds and it
 			// re-inserts nothing. Position relative to KUKEON-EGRESS no longer
@@ -372,7 +424,7 @@ func TestInstall_JumpNoChurnWhenPresent(t *testing.T) {
 			"-S KUKEON-FORWARD": {out: []byte(
 				"-N KUKEON-FORWARD\n" +
 					"-A KUKEON-FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -m comment --comment \"kukeon-forward:established\" -j ACCEPT\n" +
-					"-A KUKEON-FORWARD -o k-+ -m comment --comment \"kukeon-forward:ingress\" -j ACCEPT\n",
+					"-A KUKEON-FORWARD ! -i k-+ -o k-+ -m comment --comment \"kukeon-forward:ingress\" -j ACCEPT\n",
 			)},
 		},
 	}
@@ -404,7 +456,7 @@ func TestInstall_PrunesObsoleteEgressAdmission(t *testing.T) {
 				"-N KUKEON-FORWARD\n" +
 					"-A KUKEON-FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -m comment --comment \"kukeon-forward:established\" -j ACCEPT\n" +
 					"-A KUKEON-FORWARD -i k-+ -m comment --comment \"kukeon-forward:egress\" -j ACCEPT\n" +
-					"-A KUKEON-FORWARD -o k-+ -m comment --comment \"kukeon-forward:ingress\" -j ACCEPT\n",
+					"-A KUKEON-FORWARD ! -i k-+ -o k-+ -m comment --comment \"kukeon-forward:ingress\" -j ACCEPT\n",
 			)},
 			"-C FORWARD -j KUKEON-FORWARD": {},
 		},
@@ -427,6 +479,84 @@ func TestInstall_PrunesObsoleteEgressAdmission(t *testing.T) {
 	// is present so nothing is re-inserted.
 	if wasCalledWithVerb(runner, "-F") {
 		t.Errorf("must not flush a chain carrying current tagged rules; calls = %v", runner.calls)
+	}
+}
+
+// TestInstall_PrunesUnscopedIngressAdmission is the upgrade-path guard for the
+// inter-bridge fix: a host upgraded from the intermediate #1076 layout carries
+// the *unscoped* ingress rule (`-o k-+ ... :ingress`, no `! -i k-+`) that admits
+// a deny-space's inter-bridge egress before its KUKEON-EGRESS chain runs.
+// Install must -D that rule and leave only the scoped `! -i k-+ -o k-+` form.
+func TestInstall_PrunesUnscopedIngressAdmission(t *testing.T) {
+	runner := &fakeRunner{
+		respond: map[string]fakeResp{
+			// Intermediate-#1076 host: established (tagged) + the unscoped
+			// ingress rule. Migration sees only tagged rules (no flush); the
+			// scoped replacement is absent so it gets -A'd, and the prune -D's
+			// the unscoped one.
+			"-S KUKEON-FORWARD": {out: []byte(
+				"-N KUKEON-FORWARD\n" +
+					"-A KUKEON-FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -m comment --comment \"kukeon-forward:established\" -j ACCEPT\n" +
+					"-A KUKEON-FORWARD -o k-+ -m comment --comment \"kukeon-forward:ingress\" -j ACCEPT\n",
+			)},
+			"-C FORWARD -j KUKEON-FORWARD": {},
+		},
+	}
+	// Every current admission rule is absent in its current shape → each gets
+	// -A'd (the scoped ingress form in particular).
+	for _, rule := range firewall.AdmissionRules() {
+		check := strings.Join(append([]string{"-C"}, rule[1:]...), " ")
+		runner.respond[check] = fakeResp{err: errors.New("absent")}
+	}
+
+	if err := newInstaller(runner).Install(context.Background()); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	wantDel := []string{
+		"-D", firewall.ForwardChainName,
+		"-o", firewall.BridgeIfaceMatch,
+		"-m", "comment", "--comment", "kukeon-forward:ingress",
+		"-j", "ACCEPT",
+	}
+	if !wasCalled(runner, wantDel) {
+		t.Errorf("expected the unscoped ingress rule to be pruned via %v; calls = %v",
+			wantDel, runner.calls)
+	}
+	// The scoped replacement must be installed.
+	var scoped []string
+	for _, r := range firewall.AdmissionRules() {
+		if strings.Contains(strings.Join(r, " "), "kukeon-forward:ingress") {
+			scoped = r
+		}
+	}
+	if !wasCalled(runner, scoped) {
+		t.Errorf("expected the scoped ingress rule %v to be installed; calls = %v", scoped, runner.calls)
+	}
+	// The chain must not be flushed (the existing rules are tagged).
+	if wasCalledWithVerb(runner, "-F") {
+		t.Errorf("must not flush a chain carrying tagged rules; calls = %v", runner.calls)
+	}
+}
+
+// TestInstall_DoesNotPruneScopedIngress guards the idempotency of the prune:
+// on a healthy post-fix host the ingress rule carries the `! -i k-+` scope, and
+// the unscoped-ingress prune must leave it alone (it is the rule we want).
+func TestInstall_DoesNotPruneScopedIngress(t *testing.T) {
+	runner := &fakeRunner{
+		respond: map[string]fakeResp{
+			"-S KUKEON-FORWARD": {out: []byte(
+				"-N KUKEON-FORWARD\n" +
+					"-A KUKEON-FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -m comment --comment \"kukeon-forward:established\" -j ACCEPT\n" +
+					"-A KUKEON-FORWARD ! -i k-+ -o k-+ -m comment --comment \"kukeon-forward:ingress\" -j ACCEPT\n",
+			)},
+			"-C FORWARD -j KUKEON-FORWARD": {},
+		},
+	}
+	if err := newInstaller(runner).Install(context.Background()); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if wasCalledWithVerb(runner, "-D") {
+		t.Errorf("must not -D the scoped ingress rule; calls = %v", runner.calls)
 	}
 }
 

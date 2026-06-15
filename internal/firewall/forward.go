@@ -36,8 +36,9 @@ import (
 )
 
 // ForwardChainName is the kukeon-owned FORWARD admission chain. It now carries
-// only ingress admission (`-o k-+ ACCEPT`) plus the stateful return-traffic
-// ACCEPT; egress admission moved per-space in #1076.
+// only ingress admission (`! -i k-+ -o k-+ ACCEPT`, scoped to non-bridge
+// sources) plus the stateful return-traffic ACCEPT; egress admission moved
+// per-space in #1076.
 //
 // There is no longer any ordering contract with KUKEON-EGRESS
 // (netpolicy.MasterChainName). Egress is decided entirely within each space's
@@ -46,6 +47,16 @@ import (
 // relative to KUKEON-EGRESS is immaterial to correctness. ensureForwardJump
 // only guarantees the jump *exists* (re-inserting it after a reboot flush or
 // Docker churn); it no longer reorders it.
+//
+// The one rule here that *could* shadow an egress decision is the ingress
+// `-o k-+ ACCEPT`: an inter-bridge packet (`-i k-A -o k-B`) is both ingress to
+// B and egress from A, so a bare `-o k-+` would ACCEPT a deny-space A's egress
+// to B before A's chain runs — fail-open whenever this chain sits ahead of
+// KUKEON-EGRESS. The ingress rule is therefore scoped `! -i k-+`: it admits
+// only traffic that did *not* originate on a kukeon bridge (true external
+// ingress), so a space's egress (always bridge-sourced) can never match it and
+// always falls through to KUKEON-EGRESS. That is what keeps the position
+// genuinely immaterial — including for the inter-bridge case.
 const ForwardChainName = "KUKEON-FORWARD"
 
 // BridgeIfaceMatch is the iptables -i / -o interface match that scopes the
@@ -75,7 +86,18 @@ const commentTagPrefix = "kukeon-forward"
 // Rule order:
 //  1. RELATED,ESTABLISHED ACCEPT — return-traffic for already-admitted flows
 //     so reply packets cannot be dropped by FORWARD's default policy.
-//  2. -o k-+ ACCEPT — admit ingress destined to a kukeon bridge.
+//  2. ! -i k-+ -o k-+ ACCEPT — admit *external* ingress destined to a kukeon
+//     bridge. The `! -i k-+` qualifier scopes this to traffic that did not
+//     originate on a kukeon bridge, so it admits the internet/host→bridge case
+//     without ever matching a space's egress.
+//
+// Why the `! -i k-+` scope matters: an inter-bridge packet (`-i k-A -o k-B`)
+// is simultaneously ingress to B and egress from A. A bare `-o k-+ ACCEPT`
+// would admit it here before A's KUKEON-EGRESS chain ever runs — fail-open for
+// cross-space egress whenever this chain sits ahead of KUKEON-EGRESS in
+// FORWARD, which nothing orders post-#1076. Excluding bridge-sourced traffic
+// (`! -i k-+`) sends every space's egress — internet-bound and inter-bridge
+// alike — through KUKEON-EGRESS, so the deny-space decision is never shadowed.
 //
 // Egress admission (`-i k-+ ACCEPT`) is deliberately absent since #1076: a
 // host-global egress blanket fails *open* — a Default=deny space whose
@@ -94,6 +116,7 @@ func AdmissionRules() [][]string {
 		},
 		{
 			"-A", ForwardChainName,
+			"!", "-i", BridgeIfaceMatch,
 			"-o", BridgeIfaceMatch,
 			"-m", "comment", "--comment", commentTagPrefix + ":ingress",
 			"-j", "ACCEPT",
@@ -165,6 +188,10 @@ func NewInstallerWithRunner(logger *slog.Logger, runner CommandRunner) *Installe
 // the tagged variants side by side. A host upgraded from a pre-#1076 layout
 // also carries the retired `:egress` blanket rule; pruneObsoleteEgressAdmission
 // strips it so the fail-open hole #1076 closes does not survive the upgrade.
+// A host upgraded from an intermediate #1076 layout carries the *unscoped*
+// ingress rule (`-o k-+ ...:ingress`, no `! -i k-+`); pruneUnscopedIngressAdmission
+// strips that one so the inter-bridge fail-open it allowed does not survive
+// either — leaving only the scoped `! -i k-+ -o k-+` ingress rule.
 func (i *Installer) Install(ctx context.Context) error {
 	if err := i.ensureChain(ctx, ForwardChainName); err != nil {
 		return fmt.Errorf("%w: %w", errdefs.ErrForwardAdmissionApply, err)
@@ -178,6 +205,7 @@ func (i *Installer) Install(ctx context.Context) error {
 		}
 	}
 	i.pruneObsoleteEgressAdmission(ctx)
+	i.pruneUnscopedIngressAdmission(ctx)
 	if err := i.ensureForwardJump(ctx); err != nil {
 		return fmt.Errorf("%w: %w", errdefs.ErrForwardAdmissionApply, err)
 	}
@@ -280,9 +308,13 @@ func (i *Installer) migrateUntaggedRules(ctx context.Context) error {
 // Since #1076 the jump only needs to *exist* — its position relative to
 // KUKEON-EGRESS no longer matters. Egress is decided entirely within each
 // space's own KUKEON-EGRESS chain (self-terminating ACCEPT/DROP), and this
-// chain now carries only ingress + stateful admission, neither of which can
-// shadow a per-space egress decision. So the three-way missing/displaced/
-// healthy dance the pre-#1076 ordering contract required collapses to:
+// chain now carries only stateful admission and ingress *scoped to non-bridge
+// sources* (`! -i k-+`). Neither can shadow a per-space egress decision: the
+// stateful rule only matches flows a per-space chain already admitted (a denied
+// NEW packet creates no conntrack entry), and the `! -i k-+` ingress rule
+// excludes all bridge-sourced traffic, so a space's egress — internet-bound or
+// inter-bridge — always reaches KUKEON-EGRESS. So the three-way missing/
+// displaced/healthy dance the pre-#1076 ordering contract required collapses to:
 //
 //   - Present (anywhere in FORWARD): no-op, no churn.
 //   - Absent (fresh host or post-reboot flush): insert at position 1.
@@ -333,6 +365,54 @@ func (i *Installer) pruneObsoleteEgressAdmission(ctx context.Context) {
 			"chain", ForwardChainName)
 		if _, delErr := i.runner.Run(ctx, del...); delErr != nil {
 			i.logger.DebugContext(ctx, "prune obsolete egress admission (delete failed)",
+				"chain", ForwardChainName, "err", delErr)
+			return
+		}
+	}
+}
+
+// pruneUnscopedIngressAdmission deletes the *unscoped* ingress rule
+// (`-o k-+ ... kukeon-forward:ingress -j ACCEPT`, with no `! -i k-+` qualifier)
+// from ForwardChainName. That shape shipped in the intermediate #1076 layout
+// before the ingress rule was scoped to exclude bridge-sourced traffic; leaving
+// it on an upgraded host re-opens the inter-bridge fail-open hole (a deny-space
+// A's egress to bridge B matches the bare `-o k-+` ACCEPT before A's
+// KUKEON-EGRESS chain runs). The current scoped rule (`! -i k-+ -o k-+ ...`) is
+// deliberately left in place — it is matched and skipped below.
+//
+// Same shape as pruneObsoleteEgressAdmission: one `-S` read, one canonical -D
+// per matching line, no delete-until-absent loop, all failures tolerated at
+// debug so the chain converges on a later tick.
+func (i *Installer) pruneUnscopedIngressAdmission(ctx context.Context) {
+	out, err := i.runner.Run(ctx, "-S", ForwardChainName)
+	if err != nil {
+		i.logger.DebugContext(ctx, "list chain for ingress-prune check (skipping)",
+			"chain", ForwardChainName, "err", err)
+		return
+	}
+	del := []string{
+		"-D", ForwardChainName,
+		"-o", BridgeIfaceMatch,
+		"-m", "comment", "--comment", commentTagPrefix + ":ingress",
+		"-j", "ACCEPT",
+	}
+	prefix := "-A " + ForwardChainName
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		// Match the ingress rule, but skip the current scoped form: a line
+		// carrying the `! -i k-+` negation is the rule we want to keep.
+		if !strings.Contains(line, "-o "+BridgeIfaceMatch) ||
+			!strings.Contains(line, commentTagPrefix+":ingress") ||
+			strings.Contains(line, "! -i "+BridgeIfaceMatch) {
+			continue
+		}
+		i.logger.InfoContext(ctx, "pruning obsolete unscoped ingress admission rule",
+			"chain", ForwardChainName)
+		if _, delErr := i.runner.Run(ctx, del...); delErr != nil {
+			i.logger.DebugContext(ctx, "prune unscoped ingress admission (delete failed)",
 				"chain", ForwardChainName, "err", delErr)
 			return
 		}
