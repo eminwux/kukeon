@@ -203,13 +203,19 @@ func TestInstall_IsIdempotent(t *testing.T) {
 	runner := &fakeRunner{
 		respond: map[string]fakeResp{
 			// -L succeeds → chain present.
-			// -C jump succeeds → jump present.
 			// Migration check: chain populated with already-tagged rules → no flush.
 			"-S KUKEON-FORWARD": {out: []byte(
 				"-N KUKEON-FORWARD\n" +
 					"-A KUKEON-FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -m comment --comment \"kukeon-forward:established\" -j ACCEPT\n" +
 					"-A KUKEON-FORWARD -i k-+ -m comment --comment \"kukeon-forward:egress\" -j ACCEPT\n" +
 					"-A KUKEON-FORWARD -o k-+ -m comment --comment \"kukeon-forward:ingress\" -j ACCEPT\n",
+			)},
+			// FORWARD jump present and correctly ordered after KUKEON-EGRESS →
+			// ensureForwardJump finds it healthy and re-claims nothing.
+			"-S FORWARD": {out: []byte(
+				"-P FORWARD DROP\n" +
+					"-A FORWARD -j KUKEON-EGRESS\n" +
+					"-A FORWARD -j KUKEON-FORWARD\n",
 			)},
 		},
 	}
@@ -242,7 +248,12 @@ func TestInstall_MigratesUntaggedRules(t *testing.T) {
 					"-A KUKEON-FORWARD -i k-+ -j ACCEPT\n" +
 					"-A KUKEON-FORWARD -o k-+ -j ACCEPT\n",
 			)},
-			"-C FORWARD -j KUKEON-FORWARD": {},
+			// Jump already present (upgrade path migrates the child chain's
+			// rules, not the FORWARD jump) → ensureForwardJump no-ops.
+			"-S FORWARD": {out: []byte(
+				"-P FORWARD DROP\n" +
+					"-A FORWARD -j KUKEON-FORWARD\n",
+			)},
 		},
 	}
 	// After the flush, every -C against a tagged rule fails so each gets -A'd.
@@ -398,6 +409,123 @@ func TestInstall_DoesNotMatchEgressLikeSiblingChain(t *testing.T) {
 	}
 	if wasCalled(runner, []string{"-I", "FORWARD", "2", "-j", "KUKEON-FORWARD"}) {
 		t.Errorf("must not match KUKEON-EGRESS-FOO as KUKEON-EGRESS")
+	}
+}
+
+// TestInstall_SurvivesDockerChurnWithoutReorder is #1075 AC #4: when Docker
+// re-asserts its own chains (DOCKER-USER / DOCKER-FORWARD) at the top of
+// FORWARD it pushes kukeon's jumps down but never deletes them and never
+// inverts their relative order. Because KUKEON-FORWARD is ACCEPT-only and
+// position relative to Docker is immaterial to correctness, the self-assert
+// must treat this as healthy — no delete, no re-insert, no churn.
+func TestInstall_SurvivesDockerChurnWithoutReorder(t *testing.T) {
+	runner := &fakeRunner{
+		respond: map[string]fakeResp{
+			// Docker pushed kukeon's jumps down the chain; KUKEON-EGRESS is
+			// still ahead of KUKEON-FORWARD, so the ordering invariant holds.
+			"-S FORWARD": {out: []byte(
+				"-P FORWARD DROP\n" +
+					"-A FORWARD -j DOCKER-USER\n" +
+					"-A FORWARD -j DOCKER-FORWARD\n" +
+					"-A FORWARD -j KUKEON-EGRESS\n" +
+					"-A FORWARD -j KUKEON-FORWARD\n",
+			)},
+			// Chain + tagged rules already present → no migration/rule churn.
+			"-S KUKEON-FORWARD": {out: []byte(
+				"-N KUKEON-FORWARD\n" +
+					"-A KUKEON-FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -m comment --comment \"kukeon-forward:established\" -j ACCEPT\n" +
+					"-A KUKEON-FORWARD -i k-+ -m comment --comment \"kukeon-forward:egress\" -j ACCEPT\n" +
+					"-A KUKEON-FORWARD -o k-+ -m comment --comment \"kukeon-forward:ingress\" -j ACCEPT\n",
+			)},
+		},
+	}
+
+	if err := newInstaller(runner).Install(context.Background()); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if wasCalledWithVerb(runner, "-D") {
+		t.Errorf("must not delete the jump when Docker merely reordered it; calls = %v", runner.calls)
+	}
+	if wasCalledWithVerb(runner, "-I") {
+		t.Errorf("must not re-insert the jump under harmless Docker churn; calls = %v", runner.calls)
+	}
+}
+
+// invertedForwardRunner simulates a FORWARD chain where KUKEON-FORWARD sits
+// *ahead* of KUKEON-EGRESS — the displacement that lets the blanket admission
+// shadow per-space egress DROP rules. After the self-assert deletes the
+// misplaced jump, the second `-S FORWARD` read reflects the post-delete state
+// (KUKEON-EGRESS shifted up to position 1) so the re-insert lands in the
+// correct slot. The stateless fakeRunner cannot model that shift, hence this
+// purpose-built stateful runner.
+type invertedForwardRunner struct {
+	calls   [][]string
+	deleted bool
+}
+
+func (r *invertedForwardRunner) Run(_ context.Context, args ...string) ([]byte, error) {
+	r.calls = append(r.calls, append([]string(nil), args...))
+	joined := strings.Join(args, " ")
+	switch {
+	case joined == "-S FORWARD":
+		if r.deleted {
+			// KUKEON-FORWARD removed; KUKEON-EGRESS now at position 1.
+			return []byte("-P FORWARD DROP\n-A FORWARD -j KUKEON-EGRESS\n"), nil
+		}
+		// Inverted: KUKEON-FORWARD (1) ahead of KUKEON-EGRESS (2).
+		return []byte(
+			"-P FORWARD DROP\n" +
+				"-A FORWARD -j KUKEON-FORWARD\n" +
+				"-A FORWARD -j KUKEON-EGRESS\n",
+		), nil
+	case joined == "-D FORWARD -j KUKEON-FORWARD":
+		r.deleted = true
+		return nil, nil
+	default:
+		// All existence probes (-L chain, -C rule, -S KUKEON-FORWARD) report
+		// "present/empty" so Install skips migration and rule churn and
+		// exercises only the jump self-assert.
+		return nil, nil
+	}
+}
+
+func (r *invertedForwardRunner) ran(prefix ...string) bool {
+	for _, got := range r.calls {
+		if len(got) < len(prefix) {
+			continue
+		}
+		match := true
+		for i := range prefix {
+			if got[i] != prefix[i] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}
+
+// TestInstall_ReclaimsDisplacedJump is #1075 AC #1 (the "displaced" arm):
+// when KUKEON-FORWARD is present but ahead of KUKEON-EGRESS, the self-assert
+// deletes the misplaced jump and re-inserts it immediately after
+// KUKEON-EGRESS so per-space egress DROP rules win over the blanket admission.
+func TestInstall_ReclaimsDisplacedJump(t *testing.T) {
+	runner := &invertedForwardRunner{}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	installer := firewall.NewInstallerWithRunner(logger, runner)
+	if err := installer.Install(context.Background()); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if !runner.ran("-D", "FORWARD", "-j", "KUKEON-FORWARD") {
+		t.Errorf("expected the displaced jump to be deleted; calls = %v", runner.calls)
+	}
+	// After the delete, KUKEON-EGRESS is at position 1, so the jump must be
+	// re-inserted at position 2 (immediately after it).
+	if !runner.ran("-I", "FORWARD", "2", "-j", "KUKEON-FORWARD") {
+		t.Errorf("expected re-insert at position 2 (after KUKEON-EGRESS); calls = %v", runner.calls)
 	}
 }
 
