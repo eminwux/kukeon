@@ -60,8 +60,8 @@ func checkStorage(ctx context.Context, rc *runCtx) []Result {
 		}}
 	}
 
-	realms := enumerateRealmsForStorage(ctx, rc)
-	if len(realms) == 0 {
+	targets := enumerateRealmsForStorage(ctx, rc)
+	if len(targets) == 0 {
 		return []Result{{
 			Section: sectionStorage,
 			Name:    "realms",
@@ -70,27 +70,44 @@ func checkStorage(ctx context.Context, rc *runCtx) []Result {
 		}}
 	}
 
-	results := make([]Result, 0, len(realms))
-	for _, realm := range realms {
-		results = append(results, storageRowForRealm(rc, realm))
+	results := make([]Result, 0, len(targets))
+	for _, target := range targets {
+		results = append(results, storageRowForRealm(rc, target))
 	}
 	return results
 }
 
-// enumerateRealmsForStorage returns the realm names to probe. Prefers
-// the daemon's ListRealms (canonical source) and falls back to deriving
-// realm names from the ctr namespace list when the daemon is down or
-// listing fails — the section still has something to report, with the
-// daemon-down rationale surfacing on the daemon row above.
-func enumerateRealmsForStorage(ctx context.Context, rc *runCtx) []string {
+// realmStorageTarget pairs a realm's display-name label with the containerd
+// namespace whose footprint the storage row probes. Carrying the namespace
+// explicitly — the daemon-resolved Spec.Namespace on the canonical path, the
+// actual ctr namespace on the fallback — keeps the probe off the recomputed
+// consts.RealmNamespace, which mis-resolves the namespace under a non-default
+// containerdNamespaceSuffix the in-process path never picked up (issue #1326).
+type realmStorageTarget struct {
+	name      string
+	namespace string
+}
+
+// enumerateRealmsForStorage returns the realms to probe, each carrying both
+// the display-name label and the containerd namespace. Prefers the daemon's
+// ListRealms (canonical source) — taking the namespace from the realm's
+// daemon-resolved Spec.Namespace so a non-default containerdNamespaceSuffix
+// is honored (issue #1326) — and falls back to deriving realms from the ctr
+// namespace list when the daemon is down or listing fails, where the actual
+// namespace is the one enumerated. The fallback keeps the section populated,
+// with the daemon-down rationale surfacing on the daemon row above.
+func enumerateRealmsForStorage(ctx context.Context, rc *runCtx) []realmStorageTarget {
 	if rc.daemonClient != nil {
 		realms, err := rc.daemonClient.ListRealms(ctx)
 		if err == nil {
-			out := make([]string, 0, len(realms))
+			out := make([]realmStorageTarget, 0, len(realms))
 			for i := range realms {
-				out = append(out, realms[i].Metadata.Name)
+				out = append(out, realmStorageTarget{
+					name:      realms[i].Metadata.Name,
+					namespace: realmNamespace(realms[i]),
+				})
 			}
-			sort.Strings(out)
+			sortStorageTargets(out)
 			return out
 		}
 	}
@@ -99,14 +116,22 @@ func enumerateRealmsForStorage(ctx context.Context, rc *runCtx) []string {
 	if err != nil {
 		return nil
 	}
-	out := make([]string, 0, len(nsList))
+	out := make([]realmStorageTarget, 0, len(nsList))
 	for _, ns := range nsList {
 		if realm := consts.RealmFromNamespace(ns); realm != "" {
-			out = append(out, realm)
+			out = append(out, realmStorageTarget{name: realm, namespace: ns})
 		}
 	}
-	sort.Strings(out)
+	sortStorageTargets(out)
 	return out
+}
+
+// sortStorageTargets orders targets by their display name so the rendered
+// storage rows stay stable regardless of daemon/ctr enumeration order.
+func sortStorageTargets(targets []realmStorageTarget) {
+	sort.Slice(targets, func(i, j int) bool {
+		return targets[i].name < targets[j].name
+	})
 }
 
 // storageRowForRealm probes one realm's containerd namespace and
@@ -114,13 +139,13 @@ func enumerateRealmsForStorage(ctx context.Context, rc *runCtx) []string {
 // containerd metadata read shouldn't be a regression signal alongside
 // the parity walk's FAIL, and the operator already has the host
 // section's signal.
-func storageRowForRealm(rc *runCtx, realm string) Result {
+func storageRowForRealm(rc *runCtx, target realmStorageTarget) Result {
 	r := Result{
 		Section: sectionStorage,
-		Name:    realm,
+		Name:    target.name,
 	}
 
-	ns := consts.RealmNamespace(realm)
+	ns := target.namespace
 	stats, err := rc.ctrClient.NamespaceStorage(ns)
 	if err != nil {
 		r.Status = StatusWARN
