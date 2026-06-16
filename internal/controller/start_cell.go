@@ -84,18 +84,26 @@ func (b *Exec) StartCell(cell intmodel.Cell) (StartCellResult, error) {
 	//
 	//   - Pending / Unknown: genuinely unrecoverable / mid-transition. Refuse
 	//     with the same delete-then-rerun pointer the CLI verbs print.
-	//   - Failed (kukeon bring-up fault, container records may be half-created)
-	//     and Error (workload crash whose sticky root is still running): a plain
-	//     StartCell cannot recover either — Failed's records may be incomplete,
-	//     and Error's live root trips the running-container guard. Both route
-	//     through RecreateCell (stop -> delete -> recreate containers -> start,
-	//     including the leftover root), the same recovery the OutOfSync
-	//     breaking-diff reapply already uses. Routed here (before the OutOfSync
-	//     reapply) so the cell is recovered from its on-disk spec regardless of
-	//     lineage; the next reconcile re-flags OutOfSync if it still diverges
-	//     from a lineage Config. RecreateCell's start phase funnels through
-	//     markCellReady, which clears the failure breadcrumb (Status.Reason /
-	//     Message) on the Ready transition (#1268).
+	//   - Failed (kukeon bring-up fault, container records may be half-created),
+	//     Error (workload crash whose sticky root is still running), and Degraded
+	//     (root/sandbox up but a non-root workload down or restarting): a plain
+	//     StartCell cannot cleanly recover any of them. Failed's records may be
+	//     incomplete; Error's live root trips the running-container guard; and a
+	//     Degraded cell that an operator explicitly start/restarts carries a
+	//     preserved non-zero workload exit that the stop step re-derives into a
+	//     sticky Error — a plain relaunch leaves the cell stuck at Error N/N
+	//     (every container back up, yet state still Error), the inverse of the
+	//     Ready 1/2 contradiction Degraded was introduced to kill (#1317 review).
+	//     All three route through RecreateCell (stop -> delete -> recreate
+	//     containers -> start, including the leftover root), the same recovery
+	//     the OutOfSync breaking-diff reapply already uses. Routed here (before
+	//     the OutOfSync reapply) so the cell is recovered from its on-disk spec
+	//     regardless of lineage; the next reconcile re-flags OutOfSync if it
+	//     still diverges from a lineage Config. RecreateCell's start phase
+	//     funnels through markCellReady, which clears the failure breadcrumb
+	//     (Status.Reason / Message) on the Ready transition (#1268), so a single
+	//     operator recovery of a Degraded cell lands Ready instead of needing a
+	//     second restart.
 	//   - Ready (stale metadata, no live task) / Stopped / Exited: fall through
 	//     to the running-container guard and the regular start path below — their
 	//     container records are intact and not running, so runner.StartCell
@@ -109,7 +117,7 @@ func (b *Exec) StartCell(cell intmodel.Cell) (StartCellResult, error) {
 			state.String(),
 			internalCell.Metadata.Name,
 		)
-	case intmodel.CellStateFailed, intmodel.CellStateError:
+	case intmodel.CellStateFailed, intmodel.CellStateError, intmodel.CellStateDegraded:
 		state := v1beta1.CellState(internalCell.Status.State)
 		recreated, recreateErr := b.runner.RecreateCell(internalCell)
 		if recreateErr != nil {
@@ -123,12 +131,12 @@ func (b *Exec) StartCell(cell intmodel.Cell) (StartCellResult, error) {
 	// Check if containers are actually running by examining Status.Containers
 	// which is freshly populated from containerd by validateAndGetCell -> GetCell -> populateCellContainerStatuses
 	// This prevents blocking starts when containers have crashed externally but metadata still shows Ready state.
-	// Only Ready / Degraded / Stopped / Exited reach here — the recovery switch
-	// above already claimed Pending / Unknown (refused) and Failed / Error
+	// Only Ready / Stopped / Exited reach here — the recovery switch above
+	// already claimed Pending / Unknown (refused) and Failed / Error / Degraded
 	// (recreate), so a leftover-running root on a recoverable terminal cell no
-	// longer trips this guard. Degraded (root up, a non-root workload down or
-	// restarting) falls through like Ready: it is a live cell the reconciler is
-	// already recovering, not a recreate candidate.
+	// longer trips this guard. Degraded is no longer in the fall-through set: an
+	// operator start/restart of a partially-down cell routes through the recovery
+	// recreate above so it lands Ready in a single action (#1317 review).
 	if len(internalCell.Status.Containers) > 0 {
 		// Check if any container is actually running
 		hasRunningContainer := false
