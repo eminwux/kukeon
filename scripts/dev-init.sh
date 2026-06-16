@@ -330,9 +330,9 @@ EOF
     fi
 
     # KUKE_CONFIGURATION is bound to viper for every `kuke` subcommand
-    # (KUKE_CONFIGURATION.BindEnv in cmd/kuke/kuke.go's loadConfig), so
-    # exporting it here routes every client invocation below through the
-    # dev-profile client config. sudo invocations must add KUKE_CONFIGURATION
+    # (KUKE_CONFIGURATION.BindEnv in cmd/kuke/kuke.go's loadClientConfiguration,
+    # ahead of the path read), so exporting it here routes every client
+    # invocation below through the dev-profile client config. sudo invocations must add KUKE_CONFIGURATION
     # to --preserve-env=... or the value is stripped at the sudo boundary.
     export KUKE_CONFIGURATION="${DEV_PROFILE_CLIENT_CONFIG}"
 
