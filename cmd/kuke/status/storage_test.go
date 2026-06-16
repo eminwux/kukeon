@@ -86,6 +86,61 @@ func TestCheckStorage_PerRealmRow(t *testing.T) {
 	}
 }
 
+// TestCheckStorage_DevSuffixProbesLiveNamespaces is the issue #1326
+// regression guard for STORAGE: under a non-default
+// containerdNamespaceSuffix (the dev profile's dev.kukeon.io), each row must
+// probe the realm's daemon-resolved Spec.Namespace (*.dev.kukeon.io) — the
+// populated namespaces the daemon and PARITY use — rather than the recomputed
+// default-suffix namespaces, which are empty and report a zero footprint.
+func TestCheckStorage_DevSuffixProbesLiveNamespaces(t *testing.T) {
+	rc := &runCtx{
+		daemonClient: newFakeClient().
+			withRealmNamespace("default", "default.dev.kukeon.io").
+			withRealmNamespace("kuke-system", "kuke-system.dev.kukeon.io"),
+		ctrClient: &fakeCtrClient{
+			namespaces: []string{"default.dev.kukeon.io", "kuke-system.dev.kukeon.io"},
+			storage: map[string]ctr.StorageStats{
+				"default.dev.kukeon.io":     {Snapshots: 3, Leases: 4, Blobs: 5, BlobsBytes: 6 * 1024 * 1024},
+				"kuke-system.dev.kukeon.io": {Snapshots: 7, Leases: 8, Blobs: 9, BlobsBytes: 10 * 1024 * 1024},
+				// Default-suffix namespaces deliberately absent: a recompute
+				// would probe these, miss, and report a zero footprint.
+			},
+		},
+	}
+
+	results := checkStorage(context.Background(), rc)
+	if len(results) != 2 {
+		t.Fatalf("expected one row per realm; got %d (%+v)", len(results), results)
+	}
+
+	byName := map[string]Result{}
+	for _, r := range results {
+		byName[r.Name] = r
+	}
+
+	def, ok := byName["default"]
+	if !ok {
+		t.Fatalf("expected row for default realm; got %+v", byName)
+	}
+	if !strings.Contains(def.Detail, "default.dev.kukeon.io") {
+		t.Errorf("default Detail should name the dev-suffix namespace; got %q", def.Detail)
+	}
+	if def.Storage == nil || def.Storage.Blobs != 5 {
+		t.Errorf("default row should carry the dev-namespace footprint (5 blobs); got %+v", def.Storage)
+	}
+
+	sys, ok := byName["kuke-system"]
+	if !ok {
+		t.Fatalf("expected row for kuke-system realm; got %+v", byName)
+	}
+	if !strings.Contains(sys.Detail, "kuke-system.dev.kukeon.io") {
+		t.Errorf("kuke-system Detail should name the dev-suffix namespace; got %q", sys.Detail)
+	}
+	if sys.Storage == nil || sys.Storage.Blobs != 9 {
+		t.Errorf("kuke-system row should carry the dev-namespace footprint (9 blobs); got %+v", sys.Storage)
+	}
+}
+
 // TestCheckStorage_DaemonDownFallsBackToNamespaces pins the degraded
 // path: a daemon-down run still surfaces per-namespace figures by
 // deriving realm names from the ctr namespace list. The section stays

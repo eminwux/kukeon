@@ -186,6 +186,35 @@ func TestCheckStateNamespaces_LiveRealmHistoryIsClean(t *testing.T) {
 	}
 }
 
+// TestCheckStateNamespaces_DevSuffixNotResidual is the issue #1326 regression
+// guard: under a non-default containerdNamespaceSuffix (the dev profile's
+// dev.kukeon.io), the live *.dev.kukeon.io namespaces the daemon actively uses
+// must not be flagged residual. The check attributes each realm's namespace
+// from its daemon-resolved Spec.Namespace, so the expected set matches the
+// actual namespaces and the dangerous `ctr namespace remove` remediation
+// against live namespaces never fires.
+func TestCheckStateNamespaces_DevSuffixNotResidual(t *testing.T) {
+	rc := &runCtx{
+		daemonClient: newFakeClient().
+			withRealmNamespace("default", "default.dev.kukeon.io").
+			withRealmNamespace("kuke-system", "kuke-system.dev.kukeon.io"),
+		ctrClient: &fakeCtrClient{namespaces: []string{
+			"default.dev.kukeon.io",
+			"kuke-system.dev.kukeon.io",
+			"kuke-system.dev.kukeon.io_history",
+		}},
+		logger: testLogger(),
+	}
+
+	r := checkStateNamespaces(context.Background(), rc)
+	if r.Status != StatusOK {
+		t.Fatalf("dev-suffix live namespaces must not be residual; got %s (%q)", r.Status, r.Detail)
+	}
+	if strings.Contains(r.Detail, "residual") {
+		t.Errorf("Detail must not flag residual namespaces; got %q", r.Detail)
+	}
+}
+
 // TestCheckParity_NestedDescent confirms the walk recurses into the
 // realm-set intersection (spaces / stacks / cells / containers) — a
 // regression in the descent loop would silently stop reporting nested
@@ -609,6 +638,19 @@ func (f *fakeClient) withRealms(names ...string) *fakeClient {
 			Metadata: v1beta1.RealmMetadata{Name: name},
 		})
 	}
+	return f
+}
+
+// withRealmNamespace seeds one realm carrying an explicit daemon-resolved
+// Spec.Namespace — the shape a non-default containerdNamespaceSuffix (the dev
+// profile's dev.kukeon.io) produces. The STATE/STORAGE checks attribute the
+// namespace from Spec.Namespace rather than recomputing it, so this exercises
+// the suffix-aware path (issue #1326).
+func (f *fakeClient) withRealmNamespace(name, namespace string) *fakeClient {
+	f.realms = append(f.realms, v1beta1.RealmDoc{
+		Metadata: v1beta1.RealmMetadata{Name: name},
+		Spec:     v1beta1.RealmSpec{Namespace: namespace},
+	})
 	return f
 }
 

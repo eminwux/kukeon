@@ -26,7 +26,27 @@ import (
 	"time"
 
 	"github.com/eminwux/kukeon/internal/consts"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
+
+// realmNamespace returns the containerd namespace to attribute to a realm,
+// preferring the daemon-resolved Spec.Namespace over a recomputed
+// consts.RealmNamespace. The recomputation reads the process-global
+// RealmNamespaceSuffix, which the in-process status STATE/STORAGE path does
+// not pick up from a KUKE_CONFIGURATION client config — so under a
+// non-default containerdNamespaceSuffix (the dev profile's dev.kukeon.io) it
+// returns the default-suffix namespace, false-flagging the live
+// *.dev.kukeon.io namespaces as residual and measuring the wrong (empty)
+// namespaces in STORAGE (issue #1326). Spec.Namespace is the same
+// authoritative value the daemon and the PARITY section already use. Falls
+// back to the recomputed form for a realm whose Spec.Namespace is unset
+// (e.g. a hand-built test realm or a pre-Spec.Namespace persisted doc).
+func realmNamespace(r v1beta1.RealmDoc) string {
+	if r.Spec.Namespace != "" {
+		return r.Spec.Namespace
+	}
+	return consts.RealmNamespace(r.Metadata.Name)
+}
 
 // Section names — kept as constants so the renderer's section grouping and
 // the JSON `section` field are spelled the same way everywhere.
@@ -392,7 +412,7 @@ func checkStateNamespaces(ctx context.Context, rc *runCtx) Result {
 	// in this set and falls through to the residual list below (issue #1183).
 	expectedNS := make(map[string]bool, len(realms))
 	for i := range realms {
-		ns := consts.RealmNamespace(realms[i].Metadata.Name)
+		ns := realmNamespace(realms[i])
 		expectedNS[ns] = true
 		expectedNS[consts.BuildKitHistoryNamespace(ns)] = true
 	}
