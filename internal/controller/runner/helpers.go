@@ -18,11 +18,14 @@ package runner
 
 import (
 	"context"
+	"crypto/sha512"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -48,35 +51,23 @@ func (r *Exec) purgeCNIForContainer(containerID, netnsPath, networkName string) 
 	// lease.
 	netnsPath = r.sanitizeDELNetns(netnsPath)
 
-	// Always try to call CNI DEL if network name is available
-	// Some CNI plugins may handle empty/invalid netns gracefully
+	// Always try to call CNI DEL if network name is available; some CNI plugins
+	// handle empty/invalid netns gracefully. A skipped or failed DEL leaves the
+	// bridge plugin's per-container masquerade nat chains stranded on the host,
+	// so runCNIDel surfaces each failure mode above Debug and records its outcome
+	// in the purge result rather than reporting a clean purge (issue #1324).
 	if networkName != "" {
-		cniConfigPath, err := r.findCNIConfigPath(networkName)
-		if err == nil {
-			var cniMgr *cni.Manager
-			cniMgr, err = cni.NewManager(
-				r.cniConf.CniBinDir,
-				r.cniConf.CniConfigDir,
-				r.cniConf.CniCacheDir,
-			)
-			if err == nil {
-				if err = cniMgr.LoadNetworkConfigList(cniConfigPath); err == nil {
-					// Attempt CNI DEL even when netnsPath is empty. libcni's
-					// DelNetworkList is netns-optional: it reconstructs teardown
-					// (including the bridge plugin's ipMasq iptables chains/rules)
-					// from the cached CNI result, which the cache-removal block
-					// below only clears *after* this DEL has run. A stopped cell
-					// has no containerd task and thus no netns path, so gating DEL
-					// on netnsPath != "" permanently leaked the per-cell CNI-*
-					// masquerade chains on every delete-while-stopped (issue #1174).
-					if err = cniMgr.DelContainerFromNetwork(r.ctx, containerID, netnsPath); err == nil {
-						purged = append(purged, "cni-del")
-						r.logger.DebugContext(r.ctx, "called CNI DEL for container", "container", containerID)
-					} else {
-						r.logger.DebugContext(r.ctx, "CNI DEL failed (netns may be invalid)", "container", containerID, "error", err)
-					}
-				}
-			}
+		purged = append(purged, r.runCNIDel(containerID, netnsPath, networkName))
+		// Belt-and-suspenders: the plugin-chain DEL above only tears down the
+		// bridge plugin's per-container masquerade chain when it runs with a
+		// LIVE netns. On the purge path the container task is already gone, so
+		// the DEL runs with an empty netns and the bridge plugin early-returns
+		// after the IPAM release — never reaching its ipMasq teardown
+		// (containernetworking/plugins bridge cmdDel). This sweep reclaims the
+		// stranded chain + its POSTROUTING jump directly so a no-netns DEL (or a
+		// conflist-lookup miss) can't leak host nat state (issue #1324).
+		if marker := r.sweepCNIMasqChain(networkName, containerID); marker != "" {
+			purged = append(purged, marker)
 		}
 	}
 
@@ -165,6 +156,162 @@ func (r *Exec) purgeCNIForContainer(containerID, netnsPath, networkName string) 
 	}
 
 	return nil
+}
+
+// runCNIDel runs the plugin-chain CNI DEL for a single container and returns a
+// purge-result marker describing the outcome. The bridge plugin's per-container
+// masquerade nat chains are only torn down by this DEL, so a skipped or failed
+// DEL leaks host nat state on every networked-cell purge — every non-success
+// path is therefore logged at Warn (above the prior Debug) and reflected in the
+// returned marker rather than reported as a clean purge (issue #1324).
+func (r *Exec) runCNIDel(containerID, netnsPath, networkName string) string {
+	cniConfigPath, err := r.findCNIConfigPath(networkName)
+	if err != nil {
+		r.logger.WarnContext(
+			r.ctx,
+			"skipping CNI DEL: network config list not found; per-container masquerade nat rules may leak",
+			"container", containerID, "network", networkName, "error", err,
+		)
+		return "cni-del-skipped:config-not-found"
+	}
+
+	cniMgr, err := cni.NewManager(
+		r.cniConf.CniBinDir,
+		r.cniConf.CniConfigDir,
+		r.cniConf.CniCacheDir,
+	)
+	if err != nil {
+		r.logger.WarnContext(
+			r.ctx,
+			"skipping CNI DEL: failed to build CNI manager; per-container masquerade nat rules may leak",
+			"container", containerID, "network", networkName, "error", err,
+		)
+		return "cni-del-skipped:manager-error"
+	}
+
+	if err = cniMgr.LoadNetworkConfigList(cniConfigPath); err != nil {
+		r.logger.WarnContext(
+			r.ctx,
+			"skipping CNI DEL: failed to load network config list; per-container masquerade nat rules may leak",
+			"container", containerID, "network", networkName, "config", cniConfigPath, "error", err,
+		)
+		return "cni-del-skipped:load-error"
+	}
+
+	// Attempt CNI DEL even when netnsPath is empty. libcni's DelNetworkList is
+	// netns-optional: it reconstructs teardown (including the bridge plugin's
+	// ipMasq iptables chains/rules) from the cached CNI result, which the
+	// cache-removal block in purgeCNIForContainer only clears *after* this DEL
+	// has run. A stopped cell has no containerd task and thus no netns path, so
+	// gating DEL on netnsPath != "" permanently leaked the per-cell CNI-*
+	// masquerade chains on every delete-while-stopped (issue #1174).
+	if err = cniMgr.DelContainerFromNetwork(r.ctx, containerID, netnsPath); err != nil {
+		r.logger.WarnContext(
+			r.ctx,
+			"CNI DEL failed; per-container masquerade nat rules may leak",
+			"container", containerID, "network", networkName, "error", err,
+		)
+		return "cni-del-failed"
+	}
+	r.logger.DebugContext(r.ctx, "called CNI DEL for container", "container", containerID)
+	return "cni-del"
+}
+
+// cniIptablesRun shells out to the iptables binary for the best-effort
+// masquerade-chain sweep below. It is a package var so tests can capture the
+// invocations without touching the host firewall; production never reassigns
+// it (mirrors the reassign-in-tests pattern cni.CNINetworksDir uses). The
+// project deliberately shells out to iptables here (as internal/netpolicy does)
+// rather than importing containernetworking/plugins, to avoid pulling a new
+// dependency closure (plugins + coreos/go-iptables) for three commands.
+//
+//nolint:gochecknoglobals // test seam for the production iptables shell-out; reassigned only by tests, never by production code
+var cniIptablesRun = func(ctx context.Context, args ...string) ([]byte, error) {
+	out, err := exec.CommandContext(ctx, "iptables", args...).CombinedOutput()
+	if err != nil {
+		return out, fmt.Errorf("iptables %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	return out, nil
+}
+
+// cniMasqChainName reproduces the bridge plugin's per-container masquerade chain
+// name: "CNI-" + the first 24 hex chars of sha512(networkName+containerID),
+// total 28 chars. This is utils.FormatChainName from
+// github.com/containernetworking/plugins (pkg/utils), pinned here so the purge
+// sweep can target the exact chain the bridge plugin created without importing
+// the plugins module. Verified byte-for-byte against live-created chains in the
+// #1324 dev-init repro (see TestCNIMasqChainName golden values).
+func cniMasqChainName(networkName, containerID string) string {
+	const maxChainLength = 28
+	sum := sha512.Sum512([]byte(networkName + containerID))
+	return fmt.Sprintf("CNI-%x", sum)[:maxChainLength]
+}
+
+// sweepCNIMasqChain best-effort removes the bridge plugin's per-container
+// masquerade chain (CNI-<hash>) and every POSTROUTING rule jumping to it. It is
+// the backstop for the no-live-netns DEL case (see purgeCNIForContainer): the
+// bridge plugin's own DEL only tears these rules down with a live netns, so on
+// the purge path they would otherwise leak permanently (issue #1324). Returns a
+// purge-result marker when it removed anything, or "" when the chain was already
+// gone (the common case once a live-netns DEL has run). All iptables calls are
+// best-effort: a missing chain/rule is expected and not logged.
+func (r *Exec) sweepCNIMasqChain(networkName, containerID string) string {
+	chain := cniMasqChainName(networkName, containerID)
+	swept := false
+
+	// 1. Delete every POSTROUTING jump to the chain, by line number in
+	//    descending order so earlier deletes don't renumber later ones. Matching
+	//    by target chain is robust to the rule's source IP and comment text.
+	lines := r.postroutingJumpLines(chain)
+	for i := len(lines) - 1; i >= 0; i-- {
+		if _, err := cniIptablesRun(r.ctx, "-t", "nat", "-D", "POSTROUTING", strconv.Itoa(lines[i])); err != nil {
+			r.logger.WarnContext(r.ctx, "ipMasq sweep: failed to delete POSTROUTING jump",
+				"chain", chain, "line", lines[i], "error", err)
+		} else {
+			swept = true
+		}
+	}
+
+	// 2. Flush then delete the chain. Both are no-ops (their not-exist errors are
+	//    ignored) once a prior live-netns DEL already reclaimed the chain.
+	_, _ = cniIptablesRun(r.ctx, "-t", "nat", "-F", chain)
+	if _, err := cniIptablesRun(r.ctx, "-t", "nat", "-X", chain); err == nil {
+		swept = true
+	}
+
+	if swept {
+		r.logger.InfoContext(r.ctx, "swept residual CNI masquerade chain",
+			"chain", chain, "container", containerID, "network", networkName)
+		return "cni-masq-swept:" + chain
+	}
+	return ""
+}
+
+// postroutingJumpLines returns the iptables line numbers of every nat
+// POSTROUTING rule whose target is chain, parsed from
+// `iptables -t nat -L POSTROUTING --line-numbers -n`. Returns nil on any
+// iptables error (the sweep then only attempts the flush/delete).
+func (r *Exec) postroutingJumpLines(chain string) []int {
+	out, err := cniIptablesRun(r.ctx, "-t", "nat", "-L", "POSTROUTING", "--line-numbers", "-n")
+	if err != nil {
+		return nil
+	}
+	var lines []int
+	for _, raw := range strings.Split(string(out), "\n") {
+		// Rule rows are "<num> <target> <prot> <opt> <source> <dest> ...";
+		// header rows ("num target ...", "Chain POSTROUTING ...") have a
+		// non-numeric first field and are skipped by the Atoi guard.
+		fields := strings.Fields(raw)
+		if len(fields) < 2 || fields[1] != chain {
+			continue
+		}
+		n, perr := strconv.Atoi(fields[0])
+		if perr != nil {
+			continue
+		}
+		lines = append(lines, n)
+	}
+	return lines
 }
 
 // containsExactContainerID checks if the content contains the exact container ID,
@@ -382,9 +529,63 @@ func (r *Exec) findCNIConfigPath(networkName string) (string, error) {
 		return configPath, nil
 	}
 
-	// Try to find in run path (space network configs)
-	// This requires listing spaces, which we'll do as a fallback
+	// Fall back to the per-space run-path conflist. Space conflists are written
+	// as <RunPath>/<metadata>/<realm>/<space>/network.conflist (see
+	// fs.SpaceNetworkConfigPath), NOT as <networkName>.conflist under
+	// CniConfigDir — so the standard-location lookup above always misses for
+	// space networks, silently skipping the CNI DEL and leaking the bridge
+	// plugin's per-container masquerade nat chains on purge (issue #1324). The
+	// network name is BuildSpaceNetworkName(realm, space) = "<realm>-<space>",
+	// but realm and space names may themselves contain '-', so the name is not
+	// reliably reversible by splitting. Enumerate realm/space dirs and match by
+	// the recomputed network name instead — the same enumeration teardownRealmCNI
+	// relies on.
+	if runConfigPath, err := r.findSpaceConflistByNetworkName(networkName); err == nil {
+		return runConfigPath, nil
+	}
+
 	return "", fmt.Errorf("CNI config not found for network %q", networkName)
+}
+
+// findSpaceConflistByNetworkName walks the run-path metadata tree
+// (<RunPath>/<metadata>/<realm>/<space>) and returns the network.conflist for
+// the space whose recomputed network name (naming.BuildSpaceNetworkName) equals
+// networkName. Returns an error when no space dir matches or none carries a
+// conflist on disk.
+func (r *Exec) findSpaceConflistByNetworkName(networkName string) (string, error) {
+	metaRoot := fs.MetadataRoot(r.opts.RunPath)
+	realmEntries, err := os.ReadDir(metaRoot)
+	if err != nil {
+		return "", err
+	}
+	for _, realmEntry := range realmEntries {
+		if !realmEntry.IsDir() {
+			continue
+		}
+		realmName := realmEntry.Name()
+		spaceEntries, rerr := os.ReadDir(fs.RealmMetadataDir(r.opts.RunPath, realmName))
+		if rerr != nil {
+			continue
+		}
+		for _, spaceEntry := range spaceEntries {
+			if !spaceEntry.IsDir() {
+				continue
+			}
+			spaceName := spaceEntry.Name()
+			candidate, nerr := naming.BuildSpaceNetworkName(realmName, spaceName)
+			if nerr != nil || candidate != networkName {
+				continue
+			}
+			confPath, perr := fs.SpaceNetworkConfigPath(r.opts.RunPath, realmName, spaceName)
+			if perr != nil {
+				continue
+			}
+			if _, statErr := os.Stat(confPath); statErr == nil {
+				return confPath, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("CNI config not found in run path for network %q", networkName)
 }
 
 // getContainerNetnsPath attempts to get the network namespace path for a container.

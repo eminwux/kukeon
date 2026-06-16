@@ -20,6 +20,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -35,6 +36,8 @@ import (
 	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/fs"
+	"github.com/eminwux/kukeon/internal/util/naming"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
@@ -165,6 +168,18 @@ func TestBuildRootCNINetworkName_DeterministicWhenSpaceMissing(t *testing.T) {
 	if got != want {
 		t.Errorf("buildRootCNINetworkName() = %q, want %q when space metadata is absent", got, want)
 	}
+}
+
+// TestMain default-stubs the package iptables shell-out (cniIptablesRun) so no
+// unit test that reaches the #1324 masquerade-chain sweep via purgeCNIForContainer
+// ever touches the host firewall. The erroring stub makes the sweep find nothing
+// and append no marker. Tests that assert on the sweep itself
+// (TestSweepCNIMasqChain*) install their own recording fake over this default.
+func TestMain(m *testing.M) {
+	cniIptablesRun = func(_ context.Context, _ ...string) ([]byte, error) {
+		return nil, errors.New("iptables stubbed in test")
+	}
+	os.Exit(m.Run())
 }
 
 // TestContainsExactContainerID covers the safety-net matcher every CNI/IPAM
@@ -361,5 +376,266 @@ func TestPurgeCNIForContainer_CallsDelWithEmptyNetns(t *testing.T) {
 	}
 	if !strings.Contains(string(calls), "DEL") {
 		t.Fatalf("expected a DEL invocation recorded, got %q", string(calls))
+	}
+}
+
+// TestFindCNIConfigPath_ResolvesRunPathConflist is the core regression guard for
+// issue #1324. Space conflists are written per-space as
+// <RunPath>/<metadata>/<realm>/<space>/network.conflist, never as
+// <networkName>.conflist under CniConfigDir — so the old findCNIConfigPath
+// (which only ever checked the CniConfigDir standard location and had an
+// unimplemented run-path fallback) always missed for space networks, silently
+// skipping the CNI DEL and leaking the bridge plugin's per-container masquerade
+// nat chains on every networked-cell purge. The realm name here carries a '-'
+// to exercise the no-reverse-split resolution (the network name "<realm>-<space>"
+// is matched by recomputing it per space dir, not by splitting on '-').
+func TestFindCNIConfigPath_ResolvesRunPathConflist(t *testing.T) {
+	const (
+		realmName = "dev-init-attach" // '-' in realm name: name is not reversible by split
+		spaceName = "ds"
+	)
+	runPath := t.TempDir()
+	confPath, err := fs.SpaceNetworkConfigPath(runPath, realmName, spaceName)
+	if err != nil {
+		t.Fatalf("SpaceNetworkConfigPath: %v", err)
+	}
+	if err = os.MkdirAll(filepath.Dir(confPath), 0o750); err != nil {
+		t.Fatalf("mkdir conflist dir: %v", err)
+	}
+	if err = os.WriteFile(confPath, []byte(`{"cniVersion":"0.4.0","name":"dev-init-attach-ds","plugins":[]}`), 0o600); err != nil {
+		t.Fatalf("write conflist: %v", err)
+	}
+
+	// Empty CniConfigDir so the standard-location lookup misses and the run-path
+	// fallback is the only thing that can resolve the conflist.
+	emptyConfDir := t.TempDir()
+	r := &Exec{
+		ctx:     context.Background(),
+		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		opts:    Options{RunPath: runPath},
+		cniConf: &cni.Conf{CniConfigDir: emptyConfDir, CniBinDir: emptyConfDir, CniCacheDir: emptyConfDir},
+	}
+
+	networkName, err := naming.BuildSpaceNetworkName(realmName, spaceName)
+	if err != nil {
+		t.Fatalf("BuildSpaceNetworkName: %v", err)
+	}
+	got, err := r.findCNIConfigPath(networkName)
+	if err != nil {
+		t.Fatalf("findCNIConfigPath(%q) returned error: %v", networkName, err)
+	}
+	if got != confPath {
+		t.Fatalf("findCNIConfigPath(%q) = %q, want run-path conflist %q", networkName, got, confPath)
+	}
+
+	// A network with no matching space dir must still error (the lookup must not
+	// resolve to an unrelated space's conflist).
+	if _, err = r.findCNIConfigPath("no-such-network"); err == nil {
+		t.Fatalf("findCNIConfigPath(no-such-network) = nil error, want not-found")
+	}
+}
+
+// TestPurgeCNIForContainer_RunPathConflistRunsDEL is the end-to-end #1324 guard:
+// with the conflist present ONLY at the per-space run path (and the CniConfigDir
+// standard location empty), purgeCNIForContainer must resolve it via the
+// fallback and actually run the CNI DEL, recording "cni-del" in the purge result
+// rather than a silent skip. A fake CNI plugin records the DEL invocation.
+func TestPurgeCNIForContainer_RunPathConflistRunsDEL(t *testing.T) {
+	const (
+		realmName   = "default"
+		spaceName   = "myspace"
+		containerID = "cid-100"
+	)
+	networkName, err := naming.BuildSpaceNetworkName(realmName, spaceName)
+	if err != nil {
+		t.Fatalf("BuildSpaceNetworkName: %v", err)
+	}
+
+	binDir := t.TempDir()
+	cacheDir := t.TempDir()
+	emptyConfDir := t.TempDir() // CniConfigDir intentionally empty: forces the run-path fallback.
+
+	// Fake CNI plugin: records each invocation's CNI_COMMAND to a marker file.
+	markerPath := filepath.Join(t.TempDir(), "del-calls")
+	pluginScript := "#!/bin/sh\nprintf '%s\\n' \"$CNI_COMMAND\" >> \"" + markerPath + "\"\nexit 0\n"
+	if err = os.WriteFile(filepath.Join(binDir, "recorddel"), []byte(pluginScript), 0o755); err != nil {
+		t.Fatalf("write fake plugin: %v", err)
+	}
+
+	// Conflist lives ONLY at the per-space run path — the exact on-disk layout
+	// that made findCNIConfigPath miss before this fix.
+	runPath := t.TempDir()
+	confPath, err := fs.SpaceNetworkConfigPath(runPath, realmName, spaceName)
+	if err != nil {
+		t.Fatalf("SpaceNetworkConfigPath: %v", err)
+	}
+	if err = os.MkdirAll(filepath.Dir(confPath), 0o750); err != nil {
+		t.Fatalf("mkdir conflist dir: %v", err)
+	}
+	conflist := `{
+  "cniVersion": "0.4.0",
+  "name": "` + networkName + `",
+  "plugins": [ { "type": "recorddel" } ]
+}`
+	if err = os.WriteFile(confPath, []byte(conflist), 0o600); err != nil {
+		t.Fatalf("write conflist: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	r := &Exec{
+		ctx:     context.Background(),
+		logger:  slog.New(slog.NewTextHandler(&logBuf, nil)),
+		opts:    Options{RunPath: runPath},
+		cniConf: &cni.Conf{CniConfigDir: emptyConfDir, CniBinDir: binDir, CniCacheDir: cacheDir},
+	}
+
+	if err = r.purgeCNIForContainer(containerID, "", networkName); err != nil {
+		t.Fatalf("purgeCNIForContainer returned error: %v", err)
+	}
+
+	// DEL must have fired through the run-path conflist.
+	calls, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatalf("CNI DEL was not invoked via run-path conflist (marker file absent): %v", err)
+	}
+	if !strings.Contains(string(calls), "DEL") {
+		t.Fatalf("expected a DEL invocation recorded, got %q", string(calls))
+	}
+	// The purge result must record a real cni-del, not a skip/failure.
+	logged := logBuf.String()
+	if !strings.Contains(logged, "cni-del") || strings.Contains(logged, "cni-del-skipped") ||
+		strings.Contains(logged, "cni-del-failed") {
+		t.Fatalf("purge result did not record a clean cni-del: %s", logged)
+	}
+}
+
+// TestPurgeCNIForContainer_SurfacesSkippedDEL covers AC #2: a skipped CNI DEL
+// (conflist resolvable nowhere) must surface above Debug (Warn) and be reflected
+// in the purge result, not swallowed and reported as a clean purge (#1324).
+func TestPurgeCNIForContainer_SurfacesSkippedDEL(t *testing.T) {
+	emptyDir := t.TempDir()
+	var logBuf bytes.Buffer
+	r := &Exec{
+		ctx:    context.Background(),
+		logger: slog.New(slog.NewTextHandler(&logBuf, nil)),
+		// RunPath points at a tree with no metadata, so the run-path fallback
+		// also misses and the DEL is genuinely unresolvable.
+		opts:    Options{RunPath: t.TempDir()},
+		cniConf: &cni.Conf{CniConfigDir: emptyDir, CniBinDir: emptyDir, CniCacheDir: emptyDir},
+	}
+
+	if err := r.purgeCNIForContainer("cid-100", "", "default-myspace"); err != nil {
+		t.Fatalf("purgeCNIForContainer returned error: %v", err)
+	}
+
+	logged := logBuf.String()
+	if !strings.Contains(logged, "level=WARN") {
+		t.Fatalf("expected a WARN log for the skipped DEL, got: %s", logged)
+	}
+	if !strings.Contains(logged, "cni-del-skipped:config-not-found") {
+		t.Fatalf("expected purge result to record cni-del-skipped:config-not-found, got: %s", logged)
+	}
+}
+
+// TestCNIMasqChainName pins the per-container masquerade chain-name replica used
+// by the purge sweep against golden values captured from live-created chains in
+// the #1324 dev-init repro. cniMasqChainName must equal utils.FormatChainName
+// from github.com/containernetworking/plugins byte-for-byte, or the sweep would
+// target the wrong (or no) chain and the masquerade nat rules would still leak.
+func TestCNIMasqChainName(t *testing.T) {
+	tests := []struct {
+		network     string
+		containerID string
+		want        string
+	}{
+		{"default-default", "default_default_natleak-test_root", "CNI-e12a15b29243523ec04d02b9"},
+		{"dev-init-attach-ds", "ds_dks_cattach_root", "CNI-ec12256cec4057b1122e3662"},
+	}
+	for _, tt := range tests {
+		if got := cniMasqChainName(tt.network, tt.containerID); got != tt.want {
+			t.Errorf("cniMasqChainName(%q, %q) = %q, want %q", tt.network, tt.containerID, got, tt.want)
+		}
+	}
+}
+
+// TestSweepCNIMasqChain is the regression guard for the #1324 belt-and-suspenders
+// sweep: on the purge path the bridge plugin's empty-netns DEL never reaches its
+// ipMasq teardown, so the masquerade chain + its POSTROUTING jumps must be
+// removed directly. It injects a fake iptables runner and asserts the sweep
+// discovers the jumps, deletes them by line number (descending so earlier
+// deletes don't renumber later ones), then flushes and deletes the chain.
+func TestSweepCNIMasqChain(t *testing.T) {
+	const (
+		network     = "default-default"
+		containerID = "default_default_natleak-test_root"
+	)
+	chain := cniMasqChainName(network, containerID) // CNI-e12a15b29243523ec04d02b9
+
+	// Canned `iptables -t nat -L POSTROUTING --line-numbers -n`: two rules jump
+	// to our chain (lines 2 and 4); the header rows and unrelated rules must be
+	// ignored.
+	listOutput := strings.Join([]string{
+		"Chain POSTROUTING (policy ACCEPT)",
+		"num  target          prot opt source       destination",
+		"1    KUKEON-FORWARD  all  --  0.0.0.0/0    0.0.0.0/0",
+		"2    " + chain + "  all  --  10.89.0.36   0.0.0.0/0",
+		"3    OTHER-CHAIN     all  --  0.0.0.0/0    0.0.0.0/0",
+		"4    " + chain + "  all  --  10.88.0.36   0.0.0.0/0",
+		"",
+	}, "\n")
+
+	var calls [][]string
+	prev := cniIptablesRun
+	cniIptablesRun = func(_ context.Context, args ...string) ([]byte, error) {
+		calls = append(calls, args)
+		if len(args) >= 3 && args[2] == "-L" {
+			return []byte(listOutput), nil
+		}
+		return nil, nil
+	}
+	t.Cleanup(func() { cniIptablesRun = prev })
+
+	r := &Exec{ctx: context.Background(), logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	marker := r.sweepCNIMasqChain(network, containerID)
+
+	if want := "cni-masq-swept:" + chain; marker != want {
+		t.Fatalf("marker = %q, want %q", marker, want)
+	}
+
+	wantSeq := [][]string{
+		{"-t", "nat", "-L", "POSTROUTING", "--line-numbers", "-n"},
+		{"-t", "nat", "-D", "POSTROUTING", "4"}, // descending: line 4 before line 2
+		{"-t", "nat", "-D", "POSTROUTING", "2"},
+		{"-t", "nat", "-F", chain},
+		{"-t", "nat", "-X", chain},
+	}
+	if len(calls) != len(wantSeq) {
+		t.Fatalf("issued %d iptables calls, want %d: %v", len(calls), len(wantSeq), calls)
+	}
+	for i := range wantSeq {
+		if strings.Join(calls[i], " ") != strings.Join(wantSeq[i], " ") {
+			t.Errorf("call %d = %v, want %v", i, calls[i], wantSeq[i])
+		}
+	}
+}
+
+// TestSweepCNIMasqChain_NoChainNoMarker covers the common post-live-netns-DEL
+// case: the chain is already gone, so the sweep finds no jumps, its flush/delete
+// no-op, and it returns "" (no false "swept" marker in the purge result).
+func TestSweepCNIMasqChain_NoChainNoMarker(t *testing.T) {
+	prev := cniIptablesRun
+	cniIptablesRun = func(_ context.Context, args ...string) ([]byte, error) {
+		if len(args) >= 3 && args[2] == "-L" {
+			// POSTROUTING with no rule jumping to our chain.
+			return []byte("Chain POSTROUTING (policy ACCEPT)\nnum  target\n1    KUKEON-FORWARD\n"), nil
+		}
+		// -F / -X on an absent chain fail, like real iptables.
+		return nil, errors.New("iptables: No chain/target/match by that name")
+	}
+	t.Cleanup(func() { cniIptablesRun = prev })
+
+	r := &Exec{ctx: context.Background(), logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	if marker := r.sweepCNIMasqChain("default-default", "default_default_natleak-test_root"); marker != "" {
+		t.Fatalf("marker = %q, want empty (chain already gone)", marker)
 	}
 }
