@@ -284,6 +284,19 @@ func LoadConfig() error {
 // PersistentPreRunE so every subcommand sees the seeded defaults before
 // reading viper.
 func loadClientConfiguration(cmd *cobra.Command) error {
+	// Bind the KUKE_CONFIGURATION env var to viper before reading the path.
+	// The `--configuration` flag is bound in SetPersistentLoggingFlags, but
+	// without this env binding `viper.GetString` only ever sees the flag (and
+	// its default ~/.kuke/kuke.yaml) — so `KUKE_CONFIGURATION=<dev config>`,
+	// the mechanism scripts/dev-init.sh uses to point every in-process client
+	// command at the dev-profile config, was silently ignored. That left the
+	// daemon-independent `kuke image *` / `kuke get image*` paths (#217/#226)
+	// resolving the default `.kukeon.io` suffix while daemon-routed kinds
+	// (get realms) reflected the daemon's own dev config and looked correct,
+	// masking the gap (#1325). BindEnv runs here, ahead of the path read,
+	// because loadClientConfiguration is invoked from PersistentPreRunE before
+	// loadConfig's other BindEnv calls.
+	_ = config.KUKE_CONFIGURATION.BindEnv()
 	path := viper.GetString(config.KUKE_CONFIGURATION.ViperKey)
 	if path == "" {
 		path = config.DefaultClientConfigurationFile()

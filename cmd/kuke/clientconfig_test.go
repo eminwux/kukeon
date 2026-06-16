@@ -277,6 +277,57 @@ spec:
 	}
 }
 
+// TestLoadClientConfigurationHonorsKukeConfigurationEnv pins the #1325 fix:
+// the dev-init mechanism points in-process client commands at the dev-profile
+// config via the KUKE_CONFIGURATION *env var* (not the --configuration flag),
+// so loadClientConfiguration must bind that env before reading the path. The
+// sibling TestLoadClientConfigurationSeedsViper seeds the viper key directly,
+// which masked the missing BindEnv: with the env var alone, the daemon-
+// independent `kuke image *` / `kuke get image*` paths resolved the default
+// `.kukeon.io` suffix instead of the configured `dev.kukeon.io`.
+func TestLoadClientConfigurationHonorsKukeConfigurationEnv(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	restoreRuntimeGlobals(t)
+
+	viper.Reset()
+	cmd, err := NewKukeCmd()
+	if err != nil {
+		t.Fatalf("NewKukeCmd() error = %v", err)
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kuke-dev.yaml")
+	content := `apiVersion: v1beta1
+kind: ClientConfiguration
+metadata:
+  name: default
+spec:
+  containerdNamespaceSuffix: dev.kukeon.io
+  cgroupRoot: /kukeon-dev
+`
+	if writeErr := os.WriteFile(path, []byte(content), 0o644); writeErr != nil {
+		t.Fatalf("WriteFile: %v", writeErr)
+	}
+	// Drive the path through the env var only — no viper.Set, no --configuration
+	// flag — exactly how scripts/dev-init.sh invokes every `kuke` client command.
+	t.Setenv(config.KUKE_CONFIGURATION.EnvVar(), path)
+
+	if loadErr := loadClientConfiguration(cmd); loadErr != nil {
+		t.Fatalf("loadClientConfiguration() error = %v", loadErr)
+	}
+	if got := viper.GetString(config.KUKEON_ROOT_NAMESPACE_SUFFIX.ViperKey); got != "dev.kukeon.io" {
+		t.Errorf("ContainerdNamespaceSuffix from KUKE_CONFIGURATION env: got %q, want %q "+
+			"(loadClientConfiguration must BindEnv before reading the path)", got, "dev.kukeon.io")
+	}
+	// The package-level suffix is what consts.RealmNamespace appends, so the
+	// in-process image controller resolves <realm>.dev.kukeon.io only when
+	// ConfigureRuntime observed the env-supplied config.
+	if got, want := consts.RealmNamespace("kuke-system"), "kuke-system.dev.kukeon.io"; got != want {
+		t.Errorf("consts.RealmNamespace: got %q, want %q "+
+			"(image verbs must resolve the env-configured suffix)", got, want)
+	}
+}
+
 // TestMaybeWriteClientConfigurationDefaultSkipsCustomPath locks the guard
 // that prevents tests (and operators pointing --configuration at a custom
 // location) from writing to ~/.kuke/kuke.yaml on the host. The path-equality
