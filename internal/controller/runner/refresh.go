@@ -797,11 +797,13 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 	//
 	// A non-zero exit derives CellStateError, which is sticky — once persisted,
 	// the cellStateIsSticky short-circuit at the top of ReconcileCell would make
-	// this pass unreachable. The restart therefore fires on the first tick that
-	// observes the exit (before Error persists), and a backoff-deferred restart
-	// deliberately avoids persisting the sticky Error transition so a later tick
-	// can still fire. Failed cells (a kukeon bring-up fault) are already excluded
-	// by that same short-circuit; never-Ready cells are excluded by the
+	// this pass unreachable. While a restart is owed (fired or backoff-deferred)
+	// the cell is converging, not failed, so it is held at non-sticky
+	// CellStateDegraded instead: the reap gate is suppressed, the crash
+	// breadcrumb cleared, and a later tick re-derives Ready (workload back up) or
+	// settles the sticky Error only once the restart budget exhausts (restartNone
+	// from the on-failure cap). Failed cells (a kukeon bring-up fault) are already
+	// excluded by the sticky short-circuit; never-Ready cells are excluded by the
 	// ReadyObserved gate inside maybeRestartExitedContainers.
 	cell, restartResult, restartErr := r.maybeRestartExitedContainers(cell)
 	if restartErr != nil {
@@ -812,17 +814,31 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 	}
 	switch restartResult {
 	case restartFired:
-		// A fired restart suppresses wind-down / auto-delete for this tick; the
-		// next tick re-derives the cell with the relaunched container Ready.
-		return cell, ReconcileOutcome{Updated: true}, nil
+		// A fired restart suppresses wind-down / auto-delete for this tick. The
+		// cell is mid-convergence (a workload crashed and was just relaunched),
+		// so hold it at non-sticky Degraded rather than the sticky Error the
+		// crash derived — Error would short-circuit this pass next tick and
+		// strand the restart loop. The next tick re-derives Ready once the
+		// relaunched container is observed up (or Degraded again if it re-crashed).
+		// restartFired returns early, so persist the Degraded transition here.
+		cell.Status.State = intmodel.CellStateDegraded
+		cell.Status.Reason = originalStatus.Reason
+		cell.Status.Message = originalStatus.Message
+		persisted, persistErr := r.persistCellStatusGuarded(cell)
+		if persistErr != nil {
+			return cell, ReconcileOutcome{}, fmt.Errorf("failed to update cell metadata: %w", persistErr)
+		}
+		return cell, ReconcileOutcome{Updated: persisted}, nil
 	case restartDeferred:
 		// A restart is required but the per-container backoff has not elapsed.
-		// Suppress the reap gate AND hold the cell-level status at its
-		// pre-derivation value so the (sticky) Error transition is not
-		// persisted — otherwise the cellStateIsSticky short-circuit would
-		// strand the cell and this pass could never fire once the backoff
-		// clears. The refreshed container-status view below still persists.
-		cell.Status.State = originalStatus.State
+		// Suppress the reap gate and hold the cell at non-sticky Degraded so the
+		// (sticky) Error transition is not persisted — otherwise the
+		// cellStateIsSticky short-circuit would strand the cell and this pass
+		// could never fire once the backoff clears. Degraded persists honestly
+		// (the workload is down with a relaunch pending); ReadyObserved stays
+		// latched and the crash breadcrumb is cleared. Falls through to the
+		// common persist below.
+		cell.Status.State = intmodel.CellStateDegraded
 		cell.Status.ReadyObserved = originalStatus.ReadyObserved
 		cell.Status.Reason = originalStatus.Reason
 		cell.Status.Message = originalStatus.Message
@@ -1010,11 +1026,19 @@ func cellStateAutoDeleteTriggers(s intmodel.CellState) bool {
 //   - newState == Ready (the current observation),
 //   - originalStatus.State == Ready (a synchronous Start persisted
 //     Ready into the cell metadata before this reconciler tick saw it,
-//     even on the first tick after a restart).
+//     even on the first tick after a restart),
+//   - newState/originalState == Degraded (#1233 follow-up): a cell whose
+//     first observed state is Degraded — a sibling crashed before the cell
+//     ever derived Ready — has still come up (a peer workload is active /
+//     the cell is mid-convergence), so the latch must close. Without this the
+//     restart pass's ReadyObserved gate would skip it and the crashed sibling
+//     would never be restarted.
 func latchReadyObserved(prior bool, originalState, newState intmodel.CellState) bool {
 	return prior ||
 		newState == intmodel.CellStateReady ||
-		originalState == intmodel.CellStateReady
+		originalState == intmodel.CellStateReady ||
+		newState == intmodel.CellStateDegraded ||
+		originalState == intmodel.CellStateDegraded
 }
 
 // shouldAutoDeleteCell returns true when the reconciler should kick off
@@ -1492,10 +1516,10 @@ func deriveCellStateFromNonRootContainerStatuses(
 	specs []intmodel.ContainerSpec,
 	statuses []intmodel.ContainerStatus,
 ) intmodel.CellState {
-	nonRootIDs := make(map[string]struct{}, len(specs))
+	nonRootSpecs := make(map[string]intmodel.ContainerSpec, len(specs))
 	for i := range specs {
 		if !specs[i].Root {
-			nonRootIDs[specs[i].ID] = struct{}{}
+			nonRootSpecs[specs[i].ID] = specs[i]
 		}
 	}
 
@@ -1503,8 +1527,14 @@ func deriveCellStateFromNonRootContainerStatuses(
 	anyActive := false
 	anyUnknown := false
 	anyFailed := false
+	// anyDegraded tracks a terminal non-root workload that is down in a
+	// non-clean way — crashed, or exited under a policy that should keep it
+	// running. Paired with anyActive it distinguishes "some workloads up, some
+	// down" (Degraded) from "all up" (Ready); see nonRootWorkloadDegraded.
+	anyDegraded := false
 	for i := range statuses {
-		if _, ok := nonRootIDs[statuses[i].ID]; !ok {
+		spec, ok := nonRootSpecs[statuses[i].ID]
+		if !ok {
 			continue
 		}
 		seen++
@@ -1527,16 +1557,26 @@ func deriveCellStateFromNonRootContainerStatuses(
 			if containerExitedNonZero(statuses[i]) {
 				anyFailed = true
 			}
+			if nonRootWorkloadDegraded(spec, statuses[i]) {
+				anyDegraded = true
+			}
 		}
 	}
 
-	if seen < len(nonRootIDs) {
+	if seen < len(nonRootSpecs) {
 		// populate skipped or didn't reach every non-root spec — be
 		// defensive and stay Unknown so a partial-populate failure
 		// can't reap a healthy cell.
 		return intmodel.CellStateUnknown
 	}
 	if anyActive {
+		// Some workloads are up. If another is down in a non-clean way the
+		// cell is only partially healthy — Degraded, not Ready (#1233 follow-up).
+		// A cleanly-completed oneshot (never / on-failure + exit 0) is NOT
+		// degraded, so a sidecar+job cell stays Ready once the job finishes.
+		if anyDegraded {
+			return intmodel.CellStateDegraded
+		}
 		return intmodel.CellStateReady
 	}
 	if anyUnknown {
@@ -1568,6 +1608,20 @@ func containerExitedNonZero(status intmodel.ContainerStatus) bool {
 	return status.State == intmodel.ContainerStateFailed ||
 		status.State == intmodel.ContainerStateError ||
 		status.ExitCode != 0
+}
+
+// nonRootWorkloadDegraded reports whether a terminal non-root container leaves
+// the cell degraded rather than cleanly complete: a non-zero exit (a crash), or
+// a clean exit under a RestartPolicy that should keep it running (so the
+// reconciler will restart it / it is meant to be up). A clean exit under a
+// policy that does NOT restart (never, or on-failure that exited 0) is a
+// successful completion — a finished oneshot, not a degradation. Callers must
+// only consult this for containers already known to be terminal. Pairs the
+// crash check (containerExitedNonZero) with the restart-trigger predicate so
+// the two derivation sites and the restart pass agree on what "degraded" means.
+func nonRootWorkloadDegraded(spec intmodel.ContainerSpec, status intmodel.ContainerStatus) bool {
+	return containerExitedNonZero(status) ||
+		restartPolicyRequiresRestart(spec.RestartPolicy, status.ExitCode)
 }
 
 // hasNonRootContainerSpec reports whether the cell has at least one

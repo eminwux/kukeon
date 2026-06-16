@@ -492,6 +492,60 @@ func TestStartCell_ReadyStateValidation(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			// #1317 review: a Degraded cell (root/sandbox up, a non-root workload
+			// down with a preserved non-zero exit) that an operator start/restarts
+			// must recover to Ready in a single action. The recovery switch claims
+			// Degraded BEFORE the running-container guard, so it routes through
+			// RecreateCell like Error/Failed rather than falling through. Before the
+			// fix Degraded fell through; the live root + live sidecar then tripped
+			// the "has running containers and must first be stopped" guard, leaving
+			// the operator stuck at Error N/N after the daemon re-derived the
+			// preserved crash exit — the inverse of the Ready 1/2 contradiction
+			// Degraded was introduced to kill. RecreateCell stops/deletes the
+			// leftover containers and rebuilds, the only path that lands Ready.
+			name:      "cell in Degraded state with live root and sidecar recovers via RecreateCell",
+			cellName:  "degraded-cell",
+			realmName: "test-realm",
+			spaceName: "test-space",
+			stackName: "test-stack",
+			setupRunner: func(f *fakeRunner) {
+				existingCell := buildTestCell("degraded-cell", "test-realm", "test-space", "test-stack")
+				existingCell.Status.State = intmodel.CellStateDegraded
+				existingCell.Spec.Containers = []intmodel.ContainerSpec{
+					{ID: "root", Image: "alpine:latest"},
+					{ID: "sidecar", Image: "alpine:latest"},
+					{ID: "job", Image: "alpine:latest"},
+				}
+				// Root + sidecar still running (a Degraded cell is partially live);
+				// the job crashed and is held down.
+				existingCell.Status.Containers = []intmodel.ContainerStatus{
+					{ID: "root", State: intmodel.ContainerStateReady},
+					{ID: "sidecar", State: intmodel.ContainerStateReady},
+					{ID: "job", State: intmodel.ContainerStateError, ExitCode: 137},
+				}
+				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+					return existingCell, nil
+				}
+				f.ExistsCgroupFn = func(_ any) (bool, error) {
+					return true, nil
+				}
+				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
+					return true, nil
+				}
+				f.StartCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+					return intmodel.Cell{}, errors.New("Degraded must route through RecreateCell, not StartCell")
+				}
+				f.RecreateCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
+				}
+				f.UpdateCellMetadataFn = func(_ intmodel.Cell) error {
+					return nil
+				}
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -531,6 +585,76 @@ func TestStartCell_ReadyStateValidation(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestStartCell_DegradedRecoversToReadyInOneAction pins the #1317-review fix: a
+// single operator start/restart of a Degraded cell lands Ready, not a stuck
+// Error N/N. It asserts the recovery routing concretely — RecreateCell is the
+// path taken (not a plain StartCell), and the returned cell is Ready — so a
+// regression that drops Degraded back out of the recovery switch (falling
+// through to a plain start that the daemon re-derives into sticky Error) is
+// caught here rather than only on a live host.
+func TestStartCell_DegradedRecoversToReadyInOneAction(t *testing.T) {
+	existingCell := buildTestCell("degraded-recover", "test-realm", "test-space", "test-stack")
+	existingCell.Status.State = intmodel.CellStateDegraded
+	existingCell.Spec.Containers = []intmodel.ContainerSpec{
+		{ID: "root", Image: "alpine:latest"},
+		{ID: "sidecar", Image: "alpine:latest"},
+		{ID: "job", Image: "alpine:latest"},
+	}
+	existingCell.Status.Containers = []intmodel.ContainerStatus{
+		{ID: "root", State: intmodel.ContainerStateReady},
+		{ID: "sidecar", State: intmodel.ContainerStateReady},
+		{ID: "job", State: intmodel.ContainerStateError, ExitCode: 137},
+	}
+
+	var recreateCalled, startCalled bool
+	mockRunner := &fakeRunner{
+		GetCellFn: func(_ intmodel.Cell) (intmodel.Cell, error) {
+			return existingCell, nil
+		},
+		ExistsCgroupFn: func(_ any) (bool, error) {
+			return true, nil
+		},
+		ExistsCellRootContainerFn: func(_ intmodel.Cell) (bool, error) {
+			return true, nil
+		},
+		StartCellFn: func(c intmodel.Cell) (intmodel.Cell, error) {
+			startCalled = true
+			return c, nil
+		},
+		RecreateCellFn: func(c intmodel.Cell) (intmodel.Cell, error) {
+			recreateCalled = true
+			// RecreateCell's start phase funnels through markCellReady, which
+			// lands the cell Ready and clears the failure breadcrumb.
+			c.Status.State = intmodel.CellStateReady
+			return c, nil
+		},
+		UpdateCellMetadataFn: func(_ intmodel.Cell) error {
+			return nil
+		},
+	}
+
+	ctrl := setupTestController(t, mockRunner)
+	cell := buildTestCell("degraded-recover", "test-realm", "test-space", "test-stack")
+
+	res, err := ctrl.StartCell(cell)
+	if err != nil {
+		t.Fatalf("StartCell on a Degraded cell: unexpected error: %v", err)
+	}
+	if !recreateCalled {
+		t.Error("RecreateCell was not called — a Degraded cell must recover through the recreate path")
+	}
+	if startCalled {
+		t.Error("plain StartCell was called — a Degraded cell must route through RecreateCell, not a plain start")
+	}
+	if res.Cell.Status.State != intmodel.CellStateReady {
+		t.Errorf("recovered cell state = %v, want Ready (a single recovery action must land Ready, not a stuck Error)",
+			res.Cell.Status.State)
+	}
+	if !res.Started {
+		t.Error("res.Started = false, want true (the recovery brought the cell up)")
 	}
 }
 

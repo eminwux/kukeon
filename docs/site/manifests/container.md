@@ -107,6 +107,31 @@ Only the root container is exempt: the root's exit drives cell-level lifecycle d
 
 **Auto-delete (`--rm`) interaction.** A cell that opted into auto-delete (`kuke run --rm`, or `spec.autoDelete: true`) is reaped on a **no-restart-required exit** — an exit a `never` policy (or a clean-exit `on-failure`) would otherwise preserve in `Stopped` is deleted instead. `--rm` does **not** defeat a restart-requiring policy: with `restartPolicy: always` (any exit) or `on-failure` (non-zero exit) the restart fires first and the workload is relaunched, not deleted, for that tick — so a `--rm` + `always` workload restarts on exit rather than being cleaned up. In short, `--rm` cleans up a workload once it reaches a terminal, no-restart exit; it does not override an active restart loop.
 
+### Restart on exit
+
+The same `restartPolicy` value also drives whether the reconciler **relaunches** a non-root container after it exits, before the wind-down gate above is consulted. The two readings agree on which exits matter — an exit that owes a restart is never reaped — so a container is either relaunched or preserved, never silently dropped.
+
+| Value        | Restart on exit                                                                           |
+| ------------ | ----------------------------------------------------------------------------------------- |
+| empty/unset  | Never (treated as `never`). The exited container is left terminal; the cell is preserved. |
+| `always`     | On **any** exit (zero or non-zero). Uncapped — relaunches indefinitely.                   |
+| `on-failure` | On a **non-zero** exit only. A clean (exit 0) completion is not relaunched.               |
+| `never`      | Never.                                                                                    |
+
+**Restart timing.** Restarts are evaluated on the reconcile loop, so a relaunch lands on the next reconcile tick after the exit is observed, not synchronously. Successive attempts on the same container are spaced by a minimum **30s backoff** — an exit inside the backoff window defers to a later tick. An `on-failure` container is capped at **5 restart attempts**; once the cap is exhausted the cell settles into the sticky `Error` state and self-healing stops until an operator intervenes. `always` is uncapped (it keeps the backoff but never exhausts).
+
+**Policy → cell `STATE`.** While a workload is down with a relaunch owed (or in backoff), the cell holds at the non-sticky `Degraded` state rather than the sticky `Error` a bare crash would derive — so the restart loop stays re-derivable and the cell returns to `Ready` once the workload is back up. `Degraded` is the partial-health rung between `Ready` and `Error` (root/sandbox up, a non-root workload down or restarting); see the [`status.state` table in the cell manifest](cell.md#status). The settled cell state after a single non-root workload is killed with a non-zero (e.g. SIGKILL / exit 137) signal:
+
+| `restartPolicy`                  | Relaunched? | Settled cell `STATE`          |
+| -------------------------------- | ----------- | ----------------------------- |
+| `always`                         | yes         | `Ready` (transits `Degraded`) |
+| `on-failure` (non-zero exit)     | yes         | `Ready` (transits `Degraded`) |
+| `on-failure` (cap exhausted)     | no          | `Error` (sticky)              |
+| `never` / empty (sole workload)  | no          | `Error` (sticky)              |
+| mixed: another workload still up | n/a         | `Degraded` (stable)           |
+
+The last row is the case `Degraded` was introduced for (a sidecar+job cell where the `always` sidecar stays up while a `never` job crashes): the cell is only partially healthy, so it reports `Degraded` instead of a contradictory `Ready`. An operator `kuke start`/`kuke restart` of such a cell recovers it to `Ready` in a single action.
+
 ### VolumeMount
 
 Each entry in `spec.volumes` is a mount attached to the container. The `kind` discriminator selects which OCI mount type the runtime emits.

@@ -509,3 +509,76 @@ func TestReconcileCell_AutoDeleteWithOnFailureRestartWins(t *testing.T) {
 		t.Errorf("relaunched %v, want a single relaunch of %q", fired, workloadID)
 	}
 }
+
+// TestReconcileCell_RestartHoldsCellDegraded pins the #1233 follow-up: while a
+// restart is owed (fired here), ReconcileCell holds the cell at the non-sticky
+// CellStateDegraded rather than the sticky CellStateError the crash would derive
+// — Error would short-circuit the next tick and strand the restart loop. The
+// crash breadcrumb is cleared since this is not (yet) a terminal failure.
+func TestReconcileCell_RestartHoldsCellDegraded(t *testing.T) {
+	realm, space, stack, cellName := "default", "kukeon", "kukeon", "web"
+	rootID, workloadID := "root", "workload"
+	rootContainerdID := space + "_" + stack + "_" + cellName + "_" + rootID
+	workloadContainerdID := space + "_" + stack + "_" + cellName + "_" + workloadID
+
+	fake := &deleteCellFakeClient{
+		loadCgroupFn: func(string, string) (*cgroup2.Manager, error) {
+			return &cgroup2.Manager{}, nil
+		},
+		existsContainerFn: func(_, _ string) (bool, error) { return true, nil },
+		// Root running; workload crashed (Stopped, code 1) — owes an always restart.
+		taskStatusFn: func(_, id string) (containerd.Status, error) {
+			if id == workloadContainerdID {
+				return containerd.Status{
+					Status:     containerd.Stopped,
+					ExitStatus: 1,
+					ExitTime:   time.Date(2026, 6, 7, 20, 35, 4, 0, time.UTC),
+				}, nil
+			}
+			return containerd.Status{Status: containerd.Running}, nil
+		},
+	}
+	r := newDeleteCellTestExec(t, fake)
+	seedDeleteCellRealm(t, r, realm)
+	seedPostRebootCell(t, r, realm, space, stack, cellName, rootID, workloadID, rootContainerdID, workloadContainerdID)
+
+	r.restartContainerFn = func(cell intmodel.Cell, _ string) (intmodel.Cell, error) {
+		return cell, nil
+	}
+
+	cell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: cellName},
+		Spec: intmodel.CellSpec{
+			ID:        cellName,
+			RealmName: realm,
+			SpaceName: space,
+			StackName: stack,
+			Containers: []intmodel.ContainerSpec{
+				{ID: rootID, ContainerdID: rootContainerdID, Root: true},
+				{
+					ID:            workloadID,
+					ContainerdID:  workloadContainerdID,
+					Root:          false,
+					RestartPolicy: intmodel.RestartPolicyAlways,
+				},
+			},
+		},
+		Status: intmodel.CellStatus{State: intmodel.CellStateReady, ReadyObserved: true},
+	}
+
+	outCell, outcome, err := r.ReconcileCell(cell)
+	if err != nil {
+		t.Fatalf("ReconcileCell: unexpected error: %v", err)
+	}
+	if !outcome.Updated {
+		t.Errorf("outcome.Updated = false, want true")
+	}
+	if outCell.Status.State != intmodel.CellStateDegraded {
+		t.Errorf("cell state = %v, want Degraded (a fired restart holds the cell at non-sticky Degraded)",
+			outCell.Status.State)
+	}
+	if cellStateIsSticky(outCell.Status.State) {
+		t.Errorf("cell state %v is sticky — a held-Degraded cell must stay re-derivable so a later tick can fire",
+			outCell.Status.State)
+	}
+}
