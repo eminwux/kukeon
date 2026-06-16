@@ -288,6 +288,42 @@ func TestRestartCmd(t *testing.T) {
 			},
 		},
 		{
+			// #1318: a Degraded cell (live root/sidecar, a non-root workload
+			// down/restarting) recovers via restartStopped — StartCell only, no
+			// stop-first. The stop-first would flip it out of Degraded before the
+			// daemon's StartCell re-reads it, skipping the recreate recovery arm
+			// and leaving the cell stuck at a sticky Error N/N.
+			name: "degraded cell: restarts via StartCell (no stop-first)",
+			args: []string{"degraded"},
+			setup: func() {
+				viper.Set(config.KUKE_RESTART_CELL_REALM.ViperKey, "r1")
+				viper.Set(config.KUKE_RESTART_CELL_SPACE.ViperKey, "s1")
+				viper.Set(config.KUKE_RESTART_CELL_STACK.ViperKey, "st1")
+			},
+			fake: &fakeClient{
+				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+					return kukeonv1.GetCellResult{
+						MetadataExists: true,
+						Cell: v1beta1.CellDoc{
+							Metadata: v1beta1.CellMetadata{Name: "degraded"},
+							Spec:     v1beta1.CellSpec{ID: "degraded", RealmID: "r1", SpaceID: "s1", StackID: "st1"},
+							Status:   v1beta1.CellStatus{State: v1beta1.CellStateDegraded},
+						},
+					}, nil
+				},
+				startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+					return kukeonv1.StartCellResult{Cell: doc, Started: true}, nil
+				},
+			},
+			wantOutput: `Started cell "degraded" from stack "st1"`,
+			validate: func(t *testing.T, f *fakeClient) {
+				if f.stopCalls != 0 || f.startCalls != 1 {
+					t.Fatalf("Degraded restart must call StartCell only (no stop-first), got stop=%d start=%d",
+						f.stopCalls, f.startCalls)
+				}
+			},
+		},
+		{
 			// #1267/#1268: Exited (clean self-exit) re-runs like Stopped.
 			name: "exited cell: restarts via StartCell",
 			args: []string{"done"},

@@ -202,10 +202,11 @@ func filterCellsBySelector(cells []v1beta1.CellDoc, selector *getshared.LabelSel
 }
 
 // restartOne runs the restart state machine for a single cell described by doc:
-// a Ready cell is stop+start; a Stopped/Exited/Error/Failed cell is start (the
-// daemon recovers a Failed cell via a recreate-style path, #1268); a
-// Pending/Unknown cell is refused with a delete pointer. Shared by the
-// positional-name path and the per-match loop in restartBySelector.
+// a Ready cell is stop+start; a Stopped/Exited/Error/Failed/Degraded cell is
+// start (the daemon recovers a Failed/Error/Degraded cell via a recreate-style
+// path, #1268/#1318); a Pending/Unknown cell is refused with a delete pointer.
+// Shared by the positional-name path and the per-match loop in
+// restartBySelector.
 func restartOne(cmd *cobra.Command, client kukeonv1.Client, doc v1beta1.CellDoc) error {
 	name := doc.Metadata.Name
 	realm := doc.Spec.RealmID
@@ -222,21 +223,25 @@ func restartOne(cmd *cobra.Command, client kukeonv1.Client, doc v1beta1.CellDoc)
 	}
 
 	switch pre.Cell.Status.State {
-	case v1beta1.CellStateReady, v1beta1.CellStateDegraded:
-		// Degraded (#1233 follow-up) is a live cell (root/sandbox up, a non-root
-		// workload down or restarting), so restart runs in place like Ready
-		// rather than the recreate path the terminal states take.
+	case v1beta1.CellStateReady:
+		// A Ready cell bounces in place: stop then start.
 		return restartInPlace(cmd, client, doc)
-	case v1beta1.CellStateStopped, v1beta1.CellStateExited, v1beta1.CellStateError, v1beta1.CellStateFailed:
-		// All four terminal/degraded states restart without a delete (#1268):
-		// Stopped (operator stop/kill) and Exited (clean self-exit, #1267) bring
-		// the cell back up from intact container records, while Error (workload
-		// crash whose sticky root is still live) and Failed (kukeon bring-up fault)
-		// are recovered by the daemon's StartCell via a recreate-style recovery
-		// (stop -> recreate containers -> start, including the leftover root)
-		// (#1274). restartStopped calls StartCell directly (no stop-first) so the
-		// daemon observes the persisted Error/Failed state and picks the recreate
-		// path — a stop-first would flip it to Stopped and skip the recovery.
+	case v1beta1.CellStateStopped, v1beta1.CellStateExited, v1beta1.CellStateError,
+		v1beta1.CellStateFailed, v1beta1.CellStateDegraded:
+		// These states restart without a stop-first (#1268): Stopped (operator
+		// stop/kill) and Exited (clean self-exit, #1267) bring the cell back up
+		// from intact container records, while Error (workload crash whose sticky
+		// root is still live) and Failed (kukeon bring-up fault) are recovered by
+		// the daemon's StartCell via a recreate-style recovery (stop -> recreate
+		// containers -> start, including the leftover root) (#1274). Degraded
+		// (#1318) — a live cell whose non-root workload is down/restarting —
+		// recovers the same way: the daemon's StartCell now routes Degraded
+		// through that recreate path, but only if it observes the persisted
+		// Degraded state. restartStopped calls StartCell directly (no stop-first)
+		// so the daemon sees the persisted Error/Failed/Degraded state and picks
+		// the recreate path; an in-place stop-first would flip the cell to a
+		// transient Stopped/Error before StartCell re-reads it, skipping the
+		// recovery and leaving it stuck at a sticky Error N/N.
 		return restartStopped(cmd, client, doc)
 	case v1beta1.CellStatePending, v1beta1.CellStateUnknown:
 		// Same delete-then-rerun pointer as `kuke run` on a genuinely-
