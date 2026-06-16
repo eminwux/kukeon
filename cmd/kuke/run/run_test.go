@@ -685,8 +685,11 @@ func TestRun_ExistingCell_TerminalStates_StartsAndAttaches(t *testing.T) {
 	// must call StartCell (not CreateCell — that was an unsafe re-entry per #630)
 	// and then attach. Stopped/Exited/Error re-run from intact records; Failed
 	// (kukeon bring-up fault) is recovered daemon-side via a recreate-style path
-	// reached through the same StartCell RPC (#1268). All four route identically
-	// from the CLI's perspective: a single StartCell call, no CreateCell.
+	// reached through the same StartCell RPC (#1268). Degraded (#1318) joins them:
+	// `kuke run <cell>` honours its "start + attach" contract and recovers a
+	// Degraded cell via the same StartCell RPC, in parity with kuke start/restart
+	// (not the Ready no-op). All route identically from the CLI's perspective: a
+	// single StartCell call, no CreateCell.
 	base := v1beta1.CellDoc{
 		Metadata: v1beta1.CellMetadata{Name: "my-cell"},
 		Spec: v1beta1.CellSpec{
@@ -719,6 +722,7 @@ func TestRun_ExistingCell_TerminalStates_StartsAndAttaches(t *testing.T) {
 		{"exited", v1beta1.CellStateExited},
 		{"error", v1beta1.CellStateError},
 		{"failed", v1beta1.CellStateFailed},
+		{"degraded", v1beta1.CellStateDegraded},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Cleanup(viper.Reset)

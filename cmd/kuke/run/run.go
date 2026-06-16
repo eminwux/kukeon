@@ -729,16 +729,19 @@ func warnDivergentNamedCell(w io.Writer, cellDoc v1beta1.CellDoc, changed []stri
 //     Re-entering the daemon's CreateCell→StartCell path on a healthy cell trips
 //     the runner's CNI duplicate-allocation bug (#630), so the short-circuit is
 //     mandatory, not just an optimisation.
-//   - Stopped / Exited / Error / Failed → StartCell, then attach (#1268). The
-//     routing is the correct verb (the prior fall-through to CreateCell was
-//     itself an unsafe re-entry). The live start+attach is gated on the same CNI
-//     fix (#630): StartCell re-ADDs the root container to its bridge network,
-//     which the daemon rejects with `duplicate allocation` until it releases the
-//     prior allocation on teardown. Stopped/Exited re-run from their intact
-//     container records; Error (workload crash) and Failed (kukeon bring-up fault)
-//     are routed by the daemon's StartCell through a recreate-style recovery (stop
-//     -> recreate containers -> start) so a crashed cell whose sticky root is still
-//     live, or a half-created cell, recovers without delete-then-recreate (#1274).
+//   - Stopped / Exited / Error / Failed / Degraded → StartCell, then attach
+//     (#1268, #1318). The routing is the correct verb (the prior fall-through to
+//     CreateCell was itself an unsafe re-entry). The live start+attach is gated on
+//     the same CNI fix (#630): StartCell re-ADDs the root container to its bridge
+//     network, which the daemon rejects with `duplicate allocation` until it
+//     releases the prior allocation on teardown. Stopped/Exited re-run from their
+//     intact container records; Error (workload crash), Failed (kukeon bring-up
+//     fault) and Degraded (a down/restarting non-root workload) are routed by the
+//     daemon's StartCell through a recreate-style recovery (stop -> recreate
+//     containers -> start) so a crashed, half-created, or degraded cell recovers
+//     without delete-then-recreate (#1274). Degraded joins this group rather than
+//     the Ready no-op so `run` honours its "start + attach" contract and stays in
+//     parity with `kuke start`/`kuke restart`, which already recover it.
 //   - error / partial (Pending, Unknown) → refuse with a
 //     `kuke delete cell <name>` pointer (parity with the `-c` identity contract
 //     in #625). `run` does not reconcile a genuinely-unrecoverable cell in place;
@@ -751,13 +754,7 @@ func runExistingCell(
 	flags runFlags,
 ) error {
 	switch pre.Cell.Status.State {
-	case v1beta1.CellStateReady, v1beta1.CellStateDegraded:
-		// Degraded (#1233 follow-up) is a live cell (root/sandbox up, a non-root
-		// workload down or restarting), so `kuke run` treats it like Ready: no-op
-		// after the divergence guard, leaving the reconciler to recover the
-		// workload. Re-entering StartCell here would risk the #630 CNI
-		// duplicate-allocation re-entry the Ready short-circuit avoids.
-		//
+	case v1beta1.CellStateReady:
 		// Divergence guard (#654, #683): the metadata records this cell as
 		// Ready, but its root-container task is gone from containerd — typically
 		// a daemon/host restart (#648) dropped the cell's tasks while the
@@ -780,16 +777,28 @@ func runExistingCell(
 		if printErr := printRunResult(cmd, noOpResultFromGet(pre), flags.output); printErr != nil {
 			return printErr
 		}
-	case v1beta1.CellStateStopped, v1beta1.CellStateExited, v1beta1.CellStateError, v1beta1.CellStateFailed:
-		// All four terminal/degraded states are operator-restartable without a
-		// delete (#1268): Stopped (operator stop/kill) and Exited (clean self-exit,
-		// #1267) re-run from their intact container records, while Error (workload
-		// crash whose sticky root is still live) and Failed (kukeon bring-up fault)
-		// are recovered by the daemon's StartCell, which routes both through a
-		// recreate-style recovery (stop -> recreate containers -> start, including
-		// the leftover root) (#1274). StartCell is called directly (no stop-first)
-		// so the daemon observes the persisted Error/Failed state and picks the
-		// recreate path rather than a plain start.
+	case v1beta1.CellStateStopped, v1beta1.CellStateExited, v1beta1.CellStateError,
+		v1beta1.CellStateFailed, v1beta1.CellStateDegraded:
+		// These states are operator-restartable without a delete (#1268): Stopped
+		// (operator stop/kill) and Exited (clean self-exit, #1267) re-run from their
+		// intact container records, while Error (workload crash whose sticky root is
+		// still live) and Failed (kukeon bring-up fault) are recovered by the
+		// daemon's StartCell, which routes both through a recreate-style recovery
+		// (stop -> recreate containers -> start, including the leftover root)
+		// (#1274). Degraded (#1318) — a live cell whose non-root workload is
+		// down/restarting — is started here too rather than treated as a Ready
+		// no-op: `kuke run <cell>` is "start + attach an existing cell", and
+		// Degraded is a startable state that `kuke start`/`kuke restart` already
+		// recover, so `run` recovers it identically (the run/start/restart parity
+		// invariant). The daemon's StartCell routes Degraded through the same
+		// RecreateCell path as Error/Failed, which tears containers down (releasing
+		// the CNI allocation) before recreating — so the #630 duplicate-allocation
+		// re-entry that gates the Ready no-op does NOT apply here. StartCell is
+		// called directly (no stop-first) so the daemon observes the persisted
+		// Error/Failed/Degraded state and picks the recreate path rather than a
+		// plain start. (A Degraded cell still attaches as a live cell under
+		// `kuke attach` — GuardCellTaskLiveness treats it as Ready — for the
+		// inspect-without-recreate path.)
 		startRes, err := client.StartCell(cmd.Context(), cellDoc)
 		if err != nil {
 			return err
