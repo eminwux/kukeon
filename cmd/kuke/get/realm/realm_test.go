@@ -140,6 +140,86 @@ func TestNewRealmCmd(t *testing.T) {
 	}
 }
 
+// TestNewRealmCmd_NamedSingleRow pins the #1323 kubectl-parity flip: a named
+// `kuke get realm <name>` renders a single table row by default (and the wide
+// row with `-o wide`), while `-o yaml` / `-o json` still emit the full
+// document.
+func TestNewRealmCmd_NamedSingleRow(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fake := &fakeClient{
+		getRealmFn: func(_ v1beta1.RealmDoc) (kukeonv1.GetRealmResult, error) {
+			return kukeonv1.GetRealmResult{
+				Realm: v1beta1.RealmDoc{
+					APIVersion: v1beta1.APIVersionV1Beta1,
+					Kind:       v1beta1.KindRealm,
+					Metadata:   v1beta1.RealmMetadata{Name: "r1"},
+					Spec:       v1beta1.RealmSpec{Namespace: "ns1"},
+					Status:     v1beta1.RealmStatus{State: v1beta1.RealmStateReady},
+				},
+				MetadataExists: true,
+			}, nil
+		},
+	}
+
+	run := func(t *testing.T, args ...string) string {
+		t.Helper()
+		t.Cleanup(viper.Reset)
+		cmd := realm.NewRealmCmd()
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+		ctx := context.WithValue(context.Background(), realm.MockControllerKey{}, kukeonv1.Client(fake))
+		cmd.SetContext(ctx)
+		cmd.SetArgs(append([]string{"r1"}, args...))
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		return buf.String()
+	}
+
+	t.Run("default renders single table row", func(t *testing.T) {
+		out := run(t)
+		header := testutil.FirstLine(out)
+		for _, col := range []string{"NAME", "STATE", "AGE"} {
+			if !strings.Contains(header, col) {
+				t.Errorf("named default header missing %q; got: %q", col, header)
+			}
+		}
+		if !strings.Contains(out, "r1") {
+			t.Errorf("expected single row carrying name; got:\n%s", out)
+		}
+		if strings.Contains(out, "metadata:") || strings.Contains(out, "NAMESPACE") {
+			t.Errorf("named default must not emit document/wide columns; got:\n%s", out)
+		}
+	})
+
+	t.Run("-o wide renders single wide row", func(t *testing.T) {
+		out := run(t, "-o", "wide")
+		header := testutil.FirstLine(out)
+		if !strings.Contains(header, "NAMESPACE") {
+			t.Errorf("named wide header missing NAMESPACE; got: %q", header)
+		}
+		if !strings.Contains(out, "ns1") {
+			t.Errorf("expected NAMESPACE value in wide row; got:\n%s", out)
+		}
+	})
+
+	t.Run("-o yaml emits the full document", func(t *testing.T) {
+		out := run(t, "-o", "yaml")
+		if !strings.Contains(out, "metadata:") {
+			t.Errorf("-o yaml should emit the document; got:\n%s", out)
+		}
+	})
+
+	t.Run("-o json emits the full document", func(t *testing.T) {
+		out := run(t, "-o", "json")
+		if !strings.Contains(out, "\"metadata\"") {
+			t.Errorf("-o json should emit the document; got:\n%s", out)
+		}
+	})
+}
+
 func TestNewRealmCmd_Structure(t *testing.T) {
 	cmd := realm.NewRealmCmd()
 	if cmd.Use != "realm [name]" {

@@ -145,6 +145,86 @@ func TestNewStackCmd(t *testing.T) {
 // the same shape as default. Also re-pins the cross-cutting epic
 // invariants from #827: the `CGROUP`/`CONTROLLERS` columns and the
 // `--show-controllers` flag stay gone.
+// TestNewStackCmd_NamedSingleRow pins the #1323 kubectl-parity flip: a named
+// `kuke get stack <name>` renders a single table row by default, while
+// `-o yaml` / `-o json` still emit the full document. Stack has no per-entity
+// `-o wide` columns, so wide renders the same shape as default (#603).
+func TestNewStackCmd_NamedSingleRow(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fake := &fakeClient{
+		getStackFn: func(_ v1beta1.StackDoc) (kukeonv1.GetStackResult, error) {
+			return kukeonv1.GetStackResult{
+				Stack: v1beta1.StackDoc{
+					Metadata: v1beta1.StackMetadata{Name: "st1"},
+					Spec:     v1beta1.StackSpec{RealmID: "r1", SpaceID: "s1"},
+					Status:   v1beta1.StackStatus{State: v1beta1.StackStateReady},
+				},
+				MetadataExists: true,
+			}, nil
+		},
+	}
+
+	run := func(t *testing.T, args ...string) string {
+		t.Helper()
+		t.Cleanup(viper.Reset)
+		cmd := stack.NewStackCmd()
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+		ctx := context.WithValue(context.Background(), stack.MockControllerKey{}, kukeonv1.Client(fake))
+		cmd.SetContext(ctx)
+		cmd.SetArgs(append([]string{"st1", "--realm", "r1", "--space", "s1"}, args...))
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		return buf.String()
+	}
+
+	t.Run("default renders single table row", func(t *testing.T) {
+		out := run(t)
+		header := testutil.FirstLine(out)
+		for _, col := range []string{"NAME", "REALM", "SPACE", "STATE", "AGE"} {
+			if !strings.Contains(header, col) {
+				t.Errorf("named default header missing %q; got: %q", col, header)
+			}
+		}
+		if !strings.Contains(out, "st1") {
+			t.Errorf("expected single row carrying name; got:\n%s", out)
+		}
+		if strings.Contains(out, "metadata:") {
+			t.Errorf("named default must not emit the full document; got:\n%s", out)
+		}
+	})
+
+	t.Run("-o wide renders single row", func(t *testing.T) {
+		out := run(t, "-o", "wide")
+		header := testutil.FirstLine(out)
+		for _, col := range []string{"NAME", "REALM", "SPACE", "STATE", "AGE"} {
+			if !strings.Contains(header, col) {
+				t.Errorf("named wide header missing %q; got: %q", col, header)
+			}
+		}
+		if strings.Contains(out, "metadata:") {
+			t.Errorf("named wide must not emit the full document; got:\n%s", out)
+		}
+	})
+
+	t.Run("-o yaml emits the full document", func(t *testing.T) {
+		out := run(t, "-o", "yaml")
+		if !strings.Contains(out, "metadata:") {
+			t.Errorf("-o yaml should emit the document; got:\n%s", out)
+		}
+	})
+
+	t.Run("-o json emits the full document", func(t *testing.T) {
+		out := run(t, "-o", "json")
+		if !strings.Contains(out, "\"metadata\"") {
+			t.Errorf("-o json should emit the document; got:\n%s", out)
+		}
+	})
+}
+
 func TestNewStackCmd_Columns(t *testing.T) {
 	t.Cleanup(viper.Reset)
 

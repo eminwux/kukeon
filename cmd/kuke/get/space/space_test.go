@@ -144,6 +144,83 @@ func TestNewSpaceCmd(t *testing.T) {
 // renders `allow`/`deny`/`-` across the nil-cases for Spec.Network and
 // Spec.Network.Egress; NET-DEFAULTS renders `yes`/`-` boolean of whether
 // Spec.Defaults != nil. CGROUP/CONTROLLERS never appear in any table.
+// TestNewSpaceCmd_NamedSingleRow pins the #1323 kubectl-parity flip: a named
+// `kuke get space <name>` renders a single table row by default (and the wide
+// row with `-o wide`), while `-o yaml` / `-o json` still emit the full
+// document.
+func TestNewSpaceCmd_NamedSingleRow(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fake := &fakeClient{
+		getSpaceFn: func(_ v1beta1.SpaceDoc) (kukeonv1.GetSpaceResult, error) {
+			return kukeonv1.GetSpaceResult{
+				Space: v1beta1.SpaceDoc{
+					Metadata: v1beta1.SpaceMetadata{Name: "s1"},
+					Spec:     v1beta1.SpaceSpec{RealmID: "r1"},
+					Status:   v1beta1.SpaceStatus{State: v1beta1.SpaceStateReady},
+				},
+				MetadataExists: true,
+			}, nil
+		},
+	}
+
+	run := func(t *testing.T, args ...string) string {
+		t.Helper()
+		t.Cleanup(viper.Reset)
+		cmd := space.NewSpaceCmd()
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+		ctx := context.WithValue(context.Background(), space.MockControllerKey{}, kukeonv1.Client(fake))
+		cmd.SetContext(ctx)
+		cmd.SetArgs(append([]string{"s1", "--realm", "r1"}, args...))
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		return buf.String()
+	}
+
+	t.Run("default renders single table row", func(t *testing.T) {
+		out := run(t)
+		header := testutil.FirstLine(out)
+		for _, col := range []string{"NAME", "REALM", "STATE", "AGE"} {
+			if !strings.Contains(header, col) {
+				t.Errorf("named default header missing %q; got: %q", col, header)
+			}
+		}
+		if !strings.Contains(out, "s1") {
+			t.Errorf("expected single row carrying name; got:\n%s", out)
+		}
+		if strings.Contains(out, "metadata:") || strings.Contains(out, "EGRESS") {
+			t.Errorf("named default must not emit document/wide columns; got:\n%s", out)
+		}
+	})
+
+	t.Run("-o wide renders single wide row", func(t *testing.T) {
+		out := run(t, "-o", "wide")
+		header := testutil.FirstLine(out)
+		for _, col := range []string{"NAME", "REALM", "EGRESS", "NET-DEFAULTS"} {
+			if !strings.Contains(header, col) {
+				t.Errorf("named wide header missing %q; got: %q", col, header)
+			}
+		}
+	})
+
+	t.Run("-o yaml emits the full document", func(t *testing.T) {
+		out := run(t, "-o", "yaml")
+		if !strings.Contains(out, "metadata:") {
+			t.Errorf("-o yaml should emit the document; got:\n%s", out)
+		}
+	})
+
+	t.Run("-o json emits the full document", func(t *testing.T) {
+		out := run(t, "-o", "json")
+		if !strings.Contains(out, "\"metadata\"") {
+			t.Errorf("-o json should emit the document; got:\n%s", out)
+		}
+	})
+}
+
 func TestNewSpaceCmd_Columns(t *testing.T) {
 	t.Cleanup(viper.Reset)
 

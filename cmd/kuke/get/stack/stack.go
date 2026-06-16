@@ -121,7 +121,7 @@ func NewStackCmd() *cobra.Command {
 	cmd.Flags().String("space", "", "Filter stacks by space name")
 	_ = viper.BindPFlag(config.KUKE_GET_STACK_SPACE.ViperKey, cmd.Flags().Lookup("space"))
 	cmd.Flags().
-		StringP("output", "o", "", "Output format (yaml, json, table, wide). Default: table for list, yaml for single resource")
+		StringP("output", "o", "", "Output format (yaml, json, table, wide). Default: table for list, table for single resource")
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("o"))
 
@@ -163,8 +163,12 @@ func printStack(cmd *cobra.Command, stack *v1beta1.StackDoc, format shared.Outpu
 	switch format {
 	case shared.OutputFormatJSON:
 		return shared.PrintJSON(cmd, stack)
-	default:
+	case shared.OutputFormatYAML:
 		return shared.PrintYAML(cmd, stack)
+	default:
+		// table / wide: render the single found element as a one-row table
+		// with the same columns as the list view (kubectl parity).
+		return printStacks(cmd, []v1beta1.StackDoc{*stack}, format)
 	}
 }
 

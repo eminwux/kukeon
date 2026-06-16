@@ -13,7 +13,7 @@ Resources: `realm`, `space`, `stack`, `cell`, `container`, `image`, `blueprint`,
 
 | Flag                | Description                                                                                                                                                                                                   |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--output`, `-o`    | Output format: `yaml`, `json`, `table`, `wide`. Default: `table` for list, `yaml` for a single resource. `wide` accepted by every `kuke get <kind>` for symmetry; per-kind wide columns vary (see each kind). |
+| `--output`, `-o`    | Output format: `yaml`, `json`, `table`, `wide`. Default: `table` for both a list and a single named resource (#1323). `wide` accepted by every `kuke get <kind>` for symmetry; per-kind wide columns vary (see each kind). |
 | `--selector`, `-l`  | Label selector (kubectl-style) to filter list results. Supports `=`, `==`, `!=`, existence (`key`), absence (`!key`), and comma-separated AND (e.g. `env=prod,tier!=db` or `env,!debug`). Rejected with a positional `NAME`. |
 
 Plus all [global flags](kuke.md). Every `kuke get <kind>` accepts the explicit `--no-daemon` flag to bypass the daemon (inherited as a persistent flag from the parent `get` command); `KUKEON_NO_DAEMON=true` and `--run-path /opt/kukeon` (which auto-promotes the command into in-process mode) work as well.
@@ -38,7 +38,7 @@ All scope flags default to `default`. See the [realm default note](commands.md#c
 ## Behavior
 
 - **List** (no positional arg): returns every resource matching the scope flags. Default output is a table.
-- **Single** (positional arg): returns the one matching resource. Default output is YAML.
+- **Single** (positional arg): returns the one matching resource. Default output is a **single table row** with the same columns as the list view (#1323, kubectl parity); `-o wide` renders the single wide row. The full document is reached via `-o yaml` / `-o json`. (Breaking change: scripts that relied on a bare named get emitting YAML must switch to `-o yaml`.)
 
 ## Default tables and `-o wide` columns
 

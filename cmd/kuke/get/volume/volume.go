@@ -122,7 +122,7 @@ func NewVolumeCmd() *cobra.Command {
 	cmd.Flags().String("stack", "", "Filter volumes by stack name")
 	_ = viper.BindPFlag(config.KUKE_GET_VOLUME_STACK.ViperKey, cmd.Flags().Lookup("stack"))
 	cmd.Flags().
-		StringP("output", "o", "", "Output format (yaml, json, table, wide). Default: table for list, yaml for single resource")
+		StringP("output", "o", "", "Output format (yaml, json, table, wide). Default: table for list, table for single resource")
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("o"))
 
@@ -147,10 +147,12 @@ func printVolume(cmd *cobra.Command, volume *v1beta1.VolumeDoc, format shared.Ou
 	switch format {
 	case shared.OutputFormatJSON:
 		return shared.PrintJSON(cmd, volume)
-	case shared.OutputFormatYAML, shared.OutputFormatTable, shared.OutputFormatWide:
+	case shared.OutputFormatYAML:
 		return shared.PrintYAML(cmd, volume)
 	default:
-		return shared.PrintYAML(cmd, volume)
+		// table / wide: render the single found element as a one-row table
+		// with the same columns as the list view (kubectl parity).
+		return printVolumes(cmd, []v1beta1.VolumeDoc{*volume}, format)
 	}
 }
 

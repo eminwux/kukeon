@@ -66,8 +66,8 @@ type Client interface {
 
 // NewImageCmd builds the `kuke get image` subcommand. With no positional and
 // no `--realm`, it lists images across every realm. With `--realm <r>` it
-// narrows to one. With a positional `<ref>` it describes that one image
-// (yaml by default, json with `-o json`).
+// narrows to one. With a positional `<ref>` it renders that one image as a
+// single table row by default (the full document via `-o yaml` / `-o json`).
 func NewImageCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "image [ref]",
@@ -81,7 +81,7 @@ func NewImageCmd() *cobra.Command {
 
 	cmd.Flags().String("realm", "", "Filter images by realm name; omit to list across every realm")
 	cmd.Flags().
-		StringP("output", "o", "", "Output format (yaml, json, table, wide). Default: table for list, yaml for single resource")
+		StringP("output", "o", "", "Output format (yaml, json, table, wide). Default: table for list, table for single resource")
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("o"))
 
@@ -114,7 +114,17 @@ func runImageCmd(cmd *cobra.Command, args []string) error {
 			}
 			return getErr
 		}
-		return printImage(cmd, res.Image, format)
+		if format == getshared.OutputFormatYAML || format == getshared.OutputFormatJSON {
+			return printImage(cmd, res.Image, format)
+		}
+		// table / wide: render the single found image as a one-row table with
+		// the same columns as the list view (kubectl parity).
+		return printImages(
+			cmd,
+			[]kukeonv1.ListImagesResult{{Realm: realm, Images: []kukeonv1.ImageInfo{res.Image}}},
+			format,
+			wide,
+		)
 	}
 
 	if realm != "" {

@@ -346,6 +346,94 @@ func TestGetContainer_NotFound_SurfacesSentinel(t *testing.T) {
 // column set after the epic:get redefinition (issue #605): NAME REALM SPACE
 // STACK CELL STATE RESTARTS AGE — eight columns. ROOT (as a column), IMAGE
 // (as a default column), and CGROUP must NOT appear.
+// TestNewContainerCmd_NamedSingleRow pins the #1323 kubectl-parity flip: a
+// named `kuke get container <name>` renders a single table row by default (and
+// the wide row with `-o wide`), while `-o yaml` / `-o json` still emit the full
+// document.
+func TestNewContainerCmd_NamedSingleRow(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fake := &fakeClient{
+		getContainerFn: func(_ v1beta1.ContainerDoc) (kukeonv1.GetContainerResult, error) {
+			return kukeonv1.GetContainerResult{
+				Container: v1beta1.ContainerDoc{
+					Metadata: v1beta1.ContainerMetadata{Name: "co1"},
+					Spec: v1beta1.ContainerSpec{
+						ID:      "co1",
+						RealmID: "r1",
+						SpaceID: "s1",
+						StackID: "st1",
+						CellID:  "ce1",
+						Image:   "alpine:3.20",
+					},
+					Status: v1beta1.ContainerStatus{State: v1beta1.ContainerStateReady},
+				},
+				ContainerExists: true,
+			}, nil
+		},
+	}
+
+	run := func(t *testing.T, args ...string) string {
+		t.Helper()
+		t.Cleanup(viper.Reset)
+		cmd := container.NewContainerCmd()
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+		ctx := context.WithValue(context.Background(), container.MockControllerKey{}, kukeonv1.Client(fake))
+		cmd.SetContext(ctx)
+		cmd.SetArgs(append([]string{"co1", "--realm", "r1", "--space", "s1", "--stack", "st1", "--cell", "ce1"}, args...))
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		return buf.String()
+	}
+
+	t.Run("default renders single table row", func(t *testing.T) {
+		out := run(t)
+		for _, col := range []string{"NAME", "REALM", "SPACE", "STACK", "CELL", "STATE", "RESTARTS", "AGE"} {
+			if !strings.Contains(out, col) {
+				t.Errorf("named default missing column %q; got:\n%s", col, out)
+			}
+		}
+		if !strings.Contains(out, "co1") {
+			t.Errorf("expected single row carrying name; got:\n%s", out)
+		}
+		if strings.Contains(out, "metadata:") || strings.Contains(out, "IMAGE") {
+			t.Errorf("named default must not emit document/wide columns; got:\n%s", out)
+		}
+	})
+
+	t.Run("-o wide renders single wide row", func(t *testing.T) {
+		out := run(t, "-o", "wide")
+		for _, col := range []string{"NAME", "STATE", "IMAGE", "EXIT"} {
+			if !strings.Contains(out, col) {
+				t.Errorf("named wide missing column %q; got:\n%s", col, out)
+			}
+		}
+		if !strings.Contains(out, "alpine:3.20") {
+			t.Errorf("expected IMAGE value in wide row; got:\n%s", out)
+		}
+		if strings.Contains(out, "metadata:") {
+			t.Errorf("named wide must not emit the full document; got:\n%s", out)
+		}
+	})
+
+	t.Run("-o yaml emits the full document", func(t *testing.T) {
+		out := run(t, "-o", "yaml")
+		if !strings.Contains(out, "metadata:") {
+			t.Errorf("-o yaml should emit the document; got:\n%s", out)
+		}
+	})
+
+	t.Run("-o json emits the full document", func(t *testing.T) {
+		out := run(t, "-o", "json")
+		if !strings.Contains(out, "\"metadata\"") {
+			t.Errorf("-o json should emit the document; got:\n%s", out)
+		}
+	})
+}
+
 func TestNewContainerCmd_DefaultColumns(t *testing.T) {
 	t.Cleanup(viper.Reset)
 

@@ -98,7 +98,7 @@ func NewRealmCmd() *cobra.Command {
 	}
 
 	cmd.Flags().
-		StringP("output", "o", "", "Output format (yaml, json, table, wide). Default: table for list, yaml for single resource")
+		StringP("output", "o", "", "Output format (yaml, json, table, wide). Default: table for list, table for single resource")
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("o"))
 
@@ -144,8 +144,12 @@ func printRealm(cmd *cobra.Command, realm *v1beta1.RealmDoc, format shared.Outpu
 	switch format {
 	case shared.OutputFormatJSON:
 		return shared.PrintJSON(cmd, realm)
-	default:
+	case shared.OutputFormatYAML:
 		return shared.PrintYAML(cmd, realm)
+	default:
+		// table / wide: render the single found element as a one-row table
+		// with the same columns as the list view (kubectl parity).
+		return printRealms(cmd, []v1beta1.RealmDoc{*realm}, format)
 	}
 }
 

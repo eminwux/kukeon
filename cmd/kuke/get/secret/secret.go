@@ -124,7 +124,7 @@ func NewSecretCmd() *cobra.Command {
 	cmd.Flags().String("cell", "", "Filter secrets by cell name")
 	_ = viper.BindPFlag(config.KUKE_GET_SECRET_CELL.ViperKey, cmd.Flags().Lookup("cell"))
 	cmd.Flags().
-		StringP("output", "o", "", "Output format (yaml, json, table, wide). Default: table for list, yaml for single resource")
+		StringP("output", "o", "", "Output format (yaml, json, table, wide). Default: table for list, table for single resource")
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("o"))
 
@@ -150,10 +150,12 @@ func printSecret(cmd *cobra.Command, secret *v1beta1.SecretDoc, format shared.Ou
 	switch format {
 	case shared.OutputFormatJSON:
 		return shared.PrintJSON(cmd, secret)
-	case shared.OutputFormatYAML, shared.OutputFormatTable:
+	case shared.OutputFormatYAML:
 		return shared.PrintYAML(cmd, secret)
 	default:
-		return shared.PrintYAML(cmd, secret)
+		// table / wide: render the single found element as a one-row table
+		// with the same columns as the list view (kubectl parity).
+		return printSecrets(cmd, []v1beta1.SecretDoc{*secret}, format)
 	}
 }
 

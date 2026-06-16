@@ -110,7 +110,7 @@ func NewSpaceCmd() *cobra.Command {
 	_ = viper.BindPFlag(config.KUKE_GET_SPACE_REALM.ViperKey, cmd.Flags().Lookup("realm"))
 
 	cmd.Flags().
-		StringP("output", "o", "", "Output format (yaml, json, table, wide). Default: table for list, yaml for single resource")
+		StringP("output", "o", "", "Output format (yaml, json, table, wide). Default: table for list, table for single resource")
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("o"))
 
@@ -151,8 +151,12 @@ func printSpace(cmd *cobra.Command, space *v1beta1.SpaceDoc, format shared.Outpu
 	switch format {
 	case shared.OutputFormatJSON:
 		return shared.PrintJSON(cmd, space)
-	default:
+	case shared.OutputFormatYAML:
 		return shared.PrintYAML(cmd, space)
+	default:
+		// table / wide: render the single found element as a one-row table
+		// with the same columns as the list view (kubectl parity).
+		return printSpaces(cmd, []v1beta1.SpaceDoc{*space}, format)
 	}
 }
 
