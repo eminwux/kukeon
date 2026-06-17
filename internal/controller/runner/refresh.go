@@ -1350,6 +1350,15 @@ func (r *Exec) maybeRestartExitedContainers(cell intmodel.Cell) (intmodel.Cell, 
 				return cell, result, fmt.Errorf("restart container %q: %w", spec.ID, startErr)
 			}
 			cell = started
+			// Sole-writer counter bump (#1234): the relaunch succeeded, so record
+			// it on the user-visible RestartCount/RestartTime. populate is a pure
+			// preserver of these fields, so this pass is the only place they ever
+			// advance — RestartCount = prior + 1 is an exact per-restart count that
+			// stays monotonic and survives subsequent reconciliation. StartContainer
+			// re-derived statuses from the persisted (preserved) prior, so the bump
+			// lands on top of that prior; ReconcileCell's restartFired branch then
+			// persists the incremented value via persistCellStatusGuarded.
+			stampContainerRestart(&cell, spec.ID, r.nowUTC())
 			result = restartFired
 		case restartDeferred:
 			// A fired restart in the same pass takes precedence; only downgrade
@@ -1373,6 +1382,24 @@ func (r *Exec) restartContainer(cell intmodel.Cell, containerID string) (intmode
 		return r.restartContainerFn(cell, containerID)
 	}
 	return r.StartContainer(cell, containerID)
+}
+
+// stampContainerRestart records a fired restart on the user-visible
+// ContainerStatus counters (#1234): it bumps RestartCount by exactly one over the
+// preserved prior and stamps RestartTime to now. maybeRestartExitedContainers is
+// the sole caller; populateCellContainerStatuses only preserves these fields, so
+// the count is an exact per-restart tally that stays monotonic across ticks.
+// Distinct from the runner-local recordRestartAttempt bookkeeping (backoff/cap
+// gate state), which resets when the container is observed running again. A no-op
+// if the container is absent from cell.Status.Containers.
+func stampContainerRestart(cell *intmodel.Cell, containerID string, now time.Time) {
+	for i := range cell.Status.Containers {
+		if cell.Status.Containers[i].ID == containerID {
+			cell.Status.Containers[i].RestartCount++
+			cell.Status.Containers[i].RestartTime = now
+			return
+		}
+	}
 }
 
 // restartStateKey derives the per-container key for the restart bookkeeping map

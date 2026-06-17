@@ -990,12 +990,22 @@ func (r *Exec) populateCellContainerStatuses(cell *intmodel.Cell) error {
 	// FinishTime=T with exit code 0 / no signal — a self-contradictory status).
 	// Preserving ExitCode in lockstep keeps the exit triple consistent. Issue #1137.
 	priorExitCode := make(map[string]int, len(cell.Status.Containers))
+	// Snapshot prior RestartCount/RestartTime under the same observe-and-preserve
+	// contract as the timestamps above. The reconciler's restart-on-exit pass
+	// (maybeRestartExitedContainers) is the *sole writer* of these counters
+	// (#1234); populate never increments — it only carries the persisted values
+	// across the unconditional overwrite below so the count stays monotonic and
+	// survives every reconciliation pass. Issue #1234 (epic #1151).
+	priorRestartCount := make(map[string]int, len(cell.Status.Containers))
+	priorRestartTime := make(map[string]time.Time, len(cell.Status.Containers))
 	for _, prev := range cell.Status.Containers {
 		priorStages[prev.ID] = prev.Stages
 		priorCreatedAt[prev.ID] = prev.CreatedAt
 		priorStartTime[prev.ID] = prev.StartTime
 		priorFinishTime[prev.ID] = prev.FinishTime
 		priorExitCode[prev.ID] = prev.ExitCode
+		priorRestartCount[prev.ID] = prev.RestartCount
+		priorRestartTime[prev.ID] = prev.RestartTime
 	}
 
 	statuses := make([]intmodel.ContainerStatus, 0, len(cell.Spec.Containers))
@@ -1054,20 +1064,20 @@ func (r *Exec) populateCellContainerStatuses(cell *intmodel.Cell) error {
 			exitCode = obs.ExitCode
 		}
 
-		// RestartCount/RestartTime require restart bookkeeping, but the runner has
-		// no reconciler-driven container restart-on-exit mechanism today
-		// (restartPolicy is reap-veto only, #1003) — nothing re-creates or
-		// re-starts an exited container task, so there is nothing to count from.
-		// The fields are therefore intentionally always-zero. Building the
-		// restart-on-exit mechanism and populating these counters is tracked by
-		// #1151.
+		// RestartCount/RestartTime: pure preserve. The reconciler's
+		// restart-on-exit pass (maybeRestartExitedContainers, #1233) is the sole
+		// writer — it bumps the count by one and stamps the time after a
+		// successful relaunch. populate never increments; it only carries the
+		// persisted values across this unconditional overwrite so the count is
+		// monotonic and survives reconciliation. A container that never restarted
+		// preserves a zero from a zero. Issue #1234 (epic #1151).
 		status := intmodel.ContainerStatus{
 			Name:         containerSpec.ID,
 			ID:           containerSpec.ID,
 			CreatedAt:    createdAt,
 			State:        obs.State,
-			RestartCount: 0,           // intentionally zero — see comment above (#1151)
-			RestartTime:  time.Time{}, // intentionally zero — see comment above (#1151)
+			RestartCount: priorRestartCount[containerSpec.ID],
+			RestartTime:  priorRestartTime[containerSpec.ID],
 			StartTime:    startTime,
 			FinishTime:   finishTime,
 			ExitCode:     exitCode,
