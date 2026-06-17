@@ -133,14 +133,27 @@ func (b *Exec) StartCell(cell intmodel.Cell) (StartCellResult, error) {
 	// This prevents blocking starts when containers have crashed externally but metadata still shows Ready state.
 	// Only Ready / Stopped / Exited reach here — the recovery switch above
 	// already claimed Pending / Unknown (refused) and Failed / Error / Degraded
-	// (recreate), so a leftover-running root on a recoverable terminal cell no
-	// longer trips this guard. Degraded is no longer in the fall-through set: an
-	// operator start/restart of a partially-down cell routes through the recovery
-	// recreate above so it lands Ready in a single action (#1317 review).
+	// (recreate). The guard blocks on live *workloads*, not the cell shell: on a
+	// cell with a non-root workload spec the root container is excluded, because
+	// a #1003 restart-policy veto (a non-root workload that exits cleanly under
+	// on-failure, or exits under never) deliberately leaves the root alive on an
+	// otherwise-Exited cell, and that pinned root must not wedge the cell against
+	// `kuke run` / `start` / `restart` (#1316). Root-only cells (kukeond-style /
+	// cgroup-only, no non-root spec) keep the root in the check — there the root
+	// IS the workload, so a running root must still block a duplicate start. The
+	// root/non-root split is the same one deriveCellStateFromNonRootContainer-
+	// Statuses uses to derive the cell state in the first place.
 	if len(internalCell.Status.Containers) > 0 {
-		// Check if any container is actually running
+		rootID := ""
+		if hasNonRootContainerSpec(internalCell) {
+			rootID = rootContainerID(internalCell)
+		}
+		// Check if any non-root container is actually running
 		hasRunningContainer := false
 		for _, containerStatus := range internalCell.Status.Containers {
+			if rootID != "" && containerStatus.ID == rootID {
+				continue
+			}
 			if containerStatus.State == intmodel.ContainerStateReady {
 				hasRunningContainer = true
 				break

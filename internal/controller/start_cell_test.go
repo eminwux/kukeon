@@ -546,6 +546,89 @@ func TestStartCell_ReadyStateValidation(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			// #1316: an Exited cell whose non-root workload cleanly exited under a
+			// restart-policy that vetoes wind-down (on-failure clean exit, or
+			// never) deliberately keeps its ROOT container alive (#1003). Exited is
+			// NOT in the recovery switch above (its container records are intact and
+			// re-runnable), so it falls through to this guard — which must exclude
+			// the live root and allow the start, restarting the root rather than
+			// refusing. Before the fix the running root tripped "has running
+			// containers and must first be stopped", wedging the cell (it would
+			// neither wind down nor restart). The fix narrows the guard to live
+			// non-root workloads.
+			name:      "cell in Exited state with restart-policy-pinned live root allows start",
+			cellName:  "exited-cell-live-root",
+			realmName: "test-realm",
+			spaceName: "test-space",
+			stackName: "test-stack",
+			setupRunner: func(f *fakeRunner) {
+				existingCell := buildTestCell("exited-cell-live-root", "test-realm", "test-space", "test-stack")
+				existingCell.Status.State = intmodel.CellStateExited
+				existingCell.Spec.Containers = []intmodel.ContainerSpec{
+					{ID: "root", Image: "alpine:latest", Root: true},
+					{ID: "container1", Image: "alpine:latest"},
+				}
+				// Root still running (restart-policy veto leaves it alive), non-root
+				// workload exited cleanly — the Ready 1/2 shape from the repro.
+				existingCell.Status.Containers = []intmodel.ContainerStatus{
+					{ID: "root", State: intmodel.ContainerStateReady},
+					{ID: "container1", State: intmodel.ContainerStateExited},
+				}
+				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+					return existingCell, nil
+				}
+				f.ExistsCgroupFn = func(_ any) (bool, error) {
+					return true, nil
+				}
+				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
+					return true, nil
+				}
+				// The start must go through a plain StartCell (Exited is not a
+				// recovery-switch state) — assert it is reached, not refused.
+				f.StartCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
+				}
+				f.UpdateCellMetadataFn = func(_ intmodel.Cell) error {
+					return nil
+				}
+			},
+			wantErr: false,
+		},
+		{
+			// #1316 guardrail: a root-only cell (kukeond-style, no non-root spec)
+			// keeps the root in the running-container check — there the root IS the
+			// workload, so a live root must still block a duplicate start. This pins
+			// that the root-exclusion is gated on hasNonRootContainerSpec and does
+			// not leak into root-only cells.
+			name:      "root-only cell with running root still blocks start",
+			cellName:  "root-only-cell",
+			realmName: "test-realm",
+			spaceName: "test-space",
+			stackName: "test-stack",
+			setupRunner: func(f *fakeRunner) {
+				existingCell := buildTestCell("root-only-cell", "test-realm", "test-space", "test-stack")
+				existingCell.Status.State = intmodel.CellStateReady
+				existingCell.Spec.Containers = []intmodel.ContainerSpec{
+					{ID: "root", Image: "alpine:latest", Root: true},
+				}
+				existingCell.Status.Containers = []intmodel.ContainerStatus{
+					{ID: "root", State: intmodel.ContainerStateReady},
+				}
+				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+					return existingCell, nil
+				}
+				f.ExistsCgroupFn = func(_ any) (bool, error) {
+					return true, nil
+				}
+				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
+					return true, nil
+				}
+			},
+			wantErr:     true,
+			errContains: "cell \"root-only-cell\" has running containers and must first be stopped",
+		},
 	}
 
 	for _, tt := range tests {

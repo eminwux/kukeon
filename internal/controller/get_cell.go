@@ -149,6 +149,21 @@ func rootContainerID(cell intmodel.Cell) string {
 	return ""
 }
 
+// hasNonRootContainerSpec reports whether the cell carries at least one
+// non-root (workload) container in spec. It mirrors the runner package's
+// derivation split (deriveCellStateFromNonRootContainerStatuses): a cell with
+// a non-root workload follows its workloads' lifecycle and its root is just the
+// cell shell, whereas a root-only cell (kukeond-style / cgroup-only) has the
+// root standing in as the workload.
+func hasNonRootContainerSpec(cell intmodel.Cell) bool {
+	for i := range cell.Spec.Containers {
+		if !cell.Spec.Containers[i].Root {
+			return true
+		}
+	}
+	return false
+}
+
 // ListCells lists all cells, optionally filtered by realm, space, and/or stack.
 func (b *Exec) ListCells(realmName, spaceName, stackName string) ([]intmodel.Cell, error) {
 	return b.runner.ListCells(realmName, spaceName, stackName)
