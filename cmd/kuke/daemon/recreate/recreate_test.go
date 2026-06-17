@@ -29,8 +29,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eminwux/kukeon/cmd/kuke/internal/lifecycle"
 	recreate "github.com/eminwux/kukeon/cmd/kuke/daemon/recreate"
+	"github.com/eminwux/kukeon/cmd/kuke/internal/lifecycle"
 	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/consts"
@@ -145,8 +145,8 @@ func TestDaemonRecreate(t *testing.T) {
 			wantErr: "--kukeond-image is required",
 		},
 		{
-			name:    "GetCell error is wrapped",
-			args:    []string{"--kukeond-image", "test-img:dev"},
+			name: "GetCell error is wrapped",
+			args: []string{"--kukeond-image", "test-img:dev"},
 			fake: &fakeClient{
 				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
 					return kukeonv1.GetCellResult{}, errors.New("io: read failed")
@@ -231,6 +231,7 @@ func TestDaemonRecreate(t *testing.T) {
 			ctx = context.WithValue(ctx, lifecycle.EnsureSocketDirKey{}, func() error { return nil })
 			ctx = context.WithValue(ctx, recreate.MockProvisionKukeondCellKey{}, func() error { return nil })
 			ctx = context.WithValue(ctx, recreate.MockWaitForReadyKey{}, func() error { return nil })
+			ctx = context.WithValue(ctx, recreate.MockApplySocketOwnershipKey{}, func() error { return nil })
 			ctx = context.WithValue(ctx, recreate.MockSocketDirKey{}, t.TempDir())
 			cmd.SetContext(ctx)
 			cmd.SetArgs(tt.args)
@@ -293,10 +294,11 @@ func TestDaemonRecreate_RemovesSocketAndPidFiles(t *testing.T) {
 	cmd.SetErr(buf)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(fake))
+	ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(fake))
 	ctx = context.WithValue(ctx, lifecycle.EnsureSocketDirKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockProvisionKukeondCellKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockWaitForReadyKey{}, func() error { return nil })
+	ctx = context.WithValue(ctx, recreate.MockApplySocketOwnershipKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockSocketDirKey{}, t.TempDir())
 	cmd.SetContext(ctx)
 	cmd.SetArgs([]string{"--kukeond-image", "test-img:dev"})
@@ -306,6 +308,101 @@ ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(fake))
 	}
 	if strings.Contains(buf.String(), "removed") {
 		t.Errorf("did not expect any 'removed' line when files are already gone; got:\n%s", buf.String())
+	}
+}
+
+// TestDaemonRecreate_AppliesSocketOwnership confirms the post-ready step that
+// re-asserts root:kukeon ownership on the socket runs after the daemon becomes
+// reachable and that the chown notice is printed — the regression guard for the
+// bug where `kuke daemon recreate` left the socket 0o600 root-only, forcing
+// non-root kukeon-group members to sudo.
+func TestDaemonRecreate_AppliesSocketOwnership(t *testing.T) {
+	withFreshViper(t)
+
+	var ownershipCalled bool
+	fake := &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{
+				Cell: v1beta1.CellDoc{
+					Status: v1beta1.CellStatus{State: v1beta1.CellStateStopped},
+				},
+				MetadataExists: true,
+			}, nil
+		},
+		deleteCellFn: func(doc v1beta1.CellDoc) (kukeonv1.DeleteCellResult, error) {
+			return kukeonv1.DeleteCellResult{Cell: doc, MetadataDeleted: true}, nil
+		},
+	}
+
+	cmd := recreate.NewRecreateCmd()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+	ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(fake))
+	ctx = context.WithValue(ctx, lifecycle.EnsureSocketDirKey{}, func() error { return nil })
+	ctx = context.WithValue(ctx, recreate.MockProvisionKukeondCellKey{}, func() error { return nil })
+	ctx = context.WithValue(ctx, recreate.MockWaitForReadyKey{}, func() error { return nil })
+	ctx = context.WithValue(ctx, recreate.MockApplySocketOwnershipKey{}, func() error {
+		ownershipCalled = true
+		return nil
+	})
+	ctx = context.WithValue(ctx, recreate.MockSocketDirKey{}, t.TempDir())
+	cmd.SetContext(ctx)
+	cmd.SetArgs([]string{"--kukeond-image", "test-img:dev"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ownershipCalled {
+		t.Fatal("expected the post-ready socket-ownership step to be invoked")
+	}
+	if out := buf.String(); !strings.Contains(out, "chown root:kukeon mode 0660") {
+		t.Errorf("output missing socket chown notice; got:\n%s", out)
+	}
+}
+
+// TestDaemonRecreate_SocketOwnershipFailureIsWrapped confirms a failure in the
+// post-ready socket-ownership step surfaces as a wrapped error rather than a
+// silent success that leaves the socket inaccessible.
+func TestDaemonRecreate_SocketOwnershipFailureIsWrapped(t *testing.T) {
+	withFreshViper(t)
+
+	fake := &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{
+				Cell: v1beta1.CellDoc{
+					Status: v1beta1.CellStatus{State: v1beta1.CellStateStopped},
+				},
+				MetadataExists: true,
+			}, nil
+		},
+		deleteCellFn: func(doc v1beta1.CellDoc) (kukeonv1.DeleteCellResult, error) {
+			return kukeonv1.DeleteCellResult{Cell: doc, MetadataDeleted: true}, nil
+		},
+	}
+
+	cmd := recreate.NewRecreateCmd()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+	ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(fake))
+	ctx = context.WithValue(ctx, lifecycle.EnsureSocketDirKey{}, func() error { return nil })
+	ctx = context.WithValue(ctx, recreate.MockProvisionKukeondCellKey{}, func() error { return nil })
+	ctx = context.WithValue(ctx, recreate.MockWaitForReadyKey{}, func() error { return nil })
+	ctx = context.WithValue(ctx, recreate.MockApplySocketOwnershipKey{}, func() error {
+		return errors.New("chown blew up")
+	})
+	ctx = context.WithValue(ctx, recreate.MockSocketDirKey{}, t.TempDir())
+	cmd.SetContext(ctx)
+	cmd.SetArgs([]string{"--kukeond-image", "test-img:dev"})
+
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "apply kukeon ownership") {
+		t.Fatalf("want wrapped ownership error, got %v", err)
 	}
 }
 
@@ -360,6 +457,7 @@ func TestDaemonRecreate_GracefulTimeoutEscalatesToKill(t *testing.T) {
 	ctx = context.WithValue(ctx, lifecycle.EnsureSocketDirKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockProvisionKukeondCellKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockWaitForReadyKey{}, func() error { return nil })
+	ctx = context.WithValue(ctx, recreate.MockApplySocketOwnershipKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockSocketDirKey{}, t.TempDir())
 	cmd.SetContext(ctx)
 	cmd.SetArgs([]string{"--kukeond-image", "test-img:dev", "--timeout", "50ms"})

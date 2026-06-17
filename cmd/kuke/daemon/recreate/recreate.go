@@ -40,6 +40,7 @@ import (
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/sysuser"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
@@ -59,6 +60,12 @@ type MockProvisionKukeondCellKey struct{}
 // MockWaitForReadyKey injects a stub for the wait-for-ready step so unit
 // tests can verify the teardown phase without a real listening socket.
 type MockWaitForReadyKey struct{}
+
+// MockApplySocketOwnershipKey injects a stub for the post-ready socket
+// chown/chmod step so unit tests can drive the recreate flow without root or
+// a real kukeon group. Production resolves the kukeon GID and applies
+// root:kukeon 0o660 to the socket.
+type MockApplySocketOwnershipKey struct{}
 
 // resolveProvisionKukeondCell picks the provisioning implementation. Tests
 // inject a stub via MockProvisionKukeondCellKey; production builds a real
@@ -82,17 +89,28 @@ func resolveProvisionKukeondCell(
 	}
 	containerdSocket := viper.GetString(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey)
 
+	// Pass the kukeon group GID so the provisioned daemon binds the socket
+	// 0o660 and chowns it to root:kukeon, matching `kuke init`. The host is
+	// already initialized at this point (runRecreate rejects an uninitialized
+	// host before reaching here), so the group exists. The post-ready
+	// resolveApplySocketOwnership step re-asserts this on the host, since the
+	// daemon resets socket ownership on every restart.
+	gid, err := lifecycle.LookupKukeonGID()
+	if err != nil {
+		return fmt.Errorf("resolve kukeon group gid: %w", err)
+	}
+
 	ctrl := controller.NewControllerExec(cmd.Context(), logger, controller.Options{
 		RunPath:              runPath,
 		ContainerdSocket:     containerdSocket,
 		KukeondSocket:        socketPath,
 		KukeondImage:         image,
-		KukeondSocketGID:     0,
+		KukeondSocketGID:     gid,
 		KukeondConfiguration: serverConfigPath,
 	})
 	defer ctrl.Close()
 
-	_, err := ctrl.ProvisionKukeondCell()
+	_, err = ctrl.ProvisionKukeondCell()
 	return err
 }
 
@@ -103,6 +121,23 @@ func resolveWaitForReady(cmd *cobra.Command, socketPath string) error {
 		return stub()
 	}
 	return lifecycle.WaitForKukeondReady(cmd.Context(), socketPath, lifecycle.KukeondReadyTimeout)
+}
+
+// resolveApplySocketOwnership picks the post-ready socket-ownership step. Tests
+// inject a stub via MockApplySocketOwnershipKey (the production implementation
+// chowns to uid 0, which only root may do, and needs the kukeon group a CI box
+// lacks); production resolves the kukeon GID and re-asserts root:kukeon 0o660
+// on the socket the daemon just bound — mirroring `kuke init` so a non-root
+// kukeon-group member can dial it without sudo.
+func resolveApplySocketOwnership(cmd *cobra.Command, socketPath string) error {
+	if stub, ok := cmd.Context().Value(MockApplySocketOwnershipKey{}).(func() error); ok && stub != nil {
+		return stub()
+	}
+	gid, err := lifecycle.LookupKukeonGID()
+	if err != nil {
+		return err
+	}
+	return sysuser.ChownAndChmod(socketPath, 0, gid, consts.KukeonSocketMode)
 }
 
 // NewRecreateCmd builds the `kuke daemon recreate` cobra command.
@@ -249,6 +284,19 @@ func runRecreate(cmd *cobra.Command, _ []string) error {
 	if waitErr := resolveWaitForReady(cmd, socketPath); waitErr != nil {
 		return fmt.Errorf("kukeond did not become ready after recreate: %w", waitErr)
 	}
+
+	// The daemon created the socket once it bound the listener, but it resets
+	// ownership to root-only (0o600) on every start. Re-apply kukeon ownership
+	// on the host now — mirroring `kuke init` — so a non-root kukeon-group
+	// member can dial it without sudo.
+	if ownErr := resolveApplySocketOwnership(cmd, socketPath); ownErr != nil {
+		return fmt.Errorf("apply kukeon ownership to %q: %w", socketPath, ownErr)
+	}
+	cmd.Printf(
+		"kukeond socket %q: chown root:%s mode %#o\n",
+		socketPath, consts.KukeonSystemGroup, consts.KukeonSocketMode.Perm(),
+	)
+
 	cmd.Printf("kukeond is ready (unix://%s)\n", socketPath)
 	return nil
 }

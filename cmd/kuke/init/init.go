@@ -62,7 +62,10 @@ const (
 	// `--no-daemon` reads for non-root operators.
 	kukeonRunPathDirMode  os.FileMode = os.ModeSetgid | 0o750
 	kukeonRunPathFileMode os.FileMode = 0o640
-	kukeonSocketMode      os.FileMode = 0o660
+	// kukeonSocketMode mirrors consts.KukeonSocketMode — the single source of
+	// truth shared with `kuke daemon recreate` so the init and recreate socket
+	// permissions cannot drift.
+	kukeonSocketMode os.FileMode = consts.KukeonSocketMode
 
 	// kukepauseBinaryName is the binary `kuke init` stages under <RunPath>/bin
 	// so every cell's root container — including kukeond's own — can bind-mount

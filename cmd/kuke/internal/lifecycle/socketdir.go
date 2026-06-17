@@ -46,6 +46,22 @@ func ResolveEnsureSocketDir(cmd *cobra.Command) func() error {
 	return func() error { return EnsureSocketDir(ResolveSocketPath()) }
 }
 
+// LookupKukeonGID resolves the numeric GID of the kukeon system group that
+// `kuke init` provisions on the host. The socket-dir ownership step and
+// `kuke daemon recreate`'s post-ready socket chown both need it to grant
+// non-root kukeon-group members access to the daemon without sudo.
+func LookupKukeonGID() (int, error) {
+	grp, err := user.LookupGroup(consts.KukeonSystemGroup)
+	if err != nil {
+		return 0, fmt.Errorf("lookup group %q: %w", consts.KukeonSystemGroup, err)
+	}
+	gid, err := strconv.Atoi(grp.Gid)
+	if err != nil {
+		return 0, fmt.Errorf("parse gid %q for group %q: %w", grp.Gid, consts.KukeonSystemGroup, err)
+	}
+	return gid, nil
+}
+
 // applyRunDirOwnership re-asserts root:kukeon ownership and the kukeon SGID
 // mode on the kukeond socket's parent directory. It is a package var so the
 // unit suite can substitute a non-root stub: the production implementation
@@ -54,13 +70,9 @@ func ResolveEnsureSocketDir(cmd *cobra.Command) func() error {
 //
 //nolint:gochecknoglobals // test seam for the production run-dir ownership step
 var applyRunDirOwnership = func(dir string) error {
-	grp, err := user.LookupGroup(consts.KukeonSystemGroup)
+	gid, err := LookupKukeonGID()
 	if err != nil {
-		return fmt.Errorf("lookup group %q: %w", consts.KukeonSystemGroup, err)
-	}
-	gid, err := strconv.Atoi(grp.Gid)
-	if err != nil {
-		return fmt.Errorf("parse gid %q for group %q: %w", grp.Gid, consts.KukeonSystemGroup, err)
+		return err
 	}
 	return sysuser.ChownAndChmod(dir, 0, gid, consts.KukeonRunDirMode)
 }
