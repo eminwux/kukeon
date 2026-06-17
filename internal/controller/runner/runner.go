@@ -350,11 +350,12 @@ type Exec struct {
 	// the attempt count and last-attempt time the restart pass uses to enforce
 	// the per-container backoff floor and the on-failure retry cap. Keyed by
 	// cellLockKey + container ID. Deliberately NOT the persisted user-visible
-	// RestartCount / RestartTime on ContainerStatus — that bookkeeping is
-	// #1234's scope (documented intentionally-zero in #1303); this is
-	// runner-local gate state only, reset whenever the container is observed
-	// running again. Guarded by restartStatesMu; lazily initialized so *Exec
-	// values built directly in tests participate without fixture wiring.
+	// RestartCount / RestartTime on ContainerStatus — those are written by
+	// maybeRestartExitedContainers via stampContainerRestart (#1234) and
+	// preserved by populateCellContainerStatuses; this is runner-local gate state
+	// only, reset whenever the container is observed running again. Guarded by
+	// restartStatesMu; lazily initialized so *Exec values built directly in tests
+	// participate without fixture wiring.
 	restartStates   map[string]*containerRestartState
 	restartStatesMu sync.Mutex
 

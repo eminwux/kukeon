@@ -582,3 +582,153 @@ func TestReconcileCell_RestartHoldsCellDegraded(t *testing.T) {
 			outCell.Status.State)
 	}
 }
+
+// TestMaybeRestartExitedContainers_BumpsRestartCounterByOne pins AC items 1 & 2
+// of #1234: a fired restart bumps the user-visible RestartCount by exactly one
+// over the preserved prior and stamps RestartTime to now. maybeRestartExitedContainers
+// is the sole writer, so the increment must land on the returned cell's status.
+func TestMaybeRestartExitedContainers_BumpsRestartCounterByOne(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	r, fired := recordingRestarter(now, nil)
+	cell := restartTestCell(intmodel.RestartPolicyAlways, intmodel.ContainerStateExited, 0)
+
+	out, result, err := r.maybeRestartExitedContainers(cell)
+	if err != nil {
+		t.Fatalf("maybeRestartExitedContainers: unexpected error: %v", err)
+	}
+	if result != restartFired {
+		t.Fatalf("result = %v, want restartFired", result)
+	}
+	if len(*fired) != 1 || (*fired)[0] != "work" {
+		t.Fatalf("relaunched %v, want exactly [work]", *fired)
+	}
+
+	work := containerStatusByID(t, out, "work")
+	if work.RestartCount != 1 {
+		t.Errorf("RestartCount = %d, want 1 (exactly one bump over the zero prior)", work.RestartCount)
+	}
+	if !work.RestartTime.Equal(now) {
+		t.Errorf("RestartTime = %v, want %v (the wall-clock of the relaunch)", work.RestartTime, now)
+	}
+
+	// The root container is not restarted, so its counters stay zero — the bump
+	// is per-container, not cell-wide.
+	root := containerStatusByID(t, out, "root")
+	if root.RestartCount != 0 || !root.RestartTime.IsZero() {
+		t.Errorf("root RestartCount=%d RestartTime=%v, want 0/zero (root is never restarted)",
+			root.RestartCount, root.RestartTime)
+	}
+}
+
+// TestMaybeRestartExitedContainers_RestartCounterMonotonic pins AC item 4: the
+// count advances by one from whatever prior the status carried, so successive
+// restarts tally monotonically (no Docker-style reset).
+func TestMaybeRestartExitedContainers_RestartCounterMonotonic(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	r, _ := recordingRestarter(now, nil)
+	cell := restartTestCell(intmodel.RestartPolicyAlways, intmodel.ContainerStateExited, 0)
+	// Seed a non-zero prior, as populate would have preserved from earlier ticks.
+	for i := range cell.Status.Containers {
+		if cell.Status.Containers[i].ID == "work" {
+			cell.Status.Containers[i].RestartCount = 4
+			cell.Status.Containers[i].RestartTime = now.Add(-time.Hour)
+		}
+	}
+
+	out, result, err := r.maybeRestartExitedContainers(cell)
+	if err != nil {
+		t.Fatalf("maybeRestartExitedContainers: unexpected error: %v", err)
+	}
+	if result != restartFired {
+		t.Fatalf("result = %v, want restartFired", result)
+	}
+	work := containerStatusByID(t, out, "work")
+	if work.RestartCount != 5 {
+		t.Errorf("RestartCount = %d, want 5 (prior 4 + 1, monotonic — no reset)", work.RestartCount)
+	}
+	if !work.RestartTime.Equal(now) {
+		t.Errorf("RestartTime = %v, want refreshed to %v on each restart", work.RestartTime, now)
+	}
+}
+
+// TestMaybeRestartExitedContainers_NoBumpWhenNoRestartFires confirms the counter
+// is untouched when no restart is owed — the sole-writer contract means a
+// no-fire tick must leave RestartCount/RestartTime exactly as populate preserved
+// them.
+func TestMaybeRestartExitedContainers_NoBumpWhenNoRestartFires(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	r, fired := recordingRestarter(now, nil)
+	// never-policy clean exit: no restart owed.
+	cell := restartTestCell(intmodel.RestartPolicyNever, intmodel.ContainerStateStopped, 0)
+	for i := range cell.Status.Containers {
+		if cell.Status.Containers[i].ID == "work" {
+			cell.Status.Containers[i].RestartCount = 2
+			cell.Status.Containers[i].RestartTime = now.Add(-time.Hour)
+		}
+	}
+
+	out, result, err := r.maybeRestartExitedContainers(cell)
+	if err != nil {
+		t.Fatalf("maybeRestartExitedContainers: unexpected error: %v", err)
+	}
+	if result != restartNone || len(*fired) != 0 {
+		t.Fatalf("result = %v, fired = %v, want restartNone with no relaunch", result, *fired)
+	}
+	work := containerStatusByID(t, out, "work")
+	if work.RestartCount != 2 || !work.RestartTime.Equal(now.Add(-time.Hour)) {
+		t.Errorf("RestartCount=%d RestartTime=%v, want untouched 2/%v (no fire ⇒ no bump)",
+			work.RestartCount, work.RestartTime, now.Add(-time.Hour))
+	}
+}
+
+// containerStatusByID returns the status for containerID in cell, failing the
+// test if absent.
+func containerStatusByID(t *testing.T, cell intmodel.Cell, containerID string) intmodel.ContainerStatus {
+	t.Helper()
+	for _, s := range cell.Status.Containers {
+		if s.ID == containerID {
+			return s
+		}
+	}
+	t.Fatalf("container %q not found in cell status", containerID)
+	return intmodel.ContainerStatus{}
+}
+
+// TestPopulateCellContainerStatuses_PreservesRestartCounters is the populate
+// half of #1234: populateCellContainerStatuses is a pure preserver of
+// RestartCount/RestartTime — it carries the persisted values across the
+// unconditional overwrite and never increments, even across repeated passes.
+func TestPopulateCellContainerStatuses_PreservesRestartCounters(t *testing.T) {
+	realm, space, stack, cellName := "default", "kukeon", "kukeon", "web"
+	containerID, containerdID := "root", "kukeon_kukeon_web_root"
+
+	fake := &deleteCellFakeClient{
+		existsContainerFn: func(_, _ string) (bool, error) { return true, nil },
+		taskStatusFn: func(_, _ string) (containerd.Status, error) {
+			return containerd.Status{Status: containerd.Running}, nil
+		},
+	}
+	r := newDeleteCellTestExec(t, fake)
+	seedDeleteCellRealm(t, r, realm)
+
+	cell := containerStateCell(realm, space, stack, cellName, containerID, containerdID)
+	restartTime := time.Date(2026, 6, 7, 20, 35, 4, 0, time.UTC)
+	cell.Status.Containers = []intmodel.ContainerStatus{
+		{ID: containerID, RestartCount: 3, RestartTime: restartTime},
+	}
+
+	// Two consecutive populate passes must both preserve the prior values
+	// unchanged — populate never writes these counters.
+	for pass := 1; pass <= 2; pass++ {
+		if err := r.populateCellContainerStatuses(&cell); err != nil {
+			t.Fatalf("populateCellContainerStatuses (pass %d): unexpected error: %v", pass, err)
+		}
+		got := cell.Status.Containers[0]
+		if got.RestartCount != 3 {
+			t.Errorf("pass %d: RestartCount = %d, want preserved 3 (populate never increments)", pass, got.RestartCount)
+		}
+		if !got.RestartTime.Equal(restartTime) {
+			t.Errorf("pass %d: RestartTime = %v, want preserved %v", pass, got.RestartTime, restartTime)
+		}
+	}
+}
