@@ -270,6 +270,16 @@ func loadConfig() error {
 
 	_ = config.KUKE_GET_OUTPUT.BindEnv()
 
+	// `--configuration` already binds this viper key via BindPFlag
+	// (SetPersistentLoggingFlags), but without an env binding the
+	// KUKE_CONFIGURATION env var never reaches viper — so env-delivered client
+	// config (scripts/dev-init.sh's `--no-daemon` parity walk) was silently
+	// ignored and loadClientConfiguration fell through to the flag default
+	// (~/.kuke/kuke.yaml). Precedence is viper's standard ordering: an
+	// explicit `--configuration` flag (Changed) > KUKE_CONFIGURATION env >
+	// flag default. (#1330)
+	_ = config.KUKE_CONFIGURATION.BindEnv()
+
 	return nil
 }
 
