@@ -186,6 +186,15 @@ const (
 	// so the two cannot drift on what `kuke init` produces.
 	KukeonRunDirMode os.FileMode = os.ModeSetgid | 0o750
 
+	// KukeonSocketMode is the mode applied to the kukeond socket itself
+	// (root:kukeon) after the daemon binds the listener, by `kuke init` and
+	// re-asserted by `kuke daemon recreate` so a non-root kukeon-group member
+	// can dial it without sudo. The daemon binds 0o600 root-only by default and
+	// resets ownership on every restart, so the host-side chown is the
+	// authoritative correction. Single source of truth shared by the init
+	// bootstrap and the daemon recreate path so the two cannot drift.
+	KukeonSocketMode os.FileMode = 0o660
+
 	// DefaultRealmNamespaceSuffix is the in-binary default for the
 	// containerd namespace suffix appended to every realm name (without a
 	// leading dot — RealmNamespace adds the dot when joining). Operators
