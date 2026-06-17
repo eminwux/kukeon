@@ -87,6 +87,8 @@ See [Concepts → Container](../concepts/container.md) for what a container is.
 | `git`             | `ContainerGit`             | no       | Declarative git identity + signing, expanded into `GIT_AUTHOR_*`/`GIT_COMMITTER_*`/`GIT_CONFIG_*` env before start (see [ContainerGit](#containergit))                                                                       |
 | `cniConfigPath`   | string                     | no       | Override the CNI config directory for this container                                                                                                                                                                         |
 | `restartPolicy`   | string                     | no       | Per-container reap policy at the cell wind-down / auto-delete gate. One of `always`, `on-failure`, `never`. Empty defaults to `never` (matches the Kubernetes default restartPolicy; see [Restart policy](#restart-policy)). |
+| `restartBackoffSeconds` | int                  | no       | Minimum seconds between reconciler-driven restarts of this container. Unset uses the built-in `30s` default; `0` disables the floor. Requires a restarting policy (`always`/`on-failure`). See [Restart on exit](#restart-on-exit).                                                       |
+| `restartMaxRetries`     | int                  | no       | `on-failure` retry cap before the container is left terminal. Unset uses the built-in `5` default; must be ≥ 1. Requires `restartPolicy: on-failure`. See [Restart on exit](#restart-on-exit).                                                                                            |
 | `tty`             | `ContainerTty`             | no       | Shell-UX config for the kuketty wrapper (prompt, init scripts, logging) — requires `attachable: true` (see [ContainerTty](#containertty))                                                                                    |
 
 !!! warning "Fields marked reserved"
@@ -119,6 +121,24 @@ The same `restartPolicy` value also drives whether the reconciler **relaunches**
 | `never`      | Never.                                                                                    |
 
 **Restart timing.** Restarts are evaluated on the reconcile loop, so a relaunch lands on the next reconcile tick after the exit is observed, not synchronously. Successive attempts on the same container are spaced by a minimum **30s backoff** — an exit inside the backoff window defers to a later tick. An `on-failure` container is capped at **5 restart attempts**; once the cap is exhausted the cell settles into the sticky `Error` state and self-healing stops until an operator intervenes. `always` is uncapped (it keeps the backoff but never exhausts).
+
+**Tuning the backoff and cap.** The `30s` backoff floor and `5`-attempt `on-failure` cap above are the built-in defaults. Two optional per-container fields override them:
+
+| Field                   | Type | Default | Behavior                                                                                                                                                                                |
+| ----------------------- | ---- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `restartBackoffSeconds` | int  | `30`    | Minimum seconds between successive restarts of this container. `0` disables the floor (a restart fires on the next reconcile tick that observes the exit). Negative values are rejected. |
+| `restartMaxRetries`     | int  | `5`     | Maximum `on-failure` restart attempts before the container is left terminal and the cell settles into `Error`. Must be ≥ 1.                                                             |
+
+Both fields are optional; **omit them and existing behavior is unchanged** (the built-in `30s` / `5` defaults apply). They only take effect under a restarting policy, so applying them with a policy that does not restart is a validation error:
+
+- `restartBackoffSeconds` requires `restartPolicy: always` or `on-failure`.
+- `restartMaxRetries` requires `restartPolicy: on-failure` (the cap is on-failure-specific; `always` is uncapped by contract).
+
+```yaml
+restartPolicy: on-failure
+restartBackoffSeconds: 10 # retry sooner than the 30s default
+restartMaxRetries: 3 # give up after 3 failed relaunches instead of 5
+```
 
 **Policy → cell `STATE`.** While a workload is down with a relaunch owed (or in backoff), the cell holds at the non-sticky `Degraded` state rather than the sticky `Error` a bare crash would derive — so the restart loop stays re-derivable and the cell returns to `Ready` once the workload is back up. `Degraded` is the partial-health rung between `Ready` and `Error` (root/sandbox up, a non-root workload down or restarting); see the [`status.state` table in the cell manifest](cell.md#status). The settled cell state after a single non-root workload is killed with a non-zero (e.g. SIGKILL / exit 137) signal:
 

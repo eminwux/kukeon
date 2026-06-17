@@ -2733,3 +2733,172 @@ func TestContainerCreateStagePersistenceValidation(t *testing.T) {
 		}
 	})
 }
+
+// restartInt64Ptr is a local helper for the *int64 restart-tuning fields (#1235).
+func restartInt64Ptr(v int64) *int64 { return &v }
+
+// TestContainerRestartTuningRoundTripV1Beta1 pins the #1235 user-authored
+// restart-tuning fields: restartBackoffSeconds + restartMaxRetries set on a
+// container survive Normalize → controller → Build with no drops, in both the
+// standalone ContainerDoc path and the nested CellSpec.Containers path.
+func TestContainerRestartTuningRoundTripV1Beta1(t *testing.T) {
+	backoff := restartInt64Ptr(10)
+	maxRetries := restartInt64Ptr(3)
+
+	input := ext.ContainerDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindContainer,
+		Metadata:   ext.ContainerMetadata{Name: "c"},
+		Spec: ext.ContainerSpec{
+			ID:      "c",
+			RealmID: "r", SpaceID: "s", StackID: "st", CellID: "cl",
+			Image:                 "alpine:latest",
+			RestartPolicy:         "on-failure",
+			RestartBackoffSeconds: backoff,
+			RestartMaxRetries:     maxRetries,
+		},
+	}
+
+	internal, version, err := apischeme.NormalizeContainer(input)
+	if err != nil {
+		t.Fatalf("NormalizeContainer failed: %v", err)
+	}
+	if internal.Spec.RestartBackoffSeconds == nil || *internal.Spec.RestartBackoffSeconds != 10 {
+		t.Fatalf("internal RestartBackoffSeconds = %v, want 10", internal.Spec.RestartBackoffSeconds)
+	}
+	if internal.Spec.RestartMaxRetries == nil || *internal.Spec.RestartMaxRetries != 3 {
+		t.Fatalf("internal RestartMaxRetries = %v, want 3", internal.Spec.RestartMaxRetries)
+	}
+
+	output, err := apischeme.BuildContainerExternalFromInternal(internal, version)
+	if err != nil {
+		t.Fatalf("BuildContainerExternalFromInternal failed: %v", err)
+	}
+	if output.Spec.RestartBackoffSeconds == nil || *output.Spec.RestartBackoffSeconds != 10 {
+		t.Fatalf("output RestartBackoffSeconds = %v, want 10", output.Spec.RestartBackoffSeconds)
+	}
+	if output.Spec.RestartMaxRetries == nil || *output.Spec.RestartMaxRetries != 3 {
+		t.Fatalf("output RestartMaxRetries = %v, want 3", output.Spec.RestartMaxRetries)
+	}
+}
+
+// TestContainerRestartTuningOmittedRoundTrip pins AC: an unset (nil) field
+// preserves the hardcoded default — it stays nil through the round trip (the
+// runner's effective* helpers, not the conversion, apply the default) and is
+// omitted from marshalled YAML so existing specs are byte-unaffected.
+func TestContainerRestartTuningOmittedRoundTrip(t *testing.T) {
+	input := ext.ContainerDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindContainer,
+		Metadata:   ext.ContainerMetadata{Name: "c"},
+		Spec: ext.ContainerSpec{
+			ID:      "c",
+			RealmID: "r", SpaceID: "s", StackID: "st", CellID: "cl",
+			Image: "alpine:latest",
+		},
+	}
+
+	internal, version, err := apischeme.NormalizeContainer(input)
+	if err != nil {
+		t.Fatalf("NormalizeContainer failed: %v", err)
+	}
+	if internal.Spec.RestartBackoffSeconds != nil || internal.Spec.RestartMaxRetries != nil {
+		t.Fatalf("unset fields became non-nil internally: backoff=%v retries=%v",
+			internal.Spec.RestartBackoffSeconds, internal.Spec.RestartMaxRetries)
+	}
+
+	output, err := apischeme.BuildContainerExternalFromInternal(internal, version)
+	if err != nil {
+		t.Fatalf("BuildContainerExternalFromInternal failed: %v", err)
+	}
+	if output.Spec.RestartBackoffSeconds != nil || output.Spec.RestartMaxRetries != nil {
+		t.Fatalf("unset fields became non-nil externally: backoff=%v retries=%v",
+			output.Spec.RestartBackoffSeconds, output.Spec.RestartMaxRetries)
+	}
+
+	marshalled, err := yaml.Marshal(output.Spec)
+	if err != nil {
+		t.Fatalf("yaml.Marshal: %v", err)
+	}
+	if strings.Contains(string(marshalled), "restartBackoffSeconds") ||
+		strings.Contains(string(marshalled), "restartMaxRetries") {
+		t.Fatalf("omitempty failed; unset restart-tuning fields rendered in YAML:\n%s", marshalled)
+	}
+}
+
+// TestValidateContainerRestart pins the #1235 validation surface: bounds and
+// policy-applicability of the restart-tuning fields. Driven through
+// NormalizeContainer so it exercises the same entrypoint apply uses.
+func TestValidateContainerRestart(t *testing.T) {
+	cases := []struct {
+		name       string
+		policy     string
+		backoff    *int64
+		maxRetries *int64
+		wantErr    bool
+	}{
+		{"unset fields, never policy", "never", nil, nil, false},
+		{"unset fields, empty policy", "", nil, nil, false},
+		{"backoff with always", "always", restartInt64Ptr(5), nil, false},
+		{"backoff with on-failure", "on-failure", restartInt64Ptr(15), nil, false},
+		{"backoff zero with on-failure", "on-failure", restartInt64Ptr(0), nil, false},
+		{"maxRetries with on-failure", "on-failure", nil, restartInt64Ptr(3), false},
+		{"both with on-failure", "on-failure", restartInt64Ptr(10), restartInt64Ptr(2), false},
+		{"backoff with never rejected", "never", restartInt64Ptr(5), nil, true},
+		{"backoff with empty rejected", "", restartInt64Ptr(5), nil, true},
+		{"backoff negative rejected", "on-failure", restartInt64Ptr(-1), nil, true},
+		{"maxRetries with always rejected", "always", nil, restartInt64Ptr(3), true},
+		{"maxRetries with never rejected", "never", nil, restartInt64Ptr(3), true},
+		{"maxRetries zero rejected", "on-failure", nil, restartInt64Ptr(0), true},
+		{"maxRetries negative rejected", "on-failure", nil, restartInt64Ptr(-2), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			input := ext.ContainerDoc{
+				APIVersion: ext.APIVersionV1Beta1,
+				Kind:       ext.KindContainer,
+				Metadata:   ext.ContainerMetadata{Name: "c"},
+				Spec: ext.ContainerSpec{
+					ID:      "c",
+					RealmID: "r", SpaceID: "s", StackID: "st", CellID: "cl",
+					Image:                 "alpine:latest",
+					RestartPolicy:         tc.policy,
+					RestartBackoffSeconds: tc.backoff,
+					RestartMaxRetries:     tc.maxRetries,
+				},
+			}
+			_, _, err := apischeme.NormalizeContainer(input)
+			if tc.wantErr && err == nil {
+				t.Fatalf("NormalizeContainer accepted %s; want validation error", tc.name)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("NormalizeContainer rejected %s: %v", tc.name, err)
+			}
+		})
+	}
+}
+
+// TestValidateContainerRestartViaCellPath pins that the same validation fires on
+// the nested CellSpec.Containers path (ConvertCellDocToInternal), not just the
+// standalone ContainerDoc path.
+func TestValidateContainerRestartViaCellPath(t *testing.T) {
+	cell := ext.CellDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindCell,
+		Metadata:   ext.CellMetadata{Name: "web"},
+		Spec: ext.CellSpec{
+			Containers: []ext.ContainerSpec{
+				{
+					ID:      "c",
+					RealmID: "r", SpaceID: "s", StackID: "st", CellID: "cl",
+					Image:             "alpine:latest",
+					RestartPolicy:     "never",
+					RestartMaxRetries: restartInt64Ptr(3),
+				},
+			},
+		},
+	}
+	if _, _, err := apischeme.NormalizeCell(cell); err == nil {
+		t.Fatal("NormalizeCell accepted restartMaxRetries with never policy; want validation error")
+	}
+}

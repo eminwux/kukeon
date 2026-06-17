@@ -323,28 +323,28 @@ func TestRestartDecisionFor(t *testing.T) {
 
 	t.Run("first_attempt_fires", func(t *testing.T) {
 		r := &Exec{nowFn: fixedClock(now)}
-		if got := r.restartDecisionFor(cell, "work", intmodel.RestartPolicyOnFailure); got != restartFired {
+		if got := r.restartDecisionFor(cell, "work", intmodel.RestartPolicyOnFailure, restartBackoff, onFailureMaxRestarts); got != restartFired {
 			t.Errorf("got %v, want restartFired on first attempt", got)
 		}
 	})
 	t.Run("within_backoff_defers", func(t *testing.T) {
 		r := &Exec{nowFn: fixedClock(now)}
 		r.restartStates = map[string]*containerRestartState{key(r): {attempts: 1, lastAttempt: now.Add(-time.Second)}}
-		if got := r.restartDecisionFor(cell, "work", intmodel.RestartPolicyOnFailure); got != restartDeferred {
+		if got := r.restartDecisionFor(cell, "work", intmodel.RestartPolicyOnFailure, restartBackoff, onFailureMaxRestarts); got != restartDeferred {
 			t.Errorf("got %v, want restartDeferred within backoff", got)
 		}
 	})
 	t.Run("past_backoff_fires", func(t *testing.T) {
 		r := &Exec{nowFn: fixedClock(now)}
 		r.restartStates = map[string]*containerRestartState{key(r): {attempts: 1, lastAttempt: now.Add(-restartBackoff)}}
-		if got := r.restartDecisionFor(cell, "work", intmodel.RestartPolicyOnFailure); got != restartFired {
+		if got := r.restartDecisionFor(cell, "work", intmodel.RestartPolicyOnFailure, restartBackoff, onFailureMaxRestarts); got != restartFired {
 			t.Errorf("got %v, want restartFired past backoff", got)
 		}
 	})
 	t.Run("cap_exhausted_gives_up", func(t *testing.T) {
 		r := &Exec{nowFn: fixedClock(now)}
 		r.restartStates = map[string]*containerRestartState{key(r): {attempts: onFailureMaxRestarts, lastAttempt: now.Add(-time.Hour)}}
-		if got := r.restartDecisionFor(cell, "work", intmodel.RestartPolicyOnFailure); got != restartNone {
+		if got := r.restartDecisionFor(cell, "work", intmodel.RestartPolicyOnFailure, restartBackoff, onFailureMaxRestarts); got != restartNone {
 			t.Errorf("got %v, want restartNone (cap exhausted)", got)
 		}
 	})
@@ -730,5 +730,98 @@ func TestPopulateCellContainerStatuses_PreservesRestartCounters(t *testing.T) {
 		if !got.RestartTime.Equal(restartTime) {
 			t.Errorf("pass %d: RestartTime = %v, want preserved %v", pass, got.RestartTime, restartTime)
 		}
+	}
+}
+
+// restartTuningInt64Ptr is a local helper for the *int64 restart-tuning fields.
+func restartTuningInt64Ptr(v int64) *int64 { return &v }
+
+// TestEffectiveRestartBackoff pins the #1235 fallback contract: an unset
+// (nil) Spec.RestartBackoffSeconds resolves to the hardcoded restartBackoff
+// default (no behavior change), a set value resolves to that many seconds, and
+// an explicit 0 disables the floor.
+func TestEffectiveRestartBackoff(t *testing.T) {
+	cases := []struct {
+		name string
+		spec intmodel.ContainerSpec
+		want time.Duration
+	}{
+		{"unset falls back to default", intmodel.ContainerSpec{}, restartBackoff},
+		{"set to 10s", intmodel.ContainerSpec{RestartBackoffSeconds: restartTuningInt64Ptr(10)}, 10 * time.Second},
+		{"explicit zero disables floor", intmodel.ContainerSpec{RestartBackoffSeconds: restartTuningInt64Ptr(0)}, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := effectiveRestartBackoff(tc.spec); got != tc.want {
+				t.Errorf("effectiveRestartBackoff = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestEffectiveOnFailureMaxRestarts pins the #1235 fallback contract: an unset
+// (nil) Spec.RestartMaxRetries resolves to the hardcoded onFailureMaxRestarts
+// default, a set value resolves to itself.
+func TestEffectiveOnFailureMaxRestarts(t *testing.T) {
+	cases := []struct {
+		name string
+		spec intmodel.ContainerSpec
+		want int
+	}{
+		{"unset falls back to default", intmodel.ContainerSpec{}, onFailureMaxRestarts},
+		{"set to 3", intmodel.ContainerSpec{RestartMaxRetries: restartTuningInt64Ptr(3)}, 3},
+		{"set to 1", intmodel.ContainerSpec{RestartMaxRetries: restartTuningInt64Ptr(1)}, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := effectiveOnFailureMaxRestarts(tc.spec); got != tc.want {
+				t.Errorf("effectiveOnFailureMaxRestarts = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRestartDecisionFor_HonorsUserBackoff proves the user-authored backoff,
+// not the hardcoded restartBackoff constant, governs the defer window: a
+// lastAttempt that is past the default 30s floor but inside a user-set 60s floor
+// must defer.
+func TestRestartDecisionFor_HonorsUserBackoff(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	cell := restartTestCell(intmodel.RestartPolicyOnFailure, intmodel.ContainerStateStopped, 1)
+	key := func(r *Exec) string { return r.restartStateKey(cell, "work") }
+
+	// lastAttempt 45s ago: past the default 30s, inside a user 60s window.
+	userBackoff := 60 * time.Second
+	r := &Exec{nowFn: fixedClock(now)}
+	r.restartStates = map[string]*containerRestartState{
+		key(r): {attempts: 1, lastAttempt: now.Add(-45 * time.Second)},
+	}
+	if got := r.restartDecisionFor(cell, "work", intmodel.RestartPolicyOnFailure, userBackoff, onFailureMaxRestarts); got != restartDeferred {
+		t.Errorf("got %v, want restartDeferred inside user 60s backoff", got)
+	}
+	// Same state under the default 30s backoff would fire — sanity that the
+	// difference is the backoff value, not the bookkeeping.
+	if got := r.restartDecisionFor(cell, "work", intmodel.RestartPolicyOnFailure, restartBackoff, onFailureMaxRestarts); got != restartFired {
+		t.Errorf("got %v, want restartFired under default 30s backoff", got)
+	}
+}
+
+// TestRestartDecisionFor_HonorsUserMaxRetries proves the user-authored cap, not
+// the hardcoded onFailureMaxRestarts, decides when the on-failure loop gives up:
+// 2 attempts exhausts a user cap of 2 while the default 5 would still fire.
+func TestRestartDecisionFor_HonorsUserMaxRetries(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	cell := restartTestCell(intmodel.RestartPolicyOnFailure, intmodel.ContainerStateStopped, 1)
+	key := func(r *Exec) string { return r.restartStateKey(cell, "work") }
+
+	r := &Exec{nowFn: fixedClock(now)}
+	r.restartStates = map[string]*containerRestartState{
+		key(r): {attempts: 2, lastAttempt: now.Add(-time.Hour)},
+	}
+	if got := r.restartDecisionFor(cell, "work", intmodel.RestartPolicyOnFailure, restartBackoff, 2); got != restartNone {
+		t.Errorf("got %v, want restartNone (user cap of 2 exhausted)", got)
+	}
+	if got := r.restartDecisionFor(cell, "work", intmodel.RestartPolicyOnFailure, restartBackoff, onFailureMaxRestarts); got != restartFired {
+		t.Errorf("got %v, want restartFired (default cap of 5 not yet reached)", got)
 	}
 }
