@@ -309,6 +309,59 @@ func TestLoadConfigBindsKukeondSocketEnv(t *testing.T) {
 	}
 }
 
+// TestLoadConfigBindsKukeConfigurationEnv locks down the env binding for
+// KUKE_CONFIGURATION (#1330). Before the binding, the env var never reached
+// viper — only the `--configuration` flag bound the key — so env-delivered
+// client config (how scripts/dev-init.sh delivers the dev profile for the
+// `--no-daemon` parity walk) was silently ignored and loadClientConfiguration
+// fell through to the flag default (~/.kuke/kuke.yaml).
+func TestLoadConfigBindsKukeConfigurationEnv(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	t.Setenv(config.KUKE_CONFIGURATION.EnvVar(), "/tmp/dev-profile.yaml")
+
+	viper.Reset()
+	if err := kuke.LoadConfig(); err != nil {
+		t.Fatalf("LoadConfig() error = %v, want nil", err)
+	}
+
+	if got := viper.GetString(config.KUKE_CONFIGURATION.ViperKey); got != "/tmp/dev-profile.yaml" {
+		t.Errorf("KUKE_CONFIGURATION: got %q, want %q", got, "/tmp/dev-profile.yaml")
+	}
+}
+
+// TestLoadConfigKukeConfigurationFlagBeatsEnv pins the precedence the #1330
+// fix relies on: an explicit `--configuration` flag (pflag Changed) overrides
+// the KUKE_CONFIGURATION env var, which in turn overrides the flag default.
+// Both BindPFlag (SetPersistentLoggingFlags) and BindEnv (loadConfig) target
+// the same viper key, so this guards viper's flag > env ordering from
+// regressing if either binding moves.
+func TestLoadConfigKukeConfigurationFlagBeatsEnv(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	t.Setenv(config.KUKE_CONFIGURATION.EnvVar(), "/tmp/from-env.yaml")
+
+	viper.Reset()
+	rootCmd := &cobra.Command{Use: "test"}
+	if err := kuke.SetPersistentLoggingFlags(rootCmd); err != nil {
+		t.Fatalf("SetPersistentLoggingFlags() error = %v, want nil", err)
+	}
+	if err := kuke.LoadConfig(); err != nil {
+		t.Fatalf("LoadConfig() error = %v, want nil", err)
+	}
+
+	// Env wins while the flag is unchanged.
+	if got := viper.GetString(config.KUKE_CONFIGURATION.ViperKey); got != "/tmp/from-env.yaml" {
+		t.Errorf("env precedence: got %q, want %q", got, "/tmp/from-env.yaml")
+	}
+
+	// An explicit flag overrides the env var.
+	if err := rootCmd.PersistentFlags().Set("configuration", "/tmp/from-flag.yaml"); err != nil {
+		t.Fatalf("failed to set configuration flag: %v", err)
+	}
+	if got := viper.GetString(config.KUKE_CONFIGURATION.ViperKey); got != "/tmp/from-flag.yaml" {
+		t.Errorf("flag precedence: got %q, want %q", got, "/tmp/from-flag.yaml")
+	}
+}
+
 func TestNewKukeCmdRun(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
