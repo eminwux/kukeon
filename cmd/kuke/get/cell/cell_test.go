@@ -141,6 +141,84 @@ func TestNewCellCmd(t *testing.T) {
 // TestNewCellCmd_DefaultColumns pins the default `kuke get cell` column set
 // after #929 restored SYNC: NAME REALM SPACE STACK STATE SYNC AGE — seven
 // columns, no CGROUP / CONTROLLERS / CONTAINERS / BRIDGE / DIVERGENCE.
+// TestNewCellCmd_NamedSingleRow pins the #1323 kubectl-parity flip: a named
+// `kuke get cell <name>` renders a single table row by default (and the wide
+// row with `-o wide`), while `-o yaml` / `-o json` still emit the full
+// document.
+func TestNewCellCmd_NamedSingleRow(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fake := &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{
+				Cell: v1beta1.CellDoc{
+					Metadata: v1beta1.CellMetadata{Name: "ce1"},
+					Spec:     v1beta1.CellSpec{RealmID: "r1", SpaceID: "s1", StackID: "st1"},
+					Status:   v1beta1.CellStatus{State: v1beta1.CellStateReady},
+				},
+				MetadataExists: true,
+			}, nil
+		},
+	}
+
+	run := func(t *testing.T, args ...string) string {
+		t.Helper()
+		t.Cleanup(viper.Reset)
+		cmd := cell.NewCellCmd()
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+		ctx := context.WithValue(context.Background(), cell.MockControllerKey{}, kukeonv1.Client(fake))
+		cmd.SetContext(ctx)
+		cmd.SetArgs(append([]string{"ce1", "--realm", "r1", "--space", "s1", "--stack", "st1"}, args...))
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		return buf.String()
+	}
+
+	t.Run("default renders single table row", func(t *testing.T) {
+		out := run(t)
+		for _, col := range []string{"NAME", "REALM", "SPACE", "STACK", "STATE", "SYNC", "AGE"} {
+			if !strings.Contains(out, col) {
+				t.Errorf("named default missing column %q; got:\n%s", col, out)
+			}
+		}
+		if !strings.Contains(out, "ce1") {
+			t.Errorf("expected single row carrying name; got:\n%s", out)
+		}
+		if strings.Contains(out, "metadata:") || strings.Contains(out, "CONTAINERS") {
+			t.Errorf("named default must not emit document/wide columns; got:\n%s", out)
+		}
+	})
+
+	t.Run("-o wide renders single wide row", func(t *testing.T) {
+		out := run(t, "-o", "wide")
+		for _, col := range []string{"NAME", "STATE", "CONTAINERS", "BRIDGE", "DIVERGENCE"} {
+			if !strings.Contains(out, col) {
+				t.Errorf("named wide missing column %q; got:\n%s", col, out)
+			}
+		}
+		if strings.Contains(out, "metadata:") {
+			t.Errorf("named wide must not emit the full document; got:\n%s", out)
+		}
+	})
+
+	t.Run("-o yaml emits the full document", func(t *testing.T) {
+		out := run(t, "-o", "yaml")
+		if !strings.Contains(out, "metadata:") {
+			t.Errorf("-o yaml should emit the document; got:\n%s", out)
+		}
+	})
+
+	t.Run("-o json emits the full document", func(t *testing.T) {
+		out := run(t, "-o", "json")
+		if !strings.Contains(out, "\"metadata\"") {
+			t.Errorf("-o json should emit the document; got:\n%s", out)
+		}
+	})
+}
+
 func TestNewCellCmd_DefaultColumns(t *testing.T) {
 	t.Cleanup(viper.Reset)
 

@@ -177,6 +177,77 @@ func TestNewVolumeCmd(t *testing.T) {
 	}
 }
 
+// TestNewVolumeCmd_NamedSingleRow pins the #1323 kubectl-parity flip: a named
+// `kuke get volume <name>` renders a single table row by default, while
+// `-o yaml` / `-o json` still emit the full document.
+func TestNewVolumeCmd_NamedSingleRow(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fake := &fakeClient{
+		getVolumeFn: func(doc v1beta1.VolumeDoc) (kukeonv1.GetVolumeResult, error) {
+			return kukeonv1.GetVolumeResult{
+				Volume:         v1beta1.VolumeDoc{Metadata: doc.Metadata},
+				MetadataExists: true,
+			}, nil
+		},
+	}
+
+	run := func(t *testing.T, args ...string) string {
+		t.Helper()
+		t.Cleanup(viper.Reset)
+		cmd := volume.NewVolumeCmd()
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+		ctx := context.WithValue(context.Background(), volume.MockControllerKey{}, kukeonv1.Client(fake))
+		cmd.SetContext(ctx)
+		cmd.SetArgs(append([]string{"vol1", "--realm", "r1", "--space", "s1"}, args...))
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		return buf.String()
+	}
+
+	t.Run("default renders single table row", func(t *testing.T) {
+		out := run(t)
+		for _, col := range []string{"NAME", "REALM", "SPACE", "STACK"} {
+			if !strings.Contains(out, col) {
+				t.Errorf("named default missing column %q; got:\n%s", col, out)
+			}
+		}
+		if !strings.Contains(out, "vol1") {
+			t.Errorf("expected single row carrying name; got:\n%s", out)
+		}
+		if strings.Contains(out, "metadata:") {
+			t.Errorf("named default must not emit the full document; got:\n%s", out)
+		}
+	})
+
+	t.Run("-o wide renders a single row", func(t *testing.T) {
+		out := run(t, "-o", "wide")
+		if !strings.Contains(out, "NAME") || !strings.Contains(out, "vol1") {
+			t.Errorf("named wide should render the single row; got:\n%s", out)
+		}
+		if strings.Contains(out, "metadata:") {
+			t.Errorf("named wide must not emit the full document; got:\n%s", out)
+		}
+	})
+
+	t.Run("-o yaml emits the full document", func(t *testing.T) {
+		out := run(t, "-o", "yaml")
+		if !strings.Contains(out, "metadata:") {
+			t.Errorf("-o yaml should emit the document; got:\n%s", out)
+		}
+	})
+
+	t.Run("-o json emits the full document", func(t *testing.T) {
+		out := run(t, "-o", "json")
+		if !strings.Contains(out, "\"metadata\"") {
+			t.Errorf("-o json should emit the document; got:\n%s", out)
+		}
+	})
+}
+
 type fakeClient struct {
 	kukeonv1.FakeClient
 

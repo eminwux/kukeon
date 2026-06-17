@@ -146,7 +146,7 @@ table — surface it with ` + "`-o yaml` / `-o json`" + ` when needed.`,
 				if !result.MetadataExists {
 					return fmt.Errorf("cell %q not found in stack %q/%q/%q", name, realm, space, stack)
 				}
-				return printCell(cmd, &result.Cell, outputFormat)
+				return printCell(cmd, &result.Cell, outputFormat, wide)
 			}
 
 			cells, err := client.ListCells(cmd.Context(), realm, space, stack)
@@ -165,7 +165,7 @@ table — surface it with ` + "`-o yaml` / `-o json`" + ` when needed.`,
 	cmd.Flags().String("stack", "", "Filter cells by stack name")
 	_ = viper.BindPFlag(config.KUKE_GET_CELL_STACK.ViperKey, cmd.Flags().Lookup("stack"))
 	cmd.Flags().
-		StringP("output", "o", "", "Output format (yaml, json, table, wide). Default: table for list, yaml for single resource")
+		StringP("output", "o", "", "Output format (yaml, json, table, wide). Default: table for list, table for single resource")
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("o"))
 
@@ -276,12 +276,18 @@ func filterCellsBySelector(cells []v1beta1.CellDoc, selector *shared.LabelSelect
 	return out
 }
 
-func printCell(cmd *cobra.Command, cell *v1beta1.CellDoc, format shared.OutputFormat) error {
+func printCell(cmd *cobra.Command, cell *v1beta1.CellDoc, format shared.OutputFormat, wide bool) error {
 	switch format {
 	case shared.OutputFormatJSON:
 		return shared.PrintJSON(cmd, cell)
-	default:
+	case shared.OutputFormatYAML:
 		return shared.PrintYAML(cmd, cell)
+	default:
+		// table / wide: render the single found element as a one-row table
+		// with the same columns as the list view (kubectl parity). `wide`
+		// is carried separately because resolveOutput normalises `wide` to
+		// `table` plus a bool.
+		return printCells(cmd, []v1beta1.CellDoc{*cell}, format, wide)
 	}
 }
 

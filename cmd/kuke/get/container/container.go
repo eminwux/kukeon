@@ -72,7 +72,7 @@ full container spec.`,
 	cmd.Flags().String("cell", "", "Filter containers by cell name")
 	_ = viper.BindPFlag(config.KUKE_GET_CONTAINER_CELL.ViperKey, cmd.Flags().Lookup("cell"))
 	cmd.Flags().
-		StringP("output", "o", "", "Output format (yaml, json, table, wide). Default: table for list, yaml for single resource")
+		StringP("output", "o", "", "Output format (yaml, json, table, wide). Default: table for list, table for single resource")
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("o"))
 
@@ -172,7 +172,49 @@ func runContainerCmd(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("container %q not found", name)
 		}
 
-		return printContainer(cmd, &result.Container, outputFormat)
+		if outputFormat == shared.OutputFormatYAML || outputFormat == shared.OutputFormatJSON {
+			return printContainer(cmd, &result.Container, outputFormat)
+		}
+		// table / wide: render the single found container as a one-row table
+		// with the same columns as the list view (kubectl parity). Build the
+		// single-element spec slice + probe map the list renderer expects,
+		// backfilling scope coordinates the daemon may leave unset on the
+		// returned spec (same defensive backfill the list path applies).
+		spec := result.Container.Spec
+		if spec.ID == "" {
+			spec.ID = name
+		}
+		if spec.RealmID == "" {
+			spec.RealmID = realm
+		}
+		if spec.SpaceID == "" {
+			spec.SpaceID = space
+		}
+		if spec.StackID == "" {
+			spec.StackID = stack
+		}
+		if spec.CellID == "" {
+			spec.CellID = cell
+		}
+		st := result.Container.Status
+		probes := map[string]containerProbe{
+			spec.ID: {
+				state:        containerStateToString(st.State),
+				restartCount: st.RestartCount,
+				createdAt:    st.CreatedAt,
+				exitCode:     st.ExitCode,
+				exitSignal:   st.ExitSignal,
+				labels:       result.Container.Metadata.Labels,
+			},
+		}
+		return printContainersWithState(
+			cmd,
+			[]v1beta1.ContainerSpec{spec},
+			probes,
+			outputFormat,
+			wide,
+			"",
+		)
 	}
 
 	// List path — query each container's state by calling GetContainer.

@@ -132,7 +132,10 @@ func TestImageCmd_ListSingleRealmNarrowing(t *testing.T) {
 	}
 }
 
-func TestImageCmd_DescribeSingleImageYAMLDefault(t *testing.T) {
+// TestImageCmd_DescribeSingleImageTableDefault covers the #1323 kubectl-parity
+// flip: a named `kuke get image <ref>` with no `-o` flag renders a single
+// table row (same columns as the list view), not the full YAML document.
+func TestImageCmd_DescribeSingleImageTableDefault(t *testing.T) {
 	want := kukeonv1.ImageInfo{
 		Name:      "docker.io/library/alpine:3.20",
 		Size:      7_500_000,
@@ -160,6 +163,84 @@ func TestImageCmd_DescribeSingleImageYAMLDefault(t *testing.T) {
 	}
 
 	out, err := runImageGet(t, fake, []string{want.Name})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	// Single table row: the list-view header columns plus the one image, and
+	// the full document must NOT be emitted (no yaml/json keys).
+	for _, col := range []string{"NAME", "REALM", "SIZE", "AGE"} {
+		if !strings.Contains(out, col) {
+			t.Errorf("expected table header column %q, got:\n%s", col, out)
+		}
+	}
+	if !strings.Contains(out, want.Name) || !strings.Contains(out, "default") {
+		t.Errorf("expected single row carrying name+realm, got:\n%s", out)
+	}
+	if strings.Contains(out, "mediaType:") || strings.Contains(out, "digest:") {
+		t.Errorf("table default must not emit the full document, got:\n%s", out)
+	}
+}
+
+// TestImageCmd_DescribeSingleImageWide covers the named single-wide row: a
+// named `kuke get image <ref> -o wide` renders the one image with the wide
+// CREATED / DIGEST columns appended (#1323).
+func TestImageCmd_DescribeSingleImageWide(t *testing.T) {
+	digest := "sha256:abcd1234"
+	want := kukeonv1.ImageInfo{
+		Name:      "docker.io/library/alpine:3.20",
+		Size:      7_500_000,
+		CreatedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
+		Digest:    digest,
+	}
+	fake := &fakeImageClient{
+		getImageFn: func(realm, _ string) (kukeonv1.GetImageResult, error) {
+			return kukeonv1.GetImageResult{Realm: realm, Image: want}, nil
+		},
+		listImagesFn: func(string) (kukeonv1.ListImagesResult, error) {
+			t.Fatal("ListImages should not be called when a positional ref is supplied")
+			return kukeonv1.ListImagesResult{}, nil
+		},
+	}
+
+	out, err := runImageGet(t, fake, []string{want.Name, "-o", "wide"})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	for _, col := range []string{"NAME", "REALM", "SIZE", "AGE", "CREATED", "DIGEST", "2026-01-02T03:04:05Z", digest} {
+		if !strings.Contains(out, col) {
+			t.Errorf("expected %q in named wide output, got:\n%s", col, out)
+		}
+	}
+	if strings.Contains(out, "mediaType:") {
+		t.Errorf("named wide must not emit the full document, got:\n%s", out)
+	}
+}
+
+// TestImageCmd_DescribeSingleImageYAML covers the preserved document path:
+// `-o yaml` on a named get still emits the full image document with the
+// CLI's camelCase key convention (#1194).
+func TestImageCmd_DescribeSingleImageYAML(t *testing.T) {
+	want := kukeonv1.ImageInfo{
+		Name:      "docker.io/library/alpine:3.20",
+		Size:      7_500_000,
+		Digest:    "sha256:cafef00d",
+		MediaType: "application/vnd.oci.image.manifest.v1+json",
+	}
+	fake := &fakeImageClient{
+		getImageFn: func(realm, ref string) (kukeonv1.GetImageResult, error) {
+			return kukeonv1.GetImageResult{
+				Realm:     "default",
+				Namespace: "default.kukeon.io",
+				Image:     want,
+			}, nil
+		},
+		listImagesFn: func(string) (kukeonv1.ListImagesResult, error) {
+			t.Fatal("ListImages should not be called when a positional ref is supplied")
+			return kukeonv1.ListImagesResult{}, nil
+		},
+	}
+
+	out, err := runImageGet(t, fake, []string{want.Name, "-o", "yaml"})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}

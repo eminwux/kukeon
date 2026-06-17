@@ -160,20 +160,22 @@ kuke get cells
 kuke get containers --cell <name>                # filter within current scope
 kuke get images                                  # cross-realm by default
 kuke get image --realm <name>                    # narrow to one realm
-kuke get image <ref> --realm <name>              # describe a single image (yaml default)
+kuke get image <ref> --realm <name>              # describe a single image (single table row)
+kuke get realm <name>                            # single table row (same cols as the list)
 kuke get realm <name> -o yaml                    # full spec+status
 kuke get realm <name> -o json
+kuke get realm <name> -o wide                    # single wide row
 kuke get realms -o wide                          # default cols + NAMESPACE
 ```
 
 **Invariants.**
 
 - Exit code 0 even when the result set is empty; the CLI prints a brief "no resources found" line rather than failing.
-- Table output is the default for **lists**; YAML is the default for a **single named resource**. Both behaviors are overridable via `-o {yaml,json,table,wide}`.
+- Table output is the default for **both lists and a single named resource** (#1323, kubectl parity): a named `kuke get <kind> <name>` renders a **single table row** with the same columns as the list view, filtered to that one element; `-o wide` renders the single wide row where the kind defines wide columns. The full document is reached via `-o yaml` / `-o json`. **Breaking UX change:** scripts that relied on a bare named get emitting YAML must switch to `-o yaml`. All behaviors are overridable via `-o {yaml,json,table,wide}`.
 - After `kuke init`, `kuke get realms` lists at least `default` and `kuke-system`. `kuke get realms --no-daemon` must produce the same row set — divergence is a regression (see AGENTS.md daemon-parity guard).
 - The realm default table is `NAME STATE AGE`; `-o wide` appends `NAMESPACE`. The retired `--show-controllers` flag and the `CGROUP` / `CONTROLLERS` columns are gone (epic:get) — surface `cgroupPath` / `subtreeControllers` via `-o yaml` or `-o json` when investigating.
 - `kuke get realms --no-daemon` works without `sudo` when `/opt/kukeon` is readable by the `kukeon` group; this is the supported escape hatch when the daemon is down.
-- `kuke get image[s]` lists across **every realm** by default; columns are `NAME REALM SIZE AGE`. `--realm <r>` narrows to one realm but keeps the `REALM` column for grep-ability. `-o wide` appends `CREATED` and `DIGEST`. `-o yaml` / `-o json` emit one `kukeonv1.ListImagesResult` per realm. With a positional `<ref>` the command describes a single image (yaml by default, `-o json` switches to json); `--realm` defaults to `default` on this path.
+- `kuke get image[s]` lists across **every realm** by default; columns are `NAME REALM SIZE AGE`. `--realm <r>` narrows to one realm but keeps the `REALM` column for grep-ability. `-o wide` appends `CREATED` and `DIGEST`. `-o yaml` / `-o json` emit one `kukeonv1.ListImagesResult` per realm. With a positional `<ref>` the command renders a **single table row** by default (same `NAME REALM SIZE AGE` columns, `-o wide` appends `CREATED` / `DIGEST`); `-o yaml` / `-o json` describe the full image document; `--realm` defaults to `default` on this path.
 - `kuke get image` is daemon-independent: image methods do not traverse the kukeond RPC (#226), so the persistent `--no-daemon` on `kuke get` is a no-op for this leaf — every invocation goes in-process via the containerd socket.
 - `kuke get containers --cell <name>` (and `--space <name>` / `--stack <name>`) filter **within the scope passed on the command line**. The operator must supply matching `--realm/--space/--stack` to filter into a non-default scope. When a filter returns zero rows but the named cell/space/stack exists in a different scope, the table output appends a `Hint:` line naming the realm/space/stack where it does exist, so the operator can re-run with the right flags. The hint applies to the `table` output only — `-o yaml` and `-o json` still emit an empty list, exit code 0.
 
