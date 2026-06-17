@@ -136,6 +136,9 @@ nav:
   - FAQ: faq.md
 
 extra:
+  analytics:
+    provider: google
+    property: G-SFBQZ2FFFQ
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/eminwux/kukeon
