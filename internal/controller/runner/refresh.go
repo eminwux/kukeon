@@ -1257,7 +1257,7 @@ const (
 // policy says must restart should fire now, wait for backoff, or give up
 // against the on-failure cap. Reads (does not mutate) the per-container restart
 // state under the lock.
-func (r *Exec) restartDecisionFor(cell intmodel.Cell, containerID, policy string) restartPassResult {
+func (r *Exec) restartDecisionFor(cell intmodel.Cell, containerID, policy string, backoff time.Duration, maxRetries int) restartPassResult {
 	r.restartStatesMu.Lock()
 	defer r.restartStatesMu.Unlock()
 
@@ -1266,16 +1266,41 @@ func (r *Exec) restartDecisionFor(cell intmodel.Cell, containerID, policy string
 		// First observation of this exit: fire immediately, no prior backoff.
 		return restartFired
 	}
-	if policy == intmodel.RestartPolicyOnFailure && st.attempts >= onFailureMaxRestarts {
+	if policy == intmodel.RestartPolicyOnFailure && st.attempts >= maxRetries {
 		// on-failure cap exhausted: stop retrying. Reported as restartNone so
 		// the caller falls through to the reap gate (the crashed workload
 		// settles as Error and is preserved for the operator).
 		return restartNone
 	}
-	if !st.lastAttempt.IsZero() && r.nowUTC().Sub(st.lastAttempt) < restartBackoff {
+	if !st.lastAttempt.IsZero() && r.nowUTC().Sub(st.lastAttempt) < backoff {
 		return restartDeferred
 	}
 	return restartFired
+}
+
+// effectiveRestartBackoff resolves the per-container backoff floor the restart
+// pass enforces: the user-authored Spec.RestartBackoffSeconds (#1235) when set,
+// else the hardcoded restartBackoff default (#1233). A nil pointer is unset and
+// falls back to the default — no behavior change for specs that never set the
+// field. An explicit 0 disables the floor so a restart fires on the next
+// reconcile tick that observes the exit. Validation (apischeme) already rejects
+// a negative value, so the conversion to time.Duration is safe here.
+func effectiveRestartBackoff(spec intmodel.ContainerSpec) time.Duration {
+	if spec.RestartBackoffSeconds != nil {
+		return time.Duration(*spec.RestartBackoffSeconds) * time.Second
+	}
+	return restartBackoff
+}
+
+// effectiveOnFailureMaxRestarts resolves the per-container on-failure retry cap:
+// the user-authored Spec.RestartMaxRetries (#1235) when set, else the hardcoded
+// onFailureMaxRestarts default (#1233). A nil pointer is unset and falls back to
+// the default. Validation (apischeme) already rejects a value below 1.
+func effectiveOnFailureMaxRestarts(spec intmodel.ContainerSpec) int {
+	if spec.RestartMaxRetries != nil {
+		return int(*spec.RestartMaxRetries)
+	}
+	return onFailureMaxRestarts
 }
 
 // maybeRestartExitedContainers is the reconciler's restart-on-exit pass (#1233).
@@ -1338,7 +1363,8 @@ func (r *Exec) maybeRestartExitedContainers(cell intmodel.Cell) (intmodel.Cell, 
 			continue
 		}
 
-		switch r.restartDecisionFor(cell, spec.ID, spec.RestartPolicy) {
+		switch r.restartDecisionFor(cell, spec.ID, spec.RestartPolicy,
+			effectiveRestartBackoff(spec), effectiveOnFailureMaxRestarts(spec)) {
 		case restartFired:
 			started, startErr := r.restartContainer(cell, spec.ID)
 			// Record the attempt regardless of outcome: a failed relaunch still

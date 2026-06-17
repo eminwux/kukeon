@@ -124,6 +124,27 @@ type ContainerSpec struct {
 	Git           *ContainerGit `json:"git,omitempty"                    yaml:"git,omitempty"`
 	CNIConfigPath string        `json:"cniConfigPath,omitempty"          yaml:"cniConfigPath,omitempty"`
 	RestartPolicy string        `json:"restartPolicy"                    yaml:"restartPolicy"`
+	// RestartBackoffSeconds is the minimum wall-clock interval, in seconds,
+	// between successive reconciler-driven restarts of this non-root container
+	// (#1235 parameterizes the hardcoded floor #1233 introduced). Nil/unset
+	// falls back to the runner's built-in default (30s) — existing specs see no
+	// behavior change. An explicit 0 disables the floor so a restart fires on
+	// the next reconcile tick that observes the exit. Only meaningful under a
+	// restarting policy (`always` or `on-failure`); setting it with `never` /
+	// empty is a validation error since it can never take effect. Validation
+	// also rejects a negative value.
+	RestartBackoffSeconds *int64 `json:"restartBackoffSeconds,omitempty"  yaml:"restartBackoffSeconds,omitempty"`
+	// RestartMaxRetries caps how many times the reconciler relaunches this
+	// container under the `on-failure` policy before giving up and leaving it
+	// terminal for the operator (#1235 parameterizes the hardcoded cap #1233
+	// introduced). Nil/unset falls back to the runner's built-in default (5) —
+	// existing specs see no behavior change. The counter resets whenever the
+	// container is next observed running, so the cap bites a tight crash loop,
+	// not a workload that runs for a while between crashes. `always` is uncapped
+	// by contract, so this field is only meaningful under `on-failure`; setting
+	// it with any other policy is a validation error. Validation rejects a value
+	// below 1.
+	RestartMaxRetries *int64 `json:"restartMaxRetries,omitempty"      yaml:"restartMaxRetries,omitempty"`
 	// Attachable opts the container into kuketty-wrapper injection. When
 	// true, the daemon rewrites process.args to a single element
 	// [/.kukeon/bin/kuketty] — no CLI flags, every runtime input flows

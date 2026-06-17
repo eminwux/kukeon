@@ -100,8 +100,21 @@ type ContainerSpec struct {
 	// non-zero exit) — that relaunch fires first and the cell is restarted, not
 	// deleted, for that tick (cf. `docker run --rm`).
 	RestartPolicy string
-	Attachable    bool
-	Tty           *ContainerTty
+	// RestartBackoffSeconds is the user-authored minimum interval (seconds)
+	// between reconciler-driven restarts of this container, parameterizing the
+	// runner's hardcoded restartBackoff floor (#1235, mirrors the v1beta1 field).
+	// Nil falls back to that built-in default; an explicit 0 disables the floor.
+	// Consumed by the runner's restart-on-exit pass (refresh.go:restartDecisionFor
+	// via effectiveRestartBackoff).
+	RestartBackoffSeconds *int64
+	// RestartMaxRetries is the user-authored `on-failure` retry cap for this
+	// container, parameterizing the runner's hardcoded onFailureMaxRestarts
+	// (#1235, mirrors the v1beta1 field). Nil falls back to that built-in
+	// default. Only consulted under the `on-failure` policy
+	// (refresh.go:restartDecisionFor via effectiveOnFailureMaxRestarts).
+	RestartMaxRetries *int64
+	Attachable        bool
+	Tty               *ContainerTty
 	// CellCgroupPath is the absolute cgroup path of the parent cell (mirrors
 	// Cell.Status.CgroupPath). When set, BuildContainerSpec emits an OCI
 	// Linux.CgroupsPath rooted at <CellCgroupPath>/<containerd-id> so the

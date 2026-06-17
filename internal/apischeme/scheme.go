@@ -394,6 +394,9 @@ func ConvertContainerDocToInternal(in ext.ContainerDoc) (intmodel.Container, err
 		if err := validateContainerVolumes(in.Spec); err != nil {
 			return intmodel.Container{}, err
 		}
+		if err := validateContainerRestart(in.Spec); err != nil {
+			return intmodel.Container{}, err
+		}
 		return intmodel.Container{
 			Metadata: intmodel.ContainerMetadata{
 				Name:   in.Metadata.Name,
@@ -431,6 +434,8 @@ func ConvertContainerDocToInternal(in ext.ContainerDoc) (intmodel.Container, err
 				Git:                    gitToInternal(in.Spec.Git),
 				CNIConfigPath:          in.Spec.CNIConfigPath,
 				RestartPolicy:          in.Spec.RestartPolicy,
+				RestartBackoffSeconds:  in.Spec.RestartBackoffSeconds,
+				RestartMaxRetries:      in.Spec.RestartMaxRetries,
 				Attachable:             in.Spec.Attachable,
 				Tty:                    convertContainerTtyToInternal(in.Spec.Tty),
 			},
@@ -497,6 +502,8 @@ func BuildContainerExternalFromInternal(in intmodel.Container, apiVersion ext.Ve
 				Git:                    gitToExternal(in.Spec.Git),
 				CNIConfigPath:          in.Spec.CNIConfigPath,
 				RestartPolicy:          in.Spec.RestartPolicy,
+				RestartBackoffSeconds:  in.Spec.RestartBackoffSeconds,
+				RestartMaxRetries:      in.Spec.RestartMaxRetries,
 				Attachable:             in.Spec.Attachable,
 				Tty:                    buildContainerTtyExternalFromInternal(in.Spec.Tty),
 			},
@@ -566,6 +573,8 @@ func convertContainerSpecToInternal(in ext.ContainerSpec) intmodel.ContainerSpec
 		Git:                    gitToInternal(in.Git),
 		CNIConfigPath:          in.CNIConfigPath,
 		RestartPolicy:          in.RestartPolicy,
+		RestartBackoffSeconds:  in.RestartBackoffSeconds,
+		RestartMaxRetries:      in.RestartMaxRetries,
 		Attachable:             in.Attachable,
 		Tty:                    convertContainerTtyToInternal(in.Tty),
 	}
@@ -607,6 +616,8 @@ func BuildContainerSpecExternalFromInternal(in intmodel.ContainerSpec) ext.Conta
 		Git:                    gitToExternal(in.Git),
 		CNIConfigPath:          in.CNIConfigPath,
 		RestartPolicy:          in.RestartPolicy,
+		RestartBackoffSeconds:  in.RestartBackoffSeconds,
+		RestartMaxRetries:      in.RestartMaxRetries,
 		Attachable:             in.Attachable,
 		Tty:                    buildContainerTtyExternalFromInternal(in.Tty),
 	}
@@ -702,6 +713,47 @@ func validateContainerTty(spec ext.ContainerSpec) error {
 	}
 	if err := validateContainerCreateStagePersistence(spec); err != nil {
 		return err
+	}
+	return nil
+}
+
+// validateContainerRestart enforces the bounds and policy-applicability of the
+// user-authored restart-tuning fields (#1235). The fields parameterize the
+// runner's hardcoded backoff floor and on-failure retry cap (#1233); they are
+// rejected at apply time rather than silently ignored when they can never take
+// effect, mirroring validateContainerTty's "config that can't take effect is an
+// error" contract.
+//
+//   - restartBackoffSeconds: must be >= 0, and only valid under a restarting
+//     policy (`always` or `on-failure`) — the floor never applies to a
+//     `never`/empty policy that does not restart on exit.
+//   - restartMaxRetries: must be >= 1, and only valid under `on-failure` — the
+//     cap is on-failure-specific (`always` is uncapped by contract, see
+//     refresh.go:restartDecisionFor).
+func validateContainerRestart(spec ext.ContainerSpec) error {
+	policy := spec.RestartPolicy
+	restarts := policy == intmodel.RestartPolicyAlways || policy == intmodel.RestartPolicyOnFailure
+	if spec.RestartBackoffSeconds != nil {
+		if *spec.RestartBackoffSeconds < 0 {
+			return fmt.Errorf("container %q: restartBackoffSeconds must be >= 0, got %d", spec.ID, *spec.RestartBackoffSeconds)
+		}
+		if !restarts {
+			return fmt.Errorf(
+				"container %q: restartBackoffSeconds requires restartPolicy %q or %q, got %q",
+				spec.ID, intmodel.RestartPolicyAlways, intmodel.RestartPolicyOnFailure, policy,
+			)
+		}
+	}
+	if spec.RestartMaxRetries != nil {
+		if *spec.RestartMaxRetries < 1 {
+			return fmt.Errorf("container %q: restartMaxRetries must be >= 1, got %d", spec.ID, *spec.RestartMaxRetries)
+		}
+		if policy != intmodel.RestartPolicyOnFailure {
+			return fmt.Errorf(
+				"container %q: restartMaxRetries requires restartPolicy %q, got %q",
+				spec.ID, intmodel.RestartPolicyOnFailure, policy,
+			)
+		}
 	}
 	return nil
 }
@@ -1545,6 +1597,9 @@ func ConvertCellDocToInternal(in ext.CellDoc) (intmodel.Cell, error) {
 				return intmodel.Cell{}, err
 			}
 			if err := validateContainerVolumes(c); err != nil {
+				return intmodel.Cell{}, err
+			}
+			if err := validateContainerRestart(c); err != nil {
 				return intmodel.Cell{}, err
 			}
 		}
