@@ -142,6 +142,10 @@ Each layer is a real Linux primitive, not an invented abstraction. This structur
 
 Complete documentation is available at [https://kukeon.io](https://kukeon.io), including concepts, architecture, CLI reference, manifest reference, guides, and tutorials.
 
+## Community
+
+Have questions, recommendations, or ideas for kukeon? Join the [kukeon Discord community](https://discord.gg/MHrq9wZqj3) to connect with maintainers and other users.
+
 ## Philosophy
 
 «καὶ ὁ κυκεὼν διίσταται μὴ κινούμενος»
