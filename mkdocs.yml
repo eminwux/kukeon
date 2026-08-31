@@ -142,6 +142,8 @@ extra:
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/eminwux/kukeon
+    - icon: fontawesome/brands/discord
+      link: https://discord.gg/MHrq9wZqj3
   version:
     provider: mike
 

@@ -72,6 +72,10 @@ See [Getting Started](getting-started.md) for a walk-through, or jump directly t
 - **[Manifest Reference](manifests/overview.md)** — the v1beta1 resource schemas
 - **[Tutorials](tutorials/hello-world.md)** — step-by-step examples
 
+## Community
+
+Have questions, recommendations, or ideas for kukeon? Join the [kukeon Discord community](https://discord.gg/MHrq9wZqj3) to connect with maintainers and other users.
+
 ## Philosophy
 
 > «καὶ ὁ κυκεὼν διίσταται μὴ κινούμενος»
