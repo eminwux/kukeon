@@ -5,7 +5,7 @@ kind: Workspace
 metadata:
   name: developer-workspace
 spec:
-  agentSources:
+  sources:
     - name: primary-agents
       repo: github.com/eminwux/agents
       ref: v1.4.0
@@ -17,27 +17,31 @@ spec:
       path: /home/alice/src/kukeon
       integrations:
         github:
-          type: github
-          credentials:
-            token: workspace-github-token # Named credential reference, not a token value.
+          gh:
+            credentials:
+              token:
+                secretRef: workspace-github-cli-token
+          git:
+            credentials:
+              sshKey:
+                secretRef: workspace-github-ssh-key
     - name: sbsh
       repo: github.com/eminwux/sbsh
       path: /home/alice/src/sbsh
 
-  projectTeams:
+  teams:
     - name: kukeon-development
       project: kukeon
-      agentSource: primary-agents
-      roles: [dev, pr-reviewer]
+      teamFile: teams/development.yaml
     - name: kukeon-maintenance
       project: kukeon
-      agentSource: primary-agents
-      roles: [pm]
+      teamFile: teams/maintenance.yaml
     - name: sbsh-development
       project: sbsh
-      agentSource: primary-agents
-      roles: [dev]
+      teamFile: kuketeam.yaml
 
-  workspaceCells:
     - name: orchestrator
-      blueprint: workspace-orchestrator
+      agentSource: primary-agents
+      role: orchestrator
+      workspaceCell:
+        blueprint: workspace-orchestrator

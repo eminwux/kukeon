@@ -32,15 +32,14 @@ type WorkspaceMetadata struct {
 
 // WorkspaceSpec contains all workspace declarations.
 type WorkspaceSpec struct {
-	AgentSources   []WorkspaceAgentSource `json:"agentSources"   yaml:"agentSources"`
-	Projects       []WorkspaceProject     `json:"projects"       yaml:"projects"`
-	ProjectTeams   []WorkspaceProjectTeam `json:"projectTeams"   yaml:"projectTeams"`
-	WorkspaceCells []WorkspaceCell        `json:"workspaceCells" yaml:"workspaceCells"`
+	Sources  []WorkspaceSource  `json:"sources"  yaml:"sources"`
+	Projects []WorkspaceProject `json:"projects" yaml:"projects"`
+	Teams    []WorkspaceTeam    `json:"teams"    yaml:"teams"`
 }
 
-// WorkspaceAgentSource identifies a repository and path containing role
+// WorkspaceSource identifies a repository and path containing role
 // definitions. Ref is a pinned Git tag or commit; Path is repository-relative.
-type WorkspaceAgentSource struct {
+type WorkspaceSource struct {
 	Name string `json:"name" yaml:"name"`
 	Repo string `json:"repo" yaml:"repo"`
 	Ref  string `json:"ref"  yaml:"ref"`
@@ -55,24 +54,41 @@ type WorkspaceProject struct {
 	Integrations map[string]WorkspaceIntegration `json:"integrations,omitempty" yaml:"integrations,omitempty"`
 }
 
-// WorkspaceIntegration describes an external project integration and names
-// credentials by reference. Credential values are never part of this model.
-type WorkspaceIntegration struct {
-	Type        string            `json:"type"                  yaml:"type"`
-	Credentials map[string]string `json:"credentials,omitempty" yaml:"credentials,omitempty"`
+// WorkspaceIntegration maps integration clients (such as GitHub's gh and git
+// tools) to their credential sets. The map key names the integration, so no
+// redundant type field is needed.
+type WorkspaceIntegration map[string]WorkspaceIntegrationClient
+
+// WorkspaceIntegrationClient contains credentials for one client of an
+// integration, for example GitHub CLI (gh) or Git authentication (git).
+type WorkspaceIntegrationClient struct {
+	Credentials map[string]WorkspaceCredentialRef `json:"credentials,omitempty" yaml:"credentials,omitempty"`
 }
 
-// WorkspaceProjectTeam selects a project, agent source, and explicit roles.
-type WorkspaceProjectTeam struct {
-	Name        string   `json:"name"        yaml:"name"`
-	Project     string   `json:"project"     yaml:"project"`
-	AgentSource string   `json:"agentSource" yaml:"agentSource"`
-	Roles       []string `json:"roles"       yaml:"roles"`
+// WorkspaceCredentialRef names a credential configured in a secret source.
+// Secret values are never stored in the Workspace manifest.
+type WorkspaceCredentialRef struct {
+	SecretRef string `json:"secretRef" yaml:"secretRef"`
 }
 
-// WorkspaceCell describes a cell whose scope is the workspace. Blueprint is
-// the name of the cell blueprint used to initialize it.
+// WorkspaceTeam references a project-local team manifest or declares a
+// workspace-scoped cell team. Harness and image requirements for project
+// teams remain in the referenced ProjectTeam document. A workspace team
+// declares one role and a workspaceCell; its agentSource is optional.
+type WorkspaceTeam struct {
+	Name    string `json:"name"                    yaml:"name"`
+	Project string `json:"project,omitempty"       yaml:"project,omitempty"`
+	// TeamFile is a project-relative path to a ProjectTeam document. Its
+	// harness defaults, source pin, role roster, and image requirements remain
+	// owned by that document.
+	TeamFile string `json:"teamFile,omitempty"      yaml:"teamFile,omitempty"`
+	// AgentSource is an optional source name for a workspace-scoped team.
+	AgentSource   string         `json:"agentSource,omitempty"   yaml:"agentSource,omitempty"`
+	Role          string         `json:"role,omitempty"          yaml:"role,omitempty"`
+	WorkspaceCell *WorkspaceCell `json:"workspaceCell,omitempty" yaml:"workspaceCell,omitempty"`
+}
+
+// WorkspaceCell describes a cell owned by a workspace team.
 type WorkspaceCell struct {
-	Name      string `json:"name"      yaml:"name"`
 	Blueprint string `json:"blueprint" yaml:"blueprint"`
 }

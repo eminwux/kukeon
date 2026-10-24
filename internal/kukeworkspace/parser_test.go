@@ -33,18 +33,24 @@ apiVersion: kukeworkspace.io/v1
 kind: Workspace
 metadata: {name: engineering}
 spec:
-  agentSources:
+  sources:
     - {name: house, repo: github.com/acme/agents, ref: v2.1.0, path: model1}
   projects:
     - name: api
       repo: github.com/acme/api
       path: /home/alice/src/api
       integrations:
-        github: {type: github, credentials: {token: github-work}}
-  projectTeams:
-    - {name: api-dev, project: api, agentSource: house, roles: [dev, reviewer]}
-  workspaceCells:
-    - {name: orchestrator, blueprint: workspace-orchestrator}
+        github:
+          gh:
+            credentials: {token: {secretRef: github-cli}}
+          git:
+            credentials: {sshKey: {secretRef: github-ssh}}
+  teams:
+    - {name: api-dev, project: api, teamFile: teams/api.yaml}
+    - name: orchestrator
+      role: orchestrator
+      agentSource: house
+      workspaceCell: {blueprint: workspace-orchestrator}
 `
 
 func TestParseDocumentedWorkspaceExample(t *testing.T) {
@@ -57,8 +63,11 @@ func TestParseDocumentedWorkspaceExample(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse documented example: %v", err)
 	}
-	if len(doc.Spec.Projects) != 2 || len(doc.Spec.ProjectTeams) != 3 || len(doc.Spec.WorkspaceCells) != 1 {
+	if len(doc.Spec.Projects) != 2 || len(doc.Spec.Teams) != 4 {
 		t.Fatalf("documented example missing declarations: %+v", doc.Spec)
+	}
+	if doc.Spec.Teams[3].WorkspaceCell == nil || doc.Spec.Teams[3].Role != "orchestrator" {
+		t.Fatalf("documented workspace team is missing its cell or role: %+v", doc.Spec.Teams[3])
 	}
 }
 
@@ -68,17 +77,22 @@ func TestParseWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if doc.Metadata.Name != "engineering" || len(doc.Spec.AgentSources) != 1 ||
-		len(doc.Spec.Projects) != 1 || len(doc.Spec.ProjectTeams) != 1 ||
-		len(doc.Spec.WorkspaceCells) != 1 {
+	if doc.Metadata.Name != "engineering" || len(doc.Spec.Sources) != 1 ||
+		len(doc.Spec.Projects) != 1 || len(doc.Spec.Teams) != 2 {
 		t.Fatalf("parsed workspace lost nested declarations: %+v", doc)
 	}
 	project := doc.Spec.Projects[0]
-	if project.Path != "/home/alice/src/api" || project.Integrations["github"].Credentials["token"] != "github-work" {
+	github := project.Integrations["github"]
+	if project.Path != "/home/alice/src/api" ||
+		github["gh"].Credentials["token"].SecretRef != "github-cli" ||
+		github["git"].Credentials["sshKey"].SecretRef != "github-ssh" {
 		t.Fatalf("project fields were not parsed: %+v", project)
 	}
-	if got := doc.Spec.ProjectTeams[0].Roles; len(got) != 2 || got[0] != "dev" || got[1] != "reviewer" {
-		t.Fatalf("roles = %v", got)
+	if got := doc.Spec.Teams[0].TeamFile; got != "teams/api.yaml" {
+		t.Fatalf("teamFile = %q", got)
+	}
+	if got := doc.Spec.Teams[1]; got.WorkspaceCell == nil || got.Role != "orchestrator" {
+		t.Fatalf("workspace team = %+v", got)
 	}
 }
 
@@ -90,10 +104,10 @@ func TestWorkspaceRoundTripsJSONAndYAML(t *testing.T) {
 	}
 	check := func(got model.Workspace) bool {
 		return got.Metadata.Name == "engineering" &&
-			got.Spec.AgentSources[0].Path == "model1" &&
-			got.Spec.Projects[0].Integrations["github"].Credentials["token"] == "github-work" &&
-			got.Spec.ProjectTeams[0].Roles[1] == "reviewer" &&
-			got.Spec.WorkspaceCells[0].Blueprint == "workspace-orchestrator"
+			got.Spec.Sources[0].Path == "model1" &&
+			got.Spec.Projects[0].Integrations["github"]["git"].Credentials["sshKey"].SecretRef == "github-ssh" &&
+			got.Spec.Teams[0].TeamFile == "teams/api.yaml" &&
+			got.Spec.Teams[1].WorkspaceCell.Blueprint == "workspace-orchestrator"
 	}
 
 	jsonBytes, marshalErr := json.Marshal(parsed)
@@ -125,13 +139,16 @@ func TestParseWorkspaceRejectsMalformedOrInvalidDocuments(t *testing.T) {
 		{"malformed YAML", "apiVersion: [", "decode YAML"},
 		{"wrong api version", strings.Replace(validWorkspace, "kukeworkspace.io/v1", "kukeworkspace.io/v2", 1), "apiVersion"},
 		{"wrong kind", strings.Replace(validWorkspace, "kind: Workspace", "kind: Other", 1), "kind"},
-		{"missing source ref", strings.Replace(validWorkspace, "ref: v2.1.0, ", "", 1), "agentSources[0].ref"},
+		{"missing source ref", strings.Replace(validWorkspace, "ref: v2.1.0, ", "", 1), "sources[0].ref"},
 		{"absolute source path", strings.Replace(validWorkspace, "path: model1", "path: /etc", 1), "repository-relative"},
 		{"relative project path", strings.Replace(validWorkspace, "/home/alice/src/api", "src/api", 1), "absolute host-local"},
-		{"empty roles", strings.Replace(validWorkspace, "roles: [dev, reviewer]", "roles: []", 1), "explicitly select"},
+		{"missing team file", strings.Replace(validWorkspace, "teamFile: teams/api.yaml", "teamFile: \"\"", 1), "spec.teams[0].teamFile"},
+		{"team file traversal", strings.Replace(validWorkspace, "teamFile: teams/api.yaml", "teamFile: ../outside.yaml", 1), "stay within it"},
+		{"missing secret ref", strings.Replace(validWorkspace, "secretRef: github-cli", "secretRef: \"\"", 1), "credentials.token.secretRef"},
+		{"workspace team missing role", strings.Replace(validWorkspace, "      role: orchestrator\n", "", 1), "spec.teams[1].role"},
 		{
 			"duplicate project",
-			strings.Replace(validWorkspace, "  projectTeams:", "    - {name: api, repo: github.com/acme/other, path: /tmp/other}\n  projectTeams:", 1),
+			strings.Replace(validWorkspace, "  teams:", "    - {name: api, repo: github.com/acme/other, path: /tmp/other}\n  teams:", 1),
 			"duplicate name",
 		},
 	} {
@@ -157,10 +174,21 @@ func TestValidateDoesNotResolveReferences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc.Spec.ProjectTeams[0].Project = "not-yet-resolved"
-	doc.Spec.ProjectTeams[0].AgentSource = "not-yet-resolved"
-	doc.Spec.ProjectTeams[0].Roles[0] = "not-yet-resolved"
+	doc.Spec.Teams[0].Project = "not-yet-resolved"
+	doc.Spec.Teams[0].TeamFile = "not-yet-resolved"
 	if validationErr := Validate(doc); validationErr != nil {
 		t.Fatalf("structural validation resolved semantic references: %v", validationErr)
+	}
+}
+
+func TestWorkspaceTeamAgentSourceIsOptional(t *testing.T) {
+	t.Parallel()
+	doc, err := Parse([]byte(validWorkspace))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc.Spec.Teams[1].AgentSource = ""
+	if validationErr := Validate(doc); validationErr != nil {
+		t.Fatalf("workspace team should allow an omitted agentSource: %v", validationErr)
 	}
 }
