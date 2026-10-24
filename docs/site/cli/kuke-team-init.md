@@ -18,12 +18,21 @@ configs and the drop-in entry is the only host-side record of an applied
 team. See [`docs/site/concepts/team.md`](../concepts/team.md) for the
 declarative-surface contract behind the verb.
 
+The Workspace/Team model is defined in the
+[configuration reference](https://github.com/eminwux/kukeon/blob/main/docs/workspace-team-configuration.md).
+This project-local command has only received the type/field rename required by
+that model replacement. It has not been integrated with Workspace defaults,
+user-owned Team discovery, per-role source/harness overrides or credential grants.
+The full model examples are not runnable CLI examples. Discovery and registration
+(#1348), source validation (#1354), credentials (#1355), rendering/apply (#1349),
+batch init (#1356) and modes (#1350) are separate follow-on work.
+
 ## Flags
 
-| Flag        | Default | Description                                                              |
-| ----------- | ------- | ------------------------------------------------------------------------ |
-| `--dry-run`  | `false` | print the rendered objects to stdout instead of applying them to kukeond |
-| `--build`    | `false` | build each selected image locally before apply; bind the local tag       |
+| Flag         | Default | Description                                                                                                                                                      |
+| ------------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--dry-run`  | `false` | print the rendered objects to stdout instead of applying them to kukeond                                                                                         |
+| `--build`    | `false` | build each selected image locally before apply; bind the local tag                                                                                               |
 | `--validate` | `false` | run every render-contract check (catalog, templates, partials, facts) once, print a single gap report, and exit 1 on any gap; applies nothing and writes nothing |
 
 `--build` and `--validate` are mutually exclusive.
@@ -49,7 +58,7 @@ directly from `~/.kuke/kuketeams.yaml`. `TEAM_ROOT` is **per-team-scoped**
 `TeamEntry.spec.teamDir` (auto-filled to `Layout.TeamDir(team)` by `kuke
 team init` when omitted, or the operator override when relocated). Two
 teams running on the same operator host see two different `TEAM_ROOT`
-values; there is no host-wide TeamsConfig field for it.
+values; there is no host-wide Workspace field for it.
 
 | Key              | Source                                                                  | Default                                                                |
 | ---------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------- |
@@ -60,7 +69,7 @@ values; there is no host-wide TeamsConfig field for it.
 | `HOME_DIR`       | `~/.kuke/kuketeams.yaml` `spec.homeDir` (override)                      | `$HOME` from the calling process                                       |
 | `REPO_OWNER`     | `~/.kuke/kuketeams.yaml` `spec.repoOwner` (override)                    | owner segment of the agents source's `<owner>/<repo>` (e.g. `eminwux`) |
 
-`HOME_DIR` and `REPO_OWNER` carry an explicit override on `TeamsConfigSpec`
+`HOME_DIR` and `REPO_OWNER` carry an explicit override on `WorkspaceSpec`
 so an operator whose `$HOME` is not the natural reference point — or whose
 identity differs from the agents source owner (e.g., forked agents) — can
 pin the value; the scaffolded global config stays minimal and the common
@@ -72,11 +81,11 @@ Per-project scope: the value is the team-label / on-disk source-tree path /
 agents-source path the current `kuke team init` invocation is composing
 for.
 
-| Key           | Source                                                                         | Default                                               |
-| ------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------- |
-| `NAME`        | `kuketeam.yaml` `spec.projectDir`, falling back to `metadata.name` when unset  | `metadata.name` (the team label; validated non-empty) |
-| `PROJECT_DIR` | `composeTeam`'s `projectDir` argument (`os.Getwd()`)                           | the calling cwd                                       |
-| `AGENTS_REPO` | resolved agents source's `<owner>/<repo>` path                                 | empty when unresolved                                 |
+| Key           | Source                                                                      | Default                                               |
+| ------------- | --------------------------------------------------------------------------- | ----------------------------------------------------- |
+| `NAME`        | `kuketeam.yaml` `spec.cloneDir`, falling back to `metadata.name` when unset | `metadata.name` (the team label; validated non-empty) |
+| `PROJECT_DIR` | `composeTeam`'s `projectDir` argument (`os.Getwd()`)                        | the calling cwd                                       |
+| `AGENTS_REPO` | resolved agents source's `<owner>/<repo>` path                              | empty when unresolved                                 |
 
 ## Exit codes
 

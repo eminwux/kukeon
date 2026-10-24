@@ -136,11 +136,11 @@ func (r *ValidationReport) Write(w io.Writer) error {
 //
 // The fact check is value-independent — it compares referenced keys against
 // the dot-context's key *schema*, not an operator's populated subset — so
-// Validate needs neither the TeamsConfig nor the per-run Inputs that Render
+// Validate needs neither the Workspace nor the per-run Inputs that Render
 // consumes.
 func Validate(
 	bundle *teamsource.Bundle,
-	pt *model.ProjectTeam,
+	pt *model.Team,
 ) *ValidationReport {
 	roles := map[string]*model.Role{}
 	harnessesByName := map[string]*model.Harness{}
@@ -168,13 +168,13 @@ func Validate(
 // rosterHarnessNames returns the deduplicated, lexicographically sorted set
 // of harness names the roster's defaults declare. Sorting pins a stable
 // section order independent of the (slice) declaration order.
-func rosterHarnessNames(pt *model.ProjectTeam) []string {
+func rosterHarnessNames(pt *model.Team) []string {
 	if pt == nil {
 		return nil
 	}
 	seen := map[string]struct{}{}
-	out := make([]string, 0, len(pt.Spec.Defaults.Harnesses))
-	for _, h := range pt.Spec.Defaults.Harnesses {
+	out := make([]string, 0, len(pt.HarnessNames()))
+	for _, h := range pt.HarnessNames() {
 		name := strings.TrimSpace(h)
 		if name == "" {
 			continue
@@ -193,7 +193,7 @@ func rosterHarnessNames(pt *model.ProjectTeam) []string {
 // SelectImage finds a match. Lines are sorted by their `role × harness`
 // body so two runs against the same roster emit byte-identical output.
 func validateCatalog(
-	pt *model.ProjectTeam,
+	pt *model.Team,
 	roles map[string]*model.Role,
 	ic *model.ImageCatalog,
 ) ReportSection {
@@ -202,7 +202,7 @@ func validateCatalog(
 		return sec
 	}
 	harnessNames := rosterHarnessNames(pt)
-	for _, ptRole := range pt.Spec.Roles {
+	for _, ptRole := range pt.SelectedRoles() {
 		role := roles[ptRole.Ref]
 		var roleImageNeeds []string
 		if role != nil {
@@ -437,8 +437,8 @@ func validateFacts(
 // only on which inputs are present, not their values, so synthetic
 // placeholders suffice.
 func knownFactKeys() (map[string]struct{}, map[string]struct{}) {
-	satTC := &model.TeamsConfig{
-		Spec: model.TeamsConfigSpec{
+	satTC := &model.Workspace{
+		Spec: model.WorkspaceSpec{
 			Registry:  "_",
 			HomeDir:   "_",
 			RepoOwner: "_",
@@ -446,7 +446,7 @@ func knownFactKeys() (map[string]struct{}, map[string]struct{}) {
 	}
 	// Author is a promoted field from the embedded ContainerGit, so it is set
 	// by assignment rather than in the composite literal above.
-	satTC.Spec.Git = &model.TeamsConfigGit{}
+	satTC.Spec.Git = &model.WorkspaceGit{}
 	satTC.Spec.Git.Author = &v1beta1.GitIdentity{Name: "_", Email: "_"}
 
 	satSrc := teamsource.Source{Host: "_", OwnerRepo: "_/_"}

@@ -45,7 +45,7 @@ import (
 // projectFileName is the per-project roster committed in each project repo.
 const projectFileName = "kuketeam.yaml"
 
-// registryEnv seeds TeamsConfig.spec.registry on first-run scaffold.
+// registryEnv seeds Workspace.spec.registry on first-run scaffold.
 const registryEnv = "KUKEON_REGISTRY"
 
 // GitConfigFunc reads a single `git config --global <key>` value, reporting
@@ -75,8 +75,8 @@ type MockProjectRepoURLKey struct{}
 type ResolveFunc func(
 	ctx context.Context,
 	cache teamsource.Cache,
-	tc *model.TeamsConfig,
-	pt *model.ProjectTeam,
+	tc *model.Workspace,
+	pt *model.Team,
 ) (*teamsource.Bundle, error)
 
 // MockResolveKey injects a ResolveFunc via context for tests.
@@ -204,7 +204,7 @@ func validateTeam(
 	getGit GitConfigFunc,
 	resolve ResolveFunc,
 ) error {
-	pt, err := readProjectTeam(projectDir)
+	pt, err := readTeam(projectDir)
 	if err != nil {
 		return err
 	}
@@ -221,7 +221,7 @@ func validateTeam(
 	}
 
 	var bundle *teamsource.Bundle
-	if len(pt.Spec.Defaults.Harnesses) > 0 && len(pt.Spec.Roles) > 0 {
+	if len(pt.HarnessNames()) > 0 && len(pt.SelectedRoles()) > 0 {
 		cache := teamsource.NewCache(layout.CacheDir())
 		bundle, err = resolve(ctx, cache, tc, pt)
 		if err != nil {
@@ -268,7 +268,7 @@ func composeTeam(
 	build BuildAllFunc,
 	dryRun, doBuild bool,
 ) error {
-	pt, err := readProjectTeam(projectDir)
+	pt, err := readTeam(projectDir)
 	if err != nil {
 		return err
 	}
@@ -280,7 +280,7 @@ func composeTeam(
 		return errdefs.ErrTeamMetadataNameRequired
 	}
 
-	emitSourceKind(out, pt.Spec.Source)
+	emitSourceKind(out, pt.AgentSource())
 
 	tc, scaffolded, err := loadOrScaffoldGlobalConfig(ctx, layout, getGit, dryRun)
 	if err != nil {
@@ -347,7 +347,7 @@ func composeTeam(
 	totalFailure := applied && failed > 0 && failed == len(applyResult.Resources)
 
 	if !totalFailure {
-		source := pt.Spec.Source
+		source := pt.AgentSource()
 		entry := &model.TeamEntry{
 			APIVersion: model.APIVersionV1,
 			Kind:       model.KindTeamEntry,
@@ -370,7 +370,12 @@ func composeTeam(
 			len(res.Secrets), len(res.Blueprints), len(res.Configs))
 	}
 	if failed > 0 {
-		return fmt.Errorf("%w (%d of %d documents failed)", errdefs.ErrTeamApplyFailed, failed, len(applyResult.Resources))
+		return fmt.Errorf(
+			"%w (%d of %d documents failed)",
+			errdefs.ErrTeamApplyFailed,
+			failed,
+			len(applyResult.Resources),
+		)
 	}
 	return nil
 }
@@ -418,7 +423,7 @@ func resolveTeamDir(layout teamhost.Layout, project string) string {
 // contact for every team, not just teams with rendered cells.
 func provisionHost(
 	out io.Writer, teamDir string,
-	pt *model.ProjectTeam, bundle *teamsource.Bundle, dryRun bool,
+	pt *model.Team, bundle *teamsource.Bundle, dryRun bool,
 ) error {
 	pairs := rosterPairs(pt)
 	harnesses := map[string]*model.Harness{}
@@ -452,13 +457,13 @@ func provisionHost(
 func composeSecrets(
 	out, errOut io.Writer,
 	layout teamhost.Layout, teamDir string,
-	pt *model.ProjectTeam, bundle *teamsource.Bundle,
+	pt *model.Team, bundle *teamsource.Bundle,
 	res *teamrender.Result, dryRun bool,
 ) error {
 	if bundle == nil || res == nil {
 		return nil
 	}
-	needs := teamsecrets.UnionSecretNames(bundle.Roles, pt.Spec.Roles, pt.Spec.Defaults.Harnesses)
+	needs := teamsecrets.UnionSecretNames(bundle.Roles, pt.SelectedRoles(), pt.HarnessNames())
 	if len(needs) == 0 {
 		return nil
 	}
@@ -526,19 +531,19 @@ func pruneEmptySecretBindings(configs []*v1beta1.CellConfigDoc, emptyKeys []stri
 	}
 }
 
-// rosterPairs flattens pt.Spec.Roles × pt.Spec.Defaults.Harnesses into the
+// rosterPairs flattens pt.SelectedRoles() × pt.HarnessNames() into the
 // concrete (role × harness) pairs the provisioning pass materializes state
 // dirs for. A role-less or harness-less project produces an empty list.
-func rosterPairs(pt *model.ProjectTeam) []teamhost.SeedPair {
+func rosterPairs(pt *model.Team) []teamhost.SeedPair {
 	if pt == nil {
 		return nil
 	}
-	if len(pt.Spec.Roles) == 0 || len(pt.Spec.Defaults.Harnesses) == 0 {
+	if len(pt.SelectedRoles()) == 0 || len(pt.HarnessNames()) == 0 {
 		return nil
 	}
-	pairs := make([]teamhost.SeedPair, 0, len(pt.Spec.Roles)*len(pt.Spec.Defaults.Harnesses))
-	for _, role := range pt.Spec.Roles {
-		for _, harness := range pt.Spec.Defaults.Harnesses {
+	pairs := make([]teamhost.SeedPair, 0, len(pt.SelectedRoles())*len(pt.HarnessNames()))
+	for _, role := range pt.SelectedRoles() {
+		for _, harness := range pt.HarnessNames() {
 			pairs = append(pairs, teamhost.SeedPair{Role: role.Ref, Harness: harness})
 		}
 	}
@@ -611,7 +616,7 @@ func emitSourceKind(out io.Writer, src model.TeamSource) {
 		host, ownerRepo, kind, value, src.KindLabel())
 }
 
-// loadOrScaffoldGlobalConfig returns the TeamsConfig the render pipeline
+// loadOrScaffoldGlobalConfig returns the Workspace the render pipeline
 // consumes. When the file already exists, it is parsed off disk and
 // returned with scaffolded=false. When it is absent, a scaffold is
 // composed from the operator's git config + KUKEON_REGISTRY; in non-dry-run
@@ -623,7 +628,7 @@ func loadOrScaffoldGlobalConfig(
 	layout teamhost.Layout,
 	getGit GitConfigFunc,
 	dryRun bool,
-) (*model.TeamsConfig, bool, error) {
+) (*model.Workspace, bool, error) {
 	path := layout.GlobalConfigPath()
 	raw, readErr := os.ReadFile(path)
 	if readErr == nil {
@@ -631,10 +636,10 @@ func loadOrScaffoldGlobalConfig(
 		if parseErr != nil {
 			return nil, false, fmt.Errorf("parse %q: %w", path, parseErr)
 		}
-		if doc.TeamsConfig == nil {
-			return nil, false, fmt.Errorf("%s: expected TeamsConfig, got kind %q", path, doc.Kind)
+		if doc.Workspace == nil {
+			return nil, false, fmt.Errorf("%s: expected Workspace, got kind %q", path, doc.Kind)
 		}
-		return doc.TeamsConfig, false, nil
+		return doc.Workspace, false, nil
 	}
 	if !errors.Is(readErr, os.ErrNotExist) {
 		return nil, false, fmt.Errorf("read %q: %w", path, readErr)
@@ -667,14 +672,14 @@ func renderTeam(
 	ctx context.Context,
 	layout teamhost.Layout,
 	projectDir, teamDir string,
-	pt *model.ProjectTeam,
-	tc *model.TeamsConfig,
+	pt *model.Team,
+	tc *model.Workspace,
 	project string,
 	getProjectURL ProjectRepoURLFunc,
 	resolve ResolveFunc,
 	doBuild bool,
 ) (*teamrender.Result, *teamsource.Bundle, error) {
-	if len(pt.Spec.Defaults.Harnesses) == 0 || len(pt.Spec.Roles) == 0 {
+	if len(pt.HarnessNames()) == 0 || len(pt.SelectedRoles()) == 0 {
 		return &teamrender.Result{}, nil, nil
 	}
 
@@ -689,7 +694,7 @@ func renderTeam(
 		Project:         project,
 		ProjectRepoURL:  strings.TrimSpace(projectURL),
 		ProjectDir:      projectDir,
-		ProjectCloneDir: strings.TrimSpace(pt.Spec.ProjectDir),
+		ProjectCloneDir: strings.TrimSpace(pt.Spec.CloneDir),
 		TeamDir:         teamDir,
 		Realm:           pt.Spec.Realm,
 		Space:           pt.Spec.Space,
@@ -738,10 +743,10 @@ func emitDryRun(out io.Writer, project string, layout teamhost.Layout, res *team
 	return nil
 }
 
-// readProjectTeam loads <projectDir>/kuketeam.yaml and returns the parsed
-// ProjectTeam. A missing file surfaces ErrTeamProjectFileNotFound; a parsed
+// readTeam loads <projectDir>/kuketeam.yaml and returns the parsed
+// Team. A missing file surfaces ErrTeamProjectFileNotFound; a parsed
 // document of the wrong kind surfaces ErrTeamProjectFileKind.
-func readProjectTeam(projectDir string) (*model.ProjectTeam, error) {
+func readTeam(projectDir string) (*model.Team, error) {
 	path := filepath.Join(projectDir, projectFileName)
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -754,21 +759,21 @@ func readProjectTeam(projectDir string) (*model.ProjectTeam, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse %q: %w", path, err)
 	}
-	if doc.ProjectTeam == nil {
+	if doc.Team == nil {
 		return nil, fmt.Errorf("%w (got kind %q in %q)", errdefs.ErrTeamProjectFileKind, doc.Kind, path)
 	}
-	return doc.ProjectTeam, nil
+	return doc.Team, nil
 }
 
-// buildGlobalConfig assembles the operator-global TeamsConfig scaffolded on
+// buildGlobalConfig assembles the operator-global Workspace scaffolded on
 // first run: git identity/signing seeded from `git config --global`, registry
 // from the KUKEON_REGISTRY env. Sources and secrets are left empty for the
 // operator to fill in (no interactive prompt — the verb is non-interactive).
-func buildGlobalConfig(ctx context.Context, getGit GitConfigFunc) *model.TeamsConfig {
-	cfg := &model.TeamsConfig{
+func buildGlobalConfig(ctx context.Context, getGit GitConfigFunc) *model.Workspace {
+	cfg := &model.Workspace{
 		APIVersion: model.APIVersionV1,
-		Kind:       model.KindTeamsConfig,
-		Spec:       model.TeamsConfigSpec{},
+		Kind:       model.KindWorkspace,
+		Spec:       model.WorkspaceSpec{},
 	}
 
 	if reg := strings.TrimSpace(os.Getenv(registryEnv)); reg != "" {
@@ -782,18 +787,18 @@ func buildGlobalConfig(ctx context.Context, getGit GitConfigFunc) *model.TeamsCo
 	return cfg
 }
 
-// seedGit builds a TeamsConfigGit from the operator's global git config. It
+// seedGit builds a WorkspaceGit from the operator's global git config. It
 // returns nil when no usable identity is present, so the scaffold omits the git
 // block entirely rather than emitting a half-populated one. Sign entries are
 // only seeded when a signing key is present, keeping the scaffold valid against
 // the parser's git.sign-requires-signingKey rule.
-func seedGit(ctx context.Context, getGit GitConfigFunc) *model.TeamsConfigGit {
+func seedGit(ctx context.Context, getGit GitConfigFunc) *model.WorkspaceGit {
 	name, hasName := getGit(ctx, "user.name")
 	email, hasEmail := getGit(ctx, "user.email")
 	signingKey, _ := getGit(ctx, "user.signingkey")
 	allowedSigners, _ := getGit(ctx, "gpg.ssh.allowedSignersFile")
 
-	git := &model.TeamsConfigGit{}
+	git := &model.WorkspaceGit{}
 	populated := false
 
 	if hasName && hasEmail && strings.TrimSpace(name) != "" && strings.TrimSpace(email) != "" {
@@ -913,8 +918,8 @@ func realProjectRepoURL(ctx context.Context, projectDir string) (string, bool) {
 func realResolve(
 	ctx context.Context,
 	cache teamsource.Cache,
-	tc *model.TeamsConfig,
-	pt *model.ProjectTeam,
+	tc *model.Workspace,
+	pt *model.Team,
 ) (*teamsource.Bundle, error) {
 	return teamsource.Resolve(ctx, cache, tc, pt)
 }

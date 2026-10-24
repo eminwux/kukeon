@@ -18,7 +18,7 @@ package kuketeams
 
 // TeamEntry is the host-side, per-project composition record written by
 // `kuke team init` to ~/.kuke/kuketeam.d/<project>.yaml — one document per
-// file. It replaces the former TeamsConfig.spec.teams[] array: a drop-in
+// file. It replaces the former Workspace.spec.teams[] array: a drop-in
 // directory (the systemd/sudoers.d pattern) keeps each project isolated, so a
 // corrupt or partial write touches one project and two concurrent inits never
 // race on a shared array.
@@ -33,7 +33,7 @@ type TeamEntry struct {
 // init-time LOCATOR (where the project's kuketeam.yaml was read and from where
 // its clone URL is resolved via `git remote`), not a bind-mount source. Source
 // is the structured agents-repository reference (the same TeamSource struct
-// ProjectTeam carries), copied from the project's kuketeam.yaml at init time.
+// Team carries), copied from the project's kuketeam.yaml at init time.
 //
 // TeamDir is the per-team host-state root (typically
 // `<base>/teams/<team>/`). `kuke team init` auto-populates it from

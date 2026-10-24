@@ -79,7 +79,7 @@ func twoHarnessBundle(
 	cacheDir string,
 	devNeeds []string,
 	opencodeTmpl string,
-) (*teamsource.Bundle, *model.ProjectTeam) {
+) (*teamsource.Bundle, *model.Team) {
 	const claudeTmpl = "blueprint.tmpl.yaml"
 	role := &model.Role{
 		APIVersion: model.APIVersionV1,
@@ -129,13 +129,15 @@ func twoHarnessBundle(
 		},
 		ImageCatalog: ic,
 	}
-	pt := &model.ProjectTeam{
+	pt := &model.Team{
 		APIVersion: model.APIVersionV1,
-		Kind:       model.KindProjectTeam,
+		Kind:       model.KindTeam,
 		Metadata:   model.Metadata{Name: "proj"},
-		Spec: model.ProjectTeamSpec{
-			Defaults: model.ProjectTeamDefaults{Harnesses: []string{"claude", "opencode"}},
-			Roles:    []model.ProjectTeamRole{{Ref: "dev"}},
+		Spec: model.TeamSpec{
+			TeamSelections: model.TeamSelections{
+				Harnesses: &[]model.TeamHarness{{Name: "claude"}, {Name: "opencode"}},
+				Roles:     &[]model.TeamRole{{Ref: "dev"}},
+			},
 		},
 	}
 	return bundle, pt
@@ -345,8 +347,8 @@ func TestValidateFactsIgnoresCommentedReferences(t *testing.T) {
 	t.Parallel()
 	cacheDir := t.TempDir()
 	writeHarnessFile(t, cacheDir, "claude", "blueprint.tmpl.yaml",
-		"#   - {{ .operator.X }} pulls from TeamsConfig (REGISTRY, HOME_DIR, ...).\n"+
-			"#   - {{ .project.X }}  pulls from ProjectTeam (AGENTS_REPO, PROJECT_DIR).\n"+
+		"#   - {{ .operator.X }} pulls from Workspace (REGISTRY, HOME_DIR, ...).\n"+
+			"#   - {{ .project.X }}  pulls from Team (AGENTS_REPO, PROJECT_DIR).\n"+
 			"kind: CellBlueprint\n"+
 			"name: {{ .project.NAME }}  # {{ .operator.ALSO_COMMENTED }} ignored\n"+
 			"bad: {{ .operator.REAL_GAP }}\n")
@@ -409,10 +411,10 @@ func TestKnownFactKeysCoverRendererContract(t *testing.T) {
 
 func TestValidateHarnessLessRosterEmptySections(t *testing.T) {
 	t.Parallel()
-	pt := &model.ProjectTeam{
-		APIVersion: model.APIVersionV1, Kind: model.KindProjectTeam,
+	pt := &model.Team{
+		APIVersion: model.APIVersionV1, Kind: model.KindTeam,
 		Metadata: model.Metadata{Name: "proj"},
-		Spec:     model.ProjectTeamSpec{}, // no roles, no harnesses
+		Spec:     model.TeamSpec{}, // no roles, no harnesses
 	}
 	rep := Validate(nil, pt)
 	if rep.HasMiss() {

@@ -335,13 +335,13 @@ func KebabCase(s string) string {
 // out of secrets.env, not just a dangling CellConfig fill (#1160).
 //
 // The per-harness contribution is gated by harnesses (the team's selected set,
-// ProjectTeam.spec.defaults.harnesses), so a role's Codex/OpenCode-only secret
+// Team.spec.harnesses), so a role's Codex/OpenCode-only secret
 // is not gathered when those harnesses aren't selected. The role-level
 // needs.secrets fallback is harness-independent and always contributes. Roles
 // missing from roles map are skipped silently — Render would surface the
 // missing reference, but at the pre-compose secret-name discovery stage there's
 // nothing to warn about (the parent renderer already surfaces missing roles).
-func UnionSecretNames(roles map[string]*model.Role, roster []model.ProjectTeamRole, harnesses []string) []string {
+func UnionSecretNames(roles map[string]*model.Role, roster []model.TeamRole, harnesses []string) []string {
 	if len(roster) == 0 || len(roles) == 0 {
 		return nil
 	}

@@ -22,7 +22,7 @@ import "strings"
 // `<owner>/<repo>` with no host segment.
 const DefaultSourceHost = "github.com"
 
-// TeamSource is the structured agents-source reference shared by ProjectTeam
+// TeamSource is the structured agents-source reference shared by Team
 // and TeamEntry. It replaces the former `<owner>/<repo>@vX.Y.Z` string form:
 // `repo` is host-explicit and exactly one of `tag`/`branch`/`commit` carries
 // the ref intent. The key name IS the intent — `tag`/`commit` pin to a
@@ -102,4 +102,12 @@ func (s TeamSource) Normalized() (string, string) {
 		return first, rest
 	}
 	return DefaultSourceHost, repo
+}
+
+// DefinitionSource adds a repository-relative definition root to the existing
+// versioned source contract. Path never denotes a clone destination.
+type DefinitionSource struct {
+	TeamSource `yaml:",inline"`
+
+	Path string `json:"path,omitempty" yaml:"path,omitempty"`
 }

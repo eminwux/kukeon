@@ -1,0 +1,4 @@
+apiVersion: kuketeams.io/v1
+kind: ProjectTeam
+metadata: {name: example}
+spec: {source: {repo: example/agents, tag: v1}, roles: [{ref: dev}]}

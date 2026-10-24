@@ -29,11 +29,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func globalConfig() *model.TeamsConfig {
-	return &model.TeamsConfig{
+func globalConfig() *model.Workspace {
+	return &model.Workspace{
 		APIVersion: model.APIVersionV1,
-		Kind:       model.KindTeamsConfig,
-		Spec:       model.TeamsConfigSpec{Registry: "registry.example.com"},
+		Kind:       model.KindWorkspace,
+		Spec:       model.WorkspaceSpec{Registry: "registry.example.com"},
 	}
 }
 

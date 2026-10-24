@@ -1,0 +1,252 @@
+[
+  {
+    "file": "unknown.invalid",
+    "kind": "team",
+    "field": "spec.unexpected"
+  },
+  {
+    "file": "unknown-nested.invalid",
+    "kind": "team",
+    "field": "spec.source.ref"
+  },
+  {
+    "file": "duplicate-alias.invalid",
+    "kind": "team",
+    "field": "spec.roles[1].name"
+  },
+  {
+    "file": "implicit-alias-collision.invalid",
+    "kind": "team",
+    "field": "spec.roles[1].name"
+  },
+  {
+    "file": "selectors.invalid",
+    "kind": "team",
+    "field": "spec.source"
+  },
+  {
+    "file": "missing-selector.invalid",
+    "kind": "team",
+    "field": "spec.source"
+  },
+  {
+    "file": "default-harnesses.invalid",
+    "kind": "team",
+    "field": "spec.harnesses[1].default"
+  },
+  {
+    "file": "duplicate-harnesses.invalid",
+    "kind": "team",
+    "field": "spec.harnesses[1].name"
+  },
+  {
+    "file": "source-path.invalid",
+    "kind": "team",
+    "field": "spec.source.path"
+  },
+  {
+    "file": "role-path.invalid",
+    "kind": "team",
+    "field": "spec.roles[0].path"
+  },
+  {
+    "file": "clone-path.invalid",
+    "kind": "team",
+    "field": "spec.cloneDir"
+  },
+  {
+    "file": "clone-collision.invalid",
+    "kind": "team",
+    "field": "spec.cloneDir"
+  },
+  {
+    "file": "clone-without-repo.invalid",
+    "kind": "team",
+    "field": "spec.cloneDir"
+  },
+  {
+    "file": "cwd-path.invalid",
+    "kind": "team",
+    "field": "spec.cwd"
+  },
+  {
+    "file": "cwd-expansion.invalid",
+    "kind": "team",
+    "field": "spec.cwd"
+  },
+  {
+    "file": "state-path.invalid",
+    "kind": "team",
+    "field": "spec.stateDir"
+  },
+  {
+    "file": "local-repo.invalid",
+    "kind": "team",
+    "field": "spec.repo.repo"
+  },
+  {
+    "file": "repo-selector.invalid",
+    "kind": "team",
+    "field": "spec.repo.branch"
+  },
+  {
+    "file": "mode.invalid",
+    "kind": "team",
+    "field": "spec.modes[0]"
+  },
+  {
+    "file": "duplicate-mode.invalid",
+    "kind": "team",
+    "field": "spec.modes[1]"
+  },
+  {
+    "file": "unsafe-name.invalid",
+    "kind": "team",
+    "field": "metadata.name"
+  },
+  {
+    "file": "unknown-kind.invalid",
+    "kind": "team",
+    "field": "kind"
+  },
+  {
+    "file": "legacy-entry.invalid",
+    "kind": "team",
+    "field": "kind"
+  },
+  {
+    "file": "legacy-project.invalid",
+    "kind": "team",
+    "field": "kind"
+  },
+  {
+    "file": "legacy-config.invalid",
+    "kind": "workspace",
+    "field": "kind"
+  },
+  {
+    "file": "aggregate.invalid",
+    "kind": "workspace",
+    "field": "apiVersion"
+  },
+  {
+    "file": "multiple-projects.invalid",
+    "kind": "team",
+    "field": "spec.sources"
+  },
+  {
+    "file": "retired-name.invalid",
+    "kind": "workspace",
+    "field": "metadata"
+  },
+  {
+    "file": "retired-status.invalid",
+    "kind": "workspace",
+    "field": "status"
+  },
+  {
+    "file": "mount-target.invalid",
+    "kind": "workspace",
+    "field": "spec.credentials[0].volumeMount.target"
+  },
+  {
+    "file": "mount-expansion.invalid",
+    "kind": "workspace",
+    "field": "spec.credentials[0].volumeMount.target"
+  },
+  {
+    "file": "secret-value.invalid",
+    "kind": "workspace",
+    "field": "spec.secrets.token.value"
+  },
+  {
+    "file": "secret-source.invalid",
+    "kind": "workspace",
+    "field": "spec.secrets.token.from"
+  },
+  {
+    "file": "duplicate-credential.invalid",
+    "kind": "workspace",
+    "field": "spec.credentials[1].name"
+  },
+  {
+    "file": "transport-catalog.invalid",
+    "kind": "workspace",
+    "field": "spec.sources"
+  },
+  {
+    "file": "duplicate-key.invalid",
+    "kind": "team",
+    "field": "spec.cwd"
+  },
+  {
+    "file": "null-list.invalid",
+    "kind": "team",
+    "field": "spec.roles"
+  },
+  {
+    "file": "null-grants.invalid",
+    "kind": "team",
+    "field": "spec.integrations.git.credentials"
+  },
+  {
+    "file": "wrong-type.invalid",
+    "kind": "team",
+    "field": "spec.cwd"
+  },
+  {
+    "file": "missing-spec.invalid",
+    "kind": "team",
+    "field": "spec"
+  },
+  {
+    "file": "malformed.invalid",
+    "kind": "team",
+    "field": "document"
+  },
+  {
+    "file": "extra-document.invalid",
+    "kind": "team",
+    "field": "document"
+  },
+  {
+    "file": "git-author-email.invalid",
+    "kind": "workspace",
+    "field": "spec.git.author.email"
+  },
+  {
+    "file": "git-committer-name.invalid",
+    "kind": "workspace",
+    "field": "spec.git.committer.name"
+  },
+  {
+    "file": "git-signing-key.invalid",
+    "kind": "workspace",
+    "field": "spec.git.signingKey"
+  },
+  {
+    "file": "git-sign-target.invalid",
+    "kind": "workspace",
+    "field": "spec.git.sign[0]"
+  },
+  {
+    "file": "duplicate-grants.invalid",
+    "kind": "team",
+    "field": "spec.integrations.git.credentials[1]"
+  },
+  {
+    "file": "alias-node.invalid",
+    "kind": "team",
+    "field": "spec.roles[0].name"
+  },
+  {
+    "file": "mount-traversal.invalid",
+    "kind": "workspace",
+    "field": "spec.credentials[0].volumeMount.target"
+  },
+  {
+    "file": "unsafe-harness-path.invalid",
+    "kind": "team",
+    "field": "spec.harnesses[0].path"
+  }
+]

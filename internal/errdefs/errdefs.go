@@ -634,10 +634,10 @@ var (
 	ErrControllerNoChange = errors.New("controller reported no change")
 
 	// Team-distribution parse/validation errors (kuketeams.io/v1 kinds —
-	// ProjectTeam, TeamsConfig, TeamEntry, Role, Harness, ImageCatalog).
+	// Team, Workspace, TeamEntry, Role, Harness, ImageCatalog).
 	// Issue #793, epic #792.
 
-	// ErrTeamMetadataNameRequired fires when a ProjectTeam/Role/Harness omits
+	// ErrTeamMetadataNameRequired fires when a Team/Role/Harness omits
 	// metadata.name.
 	ErrTeamMetadataNameRequired = errors.New("metadata.name is required")
 	// ErrTeamSourceInvalid fires when a structured `source` object is malformed:
@@ -652,7 +652,7 @@ var (
 	ErrTeamSourceStringForm = errors.New(
 		"source is now a structured object (repo + one of tag/branch/commit); the `<owner>/<repo>@<version>` string form is no longer supported — migrate to e.g. `source:\n  repo: github.com/eminwux/agents\n  tag: v1.4.0`",
 	)
-	// ErrTeamRoleRefRequired fires when a ProjectTeam roles[] entry omits ref.
+	// ErrTeamRoleRefRequired fires when a Team roles[] entry omits ref.
 	ErrTeamRoleRefRequired = errors.New("roles[].ref is required")
 	// ErrTeamImageCapabilityInvalid fires when an image capability entry looks
 	// like an image tag/digest instead of a bare capability name.
@@ -668,12 +668,12 @@ var (
 	ErrTeamGitSignInvalid = errors.New("git.sign entries must be one of: commits, tags")
 	// ErrTeamGitSignNeedsKey fires when git.sign is set without git.signingKey.
 	ErrTeamGitSignNeedsKey = errors.New("git.sign requires git.signingKey")
-	// ErrTeamSecretSourceInvalid fires when a TeamsConfig secret omits a valid
+	// ErrTeamSecretSourceInvalid fires when a Workspace secret omits a valid
 	// source (from: env|file) or its key.
 	ErrTeamSecretSourceInvalid = errors.New(
 		"secret must declare a source (from: env|file) and a key, never an inline value",
 	)
-	// ErrTeamSourceKeyInvalid fires when a TeamsConfig sources[] override key is
+	// ErrTeamSourceKeyInvalid fires when a Workspace sources[] override key is
 	// not in `<owner>/<repo>` or host-qualified `<host>/<owner>/<repo>` form.
 	ErrTeamSourceKeyInvalid = errors.New(
 		"sources key must be in <owner>/<repo> or <host>/<owner>/<repo> form",
@@ -681,30 +681,22 @@ var (
 	// ErrTeamEntryNameRequired fires when a TeamEntry omits metadata.name (the
 	// per-project drop-in filename key).
 	ErrTeamEntryNameRequired = errors.New("teamEntry metadata.name is required")
-	// ErrTeamMetadataNameUnsafe guards every ProjectTeam/TeamEntry metadata.name
+	// ErrTeamMetadataNameUnsafe guards every Team/TeamEntry metadata.name
 	// that flows into Layout.EntryPath against path traversal: a "/" or "\"
 	// separator, a NUL byte, a ".." substring, or a leading "." would let
 	// filepath.Join escape the drop-in directory and overwrite the operator's
-	// own global facts file (e.g. metadata.name "../kuketeams" resolves to
-	// ~/.kuke/kuketeams.yaml). Enforced at the parser layer and as
+	// own global facts file (e.g. metadata.name "../workspace" resolves to
+	// ~/.kuke/workspace.yaml). Enforced at the parser layer and as
 	// defense-in-depth in teamhost.WriteEntry.
 	ErrTeamMetadataNameUnsafe = errors.New(
 		"metadata.name must not contain path separators, NUL, '..', or a leading '.'",
-	)
-	// ErrTeamProjectDirInvalid fires when a ProjectTeam spec.projectDir is not a
-	// safe path basename (it flows into the in-cell `/home/<user>/<dir>` clone
-	// path the same way metadata.name does, so the same traversal guard
-	// applies), or when it equals the reserved `agents` repo slot dir — the
-	// collision spec.projectDir exists to avoid in the first place.
-	ErrTeamProjectDirInvalid = errors.New(
-		"spec.projectDir must be a safe path basename and must not equal the reserved \"agents\" slot dir",
 	)
 	// ErrTeamProjectFileNotFound fires when `kuke team init` finds no
 	// kuketeam.yaml in the current project directory.
 	ErrTeamProjectFileNotFound = errors.New("no kuketeam.yaml found in the current directory")
 	// ErrTeamProjectFileKind fires when the project file parses but is not a
-	// ProjectTeam document.
-	ErrTeamProjectFileKind = errors.New("project file must be a ProjectTeam document")
+	// Team document.
+	ErrTeamProjectFileKind = errors.New("project file must be a Team document")
 	// ErrTeamHarnessFieldRequired fires when a Harness omits skillPath,
 	// makeTarget, or template.
 	ErrTeamHarnessFieldRequired = errors.New(
@@ -802,3 +794,6 @@ var (
 		"team init: one or more documents failed to apply",
 	)
 )
+
+// ErrTeamConfigurationInvalid marks a structurally invalid Workspace or Team.
+var ErrTeamConfigurationInvalid = errors.New("invalid team configuration")

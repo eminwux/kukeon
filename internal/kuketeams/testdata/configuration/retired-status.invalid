@@ -1,0 +1,5 @@
+apiVersion: kuketeams.io/v1
+kind: Workspace
+spec:
+  defaults: {}
+status: {configs: 2}

@@ -1,0 +1,53 @@
+# ~/.kuke/workspace.yaml; extended defaults/resolution integration is follow-on work.
+# First init seeds Git fields via git config --global. Explicit values below are placeholders.
+apiVersion: kuketeams.io/v1
+kind: Workspace
+spec:
+  git:
+    author: { name: Example Operator, email: operator@example.com }
+    committer: { name: Example Operator, email: operator@example.com }
+    signingKey: /home/agent/.ssh/signing_key.pub
+    sign: [commits, tags]
+    allowedSigners: /home/agent/.ssh/allowed_signers
+    sshKey: ~/.ssh/id_ed25519
+  registry: registry.example.com
+  homeDir: /home/operator
+  repoOwner: example
+  # Transport overrides, NOT versioned source definitions.
+  sources:
+    github.com/example/agents: git@github.com:example/agents.git
+  secrets:
+    github-token: { from: env, key: EXAMPLE_GITHUB_TOKEN }
+    git-key: { from: file, key: ~/.ssh/example_git_key }
+    session-file: { from: file, key: ~/.config/example/session.json }
+  credentials:
+    - name: github-api
+      secretRef: github-token
+    - name: git-auth
+      secretRef: git-key
+      volumeMount: { target: /home/agent/.ssh/project_key, readOnly: true }
+    - name: session
+      secretRef: session-file
+      volumeMount:
+        { target: /home/agent/.config/example/session.json, readOnly: false }
+    - name: git-auth-default-ro
+      secretRef: git-key
+      volumeMount: { target: /home/agent/.ssh/readonly_key }
+  defaults:
+    source:
+      repo: github.com/example/agents
+      tag: v1.4.0
+      path: definitions
+    roles:
+      - ref: dev
+      - ref: pr-reviewer
+    harnesses:
+      - name: codex
+        path: harnesses/codex/blueprint.yaml
+        default: true
+      - name: claude
+    modes: [interactive, headless]
+    # Declaring credentials above grants nothing; grants are explicit per client.
+    integrations:
+      gh: { credentials: [github-api] }
+      git: { credentials: [git-auth] }

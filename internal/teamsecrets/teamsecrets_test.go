@@ -296,7 +296,7 @@ func TestUnionSecretNames(t *testing.T) {
 	tests := []struct {
 		name      string
 		roles     map[string]*model.Role
-		roster    []model.ProjectTeamRole
+		roster    []model.TeamRole
 		harnesses []string
 		want      []string
 	}{
@@ -310,7 +310,7 @@ func TestUnionSecretNames(t *testing.T) {
 					},
 				},
 			},
-			roster: []model.ProjectTeamRole{
+			roster: []model.TeamRole{
 				{Ref: "dev"},
 				{Ref: "pm"},
 				{Ref: "unknown-role"}, // skipped silently
@@ -330,7 +330,7 @@ func TestUnionSecretNames(t *testing.T) {
 					},
 				}},
 			},
-			roster:    []model.ProjectTeamRole{{Ref: "dev"}},
+			roster:    []model.TeamRole{{Ref: "dev"}},
 			harnesses: []string{"claude"},
 			want:      []string{"claude-code-oauth-token"},
 		},
@@ -346,7 +346,7 @@ func TestUnionSecretNames(t *testing.T) {
 					},
 				}},
 			},
-			roster:    []model.ProjectTeamRole{{Ref: "dev"}},
+			roster:    []model.TeamRole{{Ref: "dev"}},
 			harnesses: []string{"claude"},
 			want:      []string{"claude-code-oauth-token"},
 		},
@@ -362,7 +362,7 @@ func TestUnionSecretNames(t *testing.T) {
 					Needs: model.RoleNeeds{Secrets: []string{"shared-token", "ANTHROPIC_AUTH_TOKEN"}},
 				}},
 			},
-			roster:    []model.ProjectTeamRole{{Ref: "dev"}},
+			roster:    []model.TeamRole{{Ref: "dev"}},
 			harnesses: []string{"claude"},
 			want:      []string{"ANTHROPIC_AUTH_TOKEN", "claude-code-oauth-token", "shared-token"},
 		},

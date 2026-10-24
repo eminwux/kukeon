@@ -239,14 +239,14 @@ func TestCloneURL_SSHDefault(t *testing.T) {
 	if got := CloneURL(nil, src); got != "git@github.com:eminwux/agents.git" {
 		t.Errorf("CloneURL(nil) = %q, want SSH default", got)
 	}
-	if got := CloneURL(&model.TeamsConfig{}, src); got != "git@github.com:eminwux/agents.git" {
+	if got := CloneURL(&model.Workspace{}, src); got != "git@github.com:eminwux/agents.git" {
 		t.Errorf("CloneURL(empty) = %q, want SSH default", got)
 	}
 }
 
 func TestCloneURL_OverrideByOwnerRepo(t *testing.T) {
 	t.Parallel()
-	tc := &model.TeamsConfig{Spec: model.TeamsConfigSpec{
+	tc := &model.Workspace{Spec: model.WorkspaceSpec{
 		Sources: map[string]string{"eminwux/agents": "  https://internal.mirror/eminwux/agents.git  "},
 	}}
 	if got := CloneURL(tc, tagSrc(t)); got != "https://internal.mirror/eminwux/agents.git" {
@@ -256,7 +256,7 @@ func TestCloneURL_OverrideByOwnerRepo(t *testing.T) {
 
 func TestCloneURL_OverrideByHostQualifiedRepo(t *testing.T) {
 	t.Parallel()
-	tc := &model.TeamsConfig{Spec: model.TeamsConfigSpec{
+	tc := &model.Workspace{Spec: model.WorkspaceSpec{
 		Sources: map[string]string{"github.com/eminwux/agents": "https://internal.mirror/agents.git"},
 	}}
 	if got := CloneURL(tc, tagSrc(t)); got != "https://internal.mirror/agents.git" {
@@ -266,7 +266,7 @@ func TestCloneURL_OverrideByHostQualifiedRepo(t *testing.T) {
 
 func TestCloneURL_BlankOverrideFallsBackToSSH(t *testing.T) {
 	t.Parallel()
-	tc := &model.TeamsConfig{Spec: model.TeamsConfigSpec{
+	tc := &model.Workspace{Spec: model.WorkspaceSpec{
 		Sources: map[string]string{"eminwux/agents": "   "},
 	}}
 	if got := CloneURL(tc, tagSrc(t)); got != "git@github.com:eminwux/agents.git" {
@@ -489,16 +489,20 @@ func TestResolve_LoadsAllReferenced(t *testing.T) {
 	cache := NewCache(filepath.Join(t.TempDir(), "cache"))
 	// Default transport is SSH; an override points the resolver at the local
 	// fixture remote without a live SSH host.
-	tc := &model.TeamsConfig{
-		Spec: model.TeamsConfigSpec{
+	tc := &model.Workspace{
+		Spec: model.WorkspaceSpec{
 			Sources: map[string]string{"eminwux/agents": url},
 		},
 	}
-	pt := &model.ProjectTeam{
-		Spec: model.ProjectTeamSpec{
-			Source:   model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"},
-			Defaults: model.ProjectTeamDefaults{Harnesses: []string{"claude"}},
-			Roles:    []model.ProjectTeamRole{{Ref: "dev"}},
+	pt := &model.Team{
+		Spec: model.TeamSpec{
+			TeamSelections: model.TeamSelections{
+				Source: &model.DefinitionSource{
+					TeamSource: model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"},
+				},
+				Harnesses: &[]model.TeamHarness{{Name: "claude"}},
+				Roles:     &[]model.TeamRole{{Ref: "dev"}},
+			},
 		},
 	}
 	b, err := Resolve(context.Background(), cache, tc, pt)
@@ -518,10 +522,14 @@ func TestResolve_LoadsAllReferenced(t *testing.T) {
 
 func TestResolve_InvalidSourceErrors(t *testing.T) {
 	t.Parallel()
-	tc := &model.TeamsConfig{Spec: model.TeamsConfigSpec{}}
-	pt := &model.ProjectTeam{
+	tc := &model.Workspace{Spec: model.WorkspaceSpec{}}
+	pt := &model.Team{
 		// No ref set — exactly-one-of violated.
-		Spec: model.ProjectTeamSpec{Source: model.TeamSource{Repo: "github.com/eminwux/agents"}},
+		Spec: model.TeamSpec{
+			TeamSelections: model.TeamSelections{
+				Source: &model.DefinitionSource{TeamSource: model.TeamSource{Repo: "github.com/eminwux/agents"}},
+			},
+		},
 	}
 	cache := NewCache(filepath.Join(t.TempDir(), "cache"))
 	_, err := Resolve(context.Background(), cache, tc, pt)

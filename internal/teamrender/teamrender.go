@@ -14,7 +14,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-// Package teamrender renders a project's ProjectTeam roster into a set of
+// Package teamrender renders a project's Team roster into a set of
 // CellBlueprint and CellConfig documents — one (CellBlueprint, CellConfig)
 // pair per `(role × harness)` (epic #792, step 3 #1042). For each pair the
 // pipeline:
@@ -39,7 +39,7 @@
 //     transpile.
 //  4. bind — produce a CellConfig that references the just-rendered
 //     blueprint and carries (a) operator facts pulled from
-//     `~/.kuke/kuketeams.yaml` (git author/committer/signingKey/registry
+//     `~/.kuke/workspace.yaml` (git author/committer/signingKey/registry
 //     stamped into Values), (b) the project's cloned repo URL stamped
 //     into the `project` repo slot fill, and (c) for every secret the
 //     role declares it needs and the blueprint declares a slot for, an
@@ -104,7 +104,7 @@ const ProjectRepoSlotName = "project"
 
 // AgentsRepoSlotName mirrors ProjectRepoSlotName for the pinned agents
 // source clone. `BindConfig` fills it from the operator's
-// `TeamsConfig.spec.sources[<owner/repo>]` mapping when the blueprint
+// `Workspace.spec.sources[<owner/repo>]` mapping when the blueprint
 // declares the slot.
 const AgentsRepoSlotName = "agents"
 
@@ -131,7 +131,7 @@ type Inputs struct {
 	// ProjectCloneDir overrides the in-cell project clone dir basename the
 	// renderer exposes as `.project.NAME` (the fact a blueprint's `project` repo
 	// target reads for its `/home/<user>/<dir>` clone path). Sourced from the
-	// project's kuketeam.yaml spec.projectDir; empty falls back to Project (the
+	// project's kuketeam.yaml spec.cloneDir; empty falls back to Project (the
 	// team label). Distinct from ProjectDir above — that is the on-host
 	// source-tree path (`.project.PROJECT_DIR`), this is the in-cell clone dir.
 	// Decoupling the two breaks the self-referential-team collision (#1166)
@@ -149,7 +149,7 @@ type Inputs struct {
 	// records an explicit scope matching the live cell the CLI create path
 	// persists, closing the defaulting asymmetry that caused spurious
 	// OutOfSync (#1133). Sourced from the project's kuketeam.yaml
-	// (ProjectTeamSpec) when declared.
+	// (TeamSpec) when declared.
 	Realm string
 	Space string
 	Stack string
@@ -187,20 +187,20 @@ type Result struct {
 
 // Render runs the full per-(role × harness) pipeline against a loaded
 // Bundle. The outer loop is project-deterministic: roles are visited in
-// the order pt.Spec.Roles declares them and harnesses in the order
-// pt.Spec.Defaults.Harnesses declares them, so the same inputs always
+// the order pt.SelectedRoles() declares them and harnesses in the order
+// pt.HarnessNames() declares them, so the same inputs always
 // produce the same output ordering.
 func Render(
 	bundle *teamsource.Bundle,
-	pt *model.ProjectTeam,
-	tc *model.TeamsConfig,
+	pt *model.Team,
+	tc *model.Workspace,
 	in Inputs,
 ) (*Result, error) {
 	if bundle == nil {
 		return nil, errors.New("teamrender.Render: nil bundle")
 	}
 	if pt == nil {
-		return nil, errors.New("teamrender.Render: nil ProjectTeam")
+		return nil, errors.New("teamrender.Render: nil Team")
 	}
 	project := strings.TrimSpace(in.Project)
 	if project == "" {
@@ -221,12 +221,12 @@ func Render(
 
 	res := &Result{}
 	seenSelections := map[string]struct{}{}
-	for _, ptRole := range pt.Spec.Roles {
+	for _, ptRole := range pt.SelectedRoles() {
 		role, ok := bundle.Roles[ptRole.Ref]
 		if !ok {
 			return nil, fmt.Errorf("%w: %q", errdefs.ErrTeamRoleNotLoaded, ptRole.Ref)
 		}
-		for _, hname := range pt.Spec.Defaults.Harnesses {
+		for _, hname := range pt.HarnessNames() {
 			harness, hok := bundle.Harnesses[hname]
 			if !hok {
 				return nil, fmt.Errorf("%w: %q", errdefs.ErrTeamHarnessNotLoaded, hname)
@@ -382,7 +382,7 @@ func RenderBlueprint(
 	harness, roleRef string,
 	needs []string,
 	image *model.ImageCatalogEntry,
-	tc *model.TeamsConfig,
+	tc *model.Workspace,
 	src teamsource.Source,
 	in Inputs,
 	project, realm, space, stack string,
@@ -512,7 +512,7 @@ func BindConfig(
 	bp *v1beta1.CellBlueprintDoc,
 	r *model.Role,
 	roleRef, harness string,
-	tc *model.TeamsConfig,
+	tc *model.Workspace,
 	src teamsource.Source,
 	in Inputs,
 	project, realm, space, stack string,
@@ -626,7 +626,7 @@ func MarshalYAML(res *Result) ([]byte, error) {
 // ptRoleImageNeeds returns the project-side image-capability overrides for
 // ptRole, or nil when the role declared no overrides. Encapsulates the
 // pointer nilness so MergeNeeds receives a plain slice.
-func ptRoleImageNeeds(ptRole model.ProjectTeamRole) []string {
+func ptRoleImageNeeds(ptRole model.TeamRole) []string {
 	if ptRole.Needs == nil {
 		return nil
 	}
@@ -786,7 +786,7 @@ func renderContextValues(
 	image *model.ImageCatalogEntry,
 	needs []string,
 	r *model.Role,
-	tc *model.TeamsConfig,
+	tc *model.Workspace,
 	src teamsource.Source,
 	in Inputs,
 	project, realm, space, stack string,
@@ -860,7 +860,7 @@ func renderContextValues(
 
 	// .project.NAME is the in-cell project clone dir basename — the fact a
 	// blueprint's `project` repo target reads for `/home/<user>/<dir>`. It
-	// defaults to the team label (project) but spec.projectDir
+	// defaults to the team label (project) but spec.cloneDir
 	// (in.ProjectCloneDir) overrides it so a self-referential team can give the
 	// project clone a distinct dir from the `agents` slot (#1166). The team
 	// label itself stays project — it drives LabelTeam and operatorValues PROJECT
@@ -903,7 +903,7 @@ func renderContextValues(
 // when the operator set it, else the process's `$HOME` env var. Empty when
 // both are unset (a blueprint that references HOME_DIR then renders the
 // empty string — Go template's default for a missing map key).
-func resolveHomeDir(tc *model.TeamsConfig) string {
+func resolveHomeDir(tc *model.Workspace) string {
 	if tc != nil {
 		if v := strings.TrimSpace(tc.Spec.HomeDir); v != "" {
 			return v
@@ -917,7 +917,7 @@ func resolveHomeDir(tc *model.TeamsConfig) string {
 // `<owner>/<repo>` path (the segment before the first `/`). The common
 // single-owner case (operator owns both the agents source and their
 // projects) needs no override.
-func resolveRepoOwner(tc *model.TeamsConfig, src teamsource.Source) string {
+func resolveRepoOwner(tc *model.Workspace, src teamsource.Source) string {
 	if tc != nil {
 		if v := strings.TrimSpace(tc.Spec.RepoOwner); v != "" {
 			return v
@@ -974,7 +974,7 @@ func appendNonNil(in []string) []string {
 // CellBlueprintParameters resolves them at apply time without any
 // per-blueprint translation. Empty operator facts are omitted (the
 // blueprint's parameter default, if any, wins).
-func operatorValues(tc *model.TeamsConfig, roleRef, harness, project string) map[string]string {
+func operatorValues(tc *model.Workspace, roleRef, harness, project string) map[string]string {
 	vals := map[string]string{
 		"ROLE":    roleRef,
 		"HARNESS": harness,
@@ -1022,7 +1022,7 @@ func operatorValues(tc *model.TeamsConfig, roleRef, harness, project string) map
 // agents-side slot fill stays consistent with the bundle that produced it. A
 // zero Source (no resolved agents repo) yields the empty string so an
 // undeclared slot is never filled with a garbage URL.
-func agentsCloneURL(tc *model.TeamsConfig, src teamsource.Source) string {
+func agentsCloneURL(tc *model.Workspace, src teamsource.Source) string {
 	if src.OwnerRepo == "" || src.Host == "" {
 		return ""
 	}

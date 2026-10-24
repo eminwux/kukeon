@@ -1,0 +1,5 @@
+apiVersion: kuketeams.io/v1
+kind: Unknown
+metadata: {name: example}
+spec:
+  cwd: "~"

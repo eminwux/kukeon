@@ -1,0 +1,4 @@
+apiVersion: kuketeams.io/v1
+kind: TeamEntry
+metadata: {name: example}
+spec: {path: /host/project}

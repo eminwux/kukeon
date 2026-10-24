@@ -362,7 +362,10 @@ spec:
 	}
 	// Cross-scope volumeRef → left a hard error (Ensure stays false).
 	if ref := vols[1]; ref.VolumeRef == nil || ref.Ensure {
-		t.Errorf("cross-scope volumeRef: ensure=%v, want false (must not implicitly create in another scope)", ref.Ensure)
+		t.Errorf(
+			"cross-scope volumeRef: ensure=%v, want false (must not implicitly create in another scope)",
+			ref.Ensure,
+		)
 	}
 	// Non-volume kind → untouched.
 	if bind := vols[2]; bind.Kind != v1beta1.VolumeKindBind || bind.Ensure {
@@ -470,7 +473,22 @@ spec:
 	}
 	image := &model.ImageCatalogEntry{Ref: "claude-base", Harness: "claude", Image: "registry.local/claude:latest"}
 
-	bp, err := RenderBlueprint(cacheDir, h, r, "claude", "pm", nil, image, nil, teamsource.Source{}, Inputs{}, "kukeon", "default", "default", "default")
+	bp, err := RenderBlueprint(
+		cacheDir,
+		h,
+		r,
+		"claude",
+		"pm",
+		nil,
+		image,
+		nil,
+		teamsource.Source{},
+		Inputs{},
+		"kukeon",
+		"default",
+		"default",
+		"default",
+	)
 	if err != nil {
 		t.Fatalf("RenderBlueprint: %v", err)
 	}
@@ -495,7 +513,22 @@ spec:
         image: {{ .image }}
 `
 	writeHarnessFile(t, cacheDir, "claude", "blueprint.tmpl.yaml", idempotent)
-	bp2, err := RenderBlueprint(cacheDir, h, r, "claude", "pm", nil, image, nil, teamsource.Source{}, Inputs{}, "kukeon", "default", "default", "default")
+	bp2, err := RenderBlueprint(
+		cacheDir,
+		h,
+		r,
+		"claude",
+		"pm",
+		nil,
+		image,
+		nil,
+		teamsource.Source{},
+		Inputs{},
+		"kukeon",
+		"default",
+		"default",
+		"default",
+	)
 	if err != nil {
 		t.Fatalf("RenderBlueprint (idempotent): %v", err)
 	}
@@ -763,8 +796,8 @@ spec:
 
 	h := &model.Harness{Spec: model.HarnessSpec{Template: "blueprint.tmpl.yaml"}}
 	image := &model.ImageCatalogEntry{Image: "registry.local/claude:latest"}
-	tc := &model.TeamsConfig{Spec: model.TeamsConfigSpec{
-		Git: &model.TeamsConfigGit{
+	tc := &model.Workspace{Spec: model.WorkspaceSpec{
+		Git: &model.WorkspaceGit{
 			ContainerGit: v1beta1.ContainerGit{
 				Author: &v1beta1.GitIdentity{Name: "Operator Name", Email: "op@example.com"},
 			},
@@ -902,14 +935,14 @@ func TestBindConfigStampsTeamLabelAndProjectRepoFill(t *testing.T) {
 		}},
 	}
 	role := minimalRole()
-	tc := &model.TeamsConfig{Spec: model.TeamsConfigSpec{
-		Git: &model.TeamsConfigGit{
+	tc := &model.Workspace{Spec: model.WorkspaceSpec{
+		Git: &model.WorkspaceGit{
 			ContainerGit: v1beta1.ContainerGit{
 				Author: &v1beta1.GitIdentity{Name: "Op", Email: "op@example.com"},
 			},
 		},
 		Registry: "registry.local",
-		Secrets: map[string]model.TeamsConfigSecret{
+		Secrets: map[string]model.WorkspaceSecret{
 			"ANTHROPIC_API_KEY": {From: model.SecretFromEnv, Key: "ANTHROPIC_API_KEY"},
 		},
 	}}
@@ -969,7 +1002,7 @@ func TestBindConfigFillsSecretFromRoleNeedsWithoutTcSecrets(t *testing.T) {
 		minimalRole(),
 		"dev",
 		"claude",
-		&model.TeamsConfig{}, // no tc.spec.secrets — the production shape from #1120
+		&model.Workspace{}, // no tc.spec.secrets — the production shape from #1120
 		teamsource.Source{},
 		Inputs{Project: "sbsh"},
 		"sbsh",
@@ -1006,7 +1039,11 @@ func TestBindConfigFillsSecretFromPerHarnessList(t *testing.T) {
 				ID:    "dev",
 				Image: "x",
 				Secrets: []v1beta1.BlueprintSecretSlot{
-					{Name: "claude-code-oauth-token", Mode: v1beta1.BlueprintSecretModeEnv, EnvName: "CLAUDE_CODE_OAUTH_TOKEN"},
+					{
+						Name:    "claude-code-oauth-token",
+						Mode:    v1beta1.BlueprintSecretModeEnv,
+						EnvName: "CLAUDE_CODE_OAUTH_TOKEN",
+					},
 				},
 			}},
 		}},
@@ -1022,7 +1059,7 @@ func TestBindConfigFillsSecretFromPerHarnessList(t *testing.T) {
 	}
 	cfg := BindConfig(
 		bp, role, "dev", "claude",
-		&model.TeamsConfig{}, teamsource.Source{},
+		&model.Workspace{}, teamsource.Source{},
 		Inputs{Project: "sbsh"}, "sbsh", "default", "default", "default",
 	)
 	fill, ok := cfg.Spec.Secrets["claude-code-oauth-token"]
@@ -1048,7 +1085,11 @@ func TestBindConfigPerHarnessSecretsAreHarnessScoped(t *testing.T) {
 				ID:    "dev",
 				Image: "x",
 				Secrets: []v1beta1.BlueprintSecretSlot{
-					{Name: "claude-code-oauth-token", Mode: v1beta1.BlueprintSecretModeEnv, EnvName: "CLAUDE_CODE_OAUTH_TOKEN"},
+					{
+						Name:    "claude-code-oauth-token",
+						Mode:    v1beta1.BlueprintSecretModeEnv,
+						EnvName: "CLAUDE_CODE_OAUTH_TOKEN",
+					},
 					{Name: "openai-api-key", Mode: v1beta1.BlueprintSecretModeEnv, EnvName: "OPENAI_API_KEY"},
 				},
 			}},
@@ -1065,7 +1106,7 @@ func TestBindConfigPerHarnessSecretsAreHarnessScoped(t *testing.T) {
 	}
 	cfg := BindConfig(
 		bp, role, "dev", "claude",
-		&model.TeamsConfig{}, teamsource.Source{},
+		&model.Workspace{}, teamsource.Source{},
 		Inputs{Project: "sbsh"}, "sbsh", "default", "default", "default",
 	)
 	if _, ok := cfg.Spec.Secrets["openai-api-key"]; ok {
@@ -1108,7 +1149,7 @@ func TestBindConfigMergesPerHarnessAndRoleLevelSecrets(t *testing.T) {
 	}
 	cfg := BindConfig(
 		bp, role, "dev", "claude",
-		&model.TeamsConfig{}, teamsource.Source{},
+		&model.Workspace{}, teamsource.Source{},
 		Inputs{Project: "sbsh"}, "sbsh", "default", "default", "default",
 	)
 	if len(cfg.Spec.Secrets) != 2 {
@@ -1135,7 +1176,7 @@ func TestBindConfigSkipsUndeclaredSlots(t *testing.T) {
 		minimalRole(),
 		"dev",
 		"claude",
-		&model.TeamsConfig{},
+		&model.Workspace{},
 		teamsource.Source{},
 		in,
 		"sbsh",
@@ -1151,7 +1192,7 @@ func TestBindConfigSkipsUndeclaredSlots(t *testing.T) {
 	}
 }
 
-func TestBindConfigFillsAgentsSlotFromTeamsConfigSources(t *testing.T) {
+func TestBindConfigFillsAgentsSlotFromWorkspaceSources(t *testing.T) {
 	t.Parallel()
 	bp := &v1beta1.CellBlueprintDoc{
 		Metadata: v1beta1.CellBlueprintMetadata{Name: "dev-claude", Realm: "default"},
@@ -1164,7 +1205,7 @@ func TestBindConfigFillsAgentsSlotFromTeamsConfigSources(t *testing.T) {
 			}},
 		}},
 	}
-	tc := &model.TeamsConfig{Spec: model.TeamsConfigSpec{
+	tc := &model.Workspace{Spec: model.WorkspaceSpec{
 		Sources: map[string]string{"eminwux/agents": "git@github.com:eminwux/agents.git"},
 	}}
 	src := teamsource.Source{
@@ -1174,7 +1215,19 @@ func TestBindConfigFillsAgentsSlotFromTeamsConfigSources(t *testing.T) {
 		Ref:       "v1.4.0",
 		Kind:      teamsource.RefTag,
 	}
-	cfg := BindConfig(bp, minimalRole(), "dev", "claude", tc, src, Inputs{Project: "sbsh"}, "sbsh", "default", "default", "default")
+	cfg := BindConfig(
+		bp,
+		minimalRole(),
+		"dev",
+		"claude",
+		tc,
+		src,
+		Inputs{Project: "sbsh"},
+		"sbsh",
+		"default",
+		"default",
+		"default",
+	)
 	if got := cfg.Spec.Repos["agents"].URL; got != "git@github.com:eminwux/agents.git" {
 		t.Errorf("agents slot fill URL = %q, want agents.git", got)
 	}
@@ -1229,15 +1282,19 @@ func TestRenderEndToEnd(t *testing.T) {
 			},
 		},
 	}
-	pt := &model.ProjectTeam{
+	pt := &model.Team{
 		Metadata: model.Metadata{Name: "sbsh"},
-		Spec: model.ProjectTeamSpec{
-			Source:   model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"},
-			Defaults: model.ProjectTeamDefaults{Harnesses: []string{"claude", "codex"}},
-			Roles:    []model.ProjectTeamRole{{Ref: "dev"}},
+		Spec: model.TeamSpec{
+			TeamSelections: model.TeamSelections{
+				Source: &model.DefinitionSource{
+					TeamSource: model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"},
+				},
+				Harnesses: &[]model.TeamHarness{{Name: "claude"}, {Name: "codex"}},
+				Roles:     &[]model.TeamRole{{Ref: "dev"}},
+			},
 		},
 	}
-	res, err := Render(bundle, pt, &model.TeamsConfig{}, Inputs{Project: "sbsh"})
+	res, err := Render(bundle, pt, &model.Workspace{}, Inputs{Project: "sbsh"})
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -1296,18 +1353,22 @@ func TestRenderProjectPerRoleNeedsOverrideUnions(t *testing.T) {
 			},
 		}}},
 	}
-	pt := &model.ProjectTeam{
+	pt := &model.Team{
 		Metadata: model.Metadata{Name: "sbsh"},
-		Spec: model.ProjectTeamSpec{
-			Source:   model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"},
-			Defaults: model.ProjectTeamDefaults{Harnesses: []string{"claude"}},
-			Roles: []model.ProjectTeamRole{{
-				Ref:   "dev",
-				Needs: &model.ProjectRoleNeeds{Image: []string{"rust"}},
-			}},
+		Spec: model.TeamSpec{
+			TeamSelections: model.TeamSelections{
+				Source: &model.DefinitionSource{
+					TeamSource: model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"},
+				},
+				Harnesses: &[]model.TeamHarness{{Name: "claude"}},
+				Roles: &[]model.TeamRole{{
+					Ref:   "dev",
+					Needs: &model.TeamRoleNeeds{Image: []string{"rust"}},
+				}},
+			},
 		},
 	}
-	res, err := Render(bundle, pt, &model.TeamsConfig{}, Inputs{Project: "sbsh"})
+	res, err := Render(bundle, pt, &model.Workspace{}, Inputs{Project: "sbsh"})
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -1324,11 +1385,13 @@ func TestRenderRejectsMissingRoleInBundle(t *testing.T) {
 		Harnesses:    map[string]*model.Harness{},
 		ImageCatalog: minimalClaudeCatalog("go"),
 	}
-	pt := &model.ProjectTeam{
+	pt := &model.Team{
 		Metadata: model.Metadata{Name: "sbsh"},
-		Spec: model.ProjectTeamSpec{
-			Defaults: model.ProjectTeamDefaults{Harnesses: []string{"claude"}},
-			Roles:    []model.ProjectTeamRole{{Ref: "dev"}},
+		Spec: model.TeamSpec{
+			TeamSelections: model.TeamSelections{
+				Harnesses: &[]model.TeamHarness{{Name: "claude"}},
+				Roles:     &[]model.TeamRole{{Ref: "dev"}},
+			},
 		},
 	}
 	_, err := Render(bundle, pt, nil, Inputs{Project: "sbsh"})
@@ -1344,11 +1407,13 @@ func TestRenderRejectsMissingHarnessInBundle(t *testing.T) {
 		Harnesses:    map[string]*model.Harness{},
 		ImageCatalog: minimalClaudeCatalog("go", "git"),
 	}
-	pt := &model.ProjectTeam{
+	pt := &model.Team{
 		Metadata: model.Metadata{Name: "sbsh"},
-		Spec: model.ProjectTeamSpec{
-			Defaults: model.ProjectTeamDefaults{Harnesses: []string{"claude"}},
-			Roles:    []model.ProjectTeamRole{{Ref: "dev"}},
+		Spec: model.TeamSpec{
+			TeamSelections: model.TeamSelections{
+				Harnesses: &[]model.TeamHarness{{Name: "claude"}},
+				Roles:     &[]model.TeamRole{{Ref: "dev"}},
+			},
 		},
 	}
 	_, err := Render(bundle, pt, nil, Inputs{Project: "sbsh"})
@@ -1415,7 +1480,7 @@ spec:
 	writeHarnessFile(t, cacheDir, "claude", "blueprint.tmpl.yaml", body)
 	h := &model.Harness{Spec: model.HarnessSpec{Template: "blueprint.tmpl.yaml"}}
 	image := &model.ImageCatalogEntry{Image: "registry.local/claude:latest"}
-	tc := &model.TeamsConfig{Spec: model.TeamsConfigSpec{
+	tc := &model.Workspace{Spec: model.WorkspaceSpec{
 		HomeDir:   "/home/op",
 		RepoOwner: "ovr-owner",
 	}}
@@ -1452,7 +1517,7 @@ spec:
 	}
 }
 
-// TestRenderBlueprintProjectNameOverride confirms spec.projectDir
+// TestRenderBlueprintProjectNameOverride confirms spec.cloneDir
 // (in.ProjectCloneDir) overrides the in-cell clone dir basename the renderer
 // exposes as `.project.NAME`, decoupling it from the team label (#1166). When
 // unset, NAME falls back to the team label so the historical default holds.
@@ -1526,7 +1591,7 @@ spec:
 	writeHarnessFile(t, cacheDir, "claude", "blueprint.tmpl.yaml", body)
 	h := &model.Harness{Spec: model.HarnessSpec{Template: "blueprint.tmpl.yaml"}}
 	image := &model.ImageCatalogEntry{Image: "registry.local/claude:latest"}
-	tc := &model.TeamsConfig{} // no RepoOwner override
+	tc := &model.Workspace{} // no RepoOwner override
 	src := teamsource.Source{OwnerRepo: "eminwux/agents", Host: "github.com"}
 	bp, err := RenderBlueprint(
 		cacheDir, h, minimalRole(), "claude", "dev",
@@ -1569,7 +1634,7 @@ spec:
 	t.Setenv("HOME", "/home/sentinel")
 	bp, err := RenderBlueprint(
 		cacheDir, h, minimalRole(), "claude", "dev",
-		[]string{"go"}, image, &model.TeamsConfig{}, teamsource.Source{},
+		[]string{"go"}, image, &model.Workspace{}, teamsource.Source{},
 		Inputs{Project: "sbsh"}, "sbsh", "default",
 		"default",
 		"default",
@@ -1586,7 +1651,7 @@ spec:
 // TestRenderTwoTeamsDistinctTeamRoot covers the AC's per-team TEAM_ROOT
 // scope: two teams with different TeamDir Inputs render to two different
 // `.operator.TEAM_ROOT` values, confirming TEAM_ROOT is per-team-context
-// rather than a host-wide TeamsConfig field.
+// rather than a host-wide Workspace field.
 func TestRenderTwoTeamsDistinctTeamRoot(t *testing.T) {
 	t.Parallel()
 	cacheDir := t.TempDir()
@@ -1615,15 +1680,19 @@ spec:
 		},
 		ImageCatalog: minimalClaudeCatalog("go", "git"),
 	}
-	pt := &model.ProjectTeam{
+	pt := &model.Team{
 		Metadata: model.Metadata{Name: "team"},
-		Spec: model.ProjectTeamSpec{
-			Source:   model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"},
-			Defaults: model.ProjectTeamDefaults{Harnesses: []string{"claude"}},
-			Roles:    []model.ProjectTeamRole{{Ref: "dev"}},
+		Spec: model.TeamSpec{
+			TeamSelections: model.TeamSelections{
+				Source: &model.DefinitionSource{
+					TeamSource: model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"},
+				},
+				Harnesses: &[]model.TeamHarness{{Name: "claude"}},
+				Roles:     &[]model.TeamRole{{Ref: "dev"}},
+			},
 		},
 	}
-	tc := &model.TeamsConfig{}
+	tc := &model.Workspace{}
 
 	alpha, err := Render(bundle, pt, tc, Inputs{Project: "alpha", TeamDir: "/var/kuke/teams/alpha"})
 	if err != nil {
@@ -1655,11 +1724,13 @@ func TestRenderDefaultRealmFallback(t *testing.T) {
 		},
 		ImageCatalog: minimalClaudeCatalog("go", "git"),
 	}
-	pt := &model.ProjectTeam{
+	pt := &model.Team{
 		Metadata: model.Metadata{Name: "sbsh"},
-		Spec: model.ProjectTeamSpec{
-			Defaults: model.ProjectTeamDefaults{Harnesses: []string{"claude"}},
-			Roles:    []model.ProjectTeamRole{{Ref: "dev"}},
+		Spec: model.TeamSpec{
+			TeamSelections: model.TeamSelections{
+				Harnesses: &[]model.TeamHarness{{Name: "claude"}},
+				Roles:     &[]model.TeamRole{{Ref: "dev"}},
+			},
 		},
 	}
 	res, err := Render(bundle, pt, nil, Inputs{Project: "sbsh"})
@@ -1689,11 +1760,13 @@ func TestRenderDefaultsSpaceStackOnBlueprintAndConfig(t *testing.T) {
 		},
 		ImageCatalog: minimalClaudeCatalog("go", "git"),
 	}
-	pt := &model.ProjectTeam{
+	pt := &model.Team{
 		Metadata: model.Metadata{Name: "sbsh"},
-		Spec: model.ProjectTeamSpec{
-			Defaults: model.ProjectTeamDefaults{Harnesses: []string{"claude"}},
-			Roles:    []model.ProjectTeamRole{{Ref: "dev"}},
+		Spec: model.TeamSpec{
+			TeamSelections: model.TeamSelections{
+				Harnesses: &[]model.TeamHarness{{Name: "claude"}},
+				Roles:     &[]model.TeamRole{{Ref: "dev"}},
+			},
 		},
 	}
 	// Inputs carries no Realm/Space/Stack — exercises the all-defaults path.
@@ -1720,7 +1793,7 @@ func TestRenderDefaultsSpaceStackOnBlueprintAndConfig(t *testing.T) {
 }
 
 // TestRenderHonorsInputsScope confirms explicit Inputs.Realm/Space/Stack
-// (sourced from kuketeam.yaml's ProjectTeamSpec) flow through to both the
+// (sourced from kuketeam.yaml's TeamSpec) flow through to both the
 // Blueprint and Config scope coordinates rather than being overridden by the
 // defaults.
 func TestRenderHonorsInputsScope(t *testing.T) {
@@ -1735,11 +1808,13 @@ func TestRenderHonorsInputsScope(t *testing.T) {
 		},
 		ImageCatalog: minimalClaudeCatalog("go", "git"),
 	}
-	pt := &model.ProjectTeam{
+	pt := &model.Team{
 		Metadata: model.Metadata{Name: "sbsh"},
-		Spec: model.ProjectTeamSpec{
-			Defaults: model.ProjectTeamDefaults{Harnesses: []string{"claude"}},
-			Roles:    []model.ProjectTeamRole{{Ref: "dev"}},
+		Spec: model.TeamSpec{
+			TeamSelections: model.TeamSelections{
+				Harnesses: &[]model.TeamHarness{{Name: "claude"}},
+				Roles:     &[]model.TeamRole{{Ref: "dev"}},
+			},
 		},
 	}
 	res, err := Render(bundle, pt, nil, Inputs{

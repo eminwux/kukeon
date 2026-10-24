@@ -14,14 +14,11 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-// Package kuketeams parses and validates the team-distribution documents
-// (kuketeams.io/v1: ProjectTeam, TeamsConfig, Role, Harness, ImageCatalog;
-// issue #793, epic #792). It mirrors the internal/serverconfig +
-// internal/apply/parser split — the Go types live in
-// pkg/api/model/kuketeams; this package owns deserialization and the
-// validation rules. No CLI verb consumes it yet (the verbs land in #796 and
-// later), so it is deliberately a standalone parser rather than a registration
-// into the v1beta1 apply/get dispatch, which is group-scoped to v1beta1.
+// Package kuketeams parses team-distribution documents. The Go types live in
+// pkg/api/model/kuketeams; this package owns deserialization and structural
+// validation. Workspace and Team are the new desired configuration inputs;
+// legacy configuration kinds are rejected without compatibility readers.
+// These configuration kinds are separate from v1beta1 apply/get resources.
 package kuketeams
 
 import (
@@ -41,9 +38,8 @@ import (
 type Document struct {
 	APIVersion   string
 	Kind         string
-	ProjectTeam  *model.ProjectTeam
-	TeamsConfig  *model.TeamsConfig
-	TeamEntry    *model.TeamEntry
+	Workspace    *model.Workspace
+	Team         *model.Team
 	Role         *model.Role
 	Harness      *model.Harness
 	ImageCatalog *model.ImageCatalog
@@ -105,7 +101,7 @@ func Parse(raw []byte) (*Document, error) {
 	}
 	if h.APIVersion != model.APIVersionV1 {
 		return nil, fmt.Errorf(
-			"%w: %q (expected %s)",
+			"apiVersion: %w: %q (expected %s)",
 			errdefs.ErrUnsupportedAPIVersion,
 			h.APIVersion,
 			model.APIVersionV1,
@@ -114,39 +110,18 @@ func Parse(raw []byte) (*Document, error) {
 
 	doc := &Document{APIVersion: h.APIVersion, Kind: h.Kind}
 	switch h.Kind {
-	case model.KindProjectTeam:
-		if err := rejectStringFormSource(raw); err != nil {
+	case model.KindWorkspace:
+		v, err := ParseWorkspace(raw)
+		if err != nil {
 			return nil, err
 		}
-		var v model.ProjectTeam
-		if err := yaml.Unmarshal(raw, &v); err != nil {
-			return nil, fmt.Errorf("parse ProjectTeam: %w", err)
-		}
-		if err := validateProjectTeam(&v); err != nil {
+		doc.Workspace = v
+	case model.KindTeam:
+		v, err := ParseTeam(raw)
+		if err != nil {
 			return nil, err
 		}
-		doc.ProjectTeam = &v
-	case model.KindTeamsConfig:
-		var v model.TeamsConfig
-		if err := yaml.Unmarshal(raw, &v); err != nil {
-			return nil, fmt.Errorf("parse TeamsConfig: %w", err)
-		}
-		if err := validateTeamsConfig(&v); err != nil {
-			return nil, err
-		}
-		doc.TeamsConfig = &v
-	case model.KindTeamEntry:
-		if err := rejectStringFormSource(raw); err != nil {
-			return nil, err
-		}
-		var v model.TeamEntry
-		if err := yaml.Unmarshal(raw, &v); err != nil {
-			return nil, fmt.Errorf("parse TeamEntry: %w", err)
-		}
-		if err := validateTeamEntry(&v); err != nil {
-			return nil, err
-		}
-		doc.TeamEntry = &v
+		doc.Team = v
 	case model.KindRole:
 		var v model.Role
 		if err := yaml.Unmarshal(raw, &v); err != nil {
@@ -175,95 +150,12 @@ func Parse(raw []byte) (*Document, error) {
 		}
 		doc.ImageCatalog = &v
 	default:
-		return nil, fmt.Errorf("%w: %q", errdefs.ErrUnknownKind, h.Kind)
+		return nil, fmt.Errorf("kind: %w: %q", errdefs.ErrUnknownKind, h.Kind)
 	}
 	return doc, nil
 }
 
-// validateProjectTeam enforces the ProjectTeam contract: metadata.name present
-// and safe as a drop-in filename key; source pinned-exact; every roles[].ref
-// non-empty; defaults/role harness names known; project role image needs are
-// capability names.
-func validateProjectTeam(pt *model.ProjectTeam) error {
-	if strings.TrimSpace(pt.Metadata.Name) == "" {
-		return errdefs.ErrTeamMetadataNameRequired
-	}
-	if err := validateMetadataNameSafe(pt.Metadata.Name); err != nil {
-		return err
-	}
-	if err := ValidateSource(pt.Spec.Source); err != nil {
-		return err
-	}
-	if err := validateProjectDir(pt.Spec.ProjectDir); err != nil {
-		return err
-	}
-	for _, h := range pt.Spec.Defaults.Harnesses {
-		if !model.IsKnownHarness(h) {
-			return fmt.Errorf("%w: %q (defaults.harnesses)", errdefs.ErrTeamHarnessUnknown, h)
-		}
-	}
-	for i, role := range pt.Spec.Roles {
-		if strings.TrimSpace(role.Ref) == "" {
-			return fmt.Errorf("%w (roles[%d])", errdefs.ErrTeamRoleRefRequired, i)
-		}
-		if role.Needs != nil {
-			if err := validateCapabilityNames(role.Needs.Image, fmt.Sprintf("roles[%d].needs.image", i)); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// validateTeamsConfig enforces the TeamsConfig contract: git identities
-// complete; git.sign entries valid and key-backed; secrets declare a source;
-// sources keys well-formed. Per-project composition is no longer carried here —
-// it moved to the TeamEntry drop-in (validateTeamEntry).
-func validateTeamsConfig(tc *model.TeamsConfig) error {
-	if tc.Spec.Git != nil {
-		if err := validateGit(tc.Spec.Git); err != nil {
-			return err
-		}
-	}
-	for name, secret := range tc.Spec.Secrets {
-		switch secret.From {
-		case model.SecretFromEnv, model.SecretFromFile:
-		default:
-			return fmt.Errorf("%w (secrets[%q])", errdefs.ErrTeamSecretSourceInvalid, name)
-		}
-		if strings.TrimSpace(secret.Key) == "" {
-			return fmt.Errorf("%w (secrets[%q])", errdefs.ErrTeamSecretSourceInvalid, name)
-		}
-	}
-	for key := range tc.Spec.Sources {
-		if validateRepo(strings.TrimSpace(key)) != nil {
-			return fmt.Errorf("%w (got %q)", errdefs.ErrTeamSourceKeyInvalid, key)
-		}
-	}
-	return nil
-}
-
-// validateTeamEntry enforces the per-project drop-in contract: metadata.name
-// present and safe (it is the <project>.yaml filename key, so traversal
-// characters would let an attacker escape the drop-in directory), and source —
-// when set — a well-formed structured agents reference.
-func validateTeamEntry(te *model.TeamEntry) error {
-	if strings.TrimSpace(te.Metadata.Name) == "" {
-		return errdefs.ErrTeamEntryNameRequired
-	}
-	if err := validateMetadataNameSafe(te.Metadata.Name); err != nil {
-		return err
-	}
-	if te.Spec.Source != nil {
-		if err := ValidateSource(*te.Spec.Source); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// ValidateSource enforces the structured-source contract shared by ProjectTeam
-// and TeamEntry: repo is host-qualifiable (`<host>/<owner>/<repo>` or a bare
+// ValidateSource enforces the structured-source contract used by Team: repo is host-qualifiable (`<host>/<owner>/<repo>` or a bare
 // `<owner>/<repo>` defaulting to github.com), and exactly one of
 // tag/branch/commit carries the ref intent. Zero or multiple refs is a parse
 // error — the key name is the pinned-vs-floating signal, so ambiguity is not
@@ -341,33 +233,11 @@ func validateRepo(repo string) error {
 	return nil
 }
 
-// rejectStringFormSource probes raw for a scalar `spec.source` — the legacy
-// `<owner>/<repo>@vX.Y.Z` string form — and returns the migration error before
-// the typed unmarshal attempts (and fails cryptically) to decode a scalar into
-// the TeamSource struct. A mapping (object) source, an absent source, or an
-// empty scalar falls through to the normal parse + ValidateSource path, so
-// there is no silent dual-parse.
-func rejectStringFormSource(raw []byte) error {
-	var probe struct {
-		Spec struct {
-			Source yaml.Node `yaml:"source"`
-		} `yaml:"spec"`
-	}
-	// A failed probe-unmarshal leaves Source.Kind zero; the typed unmarshal
-	// downstream surfaces the structural error verbatim, so the probe error is
-	// deliberately ignored here.
-	_ = yaml.Unmarshal(raw, &probe)
-	if probe.Spec.Source.Kind == yaml.ScalarNode && strings.TrimSpace(probe.Spec.Source.Value) != "" {
-		return fmt.Errorf("%w (got %q)", errdefs.ErrTeamSourceStringForm, probe.Spec.Source.Value)
-	}
-	return nil
-}
-
-// validateMetadataNameSafe rejects any ProjectTeam/TeamEntry metadata.name that
+// validateMetadataNameSafe rejects any Team metadata.name that
 // would let teamhost.Layout.EntryPath escape the drop-in directory: path
 // separators ('/' or '\'), a NUL byte, a ".." substring, or a leading '.'.
-// The classic escape is metadata.name "../kuketeams", which makes the rename
-// target resolve to ~/.kuke/kuketeams.yaml — the operator's own global facts
+// The classic escape is metadata.name "../workspace", which makes the rename
+// target resolve to ~/.kuke/workspace.yaml — the operator's own global facts
 // file. Callers must check for empty-name first so their kind-specific
 // "required" sentinel surfaces rather than the unsafe-name one.
 func validateMetadataNameSafe(name string) error {
@@ -375,59 +245,6 @@ func validateMetadataNameSafe(name string) error {
 	if strings.ContainsAny(trimmed, "/\\") || strings.ContainsRune(trimmed, 0) ||
 		strings.Contains(trimmed, "..") || strings.HasPrefix(trimmed, ".") {
 		return fmt.Errorf("%w (got %q)", errdefs.ErrTeamMetadataNameUnsafe, name)
-	}
-	return nil
-}
-
-// validateProjectDir enforces the ProjectTeam spec.projectDir contract: when
-// set, it must be a safe path basename (it flows into the in-cell
-// `/home/<user>/<dir>` clone path the renderer exposes as `.project.NAME`, so
-// the same traversal guard metadata.name carries applies) and must not equal
-// the reserved `agents` repo slot dir (teamrender.AgentsRepoSlotName) — the
-// `project`/`agents` clone-time collision spec.projectDir exists to break.
-// Empty is valid: the renderer falls back to metadata.name.
-func validateProjectDir(dir string) error {
-	trimmed := strings.TrimSpace(dir)
-	if trimmed == "" {
-		return nil
-	}
-	if strings.ContainsAny(trimmed, "/\\") || strings.ContainsRune(trimmed, 0) ||
-		strings.Contains(trimmed, "..") || strings.HasPrefix(trimmed, ".") {
-		return fmt.Errorf("%w (got %q)", errdefs.ErrTeamProjectDirInvalid, dir)
-	}
-	// "agents" mirrors teamrender.AgentsRepoSlotName — the fixed in-cell dir the
-	// `agents` repo slot clones to. Referenced as a literal to avoid a
-	// parser→renderer import dependency for a single conventional name.
-	if trimmed == "agents" {
-		return fmt.Errorf("%w (got %q)", errdefs.ErrTeamProjectDirInvalid, dir)
-	}
-	return nil
-}
-
-// validateGit enforces the git superset rules: each present identity carries
-// both name and email; sign entries are commits/tags and require a signingKey.
-func validateGit(git *model.TeamsConfigGit) error {
-	if git.Author != nil {
-		if strings.TrimSpace(git.Author.Name) == "" || strings.TrimSpace(git.Author.Email) == "" {
-			return fmt.Errorf("%w (git.author)", errdefs.ErrTeamGitIdentityIncomplete)
-		}
-	}
-	if git.Committer != nil {
-		if strings.TrimSpace(git.Committer.Name) == "" || strings.TrimSpace(git.Committer.Email) == "" {
-			return fmt.Errorf("%w (git.committer)", errdefs.ErrTeamGitIdentityIncomplete)
-		}
-	}
-	if len(git.Sign) > 0 {
-		if strings.TrimSpace(git.SigningKey) == "" {
-			return errdefs.ErrTeamGitSignNeedsKey
-		}
-		for _, s := range git.Sign {
-			switch s {
-			case model.GitSignCommits, model.GitSignTags:
-			default:
-				return fmt.Errorf("%w (got %q)", errdefs.ErrTeamGitSignInvalid, s)
-			}
-		}
 	}
 	return nil
 }

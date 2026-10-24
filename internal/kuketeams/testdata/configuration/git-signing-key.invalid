@@ -1,0 +1,4 @@
+apiVersion: kuketeams.io/v1
+kind: Workspace
+spec:
+  git: {sign: [commits]}

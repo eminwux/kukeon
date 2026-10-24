@@ -1,0 +1,11 @@
+apiVersion: kuketeams.io/v1
+kind: Team
+metadata: {name: example}
+spec:
+  cwd: /one
+---
+apiVersion: kuketeams.io/v1
+kind: Team
+metadata: {name: example}
+spec:
+  cwd: /two

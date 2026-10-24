@@ -1,0 +1,4 @@
+apiVersion: kuketeams.io/v1
+kind: Workspace
+spec:
+  sources: [{name: agents, repo: example/agents}]

@@ -53,7 +53,7 @@ type RoleHarness struct {
 	Approval string `json:"approval,omitempty"    yaml:"approval,omitempty"`
 	// Permissions selects the permission mode (opencode, e.g. skip).
 	Permissions string `json:"permissions,omitempty" yaml:"permissions,omitempty"`
-	// Secrets are the secret NAMES (resolved against TeamsConfig.secrets) this
+	// Secrets are the secret NAMES (resolved against Workspace.secrets) this
 	// harness needs, declared per-harness so a role's Claude cell no longer
 	// carries secret slots only its Codex/OpenCode cells use (agents#750). Each
 	// name is matched against the rendered blueprint's secret-slot declarations
@@ -72,7 +72,7 @@ type RoleHarness struct {
 //   - Mounts: mount names rendered to []v1beta1.VolumeMount (bind mounts).
 //     `ssh` is a mount.
 //   - Params: parameter names supplied at materialization time.
-//   - Secrets: secret names resolved against TeamsConfig.secrets.
+//   - Secrets: secret names resolved against Workspace.secrets.
 type RoleNeeds struct {
 	Image   []string `json:"image,omitempty"   yaml:"image,omitempty"`
 	Repos   []string `json:"repos,omitempty"   yaml:"repos,omitempty"`

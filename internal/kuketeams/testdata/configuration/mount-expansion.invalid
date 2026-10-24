@@ -1,0 +1,4 @@
+apiVersion: kuketeams.io/v1
+kind: Workspace
+spec:
+  credentials: [{name: auth, secretRef: key, volumeMount: {target: /$HOME/key}}]

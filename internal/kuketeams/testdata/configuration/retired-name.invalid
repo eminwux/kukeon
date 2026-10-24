@@ -1,0 +1,4 @@
+apiVersion: kuketeams.io/v1
+kind: Workspace
+metadata: {name: old}
+spec: {}

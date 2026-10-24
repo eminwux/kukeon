@@ -150,7 +150,7 @@ func (l Layout) TeamSecretsEnvPath(team string) string {
 // already present, returning created=true when it scaffolded the file and
 // false when one already existed (the re-run case — its contents are left
 // untouched). The parent directory is created (0o700) if absent.
-func EnsureGlobalConfig(l Layout, cfg *model.TeamsConfig) (bool, error) {
+func EnsureGlobalConfig(l Layout, cfg *model.Workspace) (bool, error) {
 	path := l.GlobalConfigPath()
 	if _, err := os.Stat(path); err == nil {
 		return false, nil

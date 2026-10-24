@@ -1,0 +1,6 @@
+# Proposed ~/.kuke/kuketeam.d/minimal.yaml; all selections inherit Workspace defaults.
+apiVersion: kuketeams.io/v1
+kind: Team
+metadata: { name: minimal }
+spec:
+  repo: { repo: github.com/example/project }

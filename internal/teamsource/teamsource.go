@@ -14,7 +14,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-// Package teamsource resolves a kuketeams.io/v1 ProjectTeam's structured
+// Package teamsource resolves a kuketeams.io/v1 Team's structured
 // `source` reference to a local clone of the agents repo and loads the Role,
 // Harness, and ImageCatalog documents the project's roster references (epic
 // #792). The source is host-explicit (`repo: <host>/<owner>/<repo>`) and
@@ -22,7 +22,7 @@
 // cache is cloned once and reused as-is) or a floating `branch` (refetched and
 // reset to the branch tip on every init, so a stale roster is never silently
 // reused). The default clone transport is SSH (`git@<host>:<owner>/<repo>.git`)
-// using TeamsConfig.spec.git.sshKey as the clone identity; TeamsConfig.spec.
+// using Workspace.spec.git.sshKey as the clone identity; Workspace.spec.
 // sources is consulted only as an optional per-repo transport override (HTTPS,
 // internal mirror, non-standard port). Document loading delegates to the
 // existing kuketeams parser, so parse errors carry the offending file path
@@ -105,11 +105,11 @@ func FromModel(m model.TeamSource) (Source, error) {
 
 // CloneURL returns the clone URL for src. The default transport is SSH —
 // `git@<host>:<owner>/<repo>.git`, cloned under the sshKey identity (threaded
-// separately into the git env). TeamsConfig.spec.sources is consulted only as
+// separately into the git env). Workspace.spec.sources is consulted only as
 // an optional transport override: an entry keyed by the host-qualified repo or
 // the bare `<owner>/<repo>` (in that order) with a non-blank value replaces the
 // SSH default. The common case needs no sources entry.
-func CloneURL(tc *model.TeamsConfig, src Source) string {
+func CloneURL(tc *model.Workspace, src Source) string {
 	if tc != nil {
 		for _, key := range []string{src.Repo, src.OwnerRepo} {
 			if u, ok := tc.Spec.Sources[key]; ok && strings.TrimSpace(u) != "" {
@@ -248,28 +248,28 @@ type Bundle struct {
 	// CacheDir is the on-disk clone root — passed to the render pipeline when
 	// it needs to read blueprint templates or other repo-relative paths.
 	CacheDir string
-	// Roles maps the role ref (ProjectTeam.spec.roles[].ref) to its loaded Role.
+	// Roles maps the role ref (Team.spec.roles[].ref) to its loaded Role.
 	Roles map[string]*model.Role
-	// Harnesses maps the harness name (ProjectTeam.spec.defaults.harnesses[])
+	// Harnesses maps the harness name (Team.spec.harnesses[])
 	// to its loaded Harness.
 	Harnesses map[string]*model.Harness
 	// ImageCatalog is the single harnesses/images.yaml in the agents source.
 	ImageCatalog *model.ImageCatalog
 }
 
-// Resolve validates pt.Spec.Source, derives the clone URL (SSH default, with
+// Resolve validates pt.AgentSource(), derives the clone URL (SSH default, with
 // tc.spec.sources as an optional override), materializes the agents source
 // under cache using tc.spec.git.sshKey as the clone identity, and loads every
-// Role referenced by pt.Spec.Roles, every Harness referenced by
-// pt.Spec.Defaults.Harnesses, and the ImageCatalog. Parse errors surface with
+// Role referenced by pt.SelectedRoles(), every Harness referenced by
+// pt.HarnessNames(), and the ImageCatalog. Parse errors surface with
 // the offending file path.
 func Resolve(
 	ctx context.Context,
 	cache Cache,
-	tc *model.TeamsConfig,
-	pt *model.ProjectTeam,
+	tc *model.Workspace,
+	pt *model.Team,
 ) (*Bundle, error) {
-	src, err := FromModel(pt.Spec.Source)
+	src, err := FromModel(pt.AgentSource())
 	if err != nil {
 		return nil, err
 	}
@@ -282,18 +282,18 @@ func Resolve(
 	b := &Bundle{
 		Source:    src,
 		CacheDir:  dir,
-		Roles:     make(map[string]*model.Role, len(pt.Spec.Roles)),
-		Harnesses: make(map[string]*model.Harness, len(pt.Spec.Defaults.Harnesses)),
+		Roles:     make(map[string]*model.Role, len(pt.SelectedRoles())),
+		Harnesses: make(map[string]*model.Harness, len(pt.HarnessNames())),
 	}
 
-	for _, r := range pt.Spec.Roles {
+	for _, r := range pt.SelectedRoles() {
 		role, loadErr := LoadRole(dir, r.Ref)
 		if loadErr != nil {
 			return nil, loadErr
 		}
 		b.Roles[r.Ref] = role
 	}
-	for _, h := range pt.Spec.Defaults.Harnesses {
+	for _, h := range pt.HarnessNames() {
 		harness, loadErr := LoadHarness(dir, h)
 		if loadErr != nil {
 			return nil, loadErr
@@ -308,10 +308,10 @@ func Resolve(
 	return b, nil
 }
 
-// sshKeyOf returns the operator's SSH clone identity from the TeamsConfig git
+// sshKeyOf returns the operator's SSH clone identity from the Workspace git
 // block, or "" when none is configured (the default SSH agent identity is then
 // used by git).
-func sshKeyOf(tc *model.TeamsConfig) string {
+func sshKeyOf(tc *model.Workspace) string {
 	if tc == nil || tc.Spec.Git == nil {
 		return ""
 	}
@@ -422,7 +422,7 @@ func runGit(ctx context.Context, dir, sshKey string, args ...string) error {
 	if err != nil {
 		trimmed := strings.TrimSpace(string(out))
 		// Scrub URL userinfo from args before joining into the wrapper — an
-		// operator may embed basic-auth credentials in a TeamsConfig source URL
+		// operator may embed basic-auth credentials in a Workspace source URL
 		// (e.g. https://x-token:ghp_xxx@host/repo.git) and a raw join would
 		// leak the token through any surface that prints this error.
 		scrubbed := strings.Join(scrubArgs(args), " ")

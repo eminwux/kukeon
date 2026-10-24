@@ -26,13 +26,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// TestTeamsConfigGitMarshalsContainerGitSuperset asserts the embedded
+// TestWorkspaceGitMarshalsContainerGitSuperset asserts the embedded
 // v1beta1.ContainerGit fields promote in both JSON and YAML, and the added
-// sshKey field round-trips — i.e. TeamsConfig.git is a strict superset of
+// sshKey field round-trips — i.e. Workspace.git is a strict superset of
 // ContainerGit on the wire, not just in Go.
-func TestTeamsConfigGitMarshalsContainerGitSuperset(t *testing.T) {
+func TestWorkspaceGitMarshalsContainerGitSuperset(t *testing.T) {
 	t.Parallel()
-	git := model.TeamsConfigGit{
+	git := model.WorkspaceGit{
 		ContainerGit: v1beta1.ContainerGit{
 			Author:         &v1beta1.GitIdentity{Name: "A", Email: "a@example.com"},
 			SigningKey:     "/k.pub",
@@ -68,18 +68,22 @@ func TestTeamsConfigGitMarshalsContainerGitSuperset(t *testing.T) {
 func TestRoundTripAllKinds(t *testing.T) {
 	t.Parallel()
 
-	pt := model.ProjectTeam{
-		APIVersion: model.APIVersionV1, Kind: model.KindProjectTeam,
+	pt := model.Team{
+		APIVersion: model.APIVersionV1, Kind: model.KindTeam,
 		Metadata: model.Metadata{Name: "sbsh"},
-		Spec: model.ProjectTeamSpec{
-			Source:   model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"},
-			Defaults: model.ProjectTeamDefaults{Harnesses: []string{"claude"}},
-			Roles:    []model.ProjectTeamRole{{Ref: "dev", Needs: &model.ProjectRoleNeeds{Image: []string{"go"}}}},
+		Spec: model.TeamSpec{
+			TeamSelections: model.TeamSelections{
+				Source: &model.DefinitionSource{
+					TeamSource: model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"},
+				},
+				Harnesses: &[]model.TeamHarness{{Name: "claude"}},
+				Roles:     &[]model.TeamRole{{Ref: "dev", Needs: &model.TeamRoleNeeds{Image: []string{"go"}}}},
+			},
 		},
 	}
-	assertJSONYAML(t, "ProjectTeam", pt, func(got model.ProjectTeam) bool {
+	assertJSONYAML(t, "Team", pt, func(got model.Team) bool {
 		return got.Spec.Source.Repo == "github.com/eminwux/agents" && got.Spec.Source.Tag == "v1.4.0" &&
-			len(got.Spec.Roles) == 1 && got.Spec.Roles[0].Needs.Image[0] == "go"
+			len(got.SelectedRoles()) == 1 && got.SelectedRoles()[0].Needs.Image[0] == "go"
 	})
 
 	te := model.TeamEntry{
@@ -143,22 +147,22 @@ func TestRoundTripAllKinds(t *testing.T) {
 	})
 }
 
-// TestTeamsConfigSpecRoundTripsHomeDirAndRepoOwner asserts the
+// TestWorkspaceSpecRoundTripsHomeDirAndRepoOwner asserts the
 // .spec.homeDir / .spec.repoOwner override fields (added with the
 // .operator.HOME_DIR / .operator.REPO_OWNER blueprint facts) survive a
 // JSON/YAML round-trip — both default to derived values at render time,
 // but the explicit override must marshal in both encodings.
-func TestTeamsConfigSpecRoundTripsHomeDirAndRepoOwner(t *testing.T) {
+func TestWorkspaceSpecRoundTripsHomeDirAndRepoOwner(t *testing.T) {
 	t.Parallel()
-	tc := model.TeamsConfig{
-		APIVersion: model.APIVersionV1, Kind: model.KindTeamsConfig,
-		Spec: model.TeamsConfigSpec{
+	tc := model.Workspace{
+		APIVersion: model.APIVersionV1, Kind: model.KindWorkspace,
+		Spec: model.WorkspaceSpec{
 			Registry:  "registry.local",
 			HomeDir:   "/home/op",
 			RepoOwner: "eminwux",
 		},
 	}
-	assertJSONYAML(t, "TeamsConfig+HomeDir+RepoOwner", tc, func(got model.TeamsConfig) bool {
+	assertJSONYAML(t, "Workspace+HomeDir+RepoOwner", tc, func(got model.Workspace) bool {
 		return got.Spec.HomeDir == "/home/op" && got.Spec.RepoOwner == "eminwux" &&
 			got.Spec.Registry == "registry.local"
 	})

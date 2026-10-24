@@ -25,22 +25,22 @@ import (
 	model "github.com/eminwux/kukeon/pkg/api/model/kuketeams"
 )
 
-const projectTeamHappy = `
+const teamHappy = `
 apiVersion: kuketeams.io/v1
-kind: ProjectTeam
+kind: Team
 metadata: { name: sbsh }
 spec:
   source: { repo: github.com/eminwux/agents, tag: v1.4.0 }
-  defaults: { harnesses: [claude, opencode] }
+  harnesses: [{name: claude}, {name: opencode}]
   roles:
     - { ref: dev, needs: { image: [go] } }
     - { ref: pm }
     - { ref: pr-reviewer }
 `
 
-const teamsConfigHappy = `
+const workspaceHappy = `
 apiVersion: kuketeams.io/v1
-kind: TeamsConfig
+kind: Workspace
 spec:
   git:
     author:    { name: "A", email: "a@example.com" }
@@ -119,22 +119,16 @@ func TestParseHappyPaths(t *testing.T) {
 		want func(*Document) bool
 	}{
 		{
-			"ProjectTeam",
-			projectTeamHappy,
-			model.KindProjectTeam,
-			func(d *Document) bool { return d.ProjectTeam != nil },
+			"Team",
+			teamHappy,
+			model.KindTeam,
+			func(d *Document) bool { return d.Team != nil },
 		},
 		{
-			"TeamsConfig",
-			teamsConfigHappy,
-			model.KindTeamsConfig,
-			func(d *Document) bool { return d.TeamsConfig != nil },
-		},
-		{
-			"TeamEntry",
-			teamEntryHappy,
-			model.KindTeamEntry,
-			func(d *Document) bool { return d.TeamEntry != nil },
+			"Workspace",
+			workspaceHappy,
+			model.KindWorkspace,
+			func(d *Document) bool { return d.Workspace != nil },
 		},
 		{"Role", roleHappy, model.KindRole, func(d *Document) bool { return d.Role != nil }},
 		{"Harness", harnessHappy, model.KindHarness, func(d *Document) bool { return d.Harness != nil }},
@@ -165,50 +159,37 @@ func TestParseHappyPaths(t *testing.T) {
 func TestParseHappyPathFields(t *testing.T) {
 	t.Parallel()
 
-	pt, err := Parse([]byte(projectTeamHappy))
+	pt, err := Parse([]byte(teamHappy))
 	if err != nil {
-		t.Fatalf("ProjectTeam: %v", err)
+		t.Fatalf("Team: %v", err)
 	}
-	if got := pt.ProjectTeam.Spec.Source; got.Repo != "github.com/eminwux/agents" || got.Tag != "v1.4.0" {
+	if got := pt.Team.Spec.Source; got.Repo != "github.com/eminwux/agents" || got.Tag != "v1.4.0" {
 		t.Errorf("source = %+v", got)
 	}
-	if pt.ProjectTeam.Spec.Source.Floating() {
+	if pt.Team.Spec.Source.Floating() {
 		t.Errorf("tag source should be pinned, not floating")
 	}
-	if len(pt.ProjectTeam.Spec.Roles) != 3 {
-		t.Errorf("roles len = %d, want 3", len(pt.ProjectTeam.Spec.Roles))
+	if len(pt.Team.SelectedRoles()) != 3 {
+		t.Errorf("roles len = %d, want 3", len(pt.Team.SelectedRoles()))
 	}
-	if pt.ProjectTeam.Spec.Roles[0].Needs == nil ||
-		len(pt.ProjectTeam.Spec.Roles[0].Needs.Image) != 1 {
+	if pt.Team.SelectedRoles()[0].Needs == nil ||
+		len(pt.Team.SelectedRoles()[0].Needs.Image) != 1 {
 		t.Errorf("roles[0].needs.image not parsed")
 	}
 
-	tc, err := Parse([]byte(teamsConfigHappy))
+	tc, err := Parse([]byte(workspaceHappy))
 	if err != nil {
-		t.Fatalf("TeamsConfig: %v", err)
+		t.Fatalf("Workspace: %v", err)
 	}
 	// git is a strict superset of v1beta1.ContainerGit: embedded fields promote.
-	if tc.TeamsConfig.Spec.Git.Author.Email != "a@example.com" {
-		t.Errorf("embedded ContainerGit.Author.Email not promoted: %+v", tc.TeamsConfig.Spec.Git)
+	if tc.Workspace.Spec.Git.Author.Email != "a@example.com" {
+		t.Errorf("embedded ContainerGit.Author.Email not promoted: %+v", tc.Workspace.Spec.Git)
 	}
-	if tc.TeamsConfig.Spec.Git.SSHKey != "~/.ssh/id_ed25519" {
-		t.Errorf("git.sshKey = %q", tc.TeamsConfig.Spec.Git.SSHKey)
+	if tc.Workspace.Spec.Git.SSHKey != "~/.ssh/id_ed25519" {
+		t.Errorf("git.sshKey = %q", tc.Workspace.Spec.Git.SSHKey)
 	}
-	if len(tc.TeamsConfig.Spec.Git.Sign) != 2 {
-		t.Errorf("git.sign len = %d, want 2", len(tc.TeamsConfig.Spec.Git.Sign))
-	}
-
-	te, err := Parse([]byte(teamEntryHappy))
-	if err != nil {
-		t.Fatalf("TeamEntry: %v", err)
-	}
-	if te.TeamEntry.Metadata.Name != "sbsh" {
-		t.Errorf("teamEntry name = %q, want sbsh", te.TeamEntry.Metadata.Name)
-	}
-	if te.TeamEntry.Spec.Path != "/home/op/src/sbsh" || te.TeamEntry.Spec.Source == nil ||
-		te.TeamEntry.Spec.Source.Repo != "github.com/eminwux/agents" ||
-		te.TeamEntry.Spec.Source.Tag != "v1.4.0" {
-		t.Errorf("teamEntry spec = %+v", te.TeamEntry.Spec)
+	if len(tc.Workspace.Spec.Git.Sign) != 2 {
+		t.Errorf("git.sign len = %d, want 2", len(tc.Workspace.Spec.Git.Sign))
 	}
 
 	role, err := Parse([]byte(roleHappy))
@@ -277,146 +258,106 @@ func TestParseFailureModes(t *testing.T) {
 			"kind: Role\nmetadata: { name: dev }\n",
 			errdefs.ErrUnsupportedAPIVersion,
 		},
-		// ProjectTeam.
+		// Team.
 		{
-			"ProjectTeam missing name",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, roles: [{ref: dev}] }\n",
-			errdefs.ErrTeamMetadataNameRequired,
+			"Team missing name",
+			"apiVersion: kuketeams.io/v1\nkind: Team\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, roles: [{ref: dev}] }\n",
+			errdefs.ErrTeamConfigurationInvalid,
 		},
 		{
-			"ProjectTeam legacy string source",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: eminwux/agents@v1.4.0, roles: [{ref: dev}] }\n",
-			errdefs.ErrTeamSourceStringForm,
+			"Team legacy string source",
+			"apiVersion: kuketeams.io/v1\nkind: Team\nmetadata: {name: x}\nspec: { source: eminwux/agents@v1.4.0, roles: [{ref: dev}] }\n",
+			errdefs.ErrTeamConfigurationInvalid,
 		},
 		{
-			"ProjectTeam source no ref",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents}, roles: [{ref: dev}] }\n",
-			errdefs.ErrTeamSourceInvalid,
+			"Team source no ref",
+			"apiVersion: kuketeams.io/v1\nkind: Team\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents}, roles: [{ref: dev}] }\n",
+			errdefs.ErrTeamConfigurationInvalid,
 		},
 		{
-			"ProjectTeam source two refs",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, tag: v1.4.0, branch: main}, roles: [{ref: dev}] }\n",
-			errdefs.ErrTeamSourceInvalid,
+			"Team source two refs",
+			"apiVersion: kuketeams.io/v1\nkind: Team\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, tag: v1.4.0, branch: main}, roles: [{ref: dev}] }\n",
+			errdefs.ErrTeamConfigurationInvalid,
 		},
 		{
-			"ProjectTeam source missing owner",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: agents, tag: v1.4.0}, roles: [{ref: dev}] }\n",
-			errdefs.ErrTeamSourceInvalid,
+			"Team source missing owner",
+			"apiVersion: kuketeams.io/v1\nkind: Team\nmetadata: {name: x}\nspec: { source: {repo: agents, tag: v1.4.0}, roles: [{ref: dev}] }\n",
+			errdefs.ErrTeamConfigurationInvalid,
 		},
 		{
-			"ProjectTeam projectDir equals reserved agents slot",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: agents}\nspec: { source: {repo: eminwux/agents, branch: main}, projectDir: agents, roles: [{ref: dev}] }\n",
-			errdefs.ErrTeamProjectDirInvalid,
+			"Team cloneDir equals reserved agents slot",
+			"apiVersion: kuketeams.io/v1\nkind: Team\nmetadata: {name: agents}\nspec: { source: {repo: eminwux/agents, branch: main}, cloneDir: agents, roles: [{ref: dev}] }\n",
+			errdefs.ErrTeamConfigurationInvalid,
 		},
 		{
-			"ProjectTeam projectDir has path separator",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, projectDir: \"a/b\", roles: [{ref: dev}] }\n",
-			errdefs.ErrTeamProjectDirInvalid,
+			"Team cloneDir has path separator",
+			"apiVersion: kuketeams.io/v1\nkind: Team\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, cloneDir: \"a/b\", roles: [{ref: dev}] }\n",
+			errdefs.ErrTeamConfigurationInvalid,
 		},
 		{
-			"ProjectTeam projectDir traverses parent",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, projectDir: \"../escape\", roles: [{ref: dev}] }\n",
-			errdefs.ErrTeamProjectDirInvalid,
+			"Team cloneDir traverses parent",
+			"apiVersion: kuketeams.io/v1\nkind: Team\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, cloneDir: \"../escape\", roles: [{ref: dev}] }\n",
+			errdefs.ErrTeamConfigurationInvalid,
 		},
 		{
-			"ProjectTeam projectDir leading dot",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, projectDir: \".hidden\", roles: [{ref: dev}] }\n",
-			errdefs.ErrTeamProjectDirInvalid,
+			"Team cloneDir leading dot",
+			"apiVersion: kuketeams.io/v1\nkind: Team\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, cloneDir: \".hidden\", roles: [{ref: dev}] }\n",
+			errdefs.ErrTeamConfigurationInvalid,
 		},
 		{
-			"ProjectTeam empty role ref",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, roles: [{ref: \"\"}] }\n",
-			errdefs.ErrTeamRoleRefRequired,
+			"Team empty role ref",
+			"apiVersion: kuketeams.io/v1\nkind: Team\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, roles: [{ref: \"\"}] }\n",
+			errdefs.ErrTeamConfigurationInvalid,
 		},
 		{
-			"ProjectTeam unknown default harness",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, defaults: {harnesses: [bogus]}, roles: [{ref: dev}] }\n",
-			errdefs.ErrTeamHarnessUnknown,
+			"Team unsafe harness name",
+			"apiVersion: kuketeams.io/v1\nkind: Team\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, harnesses: [{name: ../bogus}], roles: [{ref: dev}] }\n",
+			errdefs.ErrTeamConfigurationInvalid,
 		},
 		{
-			"ProjectTeam role image is a tag",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, roles: [{ref: dev, needs: {image: [\"go:1.21\"]}}] }\n",
+			"Team role image is a tag",
+			"apiVersion: kuketeams.io/v1\nkind: Team\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, roles: [{ref: dev, needs: {image: [\"go:1.21\"]}}] }\n",
 			errdefs.ErrTeamImageCapabilityInvalid,
 		},
-		// TeamsConfig.
+		// Workspace.
 		{
-			"TeamsConfig git author missing email",
-			"apiVersion: kuketeams.io/v1\nkind: TeamsConfig\nspec: { git: { author: { name: A } } }\n",
-			errdefs.ErrTeamGitIdentityIncomplete,
+			"Workspace git author missing email",
+			"apiVersion: kuketeams.io/v1\nkind: Workspace\nspec: { git: { author: { name: A } } }\n",
+			errdefs.ErrTeamConfigurationInvalid,
 		},
 		{
-			"TeamsConfig sign without key",
-			"apiVersion: kuketeams.io/v1\nkind: TeamsConfig\nspec: { git: { sign: [commits] } }\n",
-			errdefs.ErrTeamGitSignNeedsKey,
+			"Workspace sign without key",
+			"apiVersion: kuketeams.io/v1\nkind: Workspace\nspec: { git: { sign: [commits] } }\n",
+			errdefs.ErrTeamConfigurationInvalid,
 		},
 		{
-			"TeamsConfig invalid sign entry",
-			"apiVersion: kuketeams.io/v1\nkind: TeamsConfig\nspec: { git: { signingKey: k, sign: [pushes] } }\n",
-			errdefs.ErrTeamGitSignInvalid,
+			"Workspace invalid sign entry",
+			"apiVersion: kuketeams.io/v1\nkind: Workspace\nspec: { git: { signingKey: k, sign: [pushes] } }\n",
+			errdefs.ErrTeamConfigurationInvalid,
 		},
 		{
-			"TeamsConfig secret bad source",
-			"apiVersion: kuketeams.io/v1\nkind: TeamsConfig\nspec: { secrets: { tok: { from: inline, key: X } } }\n",
-			errdefs.ErrTeamSecretSourceInvalid,
+			"Workspace secret bad source",
+			"apiVersion: kuketeams.io/v1\nkind: Workspace\nspec: { secrets: { tok: { from: inline, key: X } } }\n",
+			errdefs.ErrTeamConfigurationInvalid,
 		},
 		{
-			"TeamsConfig secret missing key",
-			"apiVersion: kuketeams.io/v1\nkind: TeamsConfig\nspec: { secrets: { tok: { from: env } } }\n",
-			errdefs.ErrTeamSecretSourceInvalid,
+			"Workspace secret missing key",
+			"apiVersion: kuketeams.io/v1\nkind: Workspace\nspec: { secrets: { tok: { from: env } } }\n",
+			errdefs.ErrTeamConfigurationInvalid,
 		},
 		{
-			"TeamsConfig bad sources key",
-			"apiVersion: kuketeams.io/v1\nkind: TeamsConfig\nspec: { sources: { agents: git@x } }\n",
-			errdefs.ErrTeamSourceKeyInvalid,
-		},
-		// TeamEntry.
-		{
-			"TeamEntry missing name",
-			"apiVersion: kuketeams.io/v1\nkind: TeamEntry\nspec: { path: /x }\n",
-			errdefs.ErrTeamEntryNameRequired,
+			"Workspace bad sources key",
+			"apiVersion: kuketeams.io/v1\nkind: Workspace\nspec: { sources: { agents: git@x } }\n",
+			errdefs.ErrTeamConfigurationInvalid,
 		},
 		{
-			"TeamEntry legacy string source",
-			"apiVersion: kuketeams.io/v1\nkind: TeamEntry\nmetadata: { name: a }\nspec: { path: /x, source: eminwux/agents@v1.4.0 }\n",
-			errdefs.ErrTeamSourceStringForm,
-		},
-		{
-			"TeamEntry malformed source",
-			"apiVersion: kuketeams.io/v1\nkind: TeamEntry\nmetadata: { name: a }\nspec: { path: /x, source: {repo: eminwux/agents} }\n",
-			errdefs.ErrTeamSourceInvalid,
-		},
-		{
-			// Path-traversal: an unbounded metadata.name flows into
-			// teamhost.Layout.EntryPath via filepath.Join, so a name like
-			// "../kuketeams" would clobber ~/.kuke/kuketeams.yaml. The parser
-			// must refuse before that name reaches host code.
-			"TeamEntry name traverses parent",
-			"apiVersion: kuketeams.io/v1\nkind: TeamEntry\nmetadata: { name: \"../kuketeams\" }\nspec: { path: /x }\n",
-			errdefs.ErrTeamMetadataNameUnsafe,
-		},
-		{
-			"TeamEntry name has path separator",
-			"apiVersion: kuketeams.io/v1\nkind: TeamEntry\nmetadata: { name: \"a/b\" }\nspec: { path: /x }\n",
-			errdefs.ErrTeamMetadataNameUnsafe,
-		},
-		{
-			"TeamEntry name has backslash",
-			"apiVersion: kuketeams.io/v1\nkind: TeamEntry\nmetadata: { name: \"a\\\\b\" }\nspec: { path: /x }\n",
-			errdefs.ErrTeamMetadataNameUnsafe,
-		},
-		{
-			"TeamEntry name is leading dot",
-			"apiVersion: kuketeams.io/v1\nkind: TeamEntry\nmetadata: { name: \".kuke\" }\nspec: { path: /x }\n",
-			errdefs.ErrTeamMetadataNameUnsafe,
-		},
-		{
-			// Same guard applies on the ProjectTeam side — the per-project
+			// Same guard applies on the Team side — the per-project
 			// roster is itself untrusted input (parsed from each project's
 			// committed kuketeam.yaml), and metadata.name from that file
 			// becomes the TeamEntry's metadata.name verbatim in `kuke team init`.
-			"ProjectTeam name traverses parent",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: { name: \"../kuketeams\" }\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, roles: [{ref: dev}] }\n",
-			errdefs.ErrTeamMetadataNameUnsafe,
+			"Team name traverses parent",
+			"apiVersion: kuketeams.io/v1\nkind: Team\nmetadata: { name: \"../workspace\" }\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, roles: [{ref: dev}] }\n",
+			errdefs.ErrTeamConfigurationInvalid,
 		},
 		// Role.
 		{
@@ -559,7 +500,7 @@ func TestParseDocumentsPropagatesValidation(t *testing.T) {
 	}
 }
 
-func TestParseProjectTeamAcceptsSourceForms(t *testing.T) {
+func TestParseTeamAcceptsSourceForms(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name         string
@@ -575,42 +516,42 @@ func TestParseProjectTeamAcceptsSourceForms(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			raw := "apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: " +
+			raw := "apiVersion: kuketeams.io/v1\nkind: Team\nmetadata: {name: x}\nspec: { source: " +
 				tc.source + ", roles: [{ref: dev}] }\n"
 			doc, err := Parse([]byte(raw))
 			if err != nil {
 				t.Fatalf("Parse(%s): %v", tc.name, err)
 			}
-			if got := doc.ProjectTeam.Spec.Source.Floating(); got != tc.wantFloating {
+			if got := doc.Team.Spec.Source.Floating(); got != tc.wantFloating {
 				t.Errorf("Floating() = %v, want %v", got, tc.wantFloating)
 			}
 		})
 	}
 }
 
-func TestParseProjectTeamAcceptsProjectDir(t *testing.T) {
+func TestParseTeamAcceptsCloneDir(t *testing.T) {
 	t.Parallel()
 	// A self-referential team gives the project clone a distinct in-cell dir so
 	// it never collides with the `agents` repo slot's fixed `/home/<user>/agents`.
-	raw := "apiVersion: kuketeams.io/v1\nkind: ProjectTeam\n" +
+	raw := "apiVersion: kuketeams.io/v1\nkind: Team\n" +
 		"metadata: {name: agents}\n" +
-		"spec: { source: {repo: eminwux/agents, branch: main}, projectDir: agents0, roles: [{ref: dev}] }\n"
+		"spec: { repo: {repo: eminwux/agents}, source: {repo: eminwux/agents, branch: main}, cloneDir: agents0, roles: [{ref: dev}] }\n"
 	doc, err := Parse([]byte(raw))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if got := doc.ProjectTeam.Spec.ProjectDir; got != "agents0" {
-		t.Errorf("spec.projectDir = %q, want agents0", got)
+	if got := doc.Team.Spec.CloneDir; got != "agents0" {
+		t.Errorf("spec.cloneDir = %q, want agents0", got)
 	}
-	// Omitting projectDir is valid — the renderer falls back to metadata.name.
-	bare := "apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\n" +
+	// Omitting cloneDir is valid — the renderer falls back to metadata.name.
+	bare := "apiVersion: kuketeams.io/v1\nkind: Team\nmetadata: {name: x}\n" +
 		"spec: { source: {repo: eminwux/agents, tag: v1.4.0}, roles: [{ref: dev}] }\n"
 	doc, err = Parse([]byte(bare))
 	if err != nil {
 		t.Fatalf("Parse(bare): %v", err)
 	}
-	if got := doc.ProjectTeam.Spec.ProjectDir; got != "" {
-		t.Errorf("spec.projectDir = %q, want empty", got)
+	if got := doc.Team.Spec.CloneDir; got != "" {
+		t.Errorf("spec.cloneDir = %q, want empty", got)
 	}
 }
 
@@ -645,10 +586,16 @@ func TestValidateSourceRejectsTraversalRef(t *testing.T) {
 	}
 }
 
-func TestParseTeamsConfigAcceptsHostQualifiedSourceKey(t *testing.T) {
+func TestParseWorkspaceAcceptsHostQualifiedSourceKey(t *testing.T) {
 	t.Parallel()
-	raw := "apiVersion: kuketeams.io/v1\nkind: TeamsConfig\nspec: { sources: { \"github.com/eminwux/agents\": https://github.com/eminwux/agents.git } }\n"
+	raw := "apiVersion: kuketeams.io/v1\nkind: Workspace\nspec: { sources: { \"github.com/eminwux/agents\": https://github.com/eminwux/agents.git } }\n"
 	if _, err := Parse([]byte(raw)); err != nil {
 		t.Fatalf("Parse host-qualified sources key: %v", err)
+	}
+}
+
+func TestParseRejectsTeamEntry(t *testing.T) {
+	if _, err := Parse([]byte(teamEntryHappy)); !errors.Is(err, errdefs.ErrUnknownKind) {
+		t.Fatalf("legacy TeamEntry must be rejected: %v", err)
 	}
 }

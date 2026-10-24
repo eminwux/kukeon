@@ -1,0 +1,45 @@
+# A second independent Team targeting the same repository as minimal.yaml.
+apiVersion: kuketeams.io/v1
+kind: Team
+metadata: { name: project-review }
+spec:
+  repo: { repo: github.com/example/project, branch: main }
+  cloneDir: project-code
+  cwd: $HOME/project-code
+  stateDir: ~/.kuke/custom-state/project-review
+  realm: development
+  space: engineering
+  stack: review
+  source:
+    repo: github.com/example/agents
+    branch: release/stable
+    path: definitions
+  roles:
+    - name: rev
+      ref: pr-reviewer
+      source:
+        repo: github.com/example/review-roles
+        commit: 0123456789abcdef0123456789abcdef01234567
+        path: library
+      path: roles/pr-reviewer
+      harness: codex
+      needs: { image: [go, node] }
+    - name: dev-helper
+      ref: dev
+      harness: claude
+  harnesses:
+    - name: codex
+      source:
+        repo: github.com/example/harnesses
+        tag: v2.0.0
+        path: definitions
+      path: codex/blueprint.yaml
+      default: true
+    - name: claude
+      default: false
+      path: harnesses/claude/blueprint.yaml
+  modes: [interactive]
+  # Whole-map replacement: git is explicitly disabled; no other clients inherit.
+  integrations:
+    gh: { credentials: [github-api] }
+    git: { credentials: [] }

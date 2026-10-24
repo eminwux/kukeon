@@ -1,0 +1,5 @@
+apiVersion: kuketeams.io/v1
+kind: Team
+metadata: {name: example}
+spec:
+  sources: [{name: one, path: one}, {name: two, path: two}]

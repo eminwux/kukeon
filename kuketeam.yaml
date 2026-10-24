@@ -1,9 +1,9 @@
 apiVersion: kuketeams.io/v1
-kind: ProjectTeam
+kind: Team
 metadata: { name: kukeon }
 spec:
   source: { repo: github.com/eminwux/agents, branch: main }
-  defaults: { harnesses: [claude, opencode, codex] }
+  harnesses: [{ name: claude }, { name: opencode }, { name: codex }]
   roles:
     - { ref: dev, needs: { image: [go, root] } }
     - { ref: pm }

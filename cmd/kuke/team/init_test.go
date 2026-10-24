@@ -37,8 +37,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const projectTeamYAML = `apiVersion: kuketeams.io/v1
-kind: ProjectTeam
+const teamYAML = `apiVersion: kuketeams.io/v1
+kind: Team
 metadata: { name: sbsh }
 spec:
   source: { repo: github.com/eminwux/agents, tag: v1.4.0 }
@@ -46,15 +46,14 @@ spec:
     - { ref: dev }
 `
 
-// projectTeamWithHarnessYAML carries a harness default so the render
+// teamWithHarnessYAML carries a harness default so the render
 // pipeline produces at least one (role × harness) pair.
-const projectTeamWithHarnessYAML = `apiVersion: kuketeams.io/v1
-kind: ProjectTeam
+const teamWithHarnessYAML = `apiVersion: kuketeams.io/v1
+kind: Team
 metadata: { name: sbsh }
 spec:
   source: { repo: github.com/eminwux/agents, tag: v1.4.0 }
-  defaults:
-    harnesses: [claude]
+  harnesses: [{name: claude}]
   roles:
     - { ref: dev }
 `
@@ -80,7 +79,7 @@ func stubProjectURL(url string) ProjectRepoURLFunc {
 // stubResolveErr returns a ResolveFunc that always fails — used by tests
 // that should never reach the resolve step.
 func stubResolveErr() ResolveFunc {
-	return func(_ context.Context, _ teamsource.Cache, _ *model.TeamsConfig, _ *model.ProjectTeam) (*teamsource.Bundle, error) {
+	return func(_ context.Context, _ teamsource.Cache, _ *model.Workspace, _ *model.Team) (*teamsource.Bundle, error) {
 		return nil, errors.New("resolve must not be called")
 	}
 }
@@ -165,7 +164,7 @@ func recordingApply(
 // bundle's cacheDir is a tempdir the test writes a single harness blueprint
 // template into so RenderBlueprint can read it.
 func stubBundle(b *teamsource.Bundle) ResolveFunc {
-	return func(_ context.Context, _ teamsource.Cache, _ *model.TeamsConfig, _ *model.ProjectTeam) (*teamsource.Bundle, error) {
+	return func(_ context.Context, _ teamsource.Cache, _ *model.Workspace, _ *model.Team) (*teamsource.Bundle, error) {
 		return b, nil
 	}
 }
@@ -284,7 +283,7 @@ func TestComposeTeamNoProjectFile(t *testing.T) {
 
 func TestComposeTeamWrongKind(t *testing.T) {
 	t.Parallel()
-	dir := writeProject(t, "apiVersion: kuketeams.io/v1\nkind: TeamsConfig\nspec: {}\n")
+	dir := writeProject(t, "apiVersion: kuketeams.io/v1\nkind: Workspace\nspec: {}\n")
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	err := composeTeam(
 		context.Background(), &bytes.Buffer{}, io.Discard, dir, layout,
@@ -297,7 +296,7 @@ func TestComposeTeamWrongKind(t *testing.T) {
 
 func TestComposeTeamScaffoldsAndWrites(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamYAML)
+	projectDir := writeProject(t, teamYAML)
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	git := stubGit(map[string]string{
 		"user.name":                  "Op Erator",
@@ -321,7 +320,7 @@ func TestComposeTeamScaffoldsAndWrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("global config not written: %v", err)
 	}
-	var gc model.TeamsConfig
+	var gc model.Workspace
 	if unmarshalErr := yaml.Unmarshal(rawGlobal, &gc); unmarshalErr != nil {
 		t.Fatalf("global config parse: %v", unmarshalErr)
 	}
@@ -363,7 +362,7 @@ func TestComposeTeamScaffoldsAndWrites(t *testing.T) {
 
 func TestComposeTeamReRunDoesNotRescaffold(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamYAML)
+	projectDir := writeProject(t, teamYAML)
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	git := stubGit(map[string]string{"user.name": "A", "user.email": "a@example.com"})
 
@@ -375,7 +374,7 @@ func TestComposeTeamReRunDoesNotRescaffold(t *testing.T) {
 	}
 	// Tamper the global facts; a re-run must leave them untouched.
 	if err := os.WriteFile(layout.GlobalConfigPath(), []byte(
-		"apiVersion: kuketeams.io/v1\nkind: TeamsConfig\nspec:\n  registry: sentinel.example.com\n",
+		"apiVersion: kuketeams.io/v1\nkind: Workspace\nspec:\n  registry: sentinel.example.com\n",
 	), 0o600); err != nil {
 		t.Fatalf("seed sentinel: %v", err)
 	}
@@ -400,7 +399,7 @@ func TestComposeTeamReRunDoesNotRescaffold(t *testing.T) {
 
 func TestComposeTeamNoGitIdentityOmitsGitBlock(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamYAML)
+	projectDir := writeProject(t, teamYAML)
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 
 	if err := composeTeam(
@@ -413,7 +412,7 @@ func TestComposeTeamNoGitIdentityOmitsGitBlock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("global config not written: %v", err)
 	}
-	var gc model.TeamsConfig
+	var gc model.Workspace
 	if unmarshalErr := yaml.Unmarshal(raw, &gc); unmarshalErr != nil {
 		t.Fatalf("parse: %v", unmarshalErr)
 	}
@@ -424,7 +423,7 @@ func TestComposeTeamNoGitIdentityOmitsGitBlock(t *testing.T) {
 
 func TestComposeTeamDryRunWritesNothing(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamYAML)
+	projectDir := writeProject(t, teamYAML)
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 
 	var out bytes.Buffer
@@ -449,7 +448,7 @@ func TestComposeTeamDryRunWritesNothing(t *testing.T) {
 // to stdout and neither applies nor writes kuketeam.d/<project>.yaml".
 func TestComposeTeamDryRunRendersToStdout(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	projectDir := writeProject(t, teamWithHarnessYAML)
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	bundle := buildClaudeBundle(t)
 
@@ -492,7 +491,7 @@ func TestComposeTeamDryRunRendersToStdout(t *testing.T) {
 // entry is written), and that the drop-in entry IS written then.
 func TestComposeTeamRendersOnNonDryRun(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	projectDir := writeProject(t, teamWithHarnessYAML)
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	bundle := buildClaudeBundle(t)
 
@@ -569,7 +568,9 @@ func TestPruneEmptySecretBindingsNoOps(t *testing.T) {
 	cfg := &v1beta1.CellConfigDoc{
 		Spec: v1beta1.CellConfigSpec{
 			Secrets: map[string]v1beta1.CellConfigSecretFill{
-				"claude-code-oauth-token": {SecretRef: &v1beta1.ContainerSecretRef{Name: "claude-code-oauth-token", Realm: "default"}},
+				"claude-code-oauth-token": {
+					SecretRef: &v1beta1.ContainerSecretRef{Name: "claude-code-oauth-token", Realm: "default"},
+				},
 			},
 		},
 	}
@@ -589,7 +590,7 @@ func TestPruneEmptySecretBindingsNoOps(t *testing.T) {
 // zero applied objects (#1123).
 func TestComposeTeamApplyTotalFailureExitsNonZeroSkipsEntry(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	projectDir := writeProject(t, teamWithHarnessYAML)
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	bundle := buildClaudeBundle(t)
 
@@ -625,7 +626,7 @@ func TestComposeTeamApplyTotalFailureExitsNonZeroSkipsEntry(t *testing.T) {
 // the gap (#1123).
 func TestComposeTeamApplyPartialFailureExitsNonZeroWritesEntry(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	projectDir := writeProject(t, teamWithHarnessYAML)
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	bundle := buildClaudeBundle(t)
 
@@ -656,7 +657,7 @@ func TestComposeTeamApplyPartialFailureExitsNonZeroWritesEntry(t *testing.T) {
 // the operator-actionable error path with the unmet capability named.
 func TestComposeTeamImageSelectHardError(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	projectDir := writeProject(t, teamWithHarnessYAML)
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	bundle := buildClaudeBundle(t)
 	// Drop the role's `git` from images' capability set so the merged needs
@@ -684,7 +685,7 @@ func TestComposeTeamImageSelectHardError(t *testing.T) {
 // fill — the AC's "project's cloned repo URL → CellConfig" check.
 func TestComposeTeamProjectRepoURLFilledIntoConfig(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	projectDir := writeProject(t, teamWithHarnessYAML)
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	bundle := buildClaudeBundle(t)
 
@@ -709,7 +710,7 @@ func TestComposeTeamProjectRepoURLFilledIntoConfig(t *testing.T) {
 // prunes against in #1029.
 func TestComposeTeamAppliesRenderedSetToDaemon(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	projectDir := writeProject(t, teamWithHarnessYAML)
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	bundle := buildClaudeBundle(t)
 
@@ -759,7 +760,7 @@ func TestComposeTeamAppliesRenderedSetToDaemon(t *testing.T) {
 // rendered objects to stdout but does not call into the daemon.
 func TestComposeTeamDryRunSkipsApply(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	projectDir := writeProject(t, teamWithHarnessYAML)
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	bundle := buildClaudeBundle(t)
 
@@ -781,7 +782,7 @@ func TestComposeTeamDryRunSkipsApply(t *testing.T) {
 // no (role × harness) pairs → nothing to apply, no daemon hop.
 func TestComposeTeamHarnessLessRosterSkipsApply(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamYAML)
+	projectDir := writeProject(t, teamYAML)
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 
 	var out bytes.Buffer
@@ -806,7 +807,7 @@ func TestComposeTeamHarnessLessRosterSkipsApply(t *testing.T) {
 // not leave a half-recorded team behind. The next re-run sees a clean tree.
 func TestComposeTeamApplyFailureBlocksDropInWrite(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	projectDir := writeProject(t, teamWithHarnessYAML)
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	bundle := buildClaudeBundle(t)
 
@@ -829,10 +830,10 @@ func TestComposeTeamApplyFailureBlocksDropInWrite(t *testing.T) {
 
 // TestComposeTeamWritesNothingUnderRendered covers the explicit AC: nothing
 // is written under ~/.kuke/rendered/. After a full init the layout base
-// holds only kuketeams.yaml + kuketeam.d/, never a rendered/ sibling.
+// holds only workspace.yaml + kuketeam.d/, never a rendered/ sibling.
 func TestComposeTeamWritesNothingUnderRendered(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	projectDir := writeProject(t, teamWithHarnessYAML)
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	bundle := buildClaudeBundle(t)
 
@@ -865,12 +866,11 @@ func TestComposeTeamTwoProjectsIndependent(t *testing.T) {
 
 	mkProject := func(name string) string {
 		body := fmt.Sprintf(`apiVersion: kuketeams.io/v1
-kind: ProjectTeam
+kind: Team
 metadata: { name: %s }
 spec:
   source: { repo: github.com/eminwux/agents, tag: v1.4.0 }
-  defaults:
-    harnesses: [claude]
+  harnesses: [{name: claude}]
   roles:
     - { ref: dev }
 `, name)
@@ -974,7 +974,7 @@ func TestNewInitCmdParsesDryRunFlag(t *testing.T) {
 // for the (role × harness) pairs.
 func TestComposeTeamBuildInvokesBuildAll(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	projectDir := writeProject(t, teamWithHarnessYAML)
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	bundle := buildClaudeBundle(t)
 
@@ -1033,12 +1033,11 @@ func TestComposeTeamBuildInvokesBuildAll(t *testing.T) {
 func TestComposeTeamBuildBindsInternalImageRefTwoProjects(t *testing.T) {
 	t.Parallel()
 	const otherProjectYAML = `apiVersion: kuketeams.io/v1
-kind: ProjectTeam
+kind: Team
 metadata: { name: kuke }
 spec:
   source: { repo: github.com/eminwux/agents, tag: v1.4.0 }
-  defaults:
-    harnesses: [claude]
+  harnesses: [{name: claude}]
   roles:
     - { ref: dev }
 `
@@ -1049,7 +1048,7 @@ spec:
 		name string
 		body string
 	}{
-		{"sbsh", projectTeamWithHarnessYAML},
+		{"sbsh", teamWithHarnessYAML},
 		{"kuke", otherProjectYAML},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1093,7 +1092,7 @@ spec:
 // the catalog's published image is bound and no kukeon.internal ref appears.
 func TestComposeTeamBindsPublishedImageRefWithoutBuild(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	projectDir := writeProject(t, teamWithHarnessYAML)
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	bundle := buildClaudeBundle(t)
 
@@ -1126,7 +1125,7 @@ func TestComposeTeamBindsPublishedImageRefWithoutBuild(t *testing.T) {
 // nor the daemon apply.
 func TestComposeTeamBuildSkippedOnDryRun(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	projectDir := writeProject(t, teamWithHarnessYAML)
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	bundle := buildClaudeBundle(t)
 
@@ -1152,7 +1151,7 @@ func TestComposeTeamBuildSkippedOnDryRun(t *testing.T) {
 // were.
 func TestComposeTeamBuildNotInvokedByDefault(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	projectDir := writeProject(t, teamWithHarnessYAML)
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	bundle := buildClaudeBundle(t)
 
@@ -1174,7 +1173,7 @@ func TestComposeTeamBuildNotInvokedByDefault(t *testing.T) {
 // drop-in entry with spec.teamDir auto-populated from Layout.TeamDir(project).
 func TestComposeTeamAutoFillsTeamDir(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamYAML)
+	projectDir := writeProject(t, teamYAML)
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 
 	if err := composeTeam(
@@ -1201,7 +1200,7 @@ func TestComposeTeamAutoFillsTeamDir(t *testing.T) {
 // with an override and asserts the re-write keeps it.
 func TestComposeTeamPreservesTeamDirOverride(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamYAML)
+	projectDir := writeProject(t, teamYAML)
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 
 	// Seed an existing drop-in entry with an operator-relocated teamDir.
@@ -1253,7 +1252,7 @@ func TestComposeTeamPreservesTeamDirOverride(t *testing.T) {
 // (role × harness) pair gets a state dir under `~/.kuke/teams/<team>/`.
 func TestComposeTeamProvisionsRosterStateDirs(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	projectDir := writeProject(t, teamWithHarnessYAML)
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	bundle := buildClaudeBundle(t)
 	// Add a seed to the claude harness so the AC's "seeds applied" branch
@@ -1294,12 +1293,11 @@ func TestComposeTeamProvisionsRosterStateDirs(t *testing.T) {
 func TestComposeTeamProvisionsTwoProjectsIsolated(t *testing.T) {
 	t.Parallel()
 	const otherProjectYAML = `apiVersion: kuketeams.io/v1
-kind: ProjectTeam
+kind: Team
 metadata: { name: kukeon }
 spec:
   source: { repo: github.com/eminwux/agents, tag: v1.4.0 }
-  defaults:
-    harnesses: [claude]
+  harnesses: [{name: claude}]
   roles:
     - { ref: dev }
 `
@@ -1363,7 +1361,7 @@ spec:
 // land on stdout, but no per-team root materializes.
 func TestComposeTeamProvisionDryRunWritesNothing(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	projectDir := writeProject(t, teamWithHarnessYAML)
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	bundle := buildClaudeBundle(t)
 	bundle.Harnesses["claude"].Spec.Seeds = []model.HarnessSeed{
@@ -1418,7 +1416,7 @@ var _ = v1beta1.LabelTeam
 // line per secret name the team's roles need.
 func TestComposeTeamScaffoldsSecretsEnvFilesOnFirstInit(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	projectDir := writeProject(t, teamWithHarnessYAML)
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	bundle := buildClaudeBundle(t)
 	// Add a second secret to the role's needs so the scaffold body has more
@@ -1477,7 +1475,7 @@ func TestComposeTeamScaffoldsSecretsEnvFilesOnFirstInit(t *testing.T) {
 // Secret docs (per-team value wins for shared keys).
 func TestComposeTeamRespectsPopulatedSecretsEnv(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	projectDir := writeProject(t, teamWithHarnessYAML)
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	bundle := buildClaudeBundle(t)
 	bundle.Roles["dev"].Spec.Needs.Secrets = []string{"ANTHROPIC_AUTH_TOKEN", "OPENROUTER_API_KEY"}
@@ -1547,7 +1545,7 @@ func TestComposeTeamRespectsPopulatedSecretsEnv(t *testing.T) {
 // reader can verify by the byte-offset of each section's "kind:" line.
 func TestComposeTeamBundlesSecretsBeforeBlueprintsAndConfigs(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	projectDir := writeProject(t, teamWithHarnessYAML)
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	bundle := buildClaudeBundle(t)
 	bundle.Roles["dev"].Spec.Needs.Secrets = []string{"ANTHROPIC_AUTH_TOKEN"}
@@ -1605,7 +1603,7 @@ func TestComposeTeamBundlesSecretsBeforeBlueprintsAndConfigs(t *testing.T) {
 // no populated values, no Secret docs surface (empty values are skipped).
 func TestComposeTeamDryRunDoesNotScaffoldSecretsEnv(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	projectDir := writeProject(t, teamWithHarnessYAML)
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	bundle := buildClaudeBundle(t)
 	bundle.Roles["dev"].Spec.Needs.Secrets = []string{"ANTHROPIC_AUTH_TOKEN"}
@@ -1678,7 +1676,7 @@ func TestEmitSourceKind(t *testing.T) {
 // and nothing is written to disk (no global config, no drop-in entry).
 func TestValidateTeamCleanExitsZero(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	projectDir := writeProject(t, teamWithHarnessYAML)
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	bundle := buildClaudeBundle(t)
 
@@ -1711,7 +1709,7 @@ func TestValidateTeamCleanExitsZero(t *testing.T) {
 // prints.
 func TestValidateTeamGapExitsNonZero(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	projectDir := writeProject(t, teamWithHarnessYAML)
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	bundle := buildClaudeBundle(t)
 	// Drop a capability the dev role needs (go,git) so SelectImage misses.
@@ -1735,7 +1733,7 @@ func TestValidateTeamGapExitsNonZero(t *testing.T) {
 // not triggered) and the four empty sections still render at exit 0.
 func TestValidateTeamHarnessLessRosterSkipsResolve(t *testing.T) {
 	t.Parallel()
-	projectDir := writeProject(t, projectTeamYAML) // no defaults.harnesses
+	projectDir := writeProject(t, teamYAML) // no harnesses
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 
 	var out bytes.Buffer
