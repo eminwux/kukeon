@@ -143,7 +143,7 @@ func makeFixtureRemote(t *testing.T, version string, files []agentsFile) string 
 // tagSrc is the resolved test source for the fixture remote's v1.4.0 tag.
 func tagSrc(t *testing.T) Source {
 	t.Helper()
-	s, err := FromModel(model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"})
+	s, err := FromModel(model.TeamSource{Repo: "github.com/eminwux/agents", Ref: "v1.4.0"})
 	if err != nil {
 		t.Fatalf("FromModel: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestFromModel_Forms(t *testing.T) {
 	}{
 		{
 			"host tag",
-			model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"},
+			model.TeamSource{Repo: "github.com/eminwux/agents", Ref: "v1.4.0"},
 			"eminwux/agents",
 			"github.com",
 			"v1.4.0",
@@ -170,7 +170,7 @@ func TestFromModel_Forms(t *testing.T) {
 		},
 		{
 			"bare defaults host",
-			model.TeamSource{Repo: "eminwux/agents", Tag: "v1.4.0"},
+			model.TeamSource{Repo: "eminwux/agents", Ref: "v1.4.0"},
 			"eminwux/agents",
 			"github.com",
 			"v1.4.0",
@@ -223,9 +223,9 @@ func TestFromModel_Rejects(t *testing.T) {
 	t.Parallel()
 	for _, in := range []model.TeamSource{
 		{Repo: "github.com/eminwux/agents"},                            // no ref
-		{Repo: "github.com/eminwux/agents", Tag: "v1", Branch: "main"}, // two refs
-		{Repo: "agents", Tag: "v1.4.0"},                                // missing owner
-		{Tag: "v1.4.0"},                                                // missing repo
+		{Repo: "github.com/eminwux/agents", Ref: "v1", Branch: "main"}, // two refs
+		{Repo: "agents", Ref: "v1.4.0"},                                // missing owner
+		{Ref: "v1.4.0"},                                                // missing repo
 	} {
 		if _, err := FromModel(in); !errors.Is(err, errdefs.ErrTeamSourceInvalid) {
 			t.Errorf("FromModel(%+v) err = %v, want ErrTeamSourceInvalid", in, err)
@@ -468,7 +468,7 @@ func TestCache_MaterializeMissingTagSurfaces(t *testing.T) {
 	t.Parallel()
 	url := makeFixtureRemote(t, "v1.4.0", defaultFixtureFiles())
 	cache := NewCache(filepath.Join(t.TempDir(), "cache"))
-	src, err := FromModel(model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v9.9.9"})
+	src, err := FromModel(model.TeamSource{Repo: "github.com/eminwux/agents", Ref: "v9.9.9"})
 	if err != nil {
 		t.Fatalf("FromModel: %v", err)
 	}
@@ -496,7 +496,7 @@ func TestResolve_LoadsAllReferenced(t *testing.T) {
 	}
 	pt := &model.ProjectTeam{
 		Spec: model.ProjectTeamSpec{
-			Source:   model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"},
+			Source:   model.TeamSource{Repo: "github.com/eminwux/agents", Ref: "v1.4.0"},
 			Defaults: model.ProjectTeamDefaults{Harnesses: []string{"claude"}},
 			Roles:    []model.ProjectTeamRole{{Ref: "dev"}},
 		},

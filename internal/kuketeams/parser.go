@@ -206,10 +206,31 @@ func validateProjectTeam(pt *model.ProjectTeam) error {
 		if strings.TrimSpace(role.Ref) == "" {
 			return fmt.Errorf("%w (roles[%d])", errdefs.ErrTeamRoleRefRequired, i)
 		}
+		if role.Instances < 0 {
+			return fmt.Errorf("ProjectTeam roles[%d].instances must not be negative", i)
+		}
 		if role.Needs != nil {
 			if err := validateCapabilityNames(role.Needs.Image, fmt.Sprintf("roles[%d].needs.image", i)); err != nil {
 				return err
 			}
+		}
+	}
+	if cell := pt.Spec.WorkspaceCell; cell != nil {
+		if len(pt.Spec.Roles) == 0 {
+			return errors.New("ProjectTeam workspaceCell requires at least one role")
+		}
+		if len(cell.Configs) == 0 {
+			return errors.New("ProjectTeam workspaceCell requires at least one config")
+		}
+		seenConfigs := make(map[string]struct{}, len(cell.Configs))
+		for i, config := range cell.Configs {
+			if strings.TrimSpace(config.Name) == "" || strings.TrimSpace(config.Blueprint) == "" {
+				return fmt.Errorf("ProjectTeam workspaceCell.configs[%d] requires name and blueprint", i)
+			}
+			if _, ok := seenConfigs[config.Name]; ok {
+				return fmt.Errorf("ProjectTeam workspaceCell has duplicate config %q", config.Name)
+			}
+			seenConfigs[config.Name] = struct{}{}
 		}
 	}
 	return nil
@@ -265,7 +286,7 @@ func validateTeamEntry(te *model.TeamEntry) error {
 // ValidateSource enforces the structured-source contract shared by ProjectTeam
 // and TeamEntry: repo is host-qualifiable (`<host>/<owner>/<repo>` or a bare
 // `<owner>/<repo>` defaulting to github.com), and exactly one of
-// tag/branch/commit carries the ref intent. Zero or multiple refs is a parse
+// ref/branch/commit carries the ref intent. Zero or multiple refs is a parse
 // error — the key name is the pinned-vs-floating signal, so ambiguity is not
 // tolerated.
 func ValidateSource(s model.TeamSource) error {
@@ -276,11 +297,11 @@ func ValidateSource(s model.TeamSource) error {
 	if err := validateRepo(repo); err != nil {
 		return err
 	}
-	value, kind := s.Ref()
+	value, kind := s.Reference()
 	if kind == "" {
 		return fmt.Errorf(
-			"%w (got tag=%q branch=%q commit=%q)",
-			errdefs.ErrTeamSourceInvalid, s.Tag, s.Branch, s.Commit,
+			"%w (got ref=%q branch=%q commit=%q)",
+			errdefs.ErrTeamSourceInvalid, s.Ref, s.Branch, s.Commit,
 		)
 	}
 	if err := validateRef(value, kind); err != nil {

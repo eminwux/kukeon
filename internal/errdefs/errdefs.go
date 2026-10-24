@@ -642,15 +642,15 @@ var (
 	ErrTeamMetadataNameRequired = errors.New("metadata.name is required")
 	// ErrTeamSourceInvalid fires when a structured `source` object is malformed:
 	// a missing or non-host-qualifiable repo, or other than exactly one of
-	// tag/branch/commit.
+	// ref/branch/commit.
 	ErrTeamSourceInvalid = errors.New(
-		"source must carry a repo (<host>/<owner>/<repo> or <owner>/<repo>) and exactly one of tag/branch/commit",
+		"source must carry a repo (<host>/<owner>/<repo> or <owner>/<repo>) and exactly one of ref/branch/commit",
 	)
 	// ErrTeamSourceStringForm fires when a `source` field is the legacy
 	// `<owner>/<repo>@vX.Y.Z` string instead of the structured object. The
 	// string form is no longer supported — there is no silent dual-parse.
 	ErrTeamSourceStringForm = errors.New(
-		"source is now a structured object (repo + one of tag/branch/commit); the `<owner>/<repo>@<version>` string form is no longer supported — migrate to e.g. `source:\n  repo: github.com/eminwux/agents\n  tag: v1.4.0`",
+		"source is now a structured object (repo + one of ref/branch/commit); the `<owner>/<repo>@<version>` string form is no longer supported — migrate to e.g. `source:\n  repo: github.com/eminwux/agents\n  ref: v1.4.0`",
 	)
 	// ErrTeamRoleRefRequired fires when a ProjectTeam roles[] entry omits ref.
 	ErrTeamRoleRefRequired = errors.New("roles[].ref is required")

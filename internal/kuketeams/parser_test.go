@@ -30,7 +30,7 @@ apiVersion: kuketeams.io/v1
 kind: ProjectTeam
 metadata: { name: sbsh }
 spec:
-  source: { repo: github.com/eminwux/agents, tag: v1.4.0 }
+  source: { repo: github.com/eminwux/agents, ref: v1.4.0 }
   defaults: { harnesses: [claude, opencode] }
   roles:
     - { ref: dev, needs: { image: [go] } }
@@ -59,7 +59,7 @@ const teamEntryHappy = `
 apiVersion: kuketeams.io/v1
 kind: TeamEntry
 metadata: { name: sbsh }
-spec: { path: /home/op/src/sbsh, source: { repo: github.com/eminwux/agents, tag: v1.4.0 } }
+spec: { path: /home/op/src/sbsh, source: { repo: github.com/eminwux/agents, ref: v1.4.0 } }
 `
 
 const roleHappy = `
@@ -169,7 +169,7 @@ func TestParseHappyPathFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProjectTeam: %v", err)
 	}
-	if got := pt.ProjectTeam.Spec.Source; got.Repo != "github.com/eminwux/agents" || got.Tag != "v1.4.0" {
+	if got := pt.ProjectTeam.Spec.Source; got.Repo != "github.com/eminwux/agents" || got.Ref != "v1.4.0" {
 		t.Errorf("source = %+v", got)
 	}
 	if pt.ProjectTeam.Spec.Source.Floating() {
@@ -207,7 +207,7 @@ func TestParseHappyPathFields(t *testing.T) {
 	}
 	if te.TeamEntry.Spec.Path != "/home/op/src/sbsh" || te.TeamEntry.Spec.Source == nil ||
 		te.TeamEntry.Spec.Source.Repo != "github.com/eminwux/agents" ||
-		te.TeamEntry.Spec.Source.Tag != "v1.4.0" {
+		te.TeamEntry.Spec.Source.Ref != "v1.4.0" {
 		t.Errorf("teamEntry spec = %+v", te.TeamEntry.Spec)
 	}
 
@@ -280,7 +280,7 @@ func TestParseFailureModes(t *testing.T) {
 		// ProjectTeam.
 		{
 			"ProjectTeam missing name",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, roles: [{ref: dev}] }\n",
+			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nspec: { source: {repo: eminwux/agents, ref: v1.4.0}, roles: [{ref: dev}] }\n",
 			errdefs.ErrTeamMetadataNameRequired,
 		},
 		{
@@ -295,12 +295,12 @@ func TestParseFailureModes(t *testing.T) {
 		},
 		{
 			"ProjectTeam source two refs",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, tag: v1.4.0, branch: main}, roles: [{ref: dev}] }\n",
+			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, ref: v1.4.0, branch: main}, roles: [{ref: dev}] }\n",
 			errdefs.ErrTeamSourceInvalid,
 		},
 		{
 			"ProjectTeam source missing owner",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: agents, tag: v1.4.0}, roles: [{ref: dev}] }\n",
+			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: agents, ref: v1.4.0}, roles: [{ref: dev}] }\n",
 			errdefs.ErrTeamSourceInvalid,
 		},
 		{
@@ -310,32 +310,32 @@ func TestParseFailureModes(t *testing.T) {
 		},
 		{
 			"ProjectTeam projectDir has path separator",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, projectDir: \"a/b\", roles: [{ref: dev}] }\n",
+			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, ref: v1.4.0}, projectDir: \"a/b\", roles: [{ref: dev}] }\n",
 			errdefs.ErrTeamProjectDirInvalid,
 		},
 		{
 			"ProjectTeam projectDir traverses parent",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, projectDir: \"../escape\", roles: [{ref: dev}] }\n",
+			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, ref: v1.4.0}, projectDir: \"../escape\", roles: [{ref: dev}] }\n",
 			errdefs.ErrTeamProjectDirInvalid,
 		},
 		{
 			"ProjectTeam projectDir leading dot",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, projectDir: \".hidden\", roles: [{ref: dev}] }\n",
+			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, ref: v1.4.0}, projectDir: \".hidden\", roles: [{ref: dev}] }\n",
 			errdefs.ErrTeamProjectDirInvalid,
 		},
 		{
 			"ProjectTeam empty role ref",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, roles: [{ref: \"\"}] }\n",
+			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, ref: v1.4.0}, roles: [{ref: \"\"}] }\n",
 			errdefs.ErrTeamRoleRefRequired,
 		},
 		{
 			"ProjectTeam unknown default harness",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, defaults: {harnesses: [bogus]}, roles: [{ref: dev}] }\n",
+			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, ref: v1.4.0}, defaults: {harnesses: [bogus]}, roles: [{ref: dev}] }\n",
 			errdefs.ErrTeamHarnessUnknown,
 		},
 		{
 			"ProjectTeam role image is a tag",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, roles: [{ref: dev, needs: {image: [\"go:1.21\"]}}] }\n",
+			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, ref: v1.4.0}, roles: [{ref: dev, needs: {image: [\"go:1.21\"]}}] }\n",
 			errdefs.ErrTeamImageCapabilityInvalid,
 		},
 		// TeamsConfig.
@@ -415,7 +415,7 @@ func TestParseFailureModes(t *testing.T) {
 			// committed kuketeam.yaml), and metadata.name from that file
 			// becomes the TeamEntry's metadata.name verbatim in `kuke team init`.
 			"ProjectTeam name traverses parent",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: { name: \"../kuketeams\" }\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, roles: [{ref: dev}] }\n",
+			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: { name: \"../kuketeams\" }\nspec: { source: {repo: eminwux/agents, ref: v1.4.0}, roles: [{ref: dev}] }\n",
 			errdefs.ErrTeamMetadataNameUnsafe,
 		},
 		// Role.
@@ -566,8 +566,8 @@ func TestParseProjectTeamAcceptsSourceForms(t *testing.T) {
 		source       string
 		wantFloating bool
 	}{
-		{"host-qualified tag", "{repo: github.com/eminwux/agents, tag: v1.4.0}", false},
-		{"bare owner/repo defaults host", "{repo: eminwux/agents, tag: v1.4.0}", false},
+		{"host-qualified tag", "{repo: github.com/eminwux/agents, ref: v1.4.0}", false},
+		{"bare owner/repo defaults host", "{repo: eminwux/agents, ref: v1.4.0}", false},
 		{"floating branch", "{repo: github.com/eminwux/agents, branch: main}", true},
 		{"pinned commit", "{repo: github.com/eminwux/agents, commit: 9ae9606}", false},
 		{"non-github host", "{repo: gitlab.com/group/sub/repo, branch: trunk}", true},
@@ -604,7 +604,7 @@ func TestParseProjectTeamAcceptsProjectDir(t *testing.T) {
 	}
 	// Omitting projectDir is valid — the renderer falls back to metadata.name.
 	bare := "apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\n" +
-		"spec: { source: {repo: eminwux/agents, tag: v1.4.0}, roles: [{ref: dev}] }\n"
+		"spec: { source: {repo: eminwux/agents, ref: v1.4.0}, roles: [{ref: dev}] }\n"
 	doc, err = Parse([]byte(bare))
 	if err != nil {
 		t.Fatalf("Parse(bare): %v", err)
@@ -621,7 +621,7 @@ func TestValidateSourceRejectsTraversalRepo(t *testing.T) {
 		"github.com/../../etc",
 		"eminwux/..",
 	} {
-		err := ValidateSource(model.TeamSource{Repo: repo, Tag: "v1.4.0"})
+		err := ValidateSource(model.TeamSource{Repo: repo, Ref: "v1.4.0"})
 		if !errors.Is(err, errdefs.ErrTeamSourceInvalid) {
 			t.Errorf("ValidateSource(repo=%q) err = %v, want ErrTeamSourceInvalid", repo, err)
 		}
@@ -632,8 +632,8 @@ func TestValidateSourceRejectsTraversalRef(t *testing.T) {
 	t.Parallel()
 	cases := []model.TeamSource{
 		{Repo: "eminwux/agents", Branch: "../../etc"},
-		{Repo: "eminwux/agents", Tag: ".."},
-		{Repo: "eminwux/agents", Tag: "/abs"},
+		{Repo: "eminwux/agents", Ref: ".."},
+		{Repo: "eminwux/agents", Ref: "/abs"},
 		{Repo: "eminwux/agents", Branch: "foo/../bar"},
 		{Repo: "eminwux/agents", Commit: "."},
 	}

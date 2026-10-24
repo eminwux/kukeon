@@ -93,7 +93,7 @@ func FromModel(m model.TeamSource) (Source, error) {
 		return Source{}, err
 	}
 	host, ownerRepo := m.Normalized()
-	value, kind := m.Ref()
+	value, kind := m.Reference()
 	return Source{
 		Repo:      host + "/" + ownerRepo,
 		Host:      host,

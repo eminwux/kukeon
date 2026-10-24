@@ -7,33 +7,38 @@ metadata:
 spec:
   sources:
     - name: primary-agents
-      repo: github.com/eminwux/agents
+      repo: eminwux/agents
       ref: v1.4.0
       path: model1
 
+  credentials:
+    - name: github-cli-token
+      secretRef: workspace-github-cli-token
+    - name: github-ssh-key
+      secretRef: workspace-github-ssh-key
+      volumeMount:
+        target: /home/agent/.ssh/id_ed25519
+        readOnly: true
+
   projects:
     - name: kukeon
-      repo: github.com/eminwux/kukeon
+      repo: eminwux/kukeon
       path: /home/alice/src/kukeon
       integrations:
         github:
           gh:
-            credentials:
-              token:
-                secretRef: workspace-github-cli-token
+            credentials: [github-cli-token]
           git:
-            credentials:
-              sshKey:
-                secretRef: workspace-github-ssh-key
+            credentials: [github-ssh-key]
     - name: sbsh
-      repo: github.com/eminwux/sbsh
+      repo: eminwux/sbsh
       path: /home/alice/src/sbsh
 
   teams:
     - project: kukeon
       metadata: { name: development }
       spec:
-        source: { repo: github.com/eminwux/agents, tag: v1.4.0 }
+        source: { repo: eminwux/agents, ref: v1.4.0 }
         defaults: { harnesses: [claude, codex] }
         roles:
           - { ref: dev, needs: { image: [go] } }
@@ -41,19 +46,22 @@ spec:
     - project: sbsh
       metadata: { name: sbsh-development }
       spec:
-        source: { repo: github.com/eminwux/agents, tag: v1.4.0 }
+        source: { repo: eminwux/agents, ref: v1.4.0 }
         defaults: { harnesses: [claude] }
         roles:
           - { ref: dev, needs: { image: [go] } }
 
     - metadata: { name: orchestrator }
       spec:
-        source: { repo: github.com/eminwux/agents, tag: v1.4.0 }
-        roles: [{ ref: orchestrator }]
+        source: { repo: eminwux/agents, ref: v1.4.0 }
+        roles:
+          - { ref: orchestrator, instances: 2 }
+        workspaceCell:
+          configs:
+            - name: workspace-orchestrator
+              blueprint: workspace-orchestrator
+              values: { WORKSPACE: developer-workspace }
       agentSource: primary-agents
-      role: orchestrator
-      workspaceCell:
-        blueprint: workspace-orchestrator
 
 # Runtime observations are reported separately from desired spec:
 # status:

@@ -72,13 +72,13 @@ func TestRoundTripAllKinds(t *testing.T) {
 		APIVersion: model.APIVersionV1, Kind: model.KindProjectTeam,
 		Metadata: model.Metadata{Name: "sbsh"},
 		Spec: model.ProjectTeamSpec{
-			Source:   model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"},
+			Source:   model.TeamSource{Repo: "github.com/eminwux/agents", Ref: "v1.4.0"},
 			Defaults: model.ProjectTeamDefaults{Harnesses: []string{"claude"}},
 			Roles:    []model.ProjectTeamRole{{Ref: "dev", Needs: &model.ProjectRoleNeeds{Image: []string{"go"}}}},
 		},
 	}
 	assertJSONYAML(t, "ProjectTeam", pt, func(got model.ProjectTeam) bool {
-		return got.Spec.Source.Repo == "github.com/eminwux/agents" && got.Spec.Source.Tag == "v1.4.0" &&
+		return got.Spec.Source.Repo == "github.com/eminwux/agents" && got.Spec.Source.Ref == "v1.4.0" &&
 			len(got.Spec.Roles) == 1 && got.Spec.Roles[0].Needs.Image[0] == "go"
 	})
 

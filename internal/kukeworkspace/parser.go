@@ -74,8 +74,12 @@ func Validate(doc *model.Workspace) error {
 	if err := validateSources(doc.Spec.Sources); err != nil {
 		return err
 	}
-	if err := validateProjects(doc.Spec.Projects); err != nil {
+	credentialNames, err := validateCredentials(doc.Spec.Credentials)
+	if err != nil {
 		return err
+	}
+	if projectErr := validateProjects(doc.Spec.Projects, credentialNames); projectErr != nil {
+		return projectErr
 	}
 	if err := validateTeams(doc.Spec.Teams); err != nil {
 		return err
@@ -109,7 +113,33 @@ func validateSources(sources []model.WorkspaceSource) error {
 	return nil
 }
 
-func validateProjects(projects []model.WorkspaceProject) error {
+func validateCredentials(credentials []model.WorkspaceCredential) (map[string]struct{}, error) {
+	names := make(map[string]struct{}, len(credentials))
+	for i, credential := range credentials {
+		prefix := fmt.Sprintf("spec.credentials[%d]", i)
+		if err := required(prefix, "name", credential.Name); err != nil {
+			return nil, err
+		}
+		if err := required(prefix, "secretRef", credential.SecretRef); err != nil {
+			return nil, err
+		}
+		if _, ok := names[credential.Name]; ok {
+			return nil, invalid("spec.credentials", fmt.Sprintf("contains duplicate name %q", credential.Name))
+		}
+		names[credential.Name] = struct{}{}
+		if credential.VolumeMount != nil {
+			if err := required(prefix+".volumeMount", "target", credential.VolumeMount.Target); err != nil {
+				return nil, err
+			}
+			if !filepath.IsAbs(credential.VolumeMount.Target) {
+				return nil, invalid(prefix+".volumeMount.target", "must be an absolute container path")
+			}
+		}
+	}
+	return names, nil
+}
+
+func validateProjects(projects []model.WorkspaceProject, credentialNames map[string]struct{}) error {
 	if err := uniqueNames("spec.projects", projectNames(projects)); err != nil {
 		return err
 	}
@@ -140,17 +170,11 @@ func validateProjects(projects []model.WorkspaceProject) error {
 				if strings.TrimSpace(clientName) == "" {
 					return invalid(integrationPrefix, "client names are required")
 				}
-				for credential, reference := range client.Credentials {
-					if strings.TrimSpace(credential) == "" || strings.TrimSpace(reference.SecretRef) == "" {
+				for _, credential := range client.Credentials {
+					if _, ok := credentialNames[credential]; !ok {
 						return invalid(
-							clientPrefix+".credentials."+credential+".secretRef",
-							"is required",
-						)
-					}
-					if strings.ContainsAny(reference.SecretRef, "\n\r") {
-						return invalid(
-							clientPrefix+".credentials."+credential+".secretRef",
-							"must be a single-line reference",
+							clientPrefix+".credentials",
+							fmt.Sprintf("references unknown credential %q", credential),
 						)
 					}
 				}
@@ -183,19 +207,19 @@ func validateTeams(teams []model.WorkspaceTeam) error {
 			return fieldErr
 		}
 		if team.Project != "" {
-			if team.WorkspaceCell != nil || team.Role != "" || team.AgentSource != "" {
+			if team.Spec.WorkspaceCell != nil || team.AgentSource != "" {
 				return invalid(prefix, "project teams use project and an inline ProjectTeam document")
 			}
 			continue
 		}
-		if team.WorkspaceCell == nil {
+		if team.Spec.WorkspaceCell == nil {
 			return invalid(prefix, "requires project or workspaceCell")
 		}
-		if err := required(prefix, "role", team.Role); err != nil {
-			return err
+		if len(team.Spec.Roles) == 0 {
+			return invalid(prefix+".spec.roles", "must contain at least one role for a workspace cell team")
 		}
-		if err := required(prefix+".workspaceCell", "blueprint", team.WorkspaceCell.Blueprint); err != nil {
-			return err
+		if len(team.Spec.WorkspaceCell.Configs) == 0 {
+			return invalid(prefix+".spec.workspaceCell.configs", "must contain at least one cell config")
 		}
 	}
 	return nil

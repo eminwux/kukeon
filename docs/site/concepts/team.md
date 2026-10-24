@@ -10,12 +10,12 @@ later step; this page covers the declarative surface only.
 
 ## Where the files live
 
-| File                     | Where        | Owner    | Holds                                                                              | Committed |
-| ------------------------ | ------------ | -------- | ---------------------------------------------------------------------------------- | --------- |
-| `kuke.yaml`              | host         | runtime  | kukeon runtime only (realm/space/stack, daemon). **No git/registry/teams.**        | n/a       |
-| `kuketeam.yaml`          | project repo | project  | roster: `source`, roles, harnesses, per-role `needs`                               | yes       |
+| File                                | Where        | Owner    | Holds                                                                                      | Committed |
+| ----------------------------------- | ------------ | -------- | ------------------------------------------------------------------------------------------ | --------- |
+| `kuke.yaml`                         | host         | runtime  | kukeon runtime only (realm/space/stack, daemon). **No git/registry/teams.**                | n/a       |
+| `kuketeam.yaml`                     | project repo | project  | roster: `source`, roles, harnesses, per-role `needs`                                       | yes       |
 | `~/.kuke/kuketeams.yaml`            | host         | operator | git identity + signing, registry, secret sources, source URLs. Operator-global facts only. | no        |
-| `~/.kuke/kuketeam.d/<project>.yaml` | host         | operator | one file per composed project: `name`, `path`, `source`. Written by each `kuke team init`.  | no        |
+| `~/.kuke/kuketeam.d/<project>.yaml` | host         | operator | one file per composed project: `name`, `path`, `source`. Written by each `kuke team init`. | no        |
 
 The agents source contributes three more kinds — `role.yaml`, `harness.yaml`,
 and `harnesses/images.yaml` — authored in the agents repo but deserialized by
@@ -84,8 +84,8 @@ never live in a committed or operator file.
 ### The source ref is the version, nothing else
 
 Content versioning is carried **solely** by the structured `source` object: a
-host-explicit `repo` plus exactly one of `tag` / `branch` / `commit`. The key
-name **is** the intent — `tag` and `commit` pin to a reproducible ref, `branch`
+host-explicit `repo` plus exactly one of `ref` / `branch` / `commit`. The key
+name **is** the intent — `ref` and `commit` pin to a reproducible revision, `branch`
 floats (it is refetched and reset to the branch tip on every `init`) — so
 pinned-vs-floating is unambiguous without interrogating git (a string `@ref`
 cannot tell a branch from a same-named tag). Exactly one of the three must be
@@ -118,7 +118,7 @@ clones the project fresh as a `ContainerRepo`. Consequences:
   resolved from the local `git remote` at init time.
 - The project checks out **floating `main`** (it is the operator's own repo).
   The agents `source`, by contrast, declares its ref intent explicitly: a
-  pinned `tag`/`commit` for a reproducible roster, or a floating `branch` when
+  pinned `ref`/`commit` for a reproducible roster, or a floating `branch` when
   the project deliberately tracks a moving agents branch.
 - The operator's working tree is **not** mounted — uncommitted local work is
   invisible in the cell.
@@ -127,7 +127,7 @@ clones the project fresh as a `ContainerRepo`. Consequences:
 
 `ProjectTeam.spec.projectDir` (in the committed `kuketeam.yaml`) overrides the
 in-cell project clone-dir basename, decoupling it from `metadata.name` (the team
-*label*). It exists for self-referential teams — the agents repo managing
+_label_). It exists for self-referential teams — the agents repo managing
 itself, where a role declares both the `project` and `agents` repo slots:
 without the override both resolve to `/home/<user>/agents` and collide at clone
 time. When unset, the clone dir falls back to `metadata.name`. The value is
@@ -169,7 +169,7 @@ apiVersion: kuketeams.io/v1
 kind: ProjectTeam
 metadata: { name: sbsh }
 spec:
-  source: { repo: github.com/eminwux/agents, tag: v1.4.0 } # pinned (tag)
+  source: { repo: github.com/eminwux/agents, ref: v1.4.0 } # pinned (tag)
   realm: default # optional scope coords; each defaults to `default` when omitted
   space: default
   stack: default
@@ -202,7 +202,7 @@ kind: TeamEntry
 metadata: { name: sbsh }
 spec:
   path: ~/src/sbsh # init-time locator (clone URL resolved from its git remote)
-  source: { repo: github.com/eminwux/agents, tag: v1.4.0 }
+  source: { repo: github.com/eminwux/agents, ref: v1.4.0 }
 ---
 # role.yaml — in agents, per role
 apiVersion: kuketeams.io/v1

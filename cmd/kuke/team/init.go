@@ -602,7 +602,7 @@ func emitApplySummary(
 // source (exactly-one-ref violated) prints nothing; the parser has already
 // rejected it upstream by the time render runs.
 func emitSourceKind(out io.Writer, src model.TeamSource) {
-	value, kind := src.Ref()
+	value, kind := src.Reference()
 	if kind == "" {
 		return
 	}

@@ -47,9 +47,10 @@ type WorkspaceMetadata struct {
 
 // WorkspaceSpec contains all workspace declarations.
 type WorkspaceSpec struct {
-	Sources  []WorkspaceSource  `json:"sources"  yaml:"sources"`
-	Projects []WorkspaceProject `json:"projects" yaml:"projects"`
-	Teams    []WorkspaceTeam    `json:"teams"    yaml:"teams"`
+	Sources     []WorkspaceSource     `json:"sources"     yaml:"sources"`
+	Projects    []WorkspaceProject    `json:"projects"    yaml:"projects"`
+	Teams       []WorkspaceTeam       `json:"teams"       yaml:"teams"`
+	Credentials []WorkspaceCredential `json:"credentials" yaml:"credentials"`
 }
 
 // WorkspaceSource identifies a repository and path containing role
@@ -77,31 +78,33 @@ type WorkspaceIntegration map[string]WorkspaceIntegrationClient
 // WorkspaceIntegrationClient contains credentials for one client of an
 // integration, for example GitHub CLI (gh) or Git authentication (git).
 type WorkspaceIntegrationClient struct {
-	Credentials map[string]WorkspaceCredentialRef `json:"credentials,omitempty" yaml:"credentials,omitempty"`
+	Credentials []string `json:"credentials,omitempty" yaml:"credentials,omitempty"`
 }
 
-// WorkspaceCredentialRef names a credential configured in a secret source.
+// WorkspaceCredential declares a named credential and its secret source.
 // Secret values are never stored in the Workspace manifest.
-type WorkspaceCredentialRef struct {
-	SecretRef string `json:"secretRef" yaml:"secretRef"`
+type WorkspaceCredential struct {
+	Name        string                          `json:"name"                  yaml:"name"`
+	SecretRef   string                          `json:"secretRef"             yaml:"secretRef"`
+	VolumeMount *WorkspaceCredentialVolumeMount `json:"volumeMount,omitempty" yaml:"volumeMount,omitempty"`
+}
+
+// WorkspaceCredentialVolumeMount describes where a named credential mount is
+// exposed inside a container.
+type WorkspaceCredentialVolumeMount struct {
+	Target   string `json:"target"             yaml:"target"`
+	ReadOnly bool   `json:"readOnly,omitempty" yaml:"readOnly,omitempty"`
 }
 
 // WorkspaceTeam embeds the metadata and spec of a ProjectTeam document. The
 // containing Workspace supplies the document context, so apiVersion and kind
 // are omitted; project identifies the checkout that owns this roster.
-// WorkspaceCell marks a workspace-scoped team, for which Role is the selected
-// role and AgentSource optionally selects a source in WorkspaceSpec.Sources.
+// WorkspaceCell configs and role instances are declared in the embedded
+// ProjectTeam spec. AgentSource optionally selects a source from the Workspace.
 type WorkspaceTeam struct {
-	Metadata kuketeams.Metadata        `json:"metadata"                yaml:"metadata"`
-	Spec     kuketeams.ProjectTeamSpec `json:"spec"                    yaml:"spec"`
-	Project  string                    `json:"project,omitempty"       yaml:"project,omitempty"`
+	Metadata kuketeams.Metadata        `json:"metadata"              yaml:"metadata"`
+	Spec     kuketeams.ProjectTeamSpec `json:"spec"                  yaml:"spec"`
+	Project  string                    `json:"project,omitempty"     yaml:"project,omitempty"`
 	// AgentSource is an optional source name for a workspace-scoped team.
-	AgentSource   string         `json:"agentSource,omitempty"   yaml:"agentSource,omitempty"`
-	Role          string         `json:"role,omitempty"          yaml:"role,omitempty"`
-	WorkspaceCell *WorkspaceCell `json:"workspaceCell,omitempty" yaml:"workspaceCell,omitempty"`
-}
-
-// WorkspaceCell describes a cell owned by a workspace team.
-type WorkspaceCell struct {
-	Blueprint string `json:"blueprint" yaml:"blueprint"`
+	AgentSource string `json:"agentSource,omitempty" yaml:"agentSource,omitempty"`
 }

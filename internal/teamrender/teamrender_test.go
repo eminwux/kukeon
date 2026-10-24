@@ -1232,7 +1232,7 @@ func TestRenderEndToEnd(t *testing.T) {
 	pt := &model.ProjectTeam{
 		Metadata: model.Metadata{Name: "sbsh"},
 		Spec: model.ProjectTeamSpec{
-			Source:   model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"},
+			Source:   model.TeamSource{Repo: "github.com/eminwux/agents", Ref: "v1.4.0"},
 			Defaults: model.ProjectTeamDefaults{Harnesses: []string{"claude", "codex"}},
 			Roles:    []model.ProjectTeamRole{{Ref: "dev"}},
 		},
@@ -1299,7 +1299,7 @@ func TestRenderProjectPerRoleNeedsOverrideUnions(t *testing.T) {
 	pt := &model.ProjectTeam{
 		Metadata: model.Metadata{Name: "sbsh"},
 		Spec: model.ProjectTeamSpec{
-			Source:   model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"},
+			Source:   model.TeamSource{Repo: "github.com/eminwux/agents", Ref: "v1.4.0"},
 			Defaults: model.ProjectTeamDefaults{Harnesses: []string{"claude"}},
 			Roles: []model.ProjectTeamRole{{
 				Ref:   "dev",
@@ -1618,7 +1618,7 @@ spec:
 	pt := &model.ProjectTeam{
 		Metadata: model.Metadata{Name: "team"},
 		Spec: model.ProjectTeamSpec{
-			Source:   model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"},
+			Source:   model.TeamSource{Repo: "github.com/eminwux/agents", Ref: "v1.4.0"},
 			Defaults: model.ProjectTeamDefaults{Harnesses: []string{"claude"}},
 			Roles:    []model.ProjectTeamRole{{Ref: "dev"}},
 		},

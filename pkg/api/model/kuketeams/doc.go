@@ -35,7 +35,7 @@
 // agents-side kinds (Role / Harness / ImageCatalog) are authored in the agents
 // repo but deserialized here — kukeon's parser owns the schema shape of all
 // five. Content versioning is carried solely by the structured `source`
-// reference (TeamSource: repo + one of tag/branch/commit) in
+// reference (TeamSource: repo + one of ref/branch/commit) in
 // ProjectTeam/TeamEntry; the agents kinds carry no in-file version field (it
 // would be redundant with the ref and drift-prone).
 //
@@ -94,7 +94,7 @@ const (
 
 // Metadata is the name-only metadata block carried by ProjectTeam, Role, and
 // Harness. The team kinds intentionally omit a version field — the structured
-// source ref (repo + one of tag/branch/commit) is the version authority.
+// source ref (repo + one of ref/branch/commit) is the version authority.
 type Metadata struct {
 	Name string `json:"name" yaml:"name"`
 }

@@ -41,7 +41,7 @@ const projectTeamYAML = `apiVersion: kuketeams.io/v1
 kind: ProjectTeam
 metadata: { name: sbsh }
 spec:
-  source: { repo: github.com/eminwux/agents, tag: v1.4.0 }
+  source: { repo: github.com/eminwux/agents, ref: v1.4.0 }
   roles:
     - { ref: dev }
 `
@@ -52,7 +52,7 @@ const projectTeamWithHarnessYAML = `apiVersion: kuketeams.io/v1
 kind: ProjectTeam
 metadata: { name: sbsh }
 spec:
-  source: { repo: github.com/eminwux/agents, tag: v1.4.0 }
+  source: { repo: github.com/eminwux/agents, ref: v1.4.0 }
   defaults:
     harnesses: [claude]
   roles:
@@ -348,7 +348,7 @@ func TestComposeTeamScaffoldsAndWrites(t *testing.T) {
 		t.Fatalf("entry parse: %v", unmarshalErr)
 	}
 	if te.Metadata.Name != "sbsh" || te.Spec.Path != projectDir || te.Spec.Source == nil ||
-		te.Spec.Source.Repo != "github.com/eminwux/agents" || te.Spec.Source.Tag != "v1.4.0" {
+		te.Spec.Source.Repo != "github.com/eminwux/agents" || te.Spec.Source.Ref != "v1.4.0" {
 		t.Errorf("entry content wrong: %+v", te)
 	}
 	if !strings.Contains(out.String(), "wrote team \"sbsh\"") {
@@ -868,7 +868,7 @@ func TestComposeTeamTwoProjectsIndependent(t *testing.T) {
 kind: ProjectTeam
 metadata: { name: %s }
 spec:
-  source: { repo: github.com/eminwux/agents, tag: v1.4.0 }
+  source: { repo: github.com/eminwux/agents, ref: v1.4.0 }
   defaults:
     harnesses: [claude]
   roles:
@@ -1036,7 +1036,7 @@ func TestComposeTeamBuildBindsInternalImageRefTwoProjects(t *testing.T) {
 kind: ProjectTeam
 metadata: { name: kuke }
 spec:
-  source: { repo: github.com/eminwux/agents, tag: v1.4.0 }
+  source: { repo: github.com/eminwux/agents, ref: v1.4.0 }
   defaults:
     harnesses: [claude]
   roles:
@@ -1213,7 +1213,7 @@ func TestComposeTeamPreservesTeamDirOverride(t *testing.T) {
 		Spec: model.TeamEntrySpec{
 			Path:    projectDir,
 			TeamDir: override,
-			Source:  &model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"},
+			Source:  &model.TeamSource{Repo: "github.com/eminwux/agents", Ref: "v1.4.0"},
 		},
 	}
 	if err := teamhost.WriteEntry(layout, prior); err != nil {
@@ -1297,7 +1297,7 @@ func TestComposeTeamProvisionsTwoProjectsIsolated(t *testing.T) {
 kind: ProjectTeam
 metadata: { name: kukeon }
 spec:
-  source: { repo: github.com/eminwux/agents, tag: v1.4.0 }
+  source: { repo: github.com/eminwux/agents, ref: v1.4.0 }
   defaults:
     harnesses: [claude]
   roles:
@@ -1645,7 +1645,7 @@ func TestEmitSourceKind(t *testing.T) {
 	}{
 		{
 			"tag pinned",
-			model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"},
+			model.TeamSource{Repo: "github.com/eminwux/agents", Ref: "v1.4.0"},
 			"agents source: github.com/eminwux/agents @ tag=v1.4.0 (pinned)\n",
 		},
 		{

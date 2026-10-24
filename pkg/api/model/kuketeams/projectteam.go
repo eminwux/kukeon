@@ -31,10 +31,10 @@ type ProjectTeam struct {
 // ProjectTeamSpec carries the roster.
 type ProjectTeamSpec struct {
 	// Source is the structured agents-repository reference (host-explicit repo
-	// plus exactly one of tag/branch/commit). See TeamSource. The legacy
+	// plus exactly one of ref/branch/commit). See TeamSource. The legacy
 	// `<owner>/<repo>@vX.Y.Z` string form is rejected at parse time with a
 	// migration error.
-	Source TeamSource `json:"source"             yaml:"source"`
+	Source TeamSource `json:"source"                  yaml:"source"`
 	// ProjectDir overrides the in-cell project clone dir basename, decoupling
 	// it from metadata.name (the team *label*). The renderer exposes it as
 	// `.project.NAME` — the fact a blueprint's `project` repo target reads for
@@ -45,21 +45,36 @@ type ProjectTeamSpec struct {
 	// at clone time. Distinct from the on-host source-tree path the renderer
 	// surfaces as `.project.PROJECT_DIR`. Validated as a safe path basename
 	// that does not collide with the reserved `agents` repo slot dir.
-	ProjectDir string `json:"projectDir,omitempty" yaml:"projectDir,omitempty"`
+	ProjectDir string `json:"projectDir,omitempty"    yaml:"projectDir,omitempty"`
 	// Realm, Space, and Stack are the optional scope coordinates the team's
 	// rendered cells bind to. Each defaults to `default` when omitted (the
 	// renderer stamps the defaulted value onto every rendered Blueprint/Config
 	// so the persisted Config scope matches the live cell — see teamrender
 	// DefaultRealm / DefaultSpace / DefaultStack and #1133).
-	Realm string `json:"realm,omitempty"    yaml:"realm,omitempty"`
-	Space string `json:"space,omitempty"    yaml:"space,omitempty"`
-	Stack string `json:"stack,omitempty"    yaml:"stack,omitempty"`
+	Realm string `json:"realm,omitempty"         yaml:"realm,omitempty"`
+	Space string `json:"space,omitempty"         yaml:"space,omitempty"`
+	Stack string `json:"stack,omitempty"         yaml:"stack,omitempty"`
 	// Defaults supplies project-wide harness defaults applied to every role
 	// that does not pin its own.
-	Defaults ProjectTeamDefaults `json:"defaults,omitempty" yaml:"defaults,omitempty"`
+	Defaults ProjectTeamDefaults `json:"defaults,omitempty"      yaml:"defaults,omitempty"`
 	// Roles is the roster: each entry references a role declared in the agents
 	// source and may add project-specific capability needs.
-	Roles []ProjectTeamRole `json:"roles"              yaml:"roles"`
+	Roles []ProjectTeamRole `json:"roles"                   yaml:"roles"`
+	// WorkspaceCell makes this roster available as a workspace-wide cell team.
+	// Its Configs are the named cell configurations published into kukeon.
+	WorkspaceCell *ProjectTeamWorkspaceCell `json:"workspaceCell,omitempty" yaml:"workspaceCell,omitempty"`
+}
+
+// ProjectTeamWorkspaceCell declares workspace-wide cell configurations.
+type ProjectTeamWorkspaceCell struct {
+	Configs []ProjectTeamCellConfig `json:"configs,omitempty" yaml:"configs,omitempty"`
+}
+
+// ProjectTeamCellConfig is a named CellConfig made available in the workspace.
+type ProjectTeamCellConfig struct {
+	Name      string            `json:"name"             yaml:"name"`
+	Blueprint string            `json:"blueprint"        yaml:"blueprint"`
+	Values    map[string]string `json:"values,omitempty" yaml:"values,omitempty"`
 }
 
 // ProjectTeamDefaults holds project-wide defaults.
@@ -73,11 +88,14 @@ type ProjectTeamDefaults struct {
 // project-specific capability needs on top of the role's own declaration.
 type ProjectTeamRole struct {
 	// Ref is the role name (matches a Role.metadata.name in the agents source).
-	Ref string `json:"ref"             yaml:"ref"`
+	Ref string `json:"ref"                 yaml:"ref"`
+	// Instances is the number of instances to materialize for this role.
+	// Zero means the default of one instance.
+	Instances int `json:"instances,omitempty" yaml:"instances,omitempty"`
 	// Needs adds project-specific image capabilities for this role in this
 	// project. The entries are capability NAMES (selector input), never image
 	// tags or digests.
-	Needs *ProjectRoleNeeds `json:"needs,omitempty" yaml:"needs,omitempty"`
+	Needs *ProjectRoleNeeds `json:"needs,omitempty"     yaml:"needs,omitempty"`
 }
 
 // ProjectRoleNeeds is the project-side capability override for a role. Only the
