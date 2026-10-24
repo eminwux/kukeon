@@ -1,5 +1,5 @@
-# User-owned workspace manifest. Project paths are absolute paths on the host
-# running `kuke workspace init`; they are locators, not paths mounted into cells.
+# User-owned workspace manifest. Project repositories and their revisions are
+# declared as sources; teams select the sources and integrations they use.
 apiVersion: kukeworkspace.io/v1
 kind: Workspace
 metadata:
@@ -10,6 +10,18 @@ spec:
       repo: eminwux/agents
       ref: v1.4.0
       path: model1
+    - name: kukeon
+      repo: eminwux/kukeon
+      ref: main
+      integrations:
+        github:
+          gh:
+            credentials: [github-cli-token]
+          git:
+            credentials: [github-ssh-key]
+    - name: sbsh
+      repo: eminwux/sbsh
+      ref: main
 
   credentials:
     - name: github-cli-token
@@ -20,40 +32,27 @@ spec:
         target: /home/agent/.ssh/id_ed25519
         readOnly: true
 
-  projects:
-    - name: kukeon
-      repo: eminwux/kukeon
-      path: /home/alice/src/kukeon
-      integrations:
-        github:
-          gh:
-            credentials: [github-cli-token]
-          git:
-            credentials: [github-ssh-key]
-    - name: sbsh
-      repo: eminwux/sbsh
-      path: /home/alice/src/sbsh
-
   teams:
-    - project: kukeon
-      metadata: { name: development }
+    - name: development
+      source: kukeon
+      integrations: [github]
+      agentSource: primary-agents
       spec:
-        source: { repo: eminwux/agents, ref: v1.4.0 }
         defaults: { harnesses: [claude, codex] }
         roles:
           - { ref: dev, needs: { image: [go] } }
           - { ref: pr-reviewer }
-    - project: sbsh
-      metadata: { name: sbsh-development }
+    - name: sbsh-development
+      source: sbsh
+      agentSource: primary-agents
       spec:
-        source: { repo: eminwux/agents, ref: v1.4.0 }
         defaults: { harnesses: [claude] }
         roles:
           - { ref: dev, needs: { image: [go] } }
 
-    - metadata: { name: orchestrator }
+    - name: orchestrator
+      agentSource: primary-agents
       spec:
-        source: { repo: eminwux/agents, ref: v1.4.0 }
         roles:
           - { ref: orchestrator, instances: 2 }
         workspaceCell:
@@ -61,7 +60,6 @@ spec:
             - name: workspace-orchestrator
               blueprint: workspace-orchestrator
               values: { WORKSPACE: developer-workspace }
-      agentSource: primary-agents
 
 # Runtime observations are reported separately from desired spec:
 # status:

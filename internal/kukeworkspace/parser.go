@@ -71,46 +71,52 @@ func Validate(doc *model.Workspace) error {
 	if len(doc.Spec.Teams) == 0 {
 		return invalid("spec.teams", "must contain at least one team")
 	}
-	if err := validateSources(doc.Spec.Sources); err != nil {
-		return err
-	}
 	credentialNames, err := validateCredentials(doc.Spec.Credentials)
 	if err != nil {
 		return err
 	}
-	if projectErr := validateProjects(doc.Spec.Projects, credentialNames); projectErr != nil {
-		return projectErr
-	}
-	if err := validateTeams(doc.Spec.Teams); err != nil {
+	sources, err := validateSources(doc.Spec.Sources, credentialNames)
+	if err != nil {
 		return err
+	}
+	if teamsErr := validateTeams(doc.Spec.Teams, sources); teamsErr != nil {
+		return teamsErr
 	}
 	return nil
 }
 
-func validateSources(sources []model.WorkspaceSource) error {
+func validateSources(
+	sources []model.WorkspaceSource,
+	credentialNames map[string]struct{},
+) (map[string]model.WorkspaceSource, error) {
 	if err := uniqueNames("spec.sources", sourceNames(sources)); err != nil {
-		return err
+		return nil, err
 	}
+	byName := make(map[string]model.WorkspaceSource, len(sources))
 	for i, source := range sources {
 		prefix := fmt.Sprintf("spec.sources[%d]", i)
 		if err := required(prefix, "name", source.Name); err != nil {
-			return err
+			return nil, err
 		}
 		if err := required(prefix, "repo", source.Repo); err != nil {
-			return err
+			return nil, err
 		}
 		if err := required(prefix, "ref", source.Ref); err != nil {
-			return err
+			return nil, err
 		}
-		if err := required(prefix, "path", source.Path); err != nil {
-			return err
+		if source.Path != "" {
+			clean := filepath.Clean(source.Path)
+			if filepath.IsAbs(source.Path) || clean == ".." ||
+				strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+				return nil, invalid(prefix+".path", "must be repository-relative and stay within the source")
+			}
 		}
-		clean := filepath.Clean(source.Path)
-		if filepath.IsAbs(source.Path) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-			return invalid(prefix+".path", "must be repository-relative and stay within the source")
+		if err := validateIntegrations(prefix, source.Integrations, credentialNames); err != nil {
+			return nil, err
 		}
+		byName[source.Name] = source
 	}
-	return nil
+	return byName, nil
 }
 
 func validateCredentials(credentials []model.WorkspaceCredential) (map[string]struct{}, error) {
@@ -139,44 +145,30 @@ func validateCredentials(credentials []model.WorkspaceCredential) (map[string]st
 	return names, nil
 }
 
-func validateProjects(projects []model.WorkspaceProject, credentialNames map[string]struct{}) error {
-	if err := uniqueNames("spec.projects", projectNames(projects)); err != nil {
-		return err
-	}
-	for i, project := range projects {
-		prefix := fmt.Sprintf("spec.projects[%d]", i)
-		if err := required(prefix, "name", project.Name); err != nil {
-			return err
+func validateIntegrations(
+	prefix string,
+	integrations map[string]model.WorkspaceIntegration,
+	credentialNames map[string]struct{},
+) error {
+	for name, integration := range integrations {
+		integrationPrefix := prefix + ".integrations." + name
+		if strings.TrimSpace(name) == "" {
+			return invalid(prefix+".integrations", "integration names are required")
 		}
-		if err := required(prefix, "repo", project.Repo); err != nil {
-			return err
+		if len(integration) == 0 {
+			return invalid(integrationPrefix, "must declare at least one client")
 		}
-		if err := required(prefix, "path", project.Path); err != nil {
-			return err
-		}
-		if !filepath.IsAbs(project.Path) {
-			return invalid(prefix+".path", "must be an absolute host-local checkout path")
-		}
-		for name, integration := range project.Integrations {
-			integrationPrefix := prefix + ".integrations." + name
-			if strings.TrimSpace(name) == "" {
-				return invalid(prefix+".integrations", "integration names are required")
+		for clientName, client := range integration {
+			clientPrefix := integrationPrefix + "." + clientName
+			if strings.TrimSpace(clientName) == "" {
+				return invalid(integrationPrefix, "client names are required")
 			}
-			if len(integration) == 0 {
-				return invalid(integrationPrefix, "must declare at least one client")
-			}
-			for clientName, client := range integration {
-				clientPrefix := integrationPrefix + "." + clientName
-				if strings.TrimSpace(clientName) == "" {
-					return invalid(integrationPrefix, "client names are required")
-				}
-				for _, credential := range client.Credentials {
-					if _, ok := credentialNames[credential]; !ok {
-						return invalid(
-							clientPrefix+".credentials",
-							fmt.Sprintf("references unknown credential %q", credential),
-						)
-					}
+			for _, credential := range client.Credentials {
+				if _, ok := credentialNames[credential]; !ok {
+					return invalid(
+						clientPrefix+".credentials",
+						fmt.Sprintf("references unknown credential %q", credential),
+					)
 				}
 			}
 		}
@@ -184,17 +176,48 @@ func validateProjects(projects []model.WorkspaceProject, credentialNames map[str
 	return nil
 }
 
-func validateTeams(teams []model.WorkspaceTeam) error {
+func validateTeams(teams []model.WorkspaceTeam, sources map[string]model.WorkspaceSource) error {
 	if err := uniqueNames("spec.teams", teamNames(teams)); err != nil {
 		return err
 	}
 	for i, team := range teams {
 		prefix := fmt.Sprintf("spec.teams[%d]", i)
+		if err := required(prefix, "name", team.Name); err != nil {
+			return err
+		}
+		if team.Source != "" {
+			if _, ok := sources[team.Source]; !ok {
+				return invalid(prefix+".source", fmt.Sprintf("references unknown source %q", team.Source))
+			}
+		}
+		if team.AgentSource != "" {
+			if _, ok := sources[team.AgentSource]; !ok {
+				return invalid(prefix+".agentSource", fmt.Sprintf("references unknown source %q", team.AgentSource))
+			}
+		}
+		for _, integrationName := range team.Integrations {
+			source, ok := sources[team.Source]
+			if !ok {
+				return invalid(prefix+".integrations", "requires a source reference")
+			}
+			if _, integrationExists := source.Integrations[integrationName]; !integrationExists {
+				return invalid(
+					prefix+".integrations",
+					fmt.Sprintf("source %q has no integration %q", team.Source, integrationName),
+				)
+			}
+		}
+		projectTeamSpec := team.Spec
+		if team.AgentSource != "" {
+			source := sources[team.AgentSource]
+			projectTeamSpec.Source = teammodel.TeamSource{Repo: source.Repo, Ref: source.Ref}
+		}
+		metadata := teammodel.Metadata{Name: team.Name}
 		projectTeam := teammodel.ProjectTeam{
 			APIVersion: teammodel.APIVersionV1,
 			Kind:       teammodel.KindProjectTeam,
-			Metadata:   team.Metadata,
-			Spec:       team.Spec,
+			Metadata:   metadata,
+			Spec:       projectTeamSpec,
 		}
 		teamYAML, marshalErr := yaml.Marshal(projectTeam)
 		if marshalErr != nil {
@@ -203,17 +226,14 @@ func validateTeams(teams []model.WorkspaceTeam) error {
 		if _, parseErr := teamparser.Parse(teamYAML); parseErr != nil {
 			return invalid(prefix, "must comply with the ProjectTeam document schema: "+parseErr.Error())
 		}
-		if fieldErr := required(prefix+".metadata", "name", team.Metadata.Name); fieldErr != nil {
-			return fieldErr
-		}
-		if team.Project != "" {
-			if team.Spec.WorkspaceCell != nil || team.AgentSource != "" {
-				return invalid(prefix, "project teams use project and an inline ProjectTeam document")
+		if team.Source != "" {
+			if team.Spec.WorkspaceCell != nil {
+				return invalid(prefix, "project teams use source and inline ProjectTeam spec")
 			}
 			continue
 		}
 		if team.Spec.WorkspaceCell == nil {
-			return invalid(prefix, "requires project or workspaceCell")
+			return invalid(prefix, "requires source or workspaceCell")
 		}
 		if len(team.Spec.Roles) == 0 {
 			return invalid(prefix+".spec.roles", "must contain at least one role for a workspace cell team")
@@ -259,18 +279,10 @@ func sourceNames(items []model.WorkspaceSource) []string {
 	return out
 }
 
-func projectNames(items []model.WorkspaceProject) []string {
-	out := make([]string, len(items))
-	for i := range items {
-		out[i] = items[i].Name
-	}
-	return out
-}
-
 func teamNames(items []model.WorkspaceTeam) []string {
 	out := make([]string, len(items))
 	for i := range items {
-		out[i] = items[i].Metadata.Name
+		out[i] = items[i].Name
 	}
 	return out
 }

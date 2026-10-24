@@ -48,25 +48,17 @@ type WorkspaceMetadata struct {
 // WorkspaceSpec contains all workspace declarations.
 type WorkspaceSpec struct {
 	Sources     []WorkspaceSource     `json:"sources"     yaml:"sources"`
-	Projects    []WorkspaceProject    `json:"projects"    yaml:"projects"`
 	Teams       []WorkspaceTeam       `json:"teams"       yaml:"teams"`
 	Credentials []WorkspaceCredential `json:"credentials" yaml:"credentials"`
 }
 
-// WorkspaceSource identifies a repository and path containing role
-// definitions. Ref is a pinned Git tag or commit; Path is repository-relative.
+// WorkspaceSource identifies a repository revision and optional repository
+// subdirectory. Sources may describe projects or agent role libraries.
 type WorkspaceSource struct {
-	Name string `json:"name" yaml:"name"`
-	Repo string `json:"repo" yaml:"repo"`
-	Ref  string `json:"ref"  yaml:"ref"`
-	Path string `json:"path" yaml:"path"`
-}
-
-// WorkspaceProject identifies a code repository and its host-local checkout.
-type WorkspaceProject struct {
 	Name         string                          `json:"name"                   yaml:"name"`
 	Repo         string                          `json:"repo"                   yaml:"repo"`
-	Path         string                          `json:"path"                   yaml:"path"`
+	Ref          string                          `json:"ref"                    yaml:"ref"`
+	Path         string                          `json:"path,omitempty"         yaml:"path,omitempty"`
 	Integrations map[string]WorkspaceIntegration `json:"integrations,omitempty" yaml:"integrations,omitempty"`
 }
 
@@ -97,14 +89,14 @@ type WorkspaceCredentialVolumeMount struct {
 }
 
 // WorkspaceTeam embeds the metadata and spec of a ProjectTeam document. The
-// containing Workspace supplies the document context, so apiVersion and kind
-// are omitted; project identifies the checkout that owns this roster.
-// WorkspaceCell configs and role instances are declared in the embedded
-// ProjectTeam spec. AgentSource optionally selects a source from the Workspace.
+// containing Workspace supplies document context, so apiVersion and kind are
+// omitted. Source references the project repository source; AgentSource
+// optionally references a role-library source. Integrations selects clients
+// declared by the referenced project source.
 type WorkspaceTeam struct {
-	Metadata kuketeams.Metadata        `json:"metadata"              yaml:"metadata"`
-	Spec     kuketeams.ProjectTeamSpec `json:"spec"                  yaml:"spec"`
-	Project  string                    `json:"project,omitempty"     yaml:"project,omitempty"`
-	// AgentSource is an optional source name for a workspace-scoped team.
-	AgentSource string `json:"agentSource,omitempty" yaml:"agentSource,omitempty"`
+	Name         string                    `json:"name"                   yaml:"name"`
+	Source       string                    `json:"source,omitempty"       yaml:"source,omitempty"`
+	Integrations []string                  `json:"integrations,omitempty" yaml:"integrations,omitempty"`
+	Spec         kuketeams.ProjectTeamSpec `json:"spec"                   yaml:"spec"`
+	AgentSource  string                    `json:"agentSource,omitempty"  yaml:"agentSource,omitempty"`
 }
