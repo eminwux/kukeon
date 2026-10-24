@@ -26,6 +26,7 @@ import (
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	teamparser "github.com/eminwux/kukeon/internal/kuketeams"
+	teammodel "github.com/eminwux/kukeon/pkg/api/model/kuketeams"
 	model "github.com/eminwux/kukeon/pkg/api/model/kukeworkspace"
 	"gopkg.in/yaml.v3"
 )
@@ -165,7 +166,13 @@ func validateTeams(teams []model.WorkspaceTeam) error {
 	}
 	for i, team := range teams {
 		prefix := fmt.Sprintf("spec.teams[%d]", i)
-		teamYAML, marshalErr := yaml.Marshal(team.ProjectTeam)
+		projectTeam := teammodel.ProjectTeam{
+			APIVersion: teammodel.APIVersionV1,
+			Kind:       teammodel.KindProjectTeam,
+			Metadata:   team.Metadata,
+			Spec:       team.Spec,
+		}
+		teamYAML, marshalErr := yaml.Marshal(projectTeam)
 		if marshalErr != nil {
 			return invalid(prefix, "must contain a valid ProjectTeam document")
 		}

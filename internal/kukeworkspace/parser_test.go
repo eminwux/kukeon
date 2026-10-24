@@ -47,15 +47,11 @@ spec:
             credentials: {sshKey: {secretRef: github-ssh}}
   teams:
     - project: api
-      apiVersion: kuketeams.io/v1
-      kind: ProjectTeam
       metadata: {name: api-dev}
       spec:
         source: {repo: github.com/acme/agents, tag: v2.1.0}
         roles: [{ref: dev}]
-    - apiVersion: kuketeams.io/v1
-      kind: ProjectTeam
-      metadata: {name: orchestrator}
+    - metadata: {name: orchestrator}
       spec:
         source: {repo: github.com/acme/agents, tag: v2.1.0}
         roles: [{ref: orchestrator}]
@@ -100,7 +96,7 @@ func TestParseWorkspace(t *testing.T) {
 		github["git"].Credentials["sshKey"].SecretRef != "github-ssh" {
 		t.Fatalf("project fields were not parsed: %+v", project)
 	}
-	if got := doc.Spec.Teams[0].ProjectTeam.Metadata.Name; got != "api-dev" {
+	if got := doc.Spec.Teams[0].Metadata.Name; got != "api-dev" {
 		t.Fatalf("team document metadata.name = %q", got)
 	}
 	if got := doc.Spec.Teams[1]; got.WorkspaceCell == nil || got.Role != "orchestrator" {
@@ -121,7 +117,7 @@ func TestWorkspaceRoundTripsJSONAndYAML(t *testing.T) {
 		return got.Metadata.Name == "engineering" &&
 			got.Spec.Sources[0].Path == "model1" &&
 			got.Spec.Projects[0].Integrations["github"]["git"].Credentials["sshKey"].SecretRef == "github-ssh" &&
-			got.Spec.Teams[0].ProjectTeam.Spec.Roles[0].Ref == "dev" &&
+			got.Spec.Teams[0].Spec.Roles[0].Ref == "dev" &&
 			got.Spec.Teams[1].WorkspaceCell.Blueprint == "workspace-orchestrator" &&
 			got.Status.Configs == 3
 	}
@@ -158,7 +154,16 @@ func TestParseWorkspaceRejectsMalformedOrInvalidDocuments(t *testing.T) {
 		{"missing source ref", strings.Replace(validWorkspace, "ref: v2.1.0, ", "", 1), "sources[0].ref"},
 		{"absolute source path", strings.Replace(validWorkspace, "path: model1", "path: /etc", 1), "repository-relative"},
 		{"relative project path", strings.Replace(validWorkspace, "/home/alice/src/api", "src/api", 1), "absolute host-local"},
-		{"missing ProjectTeam apiVersion", strings.Replace(validWorkspace, "apiVersion: kuketeams.io/v1\n      kind: ProjectTeam", "apiVersion: \"\"\n      kind: ProjectTeam", 1), "ProjectTeam document schema"},
+		{
+			"invalid embedded ProjectTeam",
+			strings.Replace(
+				validWorkspace,
+				"source: {repo: github.com/acme/agents, tag: v2.1.0}",
+				"source: {repo: github.com/acme/agents}",
+				1,
+			),
+			"ProjectTeam document schema",
+		},
 		{"missing secret ref", strings.Replace(validWorkspace, "secretRef: github-cli", "secretRef: \"\"", 1), "credentials.token.secretRef"},
 		{"workspace team missing role", strings.Replace(validWorkspace, "      role: orchestrator\n", "", 1), "spec.teams[1].role"},
 		{
@@ -190,7 +195,7 @@ func TestValidateDoesNotResolveReferences(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc.Spec.Teams[0].Project = "not-yet-resolved"
-	doc.Spec.Teams[0].ProjectTeam.Metadata.Name = "unresolved-local-team"
+	doc.Spec.Teams[0].Metadata.Name = "unresolved-local-team"
 	if validationErr := Validate(doc); validationErr != nil {
 		t.Fatalf("structural validation resolved semantic references: %v", validationErr)
 	}

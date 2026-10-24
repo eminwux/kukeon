@@ -31,8 +31,6 @@ spec:
 
   teams:
     - project: kukeon
-      apiVersion: kuketeams.io/v1
-      kind: ProjectTeam
       metadata: { name: development }
       spec:
         source: { repo: github.com/eminwux/agents, tag: v1.4.0 }
@@ -41,8 +39,6 @@ spec:
           - { ref: dev, needs: { image: [go] } }
           - { ref: pr-reviewer }
     - project: sbsh
-      apiVersion: kuketeams.io/v1
-      kind: ProjectTeam
       metadata: { name: sbsh-development }
       spec:
         source: { repo: github.com/eminwux/agents, tag: v1.4.0 }
@@ -50,9 +46,7 @@ spec:
         roles:
           - { ref: dev, needs: { image: [go] } }
 
-    - apiVersion: kuketeams.io/v1
-      kind: ProjectTeam
-      metadata: { name: orchestrator }
+    - metadata: { name: orchestrator }
       spec:
         source: { repo: github.com/eminwux/agents, tag: v1.4.0 }
         roles: [{ ref: orchestrator }]

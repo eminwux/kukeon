@@ -86,15 +86,15 @@ type WorkspaceCredentialRef struct {
 	SecretRef string `json:"secretRef" yaml:"secretRef"`
 }
 
-// WorkspaceTeam embeds a complete ProjectTeam document. The ProjectTeam GVK,
-// metadata, and spec are declared inline in the Workspace document; project
-// identifies the project checkout that owns this roster. WorkspaceCell marks
-// a workspace-scoped team, for which Role is the selected role and AgentSource
-// optionally selects a source declared in WorkspaceSpec.Sources.
+// WorkspaceTeam embeds the metadata and spec of a ProjectTeam document. The
+// containing Workspace supplies the document context, so apiVersion and kind
+// are omitted; project identifies the checkout that owns this roster.
+// WorkspaceCell marks a workspace-scoped team, for which Role is the selected
+// role and AgentSource optionally selects a source in WorkspaceSpec.Sources.
 type WorkspaceTeam struct {
-	kuketeams.ProjectTeam `json:",inline" yaml:",inline"`
-
-	Project string `json:"project,omitempty"       yaml:"project,omitempty"`
+	Metadata kuketeams.Metadata        `json:"metadata"                yaml:"metadata"`
+	Spec     kuketeams.ProjectTeamSpec `json:"spec"                    yaml:"spec"`
+	Project  string                    `json:"project,omitempty"       yaml:"project,omitempty"`
 	// AgentSource is an optional source name for a workspace-scoped team.
 	AgentSource   string         `json:"agentSource,omitempty"   yaml:"agentSource,omitempty"`
 	Role          string         `json:"role,omitempty"          yaml:"role,omitempty"`
