@@ -36,15 +36,24 @@ spec:
           credentials: [github-cli-token]
         git:
           credentials: [github-ssh-key]
-      harness: [claude, codex]
-      roles:
+      harnesses:
+        - { name: claude, source: primary-agents, path: harnesses/claude }
+        - {
+            name: codex,
+            source: primary-agents,
+            path: harnesses/codex,
+            default: true,
+          }
+      agents:
         - {
             name: dev,
             source: primary-agents,
             path: dev,
+            harness: claude,
             needs: { image: [go] },
           }
         - { name: rev, source: primary-agents, path: pr-reviewer }
+
     - name: sbsh-development
       sources:
         - { name: sbsh, path: sbsh }
@@ -54,15 +63,24 @@ spec:
           credentials: [github-cli-token]
         git:
           credentials: [github-ssh-key]
-      harness: [claude, codex]
-      roles:
+      harnesses:
+        - {
+            name: claude,
+            source: primary-agents,
+            path: harnesses/claude,
+            default: true,
+          }
+        - { name: codex, source: primary-agents, path: harnesses/codex }
+      agents:
         - {
             name: dev,
             source: primary-agents,
             path: dev,
+            harness: claude,
             needs: { image: [go] },
           }
         - { name: rev, source: primary-agents, path: pr-reviewer }
+
     - name: orchestrator
       integrations:
         gh:
@@ -70,8 +88,15 @@ spec:
         git:
           credentials: [github-ssh-key]
       cwd: $HOME
-      harness: [claude, codex]
-      roles:
+      harnesses:
+        - {
+            name: claude,
+            source: primary-agents,
+            path: harnesses/claude,
+            default: true,
+          }
+        - { name: codex, source: primary-agents, path: harnesses/codex }
+      agents:
         - { name: root, source: primary-agents, path: orchestrator }
 
 # Runtime observations are reported separately from desired spec:

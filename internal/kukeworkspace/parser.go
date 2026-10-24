@@ -182,8 +182,43 @@ func validateTeams(
 		if err := validateWorkingDirectory(prefix+".cwd", team.CWD); err != nil {
 			return err
 		}
-		if len(team.Harness) == 0 {
-			return invalid(prefix+".harness", "must contain at least one harness")
+		if len(team.Harnesses) == 0 {
+			return invalid(prefix+".harnesses", "must contain at least one harness")
+		}
+		harnessNames := make(map[string]struct{}, len(team.Harnesses))
+		projectTeamSpec := teammodel.ProjectTeamSpec{}
+		defaultHarnesses := 0
+		for j, harness := range team.Harnesses {
+			harnessPrefix := fmt.Sprintf("%s.harnesses[%d]", prefix, j)
+			if err := required(harnessPrefix, "name", harness.Name); err != nil {
+				return err
+			}
+			if _, exists := harnessNames[harness.Name]; exists {
+				return invalid(prefix+".harnesses", fmt.Sprintf("contains duplicate name %q", harness.Name))
+			}
+			harnessNames[harness.Name] = struct{}{}
+			if err := required(harnessPrefix, "source", harness.Source); err != nil {
+				return err
+			}
+			if err := required(harnessPrefix, "path", harness.Path); err != nil {
+				return err
+			}
+			if err := validateRelativePath(harnessPrefix+".path", harness.Path); err != nil {
+				return err
+			}
+			if _, ok := sources[harness.Source]; !ok {
+				return invalid(harnessPrefix+".source", fmt.Sprintf("references unknown source %q", harness.Source))
+			}
+			if !teammodel.IsKnownHarness(harness.Name) {
+				return invalid(harnessPrefix+".name", fmt.Sprintf("unknown harness %q", harness.Name))
+			}
+			if harness.Default {
+				defaultHarnesses++
+				projectTeamSpec.Defaults.Harnesses = append(projectTeamSpec.Defaults.Harnesses, harness.Name)
+			}
+		}
+		if defaultHarnesses > 1 {
+			return invalid(prefix+".harnesses", "must not contain more than one default harness")
 		}
 		for j, sourceRef := range team.Sources {
 			sourcePrefix := fmt.Sprintf("%s.sources[%d]", prefix, j)
@@ -206,31 +241,40 @@ func validateTeams(
 		if err := validateIntegrations(prefix, team.Integrations, credentialNames); err != nil {
 			return err
 		}
-		if len(team.Roles) == 0 {
-			return invalid(prefix+".roles", "must contain at least one role")
+		if len(team.Agents) == 0 {
+			return invalid(prefix+".agents", "must contain at least one agent")
 		}
-		projectTeamSpec := teammodel.ProjectTeamSpec{Defaults: teammodel.ProjectTeamDefaults{Harnesses: team.Harness}}
-		seenRoles := make(map[string]struct{}, len(team.Roles))
-		for j, role := range team.Roles {
-			rolePrefix := fmt.Sprintf("%s.roles[%d]", prefix, j)
-			if err := required(rolePrefix, "name", role.Name); err != nil {
+		seenAgents := make(map[string]struct{}, len(team.Agents))
+		for j, agent := range team.Agents {
+			agentPrefix := fmt.Sprintf("%s.agents[%d]", prefix, j)
+			if err := required(agentPrefix, "name", agent.Name); err != nil {
 				return err
 			}
-			if _, exists := seenRoles[role.Name]; exists {
-				return invalid(prefix+".roles", fmt.Sprintf("contains duplicate name %q", role.Name))
+			if _, exists := seenAgents[agent.Name]; exists {
+				return invalid(prefix+".agents", fmt.Sprintf("contains duplicate name %q", agent.Name))
 			}
-			seenRoles[role.Name] = struct{}{}
-			if role.Source == "" || role.Path == "" {
-				return invalid(rolePrefix, "requires source and path")
+			seenAgents[agent.Name] = struct{}{}
+			if agent.Source == "" || agent.Path == "" {
+				return invalid(agentPrefix, "requires source and path")
 			}
-			source, ok := sources[role.Source]
+			source, ok := sources[agent.Source]
 			if !ok {
-				return invalid(rolePrefix+".source", fmt.Sprintf("references unknown source %q", role.Source))
+				return invalid(agentPrefix+".source", fmt.Sprintf("references unknown source %q", agent.Source))
+			}
+			if err := validateRelativePath(agentPrefix+".path", agent.Path); err != nil {
+				return err
+			}
+			if agent.Harness != "" {
+				if _, configured := harnessNames[agent.Harness]; !configured {
+					return invalid(agentPrefix+".harness", fmt.Sprintf("references unknown harness %q", agent.Harness))
+				}
 			}
 			if j == 0 {
 				projectTeamSpec.Source = teammodel.TeamSource{Repo: source.Repo, Ref: source.Ref}
 			}
-			projectTeamSpec.Roles = append(projectTeamSpec.Roles, role)
+			projectTeamSpec.Roles = append(projectTeamSpec.Roles, teammodel.ProjectTeamRole{
+				Name: agent.Name, Source: agent.Source, Path: agent.Path, Needs: agent.Needs,
+			})
 		}
 		metadata := teammodel.Metadata{Name: team.Name}
 		projectTeam := teammodel.ProjectTeam{

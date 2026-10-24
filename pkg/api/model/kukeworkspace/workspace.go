@@ -90,8 +90,25 @@ type WorkspaceTeam struct {
 	Sources      []WorkspaceTeamSource                 `json:"sources,omitempty"      yaml:"sources,omitempty"`
 	CWD          string                                `json:"cwd"                    yaml:"cwd"`
 	Integrations map[string]WorkspaceIntegrationClient `json:"integrations,omitempty" yaml:"integrations,omitempty"`
-	Harness      []string                              `json:"harness"                yaml:"harness"`
-	Roles        []kuketeams.ProjectTeamRole           `json:"roles"                  yaml:"roles"`
+	Harnesses    []WorkspaceHarness                    `json:"harnesses"              yaml:"harnesses"`
+	Agents       []WorkspaceAgent                      `json:"agents"                 yaml:"agents"`
+}
+
+// WorkspaceHarness selects a harness implementation from a workspace source.
+type WorkspaceHarness struct {
+	Name    string `json:"name"              yaml:"name"`
+	Source  string `json:"source"            yaml:"source"`
+	Path    string `json:"path"              yaml:"path"`
+	Default bool   `json:"default,omitempty" yaml:"default,omitempty"`
+}
+
+// WorkspaceAgent selects an agent role from a workspace source.
+type WorkspaceAgent struct {
+	Name    string                      `json:"name"              yaml:"name"`
+	Source  string                      `json:"source"            yaml:"source"`
+	Path    string                      `json:"path"              yaml:"path"`
+	Harness string                      `json:"harness,omitempty" yaml:"harness,omitempty"`
+	Needs   *kuketeams.ProjectRoleNeeds `json:"needs,omitempty"   yaml:"needs,omitempty"`
 }
 
 // WorkspaceTeamSource references a workspace source and selects its checkout
