@@ -16,13 +16,28 @@
 
 package kukeworkspace
 
+import "github.com/eminwux/kukeon/pkg/api/model/kuketeams"
+
 // Workspace is a user-owned manifest that combines projects, their teams, and
 // cells shared across the workspace.
 type Workspace struct {
-	APIVersion string            `json:"apiVersion" yaml:"apiVersion"`
-	Kind       string            `json:"kind"       yaml:"kind"`
-	Metadata   WorkspaceMetadata `json:"metadata"   yaml:"metadata"`
-	Spec       WorkspaceSpec     `json:"spec"       yaml:"spec"`
+	APIVersion string            `json:"apiVersion"       yaml:"apiVersion"`
+	Kind       string            `json:"kind"             yaml:"kind"`
+	Metadata   WorkspaceMetadata `json:"metadata"         yaml:"metadata"`
+	Spec       WorkspaceSpec     `json:"spec"             yaml:"spec"`
+	Status     WorkspaceStatus   `json:"status,omitempty" yaml:"status,omitempty"`
+}
+
+// WorkspaceStatus reports resources currently materialized from this
+// Workspace configuration. Counts are observations, not desired values.
+type WorkspaceStatus struct {
+	// Configs counts Config resources resolved from this Workspace spec.
+	Configs int `json:"configs"      yaml:"configs"`
+	// Blueprints counts Blueprint resources resolved from this Workspace spec.
+	Blueprints int `json:"blueprints"   yaml:"blueprints"`
+	// RunningCells counts currently running cells materialized from those
+	// configurations.
+	RunningCells int `json:"runningCells" yaml:"runningCells"`
 }
 
 // WorkspaceMetadata identifies the manifest.
@@ -71,17 +86,15 @@ type WorkspaceCredentialRef struct {
 	SecretRef string `json:"secretRef" yaml:"secretRef"`
 }
 
-// WorkspaceTeam references a project-local team manifest or declares a
-// workspace-scoped cell team. Harness and image requirements for project
-// teams remain in the referenced ProjectTeam document. A workspace team
-// declares one role and a workspaceCell; its agentSource is optional.
+// WorkspaceTeam embeds a complete ProjectTeam document. The ProjectTeam GVK,
+// metadata, and spec are declared inline in the Workspace document; project
+// identifies the project checkout that owns this roster. WorkspaceCell marks
+// a workspace-scoped team, for which Role is the selected role and AgentSource
+// optionally selects a source declared in WorkspaceSpec.Sources.
 type WorkspaceTeam struct {
-	Name    string `json:"name"                    yaml:"name"`
+	kuketeams.ProjectTeam `json:",inline" yaml:",inline"`
+
 	Project string `json:"project,omitempty"       yaml:"project,omitempty"`
-	// TeamFile is a project-relative path to a ProjectTeam document. Its
-	// harness defaults, source pin, role roster, and image requirements remain
-	// owned by that document.
-	TeamFile string `json:"teamFile,omitempty"      yaml:"teamFile,omitempty"`
 	// AgentSource is an optional source name for a workspace-scoped team.
 	AgentSource   string         `json:"agentSource,omitempty"   yaml:"agentSource,omitempty"`
 	Role          string         `json:"role,omitempty"          yaml:"role,omitempty"`

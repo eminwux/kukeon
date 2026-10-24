@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
+	teamparser "github.com/eminwux/kukeon/internal/kuketeams"
 	model "github.com/eminwux/kukeon/pkg/api/model/kukeworkspace"
 	"gopkg.in/yaml.v3"
 )
@@ -164,31 +165,24 @@ func validateTeams(teams []model.WorkspaceTeam) error {
 	}
 	for i, team := range teams {
 		prefix := fmt.Sprintf("spec.teams[%d]", i)
-		if err := required(prefix, "name", team.Name); err != nil {
-			return err
+		teamYAML, marshalErr := yaml.Marshal(team.ProjectTeam)
+		if marshalErr != nil {
+			return invalid(prefix, "must contain a valid ProjectTeam document")
+		}
+		if _, parseErr := teamparser.Parse(teamYAML); parseErr != nil {
+			return invalid(prefix, "must comply with the ProjectTeam document schema: "+parseErr.Error())
+		}
+		if fieldErr := required(prefix+".metadata", "name", team.Metadata.Name); fieldErr != nil {
+			return fieldErr
 		}
 		if team.Project != "" {
 			if team.WorkspaceCell != nil || team.Role != "" || team.AgentSource != "" {
-				return invalid(prefix, "project teams use project and teamFile")
-			}
-			if err := required(prefix, "project", team.Project); err != nil {
-				return err
-			}
-			if err := required(prefix, "teamFile", team.TeamFile); err != nil {
-				return err
-			}
-			clean := filepath.Clean(team.TeamFile)
-			if filepath.IsAbs(team.TeamFile) || clean == ".." ||
-				strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-				return invalid(prefix+".teamFile", "must be relative to the project and stay within it")
+				return invalid(prefix, "project teams use project and an inline ProjectTeam document")
 			}
 			continue
 		}
 		if team.WorkspaceCell == nil {
 			return invalid(prefix, "requires project or workspaceCell")
-		}
-		if team.TeamFile != "" {
-			return invalid(prefix+".teamFile", "is only valid for a project team")
 		}
 		if err := required(prefix, "role", team.Role); err != nil {
 			return err
@@ -245,7 +239,7 @@ func projectNames(items []model.WorkspaceProject) []string {
 func teamNames(items []model.WorkspaceTeam) []string {
 	out := make([]string, len(items))
 	for i := range items {
-		out[i] = items[i].Name
+		out[i] = items[i].Metadata.Name
 	}
 	return out
 }

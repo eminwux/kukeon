@@ -30,18 +30,39 @@ spec:
       path: /home/alice/src/sbsh
 
   teams:
-    - name: kukeon-development
-      project: kukeon
-      teamFile: teams/development.yaml
-    - name: kukeon-maintenance
-      project: kukeon
-      teamFile: teams/maintenance.yaml
-    - name: sbsh-development
-      project: sbsh
-      teamFile: kuketeam.yaml
+    - project: kukeon
+      apiVersion: kuketeams.io/v1
+      kind: ProjectTeam
+      metadata: { name: development }
+      spec:
+        source: { repo: github.com/eminwux/agents, tag: v1.4.0 }
+        defaults: { harnesses: [claude, codex] }
+        roles:
+          - { ref: dev, needs: { image: [go] } }
+          - { ref: pr-reviewer }
+    - project: sbsh
+      apiVersion: kuketeams.io/v1
+      kind: ProjectTeam
+      metadata: { name: sbsh-development }
+      spec:
+        source: { repo: github.com/eminwux/agents, tag: v1.4.0 }
+        defaults: { harnesses: [claude] }
+        roles:
+          - { ref: dev, needs: { image: [go] } }
 
-    - name: orchestrator
+    - apiVersion: kuketeams.io/v1
+      kind: ProjectTeam
+      metadata: { name: orchestrator }
+      spec:
+        source: { repo: github.com/eminwux/agents, tag: v1.4.0 }
+        roles: [{ ref: orchestrator }]
       agentSource: primary-agents
       role: orchestrator
       workspaceCell:
         blueprint: workspace-orchestrator
+
+# Runtime observations are reported separately from desired spec:
+# status:
+#   configs: 3
+#   blueprints: 2
+#   runningCells: 4
