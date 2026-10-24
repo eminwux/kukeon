@@ -28,6 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -203,8 +204,23 @@ func validateProjectTeam(pt *model.ProjectTeam) error {
 		}
 	}
 	for i, role := range pt.Spec.Roles {
-		if strings.TrimSpace(role.Ref) == "" {
+		roleRef := strings.TrimSpace(role.Ref)
+		roleSource := strings.TrimSpace(role.Source)
+		rolePath := strings.TrimSpace(role.Path)
+		if roleRef == "" && (roleSource == "" || rolePath == "") {
 			return fmt.Errorf("%w (roles[%d])", errdefs.ErrTeamRoleRefRequired, i)
+		}
+		if roleRef != "" && (roleSource != "" || rolePath != "") {
+			return fmt.Errorf("ProjectTeam roles[%d] must use ref or source and path", i)
+		}
+		if rolePath != "" {
+			clean := filepath.Clean(rolePath)
+			if filepath.IsAbs(rolePath) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+				return fmt.Errorf(
+					"ProjectTeam roles[%d].path must be repository-relative and stay within its source",
+					i,
+				)
+			}
 		}
 		if role.Instances < 0 {
 			return fmt.Errorf("ProjectTeam roles[%d].instances must not be negative", i)

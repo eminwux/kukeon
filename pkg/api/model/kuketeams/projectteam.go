@@ -87,8 +87,13 @@ type ProjectTeamDefaults struct {
 // ProjectTeamRole references a role from the agents source and optionally adds
 // project-specific capability needs on top of the role's own declaration.
 type ProjectTeamRole struct {
-	// Ref is the role name (matches a Role.metadata.name in the agents source).
-	Ref string `json:"ref"                 yaml:"ref"`
+	// Ref is the legacy role name (matches a Role.metadata.name in the team
+	// source). Workspace teams can instead select a role with Source and Path.
+	Ref string `json:"ref,omitempty"       yaml:"ref,omitempty"`
+	// Source names the Workspace source containing this role definition.
+	Source string `json:"source,omitempty"    yaml:"source,omitempty"`
+	// Path selects the role definition within Source.
+	Path string `json:"path,omitempty"      yaml:"path,omitempty"`
 	// Instances is the number of instances to materialize for this role.
 	// Zero means the default of one instance.
 	Instances int `json:"instances,omitempty" yaml:"instances,omitempty"`

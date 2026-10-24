@@ -13,12 +13,6 @@ spec:
     - name: kukeon
       repo: eminwux/kukeon
       ref: main
-      integrations:
-        github:
-          gh:
-            credentials: [github-cli-token]
-          git:
-            credentials: [github-ssh-key]
     - name: sbsh
       repo: eminwux/sbsh
       ref: main
@@ -34,27 +28,35 @@ spec:
 
   teams:
     - name: development
-      source: kukeon
-      integrations: [github]
-      agentSource: primary-agents
+      sources: [kukeon]
+      cwd: /home/kukeon
+      config:
+        integrations:
+          github:
+            gh:
+              credentials: [github-cli-token]
+            git:
+              credentials: [github-ssh-key]
       spec:
         defaults: { harnesses: [claude, codex] }
         roles:
-          - { ref: dev, needs: { image: [go] } }
-          - { ref: pr-reviewer }
+          - { source: primary-agents, path: dev, needs: { image: [go] } }
+          - { source: primary-agents, path: pr-reviewer }
     - name: sbsh-development
-      source: sbsh
-      agentSource: primary-agents
+      sources: [sbsh]
+      cwd: /home/sbsh
+      config: {}
       spec:
         defaults: { harnesses: [claude] }
         roles:
-          - { ref: dev, needs: { image: [go] } }
+          - { source: primary-agents, path: dev, needs: { image: [go] } }
 
     - name: orchestrator
-      agentSource: primary-agents
+      cwd: /home/kuke
+      config: {}
       spec:
         roles:
-          - { ref: orchestrator, instances: 2 }
+          - { source: primary-agents, path: orchestrator, instances: 2 }
         workspaceCell:
           configs:
             - name: workspace-orchestrator

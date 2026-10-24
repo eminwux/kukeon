@@ -75,11 +75,11 @@ func Validate(doc *model.Workspace) error {
 	if err != nil {
 		return err
 	}
-	sources, err := validateSources(doc.Spec.Sources, credentialNames)
+	sources, err := validateSources(doc.Spec.Sources)
 	if err != nil {
 		return err
 	}
-	if teamsErr := validateTeams(doc.Spec.Teams, sources); teamsErr != nil {
+	if teamsErr := validateTeams(doc.Spec.Teams, sources, credentialNames); teamsErr != nil {
 		return teamsErr
 	}
 	return nil
@@ -87,7 +87,6 @@ func Validate(doc *model.Workspace) error {
 
 func validateSources(
 	sources []model.WorkspaceSource,
-	credentialNames map[string]struct{},
 ) (map[string]model.WorkspaceSource, error) {
 	if err := uniqueNames("spec.sources", sourceNames(sources)); err != nil {
 		return nil, err
@@ -110,9 +109,6 @@ func validateSources(
 				strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 				return nil, invalid(prefix+".path", "must be repository-relative and stay within the source")
 			}
-		}
-		if err := validateIntegrations(prefix, source.Integrations, credentialNames); err != nil {
-			return nil, err
 		}
 		byName[source.Name] = source
 	}
@@ -176,7 +172,11 @@ func validateIntegrations(
 	return nil
 }
 
-func validateTeams(teams []model.WorkspaceTeam, sources map[string]model.WorkspaceSource) error {
+func validateTeams(
+	teams []model.WorkspaceTeam,
+	sources map[string]model.WorkspaceSource,
+	credentialNames map[string]struct{},
+) error {
 	if err := uniqueNames("spec.teams", teamNames(teams)); err != nil {
 		return err
 	}
@@ -185,32 +185,53 @@ func validateTeams(teams []model.WorkspaceTeam, sources map[string]model.Workspa
 		if err := required(prefix, "name", team.Name); err != nil {
 			return err
 		}
-		if team.Source != "" {
-			if _, ok := sources[team.Source]; !ok {
-				return invalid(prefix+".source", fmt.Sprintf("references unknown source %q", team.Source))
-			}
+		if err := required(prefix, "cwd", team.CWD); err != nil {
+			return err
 		}
-		if team.AgentSource != "" {
-			if _, ok := sources[team.AgentSource]; !ok {
-				return invalid(prefix+".agentSource", fmt.Sprintf("references unknown source %q", team.AgentSource))
-			}
+		if !filepath.IsAbs(team.CWD) {
+			return invalid(prefix+".cwd", "must be an absolute working directory")
 		}
-		for _, integrationName := range team.Integrations {
-			source, ok := sources[team.Source]
-			if !ok {
-				return invalid(prefix+".integrations", "requires a source reference")
-			}
-			if _, integrationExists := source.Integrations[integrationName]; !integrationExists {
+		if team.Config == nil {
+			return invalid(prefix+".config", "is required")
+		}
+		for j, sourceName := range team.Sources {
+			if _, ok := sources[sourceName]; !ok {
 				return invalid(
-					prefix+".integrations",
-					fmt.Sprintf("source %q has no integration %q", team.Source, integrationName),
+					fmt.Sprintf("%s.sources[%d]", prefix, j),
+					fmt.Sprintf("references unknown source %q", sourceName),
 				)
 			}
 		}
+		if err := validateIntegrations(prefix+".config", team.Config.Integrations, credentialNames); err != nil {
+			return err
+		}
 		projectTeamSpec := team.Spec
-		if team.AgentSource != "" {
-			source := sources[team.AgentSource]
-			projectTeamSpec.Source = teammodel.TeamSource{Repo: source.Repo, Ref: source.Ref}
+		for j, role := range team.Spec.Roles {
+			rolePrefix := fmt.Sprintf("%s.spec.roles[%d]", prefix, j)
+			if role.Source == "" || role.Path == "" {
+				return invalid(rolePrefix, "requires source and path")
+			}
+			source, ok := sources[role.Source]
+			if !ok {
+				return invalid(rolePrefix+".source", fmt.Sprintf("references unknown source %q", role.Source))
+			}
+			if j == 0 {
+				projectTeamSpec.Source = teammodel.TeamSource{Repo: source.Repo, Ref: source.Ref}
+			}
+		}
+		if len(team.Sources) > 0 && team.Spec.WorkspaceCell != nil {
+			return invalid(prefix, "project teams use sources and inline ProjectTeam spec")
+		}
+		if len(team.Sources) == 0 {
+			if team.Spec.WorkspaceCell == nil {
+				return invalid(prefix, "requires sources or workspaceCell")
+			}
+			if len(team.Spec.Roles) == 0 {
+				return invalid(prefix+".spec.roles", "workspaceCell requires at least one role")
+			}
+			if len(team.Spec.WorkspaceCell.Configs) == 0 {
+				return invalid(prefix+".spec.workspaceCell.configs", "must contain at least one cell config")
+			}
 		}
 		metadata := teammodel.Metadata{Name: team.Name}
 		projectTeam := teammodel.ProjectTeam{
@@ -225,21 +246,6 @@ func validateTeams(teams []model.WorkspaceTeam, sources map[string]model.Workspa
 		}
 		if _, parseErr := teamparser.Parse(teamYAML); parseErr != nil {
 			return invalid(prefix, "must comply with the ProjectTeam document schema: "+parseErr.Error())
-		}
-		if team.Source != "" {
-			if team.Spec.WorkspaceCell != nil {
-				return invalid(prefix, "project teams use source and inline ProjectTeam spec")
-			}
-			continue
-		}
-		if team.Spec.WorkspaceCell == nil {
-			return invalid(prefix, "requires source or workspaceCell")
-		}
-		if len(team.Spec.Roles) == 0 {
-			return invalid(prefix+".spec.roles", "must contain at least one role for a workspace cell team")
-		}
-		if len(team.Spec.WorkspaceCell.Configs) == 0 {
-			return invalid(prefix+".spec.workspaceCell.configs", "must contain at least one cell config")
 		}
 	}
 	return nil

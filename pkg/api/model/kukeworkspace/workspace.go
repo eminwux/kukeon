@@ -55,11 +55,10 @@ type WorkspaceSpec struct {
 // WorkspaceSource identifies a repository revision and optional repository
 // subdirectory. Sources may describe projects or agent role libraries.
 type WorkspaceSource struct {
-	Name         string                          `json:"name"                   yaml:"name"`
-	Repo         string                          `json:"repo"                   yaml:"repo"`
-	Ref          string                          `json:"ref"                    yaml:"ref"`
-	Path         string                          `json:"path,omitempty"         yaml:"path,omitempty"`
-	Integrations map[string]WorkspaceIntegration `json:"integrations,omitempty" yaml:"integrations,omitempty"`
+	Name string `json:"name"           yaml:"name"`
+	Repo string `json:"repo"           yaml:"repo"`
+	Ref  string `json:"ref"            yaml:"ref"`
+	Path string `json:"path,omitempty" yaml:"path,omitempty"`
 }
 
 // WorkspaceIntegration maps integration clients (such as GitHub's gh and git
@@ -90,13 +89,18 @@ type WorkspaceCredentialVolumeMount struct {
 
 // WorkspaceTeam embeds the metadata and spec of a ProjectTeam document. The
 // containing Workspace supplies document context, so apiVersion and kind are
-// omitted. Source references the project repository source; AgentSource
-// optionally references a role-library source. Integrations selects clients
-// declared by the referenced project source.
+// omitted. Sources are project-code checkouts; role-level sources select role
+// definitions. Config carries team-specific integrations, and CWD sets the
+// working directory supplied to the harness.
 type WorkspaceTeam struct {
-	Name         string                    `json:"name"                   yaml:"name"`
-	Source       string                    `json:"source,omitempty"       yaml:"source,omitempty"`
-	Integrations []string                  `json:"integrations,omitempty" yaml:"integrations,omitempty"`
-	Spec         kuketeams.ProjectTeamSpec `json:"spec"                   yaml:"spec"`
-	AgentSource  string                    `json:"agentSource,omitempty"  yaml:"agentSource,omitempty"`
+	Name    string                    `json:"name"              yaml:"name"`
+	Sources []string                  `json:"sources,omitempty" yaml:"sources,omitempty"`
+	CWD     string                    `json:"cwd,omitempty"     yaml:"cwd,omitempty"`
+	Config  *WorkspaceTeamConfig      `json:"config"            yaml:"config"`
+	Spec    kuketeams.ProjectTeamSpec `json:"spec"              yaml:"spec"`
+}
+
+// WorkspaceTeamConfig contains settings scoped to one team instance.
+type WorkspaceTeamConfig struct {
+	Integrations map[string]WorkspaceIntegration `json:"integrations,omitempty" yaml:"integrations,omitempty"`
 }
