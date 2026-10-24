@@ -112,7 +112,7 @@ type WorkspaceAgent struct {
 }
 
 // WorkspaceTeamSource references a workspace source and selects its checkout
-// directory for this team.
+// directory inside the team's container.
 type WorkspaceTeamSource struct {
 	Name string `json:"name" yaml:"name"`
 	Path string `json:"path" yaml:"path"`

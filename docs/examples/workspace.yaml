@@ -29,6 +29,7 @@ spec:
   teams:
     - name: kukeon
       sources:
+        # Clone the kukeon source into the team container's ./kukeon path.
         - { name: kukeon, path: kukeon }
       cwd: kukeon
       integrations:
@@ -56,6 +57,7 @@ spec:
 
     - name: sbsh-development
       sources:
+        # Clone the sbsh source into the team container's ./sbsh path.
         - { name: sbsh, path: sbsh }
       cwd: $HOME/sbsh
       integrations:

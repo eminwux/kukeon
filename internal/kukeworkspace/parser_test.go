@@ -71,6 +71,13 @@ func TestParseDocumentedWorkspaceExample(t *testing.T) {
 	if len(doc.Spec.Sources) != 3 || len(doc.Spec.Teams) != 3 {
 		t.Fatalf("documented example missing declarations: %+v", doc.Spec)
 	}
+	if len(doc.Spec.Teams[0].Sources) != 1 ||
+		doc.Spec.Teams[0].Sources[0] != (model.WorkspaceTeamSource{Name: "kukeon", Path: "kukeon"}) {
+		t.Fatalf(
+			"documented kukeon source should check out at ./kukeon in the team container: %+v",
+			doc.Spec.Teams[0].Sources,
+		)
+	}
 	if len(doc.Spec.Teams[2].Sources) != 0 || doc.Spec.Teams[2].Agents[0].Name != "root" {
 		t.Fatalf("documented orchestrator should have only its agent role: %+v", doc.Spec.Teams[2])
 	}
