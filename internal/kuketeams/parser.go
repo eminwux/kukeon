@@ -205,13 +205,15 @@ func validateProjectTeam(pt *model.ProjectTeam) error {
 	}
 	for i, role := range pt.Spec.Roles {
 		roleRef := strings.TrimSpace(role.Ref)
+		roleName := strings.TrimSpace(role.Name)
 		roleSource := strings.TrimSpace(role.Source)
 		rolePath := strings.TrimSpace(role.Path)
-		if roleRef == "" && (roleSource == "" || rolePath == "") {
-			return fmt.Errorf("%w (roles[%d])", errdefs.ErrTeamRoleRefRequired, i)
+		workspaceRole := roleSource != "" || rolePath != "" || roleName != ""
+		if workspaceRole && (roleSource == "" || rolePath == "" || roleName == "" || roleRef != "") {
+			return fmt.Errorf("ProjectTeam roles[%d] must use ref, or name with source and path", i)
 		}
-		if roleRef != "" && (roleSource != "" || rolePath != "") {
-			return fmt.Errorf("ProjectTeam roles[%d] must use ref or source and path", i)
+		if !workspaceRole && roleRef == "" {
+			return fmt.Errorf("%w (roles[%d])", errdefs.ErrTeamRoleRefRequired, i)
 		}
 		if rolePath != "" {
 			clean := filepath.Clean(rolePath)

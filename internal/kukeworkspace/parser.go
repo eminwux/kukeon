@@ -143,29 +143,20 @@ func validateCredentials(credentials []model.WorkspaceCredential) (map[string]st
 
 func validateIntegrations(
 	prefix string,
-	integrations map[string]model.WorkspaceIntegration,
+	integrations map[string]model.WorkspaceIntegrationClient,
 	credentialNames map[string]struct{},
 ) error {
-	for name, integration := range integrations {
-		integrationPrefix := prefix + ".integrations." + name
-		if strings.TrimSpace(name) == "" {
-			return invalid(prefix+".integrations", "integration names are required")
+	for clientName, client := range integrations {
+		clientPrefix := prefix + ".integrations." + clientName
+		if strings.TrimSpace(clientName) == "" {
+			return invalid(prefix+".integrations", "client names are required")
 		}
-		if len(integration) == 0 {
-			return invalid(integrationPrefix, "must declare at least one client")
-		}
-		for clientName, client := range integration {
-			clientPrefix := integrationPrefix + "." + clientName
-			if strings.TrimSpace(clientName) == "" {
-				return invalid(integrationPrefix, "client names are required")
-			}
-			for _, credential := range client.Credentials {
-				if _, ok := credentialNames[credential]; !ok {
-					return invalid(
-						clientPrefix+".credentials",
-						fmt.Sprintf("references unknown credential %q", credential),
-					)
-				}
+		for _, credential := range client.Credentials {
+			if _, ok := credentialNames[credential]; !ok {
+				return invalid(
+					clientPrefix+".credentials",
+					fmt.Sprintf("references unknown credential %q", credential),
+				)
 			}
 		}
 	}
@@ -188,26 +179,47 @@ func validateTeams(
 		if err := required(prefix, "cwd", team.CWD); err != nil {
 			return err
 		}
-		if !filepath.IsAbs(team.CWD) {
-			return invalid(prefix+".cwd", "must be an absolute working directory")
+		if err := validateWorkingDirectory(prefix+".cwd", team.CWD); err != nil {
+			return err
 		}
-		if team.Config == nil {
-			return invalid(prefix+".config", "is required")
+		if len(team.Harness) == 0 {
+			return invalid(prefix+".harness", "must contain at least one harness")
 		}
-		for j, sourceName := range team.Sources {
-			if _, ok := sources[sourceName]; !ok {
+		for j, sourceRef := range team.Sources {
+			sourcePrefix := fmt.Sprintf("%s.sources[%d]", prefix, j)
+			if err := required(sourcePrefix, "name", sourceRef.Name); err != nil {
+				return err
+			}
+			if err := required(sourcePrefix, "path", sourceRef.Path); err != nil {
+				return err
+			}
+			if err := validateRelativePath(sourcePrefix+".path", sourceRef.Path); err != nil {
+				return err
+			}
+			if _, ok := sources[sourceRef.Name]; !ok {
 				return invalid(
-					fmt.Sprintf("%s.sources[%d]", prefix, j),
-					fmt.Sprintf("references unknown source %q", sourceName),
+					sourcePrefix+".name",
+					fmt.Sprintf("references unknown source %q", sourceRef.Name),
 				)
 			}
 		}
-		if err := validateIntegrations(prefix+".config", team.Config.Integrations, credentialNames); err != nil {
+		if err := validateIntegrations(prefix, team.Integrations, credentialNames); err != nil {
 			return err
 		}
-		projectTeamSpec := team.Spec
-		for j, role := range team.Spec.Roles {
-			rolePrefix := fmt.Sprintf("%s.spec.roles[%d]", prefix, j)
+		if len(team.Roles) == 0 {
+			return invalid(prefix+".roles", "must contain at least one role")
+		}
+		projectTeamSpec := teammodel.ProjectTeamSpec{Defaults: teammodel.ProjectTeamDefaults{Harnesses: team.Harness}}
+		seenRoles := make(map[string]struct{}, len(team.Roles))
+		for j, role := range team.Roles {
+			rolePrefix := fmt.Sprintf("%s.roles[%d]", prefix, j)
+			if err := required(rolePrefix, "name", role.Name); err != nil {
+				return err
+			}
+			if _, exists := seenRoles[role.Name]; exists {
+				return invalid(prefix+".roles", fmt.Sprintf("contains duplicate name %q", role.Name))
+			}
+			seenRoles[role.Name] = struct{}{}
 			if role.Source == "" || role.Path == "" {
 				return invalid(rolePrefix, "requires source and path")
 			}
@@ -218,20 +230,7 @@ func validateTeams(
 			if j == 0 {
 				projectTeamSpec.Source = teammodel.TeamSource{Repo: source.Repo, Ref: source.Ref}
 			}
-		}
-		if len(team.Sources) > 0 && team.Spec.WorkspaceCell != nil {
-			return invalid(prefix, "project teams use sources and inline ProjectTeam spec")
-		}
-		if len(team.Sources) == 0 {
-			if team.Spec.WorkspaceCell == nil {
-				return invalid(prefix, "requires sources or workspaceCell")
-			}
-			if len(team.Spec.Roles) == 0 {
-				return invalid(prefix+".spec.roles", "workspaceCell requires at least one role")
-			}
-			if len(team.Spec.WorkspaceCell.Configs) == 0 {
-				return invalid(prefix+".spec.workspaceCell.configs", "must contain at least one cell config")
-			}
+			projectTeamSpec.Roles = append(projectTeamSpec.Roles, role)
 		}
 		metadata := teammodel.Metadata{Name: team.Name}
 		projectTeam := teammodel.ProjectTeam{
@@ -246,6 +245,31 @@ func validateTeams(
 		}
 		if _, parseErr := teamparser.Parse(teamYAML); parseErr != nil {
 			return invalid(prefix, "must comply with the ProjectTeam document schema: "+parseErr.Error())
+		}
+	}
+	return nil
+}
+
+func validateWorkingDirectory(field, cwd string) error {
+	if filepath.IsAbs(cwd) || cwd == "$HOME" || cwd == "~" {
+		return nil
+	}
+	if strings.HasPrefix(cwd, "$HOME/") {
+		return validateRelativePath(field, strings.TrimPrefix(cwd, "$HOME/"))
+	}
+	if strings.HasPrefix(cwd, "~/") {
+		return validateRelativePath(field, strings.TrimPrefix(cwd, "~/"))
+	}
+	return validateRelativePath(field, cwd)
+}
+
+func validateRelativePath(field, value string) error {
+	if filepath.IsAbs(value) {
+		return invalid(field, "must be relative")
+	}
+	for _, segment := range strings.Split(filepath.ToSlash(value), "/") {
+		if segment == ".." {
+			return invalid(field, "must not traverse outside its base directory")
 		}
 	}
 	return nil

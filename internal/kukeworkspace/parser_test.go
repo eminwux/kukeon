@@ -45,22 +45,16 @@ spec:
       volumeMount: {target: /home/agent/.ssh/id_ed25519, readOnly: true}
   teams:
     - name: api-dev
-      sources: [api]
-      cwd: /home/api
-      config:
-        integrations:
-          github:
-            gh: {credentials: [github-cli]}
-      spec:
-        roles: [{source: house, path: dev}]
+      sources: [{name: api, path: api}]
+      cwd: api
+      integrations: {gh: {credentials: [github-cli]}}
+      harness: [claude]
+      roles: [{name: dev, source: house, path: dev}]
     - name: orchestrator
-      cwd: /home/kuke
-      config: {}
-      spec:
-        roles: [{source: house, path: orchestrator, instances: 2}]
-        workspaceCell:
-          configs:
-            - {name: workspace-orchestrator, blueprint: workspace-orchestrator}
+      cwd: $HOME
+      integrations: {gh: {credentials: [github-cli]}}
+      harness: [claude]
+      roles: [{name: root, source: house, path: orchestrator}]
 status: {configs: 3, blueprints: 2, runningCells: 1}
 `
 
@@ -77,8 +71,8 @@ func TestParseDocumentedWorkspaceExample(t *testing.T) {
 	if len(doc.Spec.Sources) != 3 || len(doc.Spec.Teams) != 3 {
 		t.Fatalf("documented example missing declarations: %+v", doc.Spec)
 	}
-	if doc.Spec.Teams[2].Spec.WorkspaceCell == nil || doc.Spec.Teams[2].Spec.Roles[0].Instances != 2 {
-		t.Fatalf("documented workspace team is missing its cell or role: %+v", doc.Spec.Teams[2])
+	if len(doc.Spec.Teams[2].Sources) != 0 || doc.Spec.Teams[2].Roles[0].Name != "root" {
+		t.Fatalf("documented orchestrator should have only its agent role: %+v", doc.Spec.Teams[2])
 	}
 }
 
@@ -91,19 +85,18 @@ func TestParseWorkspace(t *testing.T) {
 	if doc.Metadata.Name != "engineering" || len(doc.Spec.Sources) != 2 || len(doc.Spec.Teams) != 2 {
 		t.Fatalf("parsed workspace lost nested declarations: %+v", doc)
 	}
-	github := doc.Spec.Teams[0].Config.Integrations["github"]
-	if len(doc.Spec.Teams[0].Sources) != 1 || doc.Spec.Teams[0].Sources[0] != "api" ||
-		doc.Spec.Teams[0].CWD != "/home/api" ||
-		github["gh"].Credentials[0] != "github-cli" ||
+	if len(doc.Spec.Teams[0].Sources) != 1 || doc.Spec.Teams[0].Sources[0].Name != "api" ||
+		doc.Spec.Teams[0].Sources[0].Path != "api" ||
+		doc.Spec.Teams[0].CWD != "api" ||
+		doc.Spec.Teams[0].Integrations["gh"].Credentials[0] != "github-cli" ||
+		doc.Spec.Teams[0].Harness[0] != "claude" ||
 		doc.Spec.Credentials[1].VolumeMount.Target != "/home/agent/.ssh/id_ed25519" {
 		t.Fatalf("source/team fields were not parsed: %+v", doc.Spec)
 	}
 	if got := doc.Spec.Teams[0].Name; got != "api-dev" {
 		t.Fatalf("team name = %q", got)
 	}
-	if got := doc.Spec.Teams[1]; got.Spec.WorkspaceCell == nil || got.Spec.Roles[0].Path != "orchestrator" ||
-		len(got.Sources) != 0 ||
-		got.CWD != "/home/kuke" {
+	if got := doc.Spec.Teams[1]; got.Roles[0].Path != "orchestrator" || len(got.Sources) != 0 || got.CWD != "$HOME" {
 		t.Fatalf("workspace team = %+v", got)
 	}
 	if doc.Status.Configs != 3 || doc.Status.Blueprints != 2 || doc.Status.RunningCells != 1 {
@@ -120,11 +113,11 @@ func TestWorkspaceRoundTripsJSONAndYAML(t *testing.T) {
 	check := func(got model.Workspace) bool {
 		return got.Metadata.Name == "engineering" &&
 			got.Spec.Sources[0].Path == "model1" &&
-			got.Spec.Teams[0].Config.Integrations["github"]["gh"].Credentials[0] == "github-cli" &&
-			got.Spec.Teams[0].Sources[0] == "api" &&
-			got.Spec.Teams[0].Spec.Roles[0].Source == "house" &&
-			got.Spec.Teams[0].Spec.Roles[0].Path == "dev" &&
-			got.Spec.Teams[1].Spec.WorkspaceCell.Configs[0].Blueprint == "workspace-orchestrator" &&
+			got.Spec.Teams[0].Integrations["gh"].Credentials[0] == "github-cli" &&
+			got.Spec.Teams[0].Sources[0].Name == "api" &&
+			got.Spec.Teams[0].Roles[0].Source == "house" &&
+			got.Spec.Teams[0].Roles[0].Path == "dev" &&
+			got.Spec.Teams[1].Roles[0].Name == "root" &&
 			got.Status.Configs == 3
 	}
 
@@ -159,20 +152,21 @@ func TestParseWorkspaceRejectsMalformedOrInvalidDocuments(t *testing.T) {
 		{"wrong kind", strings.Replace(validWorkspace, "kind: Workspace", "kind: Other", 1), "kind"},
 		{"missing source ref", strings.Replace(validWorkspace, "ref: v2.1.0, ", "", 1), "sources[0].ref"},
 		{"absolute source path", strings.Replace(validWorkspace, "path: model1", "path: /etc", 1), "repository-relative"},
-		{"unknown team source", strings.Replace(validWorkspace, "sources: [api]", "sources: [missing]", 1), "unknown source"},
-		{"team config required", strings.Replace(validWorkspace, "      config:\n        integrations:", "      integrations:", 1), "spec.teams[0].config is required"},
-		{"team cwd must be absolute", strings.Replace(validWorkspace, "cwd: /home/api", "cwd: home/api", 1), "absolute working directory"},
+		{"unknown team source", strings.Replace(validWorkspace, "{name: api, path: api}", "{name: missing, path: api}", 1), "unknown source"},
+		{"cwd traversal rejected", strings.Replace(validWorkspace, "cwd: api", "cwd: $HOME/../etc", 1), "must not traverse"},
+		{"unknown role source", strings.Replace(validWorkspace, "source: house", "source: missing", 1), "unknown source"},
+		{"duplicate role name", strings.Replace(validWorkspace, "roles: [{name: dev, source: house, path: dev}]", "roles: [{name: dev, source: house, path: dev}, {name: dev, source: house, path: dev}]", 1), "duplicate name"},
 		{
-			"invalid embedded ProjectTeam",
+			"role path required",
 			strings.Replace(validWorkspace, "path: dev", "path: \"\"", 1),
 			"requires source and path",
 		},
 		{"missing secret ref", strings.Replace(validWorkspace, "secretRef: cli-token", "secretRef: \"\"", 1), "spec.credentials[0].secretRef"},
 		{"unknown credential reference", strings.Replace(validWorkspace, "credentials: [github-cli]", "credentials: [unknown]", 1), "unknown credential"},
-		{"workspace team missing role", strings.Replace(validWorkspace, "        roles: [{source: house, path: orchestrator, instances: 2}]\n", "        roles: []\n", 1), "workspaceCell requires at least one role"},
+		{"team missing role", strings.Replace(validWorkspace, "roles: [{name: root, source: house, path: orchestrator}]", "roles: []", 1), "must contain at least one role"},
 		{
 			"duplicate team",
-			strings.Replace(validWorkspace, "    - name: orchestrator", "    - {name: api-dev, sources: [api], config: {}, spec: {roles: [{source: house, path: dev}]}}\n    - name: orchestrator", 1),
+			strings.Replace(validWorkspace, "    - name: orchestrator", "    - {name: api-dev, sources: [{name: api, path: api}], cwd: api, harness: [claude], roles: [{name: dev, source: house, path: dev}]}\n    - name: orchestrator", 1),
 			"duplicate name",
 		},
 	} {

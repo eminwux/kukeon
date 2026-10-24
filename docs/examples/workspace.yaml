@@ -7,14 +7,14 @@ metadata:
 spec:
   sources:
     - name: primary-agents
-      repo: eminwux/agents
+      repo: github.com/eminwux/agents
       ref: v1.4.0
       path: model1
     - name: kukeon
-      repo: eminwux/kukeon
+      repo: github.com/eminwux/kukeon
       ref: main
     - name: sbsh
-      repo: eminwux/sbsh
+      repo: github.com/eminwux/sbsh
       ref: main
 
   credentials:
@@ -27,41 +27,52 @@ spec:
         readOnly: true
 
   teams:
-    - name: development
-      sources: [kukeon]
-      cwd: /home/kukeon
-      config:
-        integrations:
-          github:
-            gh:
-              credentials: [github-cli-token]
-            git:
-              credentials: [github-ssh-key]
-      spec:
-        defaults: { harnesses: [claude, codex] }
-        roles:
-          - { source: primary-agents, path: dev, needs: { image: [go] } }
-          - { source: primary-agents, path: pr-reviewer }
+    - name: kukeon
+      sources:
+        - { name: kukeon, path: kukeon }
+      cwd: kukeon
+      integrations:
+        gh:
+          credentials: [github-cli-token]
+        git:
+          credentials: [github-ssh-key]
+      harness: [claude, codex]
+      roles:
+        - {
+            name: dev,
+            source: primary-agents,
+            path: dev,
+            needs: { image: [go] },
+          }
+        - { name: rev, source: primary-agents, path: pr-reviewer }
     - name: sbsh-development
-      sources: [sbsh]
-      cwd: /home/sbsh
-      config: {}
-      spec:
-        defaults: { harnesses: [claude] }
-        roles:
-          - { source: primary-agents, path: dev, needs: { image: [go] } }
-
+      sources:
+        - { name: sbsh, path: sbsh }
+      cwd: $HOME/sbsh
+      integrations:
+        gh:
+          credentials: [github-cli-token]
+        git:
+          credentials: [github-ssh-key]
+      harness: [claude, codex]
+      roles:
+        - {
+            name: dev,
+            source: primary-agents,
+            path: dev,
+            needs: { image: [go] },
+          }
+        - { name: rev, source: primary-agents, path: pr-reviewer }
     - name: orchestrator
-      cwd: /home/kuke
-      config: {}
-      spec:
-        roles:
-          - { source: primary-agents, path: orchestrator, instances: 2 }
-        workspaceCell:
-          configs:
-            - name: workspace-orchestrator
-              blueprint: workspace-orchestrator
-              values: { WORKSPACE: developer-workspace }
+      integrations:
+        gh:
+          credentials: [github-cli-token]
+        git:
+          credentials: [github-ssh-key]
+      cwd: $HOME
+      harness: [claude, codex]
+      roles:
+        - { name: root, source: primary-agents, path: orchestrator }
 
 # Runtime observations are reported separately from desired spec:
 # status:

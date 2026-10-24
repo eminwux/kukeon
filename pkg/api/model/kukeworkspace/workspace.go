@@ -61,11 +61,6 @@ type WorkspaceSource struct {
 	Path string `json:"path,omitempty" yaml:"path,omitempty"`
 }
 
-// WorkspaceIntegration maps integration clients (such as GitHub's gh and git
-// tools) to their credential sets. The map key names the integration, so no
-// redundant type field is needed.
-type WorkspaceIntegration map[string]WorkspaceIntegrationClient
-
 // WorkspaceIntegrationClient contains credentials for one client of an
 // integration, for example GitHub CLI (gh) or Git authentication (git).
 type WorkspaceIntegrationClient struct {
@@ -87,20 +82,21 @@ type WorkspaceCredentialVolumeMount struct {
 	ReadOnly bool   `json:"readOnly,omitempty" yaml:"readOnly,omitempty"`
 }
 
-// WorkspaceTeam embeds the metadata and spec of a ProjectTeam document. The
-// containing Workspace supplies document context, so apiVersion and kind are
-// omitted. Sources are project-code checkouts; role-level sources select role
-// definitions. Config carries team-specific integrations, and CWD sets the
-// working directory supplied to the harness.
+// WorkspaceTeam describes a named agent team. Sources are project-code
+// checkouts; role-level sources select role definitions. Integrations and
+// harnesses are scoped to this team, and CWD is passed to the harness.
 type WorkspaceTeam struct {
-	Name    string                    `json:"name"              yaml:"name"`
-	Sources []string                  `json:"sources,omitempty" yaml:"sources,omitempty"`
-	CWD     string                    `json:"cwd,omitempty"     yaml:"cwd,omitempty"`
-	Config  *WorkspaceTeamConfig      `json:"config"            yaml:"config"`
-	Spec    kuketeams.ProjectTeamSpec `json:"spec"              yaml:"spec"`
+	Name         string                                `json:"name"                   yaml:"name"`
+	Sources      []WorkspaceTeamSource                 `json:"sources,omitempty"      yaml:"sources,omitempty"`
+	CWD          string                                `json:"cwd"                    yaml:"cwd"`
+	Integrations map[string]WorkspaceIntegrationClient `json:"integrations,omitempty" yaml:"integrations,omitempty"`
+	Harness      []string                              `json:"harness"                yaml:"harness"`
+	Roles        []kuketeams.ProjectTeamRole           `json:"roles"                  yaml:"roles"`
 }
 
-// WorkspaceTeamConfig contains settings scoped to one team instance.
-type WorkspaceTeamConfig struct {
-	Integrations map[string]WorkspaceIntegration `json:"integrations,omitempty" yaml:"integrations,omitempty"`
+// WorkspaceTeamSource references a workspace source and selects its checkout
+// directory for this team.
+type WorkspaceTeamSource struct {
+	Name string `json:"name" yaml:"name"`
+	Path string `json:"path" yaml:"path"`
 }

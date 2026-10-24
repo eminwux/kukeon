@@ -87,6 +87,8 @@ type ProjectTeamDefaults struct {
 // ProjectTeamRole references a role from the agents source and optionally adds
 // project-specific capability needs on top of the role's own declaration.
 type ProjectTeamRole struct {
+	// Name is the Workspace team's local role label.
+	Name string `json:"name,omitempty"      yaml:"name,omitempty"`
 	// Ref is the legacy role name (matches a Role.metadata.name in the team
 	// source). Workspace teams can instead select a role with Source and Path.
 	Ref string `json:"ref,omitempty"       yaml:"ref,omitempty"`
