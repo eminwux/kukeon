@@ -1,0 +1,43 @@
+# User-owned workspace manifest. Project paths are absolute paths on the host
+# running `kuke workspace init`; they are locators, not paths mounted into cells.
+apiVersion: kukeworkspace.io/v1
+kind: Workspace
+metadata:
+  name: developer-workspace
+spec:
+  agentSources:
+    - name: primary-agents
+      repo: github.com/eminwux/agents
+      ref: v1.4.0
+      path: model1
+
+  projects:
+    - name: kukeon
+      repo: github.com/eminwux/kukeon
+      path: /home/alice/src/kukeon
+      integrations:
+        github:
+          type: github
+          credentials:
+            token: workspace-github-token # Named credential reference, not a token value.
+    - name: sbsh
+      repo: github.com/eminwux/sbsh
+      path: /home/alice/src/sbsh
+
+  projectTeams:
+    - name: kukeon-development
+      project: kukeon
+      agentSource: primary-agents
+      roles: [dev, pr-reviewer]
+    - name: kukeon-maintenance
+      project: kukeon
+      agentSource: primary-agents
+      roles: [pm]
+    - name: sbsh-development
+      project: sbsh
+      agentSource: primary-agents
+      roles: [dev]
+
+  workspaceCells:
+    - name: orchestrator
+      blueprint: workspace-orchestrator

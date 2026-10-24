@@ -19,6 +19,7 @@ package kukeworkspace
 import (
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -45,6 +46,21 @@ spec:
   workspaceCells:
     - {name: orchestrator, blueprint: workspace-orchestrator}
 `
+
+func TestParseDocumentedWorkspaceExample(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile("../../docs/examples/workspace.yaml")
+	if err != nil {
+		t.Fatalf("read documented example: %v", err)
+	}
+	doc, err := Parse(raw)
+	if err != nil {
+		t.Fatalf("parse documented example: %v", err)
+	}
+	if len(doc.Spec.Projects) != 2 || len(doc.Spec.ProjectTeams) != 3 || len(doc.Spec.WorkspaceCells) != 1 {
+		t.Fatalf("documented example missing declarations: %+v", doc.Spec)
+	}
+}
 
 func TestParseWorkspace(t *testing.T) {
 	t.Parallel()
