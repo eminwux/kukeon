@@ -978,3 +978,64 @@ func errorSpecOpt(err error) oci.SpecOpts {
 		return err
 	}
 }
+
+// originalImageEnvAnnotation stores the creation-time image env before any
+// authored env, secrets, or invocation overrides are applied. Presence matters:
+// an encoded empty list is distinct from an older record without this annotation.
+const originalImageEnvAnnotation = "io.kukeon.original-image-env"
+
+func withOriginalImageEnv(_ context.Context, _ oci.Client, _ *containers.Container, s *oci.Spec) error {
+	env := append([]string{}, s.Process.Env...)
+	encoded, err := json.Marshal(env)
+	if err != nil {
+		return fmt.Errorf("encode original image env: %w", err)
+	}
+	if s.Annotations == nil {
+		s.Annotations = make(map[string]string)
+	}
+	s.Annotations[originalImageEnvAnnotation] = string(encoded)
+	return nil
+}
+
+// WithFreshProcessEnv replaces only the runtime environment of a reused
+// container, using creation-time defaults rather than resolving a mutable image
+// name. Older records freeze their existing OCI env as a compatibility baseline;
+// unidentified historical runtime additions cannot be removed from those records.
+func WithFreshProcessEnv(spec intmodel.ContainerSpec, runPath string) oci.SpecOpts {
+	return func(ctx context.Context, client oci.Client, c *containers.Container, s *oci.Spec) error {
+		encoded, captured := s.Annotations[originalImageEnvAnnotation]
+		if !captured {
+			if err := withOriginalImageEnv(ctx, client, c, s); err != nil {
+				return err
+			}
+			encoded = s.Annotations[originalImageEnvAnnotation]
+		}
+		var originalEnv []string
+		if err := json.Unmarshal([]byte(encoded), &originalEnv); err != nil {
+			return fmt.Errorf("decode original image env: %w", err)
+		}
+		// Re-resolve env secrets with the same precedence as initial creation.
+		// File-mounted secrets and their existing mounts need no change here.
+		var envSecrets []intmodel.ContainerSecret
+		for _, secret := range spec.Secrets {
+			if secret.MountPath == "" {
+				envSecrets = append(envSecrets, secret)
+			}
+		}
+		resolved, err := resolveSecrets(spec.ContainerdID, envSecrets, DefaultSecretsStagingDir, runPath)
+		if err != nil {
+			return fmt.Errorf("resolve reused container env secrets: %w", err)
+		}
+		envSpec := spec
+		envSpec.Env = append(append([]string(nil), spec.Env...), resolved.EnvAdds...)
+		fresh := &oci.Spec{Process: &runtimespec.Process{Env: originalEnv}}
+		if err = oci.WithDefaultPathEnv(ctx, client, c, fresh); err != nil {
+			return err
+		}
+		if err = oci.WithEnv(kukeonContainerEnv(envSpec))(ctx, client, c, fresh); err != nil {
+			return err
+		}
+		s.Process.Env = fresh.Process.Env
+		return nil
+	}
+}
