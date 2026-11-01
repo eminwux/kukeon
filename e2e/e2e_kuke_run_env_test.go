@@ -17,6 +17,8 @@
 package e2e_test
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -26,7 +28,14 @@ import (
 	"testing"
 	"time"
 
+	containerd "github.com/containerd/containerd/v2/client"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/core/images"
+	"github.com/containerd/containerd/v2/pkg/namespaces"
+	"github.com/containerd/platforms"
 	"github.com/eminwux/kukeon/internal/util/fs"
+	"github.com/opencontainers/go-digest"
+	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 // TestKuke_RunRuntimeEnvReuse checks the actual attachable shell, rather than
@@ -57,6 +66,19 @@ func TestKuke_RunRuntimeEnvReuse(t *testing.T) {
 	invoke("create", "realm", realm)
 	invoke("create", "space", space, "--realm", realm)
 	invoke("create", "stack", stack, "--realm", realm, "--space", space)
+	namespace := realm + ".kukeon.io"
+	imageRef := "kukeon.internal/runtime-env:latest"
+	imageClient, imageErr := containerd.New("/run/containerd/containerd.sock")
+	if imageErr != nil {
+		t.Fatal(imageErr)
+	}
+	defer imageClient.Close()
+	imageCtx := namespaces.WithNamespace(context.Background(), namespace)
+	source, imageErr := imageClient.Pull(imageCtx, "docker.io/library/busybox:latest", containerd.WithPullUnpack)
+	if imageErr != nil {
+		t.Fatal(imageErr)
+	}
+	publishRuntimeEnvImage(imageCtx, t, imageClient, source, imageRef, "original")
 	fixture := filepath.Join(t.TempDir(), "runtime-env.yaml")
 	doc := fmt.Sprintf(`apiVersion: v1beta1
 kind: Cell
@@ -74,11 +96,11 @@ spec:
       command: sleep
       args: ["3600"]
     - id: work
-      image: docker.io/library/busybox:latest
+      image: %s
       command: /bin/sh
       attachable: true
       env: ["VALUE=spec"]
-`, cell, cell, realm, space, stack)
+`, cell, cell, realm, space, stack, imageRef)
 	if err := os.WriteFile(fixture, []byte(doc), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -97,6 +119,9 @@ spec:
 		}
 		if i < 2 {
 			args = append(args, "--env", "VALUE="+expected, "--env", "RUNTIME_ONLY="+expected)
+		}
+		if i == 0 {
+			args = append(args, "--env", "IMAGE_BASE=runtime")
 		}
 		invoke(append(args, scope...)...)
 		output := invoke(append([]string{"get", "cell", cell, "-o", "json"}, scope...)...)
@@ -145,7 +170,7 @@ spec:
 		if i == 0 {
 			command += "printf kept > /tmp/runtime-env-overlay; "
 		}
-		command += "printf 'OVERLAY_RESULT:%s\\n' \"$(cat /tmp/runtime-env-overlay)\"\n"
+		command += "printf 'IMAGE_RESULT:%s\\n' \"$IMAGE_BASE\"; printf 'OVERLAY_RESULT:%s\\n' \"$(cat /tmp/runtime-env-overlay)\"\n"
 		if err = session.Write([]byte(command)); err != nil {
 			t.Fatal(err)
 		}
@@ -154,6 +179,13 @@ spec:
 			runtimeOnly = "unset"
 		}
 		if err = session.WaitForOutput([]byte("ENV_RESULT:"+expected+":"+runtimeOnly), 10*time.Second); err != nil {
+			t.Fatal(err)
+		}
+		imageDefault := "original"
+		if i == 0 {
+			imageDefault = "runtime"
+		}
+		if err = session.WaitForOutput([]byte("IMAGE_RESULT:"+imageDefault), 10*time.Second); err != nil {
 			t.Fatal(err)
 		}
 		if err = session.WaitForOutput([]byte("OVERLAY_RESULT:kept"), 10*time.Second); err != nil {
@@ -167,5 +199,74 @@ spec:
 			t.Fatalf("detach: code=%d err=%v output=%s", code, err, out)
 		}
 		invoke(append([]string{"stop", cell}, scope...)...)
+		if i == 0 {
+			publishRuntimeEnvImage(imageCtx, t, imageClient, source, imageRef, "repointed")
+		}
+		if i == 1 {
+			if err = imageClient.ImageService().Delete(imageCtx, imageRef); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+}
+
+// publishRuntimeEnvImage changes only the image config, leaving its rootfs
+// layers intact. Repointing this tag must not change a reused cell's defaults.
+func publishRuntimeEnvImage(
+	ctx context.Context,
+	t *testing.T,
+	client *containerd.Client,
+	source containerd.Image,
+	ref, value string,
+) {
+	t.Helper()
+	manifest, err := images.Manifest(ctx, client.ContentStore(), source.Target(), platforms.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob, err := content.ReadBlob(ctx, client.ContentStore(), manifest.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config imagespec.Image
+	if err = json.Unmarshal(blob, &config); err != nil {
+		t.Fatal(err)
+	}
+	config.Config.Env = append(config.Config.Env, "IMAGE_BASE="+value)
+	blob, err = json.Marshal(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	descriptor := imagespec.Descriptor{
+		MediaType: imagespec.MediaTypeImageConfig,
+		Digest:    digest.FromBytes(blob),
+		Size:      int64(len(blob)),
+	}
+	if err = content.WriteBlob(ctx, client.ContentStore(), "config-"+value, bytes.NewReader(blob), descriptor); err != nil {
+		t.Fatal(err)
+	}
+	manifest.Config = descriptor
+	manifest.MediaType = imagespec.MediaTypeImageManifest
+	blob, err = json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	descriptor = imagespec.Descriptor{
+		MediaType: imagespec.MediaTypeImageManifest,
+		Digest:    digest.FromBytes(blob),
+		Size:      int64(len(blob)),
+	}
+	labels := map[string]string{"containerd.io/gc.ref.content.config": manifest.Config.Digest.String()}
+	for i, layer := range manifest.Layers {
+		labels[fmt.Sprintf("containerd.io/gc.ref.content.l.%d", i)] = layer.Digest.String()
+	}
+	if err = content.WriteBlob(ctx, client.ContentStore(), "manifest-"+value, bytes.NewReader(blob), descriptor, content.WithLabels(labels)); err != nil {
+		t.Fatal(err)
+	}
+	image := images.Image{Name: ref, Target: descriptor}
+	if _, err = client.ImageService().Create(ctx, image); err != nil {
+		if _, err = client.ImageService().Update(ctx, image, "target"); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

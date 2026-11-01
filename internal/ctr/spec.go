@@ -28,11 +28,9 @@ import (
 
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/core/containers"
-	"github.com/containerd/containerd/v2/core/content"
 	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/containerd/typeurl/v2"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 )
 
@@ -981,26 +979,40 @@ func errorSpecOpt(err error) oci.SpecOpts {
 	}
 }
 
+// originalImageEnvAnnotation stores the creation-time image env before any
+// authored env, secrets, or invocation overrides are applied. Presence matters:
+// an encoded empty list is distinct from an older record without this annotation.
+const originalImageEnvAnnotation = "io.kukeon.original-image-env"
+
+func withOriginalImageEnv(_ context.Context, _ oci.Client, _ *containers.Container, s *oci.Spec) error {
+	env := append([]string{}, s.Process.Env...)
+	encoded, err := json.Marshal(env)
+	if err != nil {
+		return fmt.Errorf("encode original image env: %w", err)
+	}
+	if s.Annotations == nil {
+		s.Annotations = make(map[string]string)
+	}
+	s.Annotations[originalImageEnvAnnotation] = string(encoded)
+	return nil
+}
+
 // WithFreshProcessEnv replaces only the runtime environment of a reused
-// container. Rebuild from the container image rather than the old OCI env so
-// omitted per-invocation overrides disappear without replacing the snapshot.
-func WithFreshProcessEnv(container containerd.Container, spec intmodel.ContainerSpec, runPath string) oci.SpecOpts {
+// container, using creation-time defaults rather than resolving a mutable image
+// name. Older records freeze their existing OCI env as a compatibility baseline;
+// unidentified historical runtime additions cannot be removed from those records.
+func WithFreshProcessEnv(spec intmodel.ContainerSpec, runPath string) oci.SpecOpts {
 	return func(ctx context.Context, client oci.Client, c *containers.Container, s *oci.Spec) error {
-		image, err := container.Image(ctx)
-		if err != nil {
-			return fmt.Errorf("load reused container image: %w", err)
+		encoded, captured := s.Annotations[originalImageEnvAnnotation]
+		if !captured {
+			if err := withOriginalImageEnv(ctx, client, c, s); err != nil {
+				return err
+			}
+			encoded = s.Annotations[originalImageEnvAnnotation]
 		}
-		descriptor, err := image.Config(ctx)
-		if err != nil {
-			return fmt.Errorf("load reused image config: %w", err)
-		}
-		blob, err := content.ReadBlob(ctx, image.ContentStore(), descriptor)
-		if err != nil {
-			return fmt.Errorf("read reused image config: %w", err)
-		}
-		var config imagespec.Image
-		if err = json.Unmarshal(blob, &config); err != nil {
-			return fmt.Errorf("decode reused image config: %w", err)
+		var originalEnv []string
+		if err := json.Unmarshal([]byte(encoded), &originalEnv); err != nil {
+			return fmt.Errorf("decode original image env: %w", err)
 		}
 		// Re-resolve env secrets with the same precedence as initial creation.
 		// File-mounted secrets and their existing mounts need no change here.
@@ -1016,7 +1028,7 @@ func WithFreshProcessEnv(container containerd.Container, spec intmodel.Container
 		}
 		envSpec := spec
 		envSpec.Env = append(append([]string(nil), spec.Env...), resolved.EnvAdds...)
-		fresh := &oci.Spec{Process: &runtimespec.Process{Env: config.Config.Env}}
+		fresh := &oci.Spec{Process: &runtimespec.Process{Env: originalEnv}}
 		if err = oci.WithDefaultPathEnv(ctx, client, c, fresh); err != nil {
 			return err
 		}
