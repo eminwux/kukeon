@@ -17,63 +17,18 @@
 package ctr
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
 
-	containerd "github.com/containerd/containerd/v2/client"
-	"github.com/containerd/containerd/v2/core/content"
-	"github.com/containerd/containerd/v2/plugins/content/local"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	"github.com/opencontainers/go-digest"
-	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 )
 
-type envTestImage struct {
-	containerd.Image
-
-	store      content.Store
-	descriptor imagespec.Descriptor
-}
-
-func (i envTestImage) Config(context.Context) (imagespec.Descriptor, error) { return i.descriptor, nil }
-func (i envTestImage) ContentStore() content.Store                          { return i.store }
-
-type envTestContainer struct {
-	containerd.Container
-
-	image containerd.Image
-}
-
-func (c envTestContainer) Image(context.Context) (containerd.Image, error) { return c.image, nil }
-
 func TestFreshProcessEnv_ReplacesStaleRuntimeOnlyEnv(t *testing.T) {
 	ctx := context.Background()
-	store, err := local.NewStore(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	blob, err := json.Marshal(
-		imagespec.Image{
-			Config: imagespec.ImageConfig{Env: []string{"IMAGE_ONLY=kept", "VALUE=image", "PATH=/image/bin"}},
-		},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	descriptor := imagespec.Descriptor{
-		MediaType: imagespec.MediaTypeImageConfig,
-		Digest:    digest.FromBytes(blob),
-		Size:      int64(len(blob)),
-	}
-	if err = content.WriteBlob(ctx, store, "env-test", bytes.NewReader(blob), descriptor); err != nil {
-		t.Fatal(err)
-	}
-	container := envTestContainer{image: envTestImage{store: store, descriptor: descriptor}}
 	t.Setenv("KUKEON_TEST_SECRET", "secret")
 	authored := intmodel.ContainerSpec{
 		ID:       "work",
@@ -88,12 +43,18 @@ func TestFreshProcessEnv_ReplacesStaleRuntimeOnlyEnv(t *testing.T) {
 		Env:  []string{"VALUE=old", "STALE=old"},
 	}
 	spec := &runtimespec.Spec{Process: process, Mounts: []runtimespec.Mount{{Destination: "/kept"}}}
+	// Apply the same capture option used immediately after WithImageConfig.
+	spec.Process.Env = []string{"IMAGE_ONLY=kept", "VALUE=image", "PATH=/image/bin"}
+	if err := withOriginalImageEnv(ctx, nil, nil, spec); err != nil {
+		t.Fatal(err)
+	}
+	spec.Process.Env = []string{"VALUE=old", "STALE=old"}
 	for _, runtime := range [][]string{{"VALUE=first", "RUNTIME_ONLY=first"}, {"VALUE=second", "RUNTIME_ONLY=second"}, nil} {
 		invocation := authored
 		if len(runtime) > 0 {
 			invocation.Env = runtime
 		}
-		if err = WithFreshProcessEnv(container, invocation, "")(ctx, nil, nil, spec); err != nil {
+		if err := WithFreshProcessEnv(invocation, "")(ctx, nil, nil, spec); err != nil {
 			t.Fatal(err)
 		}
 		got := make(map[string]string)
@@ -129,5 +90,50 @@ func TestFreshProcessEnv_ReplacesStaleRuntimeOnlyEnv(t *testing.T) {
 	}
 	if !reflect.DeepEqual(authored.Env, []string{"VALUE=spec"}) {
 		t.Fatalf("mutated authored env: %v", authored.Env)
+	}
+}
+
+func TestFreshProcessEnv_LegacyBaseline(t *testing.T) {
+	ctx := context.Background()
+	spec := &runtimespec.Spec{
+		Process: &runtimespec.Process{Env: []string{"IMAGE_ONLY=original", "VALUE=old", "UNKNOWN_HISTORICAL=kept"}},
+	}
+	for _, value := range []string{"current", "spec"} {
+		if err := WithFreshProcessEnv(intmodel.ContainerSpec{Env: []string{"VALUE=" + value}}, "")(ctx, nil, nil, spec); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(strings.Join(spec.Process.Env, "\n"), "VALUE="+value) {
+			t.Fatal(spec.Process.Env)
+		}
+		if !strings.Contains(strings.Join(spec.Process.Env, "\n"), "UNKNOWN_HISTORICAL=kept") {
+			t.Fatal("legacy baseline lost")
+		}
+	}
+	var baseline []string
+	if err := json.Unmarshal([]byte(spec.Annotations[originalImageEnvAnnotation]), &baseline); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(baseline, []string{"IMAGE_ONLY=original", "VALUE=old", "UNKNOWN_HISTORICAL=kept"}) {
+		t.Fatal(baseline)
+	}
+}
+
+func TestFreshProcessEnv_EmptyOriginalBaseline(t *testing.T) {
+	ctx := context.Background()
+	spec := &runtimespec.Spec{Process: &runtimespec.Process{}}
+	if err := withOriginalImageEnv(ctx, nil, nil, spec); err != nil {
+		t.Fatal(err)
+	}
+	if spec.Annotations[originalImageEnvAnnotation] != "[]" {
+		t.Fatal("empty baseline must be explicit")
+	}
+	spec.Process.Env = []string{"RUNTIME_ONLY=stale"}
+	if err := WithFreshProcessEnv(intmodel.ContainerSpec{}, "")(ctx, nil, nil, spec); err != nil {
+		t.Fatal(err)
+	}
+	for _, env := range spec.Process.Env {
+		if strings.HasPrefix(env, "RUNTIME_ONLY=") {
+			t.Fatal("stale runtime-only env remains")
+		}
 	}
 }

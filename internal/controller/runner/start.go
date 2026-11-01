@@ -1166,13 +1166,9 @@ func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr erro
 		// runtime-only keys from a previous invocation. Keep the record and
 		// snapshot; apply only the new process env before creating the task.
 		if reuseExistingChild && attachableID != "" && containerSpec.ID == attachableID {
-			existing, loadErr := r.ctrClient.GetContainer(namespace, ctrContainerID)
-			if loadErr != nil {
-				return intmodel.Cell{}, fmt.Errorf("load reused attachable container: %w", loadErr)
-			}
 			invocationSpec := mergeRuntimeEnvForContainer(containerSpec, attachableID, internalCell.Spec.RuntimeEnv)
 			specWithNamespaces.SpecOpts = append(specWithNamespaces.SpecOpts,
-				ctr.WithFreshProcessEnv(existing, invocationSpec, r.opts.RunPath),
+				ctr.WithFreshProcessEnv(invocationSpec, r.opts.RunPath),
 			)
 		}
 
