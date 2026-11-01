@@ -64,8 +64,10 @@ kukeond: kuke
 # argv[0]-dispatched from kuke) so its import set stays stdlib + a small pty
 # helper, controlling per-process RSS and startup time as attachable-container
 # count scales — see the issue body's "Why a separate binary" note.
+# Build statically, as release-build does: the wrapper is injected into
+# workload images and cannot depend on the build host's libc being available.
 kuketty:
-	go build \
+	CGO_ENABLED=0 go build \
 	-o kuketty \
 	-ldflags="$(LDFLAGS)" \
 	./cmd/kuketty/
