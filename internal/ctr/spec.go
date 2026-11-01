@@ -28,9 +28,11 @@ import (
 
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/core/containers"
+	"github.com/containerd/containerd/v2/core/content"
 	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/containerd/typeurl/v2"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 )
 
@@ -976,5 +978,52 @@ func seccompSpecOpt(raw, value string, hasValue bool) oci.SpecOpts {
 func errorSpecOpt(err error) oci.SpecOpts {
 	return func(_ context.Context, _ oci.Client, _ *containers.Container, _ *runtimespec.Spec) error {
 		return err
+	}
+}
+
+// WithFreshProcessEnv replaces only the runtime environment of a reused
+// container. Rebuild from the container image rather than the old OCI env so
+// omitted per-invocation overrides disappear without replacing the snapshot.
+func WithFreshProcessEnv(container containerd.Container, spec intmodel.ContainerSpec, runPath string) oci.SpecOpts {
+	return func(ctx context.Context, client oci.Client, c *containers.Container, s *oci.Spec) error {
+		image, err := container.Image(ctx)
+		if err != nil {
+			return fmt.Errorf("load reused container image: %w", err)
+		}
+		descriptor, err := image.Config(ctx)
+		if err != nil {
+			return fmt.Errorf("load reused image config: %w", err)
+		}
+		blob, err := content.ReadBlob(ctx, image.ContentStore(), descriptor)
+		if err != nil {
+			return fmt.Errorf("read reused image config: %w", err)
+		}
+		var config imagespec.Image
+		if err = json.Unmarshal(blob, &config); err != nil {
+			return fmt.Errorf("decode reused image config: %w", err)
+		}
+		// Re-resolve env secrets with the same precedence as initial creation.
+		// File-mounted secrets and their existing mounts need no change here.
+		var envSecrets []intmodel.ContainerSecret
+		for _, secret := range spec.Secrets {
+			if secret.MountPath == "" {
+				envSecrets = append(envSecrets, secret)
+			}
+		}
+		resolved, err := resolveSecrets(spec.ContainerdID, envSecrets, DefaultSecretsStagingDir, runPath)
+		if err != nil {
+			return fmt.Errorf("resolve reused container env secrets: %w", err)
+		}
+		envSpec := spec
+		envSpec.Env = append(append([]string(nil), spec.Env...), resolved.EnvAdds...)
+		fresh := &oci.Spec{Process: &runtimespec.Process{Env: config.Config.Env}}
+		if err = oci.WithDefaultPathEnv(ctx, client, c, fresh); err != nil {
+			return err
+		}
+		if err = oci.WithEnv(kukeonContainerEnv(envSpec))(ctx, client, c, fresh); err != nil {
+			return err
+		}
+		s.Process.Env = fresh.Process.Env
+		return nil
 	}
 }
