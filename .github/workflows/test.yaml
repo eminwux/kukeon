@@ -11,6 +11,7 @@ on:
     # edits to this file still run their own job.
     paths:
       - "**/*.go"
+      - "cmd/kuke/apply/testdata/**"
       - "**/go.mod"
       - "**/go.sum"
       - "go.work"
@@ -23,6 +24,7 @@ on:
       - main
     paths:
       - "**/*.go"
+      - "cmd/kuke/apply/testdata/**"
       - "**/go.mod"
       - "**/go.sum"
       - "go.work"
@@ -89,7 +91,7 @@ jobs:
       # public recursors. GH ubuntu-latest runners route DNS through
       # systemd-resolved at 127.0.0.53, which has been observed to drop UDP
       # responses under bursty parallel load — the e2e suite's parallel image
-      # pulls hit registry-1.docker.io and registry.eminwux.com from many
+      # pulls hit registry-1.docker.io and ghcr.io from many
       # workers simultaneously, surfacing as 20s `read udp 127.0.0.1:NNN->
       # 127.0.0.53:53: i/o timeout` errors from containerd's image fetcher
       # (observed on this PR's first green-everything-else run). Applied
@@ -108,7 +110,7 @@ jobs:
           options timeout:2 attempts:3
           EOF
           getent hosts registry-1.docker.io > /dev/null
-          getent hosts registry.eminwux.com > /dev/null
+          getent hosts ghcr.io > /dev/null
 
       - name: Ensure docker daemon is running
         run: |
