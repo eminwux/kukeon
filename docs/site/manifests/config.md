@@ -57,7 +57,9 @@ The reference may cross scopes: a Config in one realm may instantiate a Blueprin
 
 ### `spec.values` (map[string]string, optional)
 
-Scalar fills for the blueprint's `${KEY}` parameters. Stored verbatim; resolution happens at run time. An undeclared key in `values` errors at apply time (typos surface immediately).
+Scalar fills for `${KEY}` references in the blueprint's cell body. Stored verbatim; resolution happens when the Config materializes a cell. Keys need not be declared in the blueprint's `spec.parameters[]`: undeclared keys are accepted and substituted wherever the body references them. For example, `values: {ROLE: dev}` resolves `${ROLE}` to `dev` even without a `ROLE` parameter declaration. Unreferenced keys are tolerated, and declared required parameters must still resolve to a value.
+
+Interactive `kuke run --from-blueprint --param KEY=VALUE` remains strict: an undeclared `--param` key errors at call time. See the Blueprint's [`spec.parameters[]`](blueprint.md#specparameters-list-optional) reference.
 
 ### `spec.repos` (map[string][RepoFill](#cellconfigrepofill), optional)
 
