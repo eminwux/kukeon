@@ -13,6 +13,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/distribution/reference v0.6.0
 	github.com/eminwux/sbsh v0.13.1
+	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
 	github.com/jsimonetti/rtnetlink/v2 v2.0.1
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
@@ -20,6 +21,7 @@ require (
 	github.com/spf13/cobra v1.10.1
 	github.com/spf13/viper v1.21.0
 	golang.org/x/sys v0.39.0
+	golang.org/x/term v0.38.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -83,7 +85,6 @@ require (
 	golang.org/x/exp v0.0.0-20250408133849-7e4ce0ab07d0 // indirect
 	golang.org/x/net v0.48.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
-	golang.org/x/term v0.38.0 // indirect
 	golang.org/x/text v0.32.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251202230838-ff82c1b0f217 // indirect
 	google.golang.org/grpc v1.79.3 // indirect

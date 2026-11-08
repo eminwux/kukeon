@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import "./style.css";
 import { useResource, ErrorNotice, type Resource, type Failure } from "./request";
 import { CatalogPage, catalogTitles, RelatedResources } from "./catalog";
+import { AttachTerminal } from "./terminal";
 
 type SetupStatus = { name?: string; index?: number; state: string; error?: string };
 type RuntimeStatus = {
@@ -160,7 +161,7 @@ function ResourceDetails({ route, revision }: { route: Route; revision: number }
   const depth = route.scope.length - 1;
   const kind = kinds[depth];
   const detail = useResource<Doc>(apiPath(route.scope), revision);
-  const containers = useResource<{ id: string }[]>(depth === 3 ? `${apiPath(route.scope)}/containers` : null, revision);
+  const containers = useResource<{ id: string; attachable?: boolean; root?: boolean }[]>(depth === 3 ? `${apiPath(route.scope)}/containers` : null, revision);
   return <>
     <div className="detail-actions"><a href={listLink(Math.min(depth, 3))}>← Back to {titles[Math.min(depth, 3)].toLowerCase()}</a><a className="document-action" href={resourceLink(route.scope, !route.document)}>{route.document ? "Show overview" : "View document"}</a></div>
     {detail.loading && <p role="status">Loading {kind} details…</p>}
@@ -169,6 +170,7 @@ function ResourceDetails({ route, revision }: { route: Route; revision: number }
     {detail.data && (depth === 3 || depth === 4) && !route.document && <StatusSummary status={detail.data.status} kind={kind} />}
     {detail.data && <section className="panel"><div className="panel-heading"><h2>{route.document ? "API document" : "Resource overview"}</h2><StateBadge state={detail.data.status?.state} /></div>{route.document ? <pre tabIndex={0} aria-label={`Complete ${kind} JSON`}>{JSON.stringify(detail.data, null, 2)}</pre> : <div className="panel-body"><dl className="details-grid"><dt>Name</dt><dd>{detail.data.metadata.name}</dd><dt>Kind</dt><dd>{detail.data.kind ?? kind}</dd><dt>Scope</dt><dd>{route.scope.join(" / ")}</dd><dt>API version</dt><dd>{detail.data.apiVersion ?? "Not reported"}</dd><dt>Labels</dt><dd>{Object.entries(detail.data.metadata.labels ?? {}).map(([key, value]) => <span className="badge label-badge" key={key}>{key}: {value}</span>)}{!Object.keys(detail.data.metadata.labels ?? {}).length && "No labels"}</dd></dl>{depth < 3 && <a className="text-link" href={listLink(depth + 1, route.scope)}>View {titles[depth + 1].toLowerCase()} in this {kind} →</a>}</div>}</section>}
     {detail.data && !route.document && <RelatedResources doc={detail.data} revision={revision} />}
+    {depth === 3 && !route.document && containers.data && !containers.error && <AttachTerminal key={route.scope.join("/")} path={apiPath(route.scope)} containers={containers.data} />}
     {depth === 3 && <section className="panel container-panel"><div className="panel-heading"><h2>Containers</h2><span className="badge">{detail.error ? "Stale observations" : detail.loading ? "Refreshing observations" : "Cell observations"}</span></div><div className="panel-body">{containers.loading && <p>Loading containers…</p>}{containers.error && <ErrorNotice error={containers.error} />}{containers.error && containers.data && <p className="stale">Stale container list — refresh failed.</p>}{!containers.loading && !containers.error && !containers.data?.length && <p>No containers found.</p>}<ul className="state-list">{containers.data?.map(container => <li key={container.id}><a className="text-link" href={resourceLink([...route.scope, container.id])}>{container.id}</a><StateBadge state={detail.data?.status?.containers?.find(item => item.name === container.id || item.id === container.id)?.state} /><a href={resourceLink([...route.scope, container.id], true)}>View document</a></li>)}</ul></div></section>}
   </>;
 }

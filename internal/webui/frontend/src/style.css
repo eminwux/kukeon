@@ -144,3 +144,4 @@ button:disabled { cursor: default; opacity: .4; }
 .create-cell-form label { display: grid; gap: 6px; }
 .create-cell-form input[type="checkbox"] { width: auto; justify-self: start; }
 .create-cell-form textarea { min-height: 100px; resize: vertical; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--code); color: var(--text); font: inherit; }
+.terminal-screen { height: 420px; margin-top: 1rem; padding: 8px; background: #111; }

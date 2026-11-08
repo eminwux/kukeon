@@ -28,6 +28,34 @@ async function mock(page, handler = () => undefined) {
 const failure = { status: 503, json: { error: { code: "unavailable", message: "Scoped read failed" } } };
 const nav = page => page.getByRole("navigation", { name: "Main navigation" });
 
+test("terminal selects eligible containers, forwards input and resize, and detaches", async ({ page }) => {
+  await mock(page, path => path.endsWith("/containers") ? { json: [
+    { id: "worker", attachable: true }, { id: "shell", attachable: true },
+    { id: "pause", root: true, attachable: true }, { id: "no-tty" },
+  ] } : undefined);
+  const messages = [];
+  let selected = "";
+  let closed = false;
+  await page.routeWebSocket("**/attach", socket => {
+    selected = new URL(socket.url()).pathname;
+    socket.onMessage(message => { messages.push(message); });
+    socket.onClose(() => { closed = true; });
+    socket.send(new TextEncoder().encode("terminal ready"));
+  });
+  await page.goto(`${server.url}#/resource/dev/shared/services/api`);
+  const panel = page.locator("section").filter({ has: page.getByRole("heading", { name: "Terminal", exact: true }) });
+  await expect(panel.locator("option")).toHaveCount(2);
+  await panel.getByLabel("Container").selectOption("shell");
+  await panel.getByRole("button", { name: "Attach" }).click();
+  await expect(panel.getByRole("status")).toHaveText("Connected");
+  await expect.poll(() => selected).toContain("/containers/shell/attach");
+  await expect.poll(() => messages.some(message => typeof message === "string" && JSON.parse(message).type === "resize")).toBe(true);
+  await panel.locator(".xterm-helper-textarea").press("a");
+  await expect.poll(() => messages.some(message => Buffer.isBuffer(message) && message.toString() === "a")).toBe(true);
+  await panel.getByRole("button", { name: "Detach" }).click();
+  await expect.poll(() => closed).toBe(true);
+});
+
 test("dashboard is the landing page with resource summaries and type navigation", async ({ page }) => {
   await mock(page);
   await page.goto(server.url);

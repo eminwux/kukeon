@@ -161,3 +161,12 @@ The JSON POST endpoints `/api/cells/from-config/preview` and
 and checks the preview digest before submitting. Neither endpoint reads daemon
 storage directly. Config parameters and secret references remain in the config;
 the form does not accept arbitrary cell documents or template parameter overrides.
+
+### Attach to a terminal
+
+Open a cell overview, select an attachable container, and choose **Attach**.
+The terminal forwards keyboard input and resizes with its panel. Choose **Detach**
+or leave the page to disconnect; the cell continues running. The cell and its
+selected container must be running, and the server's user must have permission
+to connect to the attach socket returned by kukeond. Connection and permission
+errors are shown in the terminal panel.
