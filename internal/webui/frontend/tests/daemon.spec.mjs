@@ -21,6 +21,24 @@ test("packaged browser reads real daemon documents and unavailable socket", asyn
       await page.getByRole("button", { name: realm.metadata.name, exact: true }).click();
       await expect(page.getByLabel("Complete realm JSON")).toHaveText(JSON.stringify(await detail.json(), null, 2));
     }
+    // Walk one populated branch at each level against the actual daemon.
+    let scope = [];
+    let path = "/api/realms";
+    for (const kind of ["realm", "space", "stack", "cell", "container"]) {
+      const response = await request.get(`${server.url}${path}`);
+      expect(response.ok()).toBeTruthy();
+      const entries = await response.json();
+      if (!entries.length) break;
+      const name = entries[0].metadata?.name ?? entries[0].id;
+      scope.push(name);
+      path += `/${encodeURIComponent(name)}`;
+      const document = await request.get(`${server.url}${path}`);
+      expect(document.ok()).toBeTruthy();
+      await page.goto(`${server.url}#${scope.map(encodeURIComponent).join("/")}`);
+      await expect(page.getByLabel(`Complete ${kind} JSON`)).toHaveText(JSON.stringify(await document.json(), null, 2));
+      const next = { realm: "spaces", space: "stacks", stack: "cells", cell: "containers" }[kind];
+      if (next) path += `/${next}`;
+    }
     await page.getByRole("button", { name: "Refresh" }).click();
     await expect(page.getByRole("status")).toHaveText("Connected");
   } finally { await server.stop(); }
