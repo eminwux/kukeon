@@ -1,9 +1,9 @@
 # Web UI development
 
 The frontend foundation lives in `internal/webui/frontend`: a client-rendered
-React and TypeScript application built with Vite. This first slice provides a
-preview shell and a Go asset package. `kuke serve`, daemon HTTP endpoints, and
-realm browsing are subsequent work; the current CLI has no web server command.
+React and TypeScript application built with Vite. The CLI now serves the embedded preview shell and read-only realm HTTP API.
+The interactive realm browser and its browser smoke checks remain slice 3.
+See [local server usage](web-server.md).
 
 ## Build policy
 
@@ -25,8 +25,7 @@ Use Node.js 22.12+ (CI uses Node 22) and npm for frontend development. Ordinary
 and do not require Node or a frontend build. The Docker builder already copies
 `internal/`, including `dist`. A build importing `internal/webui` embeds the
 production files using `go:embed`; no asset files are loaded at runtime.
-The current CLI does not import that package yet, so its linker will not include
-the frontend until the server slice connects it.
+The `kuke serve` command imports that package, so the CLI includes the frontend.
 
 The generated JavaScript retains dependency license notices. No CDN, remote
 font, database, or additional runtime is needed by the production bundle.
@@ -40,14 +39,13 @@ npm run dev
 ```
 
 Open the loopback URL Vite prints. `npm run preview` previews the production
-bundle after `make web-ui`. These are development tools, not the future
+bundle after `make web-ui`. These are development tools, separate from the
 `kuke serve` command, and do not connect to kukeond.
 
 ## Go integration and verification
 
-`webui.Assets()` returns a filesystem rooted at `index.html`. The server slice
-can pass it to `http.FileServerFS` after applying its own Host/Origin and listener
-policy. The package exposes only built files, not frontend source or node_modules.
+`webui.Assets()` returns a filesystem rooted at `index.html`. The HTTP server
+passes it to `http.FileServerFS` behind its Host/Origin and listener policy. The package exposes only built files, not frontend source or node_modules.
 
 ```sh
 GOWORK=off go test ./internal/webui
