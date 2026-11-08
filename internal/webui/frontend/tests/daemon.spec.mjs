@@ -13,7 +13,7 @@ test("packaged browser reads real daemon documents and unavailable socket", asyn
     const realms = await response.json();
     expect(realms.length, "Smoke daemon must contain at least one realm").toBeGreaterThan(0);
     await page.goto(server.url);
-    await expect(page.getByRole("status")).toHaveText("Connected");
+    await expect(page.getByLabel("Daemon connection").getByRole("status")).toHaveText("Connected");
     await expect(page.getByLabel("Daemon connection")).toContainText(endpoint);
     for (const realm of realms) {
       const detail = await request.get(`${server.url}/api/realms/${encodeURIComponent(realm.metadata.name)}`);
@@ -40,7 +40,7 @@ test("packaged browser reads real daemon documents and unavailable socket", asyn
       if (next) path += `/${next}`;
     }
     await page.getByRole("button", { name: "Refresh" }).click();
-    await expect(page.getByRole("status")).toHaveText("Connected");
+    await expect(page.getByLabel("Daemon connection").getByRole("status")).toHaveText("Connected");
   } finally { await server.stop(); }
   // Never stop the operator's daemon to induce the failure case.
   const unavailable = await startServer();

@@ -8,11 +8,11 @@ or external asset files at runtime.
 
 ## Browse the resource hierarchy
 
-The connection strip shows the selected daemon socket. **Connected** means the
+The sidebar connection section shows the selected daemon socket. **Connected** means the
 latest realm-list request succeeded; it is not a general daemon health check.
 Select any realm to read its complete JSON document, including metadata, spec,
 status, and any additional returned fields. Select spaces, stacks, cells, and
-containers in the panels below to inspect the same complete documents at each
+containers in the sidebar to inspect the same complete documents at each
 level. Cell and container documents include the runtime status returned by the
 daemon. Container lists contain specs; select a container to retrieve its full
 document and runtime status. The view is read-only.
@@ -83,3 +83,15 @@ Errors use `{ "error": { "code": "...", "message": "..." } }`:
 kuke serve --listen 127.0.0.1 --port 5129
 curl http://127.0.0.1:5129/api/realms
 ```
+
+## Workspace layout and appearance
+
+The sidebar holds the resource hierarchy and daemon connection information.
+Selecting a resource opens its complete document in the main inspector; use the
+breadcrumb links to return to an ancestor. On small screens, the menu button
+opens the sidebar, and choosing a resource closes it.
+
+Use **Appearance** at the bottom of the sidebar to choose **System**, **Light**,
+or **Dark**. System follows the device preference, including changes while the
+page is open. An explicit choice is saved in this browser when local storage is
+available. The preference affects presentation only.

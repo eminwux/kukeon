@@ -62,88 +62,94 @@ function Children({ scope, depth, revision }: { scope: string[]; depth: number; 
   const kind = kinds[depth];
   const title = kind[0].toUpperCase() + kind.slice(1);
   const parent = scope.slice(0, depth);
-  const path = `${apiPath(parent)}/${kind}s`;
-  const selected = scope[depth];
-  const list = useResource<Entry[]>(path, revision);
-  const detail = useResource<Realm>(selected === undefined ? null : apiPath(scope.slice(0, depth + 1)), revision);
-  return <section aria-label={`${title} browser`}>
-    <h2 className="scope-heading">{title}s in {parent.join(" / ")}</h2>
-    <div className="browser">
-      <section className="panel" aria-label={`${title} list`} aria-busy={list.loading}>
-        <h2>{title}s</h2>
-        {list.loading && <p role="status">Loading {kind}s…</p>}
-        {list.error && <ErrorNotice error={list.error} kind={title} />}
-        {list.error && list.data !== undefined && <p className="stale">Stale {kind} list — refresh failed.</p>}
-        {!list.loading && !list.error && list.data?.length === 0 && <p>No {kind}s found.</p>}
-        <ul>{list.data?.map((entry) => {
-          const name = entry.metadata?.name ?? entry.id!;
-          return <li key={name}><a className="realm" href={scopeLink([...parent, name])} aria-current={selected === name ? "page" : undefined}>{name}{entry.status?.state && <span>{entry.status.state}</span>}</a></li>;
-        })}</ul>
-      </section>
-      <section className="document panel" aria-label={`${title} document`} aria-busy={selected !== undefined && detail.loading}>
-        <h2>{selected ?? `${title} document`}</h2>
-        {selected === undefined ? <p>Choose a {kind} from the list.</p> : <>
-          <p className="description">Scope: {scope.slice(0, depth + 1).join(" / ")}</p>
-          {detail.loading && <p role="status">Loading {kind} document…</p>}
-          {detail.error && <ErrorNotice error={detail.error} kind={title} />}
-          {detail.error && detail.data !== undefined && <p className="stale">Stale {kind} document — refresh failed.</p>}
-          {detail.data !== undefined && <pre tabIndex={0} aria-label={`Complete ${kind} JSON`}>{JSON.stringify(detail.data, null, 2)}</pre>}
-        </>}
-      </section>
-    </div>
-    {selected !== undefined && depth < 4 && <Children scope={scope} depth={depth + 1} revision={revision} />}
-  </section>;
+  const list = useResource<Entry[]>(`${apiPath(parent)}/${kind}s`, revision);
+  return <>
+    <section className="nav-group" aria-label={`${title} list`} aria-busy={list.loading}>
+      <h2>{title}s <span>{list.data?.length ?? "—"}</span></h2>
+      {list.loading && <p role="status">Loading {kind}s…</p>}
+      {list.error && <ErrorNotice error={list.error} kind={title} />}
+      {list.error && list.data !== undefined && <p className="stale">Stale {kind} list — refresh failed.</p>}
+      {!list.loading && !list.error && list.data?.length === 0 && <p>No {kind}s found.</p>}
+      <ul>{list.data?.map(entry => {
+        const name = entry.metadata?.name ?? entry.id!;
+        return <li key={name}><a className="resource-link" href={scopeLink([...parent, name])} aria-current={scope[depth] === name ? "page" : undefined}><span className="resource-icon" aria-hidden="true">◇</span><span>{name}</span>{entry.status?.state && <small>{entry.status.state}</small>}</a></li>;
+      })}</ul>
+    </section>
+    {scope[depth] !== undefined && depth < 4 && <Children scope={scope} depth={depth + 1} revision={revision} />}
+  </>;
 }
 
+type Theme = "system" | "light" | "dark";
+function initialTheme(): Theme {
+  try { const value = localStorage.getItem("kukeon-theme"); return value === "light" || value === "dark" ? value : "system"; }
+  catch { return "system"; }
+}
 function App() {
   const [revision, setRevision] = useState(0);
   const [scope, setScope] = useState(readScope);
+  const [theme, setTheme] = useState<Theme>(initialTheme);
+  const [menuOpen, setMenuOpen] = useState(false);
   useEffect(() => {
-    const changed = () => setScope(readScope());
+    const changed = () => { setScope(readScope()); setMenuOpen(false); };
     window.addEventListener("hashchange", changed);
     return () => window.removeEventListener("hashchange", changed);
   }, []);
-  const selected = scope[0] ?? null;
-  const setSelected = (name: string) => { window.location.hash = scopeLink([name]); };
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem("kukeon-theme", theme); } catch { /* Preferences are optional. */ }
+  }, [theme]);
   const connection = useResource<{ endpoint: string }>("/api/connection", revision);
   const realms = useResource<Realm[]>("/api/realms", revision);
-  const detail = useResource<Realm>(selected === null ? null : `/api/realms/${encodeURIComponent(selected)}`, revision);
+  const kind = kinds[Math.max(scope.length - 1, 0)];
+  const title = kind[0].toUpperCase() + kind.slice(1);
+  const selected = scope.at(-1);
+  const detail = useResource<Realm>(scope.length ? apiPath(scope) : null, revision);
   const status = realms.loading ? "Connecting…" : realms.error
     ? realms.error.code === "permission_denied" ? "Permission denied" : "Unavailable" : "Connected";
-  return (
-    <main>
-      <header><span className="mark" aria-hidden="true">K</span><span>Kukeon</span><span className="local">Local workspace</span></header>
-      <section className="connection" aria-label="Daemon connection">
-        <div><p className="eyebrow">Daemon socket</p><code>{connection.data?.endpoint ?? (connection.loading ? "Loading socket…" : "Socket unknown")}</code></div>
-        <p className="status" role="status">{status}</p>
-      </section>
-      {connection.error && <ErrorNotice error={connection.error} />}
-      <div className="heading"><div><p className="eyebrow">Explore your workspace</p><h1>Realms</h1></div><button onClick={() => setRevision((value) => value + 1)}>Refresh</button></div>
-      <p className="description">Select a realm to inspect its complete API document.</p>
-      <div className="browser">
-        <section className="realms panel" aria-label="Realm list" aria-busy={realms.loading}>
-          <h2>All realms</h2>
+  return <div className="app-shell">
+    <aside className={`sidebar ${menuOpen ? "is-open" : ""}`} id="resource-sidebar" aria-label="Workspace sidebar">
+      <button className="sidebar-close" aria-label="Close sidebar" onClick={() => setMenuOpen(false)}>×</button>
+      <a className="brand" href="#"><span className="mark" aria-hidden="true">K</span><span>Kukeon<small>LOCAL WORKSPACE</small></span></a>
+      <div className="sidebar-scroll">
+        <a className="workspace-link" href="#"><span aria-hidden="true">▦</span> Resource explorer</a>
+        <section className="nav-group" aria-label="Realm list" aria-busy={realms.loading}>
+          <h2>Realms <span>{realms.data?.length ?? "—"}</span></h2>
           {realms.loading && <p role="status">Loading realms…</p>}
           {realms.error && <ErrorNotice error={realms.error} />}
           {realms.error && realms.data !== undefined && <p className="stale">Stale realm list — refresh failed.</p>}
           {!realms.loading && !realms.error && realms.data?.length === 0 && <p>No realms found.</p>}
-          <ul>{realms.data?.map((realm) => <li key={realm.metadata.name}><button className="realm" aria-pressed={selected === realm.metadata.name} onClick={() => setSelected(realm.metadata.name)}>{realm.metadata.name}<span aria-hidden="true">→</span></button></li>)}</ul>
+          <ul>{realms.data?.map(realm => <li key={realm.metadata.name}><button className="resource-link" aria-pressed={scope[0] === realm.metadata.name} onClick={() => { window.location.hash = scopeLink([realm.metadata.name]); setMenuOpen(false); }}><span className="resource-icon" aria-hidden="true">◈</span><span>{realm.metadata.name}</span></button></li>)}</ul>
         </section>
-        <section className="document panel" aria-label="Realm document" aria-busy={selected !== null && detail.loading}>
-          <h2>{selected ?? "Realm document"}</h2>
-          {selected === null ? <p>Choose a realm from the list.</p> : <>
-            {detail.loading && <p role="status">Loading realm document…</p>}
-            {detail.error && <ErrorNotice error={detail.error} />}
-            {detail.error && detail.data !== undefined && <p className="stale">Stale realm document — refresh failed.</p>}
-            {detail.data !== undefined && <pre tabIndex={0} aria-label="Complete realm JSON">{JSON.stringify(detail.data, null, 2)}</pre>}
+        {scope.length > 0 && <Children scope={scope} depth={1} revision={revision} />}
+      </div>
+      <section className="connection" aria-label="Daemon connection">
+        <p className="status" role="status"><span className={`dot ${realms.error ? "failed" : ""}`} aria-hidden="true" />{status}</p>
+        <code>{connection.data?.endpoint ?? (connection.loading ? "Loading socket…" : "Socket unknown")}</code>
+        {connection.error && <ErrorNotice error={connection.error} />}
+        <label className="theme-control">Appearance<select aria-label="Appearance" value={theme} onChange={event => setTheme(event.target.value as Theme)}><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+      </section>
+    </aside>
+    <main className="workspace">
+      <header className="toolbar">
+        <button className="menu-toggle" aria-label="Toggle sidebar" aria-expanded={menuOpen} aria-controls="resource-sidebar" onClick={() => setMenuOpen(!menuOpen)}>☰</button>
+        <nav aria-label="Resource scope"><a href="#">Resources</a>{scope.map((name, i) => <a key={i} aria-label={`${kinds[i]}: ${name}`} href={scopeLink(scope.slice(0, i + 1))} aria-current={i === scope.length - 1 ? "page" : undefined}><span className="crumb-kind">{kinds[i]}: </span>{name}</a>)}</nav>
+        <button className="refresh" onClick={() => setRevision(value => value + 1)}>Refresh</button>
+      </header>
+      <div className="workspace-content">
+        <div className="page-heading"><p className="eyebrow">{selected ? `${title} details` : "Your infrastructure"}</p><h1>{selected ?? "Resource explorer"}</h1><p className="description">{selected ? scope.join(" / ") : "Browse your local workspace. Select a realm in the sidebar to get started."}</p></div>
+        <section className="document panel" aria-label={`${title} document`} aria-busy={selected !== undefined && detail.loading}>
+          <div className="panel-heading"><h2>{selected ? "API document" : "Workspace resources"}</h2><span className="badge">Read only</span></div>
+          {selected === undefined ? <div className="empty-state"><span aria-hidden="true">▦</span><h3>Everything in its place.</h3><p>Explore realms, spaces, stacks, cells, and containers from one workspace.</p><p>Choose a realm from the list.</p></div> : <>
+            {detail.loading && <p role="status">Loading {kind} document…</p>}
+            {detail.error && <ErrorNotice error={detail.error} kind={title} />}
+            {detail.error && detail.data !== undefined && <p className="stale">Stale {kind} document — refresh failed.</p>}
+            {detail.data !== undefined && <pre tabIndex={0} aria-label={`Complete ${kind} JSON`}>{JSON.stringify(detail.data, null, 2)}</pre>}
           </>}
         </section>
+        <footer>Live data from kukeond · Refresh to retrieve the latest state.</footer>
       </div>
-      <nav aria-label="Resource scope"><a href="#">Realms</a>{scope.map((name, i) => <a key={i} href={scopeLink(scope.slice(0, i + 1))}>{kinds[i]}: {name}</a>)}</nav>
-      {selected !== null && <Children scope={scope} depth={1} revision={revision} />}
-      <footer>Read-only view · Refresh to retrieve the latest data from kukeond.</footer>
     </main>
-  );
+  </div>;
 }
 
 const root = document.getElementById("root");

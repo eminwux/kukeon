@@ -19,7 +19,7 @@ test("complete documents, refresh failure retains stale data, retry recovers", a
   let fail = false;
   await mock(page, (path) => fail ? error("unavailable", 503) : { body: path === "/api/realms" ? [realm("default")] : realm("default") });
   await page.goto(server.url);
-  await expect(page.getByRole("status")).toHaveText("Connected");
+  await expect(page.getByLabel("Daemon connection").getByRole("status")).toHaveText("Connected");
   await expect(page.getByLabel("Daemon connection")).toContainText("missing.sock");
   await page.getByRole("button", { name: "default" }).click();
   const document = page.getByLabel("Complete realm JSON");
@@ -31,7 +31,7 @@ test("complete documents, refresh failure retains stale data, retry recovers", a
   await expect(document).toHaveText(JSON.stringify(realm("default"), null, 2));
   fail = false;
   await page.getByRole("button", { name: "Refresh" }).click();
-  await expect(page.getByRole("status")).toHaveText("Connected");
+  await expect(page.getByLabel("Daemon connection").getByRole("status")).toHaveText("Connected");
   await expect(page.locator(".stale")).toHaveCount(0);
 });
 
@@ -85,7 +85,7 @@ test("packaged UI survives an actual missing Unix socket and can retry", async (
   await expect(page.getByText("Stale realm list — refresh failed.")).toHaveCount(0);
   await mock(page, () => ({ body: [] }));
   await page.getByRole("button", { name: "Refresh" }).click();
-  await expect(page.getByRole("status")).toHaveText("Connected");
+  await expect(page.getByLabel("Daemon connection").getByRole("status")).toHaveText("Connected");
   await expect(page.getByText("No realms found.")).toBeVisible();
 });
 
@@ -116,6 +116,8 @@ for (const failedKind of ["space", "stack", "cell", "container"]) {
     await expect(page).toHaveURL(new RegExp("#demo/shared/shared/worker/app$"));
     await page.reload();
     await expect(page.getByLabel("Complete container JSON")).toContainText('"app"');
+    await page.getByRole("navigation", { name: "Resource scope" }).getByRole("link", { name: `${failedKind}: ${names[kinds.indexOf(failedKind)]}`, exact: true }).click();
+    await expect(page.getByLabel(`Complete ${failedKind} JSON`)).toBeVisible();
     fail = true;
     await page.getByRole("button", { name: "Refresh" }).click();
     await expect(page.getByText(`Stale ${failedKind} list — refresh failed.`)).toBeVisible();
@@ -123,6 +125,8 @@ for (const failedKind of ["space", "stack", "cell", "container"]) {
     fail = false;
     await page.getByRole("button", { name: "Refresh" }).click();
     await expect(page.locator(".stale")).toHaveCount(0);
+    await page.goto(`${server.url}#demo/shared/shared/worker/app`);
+    await expect(page.getByLabel("Complete container JSON")).toBeVisible();
     await page.getByRole("navigation", { name: "Resource scope" }).getByRole("link", { name: "space: shared", exact: true }).click();
     await expect(page.getByLabel("Complete container JSON")).toHaveCount(0);
     await expect(page.getByLabel("Complete stack JSON")).toHaveCount(0);
@@ -153,4 +157,39 @@ test("same named resources in another realm cannot receive a late document", asy
   await page.getByRole("button", { name: "Refresh" }).click();
   await expect(page.getByLabel("Stack list", { exact: true }).getByRole("alert")).toContainText("Permission denied");
   await expect(page.getByText("No stacks found.")).toHaveCount(0);
+});
+
+
+test("appearance follows the system and persists explicit overrides", async ({ page }) => {
+  await mock(page, () => ({ body: [] }));
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.goto(server.url);
+  const scheme = () => page.evaluate(() => getComputedStyle(document.documentElement).colorScheme);
+  await expect.poll(scheme).toBe("dark");
+  await page.getByLabel("Appearance").selectOption("light");
+  await expect.poll(scheme).toBe("light");
+  await page.reload();
+  await expect(page.getByLabel("Appearance")).toHaveValue("light");
+  await expect.poll(scheme).toBe("light");
+  await page.getByLabel("Appearance").selectOption("dark");
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect.poll(scheme).toBe("dark");
+  await page.getByLabel("Appearance").selectOption("system");
+  await expect.poll(scheme).toBe("light");
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect.poll(scheme).toBe("dark");
+});
+
+test("mobile sidebar opens, selects a resource, and closes without overflow", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mock(page, path => ({ body: path === "/api/realms" ? [realm("default")] : realm("default") }));
+  await page.goto(server.url);
+  const sidebar = page.getByRole("complementary", { name: "Workspace sidebar" });
+  await expect(sidebar).toBeHidden();
+  await page.getByRole("button", { name: "Toggle sidebar" }).click();
+  await expect(sidebar).toBeVisible();
+  await page.getByRole("button", { name: "default" }).click();
+  await expect(sidebar).toBeHidden();
+  await expect(page.getByLabel("Complete realm JSON")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 });
