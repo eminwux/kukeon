@@ -118,8 +118,12 @@ func cleanupRealm(t *testing.T, host, realmName string) {
 	t.Helper()
 
 	args := append(buildKukeDaemonArgs(host), "delete", "realm", realmName, "--cascade")
-	// Don't fail if realm doesn't exist
-	_, _, _ = runBinary(t, nil, kuke, args...)
+	code, stdout, stderr := runBinary(t, nil, kuke, args...)
+	// Explicit delete/purge tests may already have removed this realm.
+	absent := strings.TrimSpace(string(stderr)) == fmt.Sprintf("Error: realm %q not found", realmName)
+	if code != 0 && !absent {
+		t.Errorf("cleanup failed (%d): %s %s", code, stdout, stderr)
+	}
 }
 
 // TestKuke_NoRealms tests kuke get realm when no realms exist.

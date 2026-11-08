@@ -62,10 +62,8 @@ const daemonShutdownTimeout = 5 * time.Second
 //     lives where the fs.* verification helpers look for it
 //   - --reconcile-interval 0: disables the background ticker so a per-test
 //     daemon does not log noise (or race the test's create/delete sequence)
-//   - --configuration <runPath>/kukeond.yaml: path does not exist, so
-//     serverconfig.Load returns a zero doc and the daemon falls through to
-//     hardcoded defaults — keeps the harness off /etc/kukeon/kukeond.yaml
-//     even when the dev host has one
+//   - --configuration <runPath>/kukeond.yaml: explicit per-test subnet config
+//     reserved and checked by getRandomRunPath before any bridge can be created.
 func startKukeondDaemon(t *testing.T, runPath string) string {
 	t.Helper()
 
@@ -95,6 +93,7 @@ func startKukeondDaemon(t *testing.T, runPath string) string {
 		"--reconcile-interval", "0",
 		"--configuration", filepath.Join(runPath, "kukeond.yaml"),
 	)
+	cmd.Env = e2eRunEnv(nil, []string{"--run-path", runPath})
 	// Capture daemon output for diagnostics on cleanup failure.
 	logFile, logErr := os.CreateTemp("", "kukeond-*.log")
 	if logErr != nil {

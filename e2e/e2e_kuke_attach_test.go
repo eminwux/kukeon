@@ -387,7 +387,10 @@ func verifyContainerTaskIsRunning(t *testing.T, namespace, containerID string) b
 func cleanupRealmNoDaemon(t *testing.T, runPath, realmName string) {
 	t.Helper()
 	args := append(buildKukeRunPathArgs(runPath), "purge", "realm", realmName, "--cascade")
-	_, _, _ = runBinary(t, nil, kuke, args...)
+	code, stdout, stderr := runBinary(t, nil, kuke, args...)
+	if code != 0 {
+		t.Errorf("cleanup failed (%d): %s %s", code, stdout, stderr)
+	}
 }
 
 func cleanupSpaceNoDaemon(t *testing.T, runPath, realmName, spaceName string) {

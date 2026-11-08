@@ -21,6 +21,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -28,8 +29,11 @@ import (
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/cni"
+	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/metadata"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // newProvisionTestExec builds a minimal *Exec suitable for exercising
@@ -429,5 +433,181 @@ func TestEnsureSpaceCNIConfig_ForceRegenerateUsesAllocatorWhenLegacyMissing(t *t
 	alloc := cni.NewDefaultSubnetAllocator(runPath)
 	if got, _ := alloc.LoadAssigned(realmName, spaceName); got != subnet {
 		t.Errorf("recovery did not persist allocator state: got %q, want %q", got, subnet)
+	}
+}
+
+type failingTeardownBridge struct{ fail bool }
+
+var errInjectedBridgeDeletion = errors.New("injected bridge deletion failure")
+
+func (b *failingTeardownBridge) DeleteBridge(context.Context, string) error {
+	if b.fail {
+		return errInjectedBridgeDeletion
+	}
+	return nil
+}
+
+// A failed link deletion must reach the caller without discarding the conflist.
+func TestTeardownRealmCNI_RetainsFailedBridgeForRetry(t *testing.T) {
+	runPath := t.TempDir()
+	r := newProvisionTestExec(t, runPath, false)
+	bridge := &failingTeardownBridge{fail: true}
+	r.bridgeRunner = bridge
+	confPath := writeStaleConflist(t, runPath, "test-realm", "test-space", "k-test")
+	if err := r.teardownRealmCNI("test-realm"); err == nil {
+		t.Fatal("bridge failure was swallowed")
+	}
+	if _, err := os.Stat(confPath); err != nil {
+		t.Fatalf("lost retry state: %v", err)
+	}
+	bridge.fail = false
+	if err := r.teardownRealmCNI("test-realm"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(confPath); !os.IsNotExist(err) {
+		t.Fatalf("conflist remains: %v", err)
+	}
+	bridge.fail = true
+	if err := r.teardownRealmCNI("test-realm"); err == nil {
+		t.Fatal("missing conflist suppressed retry")
+	}
+}
+
+func newTeardownRetryTestExec(t *testing.T) (*Exec, *failingTeardownBridge) {
+	t.Helper()
+	r := newDeleteCellTestExec(t, &deleteCellFakeClient{})
+	r.cniConf = &cni.Conf{
+		CniConfigDir: filepath.Join(r.opts.RunPath, "cni", "config"),
+		CniCacheDir:  filepath.Join(r.opts.RunPath, "cni", "cache"),
+		CniBinDir:    filepath.Join(r.opts.RunPath, "cni", "bin"),
+	}
+	r.subnetAllocator = cni.NewDefaultSubnetAllocator(r.opts.RunPath)
+	bridge := &failingTeardownBridge{fail: true}
+	r.bridgeRunner = bridge
+	return r, bridge
+}
+
+func seedTeardownRetrySpace(t *testing.T, r *Exec, realmName, spaceName string) {
+	t.Helper()
+	doc := v1beta1.SpaceDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindSpace,
+		Metadata:   v1beta1.SpaceMetadata{Name: spaceName},
+		Spec:       v1beta1.SpaceSpec{RealmID: realmName},
+	}
+	path := fs.SpaceMetadataPath(r.opts.RunPath, realmName, spaceName)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir space metadata dir: %v", err)
+	}
+	if err := metadata.WriteMetadata(r.ctx, r.logger, doc, path); err != nil {
+		t.Fatalf("write space metadata: %v", err)
+	}
+}
+
+func TestRealmTeardownEntryPoints_RetainMetadataAndConflistOnBridgeFailure(t *testing.T) {
+	tests := []struct {
+		name string
+		call func(*Exec, intmodel.Realm) (bool, error)
+	}{
+		{
+			name: "delete",
+			call: func(r *Exec, realm intmodel.Realm) (bool, error) {
+				return false, r.DeleteRealm(realm)
+			},
+		},
+		{name: "purge", call: (*Exec).PurgeRealm},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r, bridge := newTeardownRetryTestExec(t)
+			realmName := "retry-realm-" + tt.name
+			spaceName := "retry-space"
+			seedDeleteCellRealm(t, r, realmName)
+			seedTeardownRetrySpace(t, r, realmName, spaceName)
+			confPath := writeStaleConflist(t, r.opts.RunPath, realmName, spaceName, "k-retry")
+			realm := intmodel.Realm{Metadata: intmodel.RealmMetadata{Name: realmName}}
+
+			removed, err := tt.call(r, realm)
+			if !errors.Is(err, errInjectedBridgeDeletion) {
+				t.Fatalf("first teardown error = %v, want injected bridge deletion failure", err)
+			}
+			if removed {
+				t.Fatal("reported realm namespace removed after bridge teardown failed")
+			}
+			if _, err = r.GetRealm(realm); err != nil {
+				t.Fatalf("realm metadata was not retained for retry: %v", err)
+			}
+			if _, err = os.Stat(confPath); err != nil {
+				t.Fatalf("realm conflist was not retained for retry: %v", err)
+			}
+
+			bridge.fail = false
+			removed, err = tt.call(r, realm)
+			if err != nil {
+				t.Fatalf("retry teardown: %v", err)
+			}
+			if tt.name == "purge" && !removed {
+				t.Fatal("successful realm purge did not remove its namespace")
+			}
+			if _, err = r.GetRealm(realm); !errors.Is(err, errdefs.ErrRealmNotFound) {
+				t.Errorf("realm metadata after retry = %v, want ErrRealmNotFound", err)
+			}
+			if _, err = os.Stat(confPath); !os.IsNotExist(err) {
+				t.Errorf("realm conflist after retry still exists (stat error: %v)", err)
+			}
+		})
+	}
+}
+
+func TestSpaceTeardownEntryPoints_RetainMetadataAndConflistOnBridgeFailure(t *testing.T) {
+	tests := []struct {
+		name string
+		call func(*Exec, intmodel.Space) error
+	}{
+		{name: "delete", call: (*Exec).DeleteSpace},
+		{name: "purge", call: (*Exec).PurgeSpace},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r, bridge := newTeardownRetryTestExec(t)
+			realmName := "retry-realm-" + tt.name
+			spaceName := "retry-space"
+			seedDeleteCellRealm(t, r, realmName)
+			seedTeardownRetrySpace(t, r, realmName, spaceName)
+			confPath := writeStaleConflist(t, r.opts.RunPath, realmName, spaceName, "k-retry")
+			space := intmodel.Space{
+				Metadata: intmodel.SpaceMetadata{Name: spaceName},
+				Spec:     intmodel.SpaceSpec{RealmName: realmName},
+			}
+
+			if err := tt.call(r, space); !errors.Is(err, errInjectedBridgeDeletion) {
+				t.Fatalf("first teardown error = %v, want injected bridge deletion failure", err)
+			}
+			if _, err := r.GetSpace(space); err != nil {
+				t.Fatalf("space metadata was not retained for retry: %v", err)
+			}
+			if _, err := os.Stat(confPath); err != nil {
+				t.Fatalf("space conflist was not retained for retry: %v", err)
+			}
+
+			bridge.fail = false
+			if err := tt.call(r, space); err != nil {
+				t.Fatalf("retry teardown: %v", err)
+			}
+			if _, err := r.GetSpace(space); !errors.Is(err, errdefs.ErrSpaceNotFound) {
+				t.Errorf("space metadata after retry = %v, want ErrSpaceNotFound", err)
+			}
+			if _, err := os.Stat(confPath); !os.IsNotExist(err) {
+				t.Errorf("space conflist after retry still exists (stat error: %v)", err)
+			}
+			if tt.name == "purge" {
+				metadataDir := fs.SpaceMetadataDir(r.opts.RunPath, realmName, spaceName)
+				if _, err := os.Stat(metadataDir); !os.IsNotExist(err) {
+					t.Errorf("purged space metadata directory still exists (stat error: %v)", err)
+				}
+			}
+		})
 	}
 }
