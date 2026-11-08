@@ -3444,6 +3444,8 @@
 <a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>make<span class="w"> </span>e2e
 </code></pre></div>
 <p><code>make e2e</code> needs root, a running docker daemon, and standalone containerd at <code>/run/containerd/containerd.sock</code> (the same prerequisites <code>make dev-init</code> calls out under <a href="../../guides/local-dev/">Guides → Local development</a>). Both supported paths work: a clean host where the suite owns <code>/run/kukeon/</code>, and a nested run inside a kukeon-managed <code>kukeon-dev-root</code> cell where each test auto-derives its own socket from <code>--run-path &lt;tempdir&gt;</code> so the parent dev cell's <code>/run/kukeon/</code> plumbing is untouched (see <a href="https://github.com/eminwux/kukeon/blob/main/docs/dev-init.md"><code>docs/dev-init.md</code></a>).</p>
+<p>The E2E harness requires <code>iproute2</code> and checks its pod pool against all IPv4 route tables, gateways, and interface addresses before starting test daemons. This also applies to direct <code>go test ./e2e</code> runs. The default pool is <code>10.192.0.0/12</code>; set <code>E2E_POD_CIDR_POOL</code> to an aligned IPv4 CIDR of /20 or wider if it overlaps your network. Overlap is an error, not an automatic fallback. Each test run path reserves a distinct /20 (sixteen /24 spaces); exhaustion fails rather than reusing a block. The harness supplies that subnet to daemon and in-process commands, overriding inherited <code>KUKEON_POD_SUBNET_CIDR</code> and server configuration paths for those commands.</p>
+<p>A host-wide <code>/run/kukeon-e2e-network.lock</code> excludes simultaneous suite processes. The lock is released on process exit; do not remove the lock file while a suite is running. Avoid other kukeon bridge creation during the suite: cleanup checks for new <code>k-*</code> bridges (including bridges without addresses) and remaining pool routes, and reports leaks without deleting arbitrary links. Failed realm cleanup is a test failure. A crashed run's remaining routes cause the next preflight to fail until the owned resources are cleaned up.</p>
 
 
 
@@ -3466,7 +3468,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 11, 2026 22:35:25 UTC">June 11, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 8, 2026 23:38:27 UTC">November 8, 2026</span>
   </span>
 
     
