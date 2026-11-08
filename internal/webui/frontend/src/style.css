@@ -139,3 +139,8 @@ button:disabled { cursor: default; opacity: .4; }
 .related-resources .state-list li { align-items: start; }
 .related-resources .error { margin: 0; }
 .related-resources li > div { min-width: 0; overflow-wrap: anywhere; }
+
+.create-cell-form { display: grid; gap: 14px; }
+.create-cell-form label { display: grid; gap: 6px; }
+.create-cell-form input[type="checkbox"] { width: auto; justify-self: start; }
+.create-cell-form textarea { min-height: 100px; resize: vertical; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--code); color: var(--text); font: inherit; }

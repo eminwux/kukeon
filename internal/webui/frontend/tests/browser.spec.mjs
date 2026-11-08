@@ -339,3 +339,29 @@ test("catalog empty results are distinct from retrieval failures", async ({ page
   await expect(page.getByText("Resources could not be loaded")).toBeVisible();
   await expect(page.getByText("No volumes found")).toHaveCount(0);
 });
+
+test("create from config previews, prevents duplicate submits and opens the scoped cell", async ({ page }) => {
+  await mockCatalog(page);
+  let creates = 0;
+  await page.route("**/api/cells/from-config/*", async route => {
+    const input = route.request().postDataJSON();
+    const document = { metadata: { name: input.name }, spec: { realmId: "prod", spaceId: "shared", stackId: "services" } };
+    if (route.request().url().endsWith("create")) {
+      creates++;
+      expect(input.preview).toBe("reviewed");
+      await route.fulfill({ json: document });
+    } else await route.fulfill({ json: { document, preview: "reviewed" } });
+  });
+  await page.goto(`${server.url}#/configs/prod/shared/services/shared-name`);
+  await page.getByRole("button", { name: "Create cell from config", exact: true }).click();
+  await page.getByLabel("Cell name", { exact: true }).fill("new-cell");
+  await page.getByRole("button", { name: "Preview cell", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Review cell document" })).toBeVisible();
+  expect(creates).toBe(0);
+  await page.getByLabel("Environment overrides").fill("APP=production");
+  await expect(page.getByRole("button", { name: "Confirm create cell" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Preview cell", exact: true }).click();
+  await page.getByRole("button", { name: "Confirm create cell" }).click();
+  await expect(page).toHaveURL(/#\/resource\/prod\/shared\/services\/new-cell$/);
+  expect(creates).toBe(1);
+});

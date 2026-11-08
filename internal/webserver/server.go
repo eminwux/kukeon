@@ -14,7 +14,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-// Package webserver serves embedded assets and a read-only daemon-backed resource API.
+// Package webserver serves embedded assets and a daemon-backed resource API.
 package webserver
 
 import (
@@ -36,9 +36,10 @@ import (
 )
 
 const (
-	requestTimeout = 10 * time.Second
-	headerTimeout  = 5 * time.Second
-	writeTimeout   = 15 * time.Second
+	requestTimeout  = 10 * time.Second
+	headerTimeout   = 5 * time.Second
+	creationTimeout = 2 * time.Minute
+	writeTimeout    = creationTimeout + headerTimeout
 )
 
 // Dial creates a request-owned client, closed after the RPC completes.

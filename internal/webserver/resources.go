@@ -31,7 +31,11 @@ func resourceRoute(
 	read func(context.Context, kukeonv1.Client, *http.Request) (any, error),
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
+		timeout := requestTimeout
+		if r.Method == http.MethodPost {
+			timeout = creationTimeout
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), timeout)
 		defer cancel()
 		client, err := dial(ctx)
 		if err != nil {
@@ -50,6 +54,7 @@ func resourceRoute(
 
 func registerResourceRoutes(mux *http.ServeMux, dial Dial) {
 	registerCatalogRoutes(mux, dial)
+	registerCreateRoutes(mux, dial)
 	registerSpaceRoutes(mux, dial)
 	registerStackRoutes(mux, dial)
 	registerCellRoutes(mux, dial)

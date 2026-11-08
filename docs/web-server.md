@@ -142,3 +142,22 @@ scope coordinates. Deeper coordinates require every shallower coordinate;
 non-secret cell scope and scope gaps return `invalid_request` (400). Names and
 query values must be URL-encoded. Missing resources return `not_found` (404).
 Secret responses never include `spec.data`.
+
+### Create a cell from a config
+
+Open a config overview and choose **Create cell from config**. Enter an explicit
+cell name, optional `KEY=VALUE` environment overrides, and the optional disk
+pressure bypass. Review the materialized document before confirming. The target
+scope comes from the config (missing space/stack use `default`), matching
+`kuke create cell --from-config`; the target stack must already exist.
+Creation uses the daemon's `MaterializeCell`, leaving the cell stopped.
+Existing names are rejected. If inputs or the config change after preview,
+preview again. A failed or disconnected creation can have reached the daemon;
+refresh the Cells list before retrying.
+
+The JSON POST endpoints `/api/cells/from-config/preview` and
+`/api/cells/from-config/create` require the exact same Origin and
+`Content-Type: application/json`. Preview is read only; create re-materializes
+and checks the preview digest before submitting. Neither endpoint reads daemon
+storage directly. Config parameters and secret references remain in the config;
+the form does not accept arbitrary cell documents or template parameter overrides.

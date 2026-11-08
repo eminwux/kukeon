@@ -1,3 +1,4 @@
+import { CreateCell } from "./create";
 import { useState } from "react";
 import { ErrorNotice, useResource } from "./request";
 
@@ -85,6 +86,7 @@ function CatalogDetails({ kind, scope, document, revision }: { kind: string; sco
     {detail.error && doc && <p className="stale">Stale {kind} document — refresh failed.</p>}
     {kind === "secrets" && <p className="description">Secret values are redacted. Only daemon-exposed metadata is available.</p>}
     {doc && <section className="panel"><div className="panel-heading"><h2>{document ? "API document" : "Resource overview"}</h2><span className="badge">Read only</span></div>{document ? <pre tabIndex={0} aria-label={`Complete ${kind} JSON`}>{JSON.stringify(doc, null, 2)}</pre> : <div className="panel-body"><dl className="details-grid"><dt>Name</dt><dd>{doc.metadata.name}</dd><dt>Scope</dt><dd>{scopeOf(doc.metadata).join(" / ")}</dd><dt>Kind</dt><dd>{doc.kind as string}</dd><dt>Labels</dt><dd>{Object.entries(doc.metadata.labels ?? {}).map(([key, value]) => <span className="badge label-badge" key={key}>{key}: {value}</span>)}{!Object.keys(doc.metadata.labels ?? {}).length && "No labels"}</dd>{kind === "volumes" && <><dt>Reclaim policy</dt><dd>{doc.spec?.reclaimPolicy as string || "Default (Delete)"}</dd></>}</dl><p className="description">Use View document for every API-exposed field.</p></div>}</section>}
+    {doc && kind === "configs" && !document && <CreateCell config={doc.metadata} />}
     {doc && !document && <RelatedResources doc={doc} revision={revision} />}
   </>;
 }
