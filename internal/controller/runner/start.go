@@ -1162,6 +1162,16 @@ func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr erro
 			namespacePaths,
 		)
 
+		// Refresh even with no overrides: the stored OCI env may carry
+		// runtime-only keys from a previous invocation. Keep the record and
+		// snapshot; apply only the new process env before creating the task.
+		if reuseExistingChild && attachableID != "" && containerSpec.ID == attachableID {
+			invocationSpec := mergeRuntimeEnvForContainer(containerSpec, attachableID, internalCell.Spec.RuntimeEnv)
+			specWithNamespaces.SpecOpts = append(specWithNamespaces.SpecOpts,
+				ctr.WithFreshProcessEnv(invocationSpec, r.opts.RunPath),
+			)
+		}
+
 		_, err = r.ctrClient.StartContainer(namespace, specWithNamespaces, r.containerLogTaskSpec(containerSpec))
 		if err != nil {
 			fields = appendCellLogFields([]any{"id", ctrContainerID}, cellID, cellName)
