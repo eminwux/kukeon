@@ -20,11 +20,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/version"
+	"github.com/spf13/viper"
 )
 
 func TestNewVersionCmd(t *testing.T) {
@@ -170,6 +172,11 @@ func TestVersionCmdRun(t *testing.T) {
 // injected and the real daemon dial creates a UnixClient but PingVersion
 // fails (no daemon running). This exercises the real code path.
 func TestVersionCmdRun_DaemonUnreachableNoMock(t *testing.T) {
+	// Exercise a real failed dial without depending on the host daemon being down.
+	previousHost := viper.GetString(config.KUKEON_ROOT_HOST.ViperKey)
+	viper.Set(config.KUKEON_ROOT_HOST.ViperKey, "unix://"+filepath.Join(t.TempDir(), "missing.sock"))
+	t.Cleanup(func() { viper.Set(config.KUKEON_ROOT_HOST.ViperKey, previousHost) })
+
 	cmd := version.NewVersionCmd()
 	outBuf := &bytes.Buffer{}
 	errBuf := &bytes.Buffer{}
