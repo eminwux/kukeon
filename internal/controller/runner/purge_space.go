@@ -25,6 +25,7 @@ import (
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
+	"github.com/eminwux/kukeon/internal/util/naming"
 )
 
 // PurgeSpace performs comprehensive cleanup of a space, including CNI resources and orphaned containers.
@@ -56,6 +57,20 @@ func (r *Exec) PurgeSpace(space intmodel.Space) error {
 		spaceForOps = space
 	}
 
+	// Recover the bridge even when metadata or the conflist is already gone.
+	networkName, err := naming.BuildSpaceNetworkName(realmName, spaceName)
+	if err != nil {
+		return err
+	}
+	confPath, err := fs.SpaceNetworkConfigPath(r.opts.RunPath, realmName, spaceName)
+	if err != nil {
+		return err
+	}
+	if teardownErr := r.teardownSpaceCNI(networkName, confPath); teardownErr != nil {
+		return teardownErr
+	}
+	_ = r.purgeCNIForNetwork(networkName)
+
 	// Get realm
 	lookupRealm := intmodel.Realm{
 		Metadata: intmodel.RealmMetadata{
@@ -66,20 +81,6 @@ func (r *Exec) PurgeSpace(space intmodel.Space) error {
 	if err != nil {
 		r.logger.WarnContext(r.ctx, "failed to get realm for purge", "error", err)
 		return nil
-	}
-
-	// Get network name and tear down conflist + bridge link, then purge
-	// the rest of the CNI state. DeleteSpace above already attempted the
-	// teardown, but it can be skipped on prior failure paths — call again
-	// idempotently so purge always converges.
-	var networkName string
-	if !spaceNotFound {
-		networkName, err = r.getSpaceNetworkName(internalSpace)
-		if err == nil {
-			r.teardownSpaceCNI(networkName, "")
-			// Purge IPAM and cache state for the network.
-			_ = r.purgeCNIForNetwork(networkName)
-		}
 	}
 
 	// Find all containers in space

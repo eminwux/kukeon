@@ -21,6 +21,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -429,5 +430,40 @@ func TestEnsureSpaceCNIConfig_ForceRegenerateUsesAllocatorWhenLegacyMissing(t *t
 	alloc := cni.NewDefaultSubnetAllocator(runPath)
 	if got, _ := alloc.LoadAssigned(realmName, spaceName); got != subnet {
 		t.Errorf("recovery did not persist allocator state: got %q, want %q", got, subnet)
+	}
+}
+
+type failingTeardownBridge struct{ fail bool }
+
+func (b *failingTeardownBridge) DeleteBridge(context.Context, string) error {
+	if b.fail {
+		return errors.New("injected bridge deletion failure")
+	}
+	return nil
+}
+
+// A failed link deletion must reach the caller without discarding the conflist.
+func TestTeardownRealmCNI_RetainsFailedBridgeForRetry(t *testing.T) {
+	runPath := t.TempDir()
+	r := newProvisionTestExec(t, runPath, false)
+	bridge := &failingTeardownBridge{fail: true}
+	r.bridgeRunner = bridge
+	confPath := writeStaleConflist(t, runPath, "test-realm", "test-space", "k-test")
+	if err := r.teardownRealmCNI("test-realm"); err == nil {
+		t.Fatal("bridge failure was swallowed")
+	}
+	if _, err := os.Stat(confPath); err != nil {
+		t.Fatalf("lost retry state: %v", err)
+	}
+	bridge.fail = false
+	if err := r.teardownRealmCNI("test-realm"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(confPath); !os.IsNotExist(err) {
+		t.Fatalf("conflist remains: %v", err)
+	}
+	bridge.fail = true
+	if err := r.teardownRealmCNI("test-realm"); err == nil {
+		t.Fatal("missing conflist suppressed retry")
 	}
 }

@@ -24,12 +24,13 @@ import (
 	"testing"
 
 	cni "github.com/eminwux/kukeon/internal/cni"
+	"github.com/jsimonetti/rtnetlink/v2"
 )
 
 // fakeBridgeRunner records DeleteBridge invocations and lets tests assert on
 // the call sequence. notFoundOn names a bridge for which the runner returns
 // an "already-absent" success — it never returns an error so the helper sees
-// the same idempotent contract as the real IPBridgeRunner does for missing
+// the same idempotent contract as the real NetlinkBridgeRunner does for missing
 // links.
 type fakeBridgeRunner struct {
 	calls       []string
@@ -127,8 +128,8 @@ func TestManager_TeardownNetwork_ConflistMissing(t *testing.T) {
 	if err = mgr.TeardownNetwork(context.Background(), runner, "default-foo", missing); err != nil {
 		t.Fatalf("TeardownNetwork() error = %v, want nil (missing conflist is idempotent)", err)
 	}
-	if len(runner.calls) != 0 {
-		t.Errorf("DeleteBridge calls = %v, want none (no bridge to delete)", runner.calls)
+	if !equalStrings(runner.calls, []string{cni.SafeBridgeName("default-foo")}) {
+		t.Errorf("DeleteBridge calls = %v, want recovered deterministic name", runner.calls)
 	}
 }
 
@@ -209,8 +210,8 @@ func TestManager_TeardownNetwork_MalformedConflistErrors(t *testing.T) {
 
 func TestManager_TeardownNetwork_NilRunnerDefaults(t *testing.T) {
 	// Helper must not panic when caller passes nil; it falls back to
-	// IPBridgeRunner. With a no-bridge conflist there is no link to delete,
-	// so the IPBridgeRunner path is never exercised — exactly what we want
+	// NetlinkBridgeRunner. With a no-bridge conflist there is no link to delete,
+	// so the NetlinkBridgeRunner path is never exercised — exactly what we want
 	// for a unit test that doesn't shell out to ip(8).
 	dir := t.TempDir()
 	confPath := writeConflist(t, dir, "default-bar.conflist", noBridgeConflist)
@@ -234,4 +235,69 @@ func equalStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func TestManager_TeardownNetwork_RetryAfterBridgeFailure(t *testing.T) {
+	dir := t.TempDir()
+	path := writeConflist(t, dir, "default-foo.conflist", bridgeConflist)
+	mgr, err := cni.NewManager("", dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	failure := errors.New("temporary delete failure")
+	runner := &fakeBridgeRunner{failOn: "kuke-s-deadbeef", failWithErr: failure}
+	if err = mgr.TeardownNetwork(t.Context(), runner, "default-foo", path); !errors.Is(err, failure) {
+		t.Fatalf("first teardown = %v, want deletion failure", err)
+	}
+	if _, err = os.Stat(path); err != nil {
+		t.Fatalf("lost retry identity: %v", err)
+	}
+	runner.failOn = ""
+	if err = mgr.TeardownNetwork(t.Context(), runner, "default-foo", path); err != nil {
+		t.Fatal(err)
+	}
+	if !equalStrings(runner.calls, []string{"kuke-s-deadbeef", "kuke-s-deadbeef"}) {
+		t.Fatalf("calls: %v", runner.calls)
+	}
+	if _, err = os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("conflist remains: %v", err)
+	}
+}
+
+// Run in a disposable network namespace with KUKEON_CNI_NETLINK_TEST=1.
+func TestNetlinkBridgeRunner_WithoutIP(t *testing.T) {
+	if os.Getenv("KUKEON_CNI_NETLINK_TEST") != "1" {
+		t.Skip("requires disposable network namespace")
+	}
+	t.Setenv("PATH", t.TempDir())
+	conn, err := rtnetlink.Dial(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	const name = "k-netlink-test"
+	if err = conn.Link.New(&rtnetlink.LinkMessage{Attributes: &rtnetlink.LinkAttributes{Name: name, Info: &rtnetlink.LinkInfo{Kind: "bridge"}}}); err != nil {
+		t.Fatal(err)
+	}
+	runner := cni.NetlinkBridgeRunner{}
+	t.Cleanup(func() { _ = runner.DeleteBridge(context.Background(), name) })
+	if err = runner.DeleteBridge(t.Context(), name); err != nil {
+		t.Fatal(err)
+	}
+	links, err := conn.Link.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, link := range links {
+		if link.Attributes != nil && link.Attributes.Name == name {
+			t.Fatal("bridge survived deletion")
+		}
+	}
+	if err = runner.DeleteBridge(t.Context(), name); err != nil {
+		t.Fatalf("repeat delete: %v", err)
+	}
+	// A name that resolves to a non-bridge must never delete that interface.
+	if err = runner.DeleteBridge(t.Context(), "lo"); err == nil {
+		t.Fatal("accepted non-bridge interface")
+	}
 }

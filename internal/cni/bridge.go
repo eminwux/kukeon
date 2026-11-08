@@ -20,11 +20,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os/exec"
 	"path/filepath"
-	"strings"
+	"syscall"
+	"time"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/jsimonetti/rtnetlink/v2"
 )
 
 // BridgeRunner deletes a kernel bridge link by name. Implementations must be
@@ -33,40 +34,60 @@ type BridgeRunner interface {
 	DeleteBridge(ctx context.Context, name string) error
 }
 
-// IPBridgeRunner shells out to the host `ip` binary to delete bridge links.
-// It mirrors the iproute2 invocation used by the standard CNI bridge plugin
-// at create time, so the create/teardown contract stays symmetric.
-type IPBridgeRunner struct{}
+// NetlinkBridgeRunner deletes bridge links through the kernel API. No iproute2
+// executable is needed, including in host-side daemons inside development cells.
+type NetlinkBridgeRunner struct{}
 
-// DeleteBridge runs `ip link delete <name> type bridge`. It treats the
-// "Cannot find device" error as success, so callers can invoke it without
-// first probing for the bridge.
-func (IPBridgeRunner) DeleteBridge(ctx context.Context, name string) error {
+func (NetlinkBridgeRunner) DeleteBridge(ctx context.Context, name string) error {
 	if name == "" {
 		return nil
 	}
-	cmd := exec.CommandContext(ctx, "ip", "link", "delete", name, "type", "bridge")
-	out, err := cmd.CombinedOutput()
-	if err == nil {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	conn, err := rtnetlink.Dial(nil)
+	if err != nil {
+		return fmt.Errorf("open route netlink: %w", err)
+	}
+	defer conn.Close()
+	// Bound kernel IO even when the caller supplied no deadline.
+	const netlinkTimeout = 5 * time.Second
+	deadline := time.Now().Add(netlinkTimeout)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+	if err = conn.SetReadDeadline(deadline); err != nil {
+		return err
+	}
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
+	links, err := conn.Link.List()
+	if err != nil {
+		return fmt.Errorf("list links: %w", err)
+	}
+	for _, link := range links {
+		if link.Attributes == nil || link.Attributes.Name != name {
+			continue
+		}
+		if link.Attributes.Info == nil || link.Attributes.Info.Kind != "bridge" {
+			return fmt.Errorf("%w: interface %s is not a bridge", errdefs.ErrBridgePluginMissing, name)
+		}
+		err = conn.Link.Delete(link.Index)
+		if errors.Is(err, syscall.ENODEV) || errors.Is(err, syscall.ENOENT) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("delete bridge %s: %w", name, err)
+		}
 		return nil
 	}
-	msg := strings.TrimSpace(string(out))
-	if strings.Contains(strings.ToLower(msg), "cannot find device") {
-		return nil
-	}
-	return fmt.Errorf("ip link delete %s: %w: %s", name, err, msg)
+	return nil // Already absent.
 }
 
-// TeardownNetwork removes the CNI network for networkName end-to-end: it reads
-// the bridge name from the conflist, removes the conflist file, and deletes
-// the kernel bridge link. The bridge name is read **before** the conflist is
-// removed so that a transient failure between steps still leaves enough state
-// to retry from. If configPath is empty the manager's default location is used.
-//
-// Each step is idempotent — a missing conflist, a conflist with no bridge
-// plugin, an empty `bridge` field, or an already-absent bridge are all treated
-// as success — so callers can invoke it on partially-cleaned-up state without
-// special-casing.
+// TeardownNetwork deletes the bridge before removing its conflist so a failed
+// deletion remains retryable. For legacy partial teardown with no conflist,
+// recover the deterministic bridge name from the network name. A present
+// conflist remains authoritative (including custom names and non-bridge networks).
 func (m *Manager) TeardownNetwork(
 	ctx context.Context, runner BridgeRunner, networkName, configPath string,
 ) error {
@@ -74,7 +95,7 @@ func (m *Manager) TeardownNetwork(
 		return errors.New("network name is required")
 	}
 	if runner == nil {
-		runner = IPBridgeRunner{}
+		runner = NetlinkBridgeRunner{}
 	}
 	if configPath == "" {
 		configPath = filepath.Join(m.conf.CniConfigDir, networkName+".conflist")
@@ -87,12 +108,13 @@ func (m *Manager) TeardownNetwork(
 		return fmt.Errorf("read bridge name: %w", readErr)
 	}
 
-	if delErr := m.DeleteNetwork(networkName, configPath); delErr != nil {
-		return delErr
+	if errors.Is(readErr, errdefs.ErrNetworkNotFound) {
+		bridge = SafeBridgeName(networkName)
 	}
-
-	if bridge == "" {
-		return nil
+	if bridge != "" {
+		if err := runner.DeleteBridge(ctx, bridge); err != nil {
+			return fmt.Errorf("delete bridge %s: %w", bridge, err)
+		}
 	}
-	return runner.DeleteBridge(ctx, bridge)
+	return m.DeleteNetwork(networkName, configPath)
 }

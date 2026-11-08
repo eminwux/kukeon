@@ -78,7 +78,9 @@ func (r *Exec) PurgeRealm(realm intmodel.Realm) (bool, error) {
 	// CniConfigDir because that is the source of truth for which bridges
 	// were created — IPAM dirs under CNINetworksDir can be missing if a
 	// space's containers never started.
-	r.teardownRealmCNI(realmForOps.Metadata.Name)
+	if teardownErr := r.teardownRealmCNI(realmForOps.Metadata.Name); teardownErr != nil {
+		return false, teardownErr
+	}
 
 	// Purge IPAM/cache state for any leftover networks the realm owned.
 	// Network names follow the pattern: {realmName}-{spaceName}

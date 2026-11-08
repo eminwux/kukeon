@@ -13,6 +13,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/distribution/reference v0.6.0
 	github.com/eminwux/sbsh v0.13.1
+	github.com/jsimonetti/rtnetlink/v2 v2.0.1
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/opencontainers/runtime-spec v1.2.1
@@ -49,7 +50,10 @@ require (
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/hinshun/vt10x v0.0.0-20220301184237-5011da428d02 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/josharian/native v1.1.0 // indirect
 	github.com/klauspost/compress v1.18.1 // indirect
+	github.com/mdlayher/netlink v1.7.2 // indirect
+	github.com/mdlayher/socket v0.5.1 // indirect
 	github.com/moby/locker v1.0.1 // indirect
 	github.com/moby/sys/mountinfo v0.7.2 // indirect
 	github.com/moby/sys/sequential v0.6.0 // indirect

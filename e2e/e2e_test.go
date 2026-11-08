@@ -86,6 +86,7 @@ func runReturningBinary(t *testing.T, _ []string, command string, args ...string
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Env = e2eRunEnv(nil, args)
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -116,9 +117,7 @@ func runBinary(t *testing.T, env []string, command string, args ...string) (int,
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, bin, args...)
-	if env != nil {
-		cmd.Env = env
-	}
+	cmd.Env = e2eRunEnv(env, args)
 
 	var stdoutBuf, stderrBuf strings.Builder
 	cmd.Stdout = &stdoutBuf
@@ -158,6 +157,7 @@ func getRandomRunPath(t *testing.T) string {
 	t.Helper()
 	tempDir := t.TempDir()
 	if deepSocketPathFits(tempDir) {
+		reserveE2ESubnet(t, tempDir)
 		return tempDir
 	}
 	// t.TempDir() is the standard, but here it is exactly what overflows
@@ -169,6 +169,7 @@ func getRandomRunPath(t *testing.T) string {
 		t.Fatalf("MkdirTemp(/tmp, ke-): %v", err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(short) })
+	reserveE2ESubnet(t, short)
 	return short
 }
 

@@ -101,9 +101,10 @@ func (r *Exec) DeleteSpace(space intmodel.Space) error {
 		r.logger.WarnContext(r.ctx, "failed to build network name, skipping CNI config deletion", "error", err)
 	} else {
 		confPath, _ := r.ResolveSpaceCNIConfigPath(realmName, internalSpace.Metadata.Name)
-		// teardownSpaceCNI reads the bridge name from confPath BEFORE removing
-		// the conflist, then deletes the bridge link. Safe when confPath is "".
-		r.teardownSpaceCNI(networkName, confPath)
+		// Preserve metadata and subnet ownership if bridge deletion fails.
+		if teardownErr := r.teardownSpaceCNI(networkName, confPath); teardownErr != nil {
+			return fmt.Errorf("%w: %w", errdefs.ErrDeleteSpace, teardownErr)
+		}
 		// Perform comprehensive CNI network cleanup (IPAM, cache entries, network directory)
 		_ = r.purgeCNIForNetwork(networkName)
 	}

@@ -296,9 +296,11 @@ type Runner interface {
 }
 
 type Exec struct {
-	ctx    context.Context
-	logger *slog.Logger
-	opts   Options
+	// bridgeRunner defaults to the kernel netlink implementation; tests can inject failures.
+	bridgeRunner cni.BridgeRunner
+	ctx          context.Context
+	logger       *slog.Logger
+	opts         Options
 
 	ctrClient ctr.Client
 	// ctrClientOnce serializes the lazy construction of ctrClient so two
