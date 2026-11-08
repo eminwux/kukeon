@@ -262,3 +262,14 @@ uninstall-dev:
 install.sh:
 	cp scripts/install.sh docs/site/install.sh
 	chmod +x docs/site/install.sh
+
+# Built assets are committed so ordinary Go and Docker builds need no Node.js.
+# Run explicitly after frontend edits; CI verifies the committed output.
+.PHONY: web-ui web-ui-check
+web-ui:
+	cd internal/webui/frontend && npm ci --no-audit --no-fund && npm run build
+
+web-ui-check: web-ui
+	git diff --exit-code -- internal/webui/dist
+	@test -z "$$(git ls-files --others --exclude-standard -- internal/webui/dist)" || \
+		{ echo "Untracked generated web assets; regenerate and commit internal/webui/dist" >&2; exit 1; }

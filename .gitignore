@@ -11,3 +11,5 @@
 **/__debug_bin*
 /node_modules/**
 /local/**
+
+/internal/webui/frontend/node_modules/

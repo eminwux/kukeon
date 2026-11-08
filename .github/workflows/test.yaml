@@ -16,6 +16,7 @@ on:
       - "**/go.sum"
       - "go.work"
       - "go.work.sum"
+      - "internal/webui/**"
       - "Makefile"
       - "Dockerfile"
       - ".github/workflows/test.yaml"
@@ -29,6 +30,7 @@ on:
       - "**/go.sum"
       - "go.work"
       - "go.work.sum"
+      - "internal/webui/**"
       - "Makefile"
       - "Dockerfile"
       - ".github/workflows/test.yaml"
@@ -42,6 +44,27 @@ permissions:
   contents: read
 
 jobs:
+  web-ui:
+    name: Embedded web UI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: internal/webui/frontend/package-lock.json
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Check generated assets match source
+        run: make web-ui-check
+      - name: Test packaged assets outside the checkout
+        run: |
+          GOWORK=off go test -c -o /tmp/webui.test ./internal/webui
+          cd /tmp
+          ./webui.test
+
   test:
     name: make test
     runs-on: ubuntu-latest
