@@ -18,7 +18,14 @@ Select a resource name to open its overview. Choose **View document** in a list
 row or overview to inspect every API-exposed field in its complete JSON document.
 Documents are not displayed automatically. A cell overview also lists its
 containers; their overviews and complete documents include daemon runtime status.
-Container lists contain specs, so state appears in the container detail read.
+Cell overviews include status cards for state, reported cgroup readiness, and
+container observations, plus daemon reason/message and configuration-divergence
+warnings. Container rows use the states reported in the cell's observations;
+missing observations show **Not reported**. Container detail status cards show
+state, restart count, valid timestamps, and repository/setup-stage outcomes.
+Exit codes appear only for terminal states with a reported finish time. State
+badges use text and color, and retained observations are marked stale on failure.
+Complete documents remain available through **View document**.
 
 Breadcrumbs link to parent resources. Overview links open a child list narrowed
 to the selected scope, with **Clear scope** to return to all entries. URLs retain

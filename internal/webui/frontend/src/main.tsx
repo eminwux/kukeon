@@ -2,7 +2,15 @@ import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
 
-type Doc = { metadata: { name: string; labels?: Record<string, string> }; status?: { state?: string }; apiVersion?: string; kind?: string; [key: string]: unknown };
+type SetupStatus = { name?: string; index?: number; state: string; error?: string };
+type RuntimeStatus = {
+  state?: string; name?: string; id?: string; cgroupReady?: boolean;
+  reason?: string; message?: string; outOfSync?: boolean; outOfSyncReason?: string; outOfSyncError?: string;
+  restartCount?: number; exitCode?: number; exitSignal?: string;
+  createdAt?: string; updatedAt?: string; startTime?: string; finishTime?: string; restartTime?: string;
+  containers?: RuntimeStatus[]; repos?: SetupStatus[]; stages?: SetupStatus[];
+};
+type Doc = { metadata: { name: string; labels?: Record<string, string> }; status?: RuntimeStatus; apiVersion?: string; kind?: string; [key: string]: unknown };
 type Failure = { code: string; message: string };
 type Resource<T> = { data?: T; loading: boolean; error?: Failure };
 
@@ -125,7 +133,37 @@ function useInventory(revision: number): Resource<Inventory> {
   return state;
 }
 function StateBadge({ state }: { state?: string }) {
-  return <span className={`state-badge ${state === "Ready" || state === "Running" ? "healthy" : ""}`}>{state || "Not reported"}</span>;
+  const tone = ["Ready", "Running", "done", "cloned", "fetched"].includes(state ?? "") ? "success"
+    : ["Failed", "Error", "failed"].includes(state ?? "") ? "danger"
+    : ["Pending", "Creating", "Pausing", "Degraded", "Not ready"].includes(state ?? "") ? "warning" : "neutral";
+  return <span className={`state-badge tone-${tone}`}><span className="state-dot" aria-hidden="true" />{state || "Not reported"}</span>;
+}
+function validTime(value?: string): value is string {
+  return !!value && !value.startsWith("0001-") && Number.isFinite(Date.parse(value));
+}
+function StatusSummary({ status, kind }: { status?: RuntimeStatus; kind: string }) {
+  const container = kind === "container";
+  const observations = status?.containers ?? [];
+  const finished = validTime(status?.finishTime) && ["Stopped", "Failed", "Exited", "Error"].includes(status?.state ?? "");
+  const times = container ? [["Started", status?.startTime], ["Finished", status?.finishTime], ["Last restart", status?.restartTime]] : [["Created", status?.createdAt], ["Updated", status?.updatedAt]];
+  return <section className="panel runtime-status" aria-label={`${container ? "Container" : "Cell"} status`}>
+    <div className="panel-heading"><h2>Runtime status</h2><span className="badge">Daemon observation</span></div>
+    <div className="panel-body">
+      <div className="status-grid">
+        <div className="status-card"><span>State</span><StateBadge state={status?.state} /></div>
+        {container ? <div className="status-card"><span>Restarts</span><strong>{status?.restartCount ?? "Not reported"}</strong></div> : <>
+          <div className="status-card"><span>Cgroup readiness</span><StateBadge state={status?.cgroupReady === undefined ? undefined : status.cgroupReady ? "Ready" : "Not ready"} /></div>
+          <div className="status-card"><span>Container observations</span><strong>{status?.containers ? observations.length : "Not reported"}</strong>{status?.containers && <small>{observations.filter(item => ["Ready", "Running"].includes(item.state ?? "")).length} ready · {observations.filter(item => ["Failed", "Error"].includes(item.state ?? "")).length} failed</small>}</div>
+        </>}
+        {finished && status?.exitCode !== undefined && <div className="status-card"><span>Exit code</span><strong>{status.exitCode}</strong>{status.exitSignal && <small>Signal: {status.exitSignal}</small>}</div>}
+      </div>
+      {(status?.reason || status?.message) && <div className="status-message"><strong>{status.reason || "Status message"}</strong>{status.message && <p>{status.message}</p>}</div>}
+      {(status?.outOfSync || status?.outOfSyncError) && <div className="error"><strong>{status.outOfSyncError ? "Configuration comparison failed" : "Configuration out of sync"}</strong><p>{status.outOfSyncError || status.outOfSyncReason || "The daemon reports a configuration mismatch."}</p></div>}
+      {times.some(([, value]) => validTime(value)) && <dl className="status-times">{times.filter(([, value]) => validTime(value)).map(([label, value]) => <div key={label}><dt>{label}</dt><dd><time dateTime={value}>{new Date(value!).toLocaleString()}</time></dd></div>)}</dl>}
+      {container && ([ ["Repository setup", status?.repos], ["Create stages", status?.stages] ] as const).map(([label, items]) => !!items?.length && <div className="setup-status" key={label}><h3>{label}</h3><ul className="state-list">{items.map((item, i) => <li key={i}><div><strong>{item.name ?? `Stage ${item.index ?? i}`}</strong>{item.error && <p className="setup-error">{item.error}</p>}</div><StateBadge state={item.state} /></li>)}</ul></div>)}
+      {!status && <p className="description">The daemon has not reported status for this resource.</p>}
+    </div>
+  </section>;
 }
 function Dashboard({ inventory }: { inventory: Resource<Inventory> }) {
   const partial = inventory.error || inventory.data?.failures.length;
@@ -167,8 +205,9 @@ function ResourceDetails({ route, revision }: { route: Route; revision: number }
     {detail.loading && <p role="status">Loading {kind} details…</p>}
     {detail.error && <ErrorNotice error={detail.error} kind={kind} />}
     {detail.error && detail.data && <p className="stale">Stale resource details — refresh failed.</p>}
+    {detail.data && (depth === 3 || depth === 4) && !route.document && <StatusSummary status={detail.data.status} kind={kind} />}
     {detail.data && <section className="panel"><div className="panel-heading"><h2>{route.document ? "API document" : "Resource overview"}</h2><StateBadge state={detail.data.status?.state} /></div>{route.document ? <pre tabIndex={0} aria-label={`Complete ${kind} JSON`}>{JSON.stringify(detail.data, null, 2)}</pre> : <div className="panel-body"><dl className="details-grid"><dt>Name</dt><dd>{detail.data.metadata.name}</dd><dt>Kind</dt><dd>{detail.data.kind ?? kind}</dd><dt>Scope</dt><dd>{route.scope.join(" / ")}</dd><dt>API version</dt><dd>{detail.data.apiVersion ?? "Not reported"}</dd><dt>Labels</dt><dd>{Object.entries(detail.data.metadata.labels ?? {}).map(([key, value]) => <span className="badge label-badge" key={key}>{key}: {value}</span>)}{!Object.keys(detail.data.metadata.labels ?? {}).length && "No labels"}</dd></dl>{depth < 3 && <a className="text-link" href={listLink(depth + 1, route.scope)}>View {titles[depth + 1].toLowerCase()} in this {kind} →</a>}</div>}</section>}
-    {depth === 3 && <section className="panel container-panel"><div className="panel-heading"><h2>Containers</h2></div><div className="panel-body">{containers.loading && <p>Loading containers…</p>}{containers.error && <ErrorNotice error={containers.error} />}{containers.error && containers.data && <p className="stale">Stale container list — refresh failed.</p>}{!containers.loading && !containers.error && !containers.data?.length && <p>No containers found.</p>}<ul className="state-list">{containers.data?.map(container => <li key={container.id}><a className="text-link" href={resourceLink([...route.scope, container.id])}>{container.id}</a><a href={resourceLink([...route.scope, container.id], true)}>View document</a></li>)}</ul></div></section>}
+    {depth === 3 && <section className="panel container-panel"><div className="panel-heading"><h2>Containers</h2><span className="badge">{detail.error ? "Stale observations" : detail.loading ? "Refreshing observations" : "Cell observations"}</span></div><div className="panel-body">{containers.loading && <p>Loading containers…</p>}{containers.error && <ErrorNotice error={containers.error} />}{containers.error && containers.data && <p className="stale">Stale container list — refresh failed.</p>}{!containers.loading && !containers.error && !containers.data?.length && <p>No containers found.</p>}<ul className="state-list">{containers.data?.map(container => <li key={container.id}><a className="text-link" href={resourceLink([...route.scope, container.id])}>{container.id}</a><StateBadge state={detail.data?.status?.containers?.find(item => item.name === container.id || item.id === container.id)?.state} /><a href={resourceLink([...route.scope, container.id], true)}>View document</a></li>)}</ul></div></section>}
   </>;
 }
 

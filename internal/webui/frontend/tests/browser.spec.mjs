@@ -179,3 +179,49 @@ test("mobile navigation closes after selecting a list and dashboard fits the scr
   await expect(page.getByRole("complementary")).toBeHidden();
   await expect(page.getByRole("heading", { name: "Cells", exact: true })).toBeVisible();
 });
+
+test("cell status cards and container observations expose reported runtime state", async ({ page }) => {
+  let fail = false;
+  await mock(page, path => {
+    if (path === "/api/realms/prod/spaces/shared/stacks/services/cells/api") {
+      return fail ? failure : { json: { ...doc(["prod", "shared", "services", "api"]), status: { state: "Degraded", cgroupReady: true, reason: "WorkloadDown", message: "web exited unexpectedly", containers: [{ name: "web", state: "Failed" }] } } };
+    }
+  });
+  await page.goto(`${server.url}#/resource/prod/shared/services/api`);
+  const status = page.getByRole("region", { name: "Cell status" });
+  await expect(status.getByText("Degraded", { exact: true })).toBeVisible();
+  await expect(status.getByText("Ready", { exact: true })).toBeVisible();
+  await expect(status.getByText("0 ready · 1 failed")).toBeVisible();
+  await expect(status.getByText("web exited unexpectedly")).toBeVisible();
+  await expect(page.locator(".container-panel").getByText("Failed", { exact: true })).toBeVisible();
+  fail = true;
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.getByText("Stale resource details — refresh failed.")).toBeVisible();
+  await expect(page.getByText("Stale observations")).toBeVisible();
+  await expect(status.getByText("Degraded", { exact: true })).toBeVisible();
+});
+
+test("container status shows restarts, terminal exit and setup failures without JSON", async ({ page }) => {
+  await mock(page, path => path.endsWith("/containers/web") ? { json: { ...doc(["prod", "shared", "services", "api", "web"]), status: { state: "Stopped", restartCount: 3, exitCode: 7, finishTime: "2026-01-02T03:04:05Z", repos: [{ name: "source", state: "failed", error: "Repository unavailable" }], stages: [{ index: 0, state: "done" }] } } } : undefined);
+  await page.goto(`${server.url}#/resource/prod/shared/services/api/web`);
+  const status = page.getByRole("region", { name: "Container status" });
+  await expect(status.getByText("Stopped", { exact: true })).toBeVisible();
+  await expect(status.locator(".status-card").filter({ hasText: "Restarts" })).toContainText("3");
+  await expect(status.locator(".status-card").filter({ hasText: "Exit code" })).toContainText("7");
+  await expect(status.locator("time")).toHaveAttribute("datetime", "2026-01-02T03:04:05Z");
+  await expect(status.getByText("Repository unavailable")).toBeVisible();
+  await expect(status.getByText("Stage 0", { exact: true })).toBeVisible();
+  await expect(page.locator("pre")).toHaveCount(0);
+});
+
+test("running and unreported statuses never imply a successful exit or readiness", async ({ page }) => {
+  await mock(page, path => path.endsWith("/containers/web") ? { json: { ...doc(["prod", "shared", "services", "api", "web"]), status: { state: "Ready", restartCount: 0, exitCode: 0, finishTime: "0001-01-01T00:00:00Z" } } } : undefined);
+  await page.goto(`${server.url}#/resource/prod/shared/services/api/web`);
+  const status = page.getByRole("region", { name: "Container status" });
+  await expect(status.getByText("Ready", { exact: true })).toBeVisible();
+  await expect(status.getByText("Exit code", { exact: true })).toHaveCount(0);
+  await expect(status.locator("time")).toHaveCount(0);
+  await page.goto(`${server.url}#/resource/prod/shared/services/api`);
+  await expect(page.getByRole("region", { name: "Cell status" }).getByText("Not reported", { exact: true })).toHaveCount(2);
+  await expect(page.locator(".container-panel").getByText("Not reported", { exact: true })).toBeVisible();
+});
