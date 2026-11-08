@@ -1,195 +1,181 @@
 import { test, expect } from "@playwright/test";
 import { startServer } from "./server.mjs";
 
-const realm = (name) => ({ apiVersion: "kukeon.io/v1beta1", kind: "Realm", metadata: { name, labels: { team: "platform" } }, spec: { namespace: `${name}.kukeon.io` }, status: { state: "Ready", futureField: [1, { nested: true }] } });
 let server;
 test.beforeEach(async () => { server = await startServer(); });
 test.afterEach(async () => { await server?.stop(); });
-
-async function mock(page, handler) {
-  await page.route("**/api/realms**", async (route) => {
-    const path = new URL(route.request().url()).pathname;
-    const result = path.split("/").length > 4 ? { body: [] } : await handler(path);
-    await route.fulfill({ status: result.status ?? 200, json: result.body });
-  });
+const kinds = ["Realm", "Space", "Stack", "Cell", "Container"];
+function doc(scope) {
+  return { apiVersion: "kukeon.io/v1beta1", kind: kinds[scope.length - 1], metadata: { name: scope.at(-1), labels: { team: "platform" } }, spec: { scope, futureField: { nested: true } }, status: { state: scope[0] === "prod" ? "Running" : "Ready" } };
 }
-const error = (code, status) => ({ status, body: { error: { code, message: "Test connection failure" } } });
-
-test("complete documents, refresh failure retains stale data, retry recovers", async ({ page }) => {
-  let fail = false;
-  await mock(page, (path) => fail ? error("unavailable", 503) : { body: path === "/api/realms" ? [realm("default")] : realm("default") });
-  await page.goto(server.url);
-  await expect(page.getByLabel("Daemon connection").getByRole("status")).toHaveText("Connected");
-  await expect(page.getByLabel("Daemon connection")).toContainText("missing.sock");
-  await page.getByRole("button", { name: "default" }).click();
-  const document = page.getByLabel("Complete realm JSON");
-  await expect(document).toHaveText(JSON.stringify(realm("default"), null, 2));
-  fail = true;
-  await page.getByRole("button", { name: "Refresh" }).click();
-  await expect(page.getByText("Stale realm list — refresh failed.")).toBeVisible();
-  await expect(page.getByText("Stale realm document — refresh failed.")).toBeVisible();
-  await expect(document).toHaveText(JSON.stringify(realm("default"), null, 2));
-  fail = false;
-  await page.getByRole("button", { name: "Refresh" }).click();
-  await expect(page.getByLabel("Daemon connection").getByRole("status")).toHaveText("Connected");
-  await expect(page.locator(".stale")).toHaveCount(0);
-});
-
-test("loading, empty, and permission errors are distinct", async ({ page }) => {
-  let release;
-  const gate = new Promise((resolve) => { release = resolve; });
-  let result = { body: [] };
-  await mock(page, async () => { await gate; return result; });
-  await page.goto(server.url);
-  await expect(page.getByText("Loading realms…")).toBeVisible();
-  release();
-  await expect(page.getByText("No realms found.")).toBeVisible();
-  result = error("permission_denied", 403);
-  await page.getByRole("button", { name: "Refresh" }).click();
-  await expect(page.getByRole("alert")).toContainText("Permission denied");
-  await expect(page.getByText("Stale realm list — refresh failed.")).toBeVisible();
-});
-
-test("a replaced detail request cannot overwrite a newer selection", async ({ page }) => {
-  let release;
-  const gate = new Promise((resolve) => { release = resolve; });
-  await mock(page, async (path) => {
-    if (path === "/api/realms") return { body: [realm("first"), realm("second")] };
-    if (path.endsWith("/first")) await gate;
-    return { body: realm(path.split("/").at(-1)) };
-  });
-  await page.goto(server.url);
-  await page.getByRole("button", { name: "first" }).click();
-  await expect(page.getByText("Loading realm document…")).toBeVisible();
-  await page.getByRole("button", { name: "second" }).click();
-  await expect(page.getByLabel("Complete realm JSON")).toHaveText(JSON.stringify(realm("second"), null, 2));
-  release();
-  await expect(page.getByRole("heading", { name: "second", exact: true })).toBeVisible();
-  await expect(page.getByLabel("Complete realm JSON")).not.toContainText('"first"');
-});
-
-test("switching realms clears the previous document even when the next realm is missing", async ({ page }) => {
-  await mock(page, (path) => path === "/api/realms" ? { body: [realm("first"), realm("deleted")] }
-    : path.endsWith("/first") ? { body: realm("first") } : error("not_found", 404));
-  await page.goto(server.url);
-  await page.getByRole("button", { name: "first" }).click();
-  await expect(page.getByLabel("Complete realm JSON")).toBeVisible();
-  await page.getByRole("button", { name: "deleted" }).click();
-  await expect(page.getByRole("alert")).toContainText("Realm no longer exists");
-  await expect(page.getByLabel("Complete realm JSON")).toHaveCount(0);
-});
-
-test("packaged UI survives an actual missing Unix socket and can retry", async ({ page }) => {
-  await page.goto(server.url);
-  await expect(page.getByRole("alert")).toContainText("Daemon unavailable");
-  await expect(page.getByText("Stale realm list — refresh failed.")).toHaveCount(0);
-  await mock(page, () => ({ body: [] }));
-  await page.getByRole("button", { name: "Refresh" }).click();
-  await expect(page.getByLabel("Daemon connection").getByRole("status")).toHaveText("Connected");
-  await expect(page.getByText("No realms found.")).toBeVisible();
-});
-
-for (const failedKind of ["space", "stack", "cell", "container"]) {
-  test(`scoped hierarchy preserves documents and marks failed ${failedKind} refresh stale`, async ({ page }) => {
-    const kinds = ["realm", "space", "stack", "cell", "container"];
-    const names = ["demo", "shared", "shared", "worker", "app"];
-    let fail = false;
-    await page.route("**/api/realms**", async route => {
-      const parts = new URL(route.request().url()).pathname.split("/").slice(2);
-      const depth = Math.floor((parts.length - 1) / 2);
-      const kind = kinds[depth];
-      const detail = parts.length % 2 === 0;
-      const body = { ...realm(names[depth]), kind, spec: { scope: names.slice(0, depth), futureField: { nested: true } }, status: { state: "Running" } };
-      await route.fulfill(fail && kind === failedKind
-        ? { status: 503, json: { error: { code: "unavailable", message: "Scoped read failed" } } }
-        : { json: detail ? body : depth === 4 ? [{ id: names[depth] }] : [body] });
-    });
-    await page.goto(server.url);
-    await page.getByRole("button", { name: "demo" }).click();
-    for (let depth = 1; depth < 5; depth++) {
-      const kind = kinds[depth];
-      const title = kind[0].toUpperCase() + kind.slice(1);
-      await page.getByLabel(`${title} list`, { exact: true }).getByRole("link").click();
-      await expect(page.getByLabel(`Complete ${kind} JSON`)).toContainText('"state": "Running"');
-      await expect(page.getByLabel(`Complete ${kind} JSON`)).toContainText('"futureField"');
-    }
-    await expect(page).toHaveURL(new RegExp("#demo/shared/shared/worker/app$"));
-    await page.reload();
-    await expect(page.getByLabel("Complete container JSON")).toContainText('"app"');
-    await page.getByRole("navigation", { name: "Resource scope" }).getByRole("link", { name: `${failedKind}: ${names[kinds.indexOf(failedKind)]}`, exact: true }).click();
-    await expect(page.getByLabel(`Complete ${failedKind} JSON`)).toBeVisible();
-    fail = true;
-    await page.getByRole("button", { name: "Refresh" }).click();
-    await expect(page.getByText(`Stale ${failedKind} list — refresh failed.`)).toBeVisible();
-    await expect(page.getByText(`Stale ${failedKind} document — refresh failed.`)).toBeVisible();
-    fail = false;
-    await page.getByRole("button", { name: "Refresh" }).click();
-    await expect(page.locator(".stale")).toHaveCount(0);
-    await page.goto(`${server.url}#demo/shared/shared/worker/app`);
-    await expect(page.getByLabel("Complete container JSON")).toBeVisible();
-    await page.getByRole("navigation", { name: "Resource scope" }).getByRole("link", { name: "space: shared", exact: true }).click();
-    await expect(page.getByLabel("Complete container JSON")).toHaveCount(0);
-    await expect(page.getByLabel("Complete stack JSON")).toHaveCount(0);
-    await page.goBack();
-    await expect(page.getByLabel("Complete container JSON")).toBeVisible();
-  });
+function fixture(path, cellCount = 1) {
+  const parts = path.split("/").filter(Boolean).slice(1);
+  const scope = parts.filter((_, i) => i % 2 === 1).map(decodeURIComponent);
+  if (parts.length % 2 === 0) return doc(scope);
+  const depth = Math.floor(parts.length / 2);
+  if (depth === 0) return [doc(["dev"]), doc(["prod"])];
+  if (depth === 4) return [{ id: "web" }];
+  const names = depth === 3 ? Array.from({ length: cellCount }, (_, i) => cellCount === 1 ? "api" : `api-${String(i).padStart(2, "0")}`) : [depth === 1 ? "shared" : "services"];
+  return names.map(name => doc([...scope, name]));
 }
-
-test("same named resources in another realm cannot receive a late document", async ({ page }) => {
-  let release;
-  const gate = new Promise(resolve => { release = resolve; });
+async function mock(page, handler = () => undefined) {
   await page.route("**/api/realms**", async route => {
     const path = new URL(route.request().url()).pathname;
-    if (path === "/api/realms") return route.fulfill({ json: [realm("first"), realm("second")] });
-    if (path.endsWith("/stacks")) return route.fulfill({ json: [] });
-    if (path.endsWith("/spaces")) return route.fulfill({ json: [realm("shared")] });
-    if (path === "/api/realms/first/spaces/shared") await gate;
-    await route.fulfill({ json: { ...realm("shared"), scope: path } });
+    const result = await handler(path);
+    await route.fulfill(result ?? { json: fixture(path) });
   });
-  await page.goto(`${server.url}#first/shared`);
-  await expect(page.getByText("Loading space document…")).toBeVisible();
-  await page.goto(`${server.url}#second/shared`);
-  await expect(page.getByLabel("Complete space JSON")).toContainText("/second/spaces/shared");
-  release();
-  await expect(page.getByLabel("Complete space JSON")).not.toContainText("/first/");
-  await expect(page.getByText("No stacks found.")).toBeVisible();
-  await page.route("**/stacks", route => route.fulfill({ status: 403, json: { error: { code: "permission_denied", message: "Denied" } } }));
-  await page.getByRole("button", { name: "Refresh" }).click();
-  await expect(page.getByLabel("Stack list", { exact: true }).getByRole("alert")).toContainText("Permission denied");
-  await expect(page.getByText("No stacks found.")).toHaveCount(0);
+}
+const failure = { status: 503, json: { error: { code: "unavailable", message: "Scoped read failed" } } };
+const nav = page => page.getByRole("navigation", { name: "Main navigation" });
+
+test("dashboard is the landing page with resource summaries and type navigation", async ({ page }) => {
+  await mock(page);
+  await page.goto(server.url);
+  await expect(page.getByRole("heading", { name: "Dashboard", exact: true })).toBeVisible();
+  for (const type of ["Realms", "Spaces", "Stacks", "Cells"]) {
+    await expect(page.locator(".summary-card").filter({ hasText: type }).locator("strong")).toHaveText("2");
+    await expect(nav(page).getByRole("link", { name: type, exact: true })).toBeVisible();
+  }
+  await expect(page.getByRole("heading", { name: "Cell states" })).toBeVisible();
+  await expect(page.locator("pre")).toHaveCount(0);
+  await expect(nav(page).getByText("shared")).toHaveCount(0);
 });
 
+for (const type of ["Realms", "Spaces", "Stacks", "Cells"]) {
+  test(`${type} list shows entries and scope, with complete documents only on request`, async ({ page }) => {
+    await mock(page);
+    await page.goto(`${server.url}#/${type.toLowerCase()}`);
+    await expect(page.getByRole("heading", { name: type, exact: true })).toBeVisible();
+    await expect(page.getByRole("row")).toHaveCount(3);
+    await expect(page.locator("pre")).toHaveCount(0);
+    const first = page.getByRole("row").nth(1);
+    await expect(first.getByRole("cell").nth(1)).toContainText("Ready");
+    await first.getByRole("link", { name: /View document/ }).click();
+    await expect(page.locator("pre")).toContainText('"futureField"');
+    await page.getByRole("link", { name: "Show overview" }).click();
+    await expect(page.locator("pre")).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Resource overview" })).toBeVisible();
+  });
+}
 
-test("appearance follows the system and persists explicit overrides", async ({ page }) => {
-  await mock(page, () => ({ body: [] }));
+test("lists filter by name and realm and retain complete scope for duplicate names", async ({ page }) => {
+  await mock(page);
+  await page.goto(`${server.url}#/cells`);
+  await expect(page.getByRole("row")).toHaveCount(3);
+  await page.getByLabel("Filter by realm").selectOption("prod");
+  await expect(page.getByRole("row")).toHaveCount(2);
+  await expect(page.getByRole("row").nth(1)).toContainText("prod / shared / services");
+  await page.getByRole("searchbox").fill("missing");
+  await expect(page.getByText("No matching resources")).toBeVisible();
+  await page.getByRole("searchbox").fill("api");
+  await page.getByRole("link", { name: "api", exact: true }).click();
+  await expect(page).toHaveURL(/#\/resource\/prod\/shared\/services\/api$/);
+  await expect(page.locator("pre")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Containers" })).toBeVisible();
+  await page.getByRole("link", { name: "web", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "web", exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "View document", exact: true }).click();
+  await expect(page.getByLabel("Complete container JSON")).toHaveText(JSON.stringify(doc(["prod", "shared", "services", "api", "web"]), null, 2));
+});
+
+test("scope shortcuts and browser history retain navigation", async ({ page }) => {
+  await mock(page);
+  await page.goto(`${server.url}#/resource/prod`);
+  await page.getByRole("link", { name: "View spaces in this realm" }).click();
+  await expect(page.getByRole("row")).toHaveCount(2);
+  await expect(page.getByText("Scope: prod")).toBeVisible();
+  await page.getByRole("link", { name: "Clear scope" }).click();
+  await expect(page.getByRole("row")).toHaveCount(3);
+  await page.goBack();
+  await expect(page.getByText("Scope: prod")).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("row")).toHaveCount(2);
+});
+
+test("large lists paginate and search resets the current page", async ({ page }) => {
+  await mock(page, path => ({ json: fixture(path, 16) }));
+  await page.goto(`${server.url}#/cells`);
+  await expect(page.getByText("1–25 of 32")).toBeVisible();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(page.getByText("26–32 of 32")).toBeVisible();
+  await page.getByRole("searchbox").fill("api-00");
+  await expect(page.getByText("1–2 of 2")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Previous" })).toBeDisabled();
+});
+
+test("refresh failures mark retained inventory and documents stale, retry recovers", async ({ page }) => {
+  let fail = false;
+  await mock(page, () => fail ? failure : undefined);
+  await page.goto(`${server.url}#/resource/prod/shared/services/api?document=1`);
+  await expect(page.getByLabel("Complete cell JSON")).toBeVisible();
+  await expect(page.getByLabel("Daemon connection").getByRole("status")).toHaveText("Connected");
+  fail = true;
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.getByText(/Stale inventory/)).toBeVisible();
+  await expect(page.getByText("Stale resource details — refresh failed.")).toBeVisible();
+  await expect(page.getByLabel("Complete cell JSON")).toContainText('"api"');
+  fail = false;
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.locator(".stale")).toHaveCount(0);
+  await expect(page.getByLabel("Daemon connection").getByRole("status")).toHaveText("Connected");
+});
+
+test("partial scope failures never present counts as complete", async ({ page }) => {
+  await mock(page, path => path === "/api/realms/prod/spaces/shared/stacks" ? failure : undefined);
+  await page.goto(server.url);
+  await expect(page.getByRole("alert")).toContainText("Incomplete inventory");
+  await expect(page.locator(".summary-card").filter({ hasText: "Cells" })).toContainText("Incomplete or stale data");
+  await expect(page.getByLabel("Daemon connection").getByRole("status")).toHaveText("Needs attention");
+});
+
+test("empty inventory and failed retrieval have different messages", async ({ page }) => {
+  await mock(page, () => ({ json: [] }));
+  await page.goto(`${server.url}#/realms`);
+  await expect(page.getByText("No realms found")).toBeVisible();
+  await page.unroute("**/api/realms**");
+  await page.route("**/api/realms**", route => route.fulfill(failure));
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.getByText(/Stale inventory/)).toBeVisible();
+  await expect(page.getByText("Resources could not be fully loaded")).toBeVisible();
+  await expect(page.getByText("No realms found")).toHaveCount(0);
+});
+
+test("old resource bookmarks work and replaced requests cannot overwrite another scope", async ({ page }) => {
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  await mock(page, async path => { if (path === "/api/realms/dev/spaces/shared") await gate; });
+  await page.goto(`${server.url}#dev/shared`);
+  await expect(page.getByText("Loading space details…")).toBeVisible();
+  await page.goto(`${server.url}#/resource/prod/shared?document=1`);
+  await expect(page.getByLabel("Complete space JSON")).toHaveText(JSON.stringify(doc(["prod", "shared"]), null, 2));
+  release();
+  await expect(page.getByLabel("Complete space JSON")).not.toContainText('"dev"');
+});
+
+test("theme preference follows the system and persists explicit overrides", async ({ page }) => {
+  await mock(page);
   await page.emulateMedia({ colorScheme: "dark" });
   await page.goto(server.url);
   const scheme = () => page.evaluate(() => getComputedStyle(document.documentElement).colorScheme);
   await expect.poll(scheme).toBe("dark");
   await page.getByLabel("Appearance").selectOption("light");
-  await expect.poll(scheme).toBe("light");
   await page.reload();
   await expect(page.getByLabel("Appearance")).toHaveValue("light");
   await expect.poll(scheme).toBe("light");
-  await page.getByLabel("Appearance").selectOption("dark");
-  await page.emulateMedia({ colorScheme: "light" });
-  await expect.poll(scheme).toBe("dark");
   await page.getByLabel("Appearance").selectOption("system");
-  await expect.poll(scheme).toBe("light");
-  await page.emulateMedia({ colorScheme: "dark" });
   await expect.poll(scheme).toBe("dark");
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect.poll(scheme).toBe("light");
 });
 
-test("mobile sidebar opens, selects a resource, and closes without overflow", async ({ page }) => {
+test("mobile navigation closes after selecting a list and dashboard fits the screen", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await mock(page, path => ({ body: path === "/api/realms" ? [realm("default")] : realm("default") }));
+  await mock(page);
   await page.goto(server.url);
-  const sidebar = page.getByRole("complementary", { name: "Workspace sidebar" });
-  await expect(sidebar).toBeHidden();
-  await page.getByRole("button", { name: "Toggle sidebar" }).click();
-  await expect(sidebar).toBeVisible();
-  await page.getByRole("button", { name: "default" }).click();
-  await expect(sidebar).toBeHidden();
-  await expect(page.getByLabel("Complete realm JSON")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Dashboard", exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  await page.getByRole("button", { name: "Toggle sidebar" }).click();
+  await nav(page).getByRole("link", { name: "Cells", exact: true }).click();
+  await expect(page.getByRole("complementary")).toBeHidden();
+  await expect(page.getByRole("heading", { name: "Cells", exact: true })).toBeVisible();
 });

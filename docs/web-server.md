@@ -6,33 +6,37 @@ closes the HTTP listener and request-owned daemon connections; it does not stop
 kukeond or workloads. The binary embeds all frontend assets and needs no Node.js
 or external asset files at runtime.
 
-## Browse the resource hierarchy
+## Dashboard and resource lists
 
-The sidebar connection section shows the selected daemon socket. **Connected** means the
-latest realm-list request succeeded; it is not a general daemon health check.
-Select any realm to read its complete JSON document, including metadata, spec,
-status, and any additional returned fields. Select spaces, stacks, cells, and
-containers in the sidebar to inspect the same complete documents at each
-level. Cell and container documents include the runtime status returned by the
-daemon. Container lists contain specs; select a container to retrieve its full
-document and runtime status. The view is read-only.
+The UI opens to a dashboard with summary counts for realms, spaces, stacks, and
+cells and a breakdown of daemon-reported cell states. Select **Realms**,
+**Spaces**, **Stacks**, or **Cells** in the sidebar to open its list across scopes.
+Lists show name, reported state, and parent scope. Search by name or scope, filter
+by realm, and use the paging controls for collections larger than 25 entries.
 
-The scope links show the full realm → space → stack → cell → container path.
-Bookmark or copy the URL to reopen that scope. Browser Back/Forward restores
-selections. Choosing an ancestor clears its previous descendant selections;
-names shared by different scopes remain separate.
+Select a resource name to open its overview. Choose **View document** in a list
+row or overview to inspect every API-exposed field in its complete JSON document.
+Documents are not displayed automatically. A cell overview also lists its
+containers; their overviews and complete documents include daemon runtime status.
+Container lists contain specs, so state appears in the container detail read.
 
-**Refresh** reloads all visible lists and selected documents. Loading messages identify
-pending requests. An empty list displays **No realms found**. Permission-denied
-errors mean the invoking user cannot access the socket; check its ownership and
-group permissions. **Daemon unavailable** means the request could not reach or
-complete against kukeond; check the displayed socket and daemon, then refresh.
+Breadcrumbs link to parent resources. Overview links open a child list narrowed
+to the selected scope, with **Clear scope** to return to all entries. URLs retain
+the selected list, scope, resource, and document mode. Browser Back/Forward works,
+and existing hierarchy bookmarks open the corresponding resource overview.
 
-If a refresh fails, previously loaded data stays visible with a **Stale** notice
-on each affected panel. A successful retry clears that notice. Selecting a
-different resource clears its previous document and descendant selections immediately; a deleted realm shows
-**Realm no longer exists**. The page stays available throughout connection
-failures, so retrying never requires restarting the web server.
+**Refresh** reloads the inventory and current detail. Dashboard counts are based
+on daemon list calls with bounded concurrency. A failed scope read produces an
+**Incomplete inventory** warning and counts exclude inaccessible resources. When
+a refresh fails after a successful load, the prior inventory stays visible with a
+**Stale inventory** warning; retained detail documents have their own stale notice.
+Loading, empty collections, and searches with no matches have distinct messages.
+
+The sidebar shows the selected daemon socket. **Connected** means the latest
+inventory retrieval completed without failures, not that all workloads are
+healthy. Permission errors mean the invoking user cannot access the selected
+socket or resource; check permissions. **Daemon unavailable** identifies failed
+daemon requests. Correct the connection and refresh to retry.
 
 ## Options and permissions
 
@@ -86,12 +90,11 @@ curl http://127.0.0.1:5129/api/realms
 
 ## Workspace layout and appearance
 
-The sidebar holds the resource hierarchy and daemon connection information.
-Selecting a resource opens its complete document in the main inspector; use the
-breadcrumb links to return to an ancestor. On small screens, the menu button
-opens the sidebar, and choosing a resource closes it.
+The sidebar holds the dashboard and resource-type destinations, daemon connection
+information, and appearance controls. On small screens, the menu button opens the
+sidebar; choosing a destination closes it. The main workspace shows summary
+panels, a resource list, or a selected resource overview.
 
-Use **Appearance** at the bottom of the sidebar to choose **System**, **Light**,
-or **Dark**. System follows the device preference, including changes while the
-page is open. An explicit choice is saved in this browser when local storage is
-available. The preference affects presentation only.
+Use **Appearance** to choose **System**, **Light**, or **Dark**. System follows the
+device preference, including changes while the page is open. Explicit choices
+persist in this browser when local storage is available.
