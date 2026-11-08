@@ -135,3 +135,7 @@ button:disabled { cursor: default; opacity: .4; }
 .setup-status h3 { font-size: 12px; margin: 24px 0 6px; }
 .setup-error { color: var(--error); font-size: 12px; margin: 4px 0 0; overflow-wrap: anywhere; }
 .container-panel .state-list .text-link { margin-top: 0; margin-right: auto; }
+.related-resources { margin-top: 20px; }
+.related-resources .state-list li { align-items: start; }
+.related-resources .error { margin: 0; }
+.related-resources li > div { min-width: 0; overflow-wrap: anywhere; }

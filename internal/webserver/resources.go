@@ -49,6 +49,7 @@ func resourceRoute(
 }
 
 func registerResourceRoutes(mux *http.ServeMux, dial Dial) {
+	registerCatalogRoutes(mux, dial)
 	registerSpaceRoutes(mux, dial)
 	registerStackRoutes(mux, dial)
 	registerCellRoutes(mux, dial)

@@ -45,6 +45,31 @@ healthy. Permission errors mean the invoking user cannot access the selected
 socket or resource; check permissions. **Daemon unavailable** identifies failed
 daemon requests. Correct the connection and refresh to retry.
 
+## Blueprints, configs, volumes, and secrets
+
+The sidebar also provides **Blueprints**, **Configs**, **Volumes**, and **Secrets**.
+Each has a searchable list across scopes, a realm filter, pagination, an overview,
+and an optional complete JSON document. URLs preserve the kind and full scope,
+including identically named resources at different levels. Scope breadcrumbs
+open the relevant realm, space, stack, or cell.
+
+Blueprints, configs, and volumes may be realm-, space-, or stack-scoped. Secrets
+may also be cell-scoped. List responses expose metadata; open **View document**
+to retrieve all fields supported by the daemon's detail API. Volume overviews
+show the returned reclaim policy. Secret views display metadata only; secret
+`spec.data` is cleared before HTTP serialization in both lists and details.
+
+Config overviews show their explicit blueprint reference, including cross-realm
+references. Explicit `secretRef` and `volumeRef` entries in supported documents
+link to their full target scopes. Each reference reports checking, available,
+missing, or retrieval-failed state. Template references are identified as such.
+Bare volume sources are displayed without guessing which scope the daemon will
+resolve at create/start. References describe usage, not ownership.
+
+Refresh updates the current list/document and reference checks. Empty results,
+loading, retrieval failures, missing targets, and retained stale data are shown
+separately. No catalog data is read directly from daemon storage.
+
 ## Options and permissions
 
 - `--listen`: `localhost` (default) or a literal loopback IP, including `::1`.
@@ -105,3 +130,15 @@ panels, a resource list, or a selected resource overview.
 Use **Appearance** to choose **System**, **Light**, or **Dark**. System follows the
 device preference, including changes while the page is open. Explicit choices
 persist in this browser when local storage is available.
+
+### Catalog HTTP API
+
+- `GET /api/catalog/{blueprints|configs|volumes|secrets}` lists resources.
+- `GET /api/catalog/{kind}/{name}` reads a complete daemon-exposed document.
+
+Optional list query parameters `realm`, `space`, `stack`, and (secrets only)
+`cell` filter the scope subtree. Detail queries require `realm` and use the exact
+scope coordinates. Deeper coordinates require every shallower coordinate;
+non-secret cell scope and scope gaps return `invalid_request` (400). Names and
+query values must be URL-encoded. Missing resources return `not_found` (404).
+Secret responses never include `spec.data`.

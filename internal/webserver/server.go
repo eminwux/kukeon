@@ -177,12 +177,34 @@ func writeAPIError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, fs.ErrPermission):
 		status, code = http.StatusForbidden, "permission_denied"
-	case errors.Is(err, errdefs.ErrRealmNotFound), errors.Is(err, errdefs.ErrSpaceNotFound),
-		errors.Is(err, errdefs.ErrStackNotFound), errors.Is(err, errdefs.ErrCellNotFound), errors.Is(err, errdefs.ErrContainerNotFound):
+	case errors.Is(err, errdefs.ErrBlueprintNotFound),
+		errors.Is(err, errdefs.ErrConfigNotFound),
+		errors.Is(err, errdefs.ErrVolumeNotFound),
+		errors.Is(err, errdefs.ErrSecretNotFound),
+		errors.Is(err, errdefs.ErrBlueprintScopeNotFound),
+		errors.Is(err, errdefs.ErrConfigScopeNotFound),
+		errors.Is(err, errdefs.ErrVolumeScopeNotFound),
+		errors.Is(err, errdefs.ErrSecretScopeNotFound),
+		errors.Is(err, errdefs.ErrRealmNotFound),
+		errors.Is(err, errdefs.ErrSpaceNotFound),
+		errors.Is(
+			err,
+			errdefs.ErrStackNotFound,
+		),
+		errors.Is(err, errdefs.ErrCellNotFound),
+		errors.Is(err, errdefs.ErrContainerNotFound):
 		status, code = http.StatusNotFound, "not_found"
-	case errors.Is(err, errdefs.ErrInvalidRealmName), errors.Is(err, errdefs.ErrRealmNameRequired),
-		errors.Is(err, errdefs.ErrInvalidName), errors.Is(err, errdefs.ErrSpaceNameRequired),
-		errors.Is(err, errdefs.ErrStackNameRequired), errors.Is(err, errdefs.ErrCellNameRequired),
+	case errors.Is(err, errdefs.ErrConfig),
+		errors.Is(err, errdefs.ErrBlueprintNameRequired),
+		errors.Is(err, errdefs.ErrConfigNameRequired),
+		errors.Is(err, errdefs.ErrVolumeNameRequired),
+		errors.Is(err, errdefs.ErrSecretNameRequired),
+		errors.Is(err, errdefs.ErrInvalidRealmName),
+		errors.Is(err, errdefs.ErrRealmNameRequired),
+		errors.Is(err, errdefs.ErrInvalidName),
+		errors.Is(err, errdefs.ErrSpaceNameRequired),
+		errors.Is(err, errdefs.ErrStackNameRequired),
+		errors.Is(err, errdefs.ErrCellNameRequired),
 		errors.Is(err, errdefs.ErrContainerNameRequired):
 		status, code = http.StatusBadRequest, "invalid_request"
 	}

@@ -1,6 +1,8 @@
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
+import { useResource, ErrorNotice, type Resource, type Failure } from "./request";
+import { CatalogPage, catalogTitles, RelatedResources } from "./catalog";
 
 type SetupStatus = { name?: string; index?: number; state: string; error?: string };
 type RuntimeStatus = {
@@ -11,48 +13,6 @@ type RuntimeStatus = {
   containers?: RuntimeStatus[]; repos?: SetupStatus[]; stages?: SetupStatus[];
 };
 type Doc = { metadata: { name: string; labels?: Record<string, string> }; status?: RuntimeStatus; apiVersion?: string; kind?: string; [key: string]: unknown };
-type Failure = { code: string; message: string };
-type Resource<T> = { data?: T; loading: boolean; error?: Failure };
-
-// Abort replaced requests and ignore their results, including on realm switches.
-function useResource<T>(path: string | null, revision: number): Resource<T> {
-  const [state, setState] = useState<Resource<T>>({ loading: true });
-  const [previousPath, setPreviousPath] = useState(path);
-  // Clear the previous realm before painting a different selection.
-  if (previousPath !== path) {
-    setPreviousPath(path);
-    setState({ loading: path !== null });
-  }
-  useEffect(() => {
-    if (path === null) return;
-    const controller = new AbortController();
-    setState((old) => ({ data: old.data, loading: true }));
-    void (async () => {
-      try {
-        const response = await fetch(path, { signal: controller.signal });
-        const body = await response.json();
-        if (!response.ok) throw body.error ?? { code: "http_error", message: `HTTP ${response.status}` };
-        if (!controller.signal.aborted) setState({ data: body, loading: false });
-      } catch (error) {
-        if (controller.signal.aborted) return;
-        const failure = error as Partial<Failure>;
-        setState((old) => ({ data: old.data, loading: false,
-          error: { code: failure.code ?? "unavailable", message: failure.message ?? "Request failed. Try refreshing." },
-        }));
-      }
-    })();
-    return () => controller.abort();
-  }, [path, revision]);
-  return state;
-}
-
-function ErrorNotice({ error, kind = "Realm" }: { error: Failure; kind?: string }) {
-  const title = error.code === "permission_denied" ? "Permission denied"
-    : error.code === "unavailable" ? "Daemon unavailable"
-    : error.code === "not_found" ? `${kind} no longer exists` : "Request failed";
-  return <div className="error" role="alert"><strong>{title}</strong><p>{error.message}</p></div>;
-}
-
 const kinds = ["realm", "space", "stack", "cell", "container"];
 const titles = ["Realms", "Spaces", "Stacks", "Cells"];
 type Row = { doc: Doc; scope: string[] };
@@ -65,6 +25,7 @@ function readRoute(): Route {
     const params = new URLSearchParams(query);
     if (!path || path === "/dashboard") return { view: "dashboard", scope: [], parent: [], document: false };
     const parts = path.split("/").filter(Boolean).map(decodeURIComponent);
+    if (Object.keys(catalogTitles).includes(parts[0])) return { view: parts[0], scope: parts.slice(1, 6), parent: [], document: params.has("document") };
     if (parts[0] === "resource") return { view: "resource", scope: parts.slice(1, 6), parent: [], document: params.has("document") };
     if (titles.some(title => title.toLowerCase() === parts[0])) {
       const parent: unknown = JSON.parse(params.get("parent") ?? "[]");
@@ -207,6 +168,7 @@ function ResourceDetails({ route, revision }: { route: Route; revision: number }
     {detail.error && detail.data && <p className="stale">Stale resource details — refresh failed.</p>}
     {detail.data && (depth === 3 || depth === 4) && !route.document && <StatusSummary status={detail.data.status} kind={kind} />}
     {detail.data && <section className="panel"><div className="panel-heading"><h2>{route.document ? "API document" : "Resource overview"}</h2><StateBadge state={detail.data.status?.state} /></div>{route.document ? <pre tabIndex={0} aria-label={`Complete ${kind} JSON`}>{JSON.stringify(detail.data, null, 2)}</pre> : <div className="panel-body"><dl className="details-grid"><dt>Name</dt><dd>{detail.data.metadata.name}</dd><dt>Kind</dt><dd>{detail.data.kind ?? kind}</dd><dt>Scope</dt><dd>{route.scope.join(" / ")}</dd><dt>API version</dt><dd>{detail.data.apiVersion ?? "Not reported"}</dd><dt>Labels</dt><dd>{Object.entries(detail.data.metadata.labels ?? {}).map(([key, value]) => <span className="badge label-badge" key={key}>{key}: {value}</span>)}{!Object.keys(detail.data.metadata.labels ?? {}).length && "No labels"}</dd></dl>{depth < 3 && <a className="text-link" href={listLink(depth + 1, route.scope)}>View {titles[depth + 1].toLowerCase()} in this {kind} →</a>}</div>}</section>}
+    {detail.data && !route.document && <RelatedResources doc={detail.data} revision={revision} />}
     {depth === 3 && <section className="panel container-panel"><div className="panel-heading"><h2>Containers</h2><span className="badge">{detail.error ? "Stale observations" : detail.loading ? "Refreshing observations" : "Cell observations"}</span></div><div className="panel-body">{containers.loading && <p>Loading containers…</p>}{containers.error && <ErrorNotice error={containers.error} />}{containers.error && containers.data && <p className="stale">Stale container list — refresh failed.</p>}{!containers.loading && !containers.error && !containers.data?.length && <p>No containers found.</p>}<ul className="state-list">{containers.data?.map(container => <li key={container.id}><a className="text-link" href={resourceLink([...route.scope, container.id])}>{container.id}</a><StateBadge state={detail.data?.status?.containers?.find(item => item.name === container.id || item.id === container.id)?.state} /><a href={resourceLink([...route.scope, container.id], true)}>View document</a></li>)}</ul></div></section>}
   </>;
 }
@@ -234,7 +196,8 @@ function App() {
   const inventory = useInventory(revision);
   const depth = titles.findIndex(title => title.toLowerCase() === route.view);
   const activeDepth = route.view === "resource" ? Math.min(route.scope.length - 1, 3) : depth;
-  const heading = route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : "Dashboard";
+  const catalog = Object.keys(catalogTitles).includes(route.view);
+  const heading = catalog ? (route.scope.at(-1) ?? catalogTitles[route.view]) : route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : "Dashboard";
   const status = inventory.loading ? "Refreshing…" : inventory.error || inventory.data?.failures.length ? "Needs attention" : "Connected";
   return <div className="app-shell">
     <aside className={`sidebar ${menuOpen ? "is-open" : ""}`} id="resource-sidebar" aria-label="Workspace sidebar">
@@ -244,6 +207,8 @@ function App() {
         <a className="resource-link" href="#/dashboard" aria-current={route.view === "dashboard" ? "page" : undefined}><span aria-hidden="true">▦</span> Dashboard</a>
         <p className="nav-caption">Resources</p>
         {titles.map((title, i) => <a key={title} className="resource-link" href={listLink(i)} aria-current={activeDepth === i ? "page" : undefined}><span aria-hidden="true">◇</span>{title}</a>)}
+        <p className="nav-caption">Configuration &amp; storage</p>
+        {Object.entries(catalogTitles).map(([kind, title]) => <a key={kind} className="resource-link" href={`#/${kind}`} aria-current={route.view === kind ? "page" : undefined}><span aria-hidden="true">◇</span>{title}</a>)}
       </nav>
       <section className="connection" aria-label="Daemon connection">
         <p className="status" role="status"><span className={`dot ${inventory.error || inventory.data?.failures.length ? "failed" : ""}`} aria-hidden="true" />{status}</p>
@@ -255,16 +220,16 @@ function App() {
     <main className="workspace">
       <header className="toolbar">
         <button className="menu-toggle" aria-label="Toggle sidebar" aria-expanded={menuOpen} aria-controls="resource-sidebar" onClick={() => setMenuOpen(!menuOpen)}>☰</button>
-        <nav aria-label="Resource scope"><a href="#/dashboard">Workspace</a>{route.view === "resource" ? route.scope.map((name, i) => <a key={i} aria-label={`${kinds[i]}: ${name}`} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>) : <span>{heading}</span>}</nav>
+        <nav aria-label="Resource scope"><a href="#/dashboard">Workspace</a>{catalog ? <><a href={`#/${route.view}`}>{catalogTitles[route.view]}</a>{route.scope.slice(0, -1).map((name, i) => <a key={i} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}{route.scope.length > 0 && <span>{route.scope.at(-1)}</span>}</> : route.view === "resource" ? route.scope.map((name, i) => <a key={i} aria-label={`${kinds[i]}: ${name}`} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>) : <span>{heading}</span>}</nav>
         <button className="refresh" onClick={() => setRevision(value => value + 1)}>Refresh</button>
       </header>
       <div className="workspace-content">
-        <div className="page-heading"><p className="eyebrow">{route.view === "resource" ? "Resource details" : "Workspace"}</p><h1>{heading}</h1><p className="description">{route.view === "dashboard" ? "Your local infrastructure at a glance." : route.view === "resource" ? route.scope.join(" / ") : `Browse ${heading?.toLowerCase()} across your workspace.`}</p></div>
+        <div className="page-heading"><p className="eyebrow">{route.view === "resource" || (catalog && route.scope.length > 0) ? "Resource details" : "Workspace"}</p><h1>{heading}</h1><p className="description">{route.view === "dashboard" ? "Your local infrastructure at a glance." : route.view === "resource" || (catalog && route.scope.length > 0) ? route.scope.join(" / ") : `Browse ${heading?.toLowerCase()} across your workspace.`}</p></div>
         {inventory.loading && <p className="description" role="status">Refreshing resource inventory…</p>}
         {inventory.error && <ErrorNotice error={inventory.error} />}
         {inventory.error && inventory.data && <p className="stale">Stale inventory — refresh failed. Counts and lists may be out of date.</p>}
         {!!inventory.data?.failures.length && <div className="error" role="alert"><strong>Incomplete inventory</strong><p>Some scopes could not be loaded. Counts and lists exclude unavailable resources.</p><ul>{inventory.data.failures.map(message => <li key={message}>{message}</li>)}</ul></div>}
-        {route.view === "resource" ? <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} /> : <Dashboard inventory={inventory} />}
+        {catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} /> : route.view === "resource" ? <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} /> : <Dashboard inventory={inventory} />}
         <footer>Daemon inventory · {inventory.data ? <>Last refreshed <time dateTime={inventory.data.updatedAt}>{new Date(inventory.data.updatedAt).toLocaleTimeString()}</time></> : "Not refreshed yet"} · Refresh to retrieve the latest state.</footer>
       </div>
     </main>
