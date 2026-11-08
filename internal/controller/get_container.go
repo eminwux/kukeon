@@ -73,7 +73,7 @@ func (b *Exec) GetContainer(container intmodel.Container) (GetContainerResult, e
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			res.CellMetadataExists = false
-			return res, fmt.Errorf("failed to get cell %q: cell not found", cellName)
+			return res, fmt.Errorf("failed to get cell %q: %w", cellName, errdefs.ErrCellNotFound)
 		}
 		return res, fmt.Errorf("failed to get cell %q: %w", cellName, err)
 	}
@@ -150,7 +150,13 @@ func (b *Exec) GetContainer(container intmodel.Container) (GetContainerResult, e
 	}
 
 	if !res.ContainerExists {
-		return res, fmt.Errorf("container %q not found in cell %q at run-path %q", name, cellName, b.opts.RunPath)
+		return res, fmt.Errorf(
+			"container %q not found in cell %q at run-path %q: %w",
+			name,
+			cellName,
+			b.opts.RunPath,
+			errdefs.ErrContainerNotFound,
+		)
 	}
 
 	return res, nil

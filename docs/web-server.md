@@ -6,24 +6,44 @@ closes the HTTP listener and request-owned daemon connections; it does not stop
 kukeond or workloads. The binary embeds all frontend assets and needs no Node.js
 or external asset files at runtime.
 
-## Browse realms
+## Dashboard and resource lists
 
-The connection strip shows the selected daemon socket. **Connected** means the
-latest realm-list request succeeded; it is not a general daemon health check.
-Select any realm to read its complete JSON document, including metadata, spec,
-status, and any additional returned fields. The view is read-only.
+The UI opens to a dashboard with summary counts for realms, spaces, stacks, and
+cells and a breakdown of daemon-reported cell states. Select **Realms**,
+**Spaces**, **Stacks**, or **Cells** in the sidebar to open its list across scopes.
+Lists show name, reported state, and parent scope. Search by name or scope, filter
+by realm, and use the paging controls for collections larger than 25 entries.
 
-**Refresh** reloads the list and selected document. Loading messages identify
-pending requests. An empty list displays **No realms found**. Permission-denied
-errors mean the invoking user cannot access the socket; check its ownership and
-group permissions. **Daemon unavailable** means the request could not reach or
-complete against kukeond; check the displayed socket and daemon, then refresh.
+Select a resource name to open its overview. Choose **View document** in a list
+row or overview to inspect its JSON document. Cell and container responses omit environment values; cell responses also omit materialization parameters and environment overrides.
+Documents are not displayed automatically. A cell overview also lists its
+containers; their overviews and documents include daemon runtime status.
+Cell overviews include status cards for state, reported cgroup readiness, and
+container observations, plus daemon reason/message and configuration-divergence
+warnings. Container rows use the states reported in the cell's observations;
+missing observations show **Not reported**. Container detail status cards show
+state, restart count, valid timestamps, and repository/setup-stage outcomes.
+Exit codes appear only for terminal states with a reported finish time. State
+badges use text and color, and retained observations are marked stale on failure.
+Documents remain available through **View document**.
 
-If a refresh fails, previously loaded data stays visible with a **Stale** notice
-on each affected panel. A successful retry clears that notice. Selecting a
-different realm clears the previous document immediately; a deleted realm shows
-**Realm no longer exists**. The page stays available throughout connection
-failures, so retrying never requires restarting the web server.
+Breadcrumbs link to parent resources. Overview links open a child list narrowed
+to the selected scope, with **Clear scope** to return to all entries. URLs retain
+the selected list, scope, resource, and document mode. Browser Back/Forward works,
+and existing hierarchy bookmarks open the corresponding resource overview.
+
+**Refresh** reloads the inventory and current detail. Dashboard counts are based
+on daemon list calls with bounded concurrency. A failed scope read produces an
+**Incomplete inventory** warning and counts exclude inaccessible resources. When
+a refresh fails after a successful load, the prior inventory stays visible with a
+**Stale inventory** warning; retained detail documents have their own stale notice.
+Loading, empty collections, and searches with no matches have distinct messages.
+
+The sidebar shows the selected daemon socket. **Connected** means the latest
+inventory retrieval completed without failures, not that all workloads are
+healthy. Permission errors mean the invoking user cannot access the selected
+socket or resource; check permissions. **Daemon unavailable** identifies failed
+daemon requests. Correct the connection and refresh to retry.
 
 ## Options and permissions
 
@@ -54,6 +74,18 @@ All endpoints use same-origin HTTP GET and return JSON:
 | `/api/realms`        | Complete realm documents from kukeond, or `[]` when empty               |
 | `/api/realms/{name}` | Complete selected realm document                                        |
 
+Scoped endpoints follow the same hierarchy. Each collection returns `[]` when
+empty; append `/{name}` for its document:
+
+- `/api/realms/{realm}/spaces`
+- `/api/realms/{realm}/spaces/{space}/stacks`
+- `/api/realms/{realm}/spaces/{space}/stacks/{stack}/cells`
+- `/api/realms/{realm}/spaces/{space}/stacks/{stack}/cells/{cell}/containers`
+
+Each name is a URL-encoded path segment. Collections return daemon documents,
+except containers, whose collection returns daemon container specs. No fields
+are filtered from detail documents, and no direct resource-store reads are made.
+
 Errors use `{ "error": { "code": "...", "message": "..." } }`:
 `permission_denied` (403), `not_found` (404), `invalid_request` (400), or
 `unavailable` (503). Requests time out after ten seconds. Responses are not cached.
@@ -62,3 +94,14 @@ Errors use `{ "error": { "code": "...", "message": "..." } }`:
 kuke serve --listen 127.0.0.1 --port 5129
 curl http://127.0.0.1:5129/api/realms
 ```
+
+## Workspace layout and appearance
+
+The sidebar holds the dashboard and resource-type destinations, daemon connection
+information, and appearance controls. On small screens, the menu button opens the
+sidebar; choosing a destination closes it. The main workspace shows summary
+panels, a resource list, or a selected resource overview.
+
+Use **Appearance** to choose **System**, **Light**, or **Dark**. System follows the
+device preference, including changes while the page is open. Explicit choices
+persist in this browser when local storage is available.

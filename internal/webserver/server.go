@@ -14,7 +14,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-// Package webserver serves embedded assets and a read-only daemon-backed realm API.
+// Package webserver serves embedded assets and a read-only daemon-backed resource API.
 package webserver
 
 import (
@@ -120,6 +120,7 @@ func newHandler(authority, endpoint string, dial Dial) (http.Handler, error) {
 	})
 	mux.HandleFunc("GET /api/realms", realmHandler(dial, false))
 	mux.HandleFunc("GET /api/realms/{name}", realmHandler(dial, true))
+	registerResourceRoutes(mux, dial)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -176,9 +177,13 @@ func writeAPIError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, fs.ErrPermission):
 		status, code = http.StatusForbidden, "permission_denied"
-	case errors.Is(err, errdefs.ErrRealmNotFound):
+	case errors.Is(err, errdefs.ErrRealmNotFound), errors.Is(err, errdefs.ErrSpaceNotFound),
+		errors.Is(err, errdefs.ErrStackNotFound), errors.Is(err, errdefs.ErrCellNotFound), errors.Is(err, errdefs.ErrContainerNotFound):
 		status, code = http.StatusNotFound, "not_found"
-	case errors.Is(err, errdefs.ErrInvalidRealmName), errors.Is(err, errdefs.ErrRealmNameRequired):
+	case errors.Is(err, errdefs.ErrInvalidRealmName), errors.Is(err, errdefs.ErrRealmNameRequired),
+		errors.Is(err, errdefs.ErrInvalidName), errors.Is(err, errdefs.ErrSpaceNameRequired),
+		errors.Is(err, errdefs.ErrStackNameRequired), errors.Is(err, errdefs.ErrCellNameRequired),
+		errors.Is(err, errdefs.ErrContainerNameRequired):
 		status, code = http.StatusBadRequest, "invalid_request"
 	}
 	writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": err.Error()}})

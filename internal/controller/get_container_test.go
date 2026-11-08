@@ -333,6 +333,10 @@ func TestGetContainer_CellNotFound(t *testing.T) {
 				t.Fatal("expected error but got none")
 			}
 
+			if tt.name == "cell not found - ErrCellNotFound" && !errors.Is(err, errdefs.ErrCellNotFound) {
+				t.Errorf("missing cell sentinel: %v", err)
+			}
+
 			if tt.wantResult != nil {
 				tt.wantResult(t, result)
 			}
@@ -423,6 +427,10 @@ func TestGetContainer_ContainerNotFoundInCell(t *testing.T) {
 
 			if err == nil {
 				t.Fatal("expected error but got none")
+			}
+
+			if !errors.Is(err, errdefs.ErrContainerNotFound) {
+				t.Errorf("missing container sentinel: %v", err)
 			}
 
 			if tt.wantResult != nil {
