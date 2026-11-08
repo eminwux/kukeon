@@ -10,19 +10,19 @@ spec:
   containers:
     - id: root
       root: true
-      image: registry.eminwux.com/busybox:latest
+      image: ghcr.io/containerd/busybox:latest
       command: sleep
       args:
         - "3600"
     - id: worker
-      image: registry.eminwux.com/busybox:latest
+      image: ghcr.io/containerd/busybox:latest
       command: sleep
       args:
         - "3600"
       env:
         - WORKER_MODE=active
     - id: cache
-      image: registry.eminwux.com/busybox:latest
+      image: ghcr.io/containerd/busybox:latest
       command: sleep
       args:
         - "3600"
