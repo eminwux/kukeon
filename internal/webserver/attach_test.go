@@ -65,6 +65,23 @@ func (c *attachClient) AttachContainer(_ context.Context, doc v1.ContainerDoc) (
 }
 func (c *attachClient) Close() error { return nil }
 
+func TestForwardAttachOutputCancelsSessionOnWriteFailure(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	closeConnection := false
+	forwardAttachOutput(strings.NewReader("terminal output"), func(int, []byte) error {
+		return errors.New("websocket write failed")
+	}, func() {
+		cancel()
+		closeConnection = true
+	})
+
+	if ctx.Err() == nil || !closeConnection {
+		t.Fatalf("write failure cleanup: context error %v, connection closed %t", ctx.Err(), closeConnection)
+	}
+}
+
 func TestAttachBridge(t *testing.T) {
 	client := &attachClient{
 		cell: kukeonv1.GetCellResult{
@@ -178,6 +195,55 @@ func TestAttachUnsupported(t *testing.T) {
 	_, data, err := ws.ReadMessage()
 	if err != nil || !strings.Contains(string(data), errdefs.ErrAttachNotSupported.Error()) {
 		t.Fatalf("error message %s: %v", data, err)
+	}
+}
+
+func TestAttachCleanDetach(t *testing.T) {
+	client := &attachClient{
+		cell: kukeonv1.GetCellResult{
+			MetadataExists:           true,
+			RootContainerTaskRunning: true,
+			Cell:                     v1.CellDoc{Status: v1.CellStatus{State: v1.CellStateReady}},
+		},
+	}
+	mux := http.NewServeMux()
+	registerAttachRouteWith(mux, func(context.Context) (kukeonv1.Client, error) { return client, nil },
+		func(_ context.Context, opts attach.Options) error {
+			state, err := term.MakeRaw(int(opts.Stdin.Fd()))
+			if err != nil {
+				return err
+			}
+			defer term.Restore(int(opts.Stdin.Fd()), state)
+
+			got := make([]byte, 2)
+			if _, err = io.ReadFull(opts.Stdin, got); err != nil {
+				return err
+			}
+			if string(got) != "\x1d\x1d" {
+				return errors.New("detach sequence was not forwarded")
+			}
+			return attach.ErrDetached
+		}, func(context.Context, string, int, int) error { return nil })
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	url := "ws" + strings.TrimPrefix(server.URL, "http") +
+		"/api/realms/r/spaces/s/stacks/t/cells/c/containers/work/attach"
+	ws, _, err := websocket.DefaultDialer.Dial(url, http.Header{"Origin": []string{server.URL}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Close()
+	_ = ws.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if err = ws.WriteMessage(websocket.BinaryMessage, []byte("\x1d\x1d")); err != nil {
+		t.Fatal(err)
+	}
+	kind, message, readErr := ws.ReadMessage()
+	if readErr == nil {
+		t.Fatalf("clean detach sent websocket message type %d: %s", kind, message)
+	}
+	var netErr net.Error
+	if errors.As(readErr, &netErr) && netErr.Timeout() {
+		t.Fatal("websocket stayed open after clean detach")
 	}
 }
 

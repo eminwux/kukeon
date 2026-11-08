@@ -19,6 +19,7 @@ package webserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -46,6 +47,21 @@ func resizeTerminal(ctx context.Context, socket string, cols, rows int) error {
 	return ctrl.Resize(ctx, &api.ResizeArgs{Cols: cols, Rows: rows})
 }
 
+func forwardAttachOutput(output io.Reader, write func(int, []byte) error, onWriteFailure func()) {
+	const outputBufferSize = 16 * 1024
+	buf := make([]byte, outputBufferSize)
+	for {
+		n, err := output.Read(buf)
+		if n > 0 && write(websocket.BinaryMessage, buf[:n]) != nil {
+			onWriteFailure()
+			return
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
 //nolint:funlen // Keep the connection lifecycle and its cleanup in one handler.
 func registerAttachRouteWith(
 	mux *http.ServeMux,
@@ -69,7 +85,6 @@ func registerAttachRouteWith(
 			defer ws.Close()
 			const maxInputBytes = 64 * 1024
 			const writeTimeout = 10 * time.Second
-			const outputBufferSize = 16 * 1024
 			const detachTimeout = 3 * time.Second
 			const initialRows, initialCols = 24, 80
 			ws.SetReadLimit(maxInputBytes)
@@ -157,21 +172,15 @@ func registerAttachRouteWith(
 			outputDone := make(chan struct{})
 			go func() {
 				defer close(outputDone)
-				buf := make([]byte, outputBufferSize)
-				for {
-					n, e := master.Read(buf)
-					if n > 0 && write(websocket.BinaryMessage, buf[:n]) != nil {
-						return
-					}
-					if e != nil {
-						return
-					}
-				}
+				forwardAttachOutput(master, write, func() {
+					stop()
+					_ = ws.Close()
+				})
 			}()
 			go func() {
 				defer close(finished)
 				runErr := <-done
-				if session.Err() == nil && runErr != nil {
+				if session.Err() == nil && runErr != nil && !errors.Is(runErr, attach.ErrDetached) {
 					fail(fmt.Errorf("terminal connection lost: %w", runErr))
 				}
 				_ = ws.Close()
