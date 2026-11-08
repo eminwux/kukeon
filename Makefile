@@ -273,3 +273,13 @@ web-ui-check: web-ui
 	git diff --exit-code -- internal/webui/dist
 	@test -z "$$(git ls-files --others --exclude-standard -- internal/webui/dist)" || \
 		{ echo "Untracked generated web assets; regenerate and commit internal/webui/dist" >&2; exit 1; }
+
+# Browser dependencies are installed by web-ui (or npm ci); install Chromium
+# once with `cd internal/webui/frontend && npx playwright install chromium`.
+.PHONY: web-ui-test web-ui-smoke
+web-ui-test: kuke
+	cd internal/webui/frontend && npm test
+
+# Requires KUKE_WEB_SMOKE_HOST=unix:///path/to/a/running/kukeond.sock.
+web-ui-smoke: kuke
+	cd internal/webui/frontend && npm run test:smoke

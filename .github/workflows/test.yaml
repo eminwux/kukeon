@@ -59,6 +59,10 @@ jobs:
           go-version-file: go.mod
       - name: Check generated assets match source
         run: make web-ui-check
+      - name: Install browser
+        run: cd internal/webui/frontend && npx playwright install --with-deps chromium
+      - name: Test browser states against the packaged binary
+        run: make web-ui-test
       - name: Test packaged assets outside the checkout
         run: |
           GOWORK=off go test -c -o /tmp/webui.test ./internal/webui
