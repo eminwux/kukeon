@@ -21,8 +21,8 @@ names are identified by their complete scope. Empty collections, no matching
 search results, loading, partial reads, and failed refreshes have distinct states.
 
 A resource name opens a structured overview with metadata, status, scope, and
-links to its children. The complete JSON document appears only after choosing
-**View document**. Cell overviews also link to their containers. Breadcrumbs,
+links to its children. The JSON document appears only after choosing
+**View document**. Cell and container documents omit environment values and cell materialization inputs. Cell overviews also link to their containers. Breadcrumbs,
 scoped list shortcuts, URL state, and browser history preserve the current task.
 Previously bookmarked hierarchy URLs continue to open the resource overview.
 
@@ -43,7 +43,7 @@ https://github.com/paperclipai/paperclip/blob/master/ui/src/components/Sidebar.t
 ## Next increments
 
 1. Add richer structured summaries for API-exposed lifecycle, readiness, and
-   resource-specific fields while retaining complete documents on demand.
+   resource-specific fields while retaining documents on demand.
 2. Add sorting and URL-persisted search/filter state; consider a paginated daemon
    inventory API as workspaces grow beyond browser aggregation.
 3. Add blueprint, config, volume, and secret list pages when those issue #1386

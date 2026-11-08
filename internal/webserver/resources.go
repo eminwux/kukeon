@@ -121,6 +121,9 @@ func registerCellRoutes(mux *http.ServeMux, dial Dial) {
 			if docs == nil {
 				docs = []v1beta1.CellDoc{}
 			}
+			for i := range docs {
+				docs[i] = redactCell(docs[i])
+			}
 			return docs, err
 		}),
 	)
@@ -141,7 +144,7 @@ func registerCellRoutes(mux *http.ServeMux, dial Dial) {
 			if !result.MetadataExists {
 				return nil, errdefs.ErrCellNotFound
 			}
-			return result.Cell, nil
+			return redactCell(result.Cell), nil
 		}),
 	)
 }
@@ -159,6 +162,10 @@ func registerContainerRoutes(mux *http.ServeMux, dial Dial) {
 			)
 			if docs == nil {
 				docs = []v1beta1.ContainerSpec{}
+			}
+			docs = append([]v1beta1.ContainerSpec{}, docs...)
+			for i := range docs {
+				docs[i].Env = nil
 			}
 			return docs, err
 		}),
@@ -184,7 +191,24 @@ func registerContainerRoutes(mux *http.ServeMux, dial Dial) {
 			if !result.ContainerExists {
 				return nil, errdefs.ErrContainerNotFound
 			}
+			result.Container.Spec.Env = nil
 			return result.Container, nil
 		}),
 	)
+}
+
+// redactCell removes environment and materialization inputs from browser responses.
+func redactCell(doc v1beta1.CellDoc) v1beta1.CellDoc {
+	doc.Spec.Containers = append([]v1beta1.ContainerSpec(nil), doc.Spec.Containers...)
+	for i := range doc.Spec.Containers {
+		doc.Spec.Containers[i].Env = nil
+	}
+	doc.Spec.RuntimeEnv = nil
+	if doc.Spec.Provenance != nil {
+		provenance := *doc.Spec.Provenance
+		provenance.Params = nil
+		provenance.EnvOverrides = nil
+		doc.Spec.Provenance = &provenance
+	}
+	return doc
 }

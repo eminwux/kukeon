@@ -15,9 +15,9 @@ Lists show name, reported state, and parent scope. Search by name or scope, filt
 by realm, and use the paging controls for collections larger than 25 entries.
 
 Select a resource name to open its overview. Choose **View document** in a list
-row or overview to inspect every API-exposed field in its complete JSON document.
+row or overview to inspect its JSON document. Cell and container responses omit environment values; cell responses also omit materialization parameters and environment overrides.
 Documents are not displayed automatically. A cell overview also lists its
-containers; their overviews and complete documents include daemon runtime status.
+containers; their overviews and documents include daemon runtime status.
 Cell overviews include status cards for state, reported cgroup readiness, and
 container observations, plus daemon reason/message and configuration-divergence
 warnings. Container rows use the states reported in the cell's observations;
@@ -25,7 +25,7 @@ missing observations show **Not reported**. Container detail status cards show
 state, restart count, valid timestamps, and repository/setup-stage outcomes.
 Exit codes appear only for terminal states with a reported finish time. State
 badges use text and color, and retained observations are marked stale on failure.
-Complete documents remain available through **View document**.
+Documents remain available through **View document**.
 
 Breadcrumbs link to parent resources. Overview links open a child list narrowed
 to the selected scope, with **Clear scope** to return to all entries. URLs retain
@@ -75,7 +75,7 @@ All endpoints use same-origin HTTP GET and return JSON:
 | `/api/realms/{name}` | Complete selected realm document                                        |
 
 Scoped endpoints follow the same hierarchy. Each collection returns `[]` when
-empty; append `/{name}` for its complete document:
+empty; append `/{name}` for its document:
 
 - `/api/realms/{realm}/spaces`
 - `/api/realms/{realm}/spaces/{space}/stacks`
