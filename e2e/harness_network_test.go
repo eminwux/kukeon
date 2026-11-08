@@ -298,7 +298,32 @@ func e2eRunEnv(env []string, args []string) []string {
 		result,
 		"KUKEON_POD_SUBNET_CIDR="+subnet,
 		"KUKEOND_CONFIGURATION="+filepath.Join(runPath, "kukeond.yaml"),
+		"KUKE_CONFIGURATION="+filepath.Join(runPath, "kuke.yaml"),
 	)
+}
+
+func TestE2ERunEnvUsesRunPathClientConfiguration(t *testing.T) {
+	runPath := filepath.Join(t.TempDir(), "run")
+	e2eNetwork.mu.Lock()
+	previousSubnets := e2eNetwork.subnets
+	e2eNetwork.subnets = map[string]string{runPath: "10.192.0.0/20"}
+	e2eNetwork.mu.Unlock()
+	t.Cleanup(func() {
+		e2eNetwork.mu.Lock()
+		e2eNetwork.subnets = previousSubnets
+		e2eNetwork.mu.Unlock()
+	})
+
+	env := e2eRunEnv([]string{
+		"KEEP=value",
+		"KUKE_CONFIGURATION=/home/test/.kuke/kuke.yaml",
+	}, []string{"--run-path", runPath})
+	if got, want := env[len(env)-1], "KUKE_CONFIGURATION="+filepath.Join(runPath, "kuke.yaml"); got != want {
+		t.Fatalf("client configuration = %q, want %q (env: %v)", got, want, env)
+	}
+	if got, want := env[0], "KEEP=value"; got != want {
+		t.Fatalf("preserved environment = %q, want %q", got, want)
+	}
 }
 
 func TestE2ENetworkPreflight(t *testing.T) {
