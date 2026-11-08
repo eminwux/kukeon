@@ -6,8 +6,24 @@ closes the HTTP listener and request-owned daemon connections; it does not stop
 kukeond or workloads. The binary embeds all frontend assets and needs no Node.js
 or external asset files at runtime.
 
-This delivery serves the preview shell and realm API. Interactive realm browsing,
-refresh and stale-data indicators, and browser smoke verification arrive in slice 3.
+## Browse realms
+
+The connection strip shows the selected daemon socket. **Connected** means the
+latest realm-list request succeeded; it is not a general daemon health check.
+Select any realm to read its complete JSON document, including metadata, spec,
+status, and any additional returned fields. The view is read-only.
+
+**Refresh** reloads the list and selected document. Loading messages identify
+pending requests. An empty list displays **No realms found**. Permission-denied
+errors mean the invoking user cannot access the socket; check its ownership and
+group permissions. **Daemon unavailable** means the request could not reach or
+complete against kukeond; check the displayed socket and daemon, then refresh.
+
+If a refresh fails, previously loaded data stays visible with a **Stale** notice
+on each affected panel. A successful retry clears that notice. Selecting a
+different realm clears the previous document immediately; a deleted realm shows
+**Realm no longer exists**. The page stays available throughout connection
+failures, so retrying never requires restarting the web server.
 
 ## Options and permissions
 
