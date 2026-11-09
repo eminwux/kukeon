@@ -8,6 +8,7 @@ import type { InventoryResource } from "./inventory";
 
 type Container = { id: string; attachable?: boolean; root?: boolean };
 export type TerminalState = "connecting" | "attached" | "disconnected";
+type ThemeMode = "light" | "dark" | "system";
 type Session = { id: string; scope: string[]; container: string; state: TerminalState; message: string; generation: number };
 const maxConnections = 4;
 const maxSessions = 8;
@@ -59,7 +60,17 @@ export function useTerminalSessions(inventory: InventoryResource) {
 
 type Manager = ReturnType<typeof useTerminalSessions>;
 
-function TerminalSession({ session, active, update }: { session: Session; active: boolean; update: Manager["update"] }) {
+const terminalThemes = {
+  light: { background: "#f8fafc", foreground: "#182230", cursor: "#275dad", cursorAccent: "#f8fafc", selectionBackground: "#bcd7ff",
+    black: "#253449", red: "#a82d35", green: "#157347", yellow: "#8c6000", blue: "#2458b8", magenta: "#8d3ba5", cyan: "#006b78", white: "#d7dee9",
+    brightBlack: "#5c6a7d", brightRed: "#cc3540", brightGreen: "#198657", brightYellow: "#a16d00", brightBlue: "#356ed4", brightMagenta: "#a24ab8", brightCyan: "#087e8d", brightWhite: "#ffffff" },
+  dark: { background: "#0d1421", foreground: "#e6edf7", cursor: "#a9c7ff", cursorAccent: "#0d1421", selectionBackground: "#375077",
+    black: "#263244", red: "#ff777a", green: "#78dca0", yellow: "#e9c875", blue: "#8cb7ff", magenta: "#d4a5f0", cyan: "#7bd8e2", white: "#d8e1ef",
+    brightBlack: "#8292a8", brightRed: "#ff9b9d", brightGreen: "#9ce8b7", brightYellow: "#f2d795", brightBlue: "#b0ceff", brightMagenta: "#e4c1f7", brightCyan: "#a2e9ef", brightWhite: "#ffffff" },
+};
+const resolvedTheme = (mode: ThemeMode, systemDark: boolean) => terminalThemes[mode === "system" ? systemDark ? "dark" : "light" : mode];
+
+function TerminalSession({ session, active, expanded, update, themeMode }: { session: Session; active: boolean; expanded: boolean; update: Manager["update"]; themeMode: ThemeMode }) {
   const mount = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal | null>(null);
   const socket = useRef<WebSocket | null>(null);
@@ -69,8 +80,8 @@ function TerminalSession({ session, active, update }: { session: Session; active
 
   useEffect(() => {
     if (!mount.current) return;
-    const term = new Terminal({ cursorBlink: true, convertEol: false, fontSize: 14, scrollback: 2000,
-      theme: { background: "#111827", foreground: "#f3f4f6" } });
+    const term = new Terminal({ cursorBlink: true, cursorStyle: "block", cursorInactiveStyle: "outline", convertEol: false, fontSize: 14, scrollback: 2000,
+      theme: resolvedTheme(themeMode, window.matchMedia("(prefers-color-scheme: dark)").matches) });
     const fit = new FitAddon();
     terminal.current = term;
     term.loadAddon(fit);
@@ -93,6 +104,14 @@ function TerminalSession({ session, active, update }: { session: Session; active
   }, []);
 
   useEffect(() => {
+    const preference = window.matchMedia("(prefers-color-scheme: dark)");
+    const sync = () => { if (terminal.current) terminal.current.options.theme = resolvedTheme(themeMode, preference.matches); };
+    sync();
+    preference.addEventListener("change", sync);
+    return () => preference.removeEventListener("change", sync);
+  }, [themeMode]);
+
+  useEffect(() => {
     let connection: WebSocket;
     try {
       connection = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}${apiPath(session.scope)}/containers/${encodeURIComponent(session.container)}/attach`);
@@ -103,16 +122,27 @@ function TerminalSession({ session, active, update }: { session: Session; active
     socket.current = connection;
     connection.binaryType = "arraybuffer";
     let failure = "";
+    let ready = false;
+    let receivedOutput = false;
     connection.onopen = () => {
-      update(session.id, session.generation, "attached", "Connected");
       fitNow.current();
     };
     connection.onmessage = event => {
-      if (event.data instanceof ArrayBuffer) terminal.current?.write(new Uint8Array(event.data));
+      if (event.data instanceof ArrayBuffer) {
+        terminal.current?.write(new Uint8Array(event.data));
+        if (!receivedOutput) {
+          receivedOutput = true;
+          if (ready) update(session.id, session.generation, "attached", "Attached");
+        }
+      }
       else if (typeof event.data === "string") {
         try {
           const response = JSON.parse(event.data);
-          if (response.type === "error") failure = typeof response.message === "string" ? response.message : "Terminal server error.";
+          if (response.type === "ready") {
+            ready = true;
+            update(session.id, session.generation, "attached", receivedOutput ? "Attached" : "Attached — waiting for container output. A prompt appears when the container runs an interactive shell.");
+          }
+          else if (response.type === "error") failure = typeof response.message === "string" ? response.message : "Terminal server error.";
           else failure = "Invalid terminal response.";
         } catch { failure = "Invalid terminal response."; }
         if (failure) { update(session.id, session.generation, "disconnected", failure); connection.close(); }
@@ -133,12 +163,34 @@ function TerminalSession({ session, active, update }: { session: Session; active
     return () => cancelAnimationFrame(frame);
   }, [active]);
 
+  useEffect(() => {
+    if (!active || !expanded) return;
+    const frame = requestAnimationFrame(() => { fitNow.current(); terminal.current?.focus(); });
+    return () => cancelAnimationFrame(frame);
+  }, [active, expanded]);
+
   return <div className="terminal-session" hidden={!active} aria-hidden={!active}>
     <div ref={mount} className="terminal-screen" aria-label={`Terminal for ${session.scope.join(" / ")} / ${session.container}`} />
   </div>;
 }
 
-export function TerminalWorkspace({ scope, revision, inventory, manager }: { scope: string[] | null; revision: number; inventory: InventoryResource; manager: Manager }) {
+export function TerminalWorkspace({ scope, revision, inventory, manager, themeMode }: { scope: string[] | null; revision: number; inventory: InventoryResource; manager: Manager; themeMode: ThemeMode }) {
+  const [expanded, setExpanded] = useState(false);
+  const expandButton = useRef<HTMLButtonElement>(null);
+  const screens = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (!scope) setExpanded(false); }, [scope]);
+  useEffect(() => {
+    if (!expanded) return;
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || screens.current?.contains(event.target as Node)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setExpanded(false);
+      requestAnimationFrame(() => expandButton.current?.focus());
+    };
+    window.addEventListener("keydown", escape, true);
+    return () => window.removeEventListener("keydown", escape, true);
+  }, [expanded]);
   const path = scope?.length === 4 ? `${apiPath(scope)}/containers` : null;
   const containers = useResource<Container[]>(path, revision);
   const eligible = containers.data?.filter(container => container.attachable && !container.root) ?? [];
@@ -154,8 +206,8 @@ export function TerminalWorkspace({ scope, revision, inventory, manager }: { sco
   const unavailable = cellState && unavailableStates.has(cellState);
   const atLimit = !current && (connections >= maxConnections || manager.sessions.length >= maxSessions);
   const reconnectLimited = current?.state === "disconnected" && connections >= maxConnections;
-  return <section className="panel terminal-workspace" id="cell-terminal" hidden={!scope} aria-label="Terminal workspace">
-    <div className="panel-heading"><h2>Terminal</h2><span className="badge">{connections} / {maxConnections} connections</span></div>
+  return <section className={`panel terminal-workspace${expanded ? " is-expanded" : ""}`} id="cell-terminal" hidden={!scope} aria-label="Terminal workspace">
+    <div className="panel-heading"><h2>Terminal</h2><div className="terminal-heading-actions"><span className="badge">{connections} / {maxConnections} connections</span><button ref={expandButton} type="button" aria-expanded={expanded} aria-controls="terminal-screens" onClick={() => setExpanded(value => !value)}>{expanded ? "Collapse terminal" : "Expand terminal"}</button></div></div>
     {scope && <div className="terminal-controls">
       {containers.loading && <p role="status">Loading containers…</p>}
       {containers.error && <ErrorNotice error={containers.error} kind="Containers" />}
@@ -177,6 +229,6 @@ export function TerminalWorkspace({ scope, revision, inventory, manager }: { sco
         event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
       }}>{openInCell.map(item => <button key={item.id} role="tab" aria-selected={item.id === currentId} tabIndex={item.id === currentId ? 0 : -1} onClick={() => manager.select(item.scope, item.container)}>{item.container} · {item.state}</button>)}</div>}
     </div>}
-    <div className="terminal-screens">{manager.sessions.map(session => <TerminalSession key={session.id} session={session} active={!!scope && session.id === currentId} update={manager.update} />)}</div>
+    <div className="terminal-screens" id="terminal-screens" ref={screens}>{manager.sessions.map(session => <TerminalSession key={session.id} session={session} active={!!scope && session.id === currentId} expanded={expanded} update={manager.update} themeMode={themeMode} />)}</div>
   </section>;
 }

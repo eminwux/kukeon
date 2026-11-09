@@ -104,7 +104,7 @@ func TestAttachBridge(t *testing.T) {
 				return err
 			}
 			defer term.Restore(int(opts.Stdin.Fd()), state)
-			_, _ = opts.Stdout.Write([]byte("hello"))
+			_, _ = opts.Stdout.Write([]byte("\x1b[31mhello\x1b[0m"))
 			buf := make([]byte, 2)
 			if _, err = io.ReadFull(opts.Stdin, buf); err != nil {
 				return err
@@ -135,9 +135,27 @@ func TestAttachBridge(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = ws.SetReadDeadline(time.Now().Add(5 * time.Second))
-	_, output, err := ws.ReadMessage()
-	if err != nil || string(output) != "hello" {
-		t.Fatalf("output %q: %v", output, err)
+	var output []byte
+	var gotReady bool
+	for !gotReady || output == nil {
+		kind, data, readErr := ws.ReadMessage()
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if kind == websocket.TextMessage {
+			if string(data) != `{"type":"ready"}` {
+				t.Fatalf("unexpected status %q", data)
+			}
+			gotReady = true
+		} else {
+			if !gotReady {
+				t.Fatal("terminal output arrived before attach readiness")
+			}
+			output = data
+		}
+	}
+	if string(output) != "\x1b[31mhello\x1b[0m" {
+		t.Fatalf("ANSI output %q", output)
 	}
 	if err = ws.WriteMessage(websocket.BinaryMessage, []byte("hi")); err != nil {
 		t.Fatal(err)
@@ -245,6 +263,9 @@ func TestAttachCleanDetach(t *testing.T) {
 		t.Fatal(err)
 	}
 	kind, message, readErr := ws.ReadMessage()
+	if readErr == nil && kind == websocket.TextMessage && string(message) == `{"type":"ready"}` {
+		kind, message, readErr = ws.ReadMessage()
+	}
 	if readErr == nil {
 		t.Fatalf("clean detach sent websocket message type %d: %s", kind, message)
 	}
@@ -343,6 +364,9 @@ func TestAttachRealTerminal(t *testing.T) {
 			t.Fatalf("terminal output %q: %v", output.String(), readErr)
 		}
 		if kind == websocket.TextMessage {
+			if string(data) == `{"type":"ready"}` {
+				continue
+			}
 			t.Fatalf("terminal error: %s", data)
 		}
 		output.Write(data)

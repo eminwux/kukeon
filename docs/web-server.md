@@ -195,6 +195,17 @@ tab; the sidebar shows each cell's terminal connection state. Inactive terminals
 do not receive keyboard input. Each cell remembers its selected container until
 the page is reloaded.
 
+Choose **Expand terminal** to use the available screen space while retaining the
+cell sidebar and the same attachment. **Collapse terminal**, or Escape while
+focus is on the panel controls, returns to the regular panel. Escape inside the
+terminal still reaches the container. Terminal colors follow the selected light, dark, or system
+appearance. A WebSocket opening is still **Connecting**; the terminal becomes
+**Attached** only after the server validates the cell and attach socket and sets
+up its PTY bridge. A quiet container can remain blank after that point. Prompts
+and ANSI colors come from the container's program; use an interactive shell if
+you expect a shell prompt. The ready message does not confirm that the program
+has produced output or that its process will survive a disconnect.
+
 The browser allows four concurrent terminal connections and eight retained
 terminal surfaces. At the limit, choose **Detach** on an existing terminal to
 free a slot. Detach closes that attachment and clears its browser scrollback;

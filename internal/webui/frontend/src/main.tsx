@@ -162,7 +162,7 @@ function App() {
         {inventory.error && <ErrorNotice error={inventory.error} />}
         {inventory.error && inventory.data && <p className="stale">Stale inventory — refresh failed. Counts and lists may be out of date.</p>}
         {!!inventory.data?.failures.length && <div className="error" role="alert"><strong>Incomplete inventory</strong><p>Some scopes could not be loaded. Counts and lists exclude unavailable resources.</p><ul>{inventory.data.failures.map(message => <li key={message}>{message}</li>)}</ul></div>}
-        <TerminalWorkspace scope={terminalScope} revision={revision} inventory={inventory} manager={terminals} />
+        <TerminalWorkspace scope={terminalScope} revision={revision} inventory={inventory} manager={terminals} themeMode={theme} />
         {isWorkspace ? route.scope.length === 4 ? <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} workspace /> : <WorkspaceLanding inventory={inventory} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} onCreated={() => setRevision(value => value + 1)} /> : route.view === "resource" ? <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} /> : <Dashboard inventory={inventory} />}
         <footer>Daemon inventory · {inventory.data ? <>Last refreshed <time dateTime={inventory.data.updatedAt}>{new Date(inventory.data.updatedAt).toLocaleTimeString()}</time></> : "Not refreshed yet"} · Refresh to retrieve the latest state.</footer>
       </div>

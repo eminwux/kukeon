@@ -37,24 +37,73 @@ test("terminal selects eligible containers, forwards input and resize, and detac
   const messages = [];
   let selected = "";
   let closed = false;
+  let sendReady = () => {};
+  let sendOutput = () => {};
   await page.routeWebSocket("**/attach", socket => {
     selected = new URL(socket.url()).pathname;
     socket.onMessage(message => { messages.push(message); });
     socket.onClose(() => { closed = true; });
-    socket.send(new TextEncoder().encode("terminal ready"));
+    sendReady = () => socket.send(JSON.stringify({ type: "ready" }));
+    sendOutput = () => socket.send(Buffer.from("\x1b[32mshell\x1b[0m $ "));
   });
   await page.goto(`${server.url}#/resource/dev/shared/services/api`);
   const panel = page.locator("section").filter({ has: page.getByRole("heading", { name: "Terminal", exact: true }) });
   await expect(panel.locator("option")).toHaveCount(2);
   await panel.getByLabel("Container").selectOption("shell");
   await panel.getByRole("button", { name: "Attach" }).click();
-  await expect(panel.getByRole("status")).toHaveText("Connected");
   await expect.poll(() => selected).toContain("/containers/shell/attach");
+  await expect(panel.locator(".terminal-connection-state")).toHaveText("Connecting…");
+  sendReady();
+  await expect(panel.locator(".terminal-connection-state")).toContainText("waiting for container output");
+  sendOutput();
+  await expect(panel.locator(".terminal-connection-state")).toHaveText("Attached");
   await expect.poll(() => messages.some(message => typeof message === "string" && JSON.parse(message).type === "resize")).toBe(true);
   await panel.locator(".xterm-helper-textarea").press("a");
   await expect.poll(() => messages.some(message => Buffer.isBuffer(message) && message.toString() === "a")).toBe(true);
   await panel.getByRole("button", { name: "Detach" }).click();
   await expect.poll(() => closed).toBe(true);
+});
+
+test("expanded terminal keeps its session, resizes, and follows the appearance setting", async ({ page }) => {
+  await mock(page, path => path.endsWith("/containers") ? { json: [{ id: "shell", attachable: true }] } : undefined);
+  let connections = 0;
+  const messages = [];
+  await page.routeWebSocket("**/attach", socket => {
+    connections++;
+    socket.onMessage(message => { messages.push(message); });
+    socket.send(JSON.stringify({ type: "ready" }));
+  });
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  const panel = page.getByRole("region", { name: "Terminal workspace" });
+  await panel.getByRole("button", { name: "Attach" }).click();
+  await expect(panel.locator(".terminal-connection-state")).toContainText("Attached");
+  const screen = panel.locator(".terminal-screen");
+  const initial = await screen.boundingBox();
+  const initialResizeCount = messages.filter(message => typeof message === "string" && JSON.parse(message).type === "resize").length;
+  await panel.getByRole("button", { name: "Expand terminal" }).click();
+  await expect(panel).toHaveClass(/is-expanded/);
+  await expect(panel.getByRole("button", { name: "Collapse terminal" })).toHaveAttribute("aria-expanded", "true");
+  await expect(panel.locator(".terminal-session:not([hidden]) .xterm-helper-textarea")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveClass(/is-expanded/);
+  await expect.poll(() => messages.some(message => Buffer.isBuffer(message) && message.includes(0x1b))).toBe(true);
+  await expect.poll(async () => (await screen.boundingBox())?.height).toBeGreaterThan(initial.height);
+  await expect.poll(() => messages.filter(message => typeof message === "string" && JSON.parse(message).type === "resize").length).toBeGreaterThan(initialResizeCount);
+  expect(connections).toBe(1);
+  await page.getByLabel("Appearance").selectOption("dark");
+  await expect.poll(() => screen.evaluate(el => getComputedStyle(el).backgroundColor)).toBe("rgb(13, 20, 33)");
+  await panel.getByRole("button", { name: "Collapse terminal" }).focus();
+  await page.keyboard.press("Escape");
+  await expect(panel).not.toHaveClass(/is-expanded/);
+  await expect(panel.getByRole("button", { name: "Expand terminal" })).toBeFocused();
+  expect(connections).toBe(1);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await panel.getByRole("button", { name: "Expand terminal" }).click();
+  await expect(page.getByRole("button", { name: "Toggle sidebar" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  await page.getByRole("button", { name: "Toggle sidebar" }).click();
+  await expect(page.getByRole("complementary", { name: "Cell sidebar" })).toBeVisible();
+  expect(connections).toBe(1);
 });
 
 test("Workspace retains independent scoped terminals, focus and resize while switching cells", async ({ page }) => {
@@ -68,20 +117,21 @@ test("Workspace retains independent scoped terminals, focus and resize while swi
     messages.set(path, []);
     socket.onMessage(message => messages.get(path).push(message));
     socket.onClose(() => closed.push(path));
-    socket.send(new TextEncoder().encode(`output for ${path}`));
+    socket.send(JSON.stringify({ type: "ready" }));
+    socket.send(Buffer.from(`output for ${path}`));
   });
   const cells = page.getByRole("navigation", { name: "Cell navigation" });
   await page.goto(server.url);
   await cells.getByRole("link", { name: "Open dev / shared / services / api" }).click();
   const panel = page.getByRole("region", { name: "Terminal workspace" });
   await panel.getByRole("button", { name: "Attach" }).click();
-  await expect(panel.locator(".terminal-connection-state")).toHaveText("Connected");
+  await expect(panel.locator(".terminal-connection-state")).toHaveText("Attached");
   const devPath = "/api/realms/dev/spaces/shared/stacks/services/cells/api/containers/shell/attach";
   const prodPath = "/api/realms/prod/spaces/shared/stacks/services/cells/api/containers/shell/attach";
   const devScreen = await page.locator('.terminal-screen[aria-label="Terminal for dev / shared / services / api / shell"]').elementHandle();
   await cells.getByRole("link", { name: "Open prod / shared / services / api" }).click();
   await panel.getByRole("button", { name: "Attach" }).click();
-  await expect(panel.locator(".terminal-connection-state")).toHaveText("Connected");
+  await expect(panel.locator(".terminal-connection-state")).toHaveText("Attached");
   await expect.poll(() => sockets.size).toBe(2);
   expect(closed).toEqual([]);
   expect(await devScreen.evaluate(el => el.isConnected)).toBe(true);
@@ -89,7 +139,7 @@ test("Workspace retains independent scoped terminals, focus and resize while swi
   await expect.poll(() => messages.get(prodPath).some(message => Buffer.isBuffer(message) && message.toString() === "p")).toBe(true);
   expect(messages.get(devPath).some(message => Buffer.isBuffer(message) && message.toString() === "p")).toBe(false);
   await cells.getByRole("link", { name: "Open dev / shared / services / api" }).click();
-  await expect(panel.locator(".terminal-connection-state")).toHaveText("Connected");
+  await expect(panel.locator(".terminal-connection-state")).toHaveText("Attached");
   expect(await devScreen.evaluate(el => el === document.querySelector('.terminal-screen[aria-label="Terminal for dev / shared / services / api / shell"]'))).toBe(true);
   await panel.locator(".terminal-session:not([hidden]) .xterm-helper-textarea").press("d");
   await expect.poll(() => messages.get(devPath).some(message => Buffer.isBuffer(message) && message.toString() === "d")).toBe(true);
@@ -101,7 +151,7 @@ test("Workspace retains independent scoped terminals, focus and resize while swi
   await expect(page.locator(".page-heading h1")).toHaveText("Administration");
   expect(closed).toEqual([]);
   await cells.getByRole("link", { name: "Open dev / shared / services / api" }).click();
-  await expect(panel.locator(".terminal-connection-state")).toHaveText("Connected");
+  await expect(panel.locator(".terminal-connection-state")).toHaveText("Attached");
   await expect(cells.getByRole("link", { name: "Open prod / shared / services / api" })).toContainText("Terminal attached");
 });
 
@@ -110,13 +160,14 @@ test("terminal tabs retain container selection, enforce connection limits, and d
   const closed = [];
   await page.routeWebSocket("**/attach", socket => {
     socket.onClose(() => closed.push(new URL(socket.url()).pathname));
+    socket.send(JSON.stringify({ type: "ready" }));
   });
   await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
   const panel = page.getByRole("region", { name: "Terminal workspace" });
   for (let i = 0; i < 4; i++) {
     await panel.locator(".terminal-controls select").selectOption(`shell-${i}`);
     await panel.getByRole("button", { name: "Attach" }).click();
-    await expect(panel.locator(".terminal-connection-state")).toHaveText("Connected");
+    await expect(panel.locator(".terminal-connection-state")).toContainText("Attached");
   }
   await panel.locator(".terminal-controls select").selectOption("shell-4");
   await expect(panel.getByRole("button", { name: "Attach" })).toBeDisabled();
@@ -130,7 +181,7 @@ test("terminal tabs retain container selection, enforce connection limits, and d
   await expect.poll(() => closed.length).toBe(1);
   await panel.locator(".terminal-controls select").selectOption("shell-4");
   await panel.getByRole("button", { name: "Attach" }).click();
-  await expect(panel.locator(".terminal-connection-state")).toHaveText("Connected");
+  await expect(panel.locator(".terminal-connection-state")).toContainText("Attached");
   await page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link", { name: "Open prod / shared / services / api" }).click();
   await page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link", { name: "Open dev / shared / services / api" }).click();
   await expect(panel.locator(".terminal-controls select")).toHaveValue("shell-4");
@@ -150,6 +201,7 @@ test("terminal error offers a new attachment and stopped cells release sessions"
     attempts++;
     socket.onClose(() => closed++);
     if (attempts === 1) { socket.send(JSON.stringify({ type: "error", message: "permission denied by attach socket" })); socket.close(); }
+    else socket.send(JSON.stringify({ type: "ready" }));
   });
   await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
   const panel = page.getByRole("region", { name: "Terminal workspace" });
@@ -157,13 +209,13 @@ test("terminal error offers a new attachment and stopped cells release sessions"
   await expect(panel.locator(".terminal-connection-state")).toHaveText("permission denied by attach socket");
   const screen = await panel.locator(".terminal-screen").elementHandle();
   await panel.getByRole("button", { name: "Reconnect" }).click();
-  await expect(panel.locator(".terminal-connection-state")).toHaveText("Connected");
+  await expect(panel.locator(".terminal-connection-state")).toContainText("Attached");
   expect(await screen.evaluate(el => el.isConnected)).toBe(true);
   const closedBefore = closed;
   failInventory = true;
   await page.getByRole("button", { name: "Refresh" }).click();
   await expect(page.getByText("Stale inventory — refresh failed.", { exact: false })).toBeVisible();
-  await expect(panel.locator(".terminal-connection-state")).toHaveText("Connected");
+  await expect(panel.locator(".terminal-connection-state")).toContainText("Attached");
   expect(closed).toBe(closedBefore);
   failInventory = false;
   stopped = true;
