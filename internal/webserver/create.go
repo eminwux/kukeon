@@ -99,8 +99,26 @@ func configCell(ctx context.Context, c kukeonv1.Client, input createConfigReques
 	}
 	configName := input.Config.Name
 	configRealm := input.Config.Realm
-	configSpace := input.Config.Space
-	configStack := input.Config.Stack
+	configSpace := ""
+	if rawSpace := input.Config.Space; rawSpace != "" {
+		if !filepath.IsLocal(rawSpace) {
+			return empty, fmt.Errorf("%w: unsafe config space", errdefs.ErrConfig)
+		}
+		if !safePathSegment(rawSpace) {
+			return empty, fmt.Errorf("%w: unsafe config space", errdefs.ErrConfig)
+		}
+		configSpace = rawSpace
+	}
+	configStack := ""
+	if rawStack := input.Config.Stack; rawStack != "" {
+		if !filepath.IsLocal(rawStack) {
+			return empty, fmt.Errorf("%w: unsafe config stack", errdefs.ErrConfig)
+		}
+		if !safePathSegment(rawStack) {
+			return empty, fmt.Errorf("%w: unsafe config stack", errdefs.ErrConfig)
+		}
+		configStack = rawStack
+	}
 	if !filepath.IsLocal(configName) {
 		return empty, fmt.Errorf("%w: unsafe config name", errdefs.ErrConfig)
 	}
@@ -112,12 +130,6 @@ func configCell(ctx context.Context, c kukeonv1.Client, input createConfigReques
 	}
 	if !safePathSegment(configRealm) {
 		return empty, fmt.Errorf("%w: unsafe config realm", errdefs.ErrConfig)
-	}
-	if configSpace != "" && (!filepath.IsLocal(configSpace) || !safePathSegment(configSpace)) {
-		return empty, fmt.Errorf("%w: unsafe config space", errdefs.ErrConfig)
-	}
-	if configStack != "" && (!filepath.IsLocal(configStack) || !safePathSegment(configStack)) {
-		return empty, fmt.Errorf("%w: unsafe config coordinate", errdefs.ErrConfig)
 	}
 	configMetadata := v1beta1.CellConfigMetadata{
 		Name:  configName,
