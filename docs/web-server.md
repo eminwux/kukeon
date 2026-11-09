@@ -198,8 +198,9 @@ the page is reloaded.
 Choose **Expand terminal** to use the available screen space while retaining the
 cell sidebar and the same attachment. **Collapse terminal**, or Escape while
 focus is on the panel controls, returns to the regular panel. Escape inside the
-terminal still reaches the container. Terminal colors follow the selected light, dark, or system
-appearance. A WebSocket opening is still **Connecting**; the terminal becomes
+terminal still reaches the container. The terminal uses a high-contrast ANSI
+palette with white-on-black defaults. A WebSocket opening is still
+**Connecting**; the terminal becomes
 **Attached** only after the server validates the cell and attach socket and sets
 up its PTY bridge. A quiet container can remain blank after that point. Prompts
 and ANSI colors come from the container's program; use an interactive shell if

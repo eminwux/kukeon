@@ -11,7 +11,7 @@ export function readRoute(): Route {
     if (!path || path === "/" || path === "/workspace") return { view: "workspace", scope: [], parent: [], document: false };
     const parts = path.split("/").filter(Boolean).map(decodeURIComponent);
     if (parts[0] === "workspace") return { view: "workspace", scope: parts.length === 5 ? parts.slice(1) : [], parent: [], document: false };
-    if (path === "/administration" || path === "/dashboard") return { view: "dashboard", scope: [], parent: [], document: false };
+    if (path === "/resources" || path === "/administration" || path === "/dashboard") return { view: "dashboard", scope: [], parent: [], document: false };
     if (Object.keys(catalogTitles).includes(parts[0])) return { view: parts[0], scope: parts.slice(1, 6), parent: [], document: params.has("document") };
     if (parts[0] === "resource") return { view: "resource", scope: parts.slice(1, 6), parent: [], document: params.has("document") };
     if (titles.some(title => title.toLowerCase() === parts[0])) {

@@ -29,6 +29,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/webui"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
@@ -117,7 +118,7 @@ func newHandler(authority, endpoint string, dial Dial) (http.Handler, error) {
 	mux := http.NewServeMux()
 	mux.Handle("GET /", http.FileServerFS(assets))
 	mux.HandleFunc("GET /api/connection", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"endpoint": endpoint})
+		writeJSON(w, http.StatusOK, map[string]string{"endpoint": endpoint, "version": config.Version})
 	})
 	mux.HandleFunc("GET /api/realms", realmHandler(dial, false))
 	mux.HandleFunc("GET /api/realms/{name}", realmHandler(dial, true))
@@ -125,7 +126,8 @@ func newHandler(authority, endpoint string, dial Dial) (http.Handler, error) {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; base-uri 'none'")
+		w.Header().
+			Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'")
 		origins := r.Header.Values("Origin")
 		if r.Host != authority || len(origins) > 1 || (len(origins) == 1 && origins[0] != "http://"+authority) {
 			http.Error(w, "unexpected Host or Origin", http.StatusForbidden)

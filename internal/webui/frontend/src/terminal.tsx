@@ -8,15 +8,19 @@ import type { InventoryResource } from "./inventory";
 
 type Container = { id: string; attachable?: boolean; root?: boolean };
 export type TerminalState = "connecting" | "attached" | "disconnected";
-type ThemeMode = "light" | "dark" | "system";
 type Session = { id: string; scope: string[]; container: string; state: TerminalState; message: string; generation: number };
 const maxConnections = 4;
 const maxSessions = 8;
 const cellId = (scope: string[]) => JSON.stringify(scope);
 const sessionId = (scope: string[], container: string) => JSON.stringify([...scope, container]);
 const unavailableStates = new Set(["Stopped", "Stopping", "Exited", "Deleted"]);
+const terminalTheme = {
+  background: "#000000", foreground: "#ffffff", cursor: "#ffffff", cursorAccent: "#000000", selectionBackground: "#4d4d4d",
+  black: "#000000", red: "#cd0000", green: "#00cd00", yellow: "#cdcd00", blue: "#0000ee", magenta: "#cd00cd", cyan: "#00cdcd", white: "#e5e5e5",
+  brightBlack: "#7f7f7f", brightRed: "#ff0000", brightGreen: "#00ff00", brightYellow: "#ffff00", brightBlue: "#5c5cff", brightMagenta: "#ff00ff", brightCyan: "#00ffff", brightWhite: "#ffffff",
+};
 
-// This hook lives in App, above both Workspace and Administration routes.
+// This hook lives in App, above both Workspace and Resources routes.
 export function useTerminalSessions(inventory: InventoryResource) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selection, setSelection] = useState<Record<string, string>>({});
@@ -60,17 +64,7 @@ export function useTerminalSessions(inventory: InventoryResource) {
 
 type Manager = ReturnType<typeof useTerminalSessions>;
 
-const terminalThemes = {
-  light: { background: "#f8fafc", foreground: "#182230", cursor: "#275dad", cursorAccent: "#f8fafc", selectionBackground: "#bcd7ff",
-    black: "#253449", red: "#a82d35", green: "#157347", yellow: "#8c6000", blue: "#2458b8", magenta: "#8d3ba5", cyan: "#006b78", white: "#d7dee9",
-    brightBlack: "#5c6a7d", brightRed: "#cc3540", brightGreen: "#198657", brightYellow: "#a16d00", brightBlue: "#356ed4", brightMagenta: "#a24ab8", brightCyan: "#087e8d", brightWhite: "#ffffff" },
-  dark: { background: "#0d1421", foreground: "#e6edf7", cursor: "#a9c7ff", cursorAccent: "#0d1421", selectionBackground: "#375077",
-    black: "#263244", red: "#ff777a", green: "#78dca0", yellow: "#e9c875", blue: "#8cb7ff", magenta: "#d4a5f0", cyan: "#7bd8e2", white: "#d8e1ef",
-    brightBlack: "#8292a8", brightRed: "#ff9b9d", brightGreen: "#9ce8b7", brightYellow: "#f2d795", brightBlue: "#b0ceff", brightMagenta: "#e4c1f7", brightCyan: "#a2e9ef", brightWhite: "#ffffff" },
-};
-const resolvedTheme = (mode: ThemeMode, systemDark: boolean) => terminalThemes[mode === "system" ? systemDark ? "dark" : "light" : mode];
-
-function TerminalSession({ session, active, expanded, update, themeMode }: { session: Session; active: boolean; expanded: boolean; update: Manager["update"]; themeMode: ThemeMode }) {
+function TerminalSession({ session, active, expanded, update }: { session: Session; active: boolean; expanded: boolean; update: Manager["update"] }) {
   const mount = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal | null>(null);
   const socket = useRef<WebSocket | null>(null);
@@ -80,8 +74,9 @@ function TerminalSession({ session, active, expanded, update, themeMode }: { ses
 
   useEffect(() => {
     if (!mount.current) return;
-    const term = new Terminal({ cursorBlink: true, cursorStyle: "block", cursorInactiveStyle: "outline", convertEol: false, fontSize: 14, scrollback: 2000,
-      theme: resolvedTheme(themeMode, window.matchMedia("(prefers-color-scheme: dark)").matches) });
+    const term = new Terminal({ cursorBlink: true, cursorStyle: "underline", cursorInactiveStyle: "outline", convertEol: false,
+      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace", fontSize: 14, scrollback: 2000,
+      theme: terminalTheme });
     const fit = new FitAddon();
     terminal.current = term;
     term.loadAddon(fit);
@@ -102,14 +97,6 @@ function TerminalSession({ session, active, expanded, update, themeMode }: { ses
       fitNow.current = () => {};
     };
   }, []);
-
-  useEffect(() => {
-    const preference = window.matchMedia("(prefers-color-scheme: dark)");
-    const sync = () => { if (terminal.current) terminal.current.options.theme = resolvedTheme(themeMode, preference.matches); };
-    sync();
-    preference.addEventListener("change", sync);
-    return () => preference.removeEventListener("change", sync);
-  }, [themeMode]);
 
   useEffect(() => {
     let connection: WebSocket;
@@ -174,7 +161,7 @@ function TerminalSession({ session, active, expanded, update, themeMode }: { ses
   </div>;
 }
 
-export function TerminalWorkspace({ scope, revision, inventory, manager, themeMode }: { scope: string[] | null; revision: number; inventory: InventoryResource; manager: Manager; themeMode: ThemeMode }) {
+export function TerminalWorkspace({ scope, revision, inventory, manager }: { scope: string[] | null; revision: number; inventory: InventoryResource; manager: Manager }) {
   const [expanded, setExpanded] = useState(false);
   const expandButton = useRef<HTMLButtonElement>(null);
   const screens = useRef<HTMLDivElement>(null);
@@ -229,6 +216,6 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, themeMo
         event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
       }}>{openInCell.map(item => <button key={item.id} role="tab" aria-selected={item.id === currentId} tabIndex={item.id === currentId ? 0 : -1} onClick={() => manager.select(item.scope, item.container)}>{item.container} · {item.state}</button>)}</div>}
     </div>}
-    <div className="terminal-screens" id="terminal-screens" ref={screens}>{manager.sessions.map(session => <TerminalSession key={session.id} session={session} active={!!scope && session.id === currentId} expanded={expanded} update={manager.update} themeMode={themeMode} />)}</div>
+    <div className="terminal-screens" id="terminal-screens" ref={screens}>{manager.sessions.map(session => <TerminalSession key={session.id} session={session} active={!!scope && session.id === currentId} expanded={expanded} update={manager.update} />)}</div>
   </section>;
 }

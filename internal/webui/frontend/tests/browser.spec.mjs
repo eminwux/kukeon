@@ -26,7 +26,7 @@ async function mock(page, handler = () => undefined) {
   });
 }
 const failure = { status: 503, json: { error: { code: "unavailable", message: "Scoped read failed" } } };
-const nav = page => page.getByRole("navigation", { name: "Administration resources" });
+const nav = page => page.getByRole("navigation", { name: "Resources navigation" });
 const listSearch = page => page.locator(".list-controls").getByRole("searchbox");
 
 test("terminal selects eligible containers, forwards input and resize, and detaches", async ({ page }) => {
@@ -44,7 +44,7 @@ test("terminal selects eligible containers, forwards input and resize, and detac
     socket.onMessage(message => { messages.push(message); });
     socket.onClose(() => { closed = true; });
     sendReady = () => socket.send(JSON.stringify({ type: "ready" }));
-    sendOutput = () => socket.send(Buffer.from("\x1b[32mshell\x1b[0m $ "));
+    sendOutput = () => socket.send(Buffer.from("\x1b[95;49mYOLOmo\x1b[0m $ "));
   });
   await page.goto(`${server.url}#/resource/dev/shared/services/api`);
   const panel = page.locator("section").filter({ has: page.getByRole("heading", { name: "Terminal", exact: true }) });
@@ -57,6 +57,10 @@ test("terminal selects eligible containers, forwards input and resize, and detac
   await expect(panel.locator(".terminal-connection-state")).toContainText("waiting for container output");
   sendOutput();
   await expect(panel.locator(".terminal-connection-state")).toHaveText("Attached");
+  await expect.poll(() => panel.locator(".xterm-fg-13").evaluate(el => getComputedStyle(el).color)).toBe("rgb(255, 0, 255)");
+  await expect.poll(() => panel.locator(".xterm-rows").evaluate(el => getComputedStyle(el).fontFamily)).toContain("monospace");
+  await expect(panel.locator(".xterm-cursor")).toHaveClass(/xterm-cursor-underline/);
+  await expect.poll(() => panel.locator(".xterm-cursor").evaluate(el => getComputedStyle(el).animationName)).not.toBe("none");
   await expect.poll(() => messages.some(message => typeof message === "string" && JSON.parse(message).type === "resize")).toBe(true);
   await panel.locator(".xterm-helper-textarea").press("a");
   await expect.poll(() => messages.some(message => Buffer.isBuffer(message) && message.toString() === "a")).toBe(true);
@@ -90,7 +94,9 @@ test("expanded terminal keeps its session, resizes, and follows the appearance s
   await expect.poll(async () => (await screen.boundingBox())?.height).toBeGreaterThan(initial.height);
   await expect.poll(() => messages.filter(message => typeof message === "string" && JSON.parse(message).type === "resize").length).toBeGreaterThan(initialResizeCount);
   expect(connections).toBe(1);
-  await page.getByLabel("Appearance").selectOption("dark");
+  const appearance = page.getByRole("button", { name: /Appearance:/ });
+  await appearance.click();
+  await appearance.click();
   await expect.poll(() => screen.evaluate(el => getComputedStyle(el).backgroundColor)).toBe("rgb(13, 20, 33)");
   await panel.getByRole("button", { name: "Collapse terminal" }).focus();
   await page.keyboard.press("Escape");
@@ -147,8 +153,8 @@ test("Workspace retains independent scoped terminals, focus and resize while swi
   const resizedBefore = messages.get(devPath).filter(message => typeof message === "string" && JSON.parse(message).type === "resize").length;
   await page.setViewportSize({ width: 900, height: 700 });
   await expect.poll(() => messages.get(devPath).filter(message => typeof message === "string" && JSON.parse(message).type === "resize").length).toBeGreaterThan(resizedBefore);
-  await page.getByRole("navigation", { name: "Areas" }).first().getByRole("link", { name: "Administration" }).click();
-  await expect(page.locator(".page-heading h1")).toHaveText("Administration");
+  await page.getByRole("link", { name: "Resources", exact: true }).click();
+  await expect(page.locator(".page-heading h1")).toHaveText("Resources");
   expect(closed).toEqual([]);
   await cells.getByRole("link", { name: "Open dev / shared / services / api" }).click();
   await expect(panel.locator(".terminal-connection-state")).toHaveText("Attached");
@@ -225,13 +231,13 @@ test("terminal error offers a new attachment and stopped cells release sessions"
   await expect.poll(() => closed).toBeGreaterThan(closedBefore);
 });
 
-test("Workspace lands first and Administration retains resource summaries and navigation", async ({ page }) => {
+test("Workspace lands first and Resources retains resource summaries and navigation", async ({ page }) => {
   await mock(page);
   await page.goto(server.url);
   await expect(page.locator(".page-heading h1")).toHaveText("Workspace");
   await expect(page.getByRole("region", { name: "Workspace welcome" })).toContainText("Choose a cell");
-  await page.getByRole("navigation", { name: "Areas" }).first().getByRole("link", { name: "Administration" }).click();
-  await expect(page.locator(".page-heading h1")).toHaveText("Administration");
+  await page.getByRole("link", { name: "Resources", exact: true }).click();
+  await expect(page.locator(".page-heading h1")).toHaveText("Resources");
   for (const type of ["Realms", "Spaces", "Stacks", "Cells"]) {
     await expect(page.locator(".summary-card").filter({ hasText: type }).locator("strong")).toHaveText("2");
     await expect(nav(page).getByRole("link", { name: type, exact: true })).toBeVisible();
@@ -506,19 +512,22 @@ test("old resource bookmarks work and replaced requests cannot overwrite another
   await expect(page.getByLabel("Complete space JSON")).not.toContainText('"dev"');
 });
 
-test("theme preference follows the system and persists explicit overrides", async ({ page }) => {
+test("theme icon cycles through system, light, and dark preferences", async ({ page }) => {
   await mock(page);
   await page.emulateMedia({ colorScheme: "dark" });
   await page.goto(server.url);
   const scheme = () => page.evaluate(() => getComputedStyle(document.documentElement).colorScheme);
   await expect.poll(scheme).toBe("dark");
-  await page.getByLabel("Appearance").selectOption("light");
+  const appearance = page.getByRole("button", { name: /Appearance:/ });
+  await appearance.click();
   await page.reload();
-  await expect(page.getByLabel("Appearance")).toHaveValue("light");
+  await expect(page.getByRole("button", { name: /Appearance: light/ })).toBeVisible();
   await expect.poll(scheme).toBe("light");
-  await page.getByLabel("Appearance").selectOption("system");
+  await page.getByRole("button", { name: /Appearance: light/ }).click();
+  await page.getByRole("button", { name: /Appearance: dark/ }).click();
   await expect.poll(scheme).toBe("dark");
   await page.emulateMedia({ colorScheme: "light" });
+  await page.getByRole("button", { name: /Appearance: system/ }).click();
   await expect.poll(scheme).toBe("light");
 });
 
@@ -534,7 +543,7 @@ test("mobile cell navigation closes after selection and Workspace fits the scree
   await expect(page.locator(".page-heading h1")).toHaveText("api");
   await expect(page.getByRole("link", { name: "+ New Cell" })).toBeVisible();
   await expect(page.getByRole("status", { name: "Daemon: Connected" })).toBeVisible();
-  await page.getByRole("navigation", { name: "Areas" }).last().getByRole("link", { name: "Administration" }).click();
+  await page.getByRole("link", { name: "Resources", exact: true }).click();
   await expect(nav(page).getByRole("link", { name: "Secrets" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 });
