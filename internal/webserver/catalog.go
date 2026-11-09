@@ -41,21 +41,29 @@ func catalogScope(r *http.Request, secret bool, detail bool) ([4]string, error) 
 	space := r.URL.Query().Get("space")
 	stack := r.URL.Query().Get("stack")
 	cell := r.URL.Query().Get("cell")
-	if (realm != "" && !filepath.IsLocal(realm)) ||
-		(space != "" && !filepath.IsLocal(space)) ||
-		(stack != "" && !filepath.IsLocal(stack)) ||
-		(cell != "" && !filepath.IsLocal(cell)) {
-		return [4]string{}, fmt.Errorf("%w: unsafe scope coordinate", errdefs.ErrConfig)
-	}
 	realm = strings.TrimSpace(realm)
 	space = strings.TrimSpace(space)
 	stack = strings.TrimSpace(stack)
 	cell = strings.TrimSpace(cell)
-	if (realm != "" && (!filepath.IsLocal(realm) || !safePathSegment(realm))) ||
-		(space != "" && (!filepath.IsLocal(space) || !safePathSegment(space))) ||
-		(stack != "" && (!filepath.IsLocal(stack) || !safePathSegment(stack))) ||
-		(cell != "" && (!filepath.IsLocal(cell) || !safePathSegment(cell))) {
-		return [4]string{}, fmt.Errorf("%w: unsafe scope coordinate", errdefs.ErrConfig)
+	if realm != "" {
+		if !filepath.IsLocal(realm) || !safePathSegment(realm) {
+			return [4]string{}, fmt.Errorf("%w: unsafe realm coordinate", errdefs.ErrConfig)
+		}
+	}
+	if space != "" {
+		if !filepath.IsLocal(space) || !safePathSegment(space) {
+			return [4]string{}, fmt.Errorf("%w: unsafe space coordinate", errdefs.ErrConfig)
+		}
+	}
+	if stack != "" {
+		if !filepath.IsLocal(stack) || !safePathSegment(stack) {
+			return [4]string{}, fmt.Errorf("%w: unsafe stack coordinate", errdefs.ErrConfig)
+		}
+	}
+	if cell != "" {
+		if !filepath.IsLocal(cell) || !safePathSegment(cell) {
+			return [4]string{}, fmt.Errorf("%w: unsafe cell coordinate", errdefs.ErrConfig)
+		}
 	}
 	scope := [4]string{realm, space, stack, cell}
 	if detail && scope[0] == "" {
