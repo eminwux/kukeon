@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { apiPath, kinds, titles } from "./routes";
 import type { Failure, Resource } from "./request";
 
@@ -34,14 +34,16 @@ export function useInventory(revision: number): InventoryResource {
   const [state, setState] = useState<Resource<Inventory>>({ loading: true });
   const [daemon, setDaemon] = useState<Resource<true>>({ loading: true });
   const [pulse, setPulse] = useState(0);
+  const activeRequest = useRef<AbortController | null>(null);
   useEffect(() => {
     const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") setPulse(value => value + 1);
+      if (document.visibilityState === "visible" && !activeRequest.current) setPulse(value => value + 1);
     }, 60_000);
     return () => window.clearInterval(timer);
   }, []);
   useEffect(() => {
     const controller = new AbortController();
+    activeRequest.current = controller;
     setState(old => ({ data: old.data, loading: true, error: old.error }));
     setDaemon(old => ({ ...old, loading: true }));
     void (async () => {
@@ -74,8 +76,13 @@ export function useInventory(revision: number): InventoryResource {
         setDaemon({ loading: false, error: detail });
         setState(old => ({ data: old.data, loading: false, error: detail }));
       }
-    })();
-    return () => controller.abort();
+    })().finally(() => {
+      if (activeRequest.current === controller) activeRequest.current = null;
+    });
+    return () => {
+      controller.abort();
+      if (activeRequest.current === controller) activeRequest.current = null;
+    };
   }, [revision, pulse]);
   return { ...state, daemon };
 }

@@ -179,6 +179,35 @@ test("failed inventory refresh retains cells while daemon connectivity changes i
   await expect(page.locator(".stale")).toHaveCount(0);
 });
 
+test("periodic refresh waits for a slow inventory traversal", async ({ page }) => {
+  await page.clock.install();
+  let realmReads = 0;
+  let slowScopeReads = 0;
+  let releaseScope;
+  const slowScope = new Promise(resolve => { releaseScope = resolve; });
+  await mock(page, async path => {
+    if (path === "/api/realms") realmReads++;
+    if (path === "/api/realms/dev/spaces") {
+      slowScopeReads++;
+      await slowScope;
+    }
+  });
+  await page.goto(server.url);
+  try {
+    await expect.poll(() => slowScopeReads).toBeGreaterThan(0);
+    const initialReads = realmReads;
+    await page.clock.fastForward(60_001);
+    expect(realmReads).toBe(initialReads);
+    releaseScope();
+    await expect(page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link")).toHaveCount(2);
+    expect(realmReads).toBe(initialReads);
+    await page.clock.fastForward(60_000);
+    await expect.poll(() => realmReads).toBeGreaterThan(initialReads);
+  } finally {
+    releaseScope();
+  }
+});
+
 test("initial inventory failure is distinct from an empty inventory", async ({ page }) => {
   await mock(page, () => failure);
   await page.goto(server.url);
