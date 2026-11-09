@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -44,6 +45,9 @@ func catalogScope(r *http.Request, secret bool, detail bool) ([4]string, error) 
 	}
 	for i := range scope {
 		scope[i] = strings.TrimSpace(scope[i])
+		if scope[i] != "" && (!filepath.IsLocal(scope[i]) || !safePathSegment(scope[i])) {
+			return scope, fmt.Errorf("%w: unsafe scope coordinate", errdefs.ErrConfig)
+		}
 	}
 	if detail && scope[0] == "" {
 		return scope, errdefs.ErrRealmNameRequired
@@ -73,7 +77,11 @@ func catalogHandler(dial Dial, kind string, detail bool) http.HandlerFunc {
 			return nil, err
 		}
 		if detail {
-			return getCatalog(ctx, c, kind, scope, r.PathValue("name"))
+			name := r.PathValue("name")
+			if !filepath.IsLocal(name) || !safePathSegment(name) {
+				return nil, fmt.Errorf("%w: unsafe resource name", errdefs.ErrConfig)
+			}
+			return getCatalog(ctx, c, kind, scope, name)
 		}
 		return listCatalog(ctx, c, kind, scope)
 	})

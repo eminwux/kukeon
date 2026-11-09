@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/cellconfig"
@@ -90,8 +91,17 @@ func configCell(ctx context.Context, c kukeonv1.Client, input createConfigReques
 	if strings.TrimSpace(input.Name) == "" {
 		return empty, errdefs.ErrCellNameRequired
 	}
+	if !filepath.IsLocal(input.Name) || !safePathSegment(input.Name) {
+		return empty, fmt.Errorf("%w: unsafe cell name", errdefs.ErrConfig)
+	}
 	if input.Config.Realm == "" || input.Config.Name == "" || (input.Config.Stack != "" && input.Config.Space == "") {
 		return empty, fmt.Errorf("%w: select a scoped config", errdefs.ErrConfig)
+	}
+	if !filepath.IsLocal(input.Config.Name) || !safePathSegment(input.Config.Name) ||
+		!filepath.IsLocal(input.Config.Realm) || !safePathSegment(input.Config.Realm) ||
+		(input.Config.Space != "" && (!filepath.IsLocal(input.Config.Space) || !safePathSegment(input.Config.Space))) ||
+		(input.Config.Stack != "" && (!filepath.IsLocal(input.Config.Stack) || !safePathSegment(input.Config.Stack))) {
+		return empty, fmt.Errorf("%w: unsafe config coordinate", errdefs.ErrConfig)
 	}
 	cfg, err := c.GetConfig(ctx, v1beta1.CellConfigDoc{Metadata: input.Config})
 	if err != nil {
@@ -101,6 +111,12 @@ func configCell(ctx context.Context, c kukeonv1.Client, input createConfigReques
 		return empty, errdefs.ErrConfigNotFound
 	}
 	ref := cfg.Config.Spec.Blueprint
+	if !filepath.IsLocal(ref.Name) || !safePathSegment(ref.Name) ||
+		!filepath.IsLocal(ref.Realm) || !safePathSegment(ref.Realm) ||
+		(ref.Space != "" && (!filepath.IsLocal(ref.Space) || !safePathSegment(ref.Space))) ||
+		(ref.Stack != "" && (!filepath.IsLocal(ref.Stack) || !safePathSegment(ref.Stack))) {
+		return empty, fmt.Errorf("%w: unsafe blueprint reference", errdefs.ErrConfig)
+	}
 	bp, err := c.GetBlueprint(
 		ctx,
 		v1beta1.CellBlueprintDoc{
@@ -121,6 +137,12 @@ func configCell(ctx context.Context, c kukeonv1.Client, input createConfigReques
 	doc, err := cellconfig.MaterializeWithName(cfg.Config, bp.Blueprint, input.Name)
 	if err != nil {
 		return empty, fmt.Errorf("%w: %w", errdefs.ErrConfig, err)
+	}
+	if !filepath.IsLocal(doc.Metadata.Name) || !safePathSegment(doc.Metadata.Name) ||
+		!filepath.IsLocal(doc.Spec.RealmID) || !safePathSegment(doc.Spec.RealmID) ||
+		(doc.Spec.SpaceID != "" && (!filepath.IsLocal(doc.Spec.SpaceID) || !safePathSegment(doc.Spec.SpaceID))) ||
+		(doc.Spec.StackID != "" && (!filepath.IsLocal(doc.Spec.StackID) || !safePathSegment(doc.Spec.StackID))) {
+		return empty, fmt.Errorf("%w: unsafe materialized cell coordinate", errdefs.ErrConfig)
 	}
 	seen := map[string]string{}
 	normalized := []string{}

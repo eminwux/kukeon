@@ -199,6 +199,7 @@ func TestAttachUnsupported(t *testing.T) {
 }
 
 func TestAttachCleanDetach(t *testing.T) {
+	ready := make(chan struct{})
 	client := &attachClient{
 		cell: kukeonv1.GetCellResult{
 			MetadataExists:           true,
@@ -214,6 +215,7 @@ func TestAttachCleanDetach(t *testing.T) {
 				return err
 			}
 			defer term.Restore(int(opts.Stdin.Fd()), state)
+			close(ready)
 
 			got := make([]byte, 2)
 			if _, err = io.ReadFull(opts.Stdin, got); err != nil {
@@ -234,6 +236,11 @@ func TestAttachCleanDetach(t *testing.T) {
 	}
 	defer ws.Close()
 	_ = ws.SetReadDeadline(time.Now().Add(5 * time.Second))
+	select {
+	case <-ready:
+	case <-time.After(5 * time.Second):
+		t.Fatal("terminal did not enter raw mode")
+	}
 	if err = ws.WriteMessage(websocket.BinaryMessage, []byte("\x1d\x1d")); err != nil {
 		t.Fatal(err)
 	}

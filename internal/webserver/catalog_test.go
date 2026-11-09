@@ -112,7 +112,7 @@ func (c *catalogClient) GetSecret(_ context.Context, doc v1beta1.SecretDoc) (kuk
 
 func TestCatalogAPI(t *testing.T) {
 	for _, kind := range []string{"blueprints", "configs", "volumes", "secrets"} {
-		for _, mode := range []string{"global-list", "realm-list", "stack-list", "detail", "empty", "missing", "unavailable", "permission", "gap", "missing-realm", "cell", "cell-detail"} {
+		for _, mode := range []string{"global-list", "realm-list", "stack-list", "detail", "empty", "missing", "unavailable", "permission", "gap", "missing-realm", "cell", "cell-detail", "unsafe-realm", "unsafe-space", "unsafe-cell"} {
 			t.Run(kind+"/"+mode, func(t *testing.T) {
 				c := &catalogClient{empty: mode == "empty", missing: mode == "missing"}
 				if mode == "unavailable" {
@@ -136,6 +136,12 @@ func TestCatalogAPI(t *testing.T) {
 					query = "?realm=r&stack=t"
 				case "cell", "cell-detail":
 					query = "?realm=r&space=s&stack=t&cell=c"
+				case "unsafe-realm":
+					query = "?realm=.."
+				case "unsafe-space":
+					query = "?realm=r&space=a%2Fb"
+				case "unsafe-cell":
+					query = "?realm=r&space=s&stack=t&cell=%5C.."
 				}
 				handler, err := newHandler(
 					"localhost:5129",
@@ -155,6 +161,9 @@ func TestCatalogAPI(t *testing.T) {
 					t.Fatal("secret material leaked")
 				}
 				if expected != 200 {
+					if strings.HasPrefix(mode, "unsafe-") && c.scope != nil {
+						t.Fatalf("unsafe scope reached daemon: %v", c.scope)
+					}
 					return
 				}
 				scope := []string{"", "", ""}
@@ -182,6 +191,18 @@ func TestCatalogAPI(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestCatalogRejectsUnsafeDetailName(t *testing.T) {
+	c := &catalogClient{}
+	handler := catalogHandler(func(context.Context) (kukeonv1.Client, error) { return c, nil }, catalogConfigs, true)
+	r := httptest.NewRequest(http.MethodGet, "http://localhost/api/catalog/configs/unsafe?realm=r", nil)
+	r.SetPathValue("name", "../outside")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+	if w.Code != http.StatusBadRequest || !c.closed || c.scope != nil {
+		t.Fatalf("status=%d closed=%v scope=%v body=%s", w.Code, c.closed, c.scope, w.Body)
 	}
 }
 
@@ -217,6 +238,9 @@ func checkCatalogDetail(t *testing.T, kind string, c *catalogClient, w *httptest
 
 func catalogExpectedStatus(kind, mode string) int {
 	expected := 200
+	if strings.HasPrefix(mode, "unsafe-") {
+		return 400
+	}
 	switch mode {
 	case "gap", "missing-realm":
 		expected = 400

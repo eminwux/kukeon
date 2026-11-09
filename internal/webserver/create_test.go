@@ -31,9 +31,29 @@ import (
 type creationClient struct {
 	catalogClient
 
-	created  int
-	existing bool
-	doc      v1beta1.CellDoc
+	created            int
+	existing           bool
+	unsafeBlueprintRef bool
+	getBlueprintCalls  int
+	getConfigCalls     int
+	doc                v1beta1.CellDoc
+}
+
+func (c *creationClient) GetConfig(ctx context.Context, doc v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+	c.getConfigCalls++
+	result, err := c.catalogClient.GetConfig(ctx, doc)
+	if c.unsafeBlueprintRef {
+		result.Config.Spec.Blueprint.Name = ".."
+	}
+	return result, err
+}
+
+func (c *creationClient) GetBlueprint(
+	ctx context.Context,
+	doc v1beta1.CellBlueprintDoc,
+) (kukeonv1.GetBlueprintResult, error) {
+	c.getBlueprintCalls++
+	return c.catalogClient.GetBlueprint(ctx, doc)
 }
 
 func (c *creationClient) GetStack(_ context.Context, doc v1beta1.StackDoc) (kukeonv1.GetStackResult, error) {
@@ -121,6 +141,10 @@ func TestConfigCreationValidation(t *testing.T) {
 	}{
 		{name: "empty name", input: createConfigRequest{Config: v1beta1.CellConfigMetadata{Name: "cfg", Realm: "r"}}},
 		{name: "scope gap", input: createConfigRequest{Name: "cell", Config: v1beta1.CellConfigMetadata{Name: "cfg", Realm: "r", Stack: "s"}}},
+		{name: "unsafe cell name", input: createConfigRequest{Name: "../cell", Config: v1beta1.CellConfigMetadata{Name: "cfg", Realm: "r"}}},
+		{name: "unsafe config realm", input: createConfigRequest{Name: "cell", Config: v1beta1.CellConfigMetadata{Name: "cfg", Realm: ".."}}},
+		{name: "unsafe config name", input: createConfigRequest{Name: "cell", Config: v1beta1.CellConfigMetadata{Name: "nested/name", Realm: "r"}}},
+		{name: "unsafe config space", input: createConfigRequest{Name: "cell", Config: v1beta1.CellConfigMetadata{Name: "cfg", Realm: "r", Space: `..\nested`}}},
 		{name: "invalid env", input: createConfigRequest{Name: "cell", Config: v1beta1.CellConfigMetadata{Name: "cfg", Realm: "r"}, Env: []string{"bad"}}},
 		{name: "conflicting env", input: createConfigRequest{Name: "cell", Config: v1beta1.CellConfigMetadata{Name: "cfg", Realm: "r"}, Env: []string{"A=one", "A=two"}}},
 		{name: "missing config", input: createConfigRequest{Name: "cell", Config: v1beta1.CellConfigMetadata{Name: "cfg", Realm: "r"}}, missing: true},
@@ -134,6 +158,42 @@ func TestConfigCreationValidation(t *testing.T) {
 			if c.created != 0 {
 				t.Fatal("validation mutated daemon")
 			}
+			if strings.HasPrefix(tc.name, "unsafe ") && c.getConfigCalls != 0 {
+				t.Fatalf("unsafe input reached daemon lookup: %d calls", c.getConfigCalls)
+			}
 		})
 	}
+}
+
+func TestSafePathSegment(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  bool
+	}{
+		{value: "", want: true},
+		{value: "resource-name", want: true},
+		{value: "foo..bar", want: true},
+		{value: "..", want: false},
+		{value: "../outside", want: false},
+		{value: "nested/name", want: false},
+		{value: `nested\\name`, want: false},
+		{value: "bad\x00name", want: false},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			if got := safePathSegment(tc.value); got != tc.want {
+				t.Fatalf("safePathSegment(%q) = %v, want %v", tc.value, got, tc.want)
+			}
+		})
+	}
+
+	t.Run("unsafe persisted blueprint ref", func(t *testing.T) {
+		c := &creationClient{unsafeBlueprintRef: true}
+		_, err := configCell(context.Background(), c, createConfigRequest{
+			Config: v1beta1.CellConfigMetadata{Name: "cfg", Realm: "r"},
+			Name:   "cell",
+		})
+		if err == nil || c.getBlueprintCalls != 0 {
+			t.Fatalf("unsafe blueprint reference accepted: err=%v calls=%d", err, c.getBlueprintCalls)
+		}
+	})
 }
