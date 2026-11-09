@@ -105,6 +105,12 @@ func catalogResult[T any](doc T, exists bool, err error, notFound error) (any, e
 }
 
 func listCatalog(ctx context.Context, c kukeonv1.Client, kind string, scope [4]string) (any, error) {
+	if (scope[0] != "" && (!filepath.IsLocal(scope[0]) || !safePathSegment(scope[0]))) ||
+		(scope[1] != "" && (!filepath.IsLocal(scope[1]) || !safePathSegment(scope[1]))) ||
+		(scope[2] != "" && (!filepath.IsLocal(scope[2]) || !safePathSegment(scope[2]))) ||
+		(scope[3] != "" && (!filepath.IsLocal(scope[3]) || !safePathSegment(scope[3]))) {
+		return nil, fmt.Errorf("%w: unsafe scope coordinate", errdefs.ErrConfig)
+	}
 	switch kind {
 	case catalogBlueprints:
 		return catalogList(c.ListBlueprints(ctx, scope[0], scope[1], scope[2]))
@@ -124,6 +130,13 @@ func listCatalog(ctx context.Context, c kukeonv1.Client, kind string, scope [4]s
 }
 
 func getCatalog(ctx context.Context, c kukeonv1.Client, kind string, scope [4]string, name string) (any, error) {
+	if !filepath.IsLocal(name) || !safePathSegment(name) ||
+		(scope[0] != "" && (!filepath.IsLocal(scope[0]) || !safePathSegment(scope[0]))) ||
+		(scope[1] != "" && (!filepath.IsLocal(scope[1]) || !safePathSegment(scope[1]))) ||
+		(scope[2] != "" && (!filepath.IsLocal(scope[2]) || !safePathSegment(scope[2]))) ||
+		(scope[3] != "" && (!filepath.IsLocal(scope[3]) || !safePathSegment(scope[3]))) {
+		return nil, fmt.Errorf("%w: unsafe resource coordinate", errdefs.ErrConfig)
+	}
 	switch kind {
 	case catalogBlueprints:
 		result, err := c.GetBlueprint(
