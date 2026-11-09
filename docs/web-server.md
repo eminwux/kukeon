@@ -187,9 +187,34 @@ the form does not accept arbitrary cell documents or template parameter override
 
 ### Attach to a terminal
 
-Open a cell overview, select an attachable container, and choose **Attach**.
-The terminal forwards keyboard input and resizes with its panel. Choose **Detach**
-or leave the page to disconnect; the cell continues running. The cell and its
-selected container must be running, and the server's user must have permission
-to connect to the attach socket returned by kukeond. Connection and permission
-errors are shown in the terminal panel.
+Select a cell in the Workspace sidebar, choose an attachable container, and
+choose **Attach**. You can also attach from its Administration overview. The
+terminal forwards keyboard input and resizes with its panel. Switching cells,
+containers, or application views keeps attachments and scrollback in this browser
+tab; the sidebar shows each cell's terminal connection state. Inactive terminals
+do not receive keyboard input. Each cell remembers its selected container until
+the page is reloaded.
+
+Choose **Expand terminal** to use the available screen space while retaining the
+cell sidebar and the same attachment. **Collapse terminal**, or Escape while
+focus is on the panel controls, returns to the regular panel. Escape inside the
+terminal still reaches the container. Terminal colors follow the selected light, dark, or system
+appearance. A WebSocket opening is still **Connecting**; the terminal becomes
+**Attached** only after the server validates the cell and attach socket and sets
+up its PTY bridge. A quiet container can remain blank after that point. Prompts
+and ANSI colors come from the container's program; use an interactive shell if
+you expect a shell prompt. The ready message does not confirm that the program
+has produced output or that its process will survive a disconnect.
+
+The browser allows four concurrent terminal connections and eight retained
+terminal surfaces. At the limit, choose **Detach** on an existing terminal to
+free a slot. Detach closes that attachment and clears its browser scrollback;
+it does not stop the cell. A complete inventory refresh also releases terminal
+resources for cells confirmed stopped or removed. The cell and selected container
+must be running, and the server's user must have permission to connect to the
+attach socket returned by kukeond. Connection and permission errors appear in
+the terminal panel. **Reconnect** starts a new attachment after a disconnect;
+bytes emitted while disconnected are not replayed. The existing attach protocol
+does not guarantee that a terminal process survives a network disconnect,
+browser reload, tab close, or server restart. Reloading or closing the browser
+tab closes its WebSockets and discards the in-memory terminal workspace.

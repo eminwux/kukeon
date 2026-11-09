@@ -1,50 +1,234 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
+import { ErrorNotice, useResource } from "./request";
+import { apiPath } from "./routes";
+import type { InventoryResource } from "./inventory";
 
 type Container = { id: string; attachable?: boolean; root?: boolean };
+export type TerminalState = "connecting" | "attached" | "disconnected";
+type ThemeMode = "light" | "dark" | "system";
+type Session = { id: string; scope: string[]; container: string; state: TerminalState; message: string; generation: number };
+const maxConnections = 4;
+const maxSessions = 8;
+const cellId = (scope: string[]) => JSON.stringify(scope);
+const sessionId = (scope: string[], container: string) => JSON.stringify([...scope, container]);
+const unavailableStates = new Set(["Stopped", "Stopping", "Exited", "Deleted"]);
 
-export function AttachTerminal({ path, containers }: { path: string; containers: Container[] }) {
-  const eligible = containers.filter(container => container.attachable && !container.root);
-  const [selected, setSelected] = useState(eligible[0]?.id ?? "");
-  const [active, setActive] = useState(false);
-  const [message, setMessage] = useState("");
+// This hook lives in App, above both Workspace and Administration routes.
+export function useTerminalSessions(inventory: InventoryResource) {
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [selection, setSelection] = useState<Record<string, string>>({});
+  const select = useCallback((scope: string[], container: string) => {
+    setSelection(old => ({ ...old, [cellId(scope)]: container }));
+  }, []);
+  const attach = useCallback((scope: string[], container: string) => {
+    const id = sessionId(scope, container);
+    setSessions(old => {
+      const existing = old.find(item => item.id === id);
+      if (existing?.state === "attached" || existing?.state === "connecting") return old;
+      if (old.filter(item => item.state !== "disconnected").length >= maxConnections) return old;
+      if (!existing && old.length >= maxSessions) return old;
+      if (existing) return old.map(item => item.id === id ? { ...item, generation: item.generation + 1, state: "connecting", message: "Connecting…" } : item);
+      return [...old, { id, scope: [...scope], container, state: "connecting", message: "Connecting…", generation: 0 }];
+    });
+    select(scope, container);
+  }, [select]);
+  const detach = useCallback((id: string) => setSessions(old => old.filter(item => item.id !== id)), []);
+  const update = useCallback((id: string, generation: number, state: TerminalState, message: string) => {
+    setSessions(old => old.map(item => item.id === id && item.generation === generation ? { ...item, state, message } : item));
+  }, []);
+
+  // A partial/failed refresh must not discard an attachment whose cell was omitted.
+  useEffect(() => {
+    if (!inventory.data || inventory.loading || inventory.error || inventory.data.failures.length) return;
+    const live = new Set(inventory.data.rows[3].filter(row => !unavailableStates.has(row.doc.status?.state ?? "")).map(row => cellId(row.scope)));
+    setSessions(old => old.every(item => live.has(cellId(item.scope))) ? old : old.filter(item => live.has(cellId(item.scope))));
+  }, [inventory.data, inventory.loading, inventory.error]);
+
+  const cellStates = useMemo(() => {
+    const result: Record<string, TerminalState> = {};
+    for (const session of sessions) {
+      const key = cellId(session.scope);
+      if (session.state === "attached" || (session.state === "connecting" && result[key] !== "attached") || !result[key]) result[key] = session.state;
+    }
+    return result;
+  }, [sessions]);
+  return { sessions, selection, select, attach, detach, update, cellStates };
+}
+
+type Manager = ReturnType<typeof useTerminalSessions>;
+
+const terminalThemes = {
+  light: { background: "#f8fafc", foreground: "#182230", cursor: "#275dad", cursorAccent: "#f8fafc", selectionBackground: "#bcd7ff",
+    black: "#253449", red: "#a82d35", green: "#157347", yellow: "#8c6000", blue: "#2458b8", magenta: "#8d3ba5", cyan: "#006b78", white: "#d7dee9",
+    brightBlack: "#5c6a7d", brightRed: "#cc3540", brightGreen: "#198657", brightYellow: "#a16d00", brightBlue: "#356ed4", brightMagenta: "#a24ab8", brightCyan: "#087e8d", brightWhite: "#ffffff" },
+  dark: { background: "#0d1421", foreground: "#e6edf7", cursor: "#a9c7ff", cursorAccent: "#0d1421", selectionBackground: "#375077",
+    black: "#263244", red: "#ff777a", green: "#78dca0", yellow: "#e9c875", blue: "#8cb7ff", magenta: "#d4a5f0", cyan: "#7bd8e2", white: "#d8e1ef",
+    brightBlack: "#8292a8", brightRed: "#ff9b9d", brightGreen: "#9ce8b7", brightYellow: "#f2d795", brightBlue: "#b0ceff", brightMagenta: "#e4c1f7", brightCyan: "#a2e9ef", brightWhite: "#ffffff" },
+};
+const resolvedTheme = (mode: ThemeMode, systemDark: boolean) => terminalThemes[mode === "system" ? systemDark ? "dark" : "light" : mode];
+
+function TerminalSession({ session, active, expanded, update, themeMode }: { session: Session; active: boolean; expanded: boolean; update: Manager["update"]; themeMode: ThemeMode }) {
   const mount = useRef<HTMLDivElement>(null);
+  const terminal = useRef<Terminal | null>(null);
+  const socket = useRef<WebSocket | null>(null);
+  const fitNow = useRef<() => void>(() => {});
+  const activeNow = useRef(active);
+  activeNow.current = active;
 
   useEffect(() => {
-    if (!active || !mount.current) return;
-    const term = new Terminal({ cursorBlink: true, convertEol: false, fontSize: 14 });
+    if (!mount.current) return;
+    const term = new Terminal({ cursorBlink: true, cursorStyle: "block", cursorInactiveStyle: "outline", convertEol: false, fontSize: 14, scrollback: 2000,
+      theme: resolvedTheme(themeMode, window.matchMedia("(prefers-color-scheme: dark)").matches) });
     const fit = new FitAddon();
+    terminal.current = term;
     term.loadAddon(fit);
     term.open(mount.current);
-    fit.fit();
-    const socket = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}${path}/containers/${encodeURIComponent(selected)}/attach`);
-    socket.binaryType = "arraybuffer";
-    let error = false;
     const resize = () => {
+      if (!activeNow.current || !mount.current?.clientWidth) return;
       fit.fit();
-      if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+      if (socket.current?.readyState === WebSocket.OPEN) socket.current.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
     };
-    socket.onopen = () => { setMessage("Connected"); resize(); term.focus(); };
-    socket.onmessage = event => {
-      if (typeof event.data !== "string") term.write(new Uint8Array(event.data));
-      else {
-        try { const result = JSON.parse(event.data); if (result.type === "error") { error = true; setMessage(result.message); } }
-        catch { error = true; setMessage("Invalid terminal response."); }
-      }
-    };
-    socket.onerror = () => { error = true; setMessage("Terminal connection failed."); };
-    socket.onclose = () => { if (!error) setMessage("Terminal connection closed."); };
-    const input = term.onData(data => { if (socket.readyState === WebSocket.OPEN) socket.send(new TextEncoder().encode(data)); });
+    fitNow.current = resize;
     const observer = new ResizeObserver(resize);
     observer.observe(mount.current);
-    return () => { observer.disconnect(); input.dispose(); socket.close(); term.dispose(); };
-  }, [active, selected, path]);
+    const input = term.onData(data => {
+      if (activeNow.current && socket.current?.readyState === WebSocket.OPEN) socket.current.send(new TextEncoder().encode(data));
+    });
+    return () => {
+      observer.disconnect(); input.dispose(); term.dispose(); terminal.current = null;
+      fitNow.current = () => {};
+    };
+  }, []);
 
-  return <section className="panel"><div className="panel-heading"><h2>Terminal</h2></div><div className="panel-body">
-    {!eligible.length ? <p>No attachable containers are available.</p> : <><label>Container <select value={selected} disabled={active} onChange={event => setSelected(event.target.value)}>{eligible.map(container => <option key={container.id} value={container.id}>{container.id}</option>)}</select></label>{" "}<button onClick={() => { setMessage(""); setActive(!active); }}>{active ? "Detach" : "Attach"}</button></>}
-    {message && <p role="status">{message}</p>}
-    {active && <div ref={mount} className="terminal-screen" aria-label="Container terminal" />}
-  </div></section>;
+  useEffect(() => {
+    const preference = window.matchMedia("(prefers-color-scheme: dark)");
+    const sync = () => { if (terminal.current) terminal.current.options.theme = resolvedTheme(themeMode, preference.matches); };
+    sync();
+    preference.addEventListener("change", sync);
+    return () => preference.removeEventListener("change", sync);
+  }, [themeMode]);
+
+  useEffect(() => {
+    let connection: WebSocket;
+    try {
+      connection = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}${apiPath(session.scope)}/containers/${encodeURIComponent(session.container)}/attach`);
+    } catch {
+      update(session.id, session.generation, "disconnected", "Terminal connection failed. Check the server and retry.");
+      return;
+    }
+    socket.current = connection;
+    connection.binaryType = "arraybuffer";
+    let failure = "";
+    let ready = false;
+    let receivedOutput = false;
+    connection.onopen = () => {
+      fitNow.current();
+    };
+    connection.onmessage = event => {
+      if (event.data instanceof ArrayBuffer) {
+        terminal.current?.write(new Uint8Array(event.data));
+        if (!receivedOutput) {
+          receivedOutput = true;
+          if (ready) update(session.id, session.generation, "attached", "Attached");
+        }
+      }
+      else if (typeof event.data === "string") {
+        try {
+          const response = JSON.parse(event.data);
+          if (response.type === "ready") {
+            ready = true;
+            update(session.id, session.generation, "attached", receivedOutput ? "Attached" : "Attached — waiting for container output. A prompt appears when the container runs an interactive shell.");
+          }
+          else if (response.type === "error") failure = typeof response.message === "string" ? response.message : "Terminal server error.";
+          else failure = "Invalid terminal response.";
+        } catch { failure = "Invalid terminal response."; }
+        if (failure) { update(session.id, session.generation, "disconnected", failure); connection.close(); }
+      }
+    };
+    connection.onerror = () => { failure ||= "Terminal connection failed. Check the server and retry."; update(session.id, session.generation, "disconnected", failure); connection.close(); };
+    connection.onclose = () => update(session.id, session.generation, "disconnected", failure || "Terminal connection closed. Reconnect to attach again.");
+    return () => {
+      connection.onopen = connection.onmessage = connection.onerror = connection.onclose = null;
+      connection.close();
+      if (socket.current === connection) socket.current = null;
+    };
+  }, [session.id, session.generation, session.scope, session.container, update]);
+
+  useEffect(() => {
+    if (!active) { terminal.current?.blur(); return; }
+    const frame = requestAnimationFrame(() => { fitNow.current(); terminal.current?.focus(); });
+    return () => cancelAnimationFrame(frame);
+  }, [active]);
+
+  useEffect(() => {
+    if (!active || !expanded) return;
+    const frame = requestAnimationFrame(() => { fitNow.current(); terminal.current?.focus(); });
+    return () => cancelAnimationFrame(frame);
+  }, [active, expanded]);
+
+  return <div className="terminal-session" hidden={!active} aria-hidden={!active}>
+    <div ref={mount} className="terminal-screen" aria-label={`Terminal for ${session.scope.join(" / ")} / ${session.container}`} />
+  </div>;
+}
+
+export function TerminalWorkspace({ scope, revision, inventory, manager, themeMode }: { scope: string[] | null; revision: number; inventory: InventoryResource; manager: Manager; themeMode: ThemeMode }) {
+  const [expanded, setExpanded] = useState(false);
+  const expandButton = useRef<HTMLButtonElement>(null);
+  const screens = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (!scope) setExpanded(false); }, [scope]);
+  useEffect(() => {
+    if (!expanded) return;
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || screens.current?.contains(event.target as Node)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setExpanded(false);
+      requestAnimationFrame(() => expandButton.current?.focus());
+    };
+    window.addEventListener("keydown", escape, true);
+    return () => window.removeEventListener("keydown", escape, true);
+  }, [expanded]);
+  const path = scope?.length === 4 ? `${apiPath(scope)}/containers` : null;
+  const containers = useResource<Container[]>(path, revision);
+  const eligible = containers.data?.filter(container => container.attachable && !container.root) ?? [];
+  const key = scope ? cellId(scope) : "";
+  const openInCell = manager.sessions.filter(item => cellId(item.scope) === key);
+  const options = [...eligible.map(container => container.id), ...openInCell.map(item => item.container).filter(id => !eligible.some(container => container.id === id))];
+  const selected = options.includes(manager.selection[key]) ? manager.selection[key] : options[0] ?? "";
+  const currentId = scope && selected ? sessionId(scope, selected) : "";
+  const current = manager.sessions.find(item => item.id === currentId);
+  const selectedEligible = eligible.some(container => container.id === selected);
+  const connections = manager.sessions.filter(item => item.state !== "disconnected").length;
+  const cellState = inventory.data?.rows[3].find(row => cellId(row.scope) === key)?.doc.status?.state;
+  const unavailable = cellState && unavailableStates.has(cellState);
+  const atLimit = !current && (connections >= maxConnections || manager.sessions.length >= maxSessions);
+  const reconnectLimited = current?.state === "disconnected" && connections >= maxConnections;
+  return <section className={`panel terminal-workspace${expanded ? " is-expanded" : ""}`} id="cell-terminal" hidden={!scope} aria-label="Terminal workspace">
+    <div className="panel-heading"><h2>Terminal</h2><div className="terminal-heading-actions"><span className="badge">{connections} / {maxConnections} connections</span><button ref={expandButton} type="button" aria-expanded={expanded} aria-controls="terminal-screens" onClick={() => setExpanded(value => !value)}>{expanded ? "Collapse terminal" : "Expand terminal"}</button></div></div>
+    {scope && <div className="terminal-controls">
+      {containers.loading && <p role="status">Loading containers…</p>}
+      {containers.error && <ErrorNotice error={containers.error} kind="Containers" />}
+      {containers.error && containers.data && <p className="stale">Container list is stale. Refresh before attaching.</p>}
+      {!containers.loading && !containers.error && !eligible.length && <p>No attachable containers are available.</p>}
+      {!!options.length && <><label htmlFor="terminal-container">Container</label><select id="terminal-container" value={selected} onChange={event => manager.select(scope, event.target.value)}>{options.map(id => <option key={id} value={id}>{id}{eligible.some(container => container.id === id) ? "" : " (unavailable)"}</option>)}</select>
+        {current?.state === "attached" || current?.state === "connecting" ? <button onClick={() => manager.detach(current.id)}>Detach</button> : current ? <><button disabled={reconnectLimited || !selectedEligible || !!unavailable || !!containers.error} onClick={() => manager.attach(scope, selected)}>Reconnect</button><button onClick={() => manager.detach(current.id)}>Detach</button></> : <button disabled={!!atLimit || !selectedEligible || !!unavailable || !!containers.error} onClick={() => manager.attach(scope, selected)}>Attach</button>}</>}
+      {unavailable && <p className="terminal-unavailable" role="status">Terminal unavailable: cell is {cellState}.</p>}
+      {(atLimit || reconnectLimited) && <p className="terminal-limit" role="status">Terminal limit reached. Detach another terminal to free a connection or retained slot.</p>}
+      {current && <p className={`terminal-connection-state ${current.state}`} role="status">{current.message}</p>}
+      {!!openInCell.length && <div className="terminal-tabs" role="tablist" aria-label="Open container terminals" onKeyDown={event => {
+        const index = openInCell.findIndex(item => item.id === currentId);
+        const next = event.key === "ArrowRight" ? (index + 1) % openInCell.length
+          : event.key === "ArrowLeft" ? (index - 1 + openInCell.length) % openInCell.length
+          : event.key === "Home" ? 0 : event.key === "End" ? openInCell.length - 1 : -1;
+        if (next < 0) return;
+        event.preventDefault();
+        manager.select(openInCell[next].scope, openInCell[next].container);
+        event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
+      }}>{openInCell.map(item => <button key={item.id} role="tab" aria-selected={item.id === currentId} tabIndex={item.id === currentId ? 0 : -1} onClick={() => manager.select(item.scope, item.container)}>{item.container} · {item.state}</button>)}</div>}
+    </div>}
+    <div className="terminal-screens" id="terminal-screens" ref={screens}>{manager.sessions.map(session => <TerminalSession key={session.id} session={session} active={!!scope && session.id === currentId} expanded={expanded} update={manager.update} themeMode={themeMode} />)}</div>
+  </section>;
 }

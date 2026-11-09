@@ -164,6 +164,11 @@ func registerAttachRouteWith(
 			_ = pty.Setsize(master, &pty.Winsize{Rows: initialRows, Cols: initialCols})
 			session, stop := context.WithCancel(r.Context())
 			defer stop()
+			// The WebSocket upgrade alone does not mean the daemon accepted the
+			// target. Signal readiness only after validation and PTY setup.
+			if err = write(websocket.TextMessage, []byte(`{"type":"ready"}`)); err != nil {
+				return
+			}
 			done := make(chan error, 1)
 			finished := make(chan struct{})
 			go func() {

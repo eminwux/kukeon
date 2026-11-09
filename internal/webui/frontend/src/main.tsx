@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import "./style.css";
 import { useResource, ErrorNotice, type Resource } from "./request";
 import { CatalogPage, RelatedResources } from "./catalog";
-import { AttachTerminal } from "./terminal";
+import { TerminalWorkspace, useTerminalSessions } from "./terminal";
 import { CellSidebar } from "./cell-sidebar";
 import { useInventory, type Inventory, type InventoryResource, type Doc, type RuntimeStatus } from "./inventory";
 import { apiPath, catalogTitles, kinds, titles, readRoute, resourceLink, listLink, workspaceLink, type Route } from "./routes";
@@ -71,7 +71,6 @@ function ResourceDetails({ route, revision, workspace = false }: { route: Route;
   const kind = kinds[depth];
   const detail = useResource<Doc>(apiPath(route.scope), revision);
   const containers = useResource<{ id: string; attachable?: boolean; root?: boolean }[]>(depth === 3 ? `${apiPath(route.scope)}/containers` : null, revision);
-  const terminal = depth === 3 && detail.data && containers.data && !containers.error && <div id="cell-terminal"><AttachTerminal key={JSON.stringify(route.scope)} path={apiPath(route.scope)} containers={containers.data} /></div>;
   const status = detail.data && (depth === 3 || depth === 4) && !route.document && <StatusSummary status={detail.data.status} kind={kind} />;
   const overview = detail.data && <section className="panel resource-overview"><div className="panel-heading"><h2>{route.document ? "API document" : "Resource overview"}</h2><StateBadge state={detail.data.status?.state} /></div>{route.document ? <pre tabIndex={0} aria-label={`Complete ${kind} JSON`}>{JSON.stringify(detail.data, null, 2)}</pre> : <div className="panel-body"><dl className="details-grid"><dt>Name</dt><dd>{detail.data.metadata.name}</dd><dt>Kind</dt><dd>{detail.data.kind ?? kind}</dd><dt>Scope</dt><dd>{route.scope.join(" / ")}</dd><dt>API version</dt><dd>{detail.data.apiVersion ?? "Not reported"}</dd><dt>Labels</dt><dd>{Object.entries(detail.data.metadata.labels ?? {}).map(([key, value]) => <span className="badge label-badge" key={key}>{key}: {value}</span>)}{!Object.keys(detail.data.metadata.labels ?? {}).length && "No labels"}</dd></dl>{depth < 3 && <a className="text-link" href={listLink(depth + 1, route.scope)}>View {titles[depth + 1].toLowerCase()} in this {kind} →</a>}</div>}</section>;
   const related = detail.data && !route.document && <RelatedResources doc={detail.data} revision={revision} />;
@@ -81,12 +80,9 @@ function ResourceDetails({ route, revision, workspace = false }: { route: Route;
     {detail.loading && <p role="status">Loading {kind} details…</p>}
     {detail.error && <ErrorNotice error={detail.error} kind={kind} />}
     {detail.error && detail.data && <p className="stale">Stale resource details — refresh failed.</p>}
-    {workspace && <p className="description terminal-note">Switching cells closes the current terminal attachment. The cell keeps running.</p>}
-    {workspace && terminal}
     {status}
     {overview}
     {related}
-    {!workspace && !route.document && terminal}
     {containerPanel}
   </>;
 }
@@ -130,7 +126,9 @@ function App() {
   }, [theme]);
   const connection = useResource<{ endpoint: string }>("/api/connection", revision);
   const inventory = useInventory(revision);
+  const terminals = useTerminalSessions(inventory);
   const isWorkspace = route.view === "workspace";
+  const terminalScope = (isWorkspace || route.view === "resource" && !route.document) && route.scope.length === 4 ? route.scope : null;
   const depth = titles.findIndex(title => title.toLowerCase() === route.view);
   const catalog = Object.keys(catalogTitles).includes(route.view);
   const heading = isWorkspace ? route.scope.at(-1) ?? "Workspace" : catalog ? route.scope.at(-1) ?? catalogTitles[route.view] : route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : "Administration";
@@ -141,7 +139,7 @@ function App() {
       <a className="brand" href={workspaceLink()}><span className="mark" aria-hidden="true">K</span><span>Kukeon<small>LOCAL WORKSPACE</small></span></a>
       <nav className="area-nav" aria-label="Areas"><a href={workspaceLink()} aria-current={isWorkspace ? "page" : undefined}>Workspace</a><a href="#/administration" aria-current={!isWorkspace ? "page" : undefined}>Administration</a></nav>
       <a className="new-cell-action sidebar-new-cell" href="#/configs">+ New Cell</a>
-      <CellSidebar inventory={inventory} selectedScope={isWorkspace ? route.scope : []} />
+      <CellSidebar inventory={inventory} selectedScope={isWorkspace ? route.scope : []} terminalStates={terminals.cellStates} />
       <section className="connection" aria-label="Daemon connection">
         <p className="status" role="status"><span className={`dot ${inventory.daemon.error ? "failed" : inventory.daemon.loading ? "checking" : ""}`} aria-hidden="true" />{daemonStatus}</p>
         <code>{connection.data?.endpoint ?? (connection.loading ? "Loading socket…" : "Socket unknown")}</code>
@@ -164,6 +162,7 @@ function App() {
         {inventory.error && <ErrorNotice error={inventory.error} />}
         {inventory.error && inventory.data && <p className="stale">Stale inventory — refresh failed. Counts and lists may be out of date.</p>}
         {!!inventory.data?.failures.length && <div className="error" role="alert"><strong>Incomplete inventory</strong><p>Some scopes could not be loaded. Counts and lists exclude unavailable resources.</p><ul>{inventory.data.failures.map(message => <li key={message}>{message}</li>)}</ul></div>}
+        <TerminalWorkspace scope={terminalScope} revision={revision} inventory={inventory} manager={terminals} themeMode={theme} />
         {isWorkspace ? route.scope.length === 4 ? <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} workspace /> : <WorkspaceLanding inventory={inventory} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} onCreated={() => setRevision(value => value + 1)} /> : route.view === "resource" ? <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} /> : <Dashboard inventory={inventory} />}
         <footer>Daemon inventory · {inventory.data ? <>Last refreshed <time dateTime={inventory.data.updatedAt}>{new Date(inventory.data.updatedAt).toLocaleTimeString()}</time></> : "Not refreshed yet"} · Refresh to retrieve the latest state.</footer>
       </div>
