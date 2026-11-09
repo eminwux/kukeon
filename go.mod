@@ -3,6 +3,7 @@ module github.com/eminwux/kukeon
 go 1.24.5
 
 require (
+	github.com/coder/websocket v1.8.15
 	github.com/containerd/cgroups/v2 v2.0.0-20221109034041-cc78c6c1e32d
 	github.com/containerd/containerd/api v1.10.0
 	github.com/containerd/containerd/v2 v2.2.0

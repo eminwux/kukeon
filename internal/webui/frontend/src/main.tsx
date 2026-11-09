@@ -1,5 +1,6 @@
-import { StrictMode, useEffect, useState } from "react";
+import { StrictMode, useEffect, useRef, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
+import "@xterm/xterm/css/xterm.css";
 import "./style.css";
 
 type SetupStatus = { name?: string; index?: number; state: string; error?: string };
@@ -10,7 +11,10 @@ type RuntimeStatus = {
   createdAt?: string; updatedAt?: string; startTime?: string; finishTime?: string; restartTime?: string;
   containers?: RuntimeStatus[]; repos?: SetupStatus[]; stages?: SetupStatus[];
 };
-type Doc = { metadata: { name: string; labels?: Record<string, string> }; status?: RuntimeStatus; apiVersion?: string; kind?: string; [key: string]: unknown };
+type CellContainer = { id: string; attachable?: boolean; root?: boolean };
+type CellProvenance = { bindingKind?: string; bindingRef?: { name: string; realm: string; space?: string; stack?: string } };
+type Doc = { metadata: { name: string; labels?: Record<string, string> }; spec?: { containers?: CellContainer[]; provenance?: CellProvenance }; status?: RuntimeStatus; apiVersion?: string; kind?: string; [key: string]: unknown };
+type ConfigSummary = { metadata: { name: string; realm: string; space?: string; stack?: string }; blueprint?: { name: string; realm: string; space?: string; stack?: string }; valueKeys?: string[]; repoSlots?: string[]; secretSlots?: string[] };
 type Failure = { code: string; message: string };
 type Resource<T> = { data?: T; loading: boolean; error?: Failure };
 
@@ -57,14 +61,16 @@ const kinds = ["realm", "space", "stack", "cell", "container"];
 const titles = ["Realms", "Spaces", "Stacks", "Cells"];
 type Row = { doc: Doc; scope: string[] };
 type Inventory = { rows: Row[][]; failures: string[]; updatedAt: string };
-type Route = { view: string; scope: string[]; parent: string[]; document: boolean };
+type Route = { view: string; scope: string[]; parent: string[]; document: boolean; configName?: string };
 function readRoute(): Route {
   try {
     const raw = window.location.hash.slice(1);
     const [path, query] = raw.split("?");
     const params = new URLSearchParams(query);
-    if (!path || path === "/dashboard") return { view: "dashboard", scope: [], parent: [], document: false };
+    if (!path) return { view: "cells", scope: [], parent: [], document: false };
+    if (path === "/dashboard") return { view: "dashboard", scope: [], parent: [], document: false };
     const parts = path.split("/").filter(Boolean).map(decodeURIComponent);
+    if (parts[0] === "config" && parts[1]) return { view: "config", scope: [params.get("realm") ?? "", params.get("space") ?? "", params.get("stack") ?? ""], parent: [], document: false, configName: parts[1] };
     if (parts[0] === "resource") return { view: "resource", scope: parts.slice(1, 6), parent: [], document: params.has("document") };
     if (titles.some(title => title.toLowerCase() === parts[0])) {
       const parent: unknown = JSON.parse(params.get("parent") ?? "[]");
@@ -82,6 +88,18 @@ function listLink(depth: number, parent: string[] = []): string {
 }
 function apiPath(scope: string[]): string {
   return "/api/" + scope.map((name, i) => `${kinds[i]}s/${encodeURIComponent(name)}`).join("/");
+}
+function configPath(ref: NonNullable<CellProvenance["bindingRef"]>): string {
+  const query = new URLSearchParams({ realm: ref.realm, space: ref.space ?? "", stack: ref.stack ?? "" });
+  return `/api/configs/${encodeURIComponent(ref.name)}?${query}`;
+}
+function configListPath(scope: { realm: string; space: string; stack: string }): string {
+  const query = new URLSearchParams(scope);
+  return `/api/configs?${query}`;
+}
+function configLink(config: ConfigSummary): string {
+  const query = new URLSearchParams({ realm: config.metadata.realm, space: config.metadata.space ?? "", stack: config.metadata.stack ?? "" });
+  return `#/config/${encodeURIComponent(config.metadata.name)}?${query}`;
 }
 async function readJSON<T>(path: string, signal: AbortSignal): Promise<T> {
   const response = await fetch(path, { signal });
@@ -178,37 +196,198 @@ function Dashboard({ inventory }: { inventory: Resource<Inventory> }) {
     </div>
   </>;
 }
-function ResourceList({ depth, inventory, parent }: { depth: number; inventory: Resource<Inventory>; parent: string[] }) {
+function ResourceList({ depth, inventory, parent, revision }: { depth: number; inventory: Resource<Inventory>; parent: string[]; revision: number }) {
   const [search, setSearch] = useState("");
   const [realm, setRealm] = useState("");
   const [page, setPage] = useState(0);
+  const [createOpen, setCreateOpen] = useState(false);
   const rows = inventory.data?.rows[depth] ?? [];
   const scoped = rows.filter(row => parent.every((name, i) => row.scope[i] === name));
   const filtered = scoped.filter(row => (!realm || row.scope[0] === realm) && row.scope.join(" / ").toLowerCase().includes(search.toLowerCase()));
   const pageSize = 25;
   const currentPage = Math.min(page, Math.max(0, Math.ceil(filtered.length / pageSize) - 1));
-  return <section className="panel" aria-label={`${titles[depth]} list`}>
-    <div className="list-controls"><label className="search-field">Search<input type="search" placeholder={`Search ${titles[depth].toLowerCase()}…`} value={search} onChange={e => { setSearch(e.target.value); setPage(0); }} /></label>{depth > 0 && <label>Realm<select aria-label="Filter by realm" value={realm} onChange={e => { setRealm(e.target.value); setPage(0); }}><option value="">All realms</option>{inventory.data?.rows[0].map(row => <option key={row.scope[0]}>{row.scope[0]}</option>)}</select></label>}<span className="result-count">{filtered.length} results</span></div>
+  return <>
+    <section className="panel" aria-label={`${titles[depth]} list`}>
+    <div className="list-controls"><label className="search-field">Search<input type="search" placeholder={`Search ${titles[depth].toLowerCase()}…`} value={search} onChange={e => { setSearch(e.target.value); setPage(0); }} /></label>{depth > 0 && <label>Realm<select aria-label="Filter by realm" value={realm} onChange={e => { setRealm(e.target.value); setPage(0); }}><option value="">All realms</option>{inventory.data?.rows[0].map(row => <option key={row.scope[0]}>{row.scope[0]}</option>)}</select></label>}<span className="result-count">{filtered.length} results</span>{depth === 3 && <button className="primary-button" onClick={() => setCreateOpen(true)}>Create cell</button>}</div>
     {parent.length > 0 && <p className="scope-filter">Scope: {parent.join(" / ")} <a href={listLink(depth)}>Clear scope</a></p>}
     <div className="table-scroll"><table><thead><tr><th>Name</th><th>State</th><th>Scope</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{filtered.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(row => <tr key={JSON.stringify(row.scope)}><td><a className="resource-name" href={resourceLink(row.scope)}>{row.doc.metadata.name}</a></td><td><StateBadge state={row.doc.status?.state} /></td><td className="scope-cell">{row.scope.slice(0, -1).join(" / ") || "Workspace"}</td><td><a className="document-action" href={resourceLink(row.scope, true)} aria-label={`View document for ${row.scope.join(" / ")}`}>View document</a></td></tr>)}</tbody></table></div>
     {!filtered.length && <div className="empty-state"><h3>{inventory.loading ? "Loading resources…" : inventory.error || inventory.data?.failures.length ? "Resources could not be fully loaded" : scoped.length ? "No matching resources" : `No ${titles[depth].toLowerCase()} found`}</h3><p>{search || realm ? "Try another search or clear the filters." : "Refresh to retrieve the latest resource state."}</p></div>}
     <div className="pagination"><span>{filtered.length ? `${currentPage * pageSize + 1}–${Math.min((currentPage + 1) * pageSize, filtered.length)} of ${filtered.length}` : "0 results"}</span><button disabled={!currentPage} onClick={() => setPage(currentPage - 1)}>Previous</button><button disabled={(currentPage + 1) * pageSize >= filtered.length} onClick={() => setPage(currentPage + 1)}>Next</button></div>
-  </section>;
+    </section>
+    {createOpen && <CreateCellDialog inventory={inventory} parent={parent} revision={revision} onClose={() => setCreateOpen(false)} />}
+  </>;
 }
-function ResourceDetails({ route, revision }: { route: Route; revision: number }) {
+
+function CreateCellDialog({ inventory, parent, revision, onClose, preset }: { inventory: Resource<Inventory>; parent: string[]; revision: number; onClose: () => void; preset?: ConfigSummary }) {
+  const dialogRef = useRef<HTMLElement>(null);
+  const realms = inventory.data?.rows[0] ?? [];
+  const initialRealm = parent[0] || realms[0]?.scope[0] || "";
+  const [realm, setRealm] = useState(initialRealm);
+  const spaces = (inventory.data?.rows[1] ?? []).filter(row => row.scope[0] === realm);
+  const initialSpace = parent[1] || spaces[0]?.scope[1] || "";
+  const [space, setSpace] = useState(initialSpace);
+  const stacks = (inventory.data?.rows[2] ?? []).filter(row => row.scope[0] === realm && row.scope[1] === space);
+  const initialStack = parent[2] || stacks[0]?.scope[2] || "";
+  const [stack, setStack] = useState(initialStack);
+  useEffect(() => {
+    if (!realm && realms.length) setRealm(parent[0] || realms[0].scope[0]);
+  }, [realm, realms, parent]);
+  useEffect(() => {
+    if (spaces.length && !spaces.some(row => row.scope[1] === space)) setSpace(parent[1] && spaces.some(row => row.scope[1] === parent[1]) ? parent[1] : spaces[0].scope[1]);
+  }, [spaces, space, parent]);
+  useEffect(() => {
+    if (stacks.length && !stacks.some(row => row.scope[2] === stack)) setStack(parent[2] && stacks.some(row => row.scope[2] === parent[2]) ? parent[2] : stacks[0].scope[2]);
+  }, [stacks, stack, parent]);
+  const configs = useResource<ConfigSummary[]>(realm ? configListPath({ realm, space: "", stack: "" }) : null, revision);
+  const [configKey, setConfigKey] = useState(preset ? JSON.stringify(preset.metadata) : "");
+  const [name, setName] = useState("");
+  const [start, setStart] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<Failure>();
+  const availableConfigs = [...(configs.data ?? [])];
+  if (preset && !availableConfigs.some(config => JSON.stringify(config.metadata) === JSON.stringify(preset.metadata))) availableConfigs.push(preset);
+  const selected = availableConfigs.find(config => JSON.stringify(config.metadata) === configKey) ?? preset;
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
+    if (!dialog) return;
+    const focusable = () => [...dialog.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])')];
+    focusable()[0]?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); onClose(); return; }
+      if (event.key !== "Tab") return;
+      const items = focusable();
+      if (!items.length) return;
+      const first = items[0], last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    dialog.addEventListener("keydown", onKeyDown);
+    return () => { dialog.removeEventListener("keydown", onKeyDown); previous?.focus(); };
+  }, []);
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!selected) return;
+    setPending(true); setError(undefined);
+    try {
+      const response = await fetch("/api/cells/from-config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ config: selected.metadata, scope: { realm, space, stack }, name, start }) });
+      const body = await response.json();
+      if (!response.ok) throw body.error ?? { code: "unavailable", message: `HTTP ${response.status}` };
+      const cell = body.cell as Doc;
+      window.location.hash = resourceLink([realm, space, stack, cell.metadata.name]).slice(1);
+    } catch (cause) {
+      const failure = cause as Partial<Failure>;
+      setError({ code: failure.code ?? "unavailable", message: failure.message ?? "Could not create the cell." });
+      setPending(false);
+    }
+  }
+  return <div className="dialog-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}><section ref={dialogRef} className="dialog panel" role="dialog" aria-modal="true" aria-labelledby="create-cell-title" tabIndex={-1}>
+    <div className="panel-heading"><div><p className="eyebrow">New workload</p><h2 id="create-cell-title">Create cell from config</h2></div><button className="icon-button" aria-label="Close" onClick={onClose}>×</button></div>
+    <form className="dialog-body" onSubmit={submit}>
+      <label>Realm<select required value={realm} onChange={event => { setRealm(event.target.value); setSpace(""); setStack(""); }}><option value="">Choose a realm</option>{realms.map(row => <option key={row.scope[0]} value={row.scope[0]}>{row.scope[0]}</option>)}</select></label>
+      <label>Space<select required value={space} onChange={event => { setSpace(event.target.value); setStack(""); }}><option value="">Choose a space</option>{spaces.map(row => <option key={row.scope[1]} value={row.scope[1]}>{row.scope[1]}</option>)}</select></label>
+      <label>Stack<select required value={stack} onChange={event => setStack(event.target.value)}><option value="">Choose a stack</option>{stacks.map(row => <option key={row.scope[2]} value={row.scope[2]}>{row.scope[2]}</option>)}</select></label>
+      <label>Cell config<select required value={configKey} onChange={event => setConfigKey(event.target.value)}><option value="">Choose a config</option>{availableConfigs.map(config => <option key={JSON.stringify(config.metadata)} value={JSON.stringify(config.metadata)}>{config.metadata.name} · {[config.metadata.realm, config.metadata.space, config.metadata.stack].filter(Boolean).join(" / ")}</option>)}</select></label>
+      {configs.loading && <p role="status">Loading configs…</p>}{configs.error && <ErrorNotice error={configs.error} kind="Config" />}
+      {selected?.blueprint && <p className="description">Uses blueprint <strong>{selected.blueprint.name}</strong> in {selected.blueprint.realm}{selected.valueKeys?.length ? ` · ${selected.valueKeys.length} configured values` : ""}{selected.repoSlots?.length ? ` · ${selected.repoSlots.length} repository slots` : ""}{selected.secretSlots?.length ? ` · ${selected.secretSlots.length} secret slots` : ""}</p>}
+      <label>Cell name <span className="description">Leave blank to generate one.</span><input value={name} onChange={event => setName(event.target.value)} autoComplete="off" /></label>
+      <label className="check-control"><input type="checkbox" checked={start} onChange={event => setStart(event.target.checked)} /> Start the cell after creating it</label>
+      {error && <ErrorNotice error={error} kind="Cell" />}
+      <div className="dialog-actions"><button type="button" onClick={onClose}>Cancel</button><button className="primary-button" type="submit" disabled={!selected || pending}>{pending ? "Creating…" : start ? "Create and start" : "Create stopped cell"}</button></div>
+    </form>
+  </section></div>;
+}
+
+function ConfigDetails({ name, scope, revision, inventory }: { name: string; scope: string[]; revision: number; inventory: Resource<Inventory> }) {
+  const summary = useResource<ConfigSummary>(configPath({ name, realm: scope[0], space: scope[1], stack: scope[2] }), revision);
+  const [createOpen, setCreateOpen] = useState(false);
+  return <>
+    <div className="detail-actions"><a href={listLink(3)}>← Back to cells</a><button className="primary-button" onClick={() => setCreateOpen(true)}>Create cell from this config</button></div>
+    {summary.loading && <p role="status">Loading config…</p>}{summary.error && <ErrorNotice error={summary.error} kind="Config" />}
+    {summary.data && <section className="panel"><div className="panel-heading"><h2>Config binding</h2><span className="badge">Reusable cell template</span></div><div className="panel-body"><dl className="details-grid"><dt>Name</dt><dd>{summary.data.metadata.name}</dd><dt>Scope</dt><dd>{[summary.data.metadata.realm, summary.data.metadata.space, summary.data.metadata.stack].filter(Boolean).join(" / ")}</dd><dt>Blueprint</dt><dd>{summary.data.blueprint ? `${summary.data.blueprint.name} · ${[summary.data.blueprint.realm, summary.data.blueprint.space, summary.data.blueprint.stack].filter(Boolean).join(" / ")}` : "Not reported"}</dd><dt>Inputs</dt><dd>{summary.data.valueKeys?.length ?? 0} values · {summary.data.repoSlots?.length ?? 0} repository slots · {summary.data.secretSlots?.length ?? 0} secret slots</dd></dl><p className="description">Config values, repository URLs, and secret references are hidden in this overview.</p></div></section>}
+    {createOpen && summary.data && <CreateCellDialog inventory={inventory} parent={scope} revision={revision} preset={summary.data} onClose={() => setCreateOpen(false)} />}
+  </>;
+}
+function ResourceDetails({ route, revision, onRefresh }: { route: Route; revision: number; onRefresh: () => void }) {
   const depth = route.scope.length - 1;
   const kind = kinds[depth];
   const detail = useResource<Doc>(apiPath(route.scope), revision);
   const containers = useResource<{ id: string }[]>(depth === 3 ? `${apiPath(route.scope)}/containers` : null, revision);
+  const provenance = depth === 3 ? detail.data?.spec?.provenance : undefined;
+  const ref = provenance?.bindingKind === "config" ? provenance.bindingRef : undefined;
+  const config = useResource<ConfigSummary>(ref ? configPath(ref) : null, revision);
+  const [terminalContainer, setTerminalContainer] = useState("");
+  const [actionPending, setActionPending] = useState(false);
+  const [actionError, setActionError] = useState<Failure>();
+  const [actionNotice, setActionNotice] = useState("");
+  const specs = detail.data?.spec?.containers ?? [];
+  const attachable = specs.filter(container => container.attachable);
+  const cellState = detail.data?.status?.state;
+  const running = cellState === "Ready" || cellState === "Running";
+  async function lifecycle(action: "start" | "stop") {
+    setActionPending(true); setActionError(undefined); setActionNotice("");
+    try {
+      const response = await fetch(`${apiPath(route.scope)}/${action}`, { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) throw body.error ?? { code: "unavailable", message: `HTTP ${response.status}` };
+      setActionNotice(action === "start" ? "Cell start requested." : "Cell stopped.");
+      onRefresh();
+    } catch (cause) {
+      const failure = cause as Partial<Failure>;
+      setActionError({ code: failure.code ?? "unavailable", message: failure.message ?? `Could not ${action} the cell.` });
+    } finally { setActionPending(false); }
+  }
   return <>
     <div className="detail-actions"><a href={listLink(Math.min(depth, 3))}>← Back to {titles[Math.min(depth, 3)].toLowerCase()}</a><a className="document-action" href={resourceLink(route.scope, !route.document)}>{route.document ? "Show overview" : "View document"}</a></div>
+    {depth === 3 && !route.document && detail.data && <section className="cell-hero panel"><div><p className="eyebrow">Cell</p><h2>{detail.data.metadata.name}</h2><p>{route.scope.join(" / ")}</p></div><div className="cell-actions">{attachable.length === 1 && <button className="primary-button" onClick={() => setTerminalContainer(attachable[0].id)}>Open terminal</button>}{attachable.length > 1 && <><label>Terminal container<select aria-label="Terminal container" value={terminalContainer || attachable[0].id} onChange={event => setTerminalContainer(event.target.value)}>{attachable.map(item => <option key={item.id} value={item.id}>{item.id}</option>)}</select></label><button className="primary-button" onClick={() => setTerminalContainer(terminalContainer || attachable[0].id)}>Open terminal</button></>}{running ? <button onClick={() => void lifecycle("stop")} disabled={actionPending}>Stop cell</button> : <button onClick={() => void lifecycle("start")} disabled={actionPending}>Start cell</button>}</div></section>}
+    {actionNotice && <p className="success-notice" role="status">{actionNotice}</p>}{actionError && <ErrorNotice error={actionError} kind="Cell" />}
     {detail.loading && <p role="status">Loading {kind} details…</p>}
     {detail.error && <ErrorNotice error={detail.error} kind={kind} />}
     {detail.error && detail.data && <p className="stale">Stale resource details — refresh failed.</p>}
     {detail.data && (depth === 3 || depth === 4) && !route.document && <StatusSummary status={detail.data.status} kind={kind} />}
+    {depth === 3 && !route.document && ref && <section className="panel lineage-panel"><div className="panel-heading"><h2>Created from config</h2><span className="badge">1:N binding</span></div><div className="panel-body">{config.loading && <p role="status">Loading config relationship…</p>}{config.error && <ErrorNotice error={config.error} kind="Config" />}{config.data && <><p><a className="resource-name" href={configLink(config.data)}>{config.data.metadata.name}</a></p><p className="description">Config in {[config.data.metadata.realm, config.data.metadata.space, config.data.metadata.stack].filter(Boolean).join(" / ")}{config.data.blueprint ? ` · blueprint ${config.data.blueprint.name}` : ""}</p><p className="description">The config is the reusable source. This cell is its own runtime instance.</p>{detail.data?.status?.outOfSync && <div className="error"><strong>Cell is out of sync with its source</strong><p>{detail.data.status.outOfSyncReason ?? "The daemon reports a difference from the config."}</p></div>}</>}</div></section>}
     {detail.data && <section className="panel"><div className="panel-heading"><h2>{route.document ? "API document" : "Resource overview"}</h2><StateBadge state={detail.data.status?.state} /></div>{route.document ? <pre tabIndex={0} aria-label={`Complete ${kind} JSON`}>{JSON.stringify(detail.data, null, 2)}</pre> : <div className="panel-body"><dl className="details-grid"><dt>Name</dt><dd>{detail.data.metadata.name}</dd><dt>Kind</dt><dd>{detail.data.kind ?? kind}</dd><dt>Scope</dt><dd>{route.scope.join(" / ")}</dd><dt>API version</dt><dd>{detail.data.apiVersion ?? "Not reported"}</dd><dt>Labels</dt><dd>{Object.entries(detail.data.metadata.labels ?? {}).map(([key, value]) => <span className="badge label-badge" key={key}>{key}: {value}</span>)}{!Object.keys(detail.data.metadata.labels ?? {}).length && "No labels"}</dd></dl>{depth < 3 && <a className="text-link" href={listLink(depth + 1, route.scope)}>View {titles[depth + 1].toLowerCase()} in this {kind} →</a>}</div>}</section>}
     {depth === 3 && <section className="panel container-panel"><div className="panel-heading"><h2>Containers</h2><span className="badge">{detail.error ? "Stale observations" : detail.loading ? "Refreshing observations" : "Cell observations"}</span></div><div className="panel-body">{containers.loading && <p>Loading containers…</p>}{containers.error && <ErrorNotice error={containers.error} />}{containers.error && containers.data && <p className="stale">Stale container list — refresh failed.</p>}{!containers.loading && !containers.error && !containers.data?.length && <p>No containers found.</p>}<ul className="state-list">{containers.data?.map(container => <li key={container.id}><a className="text-link" href={resourceLink([...route.scope, container.id])}>{container.id}</a><StateBadge state={detail.data?.status?.containers?.find(item => item.name === container.id || item.id === container.id)?.state} /><a href={resourceLink([...route.scope, container.id], true)}>View document</a></li>)}</ul></div></section>}
+    {depth === 3 && attachable.length > 1 && <section className="panel container-panel"><div className="panel-heading"><h2>Attachable containers</h2><span className="badge">Terminal access</span></div><div className="panel-body"><ul className="state-list">{attachable.map(container => <li key={container.id}><strong>{container.id}</strong><span className="description">{container.root ? "Root container" : "Interactive terminal enabled"}</span><button className="primary-button" onClick={() => setTerminalContainer(container.id)}>Open terminal</button></li>)}</ul></div></section>}
+    {depth === 3 && terminalContainer && <TerminalPanel key={terminalContainer} path={`${apiPath([...route.scope, terminalContainer])}/terminal`} container={terminalContainer} onClose={() => setTerminalContainer("")} />}
   </>;
+}
+
+function TerminalPanel({ path, container, onClose }: { path: string; container: string; onClose: () => void }) {
+  const host = useRef<HTMLDivElement>(null);
+  const [status, setStatus] = useState("Connecting…");
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let disposed = false;
+    let terminal: import("@xterm/xterm").Terminal | undefined;
+    let socket: WebSocket | undefined;
+    let observer: ResizeObserver | undefined;
+    let input: { dispose(): void } | undefined;
+    void Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit")]).then(([xterm, fitModule]) => {
+      if (disposed || !host.current) return;
+      terminal = new xterm.Terminal({ cursorBlink: true, fontSize: 13, scrollback: 3000, convertEol: true, screenReaderMode: true, theme: { background: "#111827", foreground: "#e5e7eb", cursor: "#f8fafc" } });
+      const fit = new fitModule.FitAddon();
+      terminal.loadAddon(fit);
+      terminal.open(host.current);
+      const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
+      socket = new WebSocket(`${scheme}//${window.location.host}${path}`);
+      socket.binaryType = "arraybuffer";
+      const resize = () => {
+        fit.fit();
+        if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "resize", cols: terminal!.cols, rows: terminal!.rows }));
+      };
+      socket.onopen = () => { setStatus("Connected"); resize(); terminal?.focus(); };
+      socket.onmessage = event => { if (event.data instanceof ArrayBuffer) terminal?.write(new Uint8Array(event.data)); else terminal?.write(String(event.data)); };
+      let failed = false;
+      socket.onerror = () => { failed = true; setStatus("Connection failed. Check that the cell is running and this container is attachable."); };
+      socket.onclose = () => { if (!failed) setStatus("Disconnected"); };
+      input = terminal.onData(data => { if (socket?.readyState === WebSocket.OPEN) socket.send(new TextEncoder().encode(data)); });
+      observer = new ResizeObserver(resize);
+      observer.observe(host.current);
+    }).catch(() => setStatus("Terminal could not be loaded"));
+    return () => { disposed = true; observer?.disconnect(); input?.dispose(); socket?.close(); terminal?.dispose(); };
+  }, [path, attempt]);
+  return <section className="terminal-panel panel" aria-label={`Terminal for ${container}`}><div className="panel-heading"><div><h2>Terminal · {container}</h2><p role="status" aria-live="polite">{status}</p></div><div className="terminal-controls">{status !== "Connected" && <button onClick={() => { setStatus("Connecting…"); setAttempt(value => value + 1); }}>Reconnect</button>}<button onClick={onClose}>Close terminal</button></div></div><div className="terminal-host" ref={host} tabIndex={0} aria-label={`Interactive terminal for ${container}`} /><p className="terminal-hint">Keyboard input is sent to this container. Close the panel to detach.</p></section>;
 }
 
 type Theme = "system" | "light" | "dark";
@@ -233,17 +412,18 @@ function App() {
   const connection = useResource<{ endpoint: string }>("/api/connection", revision);
   const inventory = useInventory(revision);
   const depth = titles.findIndex(title => title.toLowerCase() === route.view);
-  const activeDepth = route.view === "resource" ? Math.min(route.scope.length - 1, 3) : depth;
-  const heading = route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : "Dashboard";
+  const activeDepth = route.view === "resource" ? Math.min(route.scope.length - 1, 3) : route.view === "config" ? 3 : depth;
+  const heading = route.view === "resource" ? route.scope.at(-1) : route.view === "config" ? route.configName : depth >= 0 ? titles[depth] : "Dashboard";
   const status = inventory.loading ? "Refreshing…" : inventory.error || inventory.data?.failures.length ? "Needs attention" : "Connected";
   return <div className="app-shell">
     <aside className={`sidebar ${menuOpen ? "is-open" : ""}`} id="resource-sidebar" aria-label="Workspace sidebar">
       <button className="sidebar-close" aria-label="Close sidebar" onClick={() => setMenuOpen(false)}>×</button>
       <a className="brand" href="#"><span className="mark" aria-hidden="true">K</span><span>Kukeon<small>LOCAL WORKSPACE</small></span></a>
       <nav className="sidebar-scroll primary-nav" aria-label="Main navigation">
+        <a className="resource-link" href={listLink(3)} aria-current={activeDepth === 3 ? "page" : undefined}><span aria-hidden="true">◇</span> Cells</a>
+        <p className="nav-caption">Workspace</p>
         <a className="resource-link" href="#/dashboard" aria-current={route.view === "dashboard" ? "page" : undefined}><span aria-hidden="true">▦</span> Dashboard</a>
-        <p className="nav-caption">Resources</p>
-        {titles.map((title, i) => <a key={title} className="resource-link" href={listLink(i)} aria-current={activeDepth === i ? "page" : undefined}><span aria-hidden="true">◇</span>{title}</a>)}
+        {titles.slice(0, 3).map((title, i) => <a key={title} className="resource-link" href={listLink(i)} aria-current={activeDepth === i ? "page" : undefined}><span aria-hidden="true">◇</span>{title}</a>)}
       </nav>
       <section className="connection" aria-label="Daemon connection">
         <p className="status" role="status"><span className={`dot ${inventory.error || inventory.data?.failures.length ? "failed" : ""}`} aria-hidden="true" />{status}</p>
@@ -259,12 +439,12 @@ function App() {
         <button className="refresh" onClick={() => setRevision(value => value + 1)}>Refresh</button>
       </header>
       <div className="workspace-content">
-        <div className="page-heading"><p className="eyebrow">{route.view === "resource" ? "Resource details" : "Workspace"}</p><h1>{heading}</h1><p className="description">{route.view === "dashboard" ? "Your local infrastructure at a glance." : route.view === "resource" ? route.scope.join(" / ") : `Browse ${heading?.toLowerCase()} across your workspace.`}</p></div>
+        <div className="page-heading"><p className="eyebrow">{route.view === "resource" ? "Resource details" : route.view === "config" ? "Cell config" : "Workspace"}</p><h1>{heading}</h1><p className="description">{route.view === "dashboard" ? "Your local infrastructure at a glance." : route.view === "resource" ? route.scope.join(" / ") : route.view === "config" ? route.scope.filter(Boolean).join(" / ") : `Browse ${heading?.toLowerCase()} across your workspace.`}</p></div>
         {inventory.loading && <p className="description" role="status">Refreshing resource inventory…</p>}
         {inventory.error && <ErrorNotice error={inventory.error} />}
         {inventory.error && inventory.data && <p className="stale">Stale inventory — refresh failed. Counts and lists may be out of date.</p>}
         {!!inventory.data?.failures.length && <div className="error" role="alert"><strong>Incomplete inventory</strong><p>Some scopes could not be loaded. Counts and lists exclude unavailable resources.</p><ul>{inventory.data.failures.map(message => <li key={message}>{message}</li>)}</ul></div>}
-        {route.view === "resource" ? <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} /> : <Dashboard inventory={inventory} />}
+        {route.view === "resource" ? <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} onRefresh={() => setRevision(value => value + 1)} /> : route.view === "config" ? <ConfigDetails name={route.configName ?? ""} scope={route.scope} revision={revision} inventory={inventory} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} revision={revision} /> : <Dashboard inventory={inventory} />}
         <footer>Daemon inventory · {inventory.data ? <>Last refreshed <time dateTime={inventory.data.updatedAt}>{new Date(inventory.data.updatedAt).toLocaleTimeString()}</time></> : "Not refreshed yet"} · Refresh to retrieve the latest state.</footer>
       </div>
     </main>

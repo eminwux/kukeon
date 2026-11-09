@@ -135,3 +135,40 @@ button:disabled { cursor: default; opacity: .4; }
 .setup-status h3 { font-size: 12px; margin: 24px 0 6px; }
 .setup-error { color: var(--error); font-size: 12px; margin: 4px 0 0; overflow-wrap: anywhere; }
 .container-panel .state-list .text-link { margin-top: 0; margin-right: auto; }
+.primary-button { background: var(--accent); color: var(--panel); border-color: var(--accent); font-weight: 600; min-height: 38px; }
+.primary-button:hover { filter: brightness(.94); background: var(--accent); }
+.cell-hero { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 22px 24px; margin-bottom: 20px; }
+.cell-hero h2 { font-size: 22px; font-weight: 600; overflow-wrap: anywhere; }
+.cell-hero p:last-child { color: var(--muted); margin: 8px 0 0; font-size: 12px; }
+.cell-actions { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
+.cell-actions label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 11px; }
+.lineage-panel { margin-bottom: 20px; }
+.success-notice { color: #236c4a; background: #edf8f1; border-radius: 6px; padding: 10px 14px; }
+.terminal-link { border: 0; color: var(--accent); background: transparent; text-decoration: underline; }
+.terminal-panel { margin-top: 20px; }
+.terminal-panel .panel-heading { align-items: center; }
+.terminal-panel .panel-heading p { font-size: 11px; color: var(--muted); margin: 5px 0 0; }
+.terminal-controls { display: flex; gap: 8px; flex-wrap: wrap; }
+.terminal-host { height: min(58dvh, 620px); min-height: 300px; padding: 12px; background: #111827; }
+.terminal-host .xterm { height: 100%; }
+.terminal-host .xterm-viewport { overflow-y: auto !important; }
+.terminal-hint { margin: 0; padding: 10px 16px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--line); }
+.dialog-backdrop { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 20px; background: #10131b99; }
+.dialog { width: min(540px, 100%); max-height: min(90dvh, 850px); overflow: auto; box-shadow: 0 24px 70px #0004; }
+.dialog .panel-heading { align-items: start; }
+.dialog .eyebrow { margin-bottom: 6px; }
+.dialog-body { padding: 22px; display: grid; gap: 15px; }
+.dialog-body > label:not(.check-control) { display: grid; gap: 7px; font-size: 12px; color: var(--muted); }
+.dialog-body input:not([type="checkbox"]) { width: 100%; }
+.dialog-body select { padding: 10px; }
+.check-control { display: flex; align-items: center; gap: 9px; font-size: 12px; }
+.check-control input { width: 18px; height: 18px; }
+.dialog-actions { display: flex; justify-content: end; gap: 10px; margin-top: 6px; }
+.icon-button { font-size: 20px; min-width: 38px; min-height: 38px; }
+@media (max-width: 760px) {
+  .cell-hero { align-items: stretch; flex-direction: column; }
+  .cell-actions { align-items: stretch; }
+  .cell-actions > *, .dialog-actions > * { flex: 1; }
+  .terminal-host { min-height: 260px; height: 50dvh; }
+  .dialog-actions { flex-direction: column-reverse; }
+}

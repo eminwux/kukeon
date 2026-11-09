@@ -28,9 +28,13 @@ async function mock(page, handler = () => undefined) {
 const failure = { status: 503, json: { error: { code: "unavailable", message: "Scoped read failed" } } };
 const nav = page => page.getByRole("navigation", { name: "Main navigation" });
 
-test("dashboard is the landing page with resource summaries and type navigation", async ({ page }) => {
+test("cells are the landing page and dashboard remains available", async ({ page }) => {
   await mock(page);
   await page.goto(server.url);
+  await expect(page.getByRole("heading", { name: "Cells", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create cell" })).toBeVisible();
+  await expect(page.getByRole("row")).toHaveCount(3);
+  await page.goto(`${server.url}#/dashboard`);
   await expect(page.getByRole("heading", { name: "Dashboard", exact: true })).toBeVisible();
   for (const type of ["Realms", "Spaces", "Stacks", "Cells"]) {
     await expect(page.locator(".summary-card").filter({ hasText: type }).locator("strong")).toHaveText("2");
@@ -122,7 +126,7 @@ test("refresh failures mark retained inventory and documents stale, retry recove
 
 test("partial scope failures never present counts as complete", async ({ page }) => {
   await mock(page, path => path === "/api/realms/prod/spaces/shared/stacks" ? failure : undefined);
-  await page.goto(server.url);
+  await page.goto(`${server.url}#/dashboard`);
   await expect(page.getByRole("alert")).toContainText("Incomplete inventory");
   await expect(page.locator(".summary-card").filter({ hasText: "Cells" })).toContainText("Incomplete or stale data");
   await expect(page.getByLabel("Daemon connection").getByRole("status")).toHaveText("Needs attention");
@@ -172,7 +176,7 @@ test("mobile navigation closes after selecting a list and dashboard fits the scr
   await page.setViewportSize({ width: 390, height: 844 });
   await mock(page);
   await page.goto(server.url);
-  await expect(page.getByRole("heading", { name: "Dashboard", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Cells", exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
   await page.getByRole("button", { name: "Toggle sidebar" }).click();
   await nav(page).getByRole("link", { name: "Cells", exact: true }).click();
@@ -224,4 +228,47 @@ test("running and unreported statuses never imply a successful exit or readiness
   await page.goto(`${server.url}#/resource/prod/shared/services/api`);
   await expect(page.getByRole("region", { name: "Cell status" }).getByText("Not reported", { exact: true })).toHaveCount(2);
   await expect(page.locator(".container-panel").getByText("Not reported", { exact: true })).toBeVisible();
+});
+
+test("cells page creates a cell from a selected config", async ({ page }) => {
+  await mock(page);
+  const config = { metadata: { name: "web", realm: "dev" }, blueprint: { name: "web-template", realm: "dev" }, valueKeys: ["IMAGE_TAG"], repoSlots: [], secretSlots: [] };
+  await page.route("**/api/configs**", route => route.fulfill({ json: [config] }));
+  let requestBody;
+  await page.route("**/api/cells/from-config", async route => {
+    requestBody = route.request().postDataJSON();
+    await route.fulfill({ status: 201, json: { cell: doc(["dev", "shared", "services", "web-123abc"]), started: false } });
+  });
+  await page.goto(server.url);
+  await page.getByRole("button", { name: "Create cell" }).click();
+  const dialog = page.getByRole("dialog", { name: "Create cell from config" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel("Realm", { exact: false }).selectOption("dev");
+  await dialog.getByLabel("Space").selectOption("shared");
+  await dialog.getByLabel("Stack").selectOption("services");
+  await dialog.getByLabel("Cell config").selectOption(JSON.stringify(config.metadata));
+  await dialog.getByLabel("Cell name").fill("web-123abc");
+  await dialog.getByRole("button", { name: "Create stopped cell" }).click();
+  await expect(page).toHaveURL(/#\/resource\/dev\/shared\/services\/web-123abc$/);
+  expect(requestBody).toMatchObject({ config: config.metadata, scope: { realm: "dev", space: "shared", stack: "services" }, name: "web-123abc", start: false });
+});
+
+test("cell detail links config lineage and opens a browser terminal", async ({ page }) => {
+  const scope = ["prod", "shared", "services", "api"];
+  const cell = { ...doc(scope), spec: { containers: [{ id: "work", attachable: true }], provenance: { bindingKind: "config", bindingRef: { name: "web", realm: "prod", space: "shared", stack: "services" } } }, status: { state: "Ready", cgroupReady: true, containers: [{ name: "work", state: "Running" }] } };
+  await mock(page, path => path === "/api/realms/prod/spaces/shared/stacks/services/cells/api" ? { json: cell } : undefined);
+  await page.route("**/api/configs**", route => route.fulfill({ json: { metadata: { name: "web", realm: "prod", space: "shared", stack: "services" }, blueprint: { name: "web-template", realm: "prod" }, valueKeys: ["IMAGE_TAG"], repoSlots: [], secretSlots: [] } }));
+  await page.routeWebSocket(/\/terminal$/, socket => { socket.onMessage(() => {}); });
+  await page.goto(`${server.url}#/resource/${scope.join("/")}`);
+  const lineage = page.locator(".lineage-panel");
+  await expect(lineage.getByRole("heading", { name: "Created from config" })).toBeVisible();
+  await lineage.getByRole("link", { name: "web", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Config binding" })).toBeVisible();
+  await expect(page.getByText("1 values · 0 repository slots · 0 secret slots")).toBeVisible();
+  await page.goto(`${server.url}#/resource/${scope.join("/")}`);
+  await page.getByRole("button", { name: "Open terminal" }).first().click();
+  await expect(page.getByRole("region", { name: "Terminal for work" })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "Connected" })).toBeVisible();
+  await page.getByRole("button", { name: "Close terminal" }).click();
+  await expect(page.getByRole("region", { name: "Terminal for work" })).toHaveCount(0);
 });

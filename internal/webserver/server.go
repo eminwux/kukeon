@@ -37,8 +37,8 @@ import (
 
 const (
 	requestTimeout = 10 * time.Second
+	actionTimeout  = 2 * time.Minute
 	headerTimeout  = 5 * time.Second
-	writeTimeout   = 15 * time.Second
 )
 
 // Dial creates a request-owned client, closed after the RPC completes.
@@ -67,9 +67,10 @@ func Run(ctx context.Context, host string, port int, endpoint string, dial Dial,
 		return err
 	}
 	server := &http.Server{
+		// Resource/action handlers have their own request deadlines. Do not set
+		// WriteTimeout here: the browser terminal is a long-lived WebSocket.
 		Handler: handler, ReadHeaderTimeout: headerTimeout, IdleTimeout: time.Minute,
-		WriteTimeout: writeTimeout,
-		BaseContext:  func(net.Listener) context.Context { return ctx },
+		BaseContext: func(net.Listener) context.Context { return ctx },
 	}
 	if _, err = fmt.Fprintf(out, "Listening on http://%s\n", authority); err != nil {
 		return err
@@ -121,10 +122,12 @@ func newHandler(authority, endpoint string, dial Dial) (http.Handler, error) {
 	mux.HandleFunc("GET /api/realms", realmHandler(dial, false))
 	mux.HandleFunc("GET /api/realms/{name}", realmHandler(dial, true))
 	registerResourceRoutes(mux, dial)
+	registerCellActionRoutes(mux, dial, authority)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; base-uri 'none'")
+		w.Header().
+			Set("Content-Security-Policy", "default-src 'self'; connect-src 'self' ws://"+authority+"; frame-ancestors 'none'; base-uri 'none'")
 		origins := r.Header.Values("Origin")
 		if r.Host != authority || len(origins) > 1 || (len(origins) == 1 && origins[0] != "http://"+authority) {
 			http.Error(w, "unexpected Host or Origin", http.StatusForbidden)
@@ -178,13 +181,16 @@ func writeAPIError(w http.ResponseWriter, err error) {
 	case errors.Is(err, fs.ErrPermission):
 		status, code = http.StatusForbidden, "permission_denied"
 	case errors.Is(err, errdefs.ErrRealmNotFound), errors.Is(err, errdefs.ErrSpaceNotFound),
-		errors.Is(err, errdefs.ErrStackNotFound), errors.Is(err, errdefs.ErrCellNotFound), errors.Is(err, errdefs.ErrContainerNotFound):
+		errors.Is(err, errdefs.ErrStackNotFound), errors.Is(err, errdefs.ErrCellNotFound), errors.Is(err, errdefs.ErrContainerNotFound),
+		errors.Is(err, errdefs.ErrConfigNotFound), errors.Is(err, errdefs.ErrBlueprintNotFound):
 		status, code = http.StatusNotFound, "not_found"
 	case errors.Is(err, errdefs.ErrInvalidRealmName), errors.Is(err, errdefs.ErrRealmNameRequired),
 		errors.Is(err, errdefs.ErrInvalidName), errors.Is(err, errdefs.ErrSpaceNameRequired),
 		errors.Is(err, errdefs.ErrStackNameRequired), errors.Is(err, errdefs.ErrCellNameRequired),
 		errors.Is(err, errdefs.ErrContainerNameRequired):
 		status, code = http.StatusBadRequest, "invalid_request"
+	case errors.Is(err, errdefs.ErrAttachNotSupported), errors.Is(err, errdefs.ErrAttachTaskNotRunning):
+		status, code = http.StatusConflict, "terminal_unavailable"
 	}
 	writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": err.Error()}})
 }
