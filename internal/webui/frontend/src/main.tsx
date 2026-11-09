@@ -1,105 +1,14 @@
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
-import { useResource, ErrorNotice, type Resource, type Failure } from "./request";
-import { CatalogPage, catalogTitles, RelatedResources } from "./catalog";
+import { useResource, ErrorNotice, type Resource } from "./request";
+import { CatalogPage, RelatedResources } from "./catalog";
 import { AttachTerminal } from "./terminal";
+import { CellSidebar } from "./cell-sidebar";
+import { useInventory, type Inventory, type InventoryResource, type Doc, type RuntimeStatus } from "./inventory";
+import { apiPath, catalogTitles, kinds, titles, readRoute, resourceLink, listLink, workspaceLink, type Route } from "./routes";
+import { StateBadge } from "./status";
 
-type SetupStatus = { name?: string; index?: number; state: string; error?: string };
-type RuntimeStatus = {
-  state?: string; name?: string; id?: string; cgroupReady?: boolean;
-  reason?: string; message?: string; outOfSync?: boolean; outOfSyncReason?: string; outOfSyncError?: string;
-  restartCount?: number; exitCode?: number; exitSignal?: string;
-  createdAt?: string; updatedAt?: string; startTime?: string; finishTime?: string; restartTime?: string;
-  containers?: RuntimeStatus[]; repos?: SetupStatus[]; stages?: SetupStatus[];
-};
-type Doc = { metadata: { name: string; labels?: Record<string, string> }; status?: RuntimeStatus; apiVersion?: string; kind?: string; [key: string]: unknown };
-const kinds = ["realm", "space", "stack", "cell", "container"];
-const titles = ["Realms", "Spaces", "Stacks", "Cells"];
-type Row = { doc: Doc; scope: string[] };
-type Inventory = { rows: Row[][]; failures: string[]; updatedAt: string };
-type Route = { view: string; scope: string[]; parent: string[]; document: boolean };
-function readRoute(): Route {
-  try {
-    const raw = window.location.hash.slice(1);
-    const [path, query] = raw.split("?");
-    const params = new URLSearchParams(query);
-    if (!path || path === "/dashboard") return { view: "dashboard", scope: [], parent: [], document: false };
-    const parts = path.split("/").filter(Boolean).map(decodeURIComponent);
-    if (Object.keys(catalogTitles).includes(parts[0])) return { view: parts[0], scope: parts.slice(1, 6), parent: [], document: params.has("document") };
-    if (parts[0] === "resource") return { view: "resource", scope: parts.slice(1, 6), parent: [], document: params.has("document") };
-    if (titles.some(title => title.toLowerCase() === parts[0])) {
-      const parent: unknown = JSON.parse(params.get("parent") ?? "[]");
-      return { view: parts[0], scope: [], parent: Array.isArray(parent) && parent.every(p => typeof p === "string") ? parent.slice(0, 4) : [], document: false };
-    }
-    // Keep previously bookmarked hierarchy links working.
-    return { view: "resource", scope: parts.slice(0, 5), parent: [], document: false };
-  } catch { return { view: "dashboard", scope: [], parent: [], document: false }; }
-}
-function resourceLink(scope: string[], document = false): string {
-  return "#/resource/" + scope.map(encodeURIComponent).join("/") + (document ? "?document=1" : "");
-}
-function listLink(depth: number, parent: string[] = []): string {
-  return `#/${titles[depth].toLowerCase()}` + (parent.length ? `?parent=${encodeURIComponent(JSON.stringify(parent))}` : "");
-}
-function apiPath(scope: string[]): string {
-  return "/api/" + scope.map((name, i) => `${kinds[i]}s/${encodeURIComponent(name)}`).join("/");
-}
-async function readJSON<T>(path: string, signal: AbortSignal): Promise<T> {
-  const response = await fetch(path, { signal });
-  const body = await response.json();
-  if (!response.ok) throw body.error ?? { code: "unavailable", message: `HTTP ${response.status}` };
-  return body;
-}
-// Limit fan-out across scopes so large workspaces do not overwhelm the daemon.
-async function eachScope(rows: Row[], read: (row: Row) => Promise<void>) {
-  let cursor = 0;
-  await Promise.all(Array.from({ length: Math.min(6, rows.length) }, async () => {
-    while (cursor < rows.length) await read(rows[cursor++]);
-  }));
-}
-function useInventory(revision: number): Resource<Inventory> {
-  const [state, setState] = useState<Resource<Inventory>>({ loading: true });
-  useEffect(() => {
-    const controller = new AbortController();
-    setState(old => ({ data: old.data, loading: true }));
-    void (async () => {
-      try {
-        const realms = await readJSON<Doc[]>("/api/realms", controller.signal);
-        const result: Inventory = { rows: [realms.map(doc => ({ doc, scope: [doc.metadata.name] })), [], [], []], failures: [], updatedAt: "" };
-        for (let depth = 1; depth < 4; depth++) {
-          await eachScope(result.rows[depth - 1], async parent => {
-            try {
-              const docs = await readJSON<Doc[]>(`${apiPath(parent.scope)}/${kinds[depth]}s`, controller.signal);
-              result.rows[depth].push(...docs.map(doc => ({ doc, scope: [...parent.scope, doc.metadata.name] })));
-            } catch (error) {
-              if (controller.signal.aborted) throw error;
-              result.failures.push(`${titles[depth]} in ${parent.scope.join(" / ")}: ${(error as Failure).message ?? "Request failed"}`);
-            }
-          });
-          result.rows[depth].sort((a, b) => a.scope.join("/").localeCompare(b.scope.join("/")));
-        }
-        if (controller.signal.aborted) return;
-        result.updatedAt = new Date().toISOString();
-        setState(old => result.failures.length && old.data
-          ? { data: old.data, loading: false, error: { code: "partial", message: result.failures.join("; ") } }
-          : { data: result, loading: false });
-      } catch (error) {
-        if (controller.signal.aborted) return;
-        const failure = error as Failure;
-        setState(old => ({ data: old.data, loading: false, error: { code: failure.code ?? "unavailable", message: failure.message ?? "Request failed" } }));
-      }
-    })();
-    return () => controller.abort();
-  }, [revision]);
-  return state;
-}
-function StateBadge({ state }: { state?: string }) {
-  const tone = ["Ready", "Running", "done", "cloned", "fetched"].includes(state ?? "") ? "success"
-    : ["Failed", "Error", "failed"].includes(state ?? "") ? "danger"
-    : ["Pending", "Creating", "Pausing", "Degraded", "Not ready"].includes(state ?? "") ? "warning" : "neutral";
-  return <span className={`state-badge tone-${tone}`}><span className="state-dot" aria-hidden="true" />{state || "Not reported"}</span>;
-}
 function validTime(value?: string): value is string {
   return !!value && !value.startsWith("0001-") && Number.isFinite(Date.parse(value));
 }
@@ -136,7 +45,7 @@ function Dashboard({ inventory }: { inventory: Resource<Inventory> }) {
     <div className="summary-grid">{titles.map((title, depth) => <a className="summary-card panel" key={title} href={listLink(depth)}><span>{title}</span><strong>{inventory.data ? inventory.data.rows[depth].length : "—"}</strong><small>{inventory.loading ? "Refreshing…" : partial ? "Incomplete or stale data" : "View all →"}</small></a>)}</div>
     <div className="dashboard-grid">
       <section className="panel"><div className="panel-heading"><h2>Cell states</h2><span className="badge">{partial ? "Incomplete" : "Reported by daemon"}</span></div><div className="panel-body">{states.size ? <ul className="state-list">{[...states].map(([state, count]) => <li key={state}><StateBadge state={state} /><strong>{count}</strong></li>)}</ul> : <p className="description">{inventory.loading ? "Loading cell states…" : partial ? "Cell states could not be fully loaded." : "No cells found."}</p>}</div></section>
-      <section className="panel"><div className="panel-heading"><h2>Workspace overview</h2></div><div className="panel-body"><p>Browse resources by type, across every scope.</p><p className="description">Use a list to find a resource, inspect its status, or narrow it to a realm. Complete API documents are available on demand.</p><a className="text-link" href={listLink(3)}>Explore cells →</a></div></section>
+      <section className="panel"><div className="panel-heading"><h2>Resource overview</h2></div><div className="panel-body"><p>Browse resources by type, across every scope.</p><p className="description">Use a list to find a resource, inspect its status, or narrow it to a realm. Complete API documents are available on demand.</p><a className="text-link" href={listLink(3)}>Explore cells →</a></div></section>
     </div>
   </>;
 }
@@ -157,21 +66,28 @@ function ResourceList({ depth, inventory, parent }: { depth: number; inventory: 
     <div className="pagination"><span>{filtered.length ? `${currentPage * pageSize + 1}–${Math.min((currentPage + 1) * pageSize, filtered.length)} of ${filtered.length}` : "0 results"}</span><button disabled={!currentPage} onClick={() => setPage(currentPage - 1)}>Previous</button><button disabled={(currentPage + 1) * pageSize >= filtered.length} onClick={() => setPage(currentPage + 1)}>Next</button></div>
   </section>;
 }
-function ResourceDetails({ route, revision }: { route: Route; revision: number }) {
+function ResourceDetails({ route, revision, workspace = false }: { route: Route; revision: number; workspace?: boolean }) {
   const depth = route.scope.length - 1;
   const kind = kinds[depth];
   const detail = useResource<Doc>(apiPath(route.scope), revision);
   const containers = useResource<{ id: string; attachable?: boolean; root?: boolean }[]>(depth === 3 ? `${apiPath(route.scope)}/containers` : null, revision);
+  const terminal = depth === 3 && detail.data && containers.data && !containers.error && <div id="cell-terminal"><AttachTerminal key={JSON.stringify(route.scope)} path={apiPath(route.scope)} containers={containers.data} /></div>;
+  const status = detail.data && (depth === 3 || depth === 4) && !route.document && <StatusSummary status={detail.data.status} kind={kind} />;
+  const overview = detail.data && <section className="panel resource-overview"><div className="panel-heading"><h2>{route.document ? "API document" : "Resource overview"}</h2><StateBadge state={detail.data.status?.state} /></div>{route.document ? <pre tabIndex={0} aria-label={`Complete ${kind} JSON`}>{JSON.stringify(detail.data, null, 2)}</pre> : <div className="panel-body"><dl className="details-grid"><dt>Name</dt><dd>{detail.data.metadata.name}</dd><dt>Kind</dt><dd>{detail.data.kind ?? kind}</dd><dt>Scope</dt><dd>{route.scope.join(" / ")}</dd><dt>API version</dt><dd>{detail.data.apiVersion ?? "Not reported"}</dd><dt>Labels</dt><dd>{Object.entries(detail.data.metadata.labels ?? {}).map(([key, value]) => <span className="badge label-badge" key={key}>{key}: {value}</span>)}{!Object.keys(detail.data.metadata.labels ?? {}).length && "No labels"}</dd></dl>{depth < 3 && <a className="text-link" href={listLink(depth + 1, route.scope)}>View {titles[depth + 1].toLowerCase()} in this {kind} →</a>}</div>}</section>;
+  const related = detail.data && !route.document && <RelatedResources doc={detail.data} revision={revision} />;
+  const containerPanel = depth === 3 && <section className="panel container-panel"><div className="panel-heading"><h2>Containers</h2><span className="badge">{detail.error ? "Stale observations" : detail.loading ? "Refreshing observations" : "Cell observations"}</span></div><div className="panel-body">{containers.loading && <p>Loading containers…</p>}{containers.error && <ErrorNotice error={containers.error} />}{containers.error && containers.data && <p className="stale">Stale container list — refresh failed.</p>}{!containers.loading && !containers.error && !containers.data?.length && <p>No containers found.</p>}<ul className="state-list">{containers.data?.map(container => <li key={container.id}><a className="text-link" href={resourceLink([...route.scope, container.id])}>{container.id}</a><StateBadge state={detail.data?.status?.containers?.find(item => item.name === container.id || item.id === container.id)?.state} /><a href={resourceLink([...route.scope, container.id], true)}>View document</a></li>)}</ul></div></section>;
   return <>
-    <div className="detail-actions"><a href={listLink(Math.min(depth, 3))}>← Back to {titles[Math.min(depth, 3)].toLowerCase()}</a><a className="document-action" href={resourceLink(route.scope, !route.document)}>{route.document ? "Show overview" : "View document"}</a></div>
+    <div className="detail-actions"><a href={workspace ? resourceLink(route.scope) : listLink(Math.min(depth, 3))}>{workspace ? "View in Administration" : `← Back to ${titles[Math.min(depth, 3)].toLowerCase()}`}</a><a className="document-action" href={resourceLink(route.scope, !route.document)}>{route.document ? "Show overview" : "View document"}</a></div>
     {detail.loading && <p role="status">Loading {kind} details…</p>}
     {detail.error && <ErrorNotice error={detail.error} kind={kind} />}
     {detail.error && detail.data && <p className="stale">Stale resource details — refresh failed.</p>}
-    {detail.data && (depth === 3 || depth === 4) && !route.document && <StatusSummary status={detail.data.status} kind={kind} />}
-    {detail.data && <section className="panel"><div className="panel-heading"><h2>{route.document ? "API document" : "Resource overview"}</h2><StateBadge state={detail.data.status?.state} /></div>{route.document ? <pre tabIndex={0} aria-label={`Complete ${kind} JSON`}>{JSON.stringify(detail.data, null, 2)}</pre> : <div className="panel-body"><dl className="details-grid"><dt>Name</dt><dd>{detail.data.metadata.name}</dd><dt>Kind</dt><dd>{detail.data.kind ?? kind}</dd><dt>Scope</dt><dd>{route.scope.join(" / ")}</dd><dt>API version</dt><dd>{detail.data.apiVersion ?? "Not reported"}</dd><dt>Labels</dt><dd>{Object.entries(detail.data.metadata.labels ?? {}).map(([key, value]) => <span className="badge label-badge" key={key}>{key}: {value}</span>)}{!Object.keys(detail.data.metadata.labels ?? {}).length && "No labels"}</dd></dl>{depth < 3 && <a className="text-link" href={listLink(depth + 1, route.scope)}>View {titles[depth + 1].toLowerCase()} in this {kind} →</a>}</div>}</section>}
-    {detail.data && !route.document && <RelatedResources doc={detail.data} revision={revision} />}
-    {depth === 3 && !route.document && containers.data && !containers.error && <AttachTerminal key={route.scope.join("/")} path={apiPath(route.scope)} containers={containers.data} />}
-    {depth === 3 && <section className="panel container-panel"><div className="panel-heading"><h2>Containers</h2><span className="badge">{detail.error ? "Stale observations" : detail.loading ? "Refreshing observations" : "Cell observations"}</span></div><div className="panel-body">{containers.loading && <p>Loading containers…</p>}{containers.error && <ErrorNotice error={containers.error} />}{containers.error && containers.data && <p className="stale">Stale container list — refresh failed.</p>}{!containers.loading && !containers.error && !containers.data?.length && <p>No containers found.</p>}<ul className="state-list">{containers.data?.map(container => <li key={container.id}><a className="text-link" href={resourceLink([...route.scope, container.id])}>{container.id}</a><StateBadge state={detail.data?.status?.containers?.find(item => item.name === container.id || item.id === container.id)?.state} /><a href={resourceLink([...route.scope, container.id], true)}>View document</a></li>)}</ul></div></section>}
+    {workspace && <p className="description terminal-note">Switching cells closes the current terminal attachment. The cell keeps running.</p>}
+    {workspace && terminal}
+    {status}
+    {overview}
+    {related}
+    {!workspace && !route.document && terminal}
+    {containerPanel}
   </>;
 }
 
@@ -180,6 +96,22 @@ function initialTheme(): Theme {
   try { const value = localStorage.getItem("kukeon-theme"); return value === "light" || value === "dark" ? value : "system"; }
   catch { return "system"; }
 }
+function AdministrationNavigation({ route }: { route: Route }) {
+  const activeDepth = route.view === "resource" ? Math.min(route.scope.length - 1, 3) : titles.findIndex(title => title.toLowerCase() === route.view);
+  return <nav className="administration-nav panel" aria-label="Administration resources">
+    <a href="#/administration" aria-current={route.view === "dashboard" ? "page" : undefined}>Overview</a>
+    {titles.map((title, depth) => <a key={title} href={listLink(depth)} aria-current={activeDepth === depth ? "page" : undefined}>{title}</a>)}
+    {Object.entries(catalogTitles).map(([kind, title]) => <a key={kind} href={`#/${kind}`} aria-current={route.view === kind ? "page" : undefined}>{title}</a>)}
+  </nav>;
+}
+function WorkspaceLanding({ inventory }: { inventory: InventoryResource }) {
+  const count = inventory.data?.rows[3].length ?? 0;
+  return <section className="panel workspace-landing" aria-label="Workspace welcome">
+    <h2>{count ? "Choose a cell" : inventory.loading ? "Loading cells…" : "No cells available"}</h2>
+    <p>{count ? "Search or select a cell in the sidebar to open its terminal, status, and containers." : inventory.error || inventory.data?.failures.length ? "The inventory is incomplete. Refresh to retry unavailable scopes." : "Create a cell from an existing config or refresh the inventory."}</p>
+    <a className="new-cell-action" href="#/configs">New Cell <span aria-hidden="true">→</span></a>
+  </section>;
+}
 function App() {
   const [revision, setRevision] = useState(0);
   const [route, setRoute] = useState(readRoute);
@@ -187,8 +119,10 @@ function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   useEffect(() => {
     const changed = () => { setRoute(readRoute()); setMenuOpen(false); };
+    const keydown = (event: KeyboardEvent) => { if (event.key === "Escape") setMenuOpen(false); };
     window.addEventListener("hashchange", changed);
-    return () => window.removeEventListener("hashchange", changed);
+    window.addEventListener("keydown", keydown);
+    return () => { window.removeEventListener("hashchange", changed); window.removeEventListener("keydown", keydown); };
   }, []);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -196,24 +130,20 @@ function App() {
   }, [theme]);
   const connection = useResource<{ endpoint: string }>("/api/connection", revision);
   const inventory = useInventory(revision);
+  const isWorkspace = route.view === "workspace";
   const depth = titles.findIndex(title => title.toLowerCase() === route.view);
-  const activeDepth = route.view === "resource" ? Math.min(route.scope.length - 1, 3) : depth;
   const catalog = Object.keys(catalogTitles).includes(route.view);
-  const heading = catalog ? (route.scope.at(-1) ?? catalogTitles[route.view]) : route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : "Dashboard";
-  const status = inventory.loading ? "Refreshing…" : inventory.error || inventory.data?.failures.length ? "Needs attention" : "Connected";
+  const heading = isWorkspace ? route.scope.at(-1) ?? "Workspace" : catalog ? route.scope.at(-1) ?? catalogTitles[route.view] : route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : "Administration";
+  const daemonStatus = inventory.daemon.error?.code === "permission_denied" ? "Permission denied" : inventory.daemon.error ? "Unavailable" : inventory.daemon.loading ? "Checking…" : "Connected";
   return <div className="app-shell">
-    <aside className={`sidebar ${menuOpen ? "is-open" : ""}`} id="resource-sidebar" aria-label="Workspace sidebar">
+    <aside className={`sidebar ${menuOpen ? "is-open" : ""}`} id="cell-sidebar" aria-label="Cell sidebar">
       <button className="sidebar-close" aria-label="Close sidebar" onClick={() => setMenuOpen(false)}>×</button>
-      <a className="brand" href="#"><span className="mark" aria-hidden="true">K</span><span>Kukeon<small>LOCAL WORKSPACE</small></span></a>
-      <nav className="sidebar-scroll primary-nav" aria-label="Main navigation">
-        <a className="resource-link" href="#/dashboard" aria-current={route.view === "dashboard" ? "page" : undefined}><span aria-hidden="true">▦</span> Dashboard</a>
-        <p className="nav-caption">Resources</p>
-        {titles.map((title, i) => <a key={title} className="resource-link" href={listLink(i)} aria-current={activeDepth === i ? "page" : undefined}><span aria-hidden="true">◇</span>{title}</a>)}
-        <p className="nav-caption">Configuration &amp; storage</p>
-        {Object.entries(catalogTitles).map(([kind, title]) => <a key={kind} className="resource-link" href={`#/${kind}`} aria-current={route.view === kind ? "page" : undefined}><span aria-hidden="true">◇</span>{title}</a>)}
-      </nav>
+      <a className="brand" href={workspaceLink()}><span className="mark" aria-hidden="true">K</span><span>Kukeon<small>LOCAL WORKSPACE</small></span></a>
+      <nav className="area-nav" aria-label="Areas"><a href={workspaceLink()} aria-current={isWorkspace ? "page" : undefined}>Workspace</a><a href="#/administration" aria-current={!isWorkspace ? "page" : undefined}>Administration</a></nav>
+      <a className="new-cell-action sidebar-new-cell" href="#/configs">+ New Cell</a>
+      <CellSidebar inventory={inventory} selectedScope={isWorkspace ? route.scope : []} />
       <section className="connection" aria-label="Daemon connection">
-        <p className="status" role="status"><span className={`dot ${inventory.error || inventory.data?.failures.length ? "failed" : ""}`} aria-hidden="true" />{status}</p>
+        <p className="status" role="status"><span className={`dot ${inventory.daemon.error ? "failed" : inventory.daemon.loading ? "checking" : ""}`} aria-hidden="true" />{daemonStatus}</p>
         <code>{connection.data?.endpoint ?? (connection.loading ? "Loading socket…" : "Socket unknown")}</code>
         {connection.error && <ErrorNotice error={connection.error} />}
         <label className="theme-control">Appearance<select aria-label="Appearance" value={theme} onChange={event => setTheme(event.target.value as Theme)}><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
@@ -221,17 +151,20 @@ function App() {
     </aside>
     <main className="workspace">
       <header className="toolbar">
-        <button className="menu-toggle" aria-label="Toggle sidebar" aria-expanded={menuOpen} aria-controls="resource-sidebar" onClick={() => setMenuOpen(!menuOpen)}>☰</button>
-        <nav aria-label="Resource scope"><a href="#/dashboard">Workspace</a>{catalog ? <><a href={`#/${route.view}`}>{catalogTitles[route.view]}</a>{route.scope.slice(0, -1).map((name, i) => <a key={i} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}{route.scope.length > 0 && <span>{route.scope.at(-1)}</span>}</> : route.view === "resource" ? route.scope.map((name, i) => <a key={i} aria-label={`${kinds[i]}: ${name}`} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>) : <span>{heading}</span>}</nav>
+        <button className="menu-toggle" aria-label="Toggle sidebar" aria-expanded={menuOpen} aria-controls="cell-sidebar" onClick={() => setMenuOpen(!menuOpen)}>☰</button>
+        <nav className="toolbar-areas" aria-label="Areas"><a href={workspaceLink()} aria-current={isWorkspace ? "page" : undefined}>Workspace</a><a href="#/administration" aria-current={!isWorkspace ? "page" : undefined}>Administration</a></nav>
+        <span className="toolbar-connectivity" role="status" aria-label={`Daemon: ${daemonStatus}`} title={`Daemon: ${daemonStatus}`}><span className={`dot ${inventory.daemon.error ? "failed" : inventory.daemon.loading ? "checking" : ""}`} aria-hidden="true" /></span>
+        <nav className="breadcrumbs" aria-label="Resource scope"><a href={isWorkspace ? workspaceLink() : "#/administration"}>{isWorkspace ? "Workspace" : "Administration"}</a>{isWorkspace ? route.scope.length > 0 && <span>{route.scope.join(" / ")}</span> : catalog ? <><a href={`#/${route.view}`}>{catalogTitles[route.view]}</a>{route.scope.slice(0, -1).map((name, i) => <a key={i} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}{route.scope.length > 0 && <span>{route.scope.at(-1)}</span>}</> : route.view === "resource" ? route.scope.map((name, i) => <a key={i} aria-label={`${kinds[i]}: ${name}`} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>) : <span>{heading}</span>}</nav>
         <button className="refresh" onClick={() => setRevision(value => value + 1)}>Refresh</button>
       </header>
-      <div className="workspace-content">
-        <div className="page-heading"><p className="eyebrow">{route.view === "resource" || (catalog && route.scope.length > 0) ? "Resource details" : "Workspace"}</p><h1>{heading}</h1><p className="description">{route.view === "dashboard" ? "Your local infrastructure at a glance." : route.view === "resource" || (catalog && route.scope.length > 0) ? route.scope.join(" / ") : `Browse ${heading?.toLowerCase()} across your workspace.`}</p></div>
+      <div className={`workspace-content ${isWorkspace ? "cell-workspace-content" : ""}`}>
+        {!isWorkspace && <AdministrationNavigation route={route} />}
+        <div className="page-heading"><p className="eyebrow">{isWorkspace ? "Workspace" : "Administration"}</p><h1>{heading}</h1><p className="description">{isWorkspace ? route.scope.length ? route.scope.join(" / ") : "Select a cell to work with its terminal and inspect its state." : route.view === "dashboard" ? "Your local infrastructure at a glance." : route.view === "resource" || (catalog && route.scope.length > 0) ? route.scope.join(" / ") : `Browse ${heading?.toLowerCase()} across your infrastructure.`}</p>{isWorkspace && <a className="new-cell-action mobile-new-cell" href="#/configs">+ New Cell</a>}</div>
         {inventory.loading && <p className="description" role="status">Refreshing resource inventory…</p>}
         {inventory.error && <ErrorNotice error={inventory.error} />}
         {inventory.error && inventory.data && <p className="stale">Stale inventory — refresh failed. Counts and lists may be out of date.</p>}
         {!!inventory.data?.failures.length && <div className="error" role="alert"><strong>Incomplete inventory</strong><p>Some scopes could not be loaded. Counts and lists exclude unavailable resources.</p><ul>{inventory.data.failures.map(message => <li key={message}>{message}</li>)}</ul></div>}
-        {catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} /> : route.view === "resource" ? <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} /> : <Dashboard inventory={inventory} />}
+        {isWorkspace ? route.scope.length === 4 ? <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} workspace /> : <WorkspaceLanding inventory={inventory} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} onCreated={() => setRevision(value => value + 1)} /> : route.view === "resource" ? <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} /> : <Dashboard inventory={inventory} />}
         <footer>Daemon inventory · {inventory.data ? <>Last refreshed <time dateTime={inventory.data.updatedAt}>{new Date(inventory.data.updatedAt).toLocaleTimeString()}</time></> : "Not refreshed yet"} · Refresh to retrieve the latest state.</footer>
       </div>
     </main>

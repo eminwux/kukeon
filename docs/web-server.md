@@ -6,11 +6,31 @@ closes the HTTP listener and request-owned daemon connections; it does not stop
 kukeond or workloads. The binary embeds all frontend assets and needs no Node.js
 or external asset files at runtime.
 
-## Dashboard and resource lists
+## Workspace and Administration
 
-The UI opens to a dashboard with summary counts for realms, spaces, stacks, and
-cells and a breakdown of daemon-reported cell states. Select **Realms**,
-**Spaces**, **Stacks**, or **Cells** in the sidebar to open its list across scopes.
+The UI opens to **Workspace**. Its persistent sidebar lists every accessible cell,
+including stopped, failed, and non-attachable cells. Search by cell name or any
+part of its realm, space, and stack scope. Each link shows the parent scope and
+reported state, so duplicate names remain distinct. Select a cell to open its
+terminal, status, overview, and containers. On narrow screens, open the cell
+sidebar with the menu button; selection closes it.
+
+**Group by** defaults to **None**. Choose any label key found in cell metadata
+to organize the sidebar; cells without a value appear under **Ungrouped**. Group
+headers expand and collapse. The sidebar initially shows 25 groups and 100 cells
+per group, with controls to reveal more. The selected key and collapsed groups are stored only in
+this browser. If inventory becomes unavailable, retained cells are marked stale.
+
+**New Cell** opens Administration → Configs, where the existing config-based
+preview and creation form remains available. Creation leaves the cell stopped
+and refreshes the sidebar inventory. Switching cells closes the current terminal
+attachment but does not stop a workload. Persistent terminal tabs are not yet
+available.
+
+Open **Administration** for the resource dashboard and navigation to Realms,
+Spaces, Stacks, Cells, Blueprints, Configs, Volumes, and Secrets. The dashboard
+shows counts and daemon-reported cell states. Containers are reached through
+their cell details. Select a resource kind to open its list across scopes.
 Lists show name, reported state, and parent scope. Search by name or scope, filter
 by realm, and use the paging controls for collections larger than 25 entries.
 
@@ -32,22 +52,24 @@ to the selected scope, with **Clear scope** to return to all entries. URLs retai
 the selected list, scope, resource, and document mode. Browser Back/Forward works,
 and existing hierarchy bookmarks open the corresponding resource overview.
 
-**Refresh** reloads the inventory and current detail. Dashboard counts are based
+**Refresh** reloads the inventory and current detail. The shared inventory also
+refreshes each minute while the browser tab is visible. Switching cells fetches
+only the selected detail and container list. Administration counts are based
 on daemon list calls with bounded concurrency. A failed scope read produces an
 **Incomplete inventory** warning and counts exclude inaccessible resources. When
 a refresh fails after a successful load, the prior inventory stays visible with a
 **Stale inventory** warning; retained detail documents have their own stale notice.
 Loading, empty collections, and searches with no matches have distinct messages.
 
-The sidebar shows the selected daemon socket. **Connected** means the latest
-inventory retrieval completed without failures, not that all workloads are
-healthy. Permission errors mean the invoking user cannot access the selected
-socket or resource; check permissions. **Daemon unavailable** identifies failed
-daemon requests. Correct the connection and refresh to retry.
+The sidebar shows the selected daemon socket. **Connected** means the root realm
+request reached kukeond; it does not assert that every scope, subsystem, or
+workload is healthy. Scoped failures separately mark inventory incomplete.
+**Unavailable** or **Permission denied** describe a failed root request. Correct
+the connection or permissions and refresh to retry.
 
 ## Blueprints, configs, volumes, and secrets
 
-The sidebar also provides **Blueprints**, **Configs**, **Volumes**, and **Secrets**.
+Administration also provides **Blueprints**, **Configs**, **Volumes**, and **Secrets**.
 Each has a searchable list across scopes, a realm filter, pagination, an overview,
 and an optional complete JSON document. URLs preserve the kind and full scope,
 including identically named resources at different levels. Scope breadcrumbs
@@ -122,10 +144,11 @@ curl http://127.0.0.1:5129/api/realms
 
 ## Workspace layout and appearance
 
-The sidebar holds the dashboard and resource-type destinations, daemon connection
-information, and appearance controls. On small screens, the menu button opens the
-sidebar; choosing a destination closes it. The main workspace shows summary
-panels, a resource list, or a selected resource overview.
+The sidebar holds Workspace and Administration links, the cell inventory, daemon
+connection information, and appearance controls. Administration shows its resource
+navigation above the current view. Existing `#/dashboard`, resource, catalog, and
+hierarchy bookmarks still open their Administration views; browser history keeps
+working across both areas.
 
 Use **Appearance** to choose **System**, **Light**, or **Dark**. System follows the
 device preference, including changes while the page is open. Explicit choices

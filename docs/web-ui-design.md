@@ -2,16 +2,28 @@
 
 ## Navigation model
 
-The landing page is a dashboard. Four summary cards show the number of realms,
-spaces, stacks, and cells, and link to the corresponding resource lists. A cell
-state summary uses only states reported by the daemon. Connection success does
-not imply workload health.
+Workspace is the default landing page. The persistent sidebar lists cells from
+all accessible realms, spaces, and stacks. Each entry shows its full parent
+scope and daemon-reported state; full scoped coordinates identify the selected
+cell even when names repeat. Search matches names and scope. Grouping defaults
+to **None** and can use any label key present in the current cell inventory.
+Cells missing that label appear under **Ungrouped**. Group selection and collapsed
+groups are browser preferences, not cell metadata. The sidebar initially shows
+25 groups and 100 cells per group, with controls to reveal more. It remains available in Administration;
+on narrow screens it opens from the menu button and closes after selection.
 
-The persistent sidebar contains Dashboard, Realms, Spaces, Stacks, Cells,
-Blueprints, Configs, Volumes, and Secrets.
-Resource names do not appear in the sidebar. Scope is context within a list or
-a resource's breadcrumb, rather than a tree the operator must traverse first.
-The mobile menu uses the same destinations and closes after navigation.
+Workspace shows the selected cell's existing terminal attachment first, followed
+by status, overview, references, and containers. **New Cell** opens the existing
+Configs list and its config-based creation flow. Switching cells closes the
+current attachment without stopping the workload. Persistent terminal tabs and
+inactive attachments are separate follow-up work.
+
+Administration contains the resource dashboard, with summary counts for realms,
+spaces, stacks, and cells, and the resource-kind navigation for realms, spaces,
+stacks, cells, blueprints, configs, volumes, and secrets. Containers remain
+accessible from their cell details. Historical resource and catalog URLs still
+open Administration views, and browser Back/Forward retains scope and document
+mode. Connection success does not imply workload health.
 
 ## Lists and details
 
@@ -29,11 +41,15 @@ Previously bookmarked hierarchy URLs continue to open the resource overview.
 
 ## Data and appearance
 
-Inventory is read through the existing scoped HTTP/daemon API, with at most six
-concurrent list requests. Dashboard counts cover only successfully read scopes;
-partial results are visibly incomplete. A failed refresh retains the previous
-snapshot with a stale warning. This is a read-only inventory, not a separate
-resource database.
+Workspace and Administration share one inventory read through the existing
+scoped HTTP/daemon API, with at most six concurrent list requests. Switching
+cells fetches only the selected detail and containers, not the hierarchy again.
+The inventory refreshes every minute while the browser tab is visible and on
+manual request or successful cell creation. Administration counts cover only
+successfully read scopes; partial results are visibly incomplete. A failed
+refresh retains the previous snapshot with a stale warning. A successful root
+realm read reports daemon connectivity separately from scoped inventory failures.
+This is a read-only inventory, not a separate resource database.
 
 Light and dark palettes share semantic tokens. System follows browser preference;
 explicit choices persist locally when storage is available. Keyboard-accessible
@@ -43,14 +59,12 @@ https://github.com/paperclipai/paperclip/blob/master/ui/src/components/Sidebar.t
 
 ## Next increments
 
-1. Add richer structured summaries for API-exposed lifecycle, readiness, and
-   resource-specific fields while retaining documents on demand.
-2. Add sorting and URL-persisted search/filter state; consider a paginated daemon
-   inventory API as workspaces grow beyond browser aggregation.
-3. Add richer reference summaries and scoped catalog filters while preserving
-   complete documents, cross-realm references, and secret redaction.
-4. Add contextual lifecycle actions and terminal access with confirmation,
-   pending states, and explicit partial-failure results.
+1. Add persistent terminal tabs and bounded inactive attachments without
+   changing the Workspace shell.
+2. Add lifecycle controls with confirmation, pending states, and explicit
+   partial-failure results.
+3. Consider a paginated daemon inventory API if browser aggregation becomes
+   too costly for large installations.
 
 Verify each increment across keyboard navigation, mobile, both themes, and
 partial/unavailable daemon states. Future actions are not presented as working

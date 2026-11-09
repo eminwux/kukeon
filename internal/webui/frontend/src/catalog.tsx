@@ -1,8 +1,8 @@
 import { CreateCell } from "./create";
 import { useState } from "react";
 import { ErrorNotice, useResource } from "./request";
+import { catalogTitles } from "./routes";
 
-export const catalogTitles: Record<string, string> = { blueprints: "Blueprints", configs: "Configs", volumes: "Volumes", secrets: "Secrets" };
 type Metadata = { name: string; realm?: string; space?: string; stack?: string; cell?: string; labels?: Record<string, string>; annotations?: Record<string, string> };
 type CatalogDoc = { metadata: Metadata; spec?: Record<string, unknown>; [key: string]: unknown };
 type Reference = { kind: string; name: string; realm: string; space?: string; stack?: string; cell?: string };
@@ -76,7 +76,7 @@ function CatalogList({ kind, revision }: { kind: string; revision: number }) {
     </section>
   </>;
 }
-function CatalogDetails({ kind, scope, document, revision }: { kind: string; scope: string[]; document: boolean; revision: number }) {
+function CatalogDetails({ kind, scope, document, revision, onCreated }: { kind: string; scope: string[]; document: boolean; revision: number; onCreated: () => void }) {
   const detail = useResource<CatalogDoc>(catalogAPI(kind, scope), revision);
   const doc = detail.data;
   return <>
@@ -86,10 +86,10 @@ function CatalogDetails({ kind, scope, document, revision }: { kind: string; sco
     {detail.error && doc && <p className="stale">Stale {kind} document — refresh failed.</p>}
     {kind === "secrets" && <p className="description">Secret values are redacted. Only daemon-exposed metadata is available.</p>}
     {doc && <section className="panel"><div className="panel-heading"><h2>{document ? "API document" : "Resource overview"}</h2><span className="badge">Read only</span></div>{document ? <pre tabIndex={0} aria-label={`Complete ${kind} JSON`}>{JSON.stringify(doc, null, 2)}</pre> : <div className="panel-body"><dl className="details-grid"><dt>Name</dt><dd>{doc.metadata.name}</dd><dt>Scope</dt><dd>{scopeOf(doc.metadata).join(" / ")}</dd><dt>Kind</dt><dd>{doc.kind as string}</dd><dt>Labels</dt><dd>{Object.entries(doc.metadata.labels ?? {}).map(([key, value]) => <span className="badge label-badge" key={key}>{key}: {value}</span>)}{!Object.keys(doc.metadata.labels ?? {}).length && "No labels"}</dd>{kind === "volumes" && <><dt>Reclaim policy</dt><dd>{doc.spec?.reclaimPolicy as string || "Default (Delete)"}</dd></>}</dl><p className="description">Use View document for every API-exposed field.</p></div>}</section>}
-    {doc && kind === "configs" && !document && <CreateCell config={doc.metadata} />}
+    {doc && kind === "configs" && !document && <CreateCell config={doc.metadata} onCreated={onCreated} />}
     {doc && !document && <RelatedResources doc={doc} revision={revision} />}
   </>;
 }
-export function CatalogPage(props: { kind: string; scope: string[]; document: boolean; revision: number }) {
+export function CatalogPage(props: { kind: string; scope: string[]; document: boolean; revision: number; onCreated: () => void }) {
   return props.scope.length ? <CatalogDetails key={props.kind + JSON.stringify(props.scope)} {...props} /> : <CatalogList key={props.kind} kind={props.kind} revision={props.revision} />;
 }
