@@ -21,6 +21,27 @@ test("packaged browser reads real daemon documents and unavailable socket", asyn
       await page.goto(`${server.url}#/resource/${encodeURIComponent(realm.metadata.name)}?document=1`);
       await expect(page.getByLabel("Complete realm JSON")).toHaveText(JSON.stringify(await detail.json(), null, 2));
     }
+    // Catalog APIs are read-only and retain daemon-side secret redaction.
+    for (const kind of ["blueprints", "configs", "volumes", "secrets"]) {
+      const collection = await request.get(`${server.url}/api/catalog/${kind}`);
+      expect(collection.ok()).toBeTruthy();
+      const entries = await collection.json();
+      await page.goto(`${server.url}#/${kind}`);
+      await expect(page.getByRole("heading", { name: kind[0].toUpperCase() + kind.slice(1), exact: true })).toBeVisible();
+      if (kind === "secrets") for (const entry of entries) expect(entry.spec?.data).toBeUndefined();
+      if (!entries.length) continue;
+      const md = entries[0].metadata;
+      const coords = ["realm", "space", "stack", "cell"];
+      const params = new URLSearchParams();
+      const scope = [];
+      for (const key of coords) if (md[key]) { params.set(key, md[key]); scope.push(md[key]); }
+      const detail = await request.get(`${server.url}/api/catalog/${kind}/${encodeURIComponent(md.name)}?${params}`);
+      expect(detail.ok()).toBeTruthy();
+      const document = await detail.json();
+      if (kind === "secrets") expect(document.spec?.data).toBeUndefined();
+      await page.goto(`${server.url}#/${kind}/${[...scope, md.name].map(encodeURIComponent).join("/")}?document=1`);
+      await expect(page.getByLabel(`Complete ${kind} JSON`)).toHaveText(JSON.stringify(document, null, 2));
+    }
     // Walk one populated branch at each level against the actual daemon.
     let scope = [];
     let path = "/api/realms";

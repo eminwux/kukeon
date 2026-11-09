@@ -28,6 +28,34 @@ async function mock(page, handler = () => undefined) {
 const failure = { status: 503, json: { error: { code: "unavailable", message: "Scoped read failed" } } };
 const nav = page => page.getByRole("navigation", { name: "Main navigation" });
 
+test("terminal selects eligible containers, forwards input and resize, and detaches", async ({ page }) => {
+  await mock(page, path => path.endsWith("/containers") ? { json: [
+    { id: "worker", attachable: true }, { id: "shell", attachable: true },
+    { id: "pause", root: true, attachable: true }, { id: "no-tty" },
+  ] } : undefined);
+  const messages = [];
+  let selected = "";
+  let closed = false;
+  await page.routeWebSocket("**/attach", socket => {
+    selected = new URL(socket.url()).pathname;
+    socket.onMessage(message => { messages.push(message); });
+    socket.onClose(() => { closed = true; });
+    socket.send(new TextEncoder().encode("terminal ready"));
+  });
+  await page.goto(`${server.url}#/resource/dev/shared/services/api`);
+  const panel = page.locator("section").filter({ has: page.getByRole("heading", { name: "Terminal", exact: true }) });
+  await expect(panel.locator("option")).toHaveCount(2);
+  await panel.getByLabel("Container").selectOption("shell");
+  await panel.getByRole("button", { name: "Attach" }).click();
+  await expect(panel.getByRole("status")).toHaveText("Connected");
+  await expect.poll(() => selected).toContain("/containers/shell/attach");
+  await expect.poll(() => messages.some(message => typeof message === "string" && JSON.parse(message).type === "resize")).toBe(true);
+  await panel.locator(".xterm-helper-textarea").press("a");
+  await expect.poll(() => messages.some(message => Buffer.isBuffer(message) && message.toString() === "a")).toBe(true);
+  await panel.getByRole("button", { name: "Detach" }).click();
+  await expect.poll(() => closed).toBe(true);
+});
+
 test("dashboard is the landing page with resource summaries and type navigation", async ({ page }) => {
   await mock(page);
   await page.goto(server.url);
@@ -224,4 +252,144 @@ test("running and unreported statuses never imply a successful exit or readiness
   await page.goto(`${server.url}#/resource/prod/shared/services/api`);
   await expect(page.getByRole("region", { name: "Cell status" }).getByText("Not reported", { exact: true })).toHaveCount(2);
   await expect(page.locator(".container-panel").getByText("Not reported", { exact: true })).toBeVisible();
+});
+
+function catalogDoc(kind, scope) {
+  const metadata = { name: "shared-name", realm: scope[0], ...(scope[1] ? { space: scope[1] } : {}), ...(scope[2] ? { stack: scope[2] } : {}), ...(scope[3] ? { cell: scope[3] } : {}) };
+  const spec = kind === "configs" ? { blueprint: { name: "template", realm: "library" }, values: { PORT: "8080" } }
+    : kind === "blueprints" ? { prefix: "worker", cell: { containers: [{ id: "web", image: "nginx" }] } }
+    : kind === "volumes" ? { reclaimPolicy: "Retain" } : {};
+  return { apiVersion: "kukeon.io/v1beta1", kind: { configs: "CellConfig", blueprints: "CellBlueprint", volumes: "Volume", secrets: "Secret" }[kind], metadata, spec };
+}
+async function mockCatalog(page, handler) {
+  await mock(page);
+  await page.route("**/api/catalog/**", async route => {
+    const url = new URL(route.request().url());
+    const parts = url.pathname.split("/").filter(Boolean);
+    const kind = parts[2];
+    const custom = await handler?.(url);
+    if (custom) return route.fulfill(custom);
+    if (!parts[3]) {
+      const scopes = [["dev"], ["prod"], ["prod", "shared"], ["prod", "shared", "services"], ...(kind === "secrets" ? [["prod", "shared", "services", "api"]] : [])];
+      return route.fulfill({ json: scopes.map(scope => catalogDoc(kind, scope)) });
+    }
+    const scope = ["realm", "space", "stack", "cell"].map(key => url.searchParams.get(key)).filter(Boolean);
+    const document = catalogDoc(kind, scope);
+    document.metadata.name = decodeURIComponent(parts[3]);
+    await route.fulfill({ json: document });
+  });
+}
+for (const kind of ["blueprints", "configs", "volumes", "secrets"]) {
+  test(`${kind} browse all applicable scopes with complete documents on demand`, async ({ page }) => {
+    await mockCatalog(page);
+    await page.goto(`${server.url}#/${kind}`);
+    const count = kind === "secrets" ? 5 : 4;
+    await expect(page.getByRole("row")).toHaveCount(count + 1);
+    await expect(page.locator("pre")).toHaveCount(0);
+    await page.getByLabel("Filter by realm").selectOption("prod");
+    await expect(page.getByRole("row")).toHaveCount(count);
+    await page.getByRole("searchbox").fill("missing");
+    await expect(page.getByText("No matching resources")).toBeVisible();
+    await page.getByRole("searchbox").fill(kind === "secrets" ? "prod / shared / services / api" : "prod / shared / services");
+    await expect(page.getByRole("row")).toHaveCount(2);
+    await page.getByRole("link", { name: "shared-name", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Resource overview" })).toBeVisible();
+    await expect(page.locator("pre")).toHaveCount(0);
+    await page.getByRole("link", { name: "View document", exact: true }).click();
+    const scope = kind === "secrets" ? ["prod", "shared", "services", "api"] : ["prod", "shared", "services"];
+    await expect(page.getByLabel(`Complete ${kind} JSON`)).toHaveText(JSON.stringify(catalogDoc(kind, scope), null, 2));
+    await page.reload();
+    await expect(page.getByLabel(`Complete ${kind} JSON`)).toBeVisible();
+    if (kind === "secrets") await expect(page.getByText(/Secret values are redacted/)).toBeVisible();
+  });
+}
+
+test("config references navigate across realms and missing targets report errors", async ({ page }) => {
+  let missing = true;
+  await mockCatalog(page, url => url.pathname.endsWith("/blueprints/template") && missing ? { status: 404, json: { error: { code: "not_found", message: "Blueprint is missing" } } } : undefined);
+  await page.goto(`${server.url}#/configs/prod/shared/services/shared-name`);
+  await expect(page.getByRole("region", { name: "Resource references" }).getByRole("alert")).toContainText("Missing reference");
+  await page.getByRole("link", { name: "template", exact: true }).click();
+  await expect(page).toHaveURL(/#\/blueprints\/library\/template$/);
+  await expect(page.getByRole("alert")).toContainText("Blueprint is missing");
+  missing = false;
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.getByRole("heading", { name: "Resource overview" })).toBeVisible();
+  await page.getByRole("link", { name: "View document", exact: true }).click();
+  await expect(page.getByLabel("Complete blueprints JSON")).toContainText('"realm": "library"');
+});
+
+test("explicit secret and volume references show usage and errors without ownership assumptions", async ({ page }) => {
+  await mockCatalog(page, url => {
+    if (url.pathname.endsWith("/blueprints/shared-name")) {
+      const document = catalogDoc("blueprints", ["prod"]);
+      document.spec.cell.containers[0].secrets = [{ secretRef: { name: "credential", realm: "library", space: "secure", stack: "data", cell: "source" } }];
+      document.spec.cell.containers[0].volumes = [{ kind: "volume", volumeRef: { name: "cache", realm: "store" }, target: "/cache" }];
+      return { json: document };
+    }
+    if (url.pathname.endsWith("/volumes/cache")) return { status: 503, json: { error: { code: "unavailable", message: "Volume lookup failed" } } };
+  });
+  await page.goto(`${server.url}#/blueprints/prod/shared-name`);
+  const refs = page.getByRole("region", { name: "Resource references" });
+  await expect(refs.getByText(/not ownership/)).toBeVisible();
+  await expect(refs.getByRole("alert")).toContainText("Reference retrieval failed");
+  await expect(refs.getByRole("link", { name: "credential" })).toHaveAttribute("href", "#/secrets/library/secure/data/source/credential");
+  await expect(refs.getByRole("link", { name: "cache" })).toHaveAttribute("href", "#/volumes/store/cache");
+});
+
+test("catalog refresh retains stale list and document with visible failure and recovers", async ({ page }) => {
+  let fail = false;
+  await mockCatalog(page, () => fail ? failure : undefined);
+  await page.goto(`${server.url}#/secrets`);
+  await expect(page.getByRole("row")).toHaveCount(6);
+  fail = true;
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.getByText("Stale secrets list — refresh failed.")).toBeVisible();
+  await expect(page.getByRole("row")).toHaveCount(6);
+  fail = false;
+  await page.goto(`${server.url}#/secrets/prod/shared-name?document=1`);
+  await expect(page.getByLabel("Complete secrets JSON")).toBeVisible();
+  fail = true;
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.getByText("Stale secrets document — refresh failed.")).toBeVisible();
+  fail = false;
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.locator(".stale")).toHaveCount(0);
+});
+
+test("catalog empty results are distinct from retrieval failures", async ({ page }) => {
+  let fail = false;
+  await mockCatalog(page, () => fail ? failure : { json: [] });
+  await page.goto(`${server.url}#/volumes`);
+  await expect(page.getByText("No volumes found")).toBeVisible();
+  fail = true;
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.getByText("Resources could not be loaded")).toBeVisible();
+  await expect(page.getByText("No volumes found")).toHaveCount(0);
+});
+
+test("create from config previews, prevents duplicate submits and opens the scoped cell", async ({ page }) => {
+  await mockCatalog(page);
+  let creates = 0;
+  await page.route("**/api/cells/from-config/*", async route => {
+    const input = route.request().postDataJSON();
+    const document = { metadata: { name: input.name }, spec: { realmId: "prod", spaceId: "shared", stackId: "services" } };
+    if (route.request().url().endsWith("create")) {
+      creates++;
+      expect(input.preview).toBe("reviewed");
+      await route.fulfill({ json: document });
+    } else await route.fulfill({ json: { document, preview: "reviewed" } });
+  });
+  await page.goto(`${server.url}#/configs/prod/shared/services/shared-name`);
+  await page.getByRole("button", { name: "Create cell from config", exact: true }).click();
+  await page.getByLabel("Cell name", { exact: true }).fill("new-cell");
+  await page.getByRole("button", { name: "Preview cell", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Review cell document" })).toBeVisible();
+  expect(creates).toBe(0);
+  await page.getByLabel("Environment overrides").fill("APP=production");
+  await expect(page.getByRole("button", { name: "Confirm create cell" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Preview cell", exact: true }).click();
+  await page.getByRole("button", { name: "Confirm create cell" }).click();
+  await expect(page).toHaveURL(/#\/resource\/prod\/shared\/services\/new-cell$/);
+  expect(creates).toBe(1);
 });

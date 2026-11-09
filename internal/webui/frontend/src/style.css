@@ -135,3 +135,13 @@ button:disabled { cursor: default; opacity: .4; }
 .setup-status h3 { font-size: 12px; margin: 24px 0 6px; }
 .setup-error { color: var(--error); font-size: 12px; margin: 4px 0 0; overflow-wrap: anywhere; }
 .container-panel .state-list .text-link { margin-top: 0; margin-right: auto; }
+.related-resources { margin-top: 20px; }
+.related-resources .state-list li { align-items: start; }
+.related-resources .error { margin: 0; }
+.related-resources li > div { min-width: 0; overflow-wrap: anywhere; }
+
+.create-cell-form { display: grid; gap: 14px; }
+.create-cell-form label { display: grid; gap: 6px; }
+.create-cell-form input[type="checkbox"] { width: auto; justify-self: start; }
+.create-cell-form textarea { min-height: 100px; resize: vertical; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--code); color: var(--text); font: inherit; }
+.terminal-screen { height: 420px; margin-top: 1rem; padding: 8px; background: #111; }

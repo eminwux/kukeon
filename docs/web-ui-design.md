@@ -7,7 +7,8 @@ spaces, stacks, and cells, and link to the corresponding resource lists. A cell
 state summary uses only states reported by the daemon. Connection success does
 not imply workload health.
 
-The persistent sidebar contains Dashboard, Realms, Spaces, Stacks, and Cells.
+The persistent sidebar contains Dashboard, Realms, Spaces, Stacks, Cells,
+Blueprints, Configs, Volumes, and Secrets.
 Resource names do not appear in the sidebar. Scope is context within a list or
 a resource's breadcrumb, rather than a tree the operator must traverse first.
 The mobile menu uses the same destinations and closes after navigation.
@@ -46,8 +47,8 @@ https://github.com/paperclipai/paperclip/blob/master/ui/src/components/Sidebar.t
    resource-specific fields while retaining documents on demand.
 2. Add sorting and URL-persisted search/filter state; consider a paginated daemon
    inventory API as workspaces grow beyond browser aggregation.
-3. Add blueprint, config, volume, and secret list pages when those issue #1386
-   slices land, preserving scope and secret redaction.
+3. Add richer reference summaries and scoped catalog filters while preserving
+   complete documents, cross-realm references, and secret redaction.
 4. Add contextual lifecycle actions and terminal access with confirmation,
    pending states, and explicit partial-failure results.
 
