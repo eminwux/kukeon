@@ -57,6 +57,122 @@ test("terminal selects eligible containers, forwards input and resize, and detac
   await expect.poll(() => closed).toBe(true);
 });
 
+test("Workspace retains independent scoped terminals, focus and resize while switching cells", async ({ page }) => {
+  await mock(page, path => path.endsWith("/containers") ? { json: [{ id: "shell", attachable: true }] } : undefined);
+  const sockets = new Map();
+  const messages = new Map();
+  const closed = [];
+  await page.routeWebSocket("**/attach", socket => {
+    const path = new URL(socket.url()).pathname;
+    sockets.set(path, socket);
+    messages.set(path, []);
+    socket.onMessage(message => messages.get(path).push(message));
+    socket.onClose(() => closed.push(path));
+    socket.send(new TextEncoder().encode(`output for ${path}`));
+  });
+  const cells = page.getByRole("navigation", { name: "Cell navigation" });
+  await page.goto(server.url);
+  await cells.getByRole("link", { name: "Open dev / shared / services / api" }).click();
+  const panel = page.getByRole("region", { name: "Terminal workspace" });
+  await panel.getByRole("button", { name: "Attach" }).click();
+  await expect(panel.locator(".terminal-connection-state")).toHaveText("Connected");
+  const devPath = "/api/realms/dev/spaces/shared/stacks/services/cells/api/containers/shell/attach";
+  const prodPath = "/api/realms/prod/spaces/shared/stacks/services/cells/api/containers/shell/attach";
+  const devScreen = await page.locator('.terminal-screen[aria-label="Terminal for dev / shared / services / api / shell"]').elementHandle();
+  await cells.getByRole("link", { name: "Open prod / shared / services / api" }).click();
+  await panel.getByRole("button", { name: "Attach" }).click();
+  await expect(panel.locator(".terminal-connection-state")).toHaveText("Connected");
+  await expect.poll(() => sockets.size).toBe(2);
+  expect(closed).toEqual([]);
+  expect(await devScreen.evaluate(el => el.isConnected)).toBe(true);
+  await panel.locator(".terminal-session:not([hidden]) .xterm-helper-textarea").press("p");
+  await expect.poll(() => messages.get(prodPath).some(message => Buffer.isBuffer(message) && message.toString() === "p")).toBe(true);
+  expect(messages.get(devPath).some(message => Buffer.isBuffer(message) && message.toString() === "p")).toBe(false);
+  await cells.getByRole("link", { name: "Open dev / shared / services / api" }).click();
+  await expect(panel.locator(".terminal-connection-state")).toHaveText("Connected");
+  expect(await devScreen.evaluate(el => el === document.querySelector('.terminal-screen[aria-label="Terminal for dev / shared / services / api / shell"]'))).toBe(true);
+  await panel.locator(".terminal-session:not([hidden]) .xterm-helper-textarea").press("d");
+  await expect.poll(() => messages.get(devPath).some(message => Buffer.isBuffer(message) && message.toString() === "d")).toBe(true);
+  await expect.poll(() => messages.get(devPath).filter(message => typeof message === "string" && JSON.parse(message).type === "resize").length).toBeGreaterThanOrEqual(2);
+  const resizedBefore = messages.get(devPath).filter(message => typeof message === "string" && JSON.parse(message).type === "resize").length;
+  await page.setViewportSize({ width: 900, height: 700 });
+  await expect.poll(() => messages.get(devPath).filter(message => typeof message === "string" && JSON.parse(message).type === "resize").length).toBeGreaterThan(resizedBefore);
+  await page.getByRole("navigation", { name: "Areas" }).first().getByRole("link", { name: "Administration" }).click();
+  await expect(page.locator(".page-heading h1")).toHaveText("Administration");
+  expect(closed).toEqual([]);
+  await cells.getByRole("link", { name: "Open dev / shared / services / api" }).click();
+  await expect(panel.locator(".terminal-connection-state")).toHaveText("Connected");
+  await expect(cells.getByRole("link", { name: "Open prod / shared / services / api" })).toContainText("Terminal attached");
+});
+
+test("terminal tabs retain container selection, enforce connection limits, and detach explicitly", async ({ page }) => {
+  await mock(page, path => path.endsWith("/containers") ? { json: Array.from({ length: 5 }, (_, i) => ({ id: `shell-${i}`, attachable: true })) } : undefined);
+  const closed = [];
+  await page.routeWebSocket("**/attach", socket => {
+    socket.onClose(() => closed.push(new URL(socket.url()).pathname));
+  });
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  const panel = page.getByRole("region", { name: "Terminal workspace" });
+  for (let i = 0; i < 4; i++) {
+    await panel.locator(".terminal-controls select").selectOption(`shell-${i}`);
+    await panel.getByRole("button", { name: "Attach" }).click();
+    await expect(panel.locator(".terminal-connection-state")).toHaveText("Connected");
+  }
+  await panel.locator(".terminal-controls select").selectOption("shell-4");
+  await expect(panel.getByRole("button", { name: "Attach" })).toBeDisabled();
+  await expect(panel.getByText("Terminal limit reached.", { exact: false })).toBeVisible();
+  await panel.getByRole("tab", { name: "shell-0 · attached" }).click();
+  await panel.getByRole("tab", { name: "shell-0 · attached" }).press("ArrowRight");
+  await expect(panel.locator(".terminal-controls select")).toHaveValue("shell-1");
+  await panel.getByRole("tab", { name: "shell-1 · attached" }).press("Home");
+  await expect(panel.locator(".terminal-controls select")).toHaveValue("shell-0");
+  await panel.getByRole("button", { name: "Detach" }).click();
+  await expect.poll(() => closed.length).toBe(1);
+  await panel.locator(".terminal-controls select").selectOption("shell-4");
+  await panel.getByRole("button", { name: "Attach" }).click();
+  await expect(panel.locator(".terminal-connection-state")).toHaveText("Connected");
+  await page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link", { name: "Open prod / shared / services / api" }).click();
+  await page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link", { name: "Open dev / shared / services / api" }).click();
+  await expect(panel.locator(".terminal-controls select")).toHaveValue("shell-4");
+});
+
+test("terminal error offers a new attachment and stopped cells release sessions", async ({ page }) => {
+  let stopped = false;
+  let failInventory = false;
+  await mock(page, path => {
+    if (path.endsWith("/containers")) return { json: [{ id: "shell", attachable: true }] };
+    if (path === "/api/realms" && failInventory) return failure;
+    if (path.endsWith("/cells") && path.includes("/dev/")) return { json: fixture(path).map(cell => ({ ...cell, status: { state: stopped ? "Stopped" : "Ready" } })) };
+  });
+  let attempts = 0;
+  let closed = 0;
+  await page.routeWebSocket("**/attach", socket => {
+    attempts++;
+    socket.onClose(() => closed++);
+    if (attempts === 1) { socket.send(JSON.stringify({ type: "error", message: "permission denied by attach socket" })); socket.close(); }
+  });
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  const panel = page.getByRole("region", { name: "Terminal workspace" });
+  await panel.getByRole("button", { name: "Attach" }).click();
+  await expect(panel.locator(".terminal-connection-state")).toHaveText("permission denied by attach socket");
+  const screen = await panel.locator(".terminal-screen").elementHandle();
+  await panel.getByRole("button", { name: "Reconnect" }).click();
+  await expect(panel.locator(".terminal-connection-state")).toHaveText("Connected");
+  expect(await screen.evaluate(el => el.isConnected)).toBe(true);
+  const closedBefore = closed;
+  failInventory = true;
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.getByText("Stale inventory — refresh failed.", { exact: false })).toBeVisible();
+  await expect(panel.locator(".terminal-connection-state")).toHaveText("Connected");
+  expect(closed).toBe(closedBefore);
+  failInventory = false;
+  stopped = true;
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(panel.getByText("Terminal unavailable: cell is Stopped.")).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Attach" })).toBeDisabled();
+  await expect.poll(() => closed).toBeGreaterThan(closedBefore);
+});
+
 test("Workspace lands first and Administration retains resource summaries and navigation", async ({ page }) => {
   await mock(page);
   await page.goto(server.url);

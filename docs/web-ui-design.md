@@ -12,11 +12,14 @@ groups are browser preferences, not cell metadata. The sidebar initially shows
 25 groups and 100 cells per group, with controls to reveal more. It remains available in Administration;
 on narrow screens it opens from the menu button and closes after selection.
 
-Workspace shows the selected cell's existing terminal attachment first, followed
-by status, overview, references, and containers. **New Cell** opens the existing
-Configs list and its config-based creation flow. Switching cells closes the
-current attachment without stopping the workload. Persistent terminal tabs and
-inactive attachments are separate follow-up work.
+Workspace shows the selected cell's terminal first, followed by status,
+overview, references, and containers. **New Cell** opens the existing Configs
+list and its config-based creation flow. Terminal sessions belong to the app
+shell: switching cells or container tabs keeps inactive attachments mounted,
+and **Detach** explicitly releases one without stopping the workload. Four
+connections and eight retained terminal surfaces can coexist in one browser tab.
+The server attach protocol cannot replay bytes lost during a disconnect or
+guarantee that a terminal process survives reconnection or page reload.
 
 Administration contains the resource dashboard, with summary counts for realms,
 spaces, stacks, and cells, and the resource-kind navigation for realms, spaces,
@@ -59,11 +62,9 @@ https://github.com/paperclipai/paperclip/blob/master/ui/src/components/Sidebar.t
 
 ## Next increments
 
-1. Add persistent terminal tabs and bounded inactive attachments without
-   changing the Workspace shell.
-2. Add lifecycle controls with confirmation, pending states, and explicit
+1. Add lifecycle controls with confirmation, pending states, and explicit
    partial-failure results.
-3. Consider a paginated daemon inventory API if browser aggregation becomes
+2. Consider a paginated daemon inventory API if browser aggregation becomes
    too costly for large installations.
 
 Verify each increment across keyboard navigation, mobile, both themes, and
