@@ -112,7 +112,7 @@ func (c *catalogClient) GetSecret(_ context.Context, doc v1beta1.SecretDoc) (kuk
 
 func TestCatalogAPI(t *testing.T) {
 	for _, kind := range []string{"blueprints", "configs", "volumes", "secrets"} {
-		for _, mode := range []string{"global-list", "realm-list", "stack-list", "detail", "empty", "missing", "unavailable", "permission", "gap", "missing-realm", "cell", "cell-detail", "unsafe-realm", "unsafe-space", "unsafe-cell"} {
+		for _, mode := range []string{"global-list", "realm-list", "stack-list", "detail", "empty", "missing", "unavailable", "permission", "gap", "missing-realm", "cell", "cell-detail", "unsafe-realm", "unsafe-space", "unsafe-cell", "unsafe-whitespace"} {
 			t.Run(kind+"/"+mode, func(t *testing.T) {
 				c := &catalogClient{empty: mode == "empty", missing: mode == "missing"}
 				if mode == "unavailable" {
@@ -142,6 +142,8 @@ func TestCatalogAPI(t *testing.T) {
 					query = "?realm=r&space=a%2Fb"
 				case "unsafe-cell":
 					query = "?realm=r&space=s&stack=t&cell=%5C.."
+				case "unsafe-whitespace":
+					query = "?realm=%20r"
 				}
 				handler, err := newHandler(
 					"localhost:5129",

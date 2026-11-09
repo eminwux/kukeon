@@ -37,33 +37,69 @@ const (
 
 // catalogScope validates coordinates before forwarding them to the daemon.
 func catalogScope(r *http.Request, secret bool, detail bool) ([4]string, error) {
-	realm := r.URL.Query().Get("realm")
-	space := r.URL.Query().Get("space")
-	stack := r.URL.Query().Get("stack")
-	cell := r.URL.Query().Get("cell")
-	realm = strings.TrimSpace(realm)
-	space = strings.TrimSpace(space)
-	stack = strings.TrimSpace(stack)
-	cell = strings.TrimSpace(cell)
-	if realm != "" {
-		if !filepath.IsLocal(realm) || !safePathSegment(realm) {
+	realm := ""
+	if rawRealm := r.URL.Query().Get("realm"); rawRealm != "" {
+		if strings.TrimSpace(rawRealm) != rawRealm {
+			return [4]string{}, fmt.Errorf(
+				"%w: scope coordinates cannot have surrounding whitespace",
+				errdefs.ErrConfig,
+			)
+		}
+		if !filepath.IsLocal(rawRealm) {
 			return [4]string{}, fmt.Errorf("%w: unsafe realm coordinate", errdefs.ErrConfig)
 		}
+		if !safePathSegment(rawRealm) {
+			return [4]string{}, fmt.Errorf("%w: unsafe realm coordinate", errdefs.ErrConfig)
+		}
+		realm = rawRealm
 	}
-	if space != "" {
-		if !filepath.IsLocal(space) || !safePathSegment(space) {
+	space := ""
+	if rawSpace := r.URL.Query().Get("space"); rawSpace != "" {
+		if strings.TrimSpace(rawSpace) != rawSpace {
+			return [4]string{}, fmt.Errorf(
+				"%w: scope coordinates cannot have surrounding whitespace",
+				errdefs.ErrConfig,
+			)
+		}
+		if !filepath.IsLocal(rawSpace) {
 			return [4]string{}, fmt.Errorf("%w: unsafe space coordinate", errdefs.ErrConfig)
 		}
+		if !safePathSegment(rawSpace) {
+			return [4]string{}, fmt.Errorf("%w: unsafe space coordinate", errdefs.ErrConfig)
+		}
+		space = rawSpace
 	}
-	if stack != "" {
-		if !filepath.IsLocal(stack) || !safePathSegment(stack) {
+	stack := ""
+	if rawStack := r.URL.Query().Get("stack"); rawStack != "" {
+		if strings.TrimSpace(rawStack) != rawStack {
+			return [4]string{}, fmt.Errorf(
+				"%w: scope coordinates cannot have surrounding whitespace",
+				errdefs.ErrConfig,
+			)
+		}
+		if !filepath.IsLocal(rawStack) {
 			return [4]string{}, fmt.Errorf("%w: unsafe stack coordinate", errdefs.ErrConfig)
 		}
+		if !safePathSegment(rawStack) {
+			return [4]string{}, fmt.Errorf("%w: unsafe stack coordinate", errdefs.ErrConfig)
+		}
+		stack = rawStack
 	}
-	if cell != "" {
-		if !filepath.IsLocal(cell) || !safePathSegment(cell) {
+	cell := ""
+	if rawCell := r.URL.Query().Get("cell"); rawCell != "" {
+		if strings.TrimSpace(rawCell) != rawCell {
+			return [4]string{}, fmt.Errorf(
+				"%w: scope coordinates cannot have surrounding whitespace",
+				errdefs.ErrConfig,
+			)
+		}
+		if !filepath.IsLocal(rawCell) {
 			return [4]string{}, fmt.Errorf("%w: unsafe cell coordinate", errdefs.ErrConfig)
 		}
+		if !safePathSegment(rawCell) {
+			return [4]string{}, fmt.Errorf("%w: unsafe cell coordinate", errdefs.ErrConfig)
+		}
+		cell = rawCell
 	}
 	scope := [4]string{realm, space, stack, cell}
 	if detail && scope[0] == "" {
