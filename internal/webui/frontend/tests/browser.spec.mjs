@@ -26,7 +26,8 @@ async function mock(page, handler = () => undefined) {
   });
 }
 const failure = { status: 503, json: { error: { code: "unavailable", message: "Scoped read failed" } } };
-const nav = page => page.getByRole("navigation", { name: "Main navigation" });
+const nav = page => page.getByRole("navigation", { name: "Administration resources" });
+const listSearch = page => page.locator(".list-controls").getByRole("searchbox");
 
 test("terminal selects eligible containers, forwards input and resize, and detaches", async ({ page }) => {
   await mock(page, path => path.endsWith("/containers") ? { json: [
@@ -56,24 +57,152 @@ test("terminal selects eligible containers, forwards input and resize, and detac
   await expect.poll(() => closed).toBe(true);
 });
 
-test("dashboard is the landing page with resource summaries and type navigation", async ({ page }) => {
+test("Workspace lands first and Administration retains resource summaries and navigation", async ({ page }) => {
   await mock(page);
   await page.goto(server.url);
-  await expect(page.getByRole("heading", { name: "Dashboard", exact: true })).toBeVisible();
+  await expect(page.locator(".page-heading h1")).toHaveText("Workspace");
+  await expect(page.getByRole("region", { name: "Workspace welcome" })).toContainText("Choose a cell");
+  await page.getByRole("navigation", { name: "Areas" }).first().getByRole("link", { name: "Administration" }).click();
+  await expect(page.locator(".page-heading h1")).toHaveText("Administration");
   for (const type of ["Realms", "Spaces", "Stacks", "Cells"]) {
     await expect(page.locator(".summary-card").filter({ hasText: type }).locator("strong")).toHaveText("2");
     await expect(nav(page).getByRole("link", { name: type, exact: true })).toBeVisible();
   }
   await expect(page.getByRole("heading", { name: "Cell states" })).toBeVisible();
   await expect(page.locator("pre")).toHaveCount(0);
-  await expect(nav(page).getByText("shared")).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link", { name: "Open dev / shared / services / api" })).toBeVisible();
+});
+
+test("cell sidebar uses full scope for duplicate names and switching reuses inventory", async ({ page }) => {
+  let inventoryReads = 0;
+  await mock(page, path => {
+    if (path === "/api/realms" || path.endsWith("/spaces") || path.endsWith("/stacks") || path.endsWith("/cells")) inventoryReads++;
+  });
+  await page.goto(server.url);
+  const cells = page.getByRole("navigation", { name: "Cell navigation" });
+  await expect(cells.getByRole("link", { name: "Open dev / shared / services / api" })).toBeVisible();
+  await expect(cells.getByRole("link", { name: "Open prod / shared / services / api" })).toBeVisible();
+  const initialReads = inventoryReads;
+  await cells.getByRole("link", { name: "Open dev / shared / services / api" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/#\/workspace\/dev\/shared\/services\/api$/);
+  await expect(page.getByText("No attachable containers are available.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Runtime status" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Containers" })).toBeVisible();
+  await expect(page.locator("#cell-terminal")).toBeVisible();
+  await cells.getByRole("link", { name: "Open prod / shared / services / api" }).click();
+  await expect(page).toHaveURL(/#\/workspace\/prod\/shared\/services\/api$/);
+  await expect(cells.getByRole("link", { name: "Open prod / shared / services / api" })).toHaveAttribute("aria-current", "page");
+  expect(inventoryReads).toBe(initialReads);
+  await page.goBack();
+  await expect(page).toHaveURL(/#\/workspace\/dev\/shared\/services\/api$/);
+});
+
+test("sidebar grouping, missing labels, search, collapse, and preference persistence", async ({ page }) => {
+  await mock(page, path => {
+    if (!path.endsWith("/cells")) return;
+    const prod = path.includes("/prod/");
+    return { json: fixture(path).map(cell => ({ ...cell, metadata: { ...cell.metadata, labels: prod ? {} : { team: "platform" } }, status: { state: prod ? "Stopped" : "Failed" } })) };
+  });
+  await page.goto(server.url);
+  const sidebar = page.getByRole("region", { name: "All cells" });
+  const cells = page.getByRole("navigation", { name: "Cell navigation" });
+  await expect(sidebar.getByLabel("Group by")).toHaveValue("");
+  await expect(cells.getByRole("link")).toHaveCount(2);
+  await expect(cells.getByRole("link", { name: "Open dev / shared / services / api" })).toContainText("Failed");
+  await expect(cells.getByRole("link", { name: "Open prod / shared / services / api" })).toContainText("Stopped");
+  await sidebar.getByLabel("Group by").selectOption("team");
+  await expect(cells.getByRole("region", { name: "platform group" })).toBeVisible();
+  await expect(cells.getByRole("region", { name: "Ungrouped group" })).toBeVisible();
+  const ungrouped = cells.getByRole("region", { name: "Ungrouped group" });
+  await ungrouped.getByRole("button", { name: /Ungrouped/ }).focus();
+  await page.keyboard.press("Enter");
+  await expect(ungrouped.getByRole("link")).toHaveCount(0);
+  await page.reload();
+  await expect(sidebar.getByLabel("Group by")).toHaveValue("team");
+  await expect(ungrouped.getByRole("button", { name: /Ungrouped/ })).toHaveAttribute("aria-expanded", "false");
+  await ungrouped.getByRole("button", { name: /Ungrouped/ }).click();
+  await sidebar.getByRole("searchbox").fill("prod / shared");
+  await expect(cells.getByRole("link")).toHaveCount(1);
+  await expect(cells.getByRole("link", { name: "Open prod / shared / services / api" })).toBeVisible();
+  await sidebar.getByRole("searchbox").fill("missing");
+  await expect(sidebar.getByText("No matching cells.")).toBeVisible();
+  await sidebar.getByLabel("Group by").selectOption("");
+  await page.reload();
+  await expect(sidebar.getByLabel("Group by")).toHaveValue("");
+});
+
+test("a literal Ungrouped label stays separate from missing labels", async ({ page }) => {
+  await mock(page, path => {
+    if (!path.endsWith("/cells")) return;
+    const prod = path.includes("/prod/");
+    return { json: fixture(path).map(cell => ({ ...cell, metadata: { ...cell.metadata, labels: prod ? {} : { team: "Ungrouped" } } })) };
+  });
+  await page.goto(server.url);
+  await page.getByRole("region", { name: "All cells" }).getByLabel("Group by").selectOption("team");
+  const cells = page.getByRole("navigation", { name: "Cell navigation" });
+  await expect(cells.getByRole("region", { name: "Ungrouped (label value) group" }).getByRole("link", { name: "Open dev / shared / services / api" })).toBeVisible();
+  await expect(cells.getByRole("region", { name: "Ungrouped group", exact: true }).getByRole("link", { name: "Open prod / shared / services / api" })).toBeVisible();
+});
+
+test("large inventories limit initial sidebar DOM and reveal more cells on demand", async ({ page }) => {
+  await mock(page, path => {
+    const result = fixture(path, 61);
+    return { json: path.endsWith("/cells") ? result.map(cell => ({ ...cell, metadata: { ...cell.metadata, labels: { team: cell.metadata.name } } })) : result };
+  });
+  await page.goto(server.url);
+  const cells = page.getByRole("navigation", { name: "Cell navigation" });
+  await expect(cells.getByRole("link")).toHaveCount(100);
+  await cells.getByRole("button", { name: "Show 22 more cells" }).click();
+  await expect(cells.getByRole("link")).toHaveCount(122);
+  await page.getByRole("region", { name: "All cells" }).getByLabel("Group by").selectOption("team");
+  await expect(cells.getByRole("region", { name: /group$/ })).toHaveCount(25);
+  await cells.getByRole("button", { name: "Show 25 more groups" }).click();
+  await expect(cells.getByRole("region", { name: /group$/ })).toHaveCount(50);
+});
+
+test("failed inventory refresh retains cells while daemon connectivity changes independently", async ({ page }) => {
+  let fail = false;
+  await mock(page, path => fail && path === "/api/realms" ? failure : undefined);
+  await page.goto(server.url);
+  const cells = page.getByRole("navigation", { name: "Cell navigation" });
+  await expect(cells.getByRole("link")).toHaveCount(2);
+  fail = true;
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.getByLabel("Daemon connection").getByRole("status")).toHaveText("Unavailable");
+  await expect(page.getByText(/Stale inventory/)).toBeVisible();
+  await expect(cells.getByRole("link")).toHaveCount(2);
+  await expect(page.getByRole("region", { name: "All cells" })).toContainText("Inventory incomplete or stale");
+  fail = false;
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.getByLabel("Daemon connection").getByRole("status")).toHaveText("Connected");
+  await expect(page.locator(".stale")).toHaveCount(0);
+});
+
+test("initial inventory failure is distinct from an empty inventory", async ({ page }) => {
+  await mock(page, () => failure);
+  await page.goto(server.url);
+  await expect(page.getByRole("region", { name: "All cells" })).toContainText("Cells unavailable");
+  await expect(page.getByRole("region", { name: "All cells" })).not.toContainText("No cells found");
+  await expect(page.getByLabel("Daemon connection").getByRole("status")).toHaveText("Unavailable");
+});
+
+test("empty Workspace offers existing config creation without inventing cells", async ({ page }) => {
+  await mockCatalog(page);
+  await page.unroute("**/api/realms**");
+  await page.route("**/api/realms**", route => route.fulfill({ json: [] }));
+  await page.goto(server.url);
+  await expect(page.getByRole("region", { name: "All cells" })).toContainText("No cells found");
+  await page.getByRole("region", { name: "Workspace welcome" }).getByRole("link", { name: /New Cell/ }).click();
+  await expect(page).toHaveURL(/#\/configs$/);
+  await expect(page.locator(".page-heading h1")).toHaveText("Configs");
 });
 
 for (const type of ["Realms", "Spaces", "Stacks", "Cells"]) {
   test(`${type} list shows entries and scope, with complete documents only on request`, async ({ page }) => {
     await mock(page);
     await page.goto(`${server.url}#/${type.toLowerCase()}`);
-    await expect(page.getByRole("heading", { name: type, exact: true })).toBeVisible();
+    await expect(page.locator(".page-heading h1")).toHaveText(type);
     await expect(page.getByRole("row")).toHaveCount(3);
     await expect(page.locator("pre")).toHaveCount(0);
     const first = page.getByRole("row").nth(1);
@@ -93,9 +222,9 @@ test("lists filter by name and realm and retain complete scope for duplicate nam
   await page.getByLabel("Filter by realm").selectOption("prod");
   await expect(page.getByRole("row")).toHaveCount(2);
   await expect(page.getByRole("row").nth(1)).toContainText("prod / shared / services");
-  await page.getByRole("searchbox").fill("missing");
+  await listSearch(page).fill("missing");
   await expect(page.getByText("No matching resources")).toBeVisible();
-  await page.getByRole("searchbox").fill("api");
+  await listSearch(page).fill("api");
   await page.getByRole("link", { name: "api", exact: true }).click();
   await expect(page).toHaveURL(/#\/resource\/prod\/shared\/services\/api$/);
   await expect(page.locator("pre")).toHaveCount(0);
@@ -126,7 +255,7 @@ test("large lists paginate and search resets the current page", async ({ page })
   await expect(page.getByText("1–25 of 32")).toBeVisible();
   await page.getByRole("button", { name: "Next", exact: true }).click();
   await expect(page.getByText("26–32 of 32")).toBeVisible();
-  await page.getByRole("searchbox").fill("api-00");
+  await listSearch(page).fill("api-00");
   await expect(page.getByText("1–2 of 2")).toBeVisible();
   await expect(page.getByRole("button", { name: "Previous" })).toBeDisabled();
 });
@@ -150,10 +279,10 @@ test("refresh failures mark retained inventory and documents stale, retry recove
 
 test("partial scope failures never present counts as complete", async ({ page }) => {
   await mock(page, path => path === "/api/realms/prod/spaces/shared/stacks" ? failure : undefined);
-  await page.goto(server.url);
+  await page.goto(`${server.url}#/administration`);
   await expect(page.getByRole("alert")).toContainText("Incomplete inventory");
   await expect(page.locator(".summary-card").filter({ hasText: "Cells" })).toContainText("Incomplete or stale data");
-  await expect(page.getByLabel("Daemon connection").getByRole("status")).toHaveText("Needs attention");
+  await expect(page.getByLabel("Daemon connection").getByRole("status")).toHaveText("Connected");
 });
 
 test("empty inventory and failed retrieval have different messages", async ({ page }) => {
@@ -196,16 +325,21 @@ test("theme preference follows the system and persists explicit overrides", asyn
   await expect.poll(scheme).toBe("light");
 });
 
-test("mobile navigation closes after selecting a list and dashboard fits the screen", async ({ page }) => {
+test("mobile cell navigation closes after selection and Workspace fits the screen", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await mock(page);
   await page.goto(server.url);
-  await expect(page.getByRole("heading", { name: "Dashboard", exact: true })).toBeVisible();
+  await expect(page.locator(".page-heading h1")).toHaveText("Workspace");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
   await page.getByRole("button", { name: "Toggle sidebar" }).click();
-  await nav(page).getByRole("link", { name: "Cells", exact: true }).click();
+  await page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link", { name: "Open dev / shared / services / api" }).click();
   await expect(page.getByRole("complementary")).toBeHidden();
-  await expect(page.getByRole("heading", { name: "Cells", exact: true })).toBeVisible();
+  await expect(page.locator(".page-heading h1")).toHaveText("api");
+  await expect(page.getByRole("link", { name: "+ New Cell" })).toBeVisible();
+  await expect(page.getByRole("status", { name: "Daemon: Connected" })).toBeVisible();
+  await page.getByRole("navigation", { name: "Areas" }).last().getByRole("link", { name: "Administration" }).click();
+  await expect(nav(page).getByRole("link", { name: "Secrets" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 });
 
 test("cell status cards and container observations expose reported runtime state", async ({ page }) => {
@@ -288,9 +422,9 @@ for (const kind of ["blueprints", "configs", "volumes", "secrets"]) {
     await expect(page.locator("pre")).toHaveCount(0);
     await page.getByLabel("Filter by realm").selectOption("prod");
     await expect(page.getByRole("row")).toHaveCount(count);
-    await page.getByRole("searchbox").fill("missing");
+    await listSearch(page).fill("missing");
     await expect(page.getByText("No matching resources")).toBeVisible();
-    await page.getByRole("searchbox").fill(kind === "secrets" ? "prod / shared / services / api" : "prod / shared / services");
+    await listSearch(page).fill(kind === "secrets" ? "prod / shared / services / api" : "prod / shared / services");
     await expect(page.getByRole("row")).toHaveCount(2);
     await page.getByRole("link", { name: "shared-name", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Resource overview" })).toBeVisible();
@@ -371,6 +505,7 @@ test("catalog empty results are distinct from retrieval failures", async ({ page
 test("create from config previews, prevents duplicate submits and opens the scoped cell", async ({ page }) => {
   await mockCatalog(page);
   let creates = 0;
+  await page.route("**/api/realms/prod/spaces/shared/stacks/services/cells", route => route.fulfill({ json: [...fixture("/api/realms/prod/spaces/shared/stacks/services/cells"), ...(creates ? [doc(["prod", "shared", "services", "new-cell"])] : [])] }));
   await page.route("**/api/cells/from-config/*", async route => {
     const input = route.request().postDataJSON();
     const document = { metadata: { name: input.name }, spec: { realmId: "prod", spaceId: "shared", stackId: "services" } };
@@ -392,4 +527,5 @@ test("create from config previews, prevents duplicate submits and opens the scop
   await page.getByRole("button", { name: "Confirm create cell" }).click();
   await expect(page).toHaveURL(/#\/resource\/prod\/shared\/services\/new-cell$/);
   expect(creates).toBe(1);
+  await expect(page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link", { name: "Open prod / shared / services / new-cell" })).toBeVisible();
 });

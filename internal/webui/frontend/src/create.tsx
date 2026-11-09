@@ -2,7 +2,7 @@ import { useState } from "react";
 
 type Config = { name: string; realm?: string; space?: string; stack?: string };
 type Cell = { metadata: { name: string }; spec: { realmId: string; spaceId: string; stackId: string } };
-export function CreateCell({ config }: { config: Config }) {
+export function CreateCell({ config, onCreated }: { config: Config; onCreated: () => void }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [env, setEnv] = useState("");
@@ -18,6 +18,7 @@ export function CreateCell({ config }: { config: Config }) {
       if (!response.ok) throw new Error(result.message ?? result.error?.message ?? "Request failed");
       if (create) {
         const cell = result as Cell;
+        onCreated();
         window.location.hash = "#/resource/" + [cell.spec.realmId, cell.spec.spaceId, cell.spec.stackId, cell.metadata.name].map(encodeURIComponent).join("/");
       } else setPreview(result);
     } catch (failure) { setError((failure as Error).message); if (create) setPreview(undefined); }

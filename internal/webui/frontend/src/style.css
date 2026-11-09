@@ -145,3 +145,59 @@ button:disabled { cursor: default; opacity: .4; }
 .create-cell-form input[type="checkbox"] { width: auto; justify-self: start; }
 .create-cell-form textarea { min-height: 100px; resize: vertical; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--code); color: var(--text); font: inherit; }
 .terminal-screen { height: 420px; margin-top: 1rem; padding: 8px; background: #111; }
+
+/* The cell list remains mounted across Workspace and Administration routes. */
+.area-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 0 12px 14px; }
+.area-nav a { text-align: center; padding: 9px 5px; border-radius: 6px; color: var(--muted); font-size: 12px; }
+.area-nav a:hover, .area-nav a[aria-current="page"] { background: var(--selected); color: var(--accent); }
+.new-cell-action { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 14px; border-radius: 7px; background: var(--accent); color: var(--panel); font-weight: 600; font-size: 12px; }
+.new-cell-action:hover { filter: brightness(.9); }
+.sidebar-new-cell { margin: 0 16px 16px; }
+.mobile-new-cell { display: none; }
+.cell-navigation { min-height: 0; flex: 1; display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+.cell-navigation-heading { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px 8px; }
+.cell-navigation-heading h2 { font-size: 13px; }
+.cell-navigation-heading span { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.cell-navigation-controls { display: grid; gap: 10px; padding: 0 16px 12px; }
+.cell-navigation-controls label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; }
+.cell-navigation-controls input, .cell-navigation-controls select { min-width: 0; width: 100%; padding: 8px 10px; }
+.cell-navigation-results { padding: 0 16px; color: var(--muted); font-size: 11px; }
+.cell-navigation-results p { margin: 4px 0 10px; }
+.cell-inventory-warning { color: var(--warning); }
+.cell-navigation-list { min-height: 0; flex: 1; overflow-y: auto; padding: 0 10px 16px; }
+.cell-group-toggle { display: flex; align-items: center; gap: 7px; width: 100%; background: transparent; border: 0; padding: 9px 7px; text-align: left; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.cell-group-toggle span:nth-child(2) { min-width: 0; }
+.cell-group-toggle small { margin-left: auto; }
+.cell-link { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 6px; margin-bottom: 2px; padding: 9px 10px; border-radius: 6px; }
+.cell-link:hover, .cell-link[aria-current="page"] { background: var(--selected); }
+.cell-link[aria-current="page"] .cell-link-name { color: var(--accent); }
+.cell-link-name { grid-column: 1 / -1; font-weight: 600; overflow-wrap: anywhere; }
+.cell-link-scope { min-width: 0; color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
+.cell-link .state-badge { justify-self: end; max-width: 100%; font-size: 10px; padding: 2px 5px; }
+.cell-more { width: 100%; margin: 6px 0 12px; font-size: 11px; }
+.connection { flex-shrink: 0; }
+.dot.checking { background: var(--warning); }
+.toolbar-areas { display: none !important; }
+.toolbar-connectivity { display: none; }
+.breadcrumbs { min-width: 0; }
+.breadcrumbs span { overflow-wrap: anywhere; }
+.administration-nav { display: flex; flex-wrap: wrap; gap: 4px; padding: 10px; margin-bottom: 30px; }
+.administration-nav a { padding: 8px 10px; border-radius: 5px; color: var(--muted); font-size: 12px; }
+.administration-nav a:hover, .administration-nav a[aria-current="page"] { background: var(--selected); color: var(--accent); }
+.workspace-landing { padding: 48px; }
+.workspace-landing h2 { font-size: 20px; }
+.workspace-landing p { max-width: 440px; color: var(--muted); line-height: 1.6; }
+.terminal-note { margin: 0 0 12px; }
+.cell-workspace-content #cell-terminal { margin-bottom: 20px; }
+.cell-workspace-content .resource-overview { margin-bottom: 20px; }
+@media (max-width: 760px) {
+  .toolbar-areas { display: flex !important; gap: 8px; font-size: 11px !important; }
+  .toolbar-areas a[aria-current="page"] { color: var(--accent); font-weight: 600; }
+  .toolbar-connectivity { display: flex; align-items: center; }
+  .breadcrumbs { display: none !important; }
+  .administration-nav { flex-wrap: nowrap; overflow-x: auto; }
+  .administration-nav a { white-space: nowrap; }
+  .workspace-landing { padding: 28px 22px; }
+  .mobile-new-cell { display: inline-flex; margin-top: 16px; }
+  .connection { padding: 12px 16px; }
+}
