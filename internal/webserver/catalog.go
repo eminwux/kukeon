@@ -37,18 +37,17 @@ const (
 
 // catalogScope validates coordinates before forwarding them to the daemon.
 func catalogScope(r *http.Request, secret bool, detail bool) ([4]string, error) {
-	scope := [4]string{
-		r.URL.Query().Get("realm"),
-		r.URL.Query().Get("space"),
-		r.URL.Query().Get("stack"),
-		r.URL.Query().Get("cell"),
+	realm := strings.TrimSpace(r.URL.Query().Get("realm"))
+	space := strings.TrimSpace(r.URL.Query().Get("space"))
+	stack := strings.TrimSpace(r.URL.Query().Get("stack"))
+	cell := strings.TrimSpace(r.URL.Query().Get("cell"))
+	if (realm != "" && (!filepath.IsLocal(realm) || !safePathSegment(realm))) ||
+		(space != "" && (!filepath.IsLocal(space) || !safePathSegment(space))) ||
+		(stack != "" && (!filepath.IsLocal(stack) || !safePathSegment(stack))) ||
+		(cell != "" && (!filepath.IsLocal(cell) || !safePathSegment(cell))) {
+		return [4]string{}, fmt.Errorf("%w: unsafe scope coordinate", errdefs.ErrConfig)
 	}
-	for i := range scope {
-		scope[i] = strings.TrimSpace(scope[i])
-		if scope[i] != "" && (!filepath.IsLocal(scope[i]) || !safePathSegment(scope[i])) {
-			return scope, fmt.Errorf("%w: unsafe scope coordinate", errdefs.ErrConfig)
-		}
-	}
+	scope := [4]string{realm, space, stack, cell}
 	if detail && scope[0] == "" {
 		return scope, errdefs.ErrRealmNameRequired
 	}
