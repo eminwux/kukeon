@@ -37,10 +37,20 @@ const (
 
 // catalogScope validates coordinates before forwarding them to the daemon.
 func catalogScope(r *http.Request, secret bool, detail bool) ([4]string, error) {
-	realm := strings.TrimSpace(r.URL.Query().Get("realm"))
-	space := strings.TrimSpace(r.URL.Query().Get("space"))
-	stack := strings.TrimSpace(r.URL.Query().Get("stack"))
-	cell := strings.TrimSpace(r.URL.Query().Get("cell"))
+	realm := r.URL.Query().Get("realm")
+	space := r.URL.Query().Get("space")
+	stack := r.URL.Query().Get("stack")
+	cell := r.URL.Query().Get("cell")
+	if (realm != "" && !filepath.IsLocal(realm)) ||
+		(space != "" && !filepath.IsLocal(space)) ||
+		(stack != "" && !filepath.IsLocal(stack)) ||
+		(cell != "" && !filepath.IsLocal(cell)) {
+		return [4]string{}, fmt.Errorf("%w: unsafe scope coordinate", errdefs.ErrConfig)
+	}
+	realm = strings.TrimSpace(realm)
+	space = strings.TrimSpace(space)
+	stack = strings.TrimSpace(stack)
+	cell = strings.TrimSpace(cell)
 	if (realm != "" && (!filepath.IsLocal(realm) || !safePathSegment(realm))) ||
 		(space != "" && (!filepath.IsLocal(space) || !safePathSegment(space))) ||
 		(stack != "" && (!filepath.IsLocal(stack) || !safePathSegment(stack))) ||
