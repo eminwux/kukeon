@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -62,7 +63,8 @@ export function useTerminalSessions(inventory: InventoryResource) {
   return { sessions, selection, select, attach, detach, update, cellStates };
 }
 
-type Manager = ReturnType<typeof useTerminalSessions>;
+export type TerminalManager = ReturnType<typeof useTerminalSessions>;
+type Manager = TerminalManager;
 
 function TerminalSession({ session, active, expanded, update }: { session: Session; active: boolean; expanded: boolean; update: Manager["update"] }) {
   const mount = useRef<HTMLDivElement>(null);
@@ -81,19 +83,31 @@ function TerminalSession({ session, active, expanded, update }: { session: Sessi
     terminal.current = term;
     term.loadAddon(fit);
     term.open(mount.current);
+    let resizeFrame = 0;
     const resize = () => {
-      if (!activeNow.current || !mount.current?.clientWidth) return;
-      fit.fit();
-      if (socket.current?.readyState === WebSocket.OPEN) socket.current.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+      if (!activeNow.current) return;
+      if (resizeFrame) cancelAnimationFrame(resizeFrame);
+      resizeFrame = requestAnimationFrame(() => {
+        resizeFrame = 0;
+        if (!activeNow.current || !mount.current?.clientWidth || !mount.current.clientHeight) return;
+        fit.fit();
+        if (socket.current?.readyState === WebSocket.OPEN) socket.current.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+      });
     };
     fitNow.current = resize;
     const observer = new ResizeObserver(resize);
     observer.observe(mount.current);
+    if (mount.current.parentElement) observer.observe(mount.current.parentElement);
+    window.addEventListener("resize", resize);
+    window.visualViewport?.addEventListener("resize", resize);
     const input = term.onData(data => {
       if (activeNow.current && socket.current?.readyState === WebSocket.OPEN) socket.current.send(new TextEncoder().encode(data));
     });
     return () => {
-      observer.disconnect(); input.dispose(); term.dispose(); terminal.current = null;
+      observer.disconnect(); window.removeEventListener("resize", resize);
+      window.visualViewport?.removeEventListener("resize", resize);
+      if (resizeFrame) cancelAnimationFrame(resizeFrame);
+      input.dispose(); term.dispose(); terminal.current = null;
       fitNow.current = () => {};
     };
   }, []);
@@ -161,11 +175,23 @@ function TerminalSession({ session, active, expanded, update }: { session: Sessi
   </div>;
 }
 
-export function TerminalWorkspace({ scope, revision, inventory, manager }: { scope: string[] | null; revision: number; inventory: InventoryResource; manager: Manager }) {
+export function TerminalWorkspace({ scope, revision, inventory, manager, visible = true, controlsHost, onExpandedChange }: { scope: string[] | null; revision: number; inventory: InventoryResource; manager: Manager; visible?: boolean; controlsHost: HTMLDivElement | null; onExpandedChange: (expanded: boolean) => void }) {
   const [expanded, setExpanded] = useState(false);
+  const [skipAutoAttachFor, setSkipAutoAttachFor] = useState("");
   const expandButton = useRef<HTMLButtonElement>(null);
   const screens = useRef<HTMLDivElement>(null);
-  useEffect(() => { if (!scope) setExpanded(false); }, [scope]);
+  useEffect(() => {
+    if (!scope) {
+      setExpanded(false);
+      onExpandedChange(false);
+    }
+  }, [scope, onExpandedChange]);
+  useEffect(() => {
+    if (!visible && expanded) {
+      setExpanded(false);
+      onExpandedChange(false);
+    }
+  }, [visible, expanded, onExpandedChange]);
   useEffect(() => {
     if (!expanded) return;
     const escape = (event: KeyboardEvent) => {
@@ -173,6 +199,7 @@ export function TerminalWorkspace({ scope, revision, inventory, manager }: { sco
       event.preventDefault();
       event.stopPropagation();
       setExpanded(false);
+      onExpandedChange(false);
       requestAnimationFrame(() => expandButton.current?.focus());
     };
     window.addEventListener("keydown", escape, true);
@@ -193,29 +220,31 @@ export function TerminalWorkspace({ scope, revision, inventory, manager }: { sco
   const unavailable = cellState && unavailableStates.has(cellState);
   const atLimit = !current && (connections >= maxConnections || manager.sessions.length >= maxSessions);
   const reconnectLimited = current?.state === "disconnected" && connections >= maxConnections;
-  return <section className={`panel terminal-workspace${expanded ? " is-expanded" : ""}`} id="cell-terminal" hidden={!scope} aria-label="Terminal workspace">
-    <div className="panel-heading"><h2>Terminal</h2><div className="terminal-heading-actions"><span className="badge">{connections} / {maxConnections} connections</span><button ref={expandButton} type="button" aria-expanded={expanded} aria-controls="terminal-screens" onClick={() => setExpanded(value => !value)}>{expanded ? "Collapse terminal" : "Expand terminal"}</button></div></div>
-    {scope && <div className="terminal-controls">
+  useEffect(() => { setSkipAutoAttachFor(""); }, [key]);
+  useEffect(() => {
+    if (!scope || containers.loading || containers.error || !selected || !selectedEligible || unavailable || atLimit || current || skipAutoAttachFor === currentId) return;
+    manager.attach(scope, selected);
+  }, [key, selected, selectedEligible, containers.loading, containers.error, unavailable, atLimit, current, currentId, skipAutoAttachFor, manager.attach]);
+  const headerState = current?.state === "attached" ? "Attached"
+    : current?.message || (skipAutoAttachFor === currentId && currentId ? "Detached" : atLimit ? "Connection limit reached" : unavailable ? `Unavailable: ${cellState}` : containers.loading ? "Loading containers…" : containers.error ? "Container list unavailable" : !eligible.length ? "No attachable containers" : !selectedEligible ? "Container unavailable" : "Connecting…");
+  const headerTone = current?.state ?? (skipAutoAttachFor === currentId && currentId || atLimit || unavailable || containers.error || !eligible.length || !selectedEligible ? "disconnected" : "connecting");
+  const controls = scope && <div className="terminal-workspace-tools">
+    <div className="terminal-tool-status"><span className={`terminal-connection-state ${headerTone}`} role="status" title={current?.message}>{headerState}</span><button ref={expandButton} type="button" aria-expanded={expanded} aria-controls="terminal-screens" onClick={() => { const next = !expanded; setExpanded(next); onExpandedChange(next); }}>{expanded ? "Collapse terminal" : "Expand terminal"}</button></div>
+    <div className="terminal-controls">
       {containers.loading && <p role="status">Loading containers…</p>}
       {containers.error && <ErrorNotice error={containers.error} kind="Containers" />}
       {containers.error && containers.data && <p className="stale">Container list is stale. Refresh before attaching.</p>}
       {!containers.loading && !containers.error && !eligible.length && <p>No attachable containers are available.</p>}
       {!!options.length && <><label htmlFor="terminal-container">Container</label><select id="terminal-container" value={selected} onChange={event => manager.select(scope, event.target.value)}>{options.map(id => <option key={id} value={id}>{id}{eligible.some(container => container.id === id) ? "" : " (unavailable)"}</option>)}</select>
-        {current?.state === "attached" || current?.state === "connecting" ? <button onClick={() => manager.detach(current.id)}>Detach</button> : current ? <><button disabled={reconnectLimited || !selectedEligible || !!unavailable || !!containers.error} onClick={() => manager.attach(scope, selected)}>Reconnect</button><button onClick={() => manager.detach(current.id)}>Detach</button></> : <button disabled={!!atLimit || !selectedEligible || !!unavailable || !!containers.error} onClick={() => manager.attach(scope, selected)}>Attach</button>}</>}
+        {current?.state === "attached" || current?.state === "connecting" ? <button onClick={() => { setSkipAutoAttachFor(current.id); manager.detach(current.id); }}>Detach</button> : current ? <><button disabled={reconnectLimited || !selectedEligible || !!unavailable || !!containers.error} onClick={() => { setSkipAutoAttachFor(""); manager.attach(scope, selected); }}>Reconnect</button><button onClick={() => { setSkipAutoAttachFor(current.id); manager.detach(current.id); }}>Detach</button></> : skipAutoAttachFor === currentId && currentId ? <button disabled={!!atLimit || !selectedEligible || !!unavailable || !!containers.error} onClick={() => { setSkipAutoAttachFor(""); manager.attach(scope, selected); }}>Attach</button> : null}</>}
       {unavailable && <p className="terminal-unavailable" role="status">Terminal unavailable: cell is {cellState}.</p>}
       {(atLimit || reconnectLimited) && <p className="terminal-limit" role="status">Terminal limit reached. Detach another terminal to free a connection or retained slot.</p>}
-      {current && <p className={`terminal-connection-state ${current.state}`} role="status">{current.message}</p>}
-      {!!openInCell.length && <div className="terminal-tabs" role="tablist" aria-label="Open container terminals" onKeyDown={event => {
-        const index = openInCell.findIndex(item => item.id === currentId);
-        const next = event.key === "ArrowRight" ? (index + 1) % openInCell.length
-          : event.key === "ArrowLeft" ? (index - 1 + openInCell.length) % openInCell.length
-          : event.key === "Home" ? 0 : event.key === "End" ? openInCell.length - 1 : -1;
-        if (next < 0) return;
-        event.preventDefault();
-        manager.select(openInCell[next].scope, openInCell[next].container);
-        event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
-      }}>{openInCell.map(item => <button key={item.id} role="tab" aria-selected={item.id === currentId} tabIndex={item.id === currentId ? 0 : -1} onClick={() => manager.select(item.scope, item.container)}>{item.container} · {item.state}</button>)}</div>}
-    </div>}
-    <div className="terminal-screens" id="terminal-screens" ref={screens}>{manager.sessions.map(session => <TerminalSession key={session.id} session={session} active={!!scope && session.id === currentId} expanded={expanded} update={manager.update} />)}</div>
-  </section>;
+    </div>
+  </div>;
+  return <>
+    {controls && controlsHost && createPortal(controls, controlsHost)}
+    <section className={`panel terminal-workspace${expanded ? " is-expanded" : ""}`} id="cell-terminal" hidden={!scope} aria-label="Terminal workspace">
+      <div className="terminal-screens" id="terminal-screens" ref={screens}>{manager.sessions.map(session => <TerminalSession key={session.id} session={session} active={!!scope && visible && session.id === currentId} expanded={expanded} update={manager.update} />)}</div>
+    </section>
+  </>;
 }

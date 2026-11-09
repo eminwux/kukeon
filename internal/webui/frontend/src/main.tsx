@@ -1,9 +1,9 @@
-import { StrictMode, useEffect, useState } from "react";
+import { StrictMode, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
 import { useResource, ErrorNotice, type Resource } from "./request";
 import { CatalogPage, RelatedResources } from "./catalog";
-import { TerminalWorkspace, useTerminalSessions } from "./terminal";
+import { TerminalWorkspace, useTerminalSessions, type TerminalManager } from "./terminal";
 import { CellSidebar } from "./cell-sidebar";
 import { useInventory, type Inventory, type InventoryResource, type Doc, type RuntimeStatus } from "./inventory";
 import { apiPath, catalogTitles, kinds, titles, readRoute, resourceLink, listLink, workspaceLink, type Route } from "./routes";
@@ -66,7 +66,7 @@ function ResourceList({ depth, inventory, parent }: { depth: number; inventory: 
     <div className="pagination"><span>{filtered.length ? `${currentPage * pageSize + 1}–${Math.min((currentPage + 1) * pageSize, filtered.length)} of ${filtered.length}` : "0 results"}</span><button disabled={!currentPage} onClick={() => setPage(currentPage - 1)}>Previous</button><button disabled={(currentPage + 1) * pageSize >= filtered.length} onClick={() => setPage(currentPage + 1)}>Next</button></div>
   </section>;
 }
-function ResourceDetails({ route, revision, workspace = false }: { route: Route; revision: number; workspace?: boolean }) {
+function ResourceDetails({ route, revision }: { route: Route; revision: number }) {
   const depth = route.scope.length - 1;
   const kind = kinds[depth];
   const detail = useResource<Doc>(apiPath(route.scope), revision);
@@ -76,7 +76,7 @@ function ResourceDetails({ route, revision, workspace = false }: { route: Route;
   const related = detail.data && !route.document && <RelatedResources doc={detail.data} revision={revision} />;
   const containerPanel = depth === 3 && <section className="panel container-panel"><div className="panel-heading"><h2>Containers</h2><span className="badge">{detail.error ? "Stale observations" : detail.loading ? "Refreshing observations" : "Cell observations"}</span></div><div className="panel-body">{containers.loading && <p>Loading containers…</p>}{containers.error && <ErrorNotice error={containers.error} />}{containers.error && containers.data && <p className="stale">Stale container list — refresh failed.</p>}{!containers.loading && !containers.error && !containers.data?.length && <p>No containers found.</p>}<ul className="state-list">{containers.data?.map(container => <li key={container.id}><a className="text-link" href={resourceLink([...route.scope, container.id])}>{container.id}</a><StateBadge state={detail.data?.status?.containers?.find(item => item.name === container.id || item.id === container.id)?.state} /><a href={resourceLink([...route.scope, container.id], true)}>View document</a></li>)}</ul></div></section>;
   return <>
-    <div className="detail-actions"><a href={workspace ? resourceLink(route.scope) : listLink(Math.min(depth, 3))}>{workspace ? "View in Resources" : `← Back to ${titles[Math.min(depth, 3)].toLowerCase()}`}</a><a className="document-action" href={resourceLink(route.scope, !route.document)}>{route.document ? "Show overview" : "View document"}</a></div>
+    <div className="detail-actions"><a href={listLink(Math.min(depth, 3))}>← Back to {titles[Math.min(depth, 3)].toLowerCase()}</a><a className="document-action" href={resourceLink(route.scope, !route.document)}>{route.document ? "Show overview" : "View document"}</a></div>
     {detail.loading && <p role="status">Loading {kind} details…</p>}
     {detail.error && <ErrorNotice error={detail.error} kind={kind} />}
     {detail.error && detail.data && <p className="stale">Stale resource details — refresh failed.</p>}
@@ -85,6 +85,79 @@ function ResourceDetails({ route, revision, workspace = false }: { route: Route;
     {related}
     {containerPanel}
   </>;
+}
+
+type CellTab = "terminal" | "overview";
+const cellTabs: { id: CellTab; label: string }[] = [
+  { id: "terminal", label: "Terminal" },
+  { id: "overview", label: "Overview" },
+];
+
+function CellDetailsScreen({ scope, revision, inventory, manager }: {
+  scope: string[] | null;
+  revision: number;
+  inventory: InventoryResource;
+  manager: TerminalManager;
+}) {
+  const [activeTab, setActiveTab] = useState<CellTab>("terminal");
+  const [terminalExpanded, setTerminalExpanded] = useState(false);
+  const [terminalToolsHost, setTerminalToolsHost] = useState<HTMLDivElement | null>(null);
+  const tablist = useRef<HTMLDivElement>(null);
+  const scopeKey = JSON.stringify(scope ?? []);
+  const detail = useResource<Doc>(scope ? apiPath(scope) : null, revision);
+  const containers = useResource<{ id: string; attachable?: boolean; root?: boolean }[]>(scope ? `${apiPath(scope)}/containers` : null, revision);
+  const status = detail.data && <StatusSummary status={detail.data.status} kind="cell" />;
+
+  useEffect(() => { setActiveTab("terminal"); setTerminalExpanded(false); }, [scopeKey]);
+
+  function moveTab(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const index = cellTabs.findIndex(tab => tab.id === activeTab);
+    const next = event.key === "ArrowRight" ? (index + 1) % cellTabs.length
+      : event.key === "ArrowLeft" ? (index - 1 + cellTabs.length) % cellTabs.length
+      : event.key === "Home" ? 0 : event.key === "End" ? cellTabs.length - 1 : -1;
+    if (next < 0) return;
+    event.preventDefault();
+    setActiveTab(cellTabs[next].id);
+    tablist.current?.querySelectorAll<HTMLButtonElement>("[role=tab]")[next]?.focus();
+  }
+
+  const overview = detail.data && scope && <section className="panel resource-overview">
+    <div className="panel-heading"><h2>Resource overview</h2><div className="cell-overview-actions"><StateBadge state={detail.data.status?.state} /><a className="document-action" href={resourceLink(scope, true)} target="_blank" rel="noopener noreferrer">View document</a></div></div>
+    <div className="panel-body"><dl className="details-grid">
+      <dt>Name</dt><dd>{detail.data.metadata.name}</dd>
+      <dt>Kind</dt><dd>{detail.data.kind ?? "cell"}</dd>
+      <dt>Scope</dt><dd>{scope.join(" / ")}</dd>
+      <dt>API version</dt><dd>{detail.data.apiVersion ?? "Not reported"}</dd>
+      <dt>Labels</dt><dd>{Object.entries(detail.data.metadata.labels ?? {}).map(([key, value]) => <span className="badge label-badge" key={key}>{key}: {value}</span>)}{!Object.keys(detail.data.metadata.labels ?? {}).length && "No labels"}</dd>
+    </dl></div>
+  </section>;
+
+  const containerPanel = <section className="panel container-panel">
+    <div className="panel-heading"><h2>Containers</h2><span className="badge">{detail.error ? "Stale observations" : detail.loading ? "Refreshing observations" : "Cell observations"}</span></div>
+    <div className="panel-body">
+      {containers.loading && <p>Loading containers…</p>}
+      {containers.error && <ErrorNotice error={containers.error} />}
+      {containers.error && containers.data && <p className="stale">Stale container list — refresh failed.</p>}
+      {!containers.loading && !containers.error && !containers.data?.length && <p>No containers found.</p>}
+      <ul className="state-list">{containers.data?.map(container => <li key={container.id}><a className="text-link" href={resourceLink([...(scope ?? []), container.id])}>{container.id}</a><StateBadge state={detail.data?.status?.containers?.find(item => item.name === container.id || item.id === container.id)?.state} /><a href={resourceLink([...(scope ?? []), container.id], true)} target="_blank" rel="noopener noreferrer">View document</a></li>)}</ul>
+    </div>
+  </section>;
+
+  return <div className="cell-detail-screen" hidden={!scope}>
+    {detail.loading && scope && <p role="status">Loading cell details…</p>}
+    {detail.error && <ErrorNotice error={detail.error} kind="Cell" />}
+    {detail.error && detail.data && <p className="stale">Stale resource details — refresh failed.</p>}
+    <div className={`cell-detail-tabbar${terminalExpanded ? " is-terminal-expanded" : ""}`}>
+      <div className="cell-detail-tabs" role="tablist" aria-label="Cell details" ref={tablist} onKeyDown={moveTab}>
+        {cellTabs.map(tab => <button key={tab.id} id={`cell-tab-${tab.id}`} role="tab" type="button" aria-selected={activeTab === tab.id} aria-controls={`cell-panel-${tab.id}`} tabIndex={activeTab === tab.id ? 0 : -1} onClick={() => setActiveTab(tab.id)}>{tab.label}</button>)}
+      </div>
+      <div className="cell-terminal-tools" ref={setTerminalToolsHost} hidden={!scope || activeTab !== "terminal"} />
+    </div>
+    <section className="cell-tab-panel cell-terminal-panel" id="cell-panel-terminal" role="tabpanel" aria-labelledby="cell-tab-terminal" tabIndex={0} hidden={activeTab !== "terminal"}>
+      <TerminalWorkspace scope={scope} revision={revision} inventory={inventory} manager={manager} visible={activeTab === "terminal" && !!scope} controlsHost={terminalToolsHost} onExpandedChange={setTerminalExpanded} />
+    </section>
+    <section className="cell-tab-panel cell-overview-content" id="cell-panel-overview" role="tabpanel" aria-labelledby="cell-tab-overview" tabIndex={0} hidden={activeTab !== "overview"}>{overview}{status}{containerPanel}</section>
+  </div>;
 }
 
 type Theme = "system" | "light" | "dark";
@@ -129,7 +202,7 @@ function App() {
   const inventory = useInventory(revision);
   const terminals = useTerminalSessions(inventory);
   const isWorkspace = route.view === "workspace";
-  const terminalScope = (isWorkspace || route.view === "resource" && !route.document) && route.scope.length === 4 ? route.scope : null;
+  const cellScreenScope = (isWorkspace || route.view === "resource" && !route.document) && route.scope.length === 4 ? route.scope : null;
   const depth = titles.findIndex(title => title.toLowerCase() === route.view);
   const catalog = Object.keys(catalogTitles).includes(route.view);
   const heading = isWorkspace ? route.scope.at(-1) ?? "Workspace" : catalog ? route.scope.at(-1) ?? catalogTitles[route.view] : route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : "Resources";
@@ -139,8 +212,8 @@ function App() {
       <button className="sidebar-close" aria-label="Close sidebar" onClick={() => setMenuOpen(false)}>×</button>
       <a className="brand" href={workspaceLink()}><span className="mark" aria-hidden="true">K</span><span className="brand-title">Kukeon<small>LOCAL WORKSPACE</small></span>{connection.data?.version && <span className="brand-version">{connection.data.version.startsWith("v") ? connection.data.version : `v${connection.data.version}`}</span>}</a>
       <nav className="area-nav" aria-label="Areas"><a href={workspaceLink()} aria-current={isWorkspace ? "page" : undefined}>Workspace</a></nav>
-      <a className="new-cell-action sidebar-new-cell" href="#/configs">+ New Cell</a>
-      <CellSidebar inventory={inventory} selectedScope={isWorkspace ? route.scope : []} terminalStates={terminals.cellStates} />
+      {!cellScreenScope && <a className="new-cell-action sidebar-new-cell" href="#/configs">+ New Cell</a>}
+      <CellSidebar inventory={inventory} selectedScope={cellScreenScope ?? []} terminalStates={terminals.cellStates} />
       <section className="connection" aria-label="Daemon connection">
         <p className="status" role="status"><span className={`dot ${inventory.daemon.error ? "failed" : inventory.daemon.loading ? "checking" : ""}`} aria-hidden="true" />{daemonStatus}</p>
         <code>{connection.data?.endpoint ?? (connection.loading ? "Loading socket…" : "Socket unknown")}</code>
@@ -167,13 +240,13 @@ function App() {
       </header>
       <div className={`workspace-content ${isWorkspace ? "cell-workspace-content" : ""}`}>
         {!isWorkspace && <ResourcesNavigation route={route} />}
-        <div className="page-heading"><p className="eyebrow">{isWorkspace ? "Workspace" : "Resources"}</p><h1>{heading}</h1><p className="description">{isWorkspace ? route.scope.length ? route.scope.join(" / ") : "Select a cell to work with its terminal and inspect its state." : route.view === "dashboard" ? "Browse and manage resources on this server." : route.view === "resource" || (catalog && route.scope.length > 0) ? route.scope.join(" / ") : `Browse ${heading?.toLowerCase()} across your infrastructure.`}</p>{isWorkspace && <a className="new-cell-action mobile-new-cell" href="#/configs">+ New Cell</a>}</div>
+        <div className="page-heading"><p className="eyebrow">{isWorkspace ? "Workspace" : "Resources"}</p><h1>{heading}</h1><p className="description">{isWorkspace ? route.scope.length ? route.scope.join(" / ") : "Select a cell to work with its terminal and inspect its state." : route.view === "dashboard" ? "Browse and manage resources on this server." : route.view === "resource" || (catalog && route.scope.length > 0) ? route.scope.join(" / ") : `Browse ${heading?.toLowerCase()} across your infrastructure.`}</p>{isWorkspace && !cellScreenScope && <a className="new-cell-action mobile-new-cell" href="#/configs">+ New Cell</a>}</div>
         {inventory.loading && <p className="description" role="status">Refreshing resource inventory…</p>}
         {inventory.error && <ErrorNotice error={inventory.error} />}
         {inventory.error && inventory.data && <p className="stale">Stale inventory — refresh failed. Counts and lists may be out of date.</p>}
         {!!inventory.data?.failures.length && <div className="error" role="alert"><strong>Incomplete inventory</strong><p>Some scopes could not be loaded. Counts and lists exclude unavailable resources.</p><ul>{inventory.data.failures.map(message => <li key={message}>{message}</li>)}</ul></div>}
-        <TerminalWorkspace scope={terminalScope} revision={revision} inventory={inventory} manager={terminals} />
-        {isWorkspace ? route.scope.length === 4 ? <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} workspace /> : <WorkspaceLanding inventory={inventory} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} onCreated={() => setRevision(value => value + 1)} /> : route.view === "resource" ? <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} /> : <Dashboard inventory={inventory} />}
+        <CellDetailsScreen scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} />
+        {isWorkspace ? route.scope.length === 4 ? null : <WorkspaceLanding inventory={inventory} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} onCreated={() => setRevision(value => value + 1)} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} /> : <Dashboard inventory={inventory} />}
         <footer>Daemon inventory · {inventory.data ? <>Last refreshed <time dateTime={inventory.data.updatedAt}>{new Date(inventory.data.updatedAt).toLocaleTimeString()}</time></> : "Not refreshed yet"} · Refresh to retrieve the latest state.</footer>
       </div>
     </main>
