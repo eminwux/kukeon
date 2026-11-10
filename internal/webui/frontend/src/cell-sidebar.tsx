@@ -3,6 +3,7 @@ import type { InventoryResource, Row } from "./inventory";
 import { workspaceLink } from "./routes";
 import { StateBadge } from "./status";
 import type { TerminalState } from "./terminal";
+import { availableLifecycleActions, CellLifecycleControls, LifecycleNotice, type LifecycleAction, type LifecycleFeedback } from "./lifecycle";
 
 const groupingKey = "kukeon-cell-grouping";
 const collapsedKey = "kukeon-cell-collapsed-groups";
@@ -24,7 +25,13 @@ function save(key: string, value: string) {
 }
 function groupId(key: string, value: string | null) { return JSON.stringify([key, value]); }
 
-export function CellSidebar({ inventory, selectedScope, terminalStates }: { inventory: InventoryResource; selectedScope: string[]; terminalStates: Record<string, TerminalState> }) {
+export function CellSidebar({ inventory, selectedScope, terminalStates, operations, onLifecycleAction }: {
+  inventory: InventoryResource;
+  selectedScope: string[];
+  terminalStates: Record<string, TerminalState>;
+  operations: Record<string, LifecycleFeedback>;
+  onLifecycleAction: (scope: string[], action: LifecycleAction, state?: string) => void;
+}) {
   const [search, setSearch] = useState("");
   const [groupBy, setGroupBy] = useState(storedGrouping);
   const [collapsed, setCollapsed] = useState(storedCollapsed);
@@ -76,7 +83,16 @@ export function CellSidebar({ inventory, selectedScope, terminalStates }: { inve
             const current = selectedScope.length === 4 && row.scope.every((part, i) => part === selectedScope[i]);
             const fullName = row.scope.join(" / ");
             const terminalState = terminalStates[JSON.stringify(row.scope)];
-            return <li key={JSON.stringify(row.scope)}><a className="cell-link" href={workspaceLink(row.scope)} aria-current={current ? "page" : undefined} aria-label={`Open ${fullName}`} title={fullName}><span className="cell-link-name">{row.doc.metadata.name}</span><span className="cell-link-scope">{row.scope.slice(0, 3).join(" / ")}</span><StateBadge state={row.doc.status?.state} />{terminalState && <span className={`cell-terminal-state ${terminalState}`}>Terminal {terminalState}</span>}</a></li>;
+            const state = row.doc.status?.state;
+            const operation = operations[JSON.stringify(row.scope)];
+            const hasActions = availableLifecycleActions(state).length > 0;
+            return <li className="cell-navigation-row" key={JSON.stringify(row.scope)}>
+              <div className="cell-link-row">
+                <a className="cell-link" href={workspaceLink(row.scope)} aria-current={current ? "page" : undefined} aria-label={`Open ${fullName}`} title={fullName}><span className="cell-link-name">{row.doc.metadata.name}</span><span className="cell-link-scope">{row.scope.slice(0, 3).join(" / ")}</span><StateBadge state={state} />{terminalState && <span className={`cell-terminal-state ${terminalState}`}>Terminal {terminalState}</span>}</a>
+                {hasActions && <details className="cell-row-action-menu"><summary aria-label={`Actions for ${fullName}`}>Actions</summary><CellLifecycleControls scope={row.scope} state={state} operation={operation} onAction={onLifecycleAction} compact showFeedback={false} /></details>}
+              </div>
+              <LifecycleNotice operation={operation} />
+            </li>;
           })}</ul>{rows.length > limit && <button className="cell-more" onClick={() => setLimits(old => ({ ...old, [id]: limit + pageSize }))}>Show {Math.min(pageSize, rows.length - limit)} more cells</button>}</>}
         </section>;
       })}
