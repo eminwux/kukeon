@@ -20,6 +20,11 @@ const terminalTheme = {
   black: "#000000", red: "#cd0000", green: "#00cd00", yellow: "#cdcd00", blue: "#0000ee", magenta: "#cd00cd", cyan: "#00cdcd", white: "#e5e5e5",
   brightBlack: "#7f7f7f", brightRed: "#ff0000", brightGreen: "#00ff00", brightYellow: "#ffff00", brightBlue: "#5c5cff", brightMagenta: "#ff00ff", brightCyan: "#00ffff", brightWhite: "#ffffff",
 };
+type Theme = "system" | "light" | "dark";
+function terminalThemeFor(theme: Theme) {
+  const dark = theme === "dark" || theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  return { ...terminalTheme, background: dark ? "#0d1421" : "#f8fafc", foreground: dark ? "#e5e6ec" : "#20232b", cursor: dark ? "#e5e6ec" : "#20232b" };
+}
 
 // This hook lives in App, above both Workspace and Resources routes.
 export function useTerminalSessions(inventory: InventoryResource) {
@@ -66,7 +71,7 @@ export function useTerminalSessions(inventory: InventoryResource) {
 export type TerminalManager = ReturnType<typeof useTerminalSessions>;
 type Manager = TerminalManager;
 
-function TerminalSession({ session, active, expanded, update }: { session: Session; active: boolean; expanded: boolean; update: Manager["update"] }) {
+function TerminalSession({ session, active, expanded, theme, update }: { session: Session; active: boolean; expanded: boolean; theme: Theme; update: Manager["update"] }) {
   const mount = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal | null>(null);
   const socket = useRef<WebSocket | null>(null);
@@ -78,7 +83,7 @@ function TerminalSession({ session, active, expanded, update }: { session: Sessi
     if (!mount.current) return;
     const term = new Terminal({ cursorBlink: true, cursorStyle: "underline", cursorInactiveStyle: "outline", convertEol: false,
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace", fontSize: 14, scrollback: 2000,
-      theme: terminalTheme });
+      theme: terminalThemeFor(theme) });
     const fit = new FitAddon();
     terminal.current = term;
     term.loadAddon(fit);
@@ -111,6 +116,15 @@ function TerminalSession({ session, active, expanded, update }: { session: Sessi
       fitNow.current = () => {};
     };
   }, []);
+
+  useEffect(() => {
+    const applyTheme = () => { if (terminal.current) terminal.current.options.theme = terminalThemeFor(theme); };
+    applyTheme();
+    if (theme !== "system") return;
+    const colorScheme = window.matchMedia("(prefers-color-scheme: dark)");
+    colorScheme.addEventListener("change", applyTheme);
+    return () => colorScheme.removeEventListener("change", applyTheme);
+  }, [theme]);
 
   useEffect(() => {
     let connection: WebSocket;
@@ -175,7 +189,7 @@ function TerminalSession({ session, active, expanded, update }: { session: Sessi
   </div>;
 }
 
-export function TerminalWorkspace({ scope, revision, inventory, manager, visible = true, controlsHost, onExpandedChange }: { scope: string[] | null; revision: number; inventory: InventoryResource; manager: Manager; visible?: boolean; controlsHost: HTMLDivElement | null; onExpandedChange: (expanded: boolean) => void }) {
+export function TerminalWorkspace({ scope, revision, inventory, manager, theme, visible = true, controlsHost, onExpandedChange }: { scope: string[] | null; revision: number; inventory: InventoryResource; manager: Manager; theme: Theme; visible?: boolean; controlsHost: HTMLDivElement | null; onExpandedChange: (expanded: boolean) => void }) {
   const [expanded, setExpanded] = useState(false);
   const [skipAutoAttachFor, setSkipAutoAttachFor] = useState("");
   const expandButton = useRef<HTMLButtonElement>(null);
@@ -244,7 +258,7 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, visible
   return <>
     {controls && controlsHost && createPortal(controls, controlsHost)}
     <section className={`panel terminal-workspace${expanded ? " is-expanded" : ""}`} id="cell-terminal" hidden={!scope} aria-label="Terminal workspace">
-      <div className="terminal-screens" id="terminal-screens" ref={screens}>{manager.sessions.map(session => <TerminalSession key={session.id} session={session} active={!!scope && visible && session.id === currentId} expanded={expanded} update={manager.update} />)}</div>
+      <div className="terminal-screens" id="terminal-screens" ref={screens}>{manager.sessions.map(session => <TerminalSession key={session.id} session={session} active={!!scope && visible && session.id === currentId} expanded={expanded} theme={theme} update={manager.update} />)}</div>
     </section>
   </>;
 }

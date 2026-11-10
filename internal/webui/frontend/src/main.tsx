@@ -93,11 +93,12 @@ const cellTabs: { id: CellTab; label: string }[] = [
   { id: "overview", label: "Overview" },
 ];
 
-function CellDetailsScreen({ scope, revision, inventory, manager }: {
+function CellDetailsScreen({ scope, revision, inventory, manager, theme }: {
   scope: string[] | null;
   revision: number;
   inventory: InventoryResource;
   manager: TerminalManager;
+  theme: Theme;
 }) {
   const [activeTab, setActiveTab] = useState<CellTab>("terminal");
   const [terminalExpanded, setTerminalExpanded] = useState(false);
@@ -154,7 +155,7 @@ function CellDetailsScreen({ scope, revision, inventory, manager }: {
       <div className="cell-terminal-tools" ref={setTerminalToolsHost} hidden={!scope || activeTab !== "terminal"} />
     </div>
     <section className="cell-tab-panel cell-terminal-panel" id="cell-panel-terminal" role="tabpanel" aria-labelledby="cell-tab-terminal" tabIndex={0} hidden={activeTab !== "terminal"}>
-      <TerminalWorkspace scope={scope} revision={revision} inventory={inventory} manager={manager} visible={activeTab === "terminal" && !!scope} controlsHost={terminalToolsHost} onExpandedChange={setTerminalExpanded} />
+      <TerminalWorkspace scope={scope} revision={revision} inventory={inventory} manager={manager} theme={theme} visible={activeTab === "terminal" && !!scope} controlsHost={terminalToolsHost} onExpandedChange={setTerminalExpanded} />
     </section>
     <section className="cell-tab-panel cell-overview-content" id="cell-panel-overview" role="tabpanel" aria-labelledby="cell-tab-overview" tabIndex={0} hidden={activeTab !== "overview"}>{overview}{status}{containerPanel}</section>
   </div>;
@@ -245,7 +246,7 @@ function App() {
         {inventory.error && <ErrorNotice error={inventory.error} />}
         {inventory.error && inventory.data && <p className="stale">Stale inventory — refresh failed. Counts and lists may be out of date.</p>}
         {!!inventory.data?.failures.length && <div className="error" role="alert"><strong>Incomplete inventory</strong><p>Some scopes could not be loaded. Counts and lists exclude unavailable resources.</p><ul>{inventory.data.failures.map(message => <li key={message}>{message}</li>)}</ul></div>}
-        <CellDetailsScreen scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} />
+        <CellDetailsScreen scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} />
         {isWorkspace ? route.scope.length === 4 ? null : <WorkspaceLanding inventory={inventory} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} onCreated={() => setRevision(value => value + 1)} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} /> : <Dashboard inventory={inventory} />}
         <footer>Daemon inventory · {inventory.data ? <>Last refreshed <time dateTime={inventory.data.updatedAt}>{new Date(inventory.data.updatedAt).toLocaleTimeString()}</time></> : "Not refreshed yet"} · Refresh to retrieve the latest state.</footer>
       </div>
