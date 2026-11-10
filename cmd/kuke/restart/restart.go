@@ -24,6 +24,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/config"
 	getshared "github.com/eminwux/kukeon/cmd/kuke/get/shared"
 	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
+	"github.com/eminwux/kukeon/internal/celllifecycle"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -208,97 +209,23 @@ func filterCellsBySelector(cells []v1beta1.CellDoc, selector *getshared.LabelSel
 // Shared by the positional-name path and the per-match loop in
 // restartBySelector.
 func restartOne(cmd *cobra.Command, client kukeonv1.Client, doc v1beta1.CellDoc) error {
-	name := doc.Metadata.Name
-	realm := doc.Spec.RealmID
-	space := doc.Spec.SpaceID
-	stack := doc.Spec.StackID
-
-	pre, err := client.GetCell(cmd.Context(), doc)
+	result, err := celllifecycle.Restart(cmd.Context(), client, doc)
 	if err != nil {
 		return err
 	}
-	if !pre.MetadataExists {
-		return fmt.Errorf("%w (cell %q in realm=%q space=%q stack=%q)",
-			errdefs.ErrCellNotFound, name, realm, space, stack)
-	}
-
-	switch pre.Cell.Status.State {
-	case v1beta1.CellStateReady:
-		// A Ready cell bounces in place: stop then start.
-		return restartInPlace(cmd, client, doc)
-	case v1beta1.CellStateStopped, v1beta1.CellStateExited, v1beta1.CellStateError,
-		v1beta1.CellStateFailed, v1beta1.CellStateDegraded:
-		// These states restart without a stop-first (#1268): Stopped (operator
-		// stop/kill) and Exited (clean self-exit, #1267) bring the cell back up
-		// from intact container records, while Error (workload crash whose sticky
-		// root is still live) and Failed (kukeon bring-up fault) are recovered by
-		// the daemon's StartCell via a recreate-style recovery (stop -> recreate
-		// containers -> start, including the leftover root) (#1274). Degraded
-		// (#1318) — a live cell whose non-root workload is down/restarting —
-		// recovers the same way: the daemon's StartCell now routes Degraded
-		// through that recreate path, but only if it observes the persisted
-		// Degraded state. restartStopped calls StartCell directly (no stop-first)
-		// so the daemon sees the persisted Error/Failed/Degraded state and picks
-		// the recreate path; an in-place stop-first would flip the cell to a
-		// transient Stopped/Error before StartCell re-reads it, skipping the
-		// recovery and leaving it stuck at a sticky Error N/N.
-		return restartStopped(cmd, client, doc)
-	case v1beta1.CellStatePending, v1beta1.CellStateUnknown:
-		// Same delete-then-rerun pointer as `kuke run` on a genuinely-
-		// unrecoverable cell. Restart does not reconcile a Pending/Unknown cell
-		// in place; the operator deletes and re-runs.
-		return fmt.Errorf(
-			"cell %q exists in %s state; delete it with `kuke delete cell %s` before restarting",
-			name, pre.Cell.Status.State.String(), name,
-		)
-	}
-	return fmt.Errorf("cell %q exists in unrecognized state %d", name, pre.Cell.Status.State)
-}
-
-// restartInPlace bounces the cell: stop then start. The CellDoc only needs name
-// + scope — the daemon resolves both verbs from the stored cell metadata. When
-// the cell is Config-lineage and Status.OutOfSync = true, the daemon's
-// controller.StartCell re-materialises from the Config on the start step so
-// the running cell ends up with the freshly-materialised spec.
-func restartInPlace(cmd *cobra.Command, client kukeonv1.Client, doc v1beta1.CellDoc) error {
-	if _, err := client.StopCell(cmd.Context(), doc); err != nil {
-		return err
-	}
-	startRes, err := client.StartCell(cmd.Context(), doc)
-	if err != nil {
-		return err
-	}
-
-	cellName := startRes.Cell.Metadata.Name
+	cellName := result.Cell.Metadata.Name
 	if cellName == "" {
 		cellName = doc.Metadata.Name
 	}
-	stackName := startRes.Cell.Spec.StackID
+	stackName := result.Cell.Spec.StackID
 	if stackName == "" {
 		stackName = doc.Spec.StackID
 	}
-	cmd.Printf("Restarted cell %q from stack %q\n", cellName, stackName)
-	return nil
-}
-
-// restartStopped is the already-stopped path: equivalent to
-// `kuke start <name>`. The daemon's controller.StartCell handles the
-// OutOfSync reapply uniformly with restartInPlace's start step.
-func restartStopped(cmd *cobra.Command, client kukeonv1.Client, doc v1beta1.CellDoc) error {
-	startRes, err := client.StartCell(cmd.Context(), doc)
-	if err != nil {
-		return err
+	if result.StoppedFirst {
+		cmd.Printf("Restarted cell %q from stack %q\n", cellName, stackName)
+	} else {
+		cmd.Printf("Started cell %q from stack %q\n", cellName, stackName)
 	}
-
-	cellName := startRes.Cell.Metadata.Name
-	if cellName == "" {
-		cellName = doc.Metadata.Name
-	}
-	stackName := startRes.Cell.Spec.StackID
-	if stackName == "" {
-		stackName = doc.Spec.StackID
-	}
-	cmd.Printf("Started cell %q from stack %q\n", cellName, stackName)
 	return nil
 }
 

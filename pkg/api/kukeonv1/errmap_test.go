@@ -19,6 +19,7 @@ package kukeonv1_test
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -54,6 +55,30 @@ func TestRoundTripPreservesSentinelAndMessage(t *testing.T) {
 	got := clientErr.Error()
 	if got != serverErr.Error() {
 		t.Errorf("clientErr.Error() = %q, want verbatim %q", got, serverErr.Error())
+	}
+}
+
+func TestInvalidCellStateRoundTrip(t *testing.T) {
+	serverErr := fmt.Errorf("%w: cell cannot start while Ready", errdefs.ErrInvalidCellState)
+	apiErr := kukeonv1.ToAPIError(serverErr)
+	if apiErr.Kind != "InvalidCellState" {
+		t.Fatalf("Kind = %q, want InvalidCellState", apiErr.Kind)
+	}
+	clientErr := kukeonv1.FromAPIError(apiErr)
+	if !errors.Is(clientErr, errdefs.ErrInvalidCellState) {
+		t.Fatalf("round-tripped error %v lost invalid-state sentinel", clientErr)
+	}
+}
+
+func TestPermissionErrorRoundTrip(t *testing.T) {
+	serverErr := fmt.Errorf("cell runtime: %w", fs.ErrPermission)
+	apiErr := kukeonv1.ToAPIError(serverErr)
+	if apiErr.Kind != "PermissionDenied" {
+		t.Fatalf("Kind = %q, want PermissionDenied", apiErr.Kind)
+	}
+	clientErr := kukeonv1.FromAPIError(apiErr)
+	if !errors.Is(clientErr, fs.ErrPermission) {
+		t.Fatalf("round-tripped error %v lost permission sentinel", clientErr)
 	}
 }
 

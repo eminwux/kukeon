@@ -18,13 +18,14 @@ package kukeonv1
 
 import (
 	"errors"
+	"io/fs"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 )
 
 // APIError is a serializable error. Kind identifies the error class; client
-// code maps it back to an errdefs.* sentinel so that errors.Is(err, errdefs.X)
-// keeps working across the wire.
+// code maps it back to a local sentinel so that errors.Is keeps working across
+// the wire.
 type APIError struct {
 	Kind    string
 	Message string
@@ -40,6 +41,8 @@ func (e *APIError) Error() string {
 // kindToSentinel maps wire Kind values to local errdefs sentinels.
 var kindToSentinel = map[string]error{
 	"CellNotFound":            errdefs.ErrCellNotFound,
+	"InvalidCellState":        errdefs.ErrInvalidCellState,
+	"PermissionDenied":        fs.ErrPermission,
 	"RealmNotFound":           errdefs.ErrRealmNotFound,
 	"SpaceNotFound":           errdefs.ErrSpaceNotFound,
 	"StackNotFound":           errdefs.ErrStackNotFound,
