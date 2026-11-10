@@ -183,19 +183,6 @@ button:disabled { cursor: default; opacity: .4; }
 .cell-lifecycle-feedback.success { color: var(--accent); }
 .cell-lifecycle-feedback.error { color: var(--error); }
 .cell-lifecycle-unavailable { color: var(--muted); font-size: 11px; }
-.cell-navigation-row { list-style: none; margin: 0 0 3px; }
-.cell-link-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 2px; }
-.cell-link-row .cell-link { min-width: 0; margin: 0; }
-.cell-row-action-menu { position: relative; padding-top: 7px; }
-.cell-row-action-menu > summary { list-style: none; cursor: pointer; padding: 5px 7px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); font-size: 10px; }
-.cell-row-action-menu > summary::-webkit-details-marker { display: none; }
-.cell-row-action-menu > summary::after { content: " ▾"; }
-.cell-row-action-menu[open] > summary { color: var(--accent); border-color: var(--accent); }
-.cell-row-action-menu .cell-lifecycle { position: absolute; top: 34px; right: 0; z-index: 7; display: block; width: 190px; padding: 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); box-shadow: 0 8px 24px #0003; }
-.cell-row-action-menu .cell-lifecycle-buttons { display: grid; grid-template-columns: 1fr 1fr; }
-.cell-row-action-menu .cell-lifecycle-buttons button { min-width: 0; }
-.cell-row-action-menu .cell-lifecycle-feedback { margin-top: 8px; }
-.cell-row-actions-feedback { padding: 2px 8px 6px; }
 
 /* The cell list remains mounted across Workspace and Resources routes. */
 .area-nav { display: grid; grid-template-columns: 1fr; gap: 4px; padding: 0 12px 14px; }
