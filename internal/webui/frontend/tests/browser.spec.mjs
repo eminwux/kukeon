@@ -58,7 +58,7 @@ test("terminal selects eligible containers, forwards input and resize, and detac
   sendOutput();
   await expect(terminalTools(page).locator(".terminal-connection-state")).toHaveText("Attached");
   await expect.poll(() => panel.locator(".xterm-fg-13").evaluate(el => getComputedStyle(el).color)).toBe("rgb(255, 0, 255)");
-  await expect.poll(() => panel.locator(".xterm-rows").evaluate(el => getComputedStyle(el).fontFamily)).toContain("monospace");
+  await expect.poll(() => panel.locator(".xterm-rows").first().evaluate(el => getComputedStyle(el).fontFamily)).toContain("monospace");
   await expect(panel.locator(".xterm-cursor")).toHaveClass(/xterm-cursor-underline/);
   await expect.poll(() => panel.locator(".xterm-cursor").evaluate(el => getComputedStyle(el).animationName)).not.toBe("none");
   await expect.poll(() => messages.some(message => typeof message === "string" && JSON.parse(message).type === "resize")).toBe(true);
