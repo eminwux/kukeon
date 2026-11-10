@@ -98,16 +98,18 @@ function AdvancedCellActions({
   operation?: LifecycleFeedback;
   onAction: (scope: string[], action: LifecycleAction, state?: string, options?: PurgeOptions) => void;
 }) {
+  const menu = useRef<HTMLDetailsElement>(null);
   const [confirming, setConfirming] = useState<DestructiveAction | null>(null);
   const pending = operation?.phase === "pending";
 
   function request(action: DestructiveAction) {
     if (pending) return;
+    if (menu.current) menu.current.open = false;
     setConfirming(action);
   }
 
   return <>
-    <details className="cell-advanced-actions">
+    <details className="cell-advanced-actions" ref={menu}>
       <summary aria-label={`Advanced actions for ${scope.join(" / ")}`}>Advanced actions</summary>
       <div className="cell-advanced-menu">
         <section aria-labelledby="cell-advanced-operations">

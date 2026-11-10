@@ -774,6 +774,7 @@ test("kill and purge require explicit confirmation and pass only selected purge 
   await dialog.getByLabel("I understand this immediately terminates the cell's running containers.").check();
   await dialog.getByRole("button", { name: "Confirm Kill" }).click();
   await expect(page.locator(".cell-lifecycle-feedback")).toContainText("Cell killed");
+  await expect(page.getByRole("button", { name: "Purge cell…" })).toHaveCount(0);
 
   await page.getByText("Advanced actions", { exact: true }).click();
   await page.getByRole("button", { name: "Purge cell…" }).click();
