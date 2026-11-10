@@ -49,8 +49,8 @@ test("terminal selects eligible containers, forwards input and resize, and detac
   });
   await page.goto(`${server.url}#/resource/dev/shared/services/api`);
   const panel = page.getByRole("region", { name: "Terminal workspace" });
-  await expect(panel.locator("option")).toHaveCount(2);
-  await panel.getByLabel("Container").selectOption("shell");
+  await expect(terminalTools(page).locator("option")).toHaveCount(2);
+  await terminalTools(page).getByLabel("Container").selectOption("shell");
   await expect.poll(() => selected).toContain("/containers/shell/attach");
   await expect(terminalTools(page).locator(".terminal-connection-state")).toHaveText("Connecting…");
   sendReady();
@@ -166,7 +166,7 @@ test("Workspace retains independent scoped terminals, focus and resize while swi
 });
 
 test("terminal container selection auto-attaches, enforces connection limits, and detaches explicitly", async ({ page }) => {
-  await mock(page, path => path.endsWith("/containers") ? { json: Array.from({ length: 5 }, (_, i) => ({ id: `shell-${i}`, attachable: true })) } : undefined);
+  await mock(page, path => path.endsWith("/containers") ? { json: Array.from({ length: 21 }, (_, i) => ({ id: `shell-${i}`, attachable: true })) } : undefined);
   const closed = [];
   await page.routeWebSocket("**/attach", socket => {
     socket.onClose(() => closed.push(new URL(socket.url()).pathname));
@@ -175,11 +175,11 @@ test("terminal container selection auto-attaches, enforces connection limits, an
   await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
   const panel = page.getByRole("region", { name: "Terminal workspace" });
   await expect(terminalTools(page).locator(".terminal-connection-state")).toHaveText("Attached");
-  for (let i = 1; i < 4; i++) {
+  for (let i = 1; i < 20; i++) {
     await terminalTools(page).locator(".terminal-controls select").selectOption(`shell-${i}`);
     await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
   }
-  await terminalTools(page).locator(".terminal-controls select").selectOption("shell-4");
+  await terminalTools(page).locator(".terminal-controls select").selectOption("shell-20");
   await expect(terminalTools(page).locator(".terminal-connection-state")).toHaveText("Connection limit reached");
   await expect(terminalTools(page).getByText("Terminal limit reached.", { exact: false })).toBeVisible();
   await expect(terminalTools(page).getByRole("button", { name: "Attach" })).toHaveCount(0);
@@ -190,11 +190,11 @@ test("terminal container selection auto-attaches, enforces connection limits, an
   await expect(terminalTools(page).locator(".terminal-controls select")).toHaveValue("shell-0");
   await terminalTools(page).getByRole("button", { name: "Detach" }).click();
   await expect.poll(() => closed.length).toBe(1);
-  await terminalTools(page).locator(".terminal-controls select").selectOption("shell-4");
+  await terminalTools(page).locator(".terminal-controls select").selectOption("shell-20");
   await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
   await page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link", { name: "Open prod / shared / services / api" }).click();
   await page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link", { name: "Open dev / shared / services / api" }).click();
-  await expect(terminalTools(page).locator(".terminal-controls select")).toHaveValue("shell-4");
+  await expect(terminalTools(page).locator(".terminal-controls select")).toHaveValue("shell-20");
 });
 
 test("terminal error offers a new attachment and stopped cells release sessions", async ({ page }) => {
@@ -229,7 +229,7 @@ test("terminal error offers a new attachment and stopped cells release sessions"
   failInventory = false;
   stopped = true;
   await page.getByRole("button", { name: "Refresh" }).click();
-  await expect(panel.getByText("Terminal unavailable: cell is Stopped.")).toBeVisible();
+  await expect(terminalTools(page).getByText("Terminal unavailable: cell is Stopped.")).toBeVisible();
   await expect(terminalTools(page).getByRole("button", { name: "Reconnect" })).toHaveCount(0);
   await expect.poll(() => closed).toBeGreaterThan(closedBefore);
 });
@@ -267,7 +267,7 @@ test("cell sidebar uses full scope for duplicate names and switching reuses inve
   await page.getByRole("tab", { name: "Overview" }).click();
   await expect(page.getByRole("heading", { name: "Runtime status" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Containers" })).toBeVisible();
-  await expect(page.locator("#cell-terminal")).toBeVisible();
+  await expect(page.locator("#cell-terminal")).toHaveCount(1);
   await expect(page.getByRole("link", { name: "+ New Cell" })).toHaveCount(0);
   await cells.getByRole("link", { name: "Open prod / shared / services / api" }).click();
   await expect(page).toHaveURL(/#\/workspace\/prod\/shared\/services\/api$/);
@@ -419,7 +419,11 @@ for (const type of ["Realms", "Spaces", "Stacks", "Cells"]) {
     await expect(page.locator("pre")).toContainText('"futureField"');
     await page.getByRole("link", { name: "Show overview" }).click();
     await expect(page.locator("pre")).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: "Resource overview" })).toBeVisible();
+    if (type === "Cells") {
+      await expect(page.getByRole("tab", { name: "Overview" })).toBeVisible();
+    } else {
+      await expect(page.getByRole("heading", { name: "Resource overview" })).toBeVisible();
+    }
   });
 }
 
@@ -548,7 +552,7 @@ test("mobile cell navigation closes after selection and Workspace fits the scree
   await page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link", { name: "Open dev / shared / services / api" }).click();
   await expect(page.getByRole("complementary")).toBeHidden();
   await expect(page.locator(".page-heading h1")).toHaveText("api");
-  await expect(page.getByRole("link", { name: "+ New Cell" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "+ New Cell" })).toHaveCount(0);
   await expect(page.getByRole("status", { name: "Daemon: Connected" })).toBeVisible();
   await page.getByRole("link", { name: "Resources", exact: true }).click();
   await expect(nav(page).getByRole("link", { name: "Secrets" })).toBeVisible();
