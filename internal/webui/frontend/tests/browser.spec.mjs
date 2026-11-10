@@ -62,7 +62,7 @@ test("terminal selects eligible containers, forwards input and resize, and detac
   await expect(panel.locator(".xterm-cursor.xterm-cursor-blink")).toHaveClass(/xterm-cursor-underline/);
   await expect.poll(() => panel.locator(".xterm-cursor.xterm-cursor-blink").evaluate(el => getComputedStyle(el).animationName)).not.toBe("none");
   await expect.poll(() => messages.some(message => typeof message === "string" && JSON.parse(message).type === "resize")).toBe(true);
-  await panel.locator(".xterm-helper-textarea").press("a");
+  await panel.locator(".terminal-session:not([hidden]) .xterm-helper-textarea").press("a");
   await expect.poll(() => messages.some(message => Buffer.isBuffer(message) && message.toString() === "a")).toBe(true);
   await terminalTools(page).getByRole("button", { name: "Detach" }).click();
   await expect.poll(() => closed).toBe(true);
