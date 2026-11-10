@@ -165,7 +165,8 @@ func (r *Exec) UpdateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 		if actualContainer, exists := actualContainers[desiredContainer.ID]; exists {
 			// Container exists, preserve containerd ID but update spec
 			desiredContainer.ContainerdID = actualContainer.ContainerdID
-			// Check if container spec changed (image, command, args) - if so, recreate
+			// Recreate non-root containers when an OCI-baked field changes so the
+			// updated Process.Env, mounts, and process settings reach the new task.
 			if containerSpecChanged(&desiredContainer, actualContainer) {
 				// Root container cannot be deleted for updates
 				if actualContainer.Root {
@@ -290,6 +291,11 @@ func (r *Exec) UpdateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 // on a workload container never reaches the running OCI Process.Env — the
 // defect issue #1154 fixes on the non-root side (the root side routes through
 // RecreateCell via the Breaking-on-root diff classification).
+// Env is also baked into the workload container's OCI Process.Env. Though
+// apply classifies it as Compatible, UpdateCell must replace only the changed
+// non-root container so the new value reaches its process while retaining the
+// root container and its writable overlay. Root-container env remains outside
+// this in-place path.
 //
 // Other Breaking-on-root fields (privileged, user, readOnlyRootFilesystem,
 // capabilities, tmpfs, resources) are not yet gated here; their non-root
@@ -301,6 +307,7 @@ func containerSpecChanged(desired, actual *intmodel.ContainerSpec) bool {
 		desired.WorkingDir != actual.WorkingDir ||
 		!stringSlicesEqual(desired.SecurityOpts, actual.SecurityOpts) ||
 		!stringSlicesEqual(desired.Devices, actual.Devices) ||
+		(!actual.Root && !stringSlicesEqual(desired.Env, actual.Env)) ||
 		!volumeMountsEqual(desired.Volumes, actual.Volumes) ||
 		!containerSecretsEqual(desired.Secrets, actual.Secrets)
 }

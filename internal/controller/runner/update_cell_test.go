@@ -24,7 +24,8 @@ import (
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
-// TestContainerSpecChanged_OCIBakedFields pins issue #1154's non-root side:
+// TestContainerSpecChanged_OCIBakedFields pins issues #1154 and #1368's
+// non-root recreate gates:
 // the UpdateCell recreate gate must fire for every OCI-baked field the runner
 // resolves at container create and never re-resolves on the in-place
 // task-restart path. A secrets-only edit on a workload (non-root) container
@@ -58,8 +59,9 @@ func TestContainerSpecChanged_OCIBakedFields(t *testing.T) {
 		{"secretsRef", func(s *intmodel.ContainerSpec) {
 			s.Secrets = []intmodel.ContainerSecret{{Name: "db", SecretRef: &intmodel.ContainerSecretRef{Name: "creds", Realm: "default"}}}
 		}, true},
-		// Compatible field — must NOT trigger a recreate (rebuilt at start).
-		{"env", func(s *intmodel.ContainerSpec) { s.Env = []string{"FOO=bar"} }, false},
+		// Compatible env changes recreate only workload containers because the
+		// OCI Process.Env is fixed at create and isn't refreshed by task restart.
+		{"env", func(s *intmodel.ContainerSpec) { s.Env = []string{"FOO=bar"} }, true},
 		// No diff — must NOT trigger a recreate.
 		{"identical", func(_ *intmodel.ContainerSpec) {}, false},
 	}

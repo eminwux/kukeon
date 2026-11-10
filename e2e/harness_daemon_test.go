@@ -65,6 +65,13 @@ const daemonShutdownTimeout = 5 * time.Second
 //   - --configuration <runPath>/kukeond.yaml: explicit per-test subnet config
 //     reserved and checked by getRandomRunPath before any bridge can be created.
 func startKukeondDaemon(t *testing.T, runPath string) string {
+	return startKukeondDaemonWithReconcileInterval(t, runPath, "0")
+}
+
+// startKukeondDaemonWithReconcileInterval is the configurable counterpart to
+// startKukeondDaemon for tests that exercise the background reconciler. Most
+// daemon-mode tests keep the ticker disabled to avoid racing setup/cleanup.
+func startKukeondDaemonWithReconcileInterval(t *testing.T, runPath, interval string) string {
 	t.Helper()
 
 	binDir := os.Getenv("E2E_BIN_DIR")
@@ -90,7 +97,7 @@ func startKukeondDaemon(t *testing.T, runPath string) string {
 		"serve",
 		"--socket", sockPath,
 		"--run-path", runPath,
-		"--reconcile-interval", "0",
+		"--reconcile-interval", interval,
 		"--configuration", filepath.Join(runPath, "kukeond.yaml"),
 	)
 	cmd.Env = e2eRunEnv(nil, []string{"--run-path", runPath})

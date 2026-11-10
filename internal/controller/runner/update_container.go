@@ -24,8 +24,8 @@ import (
 )
 
 // UpdateContainer updates an existing container within a cell.
-// If the container spec has breaking changes (image, command, args), it will
-// stop, delete, and recreate the container. Otherwise, it updates the container spec in metadata.
+// If an OCI-baked container field changes, it will stop, delete, and recreate
+// the container. Otherwise, it updates the container spec in metadata.
 func (r *Exec) UpdateContainer(cell intmodel.Cell, desiredContainer intmodel.ContainerSpec) (intmodel.Cell, error) {
 	// Get existing cell
 	existing, err := r.GetCell(cell)
