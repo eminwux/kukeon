@@ -29,10 +29,10 @@ import (
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
-// TestKuke_EnvChangesReachTheRunningProcess verifies both Config-lineage
-// reconciliation and direct apply against the process environment. Only the
-// changed workload container should be replaced: the root snapshot and an
-// unrelated sidecar must remain intact. Regression for #1368.
+// TestKuke_EnvChangesReachTheRunningProcess verifies Config-lineage, direct
+// Cell, and standalone Container updates against the process environment.
+// Only the changed workload container should be replaced: the root snapshot
+// and an unrelated sidecar must remain intact. Regression for #1368.
 func TestKuke_EnvChangesReachTheRunningProcess(t *testing.T) {
 	runPath := getRandomRunPath(t)
 	host := startKukeondDaemonWithReconcileInterval(t, runPath, "100ms")
@@ -41,9 +41,11 @@ func TestKuke_EnvChangesReachTheRunningProcess(t *testing.T) {
 	stack := generateUniqueStackName(t)
 	configCell := generateUniqueCellName(t)
 	directCell := generateUniqueCellName(t)
+	standaloneCell := generateUniqueCellName(t)
 	t.Cleanup(func() {
 		cleanupCellNoDaemon(t, runPath, realm, space, stack, configCell)
 		cleanupCellNoDaemon(t, runPath, realm, space, stack, directCell)
+		cleanupCellNoDaemon(t, runPath, realm, space, stack, standaloneCell)
 		cleanupStackNoDaemon(t, runPath, realm, space, stack)
 		cleanupSpaceNoDaemon(t, runPath, realm, space)
 		cleanupRealmNoDaemon(t, runPath, realm)
@@ -136,7 +138,7 @@ spec:
 	assertContainerEnvironment(t, configAfter, "main", "MSG=v2", "EXTRA=kept")
 	assertAttachedEnvironment(t, host, runPath, realm, space, stack, configCell, "v2:kept")
 
-	makeDirectCell := func(msg string) string {
+	makeDirectCell := func(name, msg string) string {
 		return fmt.Sprintf(`apiVersion: v1beta1
 kind: Cell
 metadata:
@@ -161,13 +163,13 @@ spec:
       image: docker.io/library/busybox:latest
       command: sleep
       args: ["3600"]
-`, directCell, directCell, realm, space, stack, msg)
+`, name, name, realm, space, stack, msg)
 	}
-	apply("direct-cell.yaml", makeDirectCell("v1"))
+	apply("direct-cell.yaml", makeDirectCell(directCell, "v1"))
 	assertAttachedEnvironment(t, host, runPath, realm, space, stack, directCell, "v1:kept")
 	directBefore := getCell(directCell)
 	directRecordsBefore := workloadRuntimeRecords(t, realm, directBefore)
-	apply("direct-cell-update.yaml", makeDirectCell("v2"))
+	apply("direct-cell-update.yaml", makeDirectCell(directCell, "v2"))
 	directAfter := getCell(directCell)
 	assertOnlyWorkloadRecreated(t, directRecordsBefore, workloadRuntimeRecords(t, realm, directAfter))
 	assertContainerEnvironment(t, directAfter, "main", "MSG=v2", "EXTRA=kept")
@@ -175,6 +177,56 @@ spec:
 
 	invoke(append([]string{"restart", directCell}, scope...)...)
 	assertAttachedEnvironment(t, host, runPath, realm, space, stack, directCell, "v2:kept")
+
+	makeStandaloneContainer := func(msg string) string {
+		return fmt.Sprintf(`apiVersion: v1beta1
+kind: Container
+metadata:
+  name: main
+  labels: {}
+spec:
+  id: main
+  realmId: %s
+  spaceId: %s
+  stackId: %s
+  cellId: %s
+  image: docker.io/library/busybox:latest
+  command: /bin/sh
+  args: []
+  attachable: true
+  env: ["MSG=%s", "EXTRA=kept"]
+  ports: []
+  volumes: []
+  networks: []
+  networksAliases: []
+  privileged: false
+  restartPolicy: ""
+`, realm, space, stack, standaloneCell, msg)
+	}
+	apply("standalone-container-cell.yaml", makeDirectCell(standaloneCell, "v1"))
+	standaloneSocket := fs.ContainerSocketSymlinkPath(runPath, realm, space, stack, standaloneCell, "main")
+	waitForSocket(t, standaloneSocket, 10*time.Second)
+	standaloneAttachArgs := append(buildKukeDaemonArgs(host), "attach", standaloneCell,
+		"--realm", realm, "--space", space, "--stack", stack)
+	standaloneSession := startPTY(t, nil, kuke, standaloneAttachArgs...)
+	t.Cleanup(standaloneSession.Close)
+	time.Sleep(attachConnectGrace)
+	if err := standaloneSession.Write([]byte("printf 'ISSUE1368_ENV:%s:%s\\n' \"$MSG\" \"${EXTRA-unset}\"\n")); err != nil {
+		t.Fatalf("write standalone container environment probe: %v", err)
+	}
+	if err := standaloneSession.WaitForOutput([]byte("ISSUE1368_ENV:v1:kept"), 10*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	standaloneBefore := getCell(standaloneCell)
+	assertContainerState(t, standaloneBefore, "main", v1beta1.ContainerStateReady)
+	standaloneRecordsBefore := workloadRuntimeRecords(t, realm, standaloneBefore)
+	apply("standalone-container-update.yaml", makeStandaloneContainer("v2"))
+	standaloneSession.Close()
+	standaloneAfter := getCell(standaloneCell)
+	assertOnlyWorkloadRecreated(t, standaloneRecordsBefore, workloadRuntimeRecords(t, realm, standaloneAfter))
+	assertContainerState(t, standaloneAfter, "main", v1beta1.ContainerStateReady)
+	assertContainerEnvironment(t, standaloneAfter, "main", "MSG=v2", "EXTRA=kept")
+	assertAttachedEnvironment(t, host, runPath, realm, space, stack, standaloneCell, "v2:kept")
 }
 
 func waitCellOutOfSync(t *testing.T, getCell func(string) *v1beta1.CellDoc, name string) {
@@ -274,6 +326,19 @@ func assertContainerEnvironment(t *testing.T, cell *v1beta1.CellDoc, id string, 
 		return
 	}
 	t.Fatalf("cell %q has no container %q", cell.Metadata.Name, id)
+}
+
+func assertContainerState(t *testing.T, cell *v1beta1.CellDoc, id string, want v1beta1.ContainerState) {
+	t.Helper()
+	for _, container := range cell.Status.Containers {
+		if container.ID == id {
+			if container.State != want {
+				t.Fatalf("container %q state = %v, want %v", id, container.State, want)
+			}
+			return
+		}
+	}
+	t.Fatalf("cell %q has no status for container %q", cell.Metadata.Name, id)
 }
 
 func assertOnlyWorkloadRecreated(
