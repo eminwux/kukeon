@@ -152,13 +152,13 @@ function CellDetailsScreen({ title, scope, revision, inventory, manager, theme, 
   </section>;
 
   return <div className="cell-detail-screen" hidden={!scope}>
-    <div className="page-heading cell-page-heading">
+    {scope && <div className="page-heading cell-page-heading">
       <div className="cell-page-title-row">
         <h1>{title}</h1>
-        {scope && <CellLifecycleControls scope={scope} state={cellState} operation={operation} onAction={onLifecycleAction} showFeedback={false} />}
+        <CellLifecycleControls scope={scope} state={cellState} operation={operation} onAction={onLifecycleAction} showFeedback={false} />
       </div>
       <LifecycleNotice operation={operation} />
-    </div>
+    </div>}
     {detail.loading && scope && <p role="status">Loading cell details…</p>}
     {detail.error && <ErrorNotice error={detail.error} kind="Cell" />}
     {detail.error && detail.data && <p className="stale">Stale resource details — refresh failed.</p>}
