@@ -239,6 +239,23 @@ button:disabled { cursor: default; opacity: .4; }
 .cell-overview-content { display: grid; gap: 20px; }
 .cell-overview-content .resource-overview, .cell-overview-content .runtime-status, .cell-overview-content .container-panel { margin: 0; }
 .cell-overview-actions { display: flex; align-items: center; gap: 10px; }
+.app-shell.cell-screen-active { height: 100dvh; min-height: 0; overflow: hidden; }
+.cell-screen-active > .workspace { display: flex; flex-direction: column; height: 100dvh; min-height: 0; overflow: hidden; }
+.cell-screen-active .toolbar { flex: 0 0 auto; }
+.cell-screen-active .breadcrumbs { flex-wrap: nowrap; overflow: hidden; white-space: nowrap; }
+.cell-screen-active .breadcrumbs > * { flex: 0 0 auto; }
+.cell-screen-active .breadcrumbs span { overflow: hidden; text-overflow: ellipsis; }
+.cell-screen-content { display: flex; flex: 1; flex-direction: column; min-height: 0; width: 100%; max-width: none; overflow: hidden; padding: 12px clamp(16px, 3vw, 40px); }
+.cell-screen-content .page-heading { flex: 0 0 auto; margin: 0 0 10px; }
+.cell-screen-content .page-heading h1 { font-size: clamp(20px, 2vw, 28px); }
+.cell-screen-content > footer { display: none; }
+.cell-screen-content .cell-detail-screen { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.cell-screen-content .cell-detail-screen[hidden] { display: none; }
+.cell-screen-content .cell-detail-tabbar { flex: 0 0 auto; margin-bottom: 8px; }
+.cell-screen-content #cell-panel-terminal { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.cell-screen-content #cell-panel-terminal[hidden] { display: none; }
+.cell-screen-content .cell-terminal-panel > #cell-terminal { flex: 1; height: auto; min-height: 0; }
+.cell-screen-content #cell-terminal[hidden] { display: none; }
 @media (max-width: 760px) {
   .cell-detail-tabbar { flex-wrap: wrap; gap: 0; margin-bottom: 12px; }
   .cell-detail-tabs button { padding: 9px 11px; }
@@ -258,6 +275,9 @@ button:disabled { cursor: default; opacity: .4; }
   .workspace-landing { padding: 28px 22px; }
   .mobile-new-cell { display: inline-flex; margin-top: 16px; }
   .connection { padding: 12px 16px; }
+  .cell-screen-content { padding: 10px 12px; }
+  .cell-screen-content .page-heading { margin-bottom: 8px; }
+  .cell-screen-content .cell-terminal-panel > #cell-terminal { height: auto; min-height: 0; }
 }
 @media (min-width: 761px) and (max-width: 1050px) {
   .cell-detail-tabbar { flex-wrap: wrap; gap: 0; }

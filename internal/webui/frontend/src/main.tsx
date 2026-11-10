@@ -207,7 +207,7 @@ function App() {
   const catalog = Object.keys(catalogTitles).includes(route.view);
   const heading = isWorkspace ? route.scope.at(-1) ?? "Workspace" : catalog ? route.scope.at(-1) ?? catalogTitles[route.view] : route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : "Resources";
   const daemonStatus = inventory.daemon.error?.code === "permission_denied" ? "Permission denied" : inventory.daemon.error ? "Unavailable" : inventory.daemon.loading ? "Checking…" : "Connected";
-  return <div className="app-shell">
+  return <div className={`app-shell${cellScreenScope ? " cell-screen-active" : ""}`}>
     <aside className={`sidebar ${menuOpen ? "is-open" : ""}`} id="cell-sidebar" aria-label="Cell sidebar">
       <button className="sidebar-close" aria-label="Close sidebar" onClick={() => setMenuOpen(false)}>×</button>
       <a className="brand" href={workspaceLink()}><span className="mark" aria-hidden="true">K</span><span className="brand-title">Kukeon<small>LOCAL WORKSPACE</small></span>{connection.data?.version && <span className="brand-version">{connection.data.version.startsWith("v") ? connection.data.version : `v${connection.data.version}`}</span>}</a>
@@ -238,9 +238,9 @@ function App() {
           </button>
         </div>
       </header>
-      <div className={`workspace-content ${isWorkspace ? "cell-workspace-content" : ""}`}>
-        {!isWorkspace && <ResourcesNavigation route={route} />}
-        <div className="page-heading"><p className="eyebrow">{isWorkspace ? "Workspace" : "Resources"}</p><h1>{heading}</h1><p className="description">{isWorkspace ? route.scope.length ? route.scope.join(" / ") : "Select a cell to work with its terminal and inspect its state." : route.view === "dashboard" ? "Browse and manage resources on this server." : route.view === "resource" || (catalog && route.scope.length > 0) ? route.scope.join(" / ") : `Browse ${heading?.toLowerCase()} across your infrastructure.`}</p>{isWorkspace && !cellScreenScope && <a className="new-cell-action mobile-new-cell" href="#/configs">+ New Cell</a>}</div>
+      <div className={`workspace-content ${isWorkspace ? "cell-workspace-content" : ""}${cellScreenScope ? " cell-screen-content" : ""}`}>
+        {!isWorkspace && !cellScreenScope && <ResourcesNavigation route={route} />}
+        <div className="page-heading">{!cellScreenScope && <p className="eyebrow">{isWorkspace ? "Workspace" : "Resources"}</p>}<h1>{heading}</h1>{!cellScreenScope && <p className="description">{isWorkspace ? route.scope.length ? route.scope.join(" / ") : "Select a cell to work with its terminal and inspect its state." : route.view === "dashboard" ? "Browse and manage resources on this server." : route.view === "resource" || (catalog && route.scope.length > 0) ? route.scope.join(" / ") : `Browse ${heading?.toLowerCase()} across your infrastructure.`}</p>}{isWorkspace && !cellScreenScope && <a className="new-cell-action mobile-new-cell" href="#/configs">+ New Cell</a>}</div>
         {inventory.loading && <p className="description" role="status">Refreshing resource inventory…</p>}
         {inventory.error && <ErrorNotice error={inventory.error} />}
         {inventory.error && inventory.data && <p className="stale">Stale inventory — refresh failed. Counts and lists may be out of date.</p>}
