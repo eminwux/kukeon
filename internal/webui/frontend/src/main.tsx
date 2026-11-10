@@ -8,7 +8,7 @@ import { CellSidebar } from "./cell-sidebar";
 import { useInventory, type Inventory, type InventoryResource, type Doc, type RuntimeStatus } from "./inventory";
 import { apiPath, catalogTitles, kinds, titles, readRoute, resourceLink, listLink, workspaceLink, type Route } from "./routes";
 import { StateBadge } from "./status";
-import { CellLifecycleControls, type LifecycleAction, type LifecycleFeedback } from "./lifecycle";
+import { CellLifecycleControls, LifecycleNotice, type LifecycleAction, type LifecycleFeedback } from "./lifecycle";
 
 function validTime(value?: string): value is string {
   return !!value && !value.startsWith("0001-") && Number.isFinite(Date.parse(value));
@@ -94,7 +94,8 @@ const cellTabs: { id: CellTab; label: string }[] = [
   { id: "overview", label: "Overview" },
 ];
 
-function CellDetailsScreen({ scope, revision, inventory, manager, theme, operations, onLifecycleAction }: {
+function CellDetailsScreen({ title, scope, revision, inventory, manager, theme, operations, onLifecycleAction }: {
+  title: string;
   scope: string[] | null;
   revision: number;
   inventory: InventoryResource;
@@ -151,10 +152,16 @@ function CellDetailsScreen({ scope, revision, inventory, manager, theme, operati
   </section>;
 
   return <div className="cell-detail-screen" hidden={!scope}>
+    <div className="page-heading cell-page-heading">
+      <div className="cell-page-title-row">
+        <h1>{title}</h1>
+        {scope && <CellLifecycleControls scope={scope} state={cellState} operation={operation} onAction={onLifecycleAction} showFeedback={false} />}
+      </div>
+      <LifecycleNotice operation={operation} />
+    </div>
     {detail.loading && scope && <p role="status">Loading cell details…</p>}
     {detail.error && <ErrorNotice error={detail.error} kind="Cell" />}
     {detail.error && detail.data && <p className="stale">Stale resource details — refresh failed.</p>}
-    {scope && <CellLifecycleControls scope={scope} state={cellState} operation={operation} onAction={onLifecycleAction} />}
     <div className={`cell-detail-tabbar${terminalExpanded ? " is-terminal-expanded" : ""}`}>
       <div className="cell-detail-tabs" role="tablist" aria-label="Cell details" ref={tablist} onKeyDown={moveTab}>
         {cellTabs.map(tab => <button key={tab.id} id={`cell-tab-${tab.id}`} role="tab" type="button" aria-selected={activeTab === tab.id} aria-controls={`cell-panel-${tab.id}`} tabIndex={activeTab === tab.id ? 0 : -1} onClick={() => setActiveTab(tab.id)}>{tab.label}</button>)}
@@ -310,12 +317,12 @@ function App() {
       </header>
       <div className={`workspace-content ${isWorkspace ? "cell-workspace-content" : ""}${cellScreenScope ? " cell-screen-content" : ""}`}>
         {!isWorkspace && !cellScreenScope && <ResourcesNavigation route={route} />}
-        <div className="page-heading">{!cellScreenScope && <p className="eyebrow">{isWorkspace ? "Workspace" : "Resources"}</p>}<h1>{heading}</h1>{!cellScreenScope && <p className="description">{isWorkspace ? route.scope.length ? route.scope.join(" / ") : "Select a cell to work with its terminal and inspect its state." : route.view === "dashboard" ? "Browse and manage resources on this server." : route.view === "resource" || (catalog && route.scope.length > 0) ? route.scope.join(" / ") : `Browse ${heading?.toLowerCase()} across your infrastructure.`}</p>}{isWorkspace && !cellScreenScope && <a className="new-cell-action mobile-new-cell" href="#/configs">+ New Cell</a>}</div>
+        {!cellScreenScope && <div className="page-heading"><p className="eyebrow">{isWorkspace ? "Workspace" : "Resources"}</p><h1>{heading}</h1><p className="description">{isWorkspace ? route.scope.length ? route.scope.join(" / ") : "Select a cell to work with its terminal and inspect its state." : route.view === "dashboard" ? "Browse and manage resources on this server." : route.view === "resource" || (catalog && route.scope.length > 0) ? route.scope.join(" / ") : `Browse ${heading?.toLowerCase()} across your infrastructure.`}</p>{isWorkspace && <a className="new-cell-action mobile-new-cell" href="#/configs">+ New Cell</a>}</div>}
         {inventory.loading && <p className="description" role="status">Refreshing resource inventory…</p>}
         {inventory.error && <ErrorNotice error={inventory.error} />}
         {inventory.error && inventory.data && <p className="stale">Stale inventory — refresh failed. Counts and lists may be out of date.</p>}
         {!!inventory.data?.failures.length && <div className="error" role="alert"><strong>Incomplete inventory</strong><p>Some scopes could not be loaded. Counts and lists exclude unavailable resources.</p><ul>{inventory.data.failures.map(message => <li key={message}>{message}</li>)}</ul></div>}
-        <CellDetailsScreen scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} operations={operations} onLifecycleAction={runCellLifecycle} />
+        <CellDetailsScreen title={heading ?? "Cell"} scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} operations={operations} onLifecycleAction={runCellLifecycle} />
         {isWorkspace ? route.scope.length === 4 ? null : <WorkspaceLanding inventory={inventory} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} onCreated={() => setRevision(value => value + 1)} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} /> : <Dashboard inventory={inventory} />}
         <footer>Daemon inventory · {inventory.data ? <>Last refreshed <time dateTime={inventory.data.updatedAt}>{new Date(inventory.data.updatedAt).toLocaleTimeString()}</time></> : "Not refreshed yet"} · Refresh to retrieve the latest state.</footer>
       </div>

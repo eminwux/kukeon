@@ -3,9 +3,7 @@ export type LifecycleFeedback = { action: LifecycleAction; phase: "pending" | "s
 
 export function availableLifecycleActions(state?: string): LifecycleAction[] {
   if (state === "Ready") return ["stop", "restart"];
-  if (["Failed", "Error", "Degraded"].includes(state ?? "")) return ["start", "stop", "restart"];
-  if (["Stopped", "Exited"].includes(state ?? "")) return ["start", "restart"];
-  return [];
+  return ["start"];
 }
 
 export function LifecycleNotice({ operation }: { operation?: LifecycleFeedback }) {

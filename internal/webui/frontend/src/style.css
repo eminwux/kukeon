@@ -247,8 +247,14 @@ button:disabled { cursor: default; opacity: .4; }
 .cell-terminal-panel .terminal-session:not([hidden]) { display: flex; flex: 1; width: 100%; min-height: 0; }
 .cell-terminal-panel .terminal-screen { width: 100%; height: 100%; min-height: 0; flex: 1; }
 .cell-detail-tabbar.is-terminal-expanded { position: fixed; top: 12px; right: 12px; left: 276px; z-index: 5; margin: 0; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--canvas); box-shadow: 0 8px 24px #0003; }
-.cell-overview-content { display: grid; gap: 20px; }
+.cell-overview-content { display: grid; flex: 1 1 auto; gap: 20px; min-height: 0; overflow-y: auto; align-content: start; overscroll-behavior: contain; }
 .cell-overview-content .resource-overview, .cell-overview-content .runtime-status, .cell-overview-content .container-panel { margin: 0; }
+.cell-page-heading { margin-bottom: 10px; }
+.cell-page-heading .cell-lifecycle-feedback { margin-top: 6px; }
+.cell-page-title-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; }
+.cell-page-title-row h1 { min-width: 0; flex: 1 1 auto; }
+.cell-page-title-row .cell-lifecycle { flex: 0 0 auto; margin: 0; }
+.cell-page-title-row .cell-lifecycle-buttons { flex-wrap: nowrap; }
 .cell-overview-actions { display: flex; align-items: center; gap: 10px; }
 .app-shell.cell-screen-active { height: 100dvh; min-height: 0; overflow: hidden; }
 .cell-screen-active > .workspace { display: flex; flex-direction: column; height: 100dvh; min-height: 0; overflow: hidden; }
@@ -260,7 +266,6 @@ button:disabled { cursor: default; opacity: .4; }
 .cell-screen-content { display: flex; flex: 1; flex-direction: column; min-height: 0; width: 100%; max-width: none; overflow: hidden; padding: 12px clamp(16px, 3vw, 40px); }
 .cell-screen-content .page-heading { flex: 0 0 auto; margin: 0 0 10px; }
 .cell-screen-content .page-heading h1 { font-size: clamp(20px, 2vw, 28px); }
-.cell-screen-content .cell-lifecycle { flex: 0 0 auto; }
 .cell-screen-content > footer { display: none; }
 .cell-screen-content .cell-detail-screen { display: flex; flex: 1; flex-direction: column; min-height: 0; }
 .cell-screen-content .cell-detail-screen[hidden] { display: none; }
