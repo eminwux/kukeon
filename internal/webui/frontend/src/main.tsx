@@ -1,9 +1,9 @@
-import { StrictMode, useEffect, useState } from "react";
+import { StrictMode, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
 import { useResource, ErrorNotice, type Resource } from "./request";
 import { CatalogPage, RelatedResources } from "./catalog";
-import { TerminalWorkspace, useTerminalSessions } from "./terminal";
+import { TerminalWorkspace, useTerminalSessions, type TerminalManager } from "./terminal";
 import { CellSidebar } from "./cell-sidebar";
 import { useInventory, type Inventory, type InventoryResource, type Doc, type RuntimeStatus } from "./inventory";
 import { apiPath, catalogTitles, kinds, titles, readRoute, resourceLink, listLink, workspaceLink, type Route } from "./routes";
@@ -66,7 +66,7 @@ function ResourceList({ depth, inventory, parent }: { depth: number; inventory: 
     <div className="pagination"><span>{filtered.length ? `${currentPage * pageSize + 1}–${Math.min((currentPage + 1) * pageSize, filtered.length)} of ${filtered.length}` : "0 results"}</span><button disabled={!currentPage} onClick={() => setPage(currentPage - 1)}>Previous</button><button disabled={(currentPage + 1) * pageSize >= filtered.length} onClick={() => setPage(currentPage + 1)}>Next</button></div>
   </section>;
 }
-function ResourceDetails({ route, revision, workspace = false }: { route: Route; revision: number; workspace?: boolean }) {
+function ResourceDetails({ route, revision }: { route: Route; revision: number }) {
   const depth = route.scope.length - 1;
   const kind = kinds[depth];
   const detail = useResource<Doc>(apiPath(route.scope), revision);
@@ -76,7 +76,7 @@ function ResourceDetails({ route, revision, workspace = false }: { route: Route;
   const related = detail.data && !route.document && <RelatedResources doc={detail.data} revision={revision} />;
   const containerPanel = depth === 3 && <section className="panel container-panel"><div className="panel-heading"><h2>Containers</h2><span className="badge">{detail.error ? "Stale observations" : detail.loading ? "Refreshing observations" : "Cell observations"}</span></div><div className="panel-body">{containers.loading && <p>Loading containers…</p>}{containers.error && <ErrorNotice error={containers.error} />}{containers.error && containers.data && <p className="stale">Stale container list — refresh failed.</p>}{!containers.loading && !containers.error && !containers.data?.length && <p>No containers found.</p>}<ul className="state-list">{containers.data?.map(container => <li key={container.id}><a className="text-link" href={resourceLink([...route.scope, container.id])}>{container.id}</a><StateBadge state={detail.data?.status?.containers?.find(item => item.name === container.id || item.id === container.id)?.state} /><a href={resourceLink([...route.scope, container.id], true)}>View document</a></li>)}</ul></div></section>;
   return <>
-    <div className="detail-actions"><a href={workspace ? resourceLink(route.scope) : listLink(Math.min(depth, 3))}>{workspace ? "View in Administration" : `← Back to ${titles[Math.min(depth, 3)].toLowerCase()}`}</a><a className="document-action" href={resourceLink(route.scope, !route.document)}>{route.document ? "Show overview" : "View document"}</a></div>
+    <div className="detail-actions"><a href={listLink(Math.min(depth, 3))}>← Back to {titles[Math.min(depth, 3)].toLowerCase()}</a><a className="document-action" href={resourceLink(route.scope, !route.document)}>{route.document ? "Show overview" : "View document"}</a></div>
     {detail.loading && <p role="status">Loading {kind} details…</p>}
     {detail.error && <ErrorNotice error={detail.error} kind={kind} />}
     {detail.error && detail.data && <p className="stale">Stale resource details — refresh failed.</p>}
@@ -87,15 +87,89 @@ function ResourceDetails({ route, revision, workspace = false }: { route: Route;
   </>;
 }
 
+type CellTab = "terminal" | "overview";
+const cellTabs: { id: CellTab; label: string }[] = [
+  { id: "terminal", label: "Terminal" },
+  { id: "overview", label: "Overview" },
+];
+
+function CellDetailsScreen({ scope, revision, inventory, manager, theme }: {
+  scope: string[] | null;
+  revision: number;
+  inventory: InventoryResource;
+  manager: TerminalManager;
+  theme: Theme;
+}) {
+  const [activeTab, setActiveTab] = useState<CellTab>("terminal");
+  const [terminalExpanded, setTerminalExpanded] = useState(false);
+  const [terminalToolsHost, setTerminalToolsHost] = useState<HTMLDivElement | null>(null);
+  const tablist = useRef<HTMLDivElement>(null);
+  const scopeKey = JSON.stringify(scope ?? []);
+  const detail = useResource<Doc>(scope ? apiPath(scope) : null, revision);
+  const containers = useResource<{ id: string; attachable?: boolean; root?: boolean }[]>(scope ? `${apiPath(scope)}/containers` : null, revision);
+  const status = detail.data && <StatusSummary status={detail.data.status} kind="cell" />;
+
+  useEffect(() => { setActiveTab("terminal"); setTerminalExpanded(false); }, [scopeKey]);
+
+  function moveTab(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const index = cellTabs.findIndex(tab => tab.id === activeTab);
+    const next = event.key === "ArrowRight" ? (index + 1) % cellTabs.length
+      : event.key === "ArrowLeft" ? (index - 1 + cellTabs.length) % cellTabs.length
+      : event.key === "Home" ? 0 : event.key === "End" ? cellTabs.length - 1 : -1;
+    if (next < 0) return;
+    event.preventDefault();
+    setActiveTab(cellTabs[next].id);
+    tablist.current?.querySelectorAll<HTMLButtonElement>("[role=tab]")[next]?.focus();
+  }
+
+  const overview = detail.data && scope && <section className="panel resource-overview">
+    <div className="panel-heading"><h2>Resource overview</h2><div className="cell-overview-actions"><StateBadge state={detail.data.status?.state} /><a className="document-action" href={resourceLink(scope, true)} target="_blank" rel="noopener noreferrer">View document</a></div></div>
+    <div className="panel-body"><dl className="details-grid">
+      <dt>Name</dt><dd>{detail.data.metadata.name}</dd>
+      <dt>Kind</dt><dd>{detail.data.kind ?? "cell"}</dd>
+      <dt>Scope</dt><dd>{scope.join(" / ")}</dd>
+      <dt>API version</dt><dd>{detail.data.apiVersion ?? "Not reported"}</dd>
+      <dt>Labels</dt><dd>{Object.entries(detail.data.metadata.labels ?? {}).map(([key, value]) => <span className="badge label-badge" key={key}>{key}: {value}</span>)}{!Object.keys(detail.data.metadata.labels ?? {}).length && "No labels"}</dd>
+    </dl></div>
+  </section>;
+
+  const containerPanel = <section className="panel container-panel">
+    <div className="panel-heading"><h2>Containers</h2><span className="badge">{detail.error ? "Stale observations" : detail.loading ? "Refreshing observations" : "Cell observations"}</span></div>
+    <div className="panel-body">
+      {containers.loading && <p>Loading containers…</p>}
+      {containers.error && <ErrorNotice error={containers.error} />}
+      {containers.error && containers.data && <p className="stale">Stale container list — refresh failed.</p>}
+      {!containers.loading && !containers.error && !containers.data?.length && <p>No containers found.</p>}
+      <ul className="state-list">{containers.data?.map(container => <li key={container.id}><a className="text-link" href={resourceLink([...(scope ?? []), container.id])}>{container.id}</a><StateBadge state={detail.data?.status?.containers?.find(item => item.name === container.id || item.id === container.id)?.state} /><a href={resourceLink([...(scope ?? []), container.id], true)} target="_blank" rel="noopener noreferrer">View document</a></li>)}</ul>
+    </div>
+  </section>;
+
+  return <div className="cell-detail-screen" hidden={!scope}>
+    {detail.loading && scope && <p role="status">Loading cell details…</p>}
+    {detail.error && <ErrorNotice error={detail.error} kind="Cell" />}
+    {detail.error && detail.data && <p className="stale">Stale resource details — refresh failed.</p>}
+    <div className={`cell-detail-tabbar${terminalExpanded ? " is-terminal-expanded" : ""}`}>
+      <div className="cell-detail-tabs" role="tablist" aria-label="Cell details" ref={tablist} onKeyDown={moveTab}>
+        {cellTabs.map(tab => <button key={tab.id} id={`cell-tab-${tab.id}`} role="tab" type="button" aria-selected={activeTab === tab.id} aria-controls={`cell-panel-${tab.id}`} tabIndex={activeTab === tab.id ? 0 : -1} onClick={() => setActiveTab(tab.id)}>{tab.label}</button>)}
+      </div>
+      <div className="cell-terminal-tools" ref={setTerminalToolsHost} hidden={!scope || activeTab !== "terminal"} />
+    </div>
+    <section className="cell-tab-panel cell-terminal-panel" id="cell-panel-terminal" role="tabpanel" aria-labelledby="cell-tab-terminal" tabIndex={0} hidden={activeTab !== "terminal"}>
+      <TerminalWorkspace scope={scope} revision={revision} inventory={inventory} manager={manager} theme={theme} visible={activeTab === "terminal" && !!scope} controlsHost={terminalToolsHost} onExpandedChange={setTerminalExpanded} />
+    </section>
+    <section className="cell-tab-panel cell-overview-content" id="cell-panel-overview" role="tabpanel" aria-labelledby="cell-tab-overview" tabIndex={0} hidden={activeTab !== "overview"}>{overview}{status}{containerPanel}</section>
+  </div>;
+}
+
 type Theme = "system" | "light" | "dark";
 function initialTheme(): Theme {
   try { const value = localStorage.getItem("kukeon-theme"); return value === "light" || value === "dark" ? value : "system"; }
   catch { return "system"; }
 }
-function AdministrationNavigation({ route }: { route: Route }) {
+function ResourcesNavigation({ route }: { route: Route }) {
   const activeDepth = route.view === "resource" ? Math.min(route.scope.length - 1, 3) : titles.findIndex(title => title.toLowerCase() === route.view);
-  return <nav className="administration-nav panel" aria-label="Administration resources">
-    <a href="#/administration" aria-current={route.view === "dashboard" ? "page" : undefined}>Overview</a>
+  return <nav className="resources-nav panel" aria-label="Resources navigation">
+    <a href="#/resources" aria-current={route.view === "dashboard" ? "page" : undefined}>Overview</a>
     {titles.map((title, depth) => <a key={title} href={listLink(depth)} aria-current={activeDepth === depth ? "page" : undefined}>{title}</a>)}
     {Object.entries(catalogTitles).map(([kind, title]) => <a key={kind} href={`#/${kind}`} aria-current={route.view === kind ? "page" : undefined}>{title}</a>)}
   </nav>;
@@ -112,6 +186,7 @@ function App() {
   const [revision, setRevision] = useState(0);
   const [route, setRoute] = useState(readRoute);
   const [theme, setTheme] = useState<Theme>(initialTheme);
+  const nextTheme: Theme = theme === "system" ? "light" : theme === "light" ? "dark" : "system";
   const [menuOpen, setMenuOpen] = useState(false);
   useEffect(() => {
     const changed = () => { setRoute(readRoute()); setMenuOpen(false); };
@@ -124,46 +199,55 @@ function App() {
     document.documentElement.dataset.theme = theme;
     try { localStorage.setItem("kukeon-theme", theme); } catch { /* Preferences are optional. */ }
   }, [theme]);
-  const connection = useResource<{ endpoint: string }>("/api/connection", revision);
+  const connection = useResource<{ endpoint: string; version: string }>("/api/connection", revision);
   const inventory = useInventory(revision);
   const terminals = useTerminalSessions(inventory);
   const isWorkspace = route.view === "workspace";
-  const terminalScope = (isWorkspace || route.view === "resource" && !route.document) && route.scope.length === 4 ? route.scope : null;
+  const cellScreenScope = (isWorkspace || route.view === "resource" && !route.document) && route.scope.length === 4 ? route.scope : null;
   const depth = titles.findIndex(title => title.toLowerCase() === route.view);
   const catalog = Object.keys(catalogTitles).includes(route.view);
-  const heading = isWorkspace ? route.scope.at(-1) ?? "Workspace" : catalog ? route.scope.at(-1) ?? catalogTitles[route.view] : route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : "Administration";
+  const heading = isWorkspace ? route.scope.at(-1) ?? "Workspace" : catalog ? route.scope.at(-1) ?? catalogTitles[route.view] : route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : "Resources";
   const daemonStatus = inventory.daemon.error?.code === "permission_denied" ? "Permission denied" : inventory.daemon.error ? "Unavailable" : inventory.daemon.loading ? "Checking…" : "Connected";
-  return <div className="app-shell">
+  return <div className={`app-shell${cellScreenScope ? " cell-screen-active" : ""}`}>
     <aside className={`sidebar ${menuOpen ? "is-open" : ""}`} id="cell-sidebar" aria-label="Cell sidebar">
       <button className="sidebar-close" aria-label="Close sidebar" onClick={() => setMenuOpen(false)}>×</button>
-      <a className="brand" href={workspaceLink()}><span className="mark" aria-hidden="true">K</span><span>Kukeon<small>LOCAL WORKSPACE</small></span></a>
-      <nav className="area-nav" aria-label="Areas"><a href={workspaceLink()} aria-current={isWorkspace ? "page" : undefined}>Workspace</a><a href="#/administration" aria-current={!isWorkspace ? "page" : undefined}>Administration</a></nav>
-      <a className="new-cell-action sidebar-new-cell" href="#/configs">+ New Cell</a>
-      <CellSidebar inventory={inventory} selectedScope={isWorkspace ? route.scope : []} terminalStates={terminals.cellStates} />
+      <a className="brand" href={workspaceLink()}><span className="mark" aria-hidden="true">K</span><span className="brand-title">Kukeon<small>LOCAL WORKSPACE</small></span>{connection.data?.version && <span className="brand-version">{connection.data.version.startsWith("v") ? connection.data.version : `v${connection.data.version}`}</span>}</a>
+      <nav className="area-nav" aria-label="Areas"><a href={workspaceLink()} aria-current={isWorkspace ? "page" : undefined}>Workspace</a></nav>
+      {!cellScreenScope && <a className="new-cell-action sidebar-new-cell" href="#/configs">+ New Cell</a>}
+      <CellSidebar inventory={inventory} selectedScope={cellScreenScope ?? []} terminalStates={terminals.cellStates} />
       <section className="connection" aria-label="Daemon connection">
         <p className="status" role="status"><span className={`dot ${inventory.daemon.error ? "failed" : inventory.daemon.loading ? "checking" : ""}`} aria-hidden="true" />{daemonStatus}</p>
         <code>{connection.data?.endpoint ?? (connection.loading ? "Loading socket…" : "Socket unknown")}</code>
         {connection.error && <ErrorNotice error={connection.error} />}
-        <label className="theme-control">Appearance<select aria-label="Appearance" value={theme} onChange={event => setTheme(event.target.value as Theme)}><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
       </section>
     </aside>
     <main className="workspace">
       <header className="toolbar">
         <button className="menu-toggle" aria-label="Toggle sidebar" aria-expanded={menuOpen} aria-controls="cell-sidebar" onClick={() => setMenuOpen(!menuOpen)}>☰</button>
-        <nav className="toolbar-areas" aria-label="Areas"><a href={workspaceLink()} aria-current={isWorkspace ? "page" : undefined}>Workspace</a><a href="#/administration" aria-current={!isWorkspace ? "page" : undefined}>Administration</a></nav>
+        <nav className="toolbar-areas" aria-label="Areas"><a href={workspaceLink()} aria-current={isWorkspace ? "page" : undefined}>Workspace</a></nav>
         <span className="toolbar-connectivity" role="status" aria-label={`Daemon: ${daemonStatus}`} title={`Daemon: ${daemonStatus}`}><span className={`dot ${inventory.daemon.error ? "failed" : inventory.daemon.loading ? "checking" : ""}`} aria-hidden="true" /></span>
-        <nav className="breadcrumbs" aria-label="Resource scope"><a href={isWorkspace ? workspaceLink() : "#/administration"}>{isWorkspace ? "Workspace" : "Administration"}</a>{isWorkspace ? route.scope.length > 0 && <span>{route.scope.join(" / ")}</span> : catalog ? <><a href={`#/${route.view}`}>{catalogTitles[route.view]}</a>{route.scope.slice(0, -1).map((name, i) => <a key={i} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}{route.scope.length > 0 && <span>{route.scope.at(-1)}</span>}</> : route.view === "resource" ? route.scope.map((name, i) => <a key={i} aria-label={`${kinds[i]}: ${name}`} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>) : <span>{heading}</span>}</nav>
-        <button className="refresh" onClick={() => setRevision(value => value + 1)}>Refresh</button>
+        <nav className="breadcrumbs" aria-label="Resource scope"><a href={isWorkspace ? workspaceLink() : "#/resources"}>{isWorkspace ? "Workspace" : "Resources"}</a>{isWorkspace ? route.scope.length > 0 && <span>{route.scope.join(" / ")}</span> : catalog ? <><a href={`#/${route.view}`}>{catalogTitles[route.view]}</a>{route.scope.slice(0, -1).map((name, i) => <a key={i} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}{route.scope.length > 0 && <span>{route.scope.at(-1)}</span>}</> : route.view === "resource" ? route.scope.map((name, i) => <a key={i} aria-label={`${kinds[i]}: ${name}`} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>) : <span>{heading}</span>}</nav>
+        <div className="toolbar-actions">
+          <a className="header-action" href="#/resources" aria-current={!isWorkspace ? "page" : undefined}>Resources</a>
+          <button className="icon-button refresh-button" type="button" aria-label="Refresh" title="Refresh" onClick={() => setRevision(value => value + 1)}>
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 11a8.1 8.1 0 0 0-14.9-4L3 10" /><path d="M3 4v6h6" /><path d="M4 13a8.1 8.1 0 0 0 14.9 4L21 14" /><path d="M21 20v-6h-6" /></svg>
+          </button>
+          <button className="icon-button" type="button" aria-label={`Appearance: ${theme}; switch to ${nextTheme}`} title={`Appearance: ${theme} (switch to ${nextTheme})`} onClick={() => setTheme(nextTheme)}>
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              {theme === "system" ? <><rect x="3.5" y="4.5" width="17" height="12" rx="2" /><path d="M8 20h8m-4-3.5V20" /></> : theme === "light" ? <><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" /></> : <path d="M20.1 15.7A8 8 0 0 1 8.3 3.9 8.2 8.2 0 1 0 20.1 15.7Z" />}
+            </svg>
+          </button>
+        </div>
       </header>
-      <div className={`workspace-content ${isWorkspace ? "cell-workspace-content" : ""}`}>
-        {!isWorkspace && <AdministrationNavigation route={route} />}
-        <div className="page-heading"><p className="eyebrow">{isWorkspace ? "Workspace" : "Administration"}</p><h1>{heading}</h1><p className="description">{isWorkspace ? route.scope.length ? route.scope.join(" / ") : "Select a cell to work with its terminal and inspect its state." : route.view === "dashboard" ? "Your local infrastructure at a glance." : route.view === "resource" || (catalog && route.scope.length > 0) ? route.scope.join(" / ") : `Browse ${heading?.toLowerCase()} across your infrastructure.`}</p>{isWorkspace && <a className="new-cell-action mobile-new-cell" href="#/configs">+ New Cell</a>}</div>
+      <div className={`workspace-content ${isWorkspace ? "cell-workspace-content" : ""}${cellScreenScope ? " cell-screen-content" : ""}`}>
+        {!isWorkspace && !cellScreenScope && <ResourcesNavigation route={route} />}
+        <div className="page-heading">{!cellScreenScope && <p className="eyebrow">{isWorkspace ? "Workspace" : "Resources"}</p>}<h1>{heading}</h1>{!cellScreenScope && <p className="description">{isWorkspace ? route.scope.length ? route.scope.join(" / ") : "Select a cell to work with its terminal and inspect its state." : route.view === "dashboard" ? "Browse and manage resources on this server." : route.view === "resource" || (catalog && route.scope.length > 0) ? route.scope.join(" / ") : `Browse ${heading?.toLowerCase()} across your infrastructure.`}</p>}{isWorkspace && !cellScreenScope && <a className="new-cell-action mobile-new-cell" href="#/configs">+ New Cell</a>}</div>
         {inventory.loading && <p className="description" role="status">Refreshing resource inventory…</p>}
         {inventory.error && <ErrorNotice error={inventory.error} />}
         {inventory.error && inventory.data && <p className="stale">Stale inventory — refresh failed. Counts and lists may be out of date.</p>}
         {!!inventory.data?.failures.length && <div className="error" role="alert"><strong>Incomplete inventory</strong><p>Some scopes could not be loaded. Counts and lists exclude unavailable resources.</p><ul>{inventory.data.failures.map(message => <li key={message}>{message}</li>)}</ul></div>}
-        <TerminalWorkspace scope={terminalScope} revision={revision} inventory={inventory} manager={terminals} themeMode={theme} />
-        {isWorkspace ? route.scope.length === 4 ? <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} workspace /> : <WorkspaceLanding inventory={inventory} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} onCreated={() => setRevision(value => value + 1)} /> : route.view === "resource" ? <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} /> : <Dashboard inventory={inventory} />}
+        <CellDetailsScreen scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} />
+        {isWorkspace ? route.scope.length === 4 ? null : <WorkspaceLanding inventory={inventory} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} onCreated={() => setRevision(value => value + 1)} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} /> : <Dashboard inventory={inventory} />}
         <footer>Daemon inventory · {inventory.data ? <>Last refreshed <time dateTime={inventory.data.updatedAt}>{new Date(inventory.data.updatedAt).toLocaleTimeString()}</time></> : "Not refreshed yet"} · Refresh to retrieve the latest state.</footer>
       </div>
     </main>

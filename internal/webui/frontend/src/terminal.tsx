@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -8,15 +9,24 @@ import type { InventoryResource } from "./inventory";
 
 type Container = { id: string; attachable?: boolean; root?: boolean };
 export type TerminalState = "connecting" | "attached" | "disconnected";
-type ThemeMode = "light" | "dark" | "system";
 type Session = { id: string; scope: string[]; container: string; state: TerminalState; message: string; generation: number };
-const maxConnections = 4;
-const maxSessions = 8;
+const maxConnections = 20;
+const maxSessions = 20;
 const cellId = (scope: string[]) => JSON.stringify(scope);
 const sessionId = (scope: string[], container: string) => JSON.stringify([...scope, container]);
 const unavailableStates = new Set(["Stopped", "Stopping", "Exited", "Deleted"]);
+const terminalTheme = {
+  background: "#000000", foreground: "#ffffff", cursor: "#ffffff", cursorAccent: "#000000", selectionBackground: "#4d4d4d",
+  black: "#000000", red: "#cd0000", green: "#00cd00", yellow: "#cdcd00", blue: "#0000ee", magenta: "#cd00cd", cyan: "#00cdcd", white: "#e5e5e5",
+  brightBlack: "#7f7f7f", brightRed: "#ff0000", brightGreen: "#00ff00", brightYellow: "#ffff00", brightBlue: "#5c5cff", brightMagenta: "#ff00ff", brightCyan: "#00ffff", brightWhite: "#ffffff",
+};
+type Theme = "system" | "light" | "dark";
+function terminalThemeFor(theme: Theme) {
+  const dark = theme === "dark" || theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  return { ...terminalTheme, background: dark ? "#0d1421" : "#f8fafc", foreground: dark ? "#e5e6ec" : "#20232b", cursor: dark ? "#e5e6ec" : "#20232b" };
+}
 
-// This hook lives in App, above both Workspace and Administration routes.
+// This hook lives in App, above both Workspace and Resources routes.
 export function useTerminalSessions(inventory: InventoryResource) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selection, setSelection] = useState<Record<string, string>>({});
@@ -58,19 +68,10 @@ export function useTerminalSessions(inventory: InventoryResource) {
   return { sessions, selection, select, attach, detach, update, cellStates };
 }
 
-type Manager = ReturnType<typeof useTerminalSessions>;
+export type TerminalManager = ReturnType<typeof useTerminalSessions>;
+type Manager = TerminalManager;
 
-const terminalThemes = {
-  light: { background: "#f8fafc", foreground: "#182230", cursor: "#275dad", cursorAccent: "#f8fafc", selectionBackground: "#bcd7ff",
-    black: "#253449", red: "#a82d35", green: "#157347", yellow: "#8c6000", blue: "#2458b8", magenta: "#8d3ba5", cyan: "#006b78", white: "#d7dee9",
-    brightBlack: "#5c6a7d", brightRed: "#cc3540", brightGreen: "#198657", brightYellow: "#a16d00", brightBlue: "#356ed4", brightMagenta: "#a24ab8", brightCyan: "#087e8d", brightWhite: "#ffffff" },
-  dark: { background: "#0d1421", foreground: "#e6edf7", cursor: "#a9c7ff", cursorAccent: "#0d1421", selectionBackground: "#375077",
-    black: "#263244", red: "#ff777a", green: "#78dca0", yellow: "#e9c875", blue: "#8cb7ff", magenta: "#d4a5f0", cyan: "#7bd8e2", white: "#d8e1ef",
-    brightBlack: "#8292a8", brightRed: "#ff9b9d", brightGreen: "#9ce8b7", brightYellow: "#f2d795", brightBlue: "#b0ceff", brightMagenta: "#e4c1f7", brightCyan: "#a2e9ef", brightWhite: "#ffffff" },
-};
-const resolvedTheme = (mode: ThemeMode, systemDark: boolean) => terminalThemes[mode === "system" ? systemDark ? "dark" : "light" : mode];
-
-function TerminalSession({ session, active, expanded, update, themeMode }: { session: Session; active: boolean; expanded: boolean; update: Manager["update"]; themeMode: ThemeMode }) {
+function TerminalSession({ session, active, expanded, theme, update }: { session: Session; active: boolean; expanded: boolean; theme: Theme; update: Manager["update"] }) {
   const mount = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal | null>(null);
   const socket = useRef<WebSocket | null>(null);
@@ -80,36 +81,50 @@ function TerminalSession({ session, active, expanded, update, themeMode }: { ses
 
   useEffect(() => {
     if (!mount.current) return;
-    const term = new Terminal({ cursorBlink: true, cursorStyle: "block", cursorInactiveStyle: "outline", convertEol: false, fontSize: 14, scrollback: 2000,
-      theme: resolvedTheme(themeMode, window.matchMedia("(prefers-color-scheme: dark)").matches) });
+    const term = new Terminal({ cursorBlink: true, cursorStyle: "underline", cursorInactiveStyle: "outline", convertEol: false,
+      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace", fontSize: 14, scrollback: 2000,
+      theme: terminalThemeFor(theme) });
     const fit = new FitAddon();
     terminal.current = term;
     term.loadAddon(fit);
     term.open(mount.current);
+    let resizeFrame = 0;
     const resize = () => {
-      if (!activeNow.current || !mount.current?.clientWidth) return;
-      fit.fit();
-      if (socket.current?.readyState === WebSocket.OPEN) socket.current.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+      if (!activeNow.current) return;
+      if (resizeFrame) cancelAnimationFrame(resizeFrame);
+      resizeFrame = requestAnimationFrame(() => {
+        resizeFrame = 0;
+        if (!activeNow.current || !mount.current?.clientWidth || !mount.current.clientHeight) return;
+        fit.fit();
+        if (socket.current?.readyState === WebSocket.OPEN) socket.current.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+      });
     };
     fitNow.current = resize;
     const observer = new ResizeObserver(resize);
     observer.observe(mount.current);
+    if (mount.current.parentElement) observer.observe(mount.current.parentElement);
+    window.addEventListener("resize", resize);
+    window.visualViewport?.addEventListener("resize", resize);
     const input = term.onData(data => {
       if (activeNow.current && socket.current?.readyState === WebSocket.OPEN) socket.current.send(new TextEncoder().encode(data));
     });
     return () => {
-      observer.disconnect(); input.dispose(); term.dispose(); terminal.current = null;
+      observer.disconnect(); window.removeEventListener("resize", resize);
+      window.visualViewport?.removeEventListener("resize", resize);
+      if (resizeFrame) cancelAnimationFrame(resizeFrame);
+      input.dispose(); term.dispose(); terminal.current = null;
       fitNow.current = () => {};
     };
   }, []);
 
   useEffect(() => {
-    const preference = window.matchMedia("(prefers-color-scheme: dark)");
-    const sync = () => { if (terminal.current) terminal.current.options.theme = resolvedTheme(themeMode, preference.matches); };
-    sync();
-    preference.addEventListener("change", sync);
-    return () => preference.removeEventListener("change", sync);
-  }, [themeMode]);
+    const applyTheme = () => { if (terminal.current) terminal.current.options.theme = terminalThemeFor(theme); };
+    applyTheme();
+    if (theme !== "system") return;
+    const colorScheme = window.matchMedia("(prefers-color-scheme: dark)");
+    colorScheme.addEventListener("change", applyTheme);
+    return () => colorScheme.removeEventListener("change", applyTheme);
+  }, [theme]);
 
   useEffect(() => {
     let connection: WebSocket;
@@ -174,11 +189,23 @@ function TerminalSession({ session, active, expanded, update, themeMode }: { ses
   </div>;
 }
 
-export function TerminalWorkspace({ scope, revision, inventory, manager, themeMode }: { scope: string[] | null; revision: number; inventory: InventoryResource; manager: Manager; themeMode: ThemeMode }) {
+export function TerminalWorkspace({ scope, revision, inventory, manager, theme, visible = true, controlsHost, onExpandedChange }: { scope: string[] | null; revision: number; inventory: InventoryResource; manager: Manager; theme: Theme; visible?: boolean; controlsHost: HTMLDivElement | null; onExpandedChange: (expanded: boolean) => void }) {
   const [expanded, setExpanded] = useState(false);
+  const [skipAutoAttachFor, setSkipAutoAttachFor] = useState("");
   const expandButton = useRef<HTMLButtonElement>(null);
   const screens = useRef<HTMLDivElement>(null);
-  useEffect(() => { if (!scope) setExpanded(false); }, [scope]);
+  useEffect(() => {
+    if (!scope) {
+      setExpanded(false);
+      onExpandedChange(false);
+    }
+  }, [scope, onExpandedChange]);
+  useEffect(() => {
+    if (!visible && expanded) {
+      setExpanded(false);
+      onExpandedChange(false);
+    }
+  }, [visible, expanded, onExpandedChange]);
   useEffect(() => {
     if (!expanded) return;
     const escape = (event: KeyboardEvent) => {
@@ -186,6 +213,7 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, themeMo
       event.preventDefault();
       event.stopPropagation();
       setExpanded(false);
+      onExpandedChange(false);
       requestAnimationFrame(() => expandButton.current?.focus());
     };
     window.addEventListener("keydown", escape, true);
@@ -206,29 +234,31 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, themeMo
   const unavailable = cellState && unavailableStates.has(cellState);
   const atLimit = !current && (connections >= maxConnections || manager.sessions.length >= maxSessions);
   const reconnectLimited = current?.state === "disconnected" && connections >= maxConnections;
-  return <section className={`panel terminal-workspace${expanded ? " is-expanded" : ""}`} id="cell-terminal" hidden={!scope} aria-label="Terminal workspace">
-    <div className="panel-heading"><h2>Terminal</h2><div className="terminal-heading-actions"><span className="badge">{connections} / {maxConnections} connections</span><button ref={expandButton} type="button" aria-expanded={expanded} aria-controls="terminal-screens" onClick={() => setExpanded(value => !value)}>{expanded ? "Collapse terminal" : "Expand terminal"}</button></div></div>
-    {scope && <div className="terminal-controls">
+  useEffect(() => { setSkipAutoAttachFor(""); }, [key]);
+  useEffect(() => {
+    if (!scope || containers.loading || containers.error || !selected || !selectedEligible || unavailable || atLimit || current || skipAutoAttachFor === currentId) return;
+    manager.attach(scope, selected);
+  }, [key, selected, selectedEligible, containers.loading, containers.error, unavailable, atLimit, current, currentId, skipAutoAttachFor, manager.attach]);
+  const headerState = current?.state === "attached" ? "Attached"
+    : current?.message || (skipAutoAttachFor === currentId && currentId ? "Detached" : atLimit ? "Connection limit reached" : unavailable ? `Unavailable: ${cellState}` : containers.loading ? "Loading containers…" : containers.error ? "Container list unavailable" : !eligible.length ? "No attachable containers" : !selectedEligible ? "Container unavailable" : "Connecting…");
+  const headerTone = current?.state ?? (skipAutoAttachFor === currentId && currentId || atLimit || unavailable || containers.error || !eligible.length || !selectedEligible ? "disconnected" : "connecting");
+  const controls = scope && <div className="terminal-workspace-tools">
+    <div className="terminal-tool-status"><span className={`terminal-connection-state ${headerTone}`} role="status" title={current?.message}>{headerState}</span><button ref={expandButton} type="button" aria-expanded={expanded} aria-controls="terminal-screens" onClick={() => { const next = !expanded; setExpanded(next); onExpandedChange(next); }}>{expanded ? "Collapse terminal" : "Expand terminal"}</button></div>
+    <div className="terminal-controls">
       {containers.loading && <p role="status">Loading containers…</p>}
       {containers.error && <ErrorNotice error={containers.error} kind="Containers" />}
       {containers.error && containers.data && <p className="stale">Container list is stale. Refresh before attaching.</p>}
       {!containers.loading && !containers.error && !eligible.length && <p>No attachable containers are available.</p>}
       {!!options.length && <><label htmlFor="terminal-container">Container</label><select id="terminal-container" value={selected} onChange={event => manager.select(scope, event.target.value)}>{options.map(id => <option key={id} value={id}>{id}{eligible.some(container => container.id === id) ? "" : " (unavailable)"}</option>)}</select>
-        {current?.state === "attached" || current?.state === "connecting" ? <button onClick={() => manager.detach(current.id)}>Detach</button> : current ? <><button disabled={reconnectLimited || !selectedEligible || !!unavailable || !!containers.error} onClick={() => manager.attach(scope, selected)}>Reconnect</button><button onClick={() => manager.detach(current.id)}>Detach</button></> : <button disabled={!!atLimit || !selectedEligible || !!unavailable || !!containers.error} onClick={() => manager.attach(scope, selected)}>Attach</button>}</>}
+        {current?.state === "attached" || current?.state === "connecting" ? <button onClick={() => { setSkipAutoAttachFor(current.id); manager.detach(current.id); }}>Detach</button> : current ? <><button disabled={reconnectLimited || !selectedEligible || !!unavailable || !!containers.error} onClick={() => { setSkipAutoAttachFor(""); manager.attach(scope, selected); }}>Reconnect</button><button onClick={() => { setSkipAutoAttachFor(current.id); manager.detach(current.id); }}>Detach</button></> : skipAutoAttachFor === currentId && currentId ? <button disabled={!!atLimit || !selectedEligible || !!unavailable || !!containers.error} onClick={() => { setSkipAutoAttachFor(""); manager.attach(scope, selected); }}>Attach</button> : null}</>}
       {unavailable && <p className="terminal-unavailable" role="status">Terminal unavailable: cell is {cellState}.</p>}
       {(atLimit || reconnectLimited) && <p className="terminal-limit" role="status">Terminal limit reached. Detach another terminal to free a connection or retained slot.</p>}
-      {current && <p className={`terminal-connection-state ${current.state}`} role="status">{current.message}</p>}
-      {!!openInCell.length && <div className="terminal-tabs" role="tablist" aria-label="Open container terminals" onKeyDown={event => {
-        const index = openInCell.findIndex(item => item.id === currentId);
-        const next = event.key === "ArrowRight" ? (index + 1) % openInCell.length
-          : event.key === "ArrowLeft" ? (index - 1 + openInCell.length) % openInCell.length
-          : event.key === "Home" ? 0 : event.key === "End" ? openInCell.length - 1 : -1;
-        if (next < 0) return;
-        event.preventDefault();
-        manager.select(openInCell[next].scope, openInCell[next].container);
-        event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
-      }}>{openInCell.map(item => <button key={item.id} role="tab" aria-selected={item.id === currentId} tabIndex={item.id === currentId ? 0 : -1} onClick={() => manager.select(item.scope, item.container)}>{item.container} · {item.state}</button>)}</div>}
-    </div>}
-    <div className="terminal-screens" id="terminal-screens" ref={screens}>{manager.sessions.map(session => <TerminalSession key={session.id} session={session} active={!!scope && session.id === currentId} expanded={expanded} update={manager.update} themeMode={themeMode} />)}</div>
-  </section>;
+    </div>
+  </div>;
+  return <>
+    {controls && controlsHost && createPortal(controls, controlsHost)}
+    <section className={`panel terminal-workspace${expanded ? " is-expanded" : ""}`} id="cell-terminal" hidden={!scope} aria-label="Terminal workspace">
+      <div className="terminal-screens" id="terminal-screens" ref={screens}>{manager.sessions.map(session => <TerminalSession key={session.id} session={session} active={!!scope && visible && session.id === currentId} expanded={expanded} theme={theme} update={manager.update} />)}</div>
+    </section>
+  </>;
 }
