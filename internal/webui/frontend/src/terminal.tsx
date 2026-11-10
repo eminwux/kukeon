@@ -47,6 +47,17 @@ export function useTerminalSessions(inventory: InventoryResource) {
     select(scope, container);
   }, [select]);
   const detach = useCallback((id: string) => setSessions(old => old.filter(item => item.id !== id)), []);
+  const removeCell = useCallback((scope: string[]) => {
+    const key = cellId(scope);
+    retainedCells.current.delete(key);
+    setSessions(old => old.filter(item => cellId(item.scope) !== key));
+    setSelection(old => {
+      if (!(key in old)) return old;
+      const next = { ...old };
+      delete next[key];
+      return next;
+    });
+  }, []);
   const interruptCell = useCallback((scope: string[], message: string) => {
     const key = cellId(scope);
     setSessions(old => old.map(item => cellId(item.scope) === key
@@ -70,6 +81,17 @@ export function useTerminalSessions(inventory: InventoryResource) {
       if (retainedCells.current.has(key)) return true;
       return !unavailableStates.has(state) || item.state === "interrupted";
     }));
+    setSelection(old => {
+      let changed = false;
+      const next = { ...old };
+      for (const key of Object.keys(next)) {
+        if (!states.has(key)) {
+          delete next[key];
+          changed = true;
+        }
+      }
+      return changed ? next : old;
+    });
   }, [inventory.data, inventory.loading, inventory.error]);
 
   const cellStates = useMemo(() => {
@@ -80,7 +102,7 @@ export function useTerminalSessions(inventory: InventoryResource) {
     }
     return result;
   }, [sessions]);
-  return { sessions, selection, select, attach, detach, interruptCell, holdCell, releaseCell, update, cellStates };
+  return { sessions, selection, select, attach, detach, removeCell, interruptCell, holdCell, releaseCell, update, cellStates };
 }
 
 export type TerminalManager = ReturnType<typeof useTerminalSessions>;
