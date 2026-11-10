@@ -8,6 +8,7 @@ import { CellSidebar } from "./cell-sidebar";
 import { useInventory, type Inventory, type InventoryResource, type Doc, type RuntimeStatus } from "./inventory";
 import { apiPath, catalogTitles, kinds, titles, readRoute, resourceLink, listLink, workspaceLink, type Route } from "./routes";
 import { StateBadge } from "./status";
+import { CellLifecycleControls, LifecycleNotice, type LifecycleAction, type LifecycleFeedback } from "./lifecycle";
 
 function validTime(value?: string): value is string {
   return !!value && !value.startsWith("0001-") && Number.isFinite(Date.parse(value));
@@ -93,12 +94,15 @@ const cellTabs: { id: CellTab; label: string }[] = [
   { id: "overview", label: "Overview" },
 ];
 
-function CellDetailsScreen({ scope, revision, inventory, manager, theme }: {
+function CellDetailsScreen({ title, scope, revision, inventory, manager, theme, operations, onLifecycleAction }: {
+  title: string;
   scope: string[] | null;
   revision: number;
   inventory: InventoryResource;
   manager: TerminalManager;
   theme: Theme;
+  operations: Record<string, LifecycleFeedback>;
+  onLifecycleAction: (scope: string[], action: LifecycleAction, state?: string) => void;
 }) {
   const [activeTab, setActiveTab] = useState<CellTab>("terminal");
   const [terminalExpanded, setTerminalExpanded] = useState(false);
@@ -107,6 +111,9 @@ function CellDetailsScreen({ scope, revision, inventory, manager, theme }: {
   const scopeKey = JSON.stringify(scope ?? []);
   const detail = useResource<Doc>(scope ? apiPath(scope) : null, revision);
   const containers = useResource<{ id: string; attachable?: boolean; root?: boolean }[]>(scope ? `${apiPath(scope)}/containers` : null, revision);
+  const inventoryState = scope ? inventory.data?.rows[3].find(row => JSON.stringify(row.scope) === scopeKey)?.doc.status?.state : undefined;
+  const cellState = detail.data?.status?.state ?? inventoryState;
+  const operation = operations[scopeKey];
   const status = detail.data && <StatusSummary status={detail.data.status} kind="cell" />;
 
   useEffect(() => { setActiveTab("terminal"); setTerminalExpanded(false); }, [scopeKey]);
@@ -145,6 +152,13 @@ function CellDetailsScreen({ scope, revision, inventory, manager, theme }: {
   </section>;
 
   return <div className="cell-detail-screen" hidden={!scope}>
+    {scope && <div className="page-heading cell-page-heading">
+      <div className="cell-page-title-row">
+        <h1>{title}</h1>
+        <CellLifecycleControls scope={scope} state={cellState} operation={operation} onAction={onLifecycleAction} showFeedback={false} />
+      </div>
+      <LifecycleNotice operation={operation} />
+    </div>}
     {detail.loading && scope && <p role="status">Loading cell details…</p>}
     {detail.error && <ErrorNotice error={detail.error} kind="Cell" />}
     {detail.error && detail.data && <p className="stale">Stale resource details — refresh failed.</p>}
@@ -184,6 +198,8 @@ function WorkspaceLanding({ inventory }: { inventory: InventoryResource }) {
 }
 function App() {
   const [revision, setRevision] = useState(0);
+  const [operations, setOperations] = useState<Record<string, LifecycleFeedback>>({});
+  const pendingOperations = useRef(new Set<string>());
   const [route, setRoute] = useState(readRoute);
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const nextTheme: Theme = theme === "system" ? "light" : theme === "light" ? "dark" : "system";
@@ -202,6 +218,66 @@ function App() {
   const connection = useResource<{ endpoint: string; version: string }>("/api/connection", revision);
   const inventory = useInventory(revision);
   const terminals = useTerminalSessions(inventory);
+  async function runCellLifecycle(scope: string[], action: LifecycleAction, state?: string) {
+    const key = JSON.stringify(scope);
+    if (pendingOperations.current.has(key)) return;
+    pendingOperations.current.add(key);
+    terminals.holdCell(scope);
+    const pendingMessage = action === "restart"
+      ? state === "Ready" ? "Restarting cell: stopping, then starting…" : "Restarting cell: starting or recovering…"
+      : `${action === "start" ? "Starting" : "Stopping"} cell…`;
+    setOperations(old => ({ ...old, [key]: { action, phase: "pending", message: pendingMessage } }));
+    try {
+      const response = await fetch(`${apiPath(scope)}/${action}`, { method: "POST", headers: { Accept: "application/json" } });
+      let body: { error?: { code?: string; message?: string; phase?: string; stoppedFirst?: boolean } } = {};
+      try { body = await response.json(); } catch { /* Use the HTTP status below. */ }
+      if (!response.ok) {
+        const failure = body.error ?? { code: "unavailable", message: `HTTP ${response.status}` };
+        const phase = failure.phase;
+        if (action === "restart" && (phase === "stopping" || phase === "starting")) {
+          terminals.interruptCell(scope, phase === "stopping"
+            ? "Restart failed during stopping. The previous terminal connection may have ended."
+            : failure.stoppedFirst
+              ? "The cell stopped, but restart failed during starting. Reconnect when the cell is Ready to attach to its current process."
+              : "Restart failed during starting. Reconnect when the cell is Ready to attach to its current process.");
+        } else if (action === "start") {
+          terminals.interruptCell(scope, "Cell start failed. Reconnect when the cell is Ready to attach to its current process.");
+        }
+        const reason = failure.code === "permission_denied" ? "Permission denied"
+          : failure.code === "unavailable" ? "Daemon unavailable"
+          : failure.code === "invalid_state" ? "Invalid cell state"
+          : failure.code === "operation_in_progress" ? "Another operation is in progress"
+          : failure.code === "not_found" ? "Cell no longer exists"
+          : failure.code === "invalid_request" ? "Invalid lifecycle request"
+          : "Request failed";
+        const title = action === "restart" && phase === "stopping" ? "Restart failed while stopping"
+          : action === "restart" && phase === "starting" ? "Restart failed while starting"
+          : action === "restart" && phase === "validation" ? "Restart is unavailable"
+          : `${action[0].toUpperCase()}${action.slice(1)} failed`;
+        setOperations(old => ({ ...old, [key]: { action, phase: "error", message: `${title}. ${reason}: ${failure.message ?? "The daemon rejected the request."}` } }));
+        return;
+      }
+      if (action === "stop" || action === "restart") {
+        terminals.interruptCell(scope, action === "stop"
+          ? "Cell stopped. The previous terminal session ended. Reconnect after the cell starts."
+          : "Cell restarted. The previous terminal session ended; reconnect to attach to the new process.");
+      }
+      const message = action === "start" ? "Cell started."
+        : action === "stop" ? "Cell stopped. The previous terminal session ended."
+        : "Cell restarted. The previous terminal session ended; reconnect to attach to the new process.";
+      setOperations(old => ({ ...old, [key]: { action, phase: "success", message } }));
+    } catch (error) {
+      if (action === "stop" || action === "restart") {
+        terminals.interruptCell(scope, "The lifecycle request lost its connection. The terminal session may have ended; refresh the cell before reconnecting.");
+      }
+      const message = error instanceof Error ? error.message : "The request could not reach the web server.";
+      setOperations(old => ({ ...old, [key]: { action, phase: "error", message: `${action[0].toUpperCase()}${action.slice(1)} failed. Daemon unavailable: ${message}` } }));
+    } finally {
+      terminals.releaseCell(scope);
+      pendingOperations.current.delete(key);
+      setRevision(value => value + 1);
+    }
+  }
   const isWorkspace = route.view === "workspace";
   const cellScreenScope = (isWorkspace || route.view === "resource" && !route.document) && route.scope.length === 4 ? route.scope : null;
   const depth = titles.findIndex(title => title.toLowerCase() === route.view);
@@ -241,12 +317,12 @@ function App() {
       </header>
       <div className={`workspace-content ${isWorkspace ? "cell-workspace-content" : ""}${cellScreenScope ? " cell-screen-content" : ""}`}>
         {!isWorkspace && !cellScreenScope && <ResourcesNavigation route={route} />}
-        <div className="page-heading">{!cellScreenScope && <p className="eyebrow">{isWorkspace ? "Workspace" : "Resources"}</p>}<h1>{heading}</h1>{!cellScreenScope && <p className="description">{isWorkspace ? route.scope.length ? route.scope.join(" / ") : "Select a cell to work with its terminal and inspect its state." : route.view === "dashboard" ? "Browse and manage resources on this server." : route.view === "resource" || (catalog && route.scope.length > 0) ? route.scope.join(" / ") : `Browse ${heading?.toLowerCase()} across your infrastructure.`}</p>}{isWorkspace && !cellScreenScope && <a className="new-cell-action mobile-new-cell" href="#/configs">+ New Cell</a>}</div>
+        {!cellScreenScope && <div className="page-heading"><p className="eyebrow">{isWorkspace ? "Workspace" : "Resources"}</p><h1>{heading}</h1><p className="description">{isWorkspace ? route.scope.length ? route.scope.join(" / ") : "Select a cell to work with its terminal and inspect its state." : route.view === "dashboard" ? "Browse and manage resources on this server." : route.view === "resource" || (catalog && route.scope.length > 0) ? route.scope.join(" / ") : `Browse ${heading?.toLowerCase()} across your infrastructure.`}</p>{isWorkspace && <a className="new-cell-action mobile-new-cell" href="#/configs">+ New Cell</a>}</div>}
         {inventory.loading && <p className="description" role="status">Refreshing resource inventory…</p>}
         {inventory.error && <ErrorNotice error={inventory.error} />}
         {inventory.error && inventory.data && <p className="stale">Stale inventory — refresh failed. Counts and lists may be out of date.</p>}
         {!!inventory.data?.failures.length && <div className="error" role="alert"><strong>Incomplete inventory</strong><p>Some scopes could not be loaded. Counts and lists exclude unavailable resources.</p><ul>{inventory.data.failures.map(message => <li key={message}>{message}</li>)}</ul></div>}
-        <CellDetailsScreen scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} />
+        <CellDetailsScreen title={heading ?? "Cell"} scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} operations={operations} onLifecycleAction={runCellLifecycle} />
         {isWorkspace ? route.scope.length === 4 ? null : <WorkspaceLanding inventory={inventory} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} onCreated={() => setRevision(value => value + 1)} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} /> : <Dashboard inventory={inventory} />}
         <footer>Daemon inventory · {inventory.data ? <>Last refreshed <time dateTime={inventory.data.updatedAt}>{new Date(inventory.data.updatedAt).toLocaleTimeString()}</time></> : "Not refreshed yet"} · Refresh to retrieve the latest state.</footer>
       </div>

@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/eminwux/kukeon/cmd/config"
+	"github.com/eminwux/kukeon/internal/celllifecycle"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/webui"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
@@ -37,10 +38,11 @@ import (
 )
 
 const (
-	requestTimeout  = 10 * time.Second
-	headerTimeout   = 5 * time.Second
-	creationTimeout = 2 * time.Minute
-	writeTimeout    = creationTimeout + headerTimeout
+	requestTimeout   = 10 * time.Second
+	headerTimeout    = 5 * time.Second
+	creationTimeout  = 2 * time.Minute
+	lifecycleTimeout = 5 * time.Minute
+	writeTimeout     = lifecycleTimeout + headerTimeout
 )
 
 // Dial creates a request-owned client, closed after the RPC completes.
@@ -176,6 +178,19 @@ func realmHandler(dial Dial, detail bool) http.HandlerFunc {
 }
 
 func writeAPIError(w http.ResponseWriter, err error) {
+	status, code := lifecycleErrorStatus(err)
+	fields := map[string]any{"code": code, "message": err.Error()}
+	var phaseErr *celllifecycle.PhaseError
+	if errors.As(err, &phaseErr) {
+		fields["phase"] = string(phaseErr.Phase)
+		if phaseErr.StoppedFirst {
+			fields["stoppedFirst"] = true
+		}
+	}
+	writeJSON(w, status, map[string]any{"error": fields})
+}
+
+func apiErrorStatus(err error) (int, string) {
 	status, code := http.StatusServiceUnavailable, "unavailable"
 	switch {
 	case errors.Is(err, fs.ErrPermission):
@@ -211,7 +226,7 @@ func writeAPIError(w http.ResponseWriter, err error) {
 		errors.Is(err, errdefs.ErrContainerNameRequired):
 		status, code = http.StatusBadRequest, "invalid_request"
 	}
-	writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": err.Error()}})
+	return status, code
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

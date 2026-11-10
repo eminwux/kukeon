@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/eminwux/kukeon/internal/controller/apply"
+	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
@@ -112,7 +113,8 @@ func (b *Exec) StartCell(cell intmodel.Cell) (StartCellResult, error) {
 	case intmodel.CellStatePending, intmodel.CellStateUnknown:
 		state := v1beta1.CellState(internalCell.Status.State)
 		return res, fmt.Errorf(
-			"cell %q exists in %s state; delete it with `kuke delete cell %s` before restarting",
+			"%w: cell %q exists in %s state; delete it with `kuke delete cell %s` before restarting",
+			errdefs.ErrInvalidCellState,
 			internalCell.Metadata.Name,
 			state.String(),
 			internalCell.Metadata.Name,
@@ -161,7 +163,8 @@ func (b *Exec) StartCell(cell intmodel.Cell) (StartCellResult, error) {
 		}
 		if hasRunningContainer {
 			return res, fmt.Errorf(
-				"cell %q has running containers and must first be stopped",
+				"%w: cell %q has running containers and must first be stopped",
+				errdefs.ErrInvalidCellState,
 				internalCell.Metadata.Name,
 			)
 		}
@@ -170,7 +173,8 @@ func (b *Exec) StartCell(cell intmodel.Cell) (StartCellResult, error) {
 		// No container statuses available, fall back to metadata state check
 		// This preserves existing behavior for cells without containers or when status population fails
 		return res, fmt.Errorf(
-			"cell %q is already in Ready state and must first be stopped",
+			"%w: cell %q is already in Ready state and must first be stopped",
+			errdefs.ErrInvalidCellState,
 			internalCell.Metadata.Name,
 		)
 	}

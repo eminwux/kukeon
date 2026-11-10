@@ -802,3 +802,8 @@ var (
 		"team init: one or more documents failed to apply",
 	)
 )
+
+var (
+	ErrInvalidCellState        = errors.New("invalid cell lifecycle state")
+	ErrCellOperationInProgress = errors.New("cell lifecycle operation already in progress")
+)

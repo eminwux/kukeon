@@ -24,7 +24,11 @@ function save(key: string, value: string) {
 }
 function groupId(key: string, value: string | null) { return JSON.stringify([key, value]); }
 
-export function CellSidebar({ inventory, selectedScope, terminalStates }: { inventory: InventoryResource; selectedScope: string[]; terminalStates: Record<string, TerminalState> }) {
+export function CellSidebar({ inventory, selectedScope, terminalStates }: {
+  inventory: InventoryResource;
+  selectedScope: string[];
+  terminalStates: Record<string, TerminalState>;
+}) {
   const [search, setSearch] = useState("");
   const [groupBy, setGroupBy] = useState(storedGrouping);
   const [collapsed, setCollapsed] = useState(storedCollapsed);
@@ -76,7 +80,8 @@ export function CellSidebar({ inventory, selectedScope, terminalStates }: { inve
             const current = selectedScope.length === 4 && row.scope.every((part, i) => part === selectedScope[i]);
             const fullName = row.scope.join(" / ");
             const terminalState = terminalStates[JSON.stringify(row.scope)];
-            return <li key={JSON.stringify(row.scope)}><a className="cell-link" href={workspaceLink(row.scope)} aria-current={current ? "page" : undefined} aria-label={`Open ${fullName}`} title={fullName}><span className="cell-link-name">{row.doc.metadata.name}</span><span className="cell-link-scope">{row.scope.slice(0, 3).join(" / ")}</span><StateBadge state={row.doc.status?.state} />{terminalState && <span className={`cell-terminal-state ${terminalState}`}>Terminal {terminalState}</span>}</a></li>;
+            const state = row.doc.status?.state;
+            return <li key={JSON.stringify(row.scope)}><a className="cell-link" href={workspaceLink(row.scope)} aria-current={current ? "page" : undefined} aria-label={`Open ${fullName}`} title={fullName}><span className="cell-link-name">{row.doc.metadata.name}</span><span className="cell-link-scope">{row.scope.slice(0, 3).join(" / ")}</span><StateBadge state={state} />{terminalState && <span className={`cell-terminal-state ${terminalState}`}>Terminal {terminalState}</span>}</a></li>;
           })}</ul>{rows.length > limit && <button className="cell-more" onClick={() => setLimits(old => ({ ...old, [id]: limit + pageSize }))}>Show {Math.min(pageSize, rows.length - limit)} more cells</button>}</>}
         </section>;
       })}

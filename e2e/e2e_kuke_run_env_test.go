@@ -220,6 +220,19 @@ func publishRuntimeEnvImage(
 	ref, value string,
 ) {
 	t.Helper()
+	// Keep the new config and manifest protected until the image record is
+	// created. Without a lease, containerd GC can collect these blobs in the
+	// gap between writing them and publishing the image that references them.
+	ctx, releaseLease, err := client.WithLease(ctx)
+	if err != nil {
+		t.Fatalf("create image content lease: %v", err)
+	}
+	defer func() {
+		if releaseErr := releaseLease(ctx); releaseErr != nil {
+			t.Errorf("release image content lease: %v", releaseErr)
+		}
+	}()
+
 	manifest, err := images.Manifest(ctx, client.ContentStore(), source.Target(), platforms.Default())
 	if err != nil {
 		t.Fatal(err)

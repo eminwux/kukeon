@@ -8,13 +8,13 @@ import { apiPath } from "./routes";
 import type { InventoryResource } from "./inventory";
 
 type Container = { id: string; attachable?: boolean; root?: boolean };
-export type TerminalState = "connecting" | "attached" | "disconnected";
+export type TerminalState = "connecting" | "attached" | "disconnected" | "interrupted";
 type Session = { id: string; scope: string[]; container: string; state: TerminalState; message: string; generation: number };
 const maxConnections = 20;
 const maxSessions = 20;
 const cellId = (scope: string[]) => JSON.stringify(scope);
 const sessionId = (scope: string[], container: string) => JSON.stringify([...scope, container]);
-const unavailableStates = new Set(["Stopped", "Stopping", "Exited", "Deleted"]);
+const unavailableStates = new Set(["Stopped", "Stopping", "Exited", "Deleted", "Failed", "Error", "Pending", "Unknown"]);
 const terminalTheme = {
   background: "#000000", foreground: "#ffffff", cursor: "#ffffff", cursorAccent: "#000000", selectionBackground: "#4d4d4d",
   black: "#000000", red: "#cd0000", green: "#00cd00", yellow: "#cdcd00", blue: "#0000ee", magenta: "#cd00cd", cyan: "#00cdcd", white: "#e5e5e5",
@@ -30,6 +30,7 @@ function terminalThemeFor(theme: Theme) {
 export function useTerminalSessions(inventory: InventoryResource) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selection, setSelection] = useState<Record<string, string>>({});
+  const retainedCells = useRef(new Set<string>());
   const select = useCallback((scope: string[], container: string) => {
     setSelection(old => ({ ...old, [cellId(scope)]: container }));
   }, []);
@@ -38,7 +39,7 @@ export function useTerminalSessions(inventory: InventoryResource) {
     setSessions(old => {
       const existing = old.find(item => item.id === id);
       if (existing?.state === "attached" || existing?.state === "connecting") return old;
-      if (old.filter(item => item.state !== "disconnected").length >= maxConnections) return old;
+      if (old.filter(item => item.state === "attached" || item.state === "connecting").length >= maxConnections) return old;
       if (!existing && old.length >= maxSessions) return old;
       if (existing) return old.map(item => item.id === id ? { ...item, generation: item.generation + 1, state: "connecting", message: "Connecting…" } : item);
       return [...old, { id, scope: [...scope], container, state: "connecting", message: "Connecting…", generation: 0 }];
@@ -46,6 +47,14 @@ export function useTerminalSessions(inventory: InventoryResource) {
     select(scope, container);
   }, [select]);
   const detach = useCallback((id: string) => setSessions(old => old.filter(item => item.id !== id)), []);
+  const interruptCell = useCallback((scope: string[], message: string) => {
+    const key = cellId(scope);
+    setSessions(old => old.map(item => cellId(item.scope) === key
+      ? { ...item, generation: item.generation + 1, state: "interrupted", message }
+      : item));
+  }, []);
+  const holdCell = useCallback((scope: string[]) => { retainedCells.current.add(cellId(scope)); }, []);
+  const releaseCell = useCallback((scope: string[]) => { retainedCells.current.delete(cellId(scope)); }, []);
   const update = useCallback((id: string, generation: number, state: TerminalState, message: string) => {
     setSessions(old => old.map(item => item.id === id && item.generation === generation ? { ...item, state, message } : item));
   }, []);
@@ -53,8 +62,14 @@ export function useTerminalSessions(inventory: InventoryResource) {
   // A partial/failed refresh must not discard an attachment whose cell was omitted.
   useEffect(() => {
     if (!inventory.data || inventory.loading || inventory.error || inventory.data.failures.length) return;
-    const live = new Set(inventory.data.rows[3].filter(row => !unavailableStates.has(row.doc.status?.state ?? "")).map(row => cellId(row.scope)));
-    setSessions(old => old.every(item => live.has(cellId(item.scope))) ? old : old.filter(item => live.has(cellId(item.scope))));
+    const states = new Map(inventory.data.rows[3].map(row => [cellId(row.scope), row.doc.status?.state ?? ""]));
+    setSessions(old => old.filter(item => {
+      const key = cellId(item.scope);
+      const state = states.get(key);
+      if (state === undefined) return false;
+      if (retainedCells.current.has(key)) return true;
+      return !unavailableStates.has(state) || item.state === "interrupted";
+    }));
   }, [inventory.data, inventory.loading, inventory.error]);
 
   const cellStates = useMemo(() => {
@@ -65,7 +80,7 @@ export function useTerminalSessions(inventory: InventoryResource) {
     }
     return result;
   }, [sessions]);
-  return { sessions, selection, select, attach, detach, update, cellStates };
+  return { sessions, selection, select, attach, detach, interruptCell, holdCell, releaseCell, update, cellStates };
 }
 
 export type TerminalManager = ReturnType<typeof useTerminalSessions>;
@@ -77,6 +92,7 @@ function TerminalSession({ session, active, expanded, theme, update }: { session
   const socket = useRef<WebSocket | null>(null);
   const fitNow = useRef<() => void>(() => {});
   const activeNow = useRef(active);
+  const wasInterrupted = useRef(false);
   activeNow.current = active;
 
   useEffect(() => {
@@ -127,6 +143,18 @@ function TerminalSession({ session, active, expanded, theme, update }: { session
   }, [theme]);
 
   useEffect(() => {
+    if (session.state === "interrupted") {
+      terminal.current?.reset();
+      terminal.current?.write("\r\nPrevious terminal session ended. Reconnect to attach to the current process.\r\n");
+      wasInterrupted.current = true;
+    } else if (session.state === "connecting" && wasInterrupted.current) {
+      terminal.current?.reset();
+      wasInterrupted.current = false;
+    }
+  }, [session.state, session.generation]);
+
+  useEffect(() => {
+    if (session.state === "disconnected" || session.state === "interrupted") return;
     let connection: WebSocket;
     try {
       connection = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}${apiPath(session.scope)}/containers/${encodeURIComponent(session.container)}/attach`);
@@ -229,11 +257,11 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
   const currentId = scope && selected ? sessionId(scope, selected) : "";
   const current = manager.sessions.find(item => item.id === currentId);
   const selectedEligible = eligible.some(container => container.id === selected);
-  const connections = manager.sessions.filter(item => item.state !== "disconnected").length;
+  const connections = manager.sessions.filter(item => item.state === "attached" || item.state === "connecting").length;
   const cellState = inventory.data?.rows[3].find(row => cellId(row.scope) === key)?.doc.status?.state;
   const unavailable = cellState && unavailableStates.has(cellState);
   const atLimit = !current && (connections >= maxConnections || manager.sessions.length >= maxSessions);
-  const reconnectLimited = current?.state === "disconnected" && connections >= maxConnections;
+  const reconnectLimited = (current?.state === "disconnected" || current?.state === "interrupted") && connections >= maxConnections;
   useEffect(() => { setSkipAutoAttachFor(""); }, [key]);
   useEffect(() => {
     if (!scope || containers.loading || containers.error || !selected || !selectedEligible || unavailable || atLimit || current || skipAutoAttachFor === currentId) return;
