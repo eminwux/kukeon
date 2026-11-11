@@ -54,6 +54,16 @@ type ReconcileOutcome struct {
 	Vanished bool
 }
 
+// PurgeCellOutcome reports the resources that cell purge confirmed removed.
+// A false field means that cleanup was not confirmed; callers must not present
+// the purge as complete when any requested cleanup step failed.
+type PurgeCellOutcome struct {
+	ContainersDeleted bool
+	CgroupDeleted     bool
+	MetadataDeleted   bool
+	Purged            []string
+}
+
 type Runner interface {
 	BootstrapCNI(cfgDir, cacheDir, binDir string) (cni.BootstrapReport, error)
 	EnsureKukeonRootCgroup() (existsPre bool, created bool, err error)
@@ -238,7 +248,7 @@ type Runner interface {
 	PurgeRealm(realm intmodel.Realm) (namespaceRemoved bool, err error)
 	PurgeSpace(space intmodel.Space) error
 	PurgeStack(stack intmodel.Stack) error
-	PurgeCell(cell intmodel.Cell) error
+	PurgeCell(cell intmodel.Cell) (PurgeCellOutcome, error)
 	PurgeContainer(realm intmodel.Realm, containerID string) error
 
 	RefreshRealm(realm intmodel.Realm) (intmodel.Realm, bool, error)

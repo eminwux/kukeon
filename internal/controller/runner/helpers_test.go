@@ -291,14 +291,15 @@ func TestPurgeCNIForContainer_RemovesOnlyMatchingIPAMFile(t *testing.T) {
 		ctx:    context.Background(),
 		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		// Empty conf dir makes findCNIConfigPath miss, so the CNI DEL block
-		// (which needs a real plugin chain) is skipped; the cache dir points
-		// at an empty temp dir so the cache scan finds nothing on the host.
+		// (which needs a real plugin chain) is skipped and must be reported; the
+		// cache dir points at an empty temp dir so the cache scan finds nothing.
 		cniConf: &cni.Conf{CniConfigDir: tmp, CniBinDir: tmp, CniCacheDir: tmp},
 	}
 
 	// Empty netnsPath: the dead/absent-task purge path the teardown sites hit.
-	if err := r.purgeCNIForContainer(containerID, "", networkName); err != nil {
-		t.Fatalf("purgeCNIForContainer returned error: %v", err)
+	if err := r.purgeCNIForContainer(containerID, "", networkName); err == nil ||
+		!strings.Contains(err.Error(), "cni-del-skipped:config-not-found") {
+		t.Fatalf("purgeCNIForContainer error = %v, want skipped CNI DEL", err)
 	}
 
 	entries, err := os.ReadDir(ipamDir)
@@ -524,8 +525,12 @@ func TestPurgeCNIForContainer_SurfacesSkippedDEL(t *testing.T) {
 		cniConf: &cni.Conf{CniConfigDir: emptyDir, CniBinDir: emptyDir, CniCacheDir: emptyDir},
 	}
 
-	if err := r.purgeCNIForContainer("cid-100", "", "default-myspace"); err != nil {
-		t.Fatalf("purgeCNIForContainer returned error: %v", err)
+	err := r.purgeCNIForContainer("cid-100", "", "default-myspace")
+	if err == nil {
+		t.Fatal("purgeCNIForContainer returned nil after skipping CNI DEL")
+	}
+	if !strings.Contains(err.Error(), "cni-del-skipped:config-not-found") {
+		t.Fatalf("purgeCNIForContainer error = %v, want skipped DEL marker", err)
 	}
 
 	logged := logBuf.String()

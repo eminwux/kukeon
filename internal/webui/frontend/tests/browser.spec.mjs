@@ -792,6 +792,28 @@ test("kill and purge require explicit confirmation and pass only selected purge 
   expect(submitted).toEqual([{ force: true, cascade: true }]);
 });
 
+test("partial purge reports incomplete cleanup instead of success", async ({ page }) => {
+  await mock(page, (path, request) => {
+    if (request.method() !== "POST" || !path.endsWith("/purge")) return undefined;
+    return { json: {
+      action: "purge", purgeSucceeded: false, metadataDeleted: false,
+      cgroupDeleted: true, containersDeleted: true,
+      deleted: ["containers", "cgroup"],
+      purged: ["cni-resources-incomplete", "purge-error:CNI DEL failed"],
+    } };
+  });
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  await page.getByText("Advanced actions", { exact: true }).click();
+  await page.getByRole("button", { name: "Purge cell…" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Type the full target above to enable Purge").fill("dev / shared / services / api");
+  await dialog.getByRole("button", { name: "Confirm Purge" }).click();
+  const feedback = page.locator(".cell-lifecycle-feedback");
+  await expect(feedback).toContainText("Purge incomplete.");
+  await expect(feedback).not.toContainText("Cell purged.");
+  await expect(feedback).toContainText("cni-resources-incomplete");
+});
+
 test("confirmed deletion closes only that cell terminal and removes only that cell", async ({ page }) => {
   let deletedDev = false;
   const openSockets = new Set();

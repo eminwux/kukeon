@@ -45,6 +45,7 @@ import (
 // It always attempts cleanup even if the container is already deleted or network namespace is invalid.
 func (r *Exec) purgeCNIForContainer(containerID, netnsPath, networkName string) error {
 	var purged []string
+	var cleanupErrors []error
 
 	// Never run the plugin-chain DEL against the daemon's own netns (issue
 	// #1219); the IPAM-file purge below is unaffected and still releases the
@@ -57,7 +58,11 @@ func (r *Exec) purgeCNIForContainer(containerID, netnsPath, networkName string) 
 	// so runCNIDel surfaces each failure mode above Debug and records its outcome
 	// in the purge result rather than reporting a clean purge (issue #1324).
 	if networkName != "" {
-		purged = append(purged, r.runCNIDel(containerID, netnsPath, networkName))
+		marker := r.runCNIDel(containerID, netnsPath, networkName)
+		purged = append(purged, marker)
+		if marker != "cni-del" {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("CNI DEL for container %q: %s", containerID, marker))
+		}
 		// Belt-and-suspenders: the plugin-chain DEL above only tears down the
 		// bridge plugin's per-container masquerade chain when it runs with a
 		// LIVE netns. On the purge path the container task is already gone, so
@@ -82,6 +87,7 @@ func (r *Exec) purgeCNIForContainer(containerID, netnsPath, networkName string) 
 			r.logger.DebugContext(r.ctx, "removed IPAM allocation", "container", containerID, "file", ipamFile)
 		} else if !errors.Is(err, os.ErrNotExist) {
 			r.logger.DebugContext(r.ctx, "failed to remove IPAM allocation file", "container", containerID, "file", ipamFile, "error", err)
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("remove IPAM allocation for container %q: %w", containerID, err))
 		}
 
 		// Also scan network directory for files that might contain this container ID
@@ -111,10 +117,15 @@ func (r *Exec) purgeCNIForContainer(containerID, netnsPath, networkName string) 
 							)
 						} else if !errors.Is(removeErr, os.ErrNotExist) {
 							r.logger.DebugContext(r.ctx, "failed to remove IPAM allocation file", "container", containerID, "file", filePath, "error", removeErr)
+							cleanupErrors = append(cleanupErrors, fmt.Errorf("remove IPAM file %q for container %q: %w", filePath, containerID, removeErr))
 						}
 					}
+				} else if !errors.Is(readErr, os.ErrNotExist) {
+					cleanupErrors = append(cleanupErrors, fmt.Errorf("read IPAM file %q while purging container %q: %w", filePath, containerID, readErr))
 				}
 			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("read IPAM directory %q while purging container %q: %w", ipamDir, containerID, err))
 		}
 	}
 
@@ -138,14 +149,20 @@ func (r *Exec) purgeCNIForContainer(containerID, netnsPath, networkName string) 
 
 		for _, pattern := range patterns {
 			matches, err := filepath.Glob(filepath.Join(cacheDir, pattern))
-			if err == nil {
-				for _, match := range matches {
-					if err = os.Remove(match); err == nil {
-						purged = append(purged, fmt.Sprintf("cache-entry:%s", filepath.Base(match)))
-						r.logger.DebugContext(r.ctx, "removed CNI cache entry", "container", containerID, "file", match)
-					} else if !errors.Is(err, os.ErrNotExist) {
-						r.logger.WarnContext(r.ctx, "failed to remove CNI cache entry", "container", containerID, "file", match, "error", err)
-					}
+			if err != nil {
+				cleanupErrors = append(
+					cleanupErrors,
+					fmt.Errorf("find CNI cache entries for container %q: %w", containerID, err),
+				)
+				continue
+			}
+			for _, match := range matches {
+				if err = os.Remove(match); err == nil {
+					purged = append(purged, fmt.Sprintf("cache-entry:%s", filepath.Base(match)))
+					r.logger.DebugContext(r.ctx, "removed CNI cache entry", "container", containerID, "file", match)
+				} else if !errors.Is(err, os.ErrNotExist) {
+					r.logger.WarnContext(r.ctx, "failed to remove CNI cache entry", "container", containerID, "file", match, "error", err)
+					cleanupErrors = append(cleanupErrors, fmt.Errorf("remove CNI cache entry %q for container %q: %w", match, containerID, err))
 				}
 			}
 		}
@@ -155,7 +172,7 @@ func (r *Exec) purgeCNIForContainer(containerID, netnsPath, networkName string) 
 		r.logger.InfoContext(r.ctx, "purged CNI resources for container", "container", containerID, "purged", purged)
 	}
 
-	return nil
+	return errors.Join(cleanupErrors...)
 }
 
 // runCNIDel runs the plugin-chain CNI DEL for a single container and returns a

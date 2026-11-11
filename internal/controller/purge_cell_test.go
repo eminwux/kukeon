@@ -20,9 +20,11 @@ package controller_test
 
 import (
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/controller"
+	"github.com/eminwux/kukeon/internal/controller/runner"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
@@ -65,8 +67,12 @@ func TestPurgeCell_SuccessfulPurge(t *testing.T) {
 					return nil
 				}
 				// Mock comprehensive purge
-				f.PurgeCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.PurgeCellFn = func(_ intmodel.Cell) (runner.PurgeCellOutcome, error) {
+					return runner.PurgeCellOutcome{
+						CgroupDeleted:   true,
+						MetadataDeleted: true,
+						Purged:          []string{"cni-resources", "orphaned-containers", "all-metadata"},
+					}, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.PurgeCellResult) {
@@ -135,8 +141,13 @@ func TestPurgeCell_SuccessfulPurge(t *testing.T) {
 				f.DeleteCellFn = func(_ intmodel.Cell) error {
 					return nil
 				}
-				f.PurgeCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.PurgeCellFn = func(_ intmodel.Cell) (runner.PurgeCellOutcome, error) {
+					return runner.PurgeCellOutcome{
+						ContainersDeleted: true,
+						CgroupDeleted:     true,
+						MetadataDeleted:   true,
+						Purged:            []string{"cni-resources", "orphaned-containers", "all-metadata"},
+					}, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.PurgeCellResult) {
@@ -187,8 +198,12 @@ func TestPurgeCell_SuccessfulPurge(t *testing.T) {
 				f.DeleteCellFn = func(_ intmodel.Cell) error {
 					return nil
 				}
-				f.PurgeCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.PurgeCellFn = func(_ intmodel.Cell) (runner.PurgeCellOutcome, error) {
+					return runner.PurgeCellOutcome{
+						CgroupDeleted:   true,
+						MetadataDeleted: true,
+						Purged:          []string{"cni-resources", "orphaned-containers", "all-metadata"},
+					}, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.PurgeCellResult) {
@@ -230,6 +245,48 @@ func TestPurgeCell_SuccessfulPurge(t *testing.T) {
 				tt.wantResult(t, result)
 			}
 		})
+	}
+}
+
+func TestPurgeCell_ReportsPartialCleanupFailure(t *testing.T) {
+	existingCell := buildTestCell("test-cell", "test-realm", "test-space", "test-stack")
+	existingCell.Spec.Containers = []intmodel.ContainerSpec{
+		{ID: "container1", ContainerdID: "test-space_test-stack_test-cell_container1"},
+	}
+	mockRunner := &fakeRunner{
+		GetCellFn: func(_ intmodel.Cell) (intmodel.Cell, error) {
+			return existingCell, nil
+		},
+		PurgeCellFn: func(_ intmodel.Cell) (runner.PurgeCellOutcome, error) {
+			return runner.PurgeCellOutcome{
+				ContainersDeleted: true,
+				CgroupDeleted:     true,
+				MetadataDeleted:   false,
+				Purged:            []string{"cni-resources-incomplete", "orphaned-containers"},
+			}, errors.New("CNI DEL failed; metadata removal failed")
+		},
+	}
+	ctrl := setupTestController(t, mockRunner)
+
+	result, err := ctrl.PurgeCell(existingCell, false, false)
+	if err != nil {
+		t.Fatalf("PurgeCell returned an RPC error for a partial cleanup result: %v", err)
+	}
+	if result.PurgeSucceeded {
+		t.Fatal("PurgeSucceeded = true after the runner reported cleanup failures")
+	}
+	if !result.ContainersDeleted || !result.CgroupDeleted || result.MetadataDeleted {
+		t.Fatalf("cleanup flags = containers:%v cgroup:%v metadata:%v, want true/true/false",
+			result.ContainersDeleted, result.CgroupDeleted, result.MetadataDeleted)
+	}
+	if !slices.Contains(result.Purged, "cni-resources-incomplete") {
+		t.Fatalf("Purged = %v, want the incomplete CNI result", result.Purged)
+	}
+	if !slices.Contains(result.Purged, "purge-error:CNI DEL failed; metadata removal failed") {
+		t.Fatalf("Purged = %v, want the cleanup error detail", result.Purged)
+	}
+	if slices.Contains(result.Deleted, "metadata") {
+		t.Fatalf("Deleted = %v, must not claim metadata was removed", result.Deleted)
 	}
 }
 

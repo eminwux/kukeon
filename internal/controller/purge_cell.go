@@ -19,6 +19,7 @@ package controller
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -77,7 +78,6 @@ func (b *Exec) PurgeCell(cell intmodel.Cell, force, cascade bool) (PurgeCellResu
 		return result, err
 	}
 
-	// Initialize result with cell and flags
 	result = PurgeCellResult{
 		Cell:    internalCell,
 		Force:   force,
@@ -86,37 +86,39 @@ func (b *Exec) PurgeCell(cell intmodel.Cell, force, cascade bool) (PurgeCellResu
 		Purged:  []string{},
 	}
 
-	// Track what will be deleted before calling private method
-	if len(internalCell.Spec.Containers) > 0 {
+	// The runner owns deletion and the comprehensive purge so it can report the
+	// final state of each cleanup step instead of inferring success from nil.
+	outcome, purgeErr := b.runner.PurgeCell(internalCell)
+	result.ContainersDeleted = outcome.ContainersDeleted
+	result.CgroupDeleted = outcome.CgroupDeleted
+	result.MetadataDeleted = outcome.MetadataDeleted
+	result.PurgeSucceeded = purgeErr == nil && outcome.CgroupDeleted && outcome.MetadataDeleted &&
+		(len(internalCell.Spec.Containers) == 0 || outcome.ContainersDeleted) &&
+		slices.Contains(outcome.Purged, "cni-resources") &&
+		slices.Contains(outcome.Purged, "orphaned-containers")
+	if len(internalCell.Spec.Containers) > 0 && outcome.ContainersDeleted {
 		result.Deleted = append(result.Deleted, "containers")
 	}
-	result.Deleted = append(result.Deleted, "cgroup", "metadata")
-
-	// Call private cascade method for deletion and purging
-	if err = b.purgeCellCascade(internalCell, force, cascade); err != nil {
-		result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
-		result.PurgeSucceeded = false
-	} else {
-		// Since private method succeeded, assume all deletions succeeded
-		result.ContainersDeleted = len(internalCell.Spec.Containers) > 0
-		result.CgroupDeleted = true
-		result.MetadataDeleted = true
-		result.Purged = append(result.Purged, "cni-resources", "orphaned-containers", "all-metadata")
-		result.PurgeSucceeded = true
+	if outcome.CgroupDeleted {
+		result.Deleted = append(result.Deleted, "cgroup")
+	}
+	if outcome.MetadataDeleted {
+		result.Deleted = append(result.Deleted, "metadata")
+	}
+	result.Purged = append(result.Purged, outcome.Purged...)
+	if purgeErr != nil {
+		result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", purgeErr))
 	}
 
 	return result, nil
 }
 
-// purgeCellCascade handles cell deletion and purging logic using runner methods directly.
-// It returns an error if deletion/purging fails, but does not return result types.
-// Note: cascade parameter is accepted for consistency but not used (cells are leaf resources).
+// purgeCellCascade is used by parent-resource purges, which need an error-only
+// result to stop the cascade when a child cell could not be fully cleaned up.
 func (b *Exec) purgeCellCascade(cell intmodel.Cell, _, _ bool) error {
-	// Perform standard delete first (using deleteCellInternal)
 	if err := b.deleteCellInternal(cell); err != nil {
 		return fmt.Errorf("failed to delete cell: %w", err)
 	}
-
-	// Perform comprehensive purge via runner
-	return b.runner.PurgeCell(cell)
+	_, err := b.runner.PurgeCell(cell)
+	return err
 }
