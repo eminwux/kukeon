@@ -21,9 +21,13 @@ headers expand and collapse. The sidebar initially shows 25 groups and 100 cells
 per group, with controls to reveal more. The selected key and collapsed groups are stored only in
 this browser. If inventory becomes unavailable, retained cells are marked stale.
 
-**New Cell** opens Administration → Configs, where the existing config-based
-preview and creation form remains available. Creation leaves the cell stopped
-and refreshes the sidebar inventory. Switching cells preserves each cell's
+**New Cell** opens a guided workflow with **From Config** and **Manual** methods.
+Config creation uses the selected CellConfig and its referenced Blueprint;
+manual creation exposes Cell and Container authorable fields in Basic and
+Advanced sections. Both methods preview and validate before creation. Cells are
+created stopped and appear in the sidebar immediately. Starting after creation
+is an explicit opt-in; when an attachable workload is present, the Workspace
+attaches after it becomes ready. Switching cells preserves each cell's
 terminal tab and attachment up to the connection limit; it does not stop a
 workload. A lost browser connection does not guarantee that process or terminal
 state can be restored.
@@ -117,8 +121,12 @@ to retrieve all fields supported by the daemon's detail API. Volume overviews
 show the returned reclaim policy. Secret views display metadata only; secret
 `spec.data` is cleared before HTTP serialization in both lists and details.
 
-Config overviews show their explicit blueprint reference, including cross-realm
-references. Explicit `secretRef` and `volumeRef` entries in supported documents
+Config overviews link to their referenced Blueprint and list Cells whose stored
+provenance points to that exact scoped Config. Blueprint overviews list
+referencing Configs and their Cells through Config lineage. Relationship lists
+use full scope and daemon-reported state; incomplete inventory and failed lookups
+remain visible instead of presenting partial data as empty. Explicit `secretRef`
+and `volumeRef` entries in supported documents
 link to their full target scopes. Each reference reports checking, available,
 missing, or retrieval-failed state. Template references are identified as such.
 Bare volume sources are displayed without guessing which scope the daemon will
@@ -202,24 +210,48 @@ non-secret cell scope and scope gaps return `invalid_request` (400). Names and
 query values must be URL-encoded. Missing resources return `not_found` (404).
 Secret responses never include `spec.data`.
 
-### Create a cell from a config
+### Create a Cell
 
-Open a config overview and choose **Create cell from config**. Enter an explicit
-cell name, optional `KEY=VALUE` environment overrides, and the optional disk
-pressure bypass. Review the materialized document before confirming. The target
-scope comes from the config (missing space/stack use `default`), matching
-`kuke create cell --from-config`; the target stack must already exist.
-Creation uses the daemon's `MaterializeCell`, leaving the cell stopped.
-Existing names are rejected. If inputs or the config change after preview,
-preview again. A failed or disconnected creation can have reached the daemon;
-refresh the Cells list before retrying.
+Choose **New Cell** in Workspace or Administration to open the global creation
+workflow. **From Config** offers a searchable, fully scoped CellConfig selector,
+shows its Blueprint and target Realm/Space/Stack, and preserves environment
+overrides and the disk-pressure option. The Cell name is optional. When omitted,
+the server asks Kukeon's existing naming allocator for the preview name and
+reuses that exact reviewed name on create. It uses Kukeon's shared Config and
+Blueprint materialization code, then asks the daemon to persist the result.
+Existing name conflicts are returned as conflicts; after an
+unavailable or timed-out create, refresh the inventory before retrying because
+the outcome may be unknown.
+
+**Manual** provides structured Basic and Advanced sections for Cell metadata,
+Cell runtime settings, and workload containers. It includes current authorable
+Container fields: command, arguments, working directory, environment, ports,
+mounts, networks, restart policy and limits, TTY/attachable settings,
+repositories, secret references, Git identity/signing, resource limits, security,
+devices, namespaces, and cgroup settings. Daemon-owned IDs, lineage, runtime
+status, and generated fields are not editable. The daemon validates preview and
+create requests. If no root container is explicitly specified, Kukeon adds its
+default root during creation; the web server does not insert or mark a workload
+container as root. The Cell document returned by Kukeon is available in the
+Workspace success notice and includes the daemon's final specification.
+
+Both methods call the existing daemon `MaterializeCell` operation, leave the
+Cell stopped by default, refresh and upsert the shared inventory, and open the
+new Cell Workspace. The optional **Start after creation** choice is explicit;
+the Workspace attaches to an eligible attachable workload after startup when one
+is present.
 
 The JSON POST endpoints `/api/cells/from-config/preview` and
-`/api/cells/from-config/create` require the exact same Origin and
-`Content-Type: application/json`. Preview is read only; create re-materializes
-and checks the preview digest before submitting. Neither endpoint reads daemon
-storage directly. Config parameters and secret references remain in the config;
-the form does not accept arbitrary cell documents or template parameter overrides.
+`/api/cells/from-config/create` accept a scoped config reference, optional name,
+environment overrides, and disk-pressure choice. The endpoints require the exact
+same Origin and `Content-Type: application/json`. Preview is read only; create
+checks the preview digest before materializing. The manual endpoints
+`/api/cells/manual/preview` and `/api/cells/manual/create` accept the Cell name,
+target scope, labels, annotations, authorable Cell settings, and Container
+specifications. They use the same origin protections and strict request
+decoding. Unknown fields and daemon-owned Container values are rejected. Both
+endpoint pairs redact environment values and materialization inputs. Neither path
+reads daemon storage directly or introduces an independent resource store.
 
 ### Attach to a terminal
 

@@ -13,8 +13,9 @@ groups are browser preferences, not cell metadata. The sidebar initially shows
 on narrow screens it opens from the menu button and closes after selection.
 
 Workspace shows the selected cell's terminal first, followed by status,
-overview, references, and containers. **New Cell** opens the existing Configs
-list and its config-based creation flow. Terminal sessions belong to the app
+overview, references, and containers. **New Cell** opens a global workflow with
+Config-based and manual specification creation. Both preview before creating a
+stopped Cell; starting is explicit. Terminal sessions belong to the app
 shell: switching cells or container tabs keeps inactive attachments mounted,
 and **Detach** explicitly releases one without stopping the workload. Four
 connections and eight retained terminal surfaces can coexist in one browser tab.
@@ -42,6 +43,12 @@ links to its children. The JSON document appears only after choosing
 scoped list shortcuts, URL state, and browser history preserve the current task.
 Previously bookmarked hierarchy URLs continue to open the resource overview.
 
+Config details show the exact scoped Blueprint reference and Cells whose stored
+provenance points to that Config. Blueprint details show referencing Configs and
+the Cells instantiated through them. Relationship lookup uses scoped references
+and Cell lineage, not generated names; incomplete inventory and failed resource
+reads remain visible as partial or stale results.
+
 ## Data and appearance
 
 Workspace and Administration share one inventory read through the existing
@@ -60,13 +67,7 @@ links, labeled controls, semantic tables, visible focus, and responsive panels
 apply to every screen. The panel shell was inspired by Paperclip's sidebar:
 https://github.com/paperclipai/paperclip/blob/master/ui/src/components/Sidebar.tsx
 
-## Next increments
+## Future work
 
-1. Add lifecycle controls with confirmation, pending states, and explicit
-   partial-failure results.
-2. Consider a paginated daemon inventory API if browser aggregation becomes
-   too costly for large installations.
-
-Verify each increment across keyboard navigation, mobile, both themes, and
-partial/unavailable daemon states. Future actions are not presented as working
-controls before their integration is available.
+Consider a paginated daemon inventory API if browser aggregation becomes too
+costly for large installations.

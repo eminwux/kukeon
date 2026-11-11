@@ -71,6 +71,13 @@ bundle after `make web-ui`. These are development tools, separate from the
 `kuke serve` command, and do not connect to kukeond. Use `make web-ui && make kuke` followed by
 `./kuke serve` to exercise the same-origin API.
 
+The scoped relationship and manual specification schemas have focused Node unit
+tests that do not launch a browser or daemon:
+
+```sh
+node --test internal/webui/frontend/src/relationships.test.mjs internal/webui/frontend/src/creation-schema.test.mjs
+```
+
 ## Go integration and verification
 
 `webui.Assets()` returns a filesystem rooted at `index.html`. The HTTP server
