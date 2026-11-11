@@ -24,8 +24,9 @@ import (
 )
 
 // UpdateContainer updates an existing container within a cell.
-// If the container spec has breaking changes (image, command, args), it will
-// stop, delete, and recreate the container. Otherwise, it updates the container spec in metadata.
+// If an OCI-baked container field changes, it will stop, delete, and recreate
+// the container, then restart it when it was running. Otherwise, it updates
+// the container spec in metadata.
 func (r *Exec) UpdateContainer(cell intmodel.Cell, desiredContainer intmodel.ContainerSpec) (intmodel.Cell, error) {
 	// Get existing cell
 	existing, err := r.GetCell(cell)
@@ -49,8 +50,25 @@ func (r *Exec) UpdateContainer(cell intmodel.Cell, desiredContainer intmodel.Con
 		return r.CreateContainer(cell, desiredContainer)
 	}
 
+	wasRunning := false
 	// Check if container spec has breaking changes
 	if containerSpecChanged(&desiredContainer, actualContainer) {
+		state, stateErr := r.GetContainerState(existing, desiredContainer.ID)
+		if stateErr != nil {
+			return intmodel.Cell{}, fmt.Errorf(
+				"failed to determine container %q state before update: %w",
+				desiredContainer.ID,
+				stateErr,
+			)
+		}
+		if state == intmodel.ContainerStateUnknown {
+			return intmodel.Cell{}, fmt.Errorf(
+				"failed to determine container %q state before update",
+				desiredContainer.ID,
+			)
+		}
+		wasRunning = state == intmodel.ContainerStateReady
+
 		// Breaking change: stop, delete, and recreate
 		if stopErr := r.StopContainer(existing, desiredContainer.ID); stopErr != nil {
 			if isValidationError(stopErr) {
@@ -135,6 +153,18 @@ func (r *Exec) UpdateContainer(cell intmodel.Cell, desiredContainer intmodel.Con
 	// Update metadata
 	if updateErr := r.UpdateCellMetadata(existing); updateErr != nil {
 		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateCellMetadata, updateErr)
+	}
+
+	if wasRunning {
+		started, startErr := r.StartContainer(existing, desiredContainer.ID)
+		if startErr != nil {
+			return intmodel.Cell{}, fmt.Errorf(
+				"failed to start recreated container %q: %w",
+				desiredContainer.ID,
+				startErr,
+			)
+		}
+		return started, nil
 	}
 
 	return existing, nil
