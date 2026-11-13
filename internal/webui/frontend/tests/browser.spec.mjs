@@ -118,6 +118,27 @@ test("expanded terminal keeps its session, resizes, and follows the appearance s
   expect(connections).toBe(1);
 });
 
+test("terminal grid stays inside the padded screen across browser zoom levels", async ({ page }) => {
+  await mock(page, path => path.endsWith("/containers") ? { json: [{ id: "shell", attachable: true }] } : undefined);
+  await page.routeWebSocket("**/attach", socket => { socket.send(JSON.stringify({ type: "ready" })); });
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
+  // Browser zoom shrinks the CSS viewport and raises devicePixelRatio together.
+  const cdp = await page.context().newCDPSession(page);
+  const overflow = () => page.evaluate(() => {
+    const screen = document.querySelector(".terminal-session:not([hidden]) .terminal-screen");
+    const style = getComputedStyle(screen);
+    const box = screen.getBoundingClientRect();
+    const grid = screen.querySelector(".xterm-screen").getBoundingClientRect();
+    return Math.max(grid.right - (box.right - parseFloat(style.paddingRight)), grid.bottom - (box.bottom - parseFloat(style.paddingBottom)));
+  });
+  for (const zoom of [1, 1.1, 1.25, 1.5, 2, 0.8, 0.5]) {
+    await cdp.send("Emulation.setDeviceMetricsOverride", { width: Math.round(1400 / zoom), height: Math.round(900 / zoom), deviceScaleFactor: zoom, mobile: false });
+    await expect.poll(overflow, { message: `zoom ${zoom}` }).toBeLessThanOrEqual(0.5);
+  }
+});
+
 test("Workspace retains independent scoped terminals, focus and resize while switching cells", async ({ page }) => {
   await mock(page, path => path.endsWith("/containers") ? { json: [{ id: "shell", attachable: true }] } : undefined);
   const sockets = new Map();
