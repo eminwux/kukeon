@@ -664,6 +664,7 @@ test("config references navigate across realms and missing targets report errors
   await expect(page.getByRole("region", { name: "Resource references" }).getByRole("alert")).toContainText("Missing reference");
   await page.getByRole("link", { name: "template", exact: true }).click();
   await expect(page).toHaveURL(/#\/blueprints\/library\/template$/);
+  await expect(page.locator(".page-heading h1")).toHaveText("template");
   await expect(page.getByRole("alert")).toContainText("Blueprint is missing");
   missing = false;
   await page.getByRole("button", { name: "Refresh" }).click();

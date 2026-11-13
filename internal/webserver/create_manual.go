@@ -114,15 +114,19 @@ func manualCell(ctx context.Context, c kukeonv1.Client, input manualCellRequest)
 	if err := validateManualCellInput(input); err != nil {
 		return v1beta1.CellDoc{}, err
 	}
-	doc := manualCellDocument(input)
-	// Re-check the coordinates on the document itself: these are the values
-	// that reach the daemon's metadata paths.
-	if !filepath.IsLocal(doc.Metadata.Name) || !safePathSegment(doc.Metadata.Name) ||
-		!filepath.IsLocal(doc.Spec.RealmID) || !safePathSegment(doc.Spec.RealmID) ||
-		!filepath.IsLocal(doc.Spec.SpaceID) || !safePathSegment(doc.Spec.SpaceID) ||
-		!filepath.IsLocal(doc.Spec.StackID) || !safePathSegment(doc.Spec.StackID) {
+	// Check the trimmed coordinates that are copied into the document: these
+	// are the values that reach the daemon's metadata paths.
+	name := strings.TrimSpace(input.Name)
+	realm := strings.TrimSpace(input.Realm)
+	space := strings.TrimSpace(input.Space)
+	stack := strings.TrimSpace(input.Stack)
+	if !filepath.IsLocal(name) || !safePathSegment(name) ||
+		!filepath.IsLocal(realm) || !safePathSegment(realm) ||
+		!filepath.IsLocal(space) || !safePathSegment(space) ||
+		!filepath.IsLocal(stack) || !safePathSegment(stack) {
 		return v1beta1.CellDoc{}, fmt.Errorf("%w: unsafe cell coordinate", errdefs.ErrConfig)
 	}
+	doc := manualCellDocument(input, name, realm, space, stack)
 	canonical, err := apischeme.ConvertCellDocToInternal(doc)
 	if err != nil {
 		return v1beta1.CellDoc{}, fmt.Errorf("%w: %w", errdefs.ErrConfig, err)
@@ -201,8 +205,7 @@ func validateManualCellInput(input manualCellRequest) error {
 	return nil
 }
 
-func manualCellDocument(input manualCellRequest) v1beta1.CellDoc {
-	name := strings.TrimSpace(input.Name)
+func manualCellDocument(input manualCellRequest, name, realm, space, stack string) v1beta1.CellDoc {
 	doc := v1beta1.CellDoc{
 		APIVersion: v1beta1.APIVersionV1Beta1,
 		Kind:       v1beta1.KindCell,
@@ -213,9 +216,9 @@ func manualCellDocument(input manualCellRequest) v1beta1.CellDoc {
 		},
 		Spec: v1beta1.CellSpec{
 			ID:                  name,
-			RealmID:             strings.TrimSpace(input.Realm),
-			SpaceID:             strings.TrimSpace(input.Space),
-			StackID:             strings.TrimSpace(input.Stack),
+			RealmID:             realm,
+			SpaceID:             space,
+			StackID:             stack,
 			RootContainerID:     strings.TrimSpace(input.Spec.RootContainerID),
 			Tty:                 input.Spec.Tty,
 			Containers:          append([]v1beta1.ContainerSpec{}, input.Spec.Containers...),
