@@ -115,6 +115,14 @@ func manualCell(ctx context.Context, c kukeonv1.Client, input manualCellRequest)
 		return v1beta1.CellDoc{}, err
 	}
 	doc := manualCellDocument(input)
+	// Re-check the coordinates on the document itself: these are the values
+	// that reach the daemon's metadata paths.
+	if !filepath.IsLocal(doc.Metadata.Name) || !safePathSegment(doc.Metadata.Name) ||
+		!filepath.IsLocal(doc.Spec.RealmID) || !safePathSegment(doc.Spec.RealmID) ||
+		!filepath.IsLocal(doc.Spec.SpaceID) || !safePathSegment(doc.Spec.SpaceID) ||
+		!filepath.IsLocal(doc.Spec.StackID) || !safePathSegment(doc.Spec.StackID) {
+		return v1beta1.CellDoc{}, fmt.Errorf("%w: unsafe cell coordinate", errdefs.ErrConfig)
+	}
 	canonical, err := apischeme.ConvertCellDocToInternal(doc)
 	if err != nil {
 		return v1beta1.CellDoc{}, fmt.Errorf("%w: %w", errdefs.ErrConfig, err)
