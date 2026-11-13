@@ -38,6 +38,7 @@ export function useResource<T>(path: string | null, revision: number): Resource<
 export function ErrorNotice({ error, kind = "Realm" }: { error: Failure; kind?: string }) {
   const title = error.code === "permission_denied" ? "Permission denied"
     : error.code === "unavailable" ? "Daemon unavailable"
+    : error.code === "daemon_outdated" ? "Daemon outdated"
     : error.code === "not_found" ? `${kind} no longer exists` : "Request failed";
   return <div className="error" role="alert"><strong>{title}</strong><p>{error.message}</p></div>;
 }

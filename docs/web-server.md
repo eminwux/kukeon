@@ -225,8 +225,11 @@ except containers, whose collection returns daemon container specs. No fields
 are filtered from detail documents, and no direct resource-store reads are made.
 
 Errors use `{ "error": { "code": "...", "message": "..." } }`:
-`permission_denied` (403), `not_found` (404), `invalid_request` (400), or
-`unavailable` (503). Requests time out after ten seconds. Responses are not cached.
+`permission_denied` (403), `not_found` (404), `invalid_request` (400),
+`daemon_outdated` (501), or `unavailable` (503). `daemon_outdated` means the
+running kukeond predates the request (for example the `/cgroup` route against a
+daemon built before it); redeploy kukeond with the same build as `kuke`. Requests
+time out after ten seconds. Responses are not cached.
 
 ```sh
 kuke serve --listen 127.0.0.1 --port 5129

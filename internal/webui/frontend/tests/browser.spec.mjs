@@ -948,6 +948,15 @@ test("a missing cgroup reports Cgroup not present, and a failed read uses the er
   await expect(space.getByRole("alert")).toContainText("Permission denied");
 });
 
+test("a daemon without the cgroup RPC reports Daemon outdated, not Daemon unavailable", async ({ page }) => {
+  await mock(page, path => path === "/api/realms/dev/cgroup" ? { status: 501, json: { error: { code: "daemon_outdated", message: "kukeond does not support this request; upgrade kukeond to match the client: KukeonV1.GetCgroupDetail" } } } : undefined);
+  await page.goto(`${server.url}#/resource/dev`);
+  const alert = page.getByRole("region", { name: "realm cgroup" }).getByRole("alert");
+  await expect(alert).toContainText("Daemon outdated");
+  await expect(alert).toContainText("upgrade kukeond");
+  await expect(alert).not.toContainText("Daemon unavailable");
+});
+
 test("cell Overview tab shows the cell cgroup with nested runtime and delegated controllers", async ({ page }) => {
   await mock(page, path => path.endsWith("/cells/api/cgroup") ? { json: { cgroupPath: "/kukeon/dev/shared/services/api", absolutePath: "/sys/fs/cgroup/kukeon/dev/shared/services/api", exists: true, ready: true, nestedCgroupRuntime: true, subtreeControllers: ["cpu", "io", "memory", "pids"], live: { memory: { max: { state: "set", raw: "1073741824", value: 1073741824 } }, io: { state: "set", entries: [] } } } } : undefined);
   await page.goto(`${server.url}#/resource/dev/shared/services/api`);
