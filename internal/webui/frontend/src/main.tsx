@@ -148,16 +148,25 @@ function CellDetailsScreen({ title, scope, revision, inventory, manager, theme, 
 
   useEffect(() => { setActiveTab("terminal"); setTerminalExpanded(false); }, [scopeKey]);
 
-  // The fixed tabbar wraps at narrow or zoomed widths; start the expanded terminal below its real bottom edge.
+  // Stack the fixed tabbar below the toolbar (whose actions sit above it) and the expanded terminal below the
+  // tabbar; both heights change when they wrap at narrow or zoomed widths.
   useLayoutEffect(() => {
     const host = screen.current, bar = tabbar.current;
     if (!terminalExpanded || !host || !bar) return;
-    const place = () => host.style.setProperty("--terminal-expanded-top", `${Math.ceil(bar.getBoundingClientRect().bottom) + 8}px`);
+    const toolbar = host.closest(".workspace")?.querySelector<HTMLElement>(".toolbar");
+    const place = () => {
+      if (toolbar) host.style.setProperty("--terminal-expanded-tabbar-top", `${Math.ceil(toolbar.getBoundingClientRect().bottom) + 8}px`);
+      host.style.setProperty("--terminal-expanded-top", `${Math.ceil(bar.getBoundingClientRect().bottom) + 8}px`);
+    };
     place();
     const observer = new ResizeObserver(place);
     observer.observe(bar);
+    if (toolbar) observer.observe(toolbar);
     window.addEventListener("resize", place);
-    return () => { observer.disconnect(); window.removeEventListener("resize", place); host.style.removeProperty("--terminal-expanded-top"); };
+    return () => {
+      observer.disconnect(); window.removeEventListener("resize", place);
+      host.style.removeProperty("--terminal-expanded-tabbar-top"); host.style.removeProperty("--terminal-expanded-top");
+    };
   }, [terminalExpanded]);
 
   function moveTab(event: ReactKeyboardEvent<HTMLDivElement>) {
