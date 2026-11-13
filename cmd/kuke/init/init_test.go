@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"unsafe"
 
@@ -85,6 +86,9 @@ func printContainerAction(cmd *cobra.Command, label string, existedPre bool, exi
 
 //go:linkname skipLiveCellState github.com/eminwux/kukeon/cmd/kuke/init.skipLiveCellState
 func skipLiveCellState(path string, info os.FileInfo) bool
+
+//go:linkname initSweepSkip github.com/eminwux/kukeon/cmd/kuke/init.initSweepSkip
+func initSweepSkip(runPath string) func(path string, info os.FileInfo) bool
 
 //go:linkname printStartAction github.com/eminwux/kukeon/cmd/kuke/init.printStartAction
 func printStartAction(cmd *cobra.Command, label string, startedPre bool, startedPost bool, started bool)
@@ -1089,4 +1093,163 @@ func TestSkipLiveCellState_PreservesLiveSocketUnderInitSweep(t *testing.T) {
 	} else if got := info.Mode().Perm(); got != 0o640 {
 		t.Errorf("cell metadata mode: got %#o want 0o640 (swept)", got)
 	}
+}
+
+// TestInitSweepSkip_PreservesVolumeStorage builds a RunPath holding volume
+// storage at every scope depth — a volumes/ dir at 0o755, a volume dir at
+// setgid 0o770, and workload files at 0o600/0o644 inside it — then drives the
+// init ownership sweep through initSweepSkip (the predicate
+// applyKukeonOwnership wires into sysuser.ChownTreeAndChmodSkip). It asserts
+// volume storage keeps its modes, contents, and owner while scope metadata is
+// still swept, the regression guard for issue #1415. When run as root the
+// volume dir and files are first handed to a non-root uid, mirroring
+// volumePostCreateChown + a workload writing under its own uid, and the owner
+// is asserted to survive; unprivileged runs check modes and contents only.
+func TestInitSweepSkip_PreservesVolumeStorage(t *testing.T) {
+	runPath := t.TempDir()
+	dataRoot := filepath.Join(runPath, consts.KukeonMetadataSubdir)
+	stackDir := filepath.Join(dataRoot, "default", "default", "default")
+	scopes := []string{
+		filepath.Join(dataRoot, "default"),
+		filepath.Join(dataRoot, "default", "default"),
+		stackDir,
+	}
+
+	const workloadUID = 1000
+	asRoot := os.Geteuid() == 0
+
+	type entry struct {
+		path    string
+		mode    os.FileMode
+		content string
+	}
+	var preserved []entry
+	for _, scope := range scopes {
+		volumesDir := filepath.Join(scope, consts.KukeonVolumesSubdir)
+		volumeDir := filepath.Join(volumesDir, "agents-claude")
+		nestedDir := filepath.Join(volumeDir, "projects")
+		if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+			t.Fatalf("mkdir volume tree: %v", err)
+		}
+		preserved = append(preserved,
+			entry{path: volumesDir, mode: 0o755},
+			entry{path: volumeDir, mode: os.ModeSetgid | 0o770},
+			entry{path: nestedDir, mode: 0o700},
+			entry{path: filepath.Join(volumeDir, ".credentials.json"), mode: 0o600, content: "secret"},
+			entry{path: filepath.Join(volumeDir, "history.jsonl"), mode: 0o644, content: "{}\n"},
+		)
+	}
+	for _, e := range preserved {
+		if e.content == "" {
+			if err := os.Chmod(e.path, e.mode); err != nil {
+				t.Fatalf("chmod %s: %v", e.path, err)
+			}
+		} else {
+			if err := os.WriteFile(e.path, []byte(e.content), e.mode); err != nil {
+				t.Fatalf("write %s: %v", e.path, err)
+			}
+			if err := os.Chmod(e.path, e.mode); err != nil {
+				t.Fatalf("chmod %s: %v", e.path, err)
+			}
+		}
+		if asRoot && filepath.Base(e.path) != consts.KukeonVolumesSubdir {
+			if err := os.Lchown(e.path, workloadUID, -1); err != nil {
+				t.Fatalf("chown %s: %v", e.path, err)
+			}
+		}
+	}
+	// A daemon metadata file the sweep SHOULD touch (stack metadata.json).
+	stackMeta := filepath.Join(stackDir, consts.KukeonMetadataFile)
+	if err := os.WriteFile(stackMeta, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("write stack metadata: %v", err)
+	}
+
+	const (
+		dirMode  = os.ModeSetgid | os.FileMode(0o750)
+		fileMode = os.FileMode(0o640)
+	)
+	uid, gid := os.Getuid(), os.Getgid()
+	if err := sysuser.ChownTreeAndChmodSkip(
+		runPath, uid, gid, dirMode, fileMode, initSweepSkip(runPath),
+	); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+
+	for _, e := range preserved {
+		info, err := os.Lstat(e.path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", e.path, err)
+		}
+		got := info.Mode() & (os.ModePerm | os.ModeSetgid)
+		want := e.mode & (os.ModePerm | os.ModeSetgid)
+		if got != want {
+			t.Errorf("%s mode: got %#o want %#o (untouched by sweep)", e.path, got, want)
+		}
+		if e.content != "" {
+			data, readErr := os.ReadFile(e.path)
+			if readErr != nil {
+				t.Fatalf("read %s: %v", e.path, readErr)
+			}
+			if string(data) != e.content {
+				t.Errorf("%s content: got %q want %q", e.path, data, e.content)
+			}
+		}
+		if asRoot && filepath.Base(e.path) != consts.KukeonVolumesSubdir {
+			if owner := ownerUID(t, info); owner != workloadUID {
+				t.Errorf("%s owner: got uid %d want %d (untouched by sweep)", e.path, owner, workloadUID)
+			}
+		}
+	}
+	// Scope metadata outside volumes/: still swept to the file mode.
+	if info, err := os.Stat(stackMeta); err != nil {
+		t.Fatalf("stat stack metadata: %v", err)
+	} else if got := info.Mode().Perm(); got != 0o640 {
+		t.Errorf("stack metadata mode: got %#o want 0o640 (swept)", got)
+	}
+}
+
+// TestInitSweepSkip_SweepsNonScopeVolumesDir pins the structural match: a
+// directory named "volumes" outside a realm/space/stack scope position (here a
+// RunPath sibling of the metadata tree, and one nested inside a cell) is not
+// volume storage and is still swept.
+func TestInitSweepSkip_SweepsNonScopeVolumesDir(t *testing.T) {
+	runPath := t.TempDir()
+	outside := filepath.Join(runPath, consts.KukeonVolumesSubdir)
+	inCell := filepath.Join(
+		runPath, consts.KukeonMetadataSubdir,
+		"default", "default", "default", "cell", consts.KukeonVolumesSubdir,
+	)
+	for _, dir := range []string{outside, inCell} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+		if err := os.Chmod(dir, 0o755); err != nil {
+			t.Fatalf("chmod %s: %v", dir, err)
+		}
+	}
+
+	dirMode := os.ModeSetgid | os.FileMode(0o750)
+	if err := sysuser.ChownTreeAndChmodSkip(
+		runPath, os.Getuid(), os.Getgid(), dirMode, 0o640, initSweepSkip(runPath),
+	); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	for _, dir := range []string{outside, inCell} {
+		info, err := os.Stat(dir)
+		if err != nil {
+			t.Fatalf("stat %s: %v", dir, err)
+		}
+		if got := info.Mode().Perm(); got != 0o750 {
+			t.Errorf("%s mode: got %#o want 0o750 (swept)", dir, got)
+		}
+	}
+}
+
+func ownerUID(t *testing.T, info os.FileInfo) int {
+	t.Helper()
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		t.Fatalf("no syscall.Stat_t for %s", info.Name())
+	}
+	return int(st.Uid)
 }
