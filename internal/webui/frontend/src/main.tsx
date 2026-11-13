@@ -1,4 +1,4 @@
-import { StrictMode, Suspense, lazy, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { StrictMode, Suspense, lazy, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
 import { useResource, ErrorNotice, type Resource } from "./request";
@@ -136,6 +136,8 @@ function CellDetailsScreen({ title, scope, revision, inventory, manager, theme, 
   const [terminalExpanded, setTerminalExpanded] = useState(false);
   const [terminalToolsHost, setTerminalToolsHost] = useState<HTMLDivElement | null>(null);
   const tablist = useRef<HTMLDivElement>(null);
+  const screen = useRef<HTMLDivElement>(null);
+  const tabbar = useRef<HTMLDivElement>(null);
   const scopeKey = JSON.stringify(scope ?? []);
   const detail = useResource<Doc>(scope ? apiPath(scope) : null, revision);
   const containers = useResource<{ id: string; attachable?: boolean; root?: boolean }[]>(scope ? `${apiPath(scope)}/containers` : null, revision);
@@ -145,6 +147,18 @@ function CellDetailsScreen({ title, scope, revision, inventory, manager, theme, 
   const status = detail.data && <StatusSummary status={detail.data.status} kind="cell" />;
 
   useEffect(() => { setActiveTab("terminal"); setTerminalExpanded(false); }, [scopeKey]);
+
+  // The fixed tabbar wraps at narrow or zoomed widths; start the expanded terminal below its real bottom edge.
+  useLayoutEffect(() => {
+    const host = screen.current, bar = tabbar.current;
+    if (!terminalExpanded || !host || !bar) return;
+    const place = () => host.style.setProperty("--terminal-expanded-top", `${Math.ceil(bar.getBoundingClientRect().bottom) + 8}px`);
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(bar);
+    window.addEventListener("resize", place);
+    return () => { observer.disconnect(); window.removeEventListener("resize", place); host.style.removeProperty("--terminal-expanded-top"); };
+  }, [terminalExpanded]);
 
   function moveTab(event: ReactKeyboardEvent<HTMLDivElement>) {
     const index = cellTabs.findIndex(tab => tab.id === activeTab);
@@ -179,7 +193,7 @@ function CellDetailsScreen({ title, scope, revision, inventory, manager, theme, 
     </div>
   </section>;
 
-  return <div className="cell-detail-screen" hidden={!scope}>
+  return <div className="cell-detail-screen" ref={screen} hidden={!scope}>
     {scope && <div className="page-heading cell-page-heading">
       <div className="cell-page-title-row">
         <h1>{title}</h1>
@@ -190,7 +204,7 @@ function CellDetailsScreen({ title, scope, revision, inventory, manager, theme, 
     {detail.loading && scope && <p role="status">Loading cell details…</p>}
     {detail.error && <ErrorNotice error={detail.error} kind="Cell" />}
     {detail.error && detail.data && <p className="stale">Stale resource details — refresh failed.</p>}
-    <div className={`cell-detail-tabbar${terminalExpanded ? " is-terminal-expanded" : ""}`}>
+    <div ref={tabbar} className={`cell-detail-tabbar${terminalExpanded ? " is-terminal-expanded" : ""}`}>
       <div className="cell-detail-tabs" role="tablist" aria-label="Cell details" ref={tablist} onKeyDown={moveTab}>
         {cellTabs.map(tab => <button key={tab.id} id={`cell-tab-${tab.id}`} role="tab" type="button" aria-selected={activeTab === tab.id} aria-controls={`cell-panel-${tab.id}`} tabIndex={activeTab === tab.id ? 0 : -1} onClick={() => setActiveTab(tab.id)}>{tab.label}</button>)}
       </div>

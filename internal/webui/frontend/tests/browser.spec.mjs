@@ -139,6 +139,24 @@ test("terminal grid stays inside the padded screen across browser zoom levels", 
   }
 });
 
+test("expanded terminal starts below a wrapped terminal tabbar", async ({ page }) => {
+  await mock(page, path => path.endsWith("/containers") ? { json: [{ id: "shell", attachable: true }] } : undefined);
+  await page.routeWebSocket("**/attach", socket => { socket.send(JSON.stringify({ type: "ready" })); });
+  // 933px is a 1400px window at 150% zoom: the expanded tabbar wraps its terminal controls onto a second row.
+  await page.setViewportSize({ width: 933, height: 600 });
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
+  await terminalTools(page).getByRole("button", { name: "Expand terminal" }).click();
+  const panel = page.getByRole("region", { name: "Terminal workspace" });
+  await expect(panel).toHaveClass(/is-expanded/);
+  const tabbar = page.locator(".cell-detail-tabbar");
+  await expect.poll(async () => (await panel.boundingBox()).y - ((await tabbar.boundingBox()).y + (await tabbar.boundingBox()).height)).toBeGreaterThanOrEqual(0);
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await expect.poll(async () => (await panel.boundingBox()).y - ((await tabbar.boundingBox()).y + (await tabbar.boundingBox()).height)).toBeGreaterThanOrEqual(0);
+  await terminalTools(page).getByRole("button", { name: "Collapse terminal" }).click();
+  await expect(page.locator(".cell-detail-screen")).not.toHaveAttribute("style", /--terminal-expanded-top/);
+});
+
 test("Workspace retains independent scoped terminals, focus and resize while switching cells", async ({ page }) => {
   await mock(page, path => path.endsWith("/containers") ? { json: [{ id: "shell", attachable: true }] } : undefined);
   const sockets = new Map();

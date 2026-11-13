@@ -155,7 +155,7 @@ button:disabled { cursor: default; opacity: .4; }
 .terminal-workspace[hidden], .terminal-session[hidden] { display: none; }
 .terminal-tool-status { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .terminal-tool-status button { font-size: 11px; white-space: nowrap; }
-.terminal-workspace.is-expanded { position: fixed; inset: 64px 12px 12px 276px; z-index: 4; display: flex; flex-direction: column; height: auto; margin: 0; box-shadow: 0 16px 48px #0004; }
+.terminal-workspace.is-expanded { position: fixed; inset: var(--terminal-expanded-top, 64px) 12px 12px 276px; z-index: 4; display: flex; flex-direction: column; height: auto; margin: 0; box-shadow: 0 16px 48px #0004; }
 .terminal-workspace.is-expanded .terminal-screens { display: flex; flex: 1; flex-direction: column; min-height: 0; }
 .terminal-workspace.is-expanded .terminal-session:not([hidden]) { display: flex; flex: 1; min-height: 0; }
 .terminal-workspace.is-expanded .terminal-screen { height: 100%; min-height: 0; flex: 1; }
@@ -317,7 +317,7 @@ button:disabled { cursor: default; opacity: .4; }
   .cell-terminal-tools .terminal-connection-state { max-width: 34vw; }
   .cell-terminal-panel > #cell-terminal { height: clamp(360px, 70dvh, 760px); }
   .cell-detail-tabbar.is-terminal-expanded { top: 72px; right: 8px; left: 8px; }
-  .terminal-workspace.is-expanded { inset: 164px 8px 8px; }
+  .terminal-workspace.is-expanded { inset: var(--terminal-expanded-top, 164px) 8px 8px; }
   .toolbar-areas { display: flex !important; gap: 8px; font-size: 11px !important; }
   .toolbar-areas a[aria-current="page"] { color: var(--accent); font-weight: 600; }
   .toolbar-connectivity { display: flex; align-items: center; }
