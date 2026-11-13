@@ -85,3 +85,9 @@ func (b *Exec) GetRealm(realm intmodel.Realm) (GetRealmResult, error) {
 func (b *Exec) ListRealms() ([]intmodel.Realm, error) {
 	return b.runner.ListRealms()
 }
+
+// CgroupMountpoint returns the cgroup v2 mountpoint that every
+// status.cgroupPath is relative to (issue #1410).
+func (b *Exec) CgroupMountpoint() (string, error) {
+	return b.runner.CgroupMountpoint()
+}

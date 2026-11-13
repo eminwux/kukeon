@@ -8,6 +8,7 @@ import { CellSidebar } from "./cell-sidebar";
 import { useInventory, type Inventory, type InventoryResource, type Doc, type RuntimeStatus } from "./inventory";
 import { apiPath, catalogTitles, kinds, titles, readRoute, resourceLink, listLink, newCellLink, workspaceLink, type Route } from "./routes";
 import { StateBadge } from "./status";
+import { CgroupPanel } from "./cgroup";
 import { CellLifecycleControls, LifecycleNotice, type LifecycleAction, type LifecycleFeedback, type PurgeOptions } from "./lifecycle";
 import { cellRemovalConfirmed, deleteOperationComplete, purgeOperationComplete, requestedPurgeOptions } from "./lifecycle-policy.js";
 
@@ -88,6 +89,7 @@ function ResourceDetails({ route, revision }: { route: Route; revision: number }
     {overview}
     {related}
     {containerPanel}
+    {detail.data && !route.document && <CgroupPanel scope={route.scope} revision={revision} />}
   </>;
 }
 
@@ -197,7 +199,7 @@ function CellDetailsScreen({ title, scope, revision, inventory, manager, theme, 
     <section className="cell-tab-panel cell-terminal-panel" id="cell-panel-terminal" role="tabpanel" aria-labelledby="cell-tab-terminal" tabIndex={0} hidden={activeTab !== "terminal"}>
       <TerminalWorkspace scope={scope} revision={revision} inventory={inventory} manager={manager} theme={theme} visible={activeTab === "terminal" && !!scope} controlsHost={terminalToolsHost} onExpandedChange={setTerminalExpanded} />
     </section>
-    <section className="cell-tab-panel cell-overview-content" id="cell-panel-overview" role="tabpanel" aria-labelledby="cell-tab-overview" tabIndex={0} hidden={activeTab !== "overview"}>{overview}{status}{containerPanel}</section>
+    <section className="cell-tab-panel cell-overview-content" id="cell-panel-overview" role="tabpanel" aria-labelledby="cell-tab-overview" tabIndex={0} hidden={activeTab !== "overview"}>{overview}{status}{containerPanel}{scope && activeTab === "overview" && <CgroupPanel scope={scope} revision={revision} />}</section>
   </div>;
 }
 

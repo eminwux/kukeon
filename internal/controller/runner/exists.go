@@ -194,6 +194,15 @@ func (r *Exec) ExistsCgroup(doc any) (bool, error) {
 	return true, nil
 }
 
+// CgroupMountpoint returns the cgroup v2 mountpoint that every
+// status.cgroupPath is relative to (issue #1410).
+func (r *Exec) CgroupMountpoint() (string, error) {
+	if err := r.ensureClientConnected(); err != nil {
+		return "", fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+	}
+	return r.ctrClient.GetCgroupMountpoint(), nil
+}
+
 // ExistsSpaceCNIConfig checks if the CNI config for a space exists.
 // It returns a bool and an error.
 // The bool is true if the CNI config exists, false otherwise.

@@ -101,6 +101,10 @@ func (FakeClient) GetVolume(context.Context, v1beta1.VolumeDoc) (GetVolumeResult
 	return GetVolumeResult{}, ErrUnexpectedCall
 }
 
+func (FakeClient) GetCgroupDetail(context.Context, CgroupScope) (GetCgroupDetailResult, error) {
+	return GetCgroupDetailResult{}, ErrUnexpectedCall
+}
+
 func (FakeClient) GetConfig(context.Context, v1beta1.CellConfigDoc) (GetConfigResult, error) {
 	return GetConfigResult{}, ErrUnexpectedCall
 }

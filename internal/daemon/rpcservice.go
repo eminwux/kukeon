@@ -174,6 +174,15 @@ func (s *KukeonV1Service) GetVolume(args *kukeonv1.GetVolumeArgs, reply *kukeonv
 	return nil
 }
 
+func (s *KukeonV1Service) GetCgroupDetail(
+	args *kukeonv1.GetCgroupDetailArgs, reply *kukeonv1.GetCgroupDetailReply,
+) error {
+	result, err := s.core.GetCgroupDetail(s.ctx, args.Scope)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
 func (s *KukeonV1Service) GetConfig(args *kukeonv1.GetConfigArgs, reply *kukeonv1.GetConfigReply) error {
 	result, err := s.core.GetConfig(s.ctx, args.Doc)
 	reply.Result = result

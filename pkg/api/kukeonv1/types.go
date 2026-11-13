@@ -915,3 +915,149 @@ type PruneImagesResult struct {
 	LeasesDeleted  int
 	LeasesRetained int
 }
+
+// ---- Cgroup detail (issue #1410) ----
+
+// Cgroup scope kinds accepted by GetCgroupDetail.
+const (
+	CgroupKindRealm     = "realm"
+	CgroupKindSpace     = "space"
+	CgroupKindStack     = "stack"
+	CgroupKindCell      = "cell"
+	CgroupKindContainer = "container"
+)
+
+// CgroupValue states. A value the kernel does not report is never collapsed
+// to 0: an absent interface file is CgroupValueAbsent, a kernel "max" is
+// CgroupValueMax, and a read failure other than "not found" is
+// CgroupValueUnreadable.
+const (
+	CgroupValueSet        = "set"
+	CgroupValueMax        = "max"
+	CgroupValueAbsent     = "absent"
+	CgroupValueUnreadable = "unreadable"
+)
+
+// Declared resource sources for a container's spec.resources fields.
+const (
+	CgroupSourceContainer    = "container"
+	CgroupSourceSpaceDefault = "space-default"
+	CgroupSourceUnset        = "unset"
+)
+
+// CgroupScope names the realm, space, stack, cell or container whose cgroup
+// GetCgroupDetail reads. Kind selects which coordinates are required.
+type CgroupScope struct {
+	Kind      string `json:"kind"`
+	Realm     string `json:"realm"`
+	Space     string `json:"space,omitempty"`
+	Stack     string `json:"stack,omitempty"`
+	Cell      string `json:"cell,omitempty"`
+	Container string `json:"container,omitempty"`
+}
+
+type GetCgroupDetailArgs struct {
+	Scope CgroupScope
+}
+
+type GetCgroupDetailReply struct {
+	Result GetCgroupDetailResult
+	Err    *APIError
+}
+
+// CgroupValue is one cgroup v2 interface value. Raw is the trimmed file (or
+// key) content; Value is set only when State is CgroupValueSet and Raw
+// parses as an integer.
+type CgroupValue struct {
+	State string `json:"state"`
+	Raw   string `json:"raw,omitempty"`
+	Value *int64 `json:"value,omitempty"`
+}
+
+// CgroupList is a whitespace-separated interface file such as
+// cgroup.controllers.
+type CgroupList struct {
+	State  string   `json:"state"`
+	Values []string `json:"values,omitempty"`
+}
+
+// CgroupCPUMax is cpu.max. QuotaMicros is nil when the quota is "max".
+type CgroupCPUMax struct {
+	State        string `json:"state"`
+	Raw          string `json:"raw,omitempty"`
+	QuotaMicros  *int64 `json:"quotaMicros,omitempty"`
+	PeriodMicros *int64 `json:"periodMicros,omitempty"`
+}
+
+// CgroupIOMaxEntry is one device line of io.max.
+type CgroupIOMaxEntry struct {
+	Device string            `json:"device"`
+	Limits map[string]string `json:"limits"`
+}
+
+// CgroupIOMax is io.max. An empty Entries with State CgroupValueSet means the
+// file exists but no device carries a limit.
+type CgroupIOMax struct {
+	State   string             `json:"state"`
+	Entries []CgroupIOMaxEntry `json:"entries,omitempty"`
+}
+
+type CgroupMemory struct {
+	Max     CgroupValue `json:"max"`
+	High    CgroupValue `json:"high"`
+	SwapMax CgroupValue `json:"swapMax"`
+	Current CgroupValue `json:"current"`
+	Peak    CgroupValue `json:"peak"`
+	OOM     CgroupValue `json:"oom"`
+	OOMKill CgroupValue `json:"oomKill"`
+}
+
+type CgroupCPU struct {
+	Max        CgroupCPUMax `json:"max"`
+	Weight     CgroupValue  `json:"weight"`
+	UsageUsec  CgroupValue  `json:"usageUsec"`
+	UserUsec   CgroupValue  `json:"userUsec"`
+	SystemUsec CgroupValue  `json:"systemUsec"`
+}
+
+type CgroupPids struct {
+	Max     CgroupValue `json:"max"`
+	Current CgroupValue `json:"current"`
+}
+
+// CgroupLive carries the point-in-time values kukeond read from the cgroup's
+// interface files.
+type CgroupLive struct {
+	Controllers    CgroupList   `json:"controllers"`
+	SubtreeControl CgroupList   `json:"subtreeControl"`
+	Populated      CgroupValue  `json:"populated"`
+	Memory         CgroupMemory `json:"memory"`
+	CPU            CgroupCPU    `json:"cpu"`
+	Pids           CgroupPids   `json:"pids"`
+	IO             CgroupIOMax  `json:"io"`
+}
+
+// CgroupDeclaredResource is one container spec.resources field and where its
+// value came from.
+type CgroupDeclaredResource struct {
+	Field  string `json:"field"`
+	Value  *int64 `json:"value,omitempty"`
+	Source string `json:"source"`
+}
+
+// GetCgroupDetailResult combines what a resource declares about its cgroup
+// with the live values kukeond read from the hierarchy. Live is nil when the
+// cgroup directory does not exist.
+type GetCgroupDetailResult struct {
+	Scope               CgroupScope              `json:"scope"`
+	CgroupPath          string                   `json:"cgroupPath"`
+	AbsolutePath        string                   `json:"absolutePath"`
+	Exists              bool                     `json:"exists"`
+	Ready               bool                     `json:"ready"`
+	Reason              string                   `json:"reason,omitempty"`
+	SubtreeControllers  []string                 `json:"subtreeControllers,omitempty"`
+	NestedCgroupRuntime *bool                    `json:"nestedCgroupRuntime,omitempty"`
+	HostCgroup          *bool                    `json:"hostCgroup,omitempty"`
+	Declared            []CgroupDeclaredResource `json:"declared,omitempty"`
+	Live                *CgroupLive              `json:"live,omitempty"`
+}
