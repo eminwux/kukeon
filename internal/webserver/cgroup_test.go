@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
@@ -125,6 +126,11 @@ func TestCgroupRoutesErrors(t *testing.T) {
 		{"not found", errdefs.ErrCellNotFound, http.StatusNotFound},
 		{"daemon failure", io.EOF, http.StatusServiceUnavailable},
 		{"permission", errors.Join(errdefs.ErrGetCell, fs.ErrPermission), http.StatusForbidden},
+		{
+			"daemon outdated",
+			fmt.Errorf("%w: KukeonV1.GetCgroupDetail", errdefs.ErrDaemonMethodUnsupported),
+			http.StatusNotImplemented,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

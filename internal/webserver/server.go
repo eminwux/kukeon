@@ -193,6 +193,8 @@ func writeAPIError(w http.ResponseWriter, err error) {
 func apiErrorStatus(err error) (int, string) {
 	status, code := http.StatusServiceUnavailable, "unavailable"
 	switch {
+	case errors.Is(err, errdefs.ErrDaemonMethodUnsupported):
+		status, code = http.StatusNotImplemented, "daemon_outdated"
 	case errors.Is(err, errdefs.ErrCellAlreadyExists):
 		status, code = http.StatusConflict, "already_exists"
 	case errors.Is(err, fs.ErrPermission):

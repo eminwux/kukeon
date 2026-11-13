@@ -24,10 +24,12 @@ import (
 	"net"
 	"net/rpc"
 	"net/rpc/jsonrpc"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/eminwux/kukeon/internal/errdefs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
@@ -129,8 +131,20 @@ func (c *UnixClient) call(ctx context.Context, method string, args, reply any) e
 		_ = c.Close()
 		return ctx.Err()
 	case err := <-errCh:
-		return err
+		return translateCallError(method, err)
 	}
+}
+
+// translateCallError maps net/rpc's "can't find method" server error — the
+// signature of a client newer than the running daemon — to
+// errdefs.ErrDaemonMethodUnsupported so callers can tell version skew apart
+// from a daemon that is down.
+func translateCallError(method string, err error) error {
+	var serverErr rpc.ServerError
+	if errors.As(err, &serverErr) && strings.HasPrefix(string(serverErr), "rpc: can't find ") {
+		return fmt.Errorf("%w: %s (%s)", errdefs.ErrDaemonMethodUnsupported, method, string(serverErr))
+	}
+	return err
 }
 
 // CreateRealm implements Client.

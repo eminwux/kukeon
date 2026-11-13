@@ -17,13 +17,19 @@
 package kukeonv1
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"net"
+	"net/rpc"
+	"net/rpc/jsonrpc"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/eminwux/kukeon/internal/errdefs"
 )
 
 const testSockPath = "/run/kukeon/kukeond.sock"
@@ -96,3 +102,54 @@ func TestWrapDialErrorOtherErrorUnchanged(t *testing.T) {
 		}
 	}
 }
+
+// TestTranslateCallErrorMethodNotFound verifies net/rpc's "can't find method"
+// reply from an older daemon maps to ErrDaemonMethodUnsupported, while other
+// errors pass through unchanged.
+func TestTranslateCallErrorMethodNotFound(t *testing.T) {
+	got := translateCallError(MethodGetCgroupDetail,
+		rpc.ServerError("rpc: can't find method KukeonV1.GetCgroupDetail"))
+	if !errors.Is(got, errdefs.ErrDaemonMethodUnsupported) {
+		t.Fatalf("errors.Is(%v, ErrDaemonMethodUnsupported) = false", got)
+	}
+	if !strings.Contains(got.Error(), MethodGetCgroupDetail) {
+		t.Errorf("method name missing from error: %q", got)
+	}
+	for _, err := range []error{nil, rpc.ErrShutdown, rpc.ServerError("boom")} {
+		if out := translateCallError(MethodGetCgroupDetail, err); !errors.Is(out, err) ||
+			errors.Is(out, errdefs.ErrDaemonMethodUnsupported) {
+			t.Errorf("translateCallError(%v) = %v, want passthrough", err, out)
+		}
+	}
+}
+
+// TestUnixClientOutdatedDaemon drives a real net/rpc JSON server that lacks
+// GetCgroupDetail, reproducing the client-newer-than-daemon skew.
+func TestUnixClientOutdatedDaemon(t *testing.T) {
+	sock := filepath.Join(t.TempDir(), "d.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	srv := rpc.NewServer()
+	if regErr := srv.RegisterName(ServiceName, &oldDaemon{}); regErr != nil {
+		t.Fatal(regErr)
+	}
+	go func() {
+		conn, acceptErr := ln.Accept()
+		if acceptErr == nil {
+			srv.ServeCodec(jsonrpc.NewServerCodec(conn))
+		}
+	}()
+	c := NewUnixClient(sock)
+	defer c.Close()
+	_, err = c.GetCgroupDetail(context.Background(), CgroupScope{Kind: CgroupKindRealm, Realm: "default"})
+	if !errors.Is(err, errdefs.ErrDaemonMethodUnsupported) {
+		t.Fatalf("GetCgroupDetail err = %v, want ErrDaemonMethodUnsupported", err)
+	}
+}
+
+type oldDaemon struct{}
+
+func (*oldDaemon) Ping(_ *struct{}, reply *bool) error { *reply = true; return nil }
