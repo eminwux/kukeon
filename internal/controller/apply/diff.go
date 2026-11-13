@@ -18,6 +18,7 @@ package apply
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
@@ -121,6 +122,16 @@ func DiffRealm(desired, actual intmodel.Realm) DiffResult {
 		result.Details["spec.registryCredentials"] = "registry credentials changed"
 	}
 
+	// CellConfig defaults and realm images are compatible: they only feed the
+	// daemon-side CellConfig render, and dependent cells pick the change up
+	// through the OutOfSync reconciler (#1418).
+	if !scopeDefaultsEqual(desired.Spec.Defaults, actual.Spec.Defaults) {
+		markCompatible(&result, "spec.defaults", "CellConfig defaults changed")
+	}
+	if !realmImagesEqual(desired.Spec.Images, actual.Spec.Images) {
+		markCompatible(&result, "spec.images", "realm images changed")
+	}
+
 	return result
 }
 
@@ -191,6 +202,10 @@ func DiffSpace(desired, actual intmodel.Space) DiffResult {
 		result.Details["spec.defaults.container"] = "container defaults changed"
 	}
 
+	if !scopeDefaultsEqual(spaceDefaultsFill(desired.Spec.Defaults), spaceDefaultsFill(actual.Spec.Defaults)) {
+		markCompatible(&result, "spec.defaults", "CellConfig defaults changed")
+	}
+
 	return result
 }
 
@@ -254,6 +269,10 @@ func DiffStack(desired, actual intmodel.Stack) DiffResult {
 		}
 		result.ChangedFields = append(result.ChangedFields, "spec.id")
 		result.Details["spec.id"] = fmt.Sprintf("ID changed from %q to %q", actual.Spec.ID, desired.Spec.ID)
+	}
+
+	if !scopeDefaultsEqual(desired.Spec.Defaults, actual.Spec.Defaults) {
+		markCompatible(&result, "spec.defaults", "CellConfig defaults changed")
 	}
 
 	return result
@@ -1234,4 +1253,53 @@ func findRootContainer(containers []intmodel.ContainerSpec) *intmodel.ContainerS
 // isBreakingChange returns true if the change type is breaking.
 func isBreakingChange(changeType ChangeType) bool {
 	return changeType == ChangeTypeBreaking
+}
+
+// markCompatible records a compatible change on field.
+func markCompatible(result *DiffResult, field, detail string) {
+	result.HasChanges = true
+	if result.ChangeType == ChangeTypeNone {
+		result.ChangeType = ChangeTypeCompatible
+	}
+	result.ChangedFields = append(result.ChangedFields, field)
+	result.Details[field] = detail
+}
+
+// spaceDefaultsFill lifts the CellConfig-fill part of the space defaults into
+// the shared ScopeDefaults shape.
+func spaceDefaultsFill(d *intmodel.SpaceDefaults) *intmodel.ScopeDefaults {
+	if d == nil {
+		return nil
+	}
+	return &intmodel.ScopeDefaults{Values: d.Values, Repos: d.Repos, Secrets: d.Secrets}
+}
+
+// scopeDefaultsEqual compares two CellConfig defaults blocks, treating nil and
+// empty maps as equal.
+func scopeDefaultsEqual(a, b *intmodel.ScopeDefaults) bool {
+	return reflect.DeepEqual(normalizeScopeDefaults(a), normalizeScopeDefaults(b))
+}
+
+func normalizeScopeDefaults(d *intmodel.ScopeDefaults) intmodel.ScopeDefaults {
+	if d == nil {
+		return intmodel.ScopeDefaults{}
+	}
+	out := intmodel.ScopeDefaults{}
+	if len(d.Values) > 0 {
+		out.Values = d.Values
+	}
+	if len(d.Repos) > 0 {
+		out.Repos = d.Repos
+	}
+	if len(d.Secrets) > 0 {
+		out.Secrets = d.Secrets
+	}
+	return out
+}
+
+func realmImagesEqual(a, b []intmodel.RealmImage) bool {
+	if len(a) == 0 && len(b) == 0 {
+		return true
+	}
+	return reflect.DeepEqual(a, b)
 }

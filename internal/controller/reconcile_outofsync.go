@@ -28,6 +28,7 @@ import (
 	"github.com/eminwux/kukeon/internal/controller/runner"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 const (
@@ -103,14 +104,75 @@ func desiredCellOutOfSync(r runner.Runner, cell intmodel.Cell, configName string
 		return cellOutOfSync{Err: materializeErr.Error()}
 	}
 
+	drift := renderProvenanceDrift(desiredCell, cell)
 	diff := apply.DiffCell(desiredCell, cell)
-	if !diff.HasChanges {
+	if !diff.HasChanges && len(drift) == 0 {
 		return cellOutOfSync{}
+	}
+	reasons := drift
+	if diff.HasChanges {
+		reasons = append(reasons, outOfSyncSpecDifferReason(diff))
 	}
 	return cellOutOfSync{
 		OutOfSync: true,
-		Reason:    outOfSyncSpecDifferReason(diff),
+		Reason:    strings.Join(reasons, "; "),
 	}
+}
+
+// renderProvenanceDrift compares the render provenance annotations of a fresh
+// render against the live cell's and returns one reason per drifted input
+// (issue #1418):
+//
+//   - "<level> defaults changed" when the content hash of a Realm, Space or
+//     Stack spec.defaults fill differs from the one the cell was rendered
+//     with — even when the change does not alter the rendered spec, so the
+//     operator sees that a level the cell depends on moved;
+//   - "image <name> digest changed" when a realm image the cell uses now
+//     resolves to a different digest (a rebuild under the same tag), which
+//     apply.DiffCell cannot see because the container's image reference is
+//     unchanged.
+//
+// A live cell without the annotations (rendered before #1418, or not rendered
+// from a Config) reports nothing, and an image digest only counts when both
+// sides know it, so a not-yet-pulled image never flaps the verdict.
+func renderProvenanceDrift(desired, live intmodel.Cell) []string {
+	var reasons []string
+	levels := []struct{ level, key string }{
+		{v1beta1.RenderOriginRealm, cellconfig.AnnotationRenderRealmDefaults},
+		{v1beta1.RenderOriginSpace, cellconfig.AnnotationRenderSpaceDefaults},
+		{v1beta1.RenderOriginStack, cellconfig.AnnotationRenderStackDefaults},
+	}
+	for _, l := range levels {
+		liveStamp, ok := live.Metadata.Annotations[l.key]
+		if !ok || liveStamp == "" {
+			continue
+		}
+		if stampHash(liveStamp) != stampHash(desired.Metadata.Annotations[l.key]) {
+			reasons = append(reasons, l.level+" defaults changed")
+		}
+	}
+	reasons = append(reasons, imageDigestDrift(desired, live)...)
+	return reasons
+}
+
+// imageDigestDrift returns one "image <name> digest changed" reason per realm
+// image whose known digest differs between the fresh render and the live cell.
+func imageDigestDrift(desired, live intmodel.Cell) []string {
+	liveDigests := parseImageDigests(live.Metadata.Annotations[cellconfig.AnnotationRenderImageDigests])
+	desiredDigests := parseImageDigests(desired.Metadata.Annotations[cellconfig.AnnotationRenderImageDigests])
+	names := make([]string, 0, len(desiredDigests))
+	for name := range desiredDigests {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var reasons []string
+	for _, name := range names {
+		was, now := liveDigests[name], desiredDigests[name]
+		if was != "" && now != "" && was != now {
+			reasons = append(reasons, "image "+name+" digest changed")
+		}
+	}
+	return reasons
 }
 
 // provenanceEnvOverrides returns the per-cell `--env` overrides recorded in the
@@ -190,9 +252,10 @@ func lookupLineageConfig(
 	return intmodel.CellConfig{}, false, nil
 }
 
-// materializeCellFromConfig re-runs the CellConfig materialization pipeline
-// against a daemon-stored Config: decode the Config's body, resolve the
-// referenced Blueprint, then `cellconfig.MaterializeWithName` the two. Returns
+// materializeCellFromConfig re-runs the daemon-side CellConfig render
+// (renderCellFromConfig, #1418) against a daemon-stored Config: decode the
+// Config's body, resolve the referenced Blueprint, merge the Realm → Space →
+// Stack defaults, then `cellconfig.MaterializeWithName`. Returns
 // the materialized cell in the same internal-model shape the reconciler's live
 // cell uses, so apply.DiffCell can compare them directly.
 //
@@ -215,42 +278,12 @@ func lookupLineageConfig(
 func materializeCellFromConfig(
 	r runner.Runner, cfg intmodel.CellConfig, cellName string, envOverrides []string,
 ) (intmodel.Cell, error) {
-	cfgDoc, err := apischeme.ConvertCellConfigToExternal(cfg)
+	rendered, err := renderCellFromConfig(r, cfg, cellName, envOverrides)
 	if err != nil {
-		return intmodel.Cell{}, fmt.Errorf("decode lineage config: %w", err)
+		return intmodel.Cell{}, err
 	}
 
-	ref := cfgDoc.Spec.Blueprint
-	bpCarrier, getErr := r.GetBlueprint(intmodel.CellBlueprint{
-		Metadata: intmodel.CellBlueprintMetadata{
-			Name:  ref.Name,
-			Realm: ref.Realm,
-			Space: ref.Space,
-			Stack: ref.Stack,
-		},
-	})
-	if getErr != nil {
-		if errors.Is(getErr, errdefs.ErrBlueprintNotFound) {
-			return intmodel.Cell{}, fmt.Errorf("referenced blueprint %q not found", ref.Name)
-		}
-		return intmodel.Cell{}, fmt.Errorf("read referenced blueprint %q: %w", ref.Name, getErr)
-	}
-	bpDoc, bpErr := apischeme.ConvertCellBlueprintToExternal(bpCarrier)
-	if bpErr != nil {
-		return intmodel.Cell{}, fmt.Errorf("decode referenced blueprint: %w", bpErr)
-	}
-
-	cellDoc, mErr := cellconfig.MaterializeWithName(cfgDoc, bpDoc, cellName)
-	if mErr != nil {
-		return intmodel.Cell{}, fmt.Errorf("materialize cell: %w", mErr)
-	}
-
-	// Re-apply the cell's recorded per-cell --env overrides last (P3 precedence,
-	// #1023) so the re-materialized spec carries the same attachable-container
-	// Env the live cell baked at create time. A nil/empty slice is a no-op.
-	cellconfig.ApplyEnvOverrides(&cellDoc, envOverrides)
-
-	desired, convErr := apischeme.ConvertCellDocToInternal(cellDoc)
+	desired, convErr := apischeme.ConvertCellDocToInternal(rendered.Cell)
 	if convErr != nil {
 		return intmodel.Cell{}, fmt.Errorf("convert materialized cell: %w", convErr)
 	}

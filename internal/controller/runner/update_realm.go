@@ -24,7 +24,7 @@ import (
 )
 
 // UpdateRealm updates an existing realm with new metadata and compatible spec fields.
-// It only updates fields that are backward-compatible (labels, registry credentials).
+// It only updates fields that are backward-compatible (labels, registry credentials, CellConfig defaults, images).
 // Breaking changes (name, namespace) should be rejected before calling this method.
 func (r *Exec) UpdateRealm(desired intmodel.Realm) (intmodel.Realm, error) {
 	// Get existing realm
@@ -37,6 +37,8 @@ func (r *Exec) UpdateRealm(desired intmodel.Realm) (intmodel.Realm, error) {
 	// canonical labels when the user's desired doc omits them (issue #455).
 	existing.Metadata.Labels = mergeManagedLabels(existing.Metadata.Labels, desired.Metadata.Labels)
 	existing.Spec.RegistryCredentials = desired.Spec.RegistryCredentials
+	existing.Spec.Defaults = desired.Spec.Defaults
+	existing.Spec.Images = desired.Spec.Images
 
 	// Update metadata file
 	if updateErr := r.UpdateRealmMetadata(existing); updateErr != nil {

@@ -565,11 +565,15 @@ func runFused(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) error 
 	}
 	// The scope-Var bundle `kuke run` feeds cell.Materialize for binding-lookup
 	// scope (built inline rather than as a package global per gochecknoglobals).
-	cellDoc, err := cell.Materialize(cmd, client, src, cell.ScopeVars{
+	scope := cell.ScopeVars{
 		Realm: &config.KUKE_RUN_REALM,
 		Space: &config.KUKE_RUN_SPACE,
 		Stack: &config.KUKE_RUN_STACK,
-	})
+	}
+	if src.ConfigName != "" {
+		return runFromConfig(cmd, client, flags, src, scope)
+	}
+	cellDoc, err := cell.Materialize(cmd, client, src, scope)
 	if err != nil {
 		return err
 	}
@@ -607,6 +611,40 @@ func runFused(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) error 
 	}
 	if !flags.detach {
 		return attachAndMaybeAutoDelete(cmd, client, cellDoc, flags)
+	}
+	return nil
+}
+
+// runFromConfig is the --from-config branch of the fused form (#1418): kukeond
+// renders the cell from the stored CellConfig (defaults merge included) and
+// create+starts it in one RPC, then `kuke run` attaches. An explicit --name
+// that already exists is refused with the same pointer the other fused sources
+// print.
+func runFromConfig(
+	cmd *cobra.Command, client kukeonv1.Client, flags runFlags, src cell.SourceFlags, scope cell.ScopeVars,
+) error {
+	if err := cell.ValidateOverrideSymmetry(src); err != nil {
+		return err
+	}
+	req := cell.ConfigRenderRequest(cmd, src, scope)
+	req.Start = true
+	req.AutoDelete = flags.autoDelete
+
+	result, err := client.CreateCellFromConfig(cmd.Context(), req)
+	if err != nil {
+		if errors.Is(err, errdefs.ErrCellAlreadyExists) && src.Name != "" {
+			return fmt.Errorf(
+				"%w; run `kuke run %s` to start+attach it, or `kuke delete cell %s` before re-creating",
+				err, src.Name, src.Name,
+			)
+		}
+		return err
+	}
+	if printErr := printRunResult(cmd, result.CreateCellResult, flags.output); printErr != nil {
+		return printErr
+	}
+	if !flags.detach {
+		return attachAndMaybeAutoDelete(cmd, client, result.Cell, flags)
 	}
 	return nil
 }

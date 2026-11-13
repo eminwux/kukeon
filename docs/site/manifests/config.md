@@ -32,13 +32,13 @@ See [`kuke run --from-config`](../cli/kuke-run.md) for the fused create + start 
 
 A Config is scopable at realm, space, or stack — never cell. A Config materializes a cell; scoping it to a single cell is nonsensical. The scope is the deepest non-empty coordinate, and a deeper coordinate may only be set when every shallower one is.
 
-| Field    | Type              | Required | Description                                                                                                                                                   |
-| -------- | ----------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`   | string            | yes      | The config's name, unique within its scope. Stamped cells carry it as the `kukeon.io/config` lineage label, **not** as their name — see [Lineage, not identity](#lineage-not-identity).             |
-| `realm`  | string            | yes      | The always-required top-level scope coordinate.                                                                                                               |
-| `space`  | string            | no       | When set, scopes the config to a space within `realm`.                                                                                                        |
-| `stack`  | string            | no       | When set, scopes the config to a stack within `space` (requires space).                                                                                       |
-| `labels` | map[string]string | no       | Copied onto every stamped cell, in addition to the `kukeon.io/config` lineage label.                                                                          |
+| Field    | Type              | Required | Description                                                                                                                                                                             |
+| -------- | ----------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`   | string            | yes      | The config's name, unique within its scope. Stamped cells carry it as the `kukeon.io/config` lineage label, **not** as their name — see [Lineage, not identity](#lineage-not-identity). |
+| `realm`  | string            | yes      | The always-required top-level scope coordinate.                                                                                                                                         |
+| `space`  | string            | no       | When set, scopes the config to a space within `realm`.                                                                                                                                  |
+| `stack`  | string            | no       | When set, scopes the config to a stack within `space` (requires space).                                                                                                                 |
+| `labels` | map[string]string | no       | Copied onto every stamped cell, in addition to the `kukeon.io/config` lineage label.                                                                                                    |
 
 ## spec
 
@@ -92,6 +92,22 @@ A `CellConfig` fills the structural slots a [`CellBlueprint`](blueprint.md) decl
 - Optional unfilled slots are dropped silently from the materialized container.
 
 The two channels are independent: scalar `values` are blueprint-side parameters resolved at run time (see the blueprint's [`spec.parameters[]`](blueprint.md)), while `repos:` and `secrets:` are structural slot fills validated at apply time. A `${KEY}` parameter is not a slot, and a slot is not a `${KEY}` parameter.
+
+## Defaults merge
+
+kukeond is the only place a CellConfig becomes a Cell: `kuke create cell --from-config`, `kuke run --from-config`, `kuke create cell --clone`, the web UI, the `OutOfSync` reconciler and the `kuke restart` re-apply all ask the daemon to render. The render merges the `spec.defaults` of the cell's [Realm](realm.md#specdefaults-object-optional), [Space](space.md) and [Stack](stack.md) under the Config's own fill:
+
+```
+Realm defaults → Space defaults → Stack defaults → CellConfig → (per-cell --env)
+```
+
+Maps merge per key, and the deeper level wins. A blueprint parameter no level sets keeps its blueprint default. Repo and secret defaults apply only to slots the referenced blueprint declares — a realm-wide `github-token` secret default is simply ignored by a blueprint without that slot — while the Config's own fills stay strictly validated. A level default can satisfy a required slot the Config leaves open. Container `image` values that name a realm [`spec.images`](realm.md#specimages-array-optional) entry resolve to that image.
+
+`kuke create cell <name> --from-config <cfg> --dry-run --explain` prints every resolved value with the level that set it (`realm`, `space`, `stack`, `config`, or `blueprint`) and the rendered cell's digest; the web UI's create preview shows the same table (scalar values hidden).
+
+Every rendered cell records its render provenance as annotations: `kukeon.io/render-digest`, `kukeon.io/render-config-revision`, `kukeon.io/render-{realm,space,stack}-defaults` (`generation=<n> hash=<h>`), `kukeon.io/render-image-digests`, `kukeon.io/render-values-hash`, `kukeon.io/render-origins` and `kukeon.io/render-kukeon-version`. Preview and create of the same inputs (including the cell name) produce the same digest.
+
+Editing a level's `spec.defaults` marks every dependent cell `OutOfSync` with `outOfSyncReason` naming the level (`realm defaults changed`, …), and a rebuilt realm image does the same (`image <name> digest changed`). `kuke restart <cell>` applies the change: a defaults edit that leaves the rendered spec untouched only records the new provenance; a rebuilt image recreates the cell.
 
 ## Lineage, not identity
 

@@ -293,7 +293,8 @@ func (b *Exec) reapplyOutOfSyncFromConfig(cell intmodel.Cell) (intmodel.Cell, bo
 	desired.Spec.RuntimeEnv = cell.Spec.RuntimeEnv
 
 	diff := apply.DiffCell(desired, cell)
-	if !diff.HasChanges {
+	drift := renderProvenanceDrift(desired, cell)
+	if !diff.HasChanges && len(drift) == 0 {
 		// Reconciler stamped OutOfSync but the live spec already matches
 		// the materialised one — nothing to rebuild. The next reconciler
 		// tick clears the stale OutOfSync flag.
@@ -303,11 +304,57 @@ func (b *Exec) reapplyOutOfSyncFromConfig(cell intmodel.Cell) (intmodel.Cell, bo
 	// Route by change class. A Breaking diff (the RecreateCell domain
 	// apply.ReconcileCell uses — root-container baked fields, host-namespace
 	// toggles) sets diff.ChangeType to Breaking; anything else (Compatible or
-	// Additive) is applied in place with the overlay preserved.
-	if diff.ChangeType == apply.ChangeTypeBreaking {
-		return b.reapplyBreaking(cell, desired, configName)
+	// Additive) is applied in place with the overlay preserved. A rebuilt
+	// realm image (same reference, new digest, #1418) is invisible to DiffCell
+	// but needs fresh containers from the new image, so it recreates too.
+	var (
+		out     intmodel.Cell
+		started bool
+		ok      bool
+	)
+	switch {
+	case diff.ChangeType == apply.ChangeTypeBreaking || len(imageDigestDrift(desired, cell)) > 0:
+		out, started, ok = b.reapplyBreaking(cell, desired, configName)
+	case diff.HasChanges:
+		out, started, ok = b.reapplyCompatibleInPlace(cell, desired, configName)
+	default:
+		// Only a defaults level moved and the rendered spec is unchanged:
+		// nothing to rebuild, just record the new provenance and let the
+		// caller start the cell on its on-disk spec.
+		out, started, ok = cell, false, true
 	}
-	return b.reapplyCompatibleInPlace(cell, desired, configName)
+	if !ok {
+		return out, started, ok
+	}
+	return b.stampRenderProvenance(out, desired, configName), started, ok
+}
+
+// stampRenderProvenance persists the fresh render's provenance annotations on
+// a cell the re-apply just reconciled, so the next reconciler tick compares
+// against the inputs the cell now reflects and clears OutOfSync (#1418). The
+// runner's RecreateCell / UpdateCell paths key on spec and labels only, so the
+// annotations are written explicitly. An annotation-only write does not bump
+// the cell's generation, so the returned cell stays a valid token for the
+// caller's follow-up writes. A write failure is logged and leaves the cell
+// OutOfSync for the next start to retry.
+func (b *Exec) stampRenderProvenance(cell, desired intmodel.Cell, configName string) intmodel.Cell {
+	annotations := make(map[string]string, len(cell.Metadata.Annotations)+len(desired.Metadata.Annotations))
+	for k, v := range cell.Metadata.Annotations {
+		annotations[k] = v
+	}
+	for k, v := range desired.Metadata.Annotations {
+		annotations[k] = v
+	}
+	cell.Metadata.Annotations = annotations
+	if err := b.runner.UpdateCellMetadata(cell); err != nil {
+		b.logger.WarnContext(b.ctx,
+			"OutOfSync reapply could not record render provenance",
+			"cell", cell.Metadata.Name,
+			"config", configName,
+			"error", err,
+		)
+	}
+	return cell
 }
 
 // reapplyBreaking rebuilds the cell from the materialised spec via

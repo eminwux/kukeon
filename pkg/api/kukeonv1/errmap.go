@@ -65,6 +65,9 @@ var kindToSentinel = map[string]error{
 	"ImageNotFound":           errdefs.ErrImageNotFound,
 	"ConfigNotFound":          errdefs.ErrConfigNotFound,
 	"ConfigExists":            errdefs.ErrConfigExists,
+	"BlueprintNotFound":       errdefs.ErrBlueprintNotFound,
+	"CellAlreadyExists":       errdefs.ErrCellAlreadyExists,
+	"RenderDigestMismatch":    errdefs.ErrRenderDigestMismatch,
 }
 
 // sentinelToKind is the reverse lookup, populated lazily.
