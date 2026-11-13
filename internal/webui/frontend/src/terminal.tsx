@@ -235,7 +235,10 @@ function TerminalSession({ session, active, expanded, theme, update }: { session
   }, [active, expanded]);
 
   return <div className="terminal-session" hidden={!active} aria-hidden={!active}>
-    <div ref={mount} className="terminal-screen" aria-label={`Terminal for ${session.scope.join(" / ")} / ${session.container}`} />
+    <div className="terminal-screen" aria-label={`Terminal for ${session.scope.join(" / ")} / ${session.container}`}>
+      {/* FitAddon sizes from the xterm parent's computed box; keep padding off it so rows/cols never spill under the panel border. */}
+      <div ref={mount} className="terminal-mount" />
+    </div>
   </div>;
 }
 
