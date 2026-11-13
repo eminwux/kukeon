@@ -62,10 +62,6 @@ func TestPurgeCell_SuccessfulPurge(t *testing.T) {
 				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
 					return true, nil
 				}
-				// Mock deleteCellInternal (calls runner.DeleteCell)
-				f.DeleteCellFn = func(_ intmodel.Cell) error {
-					return nil
-				}
 				// Mock comprehensive purge
 				f.PurgeCellFn = func(_ intmodel.Cell) (runner.PurgeCellOutcome, error) {
 					return runner.PurgeCellOutcome{
@@ -138,9 +134,6 @@ func TestPurgeCell_SuccessfulPurge(t *testing.T) {
 				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
 					return true, nil
 				}
-				f.DeleteCellFn = func(_ intmodel.Cell) error {
-					return nil
-				}
 				f.PurgeCellFn = func(_ intmodel.Cell) (runner.PurgeCellOutcome, error) {
 					return runner.PurgeCellOutcome{
 						ContainersDeleted: true,
@@ -194,9 +187,6 @@ func TestPurgeCell_SuccessfulPurge(t *testing.T) {
 				}
 				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
 					return true, nil
-				}
-				f.DeleteCellFn = func(_ intmodel.Cell) error {
-					return nil
 				}
 				f.PurgeCellFn = func(_ intmodel.Cell) (runner.PurgeCellOutcome, error) {
 					return runner.PurgeCellOutcome{

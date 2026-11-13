@@ -92,20 +92,24 @@ func (r *Exec) PurgeCell(cell intmodel.Cell) (PurgeCellOutcome, error) {
 		result.Purged = append(result.Purged, "cgroup")
 	}
 
+	// Confirm container removal before touching metadata: the cell document is
+	// the only handle `kuke delete`/`kuke purge` can retry from, so it must
+	// survive while any of the cell's containers might still exist.
+	containersDeleted, containersErr := r.confirmPurgeCellContainers(namespace, cellForOps, cellID, containerIDs)
+	result.ContainersDeleted = containersDeleted
+	if containersErr != nil {
+		cleanupErrors = append(cleanupErrors, containersErr)
+		r.logger.WarnContext(r.ctx, "keeping cell metadata: containers not confirmed removed", "error", containersErr)
+		return result, errors.Join(cleanupErrors...)
+	}
+	result.Purged = append(result.Purged, "orphaned-containers")
+
 	metadataDeleted, metadataErr := r.purgeCellMetadata(cellForOps)
 	result.MetadataDeleted = metadataDeleted
 	if metadataErr != nil {
 		cleanupErrors = append(cleanupErrors, metadataErr)
 	} else {
 		result.Purged = append(result.Purged, "all-metadata")
-	}
-
-	containersDeleted, containersErr := r.confirmPurgeCellContainers(namespace, cellForOps, cellID, containerIDs)
-	result.ContainersDeleted = containersDeleted
-	if containersErr != nil {
-		cleanupErrors = append(cleanupErrors, containersErr)
-	} else {
-		result.Purged = append(result.Purged, "orphaned-containers")
 	}
 
 	return result, errors.Join(cleanupErrors...)
