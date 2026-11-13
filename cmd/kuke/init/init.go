@@ -37,6 +37,7 @@ import (
 	"github.com/eminwux/kukeon/internal/firewall"
 	"github.com/eminwux/kukeon/internal/instance"
 	"github.com/eminwux/kukeon/internal/sysuser"
+	"github.com/eminwux/kukeon/internal/util/fs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -368,12 +369,51 @@ func applyKukeonOwnership(
 	r.RunDirApplied = true
 	if err := sysuser.ChownTreeAndChmodSkip(
 		runPath, 0, ensure.GID, kukeonRunPathDirMode, kukeonRunPathFileMode,
-		skipLiveCellState,
+		initSweepSkip(runPath),
 	); err != nil {
 		return r, fmt.Errorf("apply kukeon ownership to %q: %w", runPath, err)
 	}
 	r.RunPathApplied = true
 	return r, nil
+}
+
+// initSweepSkip returns the skip predicate applyKukeonOwnership hands to
+// sysuser.ChownTreeAndChmodSkip: it prunes every path whose ownership and
+// mode belong to the runner rather than to init — live per-container kuketty
+// state (skipLiveCellState) and the per-scope volume storage
+// (isScopeVolumesDir).
+func initSweepSkip(runPath string) func(path string, info os.FileInfo) bool {
+	dataRoot := fs.MetadataRoot(runPath)
+	return func(path string, info os.FileInfo) bool {
+		return skipLiveCellState(path, info) || isScopeVolumesDir(dataRoot, path, info)
+	}
+}
+
+// isScopeVolumesDir reports whether path is a per-scope volumes/ directory
+// (fs.VolumesDir) — <dataRoot>/<realm>/[<space>/[<stack>/]]volumes. Volume
+// storage is owned exclusively by the runner: WriteVolume sets volumes/ to
+// 0o755 and each volume dir to root:kukeon setgid 0o770,
+// volumePostCreateChown hands the volume dir to the mounting container's uid,
+// and the workload creates the files inside under its own uid. The blanket
+// sweep reset all of it to root:kukeon 2750/0640, stripping group-write and
+// the container-uid owner so every running non-root cell lost write access to
+// its volumes on each `make dev-init` (issue #1415). Pruning volumes/ leaves
+// the whole subtree — workload data included — byte-for-byte untouched.
+//
+// The match is structural (realm, space, or stack scope depth under the
+// metadata root) rather than by basename alone, so an unrelated directory
+// that happens to be named "volumes" elsewhere under RunPath is still swept.
+func isScopeVolumesDir(dataRoot, path string, info os.FileInfo) bool {
+	if !info.IsDir() || info.Name() != consts.KukeonVolumesSubdir {
+		return false
+	}
+	rel, err := filepath.Rel(dataRoot, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	// <realm>/volumes, <realm>/<space>/volumes, <realm>/<space>/<stack>/volumes.
+	depth := len(strings.Split(rel, string(filepath.Separator)))
+	return depth >= 2 && depth <= 4
 }
 
 // skipLiveCellState reports whether the recursive `kuke init` ownership sweep
