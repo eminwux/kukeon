@@ -157,6 +157,22 @@ test("expanded terminal starts below a wrapped terminal tabbar", async ({ page }
   await expect(page.locator(".cell-detail-screen")).not.toHaveAttribute("style", /--terminal-expanded-top/);
 });
 
+test("expanded terminal controls stay clear of the toolbar actions", async ({ page }) => {
+  await mock(page, path => path.endsWith("/containers") ? { json: [{ id: "shell", attachable: true }] } : undefined);
+  await page.routeWebSocket("**/attach", socket => { socket.send(JSON.stringify({ type: "ready" })); });
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
+  await terminalTools(page).getByRole("button", { name: "Expand terminal" }).click();
+  const topmost = locator => locator.evaluate(el => { const box = el.getBoundingClientRect(); return el.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)); });
+  for (const width of [1400, 933]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect.poll(() => topmost(terminalTools(page).getByRole("button", { name: "Detach" }))).toBe(true);
+    await expect.poll(() => topmost(terminalTools(page).getByLabel("Container"))).toBe(true);
+    await expect.poll(() => topmost(page.getByRole("button", { name: "Refresh" }))).toBe(true);
+  }
+});
+
 test("Workspace retains independent scoped terminals, focus and resize while switching cells", async ({ page }) => {
   await mock(page, path => path.endsWith("/containers") ? { json: [{ id: "shell", attachable: true }] } : undefined);
   const sockets = new Map();
