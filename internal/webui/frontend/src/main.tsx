@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { StrictMode, Suspense, lazy, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
 import { useResource, ErrorNotice, type Resource } from "./request";
@@ -6,10 +6,12 @@ import { CatalogPage, RelatedResources } from "./catalog";
 import { TerminalWorkspace, useTerminalSessions, type TerminalManager } from "./terminal";
 import { CellSidebar } from "./cell-sidebar";
 import { useInventory, type Inventory, type InventoryResource, type Doc, type RuntimeStatus } from "./inventory";
-import { apiPath, catalogTitles, kinds, titles, readRoute, resourceLink, listLink, workspaceLink, type Route } from "./routes";
+import { apiPath, catalogTitles, kinds, titles, readRoute, resourceLink, listLink, newCellLink, workspaceLink, type Route } from "./routes";
 import { StateBadge } from "./status";
 import { CellLifecycleControls, LifecycleNotice, type LifecycleAction, type LifecycleFeedback, type PurgeOptions } from "./lifecycle";
 import { cellRemovalConfirmed, deleteOperationComplete, purgeOperationComplete, requestedPurgeOptions } from "./lifecycle-policy.js";
+
+const NewCellPage = lazy(async () => ({ default: (await import("./new-cell")).NewCellPage }));
 
 function validTime(value?: string): value is string {
   return !!value && !value.startsWith("0001-") && Number.isFinite(Date.parse(value));
@@ -217,7 +219,7 @@ function WorkspaceLanding({ inventory }: { inventory: InventoryResource }) {
   return <section className="panel workspace-landing" aria-label="Workspace welcome">
     <h2>{count ? "Choose a cell" : inventory.loading ? "Loading cells…" : "No cells available"}</h2>
     <p>{count ? "Search or select a cell in the sidebar to open its terminal, status, and containers." : inventory.error || inventory.data?.failures.length ? "The inventory is incomplete. Refresh to retry unavailable scopes." : "Create a cell from an existing config or refresh the inventory."}</p>
-    <a className="new-cell-action" href="#/configs">New Cell <span aria-hidden="true">→</span></a>
+    <a className="new-cell-action" href={newCellLink()}>New Cell <span aria-hidden="true">→</span></a>
   </section>;
 }
 function App() {
@@ -229,6 +231,8 @@ function App() {
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const nextTheme: Theme = theme === "system" ? "light" : theme === "light" ? "dark" : "system";
   const [menuOpen, setMenuOpen] = useState(false);
+  const [creationNotice, setCreationNotice] = useState<{ phase: "pending" | "success" | "error"; message: string }>();
+  const [creationDocument, setCreationDocument] = useState<Doc>();
   useEffect(() => {
     const changed = () => { setRoute(readRoute()); setMenuOpen(false); };
     const keydown = (event: KeyboardEvent) => { if (event.key === "Escape") setMenuOpen(false); };
@@ -403,18 +407,46 @@ function App() {
       setRevision(value => value + 1);
     }
   }
+  async function handleCellCreated(cell: Doc, start: boolean) {
+    const spec = cell.spec as { realmId?: unknown; spaceId?: unknown; stackId?: unknown; containers?: { id?: unknown; attachable?: unknown; root?: unknown }[]; tty?: { default?: unknown } } | undefined;
+    if (typeof spec?.realmId !== "string" || typeof spec.spaceId !== "string" || typeof spec.stackId !== "string") {
+      setCreationNotice({ phase: "error", message: "The daemon created a Cell but returned an incomplete scope. Refresh the inventory to locate it." });
+      setRevision(value => value + 1);
+      return;
+    }
+    const scope = [spec.realmId, spec.spaceId, spec.stackId, cell.metadata.name];
+    const attachable = spec.containers?.filter(container => container.attachable === true && container.root !== true) ?? [];
+    const preferred = typeof spec.tty?.default === "string" ? attachable.find(container => container.id === spec.tty?.default) : undefined;
+    const selected = preferred ?? attachable[0];
+    if (typeof selected?.id === "string") terminals.select(scope, selected.id);
+    inventory.upsertCell(cell);
+    setCreationDocument(cell);
+    setRevision(value => value + 1);
+    window.location.hash = workspaceLink(scope);
+    setCreationNotice({ phase: start ? "pending" : "success", message: start ? `Cell ${scope.join(" / ")} created. Starting it…` : `Cell ${scope.join(" / ")} created and left stopped.` });
+    if (!start) return;
+    try {
+      const response = await fetch(`${apiPath(scope)}/start`, { method: "POST", headers: { Accept: "application/json" } });
+      let body: { error?: { message?: string } } = {};
+      try { body = await response.json(); } catch { /* Use the HTTP status below. */ }
+      if (!response.ok) throw new Error(body.error?.message ?? `HTTP ${response.status}`);
+      setCreationNotice({ phase: "success", message: `Cell ${scope.join(" / ")} started.${selected ? " The Workspace will attach to its selected workload when ready." : " No attachable workload was defined."}` });
+    } catch (error) {
+      setCreationNotice({ phase: "error", message: `Cell ${scope.join(" / ")} was created stopped, but start failed: ${error instanceof Error ? error.message : "The daemon request failed."}` });
+    } finally { setRevision(value => value + 1); }
+  }
   const isWorkspace = route.view === "workspace";
   const cellScreenScope = (isWorkspace || route.view === "resource" && !route.document) && route.scope.length === 4 ? route.scope : null;
   const depth = titles.findIndex(title => title.toLowerCase() === route.view);
   const catalog = Object.keys(catalogTitles).includes(route.view);
-  const heading = isWorkspace ? route.scope.at(-1) ?? "Workspace" : catalog ? route.scope.at(-1) ?? catalogTitles[route.view] : route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : "Resources";
+  const heading = isWorkspace ? route.scope.at(-1) ?? "Workspace" : route.view === "new-cell" ? "New Cell" : catalog ? route.scope.at(-1) ?? catalogTitles[route.view] : route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : "Resources";
   const daemonStatus = inventory.daemon.error?.code === "permission_denied" ? "Permission denied" : inventory.daemon.error ? "Unavailable" : inventory.daemon.loading ? "Checking…" : "Connected";
   return <div className={`app-shell${cellScreenScope ? " cell-screen-active" : ""}`}>
     <aside className={`sidebar ${menuOpen ? "is-open" : ""}`} id="cell-sidebar" aria-label="Cell sidebar">
       <button className="sidebar-close" aria-label="Close sidebar" onClick={() => setMenuOpen(false)}>×</button>
       <a className="brand" href={workspaceLink()}><span className="mark" aria-hidden="true">K</span><span className="brand-title">Kukeon<small>LOCAL WORKSPACE</small></span>{connection.data?.version && <span className="brand-version">{connection.data.version.startsWith("v") ? connection.data.version : `v${connection.data.version}`}</span>}</a>
       <nav className="area-nav" aria-label="Areas"><a href={workspaceLink()} aria-current={isWorkspace ? "page" : undefined}>Workspace</a></nav>
-      {!cellScreenScope && <a className="new-cell-action sidebar-new-cell" href="#/configs">+ New Cell</a>}
+      <a className="new-cell-action sidebar-new-cell" href={newCellLink()}>+ New Cell</a>
       <CellSidebar inventory={inventory} selectedScope={cellScreenScope ?? []} terminalStates={terminals.cellStates} />
       <section className="connection" aria-label="Daemon connection">
         <p className="status" role="status"><span className={`dot ${inventory.daemon.error ? "failed" : inventory.daemon.loading ? "checking" : ""}`} aria-hidden="true" />{daemonStatus}</p>
@@ -429,6 +461,7 @@ function App() {
         <span className="toolbar-connectivity" role="status" aria-label={`Daemon: ${daemonStatus}`} title={`Daemon: ${daemonStatus}`}><span className={`dot ${inventory.daemon.error ? "failed" : inventory.daemon.loading ? "checking" : ""}`} aria-hidden="true" /></span>
         <nav className="breadcrumbs" aria-label="Resource scope"><a href={isWorkspace ? workspaceLink() : "#/resources"}>{isWorkspace ? "Workspace" : "Resources"}</a>{isWorkspace ? route.scope.length > 0 && <span>{route.scope.join(" / ")}</span> : catalog ? <><a href={`#/${route.view}`}>{catalogTitles[route.view]}</a>{route.scope.slice(0, -1).map((name, i) => <a key={i} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}{route.scope.length > 0 && <span>{route.scope.at(-1)}</span>}</> : route.view === "resource" ? route.scope.map((name, i) => <a key={i} aria-label={`${kinds[i]}: ${name}`} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>) : <span>{heading}</span>}</nav>
         <div className="toolbar-actions">
+          <a className="header-action new-cell-toolbar-action" href={newCellLink()}>New Cell</a>
           <a className="header-action" href="#/resources" aria-current={!isWorkspace ? "page" : undefined}>Resources</a>
           <button className="icon-button refresh-button" type="button" aria-label="Refresh" title="Refresh" onClick={() => setRevision(value => value + 1)}>
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 11a8.1 8.1 0 0 0-14.9-4L3 10" /><path d="M3 4v6h6" /><path d="M4 13a8.1 8.1 0 0 0 14.9 4L21 14" /><path d="M21 20v-6h-6" /></svg>
@@ -447,13 +480,14 @@ function App() {
           <button type="button" aria-label="Dismiss cell operation result" disabled={lastOperation.operation.phase === "pending"} onClick={() => setLastOperation(null)}>Dismiss</button>
         </section>}
         {!isWorkspace && !cellScreenScope && <ResourcesNavigation route={route} />}
-        {!cellScreenScope && <div className="page-heading"><p className="eyebrow">{isWorkspace ? "Workspace" : "Resources"}</p><h1>{heading}</h1><p className="description">{isWorkspace ? route.scope.length ? route.scope.join(" / ") : "Select a cell to work with its terminal and inspect its state." : route.view === "dashboard" ? "Browse and manage resources on this server." : route.view === "resource" || (catalog && route.scope.length > 0) ? route.scope.join(" / ") : `Browse ${heading?.toLowerCase()} across your infrastructure.`}</p>{isWorkspace && <a className="new-cell-action mobile-new-cell" href="#/configs">+ New Cell</a>}</div>}
+        {!cellScreenScope && <div className="page-heading"><p className="eyebrow">{isWorkspace ? "Workspace" : "Resources"}</p><h1>{heading}</h1><p className="description">{isWorkspace ? route.scope.length ? route.scope.join(" / ") : "Select a cell to work with its terminal and inspect its state." : route.view === "new-cell" ? "Create a stopped Cell from a CellConfig or define its specification manually." : route.view === "dashboard" ? "Browse and manage resources on this server." : route.view === "resource" || (catalog && route.scope.length > 0) ? route.scope.join(" / ") : `Browse ${heading?.toLowerCase()} across your infrastructure.`}</p>{isWorkspace && <a className="new-cell-action mobile-new-cell" href={newCellLink()}>+ New Cell</a>}</div>}
+        {creationNotice && <div className={`${creationNotice.phase === "error" ? "error" : creationNotice.phase === "pending" ? "creation-progress" : "creation-success"}`} role={creationNotice.phase === "error" ? "alert" : "status"}><span>{creationNotice.message}</span>{creationDocument && creationNotice.phase !== "pending" && <details><summary>View Cell document returned by Kukeon</summary><pre tabIndex={0} aria-label="Cell document returned after creation">{JSON.stringify(creationDocument, null, 2)}</pre></details>}<button type="button" className="notice-dismiss" aria-label="Dismiss creation message" onClick={() => { setCreationNotice(undefined); setCreationDocument(undefined); }}>×</button></div>}
         {inventory.loading && <p className="description" role="status">Refreshing resource inventory…</p>}
         {inventory.error && <ErrorNotice error={inventory.error} />}
         {inventory.error && inventory.data && <p className="stale">Stale inventory — refresh failed. Counts and lists may be out of date.</p>}
         {!!inventory.data?.failures.length && <div className="error" role="alert"><strong>Incomplete inventory</strong><p>Some scopes could not be loaded. Counts and lists exclude unavailable resources.</p><ul>{inventory.data.failures.map(message => <li key={message}>{message}</li>)}</ul></div>}
         <CellDetailsScreen title={heading ?? "Cell"} scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} operations={operations} onLifecycleAction={runCellLifecycle} />
-        {isWorkspace ? route.scope.length === 4 ? null : <WorkspaceLanding inventory={inventory} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} onCreated={() => setRevision(value => value + 1)} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} /> : <Dashboard inventory={inventory} />}
+        {isWorkspace ? route.scope.length === 4 ? null : <WorkspaceLanding inventory={inventory} /> : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} inventory={inventory} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} /> : <Dashboard inventory={inventory} />}
         <footer>Daemon inventory · {inventory.data ? <>Last refreshed <time dateTime={inventory.data.updatedAt}>{new Date(inventory.data.updatedAt).toLocaleTimeString()}</time></> : "Not refreshed yet"} · Refresh to retrieve the latest state.</footer>
       </div>
     </main>

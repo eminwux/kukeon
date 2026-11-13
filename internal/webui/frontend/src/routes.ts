@@ -1,7 +1,7 @@
 export const kinds = ["realm", "space", "stack", "cell", "container"];
 export const titles = ["Realms", "Spaces", "Stacks", "Cells"];
 export const catalogTitles: Record<string, string> = { blueprints: "Blueprints", configs: "Configs", volumes: "Volumes", secrets: "Secrets" };
-export type Route = { view: string; scope: string[]; parent: string[]; document: boolean };
+export type Route = { view: string; scope: string[]; parent: string[]; document: boolean; config?: string[] };
 
 export function readRoute(): Route {
   try {
@@ -10,6 +10,11 @@ export function readRoute(): Route {
     const params = new URLSearchParams(query);
     if (!path || path === "/" || path === "/workspace") return { view: "workspace", scope: [], parent: [], document: false };
     const parts = path.split("/").filter(Boolean).map(decodeURIComponent);
+    if (parts[0] === "new-cell") {
+      let config: unknown;
+      try { config = JSON.parse(params.get("config") ?? "null"); } catch { config = null; }
+      return { view: "new-cell", scope: [], parent: [], document: false, config: Array.isArray(config) && config.every(value => typeof value === "string") ? config.slice(0, 4) : undefined };
+    }
     if (parts[0] === "workspace") return { view: "workspace", scope: parts.length === 5 ? parts.slice(1) : [], parent: [], document: false };
     if (path === "/resources" || path === "/administration" || path === "/dashboard") return { view: "dashboard", scope: [], parent: [], document: false };
     if (Object.keys(catalogTitles).includes(parts[0])) return { view: parts[0], scope: parts.slice(1, 6), parent: [], document: params.has("document") };
@@ -25,6 +30,9 @@ export function readRoute(): Route {
 
 export function workspaceLink(scope: string[] = []): string {
   return "#/workspace" + (scope.length ? "/" + scope.map(encodeURIComponent).join("/") : "");
+}
+export function newCellLink(config?: string[]): string {
+  return "#/new-cell" + (config?.length ? `?config=${encodeURIComponent(JSON.stringify(config))}` : "");
 }
 export function resourceLink(scope: string[], document = false): string {
   return "#/resource/" + scope.map(encodeURIComponent).join("/") + (document ? "?document=1" : "");

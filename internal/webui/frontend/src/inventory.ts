@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiPath, kinds, titles } from "./routes";
 import type { Failure, Resource } from "./request";
 
@@ -13,7 +13,7 @@ export type RuntimeStatus = {
 export type Doc = { metadata: { name: string; labels?: Record<string, string> }; status?: RuntimeStatus; apiVersion?: string; kind?: string; [key: string]: unknown };
 export type Row = { doc: Doc; scope: string[] };
 export type Inventory = { rows: Row[][]; failures: string[]; updatedAt: string };
-export type InventoryResource = Resource<Inventory> & { daemon: Resource<true> };
+export type InventoryResource = Resource<Inventory> & { daemon: Resource<true>; upsertCell: (doc: Doc) => void };
 
 async function readJSON<T>(path: string, signal: AbortSignal): Promise<T> {
   const response = await fetch(path, { signal });
@@ -35,6 +35,20 @@ export function useInventory(revision: number): InventoryResource {
   const [daemon, setDaemon] = useState<Resource<true>>({ loading: true });
   const [pulse, setPulse] = useState(0);
   const activeRequest = useRef<AbortController | null>(null);
+  const upsertCell = useCallback((doc: Doc) => {
+    const spec = doc.spec as { realmId?: unknown; spaceId?: unknown; stackId?: unknown } | undefined;
+    if (typeof spec?.realmId !== "string" || typeof spec.spaceId !== "string" || typeof spec.stackId !== "string") return;
+    const scope = [spec.realmId, spec.spaceId, spec.stackId, doc.metadata.name];
+    setState(old => {
+      if (!old.data) return old;
+      const rows = old.data.rows.map(items => [...items]);
+      const index = rows[3].findIndex(row => JSON.stringify(row.scope) === JSON.stringify(scope));
+      const row = { doc, scope };
+      if (index < 0) rows[3].push(row); else rows[3][index] = row;
+      rows[3].sort((a, b) => a.scope.join("/").localeCompare(b.scope.join("/")));
+      return { ...old, data: { ...old.data, rows } };
+    });
+  }, []);
   useEffect(() => {
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible" && !activeRequest.current) setPulse(value => value + 1);
@@ -84,5 +98,5 @@ export function useInventory(revision: number): InventoryResource {
       if (activeRequest.current === controller) activeRequest.current = null;
     };
   }, [revision, pulse]);
-  return { ...state, daemon };
+  return { ...state, daemon, upsertCell };
 }

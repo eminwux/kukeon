@@ -268,7 +268,7 @@ test("cell sidebar uses full scope for duplicate names and switching reuses inve
   await expect(page.getByRole("heading", { name: "Runtime status" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Containers" })).toBeVisible();
   await expect(page.locator("#cell-terminal")).toHaveCount(1);
-  await expect(page.getByRole("link", { name: "+ New Cell" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "+ New Cell" })).toHaveAttribute("href", "#/new-cell");
   await cells.getByRole("link", { name: "Open prod / shared / services / api" }).click();
   await expect(page).toHaveURL(/#\/workspace\/prod\/shared\/services\/api$/);
   await expect(cells.getByRole("link", { name: "Open prod / shared / services / api" })).toHaveAttribute("aria-current", "page");
@@ -402,8 +402,8 @@ test("empty Workspace offers existing config creation without inventing cells", 
   await page.goto(server.url);
   await expect(page.getByRole("region", { name: "All cells" })).toContainText("No cells found");
   await page.getByRole("region", { name: "Workspace welcome" }).getByRole("link", { name: /New Cell/ }).click();
-  await expect(page).toHaveURL(/#\/configs$/);
-  await expect(page.locator(".page-heading h1")).toHaveText("Configs");
+  await expect(page).toHaveURL(/#\/new-cell$/);
+  await expect(page.locator(".page-heading h1")).toHaveText("New Cell");
 });
 
 for (const type of ["Realms", "Spaces", "Stacks", "Cells"]) {
@@ -664,6 +664,7 @@ test("config references navigate across realms and missing targets report errors
   await expect(page.getByRole("region", { name: "Resource references" }).getByRole("alert")).toContainText("Missing reference");
   await page.getByRole("link", { name: "template", exact: true }).click();
   await expect(page).toHaveURL(/#\/blueprints\/library\/template$/);
+  await expect(page.locator(".page-heading h1")).toHaveText("template");
   await expect(page.getByRole("alert")).toContainText("Blueprint is missing");
   missing = false;
   await page.getByRole("button", { name: "Refresh" }).click();
@@ -735,16 +736,17 @@ test("create from config previews, prevents duplicate submits and opens the scop
     } else await route.fulfill({ json: { document, preview: "reviewed" } });
   });
   await page.goto(`${server.url}#/configs/prod/shared/services/shared-name`);
-  await page.getByRole("button", { name: "Create cell from config", exact: true }).click();
-  await page.getByLabel("Cell name", { exact: true }).fill("new-cell");
-  await page.getByRole("button", { name: "Preview cell", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Review cell document" })).toBeVisible();
+  await page.getByRole("link", { name: /Create Cell from this Config/ }).click();
+  await expect(page).toHaveURL(/#\/new-cell\?config=/);
+  await page.getByLabel("Cell name (optional)").fill("new-cell");
+  await page.getByRole("button", { name: "Preview Cell", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Review Cell document" })).toBeVisible();
   expect(creates).toBe(0);
   await page.getByLabel("Environment overrides").fill("APP=production");
-  await expect(page.getByRole("button", { name: "Confirm create cell" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Preview cell", exact: true }).click();
-  await page.getByRole("button", { name: "Confirm create cell" }).click();
-  await expect(page).toHaveURL(/#\/resource\/prod\/shared\/services\/new-cell$/);
+  await expect(page.getByRole("button", { name: "Create Cell", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Preview Cell", exact: true }).click();
+  await page.getByRole("button", { name: "Create Cell", exact: true }).click();
+  await expect(page).toHaveURL(/#\/workspace\/prod\/shared\/services\/new-cell$/);
   expect(creates).toBe(1);
   await expect(page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link", { name: "Open prod / shared / services / new-cell" })).toBeVisible();
 });

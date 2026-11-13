@@ -28,7 +28,9 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/cellconfig"
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/util/naming"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
@@ -38,12 +40,14 @@ const maxCreateBody = 64 << 10
 type createConfigRequest struct {
 	Config             v1beta1.CellConfigMetadata `json:"config"`
 	Name               string                     `json:"name"`
+	ResolvedName       string                     `json:"resolvedName,omitempty"`
 	Env                []string                   `json:"env"`
 	IgnoreDiskPressure bool                       `json:"ignoreDiskPressure"`
 	Preview            string                     `json:"preview"`
 }
 
 func registerCreateRoutes(mux *http.ServeMux, dial Dial) {
+	registerManualCreateRoutes(mux, dial)
 	for _, action := range []string{"preview", "create"} {
 		mux.HandleFunc(
 			"POST /api/cells/from-config/"+action,
@@ -63,7 +67,7 @@ func registerCreateRoutes(mux *http.ServeMux, dial Dial) {
 				}
 				doc, err := configCell(ctx, c, input)
 				if err != nil {
-					return nil, err
+					return nil, redactCreationError(err, envSecrets(input.Env))
 				}
 				data, err := json.Marshal(doc)
 				if err != nil {
@@ -71,16 +75,20 @@ func registerCreateRoutes(mux *http.ServeMux, dial Dial) {
 				}
 				digest := fmt.Sprintf("%x", sha256.Sum256(append(data, byteBool(input.IgnoreDiskPressure))))
 				if strings.HasSuffix(r.URL.Path, "/preview") {
-					return map[string]any{"document": doc, "preview": digest}, nil
+					return map[string]any{"document": redactCell(doc), "preview": digest}, nil
 				}
 				if input.Preview != digest {
 					return nil, fmt.Errorf("%w: inputs or config changed; preview again", errdefs.ErrConfig)
 				}
 				doc.Spec.IgnoreDiskPressure = input.IgnoreDiskPressure
-				if _, err = c.MaterializeCell(ctx, doc); err != nil {
-					return nil, err
+				created, createErr := c.MaterializeCell(ctx, doc)
+				if createErr != nil {
+					return nil, redactCreationError(createErr, envSecrets(input.Env))
 				}
-				return doc, nil
+				if !created.Created {
+					return nil, errdefs.ErrCellAlreadyExists
+				}
+				return redactCell(created.Cell), nil
 			}),
 		)
 	}
@@ -88,11 +96,16 @@ func registerCreateRoutes(mux *http.ServeMux, dial Dial) {
 
 func configCell(ctx context.Context, c kukeonv1.Client, input createConfigRequest) (v1beta1.CellDoc, error) {
 	var empty v1beta1.CellDoc
-	if strings.TrimSpace(input.Name) == "" {
-		return empty, errdefs.ErrCellNameRequired
+	name := strings.TrimSpace(input.Name)
+	resolvedName := strings.TrimSpace(input.ResolvedName)
+	if name != "" && resolvedName != "" && name != resolvedName {
+		return empty, fmt.Errorf("%w: the reviewed cell name changed; preview again", errdefs.ErrConfig)
 	}
-	if !filepath.IsLocal(input.Name) || !safePathSegment(input.Name) {
+	if name != "" && (!filepath.IsLocal(name) || !safePathSegment(name)) {
 		return empty, fmt.Errorf("%w: unsafe cell name", errdefs.ErrConfig)
+	}
+	if resolvedName != "" && (!filepath.IsLocal(resolvedName) || !safePathSegment(resolvedName)) {
+		return empty, fmt.Errorf("%w: unsafe resolved cell name", errdefs.ErrConfig)
 	}
 	if input.Config.Realm == "" || input.Config.Name == "" || (input.Config.Stack != "" && input.Config.Space == "") {
 		return empty, fmt.Errorf("%w: select a scoped config", errdefs.ErrConfig)
@@ -168,7 +181,24 @@ func configCell(ctx context.Context, c kukeonv1.Client, input createConfigReques
 	if !bp.MetadataExists {
 		return empty, errdefs.ErrBlueprintNotFound
 	}
-	doc, err := cellconfig.MaterializeWithName(cfg.Config, bp.Blueprint, input.Name)
+	requestedName := name
+	if requestedName == "" {
+		requestedName = resolvedName
+	}
+	if requestedName == "" {
+		realm := defaultScope(cfg.Config.Metadata.Realm, consts.KukeonDefaultRealmName)
+		space := defaultScope(cfg.Config.Metadata.Space, consts.KukeonDefaultSpaceName)
+		stack := defaultScope(cfg.Config.Metadata.Stack, consts.KukeonDefaultStackName)
+		var nameErr error
+		requestedName, nameErr = allocateCellName(ctx, c, "", cellconfig.Prefix(cfg.Config), realm, space, stack)
+		if nameErr != nil {
+			return empty, fmt.Errorf("%w: allocate cell name: %w", errdefs.ErrConfig, nameErr)
+		}
+	}
+	if validationErr := naming.ValidateHierarchyName("cell", requestedName); validationErr != nil {
+		return empty, fmt.Errorf("%w: %w", errdefs.ErrConfig, validationErr)
+	}
+	doc, err := cellconfig.MaterializeWithName(cfg.Config, bp.Blueprint, requestedName)
 	if err != nil {
 		return empty, fmt.Errorf("%w: %w", errdefs.ErrConfig, err)
 	}
@@ -214,9 +244,39 @@ func configCell(ctx context.Context, c kukeonv1.Client, input createConfigReques
 		return empty, err
 	}
 	if err == nil && existing.MetadataExists {
-		return empty, fmt.Errorf("%w: cell already exists; choose another name", errdefs.ErrConfig)
+		return empty, fmt.Errorf(
+			"%w: cell %q already exists in %s / %s / %s; preview again or choose another name",
+			errdefs.ErrCellAlreadyExists, doc.Metadata.Name, doc.Spec.RealmID, doc.Spec.SpaceID, doc.Spec.StackID,
+		)
 	}
 	return doc, nil
+}
+
+func defaultScope(value, fallback string) string {
+	if trimmed := strings.TrimSpace(value); trimmed != "" {
+		return trimmed
+	}
+	return fallback
+}
+
+func allocateCellName(
+	ctx context.Context,
+	c kukeonv1.Client,
+	explicit, prefix, realm, space, stack string,
+) (string, error) {
+	return naming.AllocCellName(explicit, prefix, func(name string) (bool, error) {
+		result, err := c.GetCell(ctx, v1beta1.CellDoc{
+			Metadata: v1beta1.CellMetadata{Name: name},
+			Spec:     v1beta1.CellSpec{RealmID: realm, SpaceID: space, StackID: stack},
+		})
+		if errors.Is(err, errdefs.ErrCellNotFound) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return result.MetadataExists, nil
+	})
 }
 
 func byteBool(value bool) byte {

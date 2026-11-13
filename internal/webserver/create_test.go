@@ -33,10 +33,13 @@ type creationClient struct {
 
 	created            int
 	existing           bool
+	materializeErr     error
+	materializeCreated bool
 	unsafeBlueprintRef bool
 	getBlueprintCalls  int
 	getConfigCalls     int
 	doc                v1beta1.CellDoc
+	materializedCell   v1beta1.CellDoc
 }
 
 func (c *creationClient) GetConfig(ctx context.Context, doc v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
@@ -67,7 +70,14 @@ func (c *creationClient) GetCell(_ context.Context, doc v1beta1.CellDoc) (kukeon
 func (c *creationClient) MaterializeCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
 	c.created++
 	c.doc = doc
-	return kukeonv1.CreateCellResult{}, nil
+	if c.materializeErr != nil {
+		return kukeonv1.CreateCellResult{}, c.materializeErr
+	}
+	materialized := c.materializedCell
+	if materialized.Metadata.Name == "" {
+		materialized = doc
+	}
+	return kukeonv1.CreateCellResult{Created: c.materializeCreated, Cell: materialized}, nil
 }
 
 func TestConfigCreation(t *testing.T) {
@@ -119,6 +129,7 @@ func TestConfigCreation(t *testing.T) {
 	if w = request("create", ""); w.Code < 400 {
 		t.Fatal("missing origin accepted")
 	}
+	c.materializeCreated = true
 	if w = request("create", "http://localhost:5129"); w.Code != 200 || c.created != 1 ||
 		c.doc.Metadata.Name != "new-cell" {
 		t.Fatalf("create: %s", w.Body.String())
@@ -139,7 +150,6 @@ func TestConfigCreationValidation(t *testing.T) {
 		input   createConfigRequest
 		missing bool
 	}{
-		{name: "empty name", input: createConfigRequest{Config: v1beta1.CellConfigMetadata{Name: "cfg", Realm: "r"}}},
 		{name: "scope gap", input: createConfigRequest{Name: "cell", Config: v1beta1.CellConfigMetadata{Name: "cfg", Realm: "r", Stack: "s"}}},
 		{name: "unsafe cell name", input: createConfigRequest{Name: "../cell", Config: v1beta1.CellConfigMetadata{Name: "cfg", Realm: "r"}}},
 		{name: "unsafe config realm", input: createConfigRequest{Name: "cell", Config: v1beta1.CellConfigMetadata{Name: "cfg", Realm: ".."}}},
@@ -162,6 +172,74 @@ func TestConfigCreationValidation(t *testing.T) {
 				t.Fatalf("unsafe input reached daemon lookup: %d calls", c.getConfigCalls)
 			}
 		})
+	}
+}
+
+func TestConfigCellAutomaticNameUsesConfigPrefix(t *testing.T) {
+	c := &creationClient{}
+	doc, err := configCell(context.Background(), c, createConfigRequest{
+		Config: v1beta1.CellConfigMetadata{Name: "cfg", Realm: "r"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(doc.Metadata.Name, "cfg-") || doc.Spec.ID != doc.Metadata.Name {
+		t.Fatalf("automatic name = %q (id %q), want cfg-<suffix> and matching ID", doc.Metadata.Name, doc.Spec.ID)
+	}
+	if doc.Spec.Provenance == nil || doc.Spec.Provenance.BindingKind != v1beta1.BindingKindConfig {
+		t.Fatalf("automatic-name materialization lost Config lineage: %+v", doc.Spec.Provenance)
+	}
+
+	previewName := doc.Metadata.Name
+	created, err := configCell(context.Background(), c, createConfigRequest{
+		Config:       v1beta1.CellConfigMetadata{Name: "cfg", Realm: "r"},
+		ResolvedName: previewName,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Metadata.Name != previewName {
+		t.Fatalf("create name = %q, want reviewed generated name %q", created.Metadata.Name, previewName)
+	}
+}
+
+func TestConfigCreationAutomaticNamePreviewMatchesCreatedCell(t *testing.T) {
+	client := &creationClient{materializeCreated: true}
+	handler := testCreateHandler(t, client)
+	input := createConfigRequest{Config: v1beta1.CellConfigMetadata{Name: "cfg", Realm: "realm"}}
+	previewResponse := postCreate(t, handler, "/api/cells/from-config/preview", input)
+	if previewResponse.Code != http.StatusOK {
+		t.Fatalf("preview: %d %s", previewResponse.Code, previewResponse.Body.String())
+	}
+	var preview struct {
+		Preview  string          `json:"preview"`
+		Document v1beta1.CellDoc `json:"document"`
+	}
+	if err := json.Unmarshal(previewResponse.Body.Bytes(), &preview); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(preview.Document.Metadata.Name, "cfg-") {
+		t.Fatalf("automatic preview name = %q, want cfg- prefix", preview.Document.Metadata.Name)
+	}
+
+	input.ResolvedName = preview.Document.Metadata.Name
+	input.Preview = preview.Preview
+	createdResponse := postCreate(t, handler, "/api/cells/from-config/create", input)
+	if createdResponse.Code != http.StatusOK || client.created != 1 {
+		t.Fatalf("create: %d %s", createdResponse.Code, createdResponse.Body.String())
+	}
+	var created v1beta1.CellDoc
+	if err := json.Unmarshal(createdResponse.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Metadata.Name != preview.Document.Metadata.Name ||
+		client.doc.Metadata.Name != preview.Document.Metadata.Name {
+		t.Fatalf(
+			"created name %q and materialized name %q differ from preview %q",
+			created.Metadata.Name,
+			client.doc.Metadata.Name,
+			preview.Document.Metadata.Name,
+		)
 	}
 }
 

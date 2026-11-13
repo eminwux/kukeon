@@ -75,6 +75,7 @@ var (
 	ErrUpdateCellMetadata     = errors.New("failed to update cell metadata")
 	ErrStackNameRequired      = errors.New("stack name is required")
 	ErrCellNotFound           = errors.New("cell not found")
+	ErrCellAlreadyExists      = errors.New("cell already exists")
 	ErrCellIDRequired         = errors.New("cell id is required")
 	ErrGetCell                = errors.New("failed to get cell")
 	ErrCreateCell             = errors.New("failed to create cell")

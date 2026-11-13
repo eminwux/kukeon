@@ -1,7 +1,9 @@
-import { CreateCell } from "./create";
 import { useState } from "react";
 import { ErrorNotice, useResource } from "./request";
-import { catalogTitles } from "./routes";
+import { catalogTitles, newCellLink, workspaceLink } from "./routes";
+import { StateBadge } from "./status";
+import type { InventoryResource, Row } from "./inventory";
+import { cellsForBlueprint, cellsForConfig, configsForBlueprint, type ConfigDoc } from "./relationships.mjs";
 
 type Metadata = { name: string; realm?: string; space?: string; stack?: string; cell?: string; labels?: Record<string, string>; annotations?: Record<string, string> };
 type CatalogDoc = { metadata: Metadata; spec?: Record<string, unknown>; [key: string]: unknown };
@@ -50,6 +52,55 @@ function scopedVolumeSources(doc: { [key: string]: unknown }): string[] {
   visit(doc.spec);
   return [...found];
 }
+
+type RelatedCatalogDoc = CatalogDoc & ConfigDoc;
+function lineageReference(metadata: Metadata): Reference {
+  return { kind: "configs", name: metadata.name, realm: metadata.realm ?? "", space: metadata.space, stack: metadata.stack };
+}
+function relationResourceLink(kind: string, scope: string[]): string { return catalogLink(kind, scope); }
+function scopeLabel(scope: string[]): string { return scope.join(" / "); }
+function cellScope(row: Row): string[] { return row.scope.length === 4 ? row.scope : [...row.scope.slice(0, 3), row.doc.metadata.name]; }
+function RelatedCellList({ rows, inventory, configLabel }: { rows: Array<Row & { config?: RelatedCatalogDoc }>; inventory: InventoryResource; configLabel?: boolean }) {
+  return <>
+    {inventory.loading && !inventory.data && <p role="status">Loading shared Cell inventory…</p>}
+    {inventory.loading && inventory.data && <p role="status">Refreshing Cell inventory; displayed Cells come from the last completed retrieval.</p>}
+    {inventory.error && <p className="stale">Cell inventory could not be refreshed: {inventory.error.message}</p>}
+    {!!inventory.data?.failures.length && <p className="stale">Cell inventory is incomplete; this relationship list may be partial.</p>}
+    {!inventory.data && !inventory.loading && !inventory.error && <p className="empty-state">Cell inventory has not been retrieved.</p>}
+    {rows.length > 0 && <ul className="state-list related-cell-list">{rows.map(row => {
+      const scope = cellScope(row);
+      return <li key={JSON.stringify(scope)}><div><a className="resource-name" href={workspaceLink(scope)}>{row.doc.metadata.name}</a><p className="description">{scopeLabel(scope.slice(0, -1))}</p>{configLabel && row.config && <p className="description">Config: <a href={relationResourceLink("configs", [...scopeOf(row.config.metadata), row.config.metadata.name])}>{row.config.metadata.name}</a> · {scopeLabel(scopeOf(row.config.metadata))}</p>}</div><StateBadge state={row.doc.status?.state} /><a className="document-action" href={workspaceLink(scope)}>Open Workspace</a></li>;
+    })}</ul>}
+    {inventory.data && !rows.length && !inventory.loading && !inventory.error && !inventory.data.failures.length && <p className="description">No related Cells found.</p>}
+  </>;
+}
+function ConfigRelationships({ doc, revision, inventory }: { doc: CatalogDoc; revision: number; inventory: InventoryResource }) {
+  const ref = doc.spec?.blueprint as Reference | undefined;
+  const valid = !!ref && !!ref.name && !!ref.realm && !(ref.stack && !ref.space);
+  const scope = ref ? referenceScope(ref) : [];
+  const target = useResource<CatalogDoc>(valid ? catalogAPI("blueprints", scope) : null, revision);
+  const cells = inventory.data ? cellsForConfig(inventory.data.rows[3], lineageReference(doc.metadata)) as Row[] : [];
+  return <div className="relationship-grid">
+    <section className="panel related-resources"><div className="panel-heading"><h2>Referenced Blueprint</h2></div><div className="panel-body">
+      {!ref ? <div className="error" role="alert"><strong>Blueprint reference missing</strong><p>This CellConfig has no Blueprint reference.</p></div> : !valid ? <div className="error" role="alert"><strong>Blueprint reference is incomplete</strong><p>Reference: {scopeLabel(scope)}</p></div> : target.loading && !target.data ? <p role="status">Loading referenced Blueprint…</p> : target.error ? <><ErrorNotice error={target.error} kind="Blueprint" />{target.data && <p className="stale">Showing stale Blueprint details.</p>}</> : target.data ? <p><a className="resource-name" href={catalogLink("blueprints", scope)}>{target.data.metadata.name}</a><span className="description"> {scopeLabel(scope.slice(0, -1))}</span></p> : <p className="description">Blueprint details are unavailable.</p>}
+    </div></section>
+    <section className="panel related-resources"><div className="panel-heading"><h2>Cells using this Config</h2><span className="badge">Lineage</span></div><div className="panel-body"><p className="description">Resolved from each Cell’s scoped Config provenance.</p><RelatedCellList rows={cells} inventory={inventory} /></div></section>
+  </div>;
+}
+function BlueprintRelationships({ doc, revision, inventory }: { doc: CatalogDoc; revision: number; inventory: InventoryResource }) {
+  const configs = useResource<RelatedCatalogDoc[]>("/api/catalog/configs", revision);
+  const blueprint: Reference = { kind: "blueprints", name: doc.metadata.name, realm: doc.metadata.realm ?? "", space: doc.metadata.space, stack: doc.metadata.stack };
+  const matches = configs.data ? configsForBlueprint(configs.data, blueprint) : [];
+  const cellRows = inventory.data ? cellsForBlueprint(inventory.data.rows[3], matches) as Array<Row & { config: RelatedCatalogDoc }> : [];
+  return <div className="relationship-grid">
+    <section className="panel related-resources"><div className="panel-heading"><h2>Configs using this Blueprint</h2><span className="badge">Scoped references</span></div><div className="panel-body">
+      {configs.loading && <p role="status">{configs.data ? "Refreshing CellConfigs…" : "Loading CellConfigs…"}</p>}{configs.error && <ErrorNotice error={configs.error} kind="CellConfig" />}{configs.error && configs.data && <p className="stale">Showing stale CellConfig results.</p>}
+      {configs.data && matches.length > 0 && <ul className="state-list">{matches.map(config => { const scope = [...scopeOf(config.metadata), config.metadata.name]; return <li key={JSON.stringify(scope)}><div><a className="resource-name" href={catalogLink("configs", scope)}>{config.metadata.name}</a><p className="description">{scopeLabel(scope.slice(0, -1))}</p></div><a className="document-action" href={catalogLink("configs", scope)}>Open Config</a></li>; })}</ul>}
+      {configs.data && !matches.length && !configs.error && <p className="description">No CellConfigs reference this Blueprint.</p>}
+    </div></section>
+    <section className="panel related-resources"><div className="panel-heading"><h2>Cells using this Blueprint through Configs</h2><span className="badge">Lineage</span></div><div className="panel-body"><p className="description">Cells are matched by their scoped Config provenance, not by generated names.</p>{configs.error && !configs.data ? <p className="error" role="alert">Cannot resolve indirect Cell relationships because the CellConfig inventory failed.</p> : <RelatedCellList rows={cellRows} inventory={inventory} configLabel />}</div></section>
+  </div>;
+}
 export function RelatedResources({ doc, revision }: { doc: { [key: string]: unknown }; revision: number }) {
   const refs = references(doc);
   const sources = scopedVolumeSources(doc);
@@ -76,7 +127,7 @@ function CatalogList({ kind, revision }: { kind: string; revision: number }) {
     </section>
   </>;
 }
-function CatalogDetails({ kind, scope, document, revision, onCreated }: { kind: string; scope: string[]; document: boolean; revision: number; onCreated: () => void }) {
+function CatalogDetails({ kind, scope, document, revision, inventory }: { kind: string; scope: string[]; document: boolean; revision: number; inventory: InventoryResource }) {
   const detail = useResource<CatalogDoc>(catalogAPI(kind, scope), revision);
   const doc = detail.data;
   return <>
@@ -86,10 +137,12 @@ function CatalogDetails({ kind, scope, document, revision, onCreated }: { kind: 
     {detail.error && doc && <p className="stale">Stale {kind} document — refresh failed.</p>}
     {kind === "secrets" && <p className="description">Secret values are redacted. Only daemon-exposed metadata is available.</p>}
     {doc && <section className="panel"><div className="panel-heading"><h2>{document ? "API document" : "Resource overview"}</h2><span className="badge">Read only</span></div>{document ? <pre tabIndex={0} aria-label={`Complete ${kind} JSON`}>{JSON.stringify(doc, null, 2)}</pre> : <div className="panel-body"><dl className="details-grid"><dt>Name</dt><dd>{doc.metadata.name}</dd><dt>Scope</dt><dd>{scopeOf(doc.metadata).join(" / ")}</dd><dt>Kind</dt><dd>{doc.kind as string}</dd><dt>Labels</dt><dd>{Object.entries(doc.metadata.labels ?? {}).map(([key, value]) => <span className="badge label-badge" key={key}>{key}: {value}</span>)}{!Object.keys(doc.metadata.labels ?? {}).length && "No labels"}</dd>{kind === "volumes" && <><dt>Reclaim policy</dt><dd>{doc.spec?.reclaimPolicy as string || "Default (Delete)"}</dd></>}</dl><p className="description">Use View document for every API-exposed field.</p></div>}</section>}
-    {doc && kind === "configs" && !document && <CreateCell config={doc.metadata} onCreated={onCreated} />}
+    {doc && kind === "configs" && !document && <a className="new-cell-action config-create-action" href={newCellLink(scope)}>Create Cell from this Config <span aria-hidden="true">→</span></a>}
     {doc && !document && <RelatedResources doc={doc} revision={revision} />}
+    {doc && kind === "configs" && !document && <ConfigRelationships doc={doc} revision={revision} inventory={inventory} />}
+    {doc && kind === "blueprints" && !document && <BlueprintRelationships doc={doc} revision={revision} inventory={inventory} />}
   </>;
 }
-export function CatalogPage(props: { kind: string; scope: string[]; document: boolean; revision: number; onCreated: () => void }) {
+export function CatalogPage(props: { kind: string; scope: string[]; document: boolean; revision: number; inventory: InventoryResource }) {
   return props.scope.length ? <CatalogDetails key={props.kind + JSON.stringify(props.scope)} {...props} /> : <CatalogList key={props.kind} kind={props.kind} revision={props.revision} />;
 }
