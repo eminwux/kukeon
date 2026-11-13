@@ -183,6 +183,39 @@ button:disabled { cursor: default; opacity: .4; }
 .cell-lifecycle-feedback.success { color: var(--accent); }
 .cell-lifecycle-feedback.error { color: var(--error); }
 .cell-lifecycle-unavailable { color: var(--muted); font-size: 11px; }
+.cell-global-feedback { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 0 0 14px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-size: 11px; }
+.cell-global-feedback > strong { overflow-wrap: anywhere; }
+.cell-global-feedback .cell-lifecycle-feedback { flex: 1 1 220px; }
+.cell-global-feedback button { margin-left: auto; padding: 6px 9px; font-size: 10px; }
+.cell-advanced-actions { position: relative; flex: 0 0 auto; }
+.cell-advanced-actions > summary { min-height: 36px; display: flex; align-items: center; gap: 8px; padding: 7px 11px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--text); cursor: pointer; font-size: 11px; list-style: none; white-space: nowrap; }
+.cell-advanced-actions > summary::-webkit-details-marker { display: none; }
+.cell-advanced-actions > summary::after { content: "▾"; color: var(--muted); }
+.cell-advanced-actions[open] > summary { border-color: var(--accent); color: var(--accent); }
+.cell-advanced-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 20; width: min(300px, calc(100vw - 32px)); padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); box-shadow: 0 12px 32px #0003; }
+.cell-advanced-menu section { display: grid; gap: 7px; }
+.cell-advanced-menu h2 { margin: 0 0 2px; color: var(--muted); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+.cell-advanced-menu button { width: 100%; padding: 9px 10px; text-align: left; font-size: 12px; }
+.cell-advanced-menu .cell-destructive-actions { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.danger-action { color: var(--error); border-color: color-mix(in srgb, var(--error) 45%, var(--line)); }
+.danger-action:hover:not(:disabled) { background: var(--error-bg); }
+.cell-action-dialog { width: min(560px, calc(100vw - 28px)); max-width: none; max-height: calc(100dvh - 28px); padding: 0; overflow: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--text); box-shadow: 0 24px 72px #0006; }
+.cell-action-dialog::backdrop { background: #080b12a8; backdrop-filter: blur(2px); }
+.cell-action-dialog form { display: grid; gap: 14px; padding: clamp(18px, 4vw, 28px); }
+.cell-action-dialog h2 { font-size: 19px; font-weight: 600; }
+.cell-action-dialog p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.cell-action-target { display: grid; gap: 6px; margin: 0; padding: 11px 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--code); }
+.cell-action-target dt { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+.cell-action-target dd { margin: 0; overflow-wrap: anywhere; }
+.cell-action-target code, .cell-action-option code { color: var(--text); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+.cell-action-acknowledgment, .cell-action-option { display: flex; align-items: flex-start; gap: 9px; line-height: 1.5; font-size: 12px; }
+.cell-action-acknowledgment input, .cell-action-option input { flex: 0 0 auto; width: 16px; height: 16px; margin: 1px 0 0; accent-color: var(--accent); }
+.cell-action-option-help { margin: -8px 0 0 25px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.cell-action-scope-confirmation { display: grid; gap: 7px; font-size: 12px; font-weight: 550; }
+.cell-action-scope-confirmation input { min-width: 0; width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--canvas); color: var(--text); font: inherit; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.cell-action-dialog-buttons { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding-top: 4px; }
+.cell-action-dialog-buttons button { min-width: 104px; }
+.cell-action-dialog-buttons .danger-action:disabled { cursor: not-allowed; opacity: .55; }
 
 /* The cell list remains mounted across Workspace and Resources routes. */
 .area-nav { display: grid; grid-template-columns: 1fr; gap: 4px; padding: 0 12px 14px; }
@@ -295,6 +328,10 @@ button:disabled { cursor: default; opacity: .4; }
   .connection { padding: 12px 16px; }
   .cell-screen-content { padding: 10px 12px; }
   .cell-screen-content .page-heading { margin-bottom: 8px; }
+  .cell-page-title-row { align-items: flex-start; flex-wrap: wrap; gap: 10px; }
+  .cell-page-title-row .cell-lifecycle { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
+  .cell-page-title-row .cell-lifecycle-buttons { flex-wrap: wrap; }
+  .cell-advanced-menu { right: auto; left: 0; }
   .cell-screen-content .cell-terminal-panel > #cell-terminal { height: auto; min-height: 0; }
 }
 @media (min-width: 761px) and (max-width: 1050px) {

@@ -21,7 +21,7 @@ function fixture(path, cellCount = 1) {
 async function mock(page, handler = () => undefined) {
   await page.route("**/api/realms**", async route => {
     const path = new URL(route.request().url()).pathname;
-    const result = await handler(path);
+    const result = await handler(path, route.request());
     await route.fulfill(result ?? { json: fixture(path) });
   });
 }
@@ -747,4 +747,155 @@ test("create from config previews, prevents duplicate submits and opens the scop
   await expect(page).toHaveURL(/#\/resource\/prod\/shared\/services\/new-cell$/);
   expect(creates).toBe(1);
   await expect(page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link", { name: "Open prod / shared / services / new-cell" })).toBeVisible();
+});
+
+test("kill and purge require explicit confirmation and pass only selected purge options", async ({ page }) => {
+  const submitted = [];
+  await mock(page, (path, request) => {
+    if (request.method() !== "POST") return undefined;
+    if (path.endsWith("/kill")) return { json: { action: "kill", killed: true } };
+    if (path.endsWith("/purge")) {
+      const options = request.postDataJSON();
+      submitted.push(options);
+      return { json: {
+        action: "purge", force: options.force, cascade: options.cascade,
+        purgeSucceeded: true, metadataDeleted: true, cgroupDeleted: true,
+        containersDeleted: true, deleted: ["containers", "cgroup", "metadata"], purged: ["cni-resources"],
+      } };
+    }
+    return undefined;
+  });
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  await page.getByText("Advanced actions", { exact: true }).click();
+  await page.getByRole("button", { name: "Kill cell…" }).click();
+  let dialog = page.getByRole("dialog");
+  await expect(dialog.getByText("dev / shared / services / api", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Confirm Kill" })).toBeDisabled();
+  await dialog.getByLabel("I understand this immediately terminates the cell's running containers.").check();
+  await dialog.getByRole("button", { name: "Confirm Kill" }).click();
+  await expect(page.locator(".cell-lifecycle-feedback")).toContainText("Cell killed");
+  await expect(page.getByRole("button", { name: "Purge cell…" })).toHaveCount(0);
+
+  await page.getByText("Advanced actions", { exact: true }).click();
+  await page.getByRole("button", { name: "Purge cell…" }).click();
+  dialog = page.getByRole("dialog");
+  const force = dialog.locator("label").filter({ hasText: "--force" }).locator("input");
+  const cascade = dialog.locator("label").filter({ hasText: "--cascade" }).locator("input");
+  await expect(force).not.toBeChecked();
+  await expect(cascade).not.toBeChecked();
+  await expect(dialog.getByRole("button", { name: "Confirm Purge" })).toBeDisabled();
+  await dialog.getByLabel("Type the full target above to enable Purge").fill("dev / shared / services / api");
+  await force.check();
+  await cascade.check();
+  await dialog.getByRole("button", { name: "Confirm Purge" }).click();
+  await expect(page.locator(".cell-global-feedback")).toContainText("Cell purged");
+  expect(submitted).toEqual([{ force: true, cascade: true }]);
+});
+
+test("partial purge reports incomplete cleanup instead of success", async ({ page }) => {
+  await mock(page, (path, request) => {
+    if (request.method() !== "POST" || !path.endsWith("/purge")) return undefined;
+    return { json: {
+      action: "purge", purgeSucceeded: false, metadataDeleted: false,
+      cgroupDeleted: true, containersDeleted: true,
+      deleted: ["containers", "cgroup"],
+      purged: ["cni-resources-incomplete", "purge-error:CNI DEL failed"],
+    } };
+  });
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  await page.getByText("Advanced actions", { exact: true }).click();
+  await page.getByRole("button", { name: "Purge cell…" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Type the full target above to enable Purge").fill("dev / shared / services / api");
+  await dialog.getByRole("button", { name: "Confirm Purge" }).click();
+  const feedback = page.locator(".cell-lifecycle-feedback");
+  await expect(feedback).toContainText("Purge incomplete.");
+  await expect(feedback).not.toContainText("Cell purged.");
+  await expect(feedback).toContainText("cni-resources-incomplete");
+});
+
+test("confirmed deletion closes only that cell terminal and removes only that cell", async ({ page }) => {
+  let deletedDev = false;
+  const openSockets = new Set();
+  await mock(page, (path, request) => {
+    if (request.method() === "POST" && path.endsWith("/delete")) {
+      deletedDev = path.includes("/realms/dev/");
+      return { json: { action: "delete", metadataDeleted: true, cgroupDeleted: true, containersDeleted: true } };
+    }
+    if (path.endsWith("/cells") && path.includes("/realms/dev/") && deletedDev) return { json: [] };
+    if (path.endsWith("/containers")) return { json: [{ id: "web", attachable: true }] };
+    return undefined;
+  });
+  await page.routeWebSocket("**/attach", socket => {
+    const path = new URL(socket.url()).pathname;
+    openSockets.add(path);
+    socket.onClose(() => openSockets.delete(path));
+    socket.send(JSON.stringify({ type: "ready" }));
+  });
+
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  await expect.poll(() => openSockets.size).toBe(1);
+  await page.getByRole("link", { name: "Open prod / shared / services / api" }).click();
+  await expect.poll(() => openSockets.size).toBe(2);
+  await page.getByRole("link", { name: "Open dev / shared / services / api" }).click();
+  await page.getByText("Advanced actions", { exact: true }).click();
+  await page.getByRole("button", { name: "Delete cell…" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByText("dev / shared / services / api", { exact: true })).toBeVisible();
+  await dialog.getByLabel("I understand Delete removes this cell but does not perform Purge cleanup.").check();
+  await dialog.getByRole("button", { name: "Confirm Delete" }).click();
+  await expect(page).toHaveURL(/#\/workspace$/);
+  await expect.poll(() => openSockets.size).toBe(1);
+  expect([...openSockets].every(path => path.includes("/realms/prod/"))).toBeTruthy();
+  const cells = page.getByRole("navigation", { name: "Cell navigation" });
+  await expect(cells.getByRole("link", { name: "Open dev / shared / services / api" })).toHaveCount(0);
+  await expect(cells.getByRole("link", { name: "Open prod / shared / services / api" })).toBeVisible();
+});
+
+test("a rejected delete keeps the cell and its terminal session", async ({ page }) => {
+  let closed = false;
+  let connected = false;
+  await mock(page, (path, request) => request.method() === "POST" && path.endsWith("/delete")
+    ? { status: 403, json: { error: { code: "permission_denied", message: "delete permission denied" } } }
+    : path.endsWith("/containers") ? { json: [{ id: "web", attachable: true }] } : undefined);
+  await page.routeWebSocket("**/attach", socket => {
+    connected = true;
+    socket.onClose(() => { closed = true; });
+    socket.send(JSON.stringify({ type: "ready" }));
+  });
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  await expect.poll(() => connected).toBe(true);
+  expect(closed).toBe(false);
+  await page.getByText("Advanced actions", { exact: true }).click();
+  await page.getByRole("button", { name: "Delete cell…" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("I understand Delete removes this cell but does not perform Purge cleanup.").check();
+  await dialog.getByRole("button", { name: "Confirm Delete" }).click();
+  await expect(page.locator(".cell-lifecycle-feedback")).toContainText("Permission denied");
+  await expect(page.getByRole("link", { name: "Open dev / shared / services / api" })).toBeVisible();
+  expect(closed).toBe(false);
+});
+
+test("an unavailable delete response reconciles the cell before reporting its outcome", async ({ page }) => {
+  let closed = false;
+  let connected = false;
+  await mock(page, (path, request) => request.method() === "POST" && path.endsWith("/delete")
+    ? { status: 503, json: { error: { code: "unavailable", message: "daemon response timed out" } } }
+    : path.endsWith("/containers") ? { json: [{ id: "web", attachable: true }] } : undefined);
+  await page.routeWebSocket("**/attach", socket => {
+    connected = true;
+    socket.onClose(() => { closed = true; });
+    socket.send(JSON.stringify({ type: "ready" }));
+  });
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  await expect.poll(() => connected).toBe(true);
+  await page.getByText("Advanced actions", { exact: true }).click();
+  await page.getByRole("button", { name: "Delete cell…" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("I understand Delete removes this cell but does not perform Purge cleanup.").check();
+  await dialog.getByRole("button", { name: "Confirm Delete" }).click();
+  await expect(page.locator(".cell-lifecycle-feedback")).toContainText("Daemon unavailable");
+  await expect(page.locator(".cell-lifecycle-feedback")).toContainText("fresh daemon read confirms the cell still exists");
+  await expect(page.getByRole("link", { name: "Open dev / shared / services / api" })).toBeVisible();
+  await expect.poll(() => closed).toBe(true);
 });

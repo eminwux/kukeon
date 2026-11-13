@@ -45,6 +45,7 @@ import (
 // It always attempts cleanup even if the container is already deleted or network namespace is invalid.
 func (r *Exec) purgeCNIForContainer(containerID, netnsPath, networkName string) error {
 	var purged []string
+	var cleanupErrors []error
 
 	// Never run the plugin-chain DEL against the daemon's own netns (issue
 	// #1219); the IPAM-file purge below is unaffected and still releases the
@@ -57,7 +58,11 @@ func (r *Exec) purgeCNIForContainer(containerID, netnsPath, networkName string) 
 	// so runCNIDel surfaces each failure mode above Debug and records its outcome
 	// in the purge result rather than reporting a clean purge (issue #1324).
 	if networkName != "" {
-		purged = append(purged, r.runCNIDel(containerID, netnsPath, networkName))
+		marker := r.runCNIDel(containerID, netnsPath, networkName)
+		purged = append(purged, marker)
+		if marker != "cni-del" {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("CNI DEL for container %q: %s", containerID, marker))
+		}
 		// Belt-and-suspenders: the plugin-chain DEL above only tears down the
 		// bridge plugin's per-container masquerade chain when it runs with a
 		// LIVE netns. On the purge path the container task is already gone, so
@@ -66,8 +71,15 @@ func (r *Exec) purgeCNIForContainer(containerID, netnsPath, networkName string) 
 		// (containernetworking/plugins bridge cmdDel). This sweep reclaims the
 		// stranded chain + its POSTROUTING jump directly so a no-netns DEL (or a
 		// conflist-lookup miss) can't leak host nat state (issue #1324).
-		if marker := r.sweepCNIMasqChain(networkName, containerID); marker != "" {
+		marker, sweepErr := r.sweepCNIMasqChain(networkName, containerID)
+		if marker != "" {
 			purged = append(purged, marker)
+		}
+		if sweepErr != nil {
+			cleanupErrors = append(
+				cleanupErrors,
+				fmt.Errorf("sweep CNI masquerade chain for container %q: %w", containerID, sweepErr),
+			)
 		}
 	}
 
@@ -82,6 +94,7 @@ func (r *Exec) purgeCNIForContainer(containerID, netnsPath, networkName string) 
 			r.logger.DebugContext(r.ctx, "removed IPAM allocation", "container", containerID, "file", ipamFile)
 		} else if !errors.Is(err, os.ErrNotExist) {
 			r.logger.DebugContext(r.ctx, "failed to remove IPAM allocation file", "container", containerID, "file", ipamFile, "error", err)
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("remove IPAM allocation for container %q: %w", containerID, err))
 		}
 
 		// Also scan network directory for files that might contain this container ID
@@ -111,10 +124,15 @@ func (r *Exec) purgeCNIForContainer(containerID, netnsPath, networkName string) 
 							)
 						} else if !errors.Is(removeErr, os.ErrNotExist) {
 							r.logger.DebugContext(r.ctx, "failed to remove IPAM allocation file", "container", containerID, "file", filePath, "error", removeErr)
+							cleanupErrors = append(cleanupErrors, fmt.Errorf("remove IPAM file %q for container %q: %w", filePath, containerID, removeErr))
 						}
 					}
+				} else if !errors.Is(readErr, os.ErrNotExist) {
+					cleanupErrors = append(cleanupErrors, fmt.Errorf("read IPAM file %q while purging container %q: %w", filePath, containerID, readErr))
 				}
 			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("read IPAM directory %q while purging container %q: %w", ipamDir, containerID, err))
 		}
 	}
 
@@ -138,14 +156,20 @@ func (r *Exec) purgeCNIForContainer(containerID, netnsPath, networkName string) 
 
 		for _, pattern := range patterns {
 			matches, err := filepath.Glob(filepath.Join(cacheDir, pattern))
-			if err == nil {
-				for _, match := range matches {
-					if err = os.Remove(match); err == nil {
-						purged = append(purged, fmt.Sprintf("cache-entry:%s", filepath.Base(match)))
-						r.logger.DebugContext(r.ctx, "removed CNI cache entry", "container", containerID, "file", match)
-					} else if !errors.Is(err, os.ErrNotExist) {
-						r.logger.WarnContext(r.ctx, "failed to remove CNI cache entry", "container", containerID, "file", match, "error", err)
-					}
+			if err != nil {
+				cleanupErrors = append(
+					cleanupErrors,
+					fmt.Errorf("find CNI cache entries for container %q: %w", containerID, err),
+				)
+				continue
+			}
+			for _, match := range matches {
+				if err = os.Remove(match); err == nil {
+					purged = append(purged, fmt.Sprintf("cache-entry:%s", filepath.Base(match)))
+					r.logger.DebugContext(r.ctx, "removed CNI cache entry", "container", containerID, "file", match)
+				} else if !errors.Is(err, os.ErrNotExist) {
+					r.logger.WarnContext(r.ctx, "failed to remove CNI cache entry", "container", containerID, "file", match, "error", err)
+					cleanupErrors = append(cleanupErrors, fmt.Errorf("remove CNI cache entry %q for container %q: %w", match, containerID, err))
 				}
 			}
 		}
@@ -155,7 +179,7 @@ func (r *Exec) purgeCNIForContainer(containerID, netnsPath, networkName string) 
 		r.logger.InfoContext(r.ctx, "purged CNI resources for container", "container", containerID, "purged", purged)
 	}
 
-	return nil
+	return errors.Join(cleanupErrors...)
 }
 
 // runCNIDel runs the plugin-chain CNI DEL for a single container and returns a
@@ -247,54 +271,80 @@ func cniMasqChainName(networkName, containerID string) string {
 	return fmt.Sprintf("CNI-%x", sum)[:maxChainLength]
 }
 
-// sweepCNIMasqChain best-effort removes the bridge plugin's per-container
-// masquerade chain (CNI-<hash>) and every POSTROUTING rule jumping to it. It is
-// the backstop for the no-live-netns DEL case (see purgeCNIForContainer): the
-// bridge plugin's own DEL only tears these rules down with a live netns, so on
-// the purge path they would otherwise leak permanently (issue #1324). Returns a
-// purge-result marker when it removed anything, or "" when the chain was already
-// gone (the common case once a live-netns DEL has run). All iptables calls are
-// best-effort: a missing chain/rule is expected and not logged.
-func (r *Exec) sweepCNIMasqChain(networkName, containerID string) string {
+// sweepCNIMasqChain removes the bridge plugin's per-container masquerade chain
+// (CNI-<hash>) and every POSTROUTING rule jumping to it. It is the backstop for
+// the no-live-netns DEL case (see purgeCNIForContainer): the bridge plugin's own
+// DEL only tears these rules down with a live netns, so on the purge path they
+// would otherwise leak permanently (issue #1324). Returns a purge-result marker
+// when it removed anything, or "" when the chain was already gone (the common
+// case once a live-netns DEL has run). Any iptables failure that leaves the
+// chain or a jump to it in place is returned, so an empty-netns DEL that
+// "succeeded" cannot mask a stranded chain as a clean purge. A host without an
+// iptables binary has nothing to sweep: the bridge plugin needs the same binary
+// to create the chain.
+func (r *Exec) sweepCNIMasqChain(networkName, containerID string) (string, error) {
 	chain := cniMasqChainName(networkName, containerID)
 	swept := false
+	var sweepErrors []error
 
 	// 1. Delete every POSTROUTING jump to the chain, by line number in
 	//    descending order so earlier deletes don't renumber later ones. Matching
 	//    by target chain is robust to the rule's source IP and comment text.
-	lines := r.postroutingJumpLines(chain)
+	lines, err := r.postroutingJumpLines(chain)
+	if err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			return "", nil
+		}
+		return "", fmt.Errorf("list nat POSTROUTING rules for chain %s: %w", chain, err)
+	}
 	for i := len(lines) - 1; i >= 0; i-- {
-		if _, err := cniIptablesRun(r.ctx, "-t", "nat", "-D", "POSTROUTING", strconv.Itoa(lines[i])); err != nil {
+		if _, err = cniIptablesRun(r.ctx, "-t", "nat", "-D", "POSTROUTING", strconv.Itoa(lines[i])); err != nil {
 			r.logger.WarnContext(r.ctx, "ipMasq sweep: failed to delete POSTROUTING jump",
 				"chain", chain, "line", lines[i], "error", err)
+			sweepErrors = append(
+				sweepErrors,
+				fmt.Errorf("delete POSTROUTING jump to %s (line %d): %w", chain, lines[i], err),
+			)
 		} else {
 			swept = true
 		}
 	}
 
-	// 2. Flush then delete the chain. Both are no-ops (their not-exist errors are
-	//    ignored) once a prior live-netns DEL already reclaimed the chain.
-	_, _ = cniIptablesRun(r.ctx, "-t", "nat", "-F", chain)
-	if _, err := cniIptablesRun(r.ctx, "-t", "nat", "-X", chain); err == nil {
-		swept = true
+	// 2. Flush then delete the chain, but only when it still exists: a prior
+	//    live-netns DEL normally reclaimed it already, and probing first keeps
+	//    an expected not-exist error apart from a real failure.
+	exists, err := r.natChainExists(chain)
+	if err != nil {
+		sweepErrors = append(sweepErrors, fmt.Errorf("check nat chain %s: %w", chain, err))
+	} else if exists {
+		if _, err = cniIptablesRun(r.ctx, "-t", "nat", "-F", chain); err != nil {
+			sweepErrors = append(sweepErrors, fmt.Errorf("flush nat chain %s: %w", chain, err))
+		}
+		if _, err = cniIptablesRun(r.ctx, "-t", "nat", "-X", chain); err != nil {
+			r.logger.WarnContext(r.ctx, "ipMasq sweep: failed to delete masquerade chain",
+				"chain", chain, "error", err)
+			sweepErrors = append(sweepErrors, fmt.Errorf("delete nat chain %s: %w", chain, err))
+		} else {
+			swept = true
+		}
 	}
 
+	var marker string
 	if swept {
 		r.logger.InfoContext(r.ctx, "swept residual CNI masquerade chain",
 			"chain", chain, "container", containerID, "network", networkName)
-		return "cni-masq-swept:" + chain
+		marker = "cni-masq-swept:" + chain
 	}
-	return ""
+	return marker, errors.Join(sweepErrors...)
 }
 
 // postroutingJumpLines returns the iptables line numbers of every nat
 // POSTROUTING rule whose target is chain, parsed from
-// `iptables -t nat -L POSTROUTING --line-numbers -n`. Returns nil on any
-// iptables error (the sweep then only attempts the flush/delete).
-func (r *Exec) postroutingJumpLines(chain string) []int {
+// `iptables -t nat -L POSTROUTING --line-numbers -n`.
+func (r *Exec) postroutingJumpLines(chain string) ([]int, error) {
 	out, err := cniIptablesRun(r.ctx, "-t", "nat", "-L", "POSTROUTING", "--line-numbers", "-n")
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var lines []int
 	for _, raw := range strings.Split(string(out), "\n") {
@@ -311,7 +361,24 @@ func (r *Exec) postroutingJumpLines(chain string) []int {
 		}
 		lines = append(lines, n)
 	}
-	return lines
+	return lines, nil
+}
+
+// natChainExists reports whether chain is declared in the nat table, parsed
+// from `iptables -t nat -S` ("-N <chain>" rows). Listing the whole table
+// succeeds whether or not the chain exists, so an error here is a real failure.
+func (r *Exec) natChainExists(chain string) (bool, error) {
+	out, err := cniIptablesRun(r.ctx, "-t", "nat", "-S")
+	if err != nil {
+		return false, err
+	}
+	for _, raw := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(raw)
+		if len(fields) == 2 && fields[0] == "-N" && fields[1] == chain {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // containsExactContainerID checks if the content contains the exact container ID,

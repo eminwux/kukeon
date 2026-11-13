@@ -27,6 +27,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -172,12 +173,13 @@ func TestBuildRootCNINetworkName_DeterministicWhenSpaceMissing(t *testing.T) {
 
 // TestMain default-stubs the package iptables shell-out (cniIptablesRun) so no
 // unit test that reaches the #1324 masquerade-chain sweep via purgeCNIForContainer
-// ever touches the host firewall. The erroring stub makes the sweep find nothing
-// and append no marker. Tests that assert on the sweep itself
-// (TestSweepCNIMasqChain*) install their own recording fake over this default.
+// ever touches the host firewall. The stub reports an empty nat table, so the
+// sweep finds nothing, appends no marker and returns no error. Tests that assert
+// on the sweep itself (TestSweepCNIMasqChain*) install their own fake over this
+// default.
 func TestMain(m *testing.M) {
 	cniIptablesRun = func(_ context.Context, _ ...string) ([]byte, error) {
-		return nil, errors.New("iptables stubbed in test")
+		return nil, nil
 	}
 	os.Exit(m.Run())
 }
@@ -291,14 +293,15 @@ func TestPurgeCNIForContainer_RemovesOnlyMatchingIPAMFile(t *testing.T) {
 		ctx:    context.Background(),
 		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		// Empty conf dir makes findCNIConfigPath miss, so the CNI DEL block
-		// (which needs a real plugin chain) is skipped; the cache dir points
-		// at an empty temp dir so the cache scan finds nothing on the host.
+		// (which needs a real plugin chain) is skipped and must be reported; the
+		// cache dir points at an empty temp dir so the cache scan finds nothing.
 		cniConf: &cni.Conf{CniConfigDir: tmp, CniBinDir: tmp, CniCacheDir: tmp},
 	}
 
 	// Empty netnsPath: the dead/absent-task purge path the teardown sites hit.
-	if err := r.purgeCNIForContainer(containerID, "", networkName); err != nil {
-		t.Fatalf("purgeCNIForContainer returned error: %v", err)
+	if err := r.purgeCNIForContainer(containerID, "", networkName); err == nil ||
+		!strings.Contains(err.Error(), "cni-del-skipped:config-not-found") {
+		t.Fatalf("purgeCNIForContainer error = %v, want skipped CNI DEL", err)
 	}
 
 	entries, err := os.ReadDir(ipamDir)
@@ -524,8 +527,12 @@ func TestPurgeCNIForContainer_SurfacesSkippedDEL(t *testing.T) {
 		cniConf: &cni.Conf{CniConfigDir: emptyDir, CniBinDir: emptyDir, CniCacheDir: emptyDir},
 	}
 
-	if err := r.purgeCNIForContainer("cid-100", "", "default-myspace"); err != nil {
-		t.Fatalf("purgeCNIForContainer returned error: %v", err)
+	err := r.purgeCNIForContainer("cid-100", "", "default-myspace")
+	if err == nil {
+		t.Fatal("purgeCNIForContainer returned nil after skipping CNI DEL")
+	}
+	if !strings.Contains(err.Error(), "cni-del-skipped:config-not-found") {
+		t.Fatalf("purgeCNIForContainer error = %v, want skipped DEL marker", err)
 	}
 
 	logged := logBuf.String()
@@ -591,12 +598,18 @@ func TestSweepCNIMasqChain(t *testing.T) {
 		if len(args) >= 3 && args[2] == "-L" {
 			return []byte(listOutput), nil
 		}
+		if len(args) == 3 && args[2] == "-S" {
+			return []byte("-P POSTROUTING ACCEPT\n-N " + chain + "\n"), nil
+		}
 		return nil, nil
 	}
 	t.Cleanup(func() { cniIptablesRun = prev })
 
 	r := &Exec{ctx: context.Background(), logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	marker := r.sweepCNIMasqChain(network, containerID)
+	marker, err := r.sweepCNIMasqChain(network, containerID)
+	if err != nil {
+		t.Fatalf("sweepCNIMasqChain error = %v, want nil", err)
+	}
 
 	if want := "cni-masq-swept:" + chain; marker != want {
 		t.Fatalf("marker = %q, want %q", marker, want)
@@ -606,6 +619,7 @@ func TestSweepCNIMasqChain(t *testing.T) {
 		{"-t", "nat", "-L", "POSTROUTING", "--line-numbers", "-n"},
 		{"-t", "nat", "-D", "POSTROUTING", "4"}, // descending: line 4 before line 2
 		{"-t", "nat", "-D", "POSTROUTING", "2"},
+		{"-t", "nat", "-S"},
 		{"-t", "nat", "-F", chain},
 		{"-t", "nat", "-X", chain},
 	}
@@ -620,14 +634,20 @@ func TestSweepCNIMasqChain(t *testing.T) {
 }
 
 // TestSweepCNIMasqChain_NoChainNoMarker covers the common post-live-netns-DEL
-// case: the chain is already gone, so the sweep finds no jumps, its flush/delete
-// no-op, and it returns "" (no false "swept" marker in the purge result).
+// case: the chain is already gone, so the sweep finds no jumps, skips the
+// flush/delete, and returns "" with no error (no false "swept" marker and no
+// false failure in the purge result).
 func TestSweepCNIMasqChain_NoChainNoMarker(t *testing.T) {
+	var calls [][]string
 	prev := cniIptablesRun
 	cniIptablesRun = func(_ context.Context, args ...string) ([]byte, error) {
-		if len(args) >= 3 && args[2] == "-L" {
+		calls = append(calls, args)
+		switch {
+		case len(args) >= 3 && args[2] == "-L":
 			// POSTROUTING with no rule jumping to our chain.
 			return []byte("Chain POSTROUTING (policy ACCEPT)\nnum  target\n1    KUKEON-FORWARD\n"), nil
+		case len(args) == 3 && args[2] == "-S":
+			return []byte("-P POSTROUTING ACCEPT\n-N KUKEON-FORWARD\n"), nil
 		}
 		// -F / -X on an absent chain fail, like real iptables.
 		return nil, errors.New("iptables: No chain/target/match by that name")
@@ -635,7 +655,142 @@ func TestSweepCNIMasqChain_NoChainNoMarker(t *testing.T) {
 	t.Cleanup(func() { cniIptablesRun = prev })
 
 	r := &Exec{ctx: context.Background(), logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	if marker := r.sweepCNIMasqChain("default-default", "default_default_natleak-test_root"); marker != "" {
+	marker, err := r.sweepCNIMasqChain("default-default", "default_default_natleak-test_root")
+	if err != nil {
+		t.Fatalf("sweepCNIMasqChain error = %v, want nil (chain already gone)", err)
+	}
+	if marker != "" {
 		t.Fatalf("marker = %q, want empty (chain already gone)", marker)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("issued %d iptables calls, want list + probe only: %v", len(calls), calls)
+	}
+}
+
+// TestSweepCNIMasqChain_SurfacesFailures guards the purge-success contract:
+// every iptables failure that can leave the masquerade chain or a jump to it on
+// the host must be returned, not logged and dropped.
+func TestSweepCNIMasqChain_SurfacesFailures(t *testing.T) {
+	const (
+		network     = "default-default"
+		containerID = "default_default_natleak-test_root"
+	)
+	chain := cniMasqChainName(network, containerID)
+	listWithJump := "Chain POSTROUTING (policy ACCEPT)\nnum  target\n1    " + chain + "  all  --  10.88.0.36   0.0.0.0/0\n"
+	natWithChain := "-P POSTROUTING ACCEPT\n-N " + chain + "\n"
+	failure := errors.New("iptables: Resource temporarily unavailable")
+
+	tests := []struct {
+		name       string
+		failOp     string
+		wantErr    string
+		wantMarker bool
+	}{
+		{name: "list POSTROUTING fails", failOp: "-L", wantErr: "list nat POSTROUTING"},
+		{name: "delete jump fails", failOp: "-D", wantErr: "delete POSTROUTING jump", wantMarker: true},
+		{name: "chain probe fails", failOp: "-S", wantErr: "check nat chain", wantMarker: true},
+		{name: "flush fails", failOp: "-F", wantErr: "flush nat chain", wantMarker: true},
+		{name: "delete chain fails", failOp: "-X", wantErr: "delete nat chain", wantMarker: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prev := cniIptablesRun
+			cniIptablesRun = func(_ context.Context, args ...string) ([]byte, error) {
+				if args[2] == tt.failOp {
+					return nil, failure
+				}
+				switch args[2] {
+				case "-L":
+					return []byte(listWithJump), nil
+				case "-S":
+					return []byte(natWithChain), nil
+				}
+				return nil, nil
+			}
+			t.Cleanup(func() { cniIptablesRun = prev })
+
+			r := &Exec{ctx: context.Background(), logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+			marker, err := r.sweepCNIMasqChain(network, containerID)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) || !errors.Is(err, failure) {
+				t.Fatalf("sweepCNIMasqChain error = %v, want %q wrapping %v", err, tt.wantErr, failure)
+			}
+			if gotMarker := marker != ""; gotMarker != tt.wantMarker {
+				t.Fatalf("marker = %q, want marker present = %t", marker, tt.wantMarker)
+			}
+		})
+	}
+}
+
+// TestSweepCNIMasqChain_NoIptablesBinary keeps hosts without iptables purgeable:
+// the bridge plugin cannot have created a chain there, so there is nothing to
+// sweep and nothing to report.
+func TestSweepCNIMasqChain_NoIptablesBinary(t *testing.T) {
+	prev := cniIptablesRun
+	cniIptablesRun = func(_ context.Context, _ ...string) ([]byte, error) {
+		return nil, fmt.Errorf("iptables: %w", exec.ErrNotFound)
+	}
+	t.Cleanup(func() { cniIptablesRun = prev })
+
+	r := &Exec{ctx: context.Background(), logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	marker, err := r.sweepCNIMasqChain("default-default", "default_default_natleak-test_root")
+	if err != nil || marker != "" {
+		t.Fatalf("sweepCNIMasqChain = (%q, %v), want (\"\", nil)", marker, err)
+	}
+}
+
+// TestPurgeCNIForContainer_SurfacesMasqSweepFailure is the reviewer-reported
+// case on PR #1403: with an empty netns the plugin-chain DEL succeeds without
+// touching the masquerade chain, so a failed sweep must still make the purge
+// return an error rather than let the controller report purgeSucceeded=true.
+func TestPurgeCNIForContainer_SurfacesMasqSweepFailure(t *testing.T) {
+	const (
+		networkName = "default-myspace"
+		containerID = "cid-100"
+	)
+	chain := cniMasqChainName(networkName, containerID)
+
+	binDir := t.TempDir()
+	confDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(binDir, "okdel"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake plugin: %v", err)
+	}
+	conflist := `{
+  "cniVersion": "0.4.0",
+  "name": "` + networkName + `",
+  "plugins": [ { "type": "okdel" } ]
+}`
+	if err := os.WriteFile(filepath.Join(confDir, networkName+".conflist"), []byte(conflist), 0o644); err != nil {
+		t.Fatalf("write conflist: %v", err)
+	}
+
+	prev := cniIptablesRun
+	cniIptablesRun = func(_ context.Context, args ...string) ([]byte, error) {
+		switch args[2] {
+		case "-L":
+			return []byte("Chain POSTROUTING (policy ACCEPT)\nnum  target\n"), nil
+		case "-S":
+			return []byte("-N " + chain + "\n"), nil
+		case "-X":
+			return nil, errors.New("iptables: Too many links")
+		}
+		return nil, nil
+	}
+	t.Cleanup(func() { cniIptablesRun = prev })
+
+	r := &Exec{
+		ctx:     context.Background(),
+		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		cniConf: &cni.Conf{CniConfigDir: confDir, CniBinDir: binDir, CniCacheDir: t.TempDir()},
+	}
+	err := r.purgeCNIForContainer(containerID, "", networkName)
+	if err == nil {
+		t.Fatal("purgeCNIForContainer returned nil after the masquerade sweep failed")
+	}
+	if !strings.Contains(err.Error(), "sweep CNI masquerade chain") ||
+		!strings.Contains(err.Error(), "delete nat chain "+chain) {
+		t.Fatalf("purgeCNIForContainer error = %v, want masquerade sweep failure", err)
+	}
+	if strings.Contains(err.Error(), "CNI DEL for container") {
+		t.Fatalf("purgeCNIForContainer error = %v, want CNI DEL to have succeeded", err)
 	}
 }

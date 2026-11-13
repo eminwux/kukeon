@@ -8,7 +8,8 @@ import { CellSidebar } from "./cell-sidebar";
 import { useInventory, type Inventory, type InventoryResource, type Doc, type RuntimeStatus } from "./inventory";
 import { apiPath, catalogTitles, kinds, titles, readRoute, resourceLink, listLink, workspaceLink, type Route } from "./routes";
 import { StateBadge } from "./status";
-import { CellLifecycleControls, LifecycleNotice, type LifecycleAction, type LifecycleFeedback } from "./lifecycle";
+import { CellLifecycleControls, LifecycleNotice, type LifecycleAction, type LifecycleFeedback, type PurgeOptions } from "./lifecycle";
+import { cellRemovalConfirmed, deleteOperationComplete, purgeOperationComplete, requestedPurgeOptions } from "./lifecycle-policy.js";
 
 function validTime(value?: string): value is string {
   return !!value && !value.startsWith("0001-") && Number.isFinite(Date.parse(value));
@@ -89,6 +90,29 @@ function ResourceDetails({ route, revision }: { route: Route; revision: number }
 }
 
 type CellTab = "terminal" | "overview";
+type LifecycleResponse = {
+  error?: { code?: string; message?: string; phase?: string; stoppedFirst?: boolean };
+  killed?: boolean;
+  containersDeleted?: boolean;
+  cgroupDeleted?: boolean;
+  metadataDeleted?: boolean;
+  purgeSucceeded?: boolean;
+  force?: boolean;
+  cascade?: boolean;
+  deleted?: string[];
+  purged?: string[];
+};
+
+async function readCellPresence(scope: string[]): Promise<boolean | null> {
+  try {
+    const response = await fetch(apiPath(scope), { headers: { Accept: "application/json" } });
+    if (response.status === 404) return false;
+    return response.ok ? true : null;
+  } catch {
+    return null;
+  }
+}
+
 const cellTabs: { id: CellTab; label: string }[] = [
   { id: "terminal", label: "Terminal" },
   { id: "overview", label: "Overview" },
@@ -102,7 +126,7 @@ function CellDetailsScreen({ title, scope, revision, inventory, manager, theme, 
   manager: TerminalManager;
   theme: Theme;
   operations: Record<string, LifecycleFeedback>;
-  onLifecycleAction: (scope: string[], action: LifecycleAction, state?: string) => void;
+  onLifecycleAction: (scope: string[], action: LifecycleAction, state?: string, options?: PurgeOptions) => void;
 }) {
   const [activeTab, setActiveTab] = useState<CellTab>("terminal");
   const [terminalExpanded, setTerminalExpanded] = useState(false);
@@ -199,6 +223,7 @@ function WorkspaceLanding({ inventory }: { inventory: InventoryResource }) {
 function App() {
   const [revision, setRevision] = useState(0);
   const [operations, setOperations] = useState<Record<string, LifecycleFeedback>>({});
+  const [lastOperation, setLastOperation] = useState<{ scope: string[]; operation: LifecycleFeedback } | null>(null);
   const pendingOperations = useRef(new Set<string>());
   const [route, setRoute] = useState(readRoute);
   const [theme, setTheme] = useState<Theme>(initialTheme);
@@ -218,18 +243,29 @@ function App() {
   const connection = useResource<{ endpoint: string; version: string }>("/api/connection", revision);
   const inventory = useInventory(revision);
   const terminals = useTerminalSessions(inventory);
-  async function runCellLifecycle(scope: string[], action: LifecycleAction, state?: string) {
+  function recordOperation(scope: string[], operation: LifecycleFeedback) {
+    setOperations(old => ({ ...old, [JSON.stringify(scope)]: operation }));
+    setLastOperation({ scope: [...scope], operation });
+  }
+  async function runCellLifecycle(scope: string[], action: LifecycleAction, state?: string, options?: PurgeOptions) {
     const key = JSON.stringify(scope);
     if (pendingOperations.current.has(key)) return;
     pendingOperations.current.add(key);
     terminals.holdCell(scope);
     const pendingMessage = action === "restart"
       ? state === "Ready" ? "Restarting cell: stopping, then starting…" : "Restarting cell: starting or recovering…"
-      : `${action === "start" ? "Starting" : "Stopping"} cell…`;
-    setOperations(old => ({ ...old, [key]: { action, phase: "pending", message: pendingMessage } }));
+      : action === "kill" ? "Killing cell containers…"
+        : action === "delete" ? "Deleting cell resources…"
+          : action === "purge" ? "Purging cell resources…"
+            : `${action === "start" ? "Starting" : "Stopping"} cell…`;
+    recordOperation(scope, { action, phase: "pending", message: pendingMessage });
     try {
-      const response = await fetch(`${apiPath(scope)}/${action}`, { method: "POST", headers: { Accept: "application/json" } });
-      let body: { error?: { code?: string; message?: string; phase?: string; stoppedFirst?: boolean } } = {};
+      const response = await fetch(`${apiPath(scope)}/${action}`, {
+        method: "POST",
+        headers: action === "purge" ? { Accept: "application/json", "Content-Type": "application/json" } : { Accept: "application/json" },
+        ...(action === "purge" ? { body: JSON.stringify(requestedPurgeOptions(options?.force, options?.cascade)) } : {}),
+      });
+      let body: LifecycleResponse = {};
       try { body = await response.json(); } catch { /* Use the HTTP status below. */ }
       if (!response.ok) {
         const failure = body.error ?? { code: "unavailable", message: `HTTP ${response.status}` };
@@ -243,6 +279,20 @@ function App() {
         } else if (action === "start") {
           terminals.interruptCell(scope, "Cell start failed. Reconnect when the cell is Ready to attach to its current process.");
         }
+
+        let presence: boolean | null = null;
+        if (action === "delete" || action === "purge") {
+          presence = await readCellPresence(scope);
+          if (presence === false) {
+            terminals.removeCell(scope);
+            window.location.hash = workspaceLink();
+          } else if (failure.code === "unavailable") {
+            terminals.interruptCell(scope, "The destructive action did not return a result. This cell's terminal may have been affected; refresh before reconnecting.");
+          }
+        } else if (action === "kill" && failure.code === "unavailable") {
+          terminals.interruptCell(scope, "The kill result was not received. This cell's terminal may have ended; refresh before reconnecting.");
+        }
+
         const reason = failure.code === "permission_denied" ? "Permission denied"
           : failure.code === "unavailable" ? "Daemon unavailable"
           : failure.code === "invalid_state" ? "Invalid cell state"
@@ -254,24 +304,99 @@ function App() {
           : action === "restart" && phase === "starting" ? "Restart failed while starting"
           : action === "restart" && phase === "validation" ? "Restart is unavailable"
           : `${action[0].toUpperCase()}${action.slice(1)} failed`;
-        setOperations(old => ({ ...old, [key]: { action, phase: "error", message: `${title}. ${reason}: ${failure.message ?? "The daemon rejected the request."}` } }));
+        const reconcile = action === "delete" || action === "purge"
+          ? presence === false ? " A fresh daemon read confirms the cell is gone; its terminal tabs were closed."
+            : presence === true ? " A fresh daemon read confirms the cell still exists; it remains in the workspace."
+              : " The final state is unknown; the cell and terminal tabs were retained. Refresh before retrying."
+          : "";
+        recordOperation(scope, { action, phase: "error", message: `${title}. ${reason}: ${failure.message ?? "The daemon rejected the request."}${reconcile}` });
         return;
       }
+
       if (action === "stop" || action === "restart") {
         terminals.interruptCell(scope, action === "stop"
           ? "Cell stopped. The previous terminal session ended. Reconnect after the cell starts."
           : "Cell restarted. The previous terminal session ended; reconnect to attach to the new process.");
       }
+      if (action === "kill") {
+        if (body.killed) {
+          terminals.interruptCell(scope, "Cell killed. The cell remains; its terminal session ended and can be reconnected when appropriate.");
+          recordOperation(scope, { action, phase: "success", message: "Cell killed. Its containers were terminated; the cell definition remains and its terminal session ended." });
+        } else {
+          recordOperation(scope, { action, phase: "error", message: "The daemon did not confirm a kill. The terminal connection was left intact; refresh the cell state." });
+        }
+        return;
+      }
+      if (action === "delete") {
+        const presence = body.metadataDeleted ? false : await readCellPresence(scope);
+        if (cellRemovalConfirmed(body.metadataDeleted, presence)) {
+          terminals.removeCell(scope);
+          window.location.hash = workspaceLink();
+        }
+        const complete = deleteOperationComplete(body);
+        const outcome = body.metadataDeleted
+          ? "kukeond reports that cell metadata was deleted."
+          : presence === false ? "A fresh daemon read confirms the cell is gone."
+          : presence === true ? "The cell still exists and remains in the workspace."
+            : "The final state could not be confirmed; the cell and terminal tabs were retained.";
+        const effects = `Containers deleted: ${body.containersDeleted === true ? "yes" : "not reported"}; cgroup deleted: ${body.cgroupDeleted === true ? "yes" : "not reported"}; metadata deleted: ${body.metadataDeleted === true ? "yes" : "not confirmed"}.`;
+        if (!complete && presence !== false) {
+          terminals.interruptCell(scope, "Delete was incomplete. The cell may still exist, but its runtime resources may have changed.");
+        }
+        recordOperation(scope, { action, phase: complete ? "success" : "error", message: complete ? `Cell deleted. ${effects}` : `Delete incomplete. ${effects} ${outcome}` });
+        return;
+      }
+      if (action === "purge") {
+        const presence = body.metadataDeleted ? false : await readCellPresence(scope);
+        if (cellRemovalConfirmed(body.metadataDeleted, presence)) {
+          terminals.removeCell(scope);
+          window.location.hash = workspaceLink();
+        }
+        const complete = purgeOperationComplete(body);
+        const outcome = body.metadataDeleted
+          ? "kukeond reports that cell metadata was deleted."
+          : presence === false ? "A fresh daemon read confirms the cell is gone."
+          : presence === true ? "The cell still exists and remains in the workspace."
+            : "The final state could not be confirmed; the cell and terminal tabs were retained.";
+        const effects = `Containers deleted: ${body.containersDeleted === true ? "yes" : "not reported"}; cgroup deleted: ${body.cgroupDeleted === true ? "yes" : "not reported"}; metadata deleted: ${body.metadataDeleted === true ? "yes" : "not confirmed"}; comprehensive purge: ${body.purgeSucceeded === true ? "complete" : "incomplete"}.`;
+        const requestedOptions = `Options passed: --force ${body.force ? "enabled" : "disabled"}, --cascade ${body.cascade ? "enabled" : "disabled"}.`;
+        const details = body.purgeSucceeded
+          ? ` Deleted: ${body.deleted?.join(", ") || "none reported"}. Purged: ${body.purged?.join(", ") || "none reported"}.`
+          : ` Daemon-reported cleanup targets (individual completion unconfirmed): ${body.deleted?.join(", ") || "none reported"}. Purge detail: ${body.purged?.join(", ") || "none reported"}.`;
+        if (!complete && presence !== false) {
+          terminals.interruptCell(scope, "Purge was incomplete. The cell may still exist, but its runtime resources may have changed.");
+        }
+        recordOperation(scope, { action, phase: complete ? "success" : "error", message: complete ? `Cell purged. ${effects} ${requestedOptions}${details}` : `Purge incomplete. ${effects} ${requestedOptions}${details} ${outcome}` });
+        return;
+      }
       const message = action === "start" ? "Cell started."
         : action === "stop" ? "Cell stopped. The previous terminal session ended."
         : "Cell restarted. The previous terminal session ended; reconnect to attach to the new process.";
-      setOperations(old => ({ ...old, [key]: { action, phase: "success", message } }));
+      recordOperation(scope, { action, phase: "success", message });
     } catch (error) {
       if (action === "stop" || action === "restart") {
         terminals.interruptCell(scope, "The lifecycle request lost its connection. The terminal session may have ended; refresh the cell before reconnecting.");
       }
       const message = error instanceof Error ? error.message : "The request could not reach the web server.";
-      setOperations(old => ({ ...old, [key]: { action, phase: "error", message: `${action[0].toUpperCase()}${action.slice(1)} failed. Daemon unavailable: ${message}` } }));
+      let outcome = "";
+      if (action === "kill") {
+        terminals.interruptCell(scope, "The kill result was not received. This cell's terminal may have ended; refresh before reconnecting.");
+        outcome = " The cell state is being refreshed; the kill result remains unknown.";
+      } else if (action === "delete" || action === "purge") {
+        const presence = await readCellPresence(scope);
+        if (presence === false) {
+          terminals.removeCell(scope);
+          window.location.hash = workspaceLink();
+          outcome = " A fresh daemon read confirms the cell is gone; its terminal tabs were closed.";
+        } else if (presence === true) {
+          terminals.interruptCell(scope, "The destructive action response was lost. The cell still exists, but its runtime may have changed; refresh before reconnecting.");
+          outcome = " A fresh daemon read confirms the cell still exists; the operation's runtime effects are unknown.";
+        } else {
+          terminals.interruptCell(scope, "The destructive action response was lost. This cell's terminal may have been affected; refresh before reconnecting.");
+          outcome = " The final state is unknown; the cell remains visible until a daemon refresh confirms removal.";
+        }
+      }
+      recordOperation(scope, { action, phase: "error", message: `${action[0].toUpperCase()}${action.slice(1)} outcome unknown. Daemon unavailable: ${message}.${outcome}` });
     } finally {
       terminals.releaseCell(scope);
       pendingOperations.current.delete(key);
@@ -316,6 +441,11 @@ function App() {
         </div>
       </header>
       <div className={`workspace-content ${isWorkspace ? "cell-workspace-content" : ""}${cellScreenScope ? " cell-screen-content" : ""}`}>
+        {lastOperation && JSON.stringify(lastOperation.scope) !== JSON.stringify(cellScreenScope) && <section className="cell-global-feedback" aria-label="Cell operation result">
+          <strong>{lastOperation.scope.join(" / ")}</strong>
+          <LifecycleNotice operation={lastOperation.operation} />
+          <button type="button" aria-label="Dismiss cell operation result" disabled={lastOperation.operation.phase === "pending"} onClick={() => setLastOperation(null)}>Dismiss</button>
+        </section>}
         {!isWorkspace && !cellScreenScope && <ResourcesNavigation route={route} />}
         {!cellScreenScope && <div className="page-heading"><p className="eyebrow">{isWorkspace ? "Workspace" : "Resources"}</p><h1>{heading}</h1><p className="description">{isWorkspace ? route.scope.length ? route.scope.join(" / ") : "Select a cell to work with its terminal and inspect its state." : route.view === "dashboard" ? "Browse and manage resources on this server." : route.view === "resource" || (catalog && route.scope.length > 0) ? route.scope.join(" / ") : `Browse ${heading?.toLowerCase()} across your infrastructure.`}</p>{isWorkspace && <a className="new-cell-action mobile-new-cell" href="#/configs">+ New Cell</a>}</div>}
         {inventory.loading && <p className="description" role="status">Refreshing resource inventory…</p>}

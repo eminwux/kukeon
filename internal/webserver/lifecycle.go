@@ -18,8 +18,11 @@ package webserver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"mime"
 	"net/http"
 	"path/filepath"
 	"sync"
@@ -60,7 +63,7 @@ func (l *cellOperationLocks) tryAcquire(scope cellScope) (func(), bool) {
 
 func registerCellLifecycleRoutes(mux *http.ServeMux, dial Dial) {
 	locks := &cellOperationLocks{}
-	for _, action := range []string{"start", "stop", "restart"} {
+	for _, action := range []string{"start", "stop", "restart", "kill", "delete", "purge"} {
 		pattern := "POST /api/realms/{realm}/spaces/{space}/stacks/{stack}/cells/{cell}/" + action
 		mux.HandleFunc(pattern, cellLifecycleRoute(dial, locks, action))
 	}
@@ -68,7 +71,15 @@ func registerCellLifecycleRoutes(mux *http.ServeMux, dial Dial) {
 
 func cellLifecycleRoute(dial Dial, locks *cellOperationLocks, action string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.ContentLength != 0 {
+		force, cascade := false, false
+		if action == "purge" {
+			var err error
+			force, cascade, err = decodePurgeCellOptions(w, r)
+			if err != nil {
+				writeAPIError(w, err)
+				return
+			}
+		} else if r.ContentLength != 0 {
 			writeAPIError(w, fmt.Errorf("%w: lifecycle requests do not accept a body", errdefs.ErrConfig))
 			return
 		}
@@ -94,6 +105,7 @@ func cellLifecycleRoute(dial Dial, locks *cellOperationLocks, action string) htt
 		defer func() { _ = client.Close() }()
 
 		var cell v1beta1.CellDoc
+		response := map[string]any{"action": action}
 		switch action {
 		case "start":
 			result, callErr := client.StartCell(ctx, doc)
@@ -102,6 +114,39 @@ func cellLifecycleRoute(dial Dial, locks *cellOperationLocks, action string) htt
 				return
 			}
 			cell = result.Cell
+		case "kill":
+			result, callErr := client.KillCell(ctx, doc)
+			if callErr != nil {
+				writeAPIError(w, callErr)
+				return
+			}
+			cell = result.Cell
+			response["killed"] = result.Killed
+		case "delete":
+			result, callErr := client.DeleteCell(ctx, doc)
+			if callErr != nil {
+				writeAPIError(w, callErr)
+				return
+			}
+			cell = result.Cell
+			response["containersDeleted"] = result.ContainersDeleted
+			response["cgroupDeleted"] = result.CgroupDeleted
+			response["metadataDeleted"] = result.MetadataDeleted
+		case "purge":
+			result, callErr := client.PurgeCell(ctx, doc, force, cascade)
+			if callErr != nil {
+				writeAPIError(w, callErr)
+				return
+			}
+			cell = result.Cell
+			response["containersDeleted"] = result.ContainersDeleted
+			response["cgroupDeleted"] = result.CgroupDeleted
+			response["metadataDeleted"] = result.MetadataDeleted
+			response["purgeSucceeded"] = result.PurgeSucceeded
+			response["force"] = result.Force
+			response["cascade"] = result.Cascade
+			response["deleted"] = result.Deleted
+			response["purged"] = result.Purged
 		case "stop":
 			result, callErr := client.StopCell(ctx, doc)
 			if callErr != nil {
@@ -120,8 +165,43 @@ func cellLifecycleRoute(dial Dial, locks *cellOperationLocks, action string) htt
 			writeAPIError(w, fmt.Errorf("%w: unknown lifecycle operation", errdefs.ErrConfig))
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"action": action, "cell": redactCell(cell)})
+		if cell.Metadata.Name == "" {
+			cell = doc
+		}
+		response["cell"] = redactCell(cell)
+		writeJSON(w, http.StatusOK, response)
 	}
+}
+
+type purgeCellOptions struct {
+	Force   bool `json:"force"`
+	Cascade bool `json:"cascade"`
+}
+
+func decodePurgeCellOptions(w http.ResponseWriter, r *http.Request) (bool, bool, error) {
+	if r.Body == nil || r.Body == http.NoBody {
+		return false, false, nil
+	}
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
+		return false, false, fmt.Errorf("%w: purge options must be application/json", errdefs.ErrConfig)
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	var options purgeCellOptions
+	if err := decoder.Decode(&options); err != nil {
+		return false, false, fmt.Errorf("%w: invalid purge options: %v", errdefs.ErrConfig, err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return false, false, fmt.Errorf("%w: purge options must contain one JSON object", errdefs.ErrConfig)
+		}
+		return false, false, fmt.Errorf("%w: invalid purge options: %v", errdefs.ErrConfig, err)
+	}
+	return options.Force, options.Cascade, nil
 }
 
 func lifecycleCellDoc(r *http.Request) (v1beta1.CellDoc, cellScope, error) {

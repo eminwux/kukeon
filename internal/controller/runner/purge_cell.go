@@ -30,161 +30,257 @@ import (
 )
 
 // PurgeCell performs comprehensive cleanup of a cell, including CNI resources and orphaned containers.
-func (r *Exec) PurgeCell(cell intmodel.Cell) error {
+func (r *Exec) PurgeCell(cell intmodel.Cell) (PurgeCellOutcome, error) {
+	result := PurgeCellOutcome{Purged: []string{}}
 	defer r.lockCell(cell)()
 
-	cellName := strings.TrimSpace(cell.Metadata.Name)
-	if cellName == "" {
-		return errdefs.ErrCellNameRequired
-	}
-	realmName := strings.TrimSpace(cell.Spec.RealmName)
-	if realmName == "" {
-		return errdefs.ErrRealmNameRequired
-	}
-	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
-	if spaceName == "" {
-		return errdefs.ErrSpaceNameRequired
-	}
-	stackName := strings.TrimSpace(cell.Spec.StackName)
-	if stackName == "" {
-		return errdefs.ErrStackNameRequired
+	if err := validatePurgeCell(cell); err != nil {
+		return result, err
 	}
 
-	// First, perform standard delete
+	// Run the normal delete first. The later checks retry cleanup and report its
+	// final state, so a recovered transient error does not produce a false failure.
 	if err := r.deleteCellLocked(cell); err != nil {
-		// Log but continue with purge even if delete fails
 		r.logger.WarnContext(r.ctx, "delete failed, continuing with purge", "error", err)
 	}
 
-	// Get cell to access containers and metadata
-	internalCell, err := r.GetCell(cell)
-	if err != nil && !errors.Is(err, errdefs.ErrCellNotFound) {
-		return fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
+	cellForOps := cell
+	if internalCell, err := r.GetCell(cell); err == nil {
+		cellForOps = internalCell
+	} else if !errors.Is(err, errdefs.ErrCellNotFound) {
+		r.logger.WarnContext(r.ctx, "failed to reload cell for purge", "error", err)
 	}
 
-	// Use internalCell if available, otherwise use provided cell as fallback
-	cellForOps := internalCell
-	cellNotFound := errors.Is(err, errdefs.ErrCellNotFound)
-	if cellNotFound {
-		cellForOps = cell
+	if err := r.ensureClientConnected(); err != nil {
+		return result, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 
-	if err = r.ensureClientConnected(); err != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+	var cleanupErrors []error
+	namespace, realmErr := r.purgeCellNamespace(cellForOps)
+	if realmErr != nil {
+		cleanupErrors = append(cleanupErrors, realmErr)
+		r.logger.WarnContext(r.ctx, "failed to get realm for purge", "error", realmErr)
 	}
 
-	// Get realm to access namespace
-	lookupRealm := intmodel.Realm{
-		Metadata: intmodel.RealmMetadata{
-			Name: cellForOps.Spec.RealmName,
-		},
-	}
-	internalRealm, err := r.GetRealm(lookupRealm)
-	if err != nil {
-		r.logger.WarnContext(r.ctx, "failed to get realm for purge", "error", err)
-		return nil // Continue anyway
+	cellID := purgeCellID(cellForOps)
+	networkName := r.buildRootCNINetworkName(cellForOps.Spec.RealmName, cellForOps.Spec.SpaceName)
+
+	containerIDs, idErr := purgeCellContainerIDs(cellForOps, cellID)
+	if idErr != nil {
+		cleanupErrors = append(cleanupErrors, idErr)
 	}
 
-	// Get space for network name
-	lookupSpace := intmodel.Space{
-		Metadata: intmodel.SpaceMetadata{
-			Name: cellForOps.Spec.SpaceName,
-		},
-		Spec: intmodel.SpaceSpec{
-			RealmName: cellForOps.Spec.RealmName,
-		},
-	}
-	space, err := r.GetSpace(lookupSpace)
-	if err != nil {
-		r.logger.WarnContext(r.ctx, "failed to get space for purge", "error", err)
+	cniErr := r.purgeCellCNIResources(namespace, networkName, containerIDs)
+	if cniErr == nil && idErr == nil && networkName != "" {
+		result.Purged = append(result.Purged, "cni-resources")
 	} else {
-		var networkName string
-		networkName, err = r.getSpaceNetworkName(space)
-		if err != nil {
-			r.logger.WarnContext(r.ctx, "failed to get network name", "error", err)
-		} else {
-			// Build container names from the cell using the same naming scheme as creation
-			// This ensures we match the actual container names (using underscores, not hyphens)
-			var containerIDs []string
-
-			// Get names from cell spec, with fallbacks
-			cellSpaceName := cellForOps.Spec.SpaceName
-			cellStackName := cellForOps.Spec.StackName
-			cellID := cellForOps.Spec.ID
-			if cellID == "" {
-				cellID = cellForOps.Metadata.Name
-			}
-
-			// Add root container
-			var rootContainerID string
-			rootContainerID, err = naming.BuildRootContainerdID(cellSpaceName, cellStackName, cellID)
-			if err != nil {
-				r.logger.WarnContext(r.ctx, "failed to build root container containerd ID", "error", err)
-			} else {
-				containerIDs = append(containerIDs, rootContainerID)
-			}
-
-			// Add all containers from the cell spec
-			for _, containerSpec := range cellForOps.Spec.Containers {
-				// Use container spec names if available, otherwise fall back to cell spec names
-				containerSpaceName := containerSpec.SpaceName
-				if containerSpaceName == "" {
-					containerSpaceName = cellSpaceName
-				}
-				containerStackName := containerSpec.StackName
-				if containerStackName == "" {
-					containerStackName = cellStackName
-				}
-				containerCellName := containerSpec.CellName
-				if containerCellName == "" {
-					containerCellName = cellID
-				}
-				containerName := containerSpec.ID
-				if containerName == "" {
-					r.logger.WarnContext(r.ctx, "container spec has empty ID, skipping", "index", len(containerIDs))
-					continue
-				}
-
-				// Use ContainerdID from spec
-				containerID := containerSpec.ContainerdID
-				if containerID == "" {
-					r.logger.WarnContext(r.ctx, "container has empty ContainerdID, skipping", "container", containerName)
-					continue
-				}
-				containerIDs = append(containerIDs, containerID)
-			}
-
-			r.logger.DebugContext(r.ctx, "built container IDs from cell", "count", len(containerIDs))
-			if len(containerIDs) > 0 {
-				r.logger.InfoContext(r.ctx, "purging CNI resources for cell containers", "count", len(containerIDs))
-				for i, containerID := range containerIDs {
-					r.logger.DebugContext(r.ctx, "processing container for CNI purge", "index", i+1, "total", len(containerIDs), "id", containerID)
-					// Try to get netns path
-					r.logger.DebugContext(r.ctx, "getting container netns path", "id", containerID)
-					netnsPath, _ := r.getContainerNetnsPath(internalRealm.Spec.Namespace, containerID)
-					// Purge CNI resources
-					r.logger.DebugContext(r.ctx, "purging CNI resources for container", "id", containerID, "network", networkName)
-					_ = r.purgeCNIForContainer(containerID, netnsPath, networkName)
-				}
-				r.logger.InfoContext(r.ctx, "completed purging CNI resources for cell containers", "count", len(containerIDs))
-			}
+		result.Purged = append(result.Purged, "cni-resources-incomplete")
+		if cniErr != nil {
+			cleanupErrors = append(cleanupErrors, cniErr)
 		}
 	}
 
-	// Force remove cell cgroup if it still exists
-	spec := ctr.DefaultCellSpec(cellForOps)
-	mountpoint := r.ctrClient.GetCgroupMountpoint()
-	_ = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
+	if symlinkErr := purgeCellSocketSymlinks(r.opts.RunPath, cellForOps); symlinkErr != nil {
+		cleanupErrors = append(cleanupErrors, symlinkErr)
+	}
 
-	// Remove metadata directory completely
+	cgroupDeleted, cgroupErr := r.purgeCellCgroup(cellForOps)
+	result.CgroupDeleted = cgroupDeleted
+	if cgroupErr != nil {
+		cleanupErrors = append(cleanupErrors, cgroupErr)
+	} else {
+		result.Purged = append(result.Purged, "cgroup")
+	}
+
+	// Confirm container removal before touching metadata: the cell document is
+	// the only handle `kuke delete`/`kuke purge` can retry from, so it must
+	// survive while any of the cell's containers might still exist.
+	containersDeleted, containersErr := r.confirmPurgeCellContainers(namespace, cellForOps, cellID, containerIDs)
+	result.ContainersDeleted = containersDeleted
+	if containersErr != nil {
+		cleanupErrors = append(cleanupErrors, containersErr)
+		r.logger.WarnContext(r.ctx, "keeping cell metadata: containers not confirmed removed", "error", containersErr)
+		return result, errors.Join(cleanupErrors...)
+	}
+	result.Purged = append(result.Purged, "orphaned-containers")
+
+	metadataDeleted, metadataErr := r.purgeCellMetadata(cellForOps)
+	result.MetadataDeleted = metadataDeleted
+	if metadataErr != nil {
+		cleanupErrors = append(cleanupErrors, metadataErr)
+	} else {
+		result.Purged = append(result.Purged, "all-metadata")
+	}
+
+	return result, errors.Join(cleanupErrors...)
+}
+
+func validatePurgeCell(cell intmodel.Cell) error {
+	if strings.TrimSpace(cell.Metadata.Name) == "" {
+		return errdefs.ErrCellNameRequired
+	}
+	if strings.TrimSpace(cell.Spec.RealmName) == "" {
+		return errdefs.ErrRealmNameRequired
+	}
+	if strings.TrimSpace(cell.Spec.SpaceName) == "" {
+		return errdefs.ErrSpaceNameRequired
+	}
+	if strings.TrimSpace(cell.Spec.StackName) == "" {
+		return errdefs.ErrStackNameRequired
+	}
+	return nil
+}
+
+func (r *Exec) purgeCellNamespace(cell intmodel.Cell) (string, error) {
+	lookup := intmodel.Realm{Metadata: intmodel.RealmMetadata{Name: cell.Spec.RealmName}}
+	realm, err := r.GetRealm(lookup)
+	if err != nil {
+		return "", fmt.Errorf("get realm for purge: %w", err)
+	}
+	if realm.Spec.Namespace == "" {
+		return "", errors.New("realm has no containerd namespace")
+	}
+	return realm.Spec.Namespace, nil
+}
+
+func purgeCellID(cell intmodel.Cell) string {
+	if id := strings.TrimSpace(cell.Spec.ID); id != "" {
+		return id
+	}
+	return cell.Metadata.Name
+}
+
+func purgeCellContainerIDs(cell intmodel.Cell, cellID string) ([]string, error) {
+	containerIDs := make([]string, 0, len(cell.Spec.Containers)+1)
+	rootID, rootErr := naming.BuildRootContainerdID(cell.Spec.SpaceName, cell.Spec.StackName, cellID)
+	if rootErr == nil {
+		containerIDs = append(containerIDs, rootID)
+	}
+
+	var idErrors []error
+	if rootErr != nil {
+		idErrors = append(idErrors, fmt.Errorf("build root container ID: %w", rootErr))
+	}
+	for _, spec := range cell.Spec.Containers {
+		containerID := strings.TrimSpace(spec.ContainerdID)
+		if containerID == "" && strings.TrimSpace(spec.ID) != "" {
+			spaceName := spec.SpaceName
+			if spaceName == "" {
+				spaceName = cell.Spec.SpaceName
+			}
+			stackName := spec.StackName
+			if stackName == "" {
+				stackName = cell.Spec.StackName
+			}
+			containerCell := spec.CellName
+			if containerCell == "" {
+				containerCell = cellID
+			}
+			var err error
+			containerID, err = naming.BuildContainerdID(spaceName, stackName, containerCell, spec.ID)
+			if err != nil {
+				idErrors = append(idErrors, fmt.Errorf("build container ID for %q: %w", spec.ID, err))
+				continue
+			}
+		}
+		if containerID != "" {
+			containerIDs = append(containerIDs, containerID)
+		}
+	}
+
+	seen := make(map[string]struct{}, len(containerIDs))
+	unique := containerIDs[:0]
+	for _, containerID := range containerIDs {
+		if _, ok := seen[containerID]; ok {
+			continue
+		}
+		seen[containerID] = struct{}{}
+		unique = append(unique, containerID)
+	}
+	return unique, errors.Join(idErrors...)
+}
+
+func (r *Exec) purgeCellCNIResources(namespace, networkName string, containerIDs []string) error {
+	if networkName == "" {
+		return errors.New("could not derive the cell CNI network name")
+	}
+	var cleanupErrors []error
+	for _, containerID := range containerIDs {
+		netnsPath := ""
+		if namespace != "" {
+			netnsPath, _ = r.getContainerNetnsPath(namespace, containerID)
+		}
+		if err := r.purgeCNIForContainer(containerID, netnsPath, networkName); err != nil {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("purge CNI for container %q: %w", containerID, err))
+		}
+	}
+	return errors.Join(cleanupErrors...)
+}
+
+func purgeCellSocketSymlinks(runPath string, cell intmodel.Cell) error {
+	var cleanupErrors []error
+	for _, spec := range cell.Spec.Containers {
+		if err := removeAttachableSocketSymlink(runPath, spec); err != nil {
+			cleanupErrors = append(cleanupErrors, err)
+		}
+	}
+	return errors.Join(cleanupErrors...)
+}
+
+func (r *Exec) purgeCellCgroup(cell intmodel.Cell) (bool, error) {
+	group := cell.Status.CgroupPath
+	if group == "" {
+		group = ctr.DefaultCellSpec(cell).Group
+	}
+	if err := r.ctrClient.DeleteCgroup(group, r.ctrClient.GetCgroupMountpoint()); err != nil {
+		return false, fmt.Errorf("delete cell cgroup %q: %w", group, err)
+	}
+	return true, nil
+}
+
+func (r *Exec) purgeCellMetadata(cell intmodel.Cell) (bool, error) {
 	metadataRunPath := fs.CellMetadataDir(
 		r.opts.RunPath,
-		cellForOps.Spec.RealmName,
-		cellForOps.Spec.SpaceName,
-		cellForOps.Spec.StackName,
-		cellForOps.Metadata.Name,
+		cell.Spec.RealmName,
+		cell.Spec.SpaceName,
+		cell.Spec.StackName,
+		cell.Metadata.Name,
 	)
-	_ = os.RemoveAll(metadataRunPath)
+	if err := os.RemoveAll(metadataRunPath); err != nil {
+		return false, fmt.Errorf("remove cell metadata directory %q: %w", metadataRunPath, err)
+	}
+	return true, nil
+}
 
-	return nil
+func (r *Exec) confirmPurgeCellContainers(
+	namespace string,
+	cell intmodel.Cell,
+	cellID string,
+	expectedContainerIDs []string,
+) (bool, error) {
+	if namespace == "" {
+		return false, errors.New("cannot confirm cell container removal without a realm namespace")
+	}
+	containers, err := r.ctrClient.ListContainers(namespace)
+	if err != nil {
+		return false, fmt.Errorf("list containers after purge: %w", err)
+	}
+
+	expected := make(map[string]struct{}, len(expectedContainerIDs))
+	for _, id := range expectedContainerIDs {
+		expected[id] = struct{}{}
+	}
+	prefix := fmt.Sprintf("%s_%s_%s_", cell.Spec.SpaceName, cell.Spec.StackName, cellID)
+	var remaining []string
+	for _, container := range containers {
+		id := container.ID()
+		_, expectedID := expected[id]
+		if expectedID || strings.HasPrefix(id, prefix) {
+			remaining = append(remaining, id)
+		}
+	}
+	if len(remaining) > 0 {
+		return false, fmt.Errorf("containers remain after purge: %s", strings.Join(remaining, ", "))
+	}
+	return len(cell.Spec.Containers) > 0, nil
 }

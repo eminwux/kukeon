@@ -23,9 +23,45 @@ this browser. If inventory becomes unavailable, retained cells are marked stale.
 
 **New Cell** opens Administration → Configs, where the existing config-based
 preview and creation form remains available. Creation leaves the cell stopped
-and refreshes the sidebar inventory. Switching cells closes the current terminal
-attachment but does not stop a workload. Persistent terminal tabs are not yet
-available.
+and refreshes the sidebar inventory. Switching cells preserves each cell's
+terminal tab and attachment up to the connection limit; it does not stop a
+workload. A lost browser connection does not guarantee that process or terminal
+state can be restored.
+
+## Cell lifecycle actions
+
+Start, Stop, and Restart remain beside the selected cell title. **Advanced
+actions** contains Kill and Delete; the separate **Destructive actions** section
+contains Purge. Each action shows the full realm / space / stack / cell target
+and requires a confirmation step. The UI prevents duplicate actions for the
+same cell, while the server serializes all lifecycle actions for that scoped
+cell and kukeond remains authoritative for validation and state.
+
+- **Kill** immediately terminates the cell's containers and marks the cell
+  Stopped. Cell metadata remains. The affected terminal sessions are marked
+  interrupted; unrelated cells' sessions stay attached.
+- **Delete** asks kukeond to remove the cell containers, cgroup, and metadata
+  under normal daemon validation. It does not run Purge's broader cleanup.
+  Delete is shown as complete only when cell metadata and cgroup removal are
+  confirmed; partial or ambiguous results trigger a scoped daemon read and an
+  inventory refresh.
+- **Purge** asks kukeond for comprehensive cleanup and requires typing the full
+  scoped cell identity before submission. `--force` and `--cascade` are separate,
+  unchecked options. The current cell purge implementation records `--force`
+  without bypassing controller validation, and accepts `--cascade` without
+  applying recursive cleanup because cells are leaf resources. The result
+  reports the requested options and daemon-reported cleanup items. When purge
+  is partial, the `Deleted` list is a cleanup plan and does not prove that each
+  listed item was removed; use the success flag and refreshed inventory to
+  distinguish completion from attempted cleanup.
+
+Delete and Purge remove the cell from the sidebar and close its terminal tabs
+only after kukeond reports metadata deletion or a fresh scoped read confirms
+that the cell is absent. If the HTTP response is lost, the UI refreshes state
+and reports uncertainty instead of treating the request as failed or successful.
+Permission errors, daemon rejections, and partial cleanup leave the cell visible
+when kukeond still reports it. Refresh inventory before retrying an action with
+an unknown outcome.
 
 Open **Administration** for the resource dashboard and navigation to Realms,
 Spaces, Stacks, Cells, Blueprints, Configs, Volumes, and Secrets. The dashboard

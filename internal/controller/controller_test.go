@@ -117,7 +117,7 @@ type fakeRunner struct {
 	PurgeRealmFn     func(realm intmodel.Realm) (bool, error)
 	PurgeSpaceFn     func(space intmodel.Space) error
 	PurgeStackFn     func(stack intmodel.Stack) error
-	PurgeCellFn      func(cell intmodel.Cell) error
+	PurgeCellFn      func(cell intmodel.Cell) (runner.PurgeCellOutcome, error)
 	PurgeContainerFn func(realm intmodel.Realm, containerID string) error
 
 	// Bootstrap
@@ -599,11 +599,11 @@ func (f *fakeRunner) PurgeStack(stack intmodel.Stack) error {
 	return errors.New("unexpected call to PurgeStack")
 }
 
-func (f *fakeRunner) PurgeCell(cell intmodel.Cell) error {
+func (f *fakeRunner) PurgeCell(cell intmodel.Cell) (runner.PurgeCellOutcome, error) {
 	if f.PurgeCellFn != nil {
 		return f.PurgeCellFn(cell)
 	}
-	return errors.New("unexpected call to PurgeCell")
+	return runner.PurgeCellOutcome{}, errors.New("unexpected call to PurgeCell")
 }
 
 func (f *fakeRunner) PurgeContainer(realm intmodel.Realm, containerID string) error {
