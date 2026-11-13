@@ -132,6 +132,9 @@ var (
 	ErrInvalidCPUWeight = errors.New("cpu weight must be within [1, 10000]")
 	ErrInvalidIOWeight  = errors.New("io weight must be within [1, 1000]")
 	ErrInvalidThrottle  = errors.New("io throttle entries require type, major, minor and rate")
+	// ErrCgroupScopeKind rejects a GetCgroupDetail scope whose kind is not
+	// realm, space, stack, cell or container (issue #1410).
+	ErrCgroupScopeKind = errors.New("unsupported cgroup scope kind")
 
 	// Container-related errors.
 

@@ -289,6 +289,19 @@ func (c *UnixClient) GetVolume(ctx context.Context, doc v1beta1.VolumeDoc) (GetV
 	return reply.Result, nil
 }
 
+// GetCgroupDetail implements Client (#1410).
+func (c *UnixClient) GetCgroupDetail(ctx context.Context, scope CgroupScope) (GetCgroupDetailResult, error) {
+	args := &GetCgroupDetailArgs{Scope: scope}
+	reply := &GetCgroupDetailReply{}
+	if err := c.call(ctx, MethodGetCgroupDetail, args, reply); err != nil {
+		return GetCgroupDetailResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
 // GetBlueprint implements Client.
 func (c *UnixClient) GetBlueprint(
 	ctx context.Context, doc v1beta1.CellBlueprintDoc,

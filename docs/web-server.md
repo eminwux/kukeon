@@ -136,6 +136,49 @@ Refresh updates the current list/document and reference checks. Empty results,
 loading, retrieval failures, missing targets, and retained stale data are shown
 separately. No catalog data is read directly from daemon storage.
 
+## Cgroup details
+
+Realm, space, stack, cell, and container detail views include a **Cgroup**
+section; for cells it appears on the **Overview** tab. kukeond reads the cgroup
+v2 interface files and returns them over its Unix-socket API. `kuke serve` never
+reads `/sys/fs/cgroup` itself. Values are point-in-time: refresh re-reads them.
+
+**Configuration** shows the absolute cgroup path, readiness, the delegated
+subtree controllers, `cgroup.controllers`, `cgroup.subtree_control`, and whether
+the cgroup is populated. Cells also show `nestedCgroupRuntime`. Containers show
+`hostCgroup` and a **Declared resources** table. For each of `memoryLimitBytes`,
+`cpuShares`, and `pidsLimit` the table gives the declared value and its source,
+next to the live effective value:
+
+- **Container spec**: the container sets `spec.resources` itself.
+- **Inherited space default**: the value came from the space's
+  `spec.defaults.container.resources`. Defaults are merged into the stored
+  container spec, so a container that sets exactly the space default values
+  also reads as inherited.
+- **Not set**: no value is declared. The live column still shows the effective
+  limit, so a daemon `--default-memory-limit-bytes` fallback appears through the
+  live `memory.max`.
+
+A container's cgroup is `<cell cgroupPath>/<containerd id>`, the same placement
+runc uses.
+
+**Limits and usage (live)** lists memory (`max`, `high`, `swap.max`, `current`,
+`peak` when the kernel provides it, and the `oom`/`oom_kill` counters), CPU
+(`cpu.max` as cores, `cpu.weight`, and `cpu.stat` usage), PIDs (`max`,
+`current`), and `io.max` entries. Values are shown in human-readable units, with
+the raw kernel value next to them. Unset values are always shown, never as `0`:
+
+| Shown                                      | Meaning                                                         |
+| ------------------------------------------ | --------------------------------------------------------------- |
+| **Unlimited**                              | The kernel reports `max`                                        |
+| **100 (default)**                          | `cpu.weight` is at its kernel default                           |
+| **Not available (controller not enabled)** | The interface file is absent; the controller is not enabled     |
+| **Unreadable**                             | The file exists but kukeond could not read it                   |
+| **Cgroup not present**                     | No cgroup exists at the path (for example, a stopped container) |
+
+A missing cgroup is a normal state, not an error. Permission and daemon failures
+use the same notices as other resource views.
+
 ## Options and permissions
 
 - `--listen`: `localhost` (default) or a literal loopback IP, including `::1`.
@@ -172,6 +215,10 @@ empty; append `/{name}` for its document:
 - `/api/realms/{realm}/spaces/{space}/stacks`
 - `/api/realms/{realm}/spaces/{space}/stacks/{stack}/cells`
 - `/api/realms/{realm}/spaces/{space}/stacks/{stack}/cells/{cell}/containers`
+
+Append `/cgroup` to a realm, space, stack, cell, or container detail path to read
+that resource's cgroup configuration and live values from kukeond (for example,
+`/api/realms/{realm}/cgroup`). See [Cgroup details](#cgroup-details).
 
 Each name is a URL-encoded path segment. Collections return daemon documents,
 except containers, whose collection returns daemon container specs. No fields

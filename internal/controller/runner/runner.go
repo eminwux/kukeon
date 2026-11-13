@@ -244,6 +244,9 @@ type Runner interface {
 	DeleteConfig(config intmodel.CellConfig) error
 
 	ExistsCgroup(doc any) (bool, error)
+	// CgroupMountpoint returns the cgroup v2 mountpoint that every
+	// status.cgroupPath is relative to (issue #1410).
+	CgroupMountpoint() (string, error)
 
 	PurgeRealm(realm intmodel.Realm) (namespaceRemoved bool, err error)
 	PurgeSpace(space intmodel.Space) error

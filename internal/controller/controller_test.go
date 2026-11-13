@@ -569,6 +569,10 @@ func (f *fakeRunner) GetContainerState(cell intmodel.Cell, containerID string) (
 
 // Utility methods
 
+func (f *fakeRunner) CgroupMountpoint() (string, error) {
+	return "", errors.New("unexpected call to CgroupMountpoint")
+}
+
 func (f *fakeRunner) ExistsCgroup(doc any) (bool, error) {
 	if f.ExistsCgroupFn != nil {
 		return f.ExistsCgroupFn(doc)

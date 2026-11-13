@@ -1,0 +1,16 @@
+export type CgroupValue = { state?: string; raw?: string; value?: number };
+export type CgroupList = { state?: string; values?: string[] };
+export type CgroupCPUMax = { state?: string; raw?: string; quotaMicros?: number; periodMicros?: number };
+export type CgroupIOMax = { state?: string; entries?: { device: string; limits?: Record<string, string> }[] };
+export type CgroupDeclared = { field: string; value?: number; source: string };
+export type Formatted = { text: string; raw?: string };
+export const UNLIMITED: string;
+export const NOT_AVAILABLE: string;
+export const UNREADABLE: string;
+export const NOT_SET: string;
+export function formatBytes(bytes: number): string;
+export function formatCgroupValue(value: CgroupValue | undefined, kind?: "bytes" | "count" | "weight" | "usec"): Formatted;
+export function formatCPUMax(cpuMax: CgroupCPUMax | undefined): Formatted;
+export function formatCgroupList(list: CgroupList | undefined): string;
+export function formatIOMax(io: CgroupIOMax | undefined): string[];
+export function formatDeclared(entry: CgroupDeclared | undefined): { text: string; source: string };

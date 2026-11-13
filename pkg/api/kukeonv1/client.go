@@ -72,6 +72,10 @@ type Client interface {
 	GetStack(ctx context.Context, doc v1beta1.StackDoc) (GetStackResult, error)
 	GetCell(ctx context.Context, doc v1beta1.CellDoc) (GetCellResult, error)
 	GetContainer(ctx context.Context, doc v1beta1.ContainerDoc) (GetContainerResult, error)
+	// GetCgroupDetail reads one realm, space, stack, cell or container
+	// cgroup's declared configuration plus its live cgroup v2 interface
+	// values (issue #1410). Read-only; callers never touch /sys/fs/cgroup.
+	GetCgroupDetail(ctx context.Context, scope CgroupScope) (GetCgroupDetailResult, error)
 	// GetSecret reports the metadata-only view of a single named, scoped
 	// `kind: Secret` (issue #622). Spec.data is never echoed — the bytes do
 	// not traverse this RPC by design (#619).
@@ -279,6 +283,8 @@ const (
 	MethodGetBlueprint = ServiceName + ".GetBlueprint"
 	MethodGetConfig    = ServiceName + ".GetConfig"
 	MethodGetVolume    = ServiceName + ".GetVolume"
+
+	MethodGetCgroupDetail = ServiceName + ".GetCgroupDetail"
 
 	MethodListRealms     = ServiceName + ".ListRealms"
 	MethodListSpaces     = ServiceName + ".ListSpaces"

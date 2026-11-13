@@ -901,3 +901,60 @@ test("an unavailable delete response reconciles the cell before reporting its ou
   await expect(page.getByRole("link", { name: "Open dev / shared / services / api" })).toBeVisible();
   await expect.poll(() => closed).toBe(true);
 });
+
+test("container cgroup section distinguishes Unlimited, Not available and Not set and refreshes live values", async ({ page }) => {
+  let reads = 0;
+  const cgroup = current => ({ json: {
+    cgroupPath: "/kukeon/prod/shared/services/api/prod_shared_services_api_web", absolutePath: "/sys/fs/cgroup/kukeon/prod/shared/services/api/prod_shared_services_api_web",
+    exists: true, ready: true, hostCgroup: false,
+    declared: [{ field: "memoryLimitBytes", value: 536870912, source: "space-default" }, { field: "cpuShares", source: "unset" }, { field: "pidsLimit", value: 64, source: "container" }],
+    live: {
+      controllers: { state: "set", values: ["cpu", "memory", "pids"] }, subtreeControl: { state: "set" }, populated: { state: "set", raw: "1", value: 1 },
+      memory: { max: { state: "max", raw: "max" }, high: { state: "max", raw: "max" }, swapMax: { state: "absent" }, current: { state: "set", raw: String(current), value: current }, peak: { state: "absent" }, oom: { state: "set", raw: "0", value: 0 }, oomKill: { state: "set", raw: "0", value: 0 } },
+      cpu: { max: { state: "max", raw: "max 100000", periodMicros: 100000 }, weight: { state: "set", raw: "100", value: 100 }, usageUsec: { state: "set", raw: "2500000", value: 2500000 }, userUsec: { state: "absent" }, systemUsec: { state: "absent" } },
+      pids: { max: { state: "set", raw: "64", value: 64 }, current: { state: "set", raw: "0", value: 0 } },
+      io: { state: "absent" },
+    },
+  } });
+  await mock(page, path => path.endsWith("/containers/web/cgroup") ? cgroup(reads++ === 0 ? 1048576 : 2097152) : undefined);
+  await page.goto(`${server.url}#/resource/prod/shared/services/api/web`);
+  const panel = page.getByRole("region", { name: "container cgroup" });
+  await expect(panel.getByText("/sys/fs/cgroup/kukeon/prod/shared/services/api/prod_shared_services_api_web")).toBeVisible();
+  const declared = panel.locator("table.cgroup-declared");
+  await expect(declared.locator("tr").filter({ hasText: "Memory limit" })).toContainText("512 MiB");
+  await expect(declared.locator("tr").filter({ hasText: "Memory limit" })).toContainText("Inherited space default");
+  await expect(declared.locator("tr").filter({ hasText: "Memory limit" })).toContainText("Unlimited");
+  await expect(declared.locator("tr").filter({ hasText: "CPU shares" })).toContainText("Not set");
+  await expect(declared.locator("tr").filter({ hasText: "CPU shares" })).toContainText("100 (default)");
+  await expect(declared.locator("tr").filter({ hasText: "PIDs limit" })).toContainText("Container spec");
+  const live = panel.locator(".cgroup-live");
+  await expect(live.locator("dd").filter({ hasText: "Not available (controller not enabled)" }).first()).toBeVisible();
+  await expect(live.getByText("1 MiB", { exact: false })).toBeVisible();
+  await expect(live.getByText("peak")).toHaveCount(0);
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(live.getByText("2 MiB", { exact: false })).toBeVisible();
+});
+
+test("a missing cgroup reports Cgroup not present, and a failed read uses the error pattern", async ({ page }) => {
+  await mock(page, path => path === "/api/realms/dev/cgroup" ? { json: { cgroupPath: "/kukeon/dev", absolutePath: "/sys/fs/cgroup/kukeon/dev", exists: false, ready: false, reason: "CgroupMissing", subtreeControllers: ["cpu", "memory"] } }
+    : path === "/api/realms/dev/spaces/shared/cgroup" ? { status: 403, json: { error: { code: "permission_denied", message: "cgroup read denied" } } } : undefined);
+  await page.goto(`${server.url}#/resource/dev`);
+  const realm = page.getByRole("region", { name: "realm cgroup" });
+  await expect(realm.getByText("Cgroup not present")).toBeVisible();
+  await expect(realm.getByText("cpu memory", { exact: true })).toBeVisible();
+  await expect(realm.locator(".cgroup-live")).toHaveCount(0);
+  await page.goto(`${server.url}#/resource/dev/shared`);
+  const space = page.getByRole("region", { name: "space cgroup" });
+  await expect(space.getByRole("alert")).toContainText("Permission denied");
+});
+
+test("cell Overview tab shows the cell cgroup with nested runtime and delegated controllers", async ({ page }) => {
+  await mock(page, path => path.endsWith("/cells/api/cgroup") ? { json: { cgroupPath: "/kukeon/dev/shared/services/api", absolutePath: "/sys/fs/cgroup/kukeon/dev/shared/services/api", exists: true, ready: true, nestedCgroupRuntime: true, subtreeControllers: ["cpu", "io", "memory", "pids"], live: { memory: { max: { state: "set", raw: "1073741824", value: 1073741824 } }, io: { state: "set", entries: [] } } } } : undefined);
+  await page.goto(`${server.url}#/resource/dev/shared/services/api`);
+  await page.getByRole("tab", { name: "Overview" }).click();
+  const panel = page.getByRole("region", { name: "cell cgroup" });
+  await expect(panel.getByText("cpu io memory pids", { exact: true })).toBeVisible();
+  await expect(panel.getByText("Enabled", { exact: true })).toBeVisible();
+  await expect(panel.getByText("1 GiB", { exact: false })).toBeVisible();
+  await expect(panel.getByText("No device limits")).toBeVisible();
+});
