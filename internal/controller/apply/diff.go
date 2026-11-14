@@ -1301,5 +1301,20 @@ func realmImagesEqual(a, b []intmodel.RealmImage) bool {
 	if len(a) == 0 && len(b) == 0 {
 		return true
 	}
-	return reflect.DeepEqual(a, b)
+	return reflect.DeepEqual(normalizeRealmImages(a), normalizeRealmImages(b))
+}
+
+// normalizeRealmImages drops empty build args so `args: {}` and an omitted
+// args map compare equal and a re-apply settles to a no-op.
+func normalizeRealmImages(images []intmodel.RealmImage) []intmodel.RealmImage {
+	out := make([]intmodel.RealmImage, len(images))
+	for i, img := range images {
+		if img.Build != nil && len(img.Build.Args) == 0 {
+			build := *img.Build
+			build.Args = nil
+			img.Build = &build
+		}
+		out[i] = img
+	}
+	return out
 }

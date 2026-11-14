@@ -126,7 +126,7 @@ func renderCellFromConfig(
 	}
 	cellconfig.SortRenderedValues(values)
 
-	digest, err := cellDigest(cellDoc)
+	digest, err := cellDigest(cellDoc, images)
 	if err != nil {
 		return cellRender{}, err
 	}
@@ -289,15 +289,23 @@ func imageDigest(r runner.Runner, namespace, ref string) (string, error) {
 	return info.Digest, nil
 }
 
-// cellDigest hashes the rendered cell's identity, labels and spec. The
-// provenance annotations are deliberately excluded so the digest only moves
-// when the Cell itself would.
-func cellDigest(doc v1beta1.CellDoc) (string, error) {
+// cellDigest hashes the rendered cell's identity, labels and spec, plus the
+// digest each realm image the cell uses resolved to. The images are folded in
+// because a rebuild under the same tag moves the digest without changing the
+// spec, and a create guarded by ExpectedDigest must refuse that change. The
+// provenance annotations are otherwise excluded so the digest only moves when
+// the Cell (or an image it runs) would.
+func cellDigest(doc v1beta1.CellDoc, images []renderedImage) (string, error) {
+	imageDigests := make(map[string]string, len(images))
+	for _, img := range images {
+		imageDigests[img.Name] = img.Ref + "@" + img.Digest
+	}
 	data, err := json.Marshal(struct {
 		Name   string            `json:"name"`
 		Labels map[string]string `json:"labels,omitempty"`
 		Spec   v1beta1.CellSpec  `json:"spec"`
-	}{doc.Metadata.Name, doc.Metadata.Labels, doc.Spec})
+		Images map[string]string `json:"images,omitempty"`
+	}{doc.Metadata.Name, doc.Metadata.Labels, doc.Spec, imageDigests})
 	if err != nil {
 		return "", fmt.Errorf("digest rendered cell: %w", err)
 	}

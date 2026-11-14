@@ -61,14 +61,14 @@ spec:
 
 Named images cells rendered from a CellConfig can refer to by handle. A container whose (resolved) `image` equals an entry's `name` renders with the entry's reference, and the image's digest in the realm's containerd namespace is recorded on the cell. Each entry sets exactly one of `ref` or `build`:
 
-| Field              | Type   | Description                                                                           |
-| ------------------ | ------ | ------------------------------------------------------------------------------------- |
-| `name`             | string | Handle, unique within the realm (required)                                            |
-| `ref`              | string | Built-in or registry image reference                                                  |
-| `build.context`    | string | Build context directory (required with `build`)                                       |
-| `build.dockerfile` | string | Dockerfile path; defaults to `<context>/Dockerfile`                                   |
-| `build.args`       | map    | Build-time variables                                                                  |
-| `build.tag`        | string | Image reference the build writes; defaults to `kukeon.internal/<realm>/<name>:latest` |
+| Field              | Type   | Description                                                                                   |
+| ------------------ | ------ | --------------------------------------------------------------------------------------------- |
+| `name`             | string | Handle, unique within the realm (required)                                                    |
+| `ref`              | string | Built-in or registry image reference                                                          |
+| `build.context`    | string | Build context directory (required with `build`)                                               |
+| `build.dockerfile` | string | Dockerfile path; relative paths resolve against `context`; defaults to `<context>/Dockerfile` |
+| `build.args`       | map    | Build-time variables                                                                          |
+| `build.tag`        | string | Image reference the build writes; defaults to `kukeon.internal/<realm>/<name>:latest`         |
 
 Build a `build` entry with [`kuke build --realm <realm> --realm-image <name>`](../cli/kuke-build.md). Rebuilding it with a new digest marks every cell that uses it `OutOfSync` (reason `image <name> digest changed`); `kuke restart` recreates them on the new image. The web UI's realm page lists the images and their digests.
 

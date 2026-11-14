@@ -412,6 +412,82 @@ func TestReconcileCells_OutOfSync_ImageRebuildNamesImage(t *testing.T) {
 	}
 }
 
+// TestReconcileCells_OutOfSync_BackfillsUnpulledImageDigest: a registry realm
+// image not pulled at render time records an empty digest; the reconciler
+// back-fills it once the namespace holds the image, so a later re-pull under
+// the same reference is detected as drift.
+func TestReconcileCells_OutOfSync_BackfillsUnpulledImageDigest(t *testing.T) {
+	scope := &renderScope{
+		images: []intmodel.RealmImage{{Name: "agent", Ref: "docker.io/library/agent:1"}},
+	}
+	cfg := renderConfig()
+	cfg.Spec.Values["IMAGE"] = "agent"
+	mock := newRenderRunner(t, scope, cfg)
+	live := renderLiveCell(t, setupTestController(t, mock))
+	if got := live.Metadata.Annotations[cellconfig.AnnotationRenderImageDigests]; got != "agent=" {
+		t.Fatalf("unpulled image digests annotation = %q, want agent=", got)
+	}
+
+	mock.ListRealmsFn = func() ([]intmodel.Realm, error) {
+		return []intmodel.Realm{buildTestRealm("kuke-system", "")}, nil
+	}
+	mock.ListSpacesFn = func(string) ([]intmodel.Space, error) {
+		return []intmodel.Space{buildTestSpace("default", "kuke-system")}, nil
+	}
+	mock.ListStacksFn = func(string, string) ([]intmodel.Stack, error) {
+		return []intmodel.Stack{buildTestStack("default", "kuke-system", "default")}, nil
+	}
+	mock.ReconcileCellFn = passthroughReconcile
+
+	// The create pulled the image: the first tick back-fills its digest and
+	// leaves the cell Synced.
+	scope.digest = "sha256:aaa"
+	_, captured := runOutOfSyncHarness(t, live, mock)
+	if captured == nil {
+		t.Fatal("reconcile did not persist the back-filled digest")
+	}
+	if got := captured.Metadata.Annotations[cellconfig.AnnotationRenderImageDigests]; got != "agent=sha256:aaa" {
+		t.Errorf("back-filled image digests annotation = %q, want agent=sha256:aaa", got)
+	}
+	if captured.Status.OutOfSync {
+		t.Errorf("back-fill marked the cell OutOfSync: %q", captured.Status.OutOfSyncReason)
+	}
+
+	// A re-pull under the same reference now drifts.
+	backfilled := *captured
+	scope.digest = "sha256:bbb"
+	mock.UpdateCellMetadataFn = nil
+	_, captured = runOutOfSyncHarness(t, backfilled, mock)
+	if captured == nil || !captured.Status.OutOfSync ||
+		!strings.Contains(captured.Status.OutOfSyncReason, "image agent digest changed") {
+		t.Errorf("re-pull after back-fill not detected as drift: %+v", captured)
+	}
+}
+
+// TestCreateCellFromConfig_RefusesRealmImageRebuild: a realm image rebuilt
+// between preview and create moves the render digest even though the rendered
+// spec is unchanged, so ExpectedDigest refuses the create.
+func TestCreateCellFromConfig_RefusesRealmImageRebuild(t *testing.T) {
+	scope := &renderScope{
+		images: []intmodel.RealmImage{{Name: "agent", Build: &intmodel.RealmImageBuild{Context: "."}}},
+		digest: "sha256:aaa",
+	}
+	cfg := renderConfig()
+	cfg.Spec.Values["IMAGE"] = "agent"
+	ctrl := setupTestController(t, newRenderRunner(t, scope, cfg))
+
+	preview, err := ctrl.PreviewCellFromConfig(previewRequest())
+	if err != nil {
+		t.Fatalf("PreviewCellFromConfig: %v", err)
+	}
+	scope.digest = "sha256:bbb"
+	req := previewRequest()
+	req.ExpectedDigest = preview.Digest
+	if _, err = ctrl.CreateCellFromConfig(req); !errors.Is(err, errdefs.ErrRenderDigestMismatch) {
+		t.Fatalf("CreateCellFromConfig error = %v, want ErrRenderDigestMismatch", err)
+	}
+}
+
 func containsString(list []string, want string) bool {
 	for _, v := range list {
 		if v == want {

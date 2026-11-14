@@ -43,6 +43,15 @@ func TestDiff_ScopeDefaultsAreCompatible(t *testing.T) {
 	if apply.DiffRealm(empty, realm).HasChanges {
 		t.Error("empty and nil realm defaults must compare equal")
 	}
+	built := realm
+	built.Spec.Images = []intmodel.RealmImage{{Name: "agent", Build: &intmodel.RealmImageBuild{Context: "."}}}
+	builtEmptyArgs := realm
+	builtEmptyArgs.Spec.Images = []intmodel.RealmImage{{Name: "agent", Build: &intmodel.RealmImageBuild{
+		Context: ".", Args: map[string]string{},
+	}}}
+	if apply.DiffRealm(builtEmptyArgs, built).HasChanges {
+		t.Error("empty and nil realm image build args must compare equal")
+	}
 
 	space := intmodel.Space{Metadata: intmodel.SpaceMetadata{Name: "s"}, Spec: intmodel.SpaceSpec{RealmName: "r"}}
 	spaceWith := space

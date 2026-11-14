@@ -84,6 +84,12 @@ type cellOutOfSync struct {
 	OutOfSync bool
 	Reason    string
 	Err       string
+
+	// ImageDigests, when non-empty, is the back-filled value of the cell's
+	// render image-digests annotation: realm images whose digest was unknown
+	// at render time (a registry ref not pulled yet) now record the digest
+	// the namespace holds, so a later re-pull can be detected (#1418).
+	ImageDigests string
 }
 
 // desiredCellOutOfSync computes the OutOfSync verdict the live cell
@@ -104,19 +110,55 @@ func desiredCellOutOfSync(r runner.Runner, cell intmodel.Cell, configName string
 		return cellOutOfSync{Err: materializeErr.Error()}
 	}
 
+	backfill := backfillImageDigests(desiredCell, cell)
 	drift := renderProvenanceDrift(desiredCell, cell)
 	diff := apply.DiffCell(desiredCell, cell)
 	if !diff.HasChanges && len(drift) == 0 {
-		return cellOutOfSync{}
+		return cellOutOfSync{ImageDigests: backfill}
 	}
 	reasons := drift
 	if diff.HasChanges {
 		reasons = append(reasons, outOfSyncSpecDifferReason(diff))
 	}
 	return cellOutOfSync{
-		OutOfSync: true,
-		Reason:    strings.Join(reasons, "; "),
+		OutOfSync:    true,
+		Reason:       strings.Join(reasons, "; "),
+		ImageDigests: backfill,
 	}
+}
+
+// backfillImageDigests returns the live cell's image-digests annotation with
+// every unknown ("") digest replaced by the one the fresh render resolved, or
+// "" when nothing is back-filled. A registry realm image that was not pulled
+// at render time is pulled by the cell's create; recording its digest once it
+// is known keeps imageDigestDrift able to see a later re-pull.
+func backfillImageDigests(desired, live intmodel.Cell) string {
+	liveValue, ok := live.Metadata.Annotations[cellconfig.AnnotationRenderImageDigests]
+	if !ok || liveValue == "" {
+		return ""
+	}
+	liveDigests := parseImageDigests(liveValue)
+	desiredDigests := parseImageDigests(desired.Metadata.Annotations[cellconfig.AnnotationRenderImageDigests])
+	changed := false
+	for name, was := range liveDigests {
+		if now := desiredDigests[name]; was == "" && now != "" {
+			liveDigests[name] = now
+			changed = true
+		}
+	}
+	if !changed {
+		return ""
+	}
+	names := make([]string, 0, len(liveDigests))
+	for name := range liveDigests {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		parts = append(parts, name+"="+liveDigests[name])
+	}
+	return strings.Join(parts, ",")
 }
 
 // renderProvenanceDrift compares the render provenance annotations of a fresh
@@ -409,16 +451,26 @@ func collectDiffFieldPaths(diff apply.CellDiffResult) []string {
 }
 
 // persistCellOutOfSync writes the new OutOfSync verdict to the cell's
-// metadata when any of the three status fields would change, and reports
-// whether a write actually occurred. The no-write fast-path keeps a
+// metadata when any of the three status fields would change or an image
+// digest is back-filled, and reports whether a write actually occurred. The no-write fast-path keeps a
 // Synced fleet from spinning the metadata file once per tick.
 func persistCellOutOfSync(
 	r runner.Runner, cell intmodel.Cell, desired cellOutOfSync,
 ) (bool, error) {
 	if cell.Status.OutOfSync == desired.OutOfSync &&
 		cell.Status.OutOfSyncReason == desired.Reason &&
-		cell.Status.OutOfSyncError == desired.Err {
+		cell.Status.OutOfSyncError == desired.Err &&
+		desired.ImageDigests == "" {
 		return false, nil
+	}
+
+	if desired.ImageDigests != "" {
+		annotations := make(map[string]string, len(cell.Metadata.Annotations))
+		for k, v := range cell.Metadata.Annotations {
+			annotations[k] = v
+		}
+		annotations[cellconfig.AnnotationRenderImageDigests] = desired.ImageDigests
+		cell.Metadata.Annotations = annotations
 	}
 
 	cell.Status.OutOfSync = desired.OutOfSync

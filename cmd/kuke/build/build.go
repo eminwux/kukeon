@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"syscall"
@@ -268,7 +269,8 @@ var lookupRealm = func(cmd *cobra.Command, realm string) (kukeonv1.GetRealmResul
 // applyRealmImage resolves `--realm-image <name>` against the realm's
 // spec.images (#1418) and fills the build flags from the entry: --tag (the
 // entry's resolved reference), --file, --build-arg, and the context when the
-// operator passed none. Explicit --file / --build-arg flags still apply.
+// operator passed none. A relative build.dockerfile resolves against the
+// build context; explicit --file / --build-arg flags win over the entry.
 func applyRealmImage(cmd *cobra.Command, args []string) ([]string, error) {
 	name, err := cmd.Flags().GetString("realm-image")
 	if err != nil || strings.TrimSpace(name) == "" {
@@ -298,23 +300,49 @@ func applyRealmImage(cmd *cobra.Command, args []string) ([]string, error) {
 	if err = cmd.Flags().Set("tag", cellconfig.RealmImageRef(realm, img)); err != nil {
 		return nil, err
 	}
+	if len(args) == 0 && strings.TrimSpace(img.Build.Context) != "" {
+		args = []string{img.Build.Context}
+	}
 	if df := strings.TrimSpace(img.Build.Dockerfile); df != "" && !cmd.Flags().Changed("file") {
+		// A relative build.dockerfile names a file inside the build context,
+		// not one relative to the caller's working directory (kukebuild
+		// resolves --file against the cwd).
+		if !filepath.IsAbs(df) && len(args) > 0 {
+			df = filepath.Join(args[0], df)
+		}
 		if err = cmd.Flags().Set("file", df); err != nil {
 			return nil, err
 		}
 	}
-	keys := make([]string, 0, len(img.Build.Args))
-	for k := range img.Build.Args {
-		keys = append(keys, k)
+	if err = applyRealmImageBuildArgs(cmd, img.Build.Args); err != nil {
+		return nil, err
+	}
+	return args, nil
+}
+
+// applyRealmImageBuildArgs adds the entry's build args in key order, skipping
+// any key the operator already set with --build-arg so the explicit flag wins.
+func applyRealmImageBuildArgs(cmd *cobra.Command, entryArgs map[string]string) error {
+	explicit, err := cmd.Flags().GetStringArray("build-arg")
+	if err != nil {
+		return err
+	}
+	set := make(map[string]bool, len(explicit))
+	for _, kv := range explicit {
+		k, _, _ := strings.Cut(kv, "=")
+		set[k] = true
+	}
+	keys := make([]string, 0, len(entryArgs))
+	for k := range entryArgs {
+		if !set[k] {
+			keys = append(keys, k)
+		}
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		if err = cmd.Flags().Set("build-arg", k+"="+img.Build.Args[k]); err != nil {
-			return nil, err
+		if err = cmd.Flags().Set("build-arg", k+"="+entryArgs[k]); err != nil {
+			return err
 		}
 	}
-	if len(args) == 0 && strings.TrimSpace(img.Build.Context) != "" {
-		args = []string{img.Build.Context}
-	}
-	return args, nil
+	return nil
 }

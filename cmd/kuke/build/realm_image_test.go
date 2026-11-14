@@ -101,3 +101,38 @@ func TestRunBuildRealmImageErrors(t *testing.T) {
 		}
 	}
 }
+
+// TestRunBuildRealmImageRelativeDockerfile: a relative build.dockerfile
+// resolves against the build context, not the caller's working directory, and
+// an operator --build-arg wins over the entry's value for the same key.
+func TestRunBuildRealmImageRelativeDockerfile(t *testing.T) {
+	withRealm(t, []v1beta1.RealmImage{{Name: "agent", Build: &v1beta1.RealmImageBuild{
+		Context:    "/src/agent",
+		Dockerfile: "Dockerfile.agent",
+		Args:       map[string]string{"VERSION": "1"},
+	}}})
+	var gotArgv []string
+	withStubs(t,
+		func(string) (string, error) { return "/usr/local/bin/kukebuild", nil },
+		func(_ string, argv []string, _ []string) error { gotArgv = argv; return nil },
+	)
+
+	cmd := NewBuildCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--realm", "team", "--realm-image", "agent", "--build-arg", "VERSION=2"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	want := []string{
+		"kukebuild",
+		"--tag", "kukeon.internal/team/agent:latest",
+		"--realm", "team",
+		"--file", "/src/agent/Dockerfile.agent",
+		"--build-arg", "VERSION=2",
+		"/src/agent",
+	}
+	if !reflect.DeepEqual(gotArgv, want) {
+		t.Errorf("argv = %v, want %v", gotArgv, want)
+	}
+}
