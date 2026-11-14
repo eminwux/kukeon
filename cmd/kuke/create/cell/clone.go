@@ -22,6 +22,7 @@ import (
 	"os"
 	"strings"
 
+	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/internal/cellblueprint"
 	"github.com/eminwux/kukeon/internal/cellconfig"
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -93,7 +94,18 @@ func materializeClone(cmd *cobra.Command, client kukeonv1.Client, flags SourceFl
 	var cellDoc v1beta1.CellDoc
 	switch srcProv.BindingKind {
 	case v1beta1.BindingKindConfig:
-		cellDoc, err = cloneFromConfig(cmd, client, flags, srcProv)
+		// Settle the clone's name in the source's scope before the daemon
+		// renders it, so per-cell (${CELL_NAME}) volumes are named after the
+		// clone itself.
+		var name string
+		name, err = kukeshared.ResolveCellName(
+			cmd.Context(), client, flags.Name, src.Metadata.Name,
+			src.Spec.RealmID, src.Spec.SpaceID, src.Spec.StackID,
+		)
+		if err != nil {
+			return v1beta1.CellDoc{}, err
+		}
+		cellDoc, err = cloneFromConfig(cmd, client, flags, srcProv, name)
 	case v1beta1.BindingKindBlueprint:
 		cellDoc, err = cloneFromBlueprint(cmd, client, flags, srcProv)
 	default:
@@ -117,7 +129,11 @@ func materializeClone(cmd *cobra.Command, client kukeonv1.Client, flags SourceFl
 	// Prefix derives from the source cell's metadata.name: a materialized cell
 	// carries no Spec.Prefix field (only the Blueprint/Config bindings do), so
 	// the proposal's `Spec.Prefix ?? metadata.name` collapses to metadata.name.
-	if err = finalizeCellName(cmd, client, &cellDoc, flags.Name, src.Metadata.Name); err != nil {
+	explicitName := flags.Name
+	if srcProv.BindingKind == v1beta1.BindingKindConfig {
+		explicitName = cellDoc.Metadata.Name
+	}
+	if err = finalizeCellName(cmd, client, &cellDoc, explicitName, src.Metadata.Name); err != nil {
 		return v1beta1.CellDoc{}, err
 	}
 	applyIgnoreDiskPressure(&cellDoc, flags)
@@ -170,7 +186,7 @@ func resolveSourceCell(
 // Spec.Provenance is the source's copied verbatim, with the merged env
 // overrides recorded — byte-equal to the source when no extra --env is given.
 func cloneFromConfig(
-	cmd *cobra.Command, client kukeonv1.Client, flags SourceFlags, srcProv *v1beta1.CellProvenance,
+	cmd *cobra.Command, client kukeonv1.Client, flags SourceFlags, srcProv *v1beta1.CellProvenance, name string,
 ) (v1beta1.CellDoc, error) {
 	if len(flags.ParamArgs) > 0 {
 		return v1beta1.CellDoc{}, errors.New(
@@ -185,58 +201,38 @@ func cloneFromConfig(
 		)
 	}
 
+	// The daemon renders the clone from the lineage Config (#1418) — the
+	// same defaults merge and slot fills as --from-config — with the source's
+	// recorded env overrides plus any additional --env re-baked (AC#6).
 	ref := srcProv.BindingRef
-	cfgLookup := v1beta1.CellConfigDoc{
-		APIVersion: v1beta1.APIVersionV1Beta1,
-		Kind:       v1beta1.KindCellConfig,
-		Metadata: v1beta1.CellConfigMetadata{
+	mergedEnv := cellconfig.MergeEnv(srcProv.EnvOverrides, flags.EnvArgs)
+	preview, err := client.PreviewCellFromConfig(cmd.Context(), kukeonv1.CellFromConfigRequest{
+		Config: v1beta1.CellConfigMetadata{
 			Name:  ref.Name,
 			Realm: ref.Realm,
 			Space: ref.Space,
 			Stack: ref.Stack,
 		},
-	}
-	cfgRes, err := client.GetConfig(cmd.Context(), cfgLookup)
-	if err != nil {
-		return v1beta1.CellDoc{}, err
-	}
-	if !cfgRes.MetadataExists {
-		return v1beta1.CellDoc{}, fmt.Errorf(
-			"%w (lineage config %q in scope realm=%q space=%q stack=%q referenced by clone source)",
-			errdefs.ErrConfigNotFound, ref.Name, ref.Realm, ref.Space, ref.Stack,
-		)
-	}
-
-	bpRef := cfgRes.Config.Spec.Blueprint
-	bpRes, err := client.GetBlueprint(cmd.Context(), v1beta1.CellBlueprintDoc{
-		Metadata: v1beta1.CellBlueprintMetadata{
-			Name:  bpRef.Name,
-			Realm: bpRef.Realm,
-			Space: bpRef.Space,
-			Stack: bpRef.Stack,
-		},
+		Name:         name,
+		EnvOverrides: mergedEnv,
 	})
 	if err != nil {
+		if errors.Is(err, errdefs.ErrConfigNotFound) {
+			return v1beta1.CellDoc{}, fmt.Errorf(
+				"%w (lineage config %q in scope realm=%q space=%q stack=%q referenced by clone source)",
+				errdefs.ErrConfigNotFound, ref.Name, ref.Realm, ref.Space, ref.Stack,
+			)
+		}
 		return v1beta1.CellDoc{}, err
 	}
-	if !bpRes.MetadataExists {
-		return v1beta1.CellDoc{}, fmt.Errorf(
-			"%w (blueprint %q referenced by lineage config %q)",
-			errdefs.ErrBlueprintNotFound, bpRef.Name, cfgRes.Config.Metadata.Name,
-		)
-	}
+	cellDoc := preview.Cell
 
-	cellDoc, err := cellconfig.MaterializeWithName(cfgRes.Config, bpRes.Blueprint, flags.Name)
-	if err != nil {
-		return v1beta1.CellDoc{}, err
-	}
-
-	// Copy the source's provenance verbatim (AC#1), then re-bake its env
-	// overrides plus any additional --env (AC#6). ApplyEnvOverrides reads
-	// Spec.Provenance.EnvOverrides as the merged set, so set provenance first.
+	// Copy the source's provenance verbatim (AC#1) with the merged env
+	// overrides recorded — byte-equal to the source when no extra --env.
 	cellDoc.Spec.Provenance = v1beta1.CloneCellProvenance(srcProv)
-	mergedEnv := cellconfig.MergeEnv(srcProv.EnvOverrides, flags.EnvArgs)
-	cellconfig.ApplyEnvOverrides(&cellDoc, mergedEnv)
+	if len(mergedEnv) > 0 {
+		cellDoc.Spec.Provenance.EnvOverrides = mergedEnv
+	}
 	return cellDoc, nil
 }
 

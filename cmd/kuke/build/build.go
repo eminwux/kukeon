@@ -24,14 +24,21 @@
 package build
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 
+	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
+	"github.com/eminwux/kukeon/internal/cellconfig"
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 )
 
@@ -53,11 +60,14 @@ var (
 // NewBuildCmd builds the `kuke build` subcommand.
 func NewBuildCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use: "build [-f Dockerfile] [-t name:tag] [--realm <name>] [--build-arg K=V]... " +
+		Use: "build [-f Dockerfile] [-t name:tag | --realm-image <name>] [--realm <name>] [--build-arg K=V]... " +
 			"[--secret id=NAME,src=PATH]... [--cache-to type=local,dest=PATH]... " +
-			"[--cache-from type=local,src=PATH]... [--platform os/arch,...] [--push] <context>",
+			"[--cache-from type=local,src=PATH]... [--platform os/arch,...] [--push] [<context>]",
 		Short: "Build an OCI image from a Dockerfile into a realm's containerd namespace",
 		Long: "Build an OCI image from a Dockerfile using kukeon's native builder.\n\n" +
+			"Realm images: --realm-image NAME builds the realm's spec.images entry NAME, taking the tag,\n" +
+			"Dockerfile, build args and context from the entry. Cells rendered from a CellConfig that use the\n" +
+			"image are marked OutOfSync when the rebuilt digest changes.\n\n" +
 			"`kuke build` is a thin shim: it locates the `kukebuild` binary on PATH and\n" +
 			"exec's it. `kukebuild` embeds BuildKit, builds the context with the Dockerfile\n" +
 			"frontend, and writes the resulting image into the containerd namespace mapped\n" +
@@ -81,7 +91,7 @@ func NewBuildCmd() *cobra.Command {
 			"is still written to the realm's containerd namespace. Credentials resolve in\n" +
 			"order: (1) $DOCKER_CONFIG/config.json when DOCKER_CONFIG is set, (2)\n" +
 			"~/.docker/config.json, (3) the KUKEON_REGISTRY_AUTH env var (base64 user:pass).",
-		Args:          cobra.ExactArgs(1),
+		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE:          runBuild,
@@ -109,6 +119,13 @@ func NewBuildCmd() *cobra.Command {
 		"Comma-separated os/arch[/variant] targets (e.g. linux/amd64,linux/arm64); multiple targets "+
 			"produce a single manifest list, not per-arch tags",
 	)
+	cmd.Flags().String(
+		"realm-image",
+		"",
+		"Build the realm's spec.images entry NAME: the tag, Dockerfile, build args and (when no <context> is "+
+			"given) the context come from the entry; the tag defaults to kukeon.internal/<realm>/<name>:latest. "+
+			"Mutually exclusive with --tag.",
+	)
 	cmd.Flags().Bool(
 		"push",
 		false,
@@ -125,6 +142,14 @@ func NewBuildCmd() *cobra.Command {
 // non-zero exit; a found kukebuild replaces this process via execHandoff so
 // its progress and exit code reach the operator unmediated.
 func runBuild(cmd *cobra.Command, args []string) error {
+	args, err := applyRealmImage(cmd, args)
+	if err != nil {
+		return err
+	}
+	if len(args) != 1 {
+		return errors.New("`kuke build` requires a <context> directory (or --realm-image with a build.context)")
+	}
+
 	tag, err := cmd.Flags().GetString("tag")
 	if err != nil {
 		return err
@@ -223,7 +248,101 @@ func buildArgv(cmd *cobra.Command, args []string) ([]string, error) {
 	if push {
 		argv = append(argv, "--push")
 	}
-	// Context directory is positional and validated by cobra.ExactArgs(1).
+	// Context directory is positional (validated by runBuild).
 	argv = append(argv, args[0])
 	return argv, nil
+}
+
+// lookupRealm reads a realm through the daemon. A package var so tests can
+// drive --realm-image without a running kukeond.
+//
+//nolint:gochecknoglobals // test seam for the daemon realm lookup
+var lookupRealm = func(cmd *cobra.Command, realm string) (kukeonv1.GetRealmResult, error) {
+	client, err := kukeshared.DaemonClientFromCmd(cmd)
+	if err != nil {
+		return kukeonv1.GetRealmResult{}, err
+	}
+	defer func() { _ = client.Close() }()
+	return client.GetRealm(cmd.Context(), v1beta1.RealmDoc{Metadata: v1beta1.RealmMetadata{Name: realm}})
+}
+
+// applyRealmImage resolves `--realm-image <name>` against the realm's
+// spec.images (#1418) and fills the build flags from the entry: --tag (the
+// entry's resolved reference), --file, --build-arg, and the context when the
+// operator passed none. A relative build.dockerfile resolves against the
+// build context; explicit --file / --build-arg flags win over the entry.
+func applyRealmImage(cmd *cobra.Command, args []string) ([]string, error) {
+	name, err := cmd.Flags().GetString("realm-image")
+	if err != nil || strings.TrimSpace(name) == "" {
+		return args, err
+	}
+	if cmd.Flags().Changed("tag") {
+		return nil, errors.New("--realm-image and --tag are mutually exclusive; the entry's tag is used")
+	}
+	realm, err := cmd.Flags().GetString("realm")
+	if err != nil {
+		return nil, err
+	}
+	res, err := lookupRealm(cmd, realm)
+	if err != nil {
+		return nil, err
+	}
+	if !res.MetadataExists {
+		return nil, fmt.Errorf("%w: %q", errdefs.ErrRealmNotFound, realm)
+	}
+	img, ok := cellconfig.FindRealmImage(res.Realm.Spec.Images, name)
+	if !ok {
+		return nil, fmt.Errorf("realm %q declares no image %q in spec.images", realm, name)
+	}
+	if img.Build == nil {
+		return nil, fmt.Errorf("realm image %q is a reference (%s), not a Dockerfile build", name, img.Ref)
+	}
+	if err = cmd.Flags().Set("tag", cellconfig.RealmImageRef(realm, img)); err != nil {
+		return nil, err
+	}
+	if len(args) == 0 && strings.TrimSpace(img.Build.Context) != "" {
+		args = []string{img.Build.Context}
+	}
+	if df := strings.TrimSpace(img.Build.Dockerfile); df != "" && !cmd.Flags().Changed("file") {
+		// A relative build.dockerfile names a file inside the build context,
+		// not one relative to the caller's working directory (kukebuild
+		// resolves --file against the cwd).
+		if !filepath.IsAbs(df) && len(args) > 0 {
+			df = filepath.Join(args[0], df)
+		}
+		if err = cmd.Flags().Set("file", df); err != nil {
+			return nil, err
+		}
+	}
+	if err = applyRealmImageBuildArgs(cmd, img.Build.Args); err != nil {
+		return nil, err
+	}
+	return args, nil
+}
+
+// applyRealmImageBuildArgs adds the entry's build args in key order, skipping
+// any key the operator already set with --build-arg so the explicit flag wins.
+func applyRealmImageBuildArgs(cmd *cobra.Command, entryArgs map[string]string) error {
+	explicit, err := cmd.Flags().GetStringArray("build-arg")
+	if err != nil {
+		return err
+	}
+	set := make(map[string]bool, len(explicit))
+	for _, kv := range explicit {
+		k, _, _ := strings.Cut(kv, "=")
+		set[k] = true
+	}
+	keys := make([]string, 0, len(entryArgs))
+	for k := range entryArgs {
+		if !set[k] {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if err = cmd.Flags().Set("build-arg", k+"="+entryArgs[k]); err != nil {
+			return err
+		}
+	}
+	return nil
 }

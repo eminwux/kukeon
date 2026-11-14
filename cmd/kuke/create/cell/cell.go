@@ -26,7 +26,6 @@ import (
 	"github.com/eminwux/kukeon/cmd/kuke/create/shared"
 	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/internal/cellblueprint"
-	"github.com/eminwux/kukeon/internal/cellconfig"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -61,10 +60,13 @@ func NewCellCmd() *cobra.Command {
 			"hand-off; blueprint-lineage cells have no in-place reconcile, so " +
 			"updates flow through delete-and-re-run (or promotion to a " +
 			"CellConfig).\n" +
-			"  - `kuke create cell <name> --from-config <cfg>` — resolves the " +
-			"daemon-stored CellConfig and its referenced Blueprint, applies the " +
-			"Config's spec.values + repo/secret slot fills, materialises the " +
-			"Cell record, and persists it in a **stopped** state. Run " +
+			"  - `kuke create cell <name> --from-config <cfg> [--dry-run [--explain]]` — " +
+			"kukeond renders the cell from the daemon-stored CellConfig and its " +
+			"referenced Blueprint, merging the Realm → Space → Stack spec.defaults " +
+			"under the Config's spec.values + repo/secret slot fills (deeper levels " +
+			"win per key), and persists it in a **stopped** state. --dry-run prints " +
+			"the rendered Cell without creating it; --explain lists every merged " +
+			"value with the level that set it. Run " +
 			"`kuke start <name>` to start it. Differs from `kuke run --from-config` " +
 			"(materialise + start + attach) by leaving the cell stopped; later " +
 			"reconcile against the lineage Config flows through " +
@@ -134,6 +136,13 @@ func NewCellCmd() *cobra.Command {
 
 	// --image is a source: mutually exclusive with every from-* source (the
 	// trio's own mutex is registered in RegisterSourceFlags).
+	cmd.Flags().Bool("dry-run", false,
+		"With --from-config: ask the daemon to render the cell and print it without creating "+
+			"anything (the rendered Cell YAML; with --explain, the merged values and their origin).")
+	cmd.Flags().Bool("explain", false,
+		"With --from-config: print every merged value with the level that set it "+
+			"(realm, space, stack, config or blueprint) and the rendered cell's digest.")
+
 	cmd.MarkFlagsMutuallyExclusive("image", "from-blueprint")
 	cmd.MarkFlagsMutuallyExclusive("image", "from-config")
 	cmd.MarkFlagsMutuallyExclusive("image", "clone")
@@ -407,13 +416,33 @@ func runCreateCell(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	dryRun, err := cmd.Flags().GetBool("dry-run")
+	if err != nil {
+		return err
+	}
+	explain, err := cmd.Flags().GetBool("explain")
+	if err != nil {
+		return err
+	}
+
 	// The scope-Var bundle `kuke create cell` feeds Materialize (built inline
 	// rather than as a package global per the gochecknoglobals lint).
-	cellDoc, err := Materialize(cmd, client, flags, ScopeVars{
+	scope := ScopeVars{
 		Realm: &config.KUKE_CREATE_CELL_REALM,
 		Space: &config.KUKE_CREATE_CELL_SPACE,
 		Stack: &config.KUKE_CREATE_CELL_STACK,
-	})
+	}
+
+	// --from-config renders daemon-side (#1418): the daemon merges the
+	// Realm/Space/Stack defaults, renders, and persists the cell.
+	if flags.ConfigName != "" && flags.BlueprintName == "" && flags.CloneSource == "" {
+		return createFromConfig(cmd, client, flags, scope, dryRun, explain)
+	}
+	if dryRun || explain {
+		return errDryRunNeedsConfig
+	}
+
+	cellDoc, err := Materialize(cmd, client, flags, scope)
 	if err != nil {
 		return err
 	}
@@ -575,68 +604,19 @@ func materializeFromBlueprint(
 	return cellDoc, nil
 }
 
-// materializeFromConfig resolves the named Config and its referenced Blueprint,
-// materialises the Cell record via cellconfig.Materialize (which applies
-// spec.values, repo/secret slot fills, and the kukeon.io/config back-reference
-// label), finalizes the cell name (explicit or generated <prefix>-<6hex> per
-// epic:cell-identity #1022), applies --env overrides — returning the doc
-// without persisting it. Mirrors materializeFromBlueprint's scope-resolution
-// strategy.
+// materializeFromConfig asks the daemon to render the cell for the named
+// Config (issue #1418) and returns the rendered doc without persisting it. The
+// daemon merges the Realm → Space → Stack defaults, applies the Config's
+// values and slot fills, allocates the name and bakes --env overrides; the
+// client does not render a CellConfig itself.
 func materializeFromConfig(
 	cmd *cobra.Command, client kukeonv1.Client, flags SourceFlags, scope ScopeVars,
 ) (v1beta1.CellDoc, error) {
-	cfgLookup := v1beta1.CellConfigDoc{
-		APIVersion: v1beta1.APIVersionV1Beta1,
-		Kind:       v1beta1.KindCellConfig,
-		Metadata: v1beta1.CellConfigMetadata{
-			Name:  flags.ConfigName,
-			Realm: kukeshared.PickLookupRealm(cmd, scope.Realm),
-			Space: kukeshared.ExplicitScope(cmd, "space", scope.Space),
-			Stack: kukeshared.ExplicitScope(cmd, "stack", scope.Stack),
-		},
-	}
-	cfgRes, err := client.GetConfig(cmd.Context(), cfgLookup)
+	preview, err := client.PreviewCellFromConfig(cmd.Context(), ConfigRenderRequest(cmd, flags, scope))
 	if err != nil {
 		return v1beta1.CellDoc{}, err
 	}
-	if !cfgRes.MetadataExists {
-		return v1beta1.CellDoc{}, fmt.Errorf(
-			"%w (config %q in scope realm=%q space=%q stack=%q)",
-			errdefs.ErrConfigNotFound, cfgLookup.Metadata.Name,
-			cfgLookup.Metadata.Realm, cfgLookup.Metadata.Space, cfgLookup.Metadata.Stack,
-		)
-	}
-
-	bpRef := cfgRes.Config.Spec.Blueprint
-	bpLookup := v1beta1.CellBlueprintDoc{
-		Metadata: v1beta1.CellBlueprintMetadata{
-			Name:  bpRef.Name,
-			Realm: bpRef.Realm,
-			Space: bpRef.Space,
-			Stack: bpRef.Stack,
-		},
-	}
-	bpRes, err := client.GetBlueprint(cmd.Context(), bpLookup)
-	if err != nil {
-		return v1beta1.CellDoc{}, err
-	}
-	if !bpRes.MetadataExists {
-		return v1beta1.CellDoc{}, fmt.Errorf(
-			"%w (blueprint %q referenced by config %q in scope realm=%q space=%q stack=%q)",
-			errdefs.ErrBlueprintNotFound, bpRef.Name, cfgRes.Config.Metadata.Name,
-			bpRef.Realm, bpRef.Space, bpRef.Stack,
-		)
-	}
-
-	cellDoc, err := cellconfig.MaterializeWithName(cfgRes.Config, bpRes.Blueprint, flags.Name)
-	if err != nil {
-		return v1beta1.CellDoc{}, err
-	}
-	overlayScope(&cellDoc, flags)
-	if err = finalizeCellName(cmd, client, &cellDoc, flags.Name, cellconfig.Prefix(cfgRes.Config)); err != nil {
-		return v1beta1.CellDoc{}, err
-	}
-	cellconfig.ApplyEnvOverrides(&cellDoc, flags.EnvArgs)
+	cellDoc := preview.Cell
 	applyIgnoreDiskPressure(&cellDoc, flags)
 	return cellDoc, nil
 }

@@ -212,6 +212,36 @@ func (c *UnixClient) MaterializeCell(ctx context.Context, doc v1beta1.CellDoc) (
 	return reply.Result, nil
 }
 
+// PreviewCellFromConfig implements Client.
+func (c *UnixClient) PreviewCellFromConfig(
+	ctx context.Context, req CellFromConfigRequest,
+) (PreviewCellFromConfigResult, error) {
+	args := &PreviewCellFromConfigArgs{Request: req}
+	reply := &PreviewCellFromConfigReply{}
+	if err := c.call(ctx, MethodPreviewCellFromConfig, args, reply); err != nil {
+		return PreviewCellFromConfigResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
+// CreateCellFromConfig implements Client.
+func (c *UnixClient) CreateCellFromConfig(
+	ctx context.Context, req CellFromConfigRequest,
+) (CreateCellFromConfigResult, error) {
+	args := &CreateCellFromConfigArgs{Request: req}
+	reply := &CreateCellFromConfigReply{}
+	if err := c.call(ctx, MethodCreateCellFromConfig, args, reply); err != nil {
+		return CreateCellFromConfigResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
 // GetRealm implements Client.
 func (c *UnixClient) GetRealm(ctx context.Context, doc v1beta1.RealmDoc) (GetRealmResult, error) {
 	args := &GetRealmArgs{Doc: doc}

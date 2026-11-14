@@ -39,6 +39,9 @@ type StackSpec struct {
 	ID      string `json:"id"      yaml:"id"`
 	RealmID string `json:"realmId" yaml:"realmId"`
 	SpaceID string `json:"spaceId" yaml:"spaceId"`
+	// Defaults is the CellConfig fill every cell rendered inside this stack
+	// inherits, overriding the Realm and Space defaults per key (issue #1418).
+	Defaults *ScopeDefaults `json:"defaults,omitempty" yaml:"defaults,omitempty"`
 }
 
 type StackStatus struct {

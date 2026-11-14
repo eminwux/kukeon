@@ -90,6 +90,10 @@ func stubLineageRunner(
 		GetSpaceFn: func(s intmodel.Space) (intmodel.Space, error) {
 			return s, nil
 		},
+		// The daemon-side render reads the Realm and Stack defaults (#1418);
+		// the sample scope declares none.
+		GetRealmFn: func(r intmodel.Realm) (intmodel.Realm, error) { return r, nil },
+		GetStackFn: func(st intmodel.Stack) (intmodel.Stack, error) { return st, nil },
 		ResolveSpaceCNIConfigPathFn: func(string, string) (string, error) {
 			return "", nil
 		},

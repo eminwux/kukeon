@@ -197,6 +197,8 @@ func TestStartCell_OutOfSyncReapply_CompatibleAppliesInPlace(t *testing.T) {
 		// return empties — keeping the materialised desired diff to the intended
 		// image/hostNetwork drift only.
 		GetSpaceFn:                  func(s intmodel.Space) (intmodel.Space, error) { return s, nil },
+		GetRealmFn:                  func(r intmodel.Realm) (intmodel.Realm, error) { return r, nil },
+		GetStackFn:                  func(st intmodel.Stack) (intmodel.Stack, error) { return st, nil },
 		ResolveSpaceCNIConfigPathFn: func(string, string) (string, error) { return "", nil },
 		GetConfigFn: func(c intmodel.CellConfig) (intmodel.CellConfig, error) {
 			if c.Metadata.Name != "prod" || c.Metadata.Realm != "test-realm" {
@@ -287,6 +289,8 @@ func TestStartCell_OutOfSyncReapply_BreakingRecreates(t *testing.T) {
 		// return empties — keeping the materialised desired diff to the intended
 		// image/hostNetwork drift only.
 		GetSpaceFn:                  func(s intmodel.Space) (intmodel.Space, error) { return s, nil },
+		GetRealmFn:                  func(r intmodel.Realm) (intmodel.Realm, error) { return r, nil },
+		GetStackFn:                  func(st intmodel.Stack) (intmodel.Stack, error) { return st, nil },
 		ResolveSpaceCNIConfigPathFn: func(string, string) (string, error) { return "", nil },
 		GetConfigFn: func(intmodel.CellConfig) (intmodel.CellConfig, error) {
 			return reapplySampleCellConfig("test-realm", "test-space", "test-stack"), nil
@@ -378,6 +382,8 @@ func TestStartCell_OutOfSyncReapply_EnvOverridePreserved(t *testing.T) {
 		// return empties — keeping the materialised desired diff to the intended
 		// image/hostNetwork drift only.
 		GetSpaceFn:                  func(s intmodel.Space) (intmodel.Space, error) { return s, nil },
+		GetRealmFn:                  func(r intmodel.Realm) (intmodel.Realm, error) { return r, nil },
+		GetStackFn:                  func(st intmodel.Stack) (intmodel.Stack, error) { return st, nil },
 		ResolveSpaceCNIConfigPathFn: func(string, string) (string, error) { return "", nil },
 		GetConfigFn: func(intmodel.CellConfig) (intmodel.CellConfig, error) {
 			return reapplySampleCellConfig("test-realm", "test-space", "test-stack"), nil
@@ -452,6 +458,8 @@ func TestStartCell_OutOfSyncReapply_CompatibleUpdateErrorStillReady(t *testing.T
 		// return empties — keeping the materialised desired diff to the intended
 		// image/hostNetwork drift only.
 		GetSpaceFn:                  func(s intmodel.Space) (intmodel.Space, error) { return s, nil },
+		GetRealmFn:                  func(r intmodel.Realm) (intmodel.Realm, error) { return r, nil },
+		GetStackFn:                  func(st intmodel.Stack) (intmodel.Stack, error) { return st, nil },
 		ResolveSpaceCNIConfigPathFn: func(string, string) (string, error) { return "", nil },
 		GetConfigFn: func(intmodel.CellConfig) (intmodel.CellConfig, error) {
 			return reapplySampleCellConfig("test-realm", "test-space", "test-stack"), nil
@@ -506,6 +514,8 @@ func TestStartCell_OutOfSyncReapply_NoLineageLabelSkipsReapply(t *testing.T) {
 		// return empties — keeping the materialised desired diff to the intended
 		// image/hostNetwork drift only.
 		GetSpaceFn:                  func(s intmodel.Space) (intmodel.Space, error) { return s, nil },
+		GetRealmFn:                  func(r intmodel.Realm) (intmodel.Realm, error) { return r, nil },
+		GetStackFn:                  func(st intmodel.Stack) (intmodel.Stack, error) { return st, nil },
 		ResolveSpaceCNIConfigPathFn: func(string, string) (string, error) { return "", nil },
 		RecreateCellFn: func(intmodel.Cell) (intmodel.Cell, error) {
 			recreateCalled = true
@@ -547,6 +557,8 @@ func TestStartCell_OutOfSyncReapply_OutOfSyncErrorSkipsReapply(t *testing.T) {
 		// return empties — keeping the materialised desired diff to the intended
 		// image/hostNetwork drift only.
 		GetSpaceFn:                  func(s intmodel.Space) (intmodel.Space, error) { return s, nil },
+		GetRealmFn:                  func(r intmodel.Realm) (intmodel.Realm, error) { return r, nil },
+		GetStackFn:                  func(st intmodel.Stack) (intmodel.Stack, error) { return st, nil },
 		ResolveSpaceCNIConfigPathFn: func(string, string) (string, error) { return "", nil },
 		GetConfigFn: func(intmodel.CellConfig) (intmodel.CellConfig, error) {
 			getConfigCalled = true
@@ -588,6 +600,8 @@ func TestStartCell_OutOfSyncReapply_OutOfSyncFalseSkipsReapply(t *testing.T) {
 		// return empties — keeping the materialised desired diff to the intended
 		// image/hostNetwork drift only.
 		GetSpaceFn:                  func(s intmodel.Space) (intmodel.Space, error) { return s, nil },
+		GetRealmFn:                  func(r intmodel.Realm) (intmodel.Realm, error) { return r, nil },
+		GetStackFn:                  func(st intmodel.Stack) (intmodel.Stack, error) { return st, nil },
 		ResolveSpaceCNIConfigPathFn: func(string, string) (string, error) { return "", nil },
 		GetConfigFn: func(intmodel.CellConfig) (intmodel.CellConfig, error) {
 			getConfigCalled = true
@@ -632,6 +646,8 @@ func TestStartCell_OutOfSyncReapply_LineageConfigDeletedFallsThrough(t *testing.
 		// return empties — keeping the materialised desired diff to the intended
 		// image/hostNetwork drift only.
 		GetSpaceFn:                  func(s intmodel.Space) (intmodel.Space, error) { return s, nil },
+		GetRealmFn:                  func(r intmodel.Realm) (intmodel.Realm, error) { return r, nil },
+		GetStackFn:                  func(st intmodel.Stack) (intmodel.Stack, error) { return st, nil },
 		ResolveSpaceCNIConfigPathFn: func(string, string) (string, error) { return "", nil },
 		GetConfigFn: func(intmodel.CellConfig) (intmodel.CellConfig, error) {
 			// The scope-narrowing walk probes (space, stack), (space, ""), ("", "").
@@ -682,6 +698,8 @@ func TestStartCell_OutOfSyncReapply_RecreateErrorFallsThrough(t *testing.T) {
 		// return empties — keeping the materialised desired diff to the intended
 		// image/hostNetwork drift only.
 		GetSpaceFn:                  func(s intmodel.Space) (intmodel.Space, error) { return s, nil },
+		GetRealmFn:                  func(r intmodel.Realm) (intmodel.Realm, error) { return r, nil },
+		GetStackFn:                  func(st intmodel.Stack) (intmodel.Stack, error) { return st, nil },
 		ResolveSpaceCNIConfigPathFn: func(string, string) (string, error) { return "", nil },
 		GetConfigFn: func(intmodel.CellConfig) (intmodel.CellConfig, error) {
 			return reapplySampleCellConfig("test-realm", "test-space", "test-stack"), nil

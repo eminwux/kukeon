@@ -43,20 +43,63 @@ spec:
       serverAddress: ghcr.io
 ```
 
+### `spec.defaults` (object, optional)
+
+The CellConfig fill every cell kukeond renders from a [`CellConfig`](config.md) inside this realm inherits. Same shape as the Config's own fill — `values`, `repos`, `secrets` — and merged **Realm → Space → Stack → CellConfig**, per key, deeper levels winning. See [Defaults merge](config.md#defaults-merge).
+
+```yaml
+spec:
+  defaults:
+    values:
+      GIT_EMAIL: bot@example.com
+    secrets:
+      github-token:
+        secretRef: { name: gh-token, realm: main }
+```
+
+### `spec.images` (array, optional)
+
+Named images cells rendered from a CellConfig can refer to by handle. A container whose (resolved) `image` equals an entry's `name` renders with the entry's reference, and the image's digest in the realm's containerd namespace is recorded on the cell. Each entry sets exactly one of `ref` or `build`:
+
+| Field              | Type   | Description                                                                                   |
+| ------------------ | ------ | --------------------------------------------------------------------------------------------- |
+| `name`             | string | Handle, unique within the realm (required)                                                    |
+| `ref`              | string | Built-in or registry image reference                                                          |
+| `build.context`    | string | Build context directory (required with `build`)                                               |
+| `build.dockerfile` | string | Dockerfile path; relative paths resolve against `context`; defaults to `<context>/Dockerfile` |
+| `build.args`       | map    | Build-time variables                                                                          |
+| `build.tag`        | string | Image reference the build writes; defaults to `kukeon.internal/<realm>/<name>:latest`         |
+
+Build a `build` entry with [`kuke build --realm <realm> --realm-image <name>`](../cli/kuke-build.md). Rebuilding it with a new digest marks every cell that uses it `OutOfSync` (reason `image <name> digest changed`); `kuke restart` recreates them on the new image. The web UI's realm page lists the images and their digests.
+
+```yaml
+spec:
+  defaults:
+    values:
+      IMAGE: agent
+  images:
+    - name: agent
+      build:
+        context: /src/agent
+        args: { VERSION: "1.2" }
+    - name: base
+      ref: docker.io/library/alpine:3.20
+```
+
 ## status
 
-| Field                      | Type                                                            | Description                                                                                                                                       |
-| -------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `state`                    | `Pending`, `Creating`, `Ready`, `Deleting`, `Failed`, `Unknown` | Lifecycle state                                                                                                                                   |
-| `cgroupPath`               | string                                                          | Absolute cgroup path: `/kukeon/<realm>`                                                                                                           |
-| `subtreeControllers`       | array of string                                                 | Cgroup-v2 controller set actually delegated on this realm's `cgroup.subtree_control` after the host-root filter (e.g. `cpu`, `memory`, `io`, `pids`) |
-| `createdAt`                | RFC3339 timestamp                                               | Wall-clock time of the first persist for this realm. Set once and never moves.                                                                    |
-| `updatedAt`                | RFC3339 timestamp                                               | Wall-clock time of the most recent persist.                                                                                                       |
-| `readyAt`                  | RFC3339 timestamp                                               | Wall-clock time of the first `State==Ready` persist. Set-once: never overwritten on subsequent Ready transitions or flaps.                        |
-| `reason`                   | string                                                          | Short reason code summarizing why `state` is in its current value. Empty when none has been recorded.                                             |
-| `message`                  | string                                                          | Human-readable detail backing `reason`; especially valuable on `state: Failed`.                                                                   |
-| `cgroupReady`              | bool                                                            | Whether `cgroupPath` actually exists on the host filesystem as of the last status write — separates intent from observation.                      |
-| `containerdNamespaceReady` | bool                                                            | Whether the containerd namespace recorded in `spec.namespace` was actually present as of the last status write.                                   |
+| Field                      | Type                                                            | Description                                                                                                                                                                                           |
+| -------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `state`                    | `Pending`, `Creating`, `Ready`, `Deleting`, `Failed`, `Unknown` | Lifecycle state                                                                                                                                                                                       |
+| `cgroupPath`               | string                                                          | Absolute cgroup path: `/kukeon/<realm>`                                                                                                                                                               |
+| `subtreeControllers`       | array of string                                                 | Cgroup-v2 controller set actually delegated on this realm's `cgroup.subtree_control` after the host-root filter (e.g. `cpu`, `memory`, `io`, `pids`)                                                  |
+| `createdAt`                | RFC3339 timestamp                                               | Wall-clock time of the first persist for this realm. Set once and never moves.                                                                                                                        |
+| `updatedAt`                | RFC3339 timestamp                                               | Wall-clock time of the most recent persist.                                                                                                                                                           |
+| `readyAt`                  | RFC3339 timestamp                                               | Wall-clock time of the first `State==Ready` persist. Set-once: never overwritten on subsequent Ready transitions or flaps.                                                                            |
+| `reason`                   | string                                                          | Short reason code summarizing why `state` is in its current value. Empty when none has been recorded.                                                                                                 |
+| `message`                  | string                                                          | Human-readable detail backing `reason`; especially valuable on `state: Failed`.                                                                                                                       |
+| `cgroupReady`              | bool                                                            | Whether `cgroupPath` actually exists on the host filesystem as of the last status write — separates intent from observation.                                                                          |
+| `containerdNamespaceReady` | bool                                                            | Whether the containerd namespace recorded in `spec.namespace` was actually present as of the last status write.                                                                                       |
 | `observedGeneration`       | int                                                             | The `metadata.generation` the reconciler last acted on. Defaults to zero (omitted) and stays inert until writers begin bumping `generation`; the reconciler then compares the two to skip stale work. |
 
 `status` is populated by Kukeon; anything you set when applying is overwritten on reconcile.

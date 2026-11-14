@@ -18,12 +18,17 @@ package webserver
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/eminwux/kukeon/internal/cellconfig"
+	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/util/naming"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
@@ -38,6 +43,7 @@ type creationClient struct {
 	unsafeBlueprintRef bool
 	getBlueprintCalls  int
 	getConfigCalls     int
+	previewCalls       int
 	doc                v1beta1.CellDoc
 	materializedCell   v1beta1.CellDoc
 }
@@ -78,6 +84,72 @@ func (c *creationClient) MaterializeCell(_ context.Context, doc v1beta1.CellDoc)
 		materialized = doc
 	}
 	return kukeonv1.CreateCellResult{Created: c.materializeCreated, Cell: materialized}, nil
+}
+
+// renderFromConfig stands in for kukeond's CellConfig render (#1418): it reads
+// the Config and Blueprint through the fake's hooks, materializes, and reports
+// a digest over the rendered document so changed inputs change the digest.
+func (c *creationClient) renderFromConfig(
+	ctx context.Context, req kukeonv1.CellFromConfigRequest,
+) (kukeonv1.PreviewCellFromConfigResult, error) {
+	cfg, err := c.GetConfig(ctx, v1beta1.CellConfigDoc{Metadata: req.Config})
+	if err != nil {
+		return kukeonv1.PreviewCellFromConfigResult{}, err
+	}
+	if !cfg.MetadataExists {
+		return kukeonv1.PreviewCellFromConfigResult{}, errdefs.ErrConfigNotFound
+	}
+	ref := cfg.Config.Spec.Blueprint
+	bp, err := c.GetBlueprint(ctx, v1beta1.CellBlueprintDoc{Metadata: v1beta1.CellBlueprintMetadata{
+		Name: ref.Name, Realm: ref.Realm, Space: ref.Space, Stack: ref.Stack,
+	}})
+	if err != nil {
+		return kukeonv1.PreviewCellFromConfigResult{}, err
+	}
+	name := req.Name
+	if name == "" {
+		name, err = naming.AllocCellName("", cellconfig.Prefix(cfg.Config), nil)
+		if err != nil {
+			return kukeonv1.PreviewCellFromConfigResult{}, err
+		}
+	}
+	doc, err := cellconfig.MaterializeWithName(cfg.Config, bp.Blueprint, name)
+	if err != nil {
+		return kukeonv1.PreviewCellFromConfigResult{}, err
+	}
+	cellconfig.ApplyEnvOverrides(&doc, req.EnvOverrides)
+	data, _ := json.Marshal(doc)
+	return kukeonv1.PreviewCellFromConfigResult{
+		Cell:   doc,
+		Digest: fmt.Sprintf("sha256:%x", sha256.Sum256(data)),
+		Values: []v1beta1.RenderedValue{{Kind: v1beta1.RenderKindValue, Key: "TAG", Value: "secret", Origin: "realm"}},
+	}, nil
+}
+
+func (c *creationClient) PreviewCellFromConfig(
+	ctx context.Context, req kukeonv1.CellFromConfigRequest,
+) (kukeonv1.PreviewCellFromConfigResult, error) {
+	c.previewCalls++
+	return c.renderFromConfig(ctx, req)
+}
+
+func (c *creationClient) CreateCellFromConfig(
+	ctx context.Context, req kukeonv1.CellFromConfigRequest,
+) (kukeonv1.CreateCellFromConfigResult, error) {
+	preview, err := c.renderFromConfig(ctx, req)
+	if err != nil {
+		return kukeonv1.CreateCellFromConfigResult{}, err
+	}
+	if req.ExpectedDigest != "" && req.ExpectedDigest != preview.Digest {
+		return kukeonv1.CreateCellFromConfigResult{}, errdefs.ErrRenderDigestMismatch
+	}
+	doc := preview.Cell
+	doc.Spec.IgnoreDiskPressure = req.IgnoreDiskPressure
+	created, err := c.MaterializeCell(ctx, doc)
+	if err != nil {
+		return kukeonv1.CreateCellFromConfigResult{}, err
+	}
+	return kukeonv1.CreateCellFromConfigResult{CreateCellResult: created, Digest: preview.Digest}, nil
 }
 
 func TestConfigCreation(t *testing.T) {
@@ -177,12 +249,13 @@ func TestConfigCreationValidation(t *testing.T) {
 
 func TestConfigCellAutomaticNameUsesConfigPrefix(t *testing.T) {
 	c := &creationClient{}
-	doc, err := configCell(context.Background(), c, createConfigRequest{
+	rendered, err := configCell(context.Background(), c, createConfigRequest{
 		Config: v1beta1.CellConfigMetadata{Name: "cfg", Realm: "r"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	doc := rendered.Doc
 	if !strings.HasPrefix(doc.Metadata.Name, "cfg-") || doc.Spec.ID != doc.Metadata.Name {
 		t.Fatalf("automatic name = %q (id %q), want cfg-<suffix> and matching ID", doc.Metadata.Name, doc.Spec.ID)
 	}
@@ -198,8 +271,8 @@ func TestConfigCellAutomaticNameUsesConfigPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.Metadata.Name != previewName {
-		t.Fatalf("create name = %q, want reviewed generated name %q", created.Metadata.Name, previewName)
+	if created.Doc.Metadata.Name != previewName {
+		t.Fatalf("create name = %q, want reviewed generated name %q", created.Doc.Metadata.Name, previewName)
 	}
 }
 
@@ -270,8 +343,8 @@ func TestSafePathSegment(t *testing.T) {
 			Config: v1beta1.CellConfigMetadata{Name: "cfg", Realm: "r"},
 			Name:   "cell",
 		})
-		if err == nil || c.getBlueprintCalls != 0 {
-			t.Fatalf("unsafe blueprint reference accepted: err=%v calls=%d", err, c.getBlueprintCalls)
+		if err == nil || c.previewCalls != 0 {
+			t.Fatalf("unsafe blueprint reference accepted: err=%v render calls=%d", err, c.previewCalls)
 		}
 	})
 }

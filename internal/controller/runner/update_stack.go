@@ -39,6 +39,7 @@ func (r *Exec) UpdateStack(desired intmodel.Stack) (intmodel.Stack, error) {
 	if desired.Spec.ID != "" {
 		existing.Spec.ID = desired.Spec.ID
 	}
+	existing.Spec.Defaults = desired.Spec.Defaults
 
 	// Update metadata file
 	if updateErr := r.UpdateStackMetadata(existing); updateErr != nil {
