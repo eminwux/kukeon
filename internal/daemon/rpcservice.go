@@ -364,6 +364,22 @@ func (s *KukeonV1Service) LogContainer(
 	return nil
 }
 
+// ReadDaemonLogs returns a bounded chunk of kukeond's own log stream
+// (issue #1386, step 7). Socket access is the only gate, matching every
+// other read RPC on this service.
+func (s *KukeonV1Service) ReadDaemonLogs(
+	args *kukeonv1.ReadDaemonLogsArgs,
+	reply *kukeonv1.ReadDaemonLogsReply,
+) error {
+	result, err := s.core.ReadDaemonLogs(s.ctx, args.Request)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	if err != nil {
+		s.logger.DebugContext(s.ctx, "ReadDaemonLogs returned error", "error", err)
+	}
+	return nil
+}
+
 func (s *KukeonV1Service) StopCell(args *kukeonv1.StopCellArgs, reply *kukeonv1.StopCellReply) error {
 	result, err := s.core.StopCell(s.ctx, args.Doc)
 	reply.Result = result

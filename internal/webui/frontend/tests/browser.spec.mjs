@@ -1398,3 +1398,175 @@ test("Overview shows an explicit all-Ready state when no cell needs attention", 
   await expect(attention).toContainText("All cells Ready");
   await expect(attention.getByRole("link")).toHaveCount(0);
 });
+
+// Administration → Daemon (issue #1386, steps 6 and 8).
+const healthBody = (overrides = {}) => ({ status: "reachable", endpoint: "unix:///run/kukeon/kukeond.sock", daemonVersion: "v1.2.3", serverVersion: "v1.2.3", checkedAt: "2026-11-15T10:00:00Z", latencyMs: 3, ...overrides });
+async function mockDaemon(page, { health = () => ({ json: healthBody() }), logs = () => ({ json: { source: "/opt/kukeon/log", data: "", start: 0, next: 0, size: 0 } }) } = {}) {
+  await page.route("**/api/daemon/**", async route => {
+    const url = new URL(route.request().url());
+    await route.fulfill(await (url.pathname === "/api/daemon/health" ? health(url) : logs(url)));
+  });
+}
+
+test("Administration Daemon shows connectivity, daemon version, socket and check time separately from workloads", async ({ page }) => {
+  let checks = 0;
+  await mock(page);
+  await mockDaemon(page, { health: () => { checks++; return { json: healthBody({ daemonVersion: "v1.2.4" }) }; } });
+  await page.goto(`${server.url}#/resources`);
+  await expect(page.getByLabel("Daemon connection")).toContainText("kukeond v1.2.4");
+  await nav(page).getByRole("link", { name: "Daemon" }).click();
+  await expect(page).toHaveURL(/#\/daemon$/);
+  await expect(page.locator(".page-heading h1")).toHaveText("Daemon");
+  const panel = page.getByRole("region", { name: "Daemon connectivity" });
+  await expect(panel.locator(".state-badge")).toHaveText("Reachable");
+  await expect(panel).toContainText("v1.2.4");
+  await expect(panel).toContainText("Differs from kuke serve");
+  await expect(panel).toContainText("unix:///run/kukeon/kukeond.sock");
+  await expect(panel.locator("time").first()).toHaveAttribute("dateTime", "2026-11-15T10:00:00Z");
+  await expect(panel).toContainText("Inventory refreshed");
+  await expect(page.getByRole("region", { name: "Health scope" })).toContainText("does not report the health of cells");
+  const before = checks;
+  await panel.getByRole("button", { name: "Check again" }).click();
+  await expect.poll(() => checks).toBeGreaterThan(before);
+  await page.reload();
+  await expect(page.getByRole("region", { name: "Daemon connectivity" }).locator(".state-badge")).toHaveText("Reachable");
+});
+
+test("Daemon health distinguishes permission-denied, unavailable, outdated and failed checks", async ({ page }) => {
+  let mode = "permission_denied";
+  await mock(page);
+  await mockDaemon(page, { health: () => ({ json: healthBody({ status: mode, daemonVersion: undefined, error: { code: mode, message: `check: ${mode}` } }) }) });
+  await page.goto(`${server.url}#/daemon`);
+  const panel = page.getByRole("region", { name: "Daemon connectivity" });
+  for (const [status, label, hint] of [["permission_denied", "Permission denied", "kukeon group"], ["unavailable", "Unavailable", "kuke daemon start"], ["daemon_outdated", "Daemon outdated", "Upgrade kukeond"], ["failed", "Check failed", "daemon logs"]]) {
+    mode = status;
+    await panel.getByRole("button", { name: "Check again" }).click();
+    await expect(panel.locator(".state-badge")).toHaveText(label);
+    await expect(panel.getByRole("alert")).toContainText(`check: ${status}`);
+    await expect(panel.getByRole("alert")).toContainText(hint);
+    await expect(panel).toContainText("Unknown");
+  }
+});
+
+test("Daemon health against the real server reports an unavailable socket", async ({ page }) => {
+  await page.goto(`${server.url}#/daemon`);
+  const panel = page.getByRole("region", { name: "Daemon connectivity" });
+  await expect(panel.locator(".state-badge")).toHaveText("Unavailable");
+  await expect(panel).toContainText("missing.sock");
+  await expect(page.getByLabel("Daemon connection")).toContainText("kukeond version unknown");
+});
+
+test("Daemon logs read the latest bounded output, follow and pause explicitly, and copy", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const requests = [];
+  let appended = "";
+  await mock(page);
+  await mockDaemon(page, { logs: url => {
+    const offset = Number(url.searchParams.get("offset"));
+    requests.push(offset);
+    if (offset < 0) return { json: { source: "/opt/kukeon/kuke-system/kukeon/kukeon/kukeond/kukeond/log", data: "time=t1 level=INFO msg=started\nplain line\n", start: 100, next: 140, size: 140, truncated: true } };
+    const data = offset === 140 ? appended : "";
+    return { json: { source: "/opt/kukeon/log", data, start: offset, next: offset + data.length, size: offset + data.length } };
+  } });
+  await page.goto(`${server.url}#/resources`);
+  await nav(page).getByRole("link", { name: "Daemon" }).click();
+  await page.getByRole("navigation", { name: "Daemon sections" }).getByRole("link", { name: "Logs" }).click();
+  await expect(page).toHaveURL(/#\/daemon\/logs$/);
+  const logs = page.getByRole("region", { name: "Daemon logs" });
+  const output = logs.getByLabel("kukeond log output");
+  await expect(output).toHaveText("time=t1 level=INFO msg=started\nplain line");
+  await expect(logs).toContainText("/opt/kukeon/kuke-system/kukeon/kukeon/kukeond/kukeond/log");
+  await expect(logs).toContainText("Earlier output is not shown.");
+  await expect(logs).toContainText("at most 2,000 lines");
+  // Paused by default, like `kuke daemon logs` without -f: no polling.
+  await expect(logs.locator(".badge")).toHaveText("Paused");
+  await page.waitForTimeout(2500);
+  expect(requests).toEqual([-1]);
+
+  appended = "followed line\n";
+  await logs.getByRole("button", { name: "Follow" }).click();
+  await expect(logs.getByRole("button", { name: "Pause" })).toHaveAttribute("aria-pressed", "true");
+  await expect(output).toContainText("followed line");
+  expect(requests).toContain(140);
+  await logs.getByRole("button", { name: "Pause" }).click();
+  await expect(logs.locator(".badge")).toHaveText("Paused");
+  const paused = requests.length;
+  await page.waitForTimeout(2500);
+  expect(requests.length).toBe(paused);
+
+  await logs.getByRole("button", { name: "Copy" }).click();
+  await expect(logs.getByRole("status").filter({ hasText: "Copied 3 lines." })).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("time=t1 level=INFO msg=started\nplain line\nfollowed line");
+
+  // Reload latest replaces the retained output with a fresh tail read.
+  await logs.getByRole("button", { name: "Reload latest" }).click();
+  await expect(output).toHaveText("time=t1 level=INFO msg=started\nplain line");
+});
+
+test("Daemon logs follow reports a rotated source and drains bounded chunks", async ({ page }) => {
+  await mock(page);
+  let phase = 0;
+  await mockDaemon(page, { logs: url => {
+    const offset = Number(url.searchParams.get("offset"));
+    if (offset < 0) return { json: { source: "/log", data: "old\n", start: 0, next: 4, size: 4 } };
+    phase++;
+    if (phase === 1) return { json: { source: "/log", data: "new 1\n", start: 0, next: 6, size: 12, reset: true, more: true } };
+    if (phase === 2) return { json: { source: "/log", data: "new 2\n", start: 6, next: 12, size: 12 } };
+    return { json: { source: "/log", data: "", start: offset, next: offset, size: 12 } };
+  } });
+  await page.goto(`${server.url}#/daemon/logs`);
+  const logs = page.getByRole("region", { name: "Daemon logs" });
+  await expect(logs.getByLabel("kukeond log output")).toHaveText("old");
+  await logs.getByRole("button", { name: "Follow" }).click();
+  await expect(logs.getByLabel("kukeond log output")).toHaveText("new 1\nnew 2");
+  await expect(logs).toContainText("truncated or replaced");
+});
+
+test("Daemon logs surface unavailable sources, permission failures and lost connections", async ({ page }) => {
+  let mode = "unavailable_source";
+  await mock(page);
+  await mockDaemon(page, { logs: url => {
+    if (mode === "unavailable_source") return { status: 404, json: { error: { code: "log_unavailable", message: "kukeond log source unavailable: no log file at /opt/kukeon/log" } } };
+    if (mode === "permission") return { status: 403, json: { error: { code: "permission_denied", message: "dial kukeond: permission denied" } } };
+    if (mode === "outdated") return { status: 501, json: { error: { code: "daemon_outdated", message: "upgrade kukeond: KukeonV1.ReadDaemonLogs" } } };
+    if (mode === "down") return failure;
+    const offset = Number(url.searchParams.get("offset"));
+    return { json: { source: "/log", data: offset < 0 ? "line\n" : "", start: 0, next: 5, size: 5 } };
+  } });
+  await page.goto(`${server.url}#/daemon/logs`);
+  const logs = page.getByRole("region", { name: "Daemon logs" });
+  await expect(logs.getByRole("alert")).toContainText("Daemon logs unavailable");
+  await expect(logs.getByRole("alert")).toContainText("no log file at /opt/kukeon/log");
+  await expect(logs.getByRole("heading", { name: "No log output yet" })).toHaveCount(0);
+
+  mode = "permission";
+  await logs.getByRole("button", { name: "Reload latest" }).click();
+  await expect(logs.getByRole("alert")).toContainText("Permission denied");
+
+  mode = "outdated";
+  await logs.getByRole("button", { name: "Reload latest" }).click();
+  await expect(logs.getByRole("alert")).toContainText("Daemon outdated");
+
+  mode = "ok";
+  await logs.getByRole("button", { name: "Reload latest" }).click();
+  await expect(logs.getByLabel("kukeond log output")).toHaveText("line");
+  await expect(logs.getByRole("alert")).toHaveCount(0);
+
+  mode = "down";
+  await logs.getByRole("button", { name: "Follow" }).click();
+  await expect(logs.getByRole("alert")).toContainText("Daemon unavailable");
+  await expect(logs).toContainText("Following is retrying");
+  await expect(logs.getByLabel("kukeond log output")).toHaveText("line");
+  mode = "ok";
+  await expect(logs.getByRole("alert")).toHaveCount(0, { timeout: 5000 });
+});
+
+test("an empty daemon log is distinct from a failed read", async ({ page }) => {
+  await mock(page);
+  await mockDaemon(page);
+  await page.goto(`${server.url}#/daemon/logs`);
+  const logs = page.getByRole("region", { name: "Daemon logs" });
+  await expect(logs.getByRole("heading", { name: "No log output yet" })).toBeVisible();
+  await expect(logs.getByRole("alert")).toHaveCount(0);
+  await expect(logs.getByRole("button", { name: "Copy" })).toBeDisabled();
+});

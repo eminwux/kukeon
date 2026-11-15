@@ -141,6 +141,11 @@ var (
 	// ErrCellTaskStatus wraps a non-not-found containerd failure while
 	// reading a cell root task's status for GetNetworkDetail (issue #1411).
 	ErrCellTaskStatus = errors.New("failed to read cell root task status")
+	// ErrDaemonLogUnavailable marks a ReadDaemonLogs request whose source —
+	// the kukeond container's runtime-shim log file — does not exist or the
+	// kukeond container is not provisioned (issue #1386, step 7). A kukeond
+	// launched outside its kuke-system cell has no shim log to read.
+	ErrDaemonLogUnavailable = errors.New("kukeond log source unavailable")
 	// ErrDaemonMethodUnsupported marks an RPC the running kukeond does not
 	// implement — the client is newer than the daemon and kukeond must be
 	// rebuilt/redeployed (e.g. `kuke init --kukeond-image ...`).

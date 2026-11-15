@@ -103,6 +103,8 @@ kuke daemon log  [-f]      # alias
 
 By default the current contents are printed and the command exits; pass `-f`/`--follow` to tail until SIGINT.
 
+The same stream is available without root or host file access through kukeond's read-only `ReadDaemonLogs` socket method. The `kuke serve` web UI uses it on its **Daemon → Logs** page.
+
 | Flag             | Default | Description                                                        |
 | ---------------- | ------- | ------------------------------------------------------------------ |
 | `--follow`, `-f` | `false` | Tail until SIGINT instead of printing current contents and exiting |

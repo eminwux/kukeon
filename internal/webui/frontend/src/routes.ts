@@ -15,6 +15,8 @@ export function readRoute(): Route {
       try { config = JSON.parse(params.get("config") ?? "null"); } catch { config = null; }
       return { view: "new-cell", scope: [], parent: [], document: false, config: Array.isArray(config) && config.every(value => typeof value === "string") ? config.slice(0, 4) : undefined };
     }
+    // #/daemon (health) and #/daemon/logs live under Administration.
+    if (parts[0] === "daemon") return { view: parts[1] === "logs" ? "daemon-logs" : "daemon", scope: [], parent: [], document: false };
     if (parts[0] === "workspace") return { view: "workspace", scope: parts.length === 5 ? parts.slice(1) : [], parent: [], document: false };
     if (path === "/resources" || path === "/administration" || path === "/dashboard") return { view: "dashboard", scope: [], parent: [], document: false };
     // #/images/<realm>/<image reference>; the reference is one encoded segment.
@@ -35,6 +37,9 @@ export function workspaceLink(scope: string[] = []): string {
 }
 export function newCellLink(config?: string[]): string {
   return "#/new-cell" + (config?.length ? `?config=${encodeURIComponent(JSON.stringify(config))}` : "");
+}
+export function daemonLink(section?: "logs"): string {
+  return "#/daemon" + (section ? `/${section}` : "");
 }
 export function imagesLink(realm?: string, ref?: string): string {
   return "#/images" + [realm, ref].filter((value): value is string => !!value).map(value => "/" + encodeURIComponent(value)).join("");

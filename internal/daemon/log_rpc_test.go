@@ -111,3 +111,45 @@ func TestLogContainer_NonAttachable_RPCReturnsLogPath(t *testing.T) {
 		)
 	}
 }
+
+type daemonLogsClientFake struct {
+	kukeonv1.FakeClient
+
+	req    kukeonv1.DaemonLogRequest
+	result kukeonv1.DaemonLogResult
+	err    error
+}
+
+func (d *daemonLogsClientFake) ReadDaemonLogs(
+	_ context.Context, req kukeonv1.DaemonLogRequest,
+) (kukeonv1.DaemonLogResult, error) {
+	d.req = req
+	return d.result, d.err
+}
+
+func TestReadDaemonLogs_RPCForwardsRequestAndResult(t *testing.T) {
+	core := &daemonLogsClientFake{result: kukeonv1.DaemonLogResult{Data: "ready\n", Start: 4, Next: 10, Size: 10}}
+	svc := daemon.NewKukeonV1Service(context.Background(), discardLogger(), core)
+
+	args := &kukeonv1.ReadDaemonLogsArgs{Request: kukeonv1.DaemonLogRequest{Offset: 4, MaxBytes: 128}}
+	reply := &kukeonv1.ReadDaemonLogsReply{}
+	if err := svc.ReadDaemonLogs(args, reply); err != nil {
+		t.Fatalf("transport error: %v", err)
+	}
+	if reply.Err != nil || reply.Result != core.result || core.req != args.Request {
+		t.Fatalf("reply=%+v req=%+v", reply, core.req)
+	}
+}
+
+func TestReadDaemonLogs_RPCSurfacesUnavailableSentinel(t *testing.T) {
+	core := &daemonLogsClientFake{err: errdefs.ErrDaemonLogUnavailable}
+	svc := daemon.NewKukeonV1Service(context.Background(), discardLogger(), core)
+
+	reply := &kukeonv1.ReadDaemonLogsReply{}
+	if err := svc.ReadDaemonLogs(&kukeonv1.ReadDaemonLogsArgs{}, reply); err != nil {
+		t.Fatalf("transport error: %v", err)
+	}
+	if !errors.Is(kukeonv1.FromAPIError(reply.Err), errdefs.ErrDaemonLogUnavailable) {
+		t.Fatalf("wire error %+v does not unwrap to ErrDaemonLogUnavailable", reply.Err)
+	}
+}

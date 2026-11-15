@@ -105,7 +105,60 @@ The sidebar shows the selected daemon socket. **Connected** means the root realm
 request reached kukeond; it does not assert that every scope, subsystem, or
 workload is healthy. Scoped failures separately mark inventory incomplete.
 **Unavailable** or **Permission denied** describe a failed root request. Correct
-the connection or permissions and refresh to retry.
+the connection or permissions and refresh to retry. Below the socket, the
+sidebar names the kukeond version reported by the last health check and links
+to [Daemon health](#daemon-health). The version beside the brand is the
+`kuke serve` build.
+
+## Daemon health
+
+**Resources → Daemon** (`#/daemon`) checks connectivity to kukeond by sending a
+ping over the selected socket with the server's permissions. The page shows:
+
+- **Connectivity**: **Reachable**, **Unavailable** (no socket, connection
+  refused, or no answer within five seconds), **Permission denied** (the server
+  cannot open the socket), **Daemon outdated**, or **Check failed** (kukeond
+  answered but reported an error). Each failure includes the error and a fix.
+- **kukeond version** as reported by the daemon (not the `kuke serve` build),
+  and a note when the two differ.
+- The selected **Socket**, **Last checked** time, and response time.
+- **Inventory refreshed**: when the resource inventory was last read. This is
+  separate from the health check.
+
+**Check again** repeats the check, as does the toolbar **Refresh**. A reachable
+daemon does not mean cells, containers, cgroups, networking, or other
+subsystems are healthy. To check those, review cell states in **Overview**,
+read the [daemon logs](#daemon-logs), or run `kuke status`.
+
+## Daemon logs
+
+**Resources → Daemon → Logs** (`#/daemon/logs`) shows kukeond's own
+stdout/stderr, the same stream `kuke daemon logs` prints. It opens with the
+newest output, up to 64 KiB. Earlier output that was not loaded is marked
+**Earlier output is not shown.**
+
+- **Follow** checks for new output every two seconds and reads only what
+  follows the last line shown. **Pause** stops checking. The page starts
+  paused, like `kuke daemon logs` without `-f`.
+- **Reload latest** discards the shown output and reads the newest output
+  again.
+- **Copy** copies the shown lines to the clipboard.
+- The browser keeps at most 2,000 lines (1 MB). Older lines are removed as new
+  output arrives.
+
+Lines appear exactly as kukeond wrote them, in the order it wrote them. The
+page does not add or parse timestamps or levels. If the log file was truncated
+or replaced while following, the page shows its newest output again and says
+so. Errors use clear notices: **Daemon logs unavailable** (kukeond is not
+running in its `kuke-system` cell, so there is no log file), **Permission
+denied**, **Daemon outdated** (the kukeond build is too old to serve logs), and
+**Daemon unavailable**. When a follow request fails, the lines already shown
+stay on the page with a staleness note, and following keeps retrying.
+
+kukeond reads the log file and returns it over its Unix-socket API through the
+read-only `ReadDaemonLogs` method. `kuke serve` never opens the file itself.
+Anyone who can open the daemon socket can read these logs, the same access
+that every other read in the UI needs. No database or log store is added.
 
 ## Blueprints, configs, volumes, and secrets
 
@@ -293,6 +346,8 @@ All endpoints use same-origin HTTP GET and return JSON:
 | Path                 | Result                                                                  |
 | -------------------- | ----------------------------------------------------------------------- |
 | `/api/connection`    | Configured daemon `endpoint`; this is configuration, not a health probe |
+| `/api/daemon/health` | Connectivity check result; always HTTP 200 (see below)                  |
+| `/api/daemon/logs`   | One bounded chunk of kukeond's own log stream (see below)               |
 | `/api/realms`        | Realm documents from kukeond (passwords blanked), or `[]` when empty    |
 | `/api/realms/{name}` | Selected realm document (passwords blanked)                             |
 
@@ -322,6 +377,28 @@ containerd namespace (`images` is `[]` when empty). Append
 `null` when containerd cannot resolve them. See [Images](#images). Separately,
 `/api/realms/{name}/images` lists the realm's declared `spec.images`.
 
+`/api/daemon/health` returns `{ "status", "endpoint", "daemonVersion",
+"serverVersion", "checkedAt", "latencyMs", "error" }`. `status` is `reachable`,
+`unavailable`, `permission_denied`, `daemon_outdated`, or `failed`.
+`daemonVersion` is present only when the daemon is reachable, and `error`
+(`{ "code", "message" }`) only when it is not.
+
+`/api/daemon/logs?offset={n}&maxBytes={m}` returns `{ "source", "data",
+"start", "next", "size", "truncated", "more", "reset" }`:
+
+- `offset` defaults to `-1`, which reads the newest output. A byte offset
+  reads forward from that point; pass the previous `next` to follow.
+- `maxBytes` defaults to 65536 and must be at most 1048576.
+- `data` contains only complete lines. A line still being written is returned
+  once it ends; `next` points to its first byte. A single line longer than
+  `maxBytes` is returned in pieces.
+- `truncated` means earlier output exists before `start`. `more` means
+  complete output past `next` was already available.
+- `reset` means `offset` was past the end of the file because the log was
+  truncated or replaced, so the newest output was returned instead.
+- If kukeond has no log file to read, the error code is `log_unavailable`
+  (404).
+
 Each name is a URL-encoded path segment. Collections return daemon documents,
 except containers, whose collection returns daemon container specs. Realm
 registry passwords are blanked (see [Registry credentials](#registry-credentials))
@@ -329,7 +406,8 @@ and cell and container environment values are omitted; no other fields are
 filtered, and no direct resource-store reads are made.
 
 Errors use `{ "error": { "code": "...", "message": "..." } }`:
-`permission_denied` (403), `not_found` (404), `invalid_request` (400),
+`permission_denied` (403), `not_found` (404), `log_unavailable` (404),
+`invalid_request` (400),
 `daemon_outdated` (501), or `unavailable` (503). `daemon_outdated` means the
 running kukeond predates the request (for example the `/cgroup` route against a
 daemon built before it); redeploy kukeond with the same build as `kuke`. Requests

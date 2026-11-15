@@ -62,6 +62,23 @@ test("packaged browser reads real daemon documents and unavailable socket", asyn
     }
     await page.getByRole("button", { name: "Refresh" }).click();
     await expect(page.getByLabel("Daemon connection").getByRole("status")).toHaveText("Connected");
+    // Daemon health and logs are read from the running kukeond over its socket.
+    const health = await (await request.get(`${server.url}/api/daemon/health`)).json();
+    expect(health.status).toBe("reachable");
+    expect(health.endpoint).toBe(endpoint);
+    await page.goto(`${server.url}#/daemon`);
+    await expect(page.getByRole("region", { name: "Daemon connectivity" }).locator(".state-badge")).toHaveText("Reachable");
+    const logs = await request.get(`${server.url}/api/daemon/logs?maxBytes=4096`);
+    expect(logs.ok(), "kukeond must run in its kuke-system cell so its log file exists").toBeTruthy();
+    const chunk = await logs.json();
+    expect(chunk.source).toMatch(/kukeond\/kukeond\/log$/);
+    expect(chunk.next).toBeGreaterThanOrEqual(chunk.start);
+    expect(chunk.data.length).toBeLessThanOrEqual(4096);
+    const forward = await (await request.get(`${server.url}/api/daemon/logs?offset=${chunk.next}`)).json();
+    expect(forward.start).toBe(chunk.next);
+    await page.goto(`${server.url}#/daemon/logs`);
+    if (chunk.data) await expect(page.getByLabel("kukeond log output")).toBeVisible();
+    else await expect(page.getByRole("heading", { name: "No log output yet" })).toBeVisible();
   } finally { await server.stop(); }
   // Never stop the operator's daemon to induce the failure case.
   const unavailable = await startServer();

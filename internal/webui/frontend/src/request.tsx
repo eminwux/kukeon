@@ -39,6 +39,7 @@ export function ErrorNotice({ error, kind = "Realm" }: { error: Failure; kind?: 
   const title = error.code === "permission_denied" ? "Permission denied"
     : error.code === "unavailable" ? "Daemon unavailable"
     : error.code === "daemon_outdated" ? "Daemon outdated"
+    : error.code === "log_unavailable" ? "Daemon logs unavailable"
     : error.code === "not_found" ? `${kind} no longer exists` : "Request failed";
   return <div className="error" role="alert"><strong>{title}</strong><p>{error.message}</p></div>;
 }

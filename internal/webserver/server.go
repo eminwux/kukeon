@@ -126,6 +126,7 @@ func newHandler(authority, endpoint string, dial Dial) (http.Handler, error) {
 	mux.HandleFunc("GET /api/realms/{name}", realmHandler(dial, true))
 	mux.HandleFunc("GET /api/realms/{name}/images", realmImagesHandler(dial))
 	registerResourceRoutes(mux, dial)
+	registerDaemonRoutes(mux, endpoint, dial)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -231,6 +232,8 @@ func apiErrorStatus(err error) (int, string) {
 	switch {
 	case errors.Is(err, errdefs.ErrDaemonMethodUnsupported):
 		status, code = http.StatusNotImplemented, "daemon_outdated"
+	case errors.Is(err, errdefs.ErrDaemonLogUnavailable):
+		status, code = http.StatusNotFound, "log_unavailable"
 	case errors.Is(err, errdefs.ErrCellAlreadyExists):
 		status, code = http.StatusConflict, "already_exists"
 	case errors.Is(err, fs.ErrPermission):
