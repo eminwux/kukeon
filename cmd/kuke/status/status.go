@@ -172,7 +172,8 @@ func NewStatusCmd() *cobra.Command {
 			"`kuke get realms` vs `kuke get realms --no-daemon` diff ritual.\n\n" +
 			"Sections: daemon (socket dialable, round-trip, version), host\n" +
 			"(containerd, cgroup-v2, CNI plugins), state (orphan sockets,\n" +
-			"residual containerd namespaces), parity (every `kuke get <kind>`\n" +
+			"residual containerd namespaces, volume dirs missing group-write),\n" +
+			"parity (every `kuke get <kind>`\n" +
 			"agrees daemon-side vs in-process). Each line is OK / WARN / FAIL\n" +
 			"with a one-line remediation hint when the status is not OK.\n\n" +
 			"Exit code 0 when every check is OK or WARN; non-zero when any line\n" +
