@@ -171,15 +171,45 @@ test-root:
 test-kukebuild:
 	cd cmd/kukebuild && go test ./...
 
-# Tag the e2e suite uses to refer to the local kukeond image. The e2e harness
-# imports it into containerd's kuke-system namespace before running `kuke init`,
-# so the test does not depend on a published registry tag matching `git
-# describe`.
-KUKEON_E2E_IMAGE_DOCKER_NAME ?= kukeon-local:e2e
-KUKEON_E2E_IMAGE ?= docker.io/library/$(KUKEON_E2E_IMAGE_DOCKER_NAME)
+# Ref the e2e suite uses for the local kukeond image. `kukebuild` writes it
+# straight into the kuke-system realm's containerd namespace before `go test`
+# runs `kuke init --kukeond-image`, so the test does not depend on a published
+# registry tag matching `git describe`, nor on a docker daemon. `kukeon.internal`
+# is the ICANN-reserved, non-routable host every locally-built kukeon image uses
+# (#1063): a stray pull fails fast instead of hitting Docker Hub.
+KUKEON_E2E_IMAGE ?= kukeon.internal/kukeond:v0.0.0-e2e
+# Scratch dir for the e2e image build, wiped at the start of every run. It
+# lives outside the repo because the repo root is the build context.
+#   - KUKEON_E2E_BUILD_ROOT: a private BuildKit state root. kukebuild's default
+#     root outlives the run, but the suite's uninstall tests delete the
+#     kuke-system namespace's snapshots out from under it; a reused cache then
+#     fails the next build with "parent snapshot ... does not exist". A fresh
+#     root trades cross-run layer caching for a build that cannot reference
+#     snapshots the previous run deleted.
+#   - KUKEON_E2E_IMAGE_TAR: an OCI archive of the image, exported with `ctr`
+#     right after the build. The same uninstall tests drop the image along with
+#     the namespace, so the harness re-imports this archive before every
+#     `kuke init` instead of relying on the one build surviving.
+KUKEON_E2E_STATE_DIR ?= /var/tmp/kukeon-e2e
+KUKEON_E2E_BUILD_ROOT := $(KUKEON_E2E_STATE_DIR)/buildroot
+KUKEON_E2E_IMAGE_TAR := $(KUKEON_E2E_STATE_DIR)/kukeond.tar
 
 e2e: test-e2e
 .PHONY: test-e2e
+# Prerequisites: root, Go, standalone containerd at
+# /run/containerd/containerd.sock, iproute2 (`ip`) and `ctr` on PATH. No docker
+# daemon or binary is needed. scripts/e2e-preflight.sh checks all of these (plus
+# the freshly built kukebuild and a free /run/kukeon-e2e-network.lock) and exits
+# non-zero naming each missing piece before the image build or `go test` start.
+#
+# The kukeond image is built by kukebuild (BuildKit as a library, host network)
+# directly into kuke-system.kukeon.io. `--kukeond-config /dev/null` pins the
+# default `.kukeon.io` namespace suffix so a host /etc/kukeon/kukeond.yaml with
+# a dev profile cannot redirect the image into kuke-system.dev.kukeon.io — the
+# build-side twin of the KUKEOND_CONFIGURATION=/dev/null isolation below.
+# `ctr images export` then snapshots it to $(KUKEON_E2E_IMAGE_TAR) for the
+# harness's per-test re-import (see KUKEON_E2E_STATE_DIR above).
+#
 # `env -u KUKEOND_SOCKET` (rather than re-exporting an absent value) keeps the
 # AC's "no global KUKEOND_SOCKET for the test run" constraint honest: any
 # leftover from an interactive shell — including a parent dev-init.sh that
@@ -207,9 +237,14 @@ e2e: test-e2e
 #
 # Issue #284 collapsed KUKE_INIT_SERVER_CONFIGURATION into KUKEOND_CONFIGURATION
 # — one env var, one source of truth, the same path the daemon honours.
-test-e2e: kuke kukeond kuketty kukepause
-	@echo "Building local kukeond image $(KUKEON_E2E_IMAGE_DOCKER_NAME) for e2e"
-	docker build --build-arg VERSION=v0.0.0-e2e -t $(KUKEON_E2E_IMAGE_DOCKER_NAME) .
+test-e2e: kuke kukeond kuketty kukepause kukebuild
+	./scripts/e2e-preflight.sh $(CURDIR)
+	@echo "Building local kukeond image $(KUKEON_E2E_IMAGE) into kuke-system for e2e"
+	rm -rf $(KUKEON_E2E_STATE_DIR) && mkdir -p $(KUKEON_E2E_STATE_DIR)
+	./kukebuild --tag $(KUKEON_E2E_IMAGE) --realm kuke-system --kukeond-config /dev/null \
+		--root $(KUKEON_E2E_BUILD_ROOT) \
+		--build-arg VERSION=v0.0.0-e2e .
+	ctr --namespace kuke-system.kukeon.io images export $(KUKEON_E2E_IMAGE_TAR) $(KUKEON_E2E_IMAGE)
 	@echo "Running e2e tests using binaries in project root"
 	@if [ -x /.kukeon/bin/kuketty ]; then \
 		echo "[nested mode: kuke init --run-path <tempdir> derives <tempdir>/kukeond.sock; parent dev cell's /run/kukeon/ socket untouched]"; \
@@ -217,7 +252,7 @@ test-e2e: kuke kukeond kuketty kukepause
 	HOME=$(HOME) PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$(PATH) \
 		E2E_BIN_DIR=$(CURDIR) \
 		KUKEON_E2E_IMAGE=$(KUKEON_E2E_IMAGE) \
-		KUKEON_E2E_IMAGE_DOCKER_NAME=$(KUKEON_E2E_IMAGE_DOCKER_NAME) \
+		KUKEON_E2E_IMAGE_TAR=$(KUKEON_E2E_IMAGE_TAR) \
 		KUKEOND_CONFIGURATION=/dev/null \
 		env -u KUKEOND_SOCKET go test -v ./e2e
 
