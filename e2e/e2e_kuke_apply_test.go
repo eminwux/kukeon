@@ -860,13 +860,14 @@ spec:
         - "3600"
 `, cellName, realmName, spaceName, stackName, sleepArg)
 	}
-	apply := func(content string) {
+	runManifest := func(content string, verb ...string) {
 		t.Helper()
 		path := filepath.Join(t.TempDir(), "recreate.yaml")
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			t.Fatalf("write manifest: %v", err)
 		}
-		runReturningBinary(t, nil, kuke, append(buildKukeDaemonArgs(host), "apply", "-f", path)...)
+		args := append(append(buildKukeDaemonArgs(host), verb[0], "-f", path), verb[1:]...)
+		runReturningBinary(t, nil, kuke, args...)
 	}
 	getCell := func() *v1beta1.CellDoc {
 		t.Helper()
@@ -880,13 +881,18 @@ spec:
 		return cell
 	}
 
-	apply(manifest("3600"))
+	// Create through `kuke run -f` (controller.CreateCell stamps the managed
+	// scope labels), then recreate through `kuke apply`, mirroring #1377's repro.
+	runManifest(manifest("3600"), "run", "-d")
 	before := getCell()
 	if before.Status.CreatedAt.IsZero() || before.Status.ReadyAt.IsZero() {
 		t.Fatalf("precondition: createdAt=%v readyAt=%v, want both set", before.Status.CreatedAt, before.Status.ReadyAt)
 	}
+	if got := before.Metadata.Labels["cell.kukeon.io"]; got != cellName {
+		t.Fatalf("precondition: label cell.kukeon.io=%q, want %q", got, cellName)
+	}
 
-	apply(manifest("3601"))
+	runManifest(manifest("3601"), "apply")
 	after := getCell()
 
 	rootArgs := ""
