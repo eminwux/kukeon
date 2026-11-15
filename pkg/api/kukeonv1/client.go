@@ -87,6 +87,10 @@ type Client interface {
 	// cgroup's declared configuration plus its live cgroup v2 interface
 	// values (issue #1410). Read-only; callers never touch /sys/fs/cgroup.
 	GetCgroupDetail(ctx context.Context, scope CgroupScope) (GetCgroupDetailResult, error)
+	// GetNetworkDetail reads one space, cell or container's declared
+	// networking plus the runtime facts kukeond knows: subnet, bridge,
+	// conflist presence and the cell IPv4 (issue #1411). Read-only.
+	GetNetworkDetail(ctx context.Context, scope NetworkScope) (GetNetworkDetailResult, error)
 	// GetSecret reports the metadata-only view of a single named, scoped
 	// `kind: Secret` (issue #622). Spec.data is never echoed — the bytes do
 	// not traverse this RPC by design (#619).
@@ -356,7 +360,8 @@ const (
 	MethodGetConfig    = ServiceName + ".GetConfig"
 	MethodGetVolume    = ServiceName + ".GetVolume"
 
-	MethodGetCgroupDetail = ServiceName + ".GetCgroupDetail"
+	MethodGetCgroupDetail  = ServiceName + ".GetCgroupDetail"
+	MethodGetNetworkDetail = ServiceName + ".GetNetworkDetail"
 
 	MethodListRealms     = ServiceName + ".ListRealms"
 	MethodListSpaces     = ServiceName + ".ListSpaces"

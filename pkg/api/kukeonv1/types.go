@@ -1064,3 +1064,136 @@ type GetCgroupDetailResult struct {
 	Declared            []CgroupDeclaredResource `json:"declared,omitempty"`
 	Live                *CgroupLive              `json:"live,omitempty"`
 }
+
+// ---- Network detail (issue #1411) ----
+
+// Network scope kinds accepted by GetNetworkDetail. Realms and stacks carry
+// no networking fields, so they have no network scope.
+const (
+	NetworkKindSpace     = "space"
+	NetworkKindCell      = "cell"
+	NetworkKindContainer = "container"
+)
+
+// Space subnet sources. NetworkSubnetUnallocated means neither an allocator
+// state file nor a conflist subnet exists yet.
+const (
+	NetworkSubnetAllocator   = "allocator"
+	NetworkSubnetConflist    = "conflist"
+	NetworkSubnetUnallocated = "unallocated"
+)
+
+// Sources for a value that may be set on the resource itself or fall back.
+const (
+	NetworkSourceSpec      = "spec"
+	NetworkSourceDefault   = "default"
+	NetworkSourceSpace     = "space"
+	NetworkSourceContainer = "container"
+)
+
+// Cell IPv4 states. NetworkIPv4NotRunning means the root container's task
+// is not running; NetworkIPv4HostNetwork means the cell shares the host
+// netns and has no CNI attachment; NetworkIPv4NotAssigned means the task
+// runs but no CNI result is cached.
+const (
+	NetworkIPv4Assigned    = "assigned"
+	NetworkIPv4NotRunning  = "not-running"
+	NetworkIPv4HostNetwork = "host-network"
+	NetworkIPv4NotAssigned = "not-assigned"
+)
+
+// NetworkScope names the space, cell or container whose networking
+// GetNetworkDetail reads. Kind selects which coordinates are required.
+type NetworkScope struct {
+	Kind      string `json:"kind"`
+	Realm     string `json:"realm"`
+	Space     string `json:"space"`
+	Stack     string `json:"stack,omitempty"`
+	Cell      string `json:"cell,omitempty"`
+	Container string `json:"container,omitempty"`
+}
+
+type GetNetworkDetailArgs struct {
+	Scope NetworkScope
+}
+
+type GetNetworkDetailReply struct {
+	Result GetNetworkDetailResult
+	Err    *APIError
+}
+
+// NetworkEgressRule is one space egress allow rule. Empty Ports means any
+// port on the destination.
+type NetworkEgressRule struct {
+	Host  string `json:"host,omitempty"`
+	CIDR  string `json:"cidr,omitempty"`
+	Ports []int  `json:"ports,omitempty"`
+}
+
+// NetworkEgress is the space's declared egress policy. DefaultSource is
+// NetworkSourceDefault when spec.network.egress is absent (admit-all).
+type NetworkEgress struct {
+	Default       string              `json:"default"`
+	DefaultSource string              `json:"defaultSource"`
+	Allow         []NetworkEgressRule `json:"allow,omitempty"`
+}
+
+// SpaceNetworkDetail is what the daemon knows about a space's CNI network.
+type SpaceNetworkDetail struct {
+	NetworkName      string        `json:"networkName"`
+	BridgeName       string        `json:"bridgeName,omitempty"`
+	SubnetCIDR       string        `json:"subnetCIDR,omitempty"`
+	SubnetSource     string        `json:"subnetSource"`
+	ParentCIDR       string        `json:"parentCIDR,omitempty"`
+	ConfigPath       string        `json:"configPath"`
+	ConfigPathSource string        `json:"configPathSource"`
+	CNINetworkExists bool          `json:"cniNetworkExists"`
+	Egress           NetworkEgress `json:"egress"`
+}
+
+// ContainerNetworkSummary is one container's network-relevant spec fields.
+type ContainerNetworkSummary struct {
+	ID          string   `json:"id"`
+	Root        bool     `json:"root"`
+	HostNetwork bool     `json:"hostNetwork"`
+	HostPID     bool     `json:"hostPID"`
+	Ports       []string `json:"ports,omitempty"`
+}
+
+// CellNetworkDetail is a cell's bridge, IPv4 and network mode. HostNetwork
+// is true when any container sets hostNetwork, the same rule the runner uses
+// to put the root container (and so the whole cell) on the host netns.
+type CellNetworkDetail struct {
+	BridgeName    string                    `json:"bridgeName,omitempty"`
+	HostNetwork   bool                      `json:"hostNetwork"`
+	IPv4          string                    `json:"ipv4,omitempty"`
+	IPv4State     string                    `json:"ipv4State"`
+	RootContainer string                    `json:"rootContainer,omitempty"`
+	Containers    []ContainerNetworkSummary `json:"containers,omitempty"`
+}
+
+// ContainerNetworkDetail is a container's declared network spec. Ports,
+// Networks and NetworksAliases are stored but not applied at runtime yet
+// (#1002).
+type ContainerNetworkDetail struct {
+	ID                  string   `json:"id"`
+	Root                bool     `json:"root"`
+	HostNetwork         bool     `json:"hostNetwork"`
+	HostPID             bool     `json:"hostPID"`
+	CNIConfigPath       string   `json:"cniConfigPath"`
+	CNIConfigPathSource string   `json:"cniConfigPathSource"`
+	Ports               []string `json:"ports,omitempty"`
+	Networks            []string `json:"networks,omitempty"`
+	NetworksAliases     []string `json:"networksAliases,omitempty"`
+}
+
+// GetNetworkDetailResult combines what a resource declares about its
+// networking with the runtime facts kukeond reads. Space is always the
+// enclosing space; Cell is set for cell and container scopes; Container for
+// container scopes.
+type GetNetworkDetailResult struct {
+	Scope     NetworkScope            `json:"scope"`
+	Space     SpaceNetworkDetail      `json:"space"`
+	Cell      *CellNetworkDetail      `json:"cell,omitempty"`
+	Container *ContainerNetworkDetail `json:"container,omitempty"`
+}

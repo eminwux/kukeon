@@ -113,6 +113,10 @@ func (FakeClient) GetCgroupDetail(context.Context, CgroupScope) (GetCgroupDetail
 	return GetCgroupDetailResult{}, ErrUnexpectedCall
 }
 
+func (FakeClient) GetNetworkDetail(context.Context, NetworkScope) (GetNetworkDetailResult, error) {
+	return GetNetworkDetailResult{}, ErrUnexpectedCall
+}
+
 func (FakeClient) GetConfig(context.Context, v1beta1.CellConfigDoc) (GetConfigResult, error) {
 	return GetConfigResult{}, ErrUnexpectedCall
 }

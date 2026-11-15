@@ -346,6 +346,19 @@ func (c *UnixClient) GetCgroupDetail(ctx context.Context, scope CgroupScope) (Ge
 	return reply.Result, nil
 }
 
+// GetNetworkDetail implements Client (#1411).
+func (c *UnixClient) GetNetworkDetail(ctx context.Context, scope NetworkScope) (GetNetworkDetailResult, error) {
+	args := &GetNetworkDetailArgs{Scope: scope}
+	reply := &GetNetworkDetailReply{}
+	if err := c.call(ctx, MethodGetNetworkDetail, args, reply); err != nil {
+		return GetNetworkDetailResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
 // GetBlueprint implements Client.
 func (c *UnixClient) GetBlueprint(
 	ctx context.Context, doc v1beta1.CellBlueprintDoc,

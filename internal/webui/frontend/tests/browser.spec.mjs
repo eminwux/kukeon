@@ -1022,3 +1022,78 @@ test("cell Overview tab shows the cell cgroup with nested runtime and delegated 
   await expect(panel.getByText("1 GiB", { exact: false })).toBeVisible();
   await expect(panel.getByText("No device limits")).toBeVisible();
 });
+
+test("space network section shows the subnet and admit-all default egress, and refreshes runtime values", async ({ page }) => {
+  let reads = 0;
+  await mock(page, path => path === "/api/realms/dev/spaces/shared/network" ? { json: { space: {
+    networkName: "dev-shared", bridgeName: "k-0123abcd", subnetCIDR: reads++ === 0 ? "10.88.1.0/24" : "10.88.2.0/24", subnetSource: "allocator", parentCIDR: "10.88.0.0/16",
+    configPath: "/opt/kukeon/data/dev/shared/network.conflist", configPathSource: "default", cniNetworkExists: true,
+    egress: { default: "allow", defaultSource: "default" },
+  } } } : undefined);
+  await page.goto(`${server.url}#/resource/dev/shared`);
+  const panel = page.getByRole("region", { name: "space network" });
+  await expect(panel.getByText("dev-shared", { exact: true })).toBeVisible();
+  await expect(panel.getByText("k-0123abcd")).toBeVisible();
+  await expect(panel.getByText("10.88.1.0/24")).toBeVisible();
+  await expect(panel.getByText("/opt/kukeon/data/dev/shared/network.conflist (default)")).toBeVisible();
+  await expect(panel.getByText("Allow (default, not set)")).toBeVisible();
+  await expect(panel.getByText("No allow rules.")).toBeVisible();
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(panel.getByText("10.88.2.0/24")).toBeVisible();
+});
+
+test("space network section renders deny rules with Any port and an unallocated subnet", async ({ page }) => {
+  await mock(page, path => path === "/api/realms/dev/spaces/shared/network" ? { json: { space: {
+    networkName: "dev-shared", subnetSource: "unallocated", parentCIDR: "10.88.0.0/16", configPath: "/etc/cni/net.d/custom.conflist", configPathSource: "spec", cniNetworkExists: false,
+    egress: { default: "deny", defaultSource: "spec", allow: [{ host: "example.com", ports: [443] }, { cidr: "10.0.0.0/8" }] },
+  } } } : undefined);
+  await page.goto(`${server.url}#/resource/dev/shared`);
+  const panel = page.getByRole("region", { name: "space network" });
+  await expect(panel.getByText("Not allocated (allocated from 10.88.0.0/16)")).toBeVisible();
+  await expect(panel.locator("dd").filter({ hasText: /^Not allocated$/ })).toBeVisible();
+  await expect(panel.getByText("No (conflist not present)")).toBeVisible();
+  await expect(panel.getByText("Deny", { exact: true })).toBeVisible();
+  const rules = panel.locator("table.network-rules");
+  await expect(rules.locator("tr").filter({ hasText: "example.com" })).toContainText("443");
+  await expect(rules.locator("tr").filter({ hasText: "10.0.0.0/8" })).toContainText("Any port");
+});
+
+test("cell Overview network section shows Not running for a stopped cell and the per-container summary", async ({ page }) => {
+  await mock(page, path => path.endsWith("/cells/api/network") ? { json: {
+    space: { networkName: "dev-shared", subnetCIDR: "10.88.1.0/24", subnetSource: "allocator", configPath: "/c.conflist", configPathSource: "default", cniNetworkExists: true, egress: { default: "allow", defaultSource: "default" } },
+    cell: { bridgeName: "k-0123abcd", hostNetwork: false, ipv4State: "not-running", rootContainer: "root", containers: [{ id: "root", root: true }, { id: "web", ports: ["8080:80"] }] },
+  } } : undefined);
+  await page.goto(`${server.url}#/resource/dev/shared/services/api`);
+  await page.getByRole("tab", { name: "Overview" }).click();
+  const panel = page.getByRole("region", { name: "cell network" });
+  await expect(panel.getByText("Bridged (space network)")).toBeVisible();
+  await expect(panel.getByText("Not running", { exact: true })).toBeVisible();
+  const containers = panel.locator("table.network-containers");
+  await expect(containers.locator("tr").filter({ hasText: "web" })).toContainText("No (default)");
+  await expect(containers.locator("tr").filter({ hasText: "web" })).toContainText("Declared — not applied at runtime yet");
+  await expect(containers.locator("tr").filter({ hasText: "root" })).toContainText("Not set");
+});
+
+test("container network section labels defaults, inherited CNI path and unset declarations", async ({ page }) => {
+  await mock(page, path => path.endsWith("/containers/web/network") ? { json: {
+    space: { networkName: "prod-shared", subnetCIDR: "10.88.1.0/24", subnetSource: "allocator", configPath: "/s.conflist", configPathSource: "default", cniNetworkExists: true, egress: { default: "allow", defaultSource: "default" } },
+    cell: { hostNetwork: true, ipv4State: "host-network", rootContainer: "root" },
+    container: { id: "web", hostNetwork: true, hostPID: false, cniConfigPath: "/s.conflist", cniConfigPathSource: "space", networks: ["backend"] },
+  } } : undefined);
+  await page.goto(`${server.url}#/resource/prod/shared/services/api/web`);
+  const panel = page.getByRole("region", { name: "container network" });
+  await expect(panel.locator("dt:text-is('Host network') + dd")).toHaveText("Yes");
+  await expect(panel.locator("dt:text-is('Host PID') + dd")).toHaveText("No (default)");
+  await expect(panel.getByText("Inherited from space (/s.conflist)")).toBeVisible();
+  await expect(panel.getByText("Joins the network namespace of root container")).toBeVisible();
+  await expect(panel.getByText("Host", { exact: true })).toBeVisible();
+  await expect(panel.getByText("Host network (no CNI attachment)").first()).toBeVisible();
+  await expect(panel.locator("dd").filter({ hasText: "backend" })).toContainText("Declared — not applied at runtime yet");
+  await expect(panel.locator("dd").filter({ hasText: /^Not set$/ })).toHaveCount(2);
+});
+
+test("a failed network read uses the resource error pattern", async ({ page }) => {
+  await mock(page, path => path === "/api/realms/dev/spaces/shared/network" ? { status: 403, json: { error: { code: "permission_denied", message: "network read denied" } } } : undefined);
+  await page.goto(`${server.url}#/resource/dev/shared`);
+  await expect(page.getByRole("region", { name: "space network" }).getByRole("alert")).toContainText("Permission denied");
+});

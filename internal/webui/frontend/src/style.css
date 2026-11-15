@@ -406,3 +406,9 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--er
 .cgroup-raw, .cgroup-panel dd small { color: var(--muted); }
 .cgroup-io { margin: 0; padding-left: 18px; font-size: 13px; }
 @media (max-width: 640px) { .cgroup-panel .details-grid { grid-template-columns: minmax(0, 1fr); gap: 4px; } .cgroup-panel .details-grid dd { margin-bottom: 8px; } }
+.network-panel h3 { margin: 20px 0 10px; font-size: 13px; }
+.network-panel h3:first-child { margin-top: 0; }
+.network-panel .details-grid { gap: 10px 18px; grid-template-columns: 160px minmax(0, 1fr); }
+.network-note, .network-empty { color: var(--muted); }
+.network-empty { margin: 0; font-size: 13px; }
+@media (max-width: 640px) { .network-panel .details-grid { grid-template-columns: minmax(0, 1fr); gap: 4px; } .network-panel .details-grid dd { margin-bottom: 8px; } }

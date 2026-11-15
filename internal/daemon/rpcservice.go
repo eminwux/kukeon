@@ -210,6 +210,15 @@ func (s *KukeonV1Service) GetCgroupDetail(
 	return nil
 }
 
+func (s *KukeonV1Service) GetNetworkDetail(
+	args *kukeonv1.GetNetworkDetailArgs, reply *kukeonv1.GetNetworkDetailReply,
+) error {
+	result, err := s.core.GetNetworkDetail(s.ctx, args.Scope)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
 func (s *KukeonV1Service) GetConfig(args *kukeonv1.GetConfigArgs, reply *kukeonv1.GetConfigReply) error {
 	result, err := s.core.GetConfig(s.ctx, args.Doc)
 	reply.Result = result
