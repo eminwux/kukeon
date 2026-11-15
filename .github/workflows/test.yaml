@@ -148,6 +148,17 @@ jobs:
           test -x /opt/cni/bin/loopback
           test -x /opt/cni/bin/portmap
 
+      # The kukeon-group e2e tests (TestKuke_RunFromStopped_*_NoEACCES, the
+      # #916/#918 bind-time socket mode + GID regression guards) resolve the
+      # `kukeon` system group via user.LookupGroup and skip when it is
+      # absent. The harness's per-test `kuke init --run-path <tmp>` does not
+      # create host groups, so provision it here — idempotently, matching
+      # what `kuke init` does on a real host — so they run on CI (#1447).
+      - name: Create kukeon system group
+        run: |
+          getent group kukeon > /dev/null || sudo groupadd --system kukeon
+          getent group kukeon
+
       # `sudo -E env "PATH=$PATH"` re-injects the runner's PATH past sudoers'
       # secure_path so the actions/setup-go toolchain stays resolvable when
       # the Makefile invokes `go test` as root.
