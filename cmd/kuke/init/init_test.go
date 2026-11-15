@@ -1245,6 +1245,84 @@ func TestInitSweepSkip_SweepsNonScopeVolumesDir(t *testing.T) {
 	}
 }
 
+// TestInitSweepSkip_PreservesRootOnlyResourceDirs is the regression guard for
+// issue #1416: the per-scope secrets/ (realm..cell) and volume-meta/
+// (realm..stack) dirs ship root-only 0o700 with 0o600 files, and the init
+// sweep must not widen them to kukeon-group-readable 2750/0640. Scope
+// metadata next to them is still swept, and a secrets/ dir outside a scope
+// position (a RunPath sibling of the metadata tree) is still swept.
+func TestInitSweepSkip_PreservesRootOnlyResourceDirs(t *testing.T) {
+	runPath := t.TempDir()
+	dataRoot := filepath.Join(runPath, consts.KukeonMetadataSubdir)
+	realm := filepath.Join(dataRoot, "default")
+	space := filepath.Join(realm, "default")
+	stack := filepath.Join(space, "default")
+	cell := filepath.Join(stack, "cell")
+
+	var dirs []string
+	for _, scope := range []string{realm, space, stack, cell} {
+		dirs = append(dirs, filepath.Join(scope, consts.KukeonSecretsSubdir))
+	}
+	for _, scope := range []string{realm, space, stack} {
+		dirs = append(dirs, filepath.Join(scope, consts.KukeonVolumeMetaSubdir))
+	}
+
+	type entry struct {
+		path string
+		mode os.FileMode
+	}
+	var preserved []entry
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+		if err := os.Chmod(dir, 0o700); err != nil {
+			t.Fatalf("chmod %s: %v", dir, err)
+		}
+		file := filepath.Join(dir, "item")
+		if err := os.WriteFile(file, []byte("root-only"), 0o600); err != nil {
+			t.Fatalf("write %s: %v", file, err)
+		}
+		preserved = append(preserved, entry{path: dir, mode: 0o700}, entry{path: file, mode: 0o600})
+	}
+
+	cellMeta := filepath.Join(cell, consts.KukeonMetadataFile)
+	if err := os.WriteFile(cellMeta, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("write cell metadata: %v", err)
+	}
+	outside := filepath.Join(runPath, consts.KukeonSecretsSubdir)
+	if err := os.MkdirAll(outside, 0o700); err != nil {
+		t.Fatalf("mkdir %s: %v", outside, err)
+	}
+
+	dirMode := os.ModeSetgid | os.FileMode(0o750)
+	if err := sysuser.ChownTreeAndChmodSkip(
+		runPath, os.Getuid(), os.Getgid(), dirMode, 0o640, initSweepSkip(runPath),
+	); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+
+	for _, e := range preserved {
+		info, err := os.Lstat(e.path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", e.path, err)
+		}
+		if got := info.Mode() & (os.ModePerm | os.ModeSetgid); got != e.mode {
+			t.Errorf("%s mode: got %#o want %#o (untouched by sweep)", e.path, got, e.mode)
+		}
+	}
+	if info, err := os.Stat(cellMeta); err != nil {
+		t.Fatalf("stat cell metadata: %v", err)
+	} else if got := info.Mode().Perm(); got != 0o640 {
+		t.Errorf("cell metadata mode: got %#o want 0o640 (swept)", got)
+	}
+	if info, err := os.Stat(outside); err != nil {
+		t.Fatalf("stat %s: %v", outside, err)
+	} else if got := info.Mode().Perm(); got != 0o750 {
+		t.Errorf("%s mode: got %#o want 0o750 (swept, not a scope position)", outside, got)
+	}
+}
+
 func ownerUID(t *testing.T, info os.FileInfo) int {
 	t.Helper()
 	st, ok := info.Sys().(*syscall.Stat_t)

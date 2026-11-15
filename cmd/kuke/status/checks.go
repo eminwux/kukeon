@@ -240,7 +240,8 @@ func checkHostCNIPlugins(rc *runCtx) Result {
 
 // checkState runs the consistency probes the gaps doc's `kuke selftest`
 // proposal called for: stale orphan files in the run dir, and residual
-// containerd namespaces that no realm claims. WARN by default — neither
+// containerd namespaces that no realm claims, and volume dirs that lost
+// group-write (checkStateVolumePerms). WARN by default — neither
 // surfaces a serving regression (a daemon can run fine alongside an
 // orphan from a prior reset that wasn't fully cleaned), but the operator
 // wants to know.
@@ -248,6 +249,7 @@ func checkState(ctx context.Context, rc *runCtx) []Result {
 	return []Result{
 		checkStateRunDir(rc),
 		checkStateNamespaces(ctx, rc),
+		checkStateVolumePerms(rc),
 	}
 }
 

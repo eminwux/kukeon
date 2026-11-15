@@ -347,6 +347,22 @@ func installForwardAdmission(ctx context.Context, logger *slog.Logger) error {
 // already created by ensureSocketDir during bootstrap) and /opt/kukeon
 // (RunPath). Both end up root:kukeon mode 0o750 so the kukeon group can
 // traverse without world access.
+//
+// The RunPath sweep is a recursive denylist ("chown everything, prune what
+// the runner owns"), not an allowlist of init-created paths. The allowlist
+// redesign proposed in issue #1416 was considered and declined: the scope
+// tree (realm/space/stack/cell dirs and their metadata.json files) is created
+// by the runner on every `kuke create`/`kuke apply`, not by init, so an
+// allowlist of "paths init itself creates" would stop healing exactly the
+// tree the sweep exists to keep traversable for the kukeon group (non-root
+// `--no-daemon` reads of scope metadata), and would require init to
+// re-derive every scope layout the runner can produce. Instead every runner
+// subtree whose ownership or mode differs from the sweep's root:kukeon
+// 2750/0640 is pruned structurally by initSweepSkip; blueprints/ and configs/
+// are deliberately still swept (their 0o755/0o644 runner modes are wider than
+// the sweep's, so the sweep only narrows world access). A new runner-owned
+// subdir with a tighter or differently-owned contract must be added to
+// runnerOwnedScopeSubdirMaxDepth.
 func applyKukeonOwnership(
 	socketPath, runPath string,
 	ensure sysuser.EnsureResult,
@@ -380,40 +396,78 @@ func applyKukeonOwnership(
 // initSweepSkip returns the skip predicate applyKukeonOwnership hands to
 // sysuser.ChownTreeAndChmodSkip: it prunes every path whose ownership and
 // mode belong to the runner rather than to init — live per-container kuketty
-// state (skipLiveCellState) and the per-scope volume storage
-// (isScopeVolumesDir).
+// state (skipLiveCellState) and the per-scope runner-owned resource subdirs
+// (isRunnerOwnedScopeSubdir: volumes/, volume-meta/, secrets/).
 func initSweepSkip(runPath string) func(path string, info os.FileInfo) bool {
 	dataRoot := fs.MetadataRoot(runPath)
 	return func(path string, info os.FileInfo) bool {
-		return skipLiveCellState(path, info) || isScopeVolumesDir(dataRoot, path, info)
+		return skipLiveCellState(path, info) || isRunnerOwnedScopeSubdir(dataRoot, path, info)
 	}
 }
 
-// isScopeVolumesDir reports whether path is a per-scope volumes/ directory
-// (fs.VolumesDir) — <dataRoot>/<realm>/[<space>/[<stack>/]]volumes. Volume
-// storage is owned exclusively by the runner: WriteVolume sets volumes/ to
-// 0o755 and each volume dir to root:kukeon setgid 0o770,
-// volumePostCreateChown hands the volume dir to the mounting container's uid,
-// and the workload creates the files inside under its own uid. The blanket
-// sweep reset all of it to root:kukeon 2750/0640, stripping group-write and
-// the container-uid owner so every running non-root cell lost write access to
-// its volumes on each `make dev-init` (issue #1415). Pruning volumes/ leaves
-// the whole subtree — workload data included — byte-for-byte untouched.
+// Scope depths of a per-scope resource subdir, counted in path components
+// under the metadata root including the subdir itself: <realm>/X = 2,
+// <realm>/<space>/X = 3, <realm>/<space>/<stack>/X = 4,
+// <realm>/<space>/<stack>/<cell>/X = 5.
+const (
+	realmScopeSubdirDepth = 2
+	stackScopeSubdirDepth = 4
+	cellScopeSubdirDepth  = 5
+)
+
+// runnerOwnedScopeSubdirMaxDepth reports whether name is a per-scope resource
+// subdir the init sweep must leave untouched and, if so, the deepest scope
+// depth it can sit at.
 //
-// The match is structural (realm, space, or stack scope depth under the
-// metadata root) rather than by basename alone, so an unrelated directory
-// that happens to be named "volumes" elsewhere under RunPath is still swept.
-func isScopeVolumesDir(dataRoot, path string, info os.FileInfo) bool {
-	if !info.IsDir() || info.Name() != consts.KukeonVolumesSubdir {
+//   - volumes/ (realm/space/stack): WriteVolume sets volumes/ to 0o755 and
+//     each volume dir to root:kukeon setgid 0o770, volumePostCreateChown hands
+//     the volume dir to the mounting container's uid, and the workload creates
+//     files inside under its own uid. The sweep reset all of it to
+//     root:kukeon 2750/0640, stripping group-write and the container-uid owner
+//     so every running non-root cell lost write access to its volumes on each
+//     `make dev-init` (issue #1415).
+//   - volume-meta/ (realm/space/stack): root-only reclaim manifests, dir
+//     0o700 / files 0o600 (runner volume_meta.go). The sweep widened them to
+//     kukeon-group-readable 2750/0640 (issue #1416).
+//   - secrets/ (realm/space/stack/cell): root-only secret bytes, dir 0o700 /
+//     files 0o600 (runner secret.go, issue #619). The sweep widened them to
+//     2750/0640, letting every kukeon-group member read every secret
+//     (issue #1416). Secrets are consumed only by root (the daemon, or
+//     `sudo kuke --no-daemon`), so the runner's root-only contract stands.
+func runnerOwnedScopeSubdirMaxDepth(name string) (int, bool) {
+	switch name {
+	case consts.KukeonVolumesSubdir, consts.KukeonVolumeMetaSubdir:
+		return stackScopeSubdirDepth, true
+	case consts.KukeonSecretsSubdir:
+		return cellScopeSubdirDepth, true
+	default:
+		return 0, false
+	}
+}
+
+// isRunnerOwnedScopeSubdir reports whether path is one of the per-scope
+// runner-owned resource subdirs named by runnerOwnedScopeSubdirMaxDepth, sitting at a
+// scope position under the metadata root. Returning true prunes the whole
+// subtree — workload data and secret bytes included — so it is left
+// byte-for-byte untouched.
+//
+// The match is structural (scope depth under the metadata root) rather than
+// by basename alone, so an unrelated directory that happens to share one of
+// these names elsewhere under RunPath is still swept.
+func isRunnerOwnedScopeSubdir(dataRoot, path string, info os.FileInfo) bool {
+	if !info.IsDir() {
+		return false
+	}
+	maxDepth, ok := runnerOwnedScopeSubdirMaxDepth(info.Name())
+	if !ok {
 		return false
 	}
 	rel, err := filepath.Rel(dataRoot, path)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return false
 	}
-	// <realm>/volumes, <realm>/<space>/volumes, <realm>/<space>/<stack>/volumes.
 	depth := len(strings.Split(rel, string(filepath.Separator)))
-	return depth >= 2 && depth <= 4
+	return depth >= realmScopeSubdirDepth && depth <= maxDepth
 }
 
 // skipLiveCellState reports whether the recursive `kuke init` ownership sweep
