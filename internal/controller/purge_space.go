@@ -84,19 +84,23 @@ func (b *Exec) PurgeSpace(space intmodel.Space, force, cascade bool) (PurgeSpace
 		}
 	}
 
-	// Call private cascade method (handles cascade deletion, standard delete, and comprehensive purge)
+	// Call private cascade method (handles cascade deletion, standard delete, and comprehensive purge).
+	// A failure is returned alongside the partial result (matching PurgeRealm) so
+	// the CLI exits non-zero instead of printing a success verdict for a space
+	// that is still present.
 	if err = b.purgeSpaceCascade(internalSpace, force, cascade); err != nil {
 		result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
 		result.PurgeSucceeded = false
-	} else {
-		// Since private method succeeded, assume all operations succeeded
-		result.MetadataDeleted = true
-		result.CgroupDeleted = true
-		result.CNINetworkDeleted = true
-		result.Deleted = append(result.Deleted, "metadata", "cgroup", "network")
-		result.Purged = append(result.Purged, "cni-network", "cni-cache", "orphaned-containers", "all-metadata")
-		result.PurgeSucceeded = true
+		return result, err
 	}
+
+	// Since private method succeeded, assume all operations succeeded
+	result.MetadataDeleted = true
+	result.CgroupDeleted = true
+	result.CNINetworkDeleted = true
+	result.Deleted = append(result.Deleted, "metadata", "cgroup", "network")
+	result.Purged = append(result.Purged, "cni-network", "cni-cache", "orphaned-containers", "all-metadata")
+	result.PurgeSucceeded = true
 
 	return result, nil
 }

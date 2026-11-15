@@ -120,13 +120,13 @@ func TestDeleteStack_RefusesOnCellSubdirResidue(t *testing.T) {
 }
 
 // TestDeleteStack_AllowsKnownScopeSubdirs locks the residue check's
-// allowlist: the per-stack secrets / blueprints / configs subdirs are
-// legitimate children of the stack metadata dir (issue #619/#620/#624) and
-// must not trigger the residue refusal, otherwise every stack that ever
-// stamped a stack-scoped secret/blueprint/config would become un-deletable.
-// The post-delete cleanup currently relies on os.RemoveAll to reclaim them,
-// matching the pre-#905 behavior — the only contract this test pins is
-// that the residue check does not block the call.
+// allowlist: the per-stack secrets / blueprints / configs / volumes /
+// volume-meta subdirs are legitimate children of the stack metadata dir
+// (issue #619/#620/#624/#1018/#1237) and must not trigger the residue
+// refusal, otherwise every stack that ever stamped a stack-scoped resource
+// would become un-deletable. An empty volumes/ parent is exactly what
+// DeleteVolume leaves behind (#1370). The only contract this test pins is
+// that the residue check does not block the call and the dir is reclaimed.
 func TestDeleteStack_AllowsKnownScopeSubdirs(t *testing.T) {
 	realm, space, stack := "default", "default", "web"
 	fake := &deleteCellFakeClient{}
@@ -139,6 +139,8 @@ func TestDeleteStack_AllowsKnownScopeSubdirs(t *testing.T) {
 		consts.KukeonSecretsSubdir,
 		consts.KukeonBlueprintsSubdir,
 		consts.KukeonConfigsSubdir,
+		consts.KukeonVolumesSubdir,
+		consts.KukeonVolumeMetaSubdir,
 	} {
 		if err := os.MkdirAll(filepath.Join(stackDir, name), 0o755); err != nil {
 			t.Fatalf("mkdir %s subdir: %v", name, err)
@@ -177,4 +179,94 @@ func TestDeleteStack_RemovesStackDirOnSuccess(t *testing.T) {
 			statErr,
 		)
 	}
+}
+
+// TestDeleteStack_SucceedsAfterVolumeCreateDelete is the #1370 reproduction:
+// create a stack-scoped volume, delete it (DeleteVolume keeps the now-empty
+// volumes/ parent), then delete the stack. The empty volumes/ parent must not
+// be reported as cell residue, and the stack dir must be fully reclaimed.
+func TestDeleteStack_SucceedsAfterVolumeCreateDelete(t *testing.T) {
+	realm, space, stack := "default", "default", "web"
+	r := newDeleteCellTestExec(t, &deleteCellFakeClient{})
+	seedDeleteCellRealm(t, r, realm)
+	stackDir := filepath.Dir(seedDeleteStackStack(t, r, realm, space, stack))
+
+	md := intmodel.VolumeMetadata{Name: "scratch", Realm: realm, Space: space, Stack: stack}
+	if _, err := r.WriteVolume(intmodel.Volume{Metadata: md}); err != nil {
+		t.Fatalf("WriteVolume: %v", err)
+	}
+	if err := r.DeleteVolume(intmodel.Volume{Metadata: md}); err != nil {
+		t.Fatalf("DeleteVolume: %v", err)
+	}
+	assertExists(t, filepath.Join(stackDir, consts.KukeonVolumesSubdir), "empty volumes/ parent precondition")
+
+	if err := r.DeleteStack(buildDeleteStackRequest(realm, space, stack)); err != nil {
+		t.Fatalf("DeleteStack after volume create/delete: unexpected error: %v", err)
+	}
+	assertGone(t, stackDir, "stack dir")
+}
+
+// TestDeleteStack_ReclaimsVolumesPerPolicy pins that stack teardown treats
+// stack-scoped volumes as managed scope contents and honors their
+// reclaimPolicy: a default-policy volume is reclaimed with the stack, a Retain
+// volume (and its manifest) survives at its original coordinates, and the
+// stack itself reports gone.
+func TestDeleteStack_ReclaimsVolumesPerPolicy(t *testing.T) {
+	realm, space, stack := "default", "default", "web"
+	r := newDeleteCellTestExec(t, &deleteCellFakeClient{})
+	seedDeleteCellRealm(t, r, realm)
+	stackMetadataPath := seedDeleteStackStack(t, r, realm, space, stack)
+
+	keep := intmodel.VolumeMetadata{Name: "keep", Realm: realm, Space: space, Stack: stack}
+	drop := intmodel.VolumeMetadata{Name: "drop", Realm: realm, Space: space, Stack: stack}
+	if _, err := r.WriteVolume(retainVol(keep)); err != nil {
+		t.Fatalf("WriteVolume(retained): %v", err)
+	}
+	if _, err := r.WriteVolume(deleteVol(drop)); err != nil {
+		t.Fatalf("WriteVolume(default): %v", err)
+	}
+
+	if err := r.DeleteStack(buildDeleteStackRequest(realm, space, stack)); err != nil {
+		t.Fatalf("DeleteStack with stack-scoped volumes: unexpected error: %v", err)
+	}
+
+	rp := r.opts.RunPath
+	assertGone(t, stackMetadataPath, "stack metadata.json")
+	assertGone(t, fs.VolumePath(rp, realm, space, stack, drop.Name), "default-policy volume")
+	assertExists(t, fs.VolumePath(rp, realm, space, stack, keep.Name), "retained volume dir")
+	assertExists(t, fs.VolumeMetaPath(rp, realm, space, stack, keep.Name), "retained volume manifest")
+	if _, err := r.GetStack(buildDeleteStackRequest(realm, space, stack)); !errors.Is(err, errdefs.ErrStackNotFound) {
+		t.Errorf("GetStack after delete: want ErrStackNotFound, got %v", err)
+	}
+}
+
+// TestDeleteStack_RefusesOnCellResidueAlongsideVolumes keeps the #905 guard
+// effective once volumes/ is allowlisted: a genuine partial cell subdir next
+// to a managed volume still refuses the delete, names only the cell dir, and
+// leaves both the cell dir and the volume on disk.
+func TestDeleteStack_RefusesOnCellResidueAlongsideVolumes(t *testing.T) {
+	realm, space, stack := "default", "default", "web"
+	r := newDeleteCellTestExec(t, &deleteCellFakeClient{})
+	seedDeleteCellRealm(t, r, realm)
+	stackMetadataPath := seedDeleteStackStack(t, r, realm, space, stack)
+
+	md := intmodel.VolumeMetadata{Name: "scratch", Realm: realm, Space: space, Stack: stack}
+	if _, err := r.WriteVolume(intmodel.Volume{Metadata: md}); err != nil {
+		t.Fatalf("WriteVolume: %v", err)
+	}
+	residueDir := filepath.Join(filepath.Dir(stackMetadataPath), "api")
+	if err := os.MkdirAll(residueDir, 0o755); err != nil {
+		t.Fatalf("mkdir residue cell dir: %v", err)
+	}
+
+	err := r.DeleteStack(buildDeleteStackRequest(realm, space, stack))
+	if !errors.Is(err, errdefs.ErrDeleteStack) {
+		t.Fatalf("DeleteStack: want ErrDeleteStack on cell residue, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "remove api;") {
+		t.Errorf("residue error must name only the cell subdir; got %v", err)
+	}
+	assertExists(t, stackMetadataPath, "stack metadata.json")
+	assertExists(t, residueDir, "residue cell dir")
+	assertExists(t, fs.VolumePath(r.opts.RunPath, realm, space, stack, md.Name), "volume dir")
 }

@@ -152,8 +152,10 @@ func (r *Exec) DeleteStack(stack intmodel.Stack) error {
 	// Remove the now-residue-free stack metadata directory. metadata.DeleteMetadata
 	// above removes the dir when empty, so this typically no-ops; surface any
 	// error so the half-deleted state (metadata.json gone, dir surviving)
-	// reported in issue #905 can never again be silently swallowed.
-	if err = os.RemoveAll(metadataRunPath); err != nil {
+	// reported in issue #905 can never again be silently swallowed. The
+	// reclaim honors stack-scoped volumes' reclaimPolicy (#1237): default-policy
+	// volumes go with the stack, a Retain volume survives at its coordinates.
+	if err = r.reclaimScopeMetadata(metadataRunPath); err != nil {
 		return fmt.Errorf("%w: failed to remove stack directory %s: %w", errdefs.ErrDeleteStack, metadataRunPath, err)
 	}
 
@@ -162,9 +164,10 @@ func (r *Exec) DeleteStack(stack intmodel.Stack) error {
 
 // scanStackDirCellResidue returns the names of any subdirectories under
 // stackDir that look like surviving cell directories — anything that isn't
-// one of the known scope-bound subdirs (secrets/blueprints/configs) and
-// isn't the stack's own metadata.json or its lock sidecar. The names are
-// sorted for stable error messages. A missing stackDir returns nil, nil.
+// one of the reserved scope-bound subdirs (secrets/blueprints/configs/
+// volumes/volume-meta, see reservedScopeSubdirs) and isn't the stack's own
+// metadata.json or its lock sidecar. The names are sorted for stable error
+// messages. A missing stackDir returns nil, nil.
 func scanStackDirCellResidue(stackDir string) ([]string, error) {
 	entries, err := os.ReadDir(stackDir)
 	if err != nil {
@@ -178,11 +181,10 @@ func scanStackDirCellResidue(stackDir string) ([]string, error) {
 	var residue []string
 	for _, entry := range entries {
 		name := entry.Name()
-		switch name {
-		case metaFile, metaLock,
-			consts.KukeonSecretsSubdir,
-			consts.KukeonBlueprintsSubdir,
-			consts.KukeonConfigsSubdir:
+		if name == metaFile || name == metaLock {
+			continue
+		}
+		if _, reserved := reservedScopeSubdirs[name]; reserved {
 			continue
 		}
 		residue = append(residue, name)
