@@ -17,10 +17,12 @@
 package runner
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
 	containerd "github.com/containerd/containerd/v2/client"
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -90,7 +92,11 @@ func (r *Exec) InspectCellNetwork(cell intmodel.Cell, hostNetwork bool) (bool, s
 	if namespace == "" {
 		namespace = consts.RealmNamespace(realmName)
 	}
-	if !r.rootTaskRunning(namespace, rootID) {
+	running, err := r.rootTaskRunning(namespace, rootID)
+	if err != nil {
+		return false, "", err
+	}
+	if !running {
 		return false, "", nil
 	}
 	if hostNetwork {
@@ -116,15 +122,18 @@ func (r *Exec) InspectCellNetwork(cell intmodel.Cell, hostNetwork bool) (bool, s
 	return true, "", nil
 }
 
-func (r *Exec) rootTaskRunning(namespace, containerdID string) bool {
-	container, err := r.ctrClient.GetContainer(namespace, containerdID)
+// rootTaskRunning reports whether the root container's task is Running. It
+// goes through ctrClient.TaskStatus, which scopes the containerd calls to the
+// realm namespace (a bare r.ctx carries none and containerd rejects it). A
+// missing container or task means not running; any other error is returned.
+func (r *Exec) rootTaskRunning(namespace, containerdID string) (bool, error) {
+	status, err := r.ctrClient.TaskStatus(namespace, containerdID)
 	if err != nil {
-		return false
+		if errors.Is(err, errdefs.ErrContainerNotFound) || errors.Is(err, errdefs.ErrTaskNotFound) ||
+			cerrdefs.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("%w: %w", errdefs.ErrCellTaskStatus, err)
 	}
-	task, err := container.Task(r.ctx, nil)
-	if err != nil {
-		return false
-	}
-	status, err := task.Status(r.ctx)
-	return err == nil && status.Status == containerd.Running
+	return status.Status == containerd.Running, nil
 }

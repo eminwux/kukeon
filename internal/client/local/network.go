@@ -105,6 +105,19 @@ func (c *Client) GetNetworkDetail(
 	return res, nil
 }
 
+// wireSubnetSource maps the cni package's subnet source onto the published
+// kukeonv1 values, so the wire contract does not depend on internal strings.
+func wireSubnetSource(source string) string {
+	switch source {
+	case cni.SubnetSourceAllocator:
+		return kukeonv1.NetworkSubnetAllocator
+	case cni.SubnetSourceConflist:
+		return kukeonv1.NetworkSubnetConflist
+	default:
+		return kukeonv1.NetworkSubnetUnallocated
+	}
+}
+
 func spaceNetworkDetail(
 	networkName string, spec v1beta1.SpaceSpec, info cni.SpaceNetworkInfo,
 ) kukeonv1.SpaceNetworkDetail {
@@ -112,7 +125,7 @@ func spaceNetworkDetail(
 		NetworkName:      networkName,
 		BridgeName:       info.BridgeName,
 		SubnetCIDR:       info.SubnetCIDR,
-		SubnetSource:     info.SubnetSource,
+		SubnetSource:     wireSubnetSource(info.SubnetSource),
 		ParentCIDR:       info.ParentCIDR,
 		ConfigPath:       info.ConfigPath,
 		ConfigPathSource: kukeonv1.NetworkSourceSpec,
@@ -121,9 +134,6 @@ func spaceNetworkDetail(
 			Default:       string(v1beta1.EgressDefaultAllow),
 			DefaultSource: kukeonv1.NetworkSourceDefault,
 		},
-	}
-	if detail.SubnetSource == "" {
-		detail.SubnetSource = kukeonv1.NetworkSubnetUnallocated
 	}
 	// The daemon stamps its default conflist path into spec.cniConfigPath, so
 	// a spec value equal to the default is still the default.
