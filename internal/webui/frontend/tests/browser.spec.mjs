@@ -47,7 +47,7 @@ test("terminal selects eligible containers, forwards input and resize, and detac
     sendReady = () => socket.send(JSON.stringify({ type: "ready" }));
     sendOutput = () => socket.send(Buffer.from("\x1b[95;49mYOLOmo\x1b[0m $ "));
   });
-  await page.goto(`${server.url}#/resource/dev/shared/services/api`);
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
   const panel = page.getByRole("region", { name: "Terminal workspace" });
   await expect(terminalTools(page).locator("option")).toHaveCount(2);
   await terminalTools(page).getByLabel("Container").selectOption("shell");
@@ -82,11 +82,14 @@ test("expanded terminal keeps its session, resizes, and follows the appearance s
   await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
   const screen = panel.locator(".terminal-screen");
   const screenHandle = await screen.elementHandle();
-  await page.getByRole("tab", { name: "Overview" }).click();
+  await page.getByRole("link", { name: "View details for dev / shared / services / api" }).click();
+  await expect(page).toHaveURL(/#\/resource\/dev\/shared\/services\/api$/);
   await expect(panel).toBeHidden();
   expect(connections).toBe(1);
-  await page.getByRole("tab", { name: "Terminal" }).click();
+  await page.getByRole("link", { name: "Open terminal for dev / shared / services / api" }).click();
+  await expect(page).toHaveURL(/#\/workspace\/dev\/shared\/services\/api$/);
   await expect(panel).toBeVisible();
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
   expect(await screenHandle.evaluate(el => el.isConnected)).toBe(true);
   const initial = await screen.boundingBox();
   const initialResizeCount = messages.filter(message => typeof message === "string" && JSON.parse(message).type === "resize").length;
@@ -139,20 +142,20 @@ test("terminal grid stays inside the padded screen across browser zoom levels", 
   }
 });
 
-test("expanded terminal starts below a wrapped terminal tabbar", async ({ page }) => {
+test("expanded terminal starts below a wrapped terminal bar", async ({ page }) => {
   await mock(page, path => path.endsWith("/containers") ? { json: [{ id: "shell", attachable: true }] } : undefined);
   await page.routeWebSocket("**/attach", socket => { socket.send(JSON.stringify({ type: "ready" })); });
-  // 933px is a 1400px window at 150% zoom: the expanded tabbar wraps its terminal controls onto a second row.
+  // 933px is a 1400px window at 150% zoom: the expanded terminal bar wraps its terminal controls onto a second row.
   await page.setViewportSize({ width: 933, height: 600 });
   await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
   await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
   await terminalTools(page).getByRole("button", { name: "Expand terminal" }).click();
   const panel = page.getByRole("region", { name: "Terminal workspace" });
   await expect(panel).toHaveClass(/is-expanded/);
-  const tabbar = page.locator(".cell-detail-tabbar");
-  await expect.poll(async () => (await panel.boundingBox()).y - ((await tabbar.boundingBox()).y + (await tabbar.boundingBox()).height)).toBeGreaterThanOrEqual(0);
+  const bar = page.locator(".cell-terminal-bar");
+  await expect.poll(async () => (await panel.boundingBox()).y - ((await bar.boundingBox()).y + (await bar.boundingBox()).height)).toBeGreaterThanOrEqual(0);
   await page.setViewportSize({ width: 1400, height: 900 });
-  await expect.poll(async () => (await panel.boundingBox()).y - ((await tabbar.boundingBox()).y + (await tabbar.boundingBox()).height)).toBeGreaterThanOrEqual(0);
+  await expect.poll(async () => (await panel.boundingBox()).y - ((await bar.boundingBox()).y + (await bar.boundingBox()).height)).toBeGreaterThanOrEqual(0);
   await terminalTools(page).getByRole("button", { name: "Collapse terminal" }).click();
   await expect(page.locator(".cell-detail-screen")).not.toHaveAttribute("style", /--terminal-expanded-top/);
 });
@@ -305,6 +308,69 @@ test("Workspace lands first and Resources retains resource summaries and navigat
   await expect(page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link", { name: "Open dev / shared / services / api" })).toBeVisible();
 });
 
+test("Resources cells open cellRead and the sidebar opens cellTerminal, each linking to the other", async ({ page }) => {
+  await mock(page, path => path.endsWith("/containers") ? { json: [{ id: "shell", attachable: true }] } : undefined);
+  await page.routeWebSocket("**/attach", socket => { socket.send(JSON.stringify({ type: "ready" })); });
+  const cells = page.getByRole("navigation", { name: "Cell navigation" });
+  const sidebarCell = cells.getByRole("link", { name: "Open dev / shared / services / api" });
+  await page.goto(`${server.url}#/cells`);
+  await page.getByRole("row").filter({ hasText: "dev / shared / services" }).getByRole("link", { name: "api", exact: true }).click();
+  await expect(page).toHaveURL(/#\/resource\/dev\/shared\/services\/api$/);
+  await expect(page.getByRole("region", { name: "Cell details" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Resource overview" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Cell terminal" })).toBeHidden();
+  await expect(page.getByRole("tablist")).toHaveCount(0);
+  await expect(sidebarCell).toHaveAttribute("aria-current", "page");
+  const toTerminal = page.getByRole("link", { name: "Open terminal for dev / shared / services / api" });
+  await expect(toTerminal).toHaveAttribute("title", "Open cell terminal");
+  await toTerminal.focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/#\/workspace\/dev\/shared\/services\/api$/);
+  await expect(page.getByRole("region", { name: "Terminal workspace" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Cell details" })).toBeHidden();
+  await expect(page.getByRole("tablist")).toHaveCount(0);
+  await expect(sidebarCell).toHaveAttribute("aria-current", "page");
+
+  await page.goto(`${server.url}#/workspace`);
+  await sidebarCell.click();
+  await expect(page).toHaveURL(/#\/workspace\/dev\/shared\/services\/api$/);
+  await expect(page.getByRole("region", { name: "Terminal workspace" })).toBeVisible();
+  await expect(page.getByRole("tablist")).toHaveCount(0);
+  const toDetails = page.getByRole("link", { name: "View details for dev / shared / services / api" });
+  await expect(toDetails).toHaveAttribute("title", "View cell details");
+  await toDetails.focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/#\/resource\/dev\/shared\/services\/api$/);
+  await expect(page.getByRole("heading", { name: "Runtime status" })).toBeVisible();
+  const containerRow = page.locator(".container-panel li").filter({ hasText: "shell" });
+  await expect(containerRow.getByRole("link", { name: "shell", exact: true })).toHaveAttribute("href", "#/resource/dev/shared/services/api/shell");
+  await expect(containerRow.getByRole("link", { name: "View document" })).toHaveAttribute("href", "#/resource/dev/shared/services/api/shell?document=1");
+});
+
+for (const [width, height] of [[1440, 900], [390, 844]]) {
+  for (const theme of ["light", "dark"]) {
+    test(`cellRead panels render at full content height and the page scrolls at ${width}x${height} (${theme})`, async ({ page }) => {
+      await page.addInitScript(value => localStorage.setItem("kukeon-theme", value), theme);
+      await page.setViewportSize({ width, height });
+      await mock(page, path => path.endsWith("/cells/api/cgroup") ? { json: { cgroupPath: "/kukeon/dev/shared/services/api", absolutePath: "/sys/fs/cgroup/kukeon/dev/shared/services/api", exists: true, ready: true, nestedCgroupRuntime: true, subtreeControllers: ["cpu", "io", "memory", "pids"], live: { memory: { max: { state: "set", raw: "1073741824", value: 1073741824 } }, io: { state: "set", entries: [] } } } }
+        : path.endsWith("/containers") ? { json: [{ id: "root", root: true }, { id: "web" }, { id: "shell", attachable: true }] } : undefined);
+      await page.goto(`${server.url}#/resource/dev/shared/services/api`);
+      const panels = page.locator(".cell-overview-content > .panel");
+      await expect(page.getByRole("region", { name: "cell cgroup" }).getByText("cpu io memory pids", { exact: true })).toBeVisible();
+      await expect(page.getByRole("region", { name: "cell network" })).toBeVisible();
+      await expect(panels).toHaveCount(5);
+      const sizes = await panels.evaluateAll(items => items.map(item => ({ client: item.clientHeight, scroll: item.scrollHeight })));
+      for (const size of sizes) expect(size.client).toBeGreaterThanOrEqual(size.scroll);
+      expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe(theme);
+      expect(await page.evaluate(() => document.scrollingElement.scrollHeight > innerHeight)).toBe(true);
+      await page.evaluate(() => window.scrollTo(0, document.scrollingElement.scrollHeight));
+      expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+      await expect(page.getByRole("region", { name: "cell cgroup" })).toBeInViewport();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    });
+  }
+}
+
 test("cell sidebar uses full scope for duplicate names and switching reuses inventory", async ({ page }) => {
   let inventoryReads = 0;
   await mock(page, path => {
@@ -321,7 +387,9 @@ test("cell sidebar uses full scope for duplicate names and switching reuses inve
   await expect(page.getByText("No attachable containers are available.")).toBeVisible();
   await expect(page.locator("#cell-terminal .terminal-empty")).toHaveText("No attachable containers are available.");
   await expect(terminalTools(page).getByRole("button", { name: "Expand terminal" })).toHaveCount(0);
-  await page.getByRole("tab", { name: "Overview" }).click();
+  await page.getByRole("link", { name: "View details for dev / shared / services / api" }).click();
+  await expect(page).toHaveURL(/#\/resource\/dev\/shared\/services\/api$/);
+  await expect(cells.getByRole("link", { name: "Open dev / shared / services / api" })).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("heading", { name: "Runtime status" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Containers" })).toBeVisible();
   await expect(page.locator("#cell-terminal")).toHaveCount(1);
@@ -330,6 +398,8 @@ test("cell sidebar uses full scope for duplicate names and switching reuses inve
   await expect(page).toHaveURL(/#\/workspace\/prod\/shared\/services\/api$/);
   await expect(cells.getByRole("link", { name: "Open prod / shared / services / api" })).toHaveAttribute("aria-current", "page");
   expect(inventoryReads).toBe(initialReads);
+  await page.goBack();
+  await expect(page).toHaveURL(/#\/resource\/dev\/shared\/services\/api$/);
   await page.goBack();
   await expect(page).toHaveURL(/#\/workspace\/dev\/shared\/services\/api$/);
 });
@@ -476,11 +546,7 @@ for (const type of ["Realms", "Spaces", "Stacks", "Cells"]) {
     await expect(page.locator("pre")).toContainText('"futureField"');
     await page.getByRole("link", { name: "Show overview" }).click();
     await expect(page.locator("pre")).toHaveCount(0);
-    if (type === "Cells") {
-      await expect(page.getByRole("tab", { name: "Overview" })).toBeVisible();
-    } else {
-      await expect(page.getByRole("heading", { name: "Resource overview" })).toBeVisible();
-    }
+    await expect(page.getByRole("heading", { name: "Resource overview" })).toBeVisible();
   });
 }
 
@@ -497,7 +563,6 @@ test("lists filter by name and realm and retain complete scope for duplicate nam
   await page.getByRole("link", { name: "api", exact: true }).click();
   await expect(page).toHaveURL(/#\/resource\/prod\/shared\/services\/api$/);
   await expect(page.locator("pre")).toHaveCount(0);
-  await page.getByRole("tab", { name: "Overview" }).click();
   await expect(page.getByRole("heading", { name: "Containers" })).toBeVisible();
   await expect(page.getByRole("link", { name: "View document", exact: true }).first()).toHaveAttribute("target", "_blank");
   await page.getByRole("link", { name: "web", exact: true }).click();
@@ -624,7 +689,6 @@ test("cell status cards and container observations expose reported runtime state
     }
   });
   await page.goto(`${server.url}#/resource/prod/shared/services/api`);
-  await page.getByRole("tab", { name: "Overview" }).click();
   const status = page.getByRole("region", { name: "Cell status" });
   await expect(status.getByText("Degraded", { exact: true })).toBeVisible();
   await expect(status.getByText("Ready", { exact: true })).toBeVisible();
@@ -659,7 +723,6 @@ test("running and unreported statuses never imply a successful exit or readiness
   await expect(status.getByText("Exit code", { exact: true })).toHaveCount(0);
   await expect(status.locator("time")).toHaveCount(0);
   await page.goto(`${server.url}#/resource/prod/shared/services/api`);
-  await page.getByRole("tab", { name: "Overview" }).click();
   await expect(page.getByRole("region", { name: "Cell status" }).getByText("Not reported", { exact: true })).toHaveCount(2);
   await expect(page.locator(".container-panel").getByText("Not reported", { exact: true })).toBeVisible();
 });
@@ -1014,10 +1077,9 @@ test("a daemon without the cgroup RPC reports Daemon outdated, not Daemon unavai
   await expect(alert).not.toContainText("Daemon unavailable");
 });
 
-test("cell Overview tab shows the cell cgroup with nested runtime and delegated controllers", async ({ page }) => {
+test("cellRead shows the cell cgroup with nested runtime and delegated controllers", async ({ page }) => {
   await mock(page, path => path.endsWith("/cells/api/cgroup") ? { json: { cgroupPath: "/kukeon/dev/shared/services/api", absolutePath: "/sys/fs/cgroup/kukeon/dev/shared/services/api", exists: true, ready: true, nestedCgroupRuntime: true, subtreeControllers: ["cpu", "io", "memory", "pids"], live: { memory: { max: { state: "set", raw: "1073741824", value: 1073741824 } }, io: { state: "set", entries: [] } } } } : undefined);
   await page.goto(`${server.url}#/resource/dev/shared/services/api`);
-  await page.getByRole("tab", { name: "Overview" }).click();
   const panel = page.getByRole("region", { name: "cell cgroup" });
   await expect(panel.getByText("cpu io memory pids", { exact: true })).toBeVisible();
   await expect(panel.getByText("Enabled", { exact: true })).toBeVisible();
@@ -1060,13 +1122,12 @@ test("space network section renders deny rules with Any port and an unallocated 
   await expect(rules.locator("tr").filter({ hasText: "10.0.0.0/8" })).toContainText("Any port");
 });
 
-test("cell Overview network section shows Not running for a stopped cell and the per-container summary", async ({ page }) => {
+test("cellRead network section shows Not running for a stopped cell and the per-container summary", async ({ page }) => {
   await mock(page, path => path.endsWith("/cells/api/network") ? { json: {
     space: { networkName: "dev-shared", subnetCIDR: "10.88.1.0/24", subnetSource: "allocator", configPath: "/c.conflist", configPathSource: "default", cniNetworkExists: true, egress: { default: "allow", defaultSource: "default" } },
     cell: { bridgeName: "k-0123abcd", hostNetwork: false, ipv4State: "not-running", rootContainer: "root", containers: [{ id: "root", root: true }, { id: "web", ports: ["8080:80"] }] },
   } } : undefined);
   await page.goto(`${server.url}#/resource/dev/shared/services/api`);
-  await page.getByRole("tab", { name: "Overview" }).click();
   const panel = page.getByRole("region", { name: "cell network" });
   await expect(panel.getByText("Bridged (space network)")).toBeVisible();
   await expect(panel.getByText("Not running", { exact: true })).toBeVisible();
