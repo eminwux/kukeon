@@ -245,6 +245,28 @@ kukeond reads the inventory over its Unix-socket API (the read-only
 socket. The view is read-only: load, delete, prune, and build images with
 `kuke image` and `kuke build`, which stay daemon-independent.
 
+## Registry credentials
+
+A realm's overview includes **Registry credentials**, the per-realm
+private-registry pull credentials `kuke create registry-credential` manages.
+The table lists each entry's server and username; an entry with an empty
+server is the default, which applies to the registry named in the image
+reference. Passwords and tokens are never displayed.
+
+The form adds a credential, or replaces the entry for the same server while
+keeping every other entry. **Replace** on a row pre-fills its server and
+username; the token must be typed again. The token is sent only in the JSON
+body of `POST /api/realms/{realm}/registry-credentials`
+(`{ "server", "username", "password" }`), cleared from the form on submit, and
+never written to the URL or browser storage. The response is
+`{ "realm", "server", "username", "action" }`, without the token. kukeond
+applies the updated realm as a compatible change (no realm recreate), and the
+overview reloads after a successful save. Validation, permission, and daemon
+errors use the standard notices and never repeat the submitted token.
+
+Every realm response (`/api/realms`, `/api/realms/{name}`, and its **View
+document** view) returns registry credentials with an empty `password`.
+
 ## Options and permissions
 
 - `--listen`: `localhost` (default) or a literal loopback IP, including `::1`.
@@ -271,8 +293,8 @@ All endpoints use same-origin HTTP GET and return JSON:
 | Path                 | Result                                                                  |
 | -------------------- | ----------------------------------------------------------------------- |
 | `/api/connection`    | Configured daemon `endpoint`; this is configuration, not a health probe |
-| `/api/realms`        | Complete realm documents from kukeond, or `[]` when empty               |
-| `/api/realms/{name}` | Complete selected realm document                                        |
+| `/api/realms`        | Realm documents from kukeond (passwords blanked), or `[]` when empty    |
+| `/api/realms/{name}` | Selected realm document (passwords blanked)                             |
 
 Scoped endpoints follow the same hierarchy. Each collection returns `[]` when
 empty; append `/{name}` for its document:
@@ -301,8 +323,10 @@ containerd namespace (`images` is `[]` when empty). Append
 `/api/realms/{name}/images` lists the realm's declared `spec.images`.
 
 Each name is a URL-encoded path segment. Collections return daemon documents,
-except containers, whose collection returns daemon container specs. No fields
-are filtered from detail documents, and no direct resource-store reads are made.
+except containers, whose collection returns daemon container specs. Realm
+registry passwords are blanked (see [Registry credentials](#registry-credentials))
+and cell and container environment values are omitted; no other fields are
+filtered, and no direct resource-store reads are made.
 
 Errors use `{ "error": { "code": "...", "message": "..." } }`:
 `permission_denied` (403), `not_found` (404), `invalid_request` (400),

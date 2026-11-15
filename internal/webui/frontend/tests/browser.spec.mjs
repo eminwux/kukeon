@@ -1191,3 +1191,70 @@ test("Images view distinguishes loading, missing image, permission, outdated dae
   await page.goto(`${server.url}#/images/dev/${encodeURIComponent("missing:1")}`);
   await expect(page.getByRole("alert")).toContainText("Image no longer exists");
 });
+
+test("realm registry credentials list server and username, keep the token write-only and refresh the summary", async ({ page }) => {
+  const token = "s3cr3t-registry-token";
+  let credentials = [{ serverAddress: "ghcr.io", username: "bot", password: "" }, { username: "fallback", password: "" }];
+  const posts = [];
+  let mode = "ok";
+  await mock(page, (path, request) => {
+    if (path === "/api/realms/dev/registry-credentials") {
+      posts.push({ url: request.url(), body: request.postDataJSON(), headers: request.headers() });
+      if (mode === "invalid") return { status: 400, json: { error: { code: "invalid_request", message: "configuration error: server must be a registry host such as ghcr.io" } } };
+      if (mode === "permission") return { status: 403, json: { error: { code: "permission_denied", message: "dial kukeond: permission denied" } } };
+      const { server, username } = request.postDataJSON();
+      const entry = { ...(server ? { serverAddress: server } : {}), username, password: "" };
+      const index = credentials.findIndex(cred => (cred.serverAddress ?? "") === server);
+      credentials = index >= 0 ? credentials.map((cred, i) => i === index ? entry : cred) : [...credentials, entry];
+      return { json: { realm: "dev", server, username, action: "updated" } };
+    }
+    if (path === "/api/realms/dev") return { json: { ...doc(["dev"]), spec: { namespace: "dev.kukeon.io", registryCredentials: credentials } } };
+    return undefined;
+  });
+  await page.goto(`${server.url}#/resource/dev`);
+  const panel = page.getByRole("region", { name: "Registry credentials" });
+  await expect(panel.getByRole("row", { name: /ghcr\.io/ })).toContainText("bot");
+  await expect(panel.getByRole("row", { name: /fallback/ })).toContainText("Default (registry from image reference)");
+
+  const form = panel.getByRole("form", { name: "Add or replace registry credential" });
+  await panel.getByRole("button", { name: "Replace credential for ghcr.io" }).click();
+  await expect(form.getByLabel("Server")).toHaveValue("ghcr.io");
+  await form.getByLabel("Username").fill("robot");
+  await expect(form.getByLabel("Token")).toHaveAttribute("type", "password");
+  await form.getByLabel("Token").fill(token);
+  await form.getByRole("button", { name: "Replace credential" }).click();
+  await expect(panel.getByRole("status")).toContainText("Saved credential for ghcr.io (user robot)");
+  await expect(panel.getByRole("row", { name: /ghcr\.io/ })).toContainText("robot");
+  await expect(panel.getByRole("row")).toHaveCount(3);
+  expect(posts).toHaveLength(1);
+  expect(posts[0].body).toEqual({ server: "ghcr.io", username: "robot", password: token });
+  expect(posts[0].url).not.toContain(token);
+  expect(posts[0].headers["content-type"]).toBe("application/json");
+  await expect(form.getByLabel("Token")).toHaveValue("");
+  expect(await page.content()).not.toContain(token);
+  expect(page.url()).not.toContain(token);
+  expect(await page.evaluate(() => JSON.stringify({ ...localStorage }) + JSON.stringify({ ...sessionStorage }))).not.toContain(token);
+
+  await form.getByLabel("Username").fill("default-user");
+  await form.getByLabel("Token").fill(token);
+  await form.getByRole("button", { name: "Replace credential" }).click();
+  await expect(panel.getByRole("row", { name: /Default/ })).toContainText("default-user");
+  expect(posts[1].body.server).toBe("");
+
+  mode = "invalid";
+  await form.getByLabel("Server").fill("ghcr.io/org");
+  await form.getByLabel("Username").fill("u");
+  await form.getByLabel("Token").fill(token);
+  await form.getByRole("button", { name: "Add credential" }).click();
+  await expect(panel.getByRole("alert")).toContainText("server must be a registry host");
+  await expect(form.getByLabel("Token")).toHaveValue("");
+  mode = "permission";
+  await form.getByLabel("Token").fill(token);
+  await form.getByRole("button", { name: "Add credential" }).click();
+  await expect(panel.getByRole("alert")).toContainText("Permission denied");
+  expect(await page.content()).not.toContain(token);
+
+  await page.goto(`${server.url}#/resource/dev?document=1`);
+  await expect(page.getByLabel("Complete realm JSON")).toContainText("ghcr.io");
+  await expect(page.getByLabel("Complete realm JSON")).not.toContainText(token);
+});
