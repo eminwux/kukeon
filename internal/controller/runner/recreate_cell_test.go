@@ -352,3 +352,165 @@ func TestRecreateCell_RollsBackWhenContainerCreateFails(t *testing.T) {
 		t.Errorf("cell Reason = %q, want \"RecreateCellFailed\"", persisted.Status.Reason)
 	}
 }
+
+// TestRecreateCell_PreservesLogicalCellIdentity is the regression guard for
+// issue #1377: a Breaking root edit routed through RecreateCell persisted the
+// freshly materialized desired document with only CgroupPath carried over, so
+// the cell's set-once CreatedAt/ReadyAt reset, the controller-managed
+// `*.kukeon.io` identity labels vanished (dropping the cell out of its
+// canonical `cell.kukeon.io=<name>` selector), and the bridge/subtree
+// controller observations disappeared.
+func TestRecreateCell_PreservesLogicalCellIdentity(t *testing.T) {
+	const (
+		realm = "default"
+		space = "default"
+		stack = "default"
+		cell  = "web"
+	)
+
+	started := map[string]bool{}
+	fake := &recreateCellFakeClient{
+		deleteCellFakeClient: &deleteCellFakeClient{
+			taskStatusFn: func(_, id string) (containerd.Status, error) {
+				if started[id] {
+					return containerd.Status{Status: containerd.Running}, nil
+				}
+				return containerd.Status{}, nil
+			},
+		},
+		startContainerFn: func(_ string, spec ctr.ContainerSpec, _ ctr.TaskSpec) (containerd.Task, error) {
+			started[spec.ID] = true
+			return recreateCellTask{pid: 4242}, nil
+		},
+	}
+	r := newRecreateCellTestExec(t, fake)
+	seedDeleteCellRealm(t, r, realm)
+	seedRecreateCellSpace(t, r, realm, space)
+
+	createdAt := time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC)
+	readyAt := createdAt.Add(time.Second)
+	managed := map[string]string{
+		"realm.kukeon.io": realm,
+		"space.kukeon.io": space,
+		"stack.kukeon.io": stack,
+		"cell.kukeon.io":  cell,
+	}
+
+	existing := recreateCellHostNetworkCell(realm, space, stack, cell, "alpine:3.18")
+	existing.Metadata.Labels = map[string]string{"audit": "old"}
+	for k, v := range managed {
+		existing.Metadata.Labels[k] = v
+	}
+	existing.Metadata.Annotations = map[string]string{"kukeon.io/source-cell": "origin"}
+	existing.Status.State = intmodel.CellStateReady
+	existing.Status.CreatedAt = createdAt
+	existing.Status.ReadyAt = readyAt
+	existing.Status.CgroupPath = "/kukeon/default/default/default/web"
+	existing.Status.SubtreeControllers = []string{"cpu", "memory"}
+	existing.Status.CgroupReady = true
+	existing.Status.Network.BridgeName = "kuke-br-test"
+	if err := r.UpdateCellMetadata(existing); err != nil {
+		t.Fatalf("seed existing cell: %v", err)
+	}
+
+	// The apply layer hands RecreateCell the user's document: user labels
+	// only, no managed labels, no status.
+	desired := recreateCellHostNetworkCell(realm, space, stack, cell, "alpine:3.19")
+	desired.Metadata.Labels = map[string]string{"audit": "metadata"}
+
+	if _, err := r.RecreateCell(desired); err != nil {
+		t.Fatalf("RecreateCell: %v", err)
+	}
+
+	persisted, err := r.GetCell(desired)
+	if err != nil {
+		t.Fatalf("GetCell after RecreateCell: %v", err)
+	}
+	if persisted.Status.State != intmodel.CellStateReady {
+		t.Errorf("State = %v, want Ready", persisted.Status.State)
+	}
+	if !persisted.Status.CreatedAt.Equal(createdAt) {
+		t.Errorf("CreatedAt = %v, want preserved %v", persisted.Status.CreatedAt, createdAt)
+	}
+	if !persisted.Status.ReadyAt.Equal(readyAt) {
+		t.Errorf("ReadyAt = %v, want preserved first-ready %v", persisted.Status.ReadyAt, readyAt)
+	}
+	if got := persisted.Metadata.Labels["audit"]; got != "metadata" {
+		t.Errorf("user label audit = %q, want desired value %q", got, "metadata")
+	}
+	for k, v := range managed {
+		if got := persisted.Metadata.Labels[k]; got != v {
+			t.Errorf("managed label %s = %q, want %q (selector visibility)", k, got, v)
+		}
+	}
+	if got := persisted.Metadata.Annotations["kukeon.io/source-cell"]; got != "origin" {
+		t.Errorf("annotation kukeon.io/source-cell = %q, want preserved %q", got, "origin")
+	}
+	if persisted.Status.CgroupPath != existing.Status.CgroupPath {
+		t.Errorf("CgroupPath = %q, want %q", persisted.Status.CgroupPath, existing.Status.CgroupPath)
+	}
+	if got := persisted.Status.SubtreeControllers; len(got) != 2 || got[0] != "cpu" || got[1] != "memory" {
+		t.Errorf("SubtreeControllers = %v, want [cpu memory]", got)
+	}
+	if !persisted.Status.CgroupReady {
+		t.Error("CgroupReady = false, want preserved true")
+	}
+	if persisted.Status.Network.BridgeName != "kuke-br-test" {
+		t.Errorf("BridgeName = %q, want preserved %q", persisted.Status.Network.BridgeName, "kuke-br-test")
+	}
+}
+
+// TestRecreateCell_BackfillsMissingBridgeName pins the recompute half of
+// #1377's bridge AC: an existing document that pre-dates
+// Status.Network.BridgeName gets it derived from the space network on
+// recreate instead of staying blank.
+func TestRecreateCell_BackfillsMissingBridgeName(t *testing.T) {
+	const (
+		realm = "default"
+		space = "default"
+		stack = "default"
+		cell  = "web"
+	)
+
+	started := map[string]bool{}
+	fake := &recreateCellFakeClient{
+		deleteCellFakeClient: &deleteCellFakeClient{
+			taskStatusFn: func(_, id string) (containerd.Status, error) {
+				if started[id] {
+					return containerd.Status{Status: containerd.Running}, nil
+				}
+				return containerd.Status{}, nil
+			},
+		},
+		startContainerFn: func(_ string, spec ctr.ContainerSpec, _ ctr.TaskSpec) (containerd.Task, error) {
+			started[spec.ID] = true
+			return recreateCellTask{pid: 4242}, nil
+		},
+	}
+	r := newRecreateCellTestExec(t, fake)
+	seedDeleteCellRealm(t, r, realm)
+	seedRecreateCellSpace(t, r, realm, space)
+
+	existing := recreateCellHostNetworkCell(realm, space, stack, cell, "alpine:3.18")
+	existing.Status.State = intmodel.CellStateReady
+	if err := r.UpdateCellMetadata(existing); err != nil {
+		t.Fatalf("seed existing cell: %v", err)
+	}
+
+	desired := recreateCellHostNetworkCell(realm, space, stack, cell, "alpine:3.19")
+	if _, err := r.RecreateCell(desired); err != nil {
+		t.Fatalf("RecreateCell: %v", err)
+	}
+
+	persisted, err := r.GetCell(desired)
+	if err != nil {
+		t.Fatalf("GetCell after RecreateCell: %v", err)
+	}
+	want, err := cellSpaceBridgeName(desired)
+	if err != nil {
+		t.Fatalf("cellSpaceBridgeName: %v", err)
+	}
+	if persisted.Status.Network.BridgeName != want {
+		t.Errorf("BridgeName = %q, want recomputed %q", persisted.Status.Network.BridgeName, want)
+	}
+}

@@ -189,8 +189,8 @@ func (r *Exec) RecreateCell(desired intmodel.Cell) (_ intmodel.Cell, retErr erro
 		desired.Spec.Containers[i].ContainerdID = ""
 	}
 
-	// Preserve existing metadata and status where appropriate
-	desired.Status.CgroupPath = existing.Status.CgroupPath
+	// Carry the logical cell's identity across the runtime rebuild (#1377).
+	r.preserveRecreatedCellIdentity(existing, &desired)
 
 	// Past this point a failure has created fresh containers (and possibly an
 	// IPAM reservation); arm the rollback defer so they don't leak.
@@ -227,4 +227,50 @@ func (r *Exec) RecreateCell(desired intmodel.Cell) (_ intmodel.Cell, retErr erro
 	}
 
 	return started, nil
+}
+
+// preserveRecreatedCellIdentity copies the logical-cell metadata and the
+// still-valid status observations from the existing cell onto the desired one
+// before RecreateCell persists it (issue #1377). Recreate replaces the cell's
+// containers, not the cell: the cgroup, the space bridge and the canonical
+// identity are unchanged, so the rebuilt document must keep them.
+//
+//   - Labels merge by the same rule UpdateCell applies (#455): user-authored
+//     keys come from desired, controller-managed `*.kukeon.io` labels survive
+//     when desired omits them, so label selectors keep finding the cell.
+//   - Annotations are not user-reconciled on the update path (UpdateCell keeps
+//     the existing set), so an omitted set keeps the existing provenance.
+//   - CreatedAt and the first ReadyAt are set-once (#166); stampCellLifecycle
+//     only fills zero values, so carrying them keeps AGE stable. ReadyObserved
+//     is deliberately not carried: startCellLocked re-latches it via
+//     markCellReady once the recreated containers are actually up.
+//   - CgroupPath, SubtreeControllers and CgroupReady describe the cell cgroup,
+//     which recreate never tears down. BridgeName is carried, or recomputed
+//     when the existing document pre-dates the field.
+func (r *Exec) preserveRecreatedCellIdentity(existing intmodel.Cell, desired *intmodel.Cell) {
+	desired.Metadata.Labels = mergeManagedLabels(existing.Metadata.Labels, desired.Metadata.Labels)
+	if len(desired.Metadata.Annotations) == 0 && len(existing.Metadata.Annotations) > 0 {
+		desired.Metadata.Annotations = existing.Metadata.Annotations
+	}
+
+	if desired.Status.CreatedAt.IsZero() {
+		desired.Status.CreatedAt = existing.Status.CreatedAt
+	}
+	if desired.Status.ReadyAt.IsZero() {
+		desired.Status.ReadyAt = existing.Status.ReadyAt
+	}
+
+	desired.Status.CgroupPath = existing.Status.CgroupPath
+	desired.Status.SubtreeControllers = existing.Status.SubtreeControllers
+	desired.Status.CgroupReady = existing.Status.CgroupReady
+
+	desired.Status.Network.BridgeName = existing.Status.Network.BridgeName
+	if desired.Status.Network.BridgeName == "" {
+		if bridge, brErr := cellSpaceBridgeName(*desired); brErr == nil {
+			desired.Status.Network.BridgeName = bridge
+		} else {
+			r.logger.WarnContext(r.ctx, "could not derive cell bridge name on recreate",
+				"cell", desired.Metadata.Name, "error", brErr)
+		}
+	}
 }
