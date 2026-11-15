@@ -294,14 +294,15 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
   }, [key, selected, selectedEligible, containers.loading, containers.error, unavailable, atLimit, current, currentId, skipAutoAttachFor, manager.attach]);
   const headerState = current?.state === "attached" ? "Attached"
     : current?.message || (skipAutoAttachFor === currentId && currentId ? "Detached" : atLimit ? "Connection limit reached" : unavailable ? `Unavailable: ${cellState}` : containers.loading ? "Loading containers…" : containers.error ? "Container list unavailable" : !eligible.length ? "No attachable containers" : !selectedEligible ? "Container unavailable" : "Connecting…");
+  // With nothing to attach to, the terminal area carries the only (neutral) message.
+  const empty = !!scope && !containers.loading && !containers.error && !eligible.length && !options.length;
   const headerTone = current?.state ?? (skipAutoAttachFor === currentId && currentId || atLimit || unavailable || containers.error || !eligible.length || !selectedEligible ? "disconnected" : "connecting");
   const controls = scope && <div className="terminal-workspace-tools">
-    <div className="terminal-tool-status"><span className={`terminal-connection-state ${headerTone}`} role="status" title={current?.message}>{headerState}</span><button ref={expandButton} type="button" aria-expanded={expanded} aria-controls="terminal-screens" onClick={() => { const next = !expanded; setExpanded(next); onExpandedChange(next); }}>{expanded ? "Collapse terminal" : "Expand terminal"}</button></div>
+    {!empty && <div className="terminal-tool-status"><span className={`terminal-connection-state ${headerTone}`} role="status" title={current?.message}>{headerState}</span><button ref={expandButton} type="button" aria-expanded={expanded} aria-controls="terminal-screens" onClick={() => { const next = !expanded; setExpanded(next); onExpandedChange(next); }}>{expanded ? "Collapse terminal" : "Expand terminal"}</button></div>}
     <div className="terminal-controls">
       {containers.loading && <p role="status">Loading containers…</p>}
       {containers.error && <ErrorNotice error={containers.error} kind="Containers" />}
       {containers.error && containers.data && <p className="stale">Container list is stale. Refresh before attaching.</p>}
-      {!containers.loading && !containers.error && !eligible.length && <p>No attachable containers are available.</p>}
       {!!options.length && <><label htmlFor="terminal-container">Container</label><select id="terminal-container" value={selected} onChange={event => manager.select(scope, event.target.value)}>{options.map(id => <option key={id} value={id}>{id}{eligible.some(container => container.id === id) ? "" : " (unavailable)"}</option>)}</select>
         {current?.state === "attached" || current?.state === "connecting" ? <button onClick={() => { setSkipAutoAttachFor(current.id); manager.detach(current.id); }}>Detach</button> : current ? <><button disabled={reconnectLimited || !selectedEligible || !!unavailable || !!containers.error} onClick={() => { setSkipAutoAttachFor(""); manager.attach(scope, selected); }}>Reconnect</button><button onClick={() => { setSkipAutoAttachFor(current.id); manager.detach(current.id); }}>Detach</button></> : skipAutoAttachFor === currentId && currentId ? <button disabled={!!atLimit || !selectedEligible || !!unavailable || !!containers.error} onClick={() => { setSkipAutoAttachFor(""); manager.attach(scope, selected); }}>Attach</button> : null}</>}
       {unavailable && <p className="terminal-unavailable" role="status">Terminal unavailable: cell is {cellState}.</p>}
@@ -310,7 +311,8 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
   </div>;
   return <>
     {controls && controlsHost && createPortal(controls, controlsHost)}
-    <section className={`panel terminal-workspace${expanded ? " is-expanded" : ""}`} id="cell-terminal" hidden={!scope} aria-label="Terminal workspace">
+    <section className={`panel terminal-workspace${expanded ? " is-expanded" : ""}${empty ? " is-empty" : ""}`} id="cell-terminal" hidden={!scope} aria-label="Terminal workspace">
+      {empty && <p className="empty-state terminal-empty" role="status">No attachable containers are available.</p>}
       <div className="terminal-screens" id="terminal-screens" ref={screens}>{manager.sessions.map(session => <TerminalSession key={session.id} session={session} active={!!scope && visible && session.id === currentId} expanded={expanded} theme={theme} update={manager.update} />)}</div>
     </section>
   </>;
