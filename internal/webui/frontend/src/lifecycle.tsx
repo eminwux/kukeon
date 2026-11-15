@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { availableLifecycleActions, canConfirmDestructiveAction } from "./lifecycle-policy.js";
+import { Icon } from "./icons";
 
 export type LifecycleAction = "start" | "stop" | "restart" | "kill" | "delete" | "purge";
 export type DestructiveAction = Extract<LifecycleAction, "kill" | "delete" | "purge">;
@@ -114,11 +115,11 @@ function AdvancedCellActions({
       <div className="cell-advanced-menu">
         <section aria-labelledby="cell-advanced-operations">
           <h2 id="cell-advanced-operations">Operations</h2>
-          <button type="button" disabled={pending} onClick={() => request("kill")}>Kill cell…</button>
+          <button className="danger-action" type="button" disabled={pending} onClick={() => request("kill")}>Kill cell…</button>
         </section>
         <section className="cell-destructive-actions" aria-labelledby="cell-destructive-actions-title">
           <h2 id="cell-destructive-actions-title">Destructive actions</h2>
-          <button type="button" disabled={pending} onClick={() => request("delete")}>Delete cell…</button>
+          <button className="danger-action" type="button" disabled={pending} onClick={() => request("delete")}>Delete cell…</button>
           <button className="danger-action" type="button" disabled={pending} onClick={() => request("purge")}>Purge cell…</button>
         </section>
       </div>
@@ -131,6 +132,9 @@ function AdvancedCellActions({
     />}
   </>;
 }
+
+// Start leads, Restart is secondary and Stop shares the danger style with the destructive menu actions.
+const actionVariant: Record<LifecycleAction, string> = { start: "primary-action", restart: "", stop: "danger-action", kill: "danger-action", delete: "danger-action", purge: "danger-action" };
 
 export function CellLifecycleControls({
   scope,
@@ -150,9 +154,12 @@ export function CellLifecycleControls({
   const actions = availableLifecycleActions(state);
   return <div className={`cell-lifecycle${compact ? " is-compact" : ""}`} aria-label={`Lifecycle actions for ${scope.join(" / ")}`}>
     <div className="cell-lifecycle-buttons">
-      {actions.map(action => <button key={action} type="button" disabled={operation?.phase === "pending"} onClick={() => onAction(scope, action, state)}>
-        {operation?.phase === "pending" && operation.action === action ? `${action[0].toUpperCase()}${action.slice(1)}…` : action[0].toUpperCase() + action.slice(1)}
-      </button>)}
+      {actions.map(action => {
+        const label = operation?.phase === "pending" && operation.action === action ? `${action[0].toUpperCase()}${action.slice(1)}…` : action[0].toUpperCase() + action.slice(1);
+        return <button key={action} className={`icon-button ${actionVariant[action]}`} type="button" aria-label={label} data-tooltip={label} disabled={operation?.phase === "pending"} onClick={() => onAction(scope, action, state)}>
+          <Icon name={action === "start" ? "start" : action === "stop" ? "stop" : "restart"} />
+        </button>;
+      })}
       {!actions.length && operation?.phase !== "pending" && <span className="cell-lifecycle-unavailable">No lifecycle action in this state</span>}
     </div>
     <AdvancedCellActions scope={scope} operation={operation} onAction={onAction} />

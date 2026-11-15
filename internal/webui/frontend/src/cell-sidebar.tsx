@@ -49,6 +49,8 @@ export function CellSidebar({ inventory, selectedScope, terminalStates }: {
     }
     return [...found].sort(([a], [b]) => a === null ? 1 : b === null ? -1 : a.localeCompare(b)).map(([value, rows]) => ({ id: groupId(groupBy, value), label: value === null ? ungrouped : value === ungrouped ? `${ungrouped} (label value)` : value, rows }));
   }, [filtered, groupBy]);
+  // When every listed cell shares one realm / space / stack, show it once instead of on every row.
+  const sharedScope = filtered.length && filtered.every(row => row.scope.slice(0, 3).join(" / ") === filtered[0].scope.slice(0, 3).join(" / ")) ? filtered[0].scope.slice(0, 3).join(" / ") : "";
   const incomplete = !!inventory.error || !!inventory.data?.failures.length;
   function changeGrouping(value: string) {
     setGroupBy(value); setLimits({}); setGroupLimit(groupPageSize); save(groupingKey, value);
@@ -71,6 +73,7 @@ export function CellSidebar({ inventory, selectedScope, terminalStates }: {
       {!!filtered.length && <p className="cell-result-count">{filtered.length} {filtered.length === 1 ? "cell" : "cells"}{incomplete ? " in retained inventory" : ""}</p>}
     </div>
     <nav className="cell-navigation-list" aria-label="Cell navigation">
+      {sharedScope && <p className="cell-group-scope" title="Scope shared by every listed cell">{sharedScope}</p>}
       {groups.slice(0, groupLimit).map(({ id, label, rows }) => {
         const isCollapsed = !!groupBy && collapsed.includes(id);
         const limit = limits[id] ?? pageSize;
@@ -81,7 +84,7 @@ export function CellSidebar({ inventory, selectedScope, terminalStates }: {
             const fullName = row.scope.join(" / ");
             const terminalState = terminalStates[JSON.stringify(row.scope)];
             const state = row.doc.status?.state;
-            return <li key={JSON.stringify(row.scope)}><a className="cell-link" href={workspaceLink(row.scope)} aria-current={current ? "page" : undefined} aria-label={`Open ${fullName}`} title={fullName}><span className="cell-link-name">{row.doc.metadata.name}</span><span className="cell-link-scope">{row.scope.slice(0, 3).join(" / ")}</span><StateBadge state={state} />{terminalState && <span className={`cell-terminal-state ${terminalState}`}>Terminal {terminalState}</span>}</a></li>;
+            return <li key={JSON.stringify(row.scope)}><a className="cell-link" href={workspaceLink(row.scope)} aria-current={current ? "page" : undefined} aria-label={`Open ${fullName}`} title={fullName}><span className="cell-link-name">{row.doc.metadata.name}</span>{!sharedScope && <span className="cell-link-scope">{row.scope.slice(0, 3).join(" / ")}</span>}<StateBadge state={state} />{terminalState && <span className={`cell-terminal-state ${terminalState}`}>Terminal {terminalState}</span>}</a></li>;
           })}</ul>{rows.length > limit && <button className="cell-more" onClick={() => setLimits(old => ({ ...old, [id]: limit + pageSize }))}>Show {Math.min(pageSize, rows.length - limit)} more cells</button>}</>}
         </section>;
       })}

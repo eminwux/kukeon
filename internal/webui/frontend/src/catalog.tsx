@@ -4,6 +4,7 @@ import { catalogTitles, newCellLink, workspaceLink } from "./routes";
 import { StateBadge } from "./status";
 import type { InventoryResource, Row } from "./inventory";
 import { cellsForBlueprint, cellsForConfig, configsForBlueprint, type ConfigDoc } from "./relationships.mjs";
+import { DocumentRowLink } from "./icons";
 
 type Metadata = { name: string; realm?: string; space?: string; stack?: string; cell?: string; labels?: Record<string, string>; annotations?: Record<string, string> };
 type CatalogDoc = { metadata: Metadata; spec?: Record<string, unknown>; [key: string]: unknown };
@@ -121,7 +122,7 @@ function CatalogList({ kind, revision }: { kind: string; revision: number }) {
     <section className="panel" aria-label={`${catalogTitles[kind]} list`} aria-busy={list.loading}>
       <div className="list-controls"><label className="search-field">Search<input type="search" value={query} placeholder={`Search ${kind}…`} onChange={e => { setQuery(e.target.value); setPage(0); }} /></label><label>Realm<select aria-label="Filter by realm" value={realm} onChange={e => { setRealm(e.target.value); setPage(0); }}><option value="">All realms</option>{[...new Set(list.data?.map(doc => doc.metadata.realm))].sort().map(name => <option key={name}>{name}</option>)}</select></label><span className="result-count">{rows.length} results</span></div>
       {list.loading && <p className="scope-filter" role="status">Loading {kind}…</p>}
-      <div className="table-scroll"><table><thead><tr><th>Name</th><th>Scope</th><th>Type</th><th>Document</th></tr></thead><tbody>{rows.slice(currentPage * 25, (currentPage + 1) * 25).map(doc => { const scope = [...scopeOf(doc.metadata), doc.metadata.name]; return <tr key={JSON.stringify(scope)}><td><a className="resource-name" href={catalogLink(kind, scope)}>{doc.metadata.name}</a></td><td className="scope-cell">{scope.slice(0, -1).join(" / ")}</td><td>{doc.kind as string || catalogTitles[kind]}</td><td><a className="document-action" href={catalogLink(kind, scope, true)}>View document</a></td></tr>; })}</tbody></table></div>
+      <div className="table-scroll"><table><thead><tr><th>Name</th><th>Scope</th><th>Type</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{rows.slice(currentPage * 25, (currentPage + 1) * 25).map(doc => { const scope = [...scopeOf(doc.metadata), doc.metadata.name]; return <tr key={JSON.stringify(scope)}><td><a className="resource-name" href={catalogLink(kind, scope)}>{doc.metadata.name}</a></td><td className="scope-cell">{scope.slice(0, -1).join(" / ")}</td><td>{doc.kind as string || catalogTitles[kind]}</td><td className="row-actions"><DocumentRowLink href={catalogLink(kind, scope, true)} label={scope.join(" / ")} /></td></tr>; })}</tbody></table></div>
       {!list.loading && !rows.length && <div className="empty-state"><h3>{list.error ? "Resources could not be loaded" : list.data?.length ? "No matching resources" : `No ${kind} found`}</h3></div>}
       <div className="pagination"><span>{rows.length ? `${currentPage * 25 + 1}–${Math.min((currentPage + 1) * 25, rows.length)} of ${rows.length}` : "0 results"}</span><button disabled={!currentPage} onClick={() => setPage(currentPage - 1)}>Previous</button><button disabled={(currentPage + 1) * 25 >= rows.length} onClick={() => setPage(currentPage + 1)}>Next</button></div>
     </section>
