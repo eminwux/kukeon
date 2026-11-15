@@ -63,6 +63,13 @@ func (r *Exec) CreateSpace(space intmodel.Space) (intmodel.Space, error) {
 		return ensuredSpace, nil
 	}
 
+	// Space not found: the parent realm must exist before any side effect.
+	// provisionNewSpace persists the space document first, so without this
+	// preflight a missing realm leaves a discoverable orphan behind (#1374).
+	if parentErr := r.requireParentRealm(realmName); parentErr != nil {
+		return intmodel.Space{}, parentErr
+	}
+
 	// Space not found, create new space
 	space.Status.State = intmodel.SpaceStateCreating
 	resultSpace, err := r.provisionNewSpace(space)
@@ -98,4 +105,17 @@ func (r *Exec) EnsureSpace(space intmodel.Space) (intmodel.Space, error) {
 	}
 
 	return ensuredSpace, nil
+}
+
+// requireParentRealm returns a wrapped ErrRealmNotFound when the named realm
+// has no metadata, so first-time child provisioning fails before persisting
+// anything beneath it.
+func (r *Exec) requireParentRealm(realmName string) error {
+	if _, err := r.GetRealm(intmodel.Realm{Metadata: intmodel.RealmMetadata{Name: realmName}}); err != nil {
+		if errors.Is(err, errdefs.ErrRealmNotFound) {
+			return fmt.Errorf("parent realm %q: %w", realmName, err)
+		}
+		return fmt.Errorf("%w: %w", errdefs.ErrGetRealm, err)
+	}
+	return nil
 }

@@ -26,6 +26,7 @@ import (
 	"github.com/eminwux/kukeon/internal/controller/runner"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/naming"
 )
 
 const (
@@ -280,6 +281,50 @@ func failedCellReconcileError(result ReconcileResult, cellName string, err error
 	)
 }
 
+// validateCellIdentity runs the same identity checks normalizeCellInputs
+// (internal/controller/create_cell.go) applies at CreateCell — required
+// name/realm/space/stack, hierarchy-name character rules, container IDs —
+// without mutating the cell. It also validates the realm/space/stack names
+// the parents would be created under, so ensureCellParents never provisions
+// a parent CreateCell would later reject.
+func validateCellIdentity(desired intmodel.Cell) error {
+	name := strings.TrimSpace(desired.Metadata.Name)
+	if name == "" {
+		return errdefs.ErrCellNameRequired
+	}
+	if err := naming.ValidateHierarchyName("cell", name); err != nil {
+		return err
+	}
+	if strings.TrimSpace(desired.Spec.RealmName) == "" {
+		return errdefs.ErrRealmNameRequired
+	}
+	if err := naming.ValidateRealmName(desired.Spec.RealmName); err != nil {
+		return err
+	}
+	if strings.TrimSpace(desired.Spec.SpaceName) == "" {
+		return errdefs.ErrSpaceNameRequired
+	}
+	if err := naming.ValidateHierarchyName("space", desired.Spec.SpaceName); err != nil {
+		return err
+	}
+	if strings.TrimSpace(desired.Spec.StackName) == "" {
+		return errdefs.ErrStackNameRequired
+	}
+	if err := naming.ValidateHierarchyName("stack", desired.Spec.StackName); err != nil {
+		return err
+	}
+	for i := range desired.Spec.Containers {
+		id := strings.TrimSpace(desired.Spec.Containers[i].ID)
+		if id == "" {
+			return errdefs.ErrContainerNameRequired
+		}
+		if err := naming.ValidateHierarchyName("container", id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ensureCellParents idempotently materializes the realm, space, and stack a
 // cell hangs off of, creating each that is absent and surfacing every other
 // get/create failure as a wrapped error. Pulled out of ReconcileCell so the
@@ -344,6 +389,13 @@ func reconcileCell(r runner.Runner, desired intmodel.Cell) (ReconcileResult, err
 		Action: "unchanged",
 		Kind:   "Cell",
 		Name:   desired.Metadata.Name,
+	}
+
+	// Reject an invalid cell identity before ensureCellParents materializes
+	// any realm/space/stack (and their cgroups, bridge and firewall state):
+	// a rejected apply must leave no side effects (#1445).
+	if err := validateCellIdentity(desired); err != nil {
+		return result, err
 	}
 
 	// Ensure parent resources exist
