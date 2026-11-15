@@ -524,17 +524,30 @@ func TestKuke_RunFromStopped_NonRootKukeonGroup_NoEACCES(t *testing.T) {
 		Groups: []uint32{kukeonGID},
 	}
 
+	// Stage a copy of kuke the unprivileged caller can exec. E2E_BIN_DIR
+	// is usually the checkout, which on a nested dev host lives under a
+	// 0o700 home (`/root/kukeon`); execve(2) as `nobody` then fails with
+	// EACCES before kuke ever reaches the dial this test exists to check
+	// (#1446).
+	unprivKuke := stageBinaryForNonRoot(t, kuke)
+	unprivEnv := nonRootEnv(filepath.Dir(unprivKuke))
+
 	runPath := getRandomRunPath(t)
-	// Make the runPath traversable for the unprivileged caller. The
-	// per-container TTY inode already lands at 0o660 root:kukeon (via
-	// the chown plumbing in #911), but every parent dir on the path
-	// from / down to the socket symlink must grant search to the
-	// caller or connect(2) ENOENTs out before the EACCES race could
-	// surface. The kukeon-group operator on a real host reaches the
-	// symlink via `/opt/kukeon/s/<id>` which is created by the daemon
-	// at 0o755; per-test runPaths under /tmp inherit 0o700 from
-	// MkdirTemp, so an explicit relax is needed here.
-	if chmodErr := os.Chmod(runPath, 0o755); chmodErr != nil {
+	// Give the runPath the ownership `kuke init` gives /opt/kukeon:
+	// root:kukeon, SGID 0o750. The per-container TTY inode already lands
+	// at 0o660 root:kukeon (via the chown plumbing in #911), but
+	// connect(2) resolves the `<runPath>/s/<id>` symlink to the deep
+	// `<runPath>/data/<realm>/<space>/<stack>/<cell>/<container>/tty/socket`
+	// inode, so every directory on that path must grant search to the
+	// caller. The daemon creates data/ and the realm/space/stack/cell
+	// dirs at 0o750 without chowning them; on a real host they inherit
+	// the kukeon group from the SGID run path. A bare MkdirTemp runPath
+	// is 0o700 root:root, which left them root:root and made the dial
+	// fail with EACCES (#1398).
+	if chownErr := os.Chown(runPath, 0, int(kukeonGID)); chownErr != nil {
+		t.Fatalf("chown runPath %s: %v", runPath, chownErr)
+	}
+	if chmodErr := os.Chmod(runPath, os.ModeSetgid|0o750); chmodErr != nil {
 		t.Fatalf("chmod runPath %s: %v", runPath, chmodErr)
 	}
 
@@ -594,7 +607,7 @@ func TestKuke_RunFromStopped_NonRootKukeonGroup_NoEACCES(t *testing.T) {
 		// the StartCell → attach branch (the path that races).
 		runReturningBinary(t, nil, kuke, stopArgs...)
 
-		session := startPTYWithCredential(t, nil, unprivCred, kuke, runArgs...)
+		session := startPTYWithCredential(t, unprivEnv, unprivCred, unprivKuke, runArgs...)
 
 		// Wait long enough for `kuke run`'s in-process pkg/attach loop
 		// to either succeed (sbsh ≥ v0.12.1) or surface EACCES (sbsh
@@ -903,24 +916,17 @@ func startKukeondDaemonWithSocketGID(t *testing.T, runPath string, socketGID int
 // preserves any pre-set SysProcAttr fields and only adds Setsid /
 // Setctty, so the Credential survives the fork; the PTY master/slave
 // pair is opened by the test (root) and inherited as the child's
-// stdio, which side-steps the slave-open DAC check.
+// stdio, which side-steps the slave-open DAC check. bin is the absolute
+// path returned by stageBinaryForNonRoot, so every parent directory
+// grants search to the dropped credential.
 func startPTYWithCredential(
 	t *testing.T,
 	env []string,
 	cred *syscall.Credential,
-	command string,
+	bin string,
 	args ...string,
 ) *ptySession {
 	t.Helper()
-
-	dir := os.Getenv("E2E_BIN_DIR")
-	if dir == "" {
-		dir = ".."
-	}
-	bin := filepath.Join(dir, command)
-	if _, err := os.Stat(bin); os.IsNotExist(err) {
-		t.Skipf("binary %s not found, skipping", bin)
-	}
 
 	cmd := exec.Command(bin, args...)
 	if env != nil {
@@ -961,4 +967,63 @@ func startPTYWithCredential(
 	}()
 
 	return s
+}
+
+// stageBinaryForNonRoot copies the E2E_BIN_DIR binary named command into
+// a fresh 0o755 directory under /tmp and returns the copy's absolute
+// path. A privilege-dropped exec needs search permission on every parent
+// of the binary, and E2E_BIN_DIR defaults to the checkout — on a nested
+// dev host that sits under a 0o700 home such as /root, which `nobody`
+// cannot traverse. /tmp is world-searchable, so the copy is reachable
+// regardless of where the checkout lives.
+func stageBinaryForNonRoot(t *testing.T, command string) string {
+	t.Helper()
+
+	dir := os.Getenv("E2E_BIN_DIR")
+	if dir == "" {
+		dir = ".."
+	}
+	src := filepath.Join(dir, command)
+	data, err := os.ReadFile(src)
+	if os.IsNotExist(err) {
+		t.Skipf("binary %s not found, skipping", src)
+	}
+	if err != nil {
+		t.Fatalf("read %s: %v", src, err)
+	}
+
+	// Not t.TempDir: its parent is 0o700, which `nobody` cannot search.
+	stageDir, err := os.MkdirTemp("/tmp", "kb-") //nolint:usetesting // see above
+	if err != nil {
+		t.Fatalf("MkdirTemp(/tmp, kb-): %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(stageDir) })
+	if chmodErr := os.Chmod(stageDir, 0o755); chmodErr != nil {
+		t.Fatalf("chmod stage dir %s: %v", stageDir, chmodErr)
+	}
+
+	dst := filepath.Join(stageDir, command)
+	if writeErr := os.WriteFile(dst, data, 0o755); writeErr != nil {
+		t.Fatalf("write %s: %v", dst, writeErr)
+	}
+	return dst
+}
+
+// nonRootEnv returns the test's environment with HOME pointed at home and
+// any inherited KUKE_CONFIGURATION dropped. The suite runs as root, so the
+// inherited HOME is typically /root: a privilege-dropped kuke would then
+// fail loading `/root/.kuke/kuke.yaml` with EACCES before it dials
+// anything. A real non-root operator has their own HOME; home only needs
+// to be searchable — clientconfig.Load treats a missing kuke.yaml as
+// defaults, and the first-run default write skips silently when the
+// directory is not writable.
+func nonRootEnv(home string) []string {
+	env := make([]string, 0, len(os.Environ())+1)
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "HOME=") || strings.HasPrefix(kv, "KUKE_CONFIGURATION=") {
+			continue
+		}
+		env = append(env, kv)
+	}
+	return append(env, "HOME="+home)
 }
