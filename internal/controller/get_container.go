@@ -20,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
@@ -120,30 +119,25 @@ func (b *Exec) GetContainer(container intmodel.Container) (GetContainerResult, e
 		// to be extended to include a Status field, or container states would need
 		// to be stored separately in cell metadata.
 
+		// GetCell populated the complete per-container status — CreatedAt
+		// (issue #605), start/finish/restart times, restart count, exit
+		// code/signal (issue #1137), and the per-repo / per-create-stage
+		// outcomes pulled over the GetSetupStatus RPC (issues #642, #689).
+		// Carry the matching observation through whole so the named
+		// Container document agrees with its parent Cell (issue #1379),
+		// overriding only identity and the freshly-queried containerd state.
+		status := containerStatusForContainer(internalCell, name)
+		status.Name = name
+		status.ID = name
+		status.State = actualState
+
 		res.Container = intmodel.Container{
 			Metadata: intmodel.ContainerMetadata{
 				Name:   name,
 				Labels: labels,
 			},
-			Spec: *foundContainerSpec,
-			Status: intmodel.ContainerStatus{
-				Name:  name,
-				ID:    name,
-				State: actualState,
-				// GetCell populated per-container statuses, including the
-				// per-repo clone/fetch outcome and per-create-stage outcome
-				// pulled over the GetSetupStatus RPC (issues #642, #689). Carry
-				// the Repos / Stages slices through so
-				// `kuke get container <name> -o yaml/json` surfaces them; the
-				// rest of the status is rebuilt inline from the freshly-queried
-				// containerd state above. CreatedAt likewise rides through from
-				// the cell's per-container status so the AGE column on
-				// `kuke get container` lists picks up the controller-stamped
-				// observation time (issue #605).
-				CreatedAt: containerCreatedAtForContainer(internalCell, name),
-				Repos:     repoStatusesForContainer(internalCell, name),
-				Stages:    stageStatusesForContainer(internalCell, name),
-			},
+			Spec:   *foundContainerSpec,
+			Status: status,
 		}
 	} else {
 		res.ContainerExists = false
@@ -162,44 +156,17 @@ func (b *Exec) GetContainer(container intmodel.Container) (GetContainerResult, e
 	return res, nil
 }
 
-// containerCreatedAtForContainer returns the controller-stamped CreatedAt
-// for the named container from the cell's persisted per-container statuses
-// (populated and preserved by populateCellContainerStatuses). Returns the
-// zero time when the cell has no status entry for the name yet, which
-// renders as "-" via shared.RenderAge. Issue #605.
-func containerCreatedAtForContainer(cell intmodel.Cell, name string) time.Time {
+// containerStatusForContainer returns the named container's status from the
+// cell's per-container statuses (populated and preserved by
+// populateCellContainerStatuses), or the zero status when the cell has no
+// entry for the name yet. Zero times render as "-" via shared.RenderAge.
+func containerStatusForContainer(cell intmodel.Cell, name string) intmodel.ContainerStatus {
 	for i := range cell.Status.Containers {
 		if cell.Status.Containers[i].ID == name {
-			return cell.Status.Containers[i].CreatedAt
+			return cell.Status.Containers[i]
 		}
 	}
-	return time.Time{}
-}
-
-// repoStatusesForContainer returns the per-repo clone/fetch outcome that
-// GetCell pulled into the cell's container statuses (over the GetSetupStatus
-// RPC, issue #642) for the named container, or nil when the container has no
-// repo status (no repos[], not yet Ready, or the pull was unavailable).
-func repoStatusesForContainer(cell intmodel.Cell, name string) []intmodel.RepoStatus {
-	for i := range cell.Status.Containers {
-		if cell.Status.Containers[i].ID == name {
-			return cell.Status.Containers[i].Repos
-		}
-	}
-	return nil
-}
-
-// stageStatusesForContainer returns the per-create-stage outcome that GetCell
-// pulled into the cell's container statuses (over the GetSetupStatus RPC, issue
-// #689) for the named container, or nil when the container has no stage status
-// (no runOn: create stages, not yet Ready, or the pull was unavailable).
-func stageStatusesForContainer(cell intmodel.Cell, name string) []intmodel.StageStatus {
-	for i := range cell.Status.Containers {
-		if cell.Status.Containers[i].ID == name {
-			return cell.Status.Containers[i].Stages
-		}
-	}
-	return nil
+	return intmodel.ContainerStatus{}
 }
 
 // ListContainers lists all containers, optionally filtered by realm, space, stack, and/or cell.
