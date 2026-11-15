@@ -750,6 +750,54 @@ func TestContainerRoundTripV1Beta1(t *testing.T) {
 	}
 }
 
+// TestBuildContainerExternalFromInternal_ContainerdID pins issue #1379: the
+// named Container document carries the same daemon-stamped containerdId as
+// the parent Cell's nested spec, for root and non-root containers, and leaves
+// it empty when the record genuinely has none.
+func TestBuildContainerExternalFromInternal_ContainerdID(t *testing.T) {
+	tests := []struct {
+		name string
+		spec intmodel.ContainerSpec
+	}{
+		{
+			name: "root container",
+			spec: intmodel.ContainerSpec{ID: "root", ContainerdID: "lab_suite_shell_root", Root: true},
+		},
+		{
+			name: "non-root container",
+			spec: intmodel.ContainerSpec{ID: "main", ContainerdID: "lab_suite_shell_main"},
+		},
+		{
+			name: "no runtime identity",
+			spec: intmodel.ContainerSpec{ID: "main"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := tt.spec
+			spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName = "realm0", "lab", "suite", "shell"
+			spec.Image = "busybox:latest"
+
+			doc, err := apischeme.BuildContainerExternalFromInternal(
+				intmodel.Container{Metadata: intmodel.ContainerMetadata{Name: spec.ID}, Spec: spec},
+				ext.APIVersionV1Beta1,
+			)
+			if err != nil {
+				t.Fatalf("BuildContainerExternalFromInternal failed: %v", err)
+			}
+			if doc.Spec.ContainerdID != spec.ContainerdID {
+				t.Errorf("Spec.ContainerdID = %q, want %q", doc.Spec.ContainerdID, spec.ContainerdID)
+			}
+			// The named document's spec must match the nested spec the
+			// parent Cell renders for the same container.
+			if nested := apischeme.BuildContainerSpecExternalFromInternal(spec); !reflect.DeepEqual(doc.Spec, nested) {
+				t.Errorf("named Spec = %+v, want Cell-nested spec %+v", doc.Spec, nested)
+			}
+		})
+	}
+}
+
 // TestContainerRoundTripReposV1Beta1 pins the repos[] spec and the per-repo
 // status round trip: a YAML author's containers[].repos[] must survive
 // Normalize → controller → Build with no drops, and the controller-populated

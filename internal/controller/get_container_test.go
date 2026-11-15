@@ -20,8 +20,10 @@ package controller_test
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -888,6 +890,147 @@ func TestGetContainer_SurfacesSetupStatuses(t *testing.T) {
 	}
 	if gotStages[1].Index != 2 || gotStages[1].State != "failed" || gotStages[1].Error != "stage 2: exit 1" {
 		t.Errorf("Status.Stages[1] = %+v, want failed stage at index 2 with detail", gotStages[1])
+	}
+}
+
+// TestGetContainer_CarriesFullRuntimeStatus pins issue #1379: the named
+// Container's status must match the parent Cell's per-container observation
+// after a nonzero exit and after an automatic restart, instead of zeroing the
+// start/finish/restart times, restart count, exit code and signal. Only State
+// comes from the fresh containerd query.
+func TestGetContainer_CarriesFullRuntimeStatus(t *testing.T) {
+	created := time.Date(2026, 10, 28, 9, 0, 0, 0, time.UTC)
+	started := created.Add(time.Second)
+	finished := started.Add(2 * time.Second)
+	restarted := finished.Add(5 * time.Second)
+
+	tests := []struct {
+		name      string
+		observed  intmodel.ContainerStatus
+		liveState intmodel.ContainerState
+	}{
+		{
+			name: "nonzero exit",
+			observed: intmodel.ContainerStatus{
+				Name:       "work",
+				ID:         "work",
+				CreatedAt:  created,
+				State:      intmodel.ContainerStateFailed,
+				StartTime:  started,
+				FinishTime: finished,
+				ExitCode:   7,
+			},
+			liveState: intmodel.ContainerStateFailed,
+		},
+		{
+			name: "signalled exit",
+			observed: intmodel.ContainerStatus{
+				Name:       "work",
+				ID:         "work",
+				CreatedAt:  created,
+				State:      intmodel.ContainerStateFailed,
+				StartTime:  started,
+				FinishTime: finished,
+				ExitCode:   137,
+				ExitSignal: "SIGKILL",
+			},
+			liveState: intmodel.ContainerStateFailed,
+		},
+		{
+			name: "automatic restart",
+			observed: intmodel.ContainerStatus{
+				Name:         "work",
+				ID:           "work",
+				CreatedAt:    created,
+				State:        intmodel.ContainerStateReady,
+				StartTime:    restarted,
+				FinishTime:   finished,
+				RestartCount: 1,
+				RestartTime:  restarted,
+				ExitCode:     7,
+			},
+			liveState: intmodel.ContainerStateReady,
+		},
+		{
+			name: "never started keeps zero values",
+			observed: intmodel.ContainerStatus{
+				Name:      "work",
+				ID:        "work",
+				CreatedAt: created,
+				State:     intmodel.ContainerStatePending,
+			},
+			liveState: intmodel.ContainerStatePending,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockRunner := &fakeRunner{}
+			cell := buildTestCell("crash", "test-realm", "test-space", "test-stack")
+			cell.Spec.Containers = []intmodel.ContainerSpec{
+				{ID: "work", ContainerdID: "test-space_test-stack_crash_work", Image: "busybox:latest"},
+			}
+			cell.Status.Containers = []intmodel.ContainerStatus{tt.observed}
+			mockRunner.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+				return cell, nil
+			}
+			mockRunner.GetContainerStateFn = func(_ intmodel.Cell, _ string) (intmodel.ContainerState, error) {
+				return tt.liveState, nil
+			}
+
+			ctrl := setupTestController(t, mockRunner)
+			result, err := ctrl.GetContainer(buildTestContainer(
+				"work", "test-realm", "test-space", "test-stack", "crash", "busybox:latest",
+			))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if got := result.Container.Status; !reflect.DeepEqual(got, tt.observed) {
+				t.Errorf("Container.Status = %+v, want parent Cell observation %+v", got, tt.observed)
+			}
+			if got, want := result.Container.Spec.ContainerdID, cell.Spec.Containers[0].ContainerdID; got != want {
+				t.Errorf("Container.Spec.ContainerdID = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// TestGetContainer_LiveStateOverridesObservation confirms the freshly-queried
+// containerd state still wins over the cell's persisted per-container state
+// while the remaining observation fields ride through unchanged (issue #1379).
+func TestGetContainer_LiveStateOverridesObservation(t *testing.T) {
+	mockRunner := &fakeRunner{}
+	started := time.Date(2026, 10, 28, 9, 0, 1, 0, time.UTC)
+	cell := buildTestCell("crash", "test-realm", "test-space", "test-stack")
+	cell.Spec.Containers = []intmodel.ContainerSpec{{ID: "work", Image: "busybox:latest"}}
+	cell.Status.Containers = []intmodel.ContainerStatus{
+		{ID: "work", State: intmodel.ContainerStateReady, StartTime: started, RestartCount: 2},
+	}
+	mockRunner.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+		return cell, nil
+	}
+	mockRunner.GetContainerStateFn = func(_ intmodel.Cell, _ string) (intmodel.ContainerState, error) {
+		return intmodel.ContainerStateStopped, nil
+	}
+
+	ctrl := setupTestController(t, mockRunner)
+	result, err := ctrl.GetContainer(buildTestContainer(
+		"work", "test-realm", "test-space", "test-stack", "crash", "busybox:latest",
+	))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	st := result.Container.Status
+	if st.State != intmodel.ContainerStateStopped {
+		t.Errorf("Status.State = %v, want live containerd state %v", st.State, intmodel.ContainerStateStopped)
+	}
+	if st.Name != "work" || st.ID != "work" {
+		t.Errorf("Status identity = %q/%q, want work/work", st.Name, st.ID)
+	}
+	if !st.StartTime.Equal(started) || st.RestartCount != 2 {
+		t.Errorf("Status = %+v, want StartTime %v and RestartCount 2 carried from the cell", st, started)
 	}
 }
 
