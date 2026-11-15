@@ -3406,7 +3406,7 @@
 </code></pre></div>
 <p>Report kukeon daemon, host, state, and parity health.</p>
 <p>Run the consolidated health report that replaces the manual <code>kuke get realms</code> vs <code>kuke get realms --no-daemon</code> diff ritual.</p>
-<p>Sections: daemon (socket dialable, round-trip, version), host (containerd, cgroup-v2, CNI plugins), state (orphan sockets, residual containerd namespaces), storage (per-realm snapshot / lease / content-blob footprint), parity (every <code>kuke get &lt;kind&gt;</code> agrees daemon-side vs in-process). Each line is OK / WARN / FAIL with a one-line remediation hint when the status is not OK.</p>
+<p>Sections: daemon (socket dialable, round-trip, version), host (containerd, cgroup-v2, CNI plugins), state (orphan sockets, residual containerd namespaces, volume dirs missing group-write), storage (per-realm snapshot / lease / content-blob footprint), parity (every <code>kuke get &lt;kind&gt;</code> agrees daemon-side vs in-process). Each line is OK / WARN / FAIL with a one-line remediation hint when the status is not OK.</p>
 <p>Exit code 0 when every check is OK or WARN; non-zero when any line is FAIL. The <code>--json</code> form is the machine-readable shape for CI integration; <code>--verbose</code> surfaces the remediation hint on OK rows too.</p>
 <h2 id="flags">Flags<a class="headerlink" href="#flags" title="Permanent link">&para;</a></h2>
 <table>
@@ -3521,7 +3521,7 @@
 </tr>
 <tr>
 <td><code>state</code></td>
-<td>The run-dir under <code>/run/kukeon</code> has no orphan sockets, and no residual containerd namespaces survive from a half-cleaned <code>kuke uninstall</code>.</td>
+<td>The run-dir under <code>/run/kukeon</code> has no orphan sockets, and no residual containerd namespaces survive from a half-cleaned <code>kuke uninstall</code>, and every volume dir under <code>&lt;RunPath&gt;/data/**/volumes/&lt;name&gt;</code> keeps group rwx (<code>mode &amp; 0o070 == 0o070</code>; WARN otherwise — non-root cells mounting it lose write access).</td>
 </tr>
 <tr>
 <td><code>storage</code></td>
@@ -3564,7 +3564,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 10, 2026 11:12:54 UTC">June 10, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 15, 2026 15:54:39 UTC">November 15, 2026</span>
   </span>
 
     
