@@ -17,8 +17,10 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 
+	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/diskpressure"
 	"github.com/eminwux/kukeon/internal/util/fs"
@@ -83,6 +85,10 @@ func (b *Exec) ReconcileSpaceNetworks() (SpaceNetReconcileResult, error) {
 		for _, space := range spaces {
 			result.SpacesScanned++
 			if _, ensureErr := b.runner.EnsureSpace(space); ensureErr != nil {
+				if errors.Is(ensureErr, errdefs.ErrSpaceNotFound) {
+					// Deleted since the listing; nothing to reconcile.
+					continue
+				}
 				result.SpacesErrored++
 				result.Errors = append(result.Errors,
 					fmt.Sprintf("reconcile space network %s/%s: %v",

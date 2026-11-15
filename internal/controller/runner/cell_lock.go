@@ -94,10 +94,25 @@ func cellLockKey(cell intmodel.Cell) string {
 // directly in tests (rather than via NewRunner) participate in the same
 // serialization without extra fixture wiring.
 func (r *Exec) lockCell(cell intmodel.Cell) func() {
+	return r.lockManager().lock(cellLockKey(cell))
+}
+
+// lockSpace acquires the per-space lock that serializes the space-network
+// reconcile (EnsureSpace) against DeleteSpace. Without it a reconcile that
+// read the space before the delete could re-install the egress chain after
+// the delete removed it, leaving the chain with no space to own it. The
+// leading "space" segment keeps the key distinct from every cell key.
+func (r *Exec) lockSpace(realmName, spaceName string) func() {
+	return r.lockManager().lock(strings.Join([]string{
+		"space", strings.TrimSpace(realmName), strings.TrimSpace(spaceName),
+	}, "\x00"))
+}
+
+func (r *Exec) lockManager() *cellLockManager {
 	r.cellLocksOnce.Do(func() {
 		if r.cellLocks == nil {
 			r.cellLocks = newCellLockManager()
 		}
 	})
-	return r.cellLocks.lock(cellLockKey(cell))
+	return r.cellLocks
 }

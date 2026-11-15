@@ -25,6 +25,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
@@ -189,5 +190,31 @@ func TestReconcileSpaceNetworks_ListSpacesErrorSkipsRealm(t *testing.T) {
 	}
 	if len(res.Errors) != 1 || !strings.Contains(res.Errors[0], "realm-a") {
 		t.Errorf("Errors: got %v, want one entry naming realm-a", res.Errors)
+	}
+}
+
+// TestReconcileSpaceNetworks_SpaceDeletedMidPassIsSkipped pins that a space
+// deleted between the listing and its EnsureSpace is not an error (#1420).
+func TestReconcileSpaceNetworks_SpaceDeletedMidPassIsSkipped(t *testing.T) {
+	realm := buildTestRealm("realm-a", "")
+	gone := buildTestSpace("gone", "realm-a")
+	mock := &fakeRunner{
+		ListRealmsFn: func() ([]intmodel.Realm, error) {
+			return []intmodel.Realm{realm}, nil
+		},
+		ListSpacesFn: func(_ string) ([]intmodel.Space, error) {
+			return []intmodel.Space{gone}, nil
+		},
+		EnsureSpaceFn: func(_ intmodel.Space) (intmodel.Space, error) {
+			return intmodel.Space{}, errdefs.ErrSpaceNotFound
+		},
+	}
+
+	res, err := setupTestController(t, mock).ReconcileSpaceNetworks()
+	if err != nil {
+		t.Fatalf("ReconcileSpaceNetworks() error = %v", err)
+	}
+	if res.SpacesErrored != 0 || len(res.Errors) != 0 {
+		t.Errorf("deleted space reported as error: errored=%d errors=%v", res.SpacesErrored, res.Errors)
 	}
 }
