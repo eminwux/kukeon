@@ -18,6 +18,7 @@ package init
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -358,7 +359,10 @@ func installForwardAdmission(ctx context.Context, logger *slog.Logger) error {
 // `--no-daemon` reads of scope metadata), and would require init to
 // re-derive every scope layout the runner can produce. Instead every runner
 // subtree whose ownership or mode differs from the sweep's root:kukeon
-// 2750/0640 is pruned structurally by initSweepSkip; blueprints/ and configs/
+// 2750/0640 is pruned structurally by initSweepSkip, and the root-only
+// subtrees (secrets/, volume-meta/) are then restored to their runner
+// contract by healRootOnlyScopeSubdirs so hosts a pre-#1416 sweep already
+// widened stop leaking; blueprints/ and configs/
 // are deliberately still swept (their 0o755/0o644 runner modes are wider than
 // the sweep's, so the sweep only narrows world access). A new runner-owned
 // subdir with a tighter or differently-owned contract must be added to
@@ -389,9 +393,21 @@ func applyKukeonOwnership(
 	); err != nil {
 		return r, fmt.Errorf("apply kukeon ownership to %q: %w", runPath, err)
 	}
+	if err := healRootOnlyScopeSubdirs(runPath, 0, ensure.GID); err != nil {
+		return r, fmt.Errorf("apply kukeon ownership to %q: %w", runPath, err)
+	}
 	r.RunPathApplied = true
 	return r, nil
 }
+
+// Runner contract for the root-only per-scope resource subdirs (secrets/ and
+// volume-meta/): mirrors secretsDirMode/secretFileMode in
+// internal/controller/runner/secret.go and volumeMetaDirMode/volumeMetaFileMode
+// in internal/controller/runner/volume_meta.go.
+const (
+	rootOnlyScopeSubdirDirMode  os.FileMode = 0o700
+	rootOnlyScopeSubdirFileMode os.FileMode = 0o600
+)
 
 // initSweepSkip returns the skip predicate applyKukeonOwnership hands to
 // sysuser.ChownTreeAndChmodSkip: it prunes every path whose ownership and
@@ -405,6 +421,49 @@ func initSweepSkip(runPath string) func(path string, info os.FileInfo) bool {
 	}
 }
 
+// healRootOnlyScopeSubdirs re-asserts the runner's root-only contract (dir
+// 0o700, files 0o600, root-owned) on every per-scope secrets/ and volume-meta/
+// dir. The main sweep prunes them so it never widens them again, but every
+// host that ran a pre-#1416 `kuke init` already has them at root:kukeon
+// 2750/0640 — and the runner re-chmods only on write (WriteSecret,
+// WriteVolumeMeta), so without this pass the kukeon group would keep reading
+// those secrets until each one is re-applied. The group is set to the kukeon
+// GID, matching what the runner itself produces under the setgid scope dirs
+// (MkdirAll inherits the parent's group); the 0o700/0o600 modes make it
+// irrelevant to access. Idempotent: a host already on the contract sees the
+// same owner and modes re-applied.
+func healRootOnlyScopeSubdirs(runPath string, uid, gid int) error {
+	dataRoot := fs.MetadataRoot(runPath)
+	skip := initSweepSkip(runPath)
+	err := filepath.Walk(dataRoot, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			if path == dataRoot && os.IsNotExist(walkErr) {
+				return filepath.SkipAll
+			}
+			return walkErr
+		}
+		if !info.IsDir() {
+			return nil
+		}
+		if isRootOnlyScopeSubdir(dataRoot, path, info) {
+			if err := sysuser.ChownTreeAndChmod(
+				path, uid, gid, rootOnlyScopeSubdirDirMode, rootOnlyScopeSubdirFileMode,
+			); err != nil {
+				return err
+			}
+			return filepath.SkipDir
+		}
+		if path != dataRoot && skip(path, info) {
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("restore root-only resource dirs: %w", err)
+	}
+	return nil
+}
+
 // Scope depths of a per-scope resource subdir, counted in path components
 // under the metadata root including the subdir itself: <realm>/X = 2,
 // <realm>/<space>/X = 3, <realm>/<space>/<stack>/X = 4,
@@ -416,8 +475,8 @@ const (
 )
 
 // runnerOwnedScopeSubdirMaxDepth reports whether name is a per-scope resource
-// subdir the init sweep must leave untouched and, if so, the deepest scope
-// depth it can sit at.
+// subdir the init sweep must leave to the runner and, if so, the deepest
+// scope depth it can sit at.
 //
 //   - volumes/ (realm/space/stack): WriteVolume sets volumes/ to 0o755 and
 //     each volume dir to root:kukeon setgid 0o770, volumePostCreateChown hands
@@ -425,15 +484,17 @@ const (
 //     files inside under its own uid. The sweep reset all of it to
 //     root:kukeon 2750/0640, stripping group-write and the container-uid owner
 //     so every running non-root cell lost write access to its volumes on each
-//     `make dev-init` (issue #1415).
+//     `make dev-init` (issue #1415). Pruned and left untouched.
 //   - volume-meta/ (realm/space/stack): root-only reclaim manifests, dir
 //     0o700 / files 0o600 (runner volume_meta.go). The sweep widened them to
-//     kukeon-group-readable 2750/0640 (issue #1416).
+//     kukeon-group-readable 2750/0640 (issue #1416). Pruned from the sweep,
+//     then restored by healRootOnlyScopeSubdirs.
 //   - secrets/ (realm/space/stack/cell): root-only secret bytes, dir 0o700 /
 //     files 0o600 (runner secret.go, issue #619). The sweep widened them to
 //     2750/0640, letting every kukeon-group member read every secret
 //     (issue #1416). Secrets are consumed only by root (the daemon, or
 //     `sudo kuke --no-daemon`), so the runner's root-only contract stands.
+//     Pruned from the sweep, then restored by healRootOnlyScopeSubdirs.
 func runnerOwnedScopeSubdirMaxDepth(name string) (int, bool) {
 	switch name {
 	case consts.KukeonVolumesSubdir, consts.KukeonVolumeMetaSubdir:
@@ -446,14 +507,17 @@ func runnerOwnedScopeSubdirMaxDepth(name string) (int, bool) {
 }
 
 // isRunnerOwnedScopeSubdir reports whether path is one of the per-scope
-// runner-owned resource subdirs named by runnerOwnedScopeSubdirMaxDepth, sitting at a
-// scope position under the metadata root. Returning true prunes the whole
-// subtree — workload data and secret bytes included — so it is left
-// byte-for-byte untouched.
+// runner-owned resource subdirs named by runnerOwnedScopeSubdirMaxDepth,
+// sitting at a scope position under the metadata root. Returning true prunes
+// the whole subtree from the init sweep — workload data and secret bytes
+// included.
 //
 // The match is structural (scope depth under the metadata root) rather than
 // by basename alone, so an unrelated directory that happens to share one of
-// these names elsewhere under RunPath is still swept.
+// these names elsewhere under RunPath is still swept. At cell depth the
+// per-container dirs are siblings of the cell-scope secrets/ dir, so a
+// secrets/ there is only matched when the cell does not declare a container
+// of that name (cellScopeSecretsDir).
 func isRunnerOwnedScopeSubdir(dataRoot, path string, info os.FileInfo) bool {
 	if !info.IsDir() {
 		return false
@@ -467,7 +531,51 @@ func isRunnerOwnedScopeSubdir(dataRoot, path string, info os.FileInfo) bool {
 		return false
 	}
 	depth := len(strings.Split(rel, string(filepath.Separator)))
-	return depth >= realmScopeSubdirDepth && depth <= maxDepth
+	if depth < realmScopeSubdirDepth || depth > maxDepth {
+		return false
+	}
+	if depth == cellScopeSubdirDepth {
+		return cellScopeSecretsDir(path)
+	}
+	return true
+}
+
+// isRootOnlyScopeSubdir reports whether path is a runner-owned scope subdir
+// (isRunnerOwnedScopeSubdir) whose contract is root-only — secrets/ or
+// volume-meta/ — and so is restored by healRootOnlyScopeSubdirs.
+func isRootOnlyScopeSubdir(dataRoot, path string, info os.FileInfo) bool {
+	switch info.Name() {
+	case consts.KukeonSecretsSubdir, consts.KukeonVolumeMetaSubdir:
+		return isRunnerOwnedScopeSubdir(dataRoot, path, info)
+	default:
+		return false
+	}
+}
+
+// cellScopeSecretsDir reports whether a cell-depth secrets/ dir is the
+// cell-scope secrets dir rather than the metadata dir of a container named
+// "secrets" (fs.ContainerMetadataDir puts container dirs alongside it, and
+// ValidateHierarchyName does not reserve the name). It reads the cell's
+// metadata.json and returns false when the cell declares a container with
+// that ID, or when the document cannot be read or parsed — an unknown cell
+// leaves the dir to the main sweep, the pre-#1416 behavior, rather than
+// locking a possible container dir to root-only.
+func cellScopeSecretsDir(path string) bool {
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(path), consts.KukeonMetadataFile))
+	if err != nil {
+		return false
+	}
+	var cell v1beta1.CellDoc
+	if err = json.Unmarshal(data, &cell); err != nil {
+		return false
+	}
+	name := filepath.Base(path)
+	for _, c := range cell.Spec.Containers {
+		if c.ID == name {
+			return false
+		}
+	}
+	return true
 }
 
 // skipLiveCellState reports whether the recursive `kuke init` ownership sweep

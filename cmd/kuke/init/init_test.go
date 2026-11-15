@@ -90,6 +90,9 @@ func skipLiveCellState(path string, info os.FileInfo) bool
 //go:linkname initSweepSkip github.com/eminwux/kukeon/cmd/kuke/init.initSweepSkip
 func initSweepSkip(runPath string) func(path string, info os.FileInfo) bool
 
+//go:linkname healRootOnlyScopeSubdirs github.com/eminwux/kukeon/cmd/kuke/init.healRootOnlyScopeSubdirs
+func healRootOnlyScopeSubdirs(runPath string, uid, gid int) error
+
 //go:linkname printStartAction github.com/eminwux/kukeon/cmd/kuke/init.printStartAction
 func printStartAction(cmd *cobra.Command, label string, startedPre bool, startedPost bool, started bool)
 
@@ -1320,6 +1323,112 @@ func TestInitSweepSkip_PreservesRootOnlyResourceDirs(t *testing.T) {
 		t.Fatalf("stat %s: %v", outside, err)
 	} else if got := info.Mode().Perm(); got != 0o750 {
 		t.Errorf("%s mode: got %#o want 0o750 (swept, not a scope position)", outside, got)
+	}
+}
+
+// TestHealRootOnlyScopeSubdirs_RestoresWidenedModes is the upgrade-path
+// guard for issue #1416: a host that ran the pre-#1416 sweep already has
+// secrets/ and volume-meta/ at 2750 with 0640 files. Running the init sweep
+// plus healRootOnlyScopeSubdirs must restore the runner's root-only 0o700 /
+// 0o600 contract, leave volumes/ untouched, and leave a container dir that
+// happens to be named "secrets" on the regular sweep modes.
+func TestHealRootOnlyScopeSubdirs_RestoresWidenedModes(t *testing.T) {
+	runPath := t.TempDir()
+	dataRoot := filepath.Join(runPath, consts.KukeonMetadataSubdir)
+	realm := filepath.Join(dataRoot, "default")
+	space := filepath.Join(realm, "default")
+	stack := filepath.Join(space, "default")
+	cell := filepath.Join(stack, "cell")
+	otherCell := filepath.Join(stack, "other")
+
+	widened := os.ModeSetgid | os.FileMode(0o750)
+	var dirs []string
+	for _, scope := range []string{realm, space, stack, cell} {
+		dirs = append(dirs, filepath.Join(scope, consts.KukeonSecretsSubdir))
+	}
+	for _, scope := range []string{realm, space, stack} {
+		dirs = append(dirs, filepath.Join(scope, consts.KukeonVolumeMetaSubdir))
+	}
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+		if err := os.Chmod(dir, widened); err != nil {
+			t.Fatalf("chmod %s: %v", dir, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "item"), []byte("root-only"), 0o640); err != nil {
+			t.Fatalf("write item: %v", err)
+		}
+	}
+
+	// A volume dir: must keep its group-writable runner mode.
+	volumeDir := filepath.Join(stack, consts.KukeonVolumesSubdir, "data")
+	if err := os.MkdirAll(volumeDir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", volumeDir, err)
+	}
+	if err := os.Chmod(volumeDir, os.ModeSetgid|0o770); err != nil {
+		t.Fatalf("chmod %s: %v", volumeDir, err)
+	}
+
+	// Cell metadata: "cell" declares no container named secrets; "other"
+	// declares one, so its secrets/ is a container dir, not a secrets dir.
+	if err := os.WriteFile(filepath.Join(cell, consts.KukeonMetadataFile),
+		[]byte(`{"spec":{"containers":[{"id":"root"}]}}`), 0o640); err != nil {
+		t.Fatalf("write cell metadata: %v", err)
+	}
+	containerDir := filepath.Join(otherCell, consts.KukeonSecretsSubdir)
+	if err := os.MkdirAll(containerDir, 0o700); err != nil {
+		t.Fatalf("mkdir %s: %v", containerDir, err)
+	}
+	if err := os.WriteFile(filepath.Join(otherCell, consts.KukeonMetadataFile),
+		[]byte(`{"spec":{"containers":[{"id":"root"},{"id":"secrets"}]}}`), 0o640); err != nil {
+		t.Fatalf("write other cell metadata: %v", err)
+	}
+	containerLog := filepath.Join(containerDir, "log")
+	if err := os.WriteFile(containerLog, []byte("out"), 0o600); err != nil {
+		t.Fatalf("write container log: %v", err)
+	}
+
+	uid, gid := os.Getuid(), os.Getgid()
+	if err := sysuser.ChownTreeAndChmodSkip(
+		runPath, uid, gid, widened, 0o640, initSweepSkip(runPath),
+	); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if err := healRootOnlyScopeSubdirs(runPath, uid, gid); err != nil {
+		t.Fatalf("heal: %v", err)
+	}
+
+	assertMode := func(path string, want os.FileMode) {
+		t.Helper()
+		info, err := os.Lstat(path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", path, err)
+		}
+		if got := info.Mode() & (os.ModePerm | os.ModeSetgid); got != want {
+			t.Errorf("%s mode: got %#o want %#o", path, got, want)
+		}
+	}
+	for _, dir := range dirs {
+		assertMode(dir, 0o700)
+		assertMode(filepath.Join(dir, "item"), 0o600)
+	}
+	assertMode(volumeDir, os.ModeSetgid|0o770)
+	assertMode(containerDir, widened)
+	assertMode(containerLog, 0o640)
+
+	// Idempotent: a second pass leaves the contract in place.
+	if err := healRootOnlyScopeSubdirs(runPath, uid, gid); err != nil {
+		t.Fatalf("second heal: %v", err)
+	}
+	assertMode(dirs[0], 0o700)
+}
+
+// TestHealRootOnlyScopeSubdirs_MissingDataRoot covers a RunPath with no
+// metadata tree yet (first `kuke init` before any realm is persisted).
+func TestHealRootOnlyScopeSubdirs_MissingDataRoot(t *testing.T) {
+	if err := healRootOnlyScopeSubdirs(t.TempDir(), os.Getuid(), os.Getgid()); err != nil {
+		t.Fatalf("heal on empty RunPath: %v", err)
 	}
 }
 
