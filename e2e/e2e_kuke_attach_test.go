@@ -30,7 +30,6 @@ import (
 	"time"
 
 	"github.com/creack/pty"
-
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/util/fs"
 )
@@ -311,6 +310,19 @@ func TestKuke_AttachReattach_TerminalContinuity(t *testing.T) {
 func applyAttachableCell(t *testing.T, host, fixture, realmName, spaceName, stackName, cellName string) {
 	t.Helper()
 
+	tmpFile := renderAttachableCellFixture(t, fixture, realmName, spaceName, stackName, cellName)
+	args := append(buildKukeDaemonArgs(host), "apply", "-f", tmpFile)
+	runReturningBinary(t, nil, kuke, args...)
+}
+
+// renderAttachableCellFixture writes the named attachable cell fixture to a
+// per-test temp file with the test-side names substituted in and returns its
+// path. Split from applyAttachableCell so a caller that expects `kuke apply`
+// to fail (the required-repo fixture) can drive apply itself instead of
+// going through runReturningBinary's fatal-on-non-zero path.
+func renderAttachableCellFixture(t *testing.T, fixture, realmName, spaceName, stackName, cellName string) string {
+	t.Helper()
+
 	yamlContent := readTestdataYAML(t, fixture)
 	for old, replacement := range map[string]string{
 		"test-realm": realmName,
@@ -326,9 +338,7 @@ func applyAttachableCell(t *testing.T, host, fixture, realmName, spaceName, stac
 	if err := os.WriteFile(tmpFile, []byte(yamlContent), 0o644); err != nil {
 		t.Fatalf("write tmp yaml: %v", err)
 	}
-
-	args := append(buildKukeDaemonArgs(host), "apply", "-f", tmpFile)
-	runReturningBinary(t, nil, kuke, args...)
+	return tmpFile
 }
 
 // waitForSocket polls until the per-container kuketty control socket appears
@@ -345,6 +355,80 @@ func waitForSocket(t *testing.T, path string, timeout time.Duration) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatalf("kuketty socket %q did not appear within %s", path, timeout)
+}
+
+// kukeApplyResult is the outcome of a backgrounded `kuke apply`.
+type kukeApplyResult struct {
+	err    error
+	output string
+}
+
+// startKukeApplyAsync runs `kuke apply -f <file>` against the per-test daemon
+// in the background and delivers its combined output and exit error on the
+// returned channel. Unlike runReturningBinary it does not fail the test on a
+// non-zero exit — the caller decides which failure is expected.
+func startKukeApplyAsync(t *testing.T, host, file string) chan kukeApplyResult {
+	t.Helper()
+
+	dir := os.Getenv("E2E_BIN_DIR")
+	if dir == "" {
+		dir = ".."
+	}
+	bin := filepath.Join(dir, kuke)
+	if _, err := os.Stat(bin); os.IsNotExist(err) {
+		t.Skipf("binary %s not found, skipping", bin)
+	}
+
+	args := append(buildKukeDaemonArgs(host), "apply", "-f", file)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Env = e2eRunEnv(nil, args)
+
+	done := make(chan kukeApplyResult, 1)
+	go func() {
+		defer cancel()
+		out, err := cmd.CombinedOutput()
+		done <- kukeApplyResult{err: err, output: string(out)}
+	}()
+	return done
+}
+
+// waitForSocketWhile polls for the kuketty control socket like waitForSocket,
+// but at a tighter interval, and returns the stat taken at the moment the
+// socket was first observed — the caller asserts on that snapshot because the
+// inode may be torn down shortly after (a failed apply rolls the cell back).
+// Once applyDone fires, one final stat decides the outcome; the result is
+// re-sent on applyDone so the caller can still receive it. A fatal here
+// includes the apply output so a missing socket is diagnosable.
+func waitForSocketWhile(t *testing.T, path string, timeout time.Duration, applyDone chan kukeApplyResult) os.FileInfo {
+	t.Helper()
+
+	statSocket := func() os.FileInfo {
+		info, err := os.Stat(path)
+		if err == nil && (info.Mode()&os.ModeSocket) != 0 {
+			return info
+		}
+		return nil
+	}
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if info := statSocket(); info != nil {
+			return info
+		}
+		select {
+		case res := <-applyDone:
+			applyDone <- res
+			if info := statSocket(); info != nil {
+				return info
+			}
+			t.Fatalf("kuketty socket %q did not appear before kuke apply returned (err=%v)\noutput:\n%s",
+				path, res.err, res.output)
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	t.Fatalf("kuketty socket %q did not appear within %s", path, timeout)
+	return nil
 }
 
 // verifyContainerTaskIsRunning returns true iff `ctr task ls` reports the
@@ -683,8 +767,11 @@ func TestKuke_RunFromStopped_NonRootKukeonGroup_NoEACCES(t *testing.T) {
 // hostname (RFC 6761 reserves .invalid). DNS yields NXDOMAIN, git
 // clone fails, kuketty exits non-zero in processRepos — but the
 // socket inode is born inside claimSocketListener *before*
-// processRepos runs. The test polls for the socket to appear (the
-// bind happens) and stats it immediately. With the fix, mode is
+// processRepos runs. `kuke apply` therefore fails (the work container
+// exits inside the startup grace window), so the test runs apply in
+// the background, polls for the socket to appear (the bind happens),
+// and asserts on the stat taken at that moment, then checks apply
+// failed for the expected reason (issue #1405). With the fix, mode is
 // 0o660 and group is kukeon — the on-disk shape that admits a
 // kukeon-group dial during the pre-Serve window. Pre-fix, this stat
 // would show 0o755 group=kukeon (group ownership came from the SGID
@@ -738,27 +825,41 @@ func TestKuke_RunFromStopped_RequiredRepoUnresolvable_NoEACCES(t *testing.T) {
 		append(buildKukeDaemonArgs(host), "create", "stack", stackName,
 			"--realm", realmName, "--space", spaceName)...)
 
-	applyAttachableCell(t, host, "attachable-cell-required-repo-unresolvable.yaml",
-		realmName, spaceName, stackName, cellName)
-
 	socketPath := fs.ContainerSocketSymlinkPath(runPath,
 		realmName, spaceName, stackName, cellName, "work")
 
-	// Poll for the socket to appear. kuketty binds it inside
-	// claimSocketListener — the moment the post-#916 bind site applies
-	// mode + gid — *before* entering processRepos. The unresolvable
-	// .invalid host yields NXDOMAIN quickly, so kuketty exits within a
-	// second or two; the wait+stat loop succeeds the first iteration
-	// the bind completes, which is well before that exit.
-	waitForSocket(t, socketPath, 15*time.Second)
+	// The required repo fails, kuketty exits non-zero, and `kuke apply`
+	// reports the cell as failed because the work container exited inside
+	// the startup grace window (issue #1405). That failure is the expected
+	// outcome of this fixture, so apply runs in the background rather than
+	// through applyAttachableCell's fatal-on-non-zero path, and the socket
+	// is observed while apply is still in flight.
+	tmpFile := renderAttachableCellFixture(t, "attachable-cell-required-repo-unresolvable.yaml",
+		realmName, spaceName, stackName, cellName)
+	applyDone := startKukeApplyAsync(t, host, tmpFile)
 
-	info, err := os.Stat(socketPath)
-	if err != nil {
-		t.Fatalf("stat work socket %s during pre-Serve window: %v", socketPath, err)
+	// Poll for the socket to appear and keep the stat from that moment.
+	// kuketty binds it inside claimSocketListener — the moment the
+	// post-#916 bind site applies mode + gid — *before* entering
+	// processRepos, so the first observed inode is the pre-Serve shape.
+	// The snapshot is asserted below rather than a fresh stat after apply
+	// returns: the failed apply rolls the cell back and removes the
+	// socket path.
+	info := waitForSocketWhile(t, socketPath, 30*time.Second, applyDone)
+
+	res := <-applyDone
+	if res.err == nil {
+		t.Fatalf("kuke apply succeeded; want failure from the unresolvable required repo\noutput:\n%s",
+			res.output)
 	}
-	if info.Mode()&os.ModeSocket == 0 {
-		t.Fatalf("path %s is not a socket: mode=%v", socketPath, info.Mode())
+	if !strings.Contains(res.output, "startup grace window") {
+		t.Fatalf(
+			"kuke apply failed for an unexpected reason (want work container exit within startup grace window): %v\noutput:\n%s",
+			res.err,
+			res.output,
+		)
 	}
+
 	if got := info.Mode().Perm(); got != 0o660 {
 		t.Errorf("pre-Serve work socket mode: got %#o want 0o660 — #916 race re-opened",
 			got)
