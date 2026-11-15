@@ -44,9 +44,9 @@ function ImageListView({ realm, revision }: { realm: string; revision: number })
         <label className="search-field">Search<input type="search" value={query} placeholder="Search image references…" onChange={e => { setQuery(e.target.value); setPage(0); }} /></label>
         <span className="result-count">{rows.length} results</span>
       </div>
-      {list.data && <p className="scope-filter description">Containerd namespace <code>{list.data.namespace}</code></p>}
+      {list.data && <p className="description image-namespace">Containerd namespace <code>{list.data.namespace}</code></p>}
       {list.loading && <p className="scope-filter" role="status">{list.data ? "Refreshing images…" : "Loading images…"}</p>}
-      {rows.length > 0 && <div className="table-scroll"><table><thead><tr><th scope="col">Reference</th><th scope="col">Size</th><th scope="col">Created</th><th scope="col">Digest</th><th scope="col">Media type</th><th scope="col">Labels</th></tr></thead><tbody>
+      {rows.length > 0 && <div className="table-scroll"><table className="image-table"><thead><tr><th scope="col">Reference</th><th scope="col">Size</th><th scope="col">Created</th><th scope="col">Digest</th><th scope="col">Media type</th><th scope="col">Labels</th></tr></thead><tbody>
         {rows.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(image => <tr key={image.name}>
           <td><a className="resource-name" href={imagesLink(realm, image.name)}>{image.name}</a></td>
           <td>{formatImageSize(image.size)}</td>

@@ -319,6 +319,8 @@ test("cell sidebar uses full scope for duplicate names and switching reuses inve
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/#\/workspace\/dev\/shared\/services\/api$/);
   await expect(page.getByText("No attachable containers are available.")).toBeVisible();
+  await expect(page.locator("#cell-terminal .terminal-empty")).toHaveText("No attachable containers are available.");
+  await expect(terminalTools(page).getByRole("button", { name: "Expand terminal" })).toHaveCount(0);
   await page.getByRole("tab", { name: "Overview" }).click();
   await expect(page.getByRole("heading", { name: "Runtime status" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Containers" })).toBeVisible();
@@ -1257,4 +1259,20 @@ test("realm registry credentials list server and username, keep the token write-
   await page.goto(`${server.url}#/resource/dev?document=1`);
   await expect(page.getByLabel("Complete realm JSON")).toContainText("ghcr.io");
   await expect(page.getByLabel("Complete realm JSON")).not.toContainText(token);
+});
+
+test("realm scope, breadcrumbs and narrow lists stay within the page", async ({ page }) => {
+  await mock(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${server.url}#/realms`);
+  await expect(page.getByRole("row")).toHaveCount(3);
+  await expect(page.locator(".scope-cell").first()).toHaveText("—");
+  await page.goto(`${server.url}#/cells`);
+  await expect(page.getByRole("row")).toHaveCount(3);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${server.url}#/resources`);
+  await expect(page.locator(".breadcrumbs > *")).toHaveCount(1);
+  await page.goto(`${server.url}#/images/dev`);
+  expect(await page.locator(".breadcrumbs > span").evaluate(el => getComputedStyle(el, "::before").content)).toBe('"/"');
 });

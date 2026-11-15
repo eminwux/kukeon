@@ -71,7 +71,7 @@ export function RegistryCredentialsPanel({ realm, credentials, onSaved }: { real
         {credentials.map(cred => <tr key={cred.serverAddress ?? ""}><td>{cred.serverAddress ? <code>{cred.serverAddress}</code> : serverLabel()}</td><td>{cred.username}</td><td><button type="button" aria-label={`Replace credential for ${serverLabel(cred.serverAddress)}`} onClick={() => edit(cred)}>Replace</button></td></tr>)}
       </tbody></table> : <p>No registry credentials are configured for this realm.</p>}
       <form className="registry-credential-form" aria-label="Add or replace registry credential" method="post" autoComplete="off" onSubmit={submit}>
-        <label>Server<input name="server" value={server} placeholder="ghcr.io (empty: registry from image reference)" autoComplete="off" spellCheck={false} onChange={e => setServer(e.target.value)} /></label>
+        <label>Server (empty: from image reference)<input name="server" value={server} placeholder="ghcr.io" autoComplete="off" spellCheck={false} onChange={e => setServer(e.target.value)} /></label>
         <label>Username<input ref={usernameInput} name="username" value={username} required autoComplete="off" spellCheck={false} onChange={e => setUsername(e.target.value)} /></label>
         <label>Token<input name="token" type="password" value={token} required autoComplete="new-password" spellCheck={false} onChange={e => setToken(e.target.value)} /></label>
         <button type="submit" disabled={pending}>{pending ? "Saving…" : replacing ? "Replace credential" : "Add credential"}</button>
