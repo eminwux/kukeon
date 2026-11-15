@@ -137,6 +137,7 @@ type fakeClient struct {
 	startCellFn       func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error)
 	attachContainerFn func(doc v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error)
 	killCellFn        func(doc v1beta1.CellDoc) (kukeonv1.KillCellResult, error)
+	deleteCellFn      func(doc v1beta1.CellDoc) (kukeonv1.DeleteCellResult, error)
 	getBlueprintFn    func(doc v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error)
 	getConfigFn       func(doc v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error)
 	listConfigsFn     func(realm, space, stack string) ([]v1beta1.CellConfigDoc, error)
@@ -147,12 +148,14 @@ type fakeClient struct {
 	startCalls        int
 	attachCalls       int
 	killCalls         int
+	deleteCalls       int
 	createConfigCalls int
 	createConfigDocs  []v1beta1.CellConfigDoc
 	createDoc         v1beta1.CellDoc
 	startDoc          v1beta1.CellDoc
 	attachDoc         v1beta1.ContainerDoc
 	killDoc           v1beta1.CellDoc
+	deleteDoc         v1beta1.CellDoc
 }
 
 func (f *fakeClient) GetCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
@@ -200,6 +203,18 @@ func (f *fakeClient) KillCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.
 		return kukeonv1.KillCellResult{}, errors.New("unexpected KillCell call")
 	}
 	return f.killCellFn(doc)
+}
+
+// DeleteCell defaults to success when deleteCellFn is unset: the --rm attach
+// cleanup deletes after every successful KillCell (#1371), and tests that only
+// care about the kill leg should not have to stub the follow-up delete.
+func (f *fakeClient) DeleteCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.DeleteCellResult, error) {
+	f.deleteCalls++
+	f.deleteDoc = doc
+	if f.deleteCellFn == nil {
+		return kukeonv1.DeleteCellResult{}, nil
+	}
+	return f.deleteCellFn(doc)
 }
 
 func (f *fakeClient) GetBlueprint(
@@ -2129,6 +2144,76 @@ func TestRun_RmAttach_KillsCellOnPeerClosed(t *testing.T) {
 	if got := fc.killDoc.Spec.RealmID; got != "my-realm" {
 		t.Errorf("KillCell realm=%q want my-realm", got)
 	}
+	// #1371: --rm deletes explicitly after the kill instead of relying on the
+	// reconciler, whose auto-delete gate skips operator-interrupted cells.
+	if fc.deleteCalls != 1 {
+		t.Fatalf("DeleteCell calls=%d want 1 (--rm must delete after kill)", fc.deleteCalls)
+	}
+	if got := fc.deleteDoc.Metadata.Name; got != "my-cell" {
+		t.Errorf("DeleteCell target=%q want my-cell", got)
+	}
+}
+
+func TestRun_RmAttach_DeleteCellNotFound_Silent(t *testing.T) {
+	// The reconciler may reap a cleanly-exited --rm cell between the CLI's
+	// KillCell and DeleteCell; ErrCellNotFound on the delete is the expected
+	// idempotent outcome and must not emit a warning (#1371).
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+		attachContainerFn: attachSuccessFn(),
+		killCellFn: func(_ v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
+			return kukeonv1.KillCellResult{Killed: true}, nil
+		},
+		deleteCellFn: func(_ v1beta1.CellDoc) (kukeonv1.DeleteCellResult, error) {
+			return kukeonv1.DeleteCellResult{}, errdefs.ErrCellNotFound
+		},
+	}
+	run := &runCapture{err: fmt.Errorf("wrapped by harness: %w", sbshattach.ErrPeerClosed)}
+	cmd, buf := newCmdWithRun(t, fc, run)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "--rm"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if fc.deleteCalls != 1 {
+		t.Fatalf("DeleteCell calls=%d want 1", fc.deleteCalls)
+	}
+	if strings.Contains(buf.String(), "--rm cleanup") {
+		t.Errorf("not-found delete must be silent, got stderr:\n%s", buf.String())
+	}
+}
+
+func TestRun_RmAttach_DeleteCellFailureWarns(t *testing.T) {
+	// A DeleteCell RPC failure after a successful kill is reported on stderr
+	// but, like the kill leg, never becomes the run's exit error (#1371).
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+		attachContainerFn: attachSuccessFn(),
+		killCellFn: func(_ v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
+			return kukeonv1.KillCellResult{Killed: true}, nil
+		},
+		deleteCellFn: func(_ v1beta1.CellDoc) (kukeonv1.DeleteCellResult, error) {
+			return kukeonv1.DeleteCellResult{}, errors.New("daemon RPC: connection refused")
+		},
+	}
+	run := &runCapture{err: fmt.Errorf("wrapped by harness: %w", sbshattach.ErrPeerClosed)}
+	cmd, buf := newCmdWithRun(t, fc, run)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "--rm"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v (DeleteCell failure must not surface as a run error)", err)
+	}
+	if !strings.Contains(buf.String(), "--rm cleanup: failed to delete cell") {
+		t.Errorf("expected stderr warning about DeleteCell failure, got:\n%s", buf.String())
+	}
 }
 
 func TestRun_RmAttach_KillsCellEvenWhenAttachLoopErrors(t *testing.T) {
@@ -2189,6 +2274,9 @@ func TestRun_RmAttach_KillCellFailureDoesNotMaskAttachExit(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "--rm cleanup: failed to kill cell") {
 		t.Errorf("expected stderr warning about KillCell failure, got:\n%s", buf.String())
+	}
+	if fc.deleteCalls != 0 {
+		t.Errorf("DeleteCell calls=%d want 0 (a failed kill must not escalate to delete)", fc.deleteCalls)
 	}
 }
 

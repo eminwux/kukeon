@@ -854,7 +854,8 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 		// cell is relaunched, not deleted. The auto-delete branch is therefore NOT
 		// gated on the RestartPolicy reap check, but it is reached only once no
 		// restart is owed (cf. `docker run --rm` cleaning up a finished workload).
-		if shouldAutoDeleteCell(cell.Spec.AutoDelete, newState, cell.Status.ReadyObserved) {
+		if shouldAutoDeleteCell(cell.Spec.AutoDelete, newState, cell.Status.ReadyObserved,
+			cellOperatorStopped(cell)) {
 			return r.autoDeleteCell(cell)
 		}
 
@@ -1006,7 +1007,10 @@ func cellStateIsSticky(s intmodel.CellState) bool {
 //   - Failed (#407): a kukeon bring-up fault, sticky for the same reason.
 //   - Stopped (#1267): an operator-initiated stop is not a job that "ran its
 //     course" — the operator chose to interrupt it, so `--rm` leaves it for
-//     explicit `kuke delete cell`.
+//     explicit `kuke delete cell`. Stopped is non-sticky, though, so a later
+//     tick re-derives the all-terminal workload to Exited; the persisted
+//     reasonOperatorStopped breadcrumb (#1371) is what keeps that cell out of
+//     shouldAutoDeleteCell once the label has moved on.
 func cellStateAutoDeleteTriggers(s intmodel.CellState) bool {
 	return s == intmodel.CellStateExited
 }
@@ -1043,10 +1047,13 @@ func latchReadyObserved(prior bool, originalState, newState intmodel.CellState) 
 
 // shouldAutoDeleteCell returns true when the reconciler should kick off
 // AutoDelete cleanup. The latch (readyObserved) is the gate that
-// prevents an in-flight CreateCell from being reaped before the root
-// container has come up; see latchReadyObserved.
-func shouldAutoDeleteCell(autoDelete bool, newState intmodel.CellState, readyObserved bool) bool {
-	return autoDelete && cellStateAutoDeleteTriggers(newState) && readyObserved
+// prevents an in-flight CreateCell — or a create-only cell that was never
+// started (#1371) — from being reaped before the cell has ever come up; see
+// latchReadyObserved. operatorStopped (cellOperatorStopped) excludes a cell
+// whose running workload an operator stop/kill interrupted: it did not run
+// its course, so it stays inspectable until deleted or restarted (#1371).
+func shouldAutoDeleteCell(autoDelete bool, newState intmodel.CellState, readyObserved, operatorStopped bool) bool {
+	return autoDelete && cellStateAutoDeleteTriggers(newState) && readyObserved && !operatorStopped
 }
 
 // shouldWindDownCell decides whether the reconciler should kill the
@@ -1513,6 +1520,23 @@ func markCellReady(cell *intmodel.Cell) {
 	// so this is the single point that owns the clear (#1268).
 	cell.Status.Reason = ""
 	cell.Status.Message = ""
+}
+
+// markCellMaterialized stamps the post-provision, not-yet-started state a
+// freshly created cell persists with (#1371). Provisioning creates the cgroup
+// and containers but starts no task, so the cell is Stopped and has never been
+// Ready: the ReadyObserved latch and the first-ready ReadyAt timestamp stay
+// unset until a start path actually establishes readiness via markCellReady.
+// Latching here (the pre-#1371 behavior) let the reconciler's auto-delete gate
+// treat a create-only Spec.AutoDelete cell as one that had run, and left a
+// fused run whose start then failed carrying a fabricated readyAt /
+// readyObserved. Every create-and-start caller (controller.CreateCell, apply,
+// bootstrap) follows provisioning with runner.StartCell, whose success path
+// funnels through markCellReady, so readiness still latches eagerly there.
+func markCellMaterialized(cell *intmodel.Cell) {
+	cell.Status.State = intmodel.CellStateStopped
+	cell.Status.ReadyObserved = false
+	cell.Status.ReadyAt = time.Time{}
 }
 
 // deriveCellState dispatches between the two derivation strategies

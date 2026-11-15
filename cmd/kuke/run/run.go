@@ -901,6 +901,14 @@ func attachAndMaybeAutoDelete(
 // A KillCell failure (daemon down, RPC error, cell already gone) is
 // reported but not returned: the operator has detached, --rm is
 // best-effort, and the daemon's reconciler still owns final cleanup.
+//
+// After a successful kill the cell is deleted explicitly rather than left
+// for the reconciler (#1371): the reconciler's auto-delete gate now skips a
+// cell whose kill interrupted a still-running workload (the operator-stop
+// breadcrumb), and a workload task that is still being reaped when the
+// attach session ends would otherwise strand an `--rm` cell the operator
+// asked to be removed. ErrCellNotFound means the reconciler already reaped
+// it — the expected idempotent outcome, so it stays silent.
 func autoDeleteAfterAttach(cmd *cobra.Command, client kukeonv1.Client, doc v1beta1.CellDoc) {
 	if _, err := client.KillCell(cmd.Context(), doc); err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
@@ -908,6 +916,15 @@ func autoDeleteAfterAttach(cmd *cobra.Command, client kukeonv1.Client, doc v1bet
 		}
 		fmt.Fprintf(cmd.ErrOrStderr(),
 			"kuke run: --rm cleanup: failed to kill cell %q: %v\n",
+			doc.Metadata.Name, err)
+		return
+	}
+	if _, err := client.DeleteCell(cmd.Context(), doc); err != nil {
+		if errors.Is(err, errdefs.ErrCellNotFound) {
+			return
+		}
+		fmt.Fprintf(cmd.ErrOrStderr(),
+			"kuke run: --rm cleanup: failed to delete cell %q: %v\n",
 			doc.Metadata.Name, err)
 	}
 }
