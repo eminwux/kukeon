@@ -163,7 +163,7 @@ func realmHandler(dial Dial, detail bool) http.HandlerFunc {
 				writeAPIError(w, errdefs.ErrRealmNotFound)
 				return
 			}
-			writeJSON(w, http.StatusOK, result.Realm)
+			writeJSON(w, http.StatusOK, redactRealm(result.Realm))
 			return
 		}
 		realms, err := client.ListRealms(ctx)
@@ -173,6 +173,9 @@ func realmHandler(dial Dial, detail bool) http.HandlerFunc {
 		}
 		if realms == nil {
 			realms = []v1beta1.RealmDoc{}
+		}
+		for i := range realms {
+			realms[i] = redactRealm(realms[i])
 		}
 		writeJSON(w, http.StatusOK, realms)
 	}

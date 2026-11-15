@@ -412,3 +412,6 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--er
 .network-note, .network-empty { color: var(--muted); }
 .network-empty { margin: 0; font-size: 13px; }
 @media (max-width: 640px) { .network-panel .details-grid { grid-template-columns: minmax(0, 1fr); gap: 4px; } .network-panel .details-grid dd { margin-bottom: 8px; } }
+.registry-credential-form { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin-top: 14px; }
+.registry-credential-form label { display: grid; gap: 4px; flex: 1 1 180px; font-size: 11px; color: var(--muted); }
+.registry-credentials .creation-success { margin-top: 12px; }
