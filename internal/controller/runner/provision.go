@@ -1138,7 +1138,7 @@ func (r *Exec) provisionNewCell(cell intmodel.Cell) (intmodel.Cell, error) {
 			return intmodel.Cell{}, err
 		}
 
-		markCellReady(&cell)
+		markCellMaterialized(&cell)
 
 		// Update cell metadata
 		if err = r.UpdateCellMetadata(cell); err != nil {

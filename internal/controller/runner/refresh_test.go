@@ -142,8 +142,9 @@ func TestLatchReadyObserved(t *testing.T) {
 }
 
 // TestMarkCellReady is the eager-latch contract synchronous Ready
-// writers (provisionNewCell, StartCell idempotent skip, StartCell
-// happy path, StartContainer, RecreateCell) all rely on. State and
+// writers (StartCell idempotent skip, StartCell happy path,
+// StartContainer, RecreateCell) all rely on. provisionNewCell no longer
+// latches (#1371) — see TestMarkCellMaterialized. State and
 // ReadyObserved must close together — without that, a KillCell that
 // races the first reconciler tick (e.g. `kuke run --rm` exiting
 // attach inside the reconcile interval) flips persisted state Ready
@@ -220,7 +221,7 @@ func TestAutoDeleteSurvivesKillCellRace(t *testing.T) {
 	if !latched {
 		t.Fatalf("latchReadyObserved = false; AutoDelete gate would never fire")
 	}
-	if !shouldAutoDeleteCell(true, newState, latched) {
+	if !shouldAutoDeleteCell(true, newState, latched, false) {
 		t.Errorf("shouldAutoDeleteCell = false; cell would be stranded after the KillCell race")
 	}
 }
@@ -237,7 +238,10 @@ func TestShouldAutoDeleteCell(t *testing.T) {
 		autoDelete    bool
 		newState      intmodel.CellState
 		readyObserved bool
-		want          bool
+		// operatorStopped models the persisted reasonOperatorStopped
+		// breadcrumb (#1371).
+		operatorStopped bool
+		want            bool
 	}{
 		{
 			name:          "fires_when_all_three_satisfied",
@@ -303,13 +307,25 @@ func TestShouldAutoDeleteCell(t *testing.T) {
 			readyObserved: false,
 			want:          false,
 		},
+		{
+			// An operator stop/kill that interrupted a running workload
+			// re-derives to Exited on a later tick (Stopped is non-sticky);
+			// the persisted breadcrumb must still keep `--rm` from reaping
+			// it (#1371).
+			name:            "blocked_when_operator_interrupted_regression_1371",
+			autoDelete:      true,
+			newState:        intmodel.CellStateExited,
+			readyObserved:   true,
+			operatorStopped: true,
+			want:            false,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := shouldAutoDeleteCell(tc.autoDelete, tc.newState, tc.readyObserved)
+			got := shouldAutoDeleteCell(tc.autoDelete, tc.newState, tc.readyObserved, tc.operatorStopped)
 			if got != tc.want {
-				t.Errorf("shouldAutoDeleteCell(autoDelete=%v, new=%v, ready=%v) = %v, want %v",
-					tc.autoDelete, tc.newState, tc.readyObserved, got, tc.want)
+				t.Errorf("shouldAutoDeleteCell(autoDelete=%v, new=%v, ready=%v, operatorStopped=%v) = %v, want %v",
+					tc.autoDelete, tc.newState, tc.readyObserved, tc.operatorStopped, got, tc.want)
 			}
 		})
 	}

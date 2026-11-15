@@ -70,6 +70,10 @@ func (r *Exec) killCellLocked(cell intmodel.Cell) (intmodel.Cell, error) {
 		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
 	}
 
+	// Observe whether this stop interrupts a still-running workload before
+	// tearing anything down (#1371). See markCellOperatorStopped.
+	interruptsWorkload := r.workloadActiveBeforeStop(internalCell)
+
 	cellID := strings.TrimSpace(internalCell.Spec.ID)
 	if cellID == "" {
 		return intmodel.Cell{}, errdefs.ErrCellIDRequired
@@ -265,6 +269,9 @@ func (r *Exec) killCellLocked(cell intmodel.Cell) (intmodel.Cell, error) {
 
 	// Update cell state in internal model
 	internalCell.Status.State = intmodel.CellStateStopped
+	if interruptsWorkload {
+		markCellOperatorStopped(&internalCell)
+	}
 
 	// Unlink each Attachable container's host-side socket artifacts (the
 	// SUN_PATH-safe symlink under <RunPath>/s/ and the deep socket inode
