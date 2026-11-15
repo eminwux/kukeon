@@ -16,6 +16,8 @@
 
 package config
 
+import "github.com/eminwux/kukeon/internal/util/buildinfo"
+
 // Version is the kuke/kukeond build version.
 //
 //nolint:gochecknoglobals // needs to be global for ldflags injection
@@ -28,3 +30,8 @@ var Version = "0.1.0"
 //
 //nolint:gochecknoglobals // needs to be global for ldflags injection
 var KukeondImageRepo = "ghcr.io/eminwux/kukeon"
+
+//nolint:gochecknoinits // registers the ldflags-injected version for internal packages
+func init() {
+	buildinfo.SetVersion(Version)
+}

@@ -57,6 +57,14 @@ func (FakeClient) MaterializeCell(context.Context, v1beta1.CellDoc) (CreateCellR
 	return CreateCellResult{}, ErrUnexpectedCall
 }
 
+func (FakeClient) PreviewCellFromConfig(context.Context, CellFromConfigRequest) (PreviewCellFromConfigResult, error) {
+	return PreviewCellFromConfigResult{}, ErrUnexpectedCall
+}
+
+func (FakeClient) CreateCellFromConfig(context.Context, CellFromConfigRequest) (CreateCellFromConfigResult, error) {
+	return CreateCellFromConfigResult{}, ErrUnexpectedCall
+}
+
 func (FakeClient) CreateConfig(context.Context, v1beta1.CellConfigDoc) (CreateConfigResult, error) {
 	return CreateConfigResult{}, ErrUnexpectedCall
 }

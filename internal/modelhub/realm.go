@@ -36,6 +36,10 @@ type RealmMetadata struct {
 type RealmSpec struct {
 	Namespace           string
 	RegistryCredentials []RegistryCredentials
+	// Defaults is the realm-level CellConfig fill (#1418).
+	Defaults *ScopeDefaults
+	// Images names the realm's images (#1418).
+	Images []RealmImage
 }
 
 // RegistryCredentials contains authentication information for a container registry.

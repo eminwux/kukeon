@@ -110,6 +110,9 @@ type GetRealmResult struct {
 	MetadataExists            bool
 	CgroupExists              bool
 	ContainerdNamespaceExists bool
+	// Images is the daemon's resolution of Realm.Spec.Images: each entry's
+	// reference and its digest in the realm's containerd namespace (#1418).
+	Images []v1beta1.RealmImageStatus
 }
 
 type GetSpaceArgs struct {

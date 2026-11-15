@@ -81,8 +81,25 @@ type EgressAllowRule struct {
 // created inside the Space unless the resource's own spec overrides the field.
 // It exists so the isolation envelope can be declared once on the Space and
 // reused by every Container that lives in it.
+//
+// Values, Repos and Secrets are the CellConfig fill (the ScopeDefaults shape,
+// issue #1418) every cell rendered from a CellConfig inside the Space
+// inherits; they override the Realm defaults and are overridden by the Stack
+// defaults and the CellConfig per key.
 type SpaceDefaults struct {
-	Container *SpaceContainerDefaults `json:"container,omitempty" yaml:"container,omitempty"`
+	Container *SpaceContainerDefaults         `json:"container,omitempty" yaml:"container,omitempty"`
+	Values    map[string]string               `json:"values,omitempty"    yaml:"values,omitempty"`
+	Repos     map[string]CellConfigRepoFill   `json:"repos,omitempty"     yaml:"repos,omitempty"`
+	Secrets   map[string]CellConfigSecretFill `json:"secrets,omitempty"   yaml:"secrets,omitempty"`
+}
+
+// Fill returns the CellConfig-fill part of the Space defaults in the shared
+// ScopeDefaults shape (nil when there is none).
+func (d *SpaceDefaults) Fill() *ScopeDefaults {
+	if d == nil {
+		return nil
+	}
+	return &ScopeDefaults{Values: d.Values, Repos: d.Repos, Secrets: d.Secrets}
 }
 
 // SpaceContainerDefaults mirrors the isolation-related fields on ContainerSpec.

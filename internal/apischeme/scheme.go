@@ -43,6 +43,9 @@ func DefaultVersion(version ext.Version) ext.Version {
 func ConvertRealmDocToInternal(in ext.RealmDoc) (intmodel.Realm, error) {
 	switch in.APIVersion {
 	case VersionV1Beta1, "": // default/empty treated as v1beta1
+		if err := validateRealmImages(in.Spec.Images); err != nil {
+			return intmodel.Realm{}, err
+		}
 		registryCreds := make([]intmodel.RegistryCredentials, len(in.Spec.RegistryCredentials))
 		for i, cred := range in.Spec.RegistryCredentials {
 			registryCreds[i] = intmodel.RegistryCredentials{
@@ -60,6 +63,8 @@ func ConvertRealmDocToInternal(in ext.RealmDoc) (intmodel.Realm, error) {
 			Spec: intmodel.RealmSpec{
 				Namespace:           in.Spec.Namespace,
 				RegistryCredentials: registryCreds,
+				Defaults:            ConvertScopeDefaultsToInternal(in.Spec.Defaults),
+				Images:              realmImagesToInternal(in.Spec.Images),
 			},
 			Status: intmodel.RealmStatus{
 				State:                    intmodel.RealmState(in.Status.State),
@@ -103,6 +108,8 @@ func BuildRealmExternalFromInternal(in intmodel.Realm, apiVersion ext.Version) (
 			Spec: ext.RealmSpec{
 				Namespace:           in.Spec.Namespace,
 				RegistryCredentials: registryCreds,
+				Defaults:            BuildScopeDefaultsExternalFromInternal(in.Spec.Defaults),
+				Images:              realmImagesToExternal(in.Spec.Images),
 			},
 			Status: ext.RealmStatus{
 				State:                    ext.RealmState(in.Status.State),
@@ -317,6 +324,7 @@ func ConvertStackDocToInternal(in ext.StackDoc) (intmodel.Stack, error) {
 				ID:        in.Spec.ID,
 				RealmName: in.Spec.RealmID,
 				SpaceName: in.Spec.SpaceID,
+				Defaults:  ConvertScopeDefaultsToInternal(in.Spec.Defaults),
 			},
 			Status: intmodel.StackStatus{
 				State:              intmodel.StackState(in.Status.State),
@@ -349,9 +357,10 @@ func BuildStackExternalFromInternal(in intmodel.Stack, apiVersion ext.Version) (
 				Generation: in.Metadata.Generation,
 			},
 			Spec: ext.StackSpec{
-				ID:      in.Spec.ID,
-				RealmID: in.Spec.RealmName,
-				SpaceID: in.Spec.SpaceName,
+				ID:       in.Spec.ID,
+				RealmID:  in.Spec.RealmName,
+				SpaceID:  in.Spec.SpaceName,
+				Defaults: BuildScopeDefaultsExternalFromInternal(in.Spec.Defaults),
 			},
 			Status: ext.StackStatus{
 				State:              ext.StackState(in.Status.State),
@@ -1359,6 +1368,9 @@ func convertSpaceDefaultsToInternal(in *ext.SpaceDefaults) *intmodel.SpaceDefaul
 	}
 	return &intmodel.SpaceDefaults{
 		Container: convertSpaceContainerDefaultsToInternal(in.Container),
+		Values:    copyStringMap(in.Values),
+		Repos:     repoFillsToInternal(in.Repos),
+		Secrets:   secretFillsToInternal(in.Secrets),
 	}
 }
 
@@ -1368,6 +1380,9 @@ func buildSpaceDefaultsExternalFromInternal(in *intmodel.SpaceDefaults) *ext.Spa
 	}
 	return &ext.SpaceDefaults{
 		Container: buildSpaceContainerDefaultsExternalFromInternal(in.Container),
+		Values:    copyStringMap(in.Values),
+		Repos:     repoFillsToExternal(in.Repos),
+		Secrets:   secretFillsToExternal(in.Secrets),
 	}
 }
 

@@ -37,6 +37,8 @@ type StackSpec struct {
 	ID        string
 	RealmName string
 	SpaceName string
+	// Defaults is the stack-level CellConfig fill (#1418).
+	Defaults *ScopeDefaults
 }
 
 type StackStatus struct {

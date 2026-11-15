@@ -98,19 +98,30 @@ Supported fields (each mirrors `ContainerSpec`): `user`, `readOnlyRootFilesystem
 
 **Effective config.** The merge runs at the point the container is created or updated, so the post-merge (effective) configuration is what gets persisted. `kuke get container <name> -o yaml` shows the merged values directly — no separate `status.effectiveConfig` block is needed.
 
+### `spec.defaults` — CellConfig fill (object, optional)
+
+`spec.defaults.values`, `spec.defaults.repos` and `spec.defaults.secrets` are the CellConfig fill every cell kukeond renders from a [`CellConfig`](config.md) inside this space inherits. They override the Realm defaults and are overridden by the Stack defaults and the CellConfig per key. See [Defaults merge](config.md#defaults-merge).
+
+```yaml
+spec:
+  defaults:
+    values:
+      REGION: eu-west-1
+```
+
 ## status
 
-| Field                | Type                                    | Description                                                                                                                                          |
-| -------------------- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `state`              | `Pending`, `Ready`, `Failed`, `Unknown` | Lifecycle state                                                                                                                                      |
-| `cgroupPath`         | string                                  | Absolute cgroup path: `/kukeon/<realm>/<space>`                                                                                                      |
-| `subtreeControllers` | array of string                         | Cgroup-v2 controller set actually delegated on this space's `cgroup.subtree_control` after the host-root filter (e.g. `cpu`, `memory`, `io`, `pids`) |
-| `createdAt`          | RFC3339 timestamp                       | Wall-clock time of the first persist. Set once and never moves.                                                                                      |
-| `updatedAt`          | RFC3339 timestamp                       | Wall-clock time of the most recent persist.                                                                                                          |
-| `readyAt`            | RFC3339 timestamp                       | Wall-clock time of the first `State==Ready` persist. Set-once.                                                                                       |
-| `reason`             | string                                  | Short reason code summarizing why `state` is in its current value.                                                                                   |
-| `message`            | string                                  | Human-readable detail backing `reason`; especially valuable on `state: Failed`.                                                                      |
-| `cgroupReady`        | bool                                    | Whether `cgroupPath` actually exists on the host filesystem as of the last status write.                                                             |
+| Field                | Type                                    | Description                                                                                                                                                                                           |
+| -------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `state`              | `Pending`, `Ready`, `Failed`, `Unknown` | Lifecycle state                                                                                                                                                                                       |
+| `cgroupPath`         | string                                  | Absolute cgroup path: `/kukeon/<realm>/<space>`                                                                                                                                                       |
+| `subtreeControllers` | array of string                         | Cgroup-v2 controller set actually delegated on this space's `cgroup.subtree_control` after the host-root filter (e.g. `cpu`, `memory`, `io`, `pids`)                                                  |
+| `createdAt`          | RFC3339 timestamp                       | Wall-clock time of the first persist. Set once and never moves.                                                                                                                                       |
+| `updatedAt`          | RFC3339 timestamp                       | Wall-clock time of the most recent persist.                                                                                                                                                           |
+| `readyAt`            | RFC3339 timestamp                       | Wall-clock time of the first `State==Ready` persist. Set-once.                                                                                                                                        |
+| `reason`             | string                                  | Short reason code summarizing why `state` is in its current value.                                                                                                                                    |
+| `message`            | string                                  | Human-readable detail backing `reason`; especially valuable on `state: Failed`.                                                                                                                       |
+| `cgroupReady`        | bool                                    | Whether `cgroupPath` actually exists on the host filesystem as of the last status write.                                                                                                              |
 | `observedGeneration` | int                                     | The `metadata.generation` the reconciler last acted on. Defaults to zero (omitted) and stays inert until writers begin bumping `generation`; the reconciler then compares the two to skip stale work. |
 
 ## Bridge naming

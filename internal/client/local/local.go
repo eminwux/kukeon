@@ -182,36 +182,16 @@ func (c *Client) createCell(
 		return kukeonv1.CreateCellResult{}, err
 	}
 
-	extCell, err := apischeme.BuildCellExternalFromInternal(res.Cell, version)
+	out, err := createCellResultToExternal(res)
 	if err != nil {
-		return kukeonv1.CreateCellResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+		return kukeonv1.CreateCellResult{}, err
 	}
-
-	out := kukeonv1.CreateCellResult{
-		Cell:                    extCell,
-		MetadataExistsPre:       res.MetadataExistsPre,
-		MetadataExistsPost:      res.MetadataExistsPost,
-		CgroupExistsPre:         res.CgroupExistsPre,
-		CgroupExistsPost:        res.CgroupExistsPost,
-		CgroupCreated:           res.CgroupCreated,
-		RootContainerExistsPre:  res.RootContainerExistsPre,
-		RootContainerExistsPost: res.RootContainerExistsPost,
-		RootContainerCreated:    res.RootContainerCreated,
-		StartedPre:              res.StartedPre,
-		StartedPost:             res.StartedPost,
-		Started:                 res.Started,
-		Created:                 res.Created,
-	}
-	if len(res.Containers) > 0 {
-		out.Containers = make([]kukeonv1.ContainerCreationOutcome, len(res.Containers))
-		for i, container := range res.Containers {
-			out.Containers[i] = kukeonv1.ContainerCreationOutcome{
-				Name:       container.Name,
-				ExistsPre:  container.ExistsPre,
-				ExistsPost: container.ExistsPost,
-				Created:    container.Created,
-			}
+	if version != apischeme.VersionV1Beta1 {
+		extCell, convErr := apischeme.BuildCellExternalFromInternal(res.Cell, version)
+		if convErr != nil {
+			return kukeonv1.CreateCellResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convErr)
 		}
+		out.Cell = extCell
 	}
 	return out, nil
 }
@@ -231,12 +211,16 @@ func (c *Client) GetRealm(_ context.Context, doc v1beta1.RealmDoc) (kukeonv1.Get
 	if err != nil {
 		return kukeonv1.GetRealmResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
-	return kukeonv1.GetRealmResult{
+	out := kukeonv1.GetRealmResult{
 		Realm:                     *extRealm,
 		MetadataExists:            res.MetadataExists,
 		CgroupExists:              res.CgroupExists,
 		ContainerdNamespaceExists: res.ContainerdNamespaceExists,
-	}, nil
+	}
+	if res.MetadataExists {
+		out.Images = c.ctrl.RealmImages(res.Realm)
+	}
+	return out, nil
 }
 
 func (c *Client) GetSpace(_ context.Context, doc v1beta1.SpaceDoc) (kukeonv1.GetSpaceResult, error) {

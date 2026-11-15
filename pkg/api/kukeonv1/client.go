@@ -45,6 +45,17 @@ type Client interface {
 	// CreateCell so the same printer renders the outcome (Started will be
 	// false because the start step was skipped).
 	MaterializeCell(ctx context.Context, doc v1beta1.CellDoc) (CreateCellResult, error)
+	// PreviewCellFromConfig renders the cell a stored CellConfig would
+	// create — Realm → Space → Stack defaults merged under the Config's own
+	// fill, realm images resolved — and returns it with its digest and the
+	// origin of every merged value, without writing anything (#1418). The
+	// daemon is the only CellConfig renderer.
+	PreviewCellFromConfig(ctx context.Context, req CellFromConfigRequest) (PreviewCellFromConfigResult, error)
+	// CreateCellFromConfig renders a cell from a stored CellConfig and creates
+	// it, started (req.Start) or stopped (#1418). A non-empty
+	// req.ExpectedDigest refuses the create unless the fresh render matches
+	// it (errdefs.ErrRenderDigestMismatch).
+	CreateCellFromConfig(ctx context.Context, req CellFromConfigRequest) (CreateCellFromConfigResult, error)
 	// CreateConfig atomically persists a new CellConfig document under
 	// create-only semantics (issue #839): the daemon-side write fails with
 	// errdefs.ErrConfigExists if a Config of the same name already lives in
@@ -230,6 +241,64 @@ type MaterializeCellReply struct {
 	Err    *APIError
 }
 
+// CellFromConfigRequest names the stored CellConfig a daemon-side render
+// reads, plus the per-cell inputs the caller supplies (#1418).
+type CellFromConfigRequest struct {
+	// Config locates the CellConfig: name plus the scope it is stored in.
+	Config v1beta1.CellConfigMetadata
+	// Name is the explicit cell name; empty allocates <prefix>-<6hex>.
+	Name string
+	// EnvOverrides are per-cell `--env KEY=VALUE` overrides.
+	EnvOverrides []string
+	// AutoDelete marks the cell for deletion when its attach session ends.
+	AutoDelete bool
+	// IgnoreDiskPressure bypasses the create-time disk-pressure guard.
+	IgnoreDiskPressure bool
+	// Start starts the cell after creating it.
+	Start bool
+	// ExpectedDigest pins the digest of an earlier preview.
+	ExpectedDigest string
+}
+
+// PreviewCellFromConfigArgs is the wire request for PreviewCellFromConfig.
+type PreviewCellFromConfigArgs struct {
+	Request CellFromConfigRequest
+}
+
+// PreviewCellFromConfigResult is the rendered cell, its digest and the merge
+// explanation.
+type PreviewCellFromConfigResult struct {
+	Cell   v1beta1.CellDoc
+	Digest string
+	Values []v1beta1.RenderedValue
+}
+
+// PreviewCellFromConfigReply is the wire response for PreviewCellFromConfig.
+type PreviewCellFromConfigReply struct {
+	Result PreviewCellFromConfigResult
+	Err    *APIError
+}
+
+// CreateCellFromConfigArgs is the wire request for CreateCellFromConfig.
+type CreateCellFromConfigArgs struct {
+	Request CellFromConfigRequest
+}
+
+// CreateCellFromConfigResult is the create outcome plus the render's digest
+// and merge explanation.
+type CreateCellFromConfigResult struct {
+	CreateCellResult
+
+	Digest string
+	Values []v1beta1.RenderedValue
+}
+
+// CreateCellFromConfigReply is the wire response for CreateCellFromConfig.
+type CreateCellFromConfigReply struct {
+	Result CreateCellFromConfigResult
+	Err    *APIError
+}
+
 // CreateCellResult mirrors internal/controller.CreateCellResult using
 // external v1beta1 types, so it is safe to serialize and return to
 // non-privileged callers.
@@ -270,9 +339,12 @@ const (
 	MethodCreateStack     = ServiceName + ".CreateStack"
 	MethodCreateCell      = ServiceName + ".CreateCell"
 	MethodMaterializeCell = ServiceName + ".MaterializeCell"
-	MethodCreateConfig    = ServiceName + ".CreateConfig"
-	MethodCreateSecret    = ServiceName + ".CreateSecret"
-	MethodCreateVolume    = ServiceName + ".CreateVolume"
+
+	MethodPreviewCellFromConfig = ServiceName + ".PreviewCellFromConfig"
+	MethodCreateCellFromConfig  = ServiceName + ".CreateCellFromConfig"
+	MethodCreateConfig          = ServiceName + ".CreateConfig"
+	MethodCreateSecret          = ServiceName + ".CreateSecret"
+	MethodCreateVolume          = ServiceName + ".CreateVolume"
 
 	MethodGetRealm     = ServiceName + ".GetRealm"
 	MethodGetSpace     = ServiceName + ".GetSpace"

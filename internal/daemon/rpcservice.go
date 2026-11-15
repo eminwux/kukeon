@@ -116,6 +116,33 @@ func (s *KukeonV1Service) MaterializeCell(
 	return nil
 }
 
+// PreviewCellFromConfig is the net/rpc method for
+// KukeonV1.PreviewCellFromConfig (#1418).
+func (s *KukeonV1Service) PreviewCellFromConfig(
+	args *kukeonv1.PreviewCellFromConfigArgs,
+	reply *kukeonv1.PreviewCellFromConfigReply,
+) error {
+	result, err := s.core.PreviewCellFromConfig(s.ctx, args.Request)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
+// CreateCellFromConfig is the net/rpc method for
+// KukeonV1.CreateCellFromConfig (#1418).
+func (s *KukeonV1Service) CreateCellFromConfig(
+	args *kukeonv1.CreateCellFromConfigArgs,
+	reply *kukeonv1.CreateCellFromConfigReply,
+) error {
+	result, err := s.core.CreateCellFromConfig(s.ctx, args.Request)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	if err != nil {
+		s.logger.DebugContext(s.ctx, "CreateCellFromConfig returned error", "error", err)
+	}
+	return nil
+}
+
 // ---- Get ----
 
 func (s *KukeonV1Service) GetRealm(args *kukeonv1.GetRealmArgs, reply *kukeonv1.GetRealmReply) error {

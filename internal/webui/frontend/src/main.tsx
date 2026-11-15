@@ -9,6 +9,7 @@ import { useInventory, type Inventory, type InventoryResource, type Doc, type Ru
 import { apiPath, catalogTitles, kinds, titles, readRoute, resourceLink, listLink, newCellLink, workspaceLink, type Route } from "./routes";
 import { StateBadge } from "./status";
 import { CgroupPanel } from "./cgroup";
+import { RealmImagesPanel } from "./images";
 import { CellLifecycleControls, LifecycleNotice, type LifecycleAction, type LifecycleFeedback, type PurgeOptions } from "./lifecycle";
 import { cellRemovalConfirmed, deleteOperationComplete, purgeOperationComplete, requestedPurgeOptions } from "./lifecycle-policy.js";
 
@@ -89,6 +90,7 @@ function ResourceDetails({ route, revision }: { route: Route; revision: number }
     {overview}
     {related}
     {containerPanel}
+    {depth === 0 && detail.data && !route.document && <RealmImagesPanel realm={route.scope[0]} revision={revision} />}
     {detail.data && !route.document && <CgroupPanel scope={route.scope} revision={revision} />}
   </>;
 }

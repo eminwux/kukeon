@@ -27,8 +27,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/eminwux/kukeon/internal/cellconfig"
-	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/util/naming"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
@@ -65,24 +63,33 @@ func registerCreateRoutes(mux *http.ServeMux, dial Dial) {
 				if err := decoder.Decode(&struct{}{}); err != io.EOF {
 					return nil, fmt.Errorf("%w: expected one JSON document", errdefs.ErrConfig)
 				}
-				doc, err := configCell(ctx, c, input)
+				rendered, err := configCell(ctx, c, input)
 				if err != nil {
 					return nil, redactCreationError(err, envSecrets(input.Env))
 				}
-				data, err := json.Marshal(doc)
-				if err != nil {
-					return nil, err
-				}
-				digest := fmt.Sprintf("%x", sha256.Sum256(append(data, byteBool(input.IgnoreDiskPressure))))
+				// The preview token binds the daemon's render digest to the
+				// disk-pressure choice the operator reviewed.
+				digest := fmt.Sprintf("%x", sha256.Sum256(
+					append([]byte(rendered.Digest), byteBool(input.IgnoreDiskPressure))))
 				if strings.HasSuffix(r.URL.Path, "/preview") {
-					return map[string]any{"document": redactCell(doc), "preview": digest}, nil
+					return map[string]any{
+						"document": redactCell(rendered.Doc),
+						"preview":  digest,
+						"digest":   rendered.Digest,
+						"values":   redactRenderedValues(rendered.Values, envSecrets(input.Env)),
+					}, nil
 				}
 				if input.Preview != digest {
 					return nil, fmt.Errorf("%w: inputs or config changed; preview again", errdefs.ErrConfig)
 				}
-				doc.Spec.IgnoreDiskPressure = input.IgnoreDiskPressure
-				created, createErr := c.MaterializeCell(ctx, doc)
+				request := rendered.Request
+				request.IgnoreDiskPressure = input.IgnoreDiskPressure
+				request.ExpectedDigest = rendered.Digest
+				created, createErr := c.CreateCellFromConfig(ctx, request)
 				if createErr != nil {
+					if errors.Is(createErr, errdefs.ErrRenderDigestMismatch) {
+						return nil, fmt.Errorf("%w: inputs or config changed; preview again", errdefs.ErrConfig)
+					}
 					return nil, redactCreationError(createErr, envSecrets(input.Env))
 				}
 				if !created.Created {
@@ -94,61 +101,15 @@ func registerCreateRoutes(mux *http.ServeMux, dial Dial) {
 	}
 }
 
-func configCell(ctx context.Context, c kukeonv1.Client, input createConfigRequest) (v1beta1.CellDoc, error) {
-	var empty v1beta1.CellDoc
-	name := strings.TrimSpace(input.Name)
-	resolvedName := strings.TrimSpace(input.ResolvedName)
-	if name != "" && resolvedName != "" && name != resolvedName {
-		return empty, fmt.Errorf("%w: the reviewed cell name changed; preview again", errdefs.ErrConfig)
+func configCell(ctx context.Context, c kukeonv1.Client, input createConfigRequest) (configRender, error) {
+	var empty configRender
+	requestedName, err := reviewedCellName(input)
+	if err != nil {
+		return empty, err
 	}
-	if name != "" && (!filepath.IsLocal(name) || !safePathSegment(name)) {
-		return empty, fmt.Errorf("%w: unsafe cell name", errdefs.ErrConfig)
-	}
-	if resolvedName != "" && (!filepath.IsLocal(resolvedName) || !safePathSegment(resolvedName)) {
-		return empty, fmt.Errorf("%w: unsafe resolved cell name", errdefs.ErrConfig)
-	}
-	if input.Config.Realm == "" || input.Config.Name == "" || (input.Config.Stack != "" && input.Config.Space == "") {
-		return empty, fmt.Errorf("%w: select a scoped config", errdefs.ErrConfig)
-	}
-	configName := input.Config.Name
-	configRealm := input.Config.Realm
-	configSpace := ""
-	if rawSpace := input.Config.Space; rawSpace != "" {
-		if !filepath.IsLocal(rawSpace) {
-			return empty, fmt.Errorf("%w: unsafe config space", errdefs.ErrConfig)
-		}
-		if !safePathSegment(rawSpace) {
-			return empty, fmt.Errorf("%w: unsafe config space", errdefs.ErrConfig)
-		}
-		configSpace = rawSpace
-	}
-	configStack := ""
-	if rawStack := input.Config.Stack; rawStack != "" {
-		if !filepath.IsLocal(rawStack) {
-			return empty, fmt.Errorf("%w: unsafe config stack", errdefs.ErrConfig)
-		}
-		if !safePathSegment(rawStack) {
-			return empty, fmt.Errorf("%w: unsafe config stack", errdefs.ErrConfig)
-		}
-		configStack = rawStack
-	}
-	if !filepath.IsLocal(configName) {
-		return empty, fmt.Errorf("%w: unsafe config name", errdefs.ErrConfig)
-	}
-	if !safePathSegment(configName) {
-		return empty, fmt.Errorf("%w: unsafe config name", errdefs.ErrConfig)
-	}
-	if !filepath.IsLocal(configRealm) {
-		return empty, fmt.Errorf("%w: unsafe config realm", errdefs.ErrConfig)
-	}
-	if !safePathSegment(configRealm) {
-		return empty, fmt.Errorf("%w: unsafe config realm", errdefs.ErrConfig)
-	}
-	configMetadata := v1beta1.CellConfigMetadata{
-		Name:  configName,
-		Realm: configRealm,
-		Space: configSpace,
-		Stack: configStack,
+	configMetadata, err := configLookup(input.Config)
+	if err != nil {
+		return empty, err
 	}
 	cfg, err := c.GetConfig(ctx, v1beta1.CellConfigDoc{Metadata: configMetadata})
 	if err != nil {
@@ -157,75 +118,128 @@ func configCell(ctx context.Context, c kukeonv1.Client, input createConfigReques
 	if !cfg.MetadataExists {
 		return empty, errdefs.ErrConfigNotFound
 	}
-	ref := cfg.Config.Spec.Blueprint
-	if !filepath.IsLocal(ref.Name) || !safePathSegment(ref.Name) ||
-		!filepath.IsLocal(ref.Realm) || !safePathSegment(ref.Realm) ||
-		(ref.Space != "" && (!filepath.IsLocal(ref.Space) || !safePathSegment(ref.Space))) ||
-		(ref.Stack != "" && (!filepath.IsLocal(ref.Stack) || !safePathSegment(ref.Stack))) {
+	if !safeBlueprintRef(cfg.Config.Spec.Blueprint) {
 		return empty, fmt.Errorf("%w: unsafe blueprint reference", errdefs.ErrConfig)
 	}
-	bp, err := c.GetBlueprint(
-		ctx,
-		v1beta1.CellBlueprintDoc{
-			Metadata: v1beta1.CellBlueprintMetadata{
-				Name:  ref.Name,
-				Realm: ref.Realm,
-				Space: ref.Space,
-				Stack: ref.Stack,
-			},
-		},
-	)
+	normalized, err := normalizeEnv(input.Env)
 	if err != nil {
 		return empty, err
 	}
-	if !bp.MetadataExists {
-		return empty, errdefs.ErrBlueprintNotFound
+	// kukeond renders the cell (#1418): defaults merge, slot fills, realm
+	// images and — for an omitted name — the generated <prefix>-<6hex>.
+	request := kukeonv1.CellFromConfigRequest{
+		Config:       configMetadata,
+		Name:         requestedName,
+		EnvOverrides: normalized,
 	}
-	requestedName := name
-	if requestedName == "" {
-		requestedName = resolvedName
-	}
-	if requestedName == "" {
-		realm := defaultScope(cfg.Config.Metadata.Realm, consts.KukeonDefaultRealmName)
-		space := defaultScope(cfg.Config.Metadata.Space, consts.KukeonDefaultSpaceName)
-		stack := defaultScope(cfg.Config.Metadata.Stack, consts.KukeonDefaultStackName)
-		var nameErr error
-		requestedName, nameErr = allocateCellName(ctx, c, "", cellconfig.Prefix(cfg.Config), realm, space, stack)
-		if nameErr != nil {
-			return empty, fmt.Errorf("%w: allocate cell name: %w", errdefs.ErrConfig, nameErr)
-		}
-	}
-	if validationErr := naming.ValidateHierarchyName("cell", requestedName); validationErr != nil {
-		return empty, fmt.Errorf("%w: %w", errdefs.ErrConfig, validationErr)
-	}
-	doc, err := cellconfig.MaterializeWithName(cfg.Config, bp.Blueprint, requestedName)
+	preview, err := c.PreviewCellFromConfig(ctx, request)
 	if err != nil {
-		return empty, fmt.Errorf("%w: %w", errdefs.ErrConfig, err)
+		return empty, renderError(err)
 	}
-	if !filepath.IsLocal(doc.Metadata.Name) || !safePathSegment(doc.Metadata.Name) ||
-		!filepath.IsLocal(doc.Spec.RealmID) || !safePathSegment(doc.Spec.RealmID) ||
-		(doc.Spec.SpaceID != "" && (!filepath.IsLocal(doc.Spec.SpaceID) || !safePathSegment(doc.Spec.SpaceID))) ||
-		(doc.Spec.StackID != "" && (!filepath.IsLocal(doc.Spec.StackID) || !safePathSegment(doc.Spec.StackID))) {
+	doc := preview.Cell
+	if !safeCellCoordinates(doc) {
 		return empty, fmt.Errorf("%w: unsafe materialized cell coordinate", errdefs.ErrConfig)
 	}
+	request.Name = doc.Metadata.Name
+	if err = checkCreationTarget(ctx, c, doc); err != nil {
+		return empty, err
+	}
+	return configRender{Doc: doc, Digest: preview.Digest, Values: preview.Values, Request: request}, nil
+}
+
+// reviewedCellName returns the cell name the request asks for — the typed
+// name, else the name a previous preview resolved — after the path-safety and
+// hierarchy-name checks. Empty means "let the daemon allocate one".
+func reviewedCellName(input createConfigRequest) (string, error) {
+	name := strings.TrimSpace(input.Name)
+	resolvedName := strings.TrimSpace(input.ResolvedName)
+	if name != "" && resolvedName != "" && name != resolvedName {
+		return "", fmt.Errorf("%w: the reviewed cell name changed; preview again", errdefs.ErrConfig)
+	}
+	if name != "" && !safeSegment(name) {
+		return "", fmt.Errorf("%w: unsafe cell name", errdefs.ErrConfig)
+	}
+	if resolvedName != "" && !safeSegment(resolvedName) {
+		return "", fmt.Errorf("%w: unsafe resolved cell name", errdefs.ErrConfig)
+	}
+	requested := name
+	if requested == "" {
+		requested = resolvedName
+	}
+	if requested != "" {
+		if err := naming.ValidateHierarchyName("cell", requested); err != nil {
+			return "", fmt.Errorf("%w: %w", errdefs.ErrConfig, err)
+		}
+	}
+	return requested, nil
+}
+
+// configLookup validates the browser-selected Config coordinates before any
+// daemon read.
+func configLookup(md v1beta1.CellConfigMetadata) (v1beta1.CellConfigMetadata, error) {
+	if md.Realm == "" || md.Name == "" || (md.Stack != "" && md.Space == "") {
+		return v1beta1.CellConfigMetadata{}, fmt.Errorf("%w: select a scoped config", errdefs.ErrConfig)
+	}
+	for _, field := range []struct{ label, value string }{
+		{"config space", md.Space},
+		{"config stack", md.Stack},
+		{"config name", md.Name},
+		{"config realm", md.Realm},
+	} {
+		if field.value != "" && !safeSegment(field.value) {
+			return v1beta1.CellConfigMetadata{}, fmt.Errorf("%w: unsafe %s", errdefs.ErrConfig, field.label)
+		}
+	}
+	return v1beta1.CellConfigMetadata{Name: md.Name, Realm: md.Realm, Space: md.Space, Stack: md.Stack}, nil
+}
+
+// safeSegment reports whether value is a local, single path segment.
+func safeSegment(value string) bool {
+	return filepath.IsLocal(value) && safePathSegment(value)
+}
+
+// safeBlueprintRef rejects a persisted blueprint reference that would escape
+// the daemon's metadata tree.
+func safeBlueprintRef(ref v1beta1.CellConfigBlueprintRef) bool {
+	return safeSegment(ref.Name) && safeSegment(ref.Realm) &&
+		(ref.Space == "" || safeSegment(ref.Space)) &&
+		(ref.Stack == "" || safeSegment(ref.Stack))
+}
+
+// safeCellCoordinates rejects a rendered cell whose name or scope would escape
+// the daemon's metadata tree.
+func safeCellCoordinates(doc v1beta1.CellDoc) bool {
+	return safeSegment(doc.Metadata.Name) && safeSegment(doc.Spec.RealmID) &&
+		(doc.Spec.SpaceID == "" || safeSegment(doc.Spec.SpaceID)) &&
+		(doc.Spec.StackID == "" || safeSegment(doc.Spec.StackID))
+}
+
+// normalizeEnv validates KEY=VALUE entries, collapsing exact duplicates and
+// rejecting conflicting values for the same key.
+func normalizeEnv(entries []string) ([]string, error) {
 	seen := map[string]string{}
 	normalized := []string{}
-	for _, entry := range input.Env {
+	for _, entry := range entries {
 		key, value, ok := strings.Cut(entry, "=")
 		key = strings.TrimSpace(key)
-		if !ok || strings.TrimSpace(key) == "" {
-			return empty, fmt.Errorf("%w: environment entries require KEY=VALUE", errdefs.ErrConfig)
+		if !ok || key == "" {
+			return nil, fmt.Errorf("%w: environment entries require KEY=VALUE", errdefs.ErrConfig)
 		}
 		if old, exists := seen[key]; exists {
 			if old != value {
-				return empty, fmt.Errorf("%w: conflicting environment values for %s", errdefs.ErrConfig, key)
+				return nil, fmt.Errorf("%w: conflicting environment values for %s", errdefs.ErrConfig, key)
 			}
 			continue
 		}
 		seen[key] = value
 		normalized = append(normalized, key+"="+value)
 	}
-	cellconfig.ApplyEnvOverrides(&doc, normalized)
+	return normalized, nil
+}
+
+// checkCreationTarget requires the rendered cell's stack to exist and its name
+// to be free.
+func checkCreationTarget(ctx context.Context, c kukeonv1.Client, doc v1beta1.CellDoc) error {
 	stack, err := c.GetStack(
 		ctx,
 		v1beta1.StackDoc{
@@ -234,49 +248,44 @@ func configCell(ctx context.Context, c kukeonv1.Client, input createConfigReques
 		},
 	)
 	if err != nil {
-		return empty, err
+		return err
 	}
 	if !stack.MetadataExists {
-		return empty, errdefs.ErrStackNotFound
+		return errdefs.ErrStackNotFound
 	}
 	existing, err := c.GetCell(ctx, doc)
 	if err != nil && !errors.Is(err, errdefs.ErrCellNotFound) {
-		return empty, err
+		return err
 	}
 	if err == nil && existing.MetadataExists {
-		return empty, fmt.Errorf(
+		return fmt.Errorf(
 			"%w: cell %q already exists in %s / %s / %s; preview again or choose another name",
 			errdefs.ErrCellAlreadyExists, doc.Metadata.Name, doc.Spec.RealmID, doc.Spec.SpaceID, doc.Spec.StackID,
 		)
 	}
-	return doc, nil
+	return nil
 }
 
-func defaultScope(value, fallback string) string {
-	if trimmed := strings.TrimSpace(value); trimmed != "" {
-		return trimmed
+// configRender is a daemon-side preview plus the request that reproduces it.
+type configRender struct {
+	Doc     v1beta1.CellDoc
+	Digest  string
+	Values  []v1beta1.RenderedValue
+	Request kukeonv1.CellFromConfigRequest
+}
+
+// renderError keeps the daemon's lookup / collision sentinels and classifies
+// every other render failure (slot fills, parameters) as a config error.
+func renderError(err error) error {
+	for _, sentinel := range []error{
+		errdefs.ErrConfigNotFound, errdefs.ErrBlueprintNotFound, errdefs.ErrCellAlreadyExists,
+		errdefs.ErrStackNotFound, errdefs.ErrSpaceNotFound, errdefs.ErrRealmNotFound, errdefs.ErrConfig,
+	} {
+		if errors.Is(err, sentinel) {
+			return err
+		}
 	}
-	return fallback
-}
-
-func allocateCellName(
-	ctx context.Context,
-	c kukeonv1.Client,
-	explicit, prefix, realm, space, stack string,
-) (string, error) {
-	return naming.AllocCellName(explicit, prefix, func(name string) (bool, error) {
-		result, err := c.GetCell(ctx, v1beta1.CellDoc{
-			Metadata: v1beta1.CellMetadata{Name: name},
-			Spec:     v1beta1.CellSpec{RealmID: realm, SpaceID: space, StackID: stack},
-		})
-		if errors.Is(err, errdefs.ErrCellNotFound) {
-			return false, nil
-		}
-		if err != nil {
-			return false, err
-		}
-		return result.MetadataExists, nil
-	})
+	return fmt.Errorf("%w: %w", errdefs.ErrConfig, err)
 }
 
 func byteBool(value bool) byte {
@@ -284,4 +293,24 @@ func byteBool(value bool) byte {
 		return 1
 	}
 	return 0
+}
+
+// redactRenderedValues prepares the merge explanation for the browser. Every
+// key keeps its origin, but scalar values are withheld — the same policy
+// redactCell applies to container env and provenance params — and any --env
+// secret that leaks into a repo/secret/image description is masked.
+func redactRenderedValues(values []v1beta1.RenderedValue, secrets []string) []v1beta1.RenderedValue {
+	out := make([]v1beta1.RenderedValue, 0, len(values))
+	for _, v := range values {
+		if v.Kind == v1beta1.RenderKindValue {
+			v.Value = ""
+		}
+		for _, secret := range secrets {
+			if secret != "" {
+				v.Value = strings.ReplaceAll(v.Value, secret, "[redacted]")
+			}
+		}
+		out = append(out, v)
+	}
+	return out
 }

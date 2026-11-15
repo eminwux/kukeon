@@ -8,7 +8,19 @@ type ScopeMetadata = { name: string; realm?: string; space?: string; stack?: str
 type CatalogDoc = { metadata: ScopeMetadata; spec?: Record<string, unknown>; kind?: string };
 type CellDoc = Doc & { spec: { realmId: string; spaceId: string; stackId: string; containers?: Container[]; provenance?: unknown } };
 type Container = { id: string; image?: string; attachable?: boolean; root?: boolean; [key: string]: unknown };
-type Preview = { document: CellDoc; preview: string };
+type RenderedValue = { kind: string; key: string; value: string; origin: string };
+type Preview = { document: CellDoc; preview: string; digest?: string; values?: RenderedValue[] };
+
+// Shows each merged input of the daemon's render with the level that set it (#1418).
+function MergedValues({ values, digest }: { values: RenderedValue[]; digest?: string }) {
+  return <div className="merged-values"><h4>Merged values</h4>
+    <p className="description">Realm, Space and Stack defaults merge under the Config, deeper levels winning per key. Scalar values are hidden in the browser; use <code>kuke create cell --from-config … --dry-run --explain</code> to see them.</p>
+    {!values.length ? <p>No values, repositories, secrets or images were merged.</p> : <table aria-label="Merged values and their origin"><thead><tr><th scope="col">Kind</th><th scope="col">Key</th><th scope="col">Value</th><th scope="col">Origin</th></tr></thead><tbody>
+      {values.map(value => <tr key={`${value.kind}:${value.key}`}><td>{value.kind}</td><td><code>{value.key}</code></td><td>{value.value ? <code>{value.value}</code> : <span className="description">hidden</span>}</td><td><span className="badge">{value.origin}</span></td></tr>)}
+    </tbody></table>}
+    {digest && <p className="description">Render digest: <code>{digest}</code></p>}
+  </div>;
+}
 type FormValue = Record<string, unknown>;
 
 function scopedName(metadata: ScopeMetadata): string[] {
@@ -143,9 +155,9 @@ function ConfigCreation({ revision, inventory, configScope, onCreated }: { revis
         <label>Cell name (optional)<input value={name} disabled={pending} onChange={event => { setName(event.target.value); setPreview(undefined); setStart(false); }} /><small>Leave blank to let Kukeon choose a name using its existing naming algorithm.</small></label>
         <label>Environment overrides<textarea value={env} disabled={pending} placeholder="KEY=VALUE, one per line" onChange={event => { setEnv(event.target.value); setPreview(undefined); setStart(false); }} /></label>
         <label className="schema-check"><input type="checkbox" checked={ignoreDiskPressure} disabled={pending} onChange={event => { setIgnoreDiskPressure(event.target.checked); setPreview(undefined); setStart(false); }} /> Ignore disk pressure for this creation</label>
-        <p className="description">The daemon materializes the existing config and blueprint. Environment values are redacted in the preview. Creation leaves the Cell stopped.</p>
+        <p className="description">The daemon renders the existing config and blueprint, merging the Realm, Space and Stack defaults. Environment values are redacted in the preview. Creation leaves the Cell stopped.</p>
         {error && <p className="error" role="alert">{error}</p>}{pending && <p role="status">{stage === "create" ? "Creating Cell…" : "Preparing preview…"}</p>}
-        {preview && <div className="creation-review"><h3>Review Cell document</h3><p>Resolved Cell name: <strong>{preview.document.metadata.name}</strong></p><p className="description">The reviewed automatic name is sent back unchanged when creating, so preview and creation use the same name. Kukeon may add its default root container during materialization.</p><pre tabIndex={0} aria-label="Complete Cell preview">{JSON.stringify(preview.document, null, 2)}</pre><label className="schema-check"><input type="checkbox" checked={start} disabled={pending} onChange={event => setStart(event.target.checked)} /> {supportsAttach ? "Start and attach after creation" : "Start after creation"}</label><button type="button" disabled={pending || stackMissing} onClick={() => void submit(true)}>Create Cell</button></div>}
+        {preview && <div className="creation-review"><h3>Review Cell document</h3><p>Resolved Cell name: <strong>{preview.document.metadata.name}</strong></p><p className="description">The reviewed automatic name is sent back unchanged when creating, so preview and creation use the same name. Kukeon may add its default root container during materialization.</p>{preview.values && <MergedValues values={preview.values} digest={preview.digest} />}<pre tabIndex={0} aria-label="Complete Cell preview">{JSON.stringify(preview.document, null, 2)}</pre><label className="schema-check"><input type="checkbox" checked={start} disabled={pending} onChange={event => setStart(event.target.checked)} /> {supportsAttach ? "Start and attach after creation" : "Start after creation"}</label><button type="button" disabled={pending || stackMissing} onClick={() => void submit(true)}>Create Cell</button></div>}
         <button type="submit" disabled={pending || !detail.data || !blueprint.data || stackMissing}>{preview ? "Refresh preview" : "Preview Cell"}</button>
       </form></section>
     </>}

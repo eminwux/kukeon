@@ -74,6 +74,10 @@ type EgressAllowRule struct {
 // v1beta1.SpaceDefaults type for user-facing documentation.
 type SpaceDefaults struct {
 	Container *SpaceContainerDefaults
+	// Values, Repos and Secrets are the space-level CellConfig fill (#1418).
+	Values  map[string]string
+	Repos   map[string]RepoFill
+	Secrets map[string]SecretFill
 }
 
 // SpaceContainerDefaults mirrors the isolation fields on ContainerSpec.

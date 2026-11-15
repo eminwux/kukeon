@@ -124,6 +124,7 @@ func newHandler(authority, endpoint string, dial Dial) (http.Handler, error) {
 	})
 	mux.HandleFunc("GET /api/realms", realmHandler(dial, false))
 	mux.HandleFunc("GET /api/realms/{name}", realmHandler(dial, true))
+	mux.HandleFunc("GET /api/realms/{name}/images", realmImagesHandler(dial))
 	registerResourceRoutes(mux, dial)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -174,6 +175,38 @@ func realmHandler(dial Dial, detail bool) http.HandlerFunc {
 			realms = []v1beta1.RealmDoc{}
 		}
 		writeJSON(w, http.StatusOK, realms)
+	}
+}
+
+// realmImagesHandler lists a realm's spec.images with the reference each
+// resolves to and its digest in the realm's containerd namespace (#1418).
+func realmImagesHandler(dial Dial) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
+		defer cancel()
+		client, err := dial(ctx)
+		if err != nil {
+			writeAPIError(w, err)
+			return
+		}
+		defer func() { _ = client.Close() }()
+		result, err := client.GetRealm(
+			ctx,
+			v1beta1.RealmDoc{Metadata: v1beta1.RealmMetadata{Name: r.PathValue("name")}},
+		)
+		if err != nil {
+			writeAPIError(w, err)
+			return
+		}
+		if !result.MetadataExists {
+			writeAPIError(w, errdefs.ErrRealmNotFound)
+			return
+		}
+		images := result.Images
+		if images == nil {
+			images = []v1beta1.RealmImageStatus{}
+		}
+		writeJSON(w, http.StatusOK, images)
 	}
 }
 

@@ -38,6 +38,13 @@ type RealmMetadata struct {
 type RealmSpec struct {
 	Namespace           string                `json:"namespace"                     yaml:"namespace"`
 	RegistryCredentials []RegistryCredentials `json:"registryCredentials,omitempty" yaml:"registryCredentials,omitempty"`
+	// Defaults is the CellConfig fill every cell rendered inside this realm
+	// inherits (issue #1418). Space, Stack and the CellConfig itself
+	// override it per key.
+	Defaults *ScopeDefaults `json:"defaults,omitempty"            yaml:"defaults,omitempty"`
+	// Images names the images cells rendered from a CellConfig can refer to
+	// by handle (issue #1418).
+	Images []RealmImage `json:"images,omitempty"              yaml:"images,omitempty"`
 }
 
 // RegistryCredentials contains authentication information for a container registry.

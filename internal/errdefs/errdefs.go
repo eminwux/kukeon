@@ -610,6 +610,12 @@ var (
 	// of the same name already lives in the target scope — the caller
 	// (`kuke create config`) surfaces it as a hard collision.
 	ErrConfigExists = errors.New("config already exists")
+
+	// ErrRenderDigestMismatch is returned by CreateCellFromConfig when the
+	// caller pinned the digest of an earlier PreviewCellFromConfig and the
+	// daemon's fresh render differs (the Config, its Blueprint, a defaults
+	// level or a realm image changed in between). Issue #1418.
+	ErrRenderDigestMismatch = errors.New("rendered cell changed since preview; preview again")
 	// ErrCreateConfig wraps a failure on the controller-level atomic
 	// create-only CellConfig endpoint. Scope/blueprint/slot validation
 	// failures propagate their own sentinels (ErrConfigScopeNotFound,
