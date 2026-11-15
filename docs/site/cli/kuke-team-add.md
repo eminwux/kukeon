@@ -86,8 +86,8 @@ spec:
     - { name: pm, source: agents, path: pm }
     - { name: pr-reviewer, source: agents, path: pr-reviewer }
   harnesses:
-    - { name: claude, source: project, path: harnesses/claude }
-    - { name: codex, source: project, path: harnesses/codex }
+    - { name: claude, source: project, path: team/harnesses/claude }
+    - { name: codex, source: project, path: team/harnesses/codex }
 ```
 
 `--source` overrides only `projectSource.url`. One of `--branch`, `--tag`, or

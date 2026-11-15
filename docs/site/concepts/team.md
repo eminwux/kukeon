@@ -27,11 +27,11 @@ Two commands drive it:
 
 All documents use `apiVersion: kuketeams.io/v1` and are decoded strictly
 (single document, no unknown fields). This repository ships the `operator`
-role under `roles/` and the `claude`, `codex`, and `opencode` harnesses under
-`harnesses/`; other roles (dev, pm, pr-reviewer, …) can come from any Git
+role under `team/roles/` and the `claude`, `codex`, and `opencode` harnesses
+under `team/harnesses/`; other roles (dev, pm, pr-reviewer, …) can come from any Git
 source, such as the agents repository. The kukeon renderer that turns a pair
-into kukeon documents is embedded in `kuke` (`renderers/kukeon/v1beta1`); see
-[`harnesses/templates.md`](https://github.com/eminwux/kukeon/blob/main/harnesses/templates.md)
+into kukeon documents is embedded in `kuke` (`pkg/team/compose/renderers/kukeon/v1beta1`); see
+[`team/harnesses/templates.md`](https://github.com/eminwux/kukeon/blob/main/team/harnesses/templates.md)
 for the harness and renderer contract.
 
 ## Selections and persistence
@@ -99,10 +99,10 @@ spec:
     harnesses:
       - name: codex
         source: kukeon
-        path: harnesses/codex
+        path: team/harnesses/codex
       - name: claude
         source: kukeon
-        path: harnesses/claude
+        path: team/harnesses/claude
 ```
 
 Check external role paths, runtime `clonePath` requirements, image
@@ -159,7 +159,7 @@ Harness-owned `spec.onInit` scripts call the image-installed
 `make -C "$ROLE_SOURCE_DIR" <harness> ROLE="$ROLE_PATH"` against the role's
 checkout. A repository that serves roles therefore exposes one Makefile target
 per harness — this repository's `make claude`, `make codex`, and
-`make opencode-openrouter` (all backed by `scripts/materialize-role.sh`).
+`make opencode-openrouter` (all backed by `team/scripts/materialize-role.sh`).
 Startup then uses `INITIAL_PATH`; the harness source need not be checked out in
 the cell.
 

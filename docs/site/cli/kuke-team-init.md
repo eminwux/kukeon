@@ -47,8 +47,8 @@ spec:
 ```
 
 The initial accepted declaration contains the operator selections directly. The
-operator role and both harnesses come from the kukeon repository (`roles/` and
-`harnesses/`):
+operator role and both harnesses come from the kukeon repository (`team/roles/` and
+`team/harnesses/`):
 
 ```yaml
 apiVersion: kuketeams.io/v1
@@ -64,17 +64,17 @@ spec:
   roles:
     - name: operator
       source: kukeon
-      path: roles/operator
+      path: team/roles/operator
       initialPath: $HOME
       needs:
         image: [go]
   harnesses:
     - name: codex
       source: kukeon
-      path: harnesses/codex
+      path: team/harnesses/codex
     - name: claude
       source: kukeon
-      path: harnesses/claude
+      path: team/harnesses/claude
 ```
 
 This applies matching blueprints and CellConfigs named `kukeon-operator-codex`

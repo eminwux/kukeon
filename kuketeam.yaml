@@ -12,7 +12,7 @@ spec:
     - { name: pm, source: agents, path: pm }
     - { name: pr-reviewer, source: agents, path: pr-reviewer }
   # Harness definitions, contexts and image catalogs live in this repository
-  # (harnesses/); `project` is the source `kuke team add` adds for it.
+  # (team/harnesses/); `project` is the source `kuke team add` adds for it.
   harnesses:
-    - { name: claude, source: project, path: harnesses/claude }
-    - { name: codex, source: project, path: harnesses/codex }
+    - { name: claude, source: project, path: team/harnesses/claude }
+    - { name: codex, source: project, path: team/harnesses/codex }

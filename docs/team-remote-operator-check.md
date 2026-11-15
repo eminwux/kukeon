@@ -19,7 +19,7 @@ completed authenticated Codex turn with command-generated installation evidence.
   the default installation this requires readable `/opt/kukeon` files as well
   as access to `/run/kukeon/kukeond.sock`.
 - The catalog-selected Codex release must be available from GHCR. The current
-  reference is the one in `harnesses/codex/images.yaml`. The driver verifies an
+  reference is the one in `team/harnesses/codex/images.yaml`. The driver verifies an
   **anonymous public pull** using GHCR's pull-token/manifest protocol; it never
   reads registry login files or borrows GitHub credentials. A private or absent
   image is an unmet prerequisite for this check. Publish/make the intended
@@ -66,7 +66,7 @@ spec:
   containers:
     - id: work
       attachable: true
-      image: ghcr.io/eminwux/kuketeams/codex:v0.2.1 # from harnesses/codex/images.yaml
+      image: ghcr.io/eminwux/kuketeams/codex:v0.2.1 # from team/harnesses/codex/images.yaml
       command: /bin/bash
       workingDir: /home/user
       env:
@@ -142,7 +142,7 @@ The driver:
 The sanitized JSON report records timestamp, endpoint, driver/source revisions,
 CLI versions, image reference/digest, test cell identity, command shapes, completed
 checks, cleanup, and outcome. The `PROMPT` placeholder refers to the embedded
-`internal/launchcheck/probe.py`, keeping evidence compact and reproducible.
+`internal/team/launchcheck/probe.py`, keeping evidence compact and reproducible.
 Raw CLI stderr, capture files, session messages, auth files and credential values
 are never copied to the report. Nonzero or missing stages remain unmet; refer to
 the `failure` field instead of interpreting a partial report as a pass.

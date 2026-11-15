@@ -15,12 +15,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package team mounts the `kuke team` command. The implementation lives in
-// internal/cli (init and add) over pkg/compose, pkg/config and
-// internal/initialize, imported from the kuketeams repository.
+// internal/team/cli (init and add) over pkg/team/compose, pkg/team/config
+// and internal/team/initialize, imported from the kuketeams repository.
 package team
 
 import (
-	"github.com/eminwux/kukeon/internal/cli"
+	"github.com/eminwux/kukeon/internal/team/cli"
 	"github.com/spf13/cobra"
 )
 

@@ -1,0 +1,36 @@
+apiVersion: kuketeams.io/v1
+kind: TeamsConfig
+spec:
+  git:
+    author:
+      name: Example User
+      email: user@example.com
+    committer:
+      name: Example User
+      email: user@example.com
+    signingKey: /home/inwx/.ssh/id_rsa.pub
+    sign:
+      - commits
+    allowedSigners: /home/inwx/.ssh/allowed_signers
+  defaults:
+    sources:
+      - name: kukeon
+        url: github.com/eminwux/kukeon
+        branch: main
+    roles:
+      - name: operator
+        source: kukeon
+        path: team/roles/operator
+        needs:
+          image: [go]
+      - name: dev
+        source: kukeon
+        path: team/roles/dev
+        harness: claude
+    harnesses:
+      - name: codex
+        source: kukeon
+        path: team/harnesses/codex
+      - name: claude
+        source: kukeon
+        path: team/harnesses/claude

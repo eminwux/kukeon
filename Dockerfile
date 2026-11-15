@@ -12,7 +12,6 @@ RUN go mod download
 COPY cmd/ cmd/
 COPY pkg/ pkg/
 COPY internal internal/
-COPY renderers/ renderers/
 COPY Makefile Makefile
 
 RUN make release-build KUKEON_VERSION=${VERSION} OS=${TARGETOS} ARCHS=${TARGETARCH}
