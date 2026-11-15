@@ -52,7 +52,9 @@ func (r *Exec) ReconcileRealmHealth(realm intmodel.Realm) (bool, error) {
 	}
 	changed := false
 
-	cgroupExists, err := r.ExistsCgroup(realm)
+	// The cgroup path derives from the name alone; probing a metadata-only
+	// copy keeps the spec's registry credentials out of the logged error.
+	cgroupExists, err := r.ExistsCgroup(intmodel.Realm{Metadata: realm.Metadata})
 	switch {
 	case err != nil:
 		r.logger.DebugContext(r.ctx, "reconcile: realm cgroup probe failed",
