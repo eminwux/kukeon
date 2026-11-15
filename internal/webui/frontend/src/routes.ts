@@ -17,6 +17,8 @@ export function readRoute(): Route {
     }
     if (parts[0] === "workspace") return { view: "workspace", scope: parts.length === 5 ? parts.slice(1) : [], parent: [], document: false };
     if (path === "/resources" || path === "/administration" || path === "/dashboard") return { view: "dashboard", scope: [], parent: [], document: false };
+    // #/images/<realm>/<image reference>; the reference is one encoded segment.
+    if (parts[0] === "images") return { view: "images", scope: parts.slice(1, 3), parent: [], document: false };
     if (Object.keys(catalogTitles).includes(parts[0])) return { view: parts[0], scope: parts.slice(1, 6), parent: [], document: params.has("document") };
     if (parts[0] === "resource") return { view: "resource", scope: parts.slice(1, 6), parent: [], document: params.has("document") };
     if (titles.some(title => title.toLowerCase() === parts[0])) {
@@ -33,6 +35,9 @@ export function workspaceLink(scope: string[] = []): string {
 }
 export function newCellLink(config?: string[]): string {
   return "#/new-cell" + (config?.length ? `?config=${encodeURIComponent(JSON.stringify(config))}` : "");
+}
+export function imagesLink(realm?: string, ref?: string): string {
+  return "#/images" + [realm, ref].filter((value): value is string => !!value).map(value => "/" + encodeURIComponent(value)).join("");
 }
 export function resourceLink(scope: string[], document = false): string {
   return "#/resource/" + scope.map(encodeURIComponent).join("/") + (document ? "?document=1" : "");

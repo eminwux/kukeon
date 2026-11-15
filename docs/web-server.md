@@ -223,6 +223,28 @@ runtime does not consume them yet (#1002). The section is read-only; edit
 egress rules and network settings through the resource documents. Permission
 and daemon failures use the same notices as other resource views.
 
+## Images
+
+**Resources → Images** browses the images installed in a realm's containerd
+namespace. It opens on the `default` realm (or the first realm when there is no
+`default`); the **Realm** selector switches the scope, and only that realm's
+namespace (for example `default.kukeon.io`) is listed. Select an image
+reference to open its detail view. Both views are deep-linkable:
+`#/images/{realm}` and `#/images/{realm}/{reference}`, where the reference is
+one URL-encoded segment.
+
+The list and detail views show the image reference, size, creation time,
+digest, media type, and labels — the metadata `kuke get image` reports. A size
+or creation time containerd cannot resolve locally renders as **Unavailable**,
+never as `0 B`. Refresh re-reads the inventory. Loading, empty, permission,
+outdated-daemon, and request failures use the same notices as other resource
+views; a failed refresh keeps the last list and marks it stale.
+
+kukeond reads the inventory over its Unix-socket API (the read-only
+`ListImages` and `GetImage` methods); `kuke serve` never opens the containerd
+socket. The view is read-only: load, delete, prune, and build images with
+`kuke image` and `kuke build`, which stay daemon-independent.
+
 ## Options and permissions
 
 - `--listen`: `localhost` (default) or a literal loopback IP, including `::1`.
@@ -268,6 +290,15 @@ Append `/network` to a space, cell, or container detail path to read that
 resource's declared networking and runtime network facts from kukeond (for
 example, `/api/realms/{realm}/spaces/{space}/network`). See
 [Network details](#network-details).
+
+`/api/realms/{realm}/image-inventory` returns
+`{ "realm", "namespace", "images": [...] }` for the images in that realm's
+containerd namespace (`images` is `[]` when empty). Append
+`/{reference}` (URL-encoded, or with its literal `/` separators) for
+`{ "realm", "namespace", "image": {...} }`. Each image carries `name`, `size`,
+`createdAt`, `digest`, `mediaType`, and `labels`; `size` and `createdAt` are
+`null` when containerd cannot resolve them. See [Images](#images). Separately,
+`/api/realms/{name}/images` lists the realm's declared `spec.images`.
 
 Each name is a URL-encoded path segment. Collections return daemon documents,
 except containers, whose collection returns daemon container specs. No fields

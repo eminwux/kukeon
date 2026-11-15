@@ -520,6 +520,24 @@ func (s *KukeonV1Service) DeleteDocuments(
 	return nil
 }
 
-// Image methods (LoadImage / ListImages / GetImage / DeleteImage) are
-// intentionally not served over RPC — `kuke image *` is daemon-independent
-// by design (#226). The CLI constructs a local in-process client directly.
+// ---- Image (read-only) ----
+//
+// ListImages / GetImage are served so `kuke serve` can browse a realm's
+// containerd image inventory through kukeond (#1406). Mutating image
+// methods (LoadImage / DeleteImage / PruneImages) are intentionally not
+// served — `kuke image *` and `kuke get image` stay daemon-independent by
+// design (#226) and construct a local in-process client directly.
+
+func (s *KukeonV1Service) ListImages(args *kukeonv1.ListImagesArgs, reply *kukeonv1.ListImagesReply) error {
+	result, err := s.core.ListImages(s.ctx, args.Realm)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
+func (s *KukeonV1Service) GetImage(args *kukeonv1.GetImageArgs, reply *kukeonv1.GetImageReply) error {
+	result, err := s.core.GetImage(s.ctx, args.Realm, args.Ref)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
