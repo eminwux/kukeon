@@ -429,6 +429,8 @@ func (r *Exec) teardownSpaceCNI(networkName, configPath string) error {
 
 // teardownRealmCNI also visits spaces whose conflist was removed by an older
 // teardown attempt. Do not remove realm metadata until every bridge is gone.
+// Each space's egress chain goes with its bridge: once the realm metadata is
+// removed nothing could reconcile the chain away.
 func (r *Exec) teardownRealmCNI(realmName string) error {
 	if realmName == "" {
 		return nil
@@ -457,6 +459,7 @@ func (r *Exec) teardownRealmCNI(realmName string) error {
 			failures = append(failures, nameErr)
 			continue
 		}
+		r.removeSpaceEgressPolicyByName(realmName, spaceName)
 		if teardownErr := r.teardownSpaceCNI(networkName, confPath); teardownErr != nil {
 			failures = append(failures, teardownErr)
 		}

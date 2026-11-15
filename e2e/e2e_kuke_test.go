@@ -855,6 +855,9 @@ func TestKuke_Autocomplete_GetCell_ViaDaemon(t *testing.T) {
 	seedCellMetadata(t, runPath, realm, space, stack, cell)
 
 	host := startKukeondDaemon(t, runPath)
+	// The daemon's startup network reconcile installs the seeded space's
+	// egress chain; delete the realm through it so the chain goes too.
+	t.Cleanup(func() { cleanupRealm(t, host, realm) })
 
 	// `kuke __complete <command line…> <toComplete>`: the trailing "" is the
 	// positional cell name being completed. The completer's daemon endpoint is

@@ -70,3 +70,13 @@ func (r *Exec) applySpaceEgressPolicy(space intmodel.Space) error {
 func (r *Exec) removeSpaceEgressPolicy(space intmodel.Space) error {
 	return r.netPolicyEnforcer().Remove(r.ctx, space.Spec.RealmName, space.Metadata.Name)
 }
+
+// removeSpaceEgressPolicyByName is the best-effort form used by teardown
+// sweeps that run when the space document (or its bridge) is already gone.
+// A failure is logged, never returned, so the bridge teardown still runs.
+func (r *Exec) removeSpaceEgressPolicyByName(realmName, spaceName string) {
+	if err := r.netPolicyEnforcer().Remove(r.ctx, realmName, spaceName); err != nil {
+		r.logger.WarnContext(r.ctx, "failed to remove space egress policy",
+			"realm", realmName, "space", spaceName, "error", err)
+	}
+}
