@@ -1,0 +1,66 @@
+name: Web UI
+on:
+  pull_request:
+    branches:
+      - main
+    # Runs only when something the embedded web UI depends on changes, so a
+    # frontend-only PR skips the Go `make test` / `make e2e` jobs in
+    # test.yaml (no Go test outside internal/webui imports the package, and
+    # the e2e suite never asserts on the embedded asset bytes). The paths:
+    #   - internal/webui/**: frontend source, the generated dist/ bundle,
+    #     assets.go and assets_test.go.
+    #   - internal/webserver/**: the server that serves the bundle; the
+    #     Playwright suite runs against the packaged binary, so server
+    #     changes can break UI states.
+    #   - Makefile: web-ui-check and web-ui-test targets.
+    #   - go.mod / go.sum: the packaged kuke binary the browser suite drives.
+    # The workflow self-reference ensures CI edits to this file still run
+    # their own job.
+    paths:
+      - "internal/webui/**"
+      - "internal/webserver/**"
+      - "Makefile"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/webui.yaml"
+  push:
+    branches:
+      - main
+    paths:
+      - "internal/webui/**"
+      - "internal/webserver/**"
+      - "Makefile"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/webui.yaml"
+
+# The job only checks out the repo and runs tests, so a read-only
+# GITHUB_TOKEN is enough (same scope as test.yaml).
+permissions:
+  contents: read
+
+jobs:
+  web-ui:
+    name: Embedded web UI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: internal/webui/frontend/package-lock.json
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Check generated assets match source
+        run: make web-ui-check
+      - name: Install browser
+        run: cd internal/webui/frontend && npx playwright install --with-deps chromium
+      - name: Test browser states against the packaged binary
+        run: make web-ui-test
+      - name: Test packaged assets outside the checkout
+        run: |
+          GOWORK=off go test -c -o /tmp/webui.test ./internal/webui
+          cd /tmp
+          ./webui.test

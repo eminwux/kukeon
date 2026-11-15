@@ -9,6 +9,13 @@ on:
     # produced from the Makefile, so both stay in the trigger set alongside
     # `**/*.go` and the module files. The workflow self-reference ensures CI
     # edits to this file still run their own job.
+    #
+    # `internal/webui/**` is deliberately absent: frontend source and the
+    # generated dist/ bundle are covered by the `Embedded web UI` job in
+    # webui.yaml. No Go test outside internal/webui imports the package and
+    # the e2e suite never asserts on embedded asset bytes, so a frontend-only
+    # PR has nothing for these jobs to catch. Go files under internal/webui/
+    # still trigger this workflow through `**/*.go`.
     paths:
       - "**/*.go"
       - "cmd/kuke/apply/testdata/**"
@@ -16,7 +23,6 @@ on:
       - "**/go.sum"
       - "go.work"
       - "go.work.sum"
-      - "internal/webui/**"
       - "Makefile"
       - "Dockerfile"
       - ".github/workflows/test.yaml"
@@ -30,7 +36,6 @@ on:
       - "**/go.sum"
       - "go.work"
       - "go.work.sum"
-      - "internal/webui/**"
       - "Makefile"
       - "Dockerfile"
       - ".github/workflows/test.yaml"
@@ -44,31 +49,6 @@ permissions:
   contents: read
 
 jobs:
-  web-ui:
-    name: Embedded web UI
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: internal/webui/frontend/package-lock.json
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - name: Check generated assets match source
-        run: make web-ui-check
-      - name: Install browser
-        run: cd internal/webui/frontend && npx playwright install --with-deps chromium
-      - name: Test browser states against the packaged binary
-        run: make web-ui-test
-      - name: Test packaged assets outside the checkout
-        run: |
-          GOWORK=off go test -c -o /tmp/webui.test ./internal/webui
-          cd /tmp
-          ./webui.test
-
   test:
     name: make test
     runs-on: ubuntu-latest
