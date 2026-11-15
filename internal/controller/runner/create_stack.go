@@ -53,6 +53,14 @@ func (r *Exec) CreateStack(stack intmodel.Stack) (intmodel.Stack, error) {
 		return ensuredStack, nil
 	}
 
+	// Stack not found: the parent realm and space must exist before any
+	// side effect. provisionNewStack persists the stack document and its
+	// cgroup first, so without this preflight a missing parent leaves a
+	// Ready orphan behind (#1373).
+	if parentErr := r.requireParentSpace(stack.Spec.RealmName, stack.Spec.SpaceName); parentErr != nil {
+		return intmodel.Stack{}, parentErr
+	}
+
 	// Stack not found, create new stack
 	resultStack, err := r.provisionNewStack(stack)
 	if err != nil {
@@ -72,4 +80,32 @@ func (r *Exec) EnsureStack(stack intmodel.Stack) (intmodel.Stack, error) {
 	}
 
 	return ensuredStack, nil
+}
+
+// requireParentSpace returns a wrapped ErrRealmNotFound / ErrSpaceNotFound
+// when the stack's parent realm or space has no metadata, so first-time stack
+// provisioning fails before persisting anything beneath them.
+func (r *Exec) requireParentSpace(realmName, spaceName string) error {
+	realmName = strings.TrimSpace(realmName)
+	spaceName = strings.TrimSpace(spaceName)
+	if realmName == "" {
+		return errdefs.ErrRealmNameRequired
+	}
+	if spaceName == "" {
+		return errdefs.ErrSpaceNameRequired
+	}
+	if err := r.requireParentRealm(realmName); err != nil {
+		return err
+	}
+	_, err := r.GetSpace(intmodel.Space{
+		Metadata: intmodel.SpaceMetadata{Name: spaceName},
+		Spec:     intmodel.SpaceSpec{RealmName: realmName},
+	})
+	if err != nil {
+		if errors.Is(err, errdefs.ErrSpaceNotFound) {
+			return fmt.Errorf("parent space %q in realm %q: %w", spaceName, realmName, err)
+		}
+		return fmt.Errorf("%w: %w", errdefs.ErrGetSpace, err)
+	}
+	return nil
 }
