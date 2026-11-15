@@ -34,8 +34,25 @@ import (
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/compose"
 	"github.com/eminwux/kukeon/pkg/team/config"
+	"github.com/eminwux/kukeon/pkg/team/harness"
 	"gopkg.in/yaml.v3"
 )
+
+// publishedCodexImage returns the committed codex catalog's non-root image so
+// tests follow the release tag that release-images.sh stamps before each
+// kukeon release instead of pinning one.
+func publishedCodexImage(t *testing.T) string {
+	t.Helper()
+	catalog, err := harness.LoadCatalog(os.DirFS("../../../team/harnesses"), "codex", "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	image := catalog.Spec.Images[0].Image
+	if !strings.HasPrefix(image, "ghcr.io/eminwux/kukeon/codex:") {
+		t.Fatalf("codex catalog image = %q", image)
+	}
+	return image
+}
 
 type noGit struct{}
 
@@ -386,7 +403,7 @@ func assertRootResources(t *testing.T, result *compose.Result) {
 		p.Blueprint.Spec.Prefix != p.Config.Metadata.Name || p.Config.Spec.Blueprint.Name != p.Config.Metadata.Name {
 		t.Fatal("unstable identity")
 	}
-	if p.Image.Image != "ghcr.io/eminwux/kuketeams/codex:v0.2.1" {
+	if p.Image.Image != publishedCodexImage(t) {
 		t.Fatalf("image = %+v", p.Image)
 	}
 	c := p.Blueprint.Spec.Cell.Containers[0]
@@ -1031,7 +1048,7 @@ func TestCatalogFollowsSelectedSourceAndPath(t *testing.T) {
 	catalogPath := "nested/runtime/images.yaml"
 	external[catalogPath].Data = bytes.ReplaceAll(
 		external[catalogPath].Data,
-		[]byte("ghcr.io/eminwux/kuketeams/codex:v0.2.1"),
+		[]byte(publishedCodexImage(t)),
 		[]byte("registry.test/custom/codex:v9"),
 	)
 	cfg.Spec.Defaults.Sources = append(

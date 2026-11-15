@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"os"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -54,17 +55,33 @@ func TestInvalidHarnessSchema(t *testing.T) {
 	}
 }
 
+// committedTag returns the tag release-images.sh stamped on the committed
+// codex catalog, so these tests follow each kukeon release's regeneration.
+func committedTag(t *testing.T) string {
+	t.Helper()
+	raw, err := os.ReadFile("../../../team/harnesses/codex/images.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	match := regexp.MustCompile(`ghcr\.io/eminwux/kukeon/codex:(\S+)`).FindSubmatch(raw)
+	if match == nil {
+		t.Fatal("committed codex catalog lacks a ghcr.io/eminwux/kukeon/codex reference")
+	}
+	return string(match[1])
+}
+
 func TestCatalogGeneration(t *testing.T) {
+	tag := committedTag(t)
 	h, err := harness.Load(os.DirFS("../../../team"), "harnesses/codex")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, registry := range []string{"ghcr.io/eminwux/kuketeams", ""} {
-		c, genErr := harness.Generate(h, registry, "v0.2.1")
+	for _, registry := range []string{"ghcr.io/eminwux/kukeon", ""} {
+		c, genErr := harness.Generate(h, registry, tag)
 		if genErr != nil {
 			t.Fatal(genErr)
 		}
-		assertGenerated(t, h, c, registry)
+		assertGenerated(t, h, c, registry, tag)
 		first, marshalErr := harness.MarshalCatalog(c)
 		if marshalErr != nil {
 			t.Fatal(marshalErr)
@@ -92,13 +109,14 @@ func TestCatalogRejectsWrongShapeAndIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	tag := committedTag(t)
 	for _, test := range []struct{ name, old, value string }{
 		{"kind", "kind: HarnessImageCatalog", "kind: ImageCatalog"},
 		{"identity", "name: codex", "name: claude"},
 		{"obsolete-build", "  images:", "  build: {}\n  images:"},
-		{"invalid-ref", "ghcr.io/eminwux/kuketeams/codex:v0.2.1", "bad::ref"},
+		{"invalid-ref", "ghcr.io/eminwux/kukeon/codex:" + tag, "bad::ref"},
 		{"missing-capability", "        - codex\n", "        - wrong\n"},
-		{"duplicate-image", "ghcr.io/eminwux/kuketeams/codex-root:v0.2.1", "ghcr.io/eminwux/kuketeams/codex:v0.2.1"},
+		{"duplicate-image", "ghcr.io/eminwux/kukeon/codex-root:" + tag, "ghcr.io/eminwux/kukeon/codex:" + tag},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			raw := strings.Replace(string(original), test.old, test.value, 1)
@@ -117,7 +135,7 @@ func TestCatalogRejectsWrongShapeAndIdentity(t *testing.T) {
 	}
 }
 
-func assertGenerated(t *testing.T, h *harness.Harness, c *harness.ImageCatalog, registry string) {
+func assertGenerated(t *testing.T, h *harness.Harness, c *harness.ImageCatalog, registry, tag string) {
 	t.Helper()
 	if c.Metadata.Name != "codex" || len(c.Spec.Images) != 2 {
 		t.Fatal("lost identity or variants")
@@ -127,7 +145,7 @@ func assertGenerated(t *testing.T, h *harness.Harness, c *harness.ImageCatalog, 
 		if registry != "" {
 			prefix = registry + "/"
 		}
-		if image.Image != prefix+h.Spec.Images[i].Name+":v0.2.1" ||
+		if image.Image != prefix+h.Spec.Images[i].Name+":"+tag ||
 			!reflect.DeepEqual(image.Capabilities, h.Spec.Images[i].Capabilities) {
 			t.Fatalf("generation: %+v", image)
 		}

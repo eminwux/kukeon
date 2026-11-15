@@ -13,7 +13,7 @@ def docker(*args):
 
 
 def main():
-    registry = os.environ.get("REGISTRY", "ghcr.io/eminwux/kuketeams")
+    registry = os.environ.get("REGISTRY", "ghcr.io/eminwux/kukeon")
     tag = os.environ.get("TAG", "latest")
     prefix = registry + "/" if registry else ""
     with tempfile.TemporaryDirectory(prefix="kuketeams-ssh-") as directory:
