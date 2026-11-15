@@ -18,6 +18,7 @@ package runner
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -45,7 +46,12 @@ import (
 // metadata file), while the retained volume stays discoverable and deletable at
 // its original coordinates (ListVolumes/GetVolume/DeleteVolume walk by
 // directory presence).
+//
+// A missing scopeDir is a no-op, matching the os.RemoveAll it replaces.
 func (r *Exec) reclaimScopeMetadata(scopeDir string) error {
+	if _, err := os.Lstat(scopeDir); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
 	leaves, ancestors, err := r.collectRetainedPreserveSet(scopeDir)
 	if err != nil {
 		return err

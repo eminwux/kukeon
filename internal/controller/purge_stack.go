@@ -79,14 +79,18 @@ func (b *Exec) PurgeStack(stack intmodel.Stack, force, cascade bool) (PurgeStack
 		}
 	}
 
-	// Call private cascade method (handles cascade deletion, standard delete, and comprehensive purge)
+	// Call private cascade method (handles cascade deletion, standard delete, and comprehensive purge).
+	// A failure is returned alongside the partial result (matching PurgeRealm) so
+	// the CLI exits non-zero instead of printing a success verdict for a stack
+	// that is still present.
 	if err = b.purgeStackCascade(internalStack, force, cascade); err != nil {
 		result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
-	} else {
-		// Since private method succeeded, assume all operations succeeded
-		result.Deleted = append(result.Deleted, "metadata", "cgroup")
-		result.Purged = append(result.Purged, "cni-resources", "orphaned-containers", "all-metadata")
+		return result, err
 	}
+
+	// Since private method succeeded, assume all operations succeeded
+	result.Deleted = append(result.Deleted, "metadata", "cgroup")
+	result.Purged = append(result.Purged, "cni-resources", "orphaned-containers", "all-metadata")
 
 	return result, nil
 }

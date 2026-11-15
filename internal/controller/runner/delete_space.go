@@ -19,7 +19,6 @@ package runner
 import (
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/consts"
@@ -148,13 +147,15 @@ func (r *Exec) DeleteSpace(space intmodel.Space) error {
 		return fmt.Errorf("%w: failed to delete space metadata: %w", errdefs.ErrDeleteSpace, err)
 	}
 
-	// Remove metadata directory completely
+	// Remove metadata directory, preserving any reclaimPolicy: Retain volume in
+	// the space subtree (#1237) — including a stack-scoped one a preceding stack
+	// cascade left in place — instead of a blunt RemoveAll that would wipe it.
 	metadataRunPath := fs.SpaceMetadataDir(
 		r.opts.RunPath,
 		internalSpace.Spec.RealmName,
 		internalSpace.Metadata.Name,
 	)
-	_ = os.RemoveAll(metadataRunPath)
+	_ = r.reclaimScopeMetadata(metadataRunPath)
 
 	return nil
 }
