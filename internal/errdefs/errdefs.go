@@ -135,6 +135,9 @@ var (
 	// ErrCgroupScopeKind rejects a GetCgroupDetail scope whose kind is not
 	// realm, space, stack, cell or container (issue #1410).
 	ErrCgroupScopeKind = errors.New("unsupported cgroup scope kind")
+	// ErrNetworkScopeKind rejects a GetNetworkDetail scope whose kind is not
+	// space, cell or container (issue #1411).
+	ErrNetworkScopeKind = errors.New("unsupported network scope kind")
 	// ErrDaemonMethodUnsupported marks an RPC the running kukeond does not
 	// implement — the client is newer than the daemon and kukeond must be
 	// rebuilt/redeployed (e.g. `kuke init --kukeond-image ...`).

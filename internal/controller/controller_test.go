@@ -573,6 +573,14 @@ func (f *fakeRunner) CgroupMountpoint() (string, error) {
 	return "", errors.New("unexpected call to CgroupMountpoint")
 }
 
+func (f *fakeRunner) InspectSpaceNetwork(intmodel.Space) (cni.SpaceNetworkInfo, error) {
+	return cni.SpaceNetworkInfo{}, errors.New("unexpected call to InspectSpaceNetwork")
+}
+
+func (f *fakeRunner) InspectCellNetwork(intmodel.Cell, bool) (bool, string, error) {
+	return false, "", errors.New("unexpected call to InspectCellNetwork")
+}
+
 func (f *fakeRunner) ExistsCgroup(doc any) (bool, error) {
 	if f.ExistsCgroupFn != nil {
 		return f.ExistsCgroupFn(doc)

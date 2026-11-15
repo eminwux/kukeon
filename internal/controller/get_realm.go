@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
@@ -90,4 +91,16 @@ func (b *Exec) ListRealms() ([]intmodel.Realm, error) {
 // status.cgroupPath is relative to (issue #1410).
 func (b *Exec) CgroupMountpoint() (string, error) {
 	return b.runner.CgroupMountpoint()
+}
+
+// InspectSpaceNetwork returns the runtime view of a space's CNI network
+// (issue #1411).
+func (b *Exec) InspectSpaceNetwork(space intmodel.Space) (cni.SpaceNetworkInfo, error) {
+	return b.runner.InspectSpaceNetwork(space)
+}
+
+// InspectCellNetwork reports whether the cell's root task is running and its
+// cached CNI IPv4 (issue #1411).
+func (b *Exec) InspectCellNetwork(cell intmodel.Cell, hostNetwork bool) (bool, string, error) {
+	return b.runner.InspectCellNetwork(cell, hostNetwork)
 }

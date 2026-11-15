@@ -247,6 +247,12 @@ type Runner interface {
 	// CgroupMountpoint returns the cgroup v2 mountpoint that every
 	// status.cgroupPath is relative to (issue #1410).
 	CgroupMountpoint() (string, error)
+	// InspectSpaceNetwork returns a space's CNI conflist presence, bridge,
+	// subnet and conflist path in effect (issue #1411). Read-only.
+	InspectSpaceNetwork(space intmodel.Space) (cni.SpaceNetworkInfo, error)
+	// InspectCellNetwork reports whether the cell's root task is running and,
+	// for a bridged cell, its cached CNI IPv4 (issue #1411). Read-only.
+	InspectCellNetwork(cell intmodel.Cell, hostNetwork bool) (bool, string, error)
 
 	PurgeRealm(realm intmodel.Realm) (namespaceRemoved bool, err error)
 	PurgeSpace(space intmodel.Space) error

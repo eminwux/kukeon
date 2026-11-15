@@ -179,6 +179,50 @@ the raw kernel value next to them. Unset values are always shown, never as `0`:
 A missing cgroup is a normal state, not an error. Permission and daemon failures
 use the same notices as other resource views.
 
+## Network details
+
+Space, cell, and container detail views include a **Network** section; for
+cells it appears on the **Overview** tab. Realms and stacks have no networking
+fields, so they have none. kukeond reads the space's CNI conflist, its subnet
+allocator state, and the CNI result cache, and returns them over its
+Unix-socket API. `kuke serve` never reads `/opt/kukeon` or `/var/lib/cni`
+itself. Refresh re-reads every runtime value.
+
+- **Space**: network name (`<realm>-<space>`), bridge, subnet, CNI config path,
+  whether the CNI network (conflist) is present, the egress default, and the
+  egress allow rules (host or CIDR, with ports).
+- **Cell**: network mode, bridge, the root container's IPv4, the network
+  namespace owner, and a per-container summary of host network, host PID, and
+  declared ports. A cell is in **Host** mode when any of its containers sets
+  `hostNetwork`, the same rule the runner uses to put the root container (and
+  so the whole cell) on the host network.
+- **Container**: `hostNetwork`, `hostPID`, the CNI config path, shared
+  namespaces (the root container owns the cell's network namespace and the
+  other containers join it), and declared `ports`, `networks`, and
+  `networksAliases`.
+
+Every parameter renders, even when it is unset:
+
+| Shown                                           | Meaning                                                                                               |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| **Allow (default, not set)**                    | `spec.network.egress` (or its `default`) is absent, so egress is admit-all                            |
+| **Any port**                                    | An allow rule lists no ports, so it admits every port on that destination                             |
+| **Not allocated (allocated from 10.88.0.0/16)** | The space has no subnet yet; the daemon carves a `/24` from the `podSubnetCIDR` parent block          |
+| **(legacy conflist)**                           | A space created before the subnet allocator; the subnet is read from the conflist, not `network.json` |
+| **(default)**                                   | The CNI config path is the daemon's default location rather than a `spec.cniConfigPath` override      |
+| **Inherited from space**                        | The container has no `cniConfigPath` of its own and uses the space's conflist                         |
+| **Not running**                                 | The cell's root container task is not running, so it has no IPv4                                      |
+| **Not assigned (no CNI attachment cached)**     | The root container runs, but no CNI result is cached for it                                           |
+| **Host network (no CNI attachment)**            | The cell shares the host network namespace and is not attached to the space bridge                    |
+| **No (default)**                                | `hostNetwork` or `hostPID` is false or unset                                                          |
+| **Not set**                                     | A declared list (`ports`, `networks`, `networksAliases`) is empty                                     |
+
+Set `ports`, `networks`, and `networksAliases` values carry the note
+**Declared — not applied at runtime yet**: they are stored and diffed, but the
+runtime does not consume them yet (#1002). The section is read-only; edit
+egress rules and network settings through the resource documents. Permission
+and daemon failures use the same notices as other resource views.
+
 ## Options and permissions
 
 - `--listen`: `localhost` (default) or a literal loopback IP, including `::1`.
@@ -219,6 +263,11 @@ empty; append `/{name}` for its document:
 Append `/cgroup` to a realm, space, stack, cell, or container detail path to read
 that resource's cgroup configuration and live values from kukeond (for example,
 `/api/realms/{realm}/cgroup`). See [Cgroup details](#cgroup-details).
+
+Append `/network` to a space, cell, or container detail path to read that
+resource's declared networking and runtime network facts from kukeond (for
+example, `/api/realms/{realm}/spaces/{space}/network`). See
+[Network details](#network-details).
 
 Each name is a URL-encoded path segment. Collections return daemon documents,
 except containers, whose collection returns daemon container specs. No fields
