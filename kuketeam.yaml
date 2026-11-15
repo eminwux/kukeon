@@ -4,7 +4,7 @@ metadata: { name: kukeon-dev }
 spec:
   sources:
     - name: agents
-      url: github.com/eminwux/agents
+      url: git@github.com:eminwux/agents
       branch: main
       clonePath: /home/user/agents
     - name: kuketeams
