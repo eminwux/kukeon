@@ -1,6 +1,6 @@
 apiVersion: kuketeams.io/v1
 kind: Team
-metadata: { name: kukeon-dev }
+metadata: { name: kukeon }
 spec:
   sources:
     - name: agents
