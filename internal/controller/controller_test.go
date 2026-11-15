@@ -142,6 +142,12 @@ type fakeRunner struct {
 	RefreshCellFn   func(cell intmodel.Cell) (intmodel.Cell, int, error)
 	ReconcileCellFn func(cell intmodel.Cell) (intmodel.Cell, runner.ReconcileOutcome, error)
 
+	// Parent health reconcile methods (#1381). Unset hooks are no-ops so the
+	// cell-focused ReconcileCells tests need not stub the parent probes.
+	ReconcileRealmHealthFn func(realm intmodel.Realm) (bool, error)
+	ReconcileSpaceHealthFn func(space intmodel.Space) (bool, error)
+	ReconcileStackHealthFn func(stack intmodel.Stack) (bool, error)
+
 	// Image methods
 	LoadImageFn            func(namespace string, reader io.Reader) ([]string, error)
 	ListImagesFn           func(namespace string) ([]ctr.ImageInfo, error)
@@ -729,6 +735,27 @@ func (f *fakeRunner) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, runner.Re
 		return f.ReconcileCellFn(cell)
 	}
 	return intmodel.Cell{}, runner.ReconcileOutcome{}, errors.New("unexpected call to ReconcileCell")
+}
+
+func (f *fakeRunner) ReconcileRealmHealth(realm intmodel.Realm) (bool, error) {
+	if f.ReconcileRealmHealthFn != nil {
+		return f.ReconcileRealmHealthFn(realm)
+	}
+	return false, nil
+}
+
+func (f *fakeRunner) ReconcileSpaceHealth(space intmodel.Space) (bool, error) {
+	if f.ReconcileSpaceHealthFn != nil {
+		return f.ReconcileSpaceHealthFn(space)
+	}
+	return false, nil
+}
+
+func (f *fakeRunner) ReconcileStackHealth(stack intmodel.Stack) (bool, error) {
+	if f.ReconcileStackHealthFn != nil {
+		return f.ReconcileStackHealthFn(stack)
+	}
+	return false, nil
 }
 
 func (f *fakeRunner) LoadImage(namespace string, reader io.Reader) ([]string, error) {

@@ -436,3 +436,75 @@ func TestKuke_PurgeStack_VerifyState(t *testing.T) {
 
 	// Cleanup runs automatically via t.Cleanup()
 }
+
+// TestKuke_CreateParents_PersistHealthObservations pins #1381 against a real
+// kukeond: after a fresh create — and again after an idempotent re-create —
+// the persisted realm/space/stack documents report cgroupReady, and the realm
+// reports containerdNamespaceReady, without an operator `kuke refresh`.
+func TestKuke_CreateParents_PersistHealthObservations(t *testing.T) {
+	t.Parallel()
+
+	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
+	realmName := generateUniqueRealmName(t)
+	spaceName := generateUniqueSpaceName(t)
+	stackName := generateUniqueStackName(t)
+
+	t.Cleanup(func() {
+		cleanupStack(t, host, realmName, spaceName, stackName)
+		cleanupSpace(t, host, realmName, spaceName)
+		cleanupRealm(t, host, realmName)
+	})
+
+	createAll := func() {
+		t.Helper()
+		runReturningBinary(t, nil, kuke,
+			append(buildKukeDaemonArgs(host), "create", "realm", realmName)...)
+		runReturningBinary(t, nil, kuke,
+			append(buildKukeDaemonArgs(host), "create", "space", spaceName, "--realm", realmName)...)
+		runReturningBinary(t, nil, kuke,
+			append(buildKukeDaemonArgs(host),
+				"create", "stack", stackName, "--realm", realmName, "--space", spaceName)...)
+	}
+
+	assertHealth := func(pass string) {
+		t.Helper()
+		realm, err := parseRealmJSON(t, runReturningBinary(t, nil, kuke,
+			append(buildKukeDaemonArgs(host), "get", "realm", realmName, "--output", "json")...))
+		if err != nil {
+			t.Fatalf("%s: parse realm JSON: %v", pass, err)
+		}
+		if !realm.Status.CgroupReady {
+			t.Errorf("%s: realm cgroupReady = false, want true", pass)
+		}
+		if !realm.Status.ContainerdNamespaceReady {
+			t.Errorf("%s: realm containerdNamespaceReady = false, want true", pass)
+		}
+
+		space, err := parseSpaceJSON(t, runReturningBinary(t, nil, kuke,
+			append(buildKukeDaemonArgs(host),
+				"get", "space", spaceName, "--realm", realmName, "--output", "json")...))
+		if err != nil {
+			t.Fatalf("%s: parse space JSON: %v", pass, err)
+		}
+		if !space.Status.CgroupReady {
+			t.Errorf("%s: space cgroupReady = false, want true", pass)
+		}
+
+		stack, err := parseStackJSON(t, runReturningBinary(t, nil, kuke,
+			append(buildKukeDaemonArgs(host),
+				"get", "stack", stackName, "--realm", realmName, "--space", spaceName,
+				"--output", "json")...))
+		if err != nil {
+			t.Fatalf("%s: parse stack JSON: %v", pass, err)
+		}
+		if !stack.Status.CgroupReady {
+			t.Errorf("%s: stack cgroupReady = false, want true", pass)
+		}
+	}
+
+	createAll()
+	assertHealth("fresh create")
+	createAll()
+	assertHealth("repeated create")
+}

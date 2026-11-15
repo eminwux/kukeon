@@ -38,7 +38,14 @@ type ReconcileResult struct {
 	// "state flip persisted" apart from "cell is gone".
 	CellsDeleted int
 	CellsErrored int
-	Errors       []string
+	// ParentsUpdated counts realms, spaces and stacks whose health
+	// observations (cgroupReady, realm containerdNamespaceReady) flipped
+	// and were persisted during the pass (#1381); ParentsErrored counts the
+	// ones whose health reconcile failed. Kept apart from the Cells*
+	// counters so the per-cell summary keeps its meaning.
+	ParentsUpdated int
+	ParentsErrored int
+	Errors         []string
 }
 
 // SpaceNetReconcileResult summarizes a single pass of the daemon's
@@ -102,9 +109,12 @@ func (b *Exec) ReconcileSpaceNetworks() (SpaceNetReconcileResult, error) {
 }
 
 // ReconcileCells walks every realm/space/stack and reconciles each cell's
-// status against observed container state. Errors at any level are logged
-// and recorded in Errors; the walk continues so a single bad cell does not
-// silence the rest of the host.
+// status against observed container state. On the way down it also re-probes
+// each realm/space/stack's health observations (#1381) so a parent whose
+// cgroup was wiped by a reboot stops reporting cgroupReady, and one whose
+// cgroup came back reports it again, without an operator `kuke refresh`.
+// Errors at any level are logged and recorded in Errors; the walk continues
+// so a single bad cell does not silence the rest of the host.
 func (b *Exec) ReconcileCells() (ReconcileResult, error) {
 	result := ReconcileResult{Errors: []string{}}
 
@@ -122,6 +132,11 @@ func (b *Exec) ReconcileCells() (ReconcileResult, error) {
 
 	for _, realm := range realms {
 		realmName := realm.Metadata.Name
+		if b.reconcileParentHealth(&result, errdefs.ErrRealmNotFound,
+			"realm "+realmName,
+			func() (bool, error) { return b.runner.ReconcileRealmHealth(realm) }) {
+			continue
+		}
 		spaces, listErr := b.runner.ListSpaces(realmName)
 		if listErr != nil {
 			result.Errors = append(result.Errors,
@@ -130,6 +145,11 @@ func (b *Exec) ReconcileCells() (ReconcileResult, error) {
 		}
 		for _, space := range spaces {
 			spaceName := space.Metadata.Name
+			if b.reconcileParentHealth(&result, errdefs.ErrSpaceNotFound,
+				"space "+realmName+"/"+spaceName,
+				func() (bool, error) { return b.runner.ReconcileSpaceHealth(space) }) {
+				continue
+			}
 			stacks, stacksErr := b.runner.ListStacks(realmName, spaceName)
 			if stacksErr != nil {
 				result.Errors = append(result.Errors,
@@ -138,6 +158,11 @@ func (b *Exec) ReconcileCells() (ReconcileResult, error) {
 			}
 			for _, stack := range stacks {
 				stackName := stack.Metadata.Name
+				if b.reconcileParentHealth(&result, errdefs.ErrStackNotFound,
+					"stack "+realmName+"/"+spaceName+"/"+stackName,
+					func() (bool, error) { return b.runner.ReconcileStackHealth(stack) }) {
+					continue
+				}
 				cells, cellsErr := b.runner.ListCells(realmName, spaceName, stackName)
 				if cellsErr != nil {
 					result.Errors = append(result.Errors,
@@ -200,6 +225,31 @@ func (b *Exec) ReconcileCells() (ReconcileResult, error) {
 	}
 
 	return result, nil
+}
+
+// reconcileParentHealth runs one parent-level health reconcile and folds its
+// outcome into result. It reports true only when the resource vanished since
+// the listing (notFound), telling the caller to skip its subtree; any other
+// failure is recorded and the walk still descends, since a failed health
+// probe says nothing about the cells beneath it.
+func (b *Exec) reconcileParentHealth(
+	result *ReconcileResult,
+	notFound error,
+	label string,
+	reconcile func() (bool, error),
+) bool {
+	updated, err := reconcile()
+	switch {
+	case errors.Is(err, notFound):
+		return true
+	case err != nil:
+		result.ParentsErrored++
+		result.Errors = append(result.Errors,
+			fmt.Sprintf("reconcile %s health: %v", label, err))
+	case updated:
+		result.ParentsUpdated++
+	}
+	return false
 }
 
 // checkDiskPressure samples the data volume backing each realm's metadata tree

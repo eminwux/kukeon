@@ -275,6 +275,14 @@ type Runner interface {
 	// cell whose Spec.AutoDelete=true survives a daemon restart without
 	// needing the daemon to re-install per-cell goroutines on startup.
 	ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcome, error)
+	// ReconcileRealmHealth / ReconcileSpaceHealth / ReconcileStackHealth are
+	// the parent-level daemon-tick counterparts (#1381): they re-probe only
+	// the cgroupReady (and, for realms, containerdNamespaceReady)
+	// observations and persist a flip in either direction, leaving every
+	// other status field untouched. Return whether a status write landed.
+	ReconcileRealmHealth(realm intmodel.Realm) (bool, error)
+	ReconcileSpaceHealth(space intmodel.Space) (bool, error)
+	ReconcileStackHealth(stack intmodel.Stack) (bool, error)
 
 	GetContainerState(cell intmodel.Cell, containerID string) (intmodel.ContainerState, error)
 
