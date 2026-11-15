@@ -224,17 +224,11 @@ const (
 	KukebuildBaseDir = "/var/lib/kukebuild"
 
 	// InternalImageRegistry is the reserved, non-routable "host" every
-	// locally-built `kuke team init --build` image is tagged under. It is
-	// ICANN's `.internal` private-use TLD, so a pull against it can never
-	// accidentally reach a real registry. Three subsystems key off this one
-	// definition so they cannot drift:
-	//   - the build path (internal/teambuild) tags each built image
-	//     <InternalImageRegistry>/<name>:<version> and threads it as the
-	//     `--build-arg REGISTRY=…` so leaf FROMs resolve to the in-realm base;
-	//   - the bind path (internal/teamrender) binds the cell blueprint's image
-	//     to the same ref in `--build` mode (vs the catalog's published image);
-	//   - the runtime resolver (internal/ctr) treats refs hosted here as
-	//     local-only — never pulled, with a clear "build it" error on a miss.
+	// locally-built kukeon image is tagged under (the dev-loop kukeond image
+	// and realm image builds). It is ICANN's `.internal` private-use TLD, so a
+	// pull against it can never accidentally reach a real registry. The
+	// runtime resolver (internal/ctr) treats refs hosted here as local-only —
+	// never pulled, with a clear "build it" error on a miss.
 	InternalImageRegistry = "kukeon.internal"
 )
 
@@ -313,17 +307,15 @@ func RealmNamespace(realm string) string {
 	return realm + RealmNamespaceSuffix
 }
 
-// InternalImageRef composes the full image reference a locally-built team
-// image lands under: <InternalImageRegistry>/<name>:<version>. The build path
-// (internal/teambuild) tags with it and the bind path (internal/teamrender)
-// binds it, so both share this one formatter and the bound ref always matches
-// the tag that was built.
+// InternalImageRef composes the full image reference a locally-built image
+// lands under: <InternalImageRegistry>/<name>:<version>, so every producer and
+// consumer of such a ref shares one formatter.
 func InternalImageRef(name, version string) string {
 	return InternalImageRegistry + "/" + name + ":" + version
 }
 
 // IsInternalImageRef reports whether ref is hosted under InternalImageRegistry
-// — i.e. a local-only `kuke team init --build` image that must never be pulled
+// — i.e. a local-only built image that must never be pulled
 // from a network registry. The runtime resolver (internal/ctr) uses this to
 // short-circuit the registry pull on a local miss and surface a "build it"
 // error instead.

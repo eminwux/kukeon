@@ -1,0 +1,42 @@
+apiVersion: kuketeams.io/v1
+kind: Harness
+metadata:
+  name: codex
+spec:
+  renderer: kukeon/v1beta1
+  shell: /bin/bash
+  statePath: $HOME/.codex
+  environment:
+    CODEX_HOME: "${HOME}/.codex"
+    AGENTS_ROLE: "${ROLE_NAME}"
+    CODEX_SANDBOX: "${SANDBOX}"
+    CODEX_APPROVAL: "${APPROVAL}"
+  onInit:
+    - script: |
+        set -euo pipefail
+        make -f /opt/kuketeams/harness/Makefile.start setup
+        cd "$INITIAL_PATH" || exit 1
+        sandbox=$CODEX_SANDBOX
+        approval=$CODEX_APPROVAL
+        set -- -c 'project_doc_fallback_filenames=["CLAUDE.md"]' -c 'project_doc_max_bytes=131072'
+        if [ -n "${PROMPT:-}" ]; then
+          exec codex "$@" --ask-for-approval never exec --json \
+            --cd "$PWD" --sandbox "$sandbox" -- "$PROMPT"
+        else
+          exec codex "$@" \
+            -c 'tui.status_line=["hostname","model-with-reasoning","current-dir"]' \
+            --ask-for-approval "$approval" \
+            --cd "$PWD" --sandbox "$sandbox"
+        fi
+  skillPath: $HOME/.agents/skills
+  images:
+    - name: codex
+      build:
+        context: harnesses/codex/context
+        dockerfile: Dockerfile
+      capabilities: [codex, git, gh, go, node, make]
+    - name: codex-root
+      build:
+        context: harnesses/codex/context
+        dockerfile: Dockerfile.root
+      capabilities: [codex, git, gh, go, node, make, root]

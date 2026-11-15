@@ -13,3 +13,6 @@
 /local/**
 
 /internal/webui/frontend/node_modules/
+
+# Python bytecode caches from the team harness tests
+__pycache__/

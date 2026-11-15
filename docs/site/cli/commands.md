@@ -11,41 +11,42 @@ Both are hard-linked to the same binary on install. Running `kuke` enters the cl
 
 ## kuke subcommands
 
-| Command                        | What it does                                                          |
-| ------------------------------ | --------------------------------------------------------------------- |
-| `kuke init`                    | Bootstrap or reconcile a host                                         |
-| `kuke doctor`                  | Host pre-flight checks (cgroup-v2 delegation) before `kuke init`      |
-| `kuke status`                  | Consolidated post-`kuke init` daemon/host/state/parity health report  |
-| `kuke apply`                   | Apply resource definitions from YAML (multi-document supported)       |
-| `kuke run`                     | Create and start a single cell from a file or per-user profile        |
-| `kuke get`                     | List or describe resources (realm, space, stack, cell, container)     |
-| `kuke create`                  | Create a single resource imperatively                                 |
-| `kuke delete`                  | Delete a resource                                                     |
-| `kuke start` / `stop` / `kill` | Lifecycle operations on cells                                         |
-| `kuke purge`                   | Delete with aggressive cleanup of residual state                      |
-| `kuke refresh`                 | Reconcile `.status` from live state without touching `.spec`          |
-| `kuke restart`                 | Restart a cell (bounces the process; on OutOfSync also reconciles)    |
-| `kuke log`                     | Print a container's stdout/stderr (use `-f` to follow)                |
-| `kuke attach`                  | Attach to an Attachable container's `sbsh` terminal                   |
+| Command                        | What it does                                                             |
+| ------------------------------ | ------------------------------------------------------------------------ |
+| `kuke init`                    | Bootstrap or reconcile a host                                            |
+| `kuke doctor`                  | Host pre-flight checks (cgroup-v2 delegation) before `kuke init`         |
+| `kuke status`                  | Consolidated post-`kuke init` daemon/host/state/parity health report     |
+| `kuke apply`                   | Apply resource definitions from YAML (multi-document supported)          |
+| `kuke run`                     | Create and start a single cell from a file or per-user profile           |
+| `kuke get`                     | List or describe resources (realm, space, stack, cell, container)        |
+| `kuke create`                  | Create a single resource imperatively                                    |
+| `kuke delete`                  | Delete a resource                                                        |
+| `kuke start` / `stop` / `kill` | Lifecycle operations on cells                                            |
+| `kuke purge`                   | Delete with aggressive cleanup of residual state                         |
+| `kuke refresh`                 | Reconcile `.status` from live state without touching `.spec`             |
+| `kuke restart`                 | Restart a cell (bounces the process; on OutOfSync also reconciles)       |
+| `kuke log`                     | Print a container's stdout/stderr (use `-f` to follow)                   |
+| `kuke attach`                  | Attach to an Attachable container's `sbsh` terminal                      |
 | `kuke build`                   | Build an OCI image from a Dockerfile into a realm's containerd namespace |
-| `kuke image`                   | Manage container images in a realm's containerd namespace             |
-| `kuke daemon`                  | Manage the `kukeond` daemon cell lifecycle                            |
-| `kuke uninstall`               | Remove all kukeon runtime state from this host                        |
-| `kuke autocomplete`            | Emit a shell completion script                                        |
-| `kuke version`                 | Print the version                                                     |
+| `kuke image`                   | Manage container images in a realm's containerd namespace                |
+| `kuke daemon`                  | Manage the `kukeond` daemon cell lifecycle                               |
+| `kuke team init` / `add`       | Compose agent teams and register them with `kukeond`                     |
+| `kuke uninstall`               | Remove all kukeon runtime state from this host                           |
+| `kuke autocomplete`            | Emit a shell completion script                                           |
+| `kuke version`                 | Print the version                                                        |
 
 ## Global flags
 
 Every `kuke` subcommand inherits these persistent flags from the root command:
 
-| Flag                  | Default                           | What it does                                         |
-| --------------------- | --------------------------------- | ---------------------------------------------------- |
-| `--run-path`          | `/opt/kukeon`                     | Where Kukeon stores realm/space/stack/cell state     |
-| `--configuration`     | `$HOME/.kuke/kuke.yaml`           | ClientConfiguration YAML; absent file uses defaults  |
-| `--containerd-socket` | `/run/containerd/containerd.sock` | Containerd socket                                    |
-| `--host`              | `unix:///run/kukeon/kukeond.sock` | Daemon endpoint (`unix://` or `ssh://`)              |
-| `--verbose`, `-v`     | `false`                           | Enable verbose logging on stderr                     |
-| `--log-level`         | `info`                            | Log level (`debug`, `info`, `warn`, `error`)         |
+| Flag                  | Default                           | What it does                                        |
+| --------------------- | --------------------------------- | --------------------------------------------------- |
+| `--run-path`          | `/opt/kukeon`                     | Where Kukeon stores realm/space/stack/cell state    |
+| `--configuration`     | `$HOME/.kuke/kuke.yaml`           | ClientConfiguration YAML; absent file uses defaults |
+| `--containerd-socket` | `/run/containerd/containerd.sock` | Containerd socket                                   |
+| `--host`              | `unix:///run/kukeon/kukeond.sock` | Daemon endpoint (`unix://` or `ssh://`)             |
+| `--verbose`, `-v`     | `false`                           | Enable verbose logging on stderr                    |
+| `--log-level`         | `info`                            | Log level (`debug`, `info`, `warn`, `error`)        |
 
 `--no-daemon` is **not** a root-persistent flag — it is only accepted on `kuke init`, `kuke uninstall`, `kuke purge`, and every `kuke get <kind>` (see #222; the `get` kinds were retained per a user override on the original AC). The other promotable callers that don't carry the flag — `log`, `refresh`, `restart`, `start`, `stop`, `doctor cgroups` — reach the in-process path via `KUKEON_NO_DAEMON=true` or an explicit `--run-path` (which auto-promotes to in-process mode). The true workload verbs (`apply`, `create *`, `run`, `attach`, `delete *`, `kill *`) route through the daemon-only client after #566/#588 and ignore both knobs — they have no in-process fallback and always require the daemon.
 
@@ -87,6 +88,8 @@ The positional argument is the resource's own name; the flags specify where in t
 - [kuke build](kuke-build.md)
 - [kuke image](kuke-image.md)
 - [kuke daemon](kuke-daemon.md)
+- [kuke team init](kuke-team-init.md)
+- [kuke team add](kuke-team-add.md)
 - [kuke uninstall](kuke-uninstall.md)
 - [kuke autocomplete](kuke-autocomplete.md)
 - [kuke version](kuke-version.md)

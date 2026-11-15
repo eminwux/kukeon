@@ -1,0 +1,50 @@
+ARG REGISTRY=ghcr.io/eminwux/kuketeams
+ARG IMAGE_PREFIX=ghcr.io/eminwux/kuketeams/
+ARG TAG=latest
+FROM ${IMAGE_PREFIX}base-user:${TAG}
+
+ARG CLAUDE_CODE_VERSION=latest
+
+# JDK 17 and Android SDK tooling require root; base-user ends with
+# USER user so we switch back up for the system install.
+USER root
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends openjdk-21-jdk-headless wget unzip \
+ && rm -rf /var/lib/apt/lists/* \
+ && ln -sfT "$(dirname $(dirname $(readlink -f $(which java))))" /usr/local/openjdk
+
+# Stable arch-neutral path — the symlink above resolves to the arch-specific
+# JVM dir at build time, so this works on both amd64 and arm64.
+ENV JAVA_HOME=/usr/local/openjdk
+
+# Android SDK — baked in to avoid per-cell re-downloads (~2 GB, so we pay
+# once at image build time rather than on every cell boot).
+ENV ANDROID_HOME=/opt/android-sdk
+ENV PATH=${PATH}:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/platform-tools
+
+RUN mkdir -p ${ANDROID_HOME}/cmdline-tools \
+ && wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip \
+         -O /tmp/cmdtools.zip \
+ && unzip -q /tmp/cmdtools.zip -d /tmp/cmdtools \
+ && mv /tmp/cmdtools/cmdline-tools ${ANDROID_HOME}/cmdline-tools/latest \
+ && rm -rf /tmp/cmdtools /tmp/cmdtools.zip \
+ && yes | sdkmanager --licenses \
+ && sdkmanager \
+        "cmdline-tools;latest" \
+        "platforms;android-35" \
+        "build-tools;35.0.0" \
+        "platform-tools" \
+ && chown -R user:user ${ANDROID_HOME} /home/user
+
+USER user
+
+# Claude Code — same RUN block as harnesses/claude/Dockerfile.
+ENV PATH=/home/user/.local/bin:$PATH
+
+RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "${CLAUDE_CODE_VERSION}" \
+ && echo 'export PATH=$HOME/.local/bin:$PATH' >> /home/user/.bashrc \
+ && rm -f $HOME/.claude.json
+
+COPY Makefile.start /opt/kuketeams/harness/Makefile.start

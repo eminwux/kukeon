@@ -1,0 +1,42 @@
+apiVersion: kuketeams.io/v1
+kind: Harness
+metadata:
+  name: opencode
+spec:
+  renderer: kukeon/v1beta1
+  shell: /bin/bash
+  environment:
+    OPENCODE_CONFIG: "${HOME}/.opencode-config"
+    OPENROUTER_MODEL: "${OPENROUTER_MODEL}"
+    AGENT_DEF_DIR: "${ROLE_SOURCE_DIR}/${ROLE_PATH}"
+    SHARED_AGENT_DIR: "${ROLE_SOURCE_DIR}/common"
+    OPENCODE_PERMISSIONS: "${PERMISSIONS}"
+  parameters:
+    - name: OPENROUTER_MODEL
+      default: openrouter/qwen/qwen3.7-max
+  onInit:
+    - script: |
+        set -eu
+        set --
+        if [ "$OPENCODE_PERMISSIONS" = skip ]; then set -- --dangerously-skip-permissions; fi
+        make -f /opt/kuketeams/harness/Makefile.start setup
+
+        cd "$INITIAL_PATH" || exit 1
+        if [ -n "$PROMPT" ]; then
+          opencode run "$PROMPT" "$@" --model "$OPENROUTER_MODEL" -f ./
+        else
+          opencode --model "$OPENROUTER_MODEL" ./
+        fi
+        exit $?
+  skillPath: $HOME/.agents/skills
+  images:
+    - name: opencode
+      build:
+        context: harnesses/opencode/context
+        dockerfile: Dockerfile
+      capabilities: [opencode, git, gh, go, node, make]
+    - name: opencode-root
+      build:
+        context: harnesses/opencode/context
+        dockerfile: Dockerfile.root
+      capabilities: [opencode, git, gh, go, node, make, root]

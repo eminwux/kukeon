@@ -1,0 +1,7 @@
+apiVersion: kuketeams.io/v1
+kind: TeamsConfig
+spec:
+  defaults:
+    sources: []
+    roles: []
+    harnesses: []

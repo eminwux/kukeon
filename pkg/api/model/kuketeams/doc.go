@@ -24,7 +24,7 @@
 //     operator facts only — git identity/signing, registry, source clone URLs,
 //     secret sources.
 //   - TeamEntry (host, `~/.kuke/kuketeam.d/<project>.yaml`, one per project)
-//     carries the per-project composition record `kuke team init` writes — a
+//     carries the per-project composition record `kuke team add` writes — a
 //     drop-in directory so a corrupt write touches one project, not all (#796).
 //   - Role / Harness / ImageCatalog live in the pinned agents source. They
 //     declare, respectively, a role's skills + harness configs + needs, a
@@ -60,7 +60,7 @@ const (
 	// document (~/.kuke/kuketeams.yaml) maintained by `kuke team init`.
 	KindTeamsConfig = "TeamsConfig"
 	// KindTeamEntry identifies a host-side, per-project composition record
-	// (~/.kuke/kuketeam.d/<project>.yaml) written by `kuke team init` — one
+	// (~/.kuke/kuketeam.d/<project>.yaml) written by `kuke team add` — one
 	// document per project file.
 	KindTeamEntry = "TeamEntry"
 	// KindRole identifies a per-role document (role.yaml) in the agents source.

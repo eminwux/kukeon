@@ -318,3 +318,7 @@ web-ui-test: kuke
 # Requires KUKE_WEB_SMOKE_HOST=unix:///path/to/a/running/kukeond.sock.
 web-ui-smoke: kuke
 	cd internal/webui/frontend && npm run test:smoke
+
+# kuke team targets (harness checks, role materialization, live team checks).
+# Optional so builds that copy only this Makefile (the Dockerfile) still parse.
+-include team/team.mk

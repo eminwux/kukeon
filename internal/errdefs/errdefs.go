@@ -282,14 +282,14 @@ var (
 	ErrImageNotFound = errors.New("image not found")
 
 	// ErrInternalImageNotBuilt is returned when a cell references an image
-	// hosted under the local-only kukeon.internal registry (a
-	// `kuke team init --build` image) that is absent from the target realm's
+	// hosted under the local-only kukeon.internal registry (a locally-built
+	// image) that is absent from the target realm's
 	// containerd namespace. The resolver never pulls kukeon.internal/... refs
 	// — they are built locally, not published — so the fix is to build the
 	// image, not to retry a doomed network pull against the non-routable host.
 	ErrInternalImageNotBuilt = errors.New(
 		"local-only kukeon.internal image is not present in the realm; " +
-			"build it with `kuke team init --build`",
+			"build it with `kuke build --realm <realm>`",
 	)
 
 	// ErrGetImage wraps the underlying containerd error when fetching
@@ -654,175 +654,6 @@ var (
 	// errdefs.ErrControllerNoChange)` so `errors.Is` works across the
 	// boundary without diverging the surface text.
 	ErrControllerNoChange = errors.New("controller reported no change")
-
-	// Team-distribution parse/validation errors (kuketeams.io/v1 kinds —
-	// ProjectTeam, TeamsConfig, TeamEntry, Role, Harness, ImageCatalog).
-	// Issue #793, epic #792.
-
-	// ErrTeamMetadataNameRequired fires when a ProjectTeam/Role/Harness omits
-	// metadata.name.
-	ErrTeamMetadataNameRequired = errors.New("metadata.name is required")
-	// ErrTeamSourceInvalid fires when a structured `source` object is malformed:
-	// a missing or non-host-qualifiable repo, or other than exactly one of
-	// tag/branch/commit.
-	ErrTeamSourceInvalid = errors.New(
-		"source must carry a repo (<host>/<owner>/<repo> or <owner>/<repo>) and exactly one of tag/branch/commit",
-	)
-	// ErrTeamSourceStringForm fires when a `source` field is the legacy
-	// `<owner>/<repo>@vX.Y.Z` string instead of the structured object. The
-	// string form is no longer supported — there is no silent dual-parse.
-	ErrTeamSourceStringForm = errors.New(
-		"source is now a structured object (repo + one of tag/branch/commit); the `<owner>/<repo>@<version>` string form is no longer supported — migrate to e.g. `source:\n  repo: github.com/eminwux/agents\n  tag: v1.4.0`",
-	)
-	// ErrTeamRoleRefRequired fires when a ProjectTeam roles[] entry omits ref.
-	ErrTeamRoleRefRequired = errors.New("roles[].ref is required")
-	// ErrTeamImageCapabilityInvalid fires when an image capability entry looks
-	// like an image tag/digest instead of a bare capability name.
-	ErrTeamImageCapabilityInvalid = errors.New(
-		"image capability must be a bare capability name, not an image tag or digest",
-	)
-	// ErrTeamHarnessUnknown fires when a harness name is outside the known set.
-	ErrTeamHarnessUnknown = errors.New("unknown harness")
-	// ErrTeamGitIdentityIncomplete fires when a git author/committer identity is
-	// missing name or email.
-	ErrTeamGitIdentityIncomplete = errors.New("git identity requires both name and email")
-	// ErrTeamGitSignInvalid fires when a git.sign entry is not commits/tags.
-	ErrTeamGitSignInvalid = errors.New("git.sign entries must be one of: commits, tags")
-	// ErrTeamGitSignNeedsKey fires when git.sign is set without git.signingKey.
-	ErrTeamGitSignNeedsKey = errors.New("git.sign requires git.signingKey")
-	// ErrTeamSecretSourceInvalid fires when a TeamsConfig secret omits a valid
-	// source (from: env|file) or its key.
-	ErrTeamSecretSourceInvalid = errors.New(
-		"secret must declare a source (from: env|file) and a key, never an inline value",
-	)
-	// ErrTeamSourceKeyInvalid fires when a TeamsConfig sources[] override key is
-	// not in `<owner>/<repo>` or host-qualified `<host>/<owner>/<repo>` form.
-	ErrTeamSourceKeyInvalid = errors.New(
-		"sources key must be in <owner>/<repo> or <host>/<owner>/<repo> form",
-	)
-	// ErrTeamEntryNameRequired fires when a TeamEntry omits metadata.name (the
-	// per-project drop-in filename key).
-	ErrTeamEntryNameRequired = errors.New("teamEntry metadata.name is required")
-	// ErrTeamMetadataNameUnsafe guards every ProjectTeam/TeamEntry metadata.name
-	// that flows into Layout.EntryPath against path traversal: a "/" or "\"
-	// separator, a NUL byte, a ".." substring, or a leading "." would let
-	// filepath.Join escape the drop-in directory and overwrite the operator's
-	// own global facts file (e.g. metadata.name "../kuketeams" resolves to
-	// ~/.kuke/kuketeams.yaml). Enforced at the parser layer and as
-	// defense-in-depth in teamhost.WriteEntry.
-	ErrTeamMetadataNameUnsafe = errors.New(
-		"metadata.name must not contain path separators, NUL, '..', or a leading '.'",
-	)
-	// ErrTeamProjectDirInvalid fires when a ProjectTeam spec.projectDir is not a
-	// safe path basename (it flows into the in-cell `/home/<user>/<dir>` clone
-	// path the same way metadata.name does, so the same traversal guard
-	// applies), or when it equals the reserved `agents` repo slot dir — the
-	// collision spec.projectDir exists to avoid in the first place.
-	ErrTeamProjectDirInvalid = errors.New(
-		"spec.projectDir must be a safe path basename and must not equal the reserved \"agents\" slot dir",
-	)
-	// ErrTeamProjectFileNotFound fires when `kuke team init` finds no
-	// kuketeam.yaml in the current project directory.
-	ErrTeamProjectFileNotFound = errors.New("no kuketeam.yaml found in the current directory")
-	// ErrTeamProjectFileKind fires when the project file parses but is not a
-	// ProjectTeam document.
-	ErrTeamProjectFileKind = errors.New("project file must be a ProjectTeam document")
-	// ErrTeamHarnessFieldRequired fires when a Harness omits skillPath,
-	// makeTarget, or template.
-	ErrTeamHarnessFieldRequired = errors.New(
-		"harness skillPath, makeTarget, and template are required",
-	)
-	// ErrTeamImageRefRequired fires when an ImageCatalog entry omits ref.
-	ErrTeamImageRefRequired = errors.New("imageCatalog images[].ref is required")
-	// ErrTeamImageImageRequired fires when an ImageCatalog entry's image is not
-	// registry-qualified.
-	ErrTeamImageImageRequired = errors.New(
-		"imageCatalog images[].image must be a registry-qualified reference",
-	)
-	// ErrTeamImageBuildRequired fires when an ImageCatalog entry omits
-	// build.context or build.dockerfile.
-	ErrTeamImageBuildRequired = errors.New(
-		"imageCatalog images[].build requires non-empty context and dockerfile",
-	)
-	// ErrTeamImageCapabilitiesRequired fires when an ImageCatalog entry has no
-	// capabilities.
-	ErrTeamImageCapabilitiesRequired = errors.New(
-		"imageCatalog images[].capabilities must be non-empty",
-	)
-	// ErrTeamRoleFileKind fires when a per-role role.yaml parses to a kind
-	// other than Role.
-	ErrTeamRoleFileKind = errors.New("role file must be a Role document")
-	// ErrTeamHarnessFileKind fires when a per-harness harness.yaml parses to a
-	// kind other than Harness.
-	ErrTeamHarnessFileKind = errors.New("harness file must be a Harness document")
-	// ErrTeamImageCatalogFileKind fires when harnesses/images.yaml parses to a
-	// kind other than ImageCatalog.
-	ErrTeamImageCatalogFileKind = errors.New(
-		"image catalog file must be an ImageCatalog document",
-	)
-	// ErrTeamImageNoMatch fires when no ImageCatalog entry's capabilities
-	// superset a (role × harness)'s merged needs. The error message names the
-	// first unmet capability + the operator-actionable "build/label an image"
-	// hint, per #1042's hard-error contract.
-	ErrTeamImageNoMatch = errors.New(
-		"no image in ImageCatalog satisfies the role's merged needs",
-	)
-	// ErrTeamRoleNotLoaded fires when the render pipeline references a role
-	// the resolved Bundle did not load (resolve/render contract drift).
-	ErrTeamRoleNotLoaded = errors.New("role not loaded in bundle")
-	// ErrTeamHarnessNotLoaded fires when the render pipeline references a
-	// harness the resolved Bundle did not load.
-	ErrTeamHarnessNotLoaded = errors.New("harness not loaded in bundle")
-	// ErrTeamBlueprintTemplateMissing fires when a harness's spec.template path
-	// does not resolve under the materialized cache directory.
-	ErrTeamBlueprintTemplateMissing = errors.New(
-		"harness blueprint template not found under cache dir",
-	)
-	// ErrTeamBuildContextMissing fires when an ImageCatalog entry's resolved
-	// build.context dir or Dockerfile path does not exist in the materialized
-	// agents source — `kuke team init --build` cannot build the image.
-	ErrTeamBuildContextMissing = errors.New(
-		"build context or dockerfile missing under materialized agents source",
-	)
-	// ErrTeamBuildBaseMissing fires when a leaf Dockerfile's FROM references an
-	// in-repo (kukeon.internal/...) base whose Dockerfile is not present at
-	// `harnesses/<name>/Dockerfile` in the materialized agents source.
-	ErrTeamBuildBaseMissing = errors.New(
-		"in-repo base Dockerfile referenced by FROM is missing",
-	)
-	// ErrTeamBuildCycle fires when the FROM-walk's topo sort cannot place every
-	// build target — i.e. the cloned source's Dockerfile graph contains a cycle.
-	ErrTeamBuildCycle = errors.New(
-		"Dockerfile FROM-graph cycle prevents base-before-leaves build ordering",
-	)
-	// ErrTeamHarnessSeedPathRequired fires when a Harness seed entry omits path.
-	ErrTeamHarnessSeedPathRequired = errors.New("harness seeds[].path is required")
-	// ErrTeamHarnessSeedModeInvalid fires when a Harness seed mode is outside
-	// the permitted 0..0o777 file-permission range.
-	ErrTeamHarnessSeedModeInvalid = errors.New(
-		"harness seeds[].mode must be a file-permission bit set (0..0o777)",
-	)
-	// ErrTeamHarnessSeedPathEscapes fires when a Harness seed path, after
-	// ${TEAM_ROOT}/${HARNESS} expansion, would write outside the per-team
-	// root.
-	ErrTeamHarnessSeedPathEscapes = errors.New(
-		"harness seeds[].path escapes the per-team root after expansion",
-	)
-	// ErrTeamValidateGaps fires when `kuke team init --validate` finds one or
-	// more contract gaps (catalog miss, unresolved template path, unbound
-	// partial reference, or unbound fact reference). The gap report is printed
-	// to stdout; this sentinel drives the non-zero exit.
-	ErrTeamValidateGaps = errors.New(
-		"team validate found one or more contract gaps",
-	)
-	// ErrTeamApplyFailed fires when `kuke team init` applies its rendered
-	// secret/blueprint/config set and one or more documents come back with a
-	// `failed` action. The per-document failures are printed to stdout; this
-	// sentinel drives the non-zero exit a scripted/CI init relies on to detect
-	// a partial or total apply failure.
-	ErrTeamApplyFailed = errors.New(
-		"team init: one or more documents failed to apply",
-	)
 )
 
 var (

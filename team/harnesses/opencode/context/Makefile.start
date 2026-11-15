@@ -1,0 +1,5 @@
+# Image-owned adapter; role repositories retain their existing installer interface.
+.PHONY: setup
+setup:
+	@test -n "$$ROLE_SOURCE_DIR" -a -n "$$ROLE_PATH" || { echo 'ROLE_SOURCE_DIR and ROLE_PATH are required' >&2; exit 1; }
+	$(MAKE) -C "$$ROLE_SOURCE_DIR" opencode-openrouter ROLE="$$ROLE_PATH"

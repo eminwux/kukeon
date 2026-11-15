@@ -7,14 +7,12 @@ spec:
       url: git@github.com:eminwux/agents
       branch: main
       clonePath: /home/user/agents
-    - name: kuketeams
-      url: github.com/eminwux/kuketeams
-      branch: main
-      clonePath: /home/user/kuketeams
   roles:
     - { name: dev, source: agents, path: dev, needs: { image: [go, root] } }
     - { name: pm, source: agents, path: pm }
     - { name: pr-reviewer, source: agents, path: pr-reviewer }
+  # Harness definitions, contexts and image catalogs live in this repository
+  # (team/harnesses/); `project` is the source `kuke team add` adds for it.
   harnesses:
-    - { name: claude, source: kuketeams, path: harnesses/claude }
-    - { name: codex, source: kuketeams, path: harnesses/codex }
+    - { name: claude, source: project, path: team/harnesses/claude }
+    - { name: codex, source: project, path: team/harnesses/codex }

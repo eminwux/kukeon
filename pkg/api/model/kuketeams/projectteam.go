@@ -49,8 +49,8 @@ type ProjectTeamSpec struct {
 	// Realm, Space, and Stack are the optional scope coordinates the team's
 	// rendered cells bind to. Each defaults to `default` when omitted (the
 	// renderer stamps the defaulted value onto every rendered Blueprint/Config
-	// so the persisted Config scope matches the live cell — see teamrender
-	// DefaultRealm / DefaultSpace / DefaultStack and #1133).
+	// so the persisted Config scope matches the live cell — see Scope in
+	// pkg/team/compose and #1133).
 	Realm string `json:"realm,omitempty"    yaml:"realm,omitempty"`
 	Space string `json:"space,omitempty"    yaml:"space,omitempty"`
 	Stack string `json:"stack,omitempty"    yaml:"stack,omitempty"`

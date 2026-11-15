@@ -1,0 +1,82 @@
+apiVersion: v1beta1
+kind: CellBlueprint
+metadata:
+  name: {{ .RoleName }}-{{ .Harness }}
+  realm: {{ .Realm }}
+  space: {{ .Space }}
+  stack: {{ .Stack }}
+
+{{- $isRoot := .Root }}
+{{- $home := "/home/user" }}
+spec:
+  prefix: {{ .RoleName }}-{{ .Harness }}
+  parameters:
+{{ yamlIndent 4 .Parameters }}
+  cell:
+    tty:
+      default: work
+    {{- if $isRoot }}
+    # Root cells run docker/containerd-in-cell; the nested cgroup runtime
+    # delegates a cgroup subtree so an inner runtime can manage its own scopes.
+    nestedCgroupRuntime: true
+    {{- end }}
+    containers:
+      - id: work
+        attachable: true
+        image: {{ .Image | quote }}
+        command: {{ .Shell }}
+        workingDir: {{ $home }}
+        {{- if $isRoot }}
+        privileged: true
+        {{- end }}
+        env:
+{{ yamlIndent 10 .Environment }}
+        secrets:
+          {{- range .Secrets }}
+          - name: {{ . | quote }}
+            envName: {{ . | upper | replace "-" "_" | quote }}
+          {{- end }}
+        volumes:
+          {{- range .MountSelectors }}
+          - source: {{ if eq . "ssh" }}{{ $.HostHome }}/.ssh{{ else }}{{ template "mount_source" . }}{{ end }}
+            target: {{ if eq . "ssh" }}{{ $home }}/.ssh{{ else }}{{ template "mount_target" . }}{{ end }}
+            readOnly: {{ template "mount_readonly" . }}
+          {{- end }}
+          {{- if .StatePath }}
+          - kind: volume
+            source: {{ if .ProjectBound }}{{ .ProjectName }}-{{ end }}{{ .RoleName }}-{{ .Harness }}
+            target: {{ .StatePath }}
+          {{- end }}
+          {{- range .Mounts }}
+          - source: {{ .Source | quote }}
+            target: {{ .Target | quote }}
+            readOnly: {{ .ReadOnly }}
+          {{- end }}
+          {{- if $isRoot }}
+          # CNI plugin binaries + conflists for the in-cell runtime's networking
+          # (matches the retired crew dev-root mount; the daemon's own /opt/cni
+          # binds target the kukeond cell, not workload cells).
+          - source: /opt/cni
+            target: /opt/cni
+          {{- end }}
+        {{- if $isRoot }}
+        # Host rootfs is an overlay on sandboxed dev hosts; docker/containerd
+        # cannot stack their overlay drivers on a host bind — back with tmpfs.
+        tmpfs:
+          - path: /var/lib/docker
+            sizeBytes: 4294967296
+          - path: /var/lib/containerd
+            sizeBytes: 4294967296
+        {{- end }}
+        repos:
+          {{- range .Repos }}
+          - name: {{ . | quote }}
+            url: {{ template "repo_url" . }}
+            target: {{ $home }}/{{ if eq . "project" }}{{ $.ProjectName }}{{ else }}{{ template "repo_target" . }}{{ end }}
+            branch: main
+            required: true
+          {{- end }}
+        tty:
+          prompt: {{ .Prompt | quote }}
+          onInit:
+{{ template "onInit" .OnInit }}

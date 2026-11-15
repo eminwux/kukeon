@@ -1,0 +1,32 @@
+apiVersion: kuketeams.io/v1
+kind: HarnessImageCatalog
+metadata:
+  name: claude
+spec:
+  images:
+    - image: ghcr.io/eminwux/kuketeams/claude:v0.2.1
+      capabilities:
+        - claude
+        - git
+        - gh
+        - go
+        - node
+        - make
+    - image: ghcr.io/eminwux/kuketeams/claude-android:v0.2.1
+      capabilities:
+        - claude
+        - git
+        - gh
+        - go
+        - node
+        - make
+        - android
+    - image: ghcr.io/eminwux/kuketeams/claude-root:v0.2.1
+      capabilities:
+        - claude
+        - git
+        - gh
+        - go
+        - node
+        - make
+        - root

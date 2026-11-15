@@ -1,0 +1,125 @@
+apiVersion: kuketeams.io/v1
+kind: Harness
+metadata:
+  name: claude
+spec:
+  renderer: kukeon/v1beta1
+  shell: /bin/bash
+  statePath: $HOME/.claude
+  environment:
+    CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: "1"
+    ANTHROPIC_MODEL: "${ANTHROPIC_MODEL}"
+  parameters:
+    - name: ANTHROPIC_MODEL
+      default: opus
+  onInit:
+    - script: |
+        set -eu
+        [ -f "$HOME/.claude.json" ] ||
+          printf '{\n  "hasCompletedOnboarding": true,\n  "installMethod": "native"\n}\n' > "$HOME/.claude.json"
+
+        make -f /opt/kuketeams/harness/Makefile.start setup
+
+        cd "$INITIAL_PATH" || exit 1
+        if [ -n "$PROMPT" ]; then
+          # Supervisor loop. This shell is the work container's PID 1, so
+          # it owns the cell lifetime across turns. A one-shot
+          # `claude --print "$PROMPT"; exit $?` exits at end_turn, PID 1
+          # dies, and kukeon winds the whole cell down — so an agent that
+          # ends its turn to "wait for a wakeup" self-destructs mid-task
+          # (issue #772). Instead, re-invoke claude on the SAME session
+          # whenever a turn scheduled a wakeup, and exit only once a turn
+          # ends without one.
+          #
+          # Caveat (claude >= 2.1.163; this image runs 2.1.170): claude
+          # itself terminates background Bash tasks ~5s after a -p turn
+          # returns and stdin closes, independent of PID 1. So this loop
+          # restores the re-invocation contract but does NOT keep an
+          # in-flight backgrounded build alive across the yield — long
+          # work must be foregrounded or shell-owned (follow-up to #772).
+          SID=$(cat /proc/sys/kernel/random/uuid)
+          MAX_TURNS=50
+          turn=1
+          resume=0
+          next_prompt="$PROMPT"
+          last_err=""
+          while [ "$turn" -le "$MAX_TURNS" ]; do
+            turnlog="/tmp/claude-turn-$turn.jsonl"
+            if [ "$resume" -eq 0 ]; then
+              claude \
+                --settings "$ROLE_SOURCE_DIR/$ROLE_PATH/$HARNESS_SETTINGS" \
+                --add-dir "$ROLE_SOURCE_DIR/$ROLE_PATH" \
+                --session-id "$SID" \
+                --verbose \
+                --output-format stream-json \
+                --include-partial-messages \
+                --print "$next_prompt" </dev/null | tee "$turnlog"
+            else
+              claude \
+                --settings "$ROLE_SOURCE_DIR/$ROLE_PATH/$HARNESS_SETTINGS" \
+                --add-dir "$ROLE_SOURCE_DIR/$ROLE_PATH" \
+                --resume "$SID" \
+                --verbose \
+                --output-format stream-json \
+                --include-partial-messages \
+                --print "$next_prompt" </dev/null | tee "$turnlog"
+            fi
+            # tee masks claude's exit code under POSIX sh, so read the
+            # turn outcome and the yield signal from claude's own
+            # stream-json result rather than $?. Every branch below uses
+            # if/then/fi rather than `cond && action` lists so the loop is
+            # safe even if onInit runs under `set -e` (a `cond && action`
+            # whose cond is false returns non-zero and would abort the
+            # script — fatal on the normal non-error turn).
+            result_err=$(jq -rc 'select(.type=="result") | .is_error' "$turnlog" 2>/dev/null | tail -1)
+            # No result event at all => claude crashed mid-turn (segfault,
+            # OOM, killed) before emitting `result`. Treat that as an error
+            # exit, not clean completion — otherwise a hard crash reads as
+            # a normal "no wakeup, done" turn and exits 0.
+            if [ -z "$result_err" ] || [ "$result_err" = "true" ]; then
+              last_err="true"
+              break
+            fi
+            last_err="false"
+            # A ScheduleWakeup tool_use is the "yield, re-invoke me"
+            # signal; its input carries the delay and the prompt to fire
+            # on resume. No ScheduleWakeup this turn => the agent is done.
+            wake=$(jq -rc 'select(.type=="assistant") | .message.content[]? | select(.type=="tool_use" and .name=="ScheduleWakeup") | .input' "$turnlog" 2>/dev/null | tail -1)
+            if [ -z "$wake" ]; then break; fi
+            delay=$(printf '%s' "$wake" | jq -r '.delaySeconds // 60' 2>/dev/null)
+            case "$delay" in ''|*[!0-9]*) delay=60 ;; esac
+            # ScheduleWakeup's runtime clamp is [60, 3600]; mirror its floor.
+            if [ "$delay" -lt 60 ]; then delay=60; fi
+            if [ "$delay" -gt 3600 ]; then delay=3600; fi
+            np=$(printf '%s' "$wake" | jq -r '.prompt // empty' 2>/dev/null)
+            case "$np" in ''|'<<autonomous-loop-dynamic>>'|'<<autonomous-loop>>') np="Resume your task." ;; esac
+            next_prompt="$np"
+            resume=1
+            sleep "$delay"
+            turn=$((turn + 1))
+          done
+          if [ "$last_err" = "true" ]; then exit 1; fi
+          exit 0
+        else
+          claude \
+            --settings "$ROLE_SOURCE_DIR/$ROLE_PATH/$HARNESS_SETTINGS" \
+            --add-dir "$ROLE_SOURCE_DIR/$ROLE_PATH"
+          exit $?
+        fi
+  skillPath: $HOME/.claude/skills
+  images:
+    - name: claude
+      build:
+        context: harnesses/claude/context
+        dockerfile: Dockerfile
+      capabilities: [claude, git, gh, go, node, make]
+    - name: claude-android
+      build:
+        context: harnesses/claude/context
+        dockerfile: Dockerfile.android
+      capabilities: [claude, git, gh, go, node, make, android]
+    - name: claude-root
+      build:
+        context: harnesses/claude/context
+        dockerfile: Dockerfile.root
+      capabilities: [claude, git, gh, go, node, make, root]
