@@ -416,3 +416,91 @@ func TestReconcileHealth_VanishedResourceIsNotResurrected(t *testing.T) {
 		}
 	}
 }
+
+// TestReconcileHealth_DeleteBetweenProbeAndPersistIsNotResurrected pins the
+// DeleteX ordering race: the delete removes the cgroup first and the metadata
+// after, so a tick that read the document, then probed the already-removed
+// cgroup, would flip cgroupReady and persist into a deleted resource. The
+// must-exist status write returns NotFound instead of recreating the file.
+func TestReconcileHealth_DeleteBetweenProbeAndPersistIsNotResurrected(t *testing.T) {
+	cases := []struct {
+		name     string
+		path     func(r *Exec) string
+		notFound error
+		run      func(r *Exec) (bool, error)
+	}{
+		{
+			name:     "realm",
+			path:     func(r *Exec) string { return fs.RealmMetadataPath(r.opts.RunPath, healthTestRealm) },
+			notFound: errdefs.ErrRealmNotFound,
+			run:      func(r *Exec) (bool, error) { return r.ReconcileRealmHealth(healthRealm()) },
+		},
+		{
+			name: "space",
+			path: func(r *Exec) string {
+				return fs.SpaceMetadataPath(r.opts.RunPath, healthTestRealm, healthTestSpace)
+			},
+			notFound: errdefs.ErrSpaceNotFound,
+			run:      func(r *Exec) (bool, error) { return r.ReconcileSpaceHealth(healthSpace()) },
+		},
+		{
+			name: "stack",
+			path: func(r *Exec) string {
+				return fs.StackMetadataPath(r.opts.RunPath, healthTestRealm, healthTestSpace, healthTestStack)
+			},
+			notFound: errdefs.ErrStackNotFound,
+			run:      func(r *Exec) (bool, error) { return r.ReconcileStackHealth(healthStack()) },
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var r *Exec
+			fake := &deleteCellFakeClient{
+				// The probe runs after the tick's re-read: deleting the
+				// document here lands the delete in the probe→persist window.
+				loadCgroupFn: func(string, string) (*cgroup2.Manager, error) {
+					if err := os.Remove(tc.path(r)); err != nil && !os.IsNotExist(err) {
+						t.Fatalf("remove metadata: %v", err)
+					}
+					return nil, errCgroupAbsent
+				},
+				existsNamespaceFn: func(string) (bool, error) { return true, nil },
+			}
+			r = newHealthTestExec(t, fake)
+			seedHealthDocs(t, r, true)
+
+			updated, err := tc.run(r)
+			if updated || !errors.Is(err, tc.notFound) {
+				t.Errorf("Reconcile%sHealth = (%v, %v), want (false, %v)", tc.name, updated, err, tc.notFound)
+			}
+			if _, statErr := os.Stat(tc.path(r)); !os.IsNotExist(statErr) {
+				t.Errorf("%s recreated by the health persist (stat err %v)", tc.path(r), statErr)
+			}
+		})
+	}
+}
+
+// TestReconcileRealmHealth_MissingSocketKeepsNamespaceObservation pins that a
+// missing containerd socket (containerd restarting) is a probe error on the
+// tick path, not a clean "absent": containerdNamespaceReady must not flap.
+func TestReconcileRealmHealth_MissingSocketKeepsNamespaceObservation(t *testing.T) {
+	fake := &deleteCellFakeClient{
+		loadCgroupFn: func(string, string) (*cgroup2.Manager, error) {
+			return nil, errors.New("permission denied")
+		},
+		existsNamespaceFn: func(string) (bool, error) { return true, nil },
+	}
+	r := newHealthTestExec(t, fake)
+	seedHealthDocs(t, r, true)
+	if err := os.Remove(r.opts.ContainerdSocket); err != nil {
+		t.Fatalf("remove fake socket: %v", err)
+	}
+
+	updated, err := r.ReconcileRealmHealth(healthRealm())
+	if err != nil || updated {
+		t.Fatalf("ReconcileRealmHealth = (%v, %v), want (false, nil)", updated, err)
+	}
+	if !getHealthRealm(t, r).Status.ContainerdNamespaceReady {
+		t.Error("missing containerd socket flipped containerdNamespaceReady to false")
+	}
+}

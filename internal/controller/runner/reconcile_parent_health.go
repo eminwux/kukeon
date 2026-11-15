@@ -17,8 +17,11 @@
 package runner
 
 import (
+	"errors"
 	"fmt"
+	"os"
 
+	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
@@ -68,7 +71,7 @@ func (r *Exec) ReconcileRealmHealth(realm intmodel.Realm) (bool, error) {
 	if namespace == "" {
 		namespace = realm.Metadata.Name
 	}
-	namespaceExists, nsErr := r.ExistsRealmContainerdNamespace(namespace)
+	namespaceExists, nsErr := r.probeRealmNamespace(namespace)
 	switch {
 	case nsErr != nil:
 		r.logger.DebugContext(r.ctx, "reconcile: realm namespace probe failed",
@@ -81,7 +84,10 @@ func (r *Exec) ReconcileRealmHealth(realm intmodel.Realm) (bool, error) {
 	if !changed {
 		return false, nil
 	}
-	persisted, updateErr := r.persistRealmStatusGuarded(realm)
+	persisted, updateErr := r.persistHealthGuarded("realm", realm.Metadata.Name, r.updateRealmStatusMetadata(realm))
+	if errors.Is(updateErr, errdefs.ErrRealmNotFound) {
+		return false, updateErr
+	}
 	if updateErr != nil {
 		return false, fmt.Errorf("failed to update realm metadata: %w", updateErr)
 	}
@@ -110,7 +116,10 @@ func (r *Exec) ReconcileSpaceHealth(space intmodel.Space) (bool, error) {
 		return false, nil
 	}
 	current.Status.CgroupReady = cgroupExists
-	persisted, updateErr := r.persistSpaceStatusGuarded(current)
+	persisted, updateErr := r.persistHealthGuarded("space", current.Metadata.Name, r.updateSpaceStatusMetadata(current))
+	if errors.Is(updateErr, errdefs.ErrSpaceNotFound) {
+		return false, updateErr
+	}
 	if updateErr != nil {
 		return false, fmt.Errorf("failed to update space metadata: %w", updateErr)
 	}
@@ -134,9 +143,40 @@ func (r *Exec) ReconcileStackHealth(stack intmodel.Stack) (bool, error) {
 		return false, nil
 	}
 	stack.Status.CgroupReady = cgroupExists
-	persisted, updateErr := r.persistStackStatusGuarded(stack)
+	persisted, updateErr := r.persistHealthGuarded("stack", stack.Metadata.Name, r.updateStackStatusMetadata(stack))
+	if errors.Is(updateErr, errdefs.ErrStackNotFound) {
+		return false, updateErr
+	}
 	if updateErr != nil {
 		return false, fmt.Errorf("failed to update stack metadata: %w", updateErr)
 	}
 	return persisted, nil
+}
+
+// persistHealthGuarded classifies the result of a must-exist health write:
+// a CAS rejection — a concurrent spec writer, or a delete that removed the
+// document after the writer read it — is a benign skip the next tick
+// re-observes, mirroring persistRealmStatusGuarded.
+func (r *Exec) persistHealthGuarded(kind, name string, writeErr error) (bool, error) {
+	if errors.Is(writeErr, errdefs.ErrStaleResource) {
+		r.logger.DebugContext(r.ctx, "reconcile: skipping stale "+kind+" health persist",
+			kind, name)
+		return false, nil
+	}
+	if writeErr != nil {
+		return false, writeErr
+	}
+	return true, nil
+}
+
+// probeRealmNamespace wraps ExistsRealmContainerdNamespace for the tick path.
+// That probe reports a missing containerd socket as a clean "absent", which
+// during a containerd restart would flap containerdNamespaceReady to false
+// and back; here a missing socket is a probe error, so the last observation
+// stands until containerd answers.
+func (r *Exec) probeRealmNamespace(namespace string) (bool, error) {
+	if _, err := os.Stat(r.opts.ContainerdSocket); err != nil {
+		return false, fmt.Errorf("containerd socket %s: %w", r.opts.ContainerdSocket, err)
+	}
+	return r.ExistsRealmContainerdNamespace(namespace)
 }

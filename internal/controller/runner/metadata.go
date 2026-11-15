@@ -62,6 +62,12 @@ const firstGeneration int64 = 1
 // token check is skipped so the create's own follow-up writes do not trip a
 // false stale. A freshly-read document always carries a non-zero generation,
 // so 0 reliably distinguishes "built it" from "read then modified it".
+//
+// A non-nil missingErr makes the write must-exist: a missing document
+// returns missingErr instead of taking the initial-write branch, so a
+// status-only writer racing a delete cannot recreate the resource. A file
+// removed after the read is already caught by the CAS (prior != nil, current
+// == nil) and surfaces as errdefs.ErrStaleResource.
 func writeDocWithGeneration[D any](
 	ctx context.Context,
 	logger *slog.Logger,
@@ -70,9 +76,13 @@ func writeDocWithGeneration[D any](
 	getGeneration func(D) int64,
 	setGeneration func(*D, int64),
 	specOf func(D) any,
+	missingErr error,
 ) error {
 	prior, readErr := metadata.ReadRaw(ctx, logger, file)
 	if errors.Is(readErr, errdefs.ErrMissingMetadataFile) {
+		if missingErr != nil {
+			return missingErr
+		}
 		// No prior document: this is the initial spec write. CAS with a
 		// nil prior asserts the file does not yet exist, so a concurrent
 		// creator racing us surfaces as ErrStaleResource.
@@ -205,6 +215,17 @@ func stampCellLifecycle(cell *intmodel.Cell, now time.Time) {
 }
 
 func (r *Exec) UpdateRealmMetadata(realm intmodel.Realm) error {
+	return r.writeRealmMetadata(realm, nil)
+}
+
+// updateRealmStatusMetadata is the must-exist UpdateRealmMetadata used by
+// status-only writers: a realm whose metadata is gone returns
+// errdefs.ErrRealmNotFound instead of being recreated.
+func (r *Exec) updateRealmStatusMetadata(realm intmodel.Realm) error {
+	return r.writeRealmMetadata(realm, errdefs.ErrRealmNotFound)
+}
+
+func (r *Exec) writeRealmMetadata(realm intmodel.Realm, missingErr error) error {
 	stampRealmLifecycle(&realm, r.nowUTC())
 
 	// Convert to external model for filesystem boundary
@@ -218,7 +239,11 @@ func (r *Exec) UpdateRealmMetadata(realm intmodel.Realm) error {
 		func(d v1beta1.RealmDoc) int64 { return d.Metadata.Generation },
 		func(d *v1beta1.RealmDoc, g int64) { d.Metadata.Generation = g },
 		func(d v1beta1.RealmDoc) any { return d.Spec },
+		missingErr,
 	)
+	if missingErr != nil && errors.Is(err, missingErr) {
+		return err
+	}
 	if err != nil {
 		r.logger.Error("failed to write metadata", "err", fmt.Sprintf("%v", err))
 		return fmt.Errorf("%w: %w", errdefs.ErrWriteMetadata, err)
@@ -227,6 +252,17 @@ func (r *Exec) UpdateRealmMetadata(realm intmodel.Realm) error {
 }
 
 func (r *Exec) UpdateSpaceMetadata(space intmodel.Space) error {
+	return r.writeSpaceMetadata(space, nil)
+}
+
+// updateSpaceStatusMetadata is the must-exist UpdateSpaceMetadata used by
+// status-only writers: a space whose metadata is gone returns
+// errdefs.ErrSpaceNotFound instead of being recreated.
+func (r *Exec) updateSpaceStatusMetadata(space intmodel.Space) error {
+	return r.writeSpaceMetadata(space, errdefs.ErrSpaceNotFound)
+}
+
+func (r *Exec) writeSpaceMetadata(space intmodel.Space, missingErr error) error {
 	stampSpaceLifecycle(&space, r.nowUTC())
 
 	// Convert to external model for filesystem boundary
@@ -244,7 +280,11 @@ func (r *Exec) UpdateSpaceMetadata(space intmodel.Space) error {
 		func(d v1beta1.SpaceDoc) int64 { return d.Metadata.Generation },
 		func(d *v1beta1.SpaceDoc, g int64) { d.Metadata.Generation = g },
 		func(d v1beta1.SpaceDoc) any { return d.Spec },
+		missingErr,
 	)
+	if missingErr != nil && errors.Is(err, missingErr) {
+		return err
+	}
 	if err != nil {
 		r.logger.Error("failed to write metadata", "err", fmt.Sprintf("%v", err))
 		return fmt.Errorf("%w: %w", errdefs.ErrWriteMetadata, err)
@@ -253,6 +293,17 @@ func (r *Exec) UpdateSpaceMetadata(space intmodel.Space) error {
 }
 
 func (r *Exec) UpdateStackMetadata(stack intmodel.Stack) error {
+	return r.writeStackMetadata(stack, nil)
+}
+
+// updateStackStatusMetadata is the must-exist UpdateStackMetadata used by
+// status-only writers: a stack whose metadata is gone returns
+// errdefs.ErrStackNotFound instead of being recreated.
+func (r *Exec) updateStackStatusMetadata(stack intmodel.Stack) error {
+	return r.writeStackMetadata(stack, errdefs.ErrStackNotFound)
+}
+
+func (r *Exec) writeStackMetadata(stack intmodel.Stack, missingErr error) error {
 	stampStackLifecycle(&stack, r.nowUTC())
 
 	// Convert to external model for filesystem boundary
@@ -271,7 +322,11 @@ func (r *Exec) UpdateStackMetadata(stack intmodel.Stack) error {
 		func(d v1beta1.StackDoc) int64 { return d.Metadata.Generation },
 		func(d *v1beta1.StackDoc, g int64) { d.Metadata.Generation = g },
 		func(d v1beta1.StackDoc) any { return d.Spec },
+		missingErr,
 	)
+	if missingErr != nil && errors.Is(err, missingErr) {
+		return err
+	}
 	if err != nil {
 		r.logger.Error("failed to write metadata", "err", fmt.Sprintf("%v", err))
 		return fmt.Errorf("%w: %w", errdefs.ErrWriteMetadata, err)
@@ -299,6 +354,7 @@ func (r *Exec) UpdateCellMetadata(cell intmodel.Cell) error {
 		func(d v1beta1.CellDoc) int64 { return d.Metadata.Generation },
 		func(d *v1beta1.CellDoc, g int64) { d.Metadata.Generation = g },
 		func(d v1beta1.CellDoc) any { return d.Spec },
+		nil,
 	)
 	if err != nil {
 		r.logger.Error("failed to write metadata", "err", fmt.Sprintf("%v", err))
