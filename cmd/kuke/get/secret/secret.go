@@ -164,6 +164,11 @@ func printSecrets(cmd *cobra.Command, secrets []v1beta1.SecretDoc, format shared
 	case shared.OutputFormatYAML:
 		return shared.PrintYAML(cmd, secrets)
 	case shared.OutputFormatJSON:
+		// A nil slice encodes as JSON null; normalize so an empty list
+		// emits [] like cells/containers and the YAML path already do.
+		if secrets == nil {
+			secrets = []v1beta1.SecretDoc{}
+		}
 		return shared.PrintJSON(cmd, secrets)
 	case shared.OutputFormatTable, shared.OutputFormatWide:
 		if len(secrets) == 0 {

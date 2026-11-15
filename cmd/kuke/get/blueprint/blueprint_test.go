@@ -19,6 +19,7 @@ package blueprint_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -339,4 +340,65 @@ func (f *fakeClient) ListBlueprints(
 		return nil, errors.New("unexpected ListBlueprints call")
 	}
 	return f.listBlueprintsFn(realm, space, stack)
+}
+
+// TestNewBlueprintCmd_ListOutputShape pins the #1375 output contract: a list query
+// always emits a top-level array, including the empty (nil-slice) case that
+// Go's JSON encoder would otherwise render as null.
+func TestNewBlueprintCmd_ListOutputShape(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	run := func(t *testing.T, list func(_, _, _ string) ([]v1beta1.CellBlueprintDoc, error), args ...string) string {
+		t.Helper()
+		t.Cleanup(viper.Reset)
+		cmd := blueprint.NewBlueprintCmd()
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+		fake := &fakeClient{listBlueprintsFn: list}
+		ctx := context.WithValue(context.Background(), blueprint.MockControllerKey{}, kukeonv1.Client(fake))
+		cmd.SetContext(ctx)
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		return buf.String()
+	}
+	empty := func(_, _, _ string) ([]v1beta1.CellBlueprintDoc, error) { return nil, nil }
+
+	t.Run("-o json empty list emits []", func(t *testing.T) {
+		if out := strings.TrimSpace(run(t, empty, "-o", "json")); out != "[]" {
+			t.Errorf("empty list JSON = %q, want []", out)
+		}
+	})
+
+	t.Run("-o json empty filter result emits []", func(t *testing.T) {
+		out := strings.TrimSpace(run(t, empty, "-o", "json", "--realm", "r1", "--space", "s1", "--stack", "st1"))
+		if out != "[]" {
+			t.Errorf("empty filtered JSON = %q, want []", out)
+		}
+	})
+
+	t.Run("-o yaml empty list emits []", func(t *testing.T) {
+		if out := strings.TrimSpace(run(t, empty, "-o", "yaml")); out != "[]" {
+			t.Errorf("empty list YAML = %q, want []", out)
+		}
+	})
+
+	t.Run("-o json populated list emits an array", func(t *testing.T) {
+		populated := func(_, _, _ string) ([]v1beta1.CellBlueprintDoc, error) {
+			return []v1beta1.CellBlueprintDoc{
+				{Metadata: v1beta1.CellBlueprintMetadata{Name: "a", Realm: "r1"}},
+				{Metadata: v1beta1.CellBlueprintMetadata{Name: "b", Realm: "r1"}},
+			}, nil
+		}
+		out := run(t, populated, "-o", "json")
+		var items []map[string]any
+		if err := json.Unmarshal([]byte(out), &items); err != nil {
+			t.Fatalf("populated list JSON is not an array: %v\n%s", err, out)
+		}
+		if len(items) != 2 {
+			t.Errorf("populated list JSON has %d items, want 2; got:\n%s", len(items), out)
+		}
+	})
 }
