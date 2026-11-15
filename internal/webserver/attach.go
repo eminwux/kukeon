@@ -126,7 +126,7 @@ func registerAttachRouteWith(
 				},
 			)
 			if err == nil {
-				err = shared.GuardCellTaskLiveness(result, cell)
+				err = shared.GuardCellTaskLiveness(result, cell, realm, space, stack)
 			}
 			var socket string
 			if err == nil {

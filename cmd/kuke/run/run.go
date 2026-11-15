@@ -809,7 +809,10 @@ func runExistingCell(
 		// cleanly. (A legitimately Stopped cell has no live root task by
 		// design — StopCell deletes it — so this guard is scoped to Ready, where
 		// the task is asserted live.)
-		if err := kukshared.GuardCellTaskLiveness(pre, cellDoc.Metadata.Name); err != nil {
+		if err := kukshared.GuardCellTaskLiveness(
+			pre, cellDoc.Metadata.Name,
+			cellDoc.Spec.RealmID, cellDoc.Spec.SpaceID, cellDoc.Spec.StackID,
+		); err != nil {
 			return err
 		}
 		if printErr := printRunResult(cmd, noOpResultFromGet(pre), flags.output); printErr != nil {

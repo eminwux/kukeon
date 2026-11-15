@@ -18,6 +18,7 @@ package shared
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -33,9 +34,10 @@ import (
 // Five terminal answers, each with a state-appropriate operator pointer:
 //
 //   - !MetadataExists → the cell has never been created (or has already
-//     been deleted). Direct the operator at `kuke run` with the standard
-//     profile + name flags so attach is preceded by a creation, not by
-//     a confusing ListContainers empty.
+//     been deleted). Direct the operator at `kuke run --from-blueprint`
+//     with the cell name and the requested realm/space/stack so attach is
+//     preceded by a creation at the same coordinate, not by a confusing
+//     ListContainers empty.
 //   - Ready + RootContainerTaskRunning → nil (attach proceeds).
 //   - Ready + !RootContainerTaskRunning → the post-reboot divergence
 //     #683 was originally written for: the on-disk metadata records
@@ -56,12 +58,17 @@ import (
 // operator through their own verbs (StartCell, or the
 // delete-then-rerun pointer) — so the broader switch here is a
 // strict superset that only `kuke attach` exercises in full.
-func GuardCellTaskLiveness(get kukeonv1.GetCellResult, cellName string) error {
+//
+// realm/space/stack are the coordinate the caller looked the cell up at;
+// the missing-cell pointer threads them onto the suggested `kuke run` so
+// the recovery command creates the cell where the attach looked for it.
+func GuardCellTaskLiveness(get kukeonv1.GetCellResult, cellName, realm, space, stack string) error {
 	if !get.MetadataExists {
 		return fmt.Errorf(
-			"cell %q does not exist; create it first with "+
-				"`kuke run -p <profile> --name %s`",
-			cellName, cellName,
+			"cell %q does not exist in realm=%q space=%q stack=%q; create it first with "+
+				"`kuke run --from-blueprint <blueprint> --name %s%s` "+
+				"(or --image <ref> / --from-config <config> in place of --from-blueprint)",
+			cellName, realm, space, stack, cellName, scopeFlags(realm, space, stack),
 		)
 	}
 	switch get.Cell.Status.State {
@@ -101,4 +108,18 @@ func GuardCellTaskLiveness(get kukeonv1.GetCellResult, cellName string) error {
 			cellName, get.Cell.Status.State.String(), cellName,
 		)
 	}
+}
+
+// scopeFlags renders the --realm/--space/--stack flags for a recovery
+// command, skipping any coordinate the caller left empty.
+func scopeFlags(realm, space, stack string) string {
+	var b strings.Builder
+	for _, f := range []struct{ name, value string }{
+		{"realm", realm}, {"space", space}, {"stack", stack},
+	} {
+		if f.value != "" {
+			fmt.Fprintf(&b, " --%s %s", f.name, f.value)
+		}
+	}
+	return b.String()
 }
