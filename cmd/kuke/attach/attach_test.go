@@ -635,8 +635,14 @@ func TestAttach_NotCreated_PointsAtRun(t *testing.T) {
 	if got := err.Error(); !strings.Contains(got, "does not exist") {
 		t.Errorf("error %q missing %q wording", got, "does not exist")
 	}
-	if got := err.Error(); !strings.Contains(got, "kuke run") {
-		t.Errorf("error %q missing `kuke run` recovery pointer", got)
+	// #1376: the pointer must use a supported source (not the retired
+	// -p/--profile) and preserve the nondefault scope attach looked in.
+	want := "`kuke run --from-blueprint <blueprint> --name kukeon-pm-0 --realm r1 --space s1 --stack st1`"
+	if got := err.Error(); !strings.Contains(got, want) {
+		t.Errorf("error %q missing recovery pointer %q", got, want)
+	}
+	if got := err.Error(); strings.Contains(got, "profile") {
+		t.Errorf("error %q still references the retired -p/--profile source", got)
 	}
 	if listCalls != 0 {
 		t.Errorf("ListContainers called %d times, want 0 (guard must fire first)", listCalls)

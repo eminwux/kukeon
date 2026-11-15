@@ -120,7 +120,7 @@ func runAttach(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := kukeshared.GuardCellTaskLiveness(cellGet, cell); err != nil {
+	if err = kukeshared.GuardCellTaskLiveness(cellGet, cell, realm, space, stack); err != nil {
 		return err
 	}
 

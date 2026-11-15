@@ -38,7 +38,7 @@ func readyGet() kukeonv1.GetCellResult {
 }
 
 func TestGuardCellTaskLiveness_ReadyTaskLive_Passes(t *testing.T) {
-	if err := kukeshared.GuardCellTaskLiveness(readyGet(), "c1"); err != nil {
+	if err := kukeshared.GuardCellTaskLiveness(readyGet(), "c1", "default", "default", "default"); err != nil {
 		t.Fatalf("guard returned %v on healthy Ready+task-live cell, want nil", err)
 	}
 }
@@ -51,7 +51,7 @@ func TestGuardCellTaskLiveness_ReadyTaskDead_DivergedError(t *testing.T) {
 	get := readyGet()
 	get.RootContainerTaskRunning = false
 
-	err := kukeshared.GuardCellTaskLiveness(get, "c1")
+	err := kukeshared.GuardCellTaskLiveness(get, "c1", "default", "default", "default")
 	if err == nil {
 		t.Fatal("guard returned nil on Ready+task-dead, want divergence error")
 	}
@@ -66,18 +66,40 @@ func TestGuardCellTaskLiveness_ReadyTaskDead_DivergedError(t *testing.T) {
 func TestGuardCellTaskLiveness_NotCreated_PointsAtRun(t *testing.T) {
 	get := kukeonv1.GetCellResult{MetadataExists: false}
 
-	err := kukeshared.GuardCellTaskLiveness(get, "kukeon-pm-0")
+	err := kukeshared.GuardCellTaskLiveness(get, "kukeon-pm-0", "r1", "s1", "st1")
 	if err == nil {
 		t.Fatal("guard returned nil on !MetadataExists, want NotCreated error")
 	}
-	if got := err.Error(); !strings.Contains(got, "does not exist") {
+	got := err.Error()
+	if !strings.Contains(got, "does not exist") {
 		t.Errorf("error %q missing %q wording", got, "does not exist")
 	}
-	if got := err.Error(); !strings.Contains(got, "kuke run") {
-		t.Errorf("error %q missing `kuke run` recovery pointer", got)
+	// #1376: the pointer must name a supported creation source (the retired
+	// -p/--profile flag is rejected by `kuke run`) and carry the requested
+	// nondefault scope so the suggested command creates the cell where the
+	// lookup happened.
+	want := "`kuke run --from-blueprint <blueprint> --name kukeon-pm-0 --realm r1 --space s1 --stack st1`"
+	if !strings.Contains(got, want) {
+		t.Errorf("error %q missing recovery pointer %q", got, want)
 	}
-	if got := err.Error(); !strings.Contains(got, "--name kukeon-pm-0") {
-		t.Errorf("error %q missing `--name kukeon-pm-0` recovery pointer", got)
+	if strings.Contains(got, "-p ") || strings.Contains(got, "profile") {
+		t.Errorf("error %q still references the retired -p/--profile source", got)
+	}
+}
+
+// TestGuardCellTaskLiveness_NotCreated_OmitsEmptyScope pins that a caller
+// that leaves a coordinate empty gets no dangling `--space ` flag in the
+// recovery pointer.
+func TestGuardCellTaskLiveness_NotCreated_OmitsEmptyScope(t *testing.T) {
+	get := kukeonv1.GetCellResult{MetadataExists: false}
+
+	err := kukeshared.GuardCellTaskLiveness(get, "c1", "r1", "", "")
+	if err == nil {
+		t.Fatal("guard returned nil on !MetadataExists, want NotCreated error")
+	}
+	want := "`kuke run --from-blueprint <blueprint> --name c1 --realm r1`"
+	if got := err.Error(); !strings.Contains(got, want) {
+		t.Errorf("error %q missing recovery pointer %q", got, want)
 	}
 }
 
@@ -92,7 +114,7 @@ func TestGuardCellTaskLiveness_Stopped_PointsAtStart(t *testing.T) {
 	get.Cell.Status.State = v1beta1.CellStateStopped
 	get.RootContainerTaskRunning = false
 
-	err := kukeshared.GuardCellTaskLiveness(get, "kukeon-pm-0")
+	err := kukeshared.GuardCellTaskLiveness(get, "kukeon-pm-0", "default", "default", "default")
 	if err == nil {
 		t.Fatal("guard returned nil on Stopped cell, want start-it-first error")
 	}
@@ -113,7 +135,7 @@ func TestGuardCellTaskLiveness_Error_PointsAtStart(t *testing.T) {
 	get.Cell.Status.State = v1beta1.CellStateError
 	get.RootContainerTaskRunning = false
 
-	err := kukeshared.GuardCellTaskLiveness(get, "kukeon-pm-0")
+	err := kukeshared.GuardCellTaskLiveness(get, "kukeon-pm-0", "default", "default", "default")
 	if err == nil {
 		t.Fatal("guard returned nil on Error cell, want start-it-first error")
 	}
@@ -133,7 +155,7 @@ func TestGuardCellTaskLiveness_Failed_PointsAtDelete(t *testing.T) {
 	get.Cell.Status.State = v1beta1.CellStateFailed
 	get.RootContainerTaskRunning = false
 
-	err := kukeshared.GuardCellTaskLiveness(get, "c1")
+	err := kukeshared.GuardCellTaskLiveness(get, "c1", "default", "default", "default")
 	if err == nil {
 		t.Fatal("guard returned nil on Failed cell, want delete-it-first error")
 	}
@@ -154,7 +176,7 @@ func TestGuardCellTaskLiveness_Unknown_PointsAtDelete(t *testing.T) {
 	get.Cell.Status.State = v1beta1.CellStateUnknown
 	get.RootContainerTaskRunning = false
 
-	err := kukeshared.GuardCellTaskLiveness(get, "c1")
+	err := kukeshared.GuardCellTaskLiveness(get, "c1", "default", "default", "default")
 	if err == nil {
 		t.Fatal("guard returned nil on Unknown cell, want delete-it-first error")
 	}
@@ -176,7 +198,7 @@ func TestGuardCellTaskLiveness_Pending_PointsAtDelete(t *testing.T) {
 	get.Cell.Status.State = v1beta1.CellStatePending
 	get.RootContainerTaskRunning = false
 
-	err := kukeshared.GuardCellTaskLiveness(get, "c1")
+	err := kukeshared.GuardCellTaskLiveness(get, "c1", "default", "default", "default")
 	if err == nil {
 		t.Fatal("guard returned nil on Pending cell, want delete-it-first error")
 	}
