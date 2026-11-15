@@ -1,4 +1,4 @@
-import { StrictMode, Suspense, lazy, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { StrictMode, Suspense, lazy, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
 import { useResource, ErrorNotice, type Resource } from "./request";
@@ -102,7 +102,7 @@ function ResourceDetails({ route, revision }: { route: Route; revision: number }
   </>;
 }
 
-type CellTab = "terminal" | "overview";
+type CellView = "terminal" | "read";
 type LifecycleResponse = {
   error?: { code?: string; message?: string; phase?: string; stoppedFirst?: boolean };
   killed?: boolean;
@@ -126,13 +126,11 @@ async function readCellPresence(scope: string[]): Promise<boolean | null> {
   }
 }
 
-const cellTabs: { id: CellTab; label: string }[] = [
-  { id: "terminal", label: "Terminal" },
-  { id: "overview", label: "Overview" },
-];
-
-function CellDetailsScreen({ title, scope, revision, inventory, manager, theme, operations, onLifecycleAction }: {
+// cellTerminal (#/workspace/...) and cellRead (#/resource/...) share one mounted screen so switching
+// between them keeps the TerminalWorkspace, and therefore every attached session, alive.
+function CellDetailsScreen({ title, view, scope, revision, inventory, manager, theme, operations, onLifecycleAction }: {
   title: string;
+  view: CellView;
   scope: string[] | null;
   revision: number;
   inventory: InventoryResource;
@@ -141,30 +139,29 @@ function CellDetailsScreen({ title, scope, revision, inventory, manager, theme, 
   operations: Record<string, LifecycleFeedback>;
   onLifecycleAction: (scope: string[], action: LifecycleAction, state?: string, options?: PurgeOptions) => void;
 }) {
-  const [activeTab, setActiveTab] = useState<CellTab>("terminal");
   const [terminalExpanded, setTerminalExpanded] = useState(false);
   const [terminalToolsHost, setTerminalToolsHost] = useState<HTMLDivElement | null>(null);
-  const tablist = useRef<HTMLDivElement>(null);
   const screen = useRef<HTMLDivElement>(null);
-  const tabbar = useRef<HTMLDivElement>(null);
+  const terminalBar = useRef<HTMLDivElement>(null);
   const scopeKey = JSON.stringify(scope ?? []);
   const detail = useResource<Doc>(scope ? apiPath(scope) : null, revision);
   const containers = useResource<{ id: string; attachable?: boolean; root?: boolean }[]>(scope ? `${apiPath(scope)}/containers` : null, revision);
   const inventoryState = scope ? inventory.data?.rows[3].find(row => JSON.stringify(row.scope) === scopeKey)?.doc.status?.state : undefined;
   const cellState = detail.data?.status?.state ?? inventoryState;
   const operation = operations[scopeKey];
+  const terminalView = view === "terminal";
   const status = detail.data && <StatusSummary status={detail.data.status} kind="cell" />;
 
-  useEffect(() => { setActiveTab("terminal"); setTerminalExpanded(false); }, [scopeKey]);
+  useEffect(() => { setTerminalExpanded(false); }, [scopeKey, view]);
 
-  // Stack the fixed tabbar below the toolbar (whose actions sit above it) and the expanded terminal below the
-  // tabbar; both heights change when they wrap at narrow or zoomed widths.
+  // Stack the fixed terminal bar below the toolbar (whose actions sit above it) and the expanded terminal below
+  // the bar; both heights change when they wrap at narrow or zoomed widths.
   useLayoutEffect(() => {
-    const host = screen.current, bar = tabbar.current;
+    const host = screen.current, bar = terminalBar.current;
     if (!terminalExpanded || !host || !bar) return;
     const toolbar = host.closest(".workspace")?.querySelector<HTMLElement>(".toolbar");
     const place = () => {
-      if (toolbar) host.style.setProperty("--terminal-expanded-tabbar-top", `${Math.ceil(toolbar.getBoundingClientRect().bottom) + 8}px`);
+      if (toolbar) host.style.setProperty("--terminal-expanded-bar-top", `${Math.ceil(toolbar.getBoundingClientRect().bottom) + 8}px`);
       host.style.setProperty("--terminal-expanded-top", `${Math.ceil(bar.getBoundingClientRect().bottom) + 8}px`);
     };
     place();
@@ -174,20 +171,9 @@ function CellDetailsScreen({ title, scope, revision, inventory, manager, theme, 
     window.addEventListener("resize", place);
     return () => {
       observer.disconnect(); window.removeEventListener("resize", place);
-      host.style.removeProperty("--terminal-expanded-tabbar-top"); host.style.removeProperty("--terminal-expanded-top");
+      host.style.removeProperty("--terminal-expanded-bar-top"); host.style.removeProperty("--terminal-expanded-top");
     };
   }, [terminalExpanded]);
-
-  function moveTab(event: ReactKeyboardEvent<HTMLDivElement>) {
-    const index = cellTabs.findIndex(tab => tab.id === activeTab);
-    const next = event.key === "ArrowRight" ? (index + 1) % cellTabs.length
-      : event.key === "ArrowLeft" ? (index - 1 + cellTabs.length) % cellTabs.length
-      : event.key === "Home" ? 0 : event.key === "End" ? cellTabs.length - 1 : -1;
-    if (next < 0) return;
-    event.preventDefault();
-    setActiveTab(cellTabs[next].id);
-    tablist.current?.querySelectorAll<HTMLButtonElement>("[role=tab]")[next]?.focus();
-  }
 
   const overview = detail.data && scope && <section className="panel resource-overview">
     <div className="panel-heading"><h2>Resource overview</h2><div className="cell-overview-actions"><StateBadge state={detail.data.status?.state} /><a className="document-action" href={resourceLink(scope, true)} target="_blank" rel="noopener noreferrer">View document</a></div></div>
@@ -211,10 +197,16 @@ function CellDetailsScreen({ title, scope, revision, inventory, manager, theme, 
     </div>
   </section>;
 
+  const switchLabel = scope ? `${terminalView ? "View details for" : "Open terminal for"} ${scope.join(" / ")}` : "";
   return <div className="cell-detail-screen" ref={screen} hidden={!scope}>
     {scope && <div className="page-heading cell-page-heading">
       <div className="cell-page-title-row">
         <h1>{title}</h1>
+        <a className="icon-button cell-view-switch" href={terminalView ? resourceLink(scope) : workspaceLink(scope)} aria-label={switchLabel} title={terminalView ? "View cell details" : "Open cell terminal"}>
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            {terminalView ? <><circle cx="12" cy="12" r="9" /><path d="M12 11v5" /><path d="M12 7.5h.01" /></> : <><rect x="3" y="4.5" width="18" height="15" rx="2" /><path d="m7 9.5 3 2.5-3 2.5" /><path d="M12.5 15H17" /></>}
+          </svg>
+        </a>
         <CellLifecycleControls scope={scope} state={cellState} operation={operation} onAction={onLifecycleAction} showFeedback={false} />
       </div>
       <LifecycleNotice operation={operation} />
@@ -222,16 +214,13 @@ function CellDetailsScreen({ title, scope, revision, inventory, manager, theme, 
     {detail.loading && scope && <p role="status">Loading cell details…</p>}
     {detail.error && <ErrorNotice error={detail.error} kind="Cell" />}
     {detail.error && detail.data && <p className="stale">Stale resource details — refresh failed.</p>}
-    <div ref={tabbar} className={`cell-detail-tabbar${terminalExpanded ? " is-terminal-expanded" : ""}`}>
-      <div className="cell-detail-tabs" role="tablist" aria-label="Cell details" ref={tablist} onKeyDown={moveTab}>
-        {cellTabs.map(tab => <button key={tab.id} id={`cell-tab-${tab.id}`} role="tab" type="button" aria-selected={activeTab === tab.id} aria-controls={`cell-panel-${tab.id}`} tabIndex={activeTab === tab.id ? 0 : -1} onClick={() => setActiveTab(tab.id)}>{tab.label}</button>)}
-      </div>
-      <div className="cell-terminal-tools" ref={setTerminalToolsHost} hidden={!scope || activeTab !== "terminal"} />
+    <div ref={terminalBar} className={`cell-terminal-bar${terminalExpanded ? " is-terminal-expanded" : ""}`} hidden={!scope || !terminalView}>
+      <div className="cell-terminal-tools" ref={setTerminalToolsHost} />
     </div>
-    <section className="cell-tab-panel cell-terminal-panel" id="cell-panel-terminal" role="tabpanel" aria-labelledby="cell-tab-terminal" tabIndex={0} hidden={activeTab !== "terminal"}>
-      <TerminalWorkspace scope={scope} revision={revision} inventory={inventory} manager={manager} theme={theme} visible={activeTab === "terminal" && !!scope} controlsHost={terminalToolsHost} onExpandedChange={setTerminalExpanded} />
+    <section className="cell-terminal-view" aria-label="Cell terminal" hidden={!terminalView}>
+      <TerminalWorkspace scope={scope} revision={revision} inventory={inventory} manager={manager} theme={theme} visible={terminalView && !!scope} controlsHost={terminalToolsHost} onExpandedChange={setTerminalExpanded} />
     </section>
-    <section className="cell-tab-panel cell-overview-content" id="cell-panel-overview" role="tabpanel" aria-labelledby="cell-tab-overview" tabIndex={0} hidden={activeTab !== "overview"}>{overview}{status}{containerPanel}{scope && activeTab === "overview" && <NetworkPanel scope={scope} revision={revision} />}{scope && activeTab === "overview" && <CgroupPanel scope={scope} revision={revision} />}</section>
+    <section className="cell-overview-content" aria-label="Cell details" hidden={terminalView}>{overview}{status}{containerPanel}{scope && !terminalView && <NetworkPanel scope={scope} revision={revision} />}{scope && !terminalView && <CgroupPanel scope={scope} revision={revision} />}</section>
   </div>;
 }
 
@@ -472,12 +461,15 @@ function App() {
   }
   const isWorkspace = route.view === "workspace";
   const cellScreenScope = (isWorkspace || route.view === "resource" && !route.document) && route.scope.length === 4 ? route.scope : null;
+  // cellRead flows as an ordinary scrolling page; only cellTerminal pins the shell to the viewport.
+  const cellView: CellView = isWorkspace ? "terminal" : "read";
+  const cellTerminalActive = !!cellScreenScope && cellView === "terminal";
   const depth = titles.findIndex(title => title.toLowerCase() === route.view);
   const catalog = Object.keys(catalogTitles).includes(route.view);
   const images = route.view === "images";
   const heading = isWorkspace ? route.scope.at(-1) ?? "Workspace" : route.view === "new-cell" ? "New Cell" : images ? route.scope[1] ?? "Images" : catalog ? route.scope.at(-1) ?? catalogTitles[route.view] : route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : "Resources";
   const daemonStatus = inventory.daemon.error?.code === "permission_denied" ? "Permission denied" : inventory.daemon.error ? "Unavailable" : inventory.daemon.loading ? "Checking…" : "Connected";
-  return <div className={`app-shell${cellScreenScope ? " cell-screen-active" : ""}`}>
+  return <div className={`app-shell${cellTerminalActive ? " cell-screen-active" : ""}`}>
     <aside className={`sidebar ${menuOpen ? "is-open" : ""}`} id="cell-sidebar" aria-label="Cell sidebar">
       <button className="sidebar-close" aria-label="Close sidebar" onClick={() => setMenuOpen(false)}>×</button>
       <a className="brand" href={workspaceLink()}><span className="mark" aria-hidden="true">K</span><span className="brand-title">Kukeon<small>LOCAL WORKSPACE</small></span>{connection.data?.version && <span className="brand-version">{connection.data.version.startsWith("v") ? connection.data.version : `v${connection.data.version}`}</span>}</a>
@@ -509,7 +501,7 @@ function App() {
           </button>
         </div>
       </header>
-      <div className={`workspace-content ${isWorkspace ? "cell-workspace-content" : ""}${cellScreenScope ? " cell-screen-content" : ""}`}>
+      <div className={`workspace-content ${isWorkspace ? "cell-workspace-content" : ""}${cellTerminalActive ? " cell-screen-content" : ""}`}>
         {lastOperation && JSON.stringify(lastOperation.scope) !== JSON.stringify(cellScreenScope) && <section className="cell-global-feedback" aria-label="Cell operation result">
           <strong>{lastOperation.scope.join(" / ")}</strong>
           <LifecycleNotice operation={lastOperation.operation} />
@@ -522,7 +514,7 @@ function App() {
         {inventory.error && <ErrorNotice error={inventory.error} />}
         {inventory.error && inventory.data && <p className="stale">Stale inventory — refresh failed. Counts and lists may be out of date.</p>}
         {!!inventory.data?.failures.length && <div className="error" role="alert"><strong>Incomplete inventory</strong><p>Some scopes could not be loaded. Counts and lists exclude unavailable resources.</p><ul>{inventory.data.failures.map(message => <li key={message}>{message}</li>)}</ul></div>}
-        <CellDetailsScreen title={heading ?? "Cell"} scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} operations={operations} onLifecycleAction={runCellLifecycle} />
+        <CellDetailsScreen title={heading ?? "Cell"} view={cellView} scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} operations={operations} onLifecycleAction={runCellLifecycle} />
         {isWorkspace ? route.scope.length === 4 ? null : <WorkspaceLanding inventory={inventory} /> : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} inventory={inventory} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} /> : <Dashboard inventory={inventory} />}
         <footer>Daemon inventory · {inventory.data ? <>Last refreshed <time dateTime={inventory.data.updatedAt}>{new Date(inventory.data.updatedAt).toLocaleTimeString()}</time></> : "Not refreshed yet"} · Refresh to retrieve the latest state.</footer>
       </div>
