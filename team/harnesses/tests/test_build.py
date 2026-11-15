@@ -109,7 +109,7 @@ print(json.dumps({"args":args,"plan":plan}))
         current = re.search(rb"image:\s+[^\s]+:(v[^\s]+)", next(iter(before.values()))).group(1).decode()
         for tag, expected in ((current, 0), ("v99.0.0", 1), ("latest", 2)):
             result = subprocess.run([str(script), tag, "--check"], capture_output=True, check=False,
-                                    env=dict(os.environ, REGISTRY="ghcr.io/eminwux/kuketeams"))
+                                    env=dict(os.environ, REGISTRY="ghcr.io/eminwux/kukeon"))
             self.assertEqual(result.returncode, expected, result.stderr)
             self.assertEqual({p: p.read_bytes() for p in CATALOGS}, before)
             if expected == 1:
@@ -117,18 +117,16 @@ print(json.dumps({"args":args,"plan":plan}))
                     self.assertIn(str(path.relative_to(ROOT)).encode(), result.stderr)
                 self.assertIn(b"commit/merge", result.stderr)
 
-    @unittest.skip("publication workflow moves to kukeon releases in #1430")
     def test_workflow_checks_before_publication(self):
-        workflow = (ROOT / ".github/workflows/publish-harness-images.yml").read_text()
-        self.assertEqual(workflow.count('./harnesses/release-images.sh "$GITHUB_REF_NAME" --check'), 2)
-        self.assertLess(workflow.index("setup-go"), workflow.index("release-images.sh"))
-        self.assertLess(workflow.index("release-images.sh", workflow.index("  publish:")),
-                        workflow.index("docker/login-action"))
-        self.assertIn('make -C harnesses images REGISTRY="$REGISTRY" TAG="$TAG" PLATFORMS="$PLATFORMS" MODE=push', workflow)
-        self.assertIn("TAG: ${{ github.ref_name }}", workflow)
-        self.assertIn("PLATFORMS: linux/amd64,linux/arm64", workflow)
-        self.assertIn("harnesses/*/images.yaml", (ROOT / "scripts/prepare-release.sh").read_text())
-
+        workflow = (ROOT.parent / ".github/workflows/release.yaml").read_text()
+        job = workflow[workflow.index("  harness_images:"):]
+        self.assertEqual(job.count('./team/harnesses/release-images.sh "$GITHUB_REF_NAME" --check'), 1)
+        self.assertLess(job.index("setup-go"), job.index("release-images.sh"))
+        self.assertLess(job.index("release-images.sh"), job.index("docker/login-action"))
+        self.assertIn('make -C team/harnesses images REGISTRY="$REGISTRY" TAG="$TAG" PLATFORMS="$PLATFORMS" MODE=push', job)
+        self.assertIn("REGISTRY: ghcr.io/eminwux/kukeon", job)
+        self.assertIn("TAG: ${{ github.ref_name }}", job)
+        self.assertIn("PLATFORMS: linux/amd64,linux/arm64", job)
 
 if __name__ == "__main__":
     unittest.main()

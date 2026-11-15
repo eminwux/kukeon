@@ -82,6 +82,9 @@ jobs:
           --notes "Container images (multi-arch: linux/amd64, linux/arm64):
           - ${KUKEON_IMAGE_REPO}:${KUKEON_VERSION}
           - ${KUKEON_IMAGE_REPO}:latest
+
+          kuke team harness images (multi-arch: linux/amd64, linux/arm64):
+          $(for image in claude claude-root claude-android codex codex-root opencode opencode-root; do echo "- ${KUKEON_IMAGE_REPO}/${image}:${KUKEON_VERSION}"; done)
           "
 
   kukeon_images:
@@ -149,3 +152,68 @@ jobs:
           subject-name: ${{ env.KUKEON_REGISTRY }}/${{ env.KUKEON_IMAGE_NAME }}
           subject-digest: ${{ steps.push-kukeon.outputs.digest }}
           push-to-registry: true
+
+  # kuke team harness images (claude, claude-root, claude-android, codex,
+  # codex-root, opencode, opencode-root, plus their base, base-user and
+  # base-root parents) are published as ghcr.io/eminwux/kukeon/<image>:<tag>.
+  # The committed catalogs (team/harnesses/*/images.yaml) are what `kuke team`
+  # reads from a harness source checked out at this tag, so they must already
+  # carry this tag: before tagging, run
+  #   REGISTRY=ghcr.io/eminwux/kukeon ./team/harnesses/release-images.sh <tag>
+  # and merge the result. The --check step below fails the job with the
+  # drifting paths and that command when the catalogs were not regenerated.
+  # REGISTRY is literal (not repository_owner) because the catalogs are.
+  harness_images:
+    name: Publish Harness Images
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      REGISTRY: ghcr.io/eminwux/kukeon
+      TAG: ${{ github.ref_name }}
+      PLATFORMS: linux/amd64,linux/arm64
+      # team/harnesses/cmd/images runs through `go run` outside the root
+      # Makefile, so pin single-module resolution here (see go.work).
+      GOWORK: "off"
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check release tag and harness catalogs before publication
+        run: ./team/harnesses/release-images.sh "$GITHUB_REF_NAME" --check
+
+      - name: Free space for the complete image set
+        run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-config-inline: |
+            [worker.oci]
+              max-parallelism = 2
+
+      - name: Check harness assets and build plan
+        run: make test-harnesses
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish harness bases and leaves through the linked dependency graph
+        run: make -C team/harnesses images REGISTRY="$REGISTRY" TAG="$TAG" PLATFORMS="$PLATFORMS" MODE=push

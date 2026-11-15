@@ -2,7 +2,7 @@
 # Transient plans are derived from Harness; builds never rewrite release catalogs.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-export REGISTRY="${REGISTRY-ghcr.io/eminwux/kuketeams}"
+export REGISTRY="${REGISTRY-ghcr.io/eminwux/kukeon}"
 export TAG="${TAG-latest}"
 native_arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 export PLATFORMS="${PLATFORMS:-linux/$native_arch}"

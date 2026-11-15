@@ -66,7 +66,7 @@ spec:
   containers:
     - id: work
       attachable: true
-      image: ghcr.io/eminwux/kuketeams/codex:v0.2.1 # from team/harnesses/codex/images.yaml
+      image: ghcr.io/eminwux/kukeon/codex:v0.10.0 # from team/harnesses/codex/images.yaml
       command: /bin/bash
       workingDir: /home/user
       env:

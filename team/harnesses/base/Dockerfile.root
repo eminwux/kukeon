@@ -1,5 +1,5 @@
-ARG REGISTRY=ghcr.io/eminwux/kuketeams
-ARG IMAGE_PREFIX=ghcr.io/eminwux/kuketeams/
+ARG REGISTRY=ghcr.io/eminwux/kukeon
+ARG IMAGE_PREFIX=ghcr.io/eminwux/kukeon/
 ARG TAG=latest
 FROM ${IMAGE_PREFIX}base:${TAG}
 

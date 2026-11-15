@@ -67,7 +67,7 @@ func TestCatalogAndBuildClosure(t *testing.T) {
 			}
 			delete(expected, image.Name)
 			published := catalog.Spec.Images[i]
-			prefix := "ghcr.io/eminwux/kuketeams/" + image.Name + ":"
+			prefix := "ghcr.io/eminwux/kukeon/" + image.Name + ":"
 			if !strings.HasPrefix(published.Image, prefix) {
 				t.Fatalf("wrong namespace: %s", published.Image)
 			}
@@ -133,8 +133,8 @@ func TestSourceInventoryIsPackaged(t *testing.T) {
 		if fields[3] == "harnesses/images.yaml" {
 			continue
 		}
-		// The image publication workflow stays in eminwux/kuketeams until
-		// publishing moves to kukeon releases (#1430).
+		// kuketeams' image publication workflow is not imported: kukeon's
+		// release.yaml harness_images job publishes the images instead.
 		if fields[3] == ".github/workflows/publish-harness-images.yml" {
 			continue
 		}

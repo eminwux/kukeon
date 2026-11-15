@@ -45,7 +45,7 @@ func run(args []string) error {
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	registry := flags.String(
 		"registry",
-		env("REGISTRY", "ghcr.io/eminwux/kuketeams"),
+		env("REGISTRY", "ghcr.io/eminwux/kukeon"),
 		"registry prefix (empty for local names)",
 	)
 	tag := flags.String("tag", env("TAG", "latest"), "image tag")
