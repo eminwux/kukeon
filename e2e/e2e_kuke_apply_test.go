@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/consts"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // readTestdataYAML reads a YAML file from the testdata directory.
@@ -801,5 +802,137 @@ func TestKukeApply_MultiResource_VerifyState(t *testing.T) {
 
 	if !verifyCgroupPathExists(t, stack.Status.CgroupPath) {
 		t.Fatalf("stack cgroup path %q does not exist in filesystem", stack.Status.CgroupPath)
+	}
+}
+
+// TestKukeApply_Cell_RecreatePreservesIdentity is the daemon-backed regression
+// guard for issue #1377: a Breaking root edit (args only) routes apply through
+// RecreateCell, which used to persist the freshly materialized document and
+// drop the cell's set-once timestamps, managed identity labels and
+// bridge/controller observations — so the recreated cell vanished from its
+// canonical `cell.kukeon.io=<name>` selector while a named get still found it.
+func TestKukeApply_Cell_RecreatePreservesIdentity(t *testing.T) {
+	t.Parallel()
+
+	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
+	realmName := generateUniqueRealmName(t)
+	spaceName := generateUniqueSpaceName(t)
+	stackName := generateUniqueStackName(t)
+	cellName := generateUniqueCellName(t)
+
+	t.Cleanup(func() {
+		cleanupCell(t, host, realmName, spaceName, stackName, cellName)
+		cleanupStack(t, host, realmName, spaceName, stackName)
+		cleanupSpace(t, host, realmName, spaceName)
+		cleanupRealm(t, host, realmName)
+	})
+
+	runReturningBinary(t, nil, kuke, append(buildKukeDaemonArgs(host), "create", "realm", realmName)...)
+	runReturningBinary(t, nil, kuke,
+		append(buildKukeDaemonArgs(host), "create", "space", spaceName, "--realm", realmName)...)
+	runReturningBinary(t, nil, kuke, append(buildKukeDaemonArgs(host),
+		"create", "stack", stackName, "--realm", realmName, "--space", spaceName)...)
+
+	manifest := func(sleepArg string) string {
+		return fmt.Sprintf(`apiVersion: v1beta1
+kind: Cell
+metadata:
+  name: %[1]s
+  labels:
+    audit: metadata
+spec:
+  id: %[1]s
+  realmId: %[2]s
+  spaceId: %[3]s
+  stackId: %[4]s
+  containers:
+    - id: root
+      root: true
+      image: ghcr.io/containerd/busybox:latest
+      command: sleep
+      args:
+        - "%[5]s"
+    - id: work
+      image: ghcr.io/containerd/busybox:latest
+      command: sleep
+      args:
+        - "3600"
+`, cellName, realmName, spaceName, stackName, sleepArg)
+	}
+	apply := func(content string) {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "recreate.yaml")
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("write manifest: %v", err)
+		}
+		runReturningBinary(t, nil, kuke, append(buildKukeDaemonArgs(host), "apply", "-f", path)...)
+	}
+	getCell := func() *v1beta1.CellDoc {
+		t.Helper()
+		out := runReturningBinary(t, nil, kuke, append(buildKukeDaemonArgs(host),
+			"get", "cell", cellName, "--realm", realmName, "--space", spaceName, "--stack", stackName,
+			"--output", "json")...)
+		cell, err := parseCellJSON(t, out)
+		if err != nil {
+			t.Fatalf("parse cell JSON: %v", err)
+		}
+		return cell
+	}
+
+	apply(manifest("3600"))
+	before := getCell()
+	if before.Status.CreatedAt.IsZero() || before.Status.ReadyAt.IsZero() {
+		t.Fatalf("precondition: createdAt=%v readyAt=%v, want both set", before.Status.CreatedAt, before.Status.ReadyAt)
+	}
+
+	apply(manifest("3601"))
+	after := getCell()
+
+	rootArgs := ""
+	for _, c := range after.Spec.Containers {
+		if c.Root {
+			rootArgs = strings.Join(c.Args, " ")
+		}
+	}
+	if rootArgs != "3601" {
+		t.Fatalf("root args after recreate = %q, want %q", rootArgs, "3601")
+	}
+	if after.Metadata.Generation <= before.Metadata.Generation {
+		t.Errorf("generation = %d, want > %d", after.Metadata.Generation, before.Metadata.Generation)
+	}
+	if !after.Status.CreatedAt.Equal(before.Status.CreatedAt) {
+		t.Errorf("createdAt %v -> %v, want preserved", before.Status.CreatedAt, after.Status.CreatedAt)
+	}
+	if !after.Status.ReadyAt.Equal(before.Status.ReadyAt) {
+		t.Errorf("readyAt %v -> %v, want first-ready preserved", before.Status.ReadyAt, after.Status.ReadyAt)
+	}
+	for k, v := range before.Metadata.Labels {
+		if got := after.Metadata.Labels[k]; got != v {
+			t.Errorf("label %s: %q -> %q, want preserved", k, v, got)
+		}
+	}
+	if before.Status.Network.BridgeName != "" && after.Status.Network.BridgeName != before.Status.Network.BridgeName {
+		t.Errorf(
+			"bridgeName %q -> %q, want preserved",
+			before.Status.Network.BridgeName,
+			after.Status.Network.BridgeName,
+		)
+	}
+	if len(before.Status.SubtreeControllers) > 0 &&
+		fmt.Sprint(after.Status.SubtreeControllers) != fmt.Sprint(before.Status.SubtreeControllers) {
+		t.Errorf("subtreeControllers %v -> %v, want preserved",
+			before.Status.SubtreeControllers, after.Status.SubtreeControllers)
+	}
+
+	listOut := runReturningBinary(t, nil, kuke, append(buildKukeDaemonArgs(host),
+		"get", "cells", "--realm", realmName, "--space", spaceName, "--stack", stackName,
+		"-l", "cell.kukeon.io="+cellName, "--output", "json")...)
+	cells, err := parseCellListJSON(t, listOut)
+	if err != nil {
+		t.Fatalf("parse cell list JSON: %v", err)
+	}
+	if len(cells) != 1 || cells[0].Metadata.Name != cellName {
+		t.Errorf("selector cell.kukeon.io=%s returned %d cells, want the recreated cell", cellName, len(cells))
 	}
 }
