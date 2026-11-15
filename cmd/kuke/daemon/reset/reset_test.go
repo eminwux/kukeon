@@ -29,12 +29,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eminwux/kukeon/cmd/kuke/internal/lifecycle"
 	reset "github.com/eminwux/kukeon/cmd/kuke/daemon/reset"
+	"github.com/eminwux/kukeon/cmd/kuke/internal/lifecycle"
 	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/netpolicy"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/viper"
@@ -944,4 +945,38 @@ func (f *fakeClient) DeleteCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv
 		return kukeonv1.DeleteCellResult{}, errors.New("unexpected DeleteCell call")
 	}
 	return f.deleteCellFn(doc)
+}
+
+type recordingEnforcer struct {
+	removed []string
+}
+
+func (e *recordingEnforcer) Apply(context.Context, *netpolicy.Policy) error { return nil }
+
+func (e *recordingEnforcer) Remove(_ context.Context, realmName, spaceName string) error {
+	e.removed = append(e.removed, realmName+"/"+spaceName)
+	return nil
+}
+
+// TestRemoveSystemSpaceEgress_RemovesEachSpaceChain pins that --purge-system
+// removes each kuke-system space's egress chain before the metadata that
+// names those spaces is wiped (#1420).
+func TestRemoveSystemSpaceEgress_RemovesEachSpaceChain(t *testing.T) {
+	systemDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(systemDir, consts.KukeSystemSpaceName), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(systemDir, "realm.yaml"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	enforcer := &recordingEnforcer{}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	reset.RemoveSystemSpaceEgress(context.Background(), logger, enforcer, systemDir)
+	reset.RemoveSystemSpaceEgress(context.Background(), logger, enforcer, filepath.Join(systemDir, "missing"))
+
+	want := consts.KukeSystemRealmName + "/" + consts.KukeSystemSpaceName
+	if len(enforcer.removed) != 1 || enforcer.removed[0] != want {
+		t.Fatalf("removed = %v, want [%s]", enforcer.removed, want)
+	}
 }

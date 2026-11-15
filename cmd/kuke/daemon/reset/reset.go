@@ -25,6 +25,7 @@
 package reset
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -39,6 +40,7 @@ import (
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/firewall"
+	"github.com/eminwux/kukeon/internal/netpolicy"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
@@ -184,6 +186,11 @@ func runReset(cmd *cobra.Command, _ []string) error {
 
 	if purgeSystem {
 		systemDir := filepath.Join(runPath, consts.KukeonMetadataSubdir, consts.KukeSystemRealmName)
+		// The space metadata is what lets a later purge find each space's
+		// egress chain, so remove the chains before wiping it.
+		if firewall.IsIptablesAvailable() {
+			removeSystemSpaceEgress(cmd.Context(), logger, netpolicy.NewIptablesEnforcer(logger), systemDir)
+		}
 		removed, removeErr := removeDirIfExists(systemDir)
 		if removeErr != nil {
 			return fmt.Errorf("remove %q: %w", systemDir, removeErr)
@@ -194,7 +201,7 @@ func runReset(cmd *cobra.Command, _ []string) error {
 
 		// Symmetric with `kuke init`: full re-bootstrap should leave no
 		// kukeon-owned host firewall state behind. Per-space egress chains
-		// are torn down by space-deletion paths; this removes the host-wide
+		// were removed above; this removes the host-wide
 		// admission chain installed at init time. Skip silently when
 		// iptables is absent — the chain could not have been installed in
 		// the first place, mirroring init's warn-and-continue.
@@ -212,6 +219,33 @@ func runReset(cmd *cobra.Command, _ []string) error {
 	}
 
 	return nil
+}
+
+// removeSystemSpaceEgress removes the per-space egress chain of every space
+// directory under the kuke-system metadata tree. Best-effort: a failure is
+// logged so the purge still runs.
+func removeSystemSpaceEgress(
+	ctx context.Context,
+	logger *slog.Logger,
+	enforcer netpolicy.Enforcer,
+	systemDir string,
+) {
+	entries, err := os.ReadDir(systemDir)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			logger.WarnContext(ctx, "read kuke-system metadata dir", "dir", systemDir, "error", err)
+		}
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if rmErr := enforcer.Remove(ctx, consts.KukeSystemRealmName, entry.Name()); rmErr != nil {
+			logger.WarnContext(ctx, "failed to remove space egress policy",
+				"realm", consts.KukeSystemRealmName, "space", entry.Name(), "error", rmErr)
+		}
+	}
 }
 
 // removeFileIfExists removes a single file. Missing-file is a no-op so a

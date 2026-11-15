@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -98,13 +99,19 @@ func verifyE2ENetworkCleanup() error {
 	if err != nil {
 		return err
 	}
+	var leaked []string
 	for artifact := range egress {
 		if !e2eNetwork.egress[artifact] {
-			return fmt.Errorf(
-				"test-created egress iptables entry remains (not deleting it automatically): %s",
-				artifact,
-			)
+			leaked = append(leaked, artifact)
 		}
+	}
+	if len(leaked) > 0 {
+		// List every entry: a rule's comment names the realm and space.
+		sort.Strings(leaked)
+		return fmt.Errorf(
+			"test-created egress iptables entries remain (not deleting them automatically):\n%s",
+			strings.Join(leaked, "\n"),
+		)
 	}
 	return checkNetworkPool(e2eNetwork.pool)
 }
