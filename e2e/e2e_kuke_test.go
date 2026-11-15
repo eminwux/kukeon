@@ -305,6 +305,7 @@ func TestKuke_DaemonReset_Flags(t *testing.T) {
 // between parallel batches, which gives this test exclusive access to the
 // host-level state init touches.
 func TestKuke_DaemonReset_RoundTrip(t *testing.T) {
+	requireInitEgressRemoved(t)
 	runPath := getRandomRunPath(t)
 
 	// PR #489 (2026-05-14) moved the on-disk layout to <runPath>/data/<realm>
@@ -409,6 +410,7 @@ func TestKuke_DaemonReset_RoundTrip(t *testing.T) {
 // kukeon-suffixed containerd namespace, /run/kukeon, /opt/kukeon, the kukeon
 // user/group) and must not race them.
 func TestKuke_DaemonResetPurgeSystem_ThenUninstall(t *testing.T) {
+	requireInitEgressRemoved(t)
 	runPath := getRandomRunPath(t)
 	kukeondImage := loadKukeondImageIntoContainerd(t)
 
@@ -529,6 +531,7 @@ func TestKuke_Version_Help(t *testing.T) {
 // TestKuke_Init_VerifyState tests kuke init command with state-based verification.
 func TestKuke_Init_VerifyState(t *testing.T) {
 	t.Parallel()
+	requireInitEgressRemoved(t)
 
 	// Setup: Use a fresh, isolated run path
 	runPath := getRandomRunPath(t)
@@ -979,6 +982,7 @@ func TestKuke_Autocomplete_Fish(t *testing.T) {
 // TestKuke_Init_VerifyState or TestKuke_DaemonReset_RoundTrip, which
 // touch the same host-level surfaces.
 func TestKuke_Uninstall_VerifyState(t *testing.T) {
+	requireInitEgressRemoved(t)
 	runPath := getRandomRunPath(t)
 	kukeondImage := loadKukeondImageIntoContainerd(t)
 

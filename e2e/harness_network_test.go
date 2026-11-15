@@ -31,6 +31,9 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/eminwux/kukeon/internal/consts"
+	"github.com/eminwux/kukeon/internal/netpolicy"
 )
 
 // Each suite owns the checked pool exclusively; each run path gets a /20
@@ -114,6 +117,30 @@ func verifyE2ENetworkCleanup() error {
 		)
 	}
 	return checkNetworkPool(e2eNetwork.pool)
+}
+
+// requireInitEgressRemoved fails t when, after every other cleanup of t
+// has run, an egress chain for a space `kuke init` seeds is left behind.
+// Chain names are host-global, so the suite-level check alone cannot say
+// which test leaked one.
+func requireInitEgressRemoved(t *testing.T) {
+	t.Helper()
+	t.Cleanup(func() {
+		egress, err := egressArtifacts()
+		if err != nil {
+			t.Errorf("snapshot egress iptables state: %v", err)
+			return
+		}
+		for _, scope := range [][2]string{
+			{consts.KukeonDefaultRealmName, consts.KukeonDefaultSpaceName},
+			{consts.KukeSystemRealmName, consts.KukeSystemSpaceName},
+		} {
+			chain := "filter: chain " + netpolicy.NewAdmitAllPolicy(scope[0], scope[1], "").ChainName()
+			if egress[chain] && !e2eNetwork.egress[chain] {
+				t.Errorf("%s/%s egress %s remains after cleanup", scope[0], scope[1], chain)
+			}
+		}
+	})
 }
 
 // egressArtifacts snapshots the per-space egress chains and their dispatch
