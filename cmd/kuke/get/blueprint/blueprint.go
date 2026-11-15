@@ -199,6 +199,11 @@ func printBlueprints(cmd *cobra.Command, blueprints []v1beta1.CellBlueprintDoc, 
 	case shared.OutputFormatYAML:
 		return shared.PrintYAML(cmd, blueprints)
 	case shared.OutputFormatJSON:
+		// A nil slice encodes as JSON null; normalize so an empty list
+		// emits [] like cells/containers and the YAML path already do.
+		if blueprints == nil {
+			blueprints = []v1beta1.CellBlueprintDoc{}
+		}
 		return shared.PrintJSON(cmd, blueprints)
 	case shared.OutputFormatTable, shared.OutputFormatWide:
 		if len(blueprints) == 0 {

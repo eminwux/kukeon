@@ -199,6 +199,11 @@ func printConfigs(cmd *cobra.Command, configs []v1beta1.CellConfigDoc, format sh
 	case shared.OutputFormatYAML:
 		return shared.PrintYAML(cmd, configs)
 	case shared.OutputFormatJSON:
+		// A nil slice encodes as JSON null; normalize so an empty list
+		// emits [] like cells/containers and the YAML path already do.
+		if configs == nil {
+			configs = []v1beta1.CellConfigDoc{}
+		}
 		return shared.PrintJSON(cmd, configs)
 	case shared.OutputFormatTable, shared.OutputFormatWide:
 		if len(configs) == 0 {

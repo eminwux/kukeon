@@ -161,6 +161,11 @@ func printVolumes(cmd *cobra.Command, volumes []v1beta1.VolumeDoc, format shared
 	case shared.OutputFormatYAML:
 		return shared.PrintYAML(cmd, volumes)
 	case shared.OutputFormatJSON:
+		// A nil slice encodes as JSON null; normalize so an empty list
+		// emits [] like cells/containers and the YAML path already do.
+		if volumes == nil {
+			volumes = []v1beta1.VolumeDoc{}
+		}
 		return shared.PrintJSON(cmd, volumes)
 	case shared.OutputFormatTable, shared.OutputFormatWide:
 		if len(volumes) == 0 {
