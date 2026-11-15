@@ -37,7 +37,7 @@ def discovered_skill(injected, expected):
 
 def collect():
     home = Path('/home/user')
-    checkout = home / 'kuketeams'
+    checkout = home / 'kukeon-src'
     role = checkout / 'team/roles/operator'
     codex = home / '.codex'
     skill = home / '.agents/skills/create-cell-config'
