@@ -6,6 +6,7 @@ import "@xterm/xterm/css/xterm.css";
 import { ErrorNotice, useResource } from "./request";
 import { apiPath } from "./routes";
 import type { InventoryResource } from "./inventory";
+import { Icon } from "./icons";
 
 type Container = { id: string; attachable?: boolean; root?: boolean };
 export type TerminalState = "connecting" | "attached" | "disconnected" | "interrupted";
@@ -297,14 +298,23 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
   // With nothing to attach to, the terminal area carries the only (neutral) message.
   const empty = !!scope && !containers.loading && !containers.error && !eligible.length && !options.length;
   const headerTone = current?.state ?? (skipAutoAttachFor === currentId && currentId || atLimit || unavailable || containers.error || !eligible.length || !selectedEligible ? "disconnected" : "connecting");
+  const toggleExpanded = () => { const next = !expanded; setExpanded(next); onExpandedChange(next); };
+  const resume = () => { setSkipAutoAttachFor(""); manager.attach(scope!, selected); };
+  // Attach, Detach and Reconnect swap within one slot. A dropped session also keeps Detach so its retained slot can be released.
+  const connectButton = (label: "Attach" | "Detach" | "Reconnect", disabled: boolean, onClick: () => void) =>
+    <button type="button" className="icon-button" aria-label={label} data-tooltip={label} disabled={disabled} onClick={onClick}><Icon name={label === "Attach" ? "attach" : label === "Detach" ? "detach" : "reconnect"} /></button>;
+  const connectSlot = current?.state === "attached" || current?.state === "connecting" ? connectButton("Detach", false, () => { setSkipAutoAttachFor(current.id); manager.detach(current.id); })
+    : current ? <>{connectButton("Reconnect", reconnectLimited || !selectedEligible || !!unavailable || !!containers.error, resume)}{connectButton("Detach", false, () => { setSkipAutoAttachFor(current.id); manager.detach(current.id); })}</>
+    : skipAutoAttachFor === currentId && currentId ? connectButton("Attach", !!atLimit || !selectedEligible || !!unavailable || !!containers.error, resume) : null;
   const controls = scope && <div className="terminal-workspace-tools">
-    {!empty && <div className="terminal-tool-status"><span className={`terminal-connection-state ${headerTone}`} role="status" title={current?.message}>{headerState}</span><button ref={expandButton} type="button" aria-expanded={expanded} aria-controls="terminal-screens" onClick={() => { const next = !expanded; setExpanded(next); onExpandedChange(next); }}>{expanded ? "Collapse terminal" : "Expand terminal"}</button></div>}
+    {!empty && <span className={`terminal-connection-state ${headerTone}`} role="status" tabIndex={0} title={current?.message || headerState} data-tooltip={current?.message || headerState}><span className="state-dot" aria-hidden="true" /><span className="sr-only">{headerState}</span></span>}
     <div className="terminal-controls">
       {containers.loading && <p role="status">Loading containers…</p>}
       {containers.error && <ErrorNotice error={containers.error} kind="Containers" />}
       {containers.error && containers.data && <p className="stale">Container list is stale. Refresh before attaching.</p>}
-      {!!options.length && <><label htmlFor="terminal-container">Container</label><select id="terminal-container" value={selected} onChange={event => manager.select(scope, event.target.value)}>{options.map(id => <option key={id} value={id}>{id}{eligible.some(container => container.id === id) ? "" : " (unavailable)"}</option>)}</select>
-        {current?.state === "attached" || current?.state === "connecting" ? <button onClick={() => { setSkipAutoAttachFor(current.id); manager.detach(current.id); }}>Detach</button> : current ? <><button disabled={reconnectLimited || !selectedEligible || !!unavailable || !!containers.error} onClick={() => { setSkipAutoAttachFor(""); manager.attach(scope, selected); }}>Reconnect</button><button onClick={() => { setSkipAutoAttachFor(current.id); manager.detach(current.id); }}>Detach</button></> : skipAutoAttachFor === currentId && currentId ? <button disabled={!!atLimit || !selectedEligible || !!unavailable || !!containers.error} onClick={() => { setSkipAutoAttachFor(""); manager.attach(scope, selected); }}>Attach</button> : null}</>}
+      {!!options.length && <><label htmlFor="terminal-container" className="sr-only">Container</label><select id="terminal-container" className="mono-id" value={selected} onChange={event => manager.select(scope, event.target.value)}>{options.map(id => <option key={id} value={id}>{id}{eligible.some(container => container.id === id) ? "" : " (unavailable)"}</option>)}</select>
+        {connectSlot}</>}
+      {!empty && <button ref={expandButton} type="button" className="icon-button" aria-label={expanded ? "Collapse terminal" : "Expand terminal"} data-tooltip={expanded ? "Collapse terminal" : "Expand terminal"} aria-expanded={expanded} aria-controls="terminal-screens" onClick={toggleExpanded}><Icon name={expanded ? "collapse" : "expand"} /></button>}
       {unavailable && <p className="terminal-unavailable" role="status">Terminal unavailable: cell is {cellState}.</p>}
       {(atLimit || reconnectLimited) && <p className="terminal-limit" role="status">Terminal limit reached. Detach another terminal to free a connection or retained slot.</p>}
     </div>

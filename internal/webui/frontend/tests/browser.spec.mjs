@@ -303,7 +303,11 @@ test("Workspace lands first and Resources retains resource summaries and navigat
     await expect(page.locator(".summary-card").filter({ hasText: type }).locator("strong")).toHaveText("2");
     await expect(nav(page).getByRole("link", { name: type, exact: true })).toBeVisible();
   }
-  await expect(page.getByRole("heading", { name: "Cell states" })).toBeVisible();
+  await expect(page.locator(".summary-card").filter({ hasText: "Cells" }).getByRole("list", { name: "Cell states" })).toContainText("Running");
+  const attention = page.getByRole("region", { name: "Cells needing attention" });
+  await expect(attention.getByRole("link", { name: "api", exact: true })).toHaveAttribute("href", "#/resource/prod/shared/services/api");
+  await expect(attention.getByRole("listitem")).toHaveCount(1);
+  await expect(page.getByRole("heading", { name: "Resource overview" })).toHaveCount(0);
   await expect(page.locator("pre")).toHaveCount(0);
   await expect(page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link", { name: "Open dev / shared / services / api" })).toBeVisible();
 });
@@ -1336,4 +1340,61 @@ test("realm scope, breadcrumbs and narrow lists stay within the page", async ({ 
   await expect(page.locator(".breadcrumbs > *")).toHaveCount(1);
   await page.goto(`${server.url}#/images/dev`);
   expect(await page.locator(".breadcrumbs > span").evaluate(el => getComputedStyle(el, "::before").content)).toBe('"/"');
+});
+
+test("operator density: compact rows and header, quiet row actions, icon terminal toolbar and shared status tokens", async ({ page }) => {
+  await mock(page, path => path.endsWith("/containers") ? { json: [{ id: "shell", attachable: true }] }
+    : /\/stacks\/[^/]+\/cells$/.test(path) ? { json: fixture(path, 12) } : undefined);
+  await page.routeWebSocket("**/attach", socket => { socket.send(JSON.stringify({ type: "ready" })); });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${server.url}#/cells`);
+  const rows = page.locator("tbody tr");
+  await expect(rows).toHaveCount(24);
+  for (const box of await rows.evaluateAll(els => els.map(el => el.getBoundingClientRect().height))) expect(box).toBeLessThanOrEqual(44);
+  expect(await rows.evaluateAll(els => els.filter(el => el.getBoundingClientRect().bottom <= innerHeight).length)).toBeGreaterThanOrEqual(15);
+  expect((await page.locator(".page-heading").boundingBox()).height).toBeLessThanOrEqual(100);
+  await expect(page.locator(".eyebrow")).toHaveCount(0);
+  await expect(page.locator("tbody button")).toHaveCount(0);
+  await expect(page.locator("tbody").getByText("View document")).toHaveCount(0);
+  expect(await page.locator(".scope-cell").first().evaluate(el => getComputedStyle(el).fontFamily)).toContain("monospace");
+  const action = rows.first().getByRole("link", { name: /^View document for / });
+  expect(await action.evaluate(el => getComputedStyle(el).opacity)).toBe("0");
+  await action.focus();
+  await expect.poll(() => action.evaluate(el => getComputedStyle(el).opacity)).toBe("1");
+  await page.keyboard.press("Enter");
+  await expect(page.locator("pre")).toContainText('"futureField"');
+
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api-00`);
+  const row = page.locator(".cell-page-title-row");
+  await expect(row.locator(".terminal-connection-state")).toHaveText("Attached");
+  for (const name of ["Detach", "Expand terminal", "Stop", "Restart"]) {
+    const button = row.getByRole("button", { name, exact: true });
+    await expect(button).toHaveAttribute("data-tooltip", name);
+    await expect(button).toHaveText("");
+  }
+  const [top] = await page.locator(".cell-page-title-row > *:not([hidden])").evaluateAll(els => [new Set(els.map(el => Math.round(el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2))).size]);
+  expect(top).toBe(1);
+  await row.getByRole("button", { name: "Detach", exact: true }).click();
+  await expect(row.getByRole("button", { name: "Attach", exact: true })).toBeVisible();
+  await expect(row.getByRole("button", { name: "Detach", exact: true })).toHaveCount(0);
+  await expect(row.getByRole("button", { name: "Stop", exact: true })).toHaveClass(/danger-action/);
+  await page.getByText("Advanced actions", { exact: true }).click();
+  for (const name of ["Kill cell…", "Delete cell…", "Purge cell…"]) await expect(page.getByRole("button", { name })).toHaveClass(/danger-action/);
+
+  const tokens = () => page.evaluate(() => ["ok", "stopped", "warning", "error", "pending"].map(tone => getComputedStyle(document.documentElement).getPropertyValue(`--status-${tone}`).trim()));
+  const light = await tokens();
+  expect(light.every(Boolean)).toBe(true);
+  expect(await page.locator(".state-badge.tone-ok").first().evaluate(el => getComputedStyle(el).color)).toBe(await page.evaluate(() => { const probe = document.createElement("span"); probe.style.color = "var(--status-ok)"; document.body.append(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; }));
+  await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
+  const dark = await tokens();
+  expect(dark.every(Boolean)).toBe(true);
+  expect(dark).not.toEqual(light);
+});
+
+test("Overview shows an explicit all-Ready state when no cell needs attention", async ({ page }) => {
+  await mock(page, path => /\/cells$/.test(path) ? { json: fixture(path).map(cell => ({ ...cell, status: { state: "Ready" } })) } : undefined);
+  await page.goto(`${server.url}#/resources`);
+  const attention = page.getByRole("region", { name: "Cells needing attention" });
+  await expect(attention).toContainText("All cells Ready");
+  await expect(attention.getByRole("link")).toHaveCount(0);
 });

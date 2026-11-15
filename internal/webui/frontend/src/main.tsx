@@ -8,6 +8,7 @@ import { CellSidebar } from "./cell-sidebar";
 import { useInventory, type Inventory, type InventoryResource, type Doc, type RuntimeStatus } from "./inventory";
 import { apiPath, catalogTitles, imagesLink, kinds, titles, readRoute, resourceLink, listLink, newCellLink, workspaceLink, type Route } from "./routes";
 import { StateBadge } from "./status";
+import { DocumentRowLink } from "./icons";
 import { CgroupPanel } from "./cgroup";
 import { RealmImagesPanel } from "./images";
 import { RegistryCredentialsPanel, type RegistryCredential } from "./registry-credentials";
@@ -50,12 +51,15 @@ function Dashboard({ inventory }: { inventory: Resource<Inventory> }) {
   const cells = inventory.data?.rows[3] ?? [];
   const states = new Map<string, number>();
   for (const row of cells) { const state = row.doc.status?.state || "Not reported"; states.set(state, (states.get(state) ?? 0) + 1); }
+  const attention = cells.filter(row => row.doc.status?.state !== "Ready");
+  const cardNote = inventory.loading ? "Refreshing…" : partial ? "Incomplete or stale data" : "View all →";
   return <>
-    <div className="summary-grid">{titles.map((title, depth) => <a className="summary-card panel" key={title} href={listLink(depth)}><span>{title}</span><strong>{inventory.data ? inventory.data.rows[depth].length : "—"}</strong><small>{inventory.loading ? "Refreshing…" : partial ? "Incomplete or stale data" : "View all →"}</small></a>)}</div>
-    <div className="dashboard-grid">
-      <section className="panel"><div className="panel-heading"><h2>Cell states</h2><span className="badge">{partial ? "Incomplete" : "Reported by daemon"}</span></div><div className="panel-body">{states.size ? <ul className="state-list">{[...states].map(([state, count]) => <li key={state}><StateBadge state={state} /><strong>{count}</strong></li>)}</ul> : <p className="description">{inventory.loading ? "Loading cell states…" : partial ? "Cell states could not be fully loaded." : "No cells found."}</p>}</div></section>
-      <section className="panel"><div className="panel-heading"><h2>Resource overview</h2></div><div className="panel-body"><p>Browse resources by type, across every scope.</p><p className="description">Use a list to find a resource, inspect its status, or narrow it to a realm. Complete API documents are available on demand.</p><a className="text-link" href={listLink(3)}>Explore cells →</a></div></section>
-    </div>
+    <div className="summary-grid">{titles.map((title, depth) => <a className="summary-card panel" key={title} href={listLink(depth)}><span>{title}</span><strong>{inventory.data ? inventory.data.rows[depth].length : "—"}</strong>{depth === 3 && states.size > 0 && <ul className="summary-states" aria-label="Cell states">{[...states].map(([state, count]) => <li key={state}><StateBadge state={state} /><span>{count}</span></li>)}</ul>}<small>{cardNote}</small></a>)}</div>
+    <section className="panel attention-panel" aria-label="Cells needing attention">
+      <div className="panel-heading"><h2>Needs attention</h2><span className="badge">{partial ? "Incomplete" : `${attention.length} of ${cells.length} cells`}</span></div>
+      {attention.length ? <ul className="attention-list">{attention.map(row => <li key={JSON.stringify(row.scope)}><a className="resource-name" href={resourceLink(row.scope)}>{row.doc.metadata.name}</a><span className="mono-id">{row.scope.slice(0, 3).join(" / ")}</span><StateBadge state={row.doc.status?.state} /></li>)}</ul>
+        : <p className="attention-empty" role="status">{inventory.loading && !inventory.data ? "Loading cell states…" : partial ? "Cell states could not be fully loaded." : cells.length ? <><StateBadge state="Ready" /> All cells Ready</> : "No cells found."}</p>}
+    </section>
   </>;
 }
 function ResourceList({ depth, inventory, parent }: { depth: number; inventory: Resource<Inventory>; parent: string[] }) {
@@ -70,7 +74,7 @@ function ResourceList({ depth, inventory, parent }: { depth: number; inventory: 
   return <section className="panel" aria-label={`${titles[depth]} list`}>
     <div className="list-controls"><label className="search-field">Search<input type="search" placeholder={`Search ${titles[depth].toLowerCase()}…`} value={search} onChange={e => { setSearch(e.target.value); setPage(0); }} /></label>{depth > 0 && <label>Realm<select aria-label="Filter by realm" value={realm} onChange={e => { setRealm(e.target.value); setPage(0); }}><option value="">All realms</option>{inventory.data?.rows[0].map(row => <option key={row.scope[0]}>{row.scope[0]}</option>)}</select></label>}<span className="result-count">{filtered.length} results</span></div>
     {parent.length > 0 && <p className="scope-filter">Scope: {parent.join(" / ")} <a href={listLink(depth)}>Clear scope</a></p>}
-    <div className="table-scroll"><table><thead><tr><th>Name</th><th>State</th><th>Scope</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{filtered.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(row => <tr key={JSON.stringify(row.scope)}><td><a className="resource-name" href={resourceLink(row.scope)}>{row.doc.metadata.name}</a></td><td><StateBadge state={row.doc.status?.state} /></td><td className="scope-cell">{row.scope.slice(0, -1).join(" / ") || "—"}</td><td><a className="document-action" href={resourceLink(row.scope, true)} aria-label={`View document for ${row.scope.join(" / ")}`}>View document</a></td></tr>)}</tbody></table></div>
+    <div className="table-scroll"><table><thead><tr><th>Name</th><th>State</th><th>Scope</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{filtered.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(row => <tr key={JSON.stringify(row.scope)}><td><a className="resource-name" href={resourceLink(row.scope)}>{row.doc.metadata.name}</a></td><td><StateBadge state={row.doc.status?.state} /></td><td className="scope-cell">{row.scope.slice(0, -1).join(" / ") || "—"}</td><td className="row-actions"><DocumentRowLink href={resourceLink(row.scope, true)} label={row.scope.join(" / ")} /></td></tr>)}</tbody></table></div>
     {!filtered.length && <div className="empty-state"><h3>{inventory.loading ? "Loading resources…" : inventory.error || inventory.data?.failures.length ? "Resources could not be fully loaded" : scoped.length ? "No matching resources" : `No ${titles[depth].toLowerCase()} found`}</h3><p>{search || realm ? "Try another search or clear the filters." : "Refresh to retrieve the latest resource state."}</p></div>}
     <div className="pagination"><span>{filtered.length ? `${currentPage * pageSize + 1}–${Math.min((currentPage + 1) * pageSize, filtered.length)} of ${filtered.length}` : "0 results"}</span><button disabled={!currentPage} onClick={() => setPage(currentPage - 1)}>Previous</button><button disabled={(currentPage + 1) * pageSize >= filtered.length} onClick={() => setPage(currentPage + 1)}>Next</button></div>
   </section>;
@@ -83,9 +87,9 @@ function ResourceDetails({ route, revision }: { route: Route; revision: number }
   const detail = useResource<Doc>(apiPath(route.scope), revision + saved);
   const containers = useResource<{ id: string; attachable?: boolean; root?: boolean }[]>(depth === 3 ? `${apiPath(route.scope)}/containers` : null, revision);
   const status = detail.data && (depth === 3 || depth === 4) && !route.document && <StatusSummary status={detail.data.status} kind={kind} />;
-  const overview = detail.data && <section className="panel resource-overview"><div className="panel-heading"><h2>{route.document ? "API document" : "Resource overview"}</h2><StateBadge state={detail.data.status?.state} /></div>{route.document ? <pre tabIndex={0} aria-label={`Complete ${kind} JSON`}>{JSON.stringify(detail.data, null, 2)}</pre> : <div className="panel-body"><dl className="details-grid"><dt>Name</dt><dd>{detail.data.metadata.name}</dd><dt>Kind</dt><dd>{detail.data.kind ?? kind}</dd><dt>Scope</dt><dd>{route.scope.join(" / ")}</dd><dt>API version</dt><dd>{detail.data.apiVersion ?? "Not reported"}</dd><dt>Labels</dt><dd>{Object.entries(detail.data.metadata.labels ?? {}).map(([key, value]) => <span className="badge label-badge" key={key}>{key}: {value}</span>)}{!Object.keys(detail.data.metadata.labels ?? {}).length && "No labels"}</dd></dl>{depth < 3 && <a className="text-link" href={listLink(depth + 1, route.scope)}>View {titles[depth + 1].toLowerCase()} in this {kind} →</a>}</div>}</section>;
+  const overview = detail.data && <section className="panel resource-overview"><div className="panel-heading"><h2>{route.document ? "API document" : "Resource overview"}</h2><StateBadge state={detail.data.status?.state} /></div>{route.document ? <pre tabIndex={0} aria-label={`Complete ${kind} JSON`}>{JSON.stringify(detail.data, null, 2)}</pre> : <div className="panel-body"><dl className="details-grid"><dt>Name</dt><dd>{detail.data.metadata.name}</dd><dt>Kind</dt><dd>{detail.data.kind ?? kind}</dd><dt>Scope</dt><dd className="mono-id">{route.scope.join(" / ")}</dd><dt>API version</dt><dd>{detail.data.apiVersion ?? "Not reported"}</dd><dt>Labels</dt><dd>{Object.entries(detail.data.metadata.labels ?? {}).map(([key, value]) => <span className="badge label-badge" key={key}>{key}: {value}</span>)}{!Object.keys(detail.data.metadata.labels ?? {}).length && "No labels"}</dd></dl>{depth < 3 && <a className="text-link" href={listLink(depth + 1, route.scope)}>View {titles[depth + 1].toLowerCase()} in this {kind} →</a>}</div>}</section>;
   const related = detail.data && !route.document && <RelatedResources doc={detail.data} revision={revision} />;
-  const containerPanel = depth === 3 && <section className="panel container-panel"><div className="panel-heading"><h2>Containers</h2><span className="badge">{detail.error ? "Stale observations" : detail.loading ? "Refreshing observations" : "Cell observations"}</span></div><div className="panel-body">{containers.loading && <p>Loading containers…</p>}{containers.error && <ErrorNotice error={containers.error} />}{containers.error && containers.data && <p className="stale">Stale container list — refresh failed.</p>}{!containers.loading && !containers.error && !containers.data?.length && <p>No containers found.</p>}<ul className="state-list">{containers.data?.map(container => <li key={container.id}><a className="text-link" href={resourceLink([...route.scope, container.id])}>{container.id}</a><StateBadge state={detail.data?.status?.containers?.find(item => item.name === container.id || item.id === container.id)?.state} /><a className="document-action" href={resourceLink([...route.scope, container.id], true)}>View document</a></li>)}</ul></div></section>;
+  const containerPanel = depth === 3 && <section className="panel container-panel"><div className="panel-heading"><h2>Containers</h2><span className="badge">{detail.error ? "Stale observations" : detail.loading ? "Refreshing observations" : "Cell observations"}</span></div><div className="panel-body">{containers.loading && <p>Loading containers…</p>}{containers.error && <ErrorNotice error={containers.error} />}{containers.error && containers.data && <p className="stale">Stale container list — refresh failed.</p>}{!containers.loading && !containers.error && !containers.data?.length && <p>No containers found.</p>}<ul className="state-list">{containers.data?.map(container => <li key={container.id}><a className="text-link" href={resourceLink([...route.scope, container.id])}>{container.id}</a><StateBadge state={detail.data?.status?.containers?.find(item => item.name === container.id || item.id === container.id)?.state} /><DocumentRowLink href={resourceLink([...route.scope, container.id], true)} label={container.id} /></li>)}</ul></div></section>;
   return <>
     <div className="detail-actions"><a href={listLink(Math.min(depth, 3))}>← Back to {titles[Math.min(depth, 3)].toLowerCase()}</a><a className="document-action" href={resourceLink(route.scope, !route.document)}>{route.document ? "Show overview" : "View document"}</a></div>
     {detail.loading && <p role="status">Loading {kind} details…</p>}
@@ -180,7 +184,7 @@ function CellDetailsScreen({ title, view, scope, revision, inventory, manager, t
     <div className="panel-body"><dl className="details-grid">
       <dt>Name</dt><dd>{detail.data.metadata.name}</dd>
       <dt>Kind</dt><dd>{detail.data.kind ?? "cell"}</dd>
-      <dt>Scope</dt><dd>{scope.join(" / ")}</dd>
+      <dt>Scope</dt><dd className="mono-id">{scope.join(" / ")}</dd>
       <dt>API version</dt><dd>{detail.data.apiVersion ?? "Not reported"}</dd>
       <dt>Labels</dt><dd>{Object.entries(detail.data.metadata.labels ?? {}).map(([key, value]) => <span className="badge label-badge" key={key}>{key}: {value}</span>)}{!Object.keys(detail.data.metadata.labels ?? {}).length && "No labels"}</dd>
     </dl></div>
@@ -193,20 +197,22 @@ function CellDetailsScreen({ title, view, scope, revision, inventory, manager, t
       {containers.error && <ErrorNotice error={containers.error} />}
       {containers.error && containers.data && <p className="stale">Stale container list — refresh failed.</p>}
       {!containers.loading && !containers.error && !containers.data?.length && <p>No containers found.</p>}
-      <ul className="state-list">{containers.data?.map(container => <li key={container.id}><a className="text-link" href={resourceLink([...(scope ?? []), container.id])}>{container.id}</a><StateBadge state={detail.data?.status?.containers?.find(item => item.name === container.id || item.id === container.id)?.state} /><a className="document-action" href={resourceLink([...(scope ?? []), container.id], true)} target="_blank" rel="noopener noreferrer">View document</a></li>)}</ul>
+      <ul className="state-list">{containers.data?.map(container => <li key={container.id}><a className="text-link" href={resourceLink([...(scope ?? []), container.id])}>{container.id}</a><StateBadge state={detail.data?.status?.containers?.find(item => item.name === container.id || item.id === container.id)?.state} /><DocumentRowLink href={resourceLink([...(scope ?? []), container.id], true)} label={container.id} newTab /></li>)}</ul>
     </div>
   </section>;
 
   const switchLabel = scope ? `${terminalView ? "View details for" : "Open terminal for"} ${scope.join(" / ")}` : "";
   return <div className="cell-detail-screen" ref={screen} hidden={!scope}>
     {scope && <div className="page-heading cell-page-heading">
-      <div className="cell-page-title-row">
+      {/* cellTerminal keeps one action row: title, view switch, terminal tools, then lifecycle actions. */}
+      <div ref={terminalBar} className={`cell-page-title-row${terminalView ? " cell-terminal-bar" : ""}${terminalExpanded ? " is-terminal-expanded" : ""}`}>
         <h1>{title}</h1>
         <a className="icon-button cell-view-switch" href={terminalView ? resourceLink(scope) : workspaceLink(scope)} aria-label={switchLabel} title={terminalView ? "View cell details" : "Open cell terminal"}>
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
             {terminalView ? <><circle cx="12" cy="12" r="9" /><path d="M12 11v5" /><path d="M12 7.5h.01" /></> : <><rect x="3" y="4.5" width="18" height="15" rx="2" /><path d="m7 9.5 3 2.5-3 2.5" /><path d="M12.5 15H17" /></>}
           </svg>
         </a>
+        <div className="cell-terminal-tools" ref={setTerminalToolsHost} hidden={!terminalView} />
         <CellLifecycleControls scope={scope} state={cellState} operation={operation} onAction={onLifecycleAction} showFeedback={false} />
       </div>
       <LifecycleNotice operation={operation} />
@@ -214,9 +220,6 @@ function CellDetailsScreen({ title, view, scope, revision, inventory, manager, t
     {detail.loading && scope && <p role="status">Loading cell details…</p>}
     {detail.error && <ErrorNotice error={detail.error} kind="Cell" />}
     {detail.error && detail.data && <p className="stale">Stale resource details — refresh failed.</p>}
-    <div ref={terminalBar} className={`cell-terminal-bar${terminalExpanded ? " is-terminal-expanded" : ""}`} hidden={!scope || !terminalView}>
-      <div className="cell-terminal-tools" ref={setTerminalToolsHost} />
-    </div>
     <section className="cell-terminal-view" aria-label="Cell terminal" hidden={!terminalView}>
       <TerminalWorkspace scope={scope} revision={revision} inventory={inventory} manager={manager} theme={theme} visible={terminalView && !!scope} controlsHost={terminalToolsHost} onExpandedChange={setTerminalExpanded} />
     </section>
@@ -468,6 +471,8 @@ function App() {
   const catalog = Object.keys(catalogTitles).includes(route.view);
   const images = route.view === "images";
   const heading = isWorkspace ? route.scope.at(-1) ?? "Workspace" : route.view === "new-cell" ? "New Cell" : images ? route.scope[1] ?? "Images" : catalog ? route.scope.at(-1) ?? catalogTitles[route.view] : route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : "Resources";
+  // Only a scope path or realm qualifies the title; generic subtitles were dropped.
+  const headingContext = isWorkspace ? route.scope.join(" / ") : images ? route.scope[1] ? route.scope[0] : "" : route.view === "resource" || (catalog && route.scope.length > 0) ? route.scope.join(" / ") : "";
   const daemonStatus = inventory.daemon.error?.code === "permission_denied" ? "Permission denied" : inventory.daemon.error ? "Unavailable" : inventory.daemon.loading ? "Checking…" : "Connected";
   return <div className={`app-shell${cellTerminalActive ? " cell-screen-active" : ""}`}>
     <aside className={`sidebar ${menuOpen ? "is-open" : ""}`} id="cell-sidebar" aria-label="Cell sidebar">
@@ -508,7 +513,7 @@ function App() {
           <button type="button" aria-label="Dismiss cell operation result" disabled={lastOperation.operation.phase === "pending"} onClick={() => setLastOperation(null)}>Dismiss</button>
         </section>}
         {!isWorkspace && !cellScreenScope && <ResourcesNavigation route={route} />}
-        {!cellScreenScope && <div className="page-heading"><p className="eyebrow">{isWorkspace ? "Workspace" : "Resources"}</p><h1>{heading}</h1><p className="description">{isWorkspace ? route.scope.length ? route.scope.join(" / ") : "Select a cell to work with its terminal and inspect its state." : route.view === "new-cell" ? "Create a stopped Cell from a CellConfig or define its specification manually." : route.view === "dashboard" ? "Browse and manage resources on this server." : images ? route.scope[1] ? `Image in realm ${route.scope[0]}` : "Images installed in a realm's containerd namespace, read through kukeond." : route.view === "resource" || (catalog && route.scope.length > 0) ? route.scope.join(" / ") : `Browse ${heading?.toLowerCase()} across your infrastructure.`}</p>{isWorkspace && <a className="new-cell-action mobile-new-cell" href={newCellLink()}>+ New Cell</a>}</div>}
+        {!cellScreenScope && <div className="page-heading"><h1>{heading}</h1>{headingContext && <p className="page-context mono-id">{headingContext}</p>}{isWorkspace && <a className="new-cell-action mobile-new-cell" href={newCellLink()}>+ New Cell</a>}</div>}
         {creationNotice && <div className={`${creationNotice.phase === "error" ? "error" : creationNotice.phase === "pending" ? "creation-progress" : "creation-success"}`} role={creationNotice.phase === "error" ? "alert" : "status"}><span>{creationNotice.message}</span>{creationDocument && creationNotice.phase !== "pending" && <details><summary>View Cell document returned by Kukeon</summary><pre tabIndex={0} aria-label="Cell document returned after creation">{JSON.stringify(creationDocument, null, 2)}</pre></details>}<button type="button" className="notice-dismiss" aria-label="Dismiss creation message" onClick={() => { setCreationNotice(undefined); setCreationDocument(undefined); }}>×</button></div>}
         {inventory.loading && <p className="description" role="status">Refreshing resource inventory…</p>}
         {inventory.error && <ErrorNotice error={inventory.error} />}
