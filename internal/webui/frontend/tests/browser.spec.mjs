@@ -1097,3 +1097,97 @@ test("a failed network read uses the resource error pattern", async ({ page }) =
   await page.goto(`${server.url}#/resource/dev/shared`);
   await expect(page.getByRole("region", { name: "space network" }).getByRole("alert")).toContainText("Permission denied");
 });
+
+const inventoryImages = [
+  { name: "docker.io/library/alpine:3.19", size: 3400000, createdAt: "2026-01-02T03:04:05Z", digest: "sha256:0123456789abcdef0123", mediaType: "application/vnd.oci.image.index.v1+json", labels: { "io.kukeon/built": "true", team: "platform" } },
+  { name: "kukeon.internal/unsized:dev", size: null, createdAt: null, digest: "sha256:fedcba9876543210", mediaType: "", labels: {} },
+];
+function imageInventory(path) {
+  const match = path.match(/^\/api\/realms\/([^/]+)\/image-inventory(?:\/(.+))?$/);
+  if (!match) return undefined;
+  const realm = decodeURIComponent(match[1]);
+  const namespace = `${realm}.kukeon.io`;
+  if (!match[2]) return { json: { realm, namespace, images: realm === "prod" ? [] : inventoryImages } };
+  const image = inventoryImages.find(item => item.name === decodeURIComponent(match[2]));
+  return image ? { json: { realm, namespace, image } } : { status: 404, json: { error: { code: "not_found", message: `image not found: ${decodeURIComponent(match[2])}` } } };
+}
+
+test("Administration Images lists a realm's inventory, switches realm scope and opens a deep-linked image", async ({ page }) => {
+  const requested = [];
+  await mock(page, path => { if (path.includes("/image-inventory")) requested.push(path); return imageInventory(path); });
+  await page.goto(`${server.url}#/resources`);
+  await nav(page).getByRole("link", { name: "Images" }).click();
+  await expect(page).toHaveURL(/#\/images$/);
+  const list = page.getByRole("region", { name: "Images list" });
+  await expect(list.getByText("dev.kukeon.io")).toBeVisible();
+  const sized = list.getByRole("row", { name: /alpine/ });
+  await expect(sized).toContainText("3.2 MiB");
+  await expect(sized).toContainText("2026-01-02T03:04:05Z");
+  await expect(sized).toContainText("sha256:0123456789ab…");
+  await expect(sized).toContainText("application/vnd.oci.image.index.v1+json");
+  const unsized = list.getByRole("row", { name: /unsized/ });
+  await expect(unsized).toContainText("Unavailable");
+  await expect(unsized).not.toContainText("0 B");
+  expect(requested).toContain("/api/realms/dev/image-inventory");
+
+  await list.getByRole("combobox", { name: "Realm" }).selectOption("prod");
+  await expect(page).toHaveURL(/#\/images\/prod$/);
+  await expect(list.getByText("prod.kukeon.io")).toBeVisible();
+  await expect(list.getByRole("heading", { name: "No images found" })).toBeVisible();
+
+  await page.goto(`${server.url}#/images/dev`);
+  await list.getByRole("link", { name: "docker.io/library/alpine:3.19" }).click();
+  await expect(page).toHaveURL(/#\/images\/dev\/docker\.io%2Flibrary%2Falpine%3A3\.19$/);
+  const detail = page.getByRole("region", { name: "Image details" });
+  await expect(detail).toContainText("sha256:0123456789abcdef0123");
+  await expect(detail).toContainText("io.kukeon/built: true");
+  await expect(detail).toContainText("team: platform");
+  await expect(detail).toContainText("dev.kukeon.io");
+
+  await page.reload();
+  await expect(page.getByRole("region", { name: "Image details" })).toContainText("3.2 MiB");
+  await page.goto(`${server.url}#/images/dev/${encodeURIComponent("kukeon.internal/unsized:dev")}`);
+  const unsizedDetail = page.getByRole("region", { name: "Image details" });
+  await expect(unsizedDetail.getByText("Unavailable")).toHaveCount(3);
+});
+
+test("Images view distinguishes loading, missing image, permission, outdated daemon and failed refresh", async ({ page }) => {
+  let mode = "ok";
+  let release;
+  await mock(page, async path => {
+    if (!path.includes("/image-inventory")) return undefined;
+    if (mode === "slow") await new Promise(resolve => { release = resolve; });
+    if (mode === "permission") return { status: 403, json: { error: { code: "permission_denied", message: "dial kukeond: permission denied" } } };
+    if (mode === "outdated") return { status: 501, json: { error: { code: "daemon_outdated", message: "upgrade kukeond to match the client: KukeonV1.ListImages" } } };
+    if (mode === "fail") return failure;
+    return imageInventory(path);
+  });
+  mode = "slow";
+  await page.goto(`${server.url}#/images/dev`);
+  const list = page.getByRole("region", { name: "Images list" });
+  await expect(list.getByRole("status")).toHaveText("Loading images…");
+  release();
+  await expect(list.getByRole("row", { name: /alpine/ })).toBeVisible();
+
+  mode = "fail";
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.getByText("Stale image list — refresh failed.")).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText("Daemon unavailable");
+  await expect(list.getByRole("row", { name: /alpine/ })).toBeVisible();
+  mode = "ok";
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.getByText("Stale image list — refresh failed.")).toHaveCount(0);
+
+  mode = "permission";
+  await page.goto(`${server.url}#/images/prod`);
+  await expect(page.getByRole("alert")).toContainText("Permission denied");
+  await expect(list.getByRole("heading", { name: "Images could not be loaded" })).toBeVisible();
+
+  mode = "outdated";
+  await page.goto(`${server.url}#/images/dev`);
+  await expect(page.getByRole("alert")).toContainText("Daemon outdated");
+
+  mode = "ok";
+  await page.goto(`${server.url}#/images/dev/${encodeURIComponent("missing:1")}`);
+  await expect(page.getByRole("alert")).toContainText("Image no longer exists");
+});

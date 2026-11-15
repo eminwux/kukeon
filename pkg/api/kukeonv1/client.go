@@ -91,6 +91,12 @@ type Client interface {
 	// networking plus the runtime facts kukeond knows: subnet, bridge,
 	// conflist presence and the cell IPv4 (issue #1411). Read-only.
 	GetNetworkDetail(ctx context.Context, scope NetworkScope) (GetNetworkDetailResult, error)
+	// ListImages and GetImage read a realm's containerd image inventory
+	// (issue #1406). Read-only and served over RPC only so `kuke serve`
+	// can browse images through kukeond; the `kuke image *` / `kuke get
+	// image` CLI paths stay daemon-independent and in-process (#226).
+	ListImages(ctx context.Context, realm string) (ListImagesResult, error)
+	GetImage(ctx context.Context, realm, ref string) (GetImageResult, error)
 	// GetSecret reports the metadata-only view of a single named, scoped
 	// `kind: Secret` (issue #622). Spec.data is never echoed — the bytes do
 	// not traverse this RPC by design (#619).
@@ -200,12 +206,13 @@ type Client interface {
 	// semantics match the single-kind Delete{Realm,Space,Stack} methods.
 	DeleteDocuments(ctx context.Context, rawYAML []byte, cascade, force bool) (DeleteDocumentsResult, error)
 
-	// NOTE: image operations (LoadImage / ListImages / GetImage /
-	// DeleteImage) are intentionally NOT on this interface. They are
+	// NOTE: mutating image operations (LoadImage / DeleteImage /
+	// PruneImages) are intentionally NOT on this interface. They are
 	// daemon-independent by design (#226) and live on the in-process
 	// client (`*local.Client`) only — see the `cmd/kuke/image` package's
 	// `Client` interface, which the image subcommands use directly. The
-	// RPC daemon does not serve image methods.
+	// RPC daemon serves only the read-only ListImages / GetImage pair
+	// above, for the web UI (#1406).
 
 	Ping(ctx context.Context) error
 	// PingVersion is the Ping sibling that surfaces the daemon's reported
@@ -362,6 +369,9 @@ const (
 
 	MethodGetCgroupDetail  = ServiceName + ".GetCgroupDetail"
 	MethodGetNetworkDetail = ServiceName + ".GetNetworkDetail"
+
+	MethodListImages = ServiceName + ".ListImages"
+	MethodGetImage   = ServiceName + ".GetImage"
 
 	MethodListRealms     = ServiceName + ".ListRealms"
 	MethodListSpaces     = ServiceName + ".ListSpaces"

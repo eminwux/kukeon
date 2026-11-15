@@ -63,6 +63,7 @@ func registerResourceRoutes(mux *http.ServeMux, dial Dial) {
 	registerContainerRoutes(mux, dial)
 	registerCgroupRoutes(mux, dial)
 	registerNetworkRoutes(mux, dial)
+	registerImageInventoryRoutes(mux, dial)
 }
 
 func registerSpaceRoutes(mux *http.ServeMux, dial Dial) {

@@ -117,6 +117,14 @@ func (FakeClient) GetNetworkDetail(context.Context, NetworkScope) (GetNetworkDet
 	return GetNetworkDetailResult{}, ErrUnexpectedCall
 }
 
+func (FakeClient) ListImages(context.Context, string) (ListImagesResult, error) {
+	return ListImagesResult{}, ErrUnexpectedCall
+}
+
+func (FakeClient) GetImage(context.Context, string, string) (GetImageResult, error) {
+	return GetImageResult{}, ErrUnexpectedCall
+}
+
 func (FakeClient) GetConfig(context.Context, v1beta1.CellConfigDoc) (GetConfigResult, error) {
 	return GetConfigResult{}, ErrUnexpectedCall
 }

@@ -861,11 +861,11 @@ type DeleteResourceResult struct {
 
 // ---- Image ----
 //
-// Image result types live here (and not on the RPC interface) so the in-
-// process `*local.Client` returned by the daemon-independent `kuke image *`
-// path (#226) can keep using a wire-compatible shape without depending on
-// internal/controller. The Args/Reply wire envelopes were retired with the
-// RPC handlers — the daemon does not serve image methods.
+// Image result types live here so the in-process `*local.Client` returned
+// by the daemon-independent `kuke image *` path (#226) can keep using a
+// wire-compatible shape without depending on internal/controller. Only the
+// read-only ListImages / GetImage pair has wire envelopes: kukeond serves
+// it for the web UI (#1406); load/delete/prune are not served over RPC.
 
 // LoadImageResult reports the outcome of a `kuke image load` import: the
 // realm/namespace it landed in and the canonical image refs containerd
@@ -894,6 +894,29 @@ type ListImagesResult struct {
 	Realm     string
 	Namespace string
 	Images    []ImageInfo
+}
+
+// ListImagesArgs is the wire request for ListImages.
+type ListImagesArgs struct {
+	Realm string
+}
+
+// ListImagesReply is the wire response for ListImages.
+type ListImagesReply struct {
+	Result ListImagesResult
+	Err    *APIError
+}
+
+// GetImageArgs is the wire request for GetImage.
+type GetImageArgs struct {
+	Realm string
+	Ref   string
+}
+
+// GetImageReply is the wire response for GetImage.
+type GetImageReply struct {
+	Result GetImageResult
+	Err    *APIError
 }
 
 // GetImageResult carries the metadata of one named image in a realm.
