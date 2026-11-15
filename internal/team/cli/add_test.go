@@ -47,7 +47,10 @@ func TestAddCLIForwardsOptions(t *testing.T) {
 					if failure {
 						return initialize.Result{}, sentinel
 					}
-					return initialize.Result{Resources: 2, EntryPath: "/fixture/kukeon.yaml"}, nil
+					return initialize.Result{
+						Resources: 2, EntryPath: "/fixture/kukeon.yaml",
+						MissingSecrets: []string{"gh-token  →  kuke create secret gh-token --realm default"},
+					}, nil
 				},
 			)
 			cmd.SilenceUsage, cmd.SilenceErrors = true, true
@@ -74,7 +77,9 @@ func TestAddCLIForwardsOptions(t *testing.T) {
 				}
 				return
 			}
-			if err != nil || !strings.Contains(out.String(), "registered team kukeon") {
+			if err != nil || !strings.Contains(out.String(), "registered team kukeon") ||
+				!strings.Contains(out.String(), "Missing secrets (cells will not start until they exist):\n"+
+					"  gh-token  →  kuke create secret gh-token --realm default\n") {
 				t.Fatalf("output=%s error=%v", &out, err)
 			}
 		})

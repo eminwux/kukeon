@@ -137,6 +137,9 @@ func DecodeEntry(r io.Reader) (*TeamEntry, error) {
 	if entry.APIVersion != APIVersion || entry.Kind != KindTeamEntry || !ValidName(entry.Metadata.Name) {
 		return nil, errors.New("entry: require kuketeams.io/v1 TeamEntry and a valid metadata.name")
 	}
+	if err := ValidateSecrets("secrets", entry.Secrets); err != nil {
+		return nil, err
+	}
 	return &entry, nil
 }
 

@@ -43,10 +43,12 @@ import (
 type Options struct {
 	Sources map[string]fs.FS
 	Scope   Scope
-	// HomeDir is needed only for an explicitly requested ssh mount; TeamDir is
-	// needed for harness seed paths (Claude). Neither is discovered from the host.
+	// HomeDir is needed only for an explicitly requested ssh mount; it is not
+	// discovered from the host.
 	HomeDir string
-	TeamDir string
+	// Secrets are the bindings recorded in the team's existing TeamEntry; they
+	// take precedence over global spec.secrets and generated defaults.
+	Secrets []config.SecretBinding
 }
 
 const defaultScope = "default"
@@ -67,7 +69,6 @@ type Pair struct {
 	Blueprint *api.CellBlueprintDoc
 	Config    *api.CellConfigDoc
 	Secrets   []SecretRequirement
-	Seeds     []model.HarnessSeed
 }
 
 // SecretRequirement contains declarations only; Source is an optional creation
@@ -97,6 +98,10 @@ func Compose(cfg *config.TeamsConfig, team *config.Team, opts Options) (*Result,
 		return nil, err
 	}
 	result := &Result{Entry: entry}
+	secrets, err := newSecretBindings(opts.Secrets, cfg, scope.Realm)
+	if err != nil {
+		return nil, err
+	}
 	for _, role := range effective.Roles {
 		if !config.ValidName(role.Name) {
 			return nil, errors.New("role: invalid selection name")
@@ -105,7 +110,7 @@ func Compose(cfg *config.TeamsConfig, team *config.Team, opts Options) (*Result,
 			if !role.Selects(h) {
 				continue
 			}
-			pair, pairErr := composePair(cfg, team.Metadata.Name, role, h, effective.Sources, opts)
+			pair, pairErr := composePair(cfg, team.Metadata.Name, role, h, effective.Sources, opts, secrets)
 			if pairErr != nil {
 				return nil, fmt.Errorf("compose %s/%s: %w", role.Name, h.Name, pairErr)
 			}
@@ -135,6 +140,10 @@ func Compose(cfg *config.TeamsConfig, team *config.Team, opts Options) (*Result,
 			return nil, fmt.Errorf("spec.parameters: unsupported parameter %q", name)
 		}
 	}
+	if err = secrets.checkParameters(cfg.Spec.Parameters); err != nil {
+		return nil, err
+	}
+	result.Entry.Secrets = secrets.entry()
 	return result, nil
 }
 
@@ -161,6 +170,7 @@ func composePair(
 	hsel config.Harness,
 	sources []config.Source,
 	opts Options,
+	secrets *secretBindings,
 ) (Pair, error) {
 	if !config.ValidName(hsel.Name) {
 		return Pair{}, errors.New("invalid harness selection name")
@@ -237,14 +247,9 @@ func composePair(
 		},
 	}
 	pair := Pair{Role: selection.Name, Harness: hsel.Name, Image: image, Blueprint: bp, Config: cc}
-	if bindErr := bind(&pair, cfg, selection, &role, sources, team); bindErr != nil {
+	if bindErr := bind(&pair, cfg, selection, &role, sources, team, secrets); bindErr != nil {
 		return Pair{}, bindErr
 	}
-	pair.Seeds, err = resolveSeeds(definition, hsel.Name, opts.TeamDir)
-	if err != nil {
-		return Pair{}, err
-	}
-
 	return pair, nil
 }
 
@@ -370,19 +375,4 @@ func (r *Result) MarshalYAML() ([]byte, error) {
 		return nil, err
 	}
 	return out.Bytes(), nil
-}
-
-func resolveSeeds(harness *harness.Harness, harnessName, teamDir string) ([]model.HarnessSeed, error) {
-	var out []model.HarnessSeed
-	for _, seed := range harness.Spec.Seeds {
-		if !config.SafePath(teamDir) {
-			return nil, errors.New("TeamDir: explicit absolute team-state path required by harness seeds")
-		}
-		seed.Path = strings.NewReplacer("${TEAM_ROOT}", teamDir, "${HARNESS}", harnessName).Replace(seed.Path)
-		if !config.SafePath(seed.Path) || !strings.HasPrefix(seed.Path, teamDir+"/") {
-			return nil, errors.New("harness seed escapes TeamDir")
-		}
-		out = append(out, seed)
-	}
-	return out, nil
 }

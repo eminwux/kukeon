@@ -148,6 +148,51 @@ func TestStrictTeamAndEntry(t *testing.T) {
 	}
 }
 
+func TestEntrySecretBindings(t *testing.T) {
+	const head = "apiVersion: kuketeams.io/v1\nkind: TeamEntry\nmetadata: {name: root}\n"
+	raw := head + "secrets:\n  - {name: gh-token, secretRef: {name: gh-token, realm: default}, envName: GH_TOKEN}\nspec: {}\n"
+	entry, err := config.DecodeEntry(strings.NewReader(raw))
+	if err != nil || len(entry.Secrets) != 1 || entry.Secrets[0].EnvName != "GH_TOKEN" {
+		t.Fatalf("entry=%+v err=%v", entry, err)
+	}
+	encoded, err := yaml.Marshal(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := config.DecodeEntry(bytes.NewReader(encoded))
+	if err != nil || !reflect.DeepEqual(again, entry) {
+		t.Fatalf("round trip: %v %s", err, encoded)
+	}
+	for want, raw := range map[string]string{
+		"secrets[0].token: unknown field": head +
+			"secrets:\n  - {name: gh-token, secretRef: {name: gh-token, realm: default}, envName: GH_TOKEN, token: x}\n",
+		"secrets[1].name": head + "secrets:\n" +
+			"  - {name: gh-token, secretRef: {name: a, realm: default}, envName: A}\n" +
+			"  - {name: gh-token, secretRef: {name: b, realm: default}, envName: B}\n",
+		"secrets[0].envName": head + "secrets:\n  - {name: gh-token, secretRef: {name: a, realm: default}, envName: 1A}\n",
+	} {
+		if _, err = config.DecodeEntry(strings.NewReader(raw)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("want %q, got %v", want, err)
+		}
+	}
+}
+
+func TestDefaultSecretBinding(t *testing.T) {
+	for name, env := range map[string]string{
+		"gh-token": "GH_TOKEN", "openrouter-api-key": "OPENROUTER_API_KEY", "a.b": "A_B",
+	} {
+		b, err := config.DefaultSecretBinding(name, "default")
+		if err != nil || b.EnvName != env || b.Name != name ||
+			b.SecretRef != (config.SecretRef{Name: name, Realm: "default"}) || b.Source != nil {
+			t.Fatalf("%s: %+v %v", name, b, err)
+		}
+	}
+	if _, err := config.DefaultSecretBinding("1password", "default"); err == nil ||
+		!strings.Contains(err.Error(), "bind it explicitly") {
+		t.Fatalf("underivable env accepted: %v", err)
+	}
+}
+
 func TestSourceClonePathValidationAndRoundTrip(t *testing.T) {
 	const base = `apiVersion: kuketeams.io/v1
 kind: TeamsConfig

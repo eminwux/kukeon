@@ -131,14 +131,19 @@ identities are created once. Creation happens before dependent blueprints and
 configs are applied. Credentials and remote secret-error text are never printed
 or saved in the TeamEntry or the blueprint/config request.
 
-A missing secret without a creation source reports a command such as:
+A missing secret without a creation source does not fail init or add. The
+blueprints/configs are still applied and the team registered (kukeond resolves
+secret references only when a cell launches), and the command exits 0 after
+listing each missing runtime secret once:
 
-```sh
-kuke create secret provider-account --realm auth --space shared --stack operators --from-file /path/to/token
-kuke team init
+```text
+Missing secrets (cells will not start until they exist):
+  provider-account  →  kuke create secret provider-account --realm auth --space shared --stack operators --from-file /path/to/token
 ```
 
-The actual command uses the binding's resolved name and scope. A cell-scoped
+Create them before launching cells; no rerun is needed. `kuke run` still fails
+on a cell whose secret is absent. The actual command uses the binding's
+resolved name and scope. A cell-scoped
 reference requires a `Secret` manifest with its exact metadata coordinates,
 applied with `kuke apply -f /path/to/secret.yaml`.
 

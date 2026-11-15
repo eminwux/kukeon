@@ -172,10 +172,29 @@ an `ssh` mount. The base operator needs no SSH mount or signing prerequisite.
 Only selected role/harness requirements contribute bindings. The shipped
 operator has no `gh` or `gh-token` requirement. Claude and Codex can reuse an
 existing authenticated session and declare no mandatory token. OpenCode's
-selected provider requires `openrouter-api-key`:
+selected provider requires `openrouter-api-key`.
+
+Each required secret is bound by name, in this order of precedence:
+
+1. the binding recorded in the team's TeamEntry (`~/.kuke/kuketeam.d/<team>.yaml`
+   `secrets:`), including any operator edit to it;
+2. a global `TeamsConfig.spec.secrets` binding;
+3. a generated default: the runtime secret of the same name in the team realm
+   (`default`), exposed as the requirement upper-snake-cased (`gh-token` →
+   `GH_TOKEN`, `openrouter-api-key` → `OPENROUTER_API_KEY`).
+
+Composition records every binding the selected pairs use in the TeamEntry, so a
+repeated add or a recomposition from the entry alone keeps them. Bindings for
+requirements no selected pair uses are dropped. Because the recorded binding
+wins, change a binding after its first add by editing the TeamEntry (or delete
+it there to fall back to the global binding or default). A requirement whose
+name cannot yield an environment identifier (e.g. it starts with a digit) must
+be bound explicitly. The project's `kind: Team` file never declares bindings.
+
+An explicit global binding looks like this:
 
 ```yaml
-# Add under TeamsConfig.spec when selecting OpenCode.
+# Optional, under TeamsConfig.spec (or the same shape under TeamEntry secrets).
 secrets:
   - name: openrouter-api-key # identifier in Role.spec.harnesses.opencode.secrets
     secretRef:

@@ -167,7 +167,7 @@ func compositionFor(t *testing.T, harness string, bindings []config.SecretBindin
 	result, err := compose.Compose(
 		cfg,
 		team,
-		compose.Options{Sources: sourceFS(), TeamDir: "/operator/.kuke/teams/root"},
+		compose.Options{Sources: sourceFS()},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -177,7 +177,7 @@ func compositionFor(t *testing.T, harness string, bindings []config.SecretBindin
 
 func TestBaseOperatorHasNoSecretPrerequisite(t *testing.T) {
 	f := newFake()
-	if err := Apply(t.Context(), f, composition(t, "codex", nil)); err != nil {
+	if _, err := Apply(t.Context(), f, composition(t, "codex", nil)); err != nil {
 		t.Fatal(err)
 	}
 	if f.lookups != 0 || f.creates != 0 || f.applies != 1 || f.team != "root" {
@@ -226,7 +226,7 @@ func TestSecretReuseCreationAndRerun(t *testing.T) {
 			// Duplicate requirements across containers must create the identity once.
 			result.Pairs[0].Secrets = append(result.Pairs[0].Secrets, result.Pairs[0].Secrets[0])
 			for range 2 {
-				if err := Apply(t.Context(), f, result); err != nil {
+				if _, err := Apply(t.Context(), f, result); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -256,15 +256,16 @@ func TestSecretReuseCreationAndRerun(t *testing.T) {
 	}
 }
 
-func TestMissingSecretRemediation(t *testing.T) {
+func TestMissingSecretWarnsAndStillApplies(t *testing.T) {
 	b := binding(nil)
 	f := newFake()
-	err := Apply(t.Context(), f, composition(t, "opencode", []config.SecretBinding{b}))
-	want := "kuke create secret provider-account --realm auth --space shared --stack operators --from-file /path/to/token"
-	if err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "rerun kuke team init") ||
-		f.applies != 0 ||
-		f.creates != 0 {
-		t.Fatalf("err=%v creates=%d applies=%d", err, f.creates, f.applies)
+	result := composition(t, "opencode", []config.SecretBinding{b})
+	// The same runtime identity required twice is reported once.
+	result.Pairs[0].Secrets = append(result.Pairs[0].Secrets, result.Pairs[0].Secrets[0])
+	missing, err := Apply(t.Context(), f, result)
+	want := "provider-account  →  kuke create secret provider-account --realm auth --space shared --stack operators --from-file /path/to/token"
+	if err != nil || len(missing) != 1 || missing[0] != want || f.applies != 1 || f.creates != 0 {
+		t.Fatalf("missing=%q err=%v creates=%d applies=%d", missing, err, f.creates, f.applies)
 	}
 }
 
@@ -292,7 +293,7 @@ func TestFailuresNeverApplyDependentResourcesOrLeakCredentials(t *testing.T) {
 			f := newFake()
 			b := binding(&config.SecretSource{Env: "INIT_TEST_TOKEN"})
 			tc.setup(t, f, &b)
-			err := Apply(t.Context(), f, composition(t, "opencode", []config.SecretBinding{b}))
+			_, err := Apply(t.Context(), f, composition(t, "opencode", []config.SecretBinding{b}))
 			if err == nil || !strings.Contains(err.Error(), tc.want) ||
 				strings.Contains(err.Error(), "sensitive-value") ||
 				f.applies != 0 {
@@ -314,12 +315,12 @@ func TestCreateWriteFailureThenRerunReusesSecret(t *testing.T) {
 	f.createErr = io.EOF
 	b := binding(&config.SecretSource{Env: "INIT_TEST_TOKEN"})
 	result := composition(t, "opencode", []config.SecretBinding{b})
-	if err := Apply(t.Context(), f, result); err == nil {
+	if _, err := Apply(t.Context(), f, result); err == nil {
 		t.Fatal("expected error")
 	}
 	f.createErr = nil
 	t.Setenv("INIT_TEST_TOKEN", "replacement-value")
-	if err := Apply(t.Context(), f, result); err != nil {
+	if _, err := Apply(t.Context(), f, result); err != nil {
 		t.Fatal(err)
 	}
 	if f.creates != 1 || f.secrets[metadata(b.SecretRef)] != "first-value" {
@@ -335,7 +336,9 @@ func TestAllSecretsPreflightBeforeAnyCreate(t *testing.T) {
 		result.Pairs[0].Secrets,
 		compose.SecretRequirement{Reference: config.SecretRef{Name: "other", Realm: "auth"}},
 	)
-	if err := Apply(t.Context(), f, result); err == nil || f.creates != 0 || f.applies != 0 {
+	result.Pairs[0].Secrets[1].Source = &config.SecretSource{Env: "INIT_TEST_EMPTY"}
+	t.Setenv("INIT_TEST_EMPTY", "")
+	if _, err := Apply(t.Context(), f, result); err == nil || f.creates != 0 || f.applies != 0 {
 		t.Fatalf("preflight did not gate writes: %v", err)
 	}
 }
@@ -357,7 +360,7 @@ func TestApplyOutcomes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFake()
 			f.resources, f.applyErr = tc.resources, tc.err
-			err := Apply(t.Context(), f, composition(t, "codex", nil))
+			_, err := Apply(t.Context(), f, composition(t, "codex", nil))
 			if tc.want == "" {
 				if err != nil {
 					t.Fatal(err)
@@ -387,28 +390,28 @@ func TestSecretScopesRemainExplicit(t *testing.T) {
 			f := newFake()
 			b := binding(nil)
 			b.SecretRef = ref
-			err := Apply(t.Context(), f, composition(t, "opencode", []config.SecretBinding{b}))
-			if err == nil || f.creates != 0 {
-				t.Fatal("missing secret accepted")
+			missing, err := Apply(t.Context(), f, composition(t, "opencode", []config.SecretBinding{b}))
+			if err != nil || f.creates != 0 || len(missing) != 1 {
+				t.Fatalf("missing=%v err=%v creates=%d", missing, err, f.creates)
 			}
 			if ref.Cell != "" {
-				if !strings.Contains(err.Error(), "no --cell flag") {
-					t.Fatal(err)
+				if !strings.Contains(missing[0], "no --cell flag") {
+					t.Fatal(missing[0])
 				}
 			} else {
-				if !strings.Contains(err.Error(), "--realm auth") {
-					t.Fatal(err)
+				if !strings.Contains(missing[0], "--realm auth") {
+					t.Fatal(missing[0])
 				}
-				if ref.Stack == "" && strings.Contains(err.Error(), "--stack") {
+				if ref.Stack == "" && strings.Contains(missing[0], "--stack") {
 					t.Fatal("invented stack scope")
 				}
 			}
 			f.secrets[metadata(ref)] = "preserved"
-			if err = Apply(t.Context(), f, composition(t, "opencode", []config.SecretBinding{b})); err != nil {
+			if missing, err = Apply(t.Context(), f, composition(t, "opencode", []config.SecretBinding{b})); err != nil {
 				t.Fatal(err)
 			}
-			if f.creates != 0 {
-				t.Fatal("rotated scoped credential")
+			if f.creates != 0 || len(missing) != 0 {
+				t.Fatal("rotated scoped credential or kept reporting it missing")
 			}
 		})
 	}

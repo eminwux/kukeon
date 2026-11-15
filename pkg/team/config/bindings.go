@@ -37,17 +37,36 @@ func SafePath(value string) bool {
 }
 
 func validateBindings(s *Spec) error {
+	if err := ValidateSecrets("spec.secrets", s.Secrets); err != nil {
+		return err
+	}
+	return validateParameters(s)
+}
+
+// ValidateSecrets checks a binding list reported under field, e.g. spec.secrets.
+func ValidateSecrets(field string, bindings []SecretBinding) error {
 	secrets := map[string]bool{}
-	for i, binding := range s.Secrets {
-		field := fmt.Sprintf("spec.secrets[%d]", i)
-		if err := unique(field+".name", binding.Name, secrets); err != nil {
+	for i, binding := range bindings {
+		item := fmt.Sprintf("%s[%d]", field, i)
+		if err := unique(item+".name", binding.Name, secrets); err != nil {
 			return err
 		}
-		if err := validateSecret(field, binding); err != nil {
+		if err := validateSecret(item, binding); err != nil {
 			return err
 		}
 	}
-	return validateParameters(s)
+	return nil
+}
+
+// DefaultSecretBinding binds a requirement to a same-named runtime secret in
+// realm, exposed as the upper-snake-cased requirement (gh-token -> GH_TOKEN).
+func DefaultSecretBinding(name, realm string) (SecretBinding, error) {
+	env := strings.ToUpper(strings.NewReplacer("-", "_", ".", "_").Replace(name))
+	binding := SecretBinding{Name: name, SecretRef: SecretRef{Name: name, Realm: realm}, EnvName: env}
+	if err := validateSecret("secret "+name, binding); err != nil {
+		return SecretBinding{}, fmt.Errorf("%w; bind it explicitly in spec.secrets", err)
+	}
+	return binding, nil
 }
 
 func validateSecret(field string, binding SecretBinding) error {

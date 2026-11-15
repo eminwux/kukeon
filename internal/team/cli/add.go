@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -82,6 +83,9 @@ func newAddCommand(
 				strings.TrimSuffix(filepath.Base(result.EntryPath), ".yaml"),
 				result.EntryPath,
 			)
+			if err == nil {
+				err = printMissingSecrets(cmd.OutOrStdout(), result.MissingSecrets)
+			}
 			return err
 		},
 	}
@@ -99,3 +103,20 @@ func newAddCommand(
 }
 
 func defaultAddCommand() *cobra.Command { return newAddCommand(os.UserHomeDir, initialize.Add) }
+
+// printMissingSecrets reports runtime secrets the team needs but kukeon lacks;
+// application already succeeded, so this is guidance, not a failure.
+func printMissingSecrets(w io.Writer, missing []string) error {
+	if len(missing) == 0 {
+		return nil
+	}
+	if _, err := fmt.Fprintln(w, "Missing secrets (cells will not start until they exist):"); err != nil {
+		return err
+	}
+	for _, line := range missing {
+		if _, err := fmt.Fprintf(w, "  %s\n", line); err != nil {
+			return err
+		}
+	}
+	return nil
+}

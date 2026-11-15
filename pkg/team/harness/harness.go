@@ -53,7 +53,6 @@ type Spec struct {
 	Parameters  []api.CellBlueprintParameter `json:"parameters,omitempty"  yaml:"parameters,omitempty"`
 	StatePath   string                       `json:"statePath,omitempty"   yaml:"statePath,omitempty"`
 	Mounts      []Mount                      `json:"mounts,omitempty"      yaml:"mounts,omitempty"`
-	Seeds       []model.HarnessSeed          `json:"seeds,omitempty"       yaml:"seeds,omitempty"`
 	Images      []Image                      `json:"images"                yaml:"images"`
 }
 

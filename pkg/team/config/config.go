@@ -157,6 +157,9 @@ type TeamEntry struct {
 	Kind       string   `yaml:"kind"`
 	Metadata   Metadata `yaml:"metadata"`
 	// ProjectSource is additive to resolved sources; authored lists still replace defaults.
-	ProjectSource *Source  `yaml:"projectSource,omitempty"`
-	Spec          Defaults `yaml:"spec"`
+	ProjectSource *Source `yaml:"projectSource,omitempty"`
+	// Secrets records every binding the selected pairs used. Composition prefers
+	// these over global spec.secrets, so operator edits survive repeated adds.
+	Secrets []SecretBinding `yaml:"secrets,omitempty"`
+	Spec    Defaults        `yaml:"spec"`
 }

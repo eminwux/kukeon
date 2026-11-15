@@ -53,6 +53,9 @@ type Result struct {
 	Bootstrap bootstrap.Result
 	EntryPath string
 	Resources int
+	// MissingSecrets lists one remediation line per required runtime secret that
+	// does not exist yet; cells using it fail to start until it is created.
+	MissingSecrets []string
 }
 
 // Run initializes only when configuration is absent, unless Force resets it.
@@ -76,13 +79,17 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	}
 	entryPath := filepath.Join(opts.Root, "kuketeam.d", "kukeon.yaml")
 	team := config.Operator()
+	var recorded []config.SecretBinding
 	if !opts.Force {
 		team, err = readTeam(entryPath)
 		if err != nil {
 			return result, err
 		}
+		if recorded, err = readEntrySecrets(entryPath); err != nil {
+			return result, err
+		}
 	}
-	return runTeam(ctx, opts, boot.Config, team, result, "kuke team init")
+	return runTeam(ctx, opts, boot.Config, team, recorded, result, "kuke team init")
 }
 
 // runTeam is shared by init and add; staging precedes all daemon writes.
@@ -91,6 +98,7 @@ func runTeam(
 	opts Options,
 	cfg *config.TeamsConfig,
 	team *config.Team,
+	recorded []config.SecretBinding,
 	result Result,
 	command string,
 ) (Result, error) {
@@ -110,7 +118,8 @@ func runTeam(
 		defer cleanup()
 	}
 	composed, err := compose.Compose(cfg, team, compose.Options{
-		Sources: sources, HomeDir: opts.Home, TeamDir: filepath.Join(opts.Root, "teams", name),
+		Sources: sources, HomeDir: opts.Home,
+		Secrets: recorded,
 	})
 	if err != nil {
 		return result, fmt.Errorf("preflight composition: %w", err)
@@ -140,7 +149,8 @@ func runTeam(
 		}
 		defer func() { _ = client.Close() }()
 	}
-	if err = apply(ctx, client, composed, command); err != nil {
+	missing, err := apply(ctx, client, composed, command)
+	if err != nil {
 		if command != "kuke team init" {
 			return result, fmt.Errorf(
 				"%w; after fixing the prerequisite, rerun %s with the same revision flags",
@@ -161,7 +171,25 @@ func runTeam(
 		)
 	}
 	result.EntryPath, result.Resources = entryPath, len(composed.Pairs)*resourcesPerPair
+	result.MissingSecrets = missing
 	return result, nil
+}
+
+// readEntrySecrets returns the bindings recorded by a previous registration so
+// operator edits to them survive recomposition. An absent entry records none.
+func readEntrySecrets(path string) ([]config.SecretBinding, error) {
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read team registration %s: %w", path, err)
+	}
+	entry, err := config.DecodeEntry(bytes.NewReader(raw))
+	if err != nil {
+		return nil, fmt.Errorf("read team registration %s: %w", path, err)
+	}
+	return entry.Secrets, nil
 }
 
 func readTeam(path string) (*config.Team, error) {

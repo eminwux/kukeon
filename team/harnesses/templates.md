@@ -77,7 +77,7 @@ spec:
 ```
 
 The Harness owns images and capabilities, `shell`, `onInit`, `environment`,
-optional `parameters`, optional `statePath`, `mounts`, and noncredential `seeds`.
+optional `parameters`, optional `statePath`, and `mounts`.
 The shell is explicitly `/bin/bash` or `/bin/sh` and becomes the work container's
 command. All packaged scripts use Bash, which their shared base images supply.
 External images must include the declared interpreter and every referenced asset.
@@ -103,14 +103,13 @@ never shell source substitutions:
 
 `spec.environment` is a mapping of uppercase environment names to strings. It
 may refer to `${HOME}`, `${ROLE_SOURCE_DIR}`, `${ROLE_PATH}`, `${INITIAL_PATH}`,
-`${ROLE_NAME}`, `${SETTINGS}`, `${SANDBOX}`, `${APPROVAL}`, `${PERMISSIONS}`, and
-`${TEAM_ROOT}`, or to declared blueprint parameters. The renderer resolves its
+`${ROLE_NAME}`, `${SETTINGS}`, `${SANDBOX}`, `${APPROVAL}`, and `${PERMISSIONS}`,
+or to declared blueprint parameters. The renderer resolves its
 known inputs once; parameter references remain structural `${PARAM}` values in
 environment entries for kukeon to fill. `$HOME` notation in paths resolves before
 emission. Unsupported substitutions, unsafe paths, reserved environment keys,
 and parameters conflicting with startup inputs fail composition. Mounts retain
 separate source, target, and readOnly fields; lists and maps are never shell code.
-`TEAM_ROOT` is a host seed directory; it is not the runtime role checkout.
 
 Startup scripts are opaque shell code: no Go-template evaluation or input
 substitution occurs inside them. Quote shell variables (`"$ROLE_SOURCE_DIR"`,

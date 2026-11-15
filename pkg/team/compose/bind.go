@@ -35,6 +35,7 @@ func bind(
 	role *model.Role,
 	sources []config.Source,
 	team string,
+	secrets *secretBindings,
 ) error {
 	cc, bp := p.Config, p.Blueprint
 	if err := bindParameters(p, cfg, selection, role); err != nil {
@@ -72,7 +73,7 @@ func bind(
 		if err := bindRepos(container, sources, cc, boundRepos); err != nil {
 			return err
 		}
-		if err := bindSecrets(p, cfg, required, container, boundSecrets); err != nil {
+		if err := bindSecrets(p, secrets, required, container, boundSecrets); err != nil {
 			return err
 		}
 	}
@@ -88,15 +89,6 @@ func bind(
 	}
 
 	return nil
-}
-
-func secretBinding(cfg *config.TeamsConfig, name string) (config.SecretBinding, bool) {
-	for _, binding := range cfg.Spec.Secrets {
-		if binding.Name == name {
-			return binding, true
-		}
-	}
-	return config.SecretBinding{}, false
 }
 
 func containerGit(g *config.Git, ssh bool) *api.ContainerGit {
@@ -186,7 +178,7 @@ func bindRepos(
 
 func bindSecrets(
 	p *Pair,
-	cfg *config.TeamsConfig,
+	secrets *secretBindings,
 	required []string,
 	container *api.BlueprintContainer,
 	boundSecrets map[string]bool,
@@ -198,9 +190,9 @@ func bindSecrets(
 		if !slices.Contains(required, slot.Name) {
 			return fmt.Errorf("template secret %q is not required by selected role/harness", slot.Name)
 		}
-		binding, ok := secretBinding(cfg, slot.Name)
-		if !ok {
-			return fmt.Errorf("spec.secrets: missing structural binding for required secret %q", slot.Name)
+		binding, err := secrets.lookup(slot.Name)
+		if err != nil {
+			return err
 		}
 		if slot.Mode != "" && slot.Mode != "env" {
 			return errors.New("only environment secret destinations are supported")

@@ -59,7 +59,7 @@ func TestKukeondIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 2 {
-		if err = Apply(t.Context(), client, result); err != nil {
+		if _, err = Apply(t.Context(), client, result); err != nil {
 			t.Fatal(err)
 		}
 		for _, pair := range result.Pairs {

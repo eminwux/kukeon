@@ -224,7 +224,7 @@ func startupInputs(h *harness.Harness, role *model.Role, selection config.Role, 
 	values := map[string]string{
 		"HOME": home, "ROLE_SOURCE_DIR": repo.ClonePath, "ROLE_PATH": selection.Path, "INITIAL_PATH": initial,
 		"ROLE_NAME": role.Metadata.Name, "SETTINGS": settings.Settings, "SANDBOX": sandbox, "APPROVAL": approval,
-		"PERMISSIONS": settings.Permissions, "TEAM_ROOT": opts.TeamDir,
+		"PERMISSIONS": settings.Permissions,
 	}
 	parameters, err := startupParameters(h, role, values)
 	if err != nil {

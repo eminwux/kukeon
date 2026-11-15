@@ -129,7 +129,11 @@ func Add(ctx context.Context, opts AddOptions) (Result, error) {
 	if opts.Directory != "" {
 		command = "kuke team add <directory> --name " + opts.Name
 	}
-	return runTeam(ctx, opts.Options, cfg, team, Result{}, command)
+	recorded, err := readEntrySecrets(filepath.Join(opts.Root, "kuketeam.d", opts.Name+".yaml"))
+	if err != nil {
+		return Result{}, err
+	}
+	return runTeam(ctx, opts.Options, cfg, team, recorded, Result{}, command)
 }
 
 func validateRevision(opts AddOptions) error {

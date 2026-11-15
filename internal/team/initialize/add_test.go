@@ -29,11 +29,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	"github.com/eminwux/kukeon/pkg/team/config"
+	"gopkg.in/yaml.v3"
 )
 
 func fixtureGit(t *testing.T, dir string, args ...string) string {
@@ -261,7 +263,7 @@ func changeAddConfig(t *testing.T, opts AddOptions, change func(*config.TeamsCon
 }
 
 func TestAddFailuresPreserveAcceptedEntry(t *testing.T) {
-	for _, mode := range []string{"missing-branch", "missing-tag", "missing-commit", "rpc", "partial", "socket", "scope", "secret-lookup", "secret-missing", "registration-stage", "invalid-entry", "image", "definition", "collision", "clone-collision", "credentials"} {
+	for _, mode := range []string{"missing-branch", "missing-tag", "missing-commit", "rpc", "partial", "socket", "scope", "secret-lookup", "registration-stage", "invalid-entry", "image", "definition", "collision", "clone-collision", "credentials"} {
 		t.Run(mode, func(t *testing.T) {
 			opts, _ := setupAdd(t)
 			if _, err := Add(t.Context(), opts); err != nil {
@@ -277,10 +279,6 @@ func TestAddFailuresPreserveAcceptedEntry(t *testing.T) {
 			}
 			if mode != "rpc" && mode != "partial" && fake.applies != 0 {
 				t.Fatal("applied before preflight")
-			}
-			if mode == "secret-missing" &&
-				(!strings.Contains(err.Error(), "kuke team add kukeon") || strings.Contains(err.Error(), "kuke team init")) {
-				t.Fatal("init remediation in add")
 			}
 			if mode != "registration-stage" && mode != "invalid-entry" && mode != "clone-collision" {
 				after, _ := readAddEntry(t, opts)
@@ -518,6 +516,55 @@ func TestAddReusesScopedSecretsAndNewDefaults(t *testing.T) {
 	}
 }
 
+func TestAddRecordsSecretBindingsAndWarnsOnMissing(t *testing.T) {
+	opts, _ := setupAdd(t)
+	changeAddConfig(t, opts, func(cfg *config.TeamsConfig) {
+		cfg.Spec.Defaults.Harnesses = []config.Harness{
+			{Name: "opencode", Source: "kukeon", Path: "team/harnesses/opencode"},
+		}
+		cfg.Spec.Secrets = nil
+	})
+	fake := newFake()
+	opts.Client = fake
+	result, err := Add(t.Context(), opts)
+	want := "openrouter-api-key  →  kuke create secret openrouter-api-key --realm default --from-file /path/to/token"
+	if err != nil || fake.applies != 1 || fake.creates != 0 ||
+		!slices.Equal(result.MissingSecrets, []string{want}) {
+		t.Fatalf("missing=%q err=%v applies=%d", result.MissingSecrets, err, fake.applies)
+	}
+	_, entry := readAddEntry(t, opts)
+	if len(entry.Secrets) != 1 || entry.Secrets[0].EnvName != "OPENROUTER_API_KEY" ||
+		entry.Secrets[0].SecretRef != (config.SecretRef{Name: "openrouter-api-key", Realm: "default"}) {
+		t.Fatalf("entry secrets = %+v", entry.Secrets)
+	}
+	// An operator edit to the recorded binding outlives global bindings.
+	entry.Secrets[0].EnvName = "ROUTER_KEY"
+	edited, err := yaml.Marshal(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, filepath.Join(opts.Root, "kuketeam.d", opts.Name+".yaml"), string(edited))
+	changeAddConfig(t, opts, func(cfg *config.TeamsConfig) { cfg.Spec.Secrets = []config.SecretBinding{binding(nil)} })
+	fake.secrets[metadata(entry.Secrets[0].SecretRef)] = "present"
+	if result, err = Add(t.Context(), opts); err != nil || len(result.MissingSecrets) != 0 {
+		t.Fatalf("missing=%q err=%v", result.MissingSecrets, err)
+	}
+	if _, entry = readAddEntry(t, opts); entry.Secrets[0].EnvName != "ROUTER_KEY" ||
+		!bytes.Contains(fake.raw, []byte("ROUTER_KEY")) {
+		t.Fatal("recorded binding replaced")
+	}
+	// Deselecting the requirement drops its binding.
+	changeAddConfig(t, opts, func(cfg *config.TeamsConfig) {
+		cfg.Spec.Defaults.Harnesses = []config.Harness{{Name: "codex", Source: "kukeon", Path: "team/harnesses/codex"}}
+	})
+	if _, err = Add(t.Context(), opts); err != nil {
+		t.Fatal(err)
+	}
+	if _, entry = readAddEntry(t, opts); entry.Secrets != nil {
+		t.Fatalf("stale bindings kept: %+v", entry.Secrets)
+	}
+}
+
 type removeStageClient struct {
 	*fakeClient
 
@@ -681,16 +728,14 @@ func configureAddFailure(t *testing.T, opts *AddOptions, fake *fakeClient, mode 
 		opts.Host = "unix://" + filepath.Join(t.TempDir(), "absent.sock")
 	case "scope":
 		fake.missingRealm = true
-	case "secret-lookup", "secret-missing":
+	case "secret-lookup":
 		changeAddConfig(t, *opts, func(cfg *config.TeamsConfig) {
 			cfg.Spec.Defaults.Harnesses = []config.Harness{
 				{Name: "opencode", Source: "kukeon", Path: "team/harnesses/opencode"},
 			}
 			cfg.Spec.Secrets = []config.SecretBinding{binding(nil)}
 		})
-		if mode == "secret-lookup" {
-			fake.lookupErr = errors.New("unsafe-canary")
-		}
+		fake.lookupErr = errors.New("unsafe-canary")
 	case "registration-stage":
 		// Preserve the old entry while making directory staging impossible.
 		global, readErr := os.ReadFile(filepath.Join(opts.Root, "kuketeams.yaml"))

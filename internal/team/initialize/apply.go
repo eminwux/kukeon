@@ -51,30 +51,32 @@ var _ Client = (*kukeonv1.UnixClient)(nil)
 
 // Apply preflights all sources/scopes before writing anything to the daemon.
 // It never retries an ambiguous write. Secrets stay outside the document stream.
-func Apply(ctx context.Context, client Client, result *compose.Result) error {
+// Required secrets that are absent and have no creation source do not block
+// application; Apply returns one remediation line per missing runtime secret.
+func Apply(ctx context.Context, client Client, result *compose.Result) ([]string, error) {
 	return apply(ctx, client, result, "kuke team init")
 }
 
-func apply(ctx context.Context, client Client, result *compose.Result, command string) error {
+func apply(ctx context.Context, client Client, result *compose.Result, command string) ([]string, error) {
 	raw, err := result.MarshalYAML()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if result.Entry == nil || len(result.Pairs) == 0 {
-		return errors.New("preflight: empty team composition")
+		return nil, errors.New("preflight: empty team composition")
 	}
 	if err = client.Ping(ctx); err != nil {
-		return fmt.Errorf("kukeond connection/preflight: %w", err)
+		return nil, fmt.Errorf("kukeond connection/preflight: %w", err)
 	}
 	for _, pair := range result.Pairs {
 		md := pair.Blueprint.Metadata
 		if err = checkScope(ctx, client, config.SecretRef{Realm: md.Realm, Space: md.Space, Stack: md.Stack}, command); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	secrets, err := prepareSecrets(ctx, client, result, command)
+	secrets, missing, err := prepareSecrets(ctx, client, result, command)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for _, secret := range secrets {
 		// Close most of the preflight/create window and reuse a competing
@@ -84,24 +86,29 @@ func apply(ctx context.Context, client Client, result *compose.Result, command s
 		lookup.Spec.Data = ""
 		got, lookupErr := client.GetSecret(ctx, lookup)
 		if lookupErr != nil {
-			return requestError("recheck", "secret "+ref.Name, lookupErr)
+			return nil, requestError("recheck", "secret "+ref.Name, lookupErr)
 		}
 		if got.MetadataExists {
 			continue
 		}
 		if _, err = client.CreateSecret(ctx, secret); err != nil {
-			return requestError(
+			return nil, requestError(
 				"creation (write not retried; rerun "+command+" to check existence)",
 				"secret "+ref.Name,
 				err,
 			)
 		}
 	}
+	// CellConfigs only reference secrets structurally; kukeond resolves them at
+	// cell launch, so configs referencing a missing secret still apply.
 	applied, err := client.ApplyDocumentsForTeam(ctx, raw, result.Entry.Metadata.Name)
 	if err != nil {
-		return fmt.Errorf("kukeond apply RPC failed (application may be partial; registration unchanged): %w", err)
+		return nil, fmt.Errorf("kukeond apply RPC failed (application may be partial; registration unchanged): %w", err)
 	}
-	return checkResults(applied, len(result.Pairs)*resourcesPerPair, command)
+	if err = checkResults(applied, len(result.Pairs)*resourcesPerPair, command); err != nil {
+		return nil, err
+	}
+	return missing, nil
 }
 
 func checkResults(result kukeonv1.ApplyDocumentsResult, expected int, command string) error {
@@ -144,7 +151,7 @@ func prepareSecrets(
 	client Client,
 	result *compose.Result,
 	command string,
-) ([]api.SecretDoc, error) {
+) ([]api.SecretDoc, []string, error) {
 	// Deduplicate by complete runtime identity, not role/harness identifier.
 	requirements := map[config.SecretRef]*config.SecretSource{}
 	var order []config.SecretRef
@@ -155,7 +162,10 @@ func prepareSecrets(
 				order = append(order, required.Reference)
 			}
 			if previous != nil && required.Source != nil && *previous != *required.Source {
-				return nil, fmt.Errorf("preflight: conflicting creation sources for secret %s", required.Reference.Name)
+				return nil, nil, fmt.Errorf(
+					"preflight: conflicting creation sources for secret %s",
+					required.Reference.Name,
+				)
 			}
 			if !exists || previous == nil {
 				requirements[required.Reference] = required.Source
@@ -163,6 +173,7 @@ func prepareSecrets(
 		}
 	}
 	var pending []api.SecretDoc
+	var missing []string
 	for _, ref := range order {
 		doc := api.SecretDoc{
 			APIVersion: api.APIVersionV1Beta1, Kind: api.KindSecret,
@@ -176,26 +187,27 @@ func prepareSecrets(
 		}
 		got, err := client.GetSecret(ctx, doc)
 		if err != nil {
-			return nil, requestError("lookup", "secret "+ref.Name, err)
+			return nil, nil, requestError("lookup", "secret "+ref.Name, err)
 		}
 		if got.MetadataExists {
 			continue
 		}
 		if err = checkScope(ctx, client, ref, command); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		source := requirements[ref]
 		if source == nil {
-			return nil, missingSecret(ref, command)
+			missing = append(missing, missingSecret(ref))
+			continue
 		}
 		value, err := readSecret(source, command)
 		if err != nil {
-			return nil, fmt.Errorf("preflight secret %s: %w", ref.Name, err)
+			return nil, nil, fmt.Errorf("preflight secret %s: %w", ref.Name, err)
 		}
 		doc.Spec.Data = value
 		pending = append(pending, doc)
 	}
-	return pending, nil
+	return pending, missing, nil
 }
 
 func readSecret(source *config.SecretSource, command string) (string, error) {
@@ -218,16 +230,17 @@ func readSecret(source *config.SecretSource, command string) (string, error) {
 	return value, nil
 }
 
-func missingSecret(ref config.SecretRef, command string) error {
+// missingSecret formats one remediation line. Runtime secrets are created out
+// of band; kuke run fails on the cell until the secret exists.
+func missingSecret(ref config.SecretRef) string {
 	if ref.Cell != "" {
-		return fmt.Errorf(
-			"required secret %s is missing at realm=%s space=%s stack=%s cell=%s; kuke create secret has no --cell flag: create a Secret manifest with these metadata coordinates using kuke apply -f /path/to/secret.yaml, then rerun %s",
+		return fmt.Sprintf(
+			"%s  →  kuke apply -f /path/to/secret.yaml (kind: Secret, metadata realm=%s space=%s stack=%s cell=%s; kuke create secret has no --cell flag)",
 			ref.Name,
 			ref.Realm,
 			ref.Space,
 			ref.Stack,
 			ref.Cell,
-			command,
 		)
 	}
 	createCommand := "kuke create secret " + ref.Name + " --realm " + ref.Realm
@@ -237,12 +250,7 @@ func missingSecret(ref config.SecretRef, command string) error {
 	if ref.Stack != "" {
 		createCommand += " --stack " + ref.Stack
 	}
-	return fmt.Errorf(
-		"required secret %s is missing; supply your credential file: %s --from-file /path/to/token; then rerun %s (use the same kuke --host/--configuration endpoint)",
-		ref.Name,
-		createCommand,
-		command,
-	)
+	return ref.Name + "  →  " + createCommand + " --from-file /path/to/token"
 }
 
 func requestError(operation, subject string, err error) error {

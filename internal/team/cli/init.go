@@ -73,6 +73,9 @@ func newInitCommand(
 				result.Bootstrap.Path,
 				result.Resources, result.EntryPath,
 			)
+			if err == nil {
+				err = printMissingSecrets(cmd.OutOrStdout(), result.MissingSecrets)
+			}
 			return err
 		},
 	}

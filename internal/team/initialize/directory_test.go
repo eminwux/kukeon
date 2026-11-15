@@ -356,7 +356,7 @@ func TestDirectoryPersistsAuthoredSelectionsWithoutInput(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg.Spec.Defaults.Roles[0].Name = "new-global-role"
-	if _, err = runTeam(t.Context(), opts.Options, cfg, entry.Team(), Result{}, "saved declaration"); err != nil {
+	if _, err = runTeam(t.Context(), opts.Options, cfg, entry.Team(), entry.Secrets, Result{}, "saved declaration"); err != nil {
 		t.Fatal(err)
 	}
 	_, saved := readAddEntry(t, opts)
