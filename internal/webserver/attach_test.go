@@ -351,26 +351,33 @@ func TestAttachRealTerminal(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+	var output strings.Builder
+	readUntil := func(done func(string) bool) {
+		for !done(output.String()) {
+			kind, data, readErr := ws.ReadMessage()
+			if readErr != nil {
+				t.Fatalf("terminal output %q: %v", output.String(), readErr)
+			}
+			if kind == websocket.TextMessage {
+				if string(data) == `{"type":"ready"}` {
+					continue
+				}
+				t.Fatalf("terminal error: %s", data)
+			}
+			output.Write(data)
+		}
+	}
+	// sbsh registers the attacher before forwarding the client's initial PTY
+	// size; the detach banner is written only after that resize completes, so
+	// a resize sent before it can be overwritten by the stale initial size.
+	readUntil(func(s string) bool { return strings.Contains(s, "To detach, press ^] twice") })
 	if err = ws.WriteJSON(map[string]any{"type": "resize", "cols": 101, "rows": 32}); err != nil {
 		t.Fatal(err)
 	}
 	if err = ws.WriteMessage(websocket.BinaryMessage, []byte("stty size; printf 'WEB_ATTACH_OK\\n'\n")); err != nil {
 		t.Fatal(err)
 	}
-	var output strings.Builder
-	for !strings.Contains(output.String(), "32 101") || !strings.Contains(output.String(), "WEB_ATTACH_OK") {
-		kind, data, readErr := ws.ReadMessage()
-		if readErr != nil {
-			t.Fatalf("terminal output %q: %v", output.String(), readErr)
-		}
-		if kind == websocket.TextMessage {
-			if string(data) == `{"type":"ready"}` {
-				continue
-			}
-			t.Fatalf("terminal error: %s", data)
-		}
-		output.Write(data)
-	}
+	readUntil(func(s string) bool { return strings.Contains(s, "32 101") && strings.Contains(s, "WEB_ATTACH_OK") })
 	_ = ws.Close()
 	deadline = time.Now().Add(5 * time.Second)
 	for {
