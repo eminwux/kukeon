@@ -221,9 +221,13 @@ func buildKukeRunPathArgs(runPath string) []string {
 
 // loadKukeondImageIntoContainerd stages the local kukeond image into the
 // kuke-system containerd namespace and returns the fully-qualified image
-// reference to pass via `kuke init --kukeond-image`. It skips the test when
-// the harness env vars are unset (running `go test ./e2e` without the
-// `make e2e` wrapper) or when `docker` / `ctr` aren't on PATH. `kuke init`
+// reference to pass via `kuke init --kukeond-image`. `make e2e` builds the
+// image with kukebuild straight into that namespace and exports it to
+// KUKEON_E2E_IMAGE_TAR; this re-imports the archive on every call because the
+// suite's uninstall tests drop the namespace (and the image with it), so a
+// later caller cannot rely on the original build still being there. It skips
+// the test when the harness env vars are unset (running `go test ./e2e`
+// without the `make e2e` wrapper) or when `ctr` isn't on PATH. `kuke init`
 // otherwise resolves the kukeond image from `git describe` output, which
 // fails on dirty/untagged dev trees because that ref does not exist in any
 // registry.
@@ -231,52 +235,56 @@ func loadKukeondImageIntoContainerd(t *testing.T) string {
 	t.Helper()
 
 	image := os.Getenv("KUKEON_E2E_IMAGE")
-	dockerName := os.Getenv("KUKEON_E2E_IMAGE_DOCKER_NAME")
-	if image == "" || dockerName == "" {
+	tarPath := os.Getenv("KUKEON_E2E_IMAGE_TAR")
+	if image == "" || tarPath == "" {
 		t.Skip(
-			"KUKEON_E2E_IMAGE / KUKEON_E2E_IMAGE_DOCKER_NAME unset; " +
-				"run via 'make e2e' (which builds the local kukeond image) " +
+			"KUKEON_E2E_IMAGE / KUKEON_E2E_IMAGE_TAR unset; " +
+				"run via 'make e2e' (which builds the local kukeond image with kukebuild) " +
 				"or set both env vars manually",
 		)
 	}
 
-	dockerPath, err := exec.LookPath("docker")
-	if err != nil {
-		t.Skipf("docker binary not found, skipping kukeond image staging: %v", err)
-	}
 	ctrPath, err := exec.LookPath(ctr)
 	if err != nil {
 		t.Skipf("ctr binary not found, skipping kukeond image staging: %v", err)
 	}
 
-	tarPath := filepath.Join(t.TempDir(), "kukeond.tar")
-
-	saveCtx, saveCancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer saveCancel()
-	saveCmd := exec.CommandContext(saveCtx, dockerPath, "save", "-o", tarPath, dockerName)
-	if out, saveErr := saveCmd.CombinedOutput(); saveErr != nil {
-		t.Fatalf(
-			"docker save %q failed: %v\noutput:\n%s\n"+
-				"hint: 'make e2e' builds this image; if running go test directly, build it first",
-			dockerName, saveErr, string(out),
-		)
-	}
+	namespace := consts.RealmNamespace(consts.KukeSystemRealmName)
 
 	importCtx, importCancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer importCancel()
 	importCmd := exec.CommandContext(
 		importCtx, ctrPath,
-		"--namespace", consts.RealmNamespace(consts.KukeSystemRealmName),
+		"--namespace", namespace,
 		"images", "import", tarPath,
 	)
 	if out, importErr := importCmd.CombinedOutput(); importErr != nil {
 		t.Fatalf(
-			"ctr -n %s images import %q failed: %v\noutput:\n%s",
-			consts.RealmNamespace(consts.KukeSystemRealmName), tarPath, importErr, string(out),
+			"ctr -n %s images import %q failed: %v\noutput:\n%s\n"+
+				"hint: 'make e2e' builds and exports this archive; if running go test directly, build it first",
+			namespace, tarPath, importErr, string(out),
 		)
 	}
 
-	return image
+	lsCtx, lsCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer lsCancel()
+	lsCmd := exec.CommandContext(
+		lsCtx, ctrPath,
+		"--namespace", namespace,
+		"images", "ls", "-q", "name=="+image,
+	)
+	out, err := lsCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ctr -n %s images ls failed: %v\noutput:\n%s", namespace, err, string(out))
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.TrimSpace(line) == image {
+			return image
+		}
+	}
+	t.Fatalf("kukeond image %q not found in containerd namespace %s after importing %q",
+		image, namespace, tarPath)
+	return ""
 }
 
 // verifyContainerdNamespace verifies containerd namespace exists by running ctr ns ls.

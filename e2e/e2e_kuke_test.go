@@ -149,7 +149,7 @@ func TestKuke_Daemon_Help(t *testing.T) {
 // with a friendly "host not initialized" message when the run-path has no
 // kukeond cell metadata. Running against a fresh tmp run-path simulates the
 // no-init state without needing to tear down a real init (which would
-// require docker / kukeond image staging).
+// require kukeond image staging).
 func TestKuke_DaemonStart_Uninitialized(t *testing.T) {
 	t.Parallel()
 
@@ -297,7 +297,7 @@ func TestKuke_DaemonReset_Flags(t *testing.T) {
 
 // TestKuke_DaemonReset_RoundTrip exercises the AC: `kuke init` → `kuke daemon
 // reset --purge-system` → `kuke init` produces a clean re-bootstrap. Skipped
-// without the make-e2e harness env (KUKEON_E2E_IMAGE / docker / ctr); runs in
+// without the make-e2e harness env (KUKEON_E2E_IMAGE / KUKEON_E2E_IMAGE_TAR / ctr); runs in
 // the same environment that TestKuke_Init_VerifyState does.
 //
 // Not run with t.Parallel() so it does not race TestKuke_Init_VerifyState
