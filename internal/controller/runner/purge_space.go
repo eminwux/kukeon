@@ -57,7 +57,8 @@ func (r *Exec) PurgeSpace(space intmodel.Space) error {
 		spaceForOps = space
 	}
 
-	// Recover the bridge even when metadata or the conflist is already gone.
+	// Recover the bridge and its egress chain even when metadata or the
+	// conflist is already gone (DeleteSpace skips both for a missing space).
 	networkName, err := naming.BuildSpaceNetworkName(realmName, spaceName)
 	if err != nil {
 		return err
@@ -66,6 +67,7 @@ func (r *Exec) PurgeSpace(space intmodel.Space) error {
 	if err != nil {
 		return err
 	}
+	r.removeSpaceEgressPolicyByName(realmName, spaceName)
 	if teardownErr := r.teardownSpaceCNI(networkName, confPath); teardownErr != nil {
 		return teardownErr
 	}

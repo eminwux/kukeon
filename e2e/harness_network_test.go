@@ -25,11 +25,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/eminwux/kukeon/internal/consts"
+	"github.com/eminwux/kukeon/internal/netpolicy"
 )
 
 // Each suite owns the checked pool exclusively; each run path gets a /20
@@ -47,13 +51,15 @@ var e2eNetwork struct {
 	next    uint32
 	subnets map[string]string
 	bridges map[string]bool
+	egress  map[string]bool
 }
 
 func TestMain(m *testing.M) {
 	code := m.Run()
 	if e2eNetwork.lock != nil {
-		// The pool was empty at preflight. Any remaining route/address is a leak;
-		// never delete arbitrary links here or hide a failed test cleanup.
+		// The pool was empty at preflight. Any remaining route/address or egress
+		// chain is a leak; never delete arbitrary links or rules here or hide a
+		// failed test cleanup.
 		if err := verifyE2ENetworkCleanup(); err != nil {
 			fmt.Fprintf(os.Stderr, "E2E network cleanup failed: %v\n", err)
 			code = 1
@@ -92,7 +98,89 @@ func verifyE2ENetworkCleanup() error {
 			return fmt.Errorf("test-created bridge %s remains (not deleting it automatically)", name)
 		}
 	}
+	egress, err := egressArtifacts()
+	if err != nil {
+		return err
+	}
+	var leaked []string
+	for artifact := range egress {
+		if !e2eNetwork.egress[artifact] {
+			leaked = append(leaked, artifact)
+		}
+	}
+	if len(leaked) > 0 {
+		// List every entry: a rule's comment names the realm and space.
+		sort.Strings(leaked)
+		return fmt.Errorf(
+			"test-created egress iptables entries remain (not deleting them automatically):\n%s",
+			strings.Join(leaked, "\n"),
+		)
+	}
 	return checkNetworkPool(e2eNetwork.pool)
+}
+
+// requireInitEgressRemoved fails t when, after every other cleanup of t
+// has run, an egress chain for a space `kuke init` seeds is left behind.
+// Chain names are host-global, so the suite-level check alone cannot say
+// which test leaked one.
+func requireInitEgressRemoved(t *testing.T) {
+	t.Helper()
+	t.Cleanup(func() {
+		egress, err := egressArtifacts()
+		if err != nil {
+			t.Errorf("snapshot egress iptables state: %v", err)
+			return
+		}
+		for _, scope := range [][2]string{
+			{consts.KukeonDefaultRealmName, consts.KukeonDefaultSpaceName},
+			{consts.KukeSystemRealmName, consts.KukeSystemSpaceName},
+		} {
+			chain := "filter: chain " + netpolicy.NewAdmitAllPolicy(scope[0], scope[1], "").ChainName()
+			if egress[chain] && !e2eNetwork.egress[chain] {
+				t.Errorf("%s/%s egress %s remains after cleanup", scope[0], scope[1], chain)
+			}
+		}
+	})
+}
+
+// egressArtifacts snapshots the per-space egress chains and their dispatch
+// rules. Their bridges can already be gone, so the bridge check misses them,
+// and a run path removed afterwards leaves no daemon able to reconcile them.
+func egressArtifacts() (map[string]bool, error) {
+	artifacts := make(map[string]bool)
+	if _, err := exec.LookPath("iptables-save"); err != nil {
+		return artifacts, nil // no iptables: the daemon installs no egress chains
+	}
+	for _, table := range []string{"filter", "nat"} {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		out, err := exec.CommandContext(ctx, "iptables-save", "-t", table).Output()
+		cancel()
+		if err != nil {
+			return nil, fmt.Errorf("iptables-save -t %s: %w", table, err)
+		}
+		for artifact := range parseEgressArtifacts(table, out) {
+			artifacts[artifact] = true
+		}
+	}
+	return artifacts, nil
+}
+
+// parseEgressArtifacts keys entries by table so the same line in filter and
+// nat stays distinct. The KUKEON-EGRESS master chain itself is shared by every
+// space and intentionally outlives them, so only its rules count.
+func parseEgressArtifacts(table string, save []byte) map[string]bool {
+	artifacts := make(map[string]bool)
+	for _, line := range strings.Split(string(save), "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, ":KUKE-EGR-"):
+			name, _, _ := strings.Cut(line[1:], " ")
+			artifacts[table+": chain "+name] = true
+		case strings.HasPrefix(line, "-A KUKEON-EGRESS "), strings.HasPrefix(line, "-A KUKE-EGR-"):
+			artifacts[table+": "+line] = true
+		}
+	}
+	return artifacts
 }
 
 func networkJSON(args ...string) ([]byte, error) {
@@ -223,7 +311,13 @@ func initE2ENetwork() {
 		e2eNetwork.err = err
 		return
 	}
-	e2eNetwork.bridges = bridges
+	egress, err := egressArtifacts()
+	if err != nil {
+		_ = lock.Close()
+		e2eNetwork.err = err
+		return
+	}
+	e2eNetwork.bridges, e2eNetwork.egress = bridges, egress
 	e2eNetwork.lock, e2eNetwork.pool = lock, pool
 	e2eNetwork.subnets = make(map[string]string)
 }
@@ -357,6 +451,34 @@ func TestE2ENetworkPreflight(t *testing.T) {
 				t.Fatalf("preflight = %v, reject=%v", err, tt.reject)
 			}
 		})
+	}
+}
+
+func TestE2EEgressArtifacts(t *testing.T) {
+	save := []byte(`*filter
+:INPUT ACCEPT [0:0]
+:KUKE-EGR-feb2b3cb - [0:0]
+:KUKEON-EGRESS - [0:0]
+-A FORWARD -j KUKEON-EGRESS
+-A KUKE-EGR-feb2b3cb -m comment --comment "kukeon:rcomp:scomp:default" -j ACCEPT
+-A KUKEON-EGRESS -i k-fb4e74c1 -m comment --comment "kukeon:rcomp:scomp:dispatch" -j KUKE-EGR-feb2b3cb
+-A KUKEON-FORWARD ! -i k-+ -o k-+ -j ACCEPT
+COMMIT
+`)
+	got := parseEgressArtifacts("filter", save)
+	want := map[string]bool{
+		"filter: chain KUKE-EGR-feb2b3cb": true,
+		`filter: -A KUKE-EGR-feb2b3cb -m comment --comment "kukeon:rcomp:scomp:default" -j ACCEPT`: true,
+		`filter: -A KUKEON-EGRESS -i k-fb4e74c1 -m comment --comment "kukeon:rcomp:scomp:dispatch" ` +
+			`-j KUKE-EGR-feb2b3cb`: true,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("artifacts = %v, want %v", got, want)
+	}
+	for artifact := range want {
+		if !got[artifact] {
+			t.Fatalf("missing %q in %v", artifact, got)
+		}
 	}
 }
 

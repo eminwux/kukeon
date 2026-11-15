@@ -41,6 +41,11 @@ func (r *Exec) DeleteSpace(space intmodel.Space) error {
 		return errdefs.ErrRealmNameRequired
 	}
 
+	// Hold the space lock until the metadata is gone so a concurrent
+	// EnsureSpace cannot re-install the egress chain removed below.
+	release := r.lockSpace(realmName, spaceName)
+	defer release()
+
 	// Get the space document
 	internalSpace, err := r.GetSpace(space)
 	if err != nil {

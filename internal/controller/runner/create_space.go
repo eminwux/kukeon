@@ -76,6 +76,15 @@ func (r *Exec) CreateSpace(space intmodel.Space) (intmodel.Space, error) {
 // EnsureSpace ensures that all required resources for a space exist.
 // It ensures the CNI config and cgroup exist.
 func (r *Exec) EnsureSpace(space intmodel.Space) (intmodel.Space, error) {
+	// Re-read under the space lock: a concurrent DeleteSpace may have removed
+	// the space since the caller looked it up, and ensuring it now would
+	// re-create its egress chain with nothing left to remove it.
+	release := r.lockSpace(space.Spec.RealmName, space.Metadata.Name)
+	defer release()
+	if _, err := r.GetSpace(space); err != nil {
+		return intmodel.Space{}, err
+	}
+
 	// Ensure CNI config exists
 	ensuredSpace, ensureErr := r.ensureSpaceCNIConfig(space)
 	if ensureErr != nil {
