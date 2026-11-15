@@ -1,0 +1,26 @@
+{
+  "dev": {
+    "decision": "block",
+    "reason": "Before finishing, check whether you reproduced a project bug or hit friction whose fix names a specific file and section. If so, invoke /reflect; otherwise skip — most tasks have nothing to file. Then end the turn."
+  },
+  "pm": {
+    "decision": "block",
+    "reason": "Before finishing, check whether this task hit friction whose fix names a specific file and section. If so, invoke /reflect; otherwise skip — most tasks have nothing to file. Then end the turn."
+  },
+  "pr-reviewer": {
+    "decision": "block",
+    "reason": "Before finishing, check whether this task hit friction whose fix names a specific file and section. If so, invoke /reflect; otherwise skip — most tasks have nothing to file. Then end the turn."
+  },
+  "meta-dev": {
+    "decision": "block",
+    "reason": "Before finishing, check whether this task hit friction whose fix names a specific file and section. If so, invoke /reflect; otherwise skip — most tasks have nothing to file. Then end the turn."
+  },
+  "meta-pm": {
+    "decision": "block",
+    "reason": "Before finishing, check whether this task hit friction whose fix names a specific file and section. If so, invoke /reflect; otherwise skip — most tasks have nothing to file. Then end the turn."
+  },
+  "meta-reviewer": {
+    "decision": "block",
+    "reason": "Before finishing, check whether this task hit friction whose fix names a specific file and section. If so, invoke /reflect; otherwise skip — most tasks have nothing to file. Then end the turn."
+  }
+}

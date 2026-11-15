@@ -318,3 +318,40 @@ web-ui-test: kuke
 # Requires KUKE_WEB_SMOKE_HOST=unix:///path/to/a/running/kukeond.sock.
 web-ui-smoke: kuke
 	cd internal/webui/frontend && npm run test:smoke
+
+# ----- kuke team (composer imported from kuketeams, #1429) -----
+
+# Harness assets (definitions, build contexts, release catalogs) live under
+# harnesses/. test-harnesses checks the packaged assets and the image build
+# plan without building or pushing anything.
+.PHONY: test-harnesses
+test-harnesses:
+	go test ./internal/harnessassets
+	python3 -m unittest discover -s harnesses/codex/tests -v
+	python3 -m unittest discover -s harnesses/tests -v
+	MODE=check PLATFORMS=linux/amd64,linux/arm64 ./harnesses/build-images.sh --print | python3 harnesses/tests/check_plan.py
+	MODE=check TAG=v0.0.0-test PLATFORMS=linux/amd64,linux/arm64 ./harnesses/build-images.sh --print | python3 harnesses/tests/check_plan.py
+	REGISTRY= TAG=dev MODE=check PLATFORMS=linux/amd64,linux/arm64 ./harnesses/build-images.sh --print | python3 harnesses/tests/check_plan.py
+
+# Role materialization. A composed cell's harness start adapter runs
+# `make -C "$ROLE_SOURCE_DIR" <harness> ROLE="$ROLE_PATH"` against the role's
+# source checkout, so a repository that serves roles (this one included) must
+# expose one target per harness. One installer serves every role.
+ROLE ?= roles/operator
+.PHONY: claude codex opencode-openrouter
+claude codex opencode-openrouter:
+	@sh scripts/materialize-role.sh '$(ROLE)' '$@'
+
+# Live check against a disposable kukeond. Refuses to run without an explicit
+# endpoint.
+.PHONY: test-team-integration
+test-team-integration:
+	@test -n "$(KUKETEAMS_INTEGRATION_HOST)" || { echo 'Set KUKETEAMS_INTEGRATION_HOST to a disposable kukeond Unix endpoint' >&2; exit 1; }
+	go test -race ./internal/initialize -run '^TestKukeondIntegration$$' -count=1 -v
+
+# Launches the published Codex operator through `kuke team init` + `kuke run`
+# against an explicit endpoint; see docs/team-remote-operator-check.md.
+.PHONY: test-remote-operator
+test-remote-operator: kuke
+	@test -n "$(KUKETEAMS_REMOTE_HOST)" || { echo 'Set KUKETEAMS_REMOTE_HOST explicitly; see docs/team-remote-operator-check.md' >&2; exit 1; }
+	go test -race ./internal/launchcheck -run '^TestRemoteOperator$$' -count=1 -v -timeout 10m

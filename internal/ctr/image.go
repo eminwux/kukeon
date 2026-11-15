@@ -96,13 +96,13 @@ func (c *client) ensureImageUnpacked(namespace string, image containerd.Image, s
 //
 // Refs hosted under the local-only kukeon.internal registry (see
 // consts.InternalImageRegistry) are never pulled: they are built into this
-// realm's namespace by `kuke team init --build` (internal/teambuild), not
-// published anywhere a pull could reach. A local miss on such a ref is an
+// realm's namespace by `kuke build --realm <realm>`, not published anywhere
+// a pull could reach. A local miss on such a ref is an
 // operator error — the image was never built — so pullImage short-circuits
 // with ErrInternalImageNotBuilt ("build it") instead of attempting a doomed
-// network pull against the non-routable host. The full build→bind→run path is
-// exercised by the `kuke team init --build` two-project compose e2e and the
-// dev-init smoke; this layer's contract is the no-pull short-circuit itself.
+// network pull against the non-routable host. The build→run path is exercised
+// by the dev-init smoke; this layer's contract is the no-pull short-circuit
+// itself.
 func (c *client) pullImage(namespace string, imageRef string, creds []RegistryCredentials) (containerd.Image, error) {
 	nsCtx := c.namespaceCtx(namespace)
 	cc := c.conn()

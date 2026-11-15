@@ -112,6 +112,8 @@ nav:
       - cli/kuke-attach.md
       - cli/kuke-image.md
       - cli/kuke-daemon.md
+      - cli/kuke-team-init.md
+      - cli/kuke-team-add.md
       - cli/kuke-uninstall.md
       - cli/kuke-autocomplete.md
       - cli/kuke-version.md

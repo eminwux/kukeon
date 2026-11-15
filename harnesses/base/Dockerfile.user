@@ -1,0 +1,23 @@
+ARG REGISTRY=ghcr.io/eminwux/kuketeams
+ARG IMAGE_PREFIX=ghcr.io/eminwux/kuketeams/
+ARG TAG=latest
+FROM ${IMAGE_PREFIX}base:${TAG}
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# gettext-base ships envsubst, used by render/install shell glue. Only the
+# non-root variants need it (root variants run their own apt step downstream
+# and historically have not carried it).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends gettext-base \
+ && rm -rf /var/lib/apt/lists/*
+
+# Non-root cells run as the unprivileged `user` account, in the `kukeon` group
+# so the bind-mounted /run/kukeon/kukeond.sock is dial-able without sudo.
+RUN useradd --create-home --home-dir /home/user --shell /bin/bash user \
+ && groupadd -g 988 kukeon \
+ && usermod -aG kukeon user
+
+ENV HOME=/home/user
+USER user
+WORKDIR /home/user

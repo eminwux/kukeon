@@ -1,0 +1,12 @@
+apiVersion: kuketeams.io/v1
+kind: Role
+metadata:
+  name: inspector
+spec:
+  skills:
+    - roles/inspector/skills/inspect-runtime
+    - roles/inspector/skills/list-configs
+  harnesses:
+    claude: {}
+    codex: {}
+    opencode: {}

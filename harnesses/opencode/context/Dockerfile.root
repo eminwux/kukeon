@@ -1,0 +1,19 @@
+ARG REGISTRY=ghcr.io/eminwux/kuketeams
+ARG IMAGE_PREFIX=ghcr.io/eminwux/kuketeams/
+ARG TAG=latest
+FROM ${IMAGE_PREFIX}base-root:${TAG}
+
+ARG OPENCODE_VERSION=latest
+
+# Root keeps UID 0 while installing the CLI under the shared home layout.
+ENV NPM_CONFIG_PREFIX=/home/user/.local
+ENV PATH=/home/user/.local/bin:$PATH
+
+RUN npm install -g opencode-ai@"${OPENCODE_VERSION}"
+
+# Opencode config is written per-role by the cell's onInit (blueprint
+# script) so the `instructions` array can point at the role's playbook.
+# OPENROUTER_MODEL / OPENROUTER_API_KEY are filled at run time from the
+# cell env via opencode's `{env:NAME}` resolution.
+
+COPY Makefile.start /opt/kuketeams/harness/Makefile.start

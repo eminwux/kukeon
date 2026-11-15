@@ -1,0 +1,13 @@
+# Image-owned policy: keep the reflection hook active for unattended cells.
+# Other user/project hooks retain their normal discovery and trust rules.
+[features]
+hooks = true
+
+[hooks]
+managed_dir = "/opt/agents/codex/hooks"
+
+[[hooks.Stop]]
+[[hooks.Stop.hooks]]
+type = "command"
+command = '/usr/bin/python3 /opt/agents/codex/hooks/reflect-stop.py'
+timeout = 10

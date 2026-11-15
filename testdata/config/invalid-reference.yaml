@@ -1,0 +1,8 @@
+apiVersion: kuketeams.io/v1
+kind: TeamsConfig
+spec:
+  defaults:
+    roles:
+      - name: operator
+        source: missing
+        path: roles/operator

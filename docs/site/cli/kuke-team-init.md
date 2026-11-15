@@ -1,94 +1,188 @@
 # kuke team init
 
 ```
-kuke team init [--dry-run] [--build]
+kuke team init [--force] [--host ENDPOINT] [--configuration PATH]
 ```
 
-Compose the project's agent team from its committed `kuketeam.yaml` roster.
+Initialize the operator's team configuration and apply the kukeon operator
+team to kukeond. `init` creates no cells and starts nothing; launch a composed
+cell explicitly with kuke afterwards (for example
+`kuke run --from-config kukeon-operator-codex`).
 
-`kuke team init` reads the project's roster (`kuketeam.yaml` in the current
-directory), scaffolds the operator-global facts file
-(`~/.kuke/kuketeams.yaml`) on first run, resolves the pinned agents source
-into the on-disk cache, renders per-(role × harness) CellBlueprint /
-CellConfig pairs labeled with the project, applies that labeled set to
-kukeond, provisions the per-team host-state tree, and writes a per-project
-drop-in entry under `~/.kuke/kuketeam.d/<project>.yaml`. Nothing is written
-under `~/.kuke/rendered/` — the daemon owns the persisted blueprints /
-configs and the drop-in entry is the only host-side record of an applied
-team. See [`docs/site/concepts/team.md`](../concepts/team.md) for the
-declarative-surface contract behind the verb.
+To register a project team after `init`, use [`kuke team add`](kuke-team-add.md).
+For the shared composition model, see [Teams](../concepts/team.md).
 
 ## Flags
 
-| Flag        | Default | Description                                                              |
-| ----------- | ------- | ------------------------------------------------------------------------ |
-| `--dry-run`  | `false` | print the rendered objects to stdout instead of applying them to kukeond |
-| `--build`    | `false` | build each selected image locally before apply; bind the local tag       |
-| `--validate` | `false` | run every render-contract check (catalog, templates, partials, facts) once, print a single gap report, and exit 1 on any gap; applies nothing and writes nothing |
+| Flag              | Default | Description                                                                                  |
+| ----------------- | ------- | -------------------------------------------------------------------------------------------- |
+| `--force`         | `false` | Replace an existing `~/.kuke/kuketeams.yaml` and reapply the initial operator declaration.   |
+| `--host`          | —       | kukeond Unix endpoint. Overrides `KUKEON_HOST` and `ClientConfiguration.spec.host`.          |
+| `--configuration` | —       | kuke `ClientConfiguration` path. Defaults to `KUKE_CONFIGURATION`, then `~/.kuke/kuke.yaml`. |
 
-`--build` and `--validate` are mutually exclusive.
+## What it does
 
-Plus all [global flags](kuke.md).
+`kuke team init` creates `~/.kuke/kuketeams.yaml` only when it does not exist.
+If the file already exists, it exits with guidance to use `--force` and does not
+contact the daemon. `kuke team init --force` atomically replaces the global
+configuration with the initial document and applies the initial operator team.
+It replaces the accepted `kukeon` registration after successful application.
 
-## Operator / project fact contract
+The command fetches only the sources used by the selected role/harness
+definitions into temporary Git checkouts, and composes the kukeon team's
+blueprints and configs. Git must be installed and able to read those sources
+without a terminal prompt. `branch`, `tag`, and `commit` selectors are fetched
+explicitly; no checkout in the current directory is used. Fetched definitions
+are removed after the invocation. Runtime repository URLs and clone
+destinations still come from the authored configuration.
 
-The harness blueprint templates published in the agents source are rendered
-against a typed dot-context (see
-[`internal/teamrender/teamrender.go`](https://github.com/eminwux/kukeon/blob/main/internal/teamrender/teamrender.go)
-`renderContextValues`). The `.operator.*` and `.project.*` leaves carry the
-full operator / project fact contract a published blueprint may reference;
-a blueprint that references a key the operator did not set gets the empty
-string (Go text/template's default for a missing map key), not an error.
+Fresh global configuration is minimal (discovered Git settings are added under
+`spec.git` when available):
 
-### `.operator.*` — operator-host facts
+```yaml
+apiVersion: kuketeams.io/v1
+kind: TeamsConfig
+spec:
+  defaults: {}
+```
 
-Operator-host scope: the value is the operator's identity / paths / agents
-context. `GIT_USER_NAME`, `GIT_USER_EMAIL`, and `REGISTRY` are bound
-directly from `~/.kuke/kuketeams.yaml`. `TEAM_ROOT` is **per-team-scoped**
-— it is resolved per render call from the team's
-`TeamEntry.spec.teamDir` (auto-filled to `Layout.TeamDir(team)` by `kuke
-team init` when omitted, or the operator override when relocated). Two
-teams running on the same operator host see two different `TEAM_ROOT`
-values; there is no host-wide TeamsConfig field for it.
+The initial accepted declaration contains the operator selections directly. The
+operator role and both harnesses come from the kukeon repository (`roles/` and
+`harnesses/`):
 
-| Key              | Source                                                                  | Default                                                                |
-| ---------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `GIT_USER_NAME`  | `~/.kuke/kuketeams.yaml` `spec.git.author.name`                         | empty                                                                  |
-| `GIT_USER_EMAIL` | `~/.kuke/kuketeams.yaml` `spec.git.author.email`                        | empty                                                                  |
-| `REGISTRY`       | `~/.kuke/kuketeams.yaml` `spec.registry`                                | empty                                                                  |
-| `TEAM_ROOT`      | per-team `TeamEntry.spec.teamDir` (operator override or layout default) | `~/.kuke/teams/<team>` (`Layout.TeamDir(team)`)                        |
-| `HOME_DIR`       | `~/.kuke/kuketeams.yaml` `spec.homeDir` (override)                      | `$HOME` from the calling process                                       |
-| `REPO_OWNER`     | `~/.kuke/kuketeams.yaml` `spec.repoOwner` (override)                    | owner segment of the agents source's `<owner>/<repo>` (e.g. `eminwux`) |
+```yaml
+apiVersion: kuketeams.io/v1
+kind: TeamEntry
+metadata:
+  name: kukeon
+spec:
+  sources:
+    - name: kukeon
+      url: github.com/eminwux/kukeon
+      branch: main
+      clonePath: /home/user/kukeon-src
+  roles:
+    - name: operator
+      source: kukeon
+      path: roles/operator
+      initialPath: $HOME
+      needs:
+        image: [go]
+  harnesses:
+    - name: codex
+      source: kukeon
+      path: harnesses/codex
+    - name: claude
+      source: kukeon
+      path: harnesses/claude
+```
 
-`HOME_DIR` and `REPO_OWNER` carry an explicit override on `TeamsConfigSpec`
-so an operator whose `$HOME` is not the natural reference point — or whose
-identity differs from the agents source owner (e.g., forked agents) — can
-pin the value; the scaffolded global config stays minimal and the common
-single-owner case needs no entry.
+This applies matching blueprints and CellConfigs named `kukeon-operator-codex`
+and `kukeon-operator-claude`. Init does not start them. The explicit entry keeps
+recomposition independent of global operator defaults. Configure reusable
+[global defaults](../concepts/team.md#reusable-defaults-after-init) separately.
 
-### `.project.*` — per-project facts
+## Daemon endpoint and client configuration
 
-Per-project scope: the value is the team-label / on-disk source-tree path /
-agents-source path the current `kuke team init` invocation is composing
-for.
+The command reaches kukeond with the public `kukeonv1` Unix JSON-RPC client.
+Endpoint precedence:
 
-| Key           | Source                                                                         | Default                                               |
-| ------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------- |
-| `NAME`        | `kuketeam.yaml` `spec.projectDir`, falling back to `metadata.name` when unset  | `metadata.name` (the team label; validated non-empty) |
-| `PROJECT_DIR` | `composeTeam`'s `projectDir` argument (`os.Getwd()`)                           | the calling cwd                                       |
-| `AGENTS_REPO` | resolved agents source's `<owner>/<repo>` path                                 | empty when unresolved                                 |
+1. `kuke team init --host unix:///absolute/path/to/kukeond.sock`
+2. `KUKEON_HOST`
+3. `ClientConfiguration.spec.host`
+4. `unix:///run/kukeon/kukeond.sock`
 
-## Exit codes
+The configuration path is `--configuration`, then `KUKE_CONFIGURATION`, then
+`~/.kuke/kuke.yaml`. An absent default file is allowed; an explicitly selected
+missing file, an unreadable file, invalid YAML, or a wrong kind/version is an
+error. Only the Unix transport is accepted. Init does not start the daemon.
 
-- `0` — the team was rendered and applied (or the dry-run completed
-  cleanly) and the drop-in entry was written. `--build` flips this to
-  include the local image-build step.
-- non-zero — a hard error before apply: roster parse failure, agents
-  source resolve failure, missing required CellBlueprintParameter, or an
-  ApplyDocumentsForTeam transport failure. The drop-in entry is **not**
-  written on the apply-failure path so a re-run sees the prior state.
+Blueprints and configs target the `default` realm, space, and stack. Preflight
+checks that the parent metadata exists, checks secret prerequisites, and stages
+a complete `0600` TeamEntry before mutating the daemon. Provision missing parent
+scopes with kuke (`kuke init` creates `default/default/default`). Init never
+creates, starts, restarts, or deletes cells. `ApplyDocumentsForTeam` receives
+the stable team name `kukeon`, so reruns update that team's resources and prune
+obsolete team-owned blueprints and configs. It does not prune credentials or
+running cells.
 
-The contract is set in
-[`cmd/kuke/team/init.go`](https://github.com/eminwux/kukeon/blob/main/cmd/kuke/team/init.go)
-and [`internal/teamrender/`](https://github.com/eminwux/kukeon/blob/main/internal/teamrender/) — see
-`composeTeam` and `Render` for the full lifecycle.
+## Authentication and secrets
+
+Only selected role/harness requirements contribute secret lookups. The base
+operator with Codex or Claude does not require `gh` or `gh-token`. Selecting
+OpenCode requires its configured provider binding, as described in
+[secret declarations](../concepts/team.md#secret-declarations).
+
+Each runtime secret is identified by all explicit reference coordinates. A
+successful metadata lookup with `MetadataExists: true` reuses the existing
+credential, even when the local creation source is absent, unreadable, or holds
+a different value. A failed lookup is an error; it never authorizes secret
+creation.
+
+For a missing secret, init checks the required parent scope and resolves only
+an explicit `source.env` variable or `source.file` path. Missing or empty values
+fail preflight. File sources follow kuke's trailing-newline removal. All
+required sources are checked before the first create, and shared runtime
+identities are created once. Creation happens before dependent blueprints and
+configs are applied. Credentials and remote secret-error text are never printed
+or saved in the TeamEntry or the blueprint/config request.
+
+A missing secret without a creation source reports a command such as:
+
+```sh
+kuke create secret provider-account --realm auth --space shared --stack operators --from-file /path/to/token
+kuke team init
+```
+
+The actual command uses the binding's resolved name and scope. A cell-scoped
+reference requires a `Secret` manifest with its exact metadata coordinates,
+applied with `kuke apply -f /path/to/secret.yaml`.
+
+Init rechecks existence immediately before each create and never retries a
+secret write, including when a transport failure leaves its outcome ambiguous.
+On a rerun, a secret accepted by the previous attempt is discovered and reused.
+Secret rotation is not an init action; rotate explicitly with kuke.
+
+## Registration and recovery
+
+The accepted authored declaration is saved atomically at
+`~/.kuke/kuketeam.d/kukeon.yaml`. It retains explicit selections and
+omitted/empty list semantics, with no resolved credentials or duplicated
+effective defaults. `init --force` uses the initial operator declaration
+regardless of an existing `kukeon.yaml`. Reserve the name `kukeon` for this
+operator. Init does not discover or migrate other registrations.
+
+Registration follows full blueprint/config success only. A secret failure, RPC
+failure, total resource failure, partial apply, prune failure, or incomplete
+response returns nonzero and leaves any prior TeamEntry unchanged. A first-time
+failure creates no registration. Successful resources and created secrets are
+not rolled back: rerun `kuke team init --force` after fixing the prerequisite to
+converge the same `kukeon` identity. A registration write failure after
+application is reported as such and is also recovered by rerunning
+`init --force`.
+
+## Output
+
+```
+Created configuration: /home/me/.kuke/kuketeams.yaml
+Applied 4 resources; registered kukeon team: /home/me/.kuke/kuketeam.d/kukeon.yaml
+No cells created or started.
+```
+
+With `--force`, the first line reads `Reset configuration: …`. Diagnostics (for
+example, Git settings that could not be discovered) are written to stderr.
+
+## Validation
+
+`make test` runs the injectable-client success/failure/rerun tests and the real
+Unix JSON-RPC transport tests. A separate check verifies actual daemon storage,
+reads back blueprints and configs, repeats application, and confirms that cells
+are unchanged:
+
+```sh
+KUKETEAMS_INTEGRATION_HOST=unix:///path/to/disposable/kukeond.sock make test-team-integration
+```
+
+Use a disposable kukeond with existing `default/default/default` scope metadata.
+The check uses a unique `init-check-*` team and deletes only its generated
+blueprints and configs on cleanup.

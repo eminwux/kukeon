@@ -1,0 +1,20 @@
+apiVersion: kuketeams.io/v1
+kind: Role
+metadata:
+  name: operator
+spec:
+  skills:
+    - roles/operator/skills/create-cell-config
+  harnesses:
+    claude:
+      settings: config/claude.settings.json
+    codex:
+      sandbox: workspace-write
+      approval: on-request
+    opencode:
+      permissions: ask
+      secrets:
+        - openrouter-api-key
+  needs:
+    image:
+      - go

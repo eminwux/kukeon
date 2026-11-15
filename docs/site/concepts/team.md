@@ -1,246 +1,224 @@
 # Teams
 
-A **team** is a roster of agent roles a project runs, composed in-repo from a
-pinned **agents source**. Kukeon's runtime owns the _schemas_ of the
-team-distribution contract; the _contents_ (roles, harnesses, images) live in a
-separate, version-pinned agents repository. This page describes the contract —
-the six document kinds, where each lives, and the disciplines the parser
-enforces. The CLI verb that renders and applies a team (`kuke team init`) is a
-later step; this page covers the declarative surface only.
+A **team** is a set of agent cells composed from **roles** (what an agent is
+told to do) and **harnesses** (which agent CLI runs it, in which image). For
+every selected role × harness pair, `kuke team` renders one `CellBlueprint` and
+one `CellConfig`, applies them to kukeond under the team's ownership label, and
+records the accepted declaration on the host. Composing a team never creates or
+starts cells: launch them explicitly, for example with
+`kuke run --from-config <team>-<role>-<harness>`.
+
+Two commands drive it:
+
+- [`kuke team init`](../cli/kuke-team-init.md) creates the global configuration
+  and applies the operator team `kukeon`.
+- [`kuke team add`](../cli/kuke-team-add.md) composes a project team from a
+  directory's `kuketeam.yaml` or from a named Git source.
 
 ## Where the files live
 
-| File                     | Where        | Owner    | Holds                                                                              | Committed |
-| ------------------------ | ------------ | -------- | ---------------------------------------------------------------------------------- | --------- |
-| `kuke.yaml`              | host         | runtime  | kukeon runtime only (realm/space/stack, daemon). **No git/registry/teams.**        | n/a       |
-| `kuketeam.yaml`          | project repo | project  | roster: `source`, roles, harnesses, per-role `needs`                               | yes       |
-| `~/.kuke/kuketeams.yaml`            | host         | operator | git identity + signing, registry, secret sources, source URLs. Operator-global facts only. | no        |
-| `~/.kuke/kuketeam.d/<project>.yaml` | host         | operator | one file per composed project: `name`, `path`, `source`. Written by each `kuke team init`.  | no        |
+| File                             | Where        | Holds                                                                                                      |
+| -------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------- |
+| `~/.kuke/kuketeams.yaml`         | host         | `TeamsConfig`: global defaults (sources, roles, harnesses), Git identity, parameters, secret bindings.     |
+| `~/.kuke/kuketeam.d/<team>.yaml` | host         | `TeamEntry`: the accepted declaration of one registered team. Written only after a fully successful apply. |
+| `kuketeam.yaml`                  | project repo | `Team`: the project's selections, read by `kuke team add DIRECTORY`.                                       |
+| `roles/<role>/`                  | a source     | Role definition (`role.yaml`) and the instruction/skill assets materialized into the harness home.         |
+| `harnesses/<harness>/`           | a source     | Harness definition (`harness.yaml`), image catalog (`images.yaml`), and image build context.               |
 
-The agents source contributes three more kinds — `role.yaml`, `harness.yaml`,
-and `harnesses/images.yaml` — authored in the agents repo but deserialized by
-kukeon's parser.
+All documents use `apiVersion: kuketeams.io/v1` and are decoded strictly
+(single document, no unknown fields). This repository ships the `operator`
+role under `roles/` and the `claude`, `codex`, and `opencode` harnesses under
+`harnesses/`; other roles (dev, pm, pr-reviewer, …) can come from any Git
+source, such as the agents repository. The kukeon renderer that turns a pair
+into kukeon documents is embedded in `kuke` (`renderers/kukeon/v1beta1`); see
+[`harnesses/templates.md`](https://github.com/eminwux/kukeon/blob/main/harnesses/templates.md)
+for the harness and renderer contract.
 
-## The six kinds
+## Selections and persistence
 
-All six are GVK objects under one API group, `kuketeams.io/v1`, matching
-kukeon's parsed-document convention (every document carries `apiVersion` +
-`kind`). An unknown or empty `apiVersion`/`kind` pair is a parse error.
-
-- **`ProjectTeam`** (`kuketeam.yaml`, committed in each project repo) — the
-  per-project roster. Pins the agents `source`, declares harness defaults, lists
-  the roles the project runs.
-- **`TeamsConfig`** (`~/.kuke/kuketeams.yaml`, host, operator-owned) — operator
-  facts (git identity + signing, registry, source clone URLs, secret sources).
-  Operator-global only — the per-project composition records moved out into the
-  `kuketeam.d/` drop-in directory below.
-- **`TeamEntry`** (`~/.kuke/kuketeam.d/<project>.yaml`, host, operator-owned) —
-  one document per composed project, written by each `kuke team init`. Carries
-  the per-project init-time locator `spec.path`, the structured agents
-  `spec.source` pin copied from the project's `kuketeam.yaml`, and an optional
-  `spec.teamDir` host-state root. It replaces the former
-  `TeamsConfig.spec.teams[]` array: a drop-in directory keeps each project
-  isolated, so a corrupt write touches one project and two concurrent inits
-  never race on a shared array.
-- **`Role`** (`role.yaml`, in agents) — a role's skills, per-harness native
-  config, and `needs` (image capabilities, repos to clone, mounts to bind,
-  params, secrets).
-- **`Harness`** (`harness.yaml`, in agents) — a harness's base image, in-container
-  skill path, make target, and blueprint template.
-- **`ImageCatalog`** (`harnesses/images.yaml`, in agents) — the prebuilt
-  image → capability map, plus build provenance. The v1 image **selector**: a
-  role's capability names pick a hand-built image; there is no dynamic build.
-
-## Rendering onto the runtime
-
-The team-layer types are declarative sugar over the existing `v1beta1` runtime
-types:
-
-- `TeamsConfig.git` is a **strict superset** of `v1beta1.ContainerGit` — it
-  carries `author`, `committer`, `signingKey`, `sign`, and `allowedSigners`
-  unchanged, and adds the `sshKey` clone identity. (It embeds `ContainerGit`
-  directly, so any field added there is automatically carried.)
-- `Role.needs.repos` render to `[]v1beta1.ContainerRepo` (git clones).
-- `Role.needs.mounts` render to `[]v1beta1.VolumeMount` (bind mounts).
-
-## Disciplines the parser enforces
-
-Three disciplines keep the contract honest:
-
-### Capabilities are names, not image references
-
-A `needs.image` entry — and every `ImageCatalog` capability — is a bare
-**capability name** (`git`, `gh`, `go`), never an image tag or digest. The
-parser rejects any capability containing `/`, `:`, or `@`. Capabilities are the
-selector _input_; the `ImageCatalog` maps them to a concrete registry-qualified
-image.
-
-### Secrets declare a source, never a value
-
-A `TeamsConfig.secrets` entry declares **where** its value is read from
-(`from: env` or `from: file`, plus a `key`), never an inline value. Secret bytes
-never live in a committed or operator file.
-
-### The source ref is the version, nothing else
-
-Content versioning is carried **solely** by the structured `source` object: a
-host-explicit `repo` plus exactly one of `tag` / `branch` / `commit`. The key
-name **is** the intent — `tag` and `commit` pin to a reproducible ref, `branch`
-floats (it is refetched and reset to the branch tip on every `init`) — so
-pinned-vs-floating is unambiguous without interrogating git (a string `@ref`
-cannot tell a branch from a same-named tag). Exactly one of the three must be
-set; zero or multiple is a parse error, and the legacy
-`<owner>/<repo>@vX.Y.Z` **string** form is rejected with a migration error (no
-silent dual-parse). The agents kinds (`Role`, `Harness`, `ImageCatalog`) carry
-**no** in-file version field: it would be redundant with the ref, drift-prone,
-and per-release toil to bump across every role.
-
-`init` prints whether the resolved source is **pinned** or **floating**, so a
-non-reproducible roster is visible.
-
-### Transport: SSH by default, `sources` as an override
-
-The default clone transport is **SSH**: `repo: <host>/<owner>/<repo>` expands to
-`git@<host>:<owner>/<repo>.git`, cloned under `TeamsConfig.spec.git.sshKey` as
-the identity. A bare `<owner>/<repo>` defaults its host to `github.com`, but any
-host is expressible. `TeamsConfig.spec.sources` is **optional** — consult it only
-to override the transport (HTTPS/token, an internal mirror, a non-standard port);
-the common case needs no `sources` entry.
-
-## The project is cloned, not mounted
-
-The per-project entry's `path` (in `~/.kuke/kuketeam.d/<project>.yaml`) is an **init-time locator**, not a bind-mount source.
-At `init` time kukeon reads the project's committed `kuketeam.yaml` from that
-path and resolves the project's clone URL from its `git remote`; the cell then
-clones the project fresh as a `ContainerRepo`. Consequences:
-
-- The project's clone URL is **not** declared in `kuketeam.yaml` — it is
-  resolved from the local `git remote` at init time.
-- The project checks out **floating `main`** (it is the operator's own repo).
-  The agents `source`, by contrast, declares its ref intent explicitly: a
-  pinned `tag`/`commit` for a reproducible roster, or a floating `branch` when
-  the project deliberately tracks a moving agents branch.
-- The operator's working tree is **not** mounted — uncommitted local work is
-  invisible in the cell.
-
-### Overriding the in-cell clone directory
-
-`ProjectTeam.spec.projectDir` (in the committed `kuketeam.yaml`) overrides the
-in-cell project clone-dir basename, decoupling it from `metadata.name` (the team
-*label*). It exists for self-referential teams — the agents repo managing
-itself, where a role declares both the `project` and `agents` repo slots:
-without the override both resolve to `/home/<user>/agents` and collide at clone
-time. When unset, the clone dir falls back to `metadata.name`. The value is
-validated as a safe path basename that does not collide with the reserved
-`agents` slot directory.
-
-### Scoping the team's cells
-
-`ProjectTeam.spec.realm`, `spec.space`, and `spec.stack` (in the committed
-`kuketeam.yaml`) are the optional scope coordinates the team's rendered cells
-bind to. Each **defaults to `default`** when omitted, and the renderer stamps
-the defaulted value onto every rendered Blueprint/Config so the persisted
-Config scope matches the live cell. Set them to place a project's team cells
-under a non-`default` realm/space/stack.
-
-## Secrets: two `secrets.env` layers render to `kind: Secret`
-
-Team secret material is composed from two `secrets.env` layers and rendered as
-`kind: Secret` documents the daemon-side apply pipeline consumes alongside the
-project's CellBlueprints and CellConfigs:
-
-- a **shared** host-wide default at `~/.kuke/teams/secrets.env`, and
-- a **per-team** override at `<teamDir>/secrets.env`.
-
-Per-key per-team values win over the shared default; per-team-only keys join the
-set; shared-only keys carry through. The keys come from the union of secret
-names every role in the team references (each role's `needs.secrets`). On first
-run both files are scaffolded in place with one empty `KEY=` line per referenced
-secret (mode `0600`), leaving values for the operator to fill in by hand;
-populated files are never overwritten on re-run. Values are never logged or
-echoed — the empty-value warning names keys only, and the rendered Secret
-documents are the sole channel through which the values reach the daemon.
-
-## Example
+`TeamsConfig.spec.defaults` and `Team.spec` share `sources`, `roles`, and
+`harnesses`. An omitted list inherits the corresponding global default. An
+explicit list replaces it; `[]` selects none. References are checked against
+the effective lists. Each source has exactly one of `branch`, `tag`, or
+`commit`. A role with an explicit `harness` selects only that harness;
+otherwise it selects every harness in the effective list. Harness `default` is
+not supported; use `roles[].harness`. Unselected definitions are neither
+fetched, loaded, nor rendered.
 
 ```yaml
-# kuketeam.yaml — committed in each project repo
 apiVersion: kuketeams.io/v1
-kind: ProjectTeam
-metadata: { name: sbsh }
-spec:
-  source: { repo: github.com/eminwux/agents, tag: v1.4.0 } # pinned (tag)
-  realm: default # optional scope coords; each defaults to `default` when omitted
-  space: default
-  stack: default
-  defaults: { harnesses: [claude, opencode] }
-  roles:
-    - { ref: dev, needs: { image: [go] } }
-    - { ref: pm }
-    - { ref: pr-reviewer }
----
-# ~/.kuke/kuketeams.yaml — host, operator-owned
+kind: Team
+metadata:
+  name: example
+# All selections omitted: inherit the operator's defaults.
+```
+
+A `TeamEntry` has the same `metadata` and `spec` as the accepted `Team`, plus
+the `projectSource` that `kuke team add` resolves. Effective defaults are not
+persisted, and omitted versus explicit-empty lists round-trip unchanged, so a
+later recomposition picks up the current global defaults.
+
+Authored `roles[].needs.image` contains **capability names**, never image
+URLs. These additions cannot erase requirements in `Role.spec.needs.image`. The
+selected harness is also a mandatory image capability. One catalog image must
+satisfy the complete set; catalog order breaks ties, and a root-capable image
+is not selected unless `root` is requested. The team name `root` grants no
+privilege. Published image references are read from the `images.yaml` beside
+the selected `harness.yaml`; no registry lookup is made. An update re-resolves
+the image from the current definitions and catalog.
+
+## Reusable defaults after init
+
+After `init`, edit `~/.kuke/kuketeams.yaml` to declare reusable sources, roles,
+and harnesses. Both harnesses are listed here; dev narrows to Claude and pm to
+Codex:
+
+```yaml
 apiVersion: kuketeams.io/v1
 kind: TeamsConfig
 spec:
-  git:
-    author: { name: "...", email: "..." }
-    signingKey: ~/.ssh/id_ed25519.pub
-    sign: [commits, tags]
-    allowedSigners: ~/.ssh/allowed_signers
-    sshKey: ~/.ssh/id_ed25519
-  registry: registry.eminwux.com
-  # sources is an optional transport override (HTTPS mirror, token, custom port);
-  # the SSH default (git@github.com:eminwux/agents.git via git.sshKey) needs no entry.
-  sources: { eminwux/agents: git@github.com:eminwux/agents.git }
-  secrets:
-    claude-code-oauth-token: { from: env, key: CLAUDE_CODE_OAUTH_TOKEN }
----
-# ~/.kuke/kuketeam.d/sbsh.yaml — host, one file per composed project
-apiVersion: kuketeams.io/v1
-kind: TeamEntry
-metadata: { name: sbsh }
-spec:
-  path: ~/src/sbsh # init-time locator (clone URL resolved from its git remote)
-  source: { repo: github.com/eminwux/agents, tag: v1.4.0 }
----
-# role.yaml — in agents, per role
-apiVersion: kuketeams.io/v1
-kind: Role
-metadata: { name: dev }
-spec:
-  skills: [skills/, ../common/skills/]
-  harnesses:
-    claude: { settings: config/claude.settings.json }
-    codex: { sandbox: workspace-write, approval: on-request }
-    opencode: { permissions: skip }
-  needs:
-    image: [git, gh] # capability NAMES (selector input)
-    repos: [project, agents] # git clones → ContainerRepo
-    mounts: [ssh] # bind mounts → VolumeMount
-    params: [PROJECT_DIR, ANTHROPIC_MODEL]
-    secrets: [claude-code-oauth-token]
----
-# harness.yaml — in agents, per harness
-apiVersion: kuketeams.io/v1
-kind: Harness
-metadata: { name: claude }
-spec:
-  {
-    baseImage: claude,
-    skillPath: /home/claude/.claude/skills,
-    makeTarget: claude,
-    template: blueprint.tmpl.yaml,
-  }
----
-# harnesses/images.yaml — prebuilt image → capabilities
-apiVersion: kuketeams.io/v1
-kind: ImageCatalog
-spec:
-  images:
-    - ref: claude
-      harness: claude
-      image: registry.eminwux.com/claude:latest # registry-qualified
-      build: { context: harnesses/claude, dockerfile: Dockerfile }
-      capabilities: [git, gh, go, node, make]
+  defaults:
+    sources:
+      - name: kukeon
+        url: github.com/eminwux/kukeon
+        branch: main
+      - name: agents
+        url: github.com/eminwux/agents
+        branch: main
+    roles:
+      - name: dev
+        source: agents
+        path: dev
+        initialPath: /home/user/work
+        harness: claude
+      - name: pm
+        source: agents
+        path: pm
+        initialPath: $HOME
+        harness: codex
+    harnesses:
+      - name: codex
+        source: kukeon
+        path: harnesses/codex
+      - name: claude
+        source: kukeon
+        path: harnesses/claude
 ```
+
+Check external role paths, runtime `clonePath` requirements, image
+capabilities, and secret prerequisites against the selected source revision
+before use.
+
+## Starting directory
+
+`initialPath` is accepted on role selections in global defaults, Team, and
+TeamEntry. An explicit roles list replaces the entire global list, so omitting
+`initialPath` on a replacement role uses the home fallback rather than
+borrowing a path from the same-named global role.
+
+Supported values are clean absolute Unix paths (including `/`), `$HOME`, and
+`$HOME/subdirectory`, with path components of letters, digits, `_`, `.`, and
+`-`. Relative paths, `~`, `${HOME}`, other variables, shell expressions,
+whitespace, empty strings, and `.`/`..` components are rejected. Omit the field
+to start in the in-cell harness user's `$HOME`. `$HOME` resolves to the
+renderer profile's HOME (`/home/user`), never the host HOME. Directories must
+already exist; a failed `cd` stops startup before the harness runs.
+
+`initialPath` controls startup even when a role declares the `project`
+repository slot. To start in the project, set `initialPath` to the project's
+absolute in-cell clone destination. Role `path` still locates definition
+assets: materialization runs against the role source before launch and
+installs instructions and skills in the harness's native home directories.
+
+## Runtime repository and parameter bindings
+
+A source is the single declaration of its URL and branch/tag/commit. Optional
+`sources[].clonePath` requests a runtime clone at an absolute in-cell
+destination; omitting it requests no runtime clone. The initial `kukeon`
+TeamEntry clones its role source to `/home/user/kukeon-src`.
+
+The selected role's source and every `Role.spec.needs.repos` slot must resolve
+to an effective source with `clonePath`. Other effective sources with
+`clonePath` also request clones. Clone destinations must be unique. The
+`github.com/owner/repo` URL shorthand becomes HTTPS in runtime config fills;
+authored declarations keep their spelling.
+
+Destinations are bound in blueprint repository slots; URLs and revisions are
+bound through `CellConfig.spec.repos`. Branches map to `branch`; tags and
+commits map to `ref`. The harness launchers preserve this checkout: they do not
+switch branches or pull newer revisions during launch.
+
+`TeamsConfig.spec.parameters` is a string map of declared scalar parameters.
+Each composition binds only keys its blueprint declares. Required parameters
+without defaults must be supplied, and unknown keys fail. `AGENT_NAME` defaults
+to the full resource identity. Parameters must not hold credentials: use secret
+bindings instead.
+
+Harness-owned `spec.onInit` scripts call the image-installed
+`/opt/kuketeams/harness/Makefile.start setup`, which runs
+`make -C "$ROLE_SOURCE_DIR" <harness> ROLE="$ROLE_PATH"` against the role's
+checkout. A repository that serves roles therefore exposes one Makefile target
+per harness — this repository's `make claude`, `make codex`, and
+`make opencode-openrouter` (all backed by `scripts/materialize-role.sh`).
+Startup then uses `INITIAL_PATH`; the harness source need not be checked out in
+the cell.
+
+Host Git author/committer identities may be copied into the container. Signing
+paths are mapped into `/home/user/.ssh` only when the role explicitly requests
+an `ssh` mount. The base operator needs no SSH mount or signing prerequisite.
+
+## Secret declarations
+
+Only selected role/harness requirements contribute bindings. The shipped
+operator has no `gh` or `gh-token` requirement. Claude and Codex can reuse an
+existing authenticated session and declare no mandatory token. OpenCode's
+selected provider requires `openrouter-api-key`:
+
+```yaml
+# Add under TeamsConfig.spec when selecting OpenCode.
+secrets:
+  - name: openrouter-api-key # identifier in Role.spec.harnesses.opencode.secrets
+    secretRef:
+      name: provider-account
+      realm: auth
+      space: shared
+      stack: operators
+    envName: OPENROUTER_API_KEY
+    # Optional fallback if application finds no runtime secret:
+    source:
+      env: OPERATOR_OPENROUTER_KEY
+      # Alternatively: file: /absolute/path/to/private/provider-key
+```
+
+`name`, the scoped `secretRef`, and `envName` are required. `source` is
+optional; when present it names exactly one environment **variable** or
+absolute file **path** — there is no inline value field. Composition emits
+secret **references** in configs and consumption slots in blueprints; it never
+reads values or emits `Secret` documents. Application checks runtime existence,
+reuses existing secrets, and reads a creation source only when a secret is
+missing.
+
+## Resource names and state volumes
+
+Pairs follow role order, then harness order. Each pair's blueprint and config
+are named `<team>-<role>-<harness>`, with dots and punctuation runs collapsed
+to single hyphens: team `esp32`, role `pr-reviewer`, and harness `codex`
+produce `esp32-pr-reviewer-codex`. Different selections can collide on these
+readable names (`root-a`/`operator` and `root`/`a-operator`); choose distinct
+names in the same scope. `kukeon.io/team` labels keep the authored team name.
+Resources default to realm/space/stack `default`.
+
+Default harness state volumes use the readable resource name plus a
+16-character SHA-256 suffix when any original component contains a dot or
+hyphen, so state stays isolated even when readable names coincide. Explicit
+`volumeRef` bindings remain explicit references. Own-scope volume slots carry
+`ensure: true`.
+
+## What preflight covers
+
+Preflight covers strict document shape, selection/reference resolution, role
+assets, template and partial execution, image capabilities, parameter
+completeness, repository bindings, and structural secret requirements. It does
+not prove published image availability, runtime scope or secret existence,
+source credentials, daemon acceptance, or live authentication; those surface
+when the team is applied or a cell is launched.

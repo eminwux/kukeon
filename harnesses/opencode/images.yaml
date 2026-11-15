@@ -1,0 +1,23 @@
+apiVersion: kuketeams.io/v1
+kind: HarnessImageCatalog
+metadata:
+  name: opencode
+spec:
+  images:
+    - image: ghcr.io/eminwux/kuketeams/opencode:v0.2.1
+      capabilities:
+        - opencode
+        - git
+        - gh
+        - go
+        - node
+        - make
+    - image: ghcr.io/eminwux/kuketeams/opencode-root:v0.2.1
+      capabilities:
+        - opencode
+        - git
+        - gh
+        - go
+        - node
+        - make
+        - root
