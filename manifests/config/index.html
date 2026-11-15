@@ -2761,6 +2761,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#defaults-merge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Defaults merge
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#lineage-not-identity" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3472,6 +3483,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#defaults-merge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Defaults merge
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#lineage-not-identity" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3709,6 +3731,14 @@
 <li>Optional unfilled slots are dropped silently from the materialized container.</li>
 </ul>
 <p>The two channels are independent: scalar <code>values</code> are blueprint-side parameters resolved at run time (see the blueprint's <a href="../blueprint/"><code>spec.parameters[]</code></a>), while <code>repos:</code> and <code>secrets:</code> are structural slot fills validated at apply time. A <code>${KEY}</code> parameter is not a slot, and a slot is not a <code>${KEY}</code> parameter.</p>
+<h2 id="defaults-merge">Defaults merge<a class="headerlink" href="#defaults-merge" title="Permanent link">&para;</a></h2>
+<p>kukeond is the only place a CellConfig becomes a Cell: <code>kuke create cell --from-config</code>, <code>kuke run --from-config</code>, <code>kuke create cell --clone</code>, the web UI, the <code>OutOfSync</code> reconciler and the <code>kuke restart</code> re-apply all ask the daemon to render. The render merges the <code>spec.defaults</code> of the cell's <a href="../realm/#specdefaults-object-optional">Realm</a>, <a href="../space/">Space</a> and <a href="../stack/">Stack</a> under the Config's own fill:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Realm defaults → Space defaults → Stack defaults → CellConfig → (per-cell --env)
+</code></pre></div>
+<p>Maps merge per key, and the deeper level wins. A blueprint parameter no level sets keeps its blueprint default. Repo and secret defaults apply only to slots the referenced blueprint declares — a realm-wide <code>github-token</code> secret default is simply ignored by a blueprint without that slot — while the Config's own fills stay strictly validated. A level default can satisfy a required slot the Config leaves open. Container <code>image</code> values that name a realm <a href="../realm/#specimages-array-optional"><code>spec.images</code></a> entry resolve to that image.</p>
+<p><code>kuke create cell &lt;name&gt; --from-config &lt;cfg&gt; --dry-run --explain</code> prints every resolved value with the level that set it (<code>realm</code>, <code>space</code>, <code>stack</code>, <code>config</code>, or <code>blueprint</code>) and the rendered cell's digest; the web UI's create preview shows the same table (scalar values hidden).</p>
+<p>Every rendered cell records its render provenance as annotations: <code>kukeon.io/render-digest</code>, <code>kukeon.io/render-config-revision</code>, <code>kukeon.io/render-{realm,space,stack}-defaults</code> (<code>generation=&lt;n&gt; hash=&lt;h&gt;</code>), <code>kukeon.io/render-image-digests</code>, <code>kukeon.io/render-values-hash</code>, <code>kukeon.io/render-origins</code> and <code>kukeon.io/render-kukeon-version</code>. Preview and create of the same inputs (including the cell name) produce the same digest.</p>
+<p>Editing a level's <code>spec.defaults</code> marks every dependent cell <code>OutOfSync</code> with <code>outOfSyncReason</code> naming the level (<code>realm defaults changed</code>, …), and a rebuilt realm image does the same (<code>image &lt;name&gt; digest changed</code>). <code>kuke restart &lt;cell&gt;</code> applies the change: a defaults edit that leaves the rendered spec untouched only records the new provenance; a rebuilt image recreates the cell.</p>
 <h2 id="lineage-not-identity">Lineage, not identity<a class="headerlink" href="#lineage-not-identity" title="Permanent link">&para;</a></h2>
 <p>A <code>CellConfig</code> is a <strong>1:N</strong> binding: it stamps as many cells as you run it, each its own <a href="../../concepts/cell/"><code>CellDoc</code></a> identity. The stamped cell's name is the unified <code>&lt;prefix&gt;-&lt;6hex&gt;</code> generated per invocation (prefix = the referenced blueprint's <code>spec.prefix</code>, defaulting to its <code>metadata.name</code>), or the verbatim <code>--name X</code> when you pin one. The Config name is <strong>not</strong> the cell name — it survives only as lineage metadata.</p>
 <p>The lineage contract:</p>
@@ -3720,9 +3750,9 @@
 <p>This is the structural parallel with a <a href="../blueprint/"><code>CellBlueprint</code></a>: both are always-fresh templates (<code>&lt;prefix&gt;-&lt;6hex&gt;</code> per invocation). A Blueprint binds only scalar <code>${KEY}</code> parameters; a Config additionally binds structural repo/secret slot sources, so a blueprint with required slots can only run through a Config.</p>
 <h2 id="storage-layout">Storage layout<a class="headerlink" href="#storage-layout" title="Permanent link">&para;</a></h2>
 <p>The daemon writes the config document to a root-owned, world-readable file under the scope's metadata tree:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>&lt;runPath&gt;/data/&lt;realm&gt;/configs/&lt;name&gt;                         # realm-scoped
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>&lt;runPath&gt;/data/&lt;realm&gt;/&lt;space&gt;/configs/&lt;name&gt;                 # space-scoped
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>&lt;runPath&gt;/data/&lt;realm&gt;/&lt;space&gt;/&lt;stack&gt;/configs/&lt;name&gt;         # stack-scoped
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>&lt;runPath&gt;/data/&lt;realm&gt;/configs/&lt;name&gt;                         # realm-scoped
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>&lt;runPath&gt;/data/&lt;realm&gt;/&lt;space&gt;/configs/&lt;name&gt;                 # space-scoped
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>&lt;runPath&gt;/data/&lt;realm&gt;/&lt;space&gt;/&lt;stack&gt;/configs/&lt;name&gt;         # stack-scoped
 </code></pre></div>
 <p>The <code>configs/</code> directory is <code>0755</code> and each config document is <code>0644</code>, both owned by root. A config carries only references (a blueprint name, repo URLs, secretRefs) — no credential bytes — so the directory is world-readable, unlike <code>secrets/</code>. Because <code>configs/</code> nests inside the scope's metadata directory, the same teardown that reclaims a scope (<code>kuke purge</code> / <code>kuke delete</code>) reclaims its configs.</p>
 <h2 id="invariants">Invariants<a class="headerlink" href="#invariants" title="Permanent link">&para;</a></h2>
@@ -3734,25 +3764,25 @@
 <li><strong>Cross-scope references.</strong> A Config may reference a Blueprint in a different scope; the same is true of the <code>secretRef</code> inside each secret slot fill.</li>
 </ul>
 <h2 id="minimal">Minimal<a class="headerlink" href="#minimal" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellConfig</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nt">metadata</span><span class="p">:</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">prod</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuke-system</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span><span class="nt">blueprint</span><span class="p">:</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-code</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">    </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuke-system</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">  </span><span class="nt">values</span><span class="p">:</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">    </span><span class="nt">MODEL</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-opus-4-7</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">  </span><span class="nt">repos</span><span class="p">:</span>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">    </span><span class="nt">workspace</span><span class="p">:</span>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="w">      </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://github.com/example/repo</span>
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="w">  </span><span class="nt">secrets</span><span class="p">:</span>
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="w">    </span><span class="nt">anthropic-token</span><span class="p">:</span>
-<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="w">      </span><span class="nt">secretRef</span><span class="p">:</span>
-<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">anthropic-token</span>
-<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="w">        </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuke-system</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellConfig</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">prod</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuke-system</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">  </span><span class="nt">blueprint</span><span class="p">:</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-code</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">    </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuke-system</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">  </span><span class="nt">values</span><span class="p">:</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="w">    </span><span class="nt">MODEL</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-opus-4-7</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="w">  </span><span class="nt">repos</span><span class="p">:</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="w">    </span><span class="nt">workspace</span><span class="p">:</span>
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="w">      </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://github.com/example/repo</span>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="w">  </span><span class="nt">secrets</span><span class="p">:</span>
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a><span class="w">    </span><span class="nt">anthropic-token</span><span class="p">:</span>
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a><span class="w">      </span><span class="nt">secretRef</span><span class="p">:</span>
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">anthropic-token</span>
+<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a><span class="w">        </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuke-system</span>
 </code></pre></div>
 <p>A realm-scoped Config named <code>prod</code> that instantiates the <code>claude-code</code> blueprint (also realm-scoped), overrides the <code>MODEL</code> scalar parameter, fills the <code>workspace</code> repo slot, and fills the <code>anthropic-token</code> secret slot from the existing <code>kind: Secret</code> of the same name. Stamp a cell with <code>sudo kuke run --from-config prod --realm kuke-system</code>; each invocation stamps a fresh <code>&lt;prefix&gt;-&lt;6hex&gt;</code> cell (pin one with <code>--name</code>).</p>
 
@@ -3777,7 +3807,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 8, 2026 17:33:03 UTC">November 8, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 15, 2026 10:19:44 UTC">November 15, 2026</span>
   </span>
 
     
