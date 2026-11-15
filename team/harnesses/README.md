@@ -71,12 +71,12 @@ RUN instructions require binfmt/QEMU when not building on native workers.
 ```sh
 make test                       # Go vet and full race-enabled suite
 make test-harnesses              # references, rendered templates, hooks, build plan
-make -C harnesses plan           # resolved build graph without building
-make -C harnesses images         # native images loaded into local Docker
-make -C harnesses images IMAGES="codex codex-root"
+make -C team/harnesses plan           # resolved build graph without building
+make -C team/harnesses images         # native images loaded into local Docker
+make -C team/harnesses images IMAGES="codex codex-root"
 make -C team/harnesses/codex images REGISTRY= TAG=dev MODE=load
-make -C harnesses smoke          # after building all native images
-make -C harnesses images MODE=check PLATFORMS=linux/amd64,linux/arm64
+make -C team/harnesses smoke          # after building all native images
+make -C team/harnesses images MODE=check PLATFORMS=linux/amd64,linux/arm64
 ```
 
 Each harness Makefile invokes the shared `build-images.sh` entrypoint, which

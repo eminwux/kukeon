@@ -17,7 +17,8 @@
 package kuketeams
 
 // TeamEntry is the host-side, per-project composition record written by
-// `kuke team init` to ~/.kuke/kuketeam.d/<project>.yaml — one document per
+// `kuke team add` (and by `kuke team init` for the kukeon operator team) to
+// ~/.kuke/kuketeam.d/<project>.yaml — one document per
 // file. It replaces the former TeamsConfig.spec.teams[] array: a drop-in
 // directory (the systemd/sudoers.d pattern) keeps each project isolated, so a
 // corrupt or partial write touches one project and two concurrent inits never
@@ -36,7 +37,7 @@ type TeamEntry struct {
 // ProjectTeam carries), copied from the project's kuketeam.yaml at init time.
 //
 // TeamDir is the per-team host-state root (typically
-// `<base>/teams/<team>/`). `kuke team init` auto-populates it from
+// `<base>/teams/<team>/`). `kuke team add` auto-populates it from
 // Layout.TeamDir(metadata.name) when omitted, and preserves an
 // operator-supplied override across re-init so the operator can relocate
 // the team's state tree (e.g. to a shared NFS dev environment).

@@ -20,6 +20,10 @@ For the shared composition model, see [Teams](../concepts/team.md).
 | `--host`          | —       | kukeond Unix endpoint. Overrides `KUKEON_HOST` and `ClientConfiguration.spec.host`.          |
 | `--configuration` | —       | kuke `ClientConfiguration` path. Defaults to `KUKE_CONFIGURATION`, then `~/.kuke/kuke.yaml`. |
 
+kuke's global flags (`--verbose`, `--log-level`, `--run-path`, `--no-daemon`)
+are accepted but have no effect on `kuke team` subcommands: they resolve the
+operator home, the kukeond endpoint and the `ClientConfiguration` themselves.
+
 ## What it does
 
 `kuke team init` creates `~/.kuke/kuketeams.yaml` only when it does not exist.
