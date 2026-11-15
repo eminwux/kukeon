@@ -98,8 +98,13 @@ func TestKuke_CreateStack_RejectsInvalidNames(t *testing.T) {
 // cell names must be rejected end-to-end.
 func TestKuke_CreateCell_RejectsInvalidNames(t *testing.T) {
 	t.Parallel()
+	requireInitEgressRemoved(t)
 
 	runPath := getRandomRunPath(t)
+	// apply materializes the default/default parents (and their host-global
+	// egress chain) before the cell name is rejected; purge them once the
+	// daemon has exited.
+	t.Cleanup(func() { cleanupSpaceNoDaemon(t, runPath, "default", "default") })
 	host := startKukeondDaemon(t, runPath)
 
 	tests := []struct {
@@ -146,4 +151,3 @@ func TestKuke_CreateCell_RejectsInvalidNames(t *testing.T) {
 		})
 	}
 }
-
