@@ -16,7 +16,12 @@
 
 package runner
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/eminwux/kukeon/internal/consts"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+)
 
 // managedLabelSuffix is the trailing key segment used by every
 // controller-injected canonical label (`realm.kukeon.io`, `space.kukeon.io`,
@@ -52,4 +57,27 @@ func mergeManagedLabels(existing, desired map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+// ApplyDefaultCellLabels stamps the four controller-managed scope labels
+// (`realm.kukeon.io`, `space.kukeon.io`, `stack.kukeon.io`, `cell.kukeon.io`)
+// onto cell with "if not exists" semantics, so an explicit user-authored
+// value still wins (#455 AC #3). Every cell-create entry point calls it
+// before runner.CreateCell: controller.CreateCell (`kuke create`/`kuke run`)
+// via normalizeCellInputs, and the `kuke apply` create branch (#1461) —
+// without it a cell born from apply carries no canonical selector labels.
+func ApplyDefaultCellLabels(cell *intmodel.Cell, realm, space, stack, name string) {
+	if cell.Metadata.Labels == nil {
+		cell.Metadata.Labels = make(map[string]string)
+	}
+	for key, value := range map[string]string{
+		consts.KukeonRealmLabelKey: realm,
+		consts.KukeonSpaceLabelKey: space,
+		consts.KukeonStackLabelKey: stack,
+		consts.KukeonCellLabelKey:  name,
+	} {
+		if _, exists := cell.Metadata.Labels[key]; !exists {
+			cell.Metadata.Labels[key] = value
+		}
+	}
 }

@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/eminwux/kukeon/internal/consts"
+	"github.com/eminwux/kukeon/internal/controller/runner"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/naming"
@@ -118,7 +118,7 @@ func normalizeCellInputs(cell *intmodel.Cell) (string, string, string, string, e
 		cell.Spec.Containers[i].ID = id
 	}
 
-	applyDefaultCellLabels(cell, realm, space, stack, name)
+	runner.ApplyDefaultCellLabels(cell, realm, space, stack, name)
 
 	// Ensure Spec.ID is set
 	if cell.Spec.ID == "" {
@@ -134,25 +134,6 @@ func normalizeCellInputs(cell *intmodel.Cell) (string, string, string, string, e
 	}
 
 	return name, realm, space, stack, nil
-}
-
-// applyDefaultCellLabels sets the four scope/cell labels on the cell when
-// the operator did not author them explicitly. Extracted from
-// normalizeCellInputs to keep that function under the funlen budget.
-func applyDefaultCellLabels(cell *intmodel.Cell, realm, space, stack, name string) {
-	if cell.Metadata.Labels == nil {
-		cell.Metadata.Labels = make(map[string]string)
-	}
-	for key, value := range map[string]string{
-		consts.KukeonRealmLabelKey: realm,
-		consts.KukeonSpaceLabelKey: space,
-		consts.KukeonStackLabelKey: stack,
-		consts.KukeonCellLabelKey:  name,
-	} {
-		if _, exists := cell.Metadata.Labels[key]; !exists {
-			cell.Metadata.Labels[key] = value
-		}
-	}
 }
 
 // acquireOrCreateCell branches on whether the cell record already exists.

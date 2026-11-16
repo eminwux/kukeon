@@ -942,3 +942,87 @@ spec:
 		t.Errorf("selector cell.kukeon.io=%s returned %d cells, want the recreated cell", cellName, len(cells))
 	}
 }
+
+// TestKukeApply_Cell_CreateStampsScopeLabels is the daemon-backed regression
+// guard for issue #1461: a Cell first created by `kuke apply` (rather than
+// `kuke run -f` / `kuke create cell`) must carry the four managed scope labels
+// so the canonical `cell.kukeon.io=<name>` selector finds it, while the
+// user-authored label survives alongside them.
+func TestKukeApply_Cell_CreateStampsScopeLabels(t *testing.T) {
+	t.Parallel()
+
+	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
+	realmName := generateUniqueRealmName(t)
+	spaceName := generateUniqueSpaceName(t)
+	stackName := generateUniqueStackName(t)
+	cellName := generateUniqueCellName(t)
+
+	t.Cleanup(func() {
+		cleanupCell(t, host, realmName, spaceName, stackName, cellName)
+		cleanupStack(t, host, realmName, spaceName, stackName)
+		cleanupSpace(t, host, realmName, spaceName)
+		cleanupRealm(t, host, realmName)
+	})
+
+	runReturningBinary(t, nil, kuke, append(buildKukeDaemonArgs(host), "create", "realm", realmName)...)
+	runReturningBinary(t, nil, kuke,
+		append(buildKukeDaemonArgs(host), "create", "space", spaceName, "--realm", realmName)...)
+	runReturningBinary(t, nil, kuke, append(buildKukeDaemonArgs(host),
+		"create", "stack", stackName, "--realm", realmName, "--space", spaceName)...)
+
+	manifest := fmt.Sprintf(`apiVersion: v1beta1
+kind: Cell
+metadata:
+  name: %[1]s
+  labels:
+    audit: metadata
+spec:
+  id: %[1]s
+  realmId: %[2]s
+  spaceId: %[3]s
+  stackId: %[4]s
+  containers:
+    - id: root
+      root: true
+      image: ghcr.io/containerd/busybox:latest
+      command: sleep
+      args:
+        - "3600"
+`, cellName, realmName, spaceName, stackName)
+	path := filepath.Join(t.TempDir(), "apply-create.yaml")
+	if err := os.WriteFile(path, []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	runReturningBinary(t, nil, kuke, append(buildKukeDaemonArgs(host), "apply", "-f", path)...)
+
+	out := runReturningBinary(t, nil, kuke, append(buildKukeDaemonArgs(host),
+		"get", "cell", cellName, "--realm", realmName, "--space", spaceName, "--stack", stackName,
+		"--output", "json")...)
+	cell, err := parseCellJSON(t, out)
+	if err != nil {
+		t.Fatalf("parse cell JSON: %v", err)
+	}
+	for key, want := range map[string]string{
+		"realm.kukeon.io": realmName,
+		"space.kukeon.io": spaceName,
+		"stack.kukeon.io": stackName,
+		"cell.kukeon.io":  cellName,
+		"audit":           "metadata",
+	} {
+		if got := cell.Metadata.Labels[key]; got != want {
+			t.Errorf("label %s = %q, want %q", key, got, want)
+		}
+	}
+
+	listOut := runReturningBinary(t, nil, kuke, append(buildKukeDaemonArgs(host),
+		"get", "cells", "--realm", realmName, "--space", spaceName, "--stack", stackName,
+		"-l", "cell.kukeon.io="+cellName, "--output", "json")...)
+	cells, err := parseCellListJSON(t, listOut)
+	if err != nil {
+		t.Fatalf("parse cell list JSON: %v", err)
+	}
+	if len(cells) != 1 || cells[0].Metadata.Name != cellName {
+		t.Errorf("selector cell.kukeon.io=%s returned %d cells, want the apply-created cell", cellName, len(cells))
+	}
+}
