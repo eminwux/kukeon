@@ -55,9 +55,9 @@ func registerConfigRoutes(mux *http.ServeMux, dial Dial) {
 		mux.HandleFunc(
 			"POST /api/configs/from-blueprint/"+action,
 			resourceRoute(dial, func(ctx context.Context, c kukeonv1.Client, r *http.Request) (any, error) {
-				// Mutations require a same-origin browser request and JSON, including preview.
-				if r.Header.Get("Origin") != "http://"+r.Host || r.Header.Get("Content-Type") != "application/json" {
-					return nil, fmt.Errorf("%w: same-origin JSON request required", errdefs.ErrConfig)
+				// Mutations require JSON, including preview; the shared access policy guards Host/Origin.
+				if r.Header.Get("Content-Type") != jsonContentType {
+					return nil, fmt.Errorf("%w: JSON request required", errdefs.ErrConfig)
 				}
 				var input createFromBlueprintRequest
 				decoder := json.NewDecoder(http.MaxBytesReader(nil, r.Body, maxCreateBody))

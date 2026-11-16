@@ -72,11 +72,7 @@ func registerAttachRouteWith(
 	mux.HandleFunc(
 		"GET /api/realms/{realm}/spaces/{space}/stacks/{stack}/cells/{cell}/containers/{name}/attach",
 		func(w http.ResponseWriter, r *http.Request) {
-			// A WebSocket can carry terminal input, so require an explicit same-origin browser.
-			if r.Header.Get("Origin") != "http://"+r.Host {
-				http.Error(w, "same-origin request required", http.StatusForbidden)
-				return
-			}
+			// The shared access policy has already checked Host/Origin.
 			upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 			ws, err := upgrader.Upgrade(w, r, nil)
 			if err != nil {

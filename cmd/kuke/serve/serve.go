@@ -31,11 +31,10 @@ import (
 	"github.com/spf13/viper"
 )
 
-const defaultPort = 5129
+const defaultListen = "localhost:5129"
 
 func NewServeCmd() *cobra.Command {
-	var listen string
-	var port int
+	var listen, browserURL string
 	cmd := &cobra.Command{
 		Use: "serve", Short: "Serve the local browser UI in the foreground", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -51,12 +50,14 @@ func NewServeCmd() *cobra.Command {
 				return err
 			}
 			_ = client.Close()
-			return webserver.Run(ctx, listen, port, host, func(ctx context.Context) (kukeonv1.Client, error) {
+			return webserver.Run(ctx, listen, browserURL, host, func(ctx context.Context) (kukeonv1.Client, error) {
 				return kukeonv1.Dial(ctx, host)
-			}, cmd.OutOrStdout())
+			}, cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 	}
-	cmd.Flags().StringVar(&listen, "listen", "localhost", "Loopback IP address or localhost")
-	cmd.Flags().IntVar(&port, "port", defaultPort, "HTTP port (0 selects an available port)")
+	cmd.Flags().StringVar(&listen, "listen", defaultListen,
+		"Bind address as host:port: localhost, a literal IPv4, or a bracketed IPv6 (port 0 selects an available port)")
+	cmd.Flags().StringVar(&browserURL, "url", "",
+		"The only browser origin accepted, e.g. http://localhost:5129 (default: accept any Host and Origin)")
 	return cmd
 }

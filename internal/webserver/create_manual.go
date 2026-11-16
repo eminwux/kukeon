@@ -62,8 +62,8 @@ func registerManualCreateRoutes(mux *http.ServeMux, dial Dial) {
 		mux.HandleFunc(
 			"POST /api/cells/manual/"+action,
 			resourceRoute(dial, func(ctx context.Context, c kukeonv1.Client, r *http.Request) (any, error) {
-				if r.Header.Get("Origin") != "http://"+r.Host || r.Header.Get("Content-Type") != "application/json" {
-					return nil, fmt.Errorf("%w: same-origin JSON request required", errdefs.ErrConfig)
+				if r.Header.Get("Content-Type") != jsonContentType {
+					return nil, fmt.Errorf("%w: JSON request required", errdefs.ErrConfig)
 				}
 				var input manualCellRequest
 				decoder := json.NewDecoder(http.MaxBytesReader(nil, r.Body, maxCreateBody))

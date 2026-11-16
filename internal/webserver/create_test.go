@@ -155,7 +155,7 @@ func (c *creationClient) CreateCellFromConfig(
 func TestConfigCreation(t *testing.T) {
 	c := &creationClient{}
 	handler, err := newHandler(
-		"localhost:5129",
+		"http://localhost:5129",
 		"test",
 		func(context.Context) (kukeonv1.Client, error) { return c, nil },
 	)
@@ -174,7 +174,9 @@ func TestConfigCreation(t *testing.T) {
 			"http://localhost:5129/api/cells/from-config/"+action,
 			strings.NewReader(string(data)),
 		)
-		r.Header.Set("Origin", origin)
+		if origin != "" {
+			r.Header.Set("Origin", origin)
+		}
 		r.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, r)
@@ -198,8 +200,8 @@ func TestConfigCreation(t *testing.T) {
 		t.Fatal("unreviewed create accepted")
 	}
 	input.Preview = preview.Preview
-	if w = request("create", ""); w.Code < 400 {
-		t.Fatal("missing origin accepted")
+	if w = request("create", "http://evil.example"); w.Code != 403 {
+		t.Fatal("foreign origin accepted")
 	}
 	c.materializeCreated = true
 	if w = request("create", "http://localhost:5129"); w.Code != 200 || c.created != 1 ||

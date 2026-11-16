@@ -59,7 +59,7 @@ func TestServeConfiguration(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			args := []string{"--configuration", path, "serve", "--port", "0"}
+			args := []string{"--configuration", path, "serve", "--listen", "localhost:0"}
 			if tc.flag != "" {
 				args = append(args, "--host", tc.flag)
 			}

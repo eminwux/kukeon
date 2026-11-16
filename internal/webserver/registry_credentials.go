@@ -75,9 +75,9 @@ func registerRegistryCredentialRoutes(mux *http.ServeMux, dial Dial) {
 
 func decodeRegistryCredential(r *http.Request) (registryCredentialRequest, error) {
 	var input registryCredentialRequest
-	// Mutations require a same-origin browser request and JSON.
-	if r.Header.Get("Origin") != "http://"+r.Host || r.Header.Get("Content-Type") != "application/json" {
-		return input, fmt.Errorf("%w: same-origin JSON request required", errdefs.ErrConfig)
+	// Mutations require JSON; the shared access policy guards Host/Origin.
+	if r.Header.Get("Content-Type") != jsonContentType {
+		return input, fmt.Errorf("%w: JSON request required", errdefs.ErrConfig)
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(nil, r.Body, maxRegistryCredentialBody))
 	decoder.DisallowUnknownFields()

@@ -124,7 +124,7 @@ func TestScopedResourceAPI(t *testing.T) {
 					url += "/target"
 				}
 				handler, err := newHandler(
-					"localhost:5129",
+					"http://localhost:5129",
 					"unix:///test",
 					func(context.Context) (kukeonv1.Client, error) { return c, nil },
 				)
@@ -182,7 +182,7 @@ func TestScopedResponsesRedactInputs(t *testing.T) {
 		}},
 	}
 	handler, err := newHandler(
-		"localhost:5129",
+		"http://localhost:5129",
 		"unix:///test",
 		func(context.Context) (kukeonv1.Client, error) { return c, nil },
 	)
@@ -208,7 +208,7 @@ func TestContainerNotFoundWireErrors(t *testing.T) {
 		wire := kukeonv1.ToAPIError(fmt.Errorf("lookup: %w", sentinel))
 		c := &scopedClient{err: kukeonv1.FromAPIError(wire)}
 		handler, err := newHandler(
-			"localhost:5129",
+			"http://localhost:5129",
 			"unix:///test",
 			func(context.Context) (kukeonv1.Client, error) { return c, nil },
 		)

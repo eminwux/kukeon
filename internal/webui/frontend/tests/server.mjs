@@ -7,7 +7,7 @@ import { resolve, join } from "node:path";
 export async function startServer(endpoint) {
   const cwd = await mkdtemp(join(tmpdir(), "kuke-browser-"));
   const binary = resolve(process.env.KUKE_WEB_BINARY ?? "../../../kuke");
-  const child = spawn(binary, ["--configuration", "/dev/null", "--host", endpoint ?? `unix://${cwd}/missing.sock`, "serve", "--listen", "127.0.0.1", "--port", "0"], { cwd });
+  const child = spawn(binary, ["--configuration", "/dev/null", "--host", endpoint ?? `unix://${cwd}/missing.sock`, "serve", "--listen", "127.0.0.1:0"], { cwd });
   let output = "";
   const exited = new Promise((resolve) => child.once("close", (code) => resolve(code)));
   async function stop() {

@@ -335,10 +335,19 @@ document** view) returns registry credentials with an empty `password`.
 
 ## Options and permissions
 
-- `--listen`: `localhost` (default) or a literal loopback IP, including `::1`.
-  Non-loopback addresses and other hostnames are rejected.
-- `--port`: 5129 by default; 0 selects an available port. The printed URL always
-  includes the actual bound port. A port conflict fails with a diagnostic.
+- `--listen host:port`: the bind address, `localhost:5129` by default. The host
+  is `localhost` (pinned to `127.0.0.1`, no DNS lookup), a literal IPv4 address,
+  or a bracketed IPv6 address, including `0.0.0.0:5129` and `[::]:5129` for all
+  interfaces. Other hostnames, a missing port, and an out-of-range port are
+  rejected. Port 0 selects an available port; the printed URL always includes the
+  actual bound port. A port conflict fails with a diagnostic. `--port` was removed;
+  use `--listen localhost:<port>`.
+- `--url <origin>`: the single browser origin the server accepts, for example
+  `http://localhost:5129` or `https://kukeon.example.com`. It takes an `http` or
+  `https` scheme, a host, and an optional port (the scheme default when omitted),
+  and nothing else: a path (including a trailing `/`), query, fragment, or
+  userinfo is rejected. The port may differ from the `--listen` port, so the UI
+  works behind port mapping or a reverse proxy.
 - `--configuration`, `KUKE_CONFIGURATION`, `--host`, and `KUKEON_HOST` follow the
   normal client configuration rules. The endpoint must use the supported Unix
   socket transport. `KUKEON_NO_DAEMON` does not enable direct storage access.
@@ -348,9 +357,43 @@ The server never escalates privileges. If connection fails, the shell remains
 available and API requests can be retried. A new connection is opened for each
 request, allowing recovery after the daemon restarts.
 
-Use exactly the printed host and port: Host and any browser Origin must match
-that endpoint. No CORS allowance, accounts, sessions, or authentication tokens
-are provided. Binding is limited to loopback, including when using `localhost`.
+At startup the server prints `Listening on http://<host:port>` and then
+`Accepted browser origin: <--url value or any>`.
+
+Host and Origin are checked by one policy on every route: static assets, API
+GETs, JSON mutations, and the attach WebSocket.
+
+- **With `--url`**, a request's Host must be the `--url` host and port, and any
+  Origin it sends must be the `--url` origin. Anything else, including a request
+  carrying more than one Origin, gets a 403. Host is pinned too because browsers
+  omit Origin on same-origin GETs, so the Host check is what stops a
+  DNS-rebinding page from reading the API.
+- **Without `--url`** (the default, including the default `localhost:5129`
+  bind), any Host and any Origin are accepted. A request carrying more than one
+  Origin is still rejected.
+
+No CORS allowance, accounts, sessions, or authentication tokens are provided.
+Mutations still require `Content-Type: application/json`.
+
+**Without `--url` the server has no cross-site protection, even on localhost.**
+WebSocket upgrades are not subject to CORS, so any web page open in the same
+browser can open the attach socket and type into a cell terminal. With no Host
+pin, a DNS-rebinding page can also read the API. Pass `--url` with the address
+you browse to (for the default bind, `--url http://localhost:5129`) to turn this
+protection on.
+
+**The UI has no authentication.** When `--listen` is not a loopback address, the
+server prints a warning on stderr: anyone who can reach the address can open
+cell terminals and run daemon actions. Expose it only on trusted networks, or
+behind a proxy that adds authentication.
+
+```sh
+# All interfaces, any Host/Origin.
+kuke serve --listen 0.0.0.0:5129
+# All interfaces, but only a browser at http://localhost:5129 is accepted;
+# a browser at http://192.168.1.5:5129 gets a 403.
+kuke serve --listen 0.0.0.0:5129 --url http://localhost:5129
+```
 
 ## Read-only API
 
@@ -427,7 +470,7 @@ daemon built before it); redeploy kukeond with the same build as `kuke`. Request
 time out after ten seconds. Responses are not cached.
 
 ```sh
-kuke serve --listen 127.0.0.1 --port 5129
+kuke serve --listen 127.0.0.1:5129
 curl http://127.0.0.1:5129/api/realms
 ```
 
