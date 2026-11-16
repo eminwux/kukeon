@@ -22,14 +22,12 @@ import (
 
 // reasonOperatorStopped is the stable PascalCase Status.Reason label stamped
 // when a stop/kill interrupts a cell whose workload was still running (#1371).
-// It is the persisted breadcrumb that keeps an operator-interrupted `--rm` /
-// Spec.AutoDelete cell out of the reconciler's auto-delete gate: Stopped is
-// non-sticky, so the next reconcile tick re-derives the all-terminal workload
-// to Exited — the very state the gate triggers on — and the persisted label
-// alone cannot tell "the operator interrupted it" from "it ran to completion".
-// The breadcrumb survives that re-derivation (ReconcileCell only rewrites
-// Reason on an Error transition) and is cleared by markCellReady, so the cell
-// stays inspectable until the operator deletes or restarts it.
+// It is the persisted breadcrumb that tells "the operator interrupted it" apart
+// from "it ran to completion": ReconcileCell keeps a Stopped cell carrying it
+// at Stopped instead of re-deriving the all-terminal workload to Exited / Error
+// (cellStoppedIsDurable, #1486), and the auto-delete gate skips it (#1371). It
+// is cleared by markCellReady, so the cell stays inspectable until the
+// operator deletes or restarts it.
 const reasonOperatorStopped = "OperatorStopped"
 
 // operatorStoppedMessage is the human-readable Status.Message paired with
