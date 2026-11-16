@@ -1503,6 +1503,37 @@ test("Daemon logs read the latest bounded output, follow and pause explicitly, a
   await expect(output).toHaveText("time=t1 level=INFO msg=started\nplain line");
 });
 
+test("Daemon logs drop a follow read that is still in flight when Reload latest replaces the buffer", async ({ page }) => {
+  await mock(page);
+  let tails = 0;
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  const forward = [];
+  await mockDaemon(page, { logs: async url => {
+    const offset = Number(url.searchParams.get("offset"));
+    if (offset < 0) {
+      tails++;
+      return { json: tails === 1 ? { source: "/log", data: "a\n", start: 0, next: 2, size: 2 } : { source: "/log", data: "a\nb\n", start: 0, next: 4, size: 4 } };
+    }
+    forward.push(offset);
+    if (offset === 2) { await held; return { json: { source: "/log", data: "b\n", start: 2, next: 4, size: 4 } }; }
+    return { json: { source: "/log", data: "", start: offset, next: offset, size: 4 } };
+  } });
+  await page.goto(`${server.url}#/daemon/logs`);
+  const logs = page.getByRole("region", { name: "Daemon logs" });
+  const output = logs.getByLabel("kukeond log output");
+  await expect(output).toHaveText("a");
+  await logs.getByRole("button", { name: "Follow" }).click();
+  await expect.poll(() => forward).toContain(2);
+  await logs.getByRole("button", { name: "Reload latest" }).click();
+  await expect(output).toHaveText("a\nb");
+  release();
+  // The stale forward chunk is dropped and the next tick resumes from the reload's cursor.
+  await expect.poll(() => forward.filter(offset => offset === 4).length, { timeout: 6000 }).toBeGreaterThan(0);
+  await expect(output).toHaveText("a\nb");
+  expect(forward.filter(offset => offset === 2)).toHaveLength(1);
+});
+
 test("Daemon logs follow reports a rotated source and drains bounded chunks", async ({ page }) => {
   await mock(page);
   let phase = 0;

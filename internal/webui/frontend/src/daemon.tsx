@@ -94,7 +94,11 @@ export function DaemonLogsPage({ revision }: { revision: number }) {
   const [copyState, setCopyState] = useState<string>();
   const [reloads, setReloads] = useState(0);
   const bufferRef = useRef(buffer);
-  const busy = useRef(false);
+  // busy holds the token of the read in flight (null when idle); generation
+  // bumps on every tail reload so a follow read issued before it is dropped.
+  const busy = useRef<number | null>(null);
+  const tokens = useRef(0);
+  const generation = useRef(0);
   const output = useRef<HTMLPreElement>(null);
   const stickToBottom = useRef(true);
 
@@ -103,8 +107,11 @@ export function DaemonLogsPage({ revision }: { revision: number }) {
   // A tail read on mount, Reload, or the global Refresh replaces the buffer.
   useEffect(() => {
     const controller = new AbortController();
-    busy.current = true;
+    const token = ++tokens.current;
+    generation.current++;
+    busy.current = token;
     setLoading(true);
+    const release = () => { if (busy.current === token) busy.current = null; };
     void (async () => {
       try {
         const chunk = await readChunk(-1, controller.signal);
@@ -116,38 +123,48 @@ export function DaemonLogsPage({ revision }: { revision: number }) {
       } catch (failure) {
         if (!controller.signal.aborted) setError(toFailure(failure));
       } finally {
-        if (!controller.signal.aborted) { busy.current = false; setLoading(false); }
+        if (!controller.signal.aborted) { release(); setLoading(false); }
       }
     })();
-    return () => { controller.abort(); busy.current = false; };
+    return () => { controller.abort(); release(); };
   }, [revision, reloads, commit]);
 
   // Follow mode polls forward from the last cursor; Pause stops polling.
   useEffect(() => {
     if (!following) return;
     const controller = new AbortController();
+    let active: number | null = null;
     const tick = async () => {
-      if (busy.current || document.visibilityState !== "visible") return;
-      busy.current = true;
+      if (busy.current !== null || document.visibilityState !== "visible") return;
+      const token = ++tokens.current;
+      const gen = generation.current;
+      const stale = () => controller.signal.aborted || generation.current !== gen;
+      busy.current = active = token;
       try {
         for (let i = 0; i < FOLLOW_CHUNKS_PER_TICK; i++) {
           const cursor = bufferRef.current.next;
           const chunk = await readChunk(cursor ?? -1, controller.signal);
-          if (controller.signal.aborted) return;
+          // A tail reload that started meanwhile owns the buffer now.
+          if (stale()) return;
           commit(applyChunk(bufferRef.current, chunk, { replace: cursor === null }));
           if (chunk.reset) setNotice("The daemon log was truncated or replaced since the last read; showing its latest output.");
           setError(undefined);
           if (!chunk.more) break;
         }
       } catch (failure) {
-        if (!controller.signal.aborted) setError(toFailure(failure));
+        if (!stale()) setError(toFailure(failure));
       } finally {
-        busy.current = false;
+        if (busy.current === token) busy.current = null;
+        if (active === token) active = null;
       }
     };
     void tick();
     const timer = window.setInterval(() => { void tick(); }, FOLLOW_INTERVAL_MS);
-    return () => { window.clearInterval(timer); controller.abort(); busy.current = false; };
+    return () => {
+      window.clearInterval(timer);
+      controller.abort();
+      if (active !== null && busy.current === active) busy.current = null;
+    };
   }, [following, commit]);
 
   useLayoutEffect(() => {
