@@ -7,11 +7,6 @@ export type DestructiveAction = Extract<LifecycleAction, "kill" | "delete" | "pu
 export type PurgeOptions = { force: boolean; cascade: boolean };
 export type LifecycleFeedback = { action: LifecycleAction; phase: "pending" | "success" | "error"; message: string };
 
-export function LifecycleNotice({ operation }: { operation?: LifecycleFeedback }) {
-  if (!operation) return null;
-  return <p className={`cell-lifecycle-feedback ${operation.phase}`} role={operation.phase === "error" ? "alert" : "status"} aria-live={operation.phase === "error" ? "assertive" : "polite"}>{operation.message}</p>;
-}
-
 function CellActionConfirmation({
   action,
   scope,
@@ -142,14 +137,12 @@ export function CellLifecycleControls({
   operation,
   onAction,
   compact = false,
-  showFeedback = true,
 }: {
   scope: string[];
   state?: string;
   operation?: LifecycleFeedback;
   onAction: (scope: string[], action: LifecycleAction, state?: string, options?: PurgeOptions) => void;
   compact?: boolean;
-  showFeedback?: boolean;
 }) {
   const actions = availableLifecycleActions(state);
   return <div className={`cell-lifecycle${compact ? " is-compact" : ""}`} aria-label={`Lifecycle actions for ${scope.join(" / ")}`}>
@@ -163,6 +156,5 @@ export function CellLifecycleControls({
       {!actions.length && operation?.phase !== "pending" && <span className="cell-lifecycle-unavailable">No lifecycle action in this state</span>}
     </div>
     <AdvancedCellActions scope={scope} operation={operation} onAction={onAction} />
-    {showFeedback && <LifecycleNotice operation={operation} />}
   </div>;
 }

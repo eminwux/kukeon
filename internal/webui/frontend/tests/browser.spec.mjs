@@ -29,6 +29,9 @@ const failure = { status: 503, json: { error: { code: "unavailable", message: "S
 const nav = page => page.getByRole("navigation", { name: "Resources navigation" });
 const listSearch = page => page.locator(".list-controls").getByRole("searchbox");
 const terminalTools = page => page.locator(".cell-terminal-tools");
+const toasts = page => page.getByRole("region", { name: "Notifications" }).locator(".toast");
+const content = page => page.locator(".workspace-content");
+const inventoryIndicator = (page, state) => page.locator(".toolbar").getByRole("button", { name: `Inventory ${state}: show details` });
 
 test("terminal selects eligible containers, forwards input and resize, and detaches", async ({ page }) => {
   await mock(page, path => path.endsWith("/containers") ? { json: [
@@ -90,6 +93,7 @@ test("refreshing keeps the cell terminal size and sends no resize", async ({ pag
   hold = { promise: new Promise(resolve => { release = resolve; }) };
   await page.getByRole("button", { name: "Refresh" }).click();
   await expect(page.locator(".toolbar-connectivity .dot")).toHaveClass(/checking/);
+  await expect(page.getByRole("button", { name: "Refresh" })).toHaveAttribute("aria-busy", "true");
   await expect(page.getByText("Refreshing resource inventory…").filter({ visible: true })).toHaveCount(0);
   await expect(page.getByText("Loading cell details…").filter({ visible: true })).toHaveCount(0);
   await expect(page.getByText("Loading containers…").filter({ visible: true })).toHaveCount(0);
@@ -97,6 +101,7 @@ test("refreshing keeps the cell terminal size and sends no resize", async ({ pag
   hold = null;
   release();
   await expect(page.locator(".toolbar-connectivity .dot")).not.toHaveClass(/checking/);
+  await expect(page.getByRole("button", { name: "Refresh" })).toHaveAttribute("aria-busy", "false");
   await page.waitForTimeout(200);
   expect(await screen.boundingBox()).toEqual(before);
   expect(resizes()).toBe(sent);
@@ -274,7 +279,9 @@ test("terminal container selection auto-attaches, enforces connection limits, an
   }
   await terminalTools(page).locator(".terminal-controls select").selectOption("shell-20");
   await expect(terminalTools(page).locator(".terminal-connection-state")).toHaveText("Connection limit reached");
-  await expect(terminalTools(page).getByText("Terminal limit reached.", { exact: false })).toBeVisible();
+  await expect(panel.getByText("Terminal limit reached.", { exact: false })).toBeVisible();
+  await expect(terminalTools(page).getByText("Terminal limit reached.", { exact: false })).toHaveCount(0);
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toHaveAttribute("data-tooltip", /Terminal limit reached/);
   await expect(terminalTools(page).getByRole("button", { name: "Attach" })).toHaveCount(0);
   await terminalTools(page).locator(".terminal-controls select").selectOption("shell-1");
   await expect(terminalTools(page).locator(".terminal-connection-state")).toHaveText("Attached");
@@ -316,13 +323,14 @@ test("terminal error offers a new attachment and stopped cells release sessions"
   const closedBefore = closed;
   failInventory = true;
   await page.getByRole("button", { name: "Refresh" }).click();
-  await expect(page.getByText("Stale inventory — refresh failed.", { exact: false })).toBeVisible();
+  await expect(inventoryIndicator(page, "stale")).toBeVisible();
   await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
   expect(closed).toBe(closedBefore);
   failInventory = false;
   stopped = true;
   await page.getByRole("button", { name: "Refresh" }).click();
-  await expect(terminalTools(page).getByText("Terminal unavailable: cell is Stopped.")).toBeVisible();
+  await expect(panel.getByText("Terminal unavailable: cell is Stopped.")).toBeVisible();
+  await expect(terminalTools(page).getByText("Terminal unavailable", { exact: false })).toHaveCount(0);
   await expect(terminalTools(page).getByRole("button", { name: "Reconnect" })).toHaveCount(0);
   await expect.poll(() => closed).toBeGreaterThan(closedBefore);
 });
@@ -532,13 +540,14 @@ test("failed inventory refresh retains cells while daemon connectivity changes i
   fail = true;
   await page.getByRole("button", { name: "Refresh" }).click();
   await expect(page.getByLabel("Daemon connection").getByRole("status")).toHaveText("Unavailable");
-  await expect(page.getByText(/Stale inventory/)).toBeVisible();
+  await expect(inventoryIndicator(page, "stale")).toBeVisible();
   await expect(cells.getByRole("link")).toHaveCount(2);
   await expect(page.getByRole("region", { name: "All cells" })).toContainText("Inventory incomplete or stale");
   fail = false;
   await page.getByRole("button", { name: "Refresh" }).click();
   await expect(page.getByLabel("Daemon connection").getByRole("status")).toHaveText("Connected");
   await expect(page.locator(".stale")).toHaveCount(0);
+  await expect(page.locator(".inventory-indicator")).toHaveCount(0);
 });
 
 test("periodic refresh waits for a slow inventory traversal", async ({ page }) => {
@@ -661,7 +670,7 @@ test("refresh failures mark retained inventory and documents stale, retry recove
   await expect(page.getByLabel("Daemon connection").getByRole("status")).toHaveText("Connected");
   fail = true;
   await page.getByRole("button", { name: "Refresh" }).click();
-  await expect(page.getByText(/Stale inventory/)).toBeVisible();
+  await expect(inventoryIndicator(page, "stale")).toBeVisible();
   await expect(page.getByText("Stale resource details — refresh failed.")).toBeVisible();
   await expect(page.getByLabel("Complete cell JSON")).toContainText('"api"');
   fail = false;
@@ -673,7 +682,14 @@ test("refresh failures mark retained inventory and documents stale, retry recove
 test("partial scope failures never present counts as complete", async ({ page }) => {
   await mock(page, path => path === "/api/realms/prod/spaces/shared/stacks" ? failure : undefined);
   await page.goto(`${server.url}#/administration`);
-  await expect(page.getByRole("alert")).toContainText("Incomplete inventory");
+  await inventoryIndicator(page, "incomplete").click();
+  const popover = page.getByRole("dialog", { name: "Inventory status" });
+  await expect(popover).toContainText("Inventory incomplete");
+  await expect(popover.getByRole("listitem")).toContainText(["Stacks in prod / shared: Scoped read failed"]);
+  await expect(popover).toContainText("Last successful refresh:");
+  await expect(content(page).getByText("Incomplete inventory")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(popover).toBeHidden();
   await expect(page.locator(".summary-card").filter({ hasText: "Cells" })).toContainText("Incomplete or stale data");
   await expect(page.getByLabel("Daemon connection").getByRole("status")).toHaveText("Connected");
 });
@@ -685,7 +701,7 @@ test("empty inventory and failed retrieval have different messages", async ({ pa
   await page.unroute("**/api/realms**");
   await page.route("**/api/realms**", route => route.fulfill(failure));
   await page.getByRole("button", { name: "Refresh" }).click();
-  await expect(page.getByText(/Stale inventory/)).toBeVisible();
+  await expect(inventoryIndicator(page, "stale")).toBeVisible();
   await expect(page.getByText("Resources could not be fully loaded")).toBeVisible();
   await expect(page.getByText("No realms found")).toHaveCount(0);
 });
@@ -847,7 +863,7 @@ test("config references navigate across realms and missing targets report errors
   await page.getByRole("link", { name: "template", exact: true }).click();
   await expect(page).toHaveURL(/#\/blueprints\/library\/template$/);
   await expect(page.locator(".page-heading h1")).toHaveText("template");
-  await expect(page.getByRole("alert")).toContainText("Blueprint is missing");
+  await expect(content(page).getByRole("alert")).toContainText("Blueprint is missing");
   missing = false;
   await page.getByRole("button", { name: "Refresh" }).click();
   await expect(page.getByRole("heading", { name: "Resource overview" })).toBeVisible();
@@ -970,7 +986,7 @@ test("kill and purge require explicit confirmation and pass only selected purge 
   await expect(dialog.getByRole("button", { name: "Confirm Kill" })).toBeDisabled();
   await dialog.getByLabel("I understand this immediately terminates the cell's running containers.").check();
   await dialog.getByRole("button", { name: "Confirm Kill" }).click();
-  await expect(page.locator(".cell-lifecycle-feedback")).toContainText("Cell killed");
+  await expect(toasts(page)).toContainText(["Cell killed"]);
   await expect(page.getByRole("button", { name: "Purge cell…" })).toHaveCount(0);
 
   await page.getByText("Advanced actions", { exact: true }).click();
@@ -985,7 +1001,9 @@ test("kill and purge require explicit confirmation and pass only selected purge 
   await force.check();
   await cascade.check();
   await dialog.getByRole("button", { name: "Confirm Purge" }).click();
-  await expect(page.locator(".cell-global-feedback")).toContainText("Cell purged");
+  await expect(toasts(page)).toHaveCount(1);
+  await expect(toasts(page)).toContainText("Cell purged");
+  await expect(toasts(page).locator(".toast-title")).toHaveText("dev / shared / services / api");
   expect(submitted).toEqual([{ force: true, cascade: true }]);
 });
 
@@ -1005,7 +1023,7 @@ test("partial purge reports incomplete cleanup instead of success", async ({ pag
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Type the full target above to enable Purge").fill("dev / shared / services / api");
   await dialog.getByRole("button", { name: "Confirm Purge" }).click();
-  const feedback = page.locator(".cell-lifecycle-feedback");
+  const feedback = toasts(page);
   await expect(feedback).toContainText("Purge incomplete.");
   await expect(feedback).not.toContainText("Cell purged.");
   await expect(feedback).toContainText("cni-resources-incomplete");
@@ -1068,7 +1086,7 @@ test("a rejected delete keeps the cell and its terminal session", async ({ page 
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("I understand Delete removes this cell but does not perform Purge cleanup.").check();
   await dialog.getByRole("button", { name: "Confirm Delete" }).click();
-  await expect(page.locator(".cell-lifecycle-feedback")).toContainText("Permission denied");
+  await expect(toasts(page)).toContainText(["Permission denied"]);
   await expect(page.getByRole("link", { name: "Open dev / shared / services / api" })).toBeVisible();
   expect(closed).toBe(false);
 });
@@ -1091,10 +1109,286 @@ test("an unavailable delete response reconciles the cell before reporting its ou
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("I understand Delete removes this cell but does not perform Purge cleanup.").check();
   await dialog.getByRole("button", { name: "Confirm Delete" }).click();
-  await expect(page.locator(".cell-lifecycle-feedback")).toContainText("Daemon unavailable");
-  await expect(page.locator(".cell-lifecycle-feedback")).toContainText("fresh daemon read confirms the cell still exists");
+  await expect(toasts(page)).toContainText(["Daemon unavailable"]);
+  await expect(toasts(page)).toContainText(["fresh daemon read confirms the cell still exists"]);
   await expect(page.getByRole("link", { name: "Open dev / shared / services / api" })).toBeVisible();
   await expect.poll(() => closed).toBe(true);
+});
+
+test("lifecycle toasts update in place, auto-dismiss after a hover pause, and errors persist until dismissed", async ({ page }) => {
+  await page.clock.install();
+  const posts = [];
+  let release = () => {};
+  let fail = false;
+  await mock(page, async (path, request) => {
+    if (request.method() !== "POST") return undefined;
+    posts.push(path);
+    await new Promise(resolve => { release = resolve; });
+    return fail ? { status: 409, json: { error: { code: "invalid_state", message: "cell is busy" } } } : { json: {} };
+  });
+  const polite = page.locator('[role="status"][aria-live="polite"]');
+  const assertive = page.locator('[role="alert"][aria-live="assertive"]');
+  await page.goto(`${server.url}#/resource/dev/shared/services/api`);
+  const row = page.locator(".cell-page-title-row");
+  await row.getByRole("button", { name: "Stop", exact: true }).click();
+  await expect.poll(() => posts.length).toBe(1);
+  await expect(toasts(page)).toHaveCount(1);
+  await expect(toasts(page)).toHaveClass(/pending/);
+  await expect(toasts(page)).toHaveText(/Stopping cell…/);
+  await expect(toasts(page).locator("[role]")).toHaveCount(0);
+  await expect(polite).toHaveText("Stopping cell…");
+  await expect(row.getByRole("button", { name: "Stop…", exact: true })).toBeDisabled();
+  release();
+  await expect(toasts(page)).toHaveClass(/success/);
+  await expect(toasts(page)).toHaveCount(1);
+  await expect(toasts(page)).toContainText("Cell stopped.");
+  await expect(polite).toContainText("Cell stopped.");
+  await expect(assertive).toHaveText("");
+  await toasts(page).hover();
+  await page.clock.fastForward(6000);
+  await expect(toasts(page)).toHaveCount(1);
+  await page.mouse.move(700, 600);
+  await page.clock.fastForward(4000);
+  await expect(toasts(page)).toHaveCount(1);
+  await page.clock.fastForward(1100);
+  await expect(toasts(page)).toHaveCount(0);
+
+  fail = true;
+  await row.getByRole("button", { name: "Restart", exact: true }).click();
+  await expect.poll(() => posts.length).toBe(2);
+  await expect(toasts(page)).toHaveClass(/pending/);
+  await page.goto(`${server.url}#/resources`);
+  release();
+  await expect(toasts(page)).toHaveClass(/error/);
+  await expect(toasts(page)).toContainText("Restart failed. Invalid cell state: cell is busy");
+  await expect(toasts(page).locator(".toast-title")).toHaveText("dev / shared / services / api");
+  await expect(assertive).toContainText("Restart failed");
+  await expect(polite).toHaveText("");
+  await page.clock.fastForward(30_000);
+  await expect(toasts(page)).toHaveCount(1);
+  await toasts(page).getByRole("button", { name: "Dismiss notification" }).focus();
+  await page.keyboard.press("Escape");
+  await expect(toasts(page)).toHaveCount(0);
+
+  await page.goto(`${server.url}#/resource/dev/shared/services/api`);
+  await row.getByRole("button", { name: "Restart", exact: true }).click();
+  await expect.poll(() => posts.length).toBe(3);
+  release();
+  await expect(toasts(page)).toHaveClass(/error/);
+  await expect(toasts(page).locator(".toast-title")).toHaveCount(0);
+  await toasts(page).getByRole("button", { name: "Dismiss notification" }).click();
+  await expect(toasts(page)).toHaveCount(0);
+});
+
+test("Start, Stop, Restart and Refresh on cellTerminal never resize the attached terminal", async ({ page }) => {
+  let state = "Ready";
+  let hold = null;
+  const posts = [];
+  const cell = "/api/realms/dev/spaces/shared/stacks/services/cells/api";
+  await mock(page, async (path, request) => {
+    if (request.method() === "POST") {
+      posts.push(path);
+      if (hold) await hold.promise;
+      state = path.endsWith("/stop") ? "Stopped" : "Ready";
+      return { json: {} };
+    }
+    if (path.endsWith("/containers")) return { json: [{ id: "shell", attachable: true }] };
+    if (path === cell) return { json: { ...doc(["dev", "shared", "services", "api"]), status: { state } } };
+    if (path.endsWith("/cells") && path.includes("/dev/")) return { json: fixture(path).map(item => ({ ...item, status: { state } })) };
+  });
+  const messages = [];
+  await page.routeWebSocket("**/attach", socket => {
+    socket.onMessage(message => { messages.push(message); });
+    socket.send(JSON.stringify({ type: "ready" }));
+  });
+  const resizes = () => messages.filter(message => typeof message === "string" && JSON.parse(message).type === "resize").length;
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
+  await expect.poll(resizes).toBeGreaterThan(0);
+  await page.waitForTimeout(200);
+  const terminal = page.locator("#cell-terminal");
+  const before = await terminal.boundingBox();
+  const sent = resizes();
+  const row = page.locator(".cell-page-title-row");
+  async function act(name) {
+    let release;
+    hold = { promise: new Promise(resolve => { release = resolve; }) };
+    const count = posts.length;
+    await row.getByRole("button", { name, exact: true }).click();
+    await expect.poll(() => posts.length).toBe(count + 1);
+    await expect(toasts(page).first()).toHaveClass(/pending/);
+    expect(await terminal.boundingBox()).toEqual(before);
+    hold = null;
+    release();
+    await expect(toasts(page).first()).toHaveClass(/success/);
+    await expect(page.getByRole("button", { name: "Refresh" })).toHaveAttribute("aria-busy", "false");
+    await page.waitForTimeout(200);
+    expect(await terminal.boundingBox()).toEqual(before);
+    // On desktop the toast may briefly cover the title row's lifecycle icons; dismiss it as a user would.
+    await toasts(page).first().getByRole("button", { name: "Dismiss notification" }).click();
+    await expect(toasts(page)).toHaveCount(0);
+  }
+  await act("Restart");
+  await act("Stop");
+  await expect(page.locator("#cell-terminal").getByText("Terminal unavailable: cell is Stopped.")).toBeVisible();
+  expect(await terminal.boundingBox()).toEqual(before);
+  await act("Start");
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.getByRole("button", { name: "Refresh" })).toHaveAttribute("aria-busy", "false");
+  await page.waitForTimeout(200);
+  expect(await terminal.boundingBox()).toEqual(before);
+  expect(resizes()).toBe(sent);
+  await expect(page.locator(".cell-detail-screen > :not(.page-heading):not(.cell-terminal-view):not(.cell-overview-content)")).toHaveCount(0);
+});
+
+test("create-and-start reports through one toast that links to cellRead without resizing the terminal", async ({ page }) => {
+  await mockCatalog(page);
+  await page.route("**/api/realms/prod/spaces/shared/stacks/services/cells", route => route.fulfill({ json: [...fixture("/api/realms/prod/spaces/shared/stacks/services/cells"), doc(["prod", "shared", "services", "new-cell"])] }));
+  let releaseStart;
+  const startHeld = new Promise(resolve => { releaseStart = resolve; });
+  let started = false;
+  await page.route("**/api/realms/prod/spaces/shared/stacks/services/cells/new-cell/**", async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/start")) { started = true; await startHeld; return route.fulfill({ json: {} }); }
+    if (path.endsWith("/containers")) return route.fulfill({ json: [{ id: "shell", attachable: true }] });
+    return route.fallback();
+  });
+  await page.route("**/api/cells/from-config/*", async route => {
+    const input = route.request().postDataJSON();
+    const document = { metadata: { name: input.name }, spec: { realmId: "prod", spaceId: "shared", stackId: "services", containers: [{ id: "shell", attachable: true }] } };
+    await route.fulfill({ json: route.request().url().endsWith("create") ? document : { document, preview: "reviewed" } });
+  });
+  const messages = [];
+  await page.routeWebSocket("**/attach", socket => {
+    socket.onMessage(message => { messages.push(message); });
+    socket.send(JSON.stringify({ type: "ready" }));
+  });
+  const resizes = () => messages.filter(message => typeof message === "string" && JSON.parse(message).type === "resize").length;
+  await page.goto(`${server.url}#/configs/prod/shared/services/shared-name`);
+  await page.getByRole("link", { name: /Create Cell from this Config/ }).click();
+  await page.getByLabel("Cell name (optional)").fill("new-cell");
+  await page.getByRole("button", { name: "Preview Cell", exact: true }).click();
+  await page.getByLabel(/Start (and attach )?after creation/).check();
+  await page.getByRole("button", { name: "Create Cell", exact: true }).click();
+  await expect(page).toHaveURL(/#\/workspace\/prod\/shared\/services\/new-cell$/);
+  await expect.poll(() => started).toBe(true);
+  await expect(toasts(page)).toHaveCount(1);
+  await expect(toasts(page)).toHaveClass(/pending/);
+  await expect(toasts(page)).toContainText("Cell prod / shared / services / new-cell created. Starting it…");
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
+  await expect.poll(resizes).toBeGreaterThan(0);
+  await page.waitForTimeout(200);
+  const terminal = page.locator("#cell-terminal");
+  const before = await terminal.boundingBox();
+  const sent = resizes();
+  releaseStart();
+  await expect(toasts(page)).toHaveClass(/success/);
+  await expect(toasts(page)).toHaveCount(1);
+  await expect(toasts(page)).toContainText("Cell prod / shared / services / new-cell started.");
+  await page.waitForTimeout(200);
+  expect(await terminal.boundingBox()).toEqual(before);
+  expect(resizes()).toBe(sent);
+  await expect(page.getByText("View Cell document returned by kukeon")).toHaveCount(0);
+  await toasts(page).getByRole("link", { name: "View cell details" }).click();
+  await expect(page).toHaveURL(/#\/resource\/prod\/shared\/services\/new-cell$/);
+});
+
+test("stale and incomplete inventory use a toolbar indicator with a failure popover instead of page banners", async ({ page }) => {
+  let hold = null;
+  let failStacks = false;
+  await mock(page, async path => {
+    if (hold) await hold.promise;
+    if (failStacks && path === "/api/realms/prod/spaces/shared/stacks") return failure;
+  });
+  await page.goto(`${server.url}#/resources`);
+  await expect(page.locator(".summary-card").first()).toContainText("View all");
+  await expect(page.locator(".inventory-indicator")).toHaveCount(0);
+  let release;
+  hold = { promise: new Promise(resolve => { release = resolve; }) };
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.getByRole("button", { name: "Refresh" })).toHaveAttribute("aria-busy", "true");
+  await expect(page.getByText("Refreshing resource inventory…")).toHaveCount(0);
+  hold = null;
+  failStacks = true;
+  release();
+  await expect(page.getByRole("button", { name: "Refresh" })).toHaveAttribute("aria-busy", "false");
+  await expect(inventoryIndicator(page, "stale")).toBeVisible();
+  await expect(content(page).getByText(/Stale inventory|Incomplete inventory/)).toHaveCount(0);
+  await expect(content(page).getByRole("alert")).toHaveCount(0);
+  await inventoryIndicator(page, "stale").click();
+  const popover = page.getByRole("dialog", { name: "Inventory status" });
+  await expect(popover).toBeVisible();
+  await expect(popover.getByRole("listitem")).toHaveText(["Stacks in prod / shared: Scoped read failed"]);
+  await expect(popover.locator("time")).toHaveAttribute("datetime", /\d{4}-\d{2}-\d{2}T/);
+  const [button, box] = [await inventoryIndicator(page, "stale").boundingBox(), await popover.boundingBox()];
+  expect(box.y).toBeGreaterThanOrEqual(button.y + button.height);
+  expect(box.x).toBeGreaterThanOrEqual(16);
+  expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize().width - 16);
+  await page.keyboard.press("Escape");
+  await expect(popover).toBeHidden();
+  failStacks = false;
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.locator(".inventory-indicator")).toHaveCount(0);
+});
+
+test("toasts stay under the toolbar at desktop and mobile widths in light and dark themes", async ({ page }) => {
+  await mock(page, async (path, request) => {
+    if (request.method() === "POST") await new Promise(() => {});
+  });
+  await page.goto(`${server.url}#/resource/dev/shared/services/api`);
+  await page.locator(".cell-page-title-row").getByRole("button", { name: "Stop", exact: true }).click();
+  await expect(toasts(page)).toHaveClass(/pending/);
+  const backgrounds = new Set();
+  for (const [width, height] of [[1440, 900], [390, 844]]) {
+    await page.setViewportSize({ width, height });
+    for (const theme of ["light", "dark"]) {
+      await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
+      const toolbar = await page.locator(".toolbar").boundingBox();
+      await expect.poll(async () => (await toasts(page).boundingBox()).y).toBeGreaterThanOrEqual(toolbar.y + toolbar.height);
+      const box = await toasts(page).boundingBox();
+      if (width === 1440) {
+        expect(box.width).toBeLessThanOrEqual(360);
+        expect(Math.round(box.x + box.width)).toBe(width - 16);
+      } else {
+        expect(Math.round(box.x)).toBe(16);
+        expect(Math.round(box.width)).toBe(width - 32);
+      }
+      backgrounds.add(await toasts(page).evaluate(el => getComputedStyle(el).backgroundColor));
+    }
+  }
+  expect(backgrounds.size).toBe(2);
+});
+
+test("terminal unavailable and limit messages leave the cellTerminal title row height unchanged", async ({ page }) => {
+  let state = "Ready";
+  await mock(page, path => {
+    if (path.endsWith("/containers")) return { json: [{ id: "shell", attachable: true }] };
+    if (path === "/api/realms/dev/spaces/shared/stacks/services/cells/api") return { json: { ...doc(["dev", "shared", "services", "api"]), status: { state } } };
+    if (path.endsWith("/cells") && path.includes("/dev/")) return { json: fixture(path).map(item => ({ ...item, status: { state } })) };
+  });
+  await page.routeWebSocket("**/attach", socket => { socket.send(JSON.stringify({ type: "ready" })); });
+  const row = page.locator(".cell-page-title-row");
+  const heights = async () => {
+    const result = [];
+    for (const [width, height] of [[1440, 900], [390, 844]]) {
+      await page.setViewportSize({ width, height });
+      await page.waitForTimeout(100);
+      result.push(Math.round((await row.boundingBox()).height));
+    }
+    return result;
+  };
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
+  const ready = await heights();
+  state = "Stopped";
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.locator("#cell-terminal").getByText("Terminal unavailable: cell is Stopped.")).toBeVisible();
+  expect(await heights()).toEqual(ready);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const centers = await page.locator(".cell-page-title-row > *:not([hidden])").evaluateAll(els => new Set(els.map(el => Math.round(el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2))).size);
+  expect(centers).toBe(1);
+  await expect(row.getByText(/Terminal unavailable|Terminal limit|Loading containers/)).toHaveCount(0);
 });
 
 test("container cgroup section distinguishes Unlimited, Not available and Not set and refreshes live values", async ({ page }) => {
@@ -1310,7 +1604,7 @@ test("Images view distinguishes loading, missing image, permission, outdated dae
   mode = "fail";
   await page.getByRole("button", { name: "Refresh" }).click();
   await expect(page.getByText("Stale image list — refresh failed.")).toBeVisible();
-  await expect(page.getByRole("alert")).toContainText("Daemon unavailable");
+  await expect(content(page).getByRole("alert")).toContainText("Daemon unavailable");
   await expect(list.getByRole("row", { name: /alpine/ })).toBeVisible();
   mode = "ok";
   await page.getByRole("button", { name: "Refresh" }).click();
@@ -1318,16 +1612,16 @@ test("Images view distinguishes loading, missing image, permission, outdated dae
 
   mode = "permission";
   await page.goto(`${server.url}#/images/prod`);
-  await expect(page.getByRole("alert")).toContainText("Permission denied");
+  await expect(content(page).getByRole("alert")).toContainText("Permission denied");
   await expect(list.getByRole("heading", { name: "Images could not be loaded" })).toBeVisible();
 
   mode = "outdated";
   await page.goto(`${server.url}#/images/dev`);
-  await expect(page.getByRole("alert")).toContainText("Daemon outdated");
+  await expect(content(page).getByRole("alert")).toContainText("Daemon outdated");
 
   mode = "ok";
   await page.goto(`${server.url}#/images/dev/${encodeURIComponent("missing:1")}`);
-  await expect(page.getByRole("alert")).toContainText("Image no longer exists");
+  await expect(content(page).getByRole("alert")).toContainText("Image no longer exists");
 });
 
 test("realm registry credentials list server and username, keep the token write-only and refresh the summary", async ({ page }) => {
@@ -1361,7 +1655,8 @@ test("realm registry credentials list server and username, keep the token write-
   await expect(form.getByLabel("Token")).toHaveAttribute("type", "password");
   await form.getByLabel("Token").fill(token);
   await form.getByRole("button", { name: "Replace credential" }).click();
-  await expect(panel.getByRole("status")).toContainText("Saved credential for ghcr.io (user robot)");
+  await expect(toasts(page)).toContainText(["Saved credential for ghcr.io (user robot)"]);
+  await expect(panel.getByText("Saved credential", { exact: false })).toHaveCount(0);
   await expect(panel.getByRole("row", { name: /ghcr\.io/ })).toContainText("robot");
   await expect(panel.getByRole("row")).toHaveCount(3);
   expect(posts).toHaveLength(1);

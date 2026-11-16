@@ -200,7 +200,7 @@ button:disabled { cursor: default; opacity: .4; }
 .create-cell-form textarea { min-height: 100px; resize: vertical; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--code); color: var(--text); font: inherit; }
 .terminal-screen { display: flex; height: min(62dvh, 680px); min-height: 360px; padding: 10px; background: var(--terminal-bg); }
 .terminal-mount { flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
-.terminal-workspace { margin-bottom: 20px; }
+.terminal-workspace { position: relative; margin-bottom: 20px; }
 .terminal-workspace[hidden], .terminal-session[hidden] { display: none; }
 .terminal-workspace.is-expanded { position: fixed; inset: var(--terminal-expanded-top, 64px) 12px 12px 276px; z-index: 4; display: flex; flex-direction: column; height: auto; margin: 0; box-shadow: 0 16px 48px #0004; }
 .terminal-workspace.is-expanded .terminal-screens { display: flex; flex: 1; flex-direction: column; min-height: 0; }
@@ -217,7 +217,6 @@ button:disabled { cursor: default; opacity: .4; }
 .terminal-connection-state.connecting { color: var(--status-pending); }
 .terminal-connection-state.disconnected { color: var(--status-error); }
 .terminal-connection-state.interrupted { color: var(--status-warning); }
-.terminal-controls .terminal-limit { color: var(--status-warning); }
 .terminal-screens { min-width: 0; }
 .cell-terminal-state { grid-column: 1 / -1; font-size: 10px; color: var(--muted); }
 .cell-terminal-state.attached { color: var(--status-ok); }
@@ -227,15 +226,7 @@ button:disabled { cursor: default; opacity: .4; }
 
 .cell-lifecycle { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; margin: 0 0 10px; }
 .cell-lifecycle-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
-.cell-lifecycle-feedback { min-width: 0; margin: 0; font-size: 11px; overflow-wrap: anywhere; }
-.cell-lifecycle-feedback.pending { color: var(--warning); }
-.cell-lifecycle-feedback.success { color: var(--accent); }
-.cell-lifecycle-feedback.error { color: var(--error); }
 .cell-lifecycle-unavailable { color: var(--muted); font-size: 11px; }
-.cell-global-feedback { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 0 0 14px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-size: 11px; }
-.cell-global-feedback > strong { overflow-wrap: anywhere; }
-.cell-global-feedback .cell-lifecycle-feedback { flex: 1 1 220px; }
-.cell-global-feedback button { margin-left: auto; padding: 6px 9px; font-size: 10px; }
 .cell-advanced-actions { position: relative; flex: 0 0 auto; }
 .cell-advanced-actions > summary { min-height: 32px; display: flex; align-items: center; gap: 8px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--text); cursor: pointer; font-size: 11px; list-style: none; white-space: nowrap; }
 .cell-advanced-actions > summary::-webkit-details-marker { display: none; }
@@ -317,7 +308,6 @@ button:disabled { cursor: default; opacity: .4; }
 .cell-overview-content { display: grid; gap: 16px; min-width: 0; grid-auto-rows: max-content; align-content: start; }
 .cell-overview-content .resource-overview, .cell-overview-content .runtime-status, .cell-overview-content .container-panel { margin: 0; }
 .cell-page-heading { display: block; margin-bottom: 10px; }
-.cell-page-heading .cell-lifecycle-feedback { margin-top: 6px; }
 .cell-page-title-row { display: flex; align-items: center; gap: 6px 8px; min-width: 0; }
 .cell-page-title-row h1 { min-width: 0; flex: 0 1 auto; margin-right: 2px; }
 .cell-page-title-row:not(.cell-terminal-bar) .cell-lifecycle { margin-left: auto; }
@@ -405,10 +395,6 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--er
 .creation-review h3, .creation-form h3 { margin: 0; font-size: 13px; }
 .creation-review pre { max-height: 420px; min-height: 180px; border: 1px solid var(--line); border-radius: 7px; }
 .creation-review > button { justify-self: start; }
-.creation-success, .creation-progress { display: flex; justify-content: space-between; align-items: start; gap: 14px; margin: 0 0 16px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); font-size: 12px; }
-.creation-success { color: var(--accent); }
-.creation-progress { color: var(--warning); }
-.notice-dismiss { flex: 0 0 auto; padding: 2px 7px; }
 .relationship-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; }
 .relationship-grid .related-resources { margin-top: 0; }
 .related-cell-list li { align-items: center !important; }
@@ -436,7 +422,6 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--er
 @media (max-width: 640px) { .network-panel .details-grid { grid-template-columns: minmax(0, 1fr); gap: 4px; } .network-panel .details-grid dd { margin-bottom: 8px; } }
 .registry-credential-form { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin-top: 14px; }
 .registry-credential-form label { display: grid; gap: 4px; flex: 1 1 180px; font-size: 11px; color: var(--muted); }
-.registry-credentials .creation-success { margin-top: 12px; }
 .realm-images .panel-body, .registry-credentials .panel-body { font-size: 13px; }
 .registry-credential-form input, .registry-credential-form button { height: 36px; }
 .registry-credential-form button { padding: 0 12px; font-size: 12px; white-space: nowrap; }
@@ -461,3 +446,56 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--er
 .log-meta { padding: 0 16px; overflow-wrap: anywhere; }
 .log-omitted { padding: 0 16px; font-style: italic; }
 .log-output { white-space: pre; tab-size: 4; line-height: 1.55; }
+
+/* Notifications: toasts float in a fixed stack under the toolbar so they never reflow the page. */
+.toast-stack { position: fixed; top: max(var(--toast-top, 60px), calc(env(safe-area-inset-top, 0px) + 8px)); right: 16px; z-index: 40; display: grid; gap: 8px; width: min(360px, calc(100vw - 32px)); pointer-events: none; }
+.toast-stack[hidden] { display: none; }
+.toast-stack > * { pointer-events: auto; }
+.toast { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 10px; padding: 10px 10px 10px 12px; border: 1px solid var(--line); border-left-width: 3px; border-radius: 8px; background: var(--panel); color: var(--text); box-shadow: 0 10px 28px #0002; font-size: 12px; }
+.toast-icon { width: 8px; height: 8px; margin-top: 4px; border-radius: 50%; background: currentColor; }
+.toast-body { display: grid; gap: 4px; min-width: 0; }
+.toast-body p { margin: 0; line-height: 1.5; overflow-wrap: anywhere; }
+.toast-title { font-family: var(--mono); font-size: 11px; overflow-wrap: anywhere; }
+.toast-body .text-link { justify-self: start; }
+.toast-dismiss { width: 24px; height: 24px; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 16px; line-height: 1; }
+.toast-dismiss:hover, .toast-dismiss:focus-visible { color: var(--text); background: var(--hover); }
+.toast.pending { border-left-color: var(--status-pending); }
+.toast.pending .toast-icon { color: var(--status-pending); animation: toast-pulse 1.2s ease-in-out infinite; }
+.toast.success { border-left-color: var(--status-ok); }
+.toast.success .toast-icon { color: var(--status-ok); }
+.toast.warning { border-left-color: var(--status-warning); }
+.toast.warning .toast-icon { color: var(--status-warning); }
+.toast.error { border-left-color: var(--status-error); }
+.toast.error .toast-icon { color: var(--status-error); }
+.toast-more { justify-self: end; padding: 4px 9px; font-size: 11px; background: var(--panel); box-shadow: 0 6px 18px #0002; }
+@keyframes toast-pulse { 50% { opacity: .35; } }
+@keyframes refresh-spin { to { transform: rotate(360deg); } }
+.refresh-button[aria-busy="true"] { color: var(--accent); }
+.refresh-button[aria-busy="true"] svg { animation: refresh-spin 1s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .toast.pending .toast-icon, .refresh-button[aria-busy="true"] svg { animation: none; } }
+@media (max-width: 760px) { .toast-stack { left: 16px; right: 16px; width: auto; } }
+
+/* Ambient inventory freshness sits in the toolbar next to the connectivity dot. */
+.inventory-indicator { color: var(--status-warning); border-color: var(--status-warning-line); background: var(--status-warning-bg); }
+.inventory-indicator.unavailable { color: var(--status-error); border-color: var(--status-error-line); background: var(--status-error-bg); }
+.inventory-indicator[data-tooltip]:hover::after, .inventory-indicator[data-tooltip]:focus-visible::after { right: auto; left: 0; }
+.inventory-popover { position: fixed; inset: auto; top: var(--popover-top, 60px); left: var(--popover-left, 16px); width: min(360px, calc(100vw - 32px)); margin: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); color: var(--text); box-shadow: 0 12px 32px #0003; font-size: 12px; }
+.inventory-popover h2 { margin-bottom: 6px; }
+.inventory-popover p { margin: 0 0 8px; line-height: 1.5; }
+.inventory-popover ul { display: grid; gap: 4px; margin: 0 0 8px; padding-left: 16px; list-style: disc; color: var(--error); overflow-wrap: anywhere; }
+.inventory-popover .description { margin: 0; }
+
+/* A fixed-size detail badge keeps the cell title row one line high while details load or go stale. */
+.cell-detail-state { display: inline-grid; place-items: center; flex: 0 0 auto; width: 16px; height: 32px; cursor: help; }
+.cell-detail-state.is-idle { visibility: hidden; }
+.cell-detail-state .dot { width: 8px; height: 8px; }
+.cell-detail-state.stale .dot { background: var(--status-warning); }
+.cell-detail-state.checking .dot { background: var(--status-pending); }
+.cell-detail-state.failed .dot { background: var(--status-error); }
+.cell-detail-state[data-tooltip]:hover::after, .cell-detail-state[data-tooltip]:focus-visible::after { right: auto; left: 0; }
+
+/* Terminal messages overlay the terminal area while nothing is attached; they never resize it. */
+.terminal-overlay { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, var(--terminal-bg) 82%, transparent); pointer-events: none; }
+.terminal-overlay > * { max-width: 420px; margin: 0; text-align: center; font-size: 12px; color: var(--muted); pointer-events: auto; }
+.terminal-overlay .terminal-limit { color: var(--status-warning); }
+.terminal-overlay .error { text-align: left; }

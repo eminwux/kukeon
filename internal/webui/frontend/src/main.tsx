@@ -1,7 +1,7 @@
 import { StrictMode, Suspense, lazy, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
-import { useResource, ErrorNotice, type Resource } from "./request";
+import { useResource, ErrorNotice, failureTitle, type Resource } from "./request";
 import { CatalogPage, RelatedResources } from "./catalog";
 import { TerminalWorkspace, useTerminalSessions, type TerminalManager } from "./terminal";
 import { CellSidebar } from "./cell-sidebar";
@@ -16,7 +16,8 @@ import { RegistryCredentialsPanel, type RegistryCredential } from "./registry-cr
 import { ImagesPage } from "./image-inventory";
 import { NetworkPanel, networkKinds } from "./network";
 import { DaemonHealthPage, DaemonLogsPage } from "./daemon";
-import { CellLifecycleControls, LifecycleNotice, type LifecycleAction, type LifecycleFeedback, type PurgeOptions } from "./lifecycle";
+import { CellLifecycleControls, type LifecycleAction, type LifecycleFeedback, type PurgeOptions } from "./lifecycle";
+import { InventoryIndicator, NotificationProvider, useNotify } from "./notifications";
 import { cellRemovalConfirmed, deleteOperationComplete, purgeOperationComplete, requestedPurgeOptions } from "./lifecycle-policy.js";
 
 const NewCellPage = lazy(async () => ({ default: (await import("./new-cell")).NewCellPage }));
@@ -157,6 +158,11 @@ function CellDetailsScreen({ title, view, scope, revision, inventory, manager, t
   const operation = operations[scopeKey];
   const terminalView = view === "terminal";
   const status = detail.data && <StatusSummary status={detail.data.status} kind="cell" />;
+  // Detail loading and failures live in a fixed-size badge in the title row, so nothing renders between
+  // the row and the terminal and the row's height never changes.
+  const detailState = !scope ? null
+    : detail.error ? detail.data ? { tone: "stale", label: "Stale cell details — refresh failed." } : { tone: "failed", label: `${failureTitle(detail.error, "Cell")}: ${detail.error.message}` }
+      : detail.loading && !detail.data ? { tone: "checking", label: "Loading cell details…" } : null;
 
   useEffect(() => { setTerminalExpanded(false); }, [scopeKey, view]);
 
@@ -209,23 +215,20 @@ function CellDetailsScreen({ title, view, scope, revision, inventory, manager, t
       {/* cellTerminal keeps one action row: title, view switch, terminal tools, then lifecycle actions. */}
       <div ref={terminalBar} className={`cell-page-title-row${terminalView ? " cell-terminal-bar" : ""}${terminalExpanded ? " is-terminal-expanded" : ""}`}>
         <h1>{title}</h1>
+        <span className={`cell-detail-state ${detailState?.tone ?? "is-idle"}`} aria-hidden={!detailState} tabIndex={detailState ? 0 : -1} aria-label={detailState ? `Cell details: ${detailState.label}` : undefined} data-tooltip={detailState?.label}><span className="dot" aria-hidden="true" /></span>
         <a className="icon-button cell-view-switch" href={terminalView ? resourceLink(scope) : workspaceLink(scope)} aria-label={switchLabel} title={terminalView ? "View cell details" : "Open cell terminal"}>
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
             {terminalView ? <><circle cx="12" cy="12" r="9" /><path d="M12 11v5" /><path d="M12 7.5h.01" /></> : <><rect x="3" y="4.5" width="18" height="15" rx="2" /><path d="m7 9.5 3 2.5-3 2.5" /><path d="M12.5 15H17" /></>}
           </svg>
         </a>
         <div className="cell-terminal-tools" ref={setTerminalToolsHost} hidden={!terminalView} />
-        <CellLifecycleControls scope={scope} state={cellState} operation={operation} onAction={onLifecycleAction} showFeedback={false} />
+        <CellLifecycleControls scope={scope} state={cellState} operation={operation} onAction={onLifecycleAction} />
       </div>
-      <LifecycleNotice operation={operation} />
     </div>}
-    {detail.loading && !detail.data && scope && <p role="status">Loading cell details…</p>}
-    {detail.error && <ErrorNotice error={detail.error} kind="Cell" />}
-    {detail.error && detail.data && <p className="stale">Stale resource details — refresh failed.</p>}
     <section className="cell-terminal-view" aria-label="Cell terminal" hidden={!terminalView}>
       <TerminalWorkspace scope={scope} revision={revision} inventory={inventory} manager={manager} theme={theme} visible={terminalView && !!scope} controlsHost={terminalToolsHost} onExpandedChange={setTerminalExpanded} />
     </section>
-    <section className="cell-overview-content" aria-label="Cell details" hidden={terminalView}>{overview}{status}{containerPanel}{scope && !terminalView && <NetworkPanel scope={scope} revision={revision} />}{scope && !terminalView && <CgroupPanel scope={scope} revision={revision} />}</section>
+    <section className="cell-overview-content" aria-label="Cell details" hidden={terminalView}>{detail.error && <ErrorNotice error={detail.error} kind="Cell" />}{detail.error && detail.data && <p className="stale">Stale resource details — refresh failed.</p>}{overview}{status}{containerPanel}{scope && !terminalView && <NetworkPanel scope={scope} revision={revision} />}{scope && !terminalView && <CgroupPanel scope={scope} revision={revision} />}</section>
   </div>;
 }
 
@@ -247,15 +250,15 @@ function ResourcesNavigation({ route }: { route: Route }) {
 function App() {
   const [revision, setRevision] = useState(0);
   const [operations, setOperations] = useState<Record<string, LifecycleFeedback>>({});
-  const [lastOperation, setLastOperation] = useState<{ scope: string[]; operation: LifecycleFeedback } | null>(null);
+  const { notify } = useNotify();
+  // The cell on screen when a lifecycle result arrives; toasts for any other cell name its scope.
+  const screenCell = useRef("");
   const pendingOperations = useRef(new Set<string>());
   const [route, setRoute] = useState(readRoute);
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const nextTheme: Theme = theme === "system" ? "light" : theme === "light" ? "dark" : "system";
   const [menuOpen, setMenuOpen] = useState(false);
   const sidebar = useSidebarLayout();
-  const [creationNotice, setCreationNotice] = useState<{ phase: "pending" | "success" | "error"; message: string }>();
-  const [creationDocument, setCreationDocument] = useState<Doc>();
   useEffect(() => {
     const changed = () => { setRoute(readRoute()); setMenuOpen(false); };
     const keydown = (event: KeyboardEvent) => { if (event.key === "Escape") setMenuOpen(false); };
@@ -271,8 +274,11 @@ function App() {
   const inventory = useInventory(revision);
   const terminals = useTerminalSessions(inventory);
   function recordOperation(scope: string[], operation: LifecycleFeedback) {
-    setOperations(old => ({ ...old, [JSON.stringify(scope)]: operation }));
-    setLastOperation({ scope: [...scope], operation });
+    const key = JSON.stringify(scope);
+    setOperations(old => ({ ...old, [key]: operation }));
+    // Delete and Purge navigate away from the cell, so their results always name it.
+    const named = screenCell.current !== key || operation.action === "delete" || operation.action === "purge";
+    notify({ key: `lifecycle:${key}`, tone: operation.phase, title: named ? scope.join(" / ") : undefined, message: operation.message });
   }
   async function runCellLifecycle(scope: string[], action: LifecycleAction, state?: string, options?: PurgeOptions) {
     const key = JSON.stringify(scope);
@@ -433,7 +439,7 @@ function App() {
   async function handleCellCreated(cell: Doc, start: boolean) {
     const spec = cell.spec as { realmId?: unknown; spaceId?: unknown; stackId?: unknown; containers?: { id?: unknown; attachable?: unknown; root?: unknown }[]; tty?: { default?: unknown } } | undefined;
     if (typeof spec?.realmId !== "string" || typeof spec.spaceId !== "string" || typeof spec.stackId !== "string") {
-      setCreationNotice({ phase: "error", message: "The daemon created a Cell but returned an incomplete scope. Refresh the inventory to locate it." });
+      notify({ key: "create", tone: "error", message: "The daemon created a Cell but returned an incomplete scope. Refresh the inventory to locate it." });
       setRevision(value => value + 1);
       return;
     }
@@ -443,19 +449,20 @@ function App() {
     const selected = preferred ?? attachable[0];
     if (typeof selected?.id === "string") terminals.select(scope, selected.id);
     inventory.upsertCell(cell);
-    setCreationDocument(cell);
     setRevision(value => value + 1);
     window.location.hash = workspaceLink(scope);
-    setCreationNotice({ phase: start ? "pending" : "success", message: start ? `Cell ${scope.join(" / ")} created. Starting it…` : `Cell ${scope.join(" / ")} created and left stopped.` });
+    const key = `create:${JSON.stringify(scope)}`;
+    const link = { href: resourceLink(scope), label: "View cell details" };
+    notify({ key, tone: start ? "pending" : "success", message: start ? `Cell ${scope.join(" / ")} created. Starting it…` : `Cell ${scope.join(" / ")} created and left stopped.`, link });
     if (!start) return;
     try {
       const response = await fetch(`${apiPath(scope)}/start`, { method: "POST", headers: { Accept: "application/json" } });
       let body: { error?: { message?: string } } = {};
       try { body = await response.json(); } catch { /* Use the HTTP status below. */ }
       if (!response.ok) throw new Error(body.error?.message ?? `HTTP ${response.status}`);
-      setCreationNotice({ phase: "success", message: `Cell ${scope.join(" / ")} started.${selected ? " The terminal will attach to its selected workload when ready." : " No attachable workload was defined."}` });
+      notify({ key, tone: "success", message: `Cell ${scope.join(" / ")} started.${selected ? " The terminal will attach to its selected workload when ready." : " No attachable workload was defined."}`, link });
     } catch (error) {
-      setCreationNotice({ phase: "error", message: `Cell ${scope.join(" / ")} was created stopped, but start failed: ${error instanceof Error ? error.message : "The daemon request failed."}` });
+      notify({ key, tone: "error", message: `Cell ${scope.join(" / ")} was created stopped, but start failed: ${error instanceof Error ? error.message : "The daemon request failed."}`, link });
     } finally { setRevision(value => value + 1); }
   }
   const isWorkspace = route.view === "workspace";
@@ -463,6 +470,7 @@ function App() {
   // cellRead flows as an ordinary scrolling page; only cellTerminal pins the shell to the viewport.
   const cellView: CellView = isWorkspace ? "terminal" : "read";
   const cellTerminalActive = !!cellScreenScope && cellView === "terminal";
+  screenCell.current = cellScreenScope ? JSON.stringify(cellScreenScope) : "";
   const depth = titles.findIndex(title => title.toLowerCase() === route.view);
   const catalog = Object.keys(catalogTitles).includes(route.view);
   const images = route.view === "images";
@@ -500,11 +508,12 @@ function App() {
       <header className="toolbar">
         <button className="menu-toggle" aria-label="Toggle sidebar" aria-expanded={menuOpen} aria-controls="cell-sidebar" onClick={() => setMenuOpen(!menuOpen)}>☰</button>
         <span className="toolbar-connectivity" role="status" aria-label={`Daemon: ${daemonStatus}`} title={`Daemon: ${daemonStatus}`}><span className={`dot ${daemonTone}`} aria-hidden="true" /></span>
+        <InventoryIndicator inventory={inventory} />
         <nav className="breadcrumbs" aria-label="Resource scope">{isWorkspace || route.view === "resource" ? route.scope.map((name, i) => <a key={i} aria-label={`${kinds[i]}: ${name}`} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>) : <><a href={homeLink}>Resources</a>{daemonView ? route.view === "daemon" ? <span>Daemon</span> : <><a href={daemonLink()}>Daemon</a><span>Logs</span></> : images ? <><a href={imagesLink()}>Images</a>{route.scope[0] && (route.scope[1] ? <a href={imagesLink(route.scope[0])}>{route.scope[0]}</a> : <span>{route.scope[0]}</span>)}{route.scope[1] && <span>{route.scope[1]}</span>}</> : catalog ? <><a href={`#/${route.view}`}>{catalogTitles[route.view]}</a>{route.scope.slice(0, -1).map((name, i) => <a key={i} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}{route.scope.length > 0 && <span>{route.scope.at(-1)}</span>}</> : heading !== "Resources" && <span>{heading}</span>}</>}</nav>
         <div className="toolbar-actions">
           <a className="header-action new-cell-toolbar-action" href={newCellLink()}>New Cell</a>
           <a className="header-action" href={homeLink} aria-current={!isWorkspace ? "page" : undefined}>Resources</a>
-          <button className="icon-button refresh-button" type="button" aria-label="Refresh" title="Refresh" onClick={() => setRevision(value => value + 1)}>
+          <button className="icon-button refresh-button" type="button" aria-label="Refresh" title={inventory.loading ? "Refreshing…" : "Refresh"} aria-busy={inventory.loading} onClick={() => setRevision(value => value + 1)}>
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 11a8.1 8.1 0 0 0-14.9-4L3 10" /><path d="M3 4v6h6" /><path d="M4 13a8.1 8.1 0 0 0 14.9 4L21 14" /><path d="M21 20v-6h-6" /></svg>
           </button>
           <button className="icon-button" type="button" aria-label={`Appearance: ${theme}; switch to ${nextTheme}`} title={`Appearance: ${theme} (switch to ${nextTheme})`} onClick={() => setTheme(nextTheme)}>
@@ -515,19 +524,8 @@ function App() {
         </div>
       </header>
       <div className={`workspace-content ${isWorkspace ? "cell-workspace-content" : ""}${cellTerminalActive ? " cell-screen-content" : ""}`}>
-        {lastOperation && JSON.stringify(lastOperation.scope) !== JSON.stringify(cellScreenScope) && <section className="cell-global-feedback" aria-label="Cell operation result">
-          <strong>{lastOperation.scope.join(" / ")}</strong>
-          <LifecycleNotice operation={lastOperation.operation} />
-          <button type="button" aria-label="Dismiss cell operation result" disabled={lastOperation.operation.phase === "pending"} onClick={() => setLastOperation(null)}>Dismiss</button>
-        </section>}
         {!isWorkspace && !cellScreenScope && <ResourcesNavigation route={route} />}
         {!cellScreenScope && <div className="page-heading"><h1>{heading}</h1>{headingContext && <p className="page-context mono-id">{headingContext}</p>}</div>}
-        {creationNotice && <div className={`${creationNotice.phase === "error" ? "error" : creationNotice.phase === "pending" ? "creation-progress" : "creation-success"}`} role={creationNotice.phase === "error" ? "alert" : "status"}><span>{creationNotice.message}</span>{creationDocument && creationNotice.phase !== "pending" && <details><summary>View Cell document returned by kukeon</summary><pre tabIndex={0} aria-label="Cell document returned after creation">{JSON.stringify(creationDocument, null, 2)}</pre></details>}<button type="button" className="notice-dismiss" aria-label="Dismiss creation message" onClick={() => { setCreationNotice(undefined); setCreationDocument(undefined); }}>×</button></div>}
-        {/* cellTerminal pins the terminal to the remaining height, so a transient line would shrink and regrow it on every refresh. */}
-        {inventory.loading && !cellTerminalActive && <p className="description" role="status">Refreshing resource inventory…</p>}
-        {inventory.error && <ErrorNotice error={inventory.error} />}
-        {inventory.error && inventory.data && <p className="stale">Stale inventory — refresh failed. Counts and lists may be out of date.</p>}
-        {!!inventory.data?.failures.length && <div className="error" role="alert"><strong>Incomplete inventory</strong><p>Some scopes could not be loaded. Counts and lists exclude unavailable resources.</p><ul>{inventory.data.failures.map(message => <li key={message}>{message}</li>)}</ul></div>}
         <CellDetailsScreen title={heading ?? "Cell"} view={cellView} scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} operations={operations} onLifecycleAction={runCellLifecycle} />
         {isWorkspace ? null : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} inventory={inventory} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} /> : <Dashboard inventory={inventory} />}
         <footer>Daemon inventory · {inventory.data ? <>Last refreshed <time dateTime={inventory.data.updatedAt}>{new Date(inventory.data.updatedAt).toLocaleTimeString()}</time></> : "Not refreshed yet"} · Refresh to retrieve the latest state.</footer>
@@ -538,4 +536,4 @@ function App() {
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing application root");
-createRoot(root).render(<StrictMode><App /></StrictMode>);
+createRoot(root).render(<StrictMode><NotificationProvider><App /></NotificationProvider></StrictMode>);
