@@ -19,6 +19,7 @@ package apply
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/apischeme"
@@ -496,7 +497,21 @@ func reconcileCell(r runner.Runner, desired intmodel.Cell) (ReconcileResult, err
 // which also starts cells), and UpdateCellMetadata persists the runner-set
 // status. Pulled out of ReconcileCell to keep that function under the funlen
 // budget.
+//
+// Before CreateCell it stamps the same managed scope labels
+// controller.CreateCell does, so an apply-born cell is selectable by
+// `-l cell.kukeon.io=<name>` and the UpdateCell (#455) / RecreateCell (#1377)
+// preservation has something to preserve (#1461). The label map is cloned
+// first so the caller's manifest map is not mutated.
 func createAndStartCell(r runner.Runner, desired intmodel.Cell) (intmodel.Cell, error) {
+	desired.Metadata.Labels = maps.Clone(desired.Metadata.Labels)
+	runner.ApplyDefaultCellLabels(
+		&desired,
+		strings.TrimSpace(desired.Spec.RealmName),
+		strings.TrimSpace(desired.Spec.SpaceName),
+		strings.TrimSpace(desired.Spec.StackName),
+		strings.TrimSpace(desired.Metadata.Name),
+	)
 	created, createErr := r.CreateCell(desired)
 	if createErr != nil {
 		return intmodel.Cell{}, fmt.Errorf("failed to create cell: %w", createErr)
