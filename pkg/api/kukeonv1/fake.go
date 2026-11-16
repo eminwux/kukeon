@@ -173,6 +173,10 @@ func (FakeClient) AttachContainer(context.Context, v1beta1.ContainerDoc) (Attach
 	return AttachContainerResult{}, ErrUnexpectedCall
 }
 
+func (FakeClient) ReadDaemonLogs(context.Context, DaemonLogRequest) (DaemonLogResult, error) {
+	return DaemonLogResult{}, ErrUnexpectedCall
+}
+
 func (FakeClient) LogContainer(context.Context, v1beta1.ContainerDoc) (LogContainerResult, error) {
 	return LogContainerResult{}, ErrUnexpectedCall
 }

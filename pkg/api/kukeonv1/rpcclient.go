@@ -907,6 +907,19 @@ func (c *UnixClient) DeleteDocuments(
 	return reply.Result, nil
 }
 
+// ReadDaemonLogs implements Client (issue #1386, step 7).
+func (c *UnixClient) ReadDaemonLogs(ctx context.Context, req DaemonLogRequest) (DaemonLogResult, error) {
+	args := &ReadDaemonLogsArgs{Request: req}
+	reply := &ReadDaemonLogsReply{}
+	if err := c.call(ctx, MethodReadDaemonLogs, args, reply); err != nil {
+		return DaemonLogResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
 // Ping implements Client.
 func (c *UnixClient) Ping(ctx context.Context) error {
 	args := &PingArgs{}

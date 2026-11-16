@@ -157,6 +157,12 @@ type Client interface {
 	// the file directly. Same Attachable gate as AttachContainer: only
 	// containers wrapped by sbsh have a capture file to surface.
 	LogContainer(ctx context.Context, doc v1beta1.ContainerDoc) (LogContainerResult, error)
+	// ReadDaemonLogs returns a bounded chunk of kukeond's own stdout/stderr
+	// stream — the same runtime-shim log file `kuke daemon logs` reads —
+	// so callers without filesystem access to the daemon's storage (the
+	// `kuke serve` web UI) can read and follow it over the socket (issue
+	// #1386, step 7). Read-only; see DaemonLogRequest for the cursor contract.
+	ReadDaemonLogs(ctx context.Context, req DaemonLogRequest) (DaemonLogResult, error)
 	StopCell(ctx context.Context, doc v1beta1.CellDoc) (StopCellResult, error)
 	KillCell(ctx context.Context, doc v1beta1.CellDoc) (KillCellResult, error)
 
@@ -386,6 +392,7 @@ const (
 	MethodStartCell       = ServiceName + ".StartCell"
 	MethodAttachContainer = ServiceName + ".AttachContainer"
 	MethodLogContainer    = ServiceName + ".LogContainer"
+	MethodReadDaemonLogs  = ServiceName + ".ReadDaemonLogs"
 	MethodStopCell        = ServiceName + ".StopCell"
 	MethodKillCell        = ServiceName + ".KillCell"
 

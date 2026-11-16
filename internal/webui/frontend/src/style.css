@@ -431,3 +431,14 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--er
 .terminal-empty { display: grid; flex: 1; place-items: center; margin: 0; padding: 24px; }
 .terminal-workspace.is-empty .terminal-screens { flex: 0 0 0; }
 .creation-form select { width: 100%; padding: 9px 12px; border-radius: 6px; background: var(--code); font-size: 13px; }
+/* Administration → Daemon (issue #1386, steps 6 and 8). */
+.daemon-tabs { display: flex; gap: 2px; margin-bottom: 12px; border-bottom: 1px solid var(--line); }
+.daemon-tabs a { padding: 6px 12px; color: var(--muted); font-size: 12px; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.daemon-tabs a[aria-current="page"] { color: var(--accent); border-bottom-color: var(--accent); }
+.daemon-details { margin-top: 16px; }
+.daemon-version { margin: 4px 0 0; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.log-controls { flex-wrap: wrap; }
+.log-controls button[aria-pressed="true"] { background: var(--selected); color: var(--accent); }
+.log-meta { padding: 0 16px; overflow-wrap: anywhere; }
+.log-omitted { padding: 0 16px; font-style: italic; }
+.log-output { white-space: pre; tab-size: 4; line-height: 1.55; }

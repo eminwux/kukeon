@@ -773,6 +773,67 @@ type RefreshAllResult struct {
 
 // ---- Ping ----
 
+// Bounds for ReadDaemonLogs (issue #1386, step 7). A request with
+// MaxBytes <= 0 reads DaemonLogDefaultMaxBytes; larger values are clamped to
+// DaemonLogMaxBytes so one reply never carries an unbounded payload.
+const (
+	DaemonLogDefaultMaxBytes = 64 << 10
+	DaemonLogMaxBytes        = 1 << 20
+)
+
+// DaemonLogRequest selects a byte range of kukeond's log stream.
+//
+// A negative Offset reads the newest MaxBytes ending at the current end of
+// the stream (tail). A non-negative Offset reads forward from that byte —
+// callers pass the previous result's Next to follow the stream. An Offset
+// beyond the current end means the source was truncated or replaced; the
+// daemon then answers with a tail read and sets Reset.
+type DaemonLogRequest struct {
+	Offset   int64
+	MaxBytes int
+}
+
+// DaemonLogResult is one bounded, ordered chunk of kukeond's log stream.
+//
+// Data holds only complete, newline-terminated lines in the order the
+// source received them, verbatim: no timestamps, levels or other fields are
+// added or parsed. A trailing line that is still being written is held back
+// until its newline arrives; Next then points at its first byte. A single
+// line longer than the read bound is returned in bound-sized pieces rather
+// than stalling the cursor.
+type DaemonLogResult struct {
+	// Source is the daemon-side path of the log file read (informational).
+	Source string
+	// Data is the chunk's text; invalid UTF-8 is replaced with U+FFFD.
+	Data string
+	// Start is the byte offset of Data's first byte in the source.
+	Start int64
+	// Next is the offset to pass as DaemonLogRequest.Offset to continue.
+	Next int64
+	// Size is the source's size in bytes when it was read.
+	Size int64
+	// Truncated reports that earlier bytes exist before Start that this
+	// chunk omits (a tail read of a stream larger than the bound).
+	Truncated bool
+	// More reports that complete data beyond Next was already available
+	// when the chunk was read (a forward read that hit the bound).
+	More bool
+	// Reset reports that the requested Offset was beyond the source's end,
+	// so the cursor no longer applied and a tail read was returned instead.
+	Reset bool
+}
+
+// ReadDaemonLogsArgs is the wire request for ReadDaemonLogs.
+type ReadDaemonLogsArgs struct {
+	Request DaemonLogRequest
+}
+
+// ReadDaemonLogsReply is the wire reply for ReadDaemonLogs.
+type ReadDaemonLogsReply struct {
+	Result DaemonLogResult
+	Err    *APIError
+}
+
 // PingArgs is the empty request payload for the Ping RPC.
 type PingArgs struct{}
 

@@ -6,7 +6,7 @@ import { CatalogPage, RelatedResources } from "./catalog";
 import { TerminalWorkspace, useTerminalSessions, type TerminalManager } from "./terminal";
 import { CellSidebar } from "./cell-sidebar";
 import { useInventory, type Inventory, type InventoryResource, type Doc, type RuntimeStatus } from "./inventory";
-import { apiPath, catalogTitles, imagesLink, kinds, titles, readRoute, resourceLink, listLink, newCellLink, workspaceLink, type Route } from "./routes";
+import { apiPath, catalogTitles, daemonLink, imagesLink, kinds, titles, readRoute, resourceLink, listLink, newCellLink, workspaceLink, type Route } from "./routes";
 import { StateBadge } from "./status";
 import { DocumentRowLink } from "./icons";
 import { CgroupPanel } from "./cgroup";
@@ -14,6 +14,7 @@ import { RealmImagesPanel } from "./images";
 import { RegistryCredentialsPanel, type RegistryCredential } from "./registry-credentials";
 import { ImagesPage } from "./image-inventory";
 import { NetworkPanel, networkKinds } from "./network";
+import { DaemonHealthPage, DaemonLogsPage, type DaemonHealth } from "./daemon";
 import { CellLifecycleControls, LifecycleNotice, type LifecycleAction, type LifecycleFeedback, type PurgeOptions } from "./lifecycle";
 import { cellRemovalConfirmed, deleteOperationComplete, purgeOperationComplete, requestedPurgeOptions } from "./lifecycle-policy.js";
 
@@ -239,6 +240,7 @@ function ResourcesNavigation({ route }: { route: Route }) {
     {titles.map((title, depth) => <a key={title} href={listLink(depth)} aria-current={activeDepth === depth ? "page" : undefined}>{title}</a>)}
     {Object.entries(catalogTitles).map(([kind, title]) => <a key={kind} href={`#/${kind}`} aria-current={route.view === kind ? "page" : undefined}>{title}</a>)}
     <a href={imagesLink()} aria-current={route.view === "images" ? "page" : undefined}>Images</a>
+    <a href={daemonLink()} aria-current={route.view === "daemon" || route.view === "daemon-logs" ? "page" : undefined}>Daemon</a>
   </nav>;
 }
 function WorkspaceLanding({ inventory }: { inventory: InventoryResource }) {
@@ -272,6 +274,7 @@ function App() {
     try { localStorage.setItem("kukeon-theme", theme); } catch { /* Preferences are optional. */ }
   }, [theme]);
   const connection = useResource<{ endpoint: string; version: string }>("/api/connection", revision);
+  const health = useResource<DaemonHealth>("/api/daemon/health", revision);
   const inventory = useInventory(revision);
   const terminals = useTerminalSessions(inventory);
   function recordOperation(scope: string[], operation: LifecycleFeedback) {
@@ -470,20 +473,22 @@ function App() {
   const depth = titles.findIndex(title => title.toLowerCase() === route.view);
   const catalog = Object.keys(catalogTitles).includes(route.view);
   const images = route.view === "images";
-  const heading = isWorkspace ? route.scope.at(-1) ?? "Workspace" : route.view === "new-cell" ? "New Cell" : images ? route.scope[1] ?? "Images" : catalog ? route.scope.at(-1) ?? catalogTitles[route.view] : route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : "Resources";
+  const daemonView = route.view === "daemon" || route.view === "daemon-logs";
+  const heading = route.view === "daemon" ? "Daemon" : route.view === "daemon-logs" ? "Daemon logs" : isWorkspace ? route.scope.at(-1) ?? "Workspace" : route.view === "new-cell" ? "New Cell" : images ? route.scope[1] ?? "Images" : catalog ? route.scope.at(-1) ?? catalogTitles[route.view] : route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : "Resources";
   // Only a scope path or realm qualifies the title; generic subtitles were dropped.
   const headingContext = isWorkspace ? route.scope.join(" / ") : images ? route.scope[1] ? route.scope[0] : "" : route.view === "resource" || (catalog && route.scope.length > 0) ? route.scope.join(" / ") : "";
   const daemonStatus = inventory.daemon.error?.code === "permission_denied" ? "Permission denied" : inventory.daemon.error ? "Unavailable" : inventory.daemon.loading ? "Checking…" : "Connected";
   return <div className={`app-shell${cellTerminalActive ? " cell-screen-active" : ""}`}>
     <aside className={`sidebar ${menuOpen ? "is-open" : ""}`} id="cell-sidebar" aria-label="Cell sidebar">
       <button className="sidebar-close" aria-label="Close sidebar" onClick={() => setMenuOpen(false)}>×</button>
-      <a className="brand" href={workspaceLink()}><span className="mark" aria-hidden="true">K</span><span className="brand-title">Kukeon<small>LOCAL WORKSPACE</small></span>{connection.data?.version && <span className="brand-version">{connection.data.version.startsWith("v") ? connection.data.version : `v${connection.data.version}`}</span>}</a>
+      <a className="brand" href={workspaceLink()}><span className="mark" aria-hidden="true">K</span><span className="brand-title">Kukeon<small>LOCAL WORKSPACE</small></span>{connection.data?.version && <span className="brand-version" title="kuke serve version">{connection.data.version.startsWith("v") ? connection.data.version : `v${connection.data.version}`}</span>}</a>
       <nav className="area-nav" aria-label="Areas"><a href={workspaceLink()} aria-current={isWorkspace ? "page" : undefined}>Workspace</a></nav>
       <a className="new-cell-action sidebar-new-cell" href={newCellLink()}>+ New Cell</a>
       <CellSidebar inventory={inventory} selectedScope={cellScreenScope ?? []} terminalStates={terminals.cellStates} />
       <section className="connection" aria-label="Daemon connection">
         <p className="status" role="status"><span className={`dot ${inventory.daemon.error ? "failed" : inventory.daemon.loading ? "checking" : ""}`} aria-hidden="true" />{daemonStatus}</p>
         <code>{connection.data?.endpoint ?? (connection.loading ? "Loading socket…" : "Socket unknown")}</code>
+        <p className="daemon-version">{health.data?.status === "reachable" ? <>kukeond {health.data.daemonVersion ? (health.data.daemonVersion.startsWith("v") ? health.data.daemonVersion : `v${health.data.daemonVersion}`) : "version not reported"}</> : "kukeond version unknown"} · <a href={daemonLink()}>Daemon details</a></p>
         {connection.error && <ErrorNotice error={connection.error} />}
       </section>
     </aside>
@@ -492,7 +497,7 @@ function App() {
         <button className="menu-toggle" aria-label="Toggle sidebar" aria-expanded={menuOpen} aria-controls="cell-sidebar" onClick={() => setMenuOpen(!menuOpen)}>☰</button>
         <nav className="toolbar-areas" aria-label="Areas"><a href={workspaceLink()} aria-current={isWorkspace ? "page" : undefined}>Workspace</a></nav>
         <span className="toolbar-connectivity" role="status" aria-label={`Daemon: ${daemonStatus}`} title={`Daemon: ${daemonStatus}`}><span className={`dot ${inventory.daemon.error ? "failed" : inventory.daemon.loading ? "checking" : ""}`} aria-hidden="true" /></span>
-        <nav className="breadcrumbs" aria-label="Resource scope"><a href={isWorkspace ? workspaceLink() : "#/resources"}>{isWorkspace ? "Workspace" : "Resources"}</a>{isWorkspace ? route.scope.length > 0 && <span>{route.scope.join(" / ")}</span> : images ? <><a href={imagesLink()}>Images</a>{route.scope[0] && (route.scope[1] ? <a href={imagesLink(route.scope[0])}>{route.scope[0]}</a> : <span>{route.scope[0]}</span>)}{route.scope[1] && <span>{route.scope[1]}</span>}</> : catalog ? <><a href={`#/${route.view}`}>{catalogTitles[route.view]}</a>{route.scope.slice(0, -1).map((name, i) => <a key={i} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}{route.scope.length > 0 && <span>{route.scope.at(-1)}</span>}</> : route.view === "resource" ? route.scope.map((name, i) => <a key={i} aria-label={`${kinds[i]}: ${name}`} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>) : heading !== "Resources" && <span>{heading}</span>}</nav>
+        <nav className="breadcrumbs" aria-label="Resource scope"><a href={isWorkspace ? workspaceLink() : "#/resources"}>{isWorkspace ? "Workspace" : "Resources"}</a>{daemonView ? route.view === "daemon" ? <span>Daemon</span> : <><a href={daemonLink()}>Daemon</a><span>Logs</span></> : isWorkspace ? route.scope.length > 0 && <span>{route.scope.join(" / ")}</span> : images ? <><a href={imagesLink()}>Images</a>{route.scope[0] && (route.scope[1] ? <a href={imagesLink(route.scope[0])}>{route.scope[0]}</a> : <span>{route.scope[0]}</span>)}{route.scope[1] && <span>{route.scope[1]}</span>}</> : catalog ? <><a href={`#/${route.view}`}>{catalogTitles[route.view]}</a>{route.scope.slice(0, -1).map((name, i) => <a key={i} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}{route.scope.length > 0 && <span>{route.scope.at(-1)}</span>}</> : route.view === "resource" ? route.scope.map((name, i) => <a key={i} aria-label={`${kinds[i]}: ${name}`} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>) : heading !== "Resources" && <span>{heading}</span>}</nav>
         <div className="toolbar-actions">
           <a className="header-action new-cell-toolbar-action" href={newCellLink()}>New Cell</a>
           <a className="header-action" href="#/resources" aria-current={!isWorkspace ? "page" : undefined}>Resources</a>
@@ -520,7 +525,7 @@ function App() {
         {inventory.error && inventory.data && <p className="stale">Stale inventory — refresh failed. Counts and lists may be out of date.</p>}
         {!!inventory.data?.failures.length && <div className="error" role="alert"><strong>Incomplete inventory</strong><p>Some scopes could not be loaded. Counts and lists exclude unavailable resources.</p><ul>{inventory.data.failures.map(message => <li key={message}>{message}</li>)}</ul></div>}
         <CellDetailsScreen title={heading ?? "Cell"} view={cellView} scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} operations={operations} onLifecycleAction={runCellLifecycle} />
-        {isWorkspace ? route.scope.length === 4 ? null : <WorkspaceLanding inventory={inventory} /> : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} inventory={inventory} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} /> : <Dashboard inventory={inventory} />}
+        {isWorkspace ? route.scope.length === 4 ? null : <WorkspaceLanding inventory={inventory} /> : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} inventory={inventory} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} /> : <Dashboard inventory={inventory} />}
         <footer>Daemon inventory · {inventory.data ? <>Last refreshed <time dateTime={inventory.data.updatedAt}>{new Date(inventory.data.updatedAt).toLocaleTimeString()}</time></> : "Not refreshed yet"} · Refresh to retrieve the latest state.</footer>
       </div>
     </main>
