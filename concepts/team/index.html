@@ -3804,6 +3804,30 @@ See <a href="../blueprint-contract/">Blueprint contract</a>.</p>
 <p>A role that selects only some of the host mounts gets a profile named after
 them. The security posture is fixed in the blueprint and is never a Config
 toggle.</p>
+<p>The daemon socket and the <code>kuke</code> binary are mounted through directories, so a
+daemon restart or a rebuild reaches running cells without recreating them:</p>
+<table>
+<thead>
+<tr>
+<th>Selector</th>
+<th>Mounted</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>kukeond-socket</code></td>
+<td><code>/run/kukeon/kukeond/</code>, where kukeond hard-links its socket on every start; the cell's <code>KUKEON_HOST</code> points at <code>/run/kukeon/kukeond/kukeond.sock</code></td>
+</tr>
+<tr>
+<td><code>kuke-binary</code></td>
+<td><code>/opt/kukeon/bin/client/</code> at <code>/.kukeon/client/</code>, where <code>kuke init</code> stages its own binary, and a fixed shim at <code>/usr/local/bin/kuke</code> that runs it; re-run <code>kuke init</code> after a rebuild</td>
+</tr>
+<tr>
+<td><code>kukeon-install</code></td>
+<td><code>/opt/kukeon</code>, read-only</td>
+</tr>
+</tbody>
+</table>
 <p>Each blueprint is assembled from components: the <strong>harness</strong> (its parameters,
 env, secret slots and start modes, copied from <code>harness.yaml</code>), and the optional
 <strong>connector</strong> and <strong>forge</strong> components of the library kuke ships under
@@ -4008,7 +4032,7 @@ when the team is applied or a cell is launched.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 16, 2026 11:01:05 UTC">November 16, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 16, 2026 19:39:14 UTC">November 16, 2026</span>
   </span>
 
     
