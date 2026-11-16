@@ -68,6 +68,14 @@ const firstGeneration int64 = 1
 // status-only writer racing a delete cannot recreate the resource. A file
 // removed after the read is already caught by the CAS (prior != nil, current
 // == nil) and surfaces as errdefs.ErrStaleResource.
+//
+// A non-nil checkPrior runs against the decoded prior document before the
+// write. A status-only writer that read the document earlier uses it to
+// extend the CAS back to its own read: the CAS above only spans this
+// function's read, and a status-only write does not bump the generation, so
+// without it a concurrent status write landing between the caller's read and
+// this one (a provision's Ready persist) would be overwritten by the
+// caller's stale snapshot.
 func writeDocWithGeneration[D any](
 	ctx context.Context,
 	logger *slog.Logger,
@@ -77,6 +85,7 @@ func writeDocWithGeneration[D any](
 	setGeneration func(*D, int64),
 	specOf func(D) any,
 	missingErr error,
+	checkPrior func(D) error,
 ) error {
 	prior, readErr := metadata.ReadRaw(ctx, logger, file)
 	if errors.Is(readErr, errdefs.ErrMissingMetadataFile) {
@@ -96,6 +105,12 @@ func writeDocWithGeneration[D any](
 	var priorDoc D
 	if err := json.Unmarshal(prior, &priorDoc); err != nil {
 		return fmt.Errorf("decode prior metadata %s: %w", file, err)
+	}
+
+	if checkPrior != nil {
+		if err := checkPrior(priorDoc); err != nil {
+			return err
+		}
 	}
 
 	onDiskGeneration := getGeneration(priorDoc)
@@ -154,6 +169,20 @@ func jsonEqual(a, b any) (bool, error) {
 		return false, err
 	}
 	return bytes.Equal(ab, bb), nil
+}
+
+// expectUnchanged returns errdefs.ErrStaleResource when the on-disk document
+// differs from the one a status-only writer read. Both sides come from the
+// same on-disk decode path, so an unchanged document compares equal.
+func expectUnchanged(onDisk, observed any) error {
+	equal, err := jsonEqual(onDisk, observed)
+	if err != nil {
+		return fmt.Errorf("compare prior document: %w", err)
+	}
+	if !equal {
+		return fmt.Errorf("document changed since it was read: %w", errdefs.ErrStaleResource)
+	}
+	return nil
 }
 
 // nowUTC returns the current wall clock in UTC. Wrapped through the Exec
@@ -215,17 +244,30 @@ func stampCellLifecycle(cell *intmodel.Cell, now time.Time) {
 }
 
 func (r *Exec) UpdateRealmMetadata(realm intmodel.Realm) error {
-	return r.writeRealmMetadata(realm, nil)
+	return r.writeRealmMetadata(realm, nil, nil)
 }
 
 // updateRealmStatusMetadata is the must-exist UpdateRealmMetadata used by
 // status-only writers: a realm whose metadata is gone returns
-// errdefs.ErrRealmNotFound instead of being recreated.
-func (r *Exec) updateRealmStatusMetadata(realm intmodel.Realm) error {
-	return r.writeRealmMetadata(realm, errdefs.ErrRealmNotFound)
+// errdefs.ErrRealmNotFound instead of being recreated, and one whose on-disk
+// document no longer matches observed — the copy the writer read before
+// modifying realm — returns errdefs.ErrStaleResource instead of clobbering the
+// intervening write.
+func (r *Exec) updateRealmStatusMetadata(realm, observed intmodel.Realm) error {
+	return r.writeRealmMetadata(realm, errdefs.ErrRealmNotFound, func(prior v1beta1.RealmDoc) error {
+		priorInternal, err := apischeme.ConvertRealmDocToInternal(prior)
+		if err != nil {
+			return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+		}
+		return expectUnchanged(priorInternal, observed)
+	})
 }
 
-func (r *Exec) writeRealmMetadata(realm intmodel.Realm, missingErr error) error {
+func (r *Exec) writeRealmMetadata(
+	realm intmodel.Realm,
+	missingErr error,
+	checkPrior func(v1beta1.RealmDoc) error,
+) error {
 	stampRealmLifecycle(&realm, r.nowUTC())
 
 	// Convert to external model for filesystem boundary
@@ -240,6 +282,7 @@ func (r *Exec) writeRealmMetadata(realm intmodel.Realm, missingErr error) error 
 		func(d *v1beta1.RealmDoc, g int64) { d.Metadata.Generation = g },
 		func(d v1beta1.RealmDoc) any { return d.Spec },
 		missingErr,
+		checkPrior,
 	)
 	if missingErr != nil && errors.Is(err, missingErr) {
 		return err
@@ -252,17 +295,30 @@ func (r *Exec) writeRealmMetadata(realm intmodel.Realm, missingErr error) error 
 }
 
 func (r *Exec) UpdateSpaceMetadata(space intmodel.Space) error {
-	return r.writeSpaceMetadata(space, nil)
+	return r.writeSpaceMetadata(space, nil, nil)
 }
 
 // updateSpaceStatusMetadata is the must-exist UpdateSpaceMetadata used by
 // status-only writers: a space whose metadata is gone returns
-// errdefs.ErrSpaceNotFound instead of being recreated.
-func (r *Exec) updateSpaceStatusMetadata(space intmodel.Space) error {
-	return r.writeSpaceMetadata(space, errdefs.ErrSpaceNotFound)
+// errdefs.ErrSpaceNotFound instead of being recreated, and one whose on-disk
+// document no longer matches observed — the copy the writer read before
+// modifying space — returns errdefs.ErrStaleResource instead of clobbering the
+// intervening write.
+func (r *Exec) updateSpaceStatusMetadata(space, observed intmodel.Space) error {
+	return r.writeSpaceMetadata(space, errdefs.ErrSpaceNotFound, func(prior v1beta1.SpaceDoc) error {
+		priorInternal, err := apischeme.ConvertSpaceDocToInternal(prior)
+		if err != nil {
+			return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+		}
+		return expectUnchanged(priorInternal, observed)
+	})
 }
 
-func (r *Exec) writeSpaceMetadata(space intmodel.Space, missingErr error) error {
+func (r *Exec) writeSpaceMetadata(
+	space intmodel.Space,
+	missingErr error,
+	checkPrior func(v1beta1.SpaceDoc) error,
+) error {
 	stampSpaceLifecycle(&space, r.nowUTC())
 
 	// Convert to external model for filesystem boundary
@@ -281,6 +337,7 @@ func (r *Exec) writeSpaceMetadata(space intmodel.Space, missingErr error) error 
 		func(d *v1beta1.SpaceDoc, g int64) { d.Metadata.Generation = g },
 		func(d v1beta1.SpaceDoc) any { return d.Spec },
 		missingErr,
+		checkPrior,
 	)
 	if missingErr != nil && errors.Is(err, missingErr) {
 		return err
@@ -293,17 +350,30 @@ func (r *Exec) writeSpaceMetadata(space intmodel.Space, missingErr error) error 
 }
 
 func (r *Exec) UpdateStackMetadata(stack intmodel.Stack) error {
-	return r.writeStackMetadata(stack, nil)
+	return r.writeStackMetadata(stack, nil, nil)
 }
 
 // updateStackStatusMetadata is the must-exist UpdateStackMetadata used by
 // status-only writers: a stack whose metadata is gone returns
-// errdefs.ErrStackNotFound instead of being recreated.
-func (r *Exec) updateStackStatusMetadata(stack intmodel.Stack) error {
-	return r.writeStackMetadata(stack, errdefs.ErrStackNotFound)
+// errdefs.ErrStackNotFound instead of being recreated, and one whose on-disk
+// document no longer matches observed — the copy the writer read before
+// modifying stack — returns errdefs.ErrStaleResource instead of clobbering the
+// intervening write.
+func (r *Exec) updateStackStatusMetadata(stack, observed intmodel.Stack) error {
+	return r.writeStackMetadata(stack, errdefs.ErrStackNotFound, func(prior v1beta1.StackDoc) error {
+		priorInternal, err := apischeme.ConvertStackDocToInternal(prior)
+		if err != nil {
+			return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+		}
+		return expectUnchanged(priorInternal, observed)
+	})
 }
 
-func (r *Exec) writeStackMetadata(stack intmodel.Stack, missingErr error) error {
+func (r *Exec) writeStackMetadata(
+	stack intmodel.Stack,
+	missingErr error,
+	checkPrior func(v1beta1.StackDoc) error,
+) error {
 	stampStackLifecycle(&stack, r.nowUTC())
 
 	// Convert to external model for filesystem boundary
@@ -323,6 +393,7 @@ func (r *Exec) writeStackMetadata(stack intmodel.Stack, missingErr error) error 
 		func(d *v1beta1.StackDoc, g int64) { d.Metadata.Generation = g },
 		func(d v1beta1.StackDoc) any { return d.Spec },
 		missingErr,
+		checkPrior,
 	)
 	if missingErr != nil && errors.Is(err, missingErr) {
 		return err
@@ -354,6 +425,7 @@ func (r *Exec) UpdateCellMetadata(cell intmodel.Cell) error {
 		func(d v1beta1.CellDoc) int64 { return d.Metadata.Generation },
 		func(d *v1beta1.CellDoc, g int64) { d.Metadata.Generation = g },
 		func(d v1beta1.CellDoc) any { return d.Spec },
+		nil,
 		nil,
 	)
 	if err != nil {

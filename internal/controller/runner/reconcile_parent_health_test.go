@@ -480,6 +480,135 @@ func TestReconcileHealth_DeleteBetweenProbeAndPersistIsNotResurrected(t *testing
 	}
 }
 
+// TestReconcileHealth_StatusWriteBetweenReadAndPersistIsNotClobbered pins the
+// provision race: provisioning persists Creating, then creates the cgroup (and
+// realm namespace) the probe reports present, then persists Ready. A tick that
+// read the Creating document and persisted its snapshot after that Ready write
+// would roll the resource back to Creating with an empty cgroupPath. A
+// status-only write does not bump the generation, so only the tick's
+// read-matches-disk precondition catches it; the tick must skip instead.
+func TestReconcileHealth_StatusWriteBetweenReadAndPersistIsNotClobbered(t *testing.T) {
+	const cgroupPath = "/kukeon/provisioned"
+	controllers := []string{"cpu", "memory"}
+	cases := []struct {
+		name      string
+		seed      func(r *Exec) error
+		provision func(r *Exec) error
+		run       func(r *Exec) (bool, error)
+		check     func(t *testing.T, r *Exec)
+	}{
+		{
+			name: "realm",
+			seed: func(r *Exec) error {
+				realm := healthRealm()
+				realm.Status.State = intmodel.RealmStateCreating
+				return r.UpdateRealmMetadata(realm)
+			},
+			provision: func(r *Exec) error {
+				realm := healthRealm()
+				realm.Status = intmodel.RealmStatus{
+					State:                    intmodel.RealmStateReady,
+					CgroupPath:               cgroupPath,
+					SubtreeControllers:       controllers,
+					CgroupReady:              true,
+					ContainerdNamespaceReady: true,
+				}
+				return r.UpdateRealmMetadata(realm)
+			},
+			run: func(r *Exec) (bool, error) { return r.ReconcileRealmHealth(healthRealm()) },
+			check: func(t *testing.T, r *Exec) {
+				t.Helper()
+				got := getHealthRealm(t, r).Status
+				if got.State != intmodel.RealmStateReady || got.CgroupPath != cgroupPath ||
+					!reflect.DeepEqual(got.SubtreeControllers, controllers) {
+					t.Errorf("realm status = %+v, want the provision's Ready write preserved", got)
+				}
+			},
+		},
+		{
+			name: "space",
+			seed: func(r *Exec) error {
+				space := healthSpace()
+				space.Status.State = intmodel.SpaceStateCreating
+				return r.UpdateSpaceMetadata(space)
+			},
+			provision: func(r *Exec) error {
+				space := healthSpace()
+				space.Status = intmodel.SpaceStatus{
+					State:              intmodel.SpaceStateReady,
+					CgroupPath:         cgroupPath,
+					SubtreeControllers: controllers,
+					CgroupReady:        true,
+				}
+				return r.UpdateSpaceMetadata(space)
+			},
+			run: func(r *Exec) (bool, error) { return r.ReconcileSpaceHealth(healthSpace()) },
+			check: func(t *testing.T, r *Exec) {
+				t.Helper()
+				got := getHealthSpace(t, r).Status
+				if got.State != intmodel.SpaceStateReady || got.CgroupPath != cgroupPath ||
+					!reflect.DeepEqual(got.SubtreeControllers, controllers) {
+					t.Errorf("space status = %+v, want the provision's Ready write preserved", got)
+				}
+			},
+		},
+		{
+			name: "stack",
+			seed: func(r *Exec) error {
+				stack := healthStack()
+				stack.Status.State = intmodel.StackStatePending
+				return r.UpdateStackMetadata(stack)
+			},
+			provision: func(r *Exec) error {
+				stack := healthStack()
+				stack.Status = intmodel.StackStatus{
+					State:              intmodel.StackStateReady,
+					CgroupPath:         cgroupPath,
+					SubtreeControllers: controllers,
+					CgroupReady:        true,
+				}
+				return r.UpdateStackMetadata(stack)
+			},
+			run: func(r *Exec) (bool, error) { return r.ReconcileStackHealth(healthStack()) },
+			check: func(t *testing.T, r *Exec) {
+				t.Helper()
+				got := getHealthStack(t, r).Status
+				if got.State != intmodel.StackStateReady || got.CgroupPath != cgroupPath ||
+					!reflect.DeepEqual(got.SubtreeControllers, controllers) {
+					t.Errorf("stack status = %+v, want the provision's Ready write preserved", got)
+				}
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var r *Exec
+			fake := &deleteCellFakeClient{
+				// The probe runs after the tick's re-read: the provision's
+				// Ready write lands in the read→persist window.
+				loadCgroupFn: func(string, string) (*cgroup2.Manager, error) {
+					if err := tc.provision(r); err != nil {
+						t.Fatalf("provision Ready write: %v", err)
+					}
+					return &cgroup2.Manager{}, nil
+				},
+				existsNamespaceFn: func(string) (bool, error) { return true, nil },
+			}
+			r = newHealthTestExec(t, fake)
+			seedHealthDocs(t, r, false)
+			if err := tc.seed(r); err != nil {
+				t.Fatalf("seed Creating document: %v", err)
+			}
+
+			updated, err := tc.run(r)
+			if err != nil || updated {
+				t.Errorf("Reconcile%sHealth = (%v, %v), want (false, nil)", tc.name, updated, err)
+			}
+			tc.check(t, r)
+		})
+	}
+}
+
 // TestReconcileRealmHealth_MissingSocketKeepsNamespaceObservation pins that a
 // missing containerd socket (containerd restarting) is a probe error on the
 // tick path, not a clean "absent": containerdNamespaceReady must not flap.

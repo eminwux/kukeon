@@ -37,13 +37,14 @@ import (
 //
 // A probe that errors is not an observation: the field keeps its last
 // persisted value and nothing is written for it, so a transient failure
-// neither marks a resource healthy nor flaps it unhealthy. Persists ride the
-// same stale-generation guard as the refresh path, so a concurrent spec
-// writer wins and the next tick re-observes. Each method re-reads the
-// document before probing: the listing the caller walked may be a full pass
-// old, and persisting a stale copy could clobber a fresher status write or
-// rewrite the metadata of a resource deleted since. A vanished resource
-// surfaces as the level's NotFound error for the caller to skip.
+// neither marks a resource healthy nor flaps it unhealthy. Each method
+// re-reads the document before probing — the listing the caller walked may be
+// a full pass old — and persists only if the on-disk document is still the
+// one it read: any intervening write (a concurrent spec writer, or a
+// provision's Ready status write, which does not bump the generation) wins
+// and the next tick re-observes. The write is also must-exist, so a resource
+// deleted since the read is never recreated; a vanished resource surfaces as
+// the level's NotFound error for the caller to skip.
 
 // ReconcileRealmHealth re-probes the realm's cgroup and containerd namespace
 // and persists cgroupReady / containerdNamespaceReady when either changed.
@@ -53,6 +54,7 @@ func (r *Exec) ReconcileRealmHealth(realm intmodel.Realm) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	observed := realm
 	changed := false
 
 	// The cgroup path derives from the name alone; probing a metadata-only
@@ -84,7 +86,8 @@ func (r *Exec) ReconcileRealmHealth(realm intmodel.Realm) (bool, error) {
 	if !changed {
 		return false, nil
 	}
-	persisted, updateErr := r.persistHealthGuarded("realm", realm.Metadata.Name, r.updateRealmStatusMetadata(realm))
+	persisted, updateErr := r.persistHealthGuarded("realm", realm.Metadata.Name,
+		r.updateRealmStatusMetadata(realm, observed))
 	if errors.Is(updateErr, errdefs.ErrRealmNotFound) {
 		return false, updateErr
 	}
@@ -115,8 +118,10 @@ func (r *Exec) ReconcileSpaceHealth(space intmodel.Space) (bool, error) {
 	if cgroupExists == current.Status.CgroupReady {
 		return false, nil
 	}
+	observed := current
 	current.Status.CgroupReady = cgroupExists
-	persisted, updateErr := r.persistHealthGuarded("space", current.Metadata.Name, r.updateSpaceStatusMetadata(current))
+	persisted, updateErr := r.persistHealthGuarded("space", current.Metadata.Name,
+		r.updateSpaceStatusMetadata(current, observed))
 	if errors.Is(updateErr, errdefs.ErrSpaceNotFound) {
 		return false, updateErr
 	}
@@ -142,8 +147,10 @@ func (r *Exec) ReconcileStackHealth(stack intmodel.Stack) (bool, error) {
 	if cgroupExists == stack.Status.CgroupReady {
 		return false, nil
 	}
+	observed := stack
 	stack.Status.CgroupReady = cgroupExists
-	persisted, updateErr := r.persistHealthGuarded("stack", stack.Metadata.Name, r.updateStackStatusMetadata(stack))
+	persisted, updateErr := r.persistHealthGuarded("stack", stack.Metadata.Name,
+		r.updateStackStatusMetadata(stack, observed))
 	if errors.Is(updateErr, errdefs.ErrStackNotFound) {
 		return false, updateErr
 	}
@@ -154,9 +161,9 @@ func (r *Exec) ReconcileStackHealth(stack intmodel.Stack) (bool, error) {
 }
 
 // persistHealthGuarded classifies the result of a must-exist health write:
-// a CAS rejection — a concurrent spec writer, or a delete that removed the
-// document after the writer read it — is a benign skip the next tick
-// re-observes, mirroring persistRealmStatusGuarded.
+// a stale rejection — any write since the tick's read, or a delete that
+// removed the document after the writer read it — is a benign skip the next
+// tick re-observes, mirroring persistRealmStatusGuarded.
 func (r *Exec) persistHealthGuarded(kind, name string, writeErr error) (bool, error) {
 	if errors.Is(writeErr, errdefs.ErrStaleResource) {
 		r.logger.DebugContext(r.ctx, "reconcile: skipping stale "+kind+" health persist",
