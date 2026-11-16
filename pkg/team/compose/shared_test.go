@@ -163,24 +163,47 @@ func TestSharedBlueprintRejectsCollidingRoleSecrets(t *testing.T) {
 	}
 }
 
+// hostMount is one rendered host bind: source and read-only flag by target.
+type hostMount struct {
+	source   string
+	readOnly bool
+}
+
+// The daemon socket and kuke binary mounts bind directories, never the files
+// the host replaces on a daemon restart or rebuild (issue #1483).
+//
+//nolint:gochecknoglobals // read-only test table.
+var (
+	socketMounts = map[string]hostMount{"/run/kukeon/kukeond": {"/run/kukeon/kukeond", true}}
+	binaryMounts = map[string]hostMount{
+		"/.kukeon/client":     {"/opt/kukeon/bin/client", true},
+		"/usr/local/bin/kuke": {"/opt/kukeon/bin/kuke-shim", true},
+	}
+	installMounts = map[string]hostMount{"/opt/kukeon": {"/opt/kukeon", true}}
+)
+
+func mergeMounts(sets ...map[string]hostMount) map[string]hostMount {
+	out := map[string]hostMount{}
+	for _, set := range sets {
+		maps.Copy(out, set)
+	}
+	return out
+}
+
 // Host mounts are part of the security posture, so they select a blueprint
 // variant instead of being a config toggle.
 func TestHostMountProfiles(t *testing.T) {
+	all := mergeMounts(socketMounts, binaryMounts, installMounts)
 	for _, tc := range []struct {
 		name, mounts, want string
 		root               bool
-		targets            map[string]bool // target → readOnly
+		targets            map[string]hostMount
 	}{
-		{
-			"all", "[kukeond-socket, kuke-binary, kukeon-install]", "codex-host", false,
-			map[string]bool{"/run/kukeon/kukeond.sock": false, "/usr/local/bin/kuke": true, "/opt/kukeon": true},
-		},
-		{
-			"all-root", "[kukeon-install, ssh, kuke-binary, kukeond-socket]", "codex-root-host", true,
-			map[string]bool{"/run/kukeon/kukeond.sock": false, "/usr/local/bin/kuke": true, "/opt/kukeon": true},
-		},
-		{"partial", "[kuke-binary]", "codex-kuke-binary", false, map[string]bool{"/usr/local/bin/kuke": true}},
-		{"ssh-only", "[ssh]", "codex", false, map[string]bool{}},
+		{"all", "[kukeond-socket, kuke-binary, kukeon-install]", "codex-host", false, all},
+		{"all-root", "[kukeon-install, ssh, kuke-binary, kukeond-socket]", "codex-root-host", true, all},
+		{"partial", "[kuke-binary]", "codex-kuke-binary", false, binaryMounts},
+		{"socket", "[kukeond-socket]", "codex-kukeond-socket", false, socketMounts},
+		{"ssh-only", "[ssh]", "codex", false, map[string]hostMount{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, opts := fixture(t)
@@ -198,18 +221,21 @@ func TestHostMountProfiles(t *testing.T) {
 			if pair.Blueprint.Metadata.Name != tc.want || pair.Blueprint.Spec.Prefix != tc.want {
 				t.Fatalf("blueprint = %q, want %q", pair.Blueprint.Metadata.Name, tc.want)
 			}
-			got := map[string]bool{}
-			for _, volume := range work(t, pair, interactive).Volumes {
+			container := work(t, pair, interactive)
+			got := map[string]hostMount{}
+			for _, volume := range container.Volumes {
 				if volume.Kind == api.VolumeKindVolume || volume.Target == "/opt/cni" {
 					continue
 				}
-				if volume.Source != volume.Target {
-					t.Fatalf("host mount %q bound at a different path %q", volume.Source, volume.Target)
-				}
-				got[volume.Target] = volume.ReadOnly
+				got[volume.Target] = hostMount{volume.Source, volume.ReadOnly}
 			}
 			if !reflect.DeepEqual(got, tc.targets) {
 				t.Fatalf("host mounts = %v, want %v", got, tc.targets)
+			}
+			_, socket := tc.targets["/run/kukeon/kukeond"]
+			host := slices.Contains(container.Env, "KUKEON_HOST=unix:///run/kukeon/kukeond/kukeond.sock")
+			if host != socket {
+				t.Fatalf("KUKEON_HOST set = %v, want %v: %v", host, socket, container.Env)
 			}
 			raw, err := result.MarshalYAML()
 			if err != nil {

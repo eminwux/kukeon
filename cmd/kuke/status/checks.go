@@ -297,6 +297,7 @@ func checkStateRunDir(rc *runCtx) Result {
 		"kukeond.pid":                    true,
 		consts.KukeonSocketSymlinkSubdir: true, // "s"
 		consts.KukeonContainerTTYDir:     true, // "tty"
+		consts.KukeondSocketShareSubdir:  true, // "kukeond"
 	}
 
 	var orphans []string

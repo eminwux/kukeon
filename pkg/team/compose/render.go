@@ -361,6 +361,10 @@ func blueprintInputs(name string, g *group, lib []component.Component, opts Opti
 		"ROLE_SOURCE_DIR=${ROLE_SOURCE_DIR}", "ROLE_PATH=${ROLE_PATH}", "INITIAL_PATH=${INITIAL_PATH}",
 		"HARNESS_SETTINGS=${HARNESS_SETTINGS}", "AGENT_NAME=${AGENT_NAME}", "AGENTS_REPO=${AGENTS_REPO}",
 	}
+	if slices.Contains(prof.Mounts, "kukeond-socket") {
+		// The socket is reached through its directory mount (issue #1483).
+		environment = append(environment, "KUKEON_HOST=unix:///run/kukeon/kukeond/kukeond.sock")
+	}
 	if legacy {
 		// A harness without modes still branches on $PROMPT in its one onInit.
 		parameters = append(parameters, api.CellBlueprintParameter{

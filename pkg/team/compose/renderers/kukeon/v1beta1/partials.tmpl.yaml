@@ -1,17 +1,29 @@
 {{/* Startup is opaque shell source; YAML encoding preserves ordered blocks. */}}
 {{ define "onInit" }}{{ yamlIndent 12 . }}{{ end }}
-{{- define "mount_source" -}}
-{{- if eq . "kukeond-socket" -}}/run/kukeon/kukeond.sock
-{{- else if eq . "kuke-binary" -}}/usr/local/bin/kuke
-{{- else if eq . "kukeon-install" -}}/opt/kukeon
+{{- /*
+  Host-mount volumes of one selector. The daemon socket and the kuke binary
+  are replaced on the host (daemon restart, rebuild), so they are mounted
+  through directories: a single-file bind pins the replaced inode (#1483).
+  kukeond-socket: the daemon hard-links its socket into /run/kukeon/kukeond/
+  on every start; KUKEON_HOST points the in-cell client at it.
+  kuke-binary: `kuke init` stages the client under /opt/kukeon/bin/client/;
+  /usr/local/bin/kuke is a constant, never-replaced shim that execs it.
+*/ -}}
+{{- define "host_mounts" -}}
+{{- if eq . "kukeond-socket" }}
+          - source: /run/kukeon/kukeond
+            target: /run/kukeon/kukeond
+            readOnly: true
+{{- else if eq . "kuke-binary" }}
+          - source: /opt/kukeon/bin/client
+            target: /.kukeon/client
+            readOnly: true
+          - source: /opt/kukeon/bin/kuke-shim
+            target: /usr/local/bin/kuke
+            readOnly: true
+{{- else if eq . "kukeon-install" }}
+          - source: /opt/kukeon
+            target: /opt/kukeon
+            readOnly: true
 {{- end -}}
-{{- end -}}
-{{- define "mount_target" -}}
-{{- if eq . "kukeond-socket" -}}/run/kukeon/kukeond.sock
-{{- else if eq . "kuke-binary" -}}/usr/local/bin/kuke
-{{- else if eq . "kukeon-install" -}}/opt/kukeon
-{{- end -}}
-{{- end -}}
-{{- define "mount_readonly" -}}
-{{- if eq . "kukeond-socket" -}}false{{- else -}}true{{- end -}}
 {{- end -}}
