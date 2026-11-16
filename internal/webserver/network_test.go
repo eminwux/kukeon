@@ -59,7 +59,7 @@ func (c *networkClient) GetNetworkDetail(
 func serveNetwork(t *testing.T, c *networkClient, url string) *httptest.ResponseRecorder {
 	t.Helper()
 	handler, err := newHandler(
-		"localhost:5129",
+		"http://localhost:5129",
 		"unix:///test",
 		func(context.Context) (kukeonv1.Client, error) { return c, nil },
 	)

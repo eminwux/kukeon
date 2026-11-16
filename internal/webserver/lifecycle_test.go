@@ -189,7 +189,7 @@ func (c *lifecycleClient) PurgeCell(_ context.Context, doc v1beta1.CellDoc, forc
 
 func lifecycleHandler(t *testing.T, dial Dial) http.Handler {
 	t.Helper()
-	handler, err := newHandler("localhost:5129", "unix:///test", dial)
+	handler, err := newHandler("http://localhost:5129", "unix:///test", dial)
 	if err != nil {
 		t.Fatal(err)
 	}

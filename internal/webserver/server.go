@@ -26,7 +26,6 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/eminwux/kukeon/cmd/config"
@@ -49,35 +48,48 @@ const (
 // Dial creates a request-owned client, closed after the RPC completes.
 type Dial func(context.Context) (kukeonv1.Client, error)
 
-// Run binds only loopback and prints the URL after a successful bind.
-func Run(ctx context.Context, host string, port int, endpoint string, dial Dial, out io.Writer) error {
+// Run binds the --listen address, applies the --url access policy, and
+// prints the bound URL only after a successful bind.
+func Run(
+	ctx context.Context, listen, browserURL, endpoint string, dial Dial, out, errOut io.Writer,
+) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	address, err := listenAddress(host, port)
+	target, err := parseListen(listen)
 	if err != nil {
 		return err
 	}
-	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", address)
+	policy, err := parseAccessPolicy(browserURL)
 	if err != nil {
-		return fmt.Errorf("listen on %s (choose another --port if in use): %w", address, err)
+		return err
+	}
+	handler, err := newHandlerWithPolicy(policy, endpoint, dial)
+	if err != nil {
+		return err
+	}
+	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", target.bind)
+	if err != nil {
+		return fmt.Errorf("listen on %s (choose another --listen port if in use): %w", target.bind, err)
 	}
 	defer func() { _ = listener.Close() }()
 	_, actualPort, err := net.SplitHostPort(listener.Addr().String())
 	if err != nil {
 		return fmt.Errorf("read listening address: %w", err)
 	}
-	authority := net.JoinHostPort(host, actualPort)
-	handler, err := newHandler(authority, endpoint, dial)
-	if err != nil {
-		return err
-	}
 	server := &http.Server{
 		Handler: handler, ReadHeaderTimeout: headerTimeout, IdleTimeout: time.Minute,
 		WriteTimeout: writeTimeout,
 		BaseContext:  func(net.Listener) context.Context { return ctx },
 	}
-	if _, err = fmt.Fprintf(out, "Listening on http://%s\n", authority); err != nil {
+	if _, err = fmt.Fprintf(out, "Listening on http://%s\n", net.JoinHostPort(target.host, actualPort)); err != nil {
 		return err
+	}
+	if _, err = fmt.Fprintf(out, "Accepted browser origin: %s\n", policy); err != nil {
+		return err
+	}
+	if !target.loopback {
+		_, _ = fmt.Fprintln(errOut, "WARNING: the web UI has no authentication. Anyone who can reach "+
+			"this address can open cell terminals and run daemon actions.")
 	}
 	done := make(chan struct{})
 	go func() {
@@ -98,22 +110,17 @@ func Run(ctx context.Context, host string, port int, endpoint string, dial Dial,
 	return nil
 }
 
-func listenAddress(host string, port int) (string, error) {
-	if port < 0 || port > 65535 {
-		return "", fmt.Errorf("%w: --port must be between 0 and 65535", errdefs.ErrConfig)
+// newHandler builds the handler for a raw --url value ("" accepts any
+// Host and Origin).
+func newHandler(browserURL, endpoint string, dial Dial) (http.Handler, error) {
+	policy, err := parseAccessPolicy(browserURL)
+	if err != nil {
+		return nil, err
 	}
-	ip := net.ParseIP(host)
-	if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
-		return "", fmt.Errorf("%w: --listen must be localhost or a loopback IP address", errdefs.ErrConfig)
-	}
-	// Pin localhost to loopback, never rely on DNS for the binding boundary.
-	if host == "localhost" {
-		host = "127.0.0.1"
-	}
-	return net.JoinHostPort(host, strconv.Itoa(port)), nil
+	return newHandlerWithPolicy(policy, endpoint, dial)
 }
 
-func newHandler(authority, endpoint string, dial Dial) (http.Handler, error) {
+func newHandlerWithPolicy(policy accessPolicy, endpoint string, dial Dial) (http.Handler, error) {
 	assets, err := webui.Assets()
 	if err != nil {
 		return nil, err
@@ -131,8 +138,7 @@ func newHandler(authority, endpoint string, dial Dial) (http.Handler, error) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().
 			Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'")
-		origins := r.Header.Values("Origin")
-		if r.Host != authority || len(origins) > 1 || (len(origins) == 1 && origins[0] != "http://"+authority) {
+		if !policy.allows(r) {
 			http.Error(w, "unexpected Host or Origin", http.StatusForbidden)
 			return
 		}

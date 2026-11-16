@@ -38,29 +38,15 @@ import (
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
-func TestListenAddress(t *testing.T) {
-	for _, host := range []string{"localhost", "127.0.0.1", "127.0.0.2", "::1"} {
-		if _, err := listenAddress(host, 0); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, host := range []string{"", "0.0.0.0", "::", "example.com", "localhost.evil", "192.168.0.1"} {
-		if _, err := listenAddress(host, 5129); err == nil {
-			t.Errorf("accepted %q", host)
-		}
-	}
-	for _, port := range []int{-1, 65536} {
-		if _, err := listenAddress("localhost", port); err == nil {
-			t.Errorf("accepted %d", port)
-		}
-	}
-}
-
 func TestAccessPolicy(t *testing.T) {
-	handler, err := newHandler("localhost:5129", "unix:///missing", func(context.Context) (kukeonv1.Client, error) {
-		t.Fatal("access rejection must precede RPC")
-		return nil, io.EOF
-	})
+	handler, err := newHandler(
+		"http://localhost:5129",
+		"unix:///missing",
+		func(context.Context) (kukeonv1.Client, error) {
+			t.Fatal("access rejection must precede RPC")
+			return nil, io.EOF
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +86,7 @@ func TestAccessPolicy(t *testing.T) {
 
 func TestAccessPolicyAllowsSameOriginAPI(t *testing.T) {
 	client := &realmClient{empty: true}
-	handler, err := newHandler("localhost:5129", "unix:///test", func(context.Context) (kukeonv1.Client, error) {
+	handler, err := newHandler("http://localhost:5129", "unix:///test", func(context.Context) (kukeonv1.Client, error) {
 		return client, nil
 	})
 	if err != nil {
@@ -144,7 +130,7 @@ func TestConnectionAPI(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			handler, err := newHandler(
-				"localhost:5129",
+				"http://localhost:5129",
 				"unix:///test",
 				func(context.Context) (kukeonv1.Client, error) {
 					if tc.dialErr != nil {
@@ -228,7 +214,7 @@ func TestRealmAPI(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			client := &realmClient{doc: doc, err: tc.err, empty: tc.empty, missing: tc.missing}
 			handler, err := newHandler(
-				"localhost:5129",
+				"http://localhost:5129",
 				"unix:///test",
 				func(context.Context) (kukeonv1.Client, error) { return client, nil },
 			)
@@ -285,7 +271,7 @@ func (*RealmRPC) ListRealms(_ *kukeonv1.ListRealmsArgs, reply *kukeonv1.ListReal
 func TestDaemonRecovery(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "daemon.sock")
 	handler, err := newHandler(
-		"localhost:5129",
+		"http://localhost:5129",
 		"unix://"+path,
 		func(ctx context.Context) (kukeonv1.Client, error) { return kukeonv1.Dial(ctx, "unix://"+path) },
 	)
@@ -337,10 +323,10 @@ func (w urlWriter) Write(p []byte) (int, error) { w <- string(p); return len(p),
 func TestRunLifecycle(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	output := make(urlWriter, 1)
+	output := make(urlWriter, 4)
 	done := make(chan error, 1)
 	go func() {
-		done <- Run(ctx, "127.0.0.1", 0, "unix:///missing", func(context.Context) (kukeonv1.Client, error) { return nil, io.EOF }, output)
+		done <- Run(ctx, "127.0.0.1:0", "", "unix:///missing", func(context.Context) (kukeonv1.Client, error) { return nil, io.EOF }, output, io.Discard)
 	}()
 	var url string
 	select {
@@ -362,11 +348,7 @@ func TestRunLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var p int
-	if _, scanErr := fmt.Sscan(port, &p); scanErr != nil {
-		t.Fatal(scanErr)
-	}
-	if runErr := Run(ctx, "127.0.0.1", p, "", nil, io.Discard); runErr == nil {
+	if runErr := Run(ctx, net.JoinHostPort("127.0.0.1", port), "", "", nil, io.Discard, io.Discard); runErr == nil {
 		t.Fatal("accepted occupied port")
 	}
 	cancel()
@@ -402,7 +384,7 @@ func (c *blockingClient) Close() error { close(c.closed); return nil }
 func TestRequestCancellationClosesClient(t *testing.T) {
 	client := &blockingClient{started: make(chan struct{}), closed: make(chan struct{})}
 	handler, err := newHandler(
-		"localhost:5129",
+		"http://localhost:5129",
 		"unix:///test",
 		func(context.Context) (kukeonv1.Client, error) { return client, nil },
 	)

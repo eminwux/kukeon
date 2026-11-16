@@ -126,10 +126,6 @@ func TestAttachBridge(t *testing.T) {
 	defer server.Close()
 	path := "/api/realms/r/spaces/s/stacks/t/cells/c/containers/work/attach"
 	url := "ws" + strings.TrimPrefix(server.URL, "http") + path
-	_, response, err := websocket.DefaultDialer.Dial(url, nil)
-	if err == nil || response.StatusCode != http.StatusForbidden {
-		t.Fatal("missing origin accepted")
-	}
 	ws, _, err := websocket.DefaultDialer.Dial(url, http.Header{"Origin": []string{server.URL}})
 	if err != nil {
 		t.Fatal(err)

@@ -100,7 +100,7 @@ func (c *configFormClient) CreateConfig(
 func configFormHandler(t *testing.T, c *configFormClient) http.Handler {
 	t.Helper()
 	handler, err := newHandler(
-		"localhost:5129",
+		"http://localhost:5129",
 		"test",
 		func(context.Context) (kukeonv1.Client, error) { return c, nil },
 	)
@@ -351,9 +351,10 @@ func TestConfigFromBlueprintRejectsUnsafeCoordinates(t *testing.T) {
 	}
 }
 
-// TestConfigFromBlueprintRequiresSameOriginJSON locks the mutation guard on
-// both actions, preview included, and the strict one-document body.
-func TestConfigFromBlueprintRequiresSameOriginJSON(t *testing.T) {
+// TestConfigFromBlueprintRequiresJSON locks the mutation guard on both
+// actions, preview included, and the strict one-document body. A missing
+// Origin is a same-origin request under the shared access policy.
+func TestConfigFromBlueprintRequiresJSON(t *testing.T) {
 	data, err := json.Marshal(formRequest())
 	if err != nil {
 		t.Fatal(err)
@@ -362,7 +363,6 @@ func TestConfigFromBlueprintRequiresSameOriginJSON(t *testing.T) {
 	for _, tc := range []struct {
 		name, origin, contentType, body string
 	}{
-		{"missing origin", "", "application/json", body},
 		{"foreign origin", "http://evil.example", "application/json", body},
 		{"form content type", "http://localhost:5129", "application/x-www-form-urlencoded", body},
 		{"missing content type", "http://localhost:5129", "", body},

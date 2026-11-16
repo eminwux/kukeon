@@ -57,7 +57,7 @@ func (c *daemonClient) ReadDaemonLogs(
 
 func serveDaemon(t *testing.T, dial Dial, url string) *httptest.ResponseRecorder {
 	t.Helper()
-	handler, err := newHandler("localhost:5129", "unix:///run/kukeon/kukeond.sock", dial)
+	handler, err := newHandler("http://localhost:5129", "unix:///run/kukeon/kukeond.sock", dial)
 	if err != nil {
 		t.Fatal(err)
 	}

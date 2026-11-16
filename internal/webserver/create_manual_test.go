@@ -221,7 +221,7 @@ func TestManualCellConflictUsesConflictStatus(t *testing.T) {
 func testCreateHandler(t *testing.T, client *creationClient) http.Handler {
 	t.Helper()
 	handler, err := newHandler(
-		"localhost:5129",
+		"http://localhost:5129",
 		"test",
 		func(context.Context) (kukeonv1.Client, error) { return client, nil },
 	)
