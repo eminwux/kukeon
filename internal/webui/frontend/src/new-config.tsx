@@ -3,6 +3,7 @@ import type { InventoryResource } from "./inventory";
 import { ErrorNotice, useResource } from "./request";
 import { newCellLink } from "./routes";
 import { MergedValues } from "./merged-values";
+import { catalogAPI } from "./catalog-url.mjs";
 import { blueprintForm, buildSpec, emptyAnswers, formSections, imageChoices, imageStatus, missingAnswers, previewMode, requiredCapabilities, secretChoices } from "./config-form.mjs";
 import type { Answers, BlueprintForm, CredentialAnswer, DefaultGitAnswer, Identity, InventoryImage, Parameter, RenderedValue, RepoAnswer, RepoGitAnswer, RepoSlot, SecretChoice, SecretRef, SecretSlot, SigningAnswer } from "./config-form.mjs";
 
@@ -18,11 +19,6 @@ function scopedName(metadata: ScopeMetadata): string[] {
   return [metadata.realm, metadata.space, metadata.stack, metadata.name].filter((value): value is string => !!value);
 }
 function catalogLink(kind: string, scope: string[]): string { return `#/${kind}/` + scope.map(encodeURIComponent).join("/"); }
-function catalogAPI(kind: string, scope: string[]): string {
-  const params = new URLSearchParams();
-  ["realm", "space", "stack"].forEach((key, i) => { if (i < scope.length - 1) params.set(key, scope[i]); });
-  return `/api/catalog/${kind}/${encodeURIComponent(scope.at(-1) ?? "")}?${params}`;
-}
 function fieldId(...parts: string[]): string { return "config-" + parts.join("-").replace(/[^a-zA-Z0-9_-]/g, "-"); }
 function choiceKey(ref: Partial<SecretRef> | undefined): string {
   return ref?.name ? JSON.stringify([ref.realm ?? "", ref.space ?? "", ref.stack ?? "", ref.cell ?? "", ref.name]) : "";

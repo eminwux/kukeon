@@ -4,6 +4,7 @@ import { useResource } from "./request";
 import { cellAdvanced, containerFields } from "./creation-schema.mjs";
 import type { Field } from "./creation-schema.mjs";
 import { MergedValues, type RenderedValue } from "./merged-values";
+import { catalogAPI, referenceScope } from "./catalog-url.mjs";
 
 type ScopeMetadata = { name: string; realm?: string; space?: string; stack?: string };
 type CatalogDoc = { metadata: ScopeMetadata; spec?: Record<string, unknown>; kind?: string };
@@ -17,17 +18,9 @@ function scopedName(metadata: ScopeMetadata): string[] {
 }
 function catalogLink(kind: string, scope: string[], document = false): string { return `#/${kind}/` + scope.map(encodeURIComponent).join("/") + (document ? "?document=1" : ""); }
 function scopeLabel(scope: string[]): string { return scope.join(" / "); }
-function configAPI(scope: string[]): string {
-  const params = new URLSearchParams();
-  ["realm", "space", "stack"].forEach((key, i) => { if (scope[i]) params.set(key, scope[i]); });
-  return `/api/catalog/configs/${encodeURIComponent(scope.at(-1) ?? "")}?${params}`;
-}
 function blueprintAPI(reference: FormValue): string | null {
   if (typeof reference.name !== "string" || typeof reference.realm !== "string") return null;
-  const scope = [reference.realm, reference.space, reference.stack, reference.name].filter((value): value is string => typeof value === "string" && !!value);
-  const params = new URLSearchParams();
-  ["realm", "space", "stack"].forEach((key, i) => { if (scope[i]) params.set(key, scope[i]); });
-  return `/api/catalog/blueprints/${encodeURIComponent(scope.at(-1) ?? "")}?${params}`;
+  return catalogAPI("blueprints", referenceScope(reference));
 }
 function setAt(value: FormValue, key: string, next: unknown): FormValue { return { ...value, [key]: next }; }
 function emptyObject(fields: Field[]): FormValue {
@@ -89,12 +82,12 @@ function ConfigCreation({ revision, inventory, configScope, onCreated }: { revis
   const configRows = (configs.data ?? []).map(doc => ({ doc, scope: scopedName(doc.metadata) }));
   const filtered = configRows.filter(({ scope }) => scopeLabel(scope).toLowerCase().includes(query.toLowerCase()));
   const config = configRows.find(row => JSON.stringify(row.scope) === selected);
-  const detail = useResource<CatalogDoc>(config ? configAPI(config.scope) : null, revision);
+  const detail = useResource<CatalogDoc>(config ? catalogAPI("configs", config.scope) : null, revision);
   const blueprintRef = detail.data?.spec?.blueprint as FormValue | undefined;
   const blueprintValid = !!blueprintRef && typeof blueprintRef.name === "string" && !!blueprintRef.name && typeof blueprintRef.realm === "string" && !!blueprintRef.realm && !(blueprintRef.stack && !blueprintRef.space);
   const blueprintPath = blueprintValid && blueprintRef ? blueprintAPI(blueprintRef) : null;
   const blueprint = useResource<CatalogDoc>(blueprintPath, revision);
-  const blueprintScope = blueprintRef ? [blueprintRef.realm, blueprintRef.space, blueprintRef.stack, blueprintRef.name].filter((value): value is string => typeof value === "string" && !!value) : [];
+  const blueprintScope = referenceScope(blueprintRef);
   const [name, setName] = useState("");
   const [env, setEnv] = useState("");
   const [ignoreDiskPressure, setIgnoreDiskPressure] = useState(false);
