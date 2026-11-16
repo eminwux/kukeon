@@ -292,12 +292,28 @@ test("terminal error offers a new attachment and stopped cells release sessions"
   await expect.poll(() => closed).toBeGreaterThan(closedBefore);
 });
 
-test("Workspace lands first and Resources retains resource summaries and navigation", async ({ page }) => {
+test("Resources is home and retains resource summaries and navigation", async ({ page }) => {
   await mock(page);
   await page.goto(server.url);
-  await expect(page.locator(".page-heading h1")).toHaveText("Workspace");
-  await expect(page.getByRole("region", { name: "Workspace welcome" })).toContainText("Choose a cell");
-  await page.getByRole("link", { name: "Resources", exact: true }).click();
+  await expect(page.locator(".page-heading h1")).toHaveText("Resources");
+  await expect(page).toHaveTitle("kukeon");
+  await expect(page.locator('link[rel="icon"][type="image/svg+xml"]')).toHaveAttribute("href", /^\/assets\/.+\.svg$/);
+  const brand = page.getByRole("complementary", { name: "Cell sidebar" }).getByRole("link", { name: "kukeon", exact: true });
+  await expect(brand).toHaveAttribute("href", "#/resources");
+  await expect(brand.locator(".mark svg")).toHaveCount(1);
+  await expect(page.getByText("LOCAL WORKSPACE")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Workspace", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Workspace welcome" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "+ New Cell" })).toHaveCount(0);
+  expect(await page.evaluate(() => document.body.innerText)).not.toMatch(/Kukeon|Workspace/);
+  for (const hash of ["#/", "#/workspace", "#/workspace/dev", "#/%E0%A4%A"]) {
+    await page.goto(`${server.url}${hash}`);
+    await expect(page.locator(".page-heading h1"), hash).toHaveText("Resources");
+    await expect(page.locator(".summary-card").filter({ hasText: "Cells" }).locator("strong")).toHaveText("2");
+  }
+  await page.goto(`${server.url}#/cells`);
+  await brand.click();
+  await expect(page).toHaveURL(/#\/resources$/);
   await expect(page.locator(".page-heading h1")).toHaveText("Resources");
   for (const type of ["Realms", "Spaces", "Stacks", "Cells"]) {
     await expect(page.locator(".summary-card").filter({ hasText: type }).locator("strong")).toHaveText("2");
@@ -397,7 +413,8 @@ test("cell sidebar uses full scope for duplicate names and switching reuses inve
   await expect(page.getByRole("heading", { name: "Runtime status" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Containers" })).toBeVisible();
   await expect(page.locator("#cell-terminal")).toHaveCount(1);
-  await expect(page.getByRole("link", { name: "+ New Cell" })).toHaveAttribute("href", "#/new-cell");
+  await expect(page.getByRole("link", { name: "+ New Cell" })).toHaveCount(0);
+  await expect(page.locator(".toolbar").getByRole("link", { name: "New Cell", exact: true })).toHaveAttribute("href", "#/new-cell");
   await cells.getByRole("link", { name: "Open prod / shared / services / api" }).click();
   await expect(page).toHaveURL(/#\/workspace\/prod\/shared\/services\/api$/);
   await expect(cells.getByRole("link", { name: "Open prod / shared / services / api" })).toHaveAttribute("aria-current", "page");
@@ -526,13 +543,14 @@ test("initial inventory failure is distinct from an empty inventory", async ({ p
   await expect(page.getByLabel("Daemon connection").getByRole("status")).toHaveText("Unavailable");
 });
 
-test("empty Workspace offers existing config creation without inventing cells", async ({ page }) => {
+test("empty inventory keeps the toolbar New Cell entry point without inventing cells", async ({ page }) => {
   await mockCatalog(page);
   await page.unroute("**/api/realms**");
   await page.route("**/api/realms**", route => route.fulfill({ json: [] }));
   await page.goto(server.url);
   await expect(page.getByRole("region", { name: "All cells" })).toContainText("No cells found");
-  await page.getByRole("region", { name: "Workspace welcome" }).getByRole("link", { name: /New Cell/ }).click();
+  await expect(page.locator(".page-heading h1")).toHaveText("Resources");
+  await page.locator(".toolbar").getByRole("link", { name: "New Cell", exact: true }).click();
   await expect(page).toHaveURL(/#\/new-cell$/);
   await expect(page.locator(".page-heading h1")).toHaveText("New Cell");
 });
@@ -668,11 +686,16 @@ test("theme icon cycles through system, light, and dark preferences", async ({ p
   await expect.poll(scheme).toBe("light");
 });
 
-test("mobile cell navigation closes after selection and Workspace fits the screen", async ({ page }) => {
+test("mobile cell navigation closes after selection and Resources fits the screen", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
+  // A collapsed desktop preference must not leak into the mobile drawer.
+  await page.addInitScript(() => localStorage.setItem("kukeon-sidebar-collapsed", "true"));
   await mock(page);
   await page.goto(server.url);
-  await expect(page.locator(".page-heading h1")).toHaveText("Workspace");
+  await expect(page.locator(".page-heading h1")).toHaveText("Resources");
+  await expect(page.locator(".toolbar").getByRole("link", { name: "New Cell", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Expand sidebar" })).toHaveCount(0);
+  await expect(page.getByRole("separator", { name: "Resize sidebar" })).toBeHidden();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
   await page.getByRole("button", { name: "Toggle sidebar" }).click();
   await page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link", { name: "Open dev / shared / services / api" }).click();
@@ -795,6 +818,19 @@ test("config references navigate across realms and missing targets report errors
   await expect(page.getByRole("heading", { name: "Resource overview" })).toBeVisible();
   await page.getByRole("link", { name: "View document", exact: true }).click();
   await expect(page.getByLabel("Complete blueprints JSON")).toContainText('"realm": "library"');
+});
+
+test("config lineage lists Cells with an Open terminal action and no Workspace copy", async ({ page }) => {
+  await mockCatalog(page);
+  await page.route("**/api/realms/prod/spaces/shared/stacks/services/cells", route => {
+    const cell = doc(["prod", "shared", "services", "api"]);
+    cell.spec.provenance = { bindingKind: "config", bindingRef: { name: "shared-name", realm: "prod", space: "shared", stack: "services" } };
+    return route.fulfill({ json: [cell] });
+  });
+  await page.goto(`${server.url}#/configs/prod/shared/services/shared-name`);
+  const lineage = page.locator(".related-resources").filter({ has: page.getByRole("heading", { name: "Cells using this Config" }) });
+  await expect(lineage.getByRole("link", { name: "Open terminal", exact: true })).toHaveAttribute("href", "#/workspace/prod/shared/services/api");
+  expect(await page.evaluate(() => document.body.innerText)).not.toMatch(/Kukeon|Workspace/);
 });
 
 test("explicit secret and volume references show usage and errors without ownership assumptions", async ({ page }) => {
@@ -970,7 +1006,7 @@ test("confirmed deletion closes only that cell terminal and removes only that ce
   await expect(dialog.getByText("dev / shared / services / api", { exact: true })).toBeVisible();
   await dialog.getByLabel("I understand Delete removes this cell but does not perform Purge cleanup.").check();
   await dialog.getByRole("button", { name: "Confirm Delete" }).click();
-  await expect(page).toHaveURL(/#\/workspace$/);
+  await expect(page).toHaveURL(/#\/resources$/);
   await expect.poll(() => openSockets.size).toBe(1);
   expect([...openSockets].every(path => path.includes("/realms/prod/"))).toBeTruthy();
   const cells = page.getByRole("navigation", { name: "Cell navigation" });
@@ -1413,7 +1449,7 @@ test("Administration Daemon shows connectivity, daemon version, socket and check
   await mock(page);
   await mockDaemon(page, { health: () => { checks++; return { json: healthBody({ daemonVersion: "v1.2.4" }) }; } });
   await page.goto(`${server.url}#/resources`);
-  await expect(page.getByLabel("Daemon connection")).toContainText("kukeond v1.2.4");
+  await expect(page.getByLabel("Daemon connection").getByRole("link", { name: "Daemon details" })).toHaveAttribute("href", "#/daemon");
   await nav(page).getByRole("link", { name: "Daemon" }).click();
   await expect(page).toHaveURL(/#\/daemon$/);
   await expect(page.locator(".page-heading h1")).toHaveText("Daemon");
@@ -1453,7 +1489,7 @@ test("Daemon health against the real server reports an unavailable socket", asyn
   const panel = page.getByRole("region", { name: "Daemon connectivity" });
   await expect(panel.locator(".state-badge")).toHaveText("Unavailable");
   await expect(panel).toContainText("missing.sock");
-  await expect(page.getByLabel("Daemon connection")).toContainText("kukeond version unknown");
+  await expect(page.getByLabel("Daemon connection").getByRole("definition")).toHaveText([/./, "unknown"]);
 });
 
 test("Daemon logs read the latest bounded output, follow and pause explicitly, and copy", async ({ page, context }) => {
@@ -1600,4 +1636,100 @@ test("an empty daemon log is distinct from a failed read", async ({ page }) => {
   await expect(logs.getByRole("heading", { name: "No log output yet" })).toBeVisible();
   await expect(logs.getByRole("alert")).toHaveCount(0);
   await expect(logs.getByRole("button", { name: "Copy" })).toBeDisabled();
+});
+
+test("sidebar collapses to a persisted icon rail with accessible cell dots", async ({ page }) => {
+  await mock(page);
+  await page.goto(server.url);
+  const sidebar = page.getByRole("complementary", { name: "Cell sidebar" });
+  await expect(sidebar.getByRole("navigation", { name: "Cell navigation" })).toBeVisible();
+  await sidebar.getByRole("button", { name: "Collapse sidebar" }).click();
+  await expect(sidebar.getByRole("navigation", { name: "Cell navigation" })).toBeHidden();
+  const rail = sidebar.getByRole("navigation", { name: "Cell shortcuts" });
+  const dot = rail.getByRole("link", { name: "Open dev / shared / services / api (Ready)" });
+  await expect(dot).toHaveAttribute("title", "Open dev / shared / services / api (Ready)");
+  await expect(rail.getByRole("link", { name: "Open prod / shared / services / api (Running)" })).toBeVisible();
+  expect((await sidebar.boundingBox()).width).toBeLessThan(80);
+  await expect(sidebar.getByRole("separator", { name: "Resize sidebar" })).toHaveCount(0);
+  await expect(sidebar.getByRole("link", { name: "kukeon home" })).toHaveAttribute("href", "#/resources");
+
+  await page.reload();
+  await expect(sidebar.getByRole("button", { name: "Expand sidebar" })).toBeVisible();
+  await expect(sidebar.getByRole("navigation", { name: "Cell navigation" })).toBeHidden();
+  await dot.click();
+  await expect(page).toHaveURL(/#\/workspace\/dev\/shared\/services\/api$/);
+  await expect(dot).toHaveAttribute("aria-current", "page");
+
+  await sidebar.getByRole("button", { name: "Expand sidebar" }).click();
+  await expect(sidebar.getByRole("navigation", { name: "Cell navigation" })).toBeVisible();
+  await page.reload();
+  await expect(sidebar.getByRole("button", { name: "Collapse sidebar" })).toBeVisible();
+  await expect(rail).toHaveCount(0);
+});
+
+test("sidebar width is pointer and keyboard resizable within bounds and persists", async ({ page }) => {
+  await mock(page);
+  await page.goto(server.url);
+  const sidebar = page.getByRole("complementary", { name: "Cell sidebar" });
+  const handle = page.getByRole("separator", { name: "Resize sidebar" });
+  await expect(handle).toHaveAttribute("aria-valuenow", "264");
+  await expect(handle).toHaveAttribute("aria-valuemin", "208");
+  await expect(handle).toHaveAttribute("aria-valuemax", "480");
+  await handle.focus();
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowRight");
+  await expect(handle).toHaveAttribute("aria-valuenow", "296");
+  expect(Math.round((await sidebar.boundingBox()).width)).toBe(296);
+  await page.keyboard.press("Home");
+  await expect(handle).toHaveAttribute("aria-valuenow", "208");
+  await page.keyboard.press("ArrowLeft");
+  await expect(handle).toHaveAttribute("aria-valuenow", "208");
+
+  const box = await handle.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + 200);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 1000, box.y + 200, { steps: 5 });
+  await page.mouse.up();
+  await expect(handle).toHaveAttribute("aria-valuenow", "480");
+  const after = await handle.boundingBox();
+  await page.mouse.move(after.x + after.width / 2, after.y + 200);
+  await page.mouse.down();
+  await page.mouse.move(after.x + after.width / 2 - 150, after.y + 200, { steps: 5 });
+  await page.mouse.up();
+  await expect(handle).toHaveAttribute("aria-valuenow", "330");
+
+  await page.reload();
+  await expect(handle).toHaveAttribute("aria-valuenow", "330");
+  expect(Math.round((await sidebar.boundingBox()).width)).toBe(330);
+});
+
+test("Connected section shows web and daemon versions and warns only on a mismatch", async ({ page }) => {
+  await mock(page);
+  let daemonVersion = "v0.6.2";
+  await page.route("**/api/connection", route => route.fulfill({ json: { endpoint: "unix:///run/kukeon/kukeond.sock", version: "v0.7.0", ...(daemonVersion === undefined ? {} : { daemonVersion }) } }));
+  await page.goto(server.url);
+  const connection = page.getByLabel("Daemon connection");
+  const versions = connection.getByRole("definition");
+  await expect(versions).toHaveText(["v0.7.0", "v0.6.2"]);
+  await expect(connection.getByRole("term")).toHaveText(["web", "daemon"]);
+  const warning = connection.getByRole("img", { name: "Version mismatch: web v0.7.0 ≠ daemon v0.6.2" });
+  await expect(warning).toBeVisible();
+  await expect(warning).toHaveAttribute("title", "Version mismatch: web v0.7.0 ≠ daemon v0.6.2");
+
+  // The collapsed rail keeps the versions in the connection dot's tooltip and still shows the warning.
+  await page.getByRole("button", { name: "Collapse sidebar" }).click();
+  const rail = page.locator(".sidebar-rail");
+  await expect(rail.getByRole("status")).toHaveAttribute("title", "Daemon: Connected · web v0.7.0 · daemon v0.6.2");
+  await expect(rail.getByRole("img", { name: "Version mismatch: web v0.7.0 ≠ daemon v0.6.2" })).toBeVisible();
+  await page.getByRole("button", { name: "Expand sidebar" }).click();
+
+  daemonVersion = "v0.7.0";
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(versions).toHaveText(["v0.7.0", "v0.7.0"]);
+  await expect(connection.getByRole("img")).toHaveCount(0);
+
+  daemonVersion = undefined;
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(versions).toHaveText(["v0.7.0", "unknown"]);
+  await expect(connection.getByRole("img")).toHaveCount(0);
 });
