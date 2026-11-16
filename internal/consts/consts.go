@@ -115,6 +115,15 @@ const (
 	// the budget on the per-container short id, not the directory.
 	KukeonSocketSymlinkSubdir = "s"
 
+	// KukeondSocketShareSubdir is the basename of the directory, beside the
+	// kukeond socket, that holds a hard link to the live socket (issue #1483).
+	// Cells bind-mount this directory rather than the socket file: a file
+	// bind pins the inode, so a daemon restart (which unlinks and recreates
+	// the socket) left every running cell holding the dead one. The daemon
+	// re-links on every start and never removes the directory, so the mount
+	// source stays valid across restarts.
+	KukeondSocketShareSubdir = "kukeond"
+
 	// KukeonMaxSocketPath is Linux's UNIX_PATH_MAX minus the terminating
 	// NUL — the maximum number of bytes a path passed to `connect(2)` on a
 	// unix socket may occupy in sockaddr_un.sun_path. The daemon refuses to

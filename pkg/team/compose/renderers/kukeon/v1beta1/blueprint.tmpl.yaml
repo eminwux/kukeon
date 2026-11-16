@@ -39,9 +39,7 @@ spec:
         {{- end }}
         volumes:
           {{- range .MountSelectors }}
-          - source: {{ template "mount_source" . }}
-            target: {{ template "mount_target" . }}
-            readOnly: {{ template "mount_readonly" . }}
+          {{- template "host_mounts" . }}
           {{- end }}
           {{- if .StatePath }}
           # Harness state (logins, sessions). The Config names the volume, so a

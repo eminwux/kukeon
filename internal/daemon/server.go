@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/eminwux/kukeon/internal/client/local"
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/firewall"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
@@ -148,6 +149,8 @@ func (s *Server) Serve() error {
 	s.mu.Lock()
 	s.listener = listener
 	s.mu.Unlock()
+
+	s.publishSharedSocket()
 
 	if err := s.writePIDFile(); err != nil {
 		_ = listener.Close()
@@ -398,6 +401,8 @@ func (s *Server) Stop() error {
 	}
 	if s.opts.SocketPath != "" {
 		_ = os.Remove(s.opts.SocketPath)
+		// Only the link goes; the directory is a live cell mount source.
+		_ = os.Remove(SharedSocketPath(s.opts.SocketPath))
 	}
 	if s.opts.PIDFile != "" {
 		_ = os.Remove(s.opts.PIDFile)
@@ -419,6 +424,33 @@ func (s *Server) removeStaleSocket() error {
 		return nil
 	}
 	return fmt.Errorf("remove stale socket: %w", err)
+}
+
+// SharedSocketPath is the hard link to the socket at socketPath that cells
+// reach through a directory bind mount of its parent (issue #1483).
+func SharedSocketPath(socketPath string) string {
+	return filepath.Join(filepath.Dir(socketPath), consts.KukeondSocketShareSubdir, filepath.Base(socketPath))
+}
+
+// publishSharedSocket hard-links the freshly bound socket into the share
+// directory so a cell that bind-mounts the directory sees the new socket
+// without being recreated. A link shares the socket inode, so its owner and
+// mode are the socket's own. Best-effort: on failure the canonical socket
+// still serves, and only directory-mounting cells lose the daemon.
+func (s *Server) publishSharedSocket() {
+	link := SharedSocketPath(s.opts.SocketPath)
+	//nolint:gosec // cell users traverse it like /run/kukeon; the socket's mode gates access.
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		s.logger.WarnContext(s.ctx, "create shared socket dir failed", "dir", filepath.Dir(link), "error", err)
+		return
+	}
+	if err := os.Remove(link); err != nil && !errors.Is(err, os.ErrNotExist) {
+		s.logger.WarnContext(s.ctx, "remove stale shared socket failed", "socket", link, "error", err)
+		return
+	}
+	if err := os.Link(s.opts.SocketPath, link); err != nil {
+		s.logger.WarnContext(s.ctx, "link shared socket failed", "socket", link, "error", err)
+	}
 }
 
 func (s *Server) writePIDFile() error {

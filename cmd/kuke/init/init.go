@@ -758,6 +758,12 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	if stageErr != nil {
 		return fmt.Errorf("stage kukepause: %w", stageErr)
 	}
+	// Stage this kuke for cells' `kuke-binary` directory mount (issue #1483),
+	// so re-running init after a rebuild reaches running cells.
+	clientPaths, stageErr := stageKukeClient(runPath)
+	if stageErr != nil {
+		return fmt.Errorf("stage kuke client: %w", stageErr)
+	}
 
 	opts := controller.Options{
 		RunPath:              runPath,
@@ -790,9 +796,15 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	if chmodErr := sysuser.ChownAndChmod(kukepausePath, 0, ensure.GID, kukepauseStagedMode); chmodErr != nil {
 		return fmt.Errorf("restore kukepause exec bit %q: %w", kukepausePath, chmodErr)
 	}
+	for _, path := range []string{clientPaths.Dir, clientPaths.Binary, clientPaths.Shim} {
+		if chmodErr := sysuser.ChownAndChmod(path, 0, ensure.GID, kukeClientStagedMode); chmodErr != nil {
+			return fmt.Errorf("restore kuke client mode %q: %w", path, chmodErr)
+		}
+	}
 
 	printBootstrapReport(cmd, report, permsReport)
 	cmd.Printf("  - kukepause staged: %s\n", kukepausePath)
+	cmd.Printf("  - kuke client staged: %s\n", clientPaths.Binary)
 
 	if viper.GetBool(config.KUKE_INIT_NO_WAIT.ViperKey) {
 		return nil

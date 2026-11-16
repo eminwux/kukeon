@@ -21,6 +21,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -180,5 +181,64 @@ func TestServeReassertsForwardAdmissionOnStartup(t *testing.T) {
 			t.Fatal("socket did not appear after forward-admission error (Serve aborted?)")
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestServeRepublishesSharedSocketAcrossRestarts guards issue #1483: a cell
+// bind-mounts the share directory, so a restarted daemon must re-link its new
+// socket into the same directory inode rather than replace the directory.
+func TestServeRepublishesSharedSocketAcrossRestarts(t *testing.T) {
+	socketPath := filepath.Join(t.TempDir(), "kukeond.sock")
+	shared := SharedSocketPath(socketPath)
+	if want := filepath.Join(filepath.Dir(socketPath), "kukeond", "kukeond.sock"); shared != want {
+		t.Fatalf("SharedSocketPath = %q, want %q", shared, want)
+	}
+
+	var dirIno uint64
+	for run := range 2 {
+		srv := NewServer(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)), Options{
+			SocketPath: socketPath,
+			SocketMode: 0o600,
+		})
+		srv.forwardAdmissionFn = func() error { return nil }
+		done := make(chan error, 1)
+		go func() { done <- srv.Serve() }()
+
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			conn, err := net.Dial("unix", shared)
+			if err == nil {
+				_ = conn.Close()
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("run %d: dial shared socket: %v", run, err)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		info, err := os.Stat(filepath.Dir(shared))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ino := info.Sys().(*syscall.Stat_t).Ino
+		if run > 0 && ino != dirIno {
+			t.Fatalf("share dir replaced across restart: inode %d -> %d", dirIno, ino)
+		}
+		dirIno = ino
+
+		if err = srv.Stop(); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("Serve did not return after Stop")
+		}
+		if _, err = os.Lstat(shared); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("run %d: shared socket left after Stop: %v", run, err)
+		}
+		if _, err = os.Stat(filepath.Dir(shared)); err != nil {
+			t.Fatalf("run %d: share dir removed on Stop: %v", run, err)
+		}
 	}
 }

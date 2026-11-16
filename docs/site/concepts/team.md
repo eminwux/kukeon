@@ -148,6 +148,15 @@ A role that selects only some of the host mounts gets a profile named after
 them. The security posture is fixed in the blueprint and is never a Config
 toggle.
 
+The daemon socket and the `kuke` binary are mounted through directories, so a
+daemon restart or a rebuild reaches running cells without recreating them:
+
+| Selector         | Mounted                                                                                                                                                                              |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `kukeond-socket` | `/run/kukeon/kukeond/`, where kukeond hard-links its socket on every start; the cell's `KUKEON_HOST` points at `/run/kukeon/kukeond/kukeond.sock`                                    |
+| `kuke-binary`    | `/opt/kukeon/bin/client/` at `/.kukeon/client/`, where `kuke init` stages its own binary, and a fixed shim at `/usr/local/bin/kuke` that runs it; re-run `kuke init` after a rebuild |
+| `kukeon-install` | `/opt/kukeon`, read-only                                                                                                                                                             |
+
 Each blueprint is assembled from components: the **harness** (its parameters,
 env, secret slots and start modes, copied from `harness.yaml`), and the optional
 **connector** and **forge** components of the library kuke ships under
