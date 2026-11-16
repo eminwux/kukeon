@@ -3,12 +3,16 @@ export const titles = ["Realms", "Spaces", "Stacks", "Cells"];
 export const catalogTitles: Record<string, string> = { blueprints: "Blueprints", configs: "Configs", volumes: "Volumes", secrets: "Secrets" };
 export type Route = { view: string; scope: string[]; parent: string[]; document: boolean; config?: string[] };
 
+const HOME = (): Route => ({ view: "dashboard", scope: [], parent: [], document: false });
+export const homeLink = "#/resources";
+
 export function readRoute(): Route {
   try {
     const raw = window.location.hash.slice(1);
     const [path, query] = raw.split("?");
     const params = new URLSearchParams(query);
-    if (!path || path === "/" || path === "/workspace") return { view: "workspace", scope: [], parent: [], document: false };
+    // Resources is home: the empty hash, #/workspace without a cell scope and unparsable hashes land on it.
+    if (!path || path === "/" || path === "/workspace") return HOME();
     const parts = path.split("/").filter(Boolean).map(decodeURIComponent);
     if (parts[0] === "new-cell") {
       let config: unknown;
@@ -17,7 +21,7 @@ export function readRoute(): Route {
     }
     // #/daemon (health) and #/daemon/logs live under Administration.
     if (parts[0] === "daemon") return { view: parts[1] === "logs" ? "daemon-logs" : "daemon", scope: [], parent: [], document: false };
-    if (parts[0] === "workspace") return { view: "workspace", scope: parts.length === 5 ? parts.slice(1) : [], parent: [], document: false };
+    if (parts[0] === "workspace") return parts.length === 5 ? { view: "workspace", scope: parts.slice(1), parent: [], document: false } : HOME();
     if (path === "/resources" || path === "/administration" || path === "/dashboard") return { view: "dashboard", scope: [], parent: [], document: false };
     // #/images/<realm>/<image reference>; the reference is one encoded segment.
     if (parts[0] === "images") return { view: "images", scope: parts.slice(1, 3), parent: [], document: false };
@@ -29,11 +33,12 @@ export function readRoute(): Route {
     }
     // Historical hierarchy bookmarks have no /resource prefix.
     return { view: "resource", scope: parts.slice(0, 5), parent: [], document: false };
-  } catch { return { view: "workspace", scope: [], parent: [], document: false }; }
+  } catch { return HOME(); }
 }
 
-export function workspaceLink(scope: string[] = []): string {
-  return "#/workspace" + (scope.length ? "/" + scope.map(encodeURIComponent).join("/") : "");
+// The cell terminal keeps its historical #/workspace/<realm>/<space>/<stack>/<cell> route.
+export function workspaceLink(scope: string[]): string {
+  return "#/workspace/" + scope.map(encodeURIComponent).join("/");
 }
 export function newCellLink(config?: string[]): string {
   return "#/new-cell" + (config?.length ? `?config=${encodeURIComponent(JSON.stringify(config))}` : "");

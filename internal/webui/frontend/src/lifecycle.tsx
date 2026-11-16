@@ -41,8 +41,8 @@ function CellActionConfirmation({
   const consequence = action === "kill"
     ? "Kill immediately terminates all containers in this cell and sets its operational state to Stopped. The cell metadata and configuration remain, but running process work may be lost. This does not perform Delete or Purge cleanup."
     : action === "delete"
-      ? "Delete removes the cell's containers, cgroup, and metadata when kukeond validation permits. It does not perform Purge's broader cleanup. A daemon rejection or partial result leaves the cell in the workspace until a fresh daemon read confirms removal."
-      : "Purge requests the CLI's comprehensive cell cleanup, including cell removal and daemon-managed cleanup such as CNI resources and orphaned containers. Cleanup can be partial; the workspace will keep the cell until kukeond confirms its metadata is gone. Purge is destructive and may not be reversible.";
+      ? "Delete removes the cell's containers, cgroup, and metadata when kukeond validation permits. It does not perform Purge's broader cleanup. A daemon rejection or partial result leaves the cell listed until a fresh daemon read confirms removal."
+      : "Purge requests the CLI's comprehensive cell cleanup, including cell removal and daemon-managed cleanup such as CNI resources and orphaned containers. Cleanup can be partial; the cell stays listed until kukeond confirms its metadata is gone. Purge is destructive and may not be reversible.";
   const enabled = canConfirmDestructiveAction(action, acknowledged, typedScope, fullScope);
 
   return <dialog

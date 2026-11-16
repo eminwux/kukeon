@@ -27,7 +27,7 @@ function terminalThemeFor(theme: Theme) {
   return { ...terminalTheme, background: dark ? "#0d1421" : "#f8fafc", foreground: dark ? "#e5e6ec" : "#20232b", cursor: dark ? "#e5e6ec" : "#20232b" };
 }
 
-// This hook lives in App, above both Workspace and Resources routes.
+// This hook lives in App, above both the cell terminal and Resources routes.
 export function useTerminalSessions(inventory: InventoryResource) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selection, setSelection] = useState<Record<string, string>>({});

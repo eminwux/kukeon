@@ -21,7 +21,7 @@ export const containerFields = [
   { key: "workingDir", label: "Working directory", kind: "text" },
   { key: "env", label: "Environment variables", kind: "env", help: "Values are redacted in previews and server errors. Prefer Secret references for credentials." },
   { key: "attachable", label: "Attachable terminal", kind: "boolean" },
-  { key: "root", label: "Explicitly mark this container as the root", kind: "boolean", advanced: true, help: "Leave off to let Kukeon add its default root container." },
+  { key: "root", label: "Explicitly mark this container as the root", kind: "boolean", advanced: true, help: "Leave off to let kukeon add its default root container." },
   { key: "ports", label: "Ports", kind: "strings", advanced: true, help: "Use the supported port format, one entry per row." },
   { key: "volumes", label: "Volumes and mounts", kind: "objects", advanced: true, itemLabel: "Mount", fields: [
     { key: "kind", label: "Mount kind", kind: "enum", options: ["bind", "tmpfs", "volume"] },
@@ -58,7 +58,7 @@ export const containerFields = [
   { key: "secrets", label: "Secret references", kind: "objects", advanced: true, itemLabel: "Secret", fields: [
     { key: "name", label: "Container secret name", kind: "text", required: true }, { key: "fromFile", label: "Read host file", kind: "text" },
     { key: "fromEnv", label: "Read host environment variable", kind: "text" }, { key: "mountPath", label: "Mount path", kind: "text" },
-    { key: "secretRef", label: "Kukeon Secret reference", kind: "object", fields: [
+    { key: "secretRef", label: "kukeon Secret reference", kind: "object", fields: [
       { key: "name", label: "Secret name", kind: "text", required: true }, { key: "realm", label: "Realm", kind: "text", required: true },
       { key: "space", label: "Space", kind: "text" }, { key: "stack", label: "Stack", kind: "text" }, { key: "cell", label: "Cell", kind: "text" },
     ] },
@@ -80,7 +80,7 @@ export const containerFields = [
 ];
 
 export const cellAdvanced = [
-  { key: "rootContainerId", label: "Explicit root container ID", kind: "text", help: "Leave empty to use an explicitly marked root or Kukeon's generated default." },
+  { key: "rootContainerId", label: "Explicit root container ID", kind: "text", help: "Leave empty to use an explicitly marked root or kukeon's generated default." },
   { key: "tty", label: "Cell TTY settings", kind: "object", fields: [{ key: "default", label: "Default attachable container", kind: "text" }] },
   { key: "nestedCgroupRuntime", label: "Nested cgroup runtime", kind: "boolean" },
   { key: "ignoreDiskPressure", label: "Ignore disk pressure for this creation", kind: "boolean" },

@@ -1,4 +1,4 @@
-import { StrictMode, Suspense, lazy, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { StrictMode, Suspense, lazy, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
 import { useResource, ErrorNotice, type Resource } from "./request";
@@ -6,7 +6,8 @@ import { CatalogPage, RelatedResources } from "./catalog";
 import { TerminalWorkspace, useTerminalSessions, type TerminalManager } from "./terminal";
 import { CellSidebar } from "./cell-sidebar";
 import { useInventory, type Inventory, type InventoryResource, type Doc, type RuntimeStatus } from "./inventory";
-import { apiPath, catalogTitles, daemonLink, imagesLink, kinds, titles, readRoute, resourceLink, listLink, newCellLink, workspaceLink, type Route } from "./routes";
+import { apiPath, catalogTitles, daemonLink, homeLink, imagesLink, kinds, titles, readRoute, resourceLink, listLink, newCellLink, workspaceLink, type Route } from "./routes";
+import { BrandMark, SidebarRail, SidebarResizer, SidebarToggle, VersionRows, useSidebarLayout, versionInfo } from "./sidebar-shell";
 import { StateBadge } from "./status";
 import { DocumentRowLink } from "./icons";
 import { CgroupPanel } from "./cgroup";
@@ -14,7 +15,7 @@ import { RealmImagesPanel } from "./images";
 import { RegistryCredentialsPanel, type RegistryCredential } from "./registry-credentials";
 import { ImagesPage } from "./image-inventory";
 import { NetworkPanel, networkKinds } from "./network";
-import { DaemonHealthPage, DaemonLogsPage, type DaemonHealth } from "./daemon";
+import { DaemonHealthPage, DaemonLogsPage } from "./daemon";
 import { CellLifecycleControls, LifecycleNotice, type LifecycleAction, type LifecycleFeedback, type PurgeOptions } from "./lifecycle";
 import { cellRemovalConfirmed, deleteOperationComplete, purgeOperationComplete, requestedPurgeOptions } from "./lifecycle-policy.js";
 
@@ -243,14 +244,6 @@ function ResourcesNavigation({ route }: { route: Route }) {
     <a href={daemonLink()} aria-current={route.view === "daemon" || route.view === "daemon-logs" ? "page" : undefined}>Daemon</a>
   </nav>;
 }
-function WorkspaceLanding({ inventory }: { inventory: InventoryResource }) {
-  const count = inventory.data?.rows[3].length ?? 0;
-  return <section className="panel workspace-landing" aria-label="Workspace welcome">
-    <h2>{count ? "Choose a cell" : inventory.loading ? "Loading cells…" : "No cells available"}</h2>
-    <p>{count ? "Search or select a cell in the sidebar to open its terminal, status, and containers." : inventory.error || inventory.data?.failures.length ? "The inventory is incomplete. Refresh to retry unavailable scopes." : "Create a cell from an existing config or refresh the inventory."}</p>
-    <a className="new-cell-action" href={newCellLink()}>New Cell <span aria-hidden="true">→</span></a>
-  </section>;
-}
 function App() {
   const [revision, setRevision] = useState(0);
   const [operations, setOperations] = useState<Record<string, LifecycleFeedback>>({});
@@ -260,6 +253,7 @@ function App() {
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const nextTheme: Theme = theme === "system" ? "light" : theme === "light" ? "dark" : "system";
   const [menuOpen, setMenuOpen] = useState(false);
+  const sidebar = useSidebarLayout();
   const [creationNotice, setCreationNotice] = useState<{ phase: "pending" | "success" | "error"; message: string }>();
   const [creationDocument, setCreationDocument] = useState<Doc>();
   useEffect(() => {
@@ -273,8 +267,7 @@ function App() {
     document.documentElement.dataset.theme = theme;
     try { localStorage.setItem("kukeon-theme", theme); } catch { /* Preferences are optional. */ }
   }, [theme]);
-  const connection = useResource<{ endpoint: string; version: string }>("/api/connection", revision);
-  const health = useResource<DaemonHealth>("/api/daemon/health", revision);
+  const connection = useResource<{ endpoint: string; version: string; daemonVersion?: string }>("/api/connection", revision);
   const inventory = useInventory(revision);
   const terminals = useTerminalSessions(inventory);
   function recordOperation(scope: string[], operation: LifecycleFeedback) {
@@ -319,7 +312,7 @@ function App() {
           presence = await readCellPresence(scope);
           if (presence === false) {
             terminals.removeCell(scope);
-            window.location.hash = workspaceLink();
+            window.location.hash = homeLink;
           } else if (failure.code === "unavailable") {
             terminals.interruptCell(scope, "The destructive action did not return a result. This cell's terminal may have been affected; refresh before reconnecting.");
           }
@@ -340,7 +333,7 @@ function App() {
           : `${action[0].toUpperCase()}${action.slice(1)} failed`;
         const reconcile = action === "delete" || action === "purge"
           ? presence === false ? " A fresh daemon read confirms the cell is gone; its terminal tabs were closed."
-            : presence === true ? " A fresh daemon read confirms the cell still exists; it remains in the workspace."
+            : presence === true ? " A fresh daemon read confirms the cell still exists; it remains listed in the sidebar."
               : " The final state is unknown; the cell and terminal tabs were retained. Refresh before retrying."
           : "";
         recordOperation(scope, { action, phase: "error", message: `${title}. ${reason}: ${failure.message ?? "The daemon rejected the request."}${reconcile}` });
@@ -365,13 +358,13 @@ function App() {
         const presence = body.metadataDeleted ? false : await readCellPresence(scope);
         if (cellRemovalConfirmed(body.metadataDeleted, presence)) {
           terminals.removeCell(scope);
-          window.location.hash = workspaceLink();
+          window.location.hash = homeLink;
         }
         const complete = deleteOperationComplete(body);
         const outcome = body.metadataDeleted
           ? "kukeond reports that cell metadata was deleted."
           : presence === false ? "A fresh daemon read confirms the cell is gone."
-          : presence === true ? "The cell still exists and remains in the workspace."
+          : presence === true ? "The cell still exists and remains listed in the sidebar."
             : "The final state could not be confirmed; the cell and terminal tabs were retained.";
         const effects = `Containers deleted: ${body.containersDeleted === true ? "yes" : "not reported"}; cgroup deleted: ${body.cgroupDeleted === true ? "yes" : "not reported"}; metadata deleted: ${body.metadataDeleted === true ? "yes" : "not confirmed"}.`;
         if (!complete && presence !== false) {
@@ -384,13 +377,13 @@ function App() {
         const presence = body.metadataDeleted ? false : await readCellPresence(scope);
         if (cellRemovalConfirmed(body.metadataDeleted, presence)) {
           terminals.removeCell(scope);
-          window.location.hash = workspaceLink();
+          window.location.hash = homeLink;
         }
         const complete = purgeOperationComplete(body);
         const outcome = body.metadataDeleted
           ? "kukeond reports that cell metadata was deleted."
           : presence === false ? "A fresh daemon read confirms the cell is gone."
-          : presence === true ? "The cell still exists and remains in the workspace."
+          : presence === true ? "The cell still exists and remains listed in the sidebar."
             : "The final state could not be confirmed; the cell and terminal tabs were retained.";
         const effects = `Containers deleted: ${body.containersDeleted === true ? "yes" : "not reported"}; cgroup deleted: ${body.cgroupDeleted === true ? "yes" : "not reported"}; metadata deleted: ${body.metadataDeleted === true ? "yes" : "not confirmed"}; comprehensive purge: ${body.purgeSucceeded === true ? "complete" : "incomplete"}.`;
         const requestedOptions = `Options passed: --force ${body.force ? "enabled" : "disabled"}, --cascade ${body.cascade ? "enabled" : "disabled"}.`;
@@ -420,7 +413,7 @@ function App() {
         const presence = await readCellPresence(scope);
         if (presence === false) {
           terminals.removeCell(scope);
-          window.location.hash = workspaceLink();
+          window.location.hash = homeLink;
           outcome = " A fresh daemon read confirms the cell is gone; its terminal tabs were closed.";
         } else if (presence === true) {
           terminals.interruptCell(scope, "The destructive action response was lost. The cell still exists, but its runtime may have changed; refresh before reconnecting.");
@@ -460,7 +453,7 @@ function App() {
       let body: { error?: { message?: string } } = {};
       try { body = await response.json(); } catch { /* Use the HTTP status below. */ }
       if (!response.ok) throw new Error(body.error?.message ?? `HTTP ${response.status}`);
-      setCreationNotice({ phase: "success", message: `Cell ${scope.join(" / ")} started.${selected ? " The Workspace will attach to its selected workload when ready." : " No attachable workload was defined."}` });
+      setCreationNotice({ phase: "success", message: `Cell ${scope.join(" / ")} started.${selected ? " The terminal will attach to its selected workload when ready." : " No attachable workload was defined."}` });
     } catch (error) {
       setCreationNotice({ phase: "error", message: `Cell ${scope.join(" / ")} was created stopped, but start failed: ${error instanceof Error ? error.message : "The daemon request failed."}` });
     } finally { setRevision(value => value + 1); }
@@ -474,33 +467,41 @@ function App() {
   const catalog = Object.keys(catalogTitles).includes(route.view);
   const images = route.view === "images";
   const daemonView = route.view === "daemon" || route.view === "daemon-logs";
-  const heading = route.view === "daemon" ? "Daemon" : route.view === "daemon-logs" ? "Daemon logs" : isWorkspace ? route.scope.at(-1) ?? "Workspace" : route.view === "new-cell" ? "New Cell" : images ? route.scope[1] ?? "Images" : catalog ? route.scope.at(-1) ?? catalogTitles[route.view] : route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : "Resources";
+  const heading = route.view === "daemon" ? "Daemon" : route.view === "daemon-logs" ? "Daemon logs" : isWorkspace ? route.scope.at(-1) ?? "Cell" : route.view === "new-cell" ? "New Cell" : images ? route.scope[1] ?? "Images" : catalog ? route.scope.at(-1) ?? catalogTitles[route.view] : route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : "Resources";
   // Only a scope path or realm qualifies the title; generic subtitles were dropped.
   const headingContext = isWorkspace ? route.scope.join(" / ") : images ? route.scope[1] ? route.scope[0] : "" : route.view === "resource" || (catalog && route.scope.length > 0) ? route.scope.join(" / ") : "";
   const daemonStatus = inventory.daemon.error?.code === "permission_denied" ? "Permission denied" : inventory.daemon.error ? "Unavailable" : inventory.daemon.loading ? "Checking…" : "Connected";
-  return <div className={`app-shell${cellTerminalActive ? " cell-screen-active" : ""}`}>
+  const daemonTone = inventory.daemon.error ? "failed" : inventory.daemon.loading ? "checking" : "";
+  const versions = versionInfo(connection.data?.version, connection.data?.daemonVersion);
+  const shellStyle = { "--sidebar-width": `${sidebar.width}px` } as CSSProperties;
+  return <div className={`app-shell${cellTerminalActive ? " cell-screen-active" : ""}${sidebar.collapsed ? " sidebar-collapsed" : ""}`} style={shellStyle}>
     <aside className={`sidebar ${menuOpen ? "is-open" : ""}`} id="cell-sidebar" aria-label="Cell sidebar">
       <button className="sidebar-close" aria-label="Close sidebar" onClick={() => setMenuOpen(false)}>×</button>
-      <a className="brand" href={workspaceLink()}><span className="mark" aria-hidden="true">K</span><span className="brand-title">Kukeon<small>LOCAL WORKSPACE</small></span>{connection.data?.version && <span className="brand-version" title="kuke serve version">{connection.data.version.startsWith("v") ? connection.data.version : `v${connection.data.version}`}</span>}</a>
-      <nav className="area-nav" aria-label="Areas"><a href={workspaceLink()} aria-current={isWorkspace ? "page" : undefined}>Workspace</a></nav>
-      <a className="new-cell-action sidebar-new-cell" href={newCellLink()}>+ New Cell</a>
-      <CellSidebar inventory={inventory} selectedScope={cellScreenScope ?? []} terminalStates={terminals.cellStates} />
-      <section className="connection" aria-label="Daemon connection">
-        <p className="status" role="status"><span className={`dot ${inventory.daemon.error ? "failed" : inventory.daemon.loading ? "checking" : ""}`} aria-hidden="true" />{daemonStatus}</p>
-        <code>{connection.data?.endpoint ?? (connection.loading ? "Loading socket…" : "Socket unknown")}</code>
-        <p className="daemon-version">{health.data?.status === "reachable" ? <>kukeond {health.data.daemonVersion ? (health.data.daemonVersion.startsWith("v") ? health.data.daemonVersion : `v${health.data.daemonVersion}`) : "version not reported"}</> : "kukeond version unknown"} · <a href={daemonLink()}>Daemon details</a></p>
-        {connection.error && <ErrorNotice error={connection.error} />}
-      </section>
+      <div className="sidebar-panel">
+        <div className="sidebar-header">
+          <a className="brand" href={homeLink}><BrandMark /><span className="brand-title">kukeon</span></a>
+          <SidebarToggle collapsed={false} onToggle={() => sidebar.setCollapsed(true)} />
+        </div>
+        <CellSidebar inventory={inventory} selectedScope={cellScreenScope ?? []} terminalStates={terminals.cellStates} />
+        <section className="connection" aria-label="Daemon connection">
+          <p className="status" role="status"><span className={`dot ${daemonTone}`} aria-hidden="true" />{daemonStatus}</p>
+          <code>{connection.data?.endpoint ?? (connection.loading ? "Loading socket…" : "Socket unknown")}</code>
+          {connection.data && <VersionRows info={versions} />}
+          <p className="daemon-version"><a href={daemonLink()}>Daemon details</a></p>
+          {connection.error && <ErrorNotice error={connection.error} />}
+        </section>
+      </div>
+      {sidebar.collapsed && <SidebarRail inventory={inventory} selectedScope={cellScreenScope ?? []} connection={{ status: daemonStatus, tone: daemonTone, info: versions }} onExpand={() => sidebar.setCollapsed(false)} />}
+      {!sidebar.collapsed && <SidebarResizer width={sidebar.width} onResize={sidebar.setWidth} />}
     </aside>
     <main className="workspace">
       <header className="toolbar">
         <button className="menu-toggle" aria-label="Toggle sidebar" aria-expanded={menuOpen} aria-controls="cell-sidebar" onClick={() => setMenuOpen(!menuOpen)}>☰</button>
-        <nav className="toolbar-areas" aria-label="Areas"><a href={workspaceLink()} aria-current={isWorkspace ? "page" : undefined}>Workspace</a></nav>
-        <span className="toolbar-connectivity" role="status" aria-label={`Daemon: ${daemonStatus}`} title={`Daemon: ${daemonStatus}`}><span className={`dot ${inventory.daemon.error ? "failed" : inventory.daemon.loading ? "checking" : ""}`} aria-hidden="true" /></span>
-        <nav className="breadcrumbs" aria-label="Resource scope"><a href={isWorkspace ? workspaceLink() : "#/resources"}>{isWorkspace ? "Workspace" : "Resources"}</a>{daemonView ? route.view === "daemon" ? <span>Daemon</span> : <><a href={daemonLink()}>Daemon</a><span>Logs</span></> : isWorkspace ? route.scope.length > 0 && <span>{route.scope.join(" / ")}</span> : images ? <><a href={imagesLink()}>Images</a>{route.scope[0] && (route.scope[1] ? <a href={imagesLink(route.scope[0])}>{route.scope[0]}</a> : <span>{route.scope[0]}</span>)}{route.scope[1] && <span>{route.scope[1]}</span>}</> : catalog ? <><a href={`#/${route.view}`}>{catalogTitles[route.view]}</a>{route.scope.slice(0, -1).map((name, i) => <a key={i} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}{route.scope.length > 0 && <span>{route.scope.at(-1)}</span>}</> : route.view === "resource" ? route.scope.map((name, i) => <a key={i} aria-label={`${kinds[i]}: ${name}`} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>) : heading !== "Resources" && <span>{heading}</span>}</nav>
+        <span className="toolbar-connectivity" role="status" aria-label={`Daemon: ${daemonStatus}`} title={`Daemon: ${daemonStatus}`}><span className={`dot ${daemonTone}`} aria-hidden="true" /></span>
+        <nav className="breadcrumbs" aria-label="Resource scope">{isWorkspace || route.view === "resource" ? route.scope.map((name, i) => <a key={i} aria-label={`${kinds[i]}: ${name}`} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>) : <><a href={homeLink}>Resources</a>{daemonView ? route.view === "daemon" ? <span>Daemon</span> : <><a href={daemonLink()}>Daemon</a><span>Logs</span></> : images ? <><a href={imagesLink()}>Images</a>{route.scope[0] && (route.scope[1] ? <a href={imagesLink(route.scope[0])}>{route.scope[0]}</a> : <span>{route.scope[0]}</span>)}{route.scope[1] && <span>{route.scope[1]}</span>}</> : catalog ? <><a href={`#/${route.view}`}>{catalogTitles[route.view]}</a>{route.scope.slice(0, -1).map((name, i) => <a key={i} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}{route.scope.length > 0 && <span>{route.scope.at(-1)}</span>}</> : heading !== "Resources" && <span>{heading}</span>}</>}</nav>
         <div className="toolbar-actions">
           <a className="header-action new-cell-toolbar-action" href={newCellLink()}>New Cell</a>
-          <a className="header-action" href="#/resources" aria-current={!isWorkspace ? "page" : undefined}>Resources</a>
+          <a className="header-action" href={homeLink} aria-current={!isWorkspace ? "page" : undefined}>Resources</a>
           <button className="icon-button refresh-button" type="button" aria-label="Refresh" title="Refresh" onClick={() => setRevision(value => value + 1)}>
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 11a8.1 8.1 0 0 0-14.9-4L3 10" /><path d="M3 4v6h6" /><path d="M4 13a8.1 8.1 0 0 0 14.9 4L21 14" /><path d="M21 20v-6h-6" /></svg>
           </button>
@@ -518,14 +519,14 @@ function App() {
           <button type="button" aria-label="Dismiss cell operation result" disabled={lastOperation.operation.phase === "pending"} onClick={() => setLastOperation(null)}>Dismiss</button>
         </section>}
         {!isWorkspace && !cellScreenScope && <ResourcesNavigation route={route} />}
-        {!cellScreenScope && <div className="page-heading"><h1>{heading}</h1>{headingContext && <p className="page-context mono-id">{headingContext}</p>}{isWorkspace && <a className="new-cell-action mobile-new-cell" href={newCellLink()}>+ New Cell</a>}</div>}
-        {creationNotice && <div className={`${creationNotice.phase === "error" ? "error" : creationNotice.phase === "pending" ? "creation-progress" : "creation-success"}`} role={creationNotice.phase === "error" ? "alert" : "status"}><span>{creationNotice.message}</span>{creationDocument && creationNotice.phase !== "pending" && <details><summary>View Cell document returned by Kukeon</summary><pre tabIndex={0} aria-label="Cell document returned after creation">{JSON.stringify(creationDocument, null, 2)}</pre></details>}<button type="button" className="notice-dismiss" aria-label="Dismiss creation message" onClick={() => { setCreationNotice(undefined); setCreationDocument(undefined); }}>×</button></div>}
+        {!cellScreenScope && <div className="page-heading"><h1>{heading}</h1>{headingContext && <p className="page-context mono-id">{headingContext}</p>}</div>}
+        {creationNotice && <div className={`${creationNotice.phase === "error" ? "error" : creationNotice.phase === "pending" ? "creation-progress" : "creation-success"}`} role={creationNotice.phase === "error" ? "alert" : "status"}><span>{creationNotice.message}</span>{creationDocument && creationNotice.phase !== "pending" && <details><summary>View Cell document returned by kukeon</summary><pre tabIndex={0} aria-label="Cell document returned after creation">{JSON.stringify(creationDocument, null, 2)}</pre></details>}<button type="button" className="notice-dismiss" aria-label="Dismiss creation message" onClick={() => { setCreationNotice(undefined); setCreationDocument(undefined); }}>×</button></div>}
         {inventory.loading && <p className="description" role="status">Refreshing resource inventory…</p>}
         {inventory.error && <ErrorNotice error={inventory.error} />}
         {inventory.error && inventory.data && <p className="stale">Stale inventory — refresh failed. Counts and lists may be out of date.</p>}
         {!!inventory.data?.failures.length && <div className="error" role="alert"><strong>Incomplete inventory</strong><p>Some scopes could not be loaded. Counts and lists exclude unavailable resources.</p><ul>{inventory.data.failures.map(message => <li key={message}>{message}</li>)}</ul></div>}
         <CellDetailsScreen title={heading ?? "Cell"} view={cellView} scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} operations={operations} onLifecycleAction={runCellLifecycle} />
-        {isWorkspace ? route.scope.length === 4 ? null : <WorkspaceLanding inventory={inventory} /> : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} inventory={inventory} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} /> : <Dashboard inventory={inventory} />}
+        {isWorkspace ? null : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} inventory={inventory} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} /> : <Dashboard inventory={inventory} />}
         <footer>Daemon inventory · {inventory.data ? <>Last refreshed <time dateTime={inventory.data.updatedAt}>{new Date(inventory.data.updatedAt).toLocaleTimeString()}</time></> : "Not refreshed yet"} · Refresh to retrieve the latest state.</footer>
       </div>
     </main>

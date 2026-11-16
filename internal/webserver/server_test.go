@@ -69,7 +69,7 @@ func TestAccessPolicy(t *testing.T) {
 		status                     int
 	}{
 		{"localhost:5129", "", "GET", "/", 200},
-		{"localhost:5129", "http://localhost:5129", "GET", "/api/connection", 200},
+		{"localhost:5129", "http://localhost:5129", "GET", "/", 200},
 		{"evil:5129", "", "GET", "/api/realms", 403},
 		{"localhost:1234", "", "GET", "/", 403},
 		{"127.0.0.1:5129", "", "GET", "/", 403},
@@ -95,6 +95,70 @@ func TestAccessPolicy(t *testing.T) {
 	handler.ServeHTTP(w, r)
 	if w.Code != 403 {
 		t.Fatal("duplicate Origin accepted")
+	}
+}
+
+type versionClient struct {
+	kukeonv1.FakeClient
+
+	version string
+	err     error
+	closed  bool
+}
+
+func (c *versionClient) Close() error { c.closed = true; return nil }
+func (c *versionClient) PingVersion(context.Context) (string, error) {
+	return c.version, c.err
+}
+
+func TestConnectionAPI(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		client  *versionClient
+		dialErr error
+		want    string
+	}{
+		{name: "reachable", client: &versionClient{version: "v0.6.2"}, want: "v0.6.2"},
+		{name: "dial fails", dialErr: fmt.Errorf("dial: %w", io.EOF)},
+		{name: "ping fails", client: &versionClient{err: io.EOF}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			handler, err := newHandler(
+				"localhost:5129",
+				"unix:///test",
+				func(context.Context) (kukeonv1.Client, error) {
+					if tc.dialErr != nil {
+						return nil, tc.dialErr
+					}
+					return tc.client, nil
+				},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "http://localhost:5129/api/connection", nil))
+			if w.Code != http.StatusOK {
+				t.Fatalf("status=%d: %s", w.Code, w.Body.String())
+			}
+			var got map[string]any
+			if decodeErr := json.Unmarshal(w.Body.Bytes(), &got); decodeErr != nil {
+				t.Fatal(decodeErr)
+			}
+			if got["endpoint"] != "unix:///test" || got["version"] == nil {
+				t.Fatalf("connection fields missing: %v", got)
+			}
+			daemonVersion, present := got["daemonVersion"]
+			if tc.want == "" && present {
+				t.Fatalf("unreachable daemon reported a version: %v", got)
+			}
+			if tc.want != "" && daemonVersion != tc.want {
+				t.Fatalf("daemonVersion=%v, want %q", daemonVersion, tc.want)
+			}
+			if tc.client != nil && !tc.client.closed {
+				t.Fatal("client not closed")
+			}
+		})
 	}
 }
 

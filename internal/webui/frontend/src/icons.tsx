@@ -10,6 +10,11 @@ const glyphs = {
   start: <path d="M8 5.5v13l10.5-6.5Z" />,
   stop: <rect x="6" y="6" width="12" height="12" rx="1.5" />,
   restart: <><path d="M20 12a8 8 0 1 1-2.34-5.66" /><path d="M20 4v5h-5" /></>,
+  // Tornado mark for the brand, collapsed rail and favicon (src/favicon.svg mirrors these strokes).
+  tornado: <><path d="M3 4.5h18" /><path d="M5 8.5h14" /><path d="M7.5 12.5h9.5" /><path d="M9 16.5h6" /><path d="M10.5 20.5h3" /></>,
+  sidebarCollapse: <><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><path d="M9 4.5v15" /><path d="m15.5 10-2 2 2 2" /></>,
+  sidebarExpand: <><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><path d="M9 4.5v15" /><path d="m13.5 10 2 2-2 2" /></>,
+  warning: <><path d="M10.3 4.2 2.8 17.5A2 2 0 0 0 4.5 20.5h15a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0Z" /><path d="M12 9.5v4.5" /><path d="M12 17.5h.01" /></>,
   document: <><path d="M14 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5Z" /><path d="M14 3.5v5h5" /><path d="M9 13h6M9 16.5h4" /></>,
 } satisfies Record<string, ReactNode>;
 export type IconName = keyof typeof glyphs;

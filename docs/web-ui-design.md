@@ -2,7 +2,8 @@
 
 ## Navigation model
 
-Workspace is the default landing page. The persistent sidebar lists cells from
+The Resources dashboard is the default landing page; there is no separate
+Workspace welcome screen. The persistent sidebar lists cells from
 all accessible realms, spaces, and stacks. Each entry shows its full parent
 scope and daemon-reported state; full scoped coordinates identify the selected
 cell even when names repeat. Search matches names and scope. Grouping defaults
@@ -12,8 +13,8 @@ groups are browser preferences, not cell metadata. The sidebar initially shows
 25 groups and 100 cells per group, with controls to reveal more. It remains available in Administration;
 on narrow screens it opens from the menu button and closes after selection.
 
-Workspace shows the selected cell's terminal first, followed by status,
-overview, references, and containers. **New Cell** opens a global workflow with
+The cell terminal (`#/workspace/<realm>/<space>/<stack>/<cell>`) shows the selected cell's terminal first, followed by status,
+overview, references, and containers. The toolbar's **New Cell** opens a global workflow with
 Config-based and manual specification creation. Both preview before creating a
 stopped Cell; starting is explicit. Terminal sessions belong to the app
 shell: switching cells or container tabs keeps inactive attachments mounted,

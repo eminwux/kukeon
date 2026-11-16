@@ -39,6 +39,7 @@ import (
 
 const (
 	requestTimeout   = 10 * time.Second
+	versionTimeout   = 3 * time.Second
 	headerTimeout    = 5 * time.Second
 	creationTimeout  = 2 * time.Minute
 	lifecycleTimeout = 5 * time.Minute
@@ -119,9 +120,7 @@ func newHandler(authority, endpoint string, dial Dial) (http.Handler, error) {
 	}
 	mux := http.NewServeMux()
 	mux.Handle("GET /", http.FileServerFS(assets))
-	mux.HandleFunc("GET /api/connection", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"endpoint": endpoint, "version": config.Version})
-	})
+	mux.HandleFunc("GET /api/connection", connectionHandler(endpoint, dial))
 	mux.HandleFunc("GET /api/realms", realmHandler(dial, false))
 	mux.HandleFunc("GET /api/realms/{name}", realmHandler(dial, true))
 	mux.HandleFunc("GET /api/realms/{name}/images", realmImagesHandler(dial))
@@ -139,6 +138,31 @@ func newHandler(authority, endpoint string, dial Dial) (http.Handler, error) {
 		}
 		mux.ServeHTTP(w, r)
 	}), nil
+}
+
+// connectionInfo reports the web server build and, when kukeond answers,
+// the daemon build so the UI can flag a version mismatch (#1470).
+type connectionInfo struct {
+	Endpoint      string `json:"endpoint"`
+	Version       string `json:"version"`
+	DaemonVersion string `json:"daemonVersion,omitempty"`
+}
+
+// connectionHandler always succeeds: an unreachable daemon leaves
+// daemonVersion absent, and the inventory requests report the outage.
+func connectionHandler(endpoint string, dial Dial) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		info := connectionInfo{Endpoint: endpoint, Version: config.Version}
+		ctx, cancel := context.WithTimeout(r.Context(), versionTimeout)
+		defer cancel()
+		if client, err := dial(ctx); err == nil {
+			if version, pingErr := client.PingVersion(ctx); pingErr == nil {
+				info.DaemonVersion = version
+			}
+			_ = client.Close()
+		}
+		writeJSON(w, http.StatusOK, info)
+	}
 }
 
 func realmHandler(dial Dial, detail bool) http.HandlerFunc {

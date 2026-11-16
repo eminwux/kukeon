@@ -6,14 +6,25 @@ closes the HTTP listener and request-owned daemon connections; it does not stop
 kukeond or workloads. The binary embeds all frontend assets and needs no Node.js
 or external asset files at runtime.
 
-## Workspace and Administration
+## Resources and the cell sidebar
 
-The UI opens to **Workspace**. Its persistent sidebar lists every accessible cell,
-including stopped, failed, and non-attachable cells. Search by cell name or any
+The UI opens to the **Resources** dashboard; `#/`, `#/workspace` without a cell
+scope, and unparsable URLs all land there. The persistent sidebar lists every
+accessible cell, including stopped, failed, and non-attachable cells. Search by cell name or any
 part of its realm, space, and stack scope. Each link shows the parent scope and
 reported state, so duplicate names remain distinct. Select a cell to open its
 terminal, status, overview, and containers. On narrow screens, open the cell
 sidebar with the menu button; selection closes it.
+
+On wider screens, the sidebar's collapse button reduces it to an icon rail with
+the kukeon mark, an expand button, one state dot per cell (named by its full
+scope), and the connection dot. Drag the sidebar's right edge, or focus it and
+use the arrow keys, Home, or End, to resize it within fixed bounds. The collapsed
+state and width are stored only in this browser. The **Connected** section shows
+the `web` (`kuke serve`) and `daemon` (kukeond) versions; a warning icon appears
+when both are known and differ. An unreachable daemon shows `daemon unknown`.
+`GET /api/connection` returns `endpoint`, `version`, and, when kukeond answers
+its version ping, `daemonVersion`.
 
 **Group by** defaults to **None**. Choose any label key found in cell metadata
 to organize the sidebar; cells without a value appear under **Ungrouped**. Group
@@ -21,12 +32,12 @@ headers expand and collapse. The sidebar initially shows 25 groups and 100 cells
 per group, with controls to reveal more. The selected key and collapsed groups are stored only in
 this browser. If inventory becomes unavailable, retained cells are marked stale.
 
-**New Cell** opens a guided workflow with **From Config** and **Manual** methods.
+The toolbar's **New Cell** button opens a guided workflow with **From Config** and **Manual** methods.
 Config creation uses the selected CellConfig and its referenced Blueprint;
 manual creation exposes Cell and Container authorable fields in Basic and
 Advanced sections. Both methods preview and validate before creation. Cells are
 created stopped and appear in the sidebar immediately. Starting after creation
-is an explicit opt-in; when an attachable workload is present, the Workspace
+is an explicit opt-in; when an attachable workload is present, the cell terminal
 attaches after it becomes ready. Switching cells preserves each cell's
 terminal tab and attachment up to the connection limit; it does not stop a
 workload. A lost browser connection does not guarantee that process or terminal
@@ -106,9 +117,8 @@ request reached kukeond; it does not assert that every scope, subsystem, or
 workload is healthy. Scoped failures separately mark inventory incomplete.
 **Unavailable** or **Permission denied** describe a failed root request. Correct
 the connection or permissions and refresh to retry. Below the socket, the
-sidebar names the kukeond version reported by the last health check and links
-to [Daemon health](#daemon-health). The version beside the brand is the
-`kuke serve` build.
+sidebar lists the **web** (`kuke serve`) and **daemon** (kukeond) versions from
+`/api/connection` and links to [Daemon health](#daemon-health).
 
 ## Daemon health
 
@@ -418,10 +428,11 @@ kuke serve --listen 127.0.0.1 --port 5129
 curl http://127.0.0.1:5129/api/realms
 ```
 
-## Workspace layout and appearance
+## Layout and appearance
 
-The sidebar holds Workspace and Administration links, the cell inventory, daemon
-connection information, and appearance controls. Administration shows its resource
+The sidebar holds the kukeon brand (a link to Resources), the cell inventory,
+and daemon connection and version information; the toolbar holds **New Cell**,
+**Resources**, refresh, and appearance controls. Resources shows its resource
 navigation above the current view. Existing `#/dashboard`, resource, catalog, and
 hierarchy bookmarks still open their Administration views; browser history keeps
 working across both areas.
@@ -444,7 +455,7 @@ Secret responses never include `spec.data`.
 
 ### Create a Cell
 
-Choose **New Cell** in Workspace or Administration to open the global creation
+Choose **New Cell** in the toolbar to open the global creation
 workflow. **From Config** offers a searchable, fully scoped CellConfig selector,
 shows its Blueprint and target Realm/Space/Stack, and preserves environment
 overrides and the disk-pressure option. The Cell name is optional. When omitted,
@@ -465,12 +476,12 @@ status, and generated fields are not editable. The daemon validates preview and
 create requests. If no root container is explicitly specified, Kukeon adds its
 default root during creation; the web server does not insert or mark a workload
 container as root. The Cell document returned by Kukeon is available in the
-Workspace success notice and includes the daemon's final specification.
+creation success notice and includes the daemon's final specification.
 
 Both methods call the existing daemon `MaterializeCell` operation, leave the
 Cell stopped by default, refresh and upsert the shared inventory, and open the
-new Cell Workspace. The optional **Start after creation** choice is explicit;
-the Workspace attaches to an eligible attachable workload after startup when one
+new cell's terminal. The optional **Start after creation** choice is explicit;
+the terminal attaches to an eligible attachable workload after startup when one
 is present.
 
 The JSON POST endpoints `/api/cells/from-config/preview` and
@@ -487,7 +498,7 @@ reads daemon storage directly or introduces an independent resource store.
 
 ### Attach to a terminal
 
-Select a cell in the Workspace sidebar, choose an attachable container, and
+Select a cell in the sidebar, choose an attachable container, and
 choose **Attach**. You can also attach from its Administration overview. The
 terminal forwards keyboard input and resizes with its panel. Switching cells,
 containers, or application views keeps attachments and scrollback in this browser

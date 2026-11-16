@@ -46,7 +46,17 @@ func TestEmbeddedAssets(t *testing.T) {
 	if len(refs) < 2 {
 		t.Fatal("expected bundled JavaScript and stylesheet")
 	}
+	icon := regexp.MustCompile(`<link rel="icon" type="image/svg\+xml" href="(/assets/[^"]+\.svg)"`).FindSubmatch(index)
+	if icon == nil {
+		t.Fatal("missing SVG favicon link")
+	}
 	handler := http.FileServerFS(assets)
+	iconResponse := httptest.NewRecorder()
+	handler.ServeHTTP(iconResponse, httptest.NewRequest(http.MethodGet, string(icon[1]), nil))
+	if iconResponse.Code != http.StatusOK || !strings.HasPrefix(iconResponse.Header().Get("Content-Type"), "image/svg+xml") ||
+		!strings.Contains(iconResponse.Body.String(), "<svg") {
+		t.Fatalf("favicon %s: status %d, type %q", icon[1], iconResponse.Code, iconResponse.Header().Get("Content-Type"))
+	}
 	for _, ref := range refs {
 		path := string(ref[1])
 		if !strings.HasPrefix(path, "/assets/") {
