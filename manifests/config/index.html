@@ -1133,6 +1133,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../concepts/blueprint-contract/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Blueprint contract: components and modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../concepts/team/" class="md-nav__link">
         
   
@@ -1515,6 +1543,62 @@
     
   
     Private registry credentials
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/git-credentials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Git credentials and identity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/migrate-to-stored-git-credentials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Migrating to stored git credentials and shared blueprints
   
 
     
@@ -2800,6 +2884,50 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#specrequires-array-of-string-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        spec.requires (array of string, optional)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#speccomponents-array-of-string-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        spec.components (array of string, optional)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#specmodes-object-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        spec.modes (object, optional)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#specgit-object-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        spec.git (object, optional)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3522,6 +3650,50 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#specrequires-array-of-string-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        spec.requires (array of string, optional)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#speccomponents-array-of-string-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        spec.components (array of string, optional)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#specmodes-object-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        spec.modes (object, optional)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#specgit-object-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        spec.git (object, optional)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3756,6 +3928,12 @@
 <td>no</td>
 <td>Immutable pin — tag name or full commit SHA. Survives in-place restarts (see <a href="../container/#containerrepo">ContainerRepo <code>ref</code></a>). Mutually exclusive with <code>branch</code>.</td>
 </tr>
+<tr>
+<td><code>git</code></td>
+<td>object</td>
+<td>no</td>
+<td>This source's own git identity — <code>author</code>, <code>committer</code>, <code>credential</code>, <code>signing</code>, <code>sign</code>. Unset fields use the cell's default identity. See <a href="../container/#repogit">RepoGit</a>.</td>
+</tr>
 </tbody>
 </table>
 <h3 id="specsecrets-mapstringsecretfill-optional"><code>spec.secrets</code> (map[string]<a href="#cellconfigsecretfill">SecretFill</a>, optional)<a class="headerlink" href="#specsecrets-mapstringsecretfill-optional" title="Permanent link">&para;</a></h3>
@@ -3779,6 +3957,39 @@
 </tr>
 </tbody>
 </table>
+<h3 id="specrequires-array-of-string-optional"><code>spec.requires</code> (array of string, optional)<a class="headerlink" href="#specrequires-array-of-string-optional" title="Permanent link">&para;</a></h3>
+<p>Image capabilities this Config's cells need on top of the blueprint's and its enabled components' — for example <code>[go]</code>. See <a href="../../concepts/blueprint-contract/#image-capabilities">Image capabilities</a>.</p>
+<h3 id="speccomponents-array-of-string-optional"><code>spec.components</code> (array of string, optional)<a class="headerlink" href="#speccomponents-array-of-string-optional" title="Permanent link">&para;</a></h3>
+<p>The blueprint's <strong>optional</strong> components to enable, by name. A component that is not optional is always on and need not be listed; naming a component the blueprint does not declare is an apply-time error. Enabling a component adds its parameters, env, secret slots and required capabilities to the cell.</p>
+<h3 id="specmodes-object-optional"><code>spec.modes</code> (object, optional)<a class="headerlink" href="#specmodes-object-optional" title="Permanent link">&para;</a></h3>
+<p>Which of the blueprint's harness modes this Config's cells may be created in. Unset allows every mode the blueprint declares.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>enabled</code></td>
+<td>array of string</td>
+<td>no</td>
+<td>Modes a cell may be created in. Empty allows all.</td>
+</tr>
+<tr>
+<td><code>default</code></td>
+<td>string</td>
+<td>no</td>
+<td>Mode used when a create names none. Must be enabled. Unset: the only enabled mode, else <code>interactive</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>The mode itself is picked <strong>per cell</strong>, at create time — <code>kuke run &lt;config&gt; --mode headless --param PROMPT=…</code> — so one Config serves both an attached session and a dispatched run. A Config may fill the secret slots of every mode it enables; only the picked mode's required slots and parameters are checked for a given cell.</p>
+<h3 id="specgit-object-optional"><code>spec.git</code> (object, optional)<a class="headerlink" href="#specgit-object-optional" title="Permanent link">&para;</a></h3>
+<p>Overrides the git identity, credentials and signing config the cell inherits from its Realm → Space → Stack defaults. Same shape as a container's <a href="../container/#containergit"><code>git</code></a>: <code>author</code>, <code>committer</code> and <code>signing</code> replace the inherited value; <code>credentials[]</code> merge by <code>host</code>. See the <a href="../../guides/git-credentials/">git credentials guide</a>.</p>
 <h2 id="slot-fills">Slot fills<a class="headerlink" href="#slot-fills" title="Permanent link">&para;</a></h2>
 <p>A <code>CellConfig</code> fills the structural slots a <a href="../blueprint/"><code>CellBlueprint</code></a> declares. Slot matching is by <strong>name</strong>, across all of the blueprint's containers — the same slot name on two containers shares a single Config-side entry. The validation gates are:</p>
 <ul>
@@ -3791,7 +4002,7 @@
 <p>kukeond is the only place a CellConfig becomes a Cell: <code>kuke create cell --from-config</code>, <code>kuke run --from-config</code>, <code>kuke create cell --clone</code>, the web UI, the <code>OutOfSync</code> reconciler and the <code>kuke restart</code> re-apply all ask the daemon to render. The render merges the <code>spec.defaults</code> of the cell's <a href="../realm/#specdefaults-object-optional">Realm</a>, <a href="../space/">Space</a> and <a href="../stack/">Stack</a> under the Config's own fill:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Realm defaults → Space defaults → Stack defaults → CellConfig → (per-cell --env)
 </code></pre></div>
-<p>Maps merge per key, and the deeper level wins. A blueprint parameter no level sets keeps its blueprint default. Repo and secret defaults apply only to slots the referenced blueprint declares — a realm-wide <code>github-token</code> secret default is simply ignored by a blueprint without that slot — while the Config's own fills stay strictly validated. A level default can satisfy a required slot the Config leaves open. Container <code>image</code> values that name a realm <a href="../realm/#specimages-array-optional"><code>spec.images</code></a> entry resolve to that image.</p>
+<p>Maps merge per key, and the deeper level wins. The <code>git</code> block merges the same way: identity and signing are replaced by the deepest level that sets them, and <code>credentials[]</code> merge by <code>host</code>. A blueprint parameter no level sets keeps its blueprint default. Repo and secret defaults apply only to slots the referenced blueprint declares — a realm-wide <code>github-token</code> secret default is simply ignored by a blueprint without that slot — while the Config's own fills stay strictly validated. A level default can satisfy a required slot the Config leaves open. Container <code>image</code> values that name a realm <a href="../realm/#specimages-array-optional"><code>spec.images</code></a> entry resolve to that image.</p>
 <p><code>kuke create cell &lt;name&gt; --from-config &lt;cfg&gt; --dry-run --explain</code> prints every resolved value with the level that set it (<code>realm</code>, <code>space</code>, <code>stack</code>, <code>config</code>, or <code>blueprint</code>) and the rendered cell's digest; the web UI's create preview shows the same table (scalar values hidden).</p>
 <p>Every rendered cell records its render provenance as annotations: <code>kukeon.io/render-digest</code>, <code>kukeon.io/render-config-revision</code>, <code>kukeon.io/render-{realm,space,stack}-defaults</code> (<code>generation=&lt;n&gt; hash=&lt;h&gt;</code>), <code>kukeon.io/render-image-digests</code>, <code>kukeon.io/render-values-hash</code>, <code>kukeon.io/render-origins</code> and <code>kukeon.io/render-kukeon-version</code>. Preview and create of the same inputs (including the cell name) produce the same digest.</p>
 <p>Editing a level's <code>spec.defaults</code> marks every dependent cell <code>OutOfSync</code> with <code>outOfSyncReason</code> naming the level (<code>realm defaults changed</code>, …), and a rebuilt realm image does the same (<code>image &lt;name&gt; digest changed</code>). <code>kuke restart &lt;cell&gt;</code> applies the change: a defaults edit that leaves the rendered spec untouched only records the new provenance; a rebuilt image recreates the cell.</p>
@@ -3863,7 +4074,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 15, 2026 10:19:44 UTC">November 15, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 16, 2026 11:01:05 UTC">November 16, 2026</span>
   </span>
 
     

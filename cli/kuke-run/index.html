@@ -1133,6 +1133,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../concepts/blueprint-contract/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Blueprint contract: components and modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../concepts/team/" class="md-nav__link">
         
   
@@ -1515,6 +1543,62 @@
     
   
     Private registry credentials
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/git-credentials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Git credentials and identity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/migrate-to-stored-git-credentials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Migrating to stored git credentials and shared blueprints
   
 
     
@@ -3409,7 +3493,7 @@
 <li><code>kuke run -f &lt;file&gt;</code> — a single-cell YAML doc (or <code>-</code> for stdin). Create-or-attach by <code>metadata.name</code>.</li>
 <li><code>kuke run --image &lt;ref&gt; [--command &lt;cmd&gt;]</code> — synthesize a single-container cell from a bare image ref and create + start + attach it (the quick-start path). The container is <code>attachable: true</code> with entrypoint <code>/bin/sh</code> (overridable via <code>--command</code>); the runner synthesizes the root container at create time.</li>
 <li><code>kuke run --from-blueprint &lt;bp&gt; [--param K=V]...</code> — create + start + attach a fresh cell from a daemon-stored CellBlueprint.</li>
-<li><code>kuke run --from-config &lt;cfg&gt; [--env K=V]...</code> — create + start + attach a fresh cell from a daemon-stored CellConfig.</li>
+<li><code>kuke run --from-config &lt;cfg&gt; [--mode &lt;m&gt;] [--param K=V]... [--env K=V]...</code> — create + start + attach a fresh cell from a daemon-stored CellConfig, in the picked harness mode.</li>
 <li><code>kuke run --clone &lt;cell&gt;</code> — fork an existing cell's recipe (its materialised <code>CellDoc</code>) into a fresh cell. Lineage and provenance binding are preserved; the source cell's runtime overlay is <strong>not</strong> copied.</li>
 </ul>
 <p>The fused <code>--from-*</code>/<code>--clone</code> form delegates its create half to the same <code>cell.Materialize</code> function <code>kuke create cell</code> runs (shared FlagSet, no drift): the produced <code>CellDoc</code> is identical to <code>kuke create cell --from-...</code> followed by <code>kuke start</code>. The cell name is <code>--name X</code> when given, else a generated <code>&lt;prefix&gt;-&lt;6hex&gt;</code> probed free against the daemon at the cell's scope.</p>
@@ -3455,7 +3539,7 @@
 <tr>
 <td><code>--from-config</code></td>
 <td><em>(one source)</em></td>
-<td>Daemon-stored CellConfig name to materialise from, resolved from the same scope. The Config carries its own scalar values + structural slot fills, so <code>--param</code>/<code>--param-file</code> are rejected; persisted per-cell env overrides are supplied via <code>--env KEY=VALUE</code></td>
+<td>Daemon-stored CellConfig name to materialise from, resolved from the same scope. The Config carries its own scalar values + structural slot fills, so <code>--param-file</code> is rejected and <code>--param</code> is accepted only for the parameters of the harness mode the cell is created in (<code>--mode</code>); persisted per-cell env overrides are supplied via <code>--env KEY=VALUE</code></td>
 </tr>
 <tr>
 <td><code>--clone</code></td>
@@ -3468,9 +3552,14 @@
 <td>Name the cell created by <code>--image</code>/<code>--from-blueprint</code>/<code>--from-config</code>/<code>--clone</code>. Rejected with the <code>&lt;cell&gt;</code> positional (the positional IS the cell name) and with <code>-f</code> (where <code>metadata.name</code> is authoritative). A <code>--name X</code> collision against a live cell exits non-zero with a <code>kuke run X</code> pointer for the start+attach-existing path</td>
 </tr>
 <tr>
+<td><code>--mode</code></td>
+<td><em>(the Config's default)</em></td>
+<td>Harness mode to create the cell in (e.g. <code>interactive</code>, <code>headless</code>). Valid with <code>--from-config</code> and <code>--clone</code> of a Config-lineage cell; must be a mode the blueprint declares and the Config enables. See <a href="../../concepts/blueprint-contract/#modes">Modes</a></td>
+</tr>
+<tr>
 <td><code>--param</code></td>
 <td>(empty, repeatable)</td>
-<td>Scalar parameter override as <code>KEY=VALUE</code>. Valid with <code>--from-blueprint</code>. Each <code>KEY</code> must be declared in <code>spec.parameters[]</code>. Wins over the default and over <code>--param-file</code>. Rejected on every other source path</td>
+<td>Scalar parameter override as <code>KEY=VALUE</code>. With <code>--from-blueprint</code> each <code>KEY</code> must be declared in <code>spec.parameters[]</code>; it wins over the default and over <code>--param-file</code>. With <code>--from-config</code> it is accepted only for the picked mode's parameters (e.g. <code>--mode headless --param PROMPT=…</code>) and is recorded on the cell. Rejected on every other source path</td>
 </tr>
 <tr>
 <td><code>--param-file</code></td>
@@ -3543,7 +3632,7 @@
 <p>The <code>--from-blueprint</code>/<code>--from-config</code>/<code>--clone</code> flags run daemon-stored templates (or fork an existing cell's recipe) instead of an on-disk file. They share their definitions with <a href="../kuke-create/#kuke-create-cell"><code>kuke create cell</code></a> (<code>cell.RegisterSourceFlags</code>) so the un-fused <code>kuke create cell --from-...</code> + <code>kuke start &lt;name&gt;</code> and the fused <code>kuke run --from-...</code> produce identical CellDocs.</p>
 <ul>
 <li><strong><code>--from-blueprint &lt;bp&gt;</code></strong> — a CellBlueprint is a template with declared <code>spec.parameters[]</code>. Scalar <code>--param KEY=VALUE</code> (or <code>--param-file</code>) overrides the Blueprint's defaults. <code>--env</code> is rejected here (Blueprints take render-time <code>--param</code>, not runtime env overrides — <code>cell.ValidateOverrideSymmetry</code> enforces the rejection).</li>
-<li><strong><code>--from-config &lt;cfg&gt;</code></strong> — a CellConfig binds a CellBlueprint reference to concrete scalar values plus structural slot fills (repo bindings, secret references). <code>--param</code>/<code>--param-file</code> are rejected (the Config owns its values — edit it instead). <code>--env KEY=VALUE</code> is the <strong>persisted per-cell override</strong> baked into the materialised CellDoc (<code>Spec.Provenance.EnvOverrides</code>, #1023) — symmetric with <code>kuke create cell --from-config --env</code>. The override survives re-resolution from provenance (P5) and <code>kuke restart</code>'s daemon-side reconcile (P7).</li>
+<li><strong><code>--from-config &lt;cfg&gt;</code></strong> — a CellConfig binds a CellBlueprint reference to concrete scalar values plus structural slot fills (repo bindings, secret references). <code>--param-file</code> is rejected and <code>--param</code> is limited to the picked mode's parameters (the Config owns its values — edit it instead); <code>--mode</code> picks the harness mode, and a cell that supplies a parameter only one mode declares is created in that mode. <code>--env KEY=VALUE</code> is the <strong>persisted per-cell override</strong> baked into the materialised CellDoc (<code>Spec.Provenance.EnvOverrides</code>, #1023) — symmetric with <code>kuke create cell --from-config --env</code>. The override survives re-resolution from provenance (P5) and <code>kuke restart</code>'s daemon-side reconcile (P7).</li>
 <li><strong><code>--clone &lt;cell&gt;</code></strong> — forks an existing cell's <code>CellDoc</code> into a fresh cell. The clone copies the source's container spec, scope, and provenance binding (the new cell stays tied to its original Blueprint/Config for re-resolution); it does <strong>not</strong> copy the source's runtime overlay. Use when you want a sibling of an existing dev cell that drifts independently from this point on.</li>
 </ul>
 <p>The fused form is always create + start + attach: a <code>--name X</code> collision against a live cell exits non-zero with a <code>kuke run X</code> pointer for the start+attach-existing path. Without <code>--name</code>, the generated <code>&lt;prefix&gt;-&lt;6hex&gt;</code> is probed free against the daemon at the cell's scope, so the generated path can't collide.</p>
@@ -3582,11 +3671,14 @@
 <a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a><span class="c1"># Same Config, with a persisted per-cell env override baked into the CellDoc</span>
 <a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>--from-config<span class="w"> </span>kukeon-dev-pick-issue<span class="w"> </span>--env<span class="w"> </span><span class="nv">LABEL</span><span class="o">=</span>bug<span class="w"> </span>-d
 <a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>
-<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a><span class="c1"># Fork an existing cell's recipe into a sibling</span>
-<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>--clone<span class="w"> </span>kukeon-dev<span class="w"> </span>--name<span class="w"> </span>kukeon-dev-debug
+<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a><span class="c1"># Dispatch a headless run from the same config an attached session uses</span>
+<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>--from-config<span class="w"> </span>kukeon-dev<span class="w"> </span>--mode<span class="w"> </span>headless<span class="w"> </span>--param<span class="w"> </span><span class="nv">PROMPT</span><span class="o">=</span><span class="s2">"triage the backlog"</span><span class="w"> </span>-d
 <a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a>
-<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a><span class="c1"># One-shot job that cleans itself up after the workload exits</span>
-<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>--from-blueprint<span class="w"> </span>batch<span class="w"> </span>--rm
+<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a><span class="c1"># Fork an existing cell's recipe into a sibling</span>
+<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>--clone<span class="w"> </span>kukeon-dev<span class="w"> </span>--name<span class="w"> </span>kukeon-dev-debug
+<a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a>
+<a id="__codelineno-1-31" name="__codelineno-1-31" href="#__codelineno-1-31"></a><span class="c1"># One-shot job that cleans itself up after the workload exits</span>
+<a id="__codelineno-1-32" name="__codelineno-1-32" href="#__codelineno-1-32"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>--from-blueprint<span class="w"> </span>batch<span class="w"> </span>--rm
 </code></pre></div>
 <h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
 <ul>
@@ -3617,7 +3709,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 14, 2026 19:42:23 UTC">June 14, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 16, 2026 11:01:05 UTC">November 16, 2026</span>
   </span>
 
     

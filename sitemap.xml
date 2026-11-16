@@ -141,6 +141,10 @@
          <lastmod>2026-11-16</lastmod>
     </url>
     <url>
+         <loc>https://kukeon.io/concepts/blueprint-contract/</loc>
+         <lastmod>2026-11-16</lastmod>
+    </url>
+    <url>
          <loc>https://kukeon.io/concepts/cell/</loc>
          <lastmod>2026-11-16</lastmod>
     </url>
@@ -197,11 +201,19 @@
          <lastmod>2026-11-16</lastmod>
     </url>
     <url>
+         <loc>https://kukeon.io/guides/git-credentials/</loc>
+         <lastmod>2026-11-16</lastmod>
+    </url>
+    <url>
          <loc>https://kukeon.io/guides/init-and-reset/</loc>
          <lastmod>2026-11-16</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/guides/local-dev/</loc>
+         <lastmod>2026-11-16</lastmod>
+    </url>
+    <url>
+         <loc>https://kukeon.io/guides/migrate-to-stored-git-credentials/</loc>
          <lastmod>2026-11-16</lastmod>
     </url>
     <url>

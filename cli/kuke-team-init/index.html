@@ -1133,6 +1133,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../concepts/blueprint-contract/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Blueprint contract: components and modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../concepts/team/" class="md-nav__link">
         
   
@@ -1515,6 +1543,62 @@
     
   
     Private registry credentials
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/git-credentials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Git credentials and identity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/migrate-to-stored-git-credentials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Migrating to stored git credentials and shared blueprints
   
 
     
@@ -2273,6 +2357,17 @@
     <span class="md-ellipsis">
       
         Daemon endpoint and client configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#git-identity-and-credentials" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Git identity and credentials
       
     </span>
   </a>
@@ -3360,6 +3455,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#git-identity-and-credentials" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Git identity and credentials
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#authentication-and-secrets" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3424,7 +3530,9 @@
 
 
 <h1 id="kuke-team-init">kuke team init<a class="headerlink" href="#kuke-team-init" title="Permanent link">&para;</a></h1>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke team init [--force] [--host ENDPOINT] [--configuration PATH]
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke team init [--force] [--import-git-identity [--git-key PATH]
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>               [--git-key-passphrase-file FILE] [--git-known-hosts FILE]]
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>               [--host ENDPOINT] [--configuration PATH]
 </code></pre></div>
 <p>Initialize the operator's team configuration and apply the kukeon operator
 team to kukeond. <code>init</code> creates no cells and starts nothing; launch a composed
@@ -3459,6 +3567,39 @@ For the shared composition model, see <a href="../../concepts/team/">Teams</a>.<
 </tr>
 </tbody>
 </table>
+<p>Git identity import (see <a href="#git-identity-and-credentials">Git identity and credentials</a>):</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--import-git-identity</code></td>
+<td><code>false</code></td>
+<td>Your consent to copy an SSH private key into the <code>ssh-key</code> secret <code>git-ssh</code> and use it for the team's git credentials (and signing, if you already sign).</td>
+</tr>
+<tr>
+<td><code>--git-key</code></td>
+<td>—</td>
+<td>Private key to import. Default: the key git signs with, else <code>~/.ssh/id_ed25519</code>, <code>id_ecdsa</code>, <code>id_rsa</code>.</td>
+</tr>
+<tr>
+<td><code>--git-key-passphrase-file</code></td>
+<td>—</td>
+<td>File holding the key's passphrase. Required for a passphrase-protected key.</td>
+</tr>
+<tr>
+<td><code>--git-known-hosts</code></td>
+<td>—</td>
+<td><code>known_hosts</code> file to pin for the imported key. Default: the built-in <code>github.com</code>, <code>gitlab.com</code> and <code>bitbucket.org</code> keys.</td>
+</tr>
+</tbody>
+</table>
+<p>The last three require <code>--import-git-identity</code>.</p>
 <p>kuke's global flags (<code>--verbose</code>, <code>--log-level</code>, <code>--run-path</code>, <code>--no-daemon</code>)
 are accepted but have no effect on <code>kuke team</code> subcommands: they resolve the
 operator home, the kukeond endpoint and the <code>ClientConfiguration</code> themselves.</p>
@@ -3510,8 +3651,10 @@ operator role and both harnesses come from the kukeon repository (<code>team/rol
 <a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a><span class="w">      </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kukeon</span>
 <a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">team/harnesses/claude</span>
 </code></pre></div>
-<p>This applies matching blueprints and CellConfigs named <code>kukeon-operator-codex</code>
-and <code>kukeon-operator-claude</code>. Init does not start them. The explicit entry keeps
+<p>This applies the shared blueprints <code>codex</code> and <code>claude</code> — one per harness ×
+security profile, realm-wide, see <a href="../../concepts/team/#shared-blueprints">Teams</a> —
+and the CellConfigs <code>kukeon-operator-codex</code> and <code>kukeon-operator-claude</code> that
+reference them. Init does not start them. The explicit entry keeps
 recomposition independent of global operator defaults. Configure reusable
 <a href="../../concepts/team/#reusable-defaults-after-init">global defaults</a> separately.</p>
 <h2 id="daemon-endpoint-and-client-configuration">Daemon endpoint and client configuration<a class="headerlink" href="#daemon-endpoint-and-client-configuration" title="Permanent link">&para;</a></h2>
@@ -3533,8 +3676,49 @@ a complete <code>0600</code> TeamEntry before mutating the daemon. Provision mis
 scopes with kuke (<code>kuke init</code> creates <code>default/default/default</code>). Init never
 creates, starts, restarts, or deletes cells. <code>ApplyDocumentsForTeam</code> receives
 the stable team name <code>kukeon</code>, so reruns update that team's resources and prune
-obsolete team-owned blueprints and configs. It does not prune credentials or
-running cells.</p>
+obsolete team-owned configs. A shared blueprint the team stops using is removed
+only when no other CellConfig references it; if the realm already holds a
+different blueprint under a shared name that another team uses, this team's is
+applied as <code>&lt;name&gt;-&lt;content digest&gt;</code> instead of overwriting it. It does not
+prune credentials or running cells.</p>
+<h2 id="git-identity-and-credentials">Git identity and credentials<a class="headerlink" href="#git-identity-and-credentials" title="Permanent link">&para;</a></h2>
+<p>Team cells clone, push and sign with <a href="../../guides/git-credentials/">stored git credentials</a>.
+The host <code>~/.ssh</code> is never mounted, and init reads nothing from it unless you
+pass <code>--import-git-identity</code>.</p>
+<p><code>spec.git</code> in <code>~/.kuke/kuketeams.yaml</code> is the operator's default identity. It
+names secrets, not host paths:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">git</span><span class="p">:</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="nt">author</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Ada Lovelace</span><span class="p p-Indicator">,</span><span class="nt"> email</span><span class="p">:</span><span class="w"> </span><span class="nv">ada@example.com</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">    </span><span class="nt">committer</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Ada Lovelace</span><span class="p p-Indicator">,</span><span class="nt"> email</span><span class="p">:</span><span class="w"> </span><span class="nv">ada@example.com</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">    </span><span class="nt">credentials</span><span class="p">:</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">host</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">github.com</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">        </span><span class="nt">secretRef</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">git-ssh</span><span class="p p-Indicator">,</span><span class="nt"> realm</span><span class="p">:</span><span class="w"> </span><span class="nv">default</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">    </span><span class="nt">signing</span><span class="p">:</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">      </span><span class="nt">secretRef</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">git-ssh</span><span class="p p-Indicator">,</span><span class="nt"> realm</span><span class="p">:</span><span class="w"> </span><span class="nv">default</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">    </span><span class="nt">sign</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">commits</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">tags</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<p>Init writes it as <code>spec.defaults.git</code> of the team's stack, so every team cell
+inherits it. Only that <code>git</code> block is touched: the stack's other defaults are
+kept, and credentials for other hosts are merged by host. A source may state its
+own identity (<code>sources[].git</code>), which is rendered into that repo's fill of each
+CellConfig.</p>
+<p>Init discovers <code>user.name</code> / <code>user.email</code> from your global git configuration.
+With <code>--import-git-identity</code> it also stores your SSH key as the secret
+<code>git-ssh</code>, binds it to every host the team's sources use, and — when your git
+configuration already signs commits or tags <strong>with that key</strong> — makes it the
+signing key and stores your allowed-signers file as <code>git-allowed-signers</code>. If
+<code>user.signingkey</code> names something else (a GPG key, or a different SSH key), the
+key is imported as a credential only, signing is left off and a note says so:
+cells signing with a key your forge does not know as your signing key would
+produce unverified commits. An import always writes the secret: an existing
+<code>git-ssh</code> is replaced with the key you named, and a note reports the
+replacement. Without the flag, init reports each SSH
+source no stored credential covers and each setting that no longer has an
+effect (the pre-stored-credential <code>signingKey</code> / <code>allowedSigners</code> host paths, a
+role's <code>needs.mounts: [ssh]</code>) as a note.</p>
+<p>Migrating an existing installation: see
+<a href="../../guides/migrate-to-stored-git-credentials/">Migrating to stored git credentials</a>.</p>
 <h2 id="authentication-and-secrets">Authentication and secrets<a class="headerlink" href="#authentication-and-secrets" title="Permanent link">&para;</a></h2>
 <p>Only selected role/harness requirements contribute secret lookups. The base
 operator with Codex or Claude does not require <code>gh</code> or <code>gh-token</code>. Selecting
@@ -3556,8 +3740,8 @@ or saved in the TeamEntry or the blueprint/config request.</p>
 blueprints/configs are still applied and the team registered (kukeond resolves
 secret references only when a cell launches), and the command exits 0 after
 listing each missing runtime secret once:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Missing secrets (cells will not start until they exist):
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>  provider-account  →  kuke create secret provider-account --realm auth --space shared --stack operators --from-file /path/to/token
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Missing secrets (cells will not start until they exist):
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>  provider-account  →  kuke create secret provider-account --realm auth --space shared --stack operators --from-file /path/to/token
 </code></pre></div>
 <p>Create them before launching cells; no rerun is needed. <code>kuke run</code> still fails
 on a cell whose secret is absent. The actual command uses the binding's
@@ -3584,18 +3768,26 @@ converge the same <code>kukeon</code> identity. A registration write failure aft
 application is reported as such and is also recovered by rerunning
 <code>init --force</code>.</p>
 <h2 id="output">Output<a class="headerlink" href="#output" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Created configuration: /home/me/.kuke/kuketeams.yaml
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>Applied 4 resources; registered kukeon team: /home/me/.kuke/kuketeam.d/kukeon.yaml
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>No cells created or started.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Created configuration: /home/me/.kuke/kuketeams.yaml
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>Applied 4 resources; registered kukeon team: /home/me/.kuke/kuketeam.d/kukeon.yaml
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>No cells created or started.
 </code></pre></div>
-<p>With <code>--force</code>, the first line reads <code>Reset configuration: …</code>. Diagnostics (for
+<p>Missing runtime secrets and notes follow when there are any:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Missing secrets (cells will not start until they exist):
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>  git-ssh  →  kuke create secret git-ssh --realm default --type ssh-key --from-file /path/to/private-key  (git credential; or --type basic-auth)
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>Notes:
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>  source agents is cloned over SSH but no stored git credential covers github.com; add one to spec.git.credentials (kuke team init --force --import-git-identity imports your key)
+</code></pre></div>
+<p>The resource count is the shared blueprints plus the CellConfigs, plus one when
+the stack's git defaults were written. With <code>--force</code>, the first line reads
+<code>Reset configuration: …</code>. Diagnostics (for
 example, Git settings that could not be discovered) are written to stderr.</p>
 <h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
 <p><code>make test</code> runs the injectable-client success/failure/rerun tests and the real
 Unix JSON-RPC transport tests. A separate check verifies actual daemon storage,
 reads back blueprints and configs, repeats application, and confirms that cells
 are unchanged:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nv">KUKETEAMS_INTEGRATION_HOST</span><span class="o">=</span>unix:///path/to/disposable/kukeond.sock<span class="w"> </span>make<span class="w"> </span>test-team-integration
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nv">KUKETEAMS_INTEGRATION_HOST</span><span class="o">=</span>unix:///path/to/disposable/kukeond.sock<span class="w"> </span>make<span class="w"> </span>test-team-integration
 </code></pre></div>
 <p>Use a disposable kukeond with existing <code>default/default/default</code> scope metadata.
 The check uses a unique <code>init-check-*</code> team and deletes only its generated
@@ -3622,7 +3814,7 @@ blueprints and configs on cleanup.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 15, 2026 19:33:10 UTC">November 15, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 16, 2026 11:01:05 UTC">November 16, 2026</span>
   </span>
 
     

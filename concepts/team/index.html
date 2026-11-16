@@ -15,7 +15,7 @@
         <link rel="canonical" href="https://kukeon.io/concepts/team/">
       
       
-        <link rel="prev" href="../client-and-daemon/">
+        <link rel="prev" href="../blueprint-contract/">
       
       
         <link rel="next" href="../../architecture/overview/">
@@ -1133,6 +1133,34 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../blueprint-contract/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Blueprint contract: components and modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -1233,6 +1261,56 @@
     <span class="md-ellipsis">
       
         Starting directory
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#shared-blueprints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shared blueprints
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Shared blueprints">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Modes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#connectors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connectors
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#git-identity-and-credentials" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Git identity and credentials
       
     </span>
   </a>
@@ -1653,6 +1731,62 @@
     
   
     Private registry credentials
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/git-credentials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Git credentials and identity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/migrate-to-stored-git-credentials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Migrating to stored git credentials and shared blueprints
   
 
     
@@ -3382,6 +3516,56 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#shared-blueprints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shared blueprints
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Shared blueprints">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Modes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#connectors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connectors
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#git-identity-and-credentials" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Git identity and credentials
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#runtime-repository-and-parameter-bindings" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3448,9 +3632,9 @@
 <h1 id="teams">Teams<a class="headerlink" href="#teams" title="Permanent link">&para;</a></h1>
 <p>A <strong>team</strong> is a set of agent cells composed from <strong>roles</strong> (what an agent is
 told to do) and <strong>harnesses</strong> (which agent CLI runs it, in which image). For
-every selected role × harness pair, <code>kuke team</code> renders one <code>CellBlueprint</code> and
-one <code>CellConfig</code>, applies them to kukeond under the team's ownership label, and
-records the accepted declaration on the host. Composing a team never creates or
+every selected role × harness pair, <code>kuke team</code> renders one <code>CellConfig</code> — the
+pair's answers — against a <strong>shared</strong> <code>CellBlueprint</code>, applies them to kukeond,
+and records the accepted declaration on the host. Composing a team never creates or
 starts cells: launch them explicitly, for example with
 <code>kuke run --from-config &lt;team&gt;-&lt;role&gt;-&lt;harness&gt;</code>.</p>
 <p>Two commands drive it:</p>
@@ -3586,6 +3770,119 @@ repository slot. To start in the project, set <code>initialPath</code> to the pr
 absolute in-cell clone destination. Role <code>path</code> still locates definition
 assets: materialization runs against the role source before launch and
 installs instructions and skills in the harness's native home directories.</p>
+<h2 id="shared-blueprints">Shared blueprints<a class="headerlink" href="#shared-blueprints" title="Permanent link">&para;</a></h2>
+<p>A blueprint rendered by <code>kuke team</code> is a form with no role facts in it, so it
+is shared: <strong>one blueprint per harness × security profile</strong>, realm-wide, used by
+every role and every team in the realm — and by the web UI's <em>New config</em> form.
+See <a href="../blueprint-contract/">Blueprint contract</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Blueprint</th>
+<th>For roles that need</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;harness&gt;</code></td>
+<td>the default posture (<code>claude</code>, <code>codex</code>, <code>opencode</code>)</td>
+</tr>
+<tr>
+<td><code>&lt;harness&gt;-root</code></td>
+<td>the <code>root</code> image capability: a privileged cell with a nested container runtime</td>
+</tr>
+<tr>
+<td><code>&lt;harness&gt;-host</code></td>
+<td>the <code>kukeond-socket</code>, <code>kuke-binary</code> and <code>kukeon-install</code> host mounts</td>
+</tr>
+<tr>
+<td><code>&lt;harness&gt;-root-host</code></td>
+<td>both</td>
+</tr>
+</tbody>
+</table>
+<p>A role that selects only some of the host mounts gets a profile named after
+them. The security posture is fixed in the blueprint and is never a Config
+toggle.</p>
+<p>Each blueprint is assembled from components: the <strong>harness</strong> (its parameters,
+env, secret slots and start modes, copied from <code>harness.yaml</code>), and the optional
+<strong>connector</strong> and <strong>forge</strong> components of the library kuke ships under
+<code>team/components/</code> (<code>github</code>, <code>github-issues</code>). Everything that differs between
+two roles lives in the pair's CellConfig:</p>
+<table>
+<thead>
+<tr>
+<th>Role fact</th>
+<th>In the CellConfig</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Image picked for the role's <code>needs.image</code></td>
+<td><code>values.IMAGE</code>, plus <code>requires</code> for the capabilities</td>
+</tr>
+<tr>
+<td>Role source checkout, role path, start dir</td>
+<td><code>values.ROLE_SOURCE_DIR</code>, <code>ROLE_PATH</code>, <code>INITIAL_PATH</code></td>
+</tr>
+<tr>
+<td>Harness settings (claude settings file, codex sandbox/approval, opencode permissions)</td>
+<td><code>values.HARNESS_SETTINGS</code>, <code>SANDBOX</code>, <code>APPROVAL</code>, <code>PERMISSIONS</code></td>
+</tr>
+<tr>
+<td>Repositories</td>
+<td><code>repos.role-source</code>, <code>repos.project</code>, one slot per further cloned source</td>
+</tr>
+<tr>
+<td>Secrets</td>
+<td><code>secrets.&lt;slot&gt;</code> → a stored Secret</td>
+</tr>
+<tr>
+<td>Connectors and forges</td>
+<td><code>components</code></td>
+</tr>
+<tr>
+<td>Harness state volume</td>
+<td><code>values.STATE_VOLUME</code></td>
+</tr>
+</tbody>
+</table>
+<p>Blueprints carry <code>kukeon.io/shared: "true"</code> and no team label. If the realm
+already holds a different blueprint under a shared name that another team's
+Config references, this team's is applied as <code>&lt;name&gt;-&lt;content digest&gt;</code> instead
+of overwriting it. A team's apply removes a shared blueprint it stopped using
+only when no other CellConfig references it.</p>
+<h3 id="modes">Modes<a class="headerlink" href="#modes" title="Permanent link">&para;</a></h3>
+<p>A harness declares the ways it starts under <code>spec.modes</code> in <code>harness.yaml</code> —
+the shipped ones declare <code>interactive</code> and <code>headless</code>. The mode is picked per
+cell, so one role Config serves both:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>kuke<span class="w"> </span>run<span class="w"> </span>acme-dev-claude<span class="w">                                               </span><span class="c1"># interactive</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>kuke<span class="w"> </span>run<span class="w"> </span>acme-dev-claude<span class="w"> </span>--mode<span class="w"> </span>headless<span class="w"> </span>--param<span class="w"> </span><span class="nv">PROMPT</span><span class="o">=</span><span class="s2">"triage #42"</span><span class="w"> </span>-d
+</code></pre></div>
+<h3 id="connectors">Connectors<a class="headerlink" href="#connectors" title="Permanent link">&para;</a></h3>
+<p>A role enables a connector by name:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># role.yaml</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="nt">connectors</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">github</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="c1"># GH_TOKEN for the gh CLI, plus the `gh` image capability</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span><span class="nt">forges</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">github-issues</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="c1"># optional; implies the github connector</span>
+</code></pre></div>
+<p>The <code>github</code> connector's token is used only for the GitHub API. It is never a
+git credential: clone, push and signing use the git identity below. The older
+spelling — <code>harnesses.&lt;h&gt;.secrets: [gh-token]</code> with <code>needs.image: [gh]</code> — still
+composes and enables the same connector, filled from the same <code>gh-token</code>
+secret.</p>
+<h2 id="git-identity-and-credentials">Git identity and credentials<a class="headerlink" href="#git-identity-and-credentials" title="Permanent link">&para;</a></h2>
+<p>Team cells use <a href="../../guides/git-credentials/">stored git credentials</a>; the host
+<code>~/.ssh</code> is never mounted. <code>TeamsConfig.spec.git</code> names the operator's default
+identity, credentials and signing key by secret, and <code>kuke team</code> writes it as
+the <code>spec.defaults.git</code> of the team's stack, where every team cell inherits it.
+A source may state its own identity with <code>sources[].git</code>; it is rendered into
+that repo's fill of each CellConfig. The remote transport follows the
+credential, so a project added by its HTTPS URL is still cloned and pushed over
+SSH when its host is bound to an SSH key.</p>
+<p><a href="../../cli/kuke-team-init/#git-identity-and-credentials"><code>kuke team init --import-git-identity</code></a>
+stores your existing key as a secret, with your explicit consent. A role's
+<code>needs.mounts: [ssh]</code> is still accepted but mounts nothing.</p>
 <h2 id="runtime-repository-and-parameter-bindings">Runtime repository and parameter bindings<a class="headerlink" href="#runtime-repository-and-parameter-bindings" title="Permanent link">&para;</a></h2>
 <p>A source is the single declaration of its URL and branch/tag/commit. Optional
 <code>sources[].clonePath</code> requests a runtime clone at an absolute in-cell
@@ -3596,16 +3893,20 @@ to an effective source with <code>clonePath</code>. Other effective sources with
 <code>clonePath</code> also request clones. Clone destinations must be unique. The
 <code>github.com/owner/repo</code> URL shorthand becomes HTTPS in runtime config fills;
 authored declarations keep their spelling.</p>
-<p>Destinations are bound in blueprint repository slots; URLs and revisions are
-bound through <code>CellConfig.spec.repos</code>. Branches map to <code>branch</code>; tags and
+<p>The shared blueprint declares the repository slots <code>role-source</code> (the selected
+role's source) and <code>project</code>, plus one slot per further cloned source;
+destinations, URLs and revisions are bound through <code>CellConfig</code> values and
+<code>spec.repos</code>. Branches map to <code>branch</code>; tags and
 commits map to <code>ref</code>. The harness launchers preserve this checkout: they do not
 switch branches or pull newer revisions during launch.</p>
 <p><code>TeamsConfig.spec.parameters</code> is a string map of declared scalar parameters.
 Each composition binds only keys its blueprint declares. Required parameters
-without defaults must be supplied, and unknown keys fail. <code>AGENT_NAME</code> defaults
+without defaults must be supplied, and unknown keys fail. The parameters
+composition derives from the role and source selections (<code>IMAGE</code>, <code>ROLE_PATH</code>,
+<code>STATE_VOLUME</code>, …) cannot be set here. <code>AGENT_NAME</code> defaults
 to the full resource identity. Parameters must not hold credentials: use secret
 bindings instead.</p>
-<p>Harness-owned <code>spec.onInit</code> scripts call the image-installed
+<p>Harness-owned <code>onInit</code> scripts (<code>spec.onInit</code>, or each mode's) call the image-installed
 <code>/opt/kuketeams/harness/Makefile.start setup</code>, which runs
 <code>make -C "$ROLE_SOURCE_DIR" &lt;harness&gt; ROLE="$ROLE_PATH"</code> against the role's
 checkout. A repository that serves roles therefore exposes one Makefile target
@@ -3613,9 +3914,7 @@ per harness — this repository's <code>make claude</code>, <code>make codex</co
 <code>make opencode-openrouter</code> (all backed by <code>team/scripts/materialize-role.sh</code>).
 Startup then uses <code>INITIAL_PATH</code>; the harness source need not be checked out in
 the cell.</p>
-<p>Host Git author/committer identities may be copied into the container. Signing
-paths are mapped into <code>/home/user/.ssh</code> only when the role explicitly requests
-an <code>ssh</code> mount. The base operator needs no SSH mount or signing prerequisite.</p>
+<p>The base operator clones over HTTPS and needs no git credential.</p>
 <h2 id="secret-declarations">Secret declarations<a class="headerlink" href="#secret-declarations" title="Permanent link">&para;</a></h2>
 <p>Only selected role/harness requirements contribute bindings. The shipped
 operator has no <code>gh</code> or <code>gh-token</code> requirement. Claude and Codex can reuse an
@@ -3630,6 +3929,12 @@ selected provider requires <code>openrouter-api-key</code>.</p>
    (<code>default</code>), exposed as the requirement upper-snake-cased (<code>gh-token</code> →
    <code>GH_TOKEN</code>, <code>openrouter-api-key</code> → <code>OPENROUTER_API_KEY</code>).</li>
 </ol>
+<p>A shared blueprint fixes where a secret lands: a harness slot
+(<code>claude-code-oauth-token</code> → <code>CLAUDE_CODE_OAUTH_TOKEN</code>, <code>openrouter-api-key</code> →
+<code>OPENROUTER_API_KEY</code>) and a connector slot (<code>github-token</code> → <code>GH_TOKEN</code>) keep
+their declared destination, and a binding whose <code>envName</code> differs is rejected.
+A role secret no harness or component declares becomes an optional slot on the
+shared blueprint, with the binding's <code>envName</code>.</p>
 <p>Composition records every binding the selected pairs use in the TeamEntry, so a
 repeated add or a recomposition from the entry alone keeps them. Bindings for
 requirements no selected pair uses are dropped. Because the recorded binding
@@ -3638,19 +3943,19 @@ it there to fall back to the global binding or default). A requirement whose
 name cannot yield an environment identifier (e.g. it starts with a digit) must
 be bound explicitly. The project's <code>kind: Team</code> file never declares bindings.</p>
 <p>An explicit global binding looks like this:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Optional, under TeamsConfig.spec (or the same shape under TeamEntry secrets).</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nt">secrets</span><span class="p">:</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">openrouter-api-key</span><span class="w"> </span><span class="c1"># identifier in Role.spec.harnesses.opencode.secrets</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">    </span><span class="nt">secretRef</span><span class="p">:</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">provider-account</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">      </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auth</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">      </span><span class="nt">space</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">shared</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">      </span><span class="nt">stack</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">operators</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">    </span><span class="nt">envName</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OPENROUTER_API_KEY</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">    </span><span class="c1"># Optional fallback if application finds no runtime secret:</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">    </span><span class="nt">source</span><span class="p">:</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">      </span><span class="nt">env</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OPERATOR_OPENROUTER_KEY</span>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">      </span><span class="c1"># Alternatively: file: /absolute/path/to/private/provider-key</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># Optional, under TeamsConfig.spec (or the same shape under TeamEntry secrets).</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nt">secrets</span><span class="p">:</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">openrouter-api-key</span><span class="w"> </span><span class="c1"># identifier in Role.spec.harnesses.opencode.secrets</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">    </span><span class="nt">secretRef</span><span class="p">:</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">provider-account</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">      </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auth</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">      </span><span class="nt">space</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">shared</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">      </span><span class="nt">stack</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">operators</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">    </span><span class="nt">envName</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OPENROUTER_API_KEY</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="w">    </span><span class="c1"># Optional fallback if application finds no runtime secret:</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="w">    </span><span class="nt">source</span><span class="p">:</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="w">      </span><span class="nt">env</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OPERATOR_OPENROUTER_KEY</span>
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="w">      </span><span class="c1"># Alternatively: file: /absolute/path/to/private/provider-key</span>
 </code></pre></div>
 <p><code>name</code>, the scoped <code>secretRef</code>, and <code>envName</code> are required. <code>source</code> is
 optional; when present it names exactly one environment <strong>variable</strong> or
@@ -3660,8 +3965,8 @@ reads values or emits <code>Secret</code> documents. Application checks runtime 
 reuses existing secrets, and reads a creation source only when a secret is
 missing.</p>
 <h2 id="resource-names-and-state-volumes">Resource names and state volumes<a class="headerlink" href="#resource-names-and-state-volumes" title="Permanent link">&para;</a></h2>
-<p>Pairs follow role order, then harness order. Each pair's blueprint and config
-are named <code>&lt;team&gt;-&lt;role&gt;-&lt;harness&gt;</code>, with dots and punctuation runs collapsed
+<p>Pairs follow role order, then harness order. Each pair's config
+is named <code>&lt;team&gt;-&lt;role&gt;-&lt;harness&gt;</code>, with dots and punctuation runs collapsed
 to single hyphens: team <code>esp32</code>, role <code>pr-reviewer</code>, and harness <code>codex</code>
 produce <code>esp32-pr-reviewer-codex</code>. Different selections can collide on these
 readable names (<code>root-a</code>/<code>operator</code> and <code>root</code>/<code>a-operator</code>); choose distinct
@@ -3671,7 +3976,9 @@ Resources default to realm/space/stack <code>default</code>.</p>
 16-character SHA-256 suffix when any original component contains a dot or
 hyphen, so state stays isolated even when readable names coincide. Explicit
 <code>volumeRef</code> bindings remain explicit references. Own-scope volume slots carry
-<code>ensure: true</code>.</p>
+<code>ensure: true</code>. The name is passed to the shared blueprint as the Config's
+<code>STATE_VOLUME</code> value and is the same name earlier per-role blueprints used, so
+a harness login survives re-rendering.</p>
 <h2 id="what-preflight-covers">What preflight covers<a class="headerlink" href="#what-preflight-covers" title="Permanent link">&para;</a></h2>
 <p>Preflight covers strict document shape, selection/reference resolution, role
 assets, template and partial execution, image capabilities, parameter
@@ -3701,7 +4008,7 @@ when the team is applied or a cell is launched.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 15, 2026 19:33:10 UTC">November 15, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 16, 2026 11:01:05 UTC">November 16, 2026</span>
   </span>
 
     

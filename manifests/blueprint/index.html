@@ -1133,6 +1133,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../concepts/blueprint-contract/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Blueprint contract: components and modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../concepts/team/" class="md-nav__link">
         
   
@@ -1515,6 +1543,62 @@
     
   
     Private registry credentials
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/git-credentials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Git credentials and identity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/migrate-to-stored-git-credentials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Migrating to stored git credentials and shared blueprints
   
 
     
@@ -2717,6 +2801,45 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#specrequires-array-of-string-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        spec.requires[] (array of string, optional)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#speccomponents-list-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        spec.components[] (list, optional)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="spec.components[] (list, optional)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#component-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Component mode
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#speccell-object-required" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3428,6 +3551,45 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#specrequires-array-of-string-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        spec.requires[] (array of string, optional)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#speccomponents-list-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        spec.components[] (list, optional)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="spec.components[] (list, optional)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#component-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Component mode
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#speccell-object-required" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3601,6 +3763,7 @@
 </tr>
 </tbody>
 </table>
+<p><code>kukeon.io/shared: "true"</code> marks a blueprint as shared: a realm-wide form any team's (or hand-written) Config may reference, such as the one blueprint per harness × security profile <a href="../../concepts/team/"><code>kuke team</code></a> renders. A shared blueprint is never stamped with a team label, and a team apply removes it only once no CellConfig references it.</p>
 <h2 id="spec">spec<a class="headerlink" href="#spec" title="Permanent link">&para;</a></h2>
 <h3 id="specprefix-string-optional"><code>spec.prefix</code> (string, optional)<a class="headerlink" href="#specprefix-string-optional" title="Permanent link">&para;</a></h3>
 <p>Cell-name prefix used when generating the <code>&lt;prefix&gt;-&lt;6hex&gt;</code> name on each <code>kuke run --from-blueprint</code>. Defaults to <code>metadata.name</code> when unset.</p>
@@ -3626,7 +3789,7 @@
 <td><code>description</code></td>
 <td>string</td>
 <td>no</td>
-<td>Free-form documentation.</td>
+<td>Free-form documentation; a form shows it next to the field.</td>
 </tr>
 <tr>
 <td><code>default</code></td>
@@ -3640,8 +3803,192 @@
 <td>no</td>
 <td>When <code>true</code>, the blueprint fails to run if the parameter resolves to no value.</td>
 </tr>
+<tr>
+<td><code>type</code></td>
+<td>string</td>
+<td>no</td>
+<td><code>string</code> (default), <code>enum</code>, <code>path</code>, <code>image</code> or <code>bool</code>. A resolved value that does not fit is rejected at render.</td>
+</tr>
+<tr>
+<td><code>enum</code></td>
+<td>array of string</td>
+<td>no</td>
+<td>The accepted values of a <code>type: enum</code> parameter. Required for <code>enum</code>, rejected on every other type.</td>
+</tr>
+<tr>
+<td><code>group</code></td>
+<td>string</td>
+<td>no</td>
+<td>The form section the parameter is shown under (e.g. <code>role</code>, <code>harness</code>). Presentation only.</td>
+</tr>
 </tbody>
 </table>
+<p>A parameter with no <code>type</code> is a <code>string</code>, so blueprints written before types existed stay valid. <code>bool</code> accepts <code>true</code> / <code>false</code>; <code>image</code> accepts an image reference or a realm image name; <code>path</code> accepts an absolute or relative path.</p>
+<h3 id="specrequires-array-of-string-optional"><code>spec.requires[]</code> (array of string, optional)<a class="headerlink" href="#specrequires-array-of-string-optional" title="Permanent link">&para;</a></h3>
+<p>Image capabilities every cell stamped from this blueprint needs — for example <code>[claude, git]</code>. See <a href="../../concepts/blueprint-contract/#image-capabilities">Image capabilities</a>.</p>
+<h3 id="speccomponents-list-optional"><code>spec.components[]</code> (list, optional)<a class="headerlink" href="#speccomponents-list-optional" title="Permanent link">&para;</a></h3>
+<p>The concerns the blueprint is assembled from. Each component bundles the parameters, secret slots, env and capabilities of one concern, and the daemon folds the enabled ones into <code>spec.cell</code> when it renders a cell. See <a href="../../concepts/blueprint-contract/">Blueprint contract</a> for the model.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>kind</code></td>
+<td>string</td>
+<td>yes</td>
+<td><code>harness</code> (the agent harness), <code>connector</code> (an external service's API credentials) or <code>forge</code> (an issue/change tracker).</td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>string</td>
+<td>yes</td>
+<td>Unique within the blueprint; a Config enables an optional component by this name.</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>string</td>
+<td>no</td>
+<td>Shown next to the component's toggle.</td>
+</tr>
+<tr>
+<td><code>optional</code></td>
+<td>bool</td>
+<td>no</td>
+<td>When <code>true</code> the component is part of a cell only if the Config lists it in <a href="../config/#speccomponents-array-of-string-optional"><code>spec.components</code></a>. Otherwise always on.</td>
+</tr>
+<tr>
+<td><code>container</code></td>
+<td>string</td>
+<td>no</td>
+<td>Container the env, secrets and mode <code>onInit</code> land on. Defaults to <code>spec.cell.tty.default</code>, else the first attachable container, else the first non-root container.</td>
+</tr>
+<tr>
+<td><code>requires</code></td>
+<td>array of string</td>
+<td>no</td>
+<td>Image capabilities the component needs.</td>
+</tr>
+<tr>
+<td><code>parameters</code></td>
+<td>list of parameter</td>
+<td>no</td>
+<td>Same shape as <code>spec.parameters[]</code>; they join the blueprint's when the component is enabled.</td>
+</tr>
+<tr>
+<td><code>env</code></td>
+<td>array of string</td>
+<td>no</td>
+<td><code>KEY=value</code> entries added to the container; values may reference <code>${PARAM}</code>s.</td>
+</tr>
+<tr>
+<td><code>secrets</code></td>
+<td>list of secret slot</td>
+<td>no</td>
+<td>Secret slots added to the container; a Config fills them by name.</td>
+</tr>
+<tr>
+<td><code>modes</code></td>
+<td>map of name → mode</td>
+<td>no</td>
+<td>The ways a harness can be started. <code>harness</code> components only; at most one component of a blueprint declares modes.</td>
+</tr>
+</tbody>
+</table>
+<p>A component never declares a git credential: git authenticates only from a <a href="../container/#containergit"><code>git</code></a> block. Two enabled components — or a component and the template — that set the same env key or the same secret destination fail the render.</p>
+<h4 id="component-mode">Component mode<a class="headerlink" href="#component-mode" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>description</code></td>
+<td>string</td>
+<td>no</td>
+<td>Shown next to the mode.</td>
+</tr>
+<tr>
+<td><code>onInit</code></td>
+<td>list of <code>TtyStage</code></td>
+<td>no</td>
+<td>Replaces the container's <code>tty.onInit</code> stages for cells in this mode.</td>
+</tr>
+<tr>
+<td><code>parameters</code></td>
+<td>list of parameter</td>
+<td>no</td>
+<td>Parameters only this mode takes (e.g. the <code>PROMPT</code> of a headless run).</td>
+</tr>
+<tr>
+<td><code>env</code></td>
+<td>array of string</td>
+<td>no</td>
+<td>Env entries only this mode sets.</td>
+</tr>
+<tr>
+<td><code>secrets</code></td>
+<td>list of secret slot</td>
+<td>no</td>
+<td>Secret slots only this mode has.</td>
+</tr>
+</tbody>
+</table>
+<p>Everything a mode declares applies only to cells created in it — in particular a <code>required</code> parameter or secret is required only then.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">requires</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">claude</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">git</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">parameters</span><span class="p">:</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="nt">        name</span><span class="p">:</span><span class="w"> </span><span class="nv">IMAGE</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="nt">        type</span><span class="p">:</span><span class="w"> </span><span class="nv">image</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="nt">        default</span><span class="p">:</span><span class="w"> </span><span class="nv">ghcr.io/eminwux/kukeon/claude</span><span class="p p-Indicator">:</span><span class="nv">v0.10.0</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="nt">        group</span><span class="p">:</span><span class="w"> </span><span class="nv">image</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">      </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">ROLE_PATH</span><span class="p p-Indicator">,</span><span class="nt"> type</span><span class="p">:</span><span class="w"> </span><span class="nv">path</span><span class="p p-Indicator">,</span><span class="nt"> required</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="nt"> group</span><span class="p">:</span><span class="w"> </span><span class="nv">role</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">  </span><span class="nt">components</span><span class="p">:</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">harness</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">      </span><span class="nt">requires</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">claude</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="w">      </span><span class="nt">parameters</span><span class="p">:</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="nt">            name</span><span class="p">:</span><span class="w"> </span><span class="nv">ANTHROPIC_MODEL</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="nt">            type</span><span class="p">:</span><span class="w"> </span><span class="nv">enum</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="nt">            enum</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">opus</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sonnet</span><span class="p p-Indicator">],</span>
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a><span class="nt">            default</span><span class="p">:</span><span class="w"> </span><span class="nv">opus</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a><span class="nt">            group</span><span class="p">:</span><span class="w"> </span><span class="nv">harness</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a><span class="w">          </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a><span class="w">      </span><span class="nt">env</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"ANTHROPIC_MODEL=${ANTHROPIC_MODEL}"</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a><span class="w">      </span><span class="nt">modes</span><span class="p">:</span>
+<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a><span class="w">        </span><span class="nt">interactive</span><span class="p">:</span>
+<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a><span class="w">          </span><span class="nt">onInit</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[{</span><span class="nt"> script</span><span class="p">:</span><span class="w"> </span><span class="s">"claude"</span><span class="w"> </span><span class="p p-Indicator">}]</span>
+<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a><span class="w">        </span><span class="nt">headless</span><span class="p">:</span>
+<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a><span class="w">          </span><span class="nt">parameters</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">PROMPT</span><span class="p p-Indicator">,</span><span class="nt"> required</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="w"> </span><span class="p p-Indicator">}]</span>
+<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a><span class="w">          </span><span class="nt">env</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"PROMPT=${PROMPT}"</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a><span class="w">          </span><span class="nt">secrets</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">anthropic-api-key</span><span class="p p-Indicator">,</span><span class="nt"> envName</span><span class="p">:</span><span class="w"> </span><span class="nv">ANTHROPIC_API_KEY</span><span class="w"> </span><span class="p p-Indicator">}]</span>
+<a id="__codelineno-1-31" name="__codelineno-1-31" href="#__codelineno-1-31"></a><span class="w">          </span><span class="nt">onInit</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[{</span><span class="nt"> script</span><span class="p">:</span><span class="w"> </span><span class="s">'claude</span><span class="nv"> </span><span class="s">--print</span><span class="nv"> </span><span class="s">"$PROMPT"'</span><span class="w"> </span><span class="p p-Indicator">}]</span>
+<a id="__codelineno-1-32" name="__codelineno-1-32" href="#__codelineno-1-32"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">connector</span>
+<a id="__codelineno-1-33" name="__codelineno-1-33" href="#__codelineno-1-33"></a><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">github</span>
+<a id="__codelineno-1-34" name="__codelineno-1-34" href="#__codelineno-1-34"></a><span class="w">      </span><span class="nt">optional</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-1-35" name="__codelineno-1-35" href="#__codelineno-1-35"></a><span class="w">      </span><span class="nt">requires</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">gh</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-1-36" name="__codelineno-1-36" href="#__codelineno-1-36"></a><span class="w">      </span><span class="nt">secrets</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">github-token</span><span class="p p-Indicator">,</span><span class="nt"> envName</span><span class="p">:</span><span class="w"> </span><span class="nv">GH_TOKEN</span><span class="p p-Indicator">,</span><span class="nt"> required</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="w"> </span><span class="p p-Indicator">}]</span>
+<a id="__codelineno-1-37" name="__codelineno-1-37" href="#__codelineno-1-37"></a><span class="w">  </span><span class="nt">cell</span><span class="p">:</span>
+<a id="__codelineno-1-38" name="__codelineno-1-38" href="#__codelineno-1-38"></a><span class="w">    </span><span class="nt">containers</span><span class="p">:</span>
+<a id="__codelineno-1-39" name="__codelineno-1-39" href="#__codelineno-1-39"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">work</span>
+<a id="__codelineno-1-40" name="__codelineno-1-40" href="#__codelineno-1-40"></a><span class="w">        </span><span class="nt">attachable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-1-41" name="__codelineno-1-41" href="#__codelineno-1-41"></a><span class="w">        </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="s">"${IMAGE}"</span>
+<a id="__codelineno-1-42" name="__codelineno-1-42" href="#__codelineno-1-42"></a><span class="w">        </span><span class="nt">repos</span><span class="p">:</span>
+<a id="__codelineno-1-43" name="__codelineno-1-43" href="#__codelineno-1-43"></a><span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">role-source</span><span class="p p-Indicator">,</span><span class="nt"> target</span><span class="p">:</span><span class="w"> </span><span class="nv">/home/user/role</span><span class="p p-Indicator">,</span><span class="nt"> required</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</code></pre></div>
 <h3 id="speccell-object-required"><code>spec.cell</code> (object, required)<a class="headerlink" href="#speccell-object-required" title="Permanent link">&para;</a></h3>
 <p>The cell template body. It mirrors a <a href="../cell/"><code>Cell</code></a> manifest's user-authorable surface, but each container additionally carries structural slot declarations — repo slots with no inline <code>url</code>, and secret slots — that a <a href="../config/"><code>CellConfig</code></a> fills.</p>
 <table>
@@ -3731,9 +4078,9 @@
 </table>
 <h2 id="storage-layout">Storage layout<a class="headerlink" href="#storage-layout" title="Permanent link">&para;</a></h2>
 <p>The daemon writes the blueprint document to a root-owned, world-readable file under the scope's metadata tree:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>&lt;runPath&gt;/data/&lt;realm&gt;/blueprints/&lt;name&gt;                         # realm-scoped
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>&lt;runPath&gt;/data/&lt;realm&gt;/&lt;space&gt;/blueprints/&lt;name&gt;                 # space-scoped
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>&lt;runPath&gt;/data/&lt;realm&gt;/&lt;space&gt;/&lt;stack&gt;/blueprints/&lt;name&gt;         # stack-scoped
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>&lt;runPath&gt;/data/&lt;realm&gt;/blueprints/&lt;name&gt;                         # realm-scoped
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>&lt;runPath&gt;/data/&lt;realm&gt;/&lt;space&gt;/blueprints/&lt;name&gt;                 # space-scoped
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>&lt;runPath&gt;/data/&lt;realm&gt;/&lt;space&gt;/&lt;stack&gt;/blueprints/&lt;name&gt;         # stack-scoped
 </code></pre></div>
 <p>The <code>blueprints/</code> directory is <code>0755</code> and each blueprint document is <code>0644</code>, both owned by root. A blueprint carries only template references — no credential bytes — so the directory is world-readable, unlike <code>secrets/</code>. Because <code>blueprints/</code> nests inside the scope's metadata directory, the same teardown that reclaims a scope (<code>kuke purge</code> / <code>kuke delete</code>) reclaims its blueprints.</p>
 <h2 id="invariants">Invariants<a class="headerlink" href="#invariants" title="Permanent link">&para;</a></h2>
@@ -3744,22 +4091,22 @@
 <li><strong>Structural slots block inline.</strong> A required repo slot (no inline <code>url</code>) or any required secret slot makes the blueprint un-runnable with <code>--from-blueprint</code>; the run path refuses with a message naming the offenders and recommending <code>kuke run --from-config &lt;cfg&gt;</code> with a <code>CellConfig</code> that fills them. Optional unfilled slots are dropped silently from the materialized container.</li>
 </ul>
 <h2 id="minimal">Minimal<a class="headerlink" href="#minimal" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellBlueprint</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nt">metadata</span><span class="p">:</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-code</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuke-system</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span><span class="nt">parameters</span><span class="p">:</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">MODEL</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">      </span><span class="nt">default</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-sonnet-4-6</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">  </span><span class="nt">cell</span><span class="p">:</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">    </span><span class="nt">containers</span><span class="p">:</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">agent</span>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">        </span><span class="nt">root</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="w">        </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ghcr.io/example/claude-code:latest</span>
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="w">        </span><span class="nt">env</span><span class="p">:</span>
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">MODEL=${MODEL}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellBlueprint</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-code</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuke-system</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">  </span><span class="nt">parameters</span><span class="p">:</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">MODEL</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">      </span><span class="nt">default</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-sonnet-4-6</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">  </span><span class="nt">cell</span><span class="p">:</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="w">    </span><span class="nt">containers</span><span class="p">:</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">agent</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="w">        </span><span class="nt">root</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="w">        </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ghcr.io/example/claude-code:latest</span>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="w">        </span><span class="nt">env</span><span class="p">:</span>
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a><span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">MODEL=${MODEL}</span>
 </code></pre></div>
 <p>A realm-scoped blueprint named <code>claude-code</code> with one scalar parameter and one container. Run a fresh instance with <code>kuke run --from-blueprint claude-code --realm kuke-system</code> (each invocation produces a new <code>claude-code-&lt;6hex&gt;</code> cell). To additionally fill structural repo/secret slots, bind it via a <a href="../config/"><code>CellConfig</code></a> and run with <code>kuke run --from-config &lt;cfg&gt;</code>.</p>
 
@@ -3784,7 +4131,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 11, 2026 05:39:09 UTC">June 11, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 16, 2026 11:01:05 UTC">November 16, 2026</span>
   </span>
 
     

@@ -1133,6 +1133,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../concepts/blueprint-contract/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Blueprint contract: components and modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../concepts/team/" class="md-nav__link">
         
   
@@ -1515,6 +1543,62 @@
     
   
     Private registry credentials
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/git-credentials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Git credentials and identity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/migrate-to-stored-git-credentials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Migrating to stored git credentials and shared blueprints
   
 
     
@@ -3635,6 +3719,15 @@ subprocess.</p>
 provision clone credentials for future cells. A cell still needs access to every
 requested repository, the published image, and its harness/provider
 authentication. <code>add</code> does not forward the host SSH agent or copy keys.</p>
+<p>Inside a cell, repositories are cloned and pushed with <strong>stored</strong> git
+credentials: the <code>spec.git</code> block of <code>~/.kuke/kuketeams.yaml</code>, which <code>add</code>
+writes as the git defaults of the team's stack (see
+<a href="../kuke-team-init/#git-identity-and-credentials"><code>kuke team init</code></a> and the
+<a href="../../guides/git-credentials/">git credentials guide</a>). The transport follows
+the credential, not the URL: a project added by its HTTPS URL is still cloned
+and pushed over SSH when its host is bound to an SSH key, so an API token in the
+cell can never take over a push. <code>add</code> prints a note for every runtime-cloned
+SSH source no stored credential covers.</p>
 <h2 id="secrets">Secrets<a class="headerlink" href="#secrets" title="Permanent link">&para;</a></h2>
 <p>Roles declare only requirement names. <code>add</code> binds each required secret for the
 selected role/harness pairs and records the bindings in the TeamEntry: a binding
@@ -3653,7 +3746,8 @@ definitions, images, and required secret bindings and scopes, and stages a compl
 <code>ApplyDocumentsForTeam</code> with the team's stable ownership identity and publishes
 the registration by atomic rename only after full application success. Repeated
 add converges the same resources and one registration; obsolete team-owned
-blueprints and configs are pruned.</p>
+configs are pruned, and a shared blueprint the team stops using is removed once
+no other CellConfig references it.</p>
 <p>Failure returns nonzero and preserves any previous accepted entry. A partial
 apply or ambiguous RPC failure can leave some daemon resources changed. Fix the
 prerequisite and rerun the same command, including any explicit revision flags.
@@ -3663,6 +3757,10 @@ ambiguous writes.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Applied 6 resources; registered team kukeon-dev: /home/me/.kuke/kuketeam.d/kukeon-dev.yaml
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>No cells created or started.
 </code></pre></div>
+<p>The count is the team's shared blueprints (one per harness × security profile
+it uses) plus one CellConfig per role/harness pair, plus one when the stack's
+git defaults were written. Missing runtime secrets and notes are listed after
+it, as for <a href="../kuke-team-init/#output"><code>kuke team init</code></a>.</p>
 
 
 
@@ -3685,7 +3783,7 @@ ambiguous writes.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 15, 2026 19:33:10 UTC">November 15, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 16, 2026 11:01:05 UTC">November 16, 2026</span>
   </span>
 
     
