@@ -81,6 +81,9 @@ func TestFreshProcessEnv_ReplacesStaleRuntimeOnlyEnv(t *testing.T) {
 		if got["IMAGE_ONLY"] != "kept" || got["SECRET"] != "secret" || got["KUKEON_CELL_NAME"] != "cell" {
 			t.Fatalf("lost base env: %v", got)
 		}
+		if got["PATH"] != "/image/bin" {
+			t.Fatalf("image PATH not preserved: %q", got["PATH"])
+		}
 		if !reflect.DeepEqual(spec.Process.Args, []string{"/.kukeon/bin/kuketty"}) ||
 			spec.Process.Cwd != "/workspace" ||
 			spec.Process.User.UID != 1000 ||
@@ -134,6 +137,29 @@ func TestFreshProcessEnv_EmptyOriginalBaseline(t *testing.T) {
 	for _, env := range spec.Process.Env {
 		if strings.HasPrefix(env, "RUNTIME_ONLY=") {
 			t.Fatal("stale runtime-only env remains")
+		}
+	}
+}
+
+func TestFreshProcessEnv_DefaultPathWhenImageHasNone(t *testing.T) {
+	ctx := context.Background()
+	spec := &runtimespec.Spec{Process: &runtimespec.Process{Env: []string{"IMAGE_ONLY=kept"}}}
+	if err := withOriginalImageEnv(ctx, nil, nil, spec); err != nil {
+		t.Fatal(err)
+	}
+	spec.Process.Env = []string{"PATH=/stale/bin"}
+	for range 2 {
+		if err := WithFreshProcessEnv(intmodel.ContainerSpec{}, "")(ctx, nil, nil, spec); err != nil {
+			t.Fatal(err)
+		}
+		var paths []string
+		for _, entry := range spec.Process.Env {
+			if value, ok := strings.CutPrefix(entry, "PATH="); ok {
+				paths = append(paths, value)
+			}
+		}
+		if len(paths) != 1 || paths[0] != "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" {
+			t.Fatalf("want containerd default PATH, got %v", paths)
 		}
 	}
 }
