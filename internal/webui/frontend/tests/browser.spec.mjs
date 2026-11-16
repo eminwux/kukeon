@@ -1107,6 +1107,51 @@ test("the config preview of an existing config shows each repo's git identity", 
   await expect(page.getByRole("table", { name: "Merged values and their origin" }).getByRole("row")).toHaveCount(2);
 });
 
+// kuke team writes realm-only blueprint refs from stack-scoped configs; the
+// mock 404s any lookup whose scope slots do not match exactly, so a name that
+// leaks into the space or stack slot fails the test.
+test("create from config resolves configs and blueprint refs scoped at realm, space and stack", async ({ page }) => {
+  const scopedMetadata = scope => ({ name: scope.at(-1), realm: scope[0], ...(scope.length > 2 ? { space: scope[1] } : {}), ...(scope.length > 3 ? { stack: scope[2] } : {}) });
+  const cases = [
+    { config: ["prod", "agent"], blueprint: ["prod", "claude"] },
+    { config: ["prod", "shared", "agent"], blueprint: ["prod", "shared", "claude"] },
+    { config: ["prod", "shared", "services", "agent"], blueprint: ["prod", "shared", "services", "claude"] },
+    { config: ["prod", "shared", "services", "team"], blueprint: ["prod", "claude"] },
+  ];
+  const configs = cases.map(({ config, blueprint }) => ({ kind: "CellConfig", metadata: scopedMetadata(config), spec: { blueprint: scopedMetadata(blueprint) } }));
+  const blueprints = cases.map(({ blueprint }) => ({ kind: "CellBlueprint", metadata: scopedMetadata(blueprint), spec: {} }));
+  const lookups = [];
+  await mock(page);
+  await page.route("**/api/catalog/**", route => {
+    const url = new URL(route.request().url());
+    const [, , kind, name] = url.pathname.split("/").filter(Boolean);
+    const docs = kind === "configs" ? configs : kind === "blueprints" ? blueprints : [];
+    if (!name) return route.fulfill({ json: docs });
+    const scope = [...["realm", "space", "stack"].map(key => url.searchParams.get(key)).filter(Boolean), decodeURIComponent(name)];
+    lookups.push({ kind, scope, params: [...url.searchParams.values()] });
+    const match = docs.find(doc => JSON.stringify([doc.metadata.realm, doc.metadata.space, doc.metadata.stack, doc.metadata.name].filter(Boolean)) === JSON.stringify(scope));
+    return route.fulfill(match ? { json: match } : { status: 404, json: { error: { code: "not_found", message: `${kind} ${scope.join(" / ")} not found` } } });
+  });
+  let created;
+  await page.route("**/api/cells/from-config/*", async route => {
+    const input = route.request().postDataJSON();
+    const document = { metadata: { name: "team-1" }, spec: { realmId: "prod", spaceId: "shared", stackId: "services" } };
+    if (route.request().url().endsWith("create")) { created = input; await route.fulfill({ json: document }); }
+    else await route.fulfill({ json: { document, preview: "reviewed" } });
+  });
+  for (const { config, blueprint } of cases) {
+    await page.goto(`${server.url}#/new-cell?config=${encodeURIComponent(JSON.stringify(config))}`);
+    await expect(page.getByRole("link", { name: "claude", exact: true })).toHaveAttribute("href", `#/blueprints/${blueprint.join("/")}`);
+    await expect(page.getByText("Blueprint reference is missing")).toHaveCount(0);
+  }
+  await expect(page.getByRole("button", { name: "Preview Cell", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "Preview Cell", exact: true }).click();
+  await expect(page.getByLabel(/Start (and attach )?after creation/)).not.toBeChecked();
+  await page.getByRole("button", { name: "Create Cell", exact: true }).click();
+  await expect.poll(() => created?.config).toEqual({ name: "team", realm: "prod", space: "shared", stack: "services" });
+  for (const lookup of lookups) expect(lookup.params).not.toContain(lookup.scope.at(-1));
+});
+
 test("kill and purge require explicit confirmation and pass only selected purge options", async ({ page }) => {
   const submitted = [];
   await mock(page, (path, request) => {

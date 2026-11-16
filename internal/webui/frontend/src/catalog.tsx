@@ -5,6 +5,7 @@ import { StateBadge } from "./status";
 import type { InventoryResource, Row } from "./inventory";
 import { cellsForBlueprint, cellsForConfig, configsForBlueprint, type ConfigDoc } from "./relationships.mjs";
 import { DocumentRowLink } from "./icons";
+import { catalogAPI } from "./catalog-url.mjs";
 
 type Metadata = { name: string; realm?: string; space?: string; stack?: string; cell?: string; labels?: Record<string, string>; annotations?: Record<string, string> };
 type CatalogDoc = { metadata: Metadata; spec?: Record<string, unknown>; [key: string]: unknown };
@@ -12,11 +13,6 @@ type Reference = { kind: string; name: string; realm: string; space?: string; st
 const coordinates = ["realm", "space", "stack", "cell"] as const;
 function scopeOf(metadata: Metadata): string[] { return coordinates.map(key => metadata[key]).filter((value): value is string => !!value); }
 function catalogLink(kind: string, scope: string[], document = false): string { return `#/${kind}/` + scope.map(encodeURIComponent).join("/") + (document ? "?document=1" : ""); }
-function catalogAPI(kind: string, scope: string[]): string {
-  const params = new URLSearchParams();
-  scope.slice(0, -1).forEach((value, i) => params.set(coordinates[i], value));
-  return `/api/catalog/${kind}/${encodeURIComponent(scope.at(-1) ?? "")}?${params}`;
-}
 function referenceScope(ref: Reference): string[] { return [...scopeOf(ref), ref.name]; }
 function references(doc: { [key: string]: unknown }): Reference[] {
   const result: Reference[] = [];
