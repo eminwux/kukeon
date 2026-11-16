@@ -9,7 +9,7 @@ import { useInventory, type Inventory, type InventoryResource, type Doc, type Ru
 import { apiPath, catalogTitles, daemonLink, homeLink, imagesLink, kinds, titles, readRoute, resourceLink, listLink, newCellLink, workspaceLink, type Route } from "./routes";
 import { BrandMark, SidebarRail, SidebarResizer, SidebarToggle, VersionRows, useSidebarLayout, versionInfo } from "./sidebar-shell";
 import { StateBadge } from "./status";
-import { DocumentRowLink } from "./icons";
+import { DocumentRowLink, Icon } from "./icons";
 import { CgroupPanel } from "./cgroup";
 import { RealmImagesPanel } from "./images";
 import { RegistryCredentialsPanel, type RegistryCredential } from "./registry-credentials";
@@ -219,7 +219,7 @@ function CellDetailsScreen({ title, view, scope, revision, inventory, manager, t
       </div>
       <LifecycleNotice operation={operation} />
     </div>}
-    {detail.loading && scope && <p role="status">Loading cell details…</p>}
+    {detail.loading && !detail.data && scope && <p role="status">Loading cell details…</p>}
     {detail.error && <ErrorNotice error={detail.error} kind="Cell" />}
     {detail.error && detail.data && <p className="stale">Stale resource details — refresh failed.</p>}
     <section className="cell-terminal-view" aria-label="Cell terminal" hidden={!terminalView}>
@@ -484,10 +484,12 @@ function App() {
         </div>
         <CellSidebar inventory={inventory} selectedScope={cellScreenScope ?? []} terminalStates={terminals.cellStates} />
         <section className="connection" aria-label="Daemon connection">
-          <p className="status" role="status"><span className={`dot ${daemonTone}`} aria-hidden="true" />{daemonStatus}</p>
+          <div className="connection-heading">
+            <p className="status" role="status"><span className={`dot ${daemonTone}`} aria-hidden="true" />{daemonStatus}</p>
+            <a className="connection-action" href={daemonLink()} aria-label="Daemon details" title="Daemon details"><Icon name="info" /></a>
+          </div>
           <code>{connection.data?.endpoint ?? (connection.loading ? "Loading socket…" : "Socket unknown")}</code>
           {connection.data && <VersionRows info={versions} />}
-          <p className="daemon-version"><a href={daemonLink()}>Daemon details</a></p>
           {connection.error && <ErrorNotice error={connection.error} />}
         </section>
       </div>
@@ -521,7 +523,8 @@ function App() {
         {!isWorkspace && !cellScreenScope && <ResourcesNavigation route={route} />}
         {!cellScreenScope && <div className="page-heading"><h1>{heading}</h1>{headingContext && <p className="page-context mono-id">{headingContext}</p>}</div>}
         {creationNotice && <div className={`${creationNotice.phase === "error" ? "error" : creationNotice.phase === "pending" ? "creation-progress" : "creation-success"}`} role={creationNotice.phase === "error" ? "alert" : "status"}><span>{creationNotice.message}</span>{creationDocument && creationNotice.phase !== "pending" && <details><summary>View Cell document returned by kukeon</summary><pre tabIndex={0} aria-label="Cell document returned after creation">{JSON.stringify(creationDocument, null, 2)}</pre></details>}<button type="button" className="notice-dismiss" aria-label="Dismiss creation message" onClick={() => { setCreationNotice(undefined); setCreationDocument(undefined); }}>×</button></div>}
-        {inventory.loading && <p className="description" role="status">Refreshing resource inventory…</p>}
+        {/* cellTerminal pins the terminal to the remaining height, so a transient line would shrink and regrow it on every refresh. */}
+        {inventory.loading && !cellTerminalActive && <p className="description" role="status">Refreshing resource inventory…</p>}
         {inventory.error && <ErrorNotice error={inventory.error} />}
         {inventory.error && inventory.data && <p className="stale">Stale inventory — refresh failed. Counts and lists may be out of date.</p>}
         {!!inventory.data?.failures.length && <div className="error" role="alert"><strong>Incomplete inventory</strong><p>Some scopes could not be loaded. Counts and lists exclude unavailable resources.</p><ul>{inventory.data.failures.map(message => <li key={message}>{message}</li>)}</ul></div>}

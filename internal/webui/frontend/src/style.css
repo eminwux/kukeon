@@ -451,7 +451,11 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--er
 .daemon-tabs a { padding: 6px 12px; color: var(--muted); font-size: 12px; border-bottom: 2px solid transparent; margin-bottom: -1px; }
 .daemon-tabs a[aria-current="page"] { color: var(--accent); border-bottom-color: var(--accent); }
 .daemon-details { margin-top: 16px; }
-.daemon-version { margin: 4px 0 0; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.connection-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 7px; }
+.connection-heading .status { margin: 0; min-width: 0; }
+.connection-action { display: inline-grid; place-items: center; width: 24px; height: 24px; flex-shrink: 0; border-radius: 6px; color: var(--muted); }
+.connection-action svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.connection-action:hover, .connection-action:focus-visible { color: var(--accent); background: var(--selected); }
 .log-controls { flex-wrap: wrap; }
 .log-controls button[aria-pressed="true"] { background: var(--selected); color: var(--accent); }
 .log-meta { padding: 0 16px; overflow-wrap: anywhere; }

@@ -15,6 +15,7 @@ const glyphs = {
   sidebarCollapse: <><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><path d="M9 4.5v15" /><path d="m15.5 10-2 2 2 2" /></>,
   sidebarExpand: <><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><path d="M9 4.5v15" /><path d="m13.5 10 2 2-2 2" /></>,
   warning: <><path d="M10.3 4.2 2.8 17.5A2 2 0 0 0 4.5 20.5h15a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0Z" /><path d="M12 9.5v4.5" /><path d="M12 17.5h.01" /></>,
+  info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v5" /><path d="M12 7.5h.01" /></>,
   document: <><path d="M14 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5Z" /><path d="M14 3.5v5h5" /><path d="M9 13h6M9 16.5h4" /></>,
 } satisfies Record<string, ReactNode>;
 export type IconName = keyof typeof glyphs;

@@ -68,6 +68,40 @@ test("terminal selects eligible containers, forwards input and resize, and detac
   await expect.poll(() => closed).toBe(true);
 });
 
+test("refreshing keeps the cell terminal size and sends no resize", async ({ page }) => {
+  let hold = null;
+  await mock(page, async path => {
+    if (hold) await hold.promise;
+    return path.endsWith("/containers") ? { json: [{ id: "shell", attachable: true }] } : undefined;
+  });
+  const messages = [];
+  await page.routeWebSocket("**/attach", socket => {
+    socket.onMessage(message => { messages.push(message); });
+    socket.send(JSON.stringify({ type: "ready" }));
+  });
+  const resizes = () => messages.filter(message => typeof message === "string" && JSON.parse(message).type === "resize").length;
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
+  await expect.poll(resizes).toBeGreaterThan(0);
+  const screen = page.getByRole("region", { name: "Terminal workspace" }).locator(".terminal-screen");
+  const before = await screen.boundingBox();
+  const sent = resizes();
+  let release;
+  hold = { promise: new Promise(resolve => { release = resolve; }) };
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.locator(".toolbar-connectivity .dot")).toHaveClass(/checking/);
+  await expect(page.getByText("Refreshing resource inventory…").filter({ visible: true })).toHaveCount(0);
+  await expect(page.getByText("Loading cell details…").filter({ visible: true })).toHaveCount(0);
+  await expect(page.getByText("Loading containers…").filter({ visible: true })).toHaveCount(0);
+  expect(await screen.boundingBox()).toEqual(before);
+  hold = null;
+  release();
+  await expect(page.locator(".toolbar-connectivity .dot")).not.toHaveClass(/checking/);
+  await page.waitForTimeout(200);
+  expect(await screen.boundingBox()).toEqual(before);
+  expect(resizes()).toBe(sent);
+});
+
 test("expanded terminal keeps its session, resizes, and follows the appearance setting", async ({ page }) => {
   await mock(page, path => path.endsWith("/containers") ? { json: [{ id: "shell", attachable: true }] } : undefined);
   let connections = 0;
@@ -211,7 +245,8 @@ test("Workspace retains independent scoped terminals, focus and resize while swi
   expect(await devScreen.evaluate(el => el === document.querySelector('.terminal-screen[aria-label="Terminal for dev / shared / services / api / shell"]'))).toBe(true);
   await panel.locator(".terminal-session:not([hidden]) .xterm-helper-textarea").press("d");
   await expect.poll(() => messages.get(devPath).some(message => Buffer.isBuffer(message) && message.toString() === "d")).toBe(true);
-  await expect.poll(() => messages.get(devPath).filter(message => typeof message === "string" && JSON.parse(message).type === "resize").length).toBeGreaterThanOrEqual(2);
+  // Reactivating at an unchanged size sends nothing new; only a real size change below does.
+  await expect.poll(() => messages.get(devPath).filter(message => typeof message === "string" && JSON.parse(message).type === "resize").length).toBeGreaterThanOrEqual(1);
   const resizedBefore = messages.get(devPath).filter(message => typeof message === "string" && JSON.parse(message).type === "resize").length;
   await page.setViewportSize({ width: 900, height: 700 });
   await expect.poll(() => messages.get(devPath).filter(message => typeof message === "string" && JSON.parse(message).type === "resize").length).toBeGreaterThan(resizedBefore);
