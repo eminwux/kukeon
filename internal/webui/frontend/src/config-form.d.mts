@@ -46,5 +46,6 @@ export function imageChoices(images: InventoryImage[] | undefined, required: str
 export function imageStatus(images: InventoryImage[] | undefined, name: string, required: string[]): { status: "absent" | "unknown" | "missing" | "match"; missing: string[] };
 export function buildSpec(blueprintRef: { name?: string; realm?: string; space?: string; stack?: string }, form: BlueprintForm, answers: Answers): Record<string, unknown>;
 export function missingAnswers(form: BlueprintForm, answers: Answers, mode?: string): string[];
-export function groupGitValues(values: RenderedValue[] | undefined): { repos: RepoIdentity[]; rest: RenderedValue[] };
+export interface DefaultIdentityField { field: string; host: string; value: string; origin: string }
+export function groupGitValues(values: RenderedValue[] | undefined): { repos: RepoIdentity[]; defaults: DefaultIdentityField[]; rest: RenderedValue[] };
 export function secretChoices(secrets: unknown[] | undefined, types?: string[]): SecretChoice[];

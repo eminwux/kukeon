@@ -18,9 +18,9 @@ kuke team init --force --import-git-identity
 `--import-git-identity` is your explicit consent to copy an SSH private key into kukeon. Nothing is read from `~/.ssh` without it. It:
 
 1. picks the key — `--git-key <path>`, else the key your global git config signs with, else `~/.ssh/id_ed25519`, `id_ecdsa` or `id_rsa`;
-2. stores it as the `ssh-key` secret `git-ssh` in the `default` realm (with its `.pub` and `-cert.pub` neighbours when present; an existing `git-ssh` is kept, never overwritten);
+2. stores it as the `ssh-key` secret `git-ssh` in the `default` realm (with its `.pub` and `-cert.pub` neighbours when present; an existing `git-ssh` is replaced with the key you named, and a note reports it);
 3. binds it, in `~/.kuke/kuketeams.yaml`, to every host the team clones from;
-4. if you already sign commits, makes it the signing key and stores your allowed-signers file as the secret `git-allowed-signers`.
+4. if you already sign commits **with that key** (`user.signingkey` is its path or its public key), makes it the signing key and stores your allowed-signers file as the secret `git-allowed-signers`. A GPG signer, or one who signs with a different SSH key, gets the credential only and a note; store the signing key as its own `ssh-key` secret and name it in `spec.git.signing`.
 
 | Flag                               | Use                                                                                       |
 | ---------------------------------- | ----------------------------------------------------------------------------------------- |

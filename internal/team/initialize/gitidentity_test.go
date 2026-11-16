@@ -95,7 +95,7 @@ func TestImportGitIdentityKeyDiscoveryOrder(t *testing.T) {
 			if tc.explicit != "" {
 				imp.Key = filepath.Join(home, tc.explicit)
 			}
-			docs, err := importGitIdentity(cfg, operatorSources, home, imp)
+			docs, _, err := importGitIdentity(cfg, operatorSources, home, imp)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -107,7 +107,7 @@ func TestImportGitIdentityKeyDiscoveryOrder(t *testing.T) {
 	// `~/` in an explicit key is the operator's home, not the process's.
 	home := t.TempDir()
 	writeKey(t, filepath.Join(home, "keys/deploy"), plainKey)
-	if _, err := importGitIdentity(&config.TeamsConfig{}, nil, home, GitImport{Enabled: true, Key: "~/keys/deploy"}); err != nil {
+	if _, _, err := importGitIdentity(&config.TeamsConfig{}, nil, home, GitImport{Enabled: true, Key: "~/keys/deploy"}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -128,7 +128,7 @@ func TestImportGitIdentityBuildsSecretsAndRewritesConfig(t *testing.T) {
 		// A host the operator already bound keeps its credential.
 		Credentials: []config.GitCredential{{Host: "git.example.com", SecretRef: existing, Port: 2222}},
 	}}}
-	docs, err := importGitIdentity(cfg, operatorSources, home, GitImport{Enabled: true, KnownHostsFile: hosts})
+	docs, _, err := importGitIdentity(cfg, operatorSources, home, GitImport{Enabled: true, KnownHostsFile: hosts})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestImportGitIdentitySigningFollowsTheOperator(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := &config.TeamsConfig{Spec: config.Spec{Git: tc.git}}
-			docs, err := importGitIdentity(cfg, nil, home, GitImport{Enabled: true})
+			docs, _, err := importGitIdentity(cfg, nil, home, GitImport{Enabled: true})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -228,13 +228,13 @@ func TestImportGitIdentityPassphrase(t *testing.T) {
 	key := writeKey(t, filepath.Join(home, ".ssh/id_ed25519"), encryptedKey)
 	file := writeKey(t, filepath.Join(home, "passphrase"), passphrase+"\r\n")
 	// Refused without the passphrase: the cell could never unlock the key.
-	_, err := importGitIdentity(&config.TeamsConfig{}, nil, home, GitImport{Enabled: true})
+	_, _, err := importGitIdentity(&config.TeamsConfig{}, nil, home, GitImport{Enabled: true})
 	if err == nil || !strings.Contains(err.Error(), "passphrase-protected") ||
 		!strings.Contains(err.Error(), "--git-key-passphrase-file") || !strings.Contains(err.Error(), key) {
 		t.Fatalf("err = %v", err)
 	}
 	assertNoKeyMaterial(t, err.Error())
-	docs, err := importGitIdentity(&config.TeamsConfig{}, nil, home, GitImport{Enabled: true, PassphraseFile: file})
+	docs, _, err := importGitIdentity(&config.TeamsConfig{}, nil, home, GitImport{Enabled: true, PassphraseFile: file})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +243,7 @@ func TestImportGitIdentityPassphrase(t *testing.T) {
 	}
 	// A passphrase supplied for a plain key is kept; it is harmless.
 	writeKey(t, key, plainKey)
-	if _, err = importGitIdentity(&config.TeamsConfig{}, nil, home, GitImport{Enabled: true, PassphraseFile: file}); err != nil {
+	if _, _, err = importGitIdentity(&config.TeamsConfig{}, nil, home, GitImport{Enabled: true, PassphraseFile: file}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -285,12 +285,68 @@ func TestImportGitIdentityFailuresNeverEchoKeyMaterial(t *testing.T) {
 			cfg := &config.TeamsConfig{}
 			imp := GitImport{Enabled: true}
 			tc.setup(t, home, cfg, &imp)
-			docs, err := importGitIdentity(cfg, operatorSources, home, imp)
+			docs, _, err := importGitIdentity(cfg, operatorSources, home, imp)
 			if err == nil || docs != nil || !strings.Contains(err.Error(), tc.want) ||
 				!strings.HasPrefix(err.Error(), "import git identity: ") {
 				t.Fatalf("docs=%v err=%v, want %q", docs, err, tc.want)
 			}
 			assertNoKeyMaterial(t, err.Error())
+		})
+	}
+}
+
+// A signer whose user.signingkey is not the imported SSH key — a GPG key ID, or
+// another SSH key — gets the key as a credential only: cells SSH-signing with
+// it would produce commits that show as unverified.
+func TestImportGitIdentityDoesNotSignWithAnotherKey(t *testing.T) {
+	home := t.TempDir()
+	key := writeKey(t, filepath.Join(home, ".ssh/id_ed25519"), plainKey)
+	writeKey(t, key+".pub", publicKeyLine+"\n")
+	other := writeKey(t, filepath.Join(home, ".ssh/signing.pub"), "ssh-ed25519 AAAAOtherKeyBlob signer@host\n")
+	copyOfKey := writeKey(t, filepath.Join(home, "keys/work.pub"), publicKeyLine+"\n")
+	for _, tc := range []struct {
+		name       string
+		signingKey string
+		signs      bool
+	}{
+		{"gpg-key-id", "3AA5C34371567BD2", false},
+		{"other-ssh-key-path", other, false},
+		{"other-ssh-key-literal", "key::ssh-ed25519 AAAAOtherKeyBlob", false},
+		{"relative-path", ".ssh/id_ed25519.pub", false},
+		{"imported-key-pub-path", key + ".pub", true},
+		{"imported-key-private-path", "~/.ssh/id_ed25519", true},
+		{"imported-key-literal", "key::" + publicKeyLine, true},
+		{"imported-key-under-another-path", copyOfKey, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.TeamsConfig{Spec: config.Spec{Git: &config.Git{
+				SigningKey: tc.signingKey, Sign: []string{"commits"},
+			}}}
+			docs, notes, err := importGitIdentity(cfg, nil, home, GitImport{Enabled: true})
+			if err != nil || len(docs) != 1 {
+				t.Fatalf("docs=%d err=%v", len(docs), err)
+			}
+			git := cfg.Spec.Git
+			noted := slices.ContainsFunc(notes, func(n string) bool {
+				return strings.Contains(n, "git signing was not imported")
+			})
+			if tc.signs {
+				if git.Signing == nil || git.Signing.SecretRef.Name != "git-ssh" || len(git.Sign) != 1 || noted {
+					t.Fatalf("git=%+v notes=%v, want signing with the imported key", git, notes)
+				}
+				return
+			}
+			if git.Signing != nil || len(git.Sign) != 0 || !noted {
+				t.Fatalf("git=%+v notes=%v, want no signing and a note", git, notes)
+			}
+			if len(git.Credentials) != 1 || git.Credentials[0].SecretRef.Name != "git-ssh" {
+				t.Fatalf("credentials = %+v, want the key still bound as a credential", git.Credentials)
+			}
+			cfg.APIVersion, cfg.Kind = config.APIVersion, config.Kind
+			var encoded bytes.Buffer
+			if err = config.Encode(&encoded, cfg); err != nil {
+				t.Fatalf("rewritten configuration does not encode: %v", err)
+			}
 		})
 	}
 }
@@ -344,11 +400,18 @@ func TestRunImportsGitIdentityWithConsent(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// The key is created once; a rerun reuses the stored secret.
-		if f.creates != 1 || len(f.created) != 1 {
+		// Each consented import writes the key: a rerun replaces the stored
+		// secret (it may name a new key) and reports that it did.
+		if f.creates != attempt+1 || len(f.created) != attempt+1 {
 			t.Fatalf("attempt %d: creates = %d", attempt, f.creates)
 		}
-		created := f.created[0]
+		replaced := slices.ContainsFunc(result.Notes, func(n string) bool {
+			return strings.Contains(n, `secret "git-ssh" already existed and was replaced`)
+		})
+		if replaced != (attempt == 1) {
+			t.Fatalf("attempt %d: replacement note present = %v, notes = %v", attempt, replaced, result.Notes)
+		}
+		created := f.created[attempt]
 		if created.Metadata != (api.SecretMetadata{Name: "git-ssh", Realm: "default"}) ||
 			created.Spec.Type != api.SecretTypeSSHKey || created.Spec.SSHKey.PrivateKey != plainKey ||
 			created.Spec.SSHKey.PublicKey != publicKeyLine {
@@ -371,7 +434,8 @@ func TestRunImportsGitIdentityWithConsent(t *testing.T) {
 		if wantResources := 5 - attempt; result.Resources != wantResources {
 			t.Fatalf("attempt %d: resources = %d, want %d", attempt, result.Resources, wantResources)
 		}
-		if len(result.MissingSecrets) != 0 || len(result.Notes) != 0 {
+		// The only note is the rerun's replacement of the stored key.
+		if len(result.MissingSecrets) != 0 || len(result.Notes) != attempt {
 			t.Fatalf("attempt %d: missing=%v notes=%v", attempt, result.MissingSecrets, result.Notes)
 		}
 		raw, readErr := os.ReadFile(configPath)

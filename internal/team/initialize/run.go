@@ -96,18 +96,22 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 			return result, err
 		}
 	}
-	var imported []api.SecretDoc
+	var (
+		imported    []api.SecretDoc
+		importNotes []string
+	)
 	if opts.ImportGit.Enabled {
 		effective, resolveErr := config.Resolve(boot.Config, team)
 		if resolveErr != nil {
 			return result, resolveErr
 		}
-		imported, err = importGitIdentity(boot.Config, effective.Sources, opts.Home, opts.ImportGit)
+		imported, importNotes, err = importGitIdentity(boot.Config, effective.Sources, opts.Home, opts.ImportGit)
 		if err != nil {
 			return result, err
 		}
 	}
 	result, err = runTeam(ctx, opts, boot.Config, team, recorded, result, "kuke team init", imported)
+	result.Notes = append(result.Notes, importNotes...)
 	if err != nil || !opts.ImportGit.Enabled {
 		return result, err
 	}

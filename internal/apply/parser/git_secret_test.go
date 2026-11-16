@@ -281,11 +281,12 @@ func TestValidateDocument_Blueprint_Git(t *testing.T) {
 			wantErr: "duplicate credential host",
 		},
 		{
-			name: "container sign without key",
+			// A blueprint may ask for signing and leave the key to the Config
+			// or a scope default; the merged block is checked at render.
+			name: "container sign without key is left to the merged block",
 			tail: `        git:
           sign: [commits]
 `,
-			wantErr: "git.sign requires git.signingKey or git.signing",
 		},
 		{
 			name: "repo credential names a host",

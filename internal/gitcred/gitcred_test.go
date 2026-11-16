@@ -254,6 +254,77 @@ func TestBuild_BasicAuthHelperServesCredential(t *testing.T) {
 	}
 }
 
+// A remote on a non-default port (or plain http) keeps that port and scheme in
+// its clone URL, which the cell-global helper section — scoped to the
+// credential's own `https://host` — does not cover. The checkout then carries
+// a helper section for the URL it really uses.
+func TestBuild_BasicAuthHelperFollowsRemotePortAndScheme(t *testing.T) {
+	spec := intmodel.ContainerSpec{
+		Git: &intmodel.ContainerGit{Credentials: []intmodel.GitCredential{
+			{Host: "git.example.com", SecretRef: ref("https-cred")},
+		}},
+		Repos: []intmodel.ContainerRepo{
+			{Name: "default", URL: "https://git.example.com/o/default.git", Target: "/w/default"},
+			{Name: "port", URL: "https://git.example.com:8443/o/port.git", Target: "/w/port"},
+			{Name: "plain", URL: "http://git.example.com/o/plain.git", Target: "/w/plain"},
+		},
+	}
+	store := secrets{"https-cred": basicSecret("alice", "s3cr3t")}
+	b, err := gitcred.Build(spec, store.read)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if _, planned := b.Plan.Repos["default"]; planned {
+		t.Errorf("default-port https repo needs no plan entry, got %+v", b.Plan.Repos["default"])
+	}
+
+	dir := stageRelocated(t, b)
+	for name, want := range map[string]struct{ protocol, host string }{
+		"port":  {"https", "git.example.com:8443"},
+		"plain": {"http", "git.example.com"},
+	} {
+		entry, planned := b.Plan.Repos[name]
+		if !planned || len(entry.Config) == 0 {
+			t.Fatalf("%s: no repo-level helper section planned: %+v", name, entry)
+		}
+		// Apply the planned repo-local config to a real repository and ask git
+		// for the credential the way a clone of that URL would.
+		repo := filepath.Join(t.TempDir(), name)
+		run := func(args ...string) string {
+			cmd := exec.Command("git", args...)
+			cmd.Dir = repo
+			cmd.Env = []string{
+				"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir(), "GIT_TERMINAL_PROMPT=0",
+				gitplan.ConfigEnv + "=" + filepath.Join(dir, gitplan.ConfigFile),
+			}
+			cmd.Stdin = strings.NewReader(
+				"protocol=" + want.protocol + "\nhost=" + want.host + "\npath=o/" + name + ".git\n\n",
+			)
+			out, runErr := cmd.CombinedOutput()
+			if runErr != nil {
+				t.Fatalf("%s: git %v: %v: %s", name, args, runErr, out)
+			}
+			return string(out)
+		}
+		if err = os.MkdirAll(repo, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		run("init", "-q")
+		for _, c := range entry.Config {
+			value := strings.ReplaceAll(c.Value, gitplan.MountPath, dir)
+			if c.Add {
+				run("config", "--local", "--add", c.Key, value)
+			} else {
+				run("config", "--local", c.Key, value)
+			}
+		}
+		got := run("credential", "fill")
+		if !strings.Contains(got, "username=alice\n") || !strings.Contains(got, "password=s3cr3t\n") {
+			t.Errorf("%s: credential for %s://%s = %q, want alice's", name, want.protocol, want.host, got)
+		}
+	}
+}
+
 func TestBuild_SSHCredentialRendersHostConfig(t *testing.T) {
 	private, public := genKey(t, "ed25519", "")
 	spec := intmodel.ContainerSpec{

@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // Transports a git remote can use.
@@ -78,7 +79,10 @@ func ParseRemote(raw string) Remote {
 	if at := strings.LastIndexByte(hostPart, '@'); at >= 0 {
 		user, hostPart = hostPart[:at], hostPart[at+1:]
 	}
-	if hostPart == "" {
+	// The user and host of an scp-like remote end up in a generated
+	// ssh_config; one carrying whitespace or a control character is not a
+	// host git could reach anyway, and must not be able to add a line there.
+	if hostPart == "" || strings.ContainsFunc(user+hostPart, unsafeHostRune) {
 		return Remote{Transport: TransportOther, Path: raw}
 	}
 	return Remote{
@@ -87,6 +91,10 @@ func ParseRemote(raw string) Remote {
 		Host:      strings.ToLower(hostPart),
 		Path:      strings.TrimPrefix(repoPath, "/"),
 	}
+}
+
+func unsafeHostRune(r rune) bool {
+	return unicode.IsSpace(r) || unicode.IsControl(r)
 }
 
 func parseURLRemote(raw, transport string) Remote {

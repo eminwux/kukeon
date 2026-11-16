@@ -302,22 +302,49 @@ const identityFields = ["author", "committer", "credential", "signing"];
 
 // groupGitValues splits a render's merge explanation into the git identity
 // each repo ends up with — author, committer, credential and signing, each
-// with the level that decided it — and every other merged value.
+// with the level that decided it — the default identity the hierarchy merges
+// to (`default.author`, `default.credential[<host>]`, …), and every other
+// merged value. Every repo is listed with a `<repo>.url` entry, which is what
+// tells a repo's own key from a default one: neither a repo name nor a
+// credential host is split on the dots it contains.
 export function groupGitValues(values) {
   const repos = [];
+  const defaults = [];
   const rest = [];
-  for (const value of list(values)) {
-    if (value?.kind !== "git") { rest.push(value); continue; }
-    const cut = text(value.key).lastIndexOf(".");
-    const name = cut > 0 ? value.key.slice(0, cut) : text(value.key);
-    const field = cut > 0 ? value.key.slice(cut + 1) : "";
+  const git = [];
+  for (const value of list(values)) (value?.kind === "git" ? git : rest).push(value);
+  const names = git.map(value => text(value.key)).filter(key => key.endsWith(".url")).map(key => key.slice(0, -".url".length))
+    .sort((a, b) => b.length - a.length);
+  const repoOf = name => {
     let repo = repos.find(entry => entry.repo === name);
     if (!repo) repos.push(repo = { repo: name, url: "", fields: [] });
-    if (field === "url") repo.url = text(value.value);
-    else repo.fields.push({ field, value: text(value.value), origin: text(value.origin) });
+    return repo;
+  };
+  for (const value of git) {
+    const key = text(value.key);
+    const entry = { value: text(value.value), origin: text(value.origin) };
+    // Only the default identity keys a credential by host, so that form is a
+    // default even beside a repo that happens to be called "default".
+    const name = /^default\.credential\[.*\]$/.test(key) ? undefined : names.find(candidate => key.startsWith(`${candidate}.`));
+    if (name !== undefined) {
+      const field = key.slice(name.length + 1);
+      if (field === "url") repoOf(name).url = entry.value;
+      else repoOf(name).fields.push({ field, ...entry });
+      continue;
+    }
+    if (key.startsWith("default.")) {
+      const field = key.slice("default.".length);
+      const host = /^credential\[(.*)\]$/.exec(field);
+      defaults.push(host ? { field: "credential", host: host[1], ...entry } : { field, host: "", ...entry });
+      continue;
+    }
+    const cut = key.lastIndexOf(".");
+    repoOf(cut > 0 ? key.slice(0, cut) : key).fields.push({ field: cut > 0 ? key.slice(cut + 1) : "", ...entry });
   }
-  for (const repo of repos) repo.fields.sort((a, b) => identityFields.indexOf(a.field) - identityFields.indexOf(b.field));
-  return { repos, rest };
+  const order = entry => identityFields.indexOf(entry.field);
+  for (const repo of repos) repo.fields.sort((a, b) => order(a) - order(b));
+  defaults.sort((a, b) => order(a) - order(b) || a.host.localeCompare(b.host));
+  return { repos, defaults, rest };
 }
 
 // secretChoices narrows the secret catalog to the types a slot accepts. An

@@ -117,7 +117,7 @@ func apply(
 	}
 	missing = append(missing, gitMissing...)
 	out.missing = missing
-	for _, secret := range append(secrets, imported...) {
+	for _, secret := range secrets {
 		// Close most of the preflight/create window and reuse a competing
 		// creator's value. The existing API has no atomic create-only gate.
 		ref := secret.Metadata
@@ -129,12 +129,29 @@ func apply(
 		if got.MetadataExists {
 			continue
 		}
-		if _, err = client.CreateSecret(ctx, secret); err != nil {
-			return out, requestError(
-				"creation (write not retried; rerun "+command+" to check existence)",
-				"secret "+ref.Name,
-				err,
-			)
+		if err = createSecret(ctx, client, secret, command); err != nil {
+			return out, err
+		}
+	}
+	for _, secret := range imported {
+		// An import is the operator's explicit request to store this key, so
+		// it replaces whatever the secret held: skipping an existing one would
+		// report success while cells kept the old key. The stored bytes cannot
+		// be read back to compare, so the replacement is always written and
+		// reported.
+		ref := secret.Metadata
+		lookup := api.SecretDoc{APIVersion: secret.APIVersion, Kind: secret.Kind, Metadata: secret.Metadata}
+		got, lookupErr := client.GetSecret(ctx, lookup)
+		if lookupErr != nil {
+			return out, requestError("recheck", "secret "+ref.Name, lookupErr)
+		}
+		if err = createSecret(ctx, client, secret, command); err != nil {
+			return out, err
+		}
+		if got.MetadataExists {
+			out.notes = append(out.notes, fmt.Sprintf(
+				"secret %q already existed and was replaced with the imported material.", ref.Name,
+			))
 		}
 	}
 	// CellConfigs only reference secrets structurally; kukeond resolves them at
@@ -148,6 +165,17 @@ func apply(
 	}
 	out.resources = expected
 	return out, nil
+}
+
+func createSecret(ctx context.Context, client Client, secret api.SecretDoc, command string) error {
+	if _, err := client.CreateSecret(ctx, secret); err != nil {
+		return requestError(
+			"creation (write not retried; rerun "+command+" to check existence)",
+			"secret "+secret.Metadata.Name,
+			err,
+		)
+	}
+	return nil
 }
 
 // resolveSharedNames decides the name each shared blueprint is stored under.

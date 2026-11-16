@@ -26,6 +26,7 @@ package cellblueprint
 
 import (
 	"fmt"
+	"path"
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -233,6 +234,17 @@ func MaterializeWithName(
 	for _, bc := range doc.Spec.Cell.Containers {
 		cs, missing := materializeContainer(bc)
 		blockers = append(blockers, missing...)
+		// A blueprint may leave a checkout path to a ${PARAM} (#1472); now
+		// that it is resolved it must be what the parser demands of a
+		// literal one.
+		for _, r := range cs.Repos {
+			if !path.IsAbs(strings.TrimSpace(r.Target)) {
+				return v1beta1.CellDoc{}, fmt.Errorf(
+					"%w (container %q repo %q target %q)",
+					errdefs.ErrRepoTargetNotAbsolute, bc.ID, r.Name, r.Target,
+				)
+			}
+		}
 		containers = append(containers, cs)
 	}
 	if len(blockers) > 0 {
@@ -263,7 +275,11 @@ func MaterializeWithName(
 			Containers:          containers,
 			AutoDelete:          doc.Spec.Cell.AutoDelete,
 			NestedCgroupRuntime: doc.Spec.Cell.NestedCgroupRuntime,
-			Provenance:          blueprintProvenance(doc, params),
+			// The capability requirement the container create enforces
+			// against the image label (#1472, step 9). Resolve has already
+			// folded the enabled components' requires into the blueprint's.
+			Requires:   NormalizeRequires(doc.Spec.Requires),
+			Provenance: blueprintProvenance(doc, params),
 		},
 	}, nil
 }

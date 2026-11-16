@@ -586,7 +586,7 @@ func validateBlueprint(doc *Document) *ValidationError {
 		return &ValidationError{Index: doc.Index, Kind: doc.Kind, Name: bp.Metadata.Name, Err: declErr}
 	}
 	for _, c := range bp.Spec.Cell.Containers {
-		if gitErr := apischeme.ValidateGit(c.Git); gitErr != nil {
+		if gitErr := apischeme.ValidateGitLayer(c.Git); gitErr != nil {
 			return &ValidationError{
 				Index: doc.Index, Kind: doc.Kind, Name: bp.Metadata.Name,
 				Err: fmt.Errorf("container %q: %w", c.ID, gitErr),
@@ -824,7 +824,7 @@ func validateConfig(doc *Document) *ValidationError {
 // components / modes selections. Whether a named component or mode exists is
 // checked against the referenced blueprint at reconcile and render time.
 func validateConfigContract(cfg *v1beta1.CellConfigDoc) error {
-	if err := apischeme.ValidateGit(cfg.Spec.Git); err != nil {
+	if err := apischeme.ValidateGitLayer(cfg.Spec.Git); err != nil {
 		return err
 	}
 	for name, fill := range cfg.Spec.Repos {

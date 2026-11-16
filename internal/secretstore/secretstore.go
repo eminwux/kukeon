@@ -117,10 +117,11 @@ func TypePath(runPath string, md intmodel.SecretMetadata) string {
 		fs.SecretsDir(runPath, md.Realm, md.Space, md.Stack, md.Cell), TypesDir, md.Name)
 }
 
-// WriteType records (or, for an opaque secret, clears) the type sidecar. It is
-// called before the bytes file is replaced, so a crash in between leaves a
-// typed marker over stale bytes — a decode error — rather than typed material
-// readable as an opaque value.
+// WriteType records (or, for an opaque secret, clears) the type sidecar. The
+// caller orders it against the bytes file so a crash in between leaves a typed
+// marker over bytes of another shape — a decode error — rather than typed
+// material readable as an opaque value: record a type before replacing the
+// bytes, clear one only after.
 func WriteType(runPath string, md intmodel.SecretMetadata, secretType string) error {
 	path := TypePath(runPath, md)
 	if secretType == "" || secretType == intmodel.SecretTypeOpaque {

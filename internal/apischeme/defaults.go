@@ -192,7 +192,7 @@ func validateScopeDefaults(kind string, d *ext.ScopeDefaults) error {
 	if d == nil {
 		return nil
 	}
-	if err := ValidateGit(d.Git); err != nil {
+	if err := ValidateGitLayer(d.Git); err != nil {
 		return fmt.Errorf("%s spec.defaults.%w", kind, err)
 	}
 	for name, fill := range d.Repos {

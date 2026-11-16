@@ -159,9 +159,14 @@ CellConfig.
 Init discovers `user.name` / `user.email` from your global git configuration.
 With `--import-git-identity` it also stores your SSH key as the secret
 `git-ssh`, binds it to every host the team's sources use, and — when your git
-configuration already signs commits or tags — makes it the signing key and
-stores your allowed-signers file as `git-allowed-signers`. An existing `git-ssh`
-secret is kept, never overwritten. Without the flag, init reports each SSH
+configuration already signs commits or tags **with that key** — makes it the
+signing key and stores your allowed-signers file as `git-allowed-signers`. If
+`user.signingkey` names something else (a GPG key, or a different SSH key), the
+key is imported as a credential only, signing is left off and a note says so:
+cells signing with a key your forge does not know as your signing key would
+produce unverified commits. An import always writes the secret: an existing
+`git-ssh` is replaced with the key you named, and a note reports the
+replacement. Without the flag, init reports each SSH
 source no stored credential covers and each setting that no longer has an
 effect (the pre-stored-credential `signingKey` / `allowedSigners` host paths, a
 role's `needs.mounts: [ssh]`) as a note.

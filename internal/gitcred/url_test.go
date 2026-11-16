@@ -44,6 +44,14 @@ func TestParseRemote(t *testing.T) {
 		}},
 		{"/srv/git/repo.git", gitcred.Remote{Transport: gitcred.TransportOther, Path: "/srv/git/repo.git"}},
 		{"./relative:with:colon", gitcred.Remote{Transport: gitcred.TransportOther, Path: "./relative:with:colon"}},
+		// Whitespace or a control character in the user or host is not an
+		// scp-like remote: it must not reach the generated ssh_config.
+		{"git@github.com\n  ProxyCommand evil:o/r.git", gitcred.Remote{
+			Transport: gitcred.TransportOther, Path: "git@github.com\n  ProxyCommand evil:o/r.git",
+		}},
+		{"evil user@github.com:o/r.git", gitcred.Remote{
+			Transport: gitcred.TransportOther, Path: "evil user@github.com:o/r.git",
+		}},
 		{"file:///srv/git/repo.git", gitcred.Remote{
 			Transport: gitcred.TransportOther, Path: "file:///srv/git/repo.git",
 		}},

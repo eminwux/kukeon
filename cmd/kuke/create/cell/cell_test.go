@@ -995,6 +995,55 @@ func TestCreateCell_FromBlueprint_ParamBakedAndRecorded(t *testing.T) {
 	}
 }
 
+// TestCreateCell_FromBlueprint_RequiresAndRepoTarget pins the two blueprint
+// contract checks on the --from-blueprint path (#1472): the cell handed to the
+// daemon carries the blueprint's capability requirement, and a repo target left
+// to a ${PARAM} is refused when the parameter resolves to a relative path.
+func TestCreateCell_FromBlueprint_RequiresAndRepoTarget(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	bp := blueprintDoc()
+	bp.Spec.Requires = []string{"git"}
+	bp.Spec.Parameters = append(bp.Spec.Parameters, v1beta1.CellBlueprintParameter{Name: "DIR"})
+	bp.Spec.Cell.Containers[0].Repos = []v1beta1.ContainerRepo{
+		{Name: "app", Target: "${DIR}", URL: "https://example.com/app.git"},
+	}
+	run := func(dir string) (v1beta1.CellDoc, bool, error) {
+		var sent v1beta1.CellDoc
+		called := false
+		fc := &fakeClient{
+			getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+				return kukeonv1.GetBlueprintResult{Blueprint: bp, MetadataExists: true}, nil
+			},
+			materializeCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+				sent, called = doc, true
+				return successResultFromDoc(doc), nil
+			},
+		}
+		cmd, _ := newTestExecCmd(t, fc)
+		setFlag(t, cmd, "realm", "bp-realm")
+		setFlag(t, cmd, "from-blueprint", "web")
+		setFlag(t, cmd, "param", "DIR="+dir)
+		cmd.SetArgs([]string{"web-1"})
+		err := cmd.Execute()
+		viper.Reset()
+		return sent, called, err
+	}
+
+	sent, called, err := run("/workspace/app")
+	if err != nil || !called {
+		t.Fatalf("absolute target: called=%v err=%v", called, err)
+	}
+	if len(sent.Spec.Requires) != 1 || sent.Spec.Requires[0] != "git" {
+		t.Errorf("Spec.Requires = %v, want [git] so the image capability check runs", sent.Spec.Requires)
+	}
+
+	_, called, err = run("work")
+	if !errors.Is(err, errdefs.ErrRepoTargetNotAbsolute) || called {
+		t.Fatalf("relative target: called=%v err=%v, want ErrRepoTargetNotAbsolute before any daemon call", called, err)
+	}
+}
+
 // TestCreateCell_FromConfig_EnvBakedAndRecorded pins AC items 2 and 4: --env on
 // the --from-config path is accepted (the old refusal is gone), baked into the
 // attachable container's env, and recorded in Spec.Provenance.EnvOverrides.

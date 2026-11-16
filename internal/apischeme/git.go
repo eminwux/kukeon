@@ -177,15 +177,32 @@ func validateContainerGit(spec ext.ContainerSpec) error {
 	return nil
 }
 
-// ValidateGit enforces the ContainerGit invariants, shared by a container's
-// git block, a scope's defaults.git and a CellConfig's git:
+// ValidateGit enforces the invariants of a complete git block — the one a
+// container actually runs with, after every level has been merged:
+//   - everything ValidateGitLayer checks, and
+//   - sign requires a signing key (signingKey path or signing.secretRef).
+func ValidateGit(git *ext.ContainerGit) error {
+	if err := ValidateGitLayer(git); err != nil {
+		return err
+	}
+	if git != nil && len(git.Sign) > 0 && git.SigningKey == "" && git.Signing == nil {
+		return errors.New("git.sign requires git.signingKey or git.signing to be set")
+	}
+	return nil
+}
+
+// ValidateGitLayer enforces the invariants of one level of the git hierarchy
+// (a scope's defaults.git, a CellConfig's git, a blueprint container's git):
 //   - author and committer each require both name and email when present;
 //   - each sign entry is a known target (commits or tags);
-//   - sign requires a signing key (signingKey path or signing.secretRef), and
-//     the two signing-key forms are mutually exclusive;
+//   - the two signing-key forms are mutually exclusive;
 //   - every credential names a host and a secret, with a known host-key policy
 //     and a valid port, and no two credentials share a host.
-func ValidateGit(git *ext.ContainerGit) error {
+//
+// It does not require sign to come with a signing key: a level may turn
+// signing on for a key a shallower level supplies (#1472, step 6). The merged
+// block is checked with ValidateGit when the cell is materialized.
+func ValidateGitLayer(git *ext.ContainerGit) error {
 	if git == nil {
 		return nil
 	}
@@ -203,9 +220,6 @@ func ValidateGit(git *ext.ContainerGit) error {
 	}
 	if git.Signing != nil && (git.SigningKey != "" || git.AllowedSigners != "") {
 		return errors.New("git.signing cannot be combined with git.signingKey or git.allowedSigners")
-	}
-	if len(git.Sign) > 0 && git.SigningKey == "" && git.Signing == nil {
-		return errors.New("git.sign requires git.signingKey or git.signing to be set")
 	}
 	hosts := map[string]struct{}{}
 	for i := range git.Credentials {

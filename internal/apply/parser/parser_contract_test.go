@@ -329,6 +329,21 @@ func TestValidateDocument_ConfigContract_Valid(t *testing.T) {
 	}
 }
 
+// A Config that turns signing on without naming a key applies: the key may be
+// inherited from a Realm, Space or Stack default (#1472, step 6). Whether the
+// merged block has one is checked when the cell is rendered.
+func TestValidateDocument_ConfigContract_InheritedSigningKey(t *testing.T) {
+	doc := mutateConfig(t, func(c *v1beta1.CellConfigDoc) {
+		c.Spec.Git.Signing = nil
+		if len(c.Spec.Git.Sign) == 0 {
+			c.Spec.Git.Sign = []string{v1beta1.GitSignCommits}
+		}
+	})
+	if err := parser.ValidateDocument(doc); err != nil {
+		t.Fatalf("config with git.sign and an inherited key: %v", err)
+	}
+}
+
 func TestValidateDocument_ConfigContract_Rejections(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -375,13 +390,6 @@ func TestValidateDocument_ConfigContract_Rejections(t *testing.T) {
 				c.Spec.Git.Credentials = append(c.Spec.Git.Credentials, c.Spec.Git.Credentials[0])
 			},
 			want: errors.New("duplicate credential host"),
-		},
-		{
-			name: "sign without a signing key",
-			mutate: func(c *v1beta1.CellConfigDoc) {
-				c.Spec.Git.Signing = nil
-			},
-			want: errors.New("git.sign requires git.signingKey or git.signing"),
 		},
 		{
 			name: "repo fill credential names a host",

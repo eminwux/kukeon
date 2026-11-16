@@ -490,9 +490,21 @@ func TestMissingGitSecretsAreReported(t *testing.T) {
 	for _, name := range []string{"git-ssh", "signers", "deploy-key"} {
 		f.secrets[api.SecretMetadata{Name: name, Realm: "default"}] = "present"
 	}
+	done, err = apply(t.Context(), f, composeTeam(t, withSecrets), "kuke team init", nil)
+	if err != nil || len(done.missing) != 0 || f.creates != 0 || len(done.notes) != 0 {
+		t.Fatalf("missing=%q creates=%d notes=%q err=%v", done.missing, f.creates, done.notes, err)
+	}
+	// An import over an existing secret replaces it and says so: skipping it
+	// would report success while cells kept the old key.
 	done, err = apply(t.Context(), f, composeTeam(t, withSecrets), "kuke team init", imported)
-	if err != nil || len(done.missing) != 0 || f.creates != 0 {
+	if err != nil || len(done.missing) != 0 || f.creates != 1 ||
+		f.created[0].Spec.SSHKey.PrivateKey != "material" {
 		t.Fatalf("missing=%q creates=%d err=%v", done.missing, f.creates, err)
+	}
+	if !slices.ContainsFunc(done.notes, func(n string) bool {
+		return strings.Contains(n, `secret "git-ssh" already existed and was replaced`)
+	}) {
+		t.Fatalf("notes = %q, want the replacement reported", done.notes)
 	}
 	// A failed lookup gates the apply and reports no daemon text.
 	f = newFake()

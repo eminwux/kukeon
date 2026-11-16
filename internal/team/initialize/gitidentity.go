@@ -54,34 +54,37 @@ type GitImport struct {
 
 // importGitIdentity reads the operator's key material and rewrites cfg's git
 // block to name stored secrets instead of host paths. It returns the secrets
-// to create; nothing is written here, and the key never appears in cfg.
+// to create and any operator-facing notes; nothing is written here, and the
+// key never appears in cfg.
+//
+
 func importGitIdentity(
 	cfg *config.TeamsConfig, sources []config.Source, home string, imp GitImport,
-) ([]api.SecretDoc, error) {
+) ([]api.SecretDoc, []string, error) {
 	if cfg.Spec.Git == nil {
 		cfg.Spec.Git = &config.Git{}
 	}
 	git := cfg.Spec.Git
 	keyPath, err := gitKeyPath(git, home, imp.Key)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	private, err := readKeyFile(keyPath, "private key")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if !strings.Contains(private, "PRIVATE KEY") {
-		return nil, fmt.Errorf("import git identity: %s is not a private key", keyPath)
+		return nil, nil, fmt.Errorf("import git identity: %s is not a private key", keyPath)
 	}
 	key := &api.SecretSSHKey{PrivateKey: private}
 	if imp.PassphraseFile != "" {
 		if key.Passphrase, err = readKeyFile(imp.PassphraseFile, "passphrase"); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		key.Passphrase = strings.TrimRight(key.Passphrase, "\r\n")
 	}
 	if gitcred.PrivateKeyEncrypted(private) && key.Passphrase == "" {
-		return nil, fmt.Errorf(
+		return nil, nil, fmt.Errorf(
 			"import git identity: %s is passphrase-protected; pass --git-key-passphrase-file", keyPath,
 		)
 	}
@@ -94,7 +97,7 @@ func importGitIdentity(
 	}
 	if imp.KnownHostsFile != "" {
 		if key.KnownHosts, err = readKeyFile(imp.KnownHostsFile, "known_hosts"); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	keyRef := config.SecretRef{Name: gitKeySecret, Realm: importRealm}
@@ -111,13 +114,26 @@ func importGitIdentity(
 			git.Credentials = append(git.Credentials, config.GitCredential{Host: host, SecretRef: keyRef})
 		}
 	}
-	// Signing follows only when the operator already signs.
+	// Signing follows only when the operator already signs, and signs with
+	// the key being imported. A GPG signer, or one whose user.signingkey is a
+	// different key, must not end up SSH-signing with this one: the commits
+	// would show as unverified.
+	var notes []string
+	if len(git.Sign) > 0 && git.Signing == nil && !signsWith(git.SigningKey, home, keyPath, key.PublicKey) {
+		notes = append(notes, fmt.Sprintf(
+			"git signing was not imported: the configured signing key is not the imported SSH key %s "+
+				"(a GPG key, or a different SSH key). Cells will not sign; to sign, store the signing key "+
+				"as an ssh-key secret and name it in spec.git.signing, or rerun with --git-key naming it.",
+			keyPath,
+		))
+		git.Sign = nil
+	}
 	if len(git.Sign) > 0 && git.Signing == nil {
 		git.Signing = &config.GitSigning{SecretRef: keyRef}
 		if git.AllowedSigners != "" {
 			signers, readErr := readKeyFile(expandHome(git.AllowedSigners, home), "allowed signers file")
 			if readErr != nil {
-				return nil, readErr
+				return nil, nil, readErr
 			}
 			ref := config.SecretRef{Name: gitSignersSecret, Realm: importRealm}
 			git.Signing.AllowedSignersRef = &ref
@@ -130,7 +146,37 @@ func importGitIdentity(
 	}
 	// The host paths are now stored secrets.
 	git.SigningKey, git.AllowedSigners = "", ""
-	return docs, nil
+	return docs, notes, nil
+}
+
+// signsWith reports whether the operator's user.signingkey names the SSH key
+// being imported: its path (private or .pub), a file holding its public half,
+// or the public key itself (git's literal and `key::` forms). A GPG key ID
+// matches none of them.
+func signsWith(signingKey, home, keyPath, publicKey string) bool {
+	signingKey = strings.TrimSpace(signingKey)
+	if signingKey == "" {
+		return false
+	}
+	if samePublicKey(strings.TrimPrefix(signingKey, "key::"), publicKey) {
+		return true
+	}
+	signingPath := expandHome(signingKey, home)
+	if !filepath.IsAbs(signingPath) {
+		return false
+	}
+	if filepath.Clean(strings.TrimSuffix(signingPath, ".pub")) == filepath.Clean(keyPath) {
+		return true
+	}
+	content, err := os.ReadFile(signingPath)
+	return err == nil && samePublicKey(string(content), publicKey)
+}
+
+// samePublicKey compares two OpenSSH public key lines by type and key blob,
+// ignoring the trailing comment.
+func samePublicKey(a, b string) bool {
+	fa, fb := strings.Fields(a), strings.Fields(b)
+	return len(fa) >= 2 && len(fb) >= 2 && fa[0] == fb[0] && fa[1] == fb[1]
 }
 
 func gitKeyPath(git *config.Git, home, explicit string) (string, error) {

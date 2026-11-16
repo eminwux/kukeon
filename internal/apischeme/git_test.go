@@ -383,7 +383,10 @@ func TestContainerDoc_RejectsInvalidRepoGit(t *testing.T) {
 // TestScopeDocs_ValidateDefaultsGit asserts Realm, Space and Stack documents
 // reject an invalid defaults.git and an invalid repo-fill git at conversion.
 func TestScopeDocs_ValidateDefaultsGit(t *testing.T) {
-	badGit := &ext.ScopeDefaults{Git: &ext.ContainerGit{Sign: []string{ext.GitSignCommits}}}
+	badGit := &ext.ScopeDefaults{Git: &ext.ContainerGit{Author: &ext.GitIdentity{Name: "Dev"}}}
+	// A scope may turn signing on for a key a shallower scope supplies; only
+	// the merged block must name one.
+	signOnly := &ext.ScopeDefaults{Git: &ext.ContainerGit{Sign: []string{ext.GitSignCommits}}}
 	badRepo := &ext.ScopeDefaults{Repos: map[string]ext.CellConfigRepoFill{
 		"src": {URL: "u", Git: &ext.RepoGit{Signing: &ext.GitSigning{}}},
 	}}
@@ -415,8 +418,11 @@ func TestScopeDocs_ValidateDefaultsGit(t *testing.T) {
 	for kind, fn := range convert {
 		t.Run(kind, func(t *testing.T) {
 			err := fn(badGit)
-			if err == nil || !strings.Contains(err.Error(), kind+" spec.defaults.git.sign requires") {
-				t.Errorf("defaults.git: err = %v, want %s spec.defaults.git.sign rejection", err, kind)
+			if err == nil || !strings.Contains(err.Error(), kind+" spec.defaults.git.author requires") {
+				t.Errorf("defaults.git: err = %v, want %s spec.defaults.git.author rejection", err, kind)
+			}
+			if err = fn(signOnly); err != nil {
+				t.Errorf("defaults.git sign without a key on this level: err = %v, want accepted", err)
 			}
 			err = fn(badRepo)
 			if err == nil || !strings.Contains(err.Error(), kind+` spec.defaults.repos["src"]`) {
@@ -483,5 +489,22 @@ func TestSecretConversion(t *testing.T) {
 		if in.spec.Type == "" {
 			t.Errorf("%s: external view dropped the type", in.name)
 		}
+	}
+}
+
+// A single level of the hierarchy may set sign without a key; the complete
+// block may not. Everything else is judged the same by both.
+func TestValidateGitLayer_DefersSignNeedsKey(t *testing.T) {
+	signOnly := &ext.ContainerGit{Sign: []string{ext.GitSignCommits}}
+	if err := apischeme.ValidateGitLayer(signOnly); err != nil {
+		t.Errorf("ValidateGitLayer(sign only) = %v, want nil", err)
+	}
+	assertGitErr(t, apischeme.ValidateGit(signOnly), "git.sign requires git.signingKey or git.signing")
+	bad := &ext.ContainerGit{Sign: []string{"branches"}}
+	if err := apischeme.ValidateGitLayer(bad); err == nil {
+		t.Error("ValidateGitLayer accepted an unknown sign target")
+	}
+	if err := apischeme.ValidateGitLayer(nil); err != nil {
+		t.Errorf("ValidateGitLayer(nil) = %v", err)
 	}
 }

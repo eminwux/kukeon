@@ -72,12 +72,24 @@ func (r *Exec) WriteSecret(secret intmodel.Secret) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("%w: encode secret: %w", errdefs.ErrWriteSecret, err)
 	}
-	// Type sidecar first: see secretstore.WriteType for the crash ordering.
-	if err = secretstore.WriteType(r.opts.RunPath, md, secret.Spec.EffectiveType()); err != nil {
-		return false, fmt.Errorf("%w: %w", errdefs.ErrWriteSecret, err)
+	// The two files cannot be replaced together, so order them so that a crash
+	// in between never leaves typed material readable as an opaque value: the
+	// only half-written state is a typed marker over bytes that are not that
+	// type's JSON, which is a decode error. A typed secret therefore gets its
+	// marker first; an opaque one replaces the bytes first and only then
+	// clears whatever marker the previous (possibly typed) secret left.
+	writeType := func() error {
+		return secretstore.WriteType(r.opts.RunPath, md, secret.Spec.EffectiveType())
 	}
-	if err = atomicWriteSecret(dir, path, payload); err != nil {
-		return false, fmt.Errorf("%w: %w", errdefs.ErrWriteSecret, err)
+	writeBytes := func() error { return atomicWriteSecret(dir, path, payload) }
+	steps := []func() error{writeType, writeBytes}
+	if secret.Spec.EffectiveType() == intmodel.SecretTypeOpaque {
+		steps = []func() error{writeBytes, writeType}
+	}
+	for _, step := range steps {
+		if err = step(); err != nil {
+			return false, fmt.Errorf("%w: %w", errdefs.ErrWriteSecret, err)
+		}
 	}
 
 	action := "updated"

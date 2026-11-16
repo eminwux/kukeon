@@ -208,7 +208,34 @@ test("git values are grouped per repo with the level that decided each field", (
     { repo: "project", url: "git@github.com:o/p.git", fields: [{ field: "author", value: "bot <bot@example.com>", origin: "config" }, { field: "signing", value: "deploy (ssh-key)", origin: "config" }] },
     { repo: "role.source", url: "git@github.com:o/a.git", fields: [{ field: "credential", value: "git-ssh (ssh-key)", origin: "realm" }] },
   ]);
-  assert.deepEqual(groupGitValues(undefined), { repos: [], rest: [] });
+  assert.deepEqual(groupGitValues(undefined), { repos: [], defaults: [], rest: [] });
+});
+
+test("the default git identity is its own block, not a repo named default", () => {
+  const { repos, defaults, rest } = groupGitValues([
+    { kind: "git", key: "default.credential[github.com]", value: "git-ssh (ssh-key)", origin: "stack" },
+    { kind: "git", key: "default.signing", value: "git-ssh (ssh-key)", origin: "realm" },
+    { kind: "git", key: "default.credential[git.example.com/team]", value: "team (basic-auth)", origin: "config" },
+    { kind: "git", key: "default.author", value: "Dev <dev@example.com>", origin: "stack" },
+    { kind: "git", key: "project.author", value: "Dev <dev@example.com>", origin: "stack" },
+    { kind: "git", key: "project.url", value: "git@github.com:o/p.git", origin: "config" },
+  ]);
+  assert.deepEqual(rest, []);
+  assert.deepEqual(repos, [{ repo: "project", url: "git@github.com:o/p.git", fields: [{ field: "author", value: "Dev <dev@example.com>", origin: "stack" }] }]);
+  assert.deepEqual(defaults, [
+    { field: "author", host: "", value: "Dev <dev@example.com>", origin: "stack" },
+    { field: "credential", host: "git.example.com/team", value: "team (basic-auth)", origin: "config" },
+    { field: "credential", host: "github.com", value: "git-ssh (ssh-key)", origin: "stack" },
+    { field: "signing", host: "", value: "git-ssh (ssh-key)", origin: "realm" },
+  ]);
+  // A repo that really is called "default" keeps its own fields.
+  const named = groupGitValues([
+    { kind: "git", key: "default.url", value: "https://example.com/d.git", origin: "config" },
+    { kind: "git", key: "default.author", value: "Bot <bot@example.com>", origin: "config" },
+    { kind: "git", key: "default.credential[example.com]", value: "c (basic-auth)", origin: "realm" },
+  ]);
+  assert.deepEqual(named.repos.map(repo => [repo.repo, repo.fields.map(field => field.field)]), [["default", ["author"]]]);
+  assert.deepEqual(named.defaults.map(field => [field.field, field.host]), [["credential", "example.com"]]);
 });
 
 test("secret pickers are limited to the types a slot accepts", () => {

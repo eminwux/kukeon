@@ -573,6 +573,17 @@ func basicHelperEntries(rc resolvedCredential, scheme string, port int) []config
 	return out
 }
 
+// helperCoversScope reports whether the cell-global helper section of a
+// default basic-auth credential already names the scheme and port a clone URL
+// ends up with.
+func helperCoversScope(rc resolvedCredential, scheme string, port int) bool {
+	declared := TransportHTTPS
+	if rc.target.Scheme == TransportHTTP {
+		declared = TransportHTTP
+	}
+	return declared == scheme && rc.target.Port == port
+}
+
 // matchCredential returns the default credential covering the remote, the
 // longest path prefix winning and declaration order breaking ties.
 func matchCredential(defaults []resolvedCredential, remote Remote) (resolvedCredential, bool) {
@@ -649,7 +660,11 @@ func (b *builder) planRepo(
 				port = remote.Port
 			}
 			entry.URL = remote.HTTPURL(scheme, port)
-			if specific {
+			// The cell-global helper section is scoped to the credential's
+			// own scheme and port. A remote on another port (or plain http)
+			// takes those from its URL, so git would find no helper there:
+			// state the section for the URL this checkout really uses.
+			if specific || !helperCoversScope(rc, scheme, port) {
 				entry.Config = append(entry.Config, basicHelperEntries(rc, scheme, port)...)
 			}
 		}

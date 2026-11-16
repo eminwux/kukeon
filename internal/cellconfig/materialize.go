@@ -21,6 +21,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/cellblueprint"
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -212,6 +213,14 @@ func materializeContainer(
 		secrets = append(secrets, cs)
 	}
 
+	// Each level is validated on its own without the sign-needs-key rule, so a
+	// Config may turn signing on for a key its Realm supplies; the merged block
+	// is the one that must be complete (#1472, step 6).
+	git := containerGit(bc, cfg)
+	if err := apischeme.ValidateGit(git); err != nil {
+		return v1beta1.ContainerSpec{}, fmt.Errorf("container %q: %w", bc.ID, err)
+	}
+
 	cs := v1beta1.ContainerSpec{
 		ID:                     bc.ID,
 		Root:                   bc.Root,
@@ -236,7 +245,7 @@ func materializeContainer(
 		Tmpfs:                  bc.Tmpfs,
 		Resources:              bc.Resources,
 		Repos:                  repos,
-		Git:                    containerGit(bc, cfg),
+		Git:                    git,
 		RestartPolicy:          bc.RestartPolicy,
 		Attachable:             bc.Attachable,
 		Tty:                    bc.Tty,

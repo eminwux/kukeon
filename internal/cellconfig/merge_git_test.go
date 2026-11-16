@@ -18,6 +18,7 @@ package cellconfig
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -259,5 +260,46 @@ func TestMergeDefaults_PathSigningKeyExplained(t *testing.T) {
 	got := originOf(t, values, v1beta1.RenderKindGit, "default.signing")
 	if got.Value != "/home/u/.ssh/id.pub" || got.Origin != v1beta1.RenderOriginConfig {
 		t.Errorf("default.signing = %+v, want the key path from config", got)
+	}
+}
+
+// A Config that turns signing on inherits its key from the Realm: each level
+// is valid on its own without one, and the merged block the cell runs with is
+// complete (#1472, step 6). The same Config under a hierarchy that supplies no
+// key is refused at render, where the merged block is known.
+func TestMaterialize_SigningKeyInheritedFromRealm(t *testing.T) {
+	bp := minimalBlueprint()
+	cfg := v1beta1.CellConfigDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindCellConfig,
+		Metadata:   v1beta1.CellConfigMetadata{Name: "prod", Realm: "r"},
+		Spec: v1beta1.CellConfigSpec{
+			Blueprint: v1beta1.CellConfigBlueprintRef{Name: "web", Realm: "bp-realm"},
+			Repos:     map[string]v1beta1.CellConfigRepoFill{"src": {URL: "https://example.com/src.git"}},
+			Secrets: map[string]v1beta1.CellConfigSecretFill{
+				"token": {SecretRef: &v1beta1.ContainerSecretRef{Name: "api-token", Realm: "r"}},
+			},
+			Git: &v1beta1.ContainerGit{Sign: []string{v1beta1.GitSignCommits}},
+		},
+	}
+	realm := []DefaultsLayer{{Origin: v1beta1.RenderOriginRealm, Defaults: &v1beta1.ScopeDefaults{
+		Git: &v1beta1.ContainerGit{Signing: &v1beta1.GitSigning{SecretRef: secretRef("realm-signing")}},
+	}}}
+
+	merged, _ := MergeDefaults(cfg, bp, realm)
+	cell, err := MaterializeWithName(merged, bp, "prod")
+	if err != nil {
+		t.Fatalf("MaterializeWithName with an inherited signing key: %v", err)
+	}
+	git := cell.Spec.Containers[0].Git
+	if git == nil || git.Signing == nil || git.Signing.SecretRef.Name != "realm-signing" ||
+		len(git.Sign) != 1 || git.Sign[0] != v1beta1.GitSignCommits {
+		t.Fatalf("container git = %+v, want the Config's sign with the Realm's key", git)
+	}
+
+	merged, _ = MergeDefaults(cfg, bp, nil)
+	_, err = MaterializeWithName(merged, bp, "prod")
+	if err == nil || !strings.Contains(err.Error(), "git.sign requires git.signingKey or git.signing") {
+		t.Fatalf("no key at any level: err = %v, want the sign-needs-key rejection", err)
 	}
 }
