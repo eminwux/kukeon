@@ -2928,6 +2928,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#specautodelete-bool-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        spec.autoDelete (bool, optional)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3694,6 +3705,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#specautodelete-bool-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        spec.autoDelete (bool, optional)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3990,6 +4012,8 @@
 <p>The mode itself is picked <strong>per cell</strong>, at create time — <code>kuke run &lt;config&gt; --mode headless --param PROMPT=…</code> — so one Config serves both an attached session and a dispatched run. A Config may fill the secret slots of every mode it enables; only the picked mode's required slots and parameters are checked for a given cell.</p>
 <h3 id="specgit-object-optional"><code>spec.git</code> (object, optional)<a class="headerlink" href="#specgit-object-optional" title="Permanent link">&para;</a></h3>
 <p>Overrides the git identity, credentials and signing config the cell inherits from its Realm → Space → Stack defaults. Same shape as a container's <a href="../container/#containergit"><code>git</code></a>: <code>author</code>, <code>committer</code> and <code>signing</code> replace the inherited value; <code>credentials[]</code> merge by <code>host</code>. See the <a href="../../guides/git-credentials/">git credentials guide</a>.</p>
+<h3 id="specautodelete-bool-optional"><code>spec.autoDelete</code> (bool, optional)<a class="headerlink" href="#specautodelete-bool-optional" title="Permanent link">&para;</a></h3>
+<p>When <code>true</code>, every cell materialized from this Config gets <code>Spec.AutoDelete</code>, so it is deleted once its run ends. This is the same deletion <code>kuke run --rm</code> asks for, without the flag. The value is OR'd with the blueprint's own <code>spec.cell.autoDelete</code>. It is set on the Config, not the blueprint, because a blueprint is shared across modes and roles. A re-render of an existing cell (OutOfSync, <code>kuke restart</code>) keeps it. <code>kuke team add</code> sets it on every <a href="../../concepts/team/#tasks">task config</a>.</p>
 <h2 id="slot-fills">Slot fills<a class="headerlink" href="#slot-fills" title="Permanent link">&para;</a></h2>
 <p>A <code>CellConfig</code> fills the structural slots a <a href="../blueprint/"><code>CellBlueprint</code></a> declares. Slot matching is by <strong>name</strong>, across all of the blueprint's containers — the same slot name on two containers shares a single Config-side entry. The validation gates are:</p>
 <ul>
@@ -4074,7 +4098,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 16, 2026 11:01:05 UTC">November 16, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 16, 2026 22:19:24 UTC">November 16, 2026</span>
   </span>
 
     
