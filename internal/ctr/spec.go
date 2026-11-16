@@ -1048,6 +1048,17 @@ func withOriginalImageEnv(_ context.Context, _ oci.Client, _ *containers.Contain
 	return nil
 }
 
+// envHasKey reports whether env carries a KEY=value entry for key.
+func envHasKey(env []string, key string) bool {
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // WithFreshProcessEnv replaces only the runtime environment of a reused
 // container, using creation-time defaults rather than resolving a mutable image
 // name. Older records freeze their existing OCI env as a compatibility baseline;
@@ -1080,8 +1091,14 @@ func WithFreshProcessEnv(spec intmodel.ContainerSpec, runPath string) oci.SpecOp
 		envSpec := spec
 		envSpec.Env = append(append([]string(nil), spec.Env...), resolved.EnvAdds...)
 		fresh := &oci.Spec{Process: &runtimespec.Process{Env: originalEnv}}
-		if err = oci.WithDefaultPathEnv(ctx, client, c, fresh); err != nil {
-			return err
+		// oci.WithDefaultPathEnv overwrites any existing PATH, so apply it only
+		// when the image declared none — the same fallback WithImageConfig uses
+		// on first create. An image PATH (e.g. /home/user/.local/bin) must
+		// survive the refresh or harness CLIs vanish at onInit.
+		if !envHasKey(originalEnv, "PATH") {
+			if err = oci.WithDefaultPathEnv(ctx, client, c, fresh); err != nil {
+				return err
+			}
 		}
 		env := kukeonContainerEnv(envSpec)
 		if gitcred.Needed(envSpec) && !specHasMount(s, gitplan.MountPath) {
