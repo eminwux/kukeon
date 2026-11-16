@@ -90,7 +90,11 @@ type Pair struct {
 	// point at the same document.
 	Blueprint *api.CellBlueprintDoc
 	Config    *api.CellConfigDoc
-	Secrets   []SecretRequirement
+	// Tasks are the pair's headless task configs, one per task the team
+	// selects from the role (`<team>-<role>-<harness>-<task>`). They share
+	// the Config's blueprint, fills and secrets.
+	Tasks   []*api.CellConfigDoc
+	Secrets []SecretRequirement
 }
 
 // SecretRequirement contains declarations only; Source is an optional creation
@@ -182,6 +186,11 @@ func Compose(cfg *config.TeamsConfig, team *config.Team, opts Options) (*Result,
 		for name := range allParameters(bp) {
 			declared[name] = true
 		}
+		var note string
+		pair.Tasks, note = bindTasks(plan, pair.Config)
+		if note != "" {
+			result.Notes = append(result.Notes, note)
+		}
 		result.Pairs = append(result.Pairs, pair)
 	}
 	for _, name := range slices.Sorted(maps.Keys(cfg.Spec.Parameters)) {
@@ -199,7 +208,8 @@ func Compose(cfg *config.TeamsConfig, team *config.Team, opts Options) (*Result,
 		return nil, err
 	}
 	result.Entry.Secrets = secrets.entry()
-	result.Git, result.Notes = defaultGit(cfg.Spec.Git)
+	gitDefaults, gitNotes := defaultGit(cfg.Spec.Git)
+	result.Git, result.Notes = gitDefaults, append(result.Notes, gitNotes...)
 	result.Notes = append(result.Notes, credentialNotes(result.Git, effective.Sources)...)
 	for _, plan := range plans {
 		if slices.Contains(plan.role.Spec.Needs.Mounts, "ssh") {
@@ -287,6 +297,8 @@ type pairPlan struct {
 	extraSecrets []api.BlueprintSecretSlot
 	// extraParams are role-declared parameters the blueprint does not declare.
 	extraParams []string
+	// tasks are the role tasks the team selects, rendered as task configs.
+	tasks []model.RoleTask
 }
 
 type secretFill struct {
@@ -410,13 +422,17 @@ func planPair(
 	if err = checkSettings(hsel.Name, settings); err != nil {
 		return nil, err
 	}
+	tasks, err := selectTasks(&role, selection)
+	if err != nil {
+		return nil, err
+	}
 	if !fs.ValidPath(selection.Path) || !config.SafePath("/"+selection.Path) {
 		return nil, errors.New("role path: require a safe source-relative path")
 	}
 	plan := &pairPlan{
 		team: team, selection: selection, hsel: hsel, role: &role, settings: settings,
 		definition: definition, catalog: catalog, image: image, needs: needs, roleSource: repo,
-		profile: profile{Root: slices.Contains(needs, "root")},
+		profile: profile{Root: slices.Contains(needs, "root")}, tasks: tasks,
 	}
 	for _, mount := range role.Spec.Needs.Mounts {
 		if slices.Contains(hostMounts, mount) && !slices.Contains(plan.profile.Mounts, mount) {
@@ -549,8 +565,21 @@ func (r *Result) RenameBlueprint(bp *api.CellBlueprintDoc, name string) {
 	for i := range r.Pairs {
 		if r.Pairs[i].Blueprint == bp {
 			r.Pairs[i].Config.Spec.Blueprint.Name = name
+			for _, task := range r.Pairs[i].Tasks {
+				task.Spec.Blueprint.Name = name
+			}
 		}
 	}
+}
+
+// Configs counts every CellConfig the result applies: each pair's Config plus
+// its task configs.
+func (r *Result) Configs() int {
+	n := 0
+	for _, p := range r.Pairs {
+		n += 1 + len(p.Tasks)
+	}
+	return n
 }
 
 // MarshalYAML returns only Blueprints then Configs. Secret values and creation
@@ -571,6 +600,11 @@ func (r *Result) MarshalYAML() ([]byte, error) {
 	for _, p := range r.Pairs {
 		if err := enc.Encode(p.Config); err != nil {
 			return nil, err
+		}
+		for _, task := range p.Tasks {
+			if err := enc.Encode(task); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if err := enc.Close(); err != nil {

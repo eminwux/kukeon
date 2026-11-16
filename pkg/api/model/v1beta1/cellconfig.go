@@ -99,6 +99,12 @@ type CellConfigSpec struct {
 	// committer and signing replace the inherited value, credentials merge
 	// by host.
 	Git *ContainerGit `json:"git,omitempty"        yaml:"git,omitempty"`
+	// AutoDelete marks every cell materialized from this Config for deletion
+	// once its run ends — the same deletion `kuke run --rm` asks for. It is
+	// OR'd with the blueprint's own spec.cell.autoDelete, and set on the
+	// Config rather than the blueprint because a blueprint is shared across
+	// modes and roles (kuke team task configs, #1491).
+	AutoDelete bool `json:"autoDelete,omitempty" yaml:"autoDelete,omitempty"`
 }
 
 // CellConfigModes restricts and defaults the harness mode of a Config's cells.

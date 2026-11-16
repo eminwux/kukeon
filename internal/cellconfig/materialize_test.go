@@ -543,3 +543,44 @@ func TestMaterialize_ToleratesUndeclaredValues(t *testing.T) {
 		t.Errorf("workingDir=%q want undeclared ${ROLE} substituted to dev", c.WorkingDir)
 	}
 }
+
+// TestMaterialize_AutoDeleteORsConfigAndBlueprint pins issue #1491: the
+// cell's Spec.AutoDelete is the Config's spec.autoDelete OR'd with the
+// blueprint's spec.cell.autoDelete.
+func TestMaterialize_AutoDeleteORsConfigAndBlueprint(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		config, cellBP  bool
+		wantAutoDeleted bool
+	}{
+		{name: "neither", wantAutoDeleted: false},
+		{name: "config only", config: true, wantAutoDeleted: true},
+		{name: "blueprint only", cellBP: true, wantAutoDeleted: true},
+		{name: "both", config: true, cellBP: true, wantAutoDeleted: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bp := minimalBlueprint()
+			bp.Spec.Cell.AutoDelete = tc.cellBP
+			cfg := v1beta1.CellConfigDoc{
+				APIVersion: v1beta1.APIVersionV1Beta1,
+				Kind:       v1beta1.KindCellConfig,
+				Metadata:   v1beta1.CellConfigMetadata{Name: "task"},
+				Spec: v1beta1.CellConfigSpec{
+					Blueprint: v1beta1.CellConfigBlueprintRef{Name: "web"},
+					Repos:     map[string]v1beta1.CellConfigRepoFill{"src": {URL: "https://example.com/src.git"}},
+					Secrets: map[string]v1beta1.CellConfigSecretFill{
+						"token": {SecretRef: &v1beta1.ContainerSecretRef{Name: "t"}},
+					},
+					AutoDelete: tc.config,
+				},
+			}
+			cell, err := MaterializeWithName(cfg, bp, "task-abc123")
+			if err != nil {
+				t.Fatalf("MaterializeWithName: %v", err)
+			}
+			if cell.Spec.AutoDelete != tc.wantAutoDeleted {
+				t.Fatalf("AutoDelete = %v, want %v", cell.Spec.AutoDelete, tc.wantAutoDeleted)
+			}
+		})
+	}
+}

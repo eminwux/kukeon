@@ -18,6 +18,8 @@
 // It performs no filesystem, environment, Git, daemon, or network discovery.
 package config
 
+import "slices"
+
 const (
 	APIVersion = "kuketeams.io/v1"
 	Kind       = "TeamsConfig"
@@ -144,6 +146,18 @@ type Role struct {
 	InitialPath string `yaml:"initialPath,omitempty"`
 	Needs       *Needs `yaml:"needs,omitempty"`
 	Harness     string `yaml:"harness,omitempty"`
+	// Tasks selects which of the role's declared tasks (role.yaml
+	// spec.tasks) the team renders as headless task CellConfigs. Nil (the
+	// field omitted) selects every task the role declares; a non-nil empty
+	// list selects none. A pointer so an authored `tasks: []` survives a
+	// TeamEntry round-trip instead of being erased by omitempty.
+	Tasks *[]string `yaml:"tasks,omitempty"`
+}
+
+// SelectsTask reports whether the role entry selects the named task: every
+// task when Tasks is omitted, otherwise only the listed ones.
+func (r Role) SelectsTask(name string) bool {
+	return r.Tasks == nil || slices.Contains(*r.Tasks, name)
 }
 
 type Needs struct {

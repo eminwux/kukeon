@@ -455,3 +455,49 @@ spec:
 		}
 	}
 }
+
+// TestRoleTaskSelectionRoundTrips pins issue #1491: an omitted `tasks`
+// (every task) and an explicit `tasks: []` (none) stay distinct through the
+// TeamEntry round-trip, and selection names are validated.
+func TestRoleTaskSelectionRoundTrips(t *testing.T) {
+	cfg, err := config.Decode(strings.NewReader(`apiVersion: kuketeams.io/v1
+kind: TeamsConfig
+spec:
+  defaults:
+    sources: [{name: defs, url: github.com/example/defs, branch: main}]
+    harnesses: [{name: claude, source: defs, path: harnesses/claude}]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tasks := range []*[]string{nil, {}, {"pick-issue", "pick-bug"}} {
+		team := config.Root()
+		team.Spec.Roles = []config.Role{{Name: "dev", Source: "defs", Path: "dev", Tasks: tasks}}
+		if _, err = config.Resolve(cfg, team); err != nil {
+			t.Fatal(err)
+		}
+		entry, entryErr := config.Entry(team)
+		if entryErr != nil {
+			t.Fatal(entryErr)
+		}
+		raw, marshalErr := yaml.Marshal(entry)
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		decoded, decodeErr := config.DecodeEntry(bytes.NewReader(raw))
+		if decodeErr != nil || !reflect.DeepEqual(decoded.Team(), team) {
+			t.Fatalf("round trip of %v: %s: %v", tasks, raw, decodeErr)
+		}
+		got := decoded.Spec.Roles[0]
+		if got.SelectsTask("pick-bug") != (tasks == nil || len(*tasks) > 0) {
+			t.Fatalf("SelectsTask(pick-bug) with %v = %v", tasks, got.SelectsTask("pick-bug"))
+		}
+	}
+	for _, bad := range [][]string{{"Bad_Name"}, {"a", "a"}, {""}} {
+		team := config.Root()
+		team.Spec.Roles = []config.Role{{Name: "dev", Source: "defs", Path: "dev", Tasks: &bad}}
+		if _, err = config.Resolve(cfg, team); err == nil {
+			t.Fatalf("tasks %q accepted", bad)
+		}
+	}
+}

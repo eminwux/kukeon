@@ -106,7 +106,7 @@ func MaterializeWithName(
 			StackID:             defaultScope(cfg.Metadata.Stack, consts.KukeonDefaultStackName),
 			Tty:                 cloneCellTty(resolved.Spec.Cell.Tty),
 			Containers:          containers,
-			AutoDelete:          resolved.Spec.Cell.AutoDelete,
+			AutoDelete:          resolved.Spec.Cell.AutoDelete || cfg.Spec.AutoDelete,
 			NestedCgroupRuntime: resolved.Spec.Cell.NestedCgroupRuntime,
 			Provenance:          configProvenance(cfg),
 		},

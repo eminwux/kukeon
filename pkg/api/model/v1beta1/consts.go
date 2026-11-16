@@ -88,6 +88,10 @@ const (
 	// objects that the new roster no longer declares — converging the
 	// project's slice without touching other teams' objects.
 	LabelTeam = "kukeon.io/team"
+	// LabelTask names the role task a `kuke team` task CellConfig runs
+	// headless (issue #1491). It sits beside LabelTeam, so a task config is
+	// pruned with the team's other configs once its task is deselected.
+	LabelTask = "kukeon.io/task"
 	// LabelShared marks a CellBlueprint as shared: a realm-wide form any
 	// team's (or hand-written) CellConfig may reference, e.g. the one
 	// blueprint per harness × security profile `kuke team` renders (issue
