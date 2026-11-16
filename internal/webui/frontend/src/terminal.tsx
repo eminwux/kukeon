@@ -303,6 +303,22 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
     : current?.message || (skipAutoAttachFor === currentId && currentId ? "Detached" : atLimit ? "Connection limit reached" : unavailable ? `Unavailable: ${cellState}` : containers.loading ? "Loading containers…" : containers.error ? "Container list unavailable" : !eligible.length ? "No attachable containers" : !selectedEligible ? "Container unavailable" : "Connecting…");
   // With nothing to attach to, the terminal area carries the only (neutral) message.
   const empty = !!scope && !containers.loading && !containers.error && !eligible.length && !options.length;
+  const live = current?.state === "attached" || current?.state === "connecting";
+  const limitMessage = "Terminal limit reached. Detach another terminal to free a connection or retained slot.";
+  const staleContainers = containers.error && containers.data ? "Container list is stale. Refresh before attaching." : "";
+  // The title row never carries these messages: the state dot's tooltip does, and the terminal area
+  // shows an overlay (which cannot change the terminal's size) only while nothing is attached.
+  const tooltip = atLimit || reconnectLimited ? limitMessage
+    : unavailable && !live ? `Terminal unavailable: cell is ${cellState}.`
+      : containers.error && !live ? `${headerState}: ${containers.error.message}`
+        : staleContainers && !live ? staleContainers
+          : current?.message || headerState;
+  const overlay = !scope || empty || live ? null
+    : atLimit || reconnectLimited ? <p className="terminal-limit" role="status">{limitMessage}</p>
+      : unavailable ? <p className="terminal-unavailable" role="status">Terminal unavailable: cell is {cellState}.</p>
+        : containers.error ? <><ErrorNotice error={containers.error} kind="Containers" />{staleContainers && <p className="stale">{staleContainers}</p>}</>
+          : containers.loading && !containers.data ? <p role="status">Loading containers…</p>
+            : null;
   const headerTone = current?.state ?? (skipAutoAttachFor === currentId && currentId || atLimit || unavailable || containers.error || !eligible.length || !selectedEligible ? "disconnected" : "connecting");
   const toggleExpanded = () => { const next = !expanded; setExpanded(next); onExpandedChange(next); };
   const resume = () => { setSkipAutoAttachFor(""); manager.attach(scope!, selected); };
@@ -313,23 +329,18 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
     : current ? <>{connectButton("Reconnect", reconnectLimited || !selectedEligible || !!unavailable || !!containers.error, resume)}{connectButton("Detach", false, () => { setSkipAutoAttachFor(current.id); manager.detach(current.id); })}</>
     : skipAutoAttachFor === currentId && currentId ? connectButton("Attach", !!atLimit || !selectedEligible || !!unavailable || !!containers.error, resume) : null;
   const controls = scope && <div className="terminal-workspace-tools">
-    {!empty && <span className={`terminal-connection-state ${headerTone}`} role="status" tabIndex={0} title={current?.message || headerState} data-tooltip={current?.message || headerState}><span className="state-dot" aria-hidden="true" /><span className="sr-only">{headerState}</span></span>}
+    {!empty && <span className={`terminal-connection-state ${headerTone}`} role="status" tabIndex={0} title={tooltip} data-tooltip={tooltip}><span className="state-dot" aria-hidden="true" /><span className="sr-only">{headerState}</span></span>}
     <div className="terminal-controls">
-      {/* Refreshes keep the previous list on screen; a transient line here would reflow the bar and resize the terminal. */}
-      {containers.loading && !containers.data && <p role="status">Loading containers…</p>}
-      {containers.error && <ErrorNotice error={containers.error} kind="Containers" />}
-      {containers.error && containers.data && <p className="stale">Container list is stale. Refresh before attaching.</p>}
       {!!options.length && <><label htmlFor="terminal-container" className="sr-only">Container</label><select id="terminal-container" className="mono-id" value={selected} onChange={event => manager.select(scope, event.target.value)}>{options.map(id => <option key={id} value={id}>{id}{eligible.some(container => container.id === id) ? "" : " (unavailable)"}</option>)}</select>
         {connectSlot}</>}
       {!empty && <button ref={expandButton} type="button" className="icon-button" aria-label={expanded ? "Collapse terminal" : "Expand terminal"} data-tooltip={expanded ? "Collapse terminal" : "Expand terminal"} aria-expanded={expanded} aria-controls="terminal-screens" onClick={toggleExpanded}><Icon name={expanded ? "collapse" : "expand"} /></button>}
-      {unavailable && <p className="terminal-unavailable" role="status">Terminal unavailable: cell is {cellState}.</p>}
-      {(atLimit || reconnectLimited) && <p className="terminal-limit" role="status">Terminal limit reached. Detach another terminal to free a connection or retained slot.</p>}
     </div>
   </div>;
   return <>
     {controls && controlsHost && createPortal(controls, controlsHost)}
     <section className={`panel terminal-workspace${expanded ? " is-expanded" : ""}${empty ? " is-empty" : ""}`} id="cell-terminal" hidden={!scope} aria-label="Terminal workspace">
       {empty && <p className="empty-state terminal-empty" role="status">No attachable containers are available.</p>}
+      {overlay && <div className="terminal-overlay">{overlay}</div>}
       <div className="terminal-screens" id="terminal-screens" ref={screens}>{manager.sessions.map(session => <TerminalSession key={session.id} session={session} active={!!scope && visible && session.id === currentId} expanded={expanded} theme={theme} update={manager.update} />)}</div>
     </section>
   </>;

@@ -1,10 +1,10 @@
 import { useRef, useState, type FormEvent } from "react";
 import { ErrorNotice, type Failure } from "./request";
+import { useNotify } from "./notifications";
 
 // RegistryCredential is the redacted realm entry kuke serve returns (#1407):
 // the password is always blank, so it is never read from the document.
 export type RegistryCredential = { serverAddress?: string; username: string };
-type Notice = { kind: "success"; message: string } | { kind: "error"; error: Failure };
 
 function serverLabel(server?: string): string {
   return server ? server : "Default (registry from image reference)";
@@ -19,7 +19,8 @@ export function RegistryCredentialsPanel({ realm, credentials, onSaved }: { real
   const [username, setUsername] = useState("");
   const [token, setToken] = useState("");
   const [pending, setPending] = useState(false);
-  const [notice, setNotice] = useState<Notice>();
+  const [error, setError] = useState<Failure>();
+  const { notify } = useNotify();
   const usernameInput = useRef<HTMLInputElement>(null);
   const replacing = credentials.some(cred => (cred.serverAddress ?? "") === server.trim());
 
@@ -27,7 +28,7 @@ export function RegistryCredentialsPanel({ realm, credentials, onSaved }: { real
     setServer(cred.serverAddress ?? "");
     setUsername(cred.username);
     setToken("");
-    setNotice(undefined);
+    setError(undefined);
     usernameInput.current?.focus();
   }
 
@@ -36,11 +37,11 @@ export function RegistryCredentialsPanel({ realm, credentials, onSaved }: { real
     if (pending) return;
     const target = server.trim();
     if (!username.trim() || !token) {
-      setNotice({ kind: "error", error: { code: "invalid_request", message: !username.trim() ? "Username is required." : "Token is required." } });
+      setError({ code: "invalid_request", message: !username.trim() ? "Username is required." : "Token is required." });
       return;
     }
     setPending(true);
-    setNotice(undefined);
+    setError(undefined);
     const body = JSON.stringify({ server: target, username: username.trim(), password: token });
     setToken("");
     try {
@@ -51,13 +52,13 @@ export function RegistryCredentialsPanel({ realm, credentials, onSaved }: { real
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw result.error ?? { code: "http_error", message: `HTTP ${response.status}` };
-      setNotice({ kind: "success", message: `Saved credential for ${serverLabel(target)} (user ${result.username ?? username.trim()}).` });
+      notify({ key: `registry-credential:${realm}`, tone: "success", message: `Saved credential for ${serverLabel(target)} (user ${result.username ?? username.trim()}).` });
       setServer("");
       setUsername("");
       onSaved();
-    } catch (error) {
-      const failure = error as Partial<Failure>;
-      setNotice({ kind: "error", error: { code: failure.code ?? "unavailable", message: failure.message ?? "Request failed. Try again." } });
+    } catch (caught) {
+      const failure = caught as Partial<Failure>;
+      setError({ code: failure.code ?? "unavailable", message: failure.message ?? "Request failed. Try again." });
     } finally {
       setPending(false);
     }
@@ -76,8 +77,7 @@ export function RegistryCredentialsPanel({ realm, credentials, onSaved }: { real
         <label>Token<input name="token" type="password" value={token} required autoComplete="new-password" spellCheck={false} onChange={e => setToken(e.target.value)} /></label>
         <button type="submit" disabled={pending}>{pending ? "Saving…" : replacing ? "Replace credential" : "Add credential"}</button>
       </form>
-      {notice?.kind === "success" && <p className="creation-success" role="status">{notice.message}</p>}
-      {notice?.kind === "error" && <ErrorNotice error={notice.error} />}
+      {error && <ErrorNotice error={error} />}
     </div>
   </section>;
 }

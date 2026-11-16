@@ -84,8 +84,8 @@ test("packaged browser reads real daemon documents and unavailable socket", asyn
   const unavailable = await startServer();
   try {
     await page.goto(unavailable.url);
-    await expect(page.getByRole("alert")).toContainText("Daemon unavailable");
+    await expect(page.locator(".workspace-content").getByRole("alert")).toContainText("Daemon unavailable");
     await page.getByRole("button", { name: "Refresh" }).click();
-    await expect(page.getByRole("alert")).toContainText("Daemon unavailable");
+    await expect(page.locator(".workspace-content").getByRole("alert")).toContainText("Daemon unavailable");
   } finally { await unavailable.stop(); }
 });
