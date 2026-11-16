@@ -89,6 +89,16 @@ func resolve(
 	lookupEnv func(string) (string, bool),
 	lenient bool,
 ) (v1beta1.CellBlueprintDoc, error) {
+	// A blueprint that still carries components is resolved inline (`kuke run
+	// -b`): fold in its always-on components and its default harness mode. A
+	// CellConfig render flattens with the Config's choices before it gets here.
+	if len(doc.Spec.Components) > 0 {
+		flat, flattenErr := Flatten(doc, FlattenOptions{})
+		if flattenErr != nil {
+			return v1beta1.CellBlueprintDoc{}, flattenErr
+		}
+		doc = flat.Doc
+	}
 	values, err := resolveValues(doc, cliParams, lookupEnv, lenient)
 	if err != nil {
 		return v1beta1.CellBlueprintDoc{}, err
@@ -151,30 +161,40 @@ func resolveValues(
 	}
 
 	for _, p := range doc.Spec.Parameters {
-		if v, ok := cliParams[p.Name]; ok {
-			values[p.Name] = v
-			continue
-		}
-		if p.Default != nil {
-			values[p.Name] = *p.Default
-			continue
-		}
-		if lookupEnv != nil {
-			if v, ok := lookupEnv(p.Name); ok {
-				values[p.Name] = v
-				continue
-			}
-		}
-		if p.Required {
+		value, set := resolveParameter(p, cliParams, lookupEnv)
+		if !set && p.Required {
 			return nil, fmt.Errorf(
 				"blueprint %q: required parameter %q is not set "+
 					"(provide --param %s=... or declare a spec.parameters[].default): %w",
 				doc.Metadata.Name, p.Name, p.Name, errdefs.ErrBlueprintInvalid,
 			)
 		}
-		values[p.Name] = ""
+		// Typed parameters (#1472): the resolved value must fit the type.
+		if typeErr := ValidateValue(p, value); typeErr != nil {
+			return nil, fmt.Errorf("blueprint %q: %w", doc.Metadata.Name, typeErr)
+		}
+		values[p.Name] = value
 	}
 	return values, nil
+}
+
+// resolveParameter applies the cliParams > default > env order to one declared
+// parameter and reports whether any level supplied a value.
+func resolveParameter(
+	p v1beta1.CellBlueprintParameter, cliParams map[string]string, lookupEnv func(string) (string, bool),
+) (string, bool) {
+	if v, ok := cliParams[p.Name]; ok {
+		return v, true
+	}
+	if p.Default != nil {
+		return *p.Default, true
+	}
+	if lookupEnv != nil {
+		if v, ok := lookupEnv(p.Name); ok {
+			return v, true
+		}
+	}
+	return "", false
 }
 
 // Materialize converts a resolved blueprint into a CellDoc with a generated

@@ -18,6 +18,7 @@ package cellconfig
 
 import (
 	"fmt"
+	"path"
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/cellblueprint"
@@ -175,7 +176,21 @@ func materializeContainer(
 		if ref := strings.TrimSpace(fill.Ref); ref != "" {
 			filled.Ref = ref
 		}
+		// A source's own git identity comes from its fill (#1472, step 7).
+		if fill.Git != nil {
+			filled.Git = fill.Git
+		}
 		repos = append(repos, filled)
+	}
+	// A blueprint may leave a checkout path to a ${PARAM}; now that it is
+	// resolved it must be what the parser demands of a literal one.
+	for _, r := range repos {
+		if !path.IsAbs(strings.TrimSpace(r.Target)) {
+			return v1beta1.ContainerSpec{}, fmt.Errorf(
+				"%w (container %q repo %q target %q)",
+				errdefs.ErrRepoTargetNotAbsolute, bc.ID, r.Name, r.Target,
+			)
+		}
 	}
 
 	secrets := make([]v1beta1.ContainerSecret, 0, len(bc.Secrets))
@@ -221,7 +236,7 @@ func materializeContainer(
 		Tmpfs:                  bc.Tmpfs,
 		Resources:              bc.Resources,
 		Repos:                  repos,
-		Git:                    bc.Git,
+		Git:                    containerGit(bc, cfg),
 		RestartPolicy:          bc.RestartPolicy,
 		Attachable:             bc.Attachable,
 		Tty:                    bc.Tty,
@@ -234,6 +249,21 @@ func materializeContainer(
 		cs.Secrets = nil
 	}
 	return cs, nil
+}
+
+// containerGit resolves a container's git block: the Config's git (already
+// merged over the Realm/Space/Stack defaults by MergeDefaults) layered over
+// whatever the blueprint container itself declares. The root (pause) container
+// runs no git, so it never receives the identity or its credentials.
+func containerGit(bc v1beta1.BlueprintContainer, cfg v1beta1.CellConfigDoc) *v1beta1.ContainerGit {
+	if cfg.Spec.Git == nil || bc.Root {
+		return bc.Git
+	}
+	merged, _ := MergeGit([]GitLayer{
+		{Origin: v1beta1.RenderOriginBlueprint, Git: bc.Git},
+		{Origin: v1beta1.RenderOriginConfig, Git: cfg.Spec.Git},
+	})
+	return merged
 }
 
 // materializeSecretSlot translates a (slot, fill) pair into a runtime

@@ -51,12 +51,67 @@ type SecretMetadata struct {
 	Cell string `json:"cell,omitempty"  yaml:"cell,omitempty"`
 }
 
-// SecretSpec carries the secret material supplied at apply time. Data is
-// write-only from the operator's perspective: it is persisted to the
-// daemon-managed file and never echoed back. The omitempty tag keeps a
-// zero value out of any incidental serialization, but the value itself is
-// never serialized into a result or status by design.
+// Secret types (issue #1472, step 1). The type selects which spec block carries
+// the material and how the daemon may consume it: an opaque secret is raw bytes
+// injected through `containers[].secrets[]`; the typed git credentials are
+// consumed only through `git.credentials[]` / `git.signing` and are never put in
+// an environment variable or a URL.
+const (
+	// SecretTypeOpaque is the default: Spec.Data holds the raw bytes.
+	SecretTypeOpaque = "opaque"
+	// SecretTypeBasicAuth is an HTTPS git credential: a username plus a
+	// password or a token (Spec.BasicAuth).
+	SecretTypeBasicAuth = "basic-auth"
+	// SecretTypeSSHKey is an SSH git credential and signing key: an OpenSSH
+	// private key with an optional passphrase, public key, certificate and
+	// pinned known_hosts (Spec.SSHKey).
+	SecretTypeSSHKey = "ssh-key"
+)
+
+// SecretSpec carries the secret material supplied at apply time. Every material
+// field is write-only from the operator's perspective: it is persisted to the
+// daemon-managed file and never echoed back. Type is the only field `kuke get
+// secret` reports. The omitempty tags keep a zero value out of any incidental
+// serialization, but the material itself is never serialized into a result or
+// status by design.
 type SecretSpec struct {
-	// Data is the raw secret material supplied at apply time.
-	Data string `json:"data,omitempty" yaml:"data,omitempty"`
+	// Type is one of opaque (default when empty), basic-auth or ssh-key.
+	Type string `json:"type,omitempty"      yaml:"type,omitempty"`
+	// Data is the raw secret material of an opaque secret.
+	Data string `json:"data,omitempty"      yaml:"data,omitempty"`
+	// BasicAuth is the material of a basic-auth secret.
+	BasicAuth *SecretBasicAuth `json:"basicAuth,omitempty" yaml:"basicAuth,omitempty"`
+	// SSHKey is the material of an ssh-key secret.
+	SSHKey *SecretSSHKey `json:"sshKey,omitempty"    yaml:"sshKey,omitempty"`
+}
+
+// SecretBasicAuth is an HTTPS git credential. Exactly one of Password or Token
+// is set; both are sent as the HTTP basic-auth password.
+type SecretBasicAuth struct {
+	// Username is the HTTP basic-auth user. Required.
+	Username string `json:"username"           yaml:"username"`
+	// Password is the account password.
+	Password string `json:"password,omitempty" yaml:"password,omitempty"`
+	// Token is a personal access token used in place of a password.
+	Token string `json:"token,omitempty"    yaml:"token,omitempty"`
+}
+
+// SecretSSHKey is an SSH git credential, also usable as an SSH signing key.
+type SecretSSHKey struct {
+	// PrivateKey is the OpenSSH (or PEM) private key, any key type. Required.
+	PrivateKey string `json:"privateKey"            yaml:"privateKey"`
+	// Passphrase unlocks an encrypted PrivateKey. kuketty loads such a key
+	// into a per-container ssh-agent; the passphrase never reaches the
+	// workload's environment.
+	Passphrase string `json:"passphrase,omitempty"  yaml:"passphrase,omitempty"`
+	// PublicKey is the matching public key line. Required for signing with a
+	// passphrase-protected key (git names the agent key by its public half);
+	// optional otherwise.
+	PublicKey string `json:"publicKey,omitempty"   yaml:"publicKey,omitempty"`
+	// Certificate is an OpenSSH user certificate for PrivateKey.
+	Certificate string `json:"certificate,omitempty" yaml:"certificate,omitempty"`
+	// KnownHosts pins the host keys the credential trusts, in known_hosts
+	// format. When empty the built-in keys for github.com, gitlab.com and
+	// bitbucket.org apply.
+	KnownHosts string `json:"knownHosts,omitempty"  yaml:"knownHosts,omitempty"`
 }

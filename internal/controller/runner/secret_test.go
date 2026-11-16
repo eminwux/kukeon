@@ -28,6 +28,7 @@ import (
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/secretstore"
 	"github.com/eminwux/kukeon/internal/util/fs"
 )
 
@@ -371,5 +372,183 @@ func TestDeleteSecret(t *testing.T) {
 		Metadata: intmodel.SecretMetadata{Name: "tok", Realm: "default"},
 	}); !errors.Is(err, errdefs.ErrSecretNotFound) {
 		t.Errorf("second DeleteSecret() error = %v, want ErrSecretNotFound", err)
+	}
+}
+
+// typedSSHKeySecret is a stored ssh-key secret used by the #1472 typed-secret
+// storage tests.
+func typedSSHKeySecret(name string) intmodel.Secret {
+	return intmodel.Secret{
+		Metadata: intmodel.SecretMetadata{Name: name, Realm: "default"},
+		Spec: intmodel.SecretSpec{
+			Type: intmodel.SecretTypeSSHKey,
+			SSHKey: &intmodel.SecretSSHKey{
+				PrivateKey: "-----BEGIN OPENSSH PRIVATE" + " KEY-----\nYm9keQ==\n-----END OPENSSH PRIVATE" + " KEY-----\n",
+				Passphrase: "do-not-echo",
+			},
+		},
+	}
+}
+
+// TestWriteSecret_TypedRoundTrip pins the typed storage contract (#1472): the
+// material lands in the same root-only bytes file, the type is recorded in the
+// .types sidecar, and secretstore.Read returns the full typed spec.
+func TestWriteSecret_TypedRoundTrip(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+
+	secret := typedSSHKeySecret("deploy-key")
+	created, err := r.WriteSecret(secret)
+	if err != nil {
+		t.Fatalf("WriteSecret() error = %v", err)
+	}
+	if !created {
+		t.Errorf("created = false, want true on first write")
+	}
+
+	info, err := os.Stat(fs.SecretPath(runPath, "default", "", "", "", "deploy-key"))
+	if err != nil {
+		t.Fatalf("stat secret file: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("typed secret file mode = %o, want 600", perm)
+	}
+	sidecar, err := os.ReadFile(secretstore.TypePath(runPath, secret.Metadata))
+	if err != nil {
+		t.Fatalf("reading type sidecar: %v", err)
+	}
+	if string(sidecar) != intmodel.SecretTypeSSHKey {
+		t.Errorf("type sidecar = %q, want %q", sidecar, intmodel.SecretTypeSSHKey)
+	}
+
+	got, err := secretstore.Read(runPath, intmodel.ContainerSecretRef{Name: "deploy-key", Realm: "default"})
+	if err != nil {
+		t.Fatalf("secretstore.Read() error = %v", err)
+	}
+	if got.Type != intmodel.SecretTypeSSHKey || got.SSHKey == nil || *got.SSHKey != *secret.Spec.SSHKey {
+		t.Errorf("stored spec = %+v, want the ssh-key material written", got)
+	}
+}
+
+// TestGetAndListSecrets_ReportType confirms get and list surface a secret's
+// type from the sidecar and still never carry any material.
+func TestGetAndListSecrets_ReportType(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+
+	basic := intmodel.Secret{
+		Metadata: intmodel.SecretMetadata{Name: "forge-token", Realm: "default"},
+		Spec: intmodel.SecretSpec{
+			Type:      intmodel.SecretTypeBasicAuth,
+			BasicAuth: &intmodel.SecretBasicAuth{Username: "u", Token: "do-not-echo"},
+		},
+	}
+	opaque := intmodel.Secret{
+		Metadata: intmodel.SecretMetadata{Name: "plain", Realm: "default"},
+		Spec:     intmodel.SecretSpec{Data: "do-not-echo"},
+	}
+	for _, s := range []intmodel.Secret{typedSSHKeySecret("deploy-key"), basic, opaque} {
+		if _, err := r.WriteSecret(s); err != nil {
+			t.Fatalf("WriteSecret(%s) error = %v", s.Metadata.Name, err)
+		}
+	}
+
+	want := map[string]string{
+		"deploy-key":  intmodel.SecretTypeSSHKey,
+		"forge-token": intmodel.SecretTypeBasicAuth,
+		"plain":       intmodel.SecretTypeOpaque,
+	}
+	assertMetadataOnly := func(source string, s intmodel.Secret) {
+		t.Helper()
+		if s.Spec.Type != want[s.Metadata.Name] {
+			t.Errorf("%s %q type = %q, want %q", source, s.Metadata.Name, s.Spec.Type, want[s.Metadata.Name])
+		}
+		if s.Spec.HasMaterial() {
+			t.Errorf("%s %q carries secret material: %+v", source, s.Metadata.Name, s.Spec)
+		}
+	}
+	for name := range want {
+		got, err := r.GetSecret(intmodel.Secret{Metadata: intmodel.SecretMetadata{Name: name, Realm: "default"}})
+		if err != nil {
+			t.Fatalf("GetSecret(%s) error = %v", name, err)
+		}
+		assertMetadataOnly("get", got)
+	}
+
+	listed, err := r.ListSecrets("default", "", "", "")
+	if err != nil {
+		t.Fatalf("ListSecrets() error = %v", err)
+	}
+	// The .types sidecar directory must never surface as a secret.
+	if len(listed) != len(want) {
+		t.Fatalf("ListSecrets() returned %d secrets, want %d: %+v", len(listed), len(want), listed)
+	}
+	for _, s := range listed {
+		assertMetadataOnly("list", s)
+	}
+}
+
+// TestWriteSecret_RetypeClearsSidecar confirms overwriting a typed secret with
+// an opaque one drops the type marker, so the new bytes are never decoded as
+// the old type.
+func TestWriteSecret_RetypeClearsSidecar(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+
+	secret := typedSSHKeySecret("tok")
+	if _, err := r.WriteSecret(secret); err != nil {
+		t.Fatalf("WriteSecret(typed) error = %v", err)
+	}
+	created, err := r.WriteSecret(intmodel.Secret{
+		Metadata: secret.Metadata,
+		Spec:     intmodel.SecretSpec{Data: "now-opaque"},
+	})
+	if err != nil {
+		t.Fatalf("WriteSecret(opaque) error = %v", err)
+	}
+	if created {
+		t.Errorf("created = true, want false on overwrite")
+	}
+	if _, statErr := os.Stat(secretstore.TypePath(runPath, secret.Metadata)); !os.IsNotExist(statErr) {
+		t.Errorf("type sidecar still present after retyping to opaque (err=%v)", statErr)
+	}
+	got, err := secretstore.Read(runPath, intmodel.ContainerSecretRef{Name: "tok", Realm: "default"})
+	if err != nil {
+		t.Fatalf("secretstore.Read() error = %v", err)
+	}
+	if got.Type != intmodel.SecretTypeOpaque || got.Data != "now-opaque" {
+		t.Errorf("stored spec = %+v, want opaque now-opaque", got)
+	}
+}
+
+// TestDeleteSecret_RemovesTypeSidecar confirms delete reclaims the sidecar, so
+// a later opaque secret of the same name is not reported with the stale type.
+func TestDeleteSecret_RemovesTypeSidecar(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+
+	secret := typedSSHKeySecret("tok")
+	if _, err := r.WriteSecret(secret); err != nil {
+		t.Fatalf("WriteSecret() error = %v", err)
+	}
+	if err := r.DeleteSecret(intmodel.Secret{Metadata: secret.Metadata}); err != nil {
+		t.Fatalf("DeleteSecret() error = %v", err)
+	}
+	if _, err := os.Stat(secretstore.TypePath(runPath, secret.Metadata)); !os.IsNotExist(err) {
+		t.Errorf("type sidecar still present after delete (err=%v)", err)
+	}
+
+	if _, err := r.WriteSecret(intmodel.Secret{
+		Metadata: secret.Metadata,
+		Spec:     intmodel.SecretSpec{Data: "x"},
+	}); err != nil {
+		t.Fatalf("WriteSecret(opaque) error = %v", err)
+	}
+	got, err := r.GetSecret(intmodel.Secret{Metadata: secret.Metadata})
+	if err != nil {
+		t.Fatalf("GetSecret() error = %v", err)
+	}
+	if got.Spec.Type != intmodel.SecretTypeOpaque {
+		t.Errorf("re-created secret type = %q, want opaque", got.Spec.Type)
 	}
 }

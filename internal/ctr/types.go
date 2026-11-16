@@ -55,6 +55,9 @@ type ContainerSpec struct {
 	Runtime *ContainerRuntime
 	// SpecOpts are OCI spec options to apply.
 	SpecOpts []oci.SpecOpts
+	// RequiredCapabilities are the capabilities the image must provide; see
+	// WithRequiredCapabilities.
+	RequiredCapabilities []string
 	// Labels are key-value pairs to attach to the container.
 	Labels map[string]string
 	// CNIConfigPath is the path to the CNI configuration to use for this container.

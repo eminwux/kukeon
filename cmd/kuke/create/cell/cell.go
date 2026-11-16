@@ -189,10 +189,19 @@ func RegisterSourceFlags(cmd *cobra.Command) {
 			"explicit name used verbatim. Mutually exclusive with --from-blueprint/--from-config.")
 
 	cmd.Flags().StringArray("param", nil,
-		"Scalar parameter override as KEY=VALUE; repeatable. Valid with --from-blueprint. "+
-			"Each KEY must be declared in spec.parameters[]. Wins over the parameter's default "+
-			"and over --param-file when both set the same key. Rejected with --from-config: a "+
-			"CellConfig carries its own spec.values, edit the Config instead.")
+		"Scalar parameter override as KEY=VALUE; repeatable. With --from-blueprint each KEY "+
+			"must be declared in spec.parameters[]; it wins over the parameter's default and "+
+			"over --param-file when both set the same key. With --from-config a CellConfig "+
+			"carries its own spec.values, so only the parameters of the harness mode the cell "+
+			"is created in may be set (e.g. --mode headless --param PROMPT=...); the daemon "+
+			"refuses any other key.")
+
+	cmd.Flags().String("mode", "",
+		"Harness mode to create the cell in (e.g. interactive, headless). Valid with "+
+			"--from-config; must be declared by the Config's blueprint and enabled by the "+
+			"Config. Omitted selects the Config's spec.modes.default. The mode is recorded on "+
+			"the cell (kukeon.io/mode label, Spec.Provenance.mode), and only that mode's "+
+			"required parameters and secrets are demanded.")
 
 	cmd.Flags().String("param-file", "",
 		"File of KEY=VALUE lines whose values seed scalar parameters; one per line, "+
@@ -245,6 +254,10 @@ type SourceFlags struct {
 	// into the attachable container's env and recorded in
 	// Spec.Provenance.EnvOverrides. Issue #1023.
 	EnvArgs []string
+
+	// Mode is the harness mode the cell is created in (`--mode`), valid on the
+	// --from-config path. Empty selects the Config's default. Issue #1472.
+	Mode string
 	// IgnoreDiskPressure threads `--ignore-disk-pressure` onto the
 	// transport-only Spec.IgnoreDiskPressure field so the daemon's
 	// CreateCell guard is bypassed for this invocation. Issue #1035.
@@ -333,6 +346,14 @@ func parseCreateCellFlags(cmd *cobra.Command, args []string) (SourceFlags, error
 
 	flags.IgnoreDiskPressure = viper.GetBool(config.KUKE_CREATE_CELL_IGNORE_DISK_PRESSURE.ViperKey)
 
+	if cmd.Flags().Lookup("mode") != nil {
+		mode, modeErr := cmd.Flags().GetString("mode")
+		if modeErr != nil {
+			return SourceFlags{}, modeErr
+		}
+		flags.Mode = strings.TrimSpace(mode)
+	}
+
 	return flags, nil
 }
 
@@ -340,8 +361,11 @@ func parseCreateCellFlags(cmd *cobra.Command, args []string) (SourceFlags, error
 // symmetry shared by `kuke create cell` and `kuke run` (epic:cell-identity
 // #1023/#1025):
 //
-//   - --param/--param-file are rejected with --from-config (a CellConfig
-//     carries its own spec.values);
+//   - --param-file is rejected with --from-config (a CellConfig carries its
+//     own spec.values). --param is passed through: the daemon accepts it only
+//     for the parameters of the harness mode the cell is created in (#1472)
+//     and refuses any other key;
+//   - --mode is only valid with --from-config;
 //   - --env is rejected with --from-blueprint (its symmetric counterpart —
 //     materialise from a Config to layer env overrides).
 //
@@ -355,12 +379,12 @@ func ValidateOverrideSymmetry(flags SourceFlags) error {
 	if flags.CloneSource != "" {
 		return nil
 	}
+	if flags.Mode != "" && flags.ConfigName == "" {
+		return errors.New(
+			"--mode is only valid with --from-config; a harness mode is picked from the modes a CellConfig enables",
+		)
+	}
 	if flags.ConfigName != "" {
-		if len(flags.ParamArgs) > 0 {
-			return errors.New(
-				"--param is not valid with --from-config; a CellConfig carries its own spec.values (edit the Config instead)",
-			)
-		}
 		if flags.ParamFile != "" {
 			return errors.New(
 				"--param-file is not valid with --from-config; a CellConfig carries its own spec.values (edit the Config instead)",
@@ -514,6 +538,17 @@ func rejectBindingKnobsWithImage(cmd *cobra.Command) error {
 	if len(envArgs) > 0 {
 		return errors.New("--env is not valid with --image; layer env overrides via --from-config instead")
 	}
+	if cmd.Flags().Lookup("mode") != nil {
+		mode, modeErr := cmd.Flags().GetString("mode")
+		if modeErr != nil {
+			return modeErr
+		}
+		if strings.TrimSpace(mode) != "" {
+			return errors.New(
+				"--mode is only valid with --from-config; a harness mode is picked from the modes a CellConfig enables",
+			)
+		}
+	}
 	return nil
 }
 
@@ -612,7 +647,11 @@ func materializeFromBlueprint(
 func materializeFromConfig(
 	cmd *cobra.Command, client kukeonv1.Client, flags SourceFlags, scope ScopeVars,
 ) (v1beta1.CellDoc, error) {
-	preview, err := client.PreviewCellFromConfig(cmd.Context(), ConfigRenderRequest(cmd, flags, scope))
+	req, err := ConfigRenderRequest(cmd, flags, scope)
+	if err != nil {
+		return v1beta1.CellDoc{}, err
+	}
+	preview, err := client.PreviewCellFromConfig(cmd.Context(), req)
 	if err != nil {
 		return v1beta1.CellDoc{}, err
 	}

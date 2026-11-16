@@ -23,6 +23,7 @@ import (
 
 	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/cellconfig"
+	applypkg "github.com/eminwux/kukeon/internal/controller/apply"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/naming"
@@ -50,6 +51,18 @@ type CellFromConfigRequest struct {
 	// ExpectedDigest, when set, refuses the create unless the fresh render
 	// has this digest (the preview → create handshake).
 	ExpectedDigest string
+	// Mode is the harness mode to create the cell in; empty selects the
+	// Config's default. Must be a mode the blueprint declares and the Config
+	// enables (#1472, step 11).
+	Mode string
+	// Params are per-cell `--param KEY=VALUE` values that override the
+	// Config's values for this cell only (e.g. the PROMPT of a headless run).
+	Params map[string]string
+	// Draft, on a preview, is an unsaved CellConfig to render instead of the
+	// stored one Config names — how a form shows what its answers produce
+	// before the Config exists (#1472, step 16). A create refuses it: a cell
+	// is only ever created from a stored Config.
+	Draft *v1beta1.CellConfigDoc
 }
 
 // CellFromConfigPreview is the outcome of a render: the rendered cell, its
@@ -74,7 +87,13 @@ type CellFromConfigResult struct {
 // the name a create would use; pass it back as Name to create exactly the
 // previewed cell.
 func (b *Exec) PreviewCellFromConfig(req CellFromConfigRequest) (CellFromConfigPreview, error) {
-	cfg, err := b.lookupRequestConfig(req.Config)
+	var cfg intmodel.CellConfig
+	var err error
+	if req.Draft != nil {
+		cfg, err = b.draftConfig(*req.Draft)
+	} else {
+		cfg, err = b.lookupRequestConfig(req.Config)
+	}
 	if err != nil {
 		return CellFromConfigPreview{}, err
 	}
@@ -89,7 +108,9 @@ func (b *Exec) PreviewCellFromConfig(req CellFromConfigRequest) (CellFromConfigP
 		return CellFromConfigPreview{}, err
 	}
 
-	rendered, err := renderCellFromConfig(b.runner, cfg, name, req.EnvOverrides)
+	rendered, err := renderCellFromConfig(b.runner, cfg, cellBinding{
+		Name: name, EnvOverrides: req.EnvOverrides, Mode: strings.TrimSpace(req.Mode), Params: req.Params,
+	})
 	if err != nil {
 		return CellFromConfigPreview{}, err
 	}
@@ -99,11 +120,28 @@ func (b *Exec) PreviewCellFromConfig(req CellFromConfigRequest) (CellFromConfigP
 	return CellFromConfigPreview(rendered), nil
 }
 
+// draftConfig normalizes an unsaved CellConfig and checks it exactly as an
+// apply would, so previewing a draft reports the errors saving it would.
+func (b *Exec) draftConfig(doc v1beta1.CellConfigDoc) (intmodel.CellConfig, error) {
+	cfg, _, err := apischeme.NormalizeCellConfig(doc)
+	if err != nil {
+		return intmodel.CellConfig{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+	if err = applypkg.ValidateConfig(b.runner, cfg); err != nil {
+		return intmodel.CellConfig{}, err
+	}
+	return cfg, nil
+}
+
 // CreateCellFromConfig renders a cell from a stored CellConfig and creates it
 // (issue #1418) — the only path a CellConfig becomes a Cell. It refuses when
 // an explicit name already exists in scope, and when ExpectedDigest is set
 // and the fresh render differs from it.
 func (b *Exec) CreateCellFromConfig(req CellFromConfigRequest) (CellFromConfigResult, error) {
+	if req.Draft != nil {
+		return CellFromConfigResult{}, fmt.Errorf(
+			"%w: a cell is created from a stored CellConfig; save the draft first", errdefs.ErrConfig)
+	}
 	preview, err := b.PreviewCellFromConfig(req)
 	if err != nil {
 		return CellFromConfigResult{}, err

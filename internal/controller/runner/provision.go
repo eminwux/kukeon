@@ -1592,6 +1592,7 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 				return nil, fmt.Errorf("failed to prepare attachable container %s: %w", containerdID, attachErr)
 			}
 			buildOpts := append(r.daemonDefaultBuildOpts(), attachOpts...)
+			buildOpts = append(buildOpts, ctr.WithRequiredCapabilities(cell.Spec.Requires))
 			buildOpts = append(buildOpts, ctr.WithExtraLabels(specHashLabels(containerSpec)))
 			// Merge `kuke run --env` runtime env into the attachable
 			// container's spec env (issue #834). Returns containerSpec
@@ -1634,6 +1635,11 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 			if volErr := r.volumePostCreateChown(namespace, containerSpec); volErr != nil {
 				return nil, fmt.Errorf(
 					"failed to chown volume dir for %s: %w", containerdID, volErr,
+				)
+			}
+			if gitErr := r.gitPostCreate(namespace, containerSpec); gitErr != nil {
+				return nil, fmt.Errorf(
+					"failed to stage git credentials for %s: %w", containerdID, gitErr,
 				)
 			}
 		}
@@ -2073,6 +2079,7 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 				return nil, fmt.Errorf("failed to prepare attachable container %s: %w", containerdID, attachErr)
 			}
 			buildOpts := append(r.daemonDefaultBuildOpts(), attachOpts...)
+			buildOpts = append(buildOpts, ctr.WithRequiredCapabilities(cell.Spec.Requires))
 			buildOpts = append(buildOpts, ctr.WithExtraLabels(specHashLabels(containerSpec)))
 			createdContainer, containerCreateErr := r.ctrClient.CreateContainerFromSpec(
 				internalRealm.Spec.Namespace,
@@ -2138,6 +2145,11 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 				if volErr := r.volumePostCreateChown(internalRealm.Spec.Namespace, containerSpec); volErr != nil {
 					return nil, fmt.Errorf(
 						"failed to chown volume dir for %s: %w", containerdID, volErr,
+					)
+				}
+				if gitErr := r.gitPostCreate(internalRealm.Spec.Namespace, containerSpec); gitErr != nil {
+					return nil, fmt.Errorf(
+						"failed to stage git credentials for %s: %w", containerdID, gitErr,
 					)
 				}
 			}

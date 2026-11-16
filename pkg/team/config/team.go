@@ -155,6 +155,9 @@ func (e TeamEntry) Team() *Team {
 
 func cloneSelections(d Defaults) Defaults {
 	d.Sources = slices.Clone(d.Sources)
+	for i := range d.Sources {
+		d.Sources[i].Git = cloneSourceGit(d.Sources[i].Git)
+	}
 	d.Harnesses = slices.Clone(d.Harnesses)
 	d.Roles = slices.Clone(d.Roles)
 	for i := range d.Roles {
@@ -172,5 +175,35 @@ func cloneSource(source *Source) *Source {
 		return nil
 	}
 	copySource := *source
+	copySource.Git = cloneSourceGit(source.Git)
 	return &copySource
+}
+
+func cloneSourceGit(g *SourceGit) *SourceGit {
+	if g == nil {
+		return nil
+	}
+	out := *g
+	if g.Author != nil {
+		author := *g.Author
+		out.Author = &author
+	}
+	if g.Committer != nil {
+		committer := *g.Committer
+		out.Committer = &committer
+	}
+	if g.Credential != nil {
+		credential := *g.Credential
+		out.Credential = &credential
+	}
+	if g.Signing != nil {
+		signing := *g.Signing
+		if g.Signing.AllowedSignersRef != nil {
+			ref := *g.Signing.AllowedSignersRef
+			signing.AllowedSignersRef = &ref
+		}
+		out.Signing = &signing
+	}
+	out.Sign = slices.Clone(g.Sign)
+	return &out
 }

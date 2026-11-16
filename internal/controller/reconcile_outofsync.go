@@ -105,7 +105,7 @@ func desiredCellOutOfSync(r runner.Runner, cell intmodel.Cell, configName string
 		return cellOutOfSync{OutOfSync: true, Reason: outOfSyncReasonConfigDeleted}
 	}
 
-	desiredCell, materializeErr := materializeCellFromConfig(r, cfg, cell.Metadata.Name, provenanceEnvOverrides(cell))
+	desiredCell, materializeErr := materializeCellFromConfig(r, cfg, bindingFromCell(cell))
 	if materializeErr != nil {
 		return cellOutOfSync{Err: materializeErr.Error()}
 	}
@@ -217,18 +217,6 @@ func imageDigestDrift(desired, live intmodel.Cell) []string {
 	return reasons
 }
 
-// provenanceEnvOverrides returns the per-cell `--env` overrides recorded in the
-// cell's materialization provenance (P3 #1023), or nil for a cell with no
-// provenance (hand-built, or a pre-#1021 cell). Threaded into
-// materializeCellFromConfig so the re-resolve path re-applies the overrides the
-// live cell baked at create time (epic:cell-identity P5, #1024).
-func provenanceEnvOverrides(cell intmodel.Cell) []string {
-	if cell.Spec.Provenance == nil {
-		return nil
-	}
-	return cell.Spec.Provenance.EnvOverrides
-}
-
 // configLineage returns the lineage Config name carried on the cell's
 // `kukeon.io/config` label, if any. The second return is false for cells
 // without the label (the bulk of the host — hand-built cells, `-b` and
@@ -308,7 +296,9 @@ func lookupLineageConfig(
 // correct now that P2 (#1022) lands generated cell names that no longer match
 // the Config name (the legacy StableName pin, retired in P2).
 //
-// envOverrides carries the cell's recorded `Spec.Provenance.EnvOverrides` (the
+// The binding is rebuilt from the cell's recorded provenance (bindingFromCell):
+// its harness mode and --param overrides (#1472), and — as explained next — its
+// env overrides. Its EnvOverrides carry `Spec.Provenance.EnvOverrides` (the
 // per-cell `--env KEY=VALUE` baked at create time, P3 #1023). Re-resolving from
 // the Config alone re-runs `MaterializeWithName`, which never re-applies those
 // overrides — so without re-applying them here a cell created
@@ -318,9 +308,9 @@ func lookupLineageConfig(
 // helper the create and clone paths use (epic:cell-identity P5, #1024), so the
 // re-materialized spec matches the live cell's attachable-container Env.
 func materializeCellFromConfig(
-	r runner.Runner, cfg intmodel.CellConfig, cellName string, envOverrides []string,
+	r runner.Runner, cfg intmodel.CellConfig, binding cellBinding,
 ) (intmodel.Cell, error) {
-	rendered, err := renderCellFromConfig(r, cfg, cellName, envOverrides)
+	rendered, err := renderCellFromConfig(r, cfg, binding)
 	if err != nil {
 		return intmodel.Cell{}, err
 	}

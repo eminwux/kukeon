@@ -1,7 +1,7 @@
 export const kinds = ["realm", "space", "stack", "cell", "container"];
 export const titles = ["Realms", "Spaces", "Stacks", "Cells"];
 export const catalogTitles: Record<string, string> = { blueprints: "Blueprints", configs: "Configs", volumes: "Volumes", secrets: "Secrets" };
-export type Route = { view: string; scope: string[]; parent: string[]; document: boolean; config?: string[] };
+export type Route = { view: string; scope: string[]; parent: string[]; document: boolean; config?: string[]; blueprint?: string[] };
 
 const HOME = (): Route => ({ view: "dashboard", scope: [], parent: [], document: false });
 export const homeLink = "#/resources";
@@ -18,6 +18,12 @@ export function readRoute(): Route {
       let config: unknown;
       try { config = JSON.parse(params.get("config") ?? "null"); } catch { config = null; }
       return { view: "new-cell", scope: [], parent: [], document: false, config: Array.isArray(config) && config.every(value => typeof value === "string") ? config.slice(0, 4) : undefined };
+    }
+    // #/new-config?blueprint=[scope…, name] opens the blueprint's form.
+    if (parts[0] === "new-config") {
+      let blueprint: unknown;
+      try { blueprint = JSON.parse(params.get("blueprint") ?? "null"); } catch { blueprint = null; }
+      return { view: "new-config", scope: [], parent: [], document: false, blueprint: Array.isArray(blueprint) && blueprint.every(value => typeof value === "string") ? blueprint.slice(0, 4) : undefined };
     }
     // #/daemon (health) and #/daemon/logs live under Administration.
     if (parts[0] === "daemon") return { view: parts[1] === "logs" ? "daemon-logs" : "daemon", scope: [], parent: [], document: false };
@@ -42,6 +48,9 @@ export function workspaceLink(scope: string[]): string {
 }
 export function newCellLink(config?: string[]): string {
   return "#/new-cell" + (config?.length ? `?config=${encodeURIComponent(JSON.stringify(config))}` : "");
+}
+export function newConfigLink(blueprint?: string[]): string {
+  return "#/new-config" + (blueprint?.length ? `?blueprint=${encodeURIComponent(JSON.stringify(blueprint))}` : "");
 }
 export function daemonLink(section?: "logs"): string {
   return "#/daemon" + (section ? `/${section}` : "");

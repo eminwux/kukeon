@@ -31,6 +31,12 @@ import (
 // fakeRenderDigest is the digest the test fake's stand-in renderer reports.
 const fakeRenderDigest = "sha256:fake"
 
+// lastConfigRequest is the most recent render request a fake received, so
+// tests can assert what the CLI forwards to the daemon (mode, per-cell params).
+//
+//nolint:gochecknoglobals // test capture shared by the package's sequential fakes.
+var lastConfigRequest kukeonv1.CellFromConfigRequest
+
 // renderFromConfig stands in for kukeond's CellConfig render (#1418) so the
 // CLI tests keep asserting on the cell the daemon would produce: it reads the
 // Config and Blueprint through the fake's GetConfig/GetBlueprint hooks and
@@ -38,6 +44,7 @@ const fakeRenderDigest = "sha256:fake"
 func (f *fakeClient) renderFromConfig(
 	ctx context.Context, req kukeonv1.CellFromConfigRequest,
 ) (kukeonv1.PreviewCellFromConfigResult, error) {
+	lastConfigRequest = req
 	cfgRes, err := f.GetConfig(ctx, v1beta1.CellConfigDoc{Metadata: req.Config})
 	if err != nil {
 		return kukeonv1.PreviewCellFromConfigResult{}, err
@@ -75,6 +82,15 @@ func (f *fakeClient) renderFromConfig(
 		return kukeonv1.PreviewCellFromConfigResult{}, err
 	}
 	cellconfig.ApplyEnvOverrides(&doc, req.EnvOverrides)
+	// Like the daemon render (#1472), record the per-cell binding the Config
+	// alone does not say. The fake has no blueprint modes to pick a default
+	// from, so the recorded mode is the requested one.
+	if prov := doc.Spec.Provenance; prov != nil {
+		prov.Mode = req.Mode
+		if len(req.Params) > 0 {
+			prov.ParamOverrides = req.Params
+		}
+	}
 	if req.AutoDelete {
 		doc.Spec.AutoDelete = true
 	}

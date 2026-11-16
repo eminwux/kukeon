@@ -34,6 +34,13 @@ type RoleSpec struct {
 	// Harnesses maps a harness name to its per-role configuration. Keys must be
 	// known harnesses.
 	Harnesses map[string]RoleHarness `json:"harnesses,omitempty" yaml:"harnesses,omitempty"`
+	// Connectors lists the connector components the role's cells enable, by
+	// name (e.g. `github`: the GitHub API token as GH_TOKEN plus the `gh`
+	// capability). A connector never supplies a git credential.
+	Connectors []string `json:"connectors,omitempty" yaml:"connectors,omitempty"`
+	// Forges lists the forge components (issue/change trackers) the role's
+	// cells enable, by name (e.g. `github-issues`).
+	Forges []string `json:"forges,omitempty"     yaml:"forges,omitempty"`
 	// Needs declares what the role depends on, split by kind so each dimension
 	// renders onto the right runtime type.
 	Needs RoleNeeds `json:"needs,omitempty"     yaml:"needs,omitempty"`
@@ -55,11 +62,10 @@ type RoleHarness struct {
 	Permissions string `json:"permissions,omitempty" yaml:"permissions,omitempty"`
 	// Secrets are the secret NAMES (resolved against TeamsConfig.secrets) this
 	// harness needs, declared per-harness so a role's Claude cell no longer
-	// carries secret slots only its Codex/OpenCode cells use (agents#750). Each
-	// name is matched against the rendered blueprint's secret-slot declarations
-	// at bind time, the same way role-level RoleNeeds.Secrets is — the
-	// per-harness list is the new primary location, with RoleNeeds.Secrets kept
-	// as a transition-era fallback.
+	// carries secret slots only its Codex/OpenCode cells use (agents#750). A
+	// name the harness or one of its modes declares fills that slot; `gh-token`
+	// is the transition-era spelling of `connectors: [github]`; any other name
+	// becomes an optional slot on the shared blueprint.
 	Secrets []string `json:"secrets,omitempty"     yaml:"secrets,omitempty"`
 }
 
@@ -69,8 +75,10 @@ type RoleHarness struct {
 //   - Image: capability names (selector input for the ImageCatalog).
 //   - Repos: repo names rendered to []v1beta1.ContainerRepo (git clones).
 //     `project` and `agents` are repos.
-//   - Mounts: mount names rendered to []v1beta1.VolumeMount (bind mounts).
-//     `ssh` is a mount.
+//   - Mounts: host-mount selectors (`kukeond-socket`, `kuke-binary`,
+//     `kukeon-install`). They are part of the security posture, so they pick
+//     the blueprint variant rather than a config toggle. `ssh` is still
+//     accepted but mounts nothing: cells use stored git credentials.
 //   - Params: parameter names supplied at materialization time.
 //   - Secrets: secret names resolved against TeamsConfig.secrets.
 type RoleNeeds struct {

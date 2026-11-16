@@ -103,6 +103,21 @@ func (s *WireService) ListStacks(a *kukeonv1.ListStacksArgs, r *kukeonv1.ListSta
 	return nil
 }
 
+func (s *WireService) GetBlueprint(a *kukeonv1.GetBlueprintArgs, r *kukeonv1.GetBlueprintReply) error {
+	r.Result, _ = s.Client.GetBlueprint(context.Background(), a.Doc)
+	return nil
+}
+
+func (s *WireService) ListConfigs(a *kukeonv1.ListConfigsArgs, r *kukeonv1.ListConfigsReply) error {
+	r.Configs, _ = s.Client.ListConfigs(context.Background(), a.RealmName, a.SpaceName, a.StackName)
+	return nil
+}
+
+func (s *WireService) GetConfig(a *kukeonv1.GetConfigArgs, r *kukeonv1.GetConfigReply) error {
+	r.Result, _ = s.Client.GetConfig(context.Background(), a.Doc)
+	return nil
+}
+
 func (s *WireService) ApplyDocuments(a *kukeonv1.ApplyDocumentsArgs, r *kukeonv1.ApplyDocumentsReply) error {
 	var err error
 	r.Result, err = s.Client.ApplyDocumentsForTeam(context.Background(), a.RawYAML, a.Team)

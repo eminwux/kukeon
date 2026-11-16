@@ -25,7 +25,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
+	"github.com/eminwux/kukeon/internal/gitcred/gitplan"
 	"github.com/eminwux/kukeon/internal/kuketty/setupstatus"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
@@ -38,12 +40,15 @@ import (
 var errRequiredRepoFailed = errors.New("one or more required repos failed to resolve")
 
 // processRepos is kuketty's pre-Serve step: it clones (or fetches) each repo
-// declared on the mounted ContainerDoc.Spec into its target using the
-// container's own git identity (inherited env: HOME, ~/.ssh, ~/.gitconfig,
-// GIT_SSH_COMMAND — the same identity onInit scripts use today). Reading
-// repos[] straight from the spec (since kuketty owns the spec→TerminalSpec
-// build, issue #641) means there is no daemon-rendered sidecar doc.
-//
+// declared on the mounted ContainerDoc.Spec into its target. Each repo is
+// resolved with the git setup the daemon planned for it (gitplan.Plan, issue
+// #1472): the clone URL whose transport follows the bound credential, and the
+// repo-local config carrying the source's own identity, credential and signing
+// key. A repo with no plan entry uses the cell-global gitconfig, or — for a
+// container that declares no git block at all — whatever the image provides
+// (HOME, ~/.ssh, ~/.gitconfig, GIT_SSH_COMMAND). Reading repos[] straight from
+// the spec (since kuketty owns the spec→TerminalSpec build, issue #641) means
+// there is no daemon-rendered sidecar doc.
 // An empty repos[] is a no-op (nil statuses) — the common case. When any repo
 // marked required fails, processRepos logs each outcome and returns
 // errRequiredRepoFailed alongside the partial statuses collected so far;
@@ -52,7 +57,9 @@ var errRequiredRepoFailed = errors.New("one or more required repos failed to res
 // ContainerStatus.Repos (phase 1b, #642) — kukeond pulls them post-Serve. On
 // a required failure kuketty exits before Serve, so those statuses are never
 // reachable over the RPC; that path stays exit-code-driven (AC #5).
-func processRepos(ctx context.Context, repos []v1beta1.ContainerRepo, logger *slog.Logger) ([]setupstatus.Repo, error) {
+func processRepos(
+	ctx context.Context, repos []v1beta1.ContainerRepo, plan *gitplan.Plan, logger *slog.Logger,
+) ([]setupstatus.Repo, error) {
 	if len(repos) == 0 {
 		return nil, nil
 	}
@@ -61,7 +68,7 @@ func processRepos(ctx context.Context, repos []v1beta1.ContainerRepo, logger *sl
 	var requiredFailed bool
 	for i := range repos {
 		repo := repos[i]
-		status := resolveRepo(ctx, repo, logger)
+		status := resolveRepo(ctx, repo, plan, logger)
 		statuses = append(statuses, status)
 		if status.State == setupstatus.StateFailed {
 			logger.WarnContext(ctx, "repo resolution failed",
@@ -78,14 +85,62 @@ func processRepos(ctx context.Context, repos []v1beta1.ContainerRepo, logger *sl
 	return statuses, nil
 }
 
+// repoGit is the git invocation context of one repo: the effective clone URL,
+// the repo-local config, and the environment git runs with.
+type repoGit struct {
+	url    string
+	config []gitplan.ConfigEntry
+	env    []string
+}
+
+// planRepoGit resolves the invocation context of a repo from the plan.
+func planRepoGit(repo v1beta1.ContainerRepo, plan *gitplan.Plan) repoGit {
+	rg := repoGit{url: repo.URL}
+	managedSSH := false
+	if plan != nil {
+		managedSSH = plan.SSHCommand
+		if entry, ok := plan.Repos[repo.Name]; ok {
+			if entry.URL != "" {
+				rg.url = entry.URL
+			}
+			rg.config = entry.Config
+			for _, c := range entry.Config {
+				if c.Key == "core.sshCommand" {
+					managedSSH = true
+				}
+			}
+		}
+	}
+	rg.env = gitEnv(managedSSH)
+	return rg
+}
+
+// configFlags renders the repo-local config as `-c key=value` flags, so the
+// clone itself already runs with the source's credential. A repeated key
+// accumulates, matching how the entries are later written to the checkout.
+func (rg repoGit) configFlags() []string {
+	const flagsPerEntry = 2 // "-c" and "key=value"
+	out := make([]string, 0, flagsPerEntry*len(rg.config))
+	for _, c := range rg.config {
+		out = append(out, "-c", c.Key+"="+c.Value)
+	}
+	return out
+}
+
 // resolveRepo clones or fetches a single repo and returns its resolved
 // setupstatus.Repo. If target/.git already exists it fetches + fast-forwards
 // (clone-if-absent idempotency: the writable rootfs persists across
-// kuke stop/start, so a restart never re-clones); otherwise it clones. On
-// success it logs the resolved HEAD commit and reports State cloned/fetched
+// kuke stop/start, so a restart never re-clones); otherwise it clones. Either
+// way the planned repo-local config and origin URL are (re)written into the
+// checkout afterwards, so the workload's own commits and pushes use the
+// source's identity and an edited credential takes effect on the next start.
+// On success it logs the resolved HEAD commit and reports State cloned/fetched
 // with the commit; on failure it reports State failed with the error detail.
-func resolveRepo(ctx context.Context, repo v1beta1.ContainerRepo, logger *slog.Logger) setupstatus.Repo {
+func resolveRepo(
+	ctx context.Context, repo v1beta1.ContainerRepo, plan *gitplan.Plan, logger *slog.Logger,
+) setupstatus.Repo {
 	status := setupstatus.Repo{Name: repo.Name, Target: repo.Target}
+	rg := planRepoGit(repo, plan)
 
 	gitDir := filepath.Join(repo.Target, ".git")
 	exists := false
@@ -97,9 +152,15 @@ func resolveRepo(ctx context.Context, repo v1beta1.ContainerRepo, logger *slog.L
 	var opErr error
 	if exists {
 		state = setupstatus.StateFetched
-		opErr = fetchRepo(ctx, repo)
+		// Re-point origin and refresh the local config first: a changed
+		// credential must be in place before the fetch that needs it.
+		if opErr = applyRepoConfig(ctx, repo, rg); opErr == nil {
+			opErr = fetchRepo(ctx, repo, rg)
+		}
 	} else {
-		opErr = cloneRepo(ctx, repo)
+		if opErr = cloneRepo(ctx, repo, rg); opErr == nil {
+			opErr = applyRepoConfig(ctx, repo, rg)
+		}
 	}
 	if opErr != nil {
 		status.State = setupstatus.StateFailed
@@ -116,23 +177,44 @@ func resolveRepo(ctx context.Context, repo v1beta1.ContainerRepo, logger *slog.L
 	return status
 }
 
-// cloneRepo clones repo.URL into repo.Target. When repo.Ref is set the clone
-// fetches the default branch (plus all refs/tags) and then detaches HEAD at
-// the pinned ref — supports both a tag name and a full commit SHA. Otherwise
-// repo.Branch (if set) is forwarded to `git clone --branch`.
-func cloneRepo(ctx context.Context, repo v1beta1.ContainerRepo) error {
-	if repo.Ref != "" {
-		if err := runGit(ctx, "", "clone", repo.URL, repo.Target); err != nil {
+// applyRepoConfig writes the planned repo-local config into the checkout and
+// points origin at the effective URL. Entries are applied in order: a plain
+// entry replaces every value of its key, an Add entry appends one.
+func applyRepoConfig(ctx context.Context, repo v1beta1.ContainerRepo, rg repoGit) error {
+	if rg.url != repo.URL {
+		if err := runGit(ctx, rg.env, repo.Target, "remote", "set-url", "origin", rg.url); err != nil {
 			return err
 		}
-		return runGit(ctx, repo.Target, "checkout", "--detach", repo.Ref)
 	}
-	args := []string{"clone"}
+	for _, c := range rg.config {
+		args := []string{"config", "--local", "--replace-all", c.Key, c.Value}
+		if c.Add {
+			args = []string{"config", "--local", "--add", c.Key, c.Value}
+		}
+		if err := runGit(ctx, rg.env, repo.Target, args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// cloneRepo clones the repo's effective URL into repo.Target. When repo.Ref is
+// set the clone fetches the default branch (plus all refs/tags) and then
+// detaches HEAD at the pinned ref — supports both a tag name and a full commit
+// SHA. Otherwise repo.Branch (if set) is forwarded to `git clone --branch`.
+func cloneRepo(ctx context.Context, repo v1beta1.ContainerRepo, rg repoGit) error {
+	args := append(rg.configFlags(), "clone")
+	if repo.Ref != "" {
+		if err := runGit(ctx, rg.env, "", append(args, rg.url, repo.Target)...); err != nil {
+			return err
+		}
+		return runGit(ctx, rg.env, repo.Target, "checkout", "--detach", repo.Ref)
+	}
 	if repo.Branch != "" {
 		args = append(args, "--branch", repo.Branch)
 	}
-	args = append(args, repo.URL, repo.Target)
-	return runGit(ctx, "", args...)
+	args = append(args, rg.url, repo.Target)
+	return runGit(ctx, rg.env, "", args...)
 }
 
 // fetchRepo updates an existing checkout. For a Ref-pinned repo (immutable tag
@@ -141,28 +223,28 @@ func cloneRepo(ctx context.Context, repo v1beta1.ContainerRepo) error {
 // would error, so a tag pin only survived a fresh clone before this branch
 // (#1034). For a branch-tracking repo the prior fetch + checkout + ff-only
 // path is preserved.
-func fetchRepo(ctx context.Context, repo v1beta1.ContainerRepo) error {
+func fetchRepo(ctx context.Context, repo v1beta1.ContainerRepo, rg repoGit) error {
 	if repo.Ref != "" {
-		if err := runGit(ctx, repo.Target, "fetch", "--prune", "--tags", "origin"); err != nil {
+		if err := runGit(ctx, rg.env, repo.Target, "fetch", "--prune", "--tags", "origin"); err != nil {
 			return err
 		}
-		return runGit(ctx, repo.Target, "checkout", "--detach", repo.Ref)
+		return runGit(ctx, rg.env, repo.Target, "checkout", "--detach", repo.Ref)
 	}
-	if err := runGit(ctx, repo.Target, "fetch", "--prune", "origin"); err != nil {
+	if err := runGit(ctx, rg.env, repo.Target, "fetch", "--prune", "origin"); err != nil {
 		return err
 	}
 	if repo.Branch != "" {
-		if err := runGit(ctx, repo.Target, "checkout", repo.Branch); err != nil {
+		if err := runGit(ctx, rg.env, repo.Target, "checkout", repo.Branch); err != nil {
 			return err
 		}
 	}
-	return runGit(ctx, repo.Target, "pull", "--ff-only")
+	return runGit(ctx, rg.env, repo.Target, "pull", "--ff-only")
 }
 
 // repoHead returns the full HEAD commit SHA of the checkout at target.
 func repoHead(ctx context.Context, target string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", "-C", target, "rev-parse", "HEAD")
-	cmd.Env = gitEnv()
+	cmd.Env = gitEnv(true)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -170,14 +252,14 @@ func repoHead(ctx context.Context, target string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// runGit runs a git subcommand with the container's git identity (HOME,
-// ~/.ssh, ~/.gitconfig — inherited via gitEnv) plus the non-interactive guards
-// gitEnv adds. dir is the working directory ("" for the process cwd, e.g.
-// clone). On failure the combined output is folded into the error so the log
-// line carries an actionable message.
-func runGit(ctx context.Context, dir string, args ...string) error {
+// runGit runs a git subcommand with env (see gitEnv). dir is the working
+// directory ("" for the process cwd, e.g. clone). On failure the combined
+// output is folded into the error so the log line carries an actionable
+// message; git never prints a stored credential, which reaches it only through
+// the credential helper and the ssh key files.
+func runGit(ctx context.Context, env []string, dir string, args ...string) error {
 	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Env = gitEnv()
+	cmd.Env = env
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -193,28 +275,69 @@ func runGit(ctx context.Context, dir string, args ...string) error {
 }
 
 // gitEnv returns kuketty's environment (so the container's git identity —
-// HOME, ~/.ssh, ~/.gitconfig — is used) augmented with non-interactive guards
-// so a first-time clone of an unseen host never hangs waiting for operator
-// input (issue #617, non-interactive host-key handling):
-//
+// HOME, GIT_CONFIG_SYSTEM, the ssh-agent socket — is used) augmented with
+// non-interactive guards so a clone never hangs waiting for operator input:
 //   - GIT_TERMINAL_PROMPT=0 makes git fail instead of prompting for HTTPS
 //     credentials.
-//   - GIT_SSH_COMMAND defaults to `ssh -o StrictHostKeyChecking=accept-new
-//     -o BatchMode=yes` so a first-time git@host clone trust-on-first-use
-//     accepts the new key (but still errors on a *changed* key) rather than
-//     blocking on the interactive yes/no prompt.
-//
-// Both defaults yield to a value the container already set: an image that
-// pre-seeds known_hosts and exports its own GIT_SSH_COMMAND, or one that wants
-// HTTPS credential prompting, wins. kuketty only fills the gap so the
-// out-of-the-box path is non-interactive.
-func gitEnv() []string {
+//   - When the remote's ssh setup is managed by kukeon (managedSSH: the
+//     cell-global or repo-local config sets core.sshCommand), any inherited
+//     GIT_SSH_COMMAND is dropped, because git prefers that variable over
+//     core.sshCommand and would bypass the stored credential.
+//   - Otherwise GIT_SSH_COMMAND defaults to a non-interactive ssh that checks
+//     host keys strictly against the image's known_hosts plus the built-in
+//     keys of github.com, gitlab.com and bitbucket.org. This replaces the
+//     pre-#1472 `StrictHostKeyChecking=accept-new` fallback: trusting an
+//     unseen host is now an explicit opt-in (a credential's
+//     hostKeyPolicy: accept-new, or an image-provided GIT_SSH_COMMAND, which
+//     still wins).
+func gitEnv(managedSSH bool) []string {
 	env := os.Environ()
 	if _, ok := os.LookupEnv("GIT_TERMINAL_PROMPT"); !ok {
 		env = append(env, "GIT_TERMINAL_PROMPT=0")
 	}
+	if managedSSH {
+		kept := env[:0:0]
+		for _, kv := range env {
+			if !strings.HasPrefix(kv, "GIT_SSH_COMMAND=") {
+				kept = append(kept, kv)
+			}
+		}
+		return kept
+	}
 	if _, ok := os.LookupEnv("GIT_SSH_COMMAND"); !ok {
-		env = append(env, "GIT_SSH_COMMAND=ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes")
+		env = append(env, "GIT_SSH_COMMAND="+fallbackSSHCommand())
 	}
 	return env
 }
+
+// fallbackSSHCommand builds the default ssh invocation for a remote no stored
+// credential covers. The built-in forge keys are written to a private temp
+// file once per process; if that fails the command still checks strictly
+// against the image's own known_hosts.
+func fallbackSSHCommand() string {
+	command := "ssh -o BatchMode=yes -o StrictHostKeyChecking=yes"
+	builtinKnownHostsOnce.Do(func() {
+		f, err := os.CreateTemp("", "kukeon-known-hosts-*")
+		if err != nil {
+			return
+		}
+		defer func() { _ = f.Close() }()
+		if _, err = f.WriteString(gitplan.AllBuiltinKnownHosts()); err != nil {
+			_ = os.Remove(f.Name())
+			return
+		}
+		builtinKnownHostsPath = f.Name()
+	})
+	if builtinKnownHostsPath != "" {
+		// One option, two files: ssh keeps only the first UserKnownHostsFile
+		// it is given, and expands the ~ itself.
+		command += " -o 'UserKnownHostsFile=~/.ssh/known_hosts " + builtinKnownHostsPath + "'"
+	}
+	return command
+}
+
+//nolint:gochecknoglobals // process-wide cache of the temp known_hosts file.
+var (
+	builtinKnownHostsOnce sync.Once
+	builtinKnownHostsPath string
+)

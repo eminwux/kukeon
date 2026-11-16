@@ -133,7 +133,7 @@ func Add(ctx context.Context, opts AddOptions) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	return runTeam(ctx, opts.Options, cfg, team, recorded, Result{}, command)
+	return runTeam(ctx, opts.Options, cfg, team, recorded, Result{}, command, nil)
 }
 
 func validateRevision(opts AddOptions) error {

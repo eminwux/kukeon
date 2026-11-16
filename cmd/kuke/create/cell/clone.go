@@ -188,11 +188,24 @@ func resolveSourceCell(
 func cloneFromConfig(
 	cmd *cobra.Command, client kukeonv1.Client, flags SourceFlags, srcProv *v1beta1.CellProvenance, name string,
 ) (v1beta1.CellDoc, error) {
+	// --param stacks on the source's recorded per-cell params; like on the
+	// --from-config path the daemon accepts only the picked mode's parameters.
+	params := map[string]string{}
+	for k, v := range srcProv.ParamOverrides {
+		params[k] = v
+	}
 	if len(flags.ParamArgs) > 0 {
-		return v1beta1.CellDoc{}, errors.New(
-			"--param is not valid when cloning a Config-lineage cell; the lineage Config carries " +
-				"its own spec.values (edit the Config instead)",
-		)
+		extra, parseErr := cellblueprint.ParseParamArgs(flags.ParamArgs)
+		if parseErr != nil {
+			return v1beta1.CellDoc{}, parseErr
+		}
+		for k, v := range extra {
+			params[k] = v
+		}
+	}
+	mode := srcProv.Mode
+	if flags.Mode != "" {
+		mode = flags.Mode
 	}
 	if flags.ParamFile != "" {
 		return v1beta1.CellDoc{}, errors.New(
@@ -215,6 +228,8 @@ func cloneFromConfig(
 		},
 		Name:         name,
 		EnvOverrides: mergedEnv,
+		Mode:         mode,
+		Params:       params,
 	})
 	if err != nil {
 		if errors.Is(err, errdefs.ErrConfigNotFound) {
@@ -229,9 +244,16 @@ func cloneFromConfig(
 
 	// Copy the source's provenance verbatim (AC#1) with the merged env
 	// overrides recorded — byte-equal to the source when no extra --env.
+	rendered := cellDoc.Spec.Provenance
 	cellDoc.Spec.Provenance = v1beta1.CloneCellProvenance(srcProv)
 	if len(mergedEnv) > 0 {
 		cellDoc.Spec.Provenance.EnvOverrides = mergedEnv
+	}
+	// The clone's mode and per-cell params are what the daemon just rendered
+	// (the source's, unless --mode / --param overrode them).
+	if rendered != nil {
+		cellDoc.Spec.Provenance.Mode = rendered.Mode
+		cellDoc.Spec.Provenance.ParamOverrides = rendered.ParamOverrides
 	}
 	return cellDoc, nil
 }
@@ -249,6 +271,12 @@ func cloneFromBlueprint(
 		return v1beta1.CellDoc{}, errors.New(
 			"--env is not valid when cloning a Blueprint-lineage cell; clone a Config-lineage cell " +
 				"(or edit the Blueprint) to layer env overrides",
+		)
+	}
+	if flags.Mode != "" {
+		return v1beta1.CellDoc{}, errors.New(
+			"--mode is not valid when cloning a Blueprint-lineage cell; a harness mode is picked " +
+				"from the modes a CellConfig enables",
 		)
 	}
 

@@ -33,6 +33,7 @@ func ConvertScopeDefaultsToInternal(in *ext.ScopeDefaults) *intmodel.ScopeDefaul
 		Values:  copyStringMap(in.Values),
 		Repos:   repoFillsToInternal(in.Repos),
 		Secrets: secretFillsToInternal(in.Secrets),
+		Git:     GitToInternal(in.Git),
 	}
 }
 
@@ -46,6 +47,7 @@ func BuildScopeDefaultsExternalFromInternal(in *intmodel.ScopeDefaults) *ext.Sco
 		Values:  copyStringMap(in.Values),
 		Repos:   repoFillsToExternal(in.Repos),
 		Secrets: secretFillsToExternal(in.Secrets),
+		Git:     GitToExternal(in.Git),
 	}
 }
 
@@ -59,6 +61,7 @@ func SpaceDefaultsFill(in *intmodel.SpaceDefaults) *ext.ScopeDefaults {
 		Values:  in.Values,
 		Repos:   in.Repos,
 		Secrets: in.Secrets,
+		Git:     in.Git,
 	})
 }
 
@@ -68,7 +71,7 @@ func repoFillsToInternal(in map[string]ext.CellConfigRepoFill) map[string]intmod
 	}
 	out := make(map[string]intmodel.RepoFill, len(in))
 	for k, v := range in {
-		out[k] = intmodel.RepoFill{URL: v.URL, Branch: v.Branch, Ref: v.Ref}
+		out[k] = intmodel.RepoFill{URL: v.URL, Branch: v.Branch, Ref: v.Ref, Git: RepoGitToInternal(v.Git)}
 	}
 	return out
 }
@@ -79,7 +82,7 @@ func repoFillsToExternal(in map[string]intmodel.RepoFill) map[string]ext.CellCon
 	}
 	out := make(map[string]ext.CellConfigRepoFill, len(in))
 	for k, v := range in {
-		out[k] = ext.CellConfigRepoFill{URL: v.URL, Branch: v.Branch, Ref: v.Ref}
+		out[k] = ext.CellConfigRepoFill{URL: v.URL, Branch: v.Branch, Ref: v.Ref, Git: RepoGitToExternal(v.Git)}
 	}
 	return out
 }
@@ -176,6 +179,25 @@ func validateRealmImages(images []ext.RealmImage) error {
 			return fmt.Errorf("spec.images[%d] (%s): exactly one of ref or build is required", i, name)
 		case hasBuild && strings.TrimSpace(img.Build.Context) == "":
 			return fmt.Errorf("spec.images[%d] (%s): build.context is required", i, name)
+		}
+	}
+	return nil
+}
+
+// validateScopeDefaults checks the git identity a Realm, Space or Stack
+// contributes to its cells (#1472): the default git block and the per-source
+// git of each repo fill. The value/slot fills themselves are validated against
+// a blueprint at render time, not here — a scope default is not tied to one.
+func validateScopeDefaults(kind string, d *ext.ScopeDefaults) error {
+	if d == nil {
+		return nil
+	}
+	if err := ValidateGit(d.Git); err != nil {
+		return fmt.Errorf("%s spec.defaults.%w", kind, err)
+	}
+	for name, fill := range d.Repos {
+		if err := ValidateRepoGit(fill.Git); err != nil {
+			return fmt.Errorf("%s spec.defaults.repos[%q]: %w", kind, name, err)
 		}
 	}
 	return nil

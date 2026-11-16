@@ -537,8 +537,9 @@ func TestAddRecordsSecretBindingsAndWarnsOnMissing(t *testing.T) {
 		entry.Secrets[0].SecretRef != (config.SecretRef{Name: "openrouter-api-key", Realm: "default"}) {
 		t.Fatalf("entry secrets = %+v", entry.Secrets)
 	}
-	// An operator edit to the recorded binding outlives global bindings.
-	entry.Secrets[0].EnvName = "ROUTER_KEY"
+	// An operator edit to the recorded binding outlives global bindings. The
+	// edit repoints the runtime secret; the destination is the harness's.
+	entry.Secrets[0].SecretRef.Name = "edited-router-key"
 	edited, err := yaml.Marshal(entry)
 	if err != nil {
 		t.Fatal(err)
@@ -549,10 +550,25 @@ func TestAddRecordsSecretBindingsAndWarnsOnMissing(t *testing.T) {
 	if result, err = Add(t.Context(), opts); err != nil || len(result.MissingSecrets) != 0 {
 		t.Fatalf("missing=%q err=%v", result.MissingSecrets, err)
 	}
-	if _, entry = readAddEntry(t, opts); entry.Secrets[0].EnvName != "ROUTER_KEY" ||
-		!bytes.Contains(fake.raw, []byte("ROUTER_KEY")) {
+	if _, entry = readAddEntry(t, opts); entry.Secrets[0].SecretRef.Name != "edited-router-key" ||
+		!bytes.Contains(fake.raw, []byte("name: edited-router-key")) ||
+		bytes.Contains(fake.raw, []byte("provider-account")) {
 		t.Fatal("recorded binding replaced")
 	}
+	// A recorded destination the shared blueprint cannot honor is refused
+	// before anything is applied, and the accepted registration is kept.
+	applies := fake.applies
+	entry.Secrets[0].EnvName = "ROUTER_KEY"
+	if edited, err = yaml.Marshal(entry); err != nil {
+		t.Fatal(err)
+	}
+	accepted, _ := readAddEntry(t, opts)
+	writeFixture(t, filepath.Join(opts.Root, "kuketeam.d", opts.Name+".yaml"), string(edited))
+	if _, err = Add(t.Context(), opts); err == nil || fake.applies != applies ||
+		!strings.Contains(err.Error(), "differs from the harness destination") {
+		t.Fatalf("moved destination: err=%v applies=%d", err, fake.applies)
+	}
+	writeFixture(t, filepath.Join(opts.Root, "kuketeam.d", opts.Name+".yaml"), string(accepted))
 	// Deselecting the requirement drops its binding.
 	changeAddConfig(t, opts, func(cfg *config.TeamsConfig) {
 		cfg.Spec.Defaults.Harnesses = []config.Harness{{Name: "codex", Source: "kukeon", Path: "team/harnesses/codex"}}

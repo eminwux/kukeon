@@ -47,9 +47,87 @@ type fakeClient struct {
 	resources                                             []kukeonv1.ApplyResourceResult
 	raw                                                   []byte
 	team                                                  string
+
+	// Daemon state the shared-blueprint flow reads: stored blueprints keyed by
+	// realm/name, stored configs, and the team stack's defaults. A successful
+	// apply (without canned resources) persists what it was sent.
+	blueprints    map[string]api.CellBlueprintDoc
+	configs       []api.CellConfigDoc
+	stackDefaults *api.ScopeDefaults
+	stackLabels   map[string]string
+	blueprintErr  error
+	// created records every secret document sent to CreateSecret.
+	created []api.SecretDoc
 }
 
-func newFake() *fakeClient                       { return &fakeClient{secrets: map[api.SecretMetadata]string{}} }
+func newFake() *fakeClient {
+	return &fakeClient{secrets: map[api.SecretMetadata]string{}, blueprints: map[string]api.CellBlueprintDoc{}}
+}
+
+func blueprintKey(md api.CellBlueprintMetadata) string { return md.Realm + "/" + md.Name }
+
+func (f *fakeClient) GetBlueprint(
+	_ context.Context, doc api.CellBlueprintDoc,
+) (kukeonv1.GetBlueprintResult, error) {
+	if doc.Metadata.Space != "" || doc.Metadata.Stack != "" {
+		panic("shared blueprint looked up below realm scope")
+	}
+	stored, ok := f.blueprints[blueprintKey(doc.Metadata)]
+	return kukeonv1.GetBlueprintResult{Blueprint: stored, MetadataExists: ok}, f.blueprintErr
+}
+
+// ListConfigs is metadata-only, like the daemon's.
+func (f *fakeClient) ListConfigs(context.Context, string, string, string) ([]api.CellConfigDoc, error) {
+	out := make([]api.CellConfigDoc, 0, len(f.configs))
+	for _, cfg := range f.configs {
+		out = append(out, api.CellConfigDoc{APIVersion: cfg.APIVersion, Kind: cfg.Kind, Metadata: cfg.Metadata})
+	}
+	return out, nil
+}
+
+func (f *fakeClient) GetConfig(_ context.Context, doc api.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+	for _, cfg := range f.configs {
+		md := cfg.Metadata
+		if md.Name == doc.Metadata.Name && md.Realm == doc.Metadata.Realm && md.Space == doc.Metadata.Space &&
+			md.Stack == doc.Metadata.Stack {
+			return kukeonv1.GetConfigResult{Config: cfg, MetadataExists: true}, nil
+		}
+	}
+	return kukeonv1.GetConfigResult{}, nil
+}
+
+// persist stores an applied document the way the daemon would.
+func (f *fakeClient) persist(kind string, node *yaml.Node, team string) {
+	switch kind {
+	case "CellBlueprint":
+		var doc api.CellBlueprintDoc
+		if err := node.Decode(&doc); err != nil {
+			panic(err)
+		}
+		f.blueprints[blueprintKey(doc.Metadata)] = doc
+	case "CellConfig":
+		var doc api.CellConfigDoc
+		if err := node.Decode(&doc); err != nil {
+			panic(err)
+		}
+		if doc.Metadata.Labels[api.LabelTeam] != team {
+			panic("config applied without its team label")
+		}
+		for i := range f.configs {
+			if f.configs[i].Metadata.Name == doc.Metadata.Name {
+				f.configs[i] = doc
+				return
+			}
+		}
+		f.configs = append(f.configs, doc)
+	case "Stack":
+		var doc api.StackDoc
+		if err := node.Decode(&doc); err != nil {
+			panic(err)
+		}
+		f.stackDefaults = doc.Spec.Defaults
+	}
+}
 func (f *fakeClient) Close() error               { return nil }
 func (f *fakeClient) Ping(context.Context) error { return f.pingErr }
 func (f *fakeClient) ListRealms(context.Context) ([]api.RealmDoc, error) {
@@ -77,7 +155,10 @@ func (f *fakeClient) ListStacks(context.Context, string, string) ([]api.StackDoc
 		return nil, nil
 	}
 	return []api.StackDoc{
-		{Metadata: api.StackMetadata{Name: "default"}},
+		{
+			Metadata: api.StackMetadata{Name: "default", Labels: f.stackLabels},
+			Spec:     api.StackSpec{ID: "default", RealmID: "default", SpaceID: "default", Defaults: f.stackDefaults},
+		},
 		{Metadata: api.StackMetadata{Name: "operators"}},
 	}, nil
 }
@@ -90,7 +171,7 @@ func (f *fakeClient) ListCells(context.Context, string, string, string) ([]api.C
 }
 
 func (f *fakeClient) GetSecret(_ context.Context, doc api.SecretDoc) (kukeonv1.GetSecretResult, error) {
-	if doc.Spec.Data != "" {
+	if doc.Spec.Data != "" || doc.Spec.SSHKey != nil || doc.Spec.BasicAuth != nil || doc.Spec.Type != "" {
 		panic("lookup sent secret bytes")
 	}
 	f.lookups++
@@ -103,6 +184,7 @@ func (f *fakeClient) GetSecret(_ context.Context, doc api.SecretDoc) (kukeonv1.G
 
 func (f *fakeClient) CreateSecret(_ context.Context, doc api.SecretDoc) (kukeonv1.CreateSecretResult, error) {
 	f.creates++
+	f.created = append(f.created, doc)
 	// Model an ambiguous failure after the daemon already accepted the write.
 	f.secrets[doc.Metadata] = doc.Spec.Data
 	return kukeonv1.CreateSecretResult{Created: true}, f.createErr
@@ -120,16 +202,23 @@ func (f *fakeClient) ApplyDocumentsForTeam(
 		var resources []kukeonv1.ApplyResourceResult
 		decoder := yaml.NewDecoder(bytes.NewReader(raw))
 		for {
+			var node yaml.Node
+			if err := decoder.Decode(&node); errors.Is(err, io.EOF) {
+				break
+			} else if err != nil {
+				panic(err)
+			}
 			var doc struct {
 				Kind     string `yaml:"kind"`
 				Metadata struct {
 					Name string `yaml:"name"`
 				} `yaml:"metadata"`
 			}
-			if err := decoder.Decode(&doc); errors.Is(err, io.EOF) {
-				break
-			} else if err != nil {
+			if err := node.Decode(&doc); err != nil {
 				panic(err)
+			}
+			if f.applyErr == nil {
+				f.persist(doc.Kind, &node, team)
 			}
 			resources = append(
 				resources,

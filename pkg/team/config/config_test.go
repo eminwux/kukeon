@@ -127,7 +127,53 @@ func TestValidate(t *testing.T) {
 			func(c *config.TeamsConfig) { c.Spec.Git.Committer.Email = "\t" },
 			"spec.git.committer.email:",
 		},
-		{"missing key", func(c *config.TeamsConfig) { c.Spec.Git.SigningKey = " " }, "spec.git.signingKey:"},
+		{"missing key", func(c *config.TeamsConfig) { c.Spec.Git.SigningKey = " " }, "spec.git.signing:"},
+		{"stored signing secret", func(c *config.TeamsConfig) {
+			c.Spec.Git.SigningKey = ""
+			c.Spec.Git.Signing = &config.GitSigning{
+				SecretRef:         config.SecretRef{Name: "git-ssh", Realm: "default"},
+				AllowedSignersRef: &config.SecretRef{Name: "signers", Realm: "default"},
+			}
+		}, ""},
+		{"signing secret without realm", func(c *config.TeamsConfig) {
+			c.Spec.Git.Signing = &config.GitSigning{SecretRef: config.SecretRef{Name: "git-ssh"}}
+		}, "spec.git.signing.secretRef:"},
+		{"stored credential", func(c *config.TeamsConfig) {
+			c.Spec.Git.Credentials = []config.GitCredential{{
+				Host: "github.com", SecretRef: config.SecretRef{Name: "git-ssh", Realm: "default"},
+				User: "git", Port: 2222, HostKeyPolicy: "accept-new",
+			}}
+		}, ""},
+		{"duplicate credential host", func(c *config.TeamsConfig) {
+			ref := config.SecretRef{Name: "git-ssh", Realm: "default"}
+			c.Spec.Git.Credentials = []config.GitCredential{
+				{Host: "github.com", SecretRef: ref}, {Host: "github.com", SecretRef: ref},
+			}
+		}, "spec.git.credentials[1].host:"},
+		{"credential host with scheme", func(c *config.TeamsConfig) {
+			c.Spec.Git.Credentials = []config.GitCredential{{
+				Host: "https://github.com", SecretRef: config.SecretRef{Name: "git-ssh", Realm: "default"},
+			}}
+		}, "spec.git.credentials[0].host:"},
+		{"credential bad policy", func(c *config.TeamsConfig) {
+			c.Spec.Git.Credentials = []config.GitCredential{{
+				Host: "github.com", SecretRef: config.SecretRef{Name: "git-ssh", Realm: "default"}, HostKeyPolicy: "off",
+			}}
+		}, "spec.git.credentials[0].hostKeyPolicy:"},
+		{"source identity", func(c *config.TeamsConfig) {
+			c.Spec.Defaults.Sources[0].Git = &config.SourceGit{
+				Author:     &config.Identity{Name: "bot", Email: "bot@example.com"},
+				Credential: &config.SourceCredential{SecretRef: config.SecretRef{Name: "deploy", Realm: "default"}},
+				Signing:    &config.GitSigning{SecretRef: config.SecretRef{Name: "deploy", Realm: "default"}},
+				Sign:       []string{"commits"},
+			}
+		}, ""},
+		{"source identity blank author", func(c *config.TeamsConfig) {
+			c.Spec.Defaults.Sources[0].Git = &config.SourceGit{Author: &config.Identity{Name: "bot"}}
+		}, "sources[0].git.author.email:"},
+		{"source credential without secret", func(c *config.TeamsConfig) {
+			c.Spec.Defaults.Sources[0].Git = &config.SourceGit{Credential: &config.SourceCredential{}}
+		}, "sources[0].git.credential.secretRef:"},
 		{"bad signing value", func(c *config.TeamsConfig) { c.Spec.Git.Sign = []string{"all"} }, "spec.git.sign[0]:"},
 		{"blank signing value", func(c *config.TeamsConfig) { c.Spec.Git.Sign = []string{""} }, "spec.git.sign[0]:"},
 		{"sign both", func(c *config.TeamsConfig) { c.Spec.Git.Sign = []string{"commits", "tags"} }, ""},

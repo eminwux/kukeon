@@ -25,6 +25,7 @@ import (
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/secretstore"
 	"github.com/eminwux/kukeon/internal/util/fs"
 )
 
@@ -67,7 +68,15 @@ func (r *Exec) WriteSecret(secret intmodel.Secret) (bool, error) {
 		return false, fmt.Errorf("%w: stat secret: %w", errdefs.ErrWriteSecret, statErr)
 	}
 
-	if err := atomicWriteSecret(dir, path, []byte(secret.Spec.Data)); err != nil {
+	payload, err := secretstore.Encode(secret.Spec)
+	if err != nil {
+		return false, fmt.Errorf("%w: encode secret: %w", errdefs.ErrWriteSecret, err)
+	}
+	// Type sidecar first: see secretstore.WriteType for the crash ordering.
+	if err = secretstore.WriteType(r.opts.RunPath, md, secret.Spec.EffectiveType()); err != nil {
+		return false, fmt.Errorf("%w: %w", errdefs.ErrWriteSecret, err)
+	}
+	if err = atomicWriteSecret(dir, path, payload); err != nil {
 		return false, fmt.Errorf("%w: %w", errdefs.ErrWriteSecret, err)
 	}
 
@@ -75,9 +84,10 @@ func (r *Exec) WriteSecret(secret intmodel.Secret) (bool, error) {
 	if created {
 		action = "created"
 	}
-	// Log the scope + name + action only — never the bytes.
+	// Log the scope + name + type + action only — never the bytes.
 	r.logger.InfoContext(r.ctx, "secret "+action,
 		"name", md.Name,
+		"type", secret.Spec.EffectiveType(),
 		"realm", md.Realm,
 		"space", md.Space,
 		"stack", md.Stack,
@@ -107,8 +117,13 @@ func (r *Exec) GetSecret(secret intmodel.Secret) (intmodel.Secret, error) {
 		return intmodel.Secret{}, errdefs.ErrSecretNotFound
 	}
 
-	// Metadata-only: scope + name come from the path, never the bytes.
-	return intmodel.Secret{Metadata: md}, nil
+	// Metadata-only: scope + name come from the path and the type from its
+	// sidecar, never the bytes.
+	secretType, err := secretstore.ReadType(r.opts.RunPath, md)
+	if err != nil {
+		return intmodel.Secret{}, fmt.Errorf("%w: %w", errdefs.ErrGetSecret, err)
+	}
+	return intmodel.Secret{Metadata: md, Spec: intmodel.SecretSpec{Type: secretType}}, nil
 }
 
 // ListSecrets enumerates the metadata of every Secret bound to the scope
@@ -210,15 +225,12 @@ func (r *Exec) collectSecretsInScope(out *[]intmodel.Secret, realm, space, stack
 		if strings.HasPrefix(name, ".secret-") && strings.HasSuffix(name, ".tmp") {
 			continue
 		}
-		*out = append(*out, intmodel.Secret{
-			Metadata: intmodel.SecretMetadata{
-				Name:  name,
-				Realm: realm,
-				Space: space,
-				Stack: stack,
-				Cell:  cell,
-			},
-		})
+		md := intmodel.SecretMetadata{Name: name, Realm: realm, Space: space, Stack: stack, Cell: cell}
+		secretType, typeErr := secretstore.ReadType(r.opts.RunPath, md)
+		if typeErr != nil {
+			return fmt.Errorf("secret %q: %w", name, typeErr)
+		}
+		*out = append(*out, intmodel.Secret{Metadata: md, Spec: intmodel.SecretSpec{Type: secretType}})
 	}
 	return nil
 }
@@ -236,6 +248,10 @@ func (r *Exec) DeleteSecret(secret intmodel.Secret) error {
 			return errdefs.ErrSecretNotFound
 		}
 		return fmt.Errorf("%w: %w", errdefs.ErrDeleteSecret, err)
+	}
+
+	if err := secretstore.RemoveType(r.opts.RunPath, md); err != nil {
+		return fmt.Errorf("%w: remove type: %w", errdefs.ErrDeleteSecret, err)
 	}
 
 	// Log the scope + name only — never the bytes.

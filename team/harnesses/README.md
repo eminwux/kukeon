@@ -47,7 +47,7 @@ It contains `metadata.name` matching the Harness, plus ordered `spec.images`
 entries containing only resolved `image` references and copied `capabilities`.
 Composition reads the selected source/path's sibling catalog, including external
 layouts, and bakes its selected published reference into the blueprint. Root
-variants require explicit `root` capability opt-in. `pkg/team/harness` owns these
+variants require explicit `root` capability opt-in. Each built image carries its capabilities as the `io.kukeon.capabilities` label (set in the Bake plan from `images[].capabilities`), which kukeond checks against a cell's `requires`. `pkg/team/harness` owns these
 source document models; kukeon's Role, seed and daemon document models remain
 unchanged, so this schema migration requires no upstream kukeon release.
 

@@ -37,6 +37,9 @@ type inventoryImage struct {
 	Digest    string            `json:"digest"`
 	MediaType string            `json:"mediaType"`
 	Labels    map[string]string `json:"labels"`
+	// Capabilities are the image's io.kukeon.capabilities; the create form
+	// offers an image only when it covers the blueprint's requires.
+	Capabilities []string `json:"capabilities"`
 }
 
 type imageInventory struct {
@@ -124,6 +127,10 @@ func toInventoryImage(img kukeonv1.ImageInfo) inventoryImage {
 	}
 	if out.Labels == nil {
 		out.Labels = map[string]string{}
+	}
+	out.Capabilities = img.Capabilities
+	if out.Capabilities == nil {
+		out.Capabilities = []string{}
 	}
 	return out
 }

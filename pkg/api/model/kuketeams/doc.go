@@ -23,9 +23,11 @@
 //   - TeamsConfig (host, operator-owned, `~/.kuke/kuketeams.yaml`) carries
 //     operator facts only — git identity/signing, registry, source clone URLs,
 //     secret sources.
-//   - TeamEntry (host, `~/.kuke/kuketeam.d/<project>.yaml`, one per project)
-//     carries the per-project composition record `kuke team add` writes — a
-//     drop-in directory so a corrupt write touches one project, not all (#796).
+//   - TeamEntry (host, `~/.kuke/kuketeam.d/<team>.yaml`, one per team) carries
+//     the per-team composition record: `kuke team init` writes the operator
+//     team's `kuketeam.d/kukeon.yaml`, and `kuke team add` writes one file per
+//     added team — a drop-in directory so a corrupt write touches one team,
+//     not all (#796).
 //   - Role / Harness / ImageCatalog live in the pinned agents source. They
 //     declare, respectively, a role's skills + harness configs + needs, a
 //     harness's base image + skill path + make target, and the prebuilt
@@ -40,10 +42,11 @@
 // would be redundant with the ref and drift-prone).
 //
 // The team-layer types are declarative sugar that render onto the existing
-// v1beta1 runtime: TeamsConfig.git is a strict superset of v1beta1.ContainerGit,
-// Role.needs.repos render to []v1beta1.ContainerRepo, Role.needs.mounts render
-// to []v1beta1.VolumeMount. This package defines the parsed surface only; no
-// CLI verb consumes it yet (the verbs land in #796 and later).
+// v1beta1 runtime: TeamsConfig.git is a strict superset of v1beta1.ContainerGit
+// and is written as scope defaults, Role.needs.repos fill the shared
+// blueprint's repo slots, Role.needs.mounts select the blueprint's security
+// profile. This package defines the parsed surface only; composition lives in
+// pkg/team/compose and application in internal/team/initialize.
 package kuketeams
 
 // APIVersionV1 is the canonical API version (group/version) shared by every
@@ -59,9 +62,10 @@ const (
 	// KindTeamsConfig identifies the host-side, operator-owned global-facts
 	// document (~/.kuke/kuketeams.yaml) maintained by `kuke team init`.
 	KindTeamsConfig = "TeamsConfig"
-	// KindTeamEntry identifies a host-side, per-project composition record
-	// (~/.kuke/kuketeam.d/<project>.yaml) written by `kuke team add` — one
-	// document per project file.
+	// KindTeamEntry identifies a host-side, per-team composition record
+	// (~/.kuke/kuketeam.d/<team>.yaml) — one document per team file.
+	// `kuke team init` writes the operator team's (kukeon.yaml); `kuke team
+	// add` writes each added team's.
 	KindTeamEntry = "TeamEntry"
 	// KindRole identifies a per-role document (role.yaml) in the agents source.
 	KindRole = "Role"

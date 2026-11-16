@@ -88,6 +88,16 @@ const (
 	// objects that the new roster no longer declares — converging the
 	// project's slice without touching other teams' objects.
 	LabelTeam = "kukeon.io/team"
+	// LabelShared marks a CellBlueprint as shared: a realm-wide form any
+	// team's (or hand-written) CellConfig may reference, e.g. the one
+	// blueprint per harness × security profile `kuke team` renders (issue
+	// #1472). A shared blueprint is never stamped with LabelTeam; a team apply
+	// removes it only once no CellConfig references it any more.
+	LabelShared = "kukeon.io/shared"
+	// LabelContentDigest carries a digest of a shared blueprint's rendered
+	// content so `kuke team` can tell "same blueprint, already applied" from
+	// "same name, different content" without comparing documents.
+	LabelContentDigest = "kukeon.io/content-digest"
 )
 
 // Common printable state strings.
@@ -118,3 +128,10 @@ const (
 	// health, non-terminal (see CellStateDegraded).
 	StateDegradedStr = "Degraded"
 )
+
+// ImageLabelCapabilities is the OCI image config label listing the
+// capabilities an image provides, comma-separated (e.g. "claude,git,gh,go").
+// Harness image builds stamp it from harness.yaml images[].capabilities; the
+// daemon checks a cell's requires against it at container create, and the web
+// UI filters its image picker on it. Issue #1472, step 9.
+const ImageLabelCapabilities = "io.kukeon.capabilities"

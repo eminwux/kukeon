@@ -16,13 +16,13 @@
 
 package kuketeams
 
-// TeamEntry is the host-side, per-project composition record written by
-// `kuke team add` (and by `kuke team init` for the kukeon operator team) to
-// ~/.kuke/kuketeam.d/<project>.yaml — one document per
-// file. It replaces the former TeamsConfig.spec.teams[] array: a drop-in
-// directory (the systemd/sudoers.d pattern) keeps each project isolated, so a
-// corrupt or partial write touches one project and two concurrent inits never
-// race on a shared array.
+// TeamEntry is the host-side, per-team composition record stored at
+// ~/.kuke/kuketeam.d/<team>.yaml — one document per file. `kuke team init`
+// writes the kukeon operator team's entry (kuketeam.d/kukeon.yaml) and
+// `kuke team add` writes one per added team. It replaces the former
+// TeamsConfig.spec.teams[] array: a drop-in directory (the systemd/sudoers.d
+// pattern) keeps each team isolated, so a corrupt or partial write touches one
+// team and two concurrent adds never race on a shared array.
 type TeamEntry struct {
 	APIVersion string        `json:"apiVersion" yaml:"apiVersion"`
 	Kind       string        `json:"kind"       yaml:"kind"`

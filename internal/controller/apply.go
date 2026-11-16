@@ -20,11 +20,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/apply/parser"
 	applypkg "github.com/eminwux/kukeon/internal/controller/apply"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
@@ -113,6 +115,16 @@ func (b *Exec) ApplyDocuments(docs []parser.Document, team string) (ApplyResult,
 	// so the post-loop prune step (team != "") can delete the same-team
 	// daemon objects that fell out of the applied set.
 	var appliedBlueprints, appliedConfigs []scopedRef
+
+	// previousShared is what the team's configs referenced before this apply:
+	// the candidates for shared-blueprint pruning afterwards.
+	var previousShared []scopedRef
+	if team != "" {
+		var listErr error
+		if previousShared, listErr = b.teamBlueprintRefs(team); listErr != nil {
+			return result, listErr
+		}
+	}
 
 	// Sort documents by dependency order
 	sortedDocs := SortDocumentsByKind(docs, false)
@@ -240,7 +252,10 @@ func (b *Exec) ApplyDocuments(docs []parser.Document, team string) (ApplyResult,
 				continue
 			}
 			bpDoc := *doc.CellBlueprintDoc
-			if team != "" {
+			// A shared blueprint belongs to no team: every team in the realm
+			// (and the web UI) may reference it, so it is never team-stamped
+			// and only goes away once nothing references it (issue #1472).
+			if team != "" && bpDoc.Metadata.Labels[v1beta1.LabelShared] != "true" {
 				bpDoc.Metadata.Labels = stampTeamLabel(bpDoc.Metadata.Labels, team)
 			}
 			blueprint, _, err := apischeme.NormalizeCellBlueprint(bpDoc)
@@ -332,7 +347,7 @@ func (b *Exec) ApplyDocuments(docs []parser.Document, team string) (ApplyResult,
 	}
 
 	if team != "" {
-		pruneResults, pruneErr := b.pruneTeamObjects(team, appliedBlueprints, appliedConfigs)
+		pruneResults, pruneErr := b.pruneTeamObjects(team, appliedBlueprints, appliedConfigs, previousShared)
 		if pruneErr != nil {
 			return result, pruneErr
 		}
@@ -382,7 +397,9 @@ func stampTeamLabel(labels map[string]string, team string) map[string]string {
 // apply time, so removing the Config first cannot orphan a reference. (Both
 // kinds independently support DeleteWithoutLiveCellTeardown, so the order
 // is purely consistency-with-apply, not safety.)
-func (b *Exec) pruneTeamObjects(team string, appliedBlueprints, appliedConfigs []scopedRef) ([]ResourceResult, error) {
+func (b *Exec) pruneTeamObjects(
+	team string, appliedBlueprints, appliedConfigs, previousShared []scopedRef,
+) ([]ResourceResult, error) {
 	appliedBP := refsToSet(appliedBlueprints)
 	appliedCfg := refsToSet(appliedConfigs)
 
@@ -439,6 +456,109 @@ func (b *Exec) pruneTeamObjects(team string, appliedBlueprints, appliedConfigs [
 		out = append(out, pruneResult)
 	}
 
+	shared, err := b.pruneSharedBlueprints(team, appliedBP, previousShared, blueprints)
+	if err != nil {
+		return nil, err
+	}
+	return append(out, shared...), nil
+}
+
+// teamBlueprintRefs lists the blueprints the team's stored CellConfigs
+// reference. Taken before an apply, it is what the team used until now.
+//
+// A config that cannot be read is skipped here: the snapshot only nominates
+// blueprints for pruning, so missing one merely leaves a blueprint behind —
+// while failing would block the very re-apply that repairs the config.
+func (b *Exec) teamBlueprintRefs(team string) ([]scopedRef, error) {
+	refs, err := b.configBlueprintRefs(team, false)
+	if err != nil {
+		return nil, fmt.Errorf("team %q: %w", team, err)
+	}
+	return refs, nil
+}
+
+// configBlueprintRefs returns the blueprint each stored CellConfig references,
+// restricted to one team's configs when team is non-empty. ListConfigs carries
+// metadata only, so each config's document is read for its spec.blueprint.
+// With strict set, an unreadable config fails the call rather than being
+// skipped: the "is this blueprint still referenced" scan decides what to
+// delete from this list, and a reference it cannot see must not read as
+// "unreferenced".
+func (b *Exec) configBlueprintRefs(team string, strict bool) ([]scopedRef, error) {
+	configs, err := b.runner.ListConfigs("", "", "")
+	if err != nil {
+		return nil, fmt.Errorf("list configs: %w", err)
+	}
+	var out []scopedRef
+	for _, listed := range configs {
+		if team != "" && listed.Metadata.Labels[v1beta1.LabelTeam] != team {
+			continue
+		}
+		stored, getErr := b.runner.GetConfig(listed)
+		if getErr != nil {
+			if errors.Is(getErr, errdefs.ErrConfigNotFound) || !strict {
+				continue
+			}
+			return nil, fmt.Errorf("read config %q: %w", listed.Metadata.Name, getErr)
+		}
+		doc, convErr := apischeme.ConvertCellConfigToExternal(stored)
+		if convErr != nil {
+			if !strict {
+				continue
+			}
+			return nil, fmt.Errorf("decode config %q: %w", listed.Metadata.Name, convErr)
+		}
+		ref := doc.Spec.Blueprint
+		out = append(out, scopedRefFromMetadata(ref.Name, ref.Realm, ref.Space, ref.Stack))
+	}
+	return out, nil
+}
+
+// pruneSharedBlueprints removes the shared blueprints the team stopped using
+// in this apply. A shared blueprint carries no team label, so the ordinary
+// label scan never sees it; instead a blueprint the team's configs referenced
+// before the apply and none of its documents reference now is deleted — unless
+// any stored CellConfig (another team's, or a hand-written one) still
+// references it.
+func (b *Exec) pruneSharedBlueprints(
+	team string, applied map[scopedRef]struct{}, previous []scopedRef, blueprints []intmodel.CellBlueprint,
+) ([]ResourceResult, error) {
+	if len(previous) == 0 {
+		return nil, nil
+	}
+	inUse, err := b.configBlueprintRefs("", true)
+	if err != nil {
+		return nil, fmt.Errorf("prune team %q: %w", team, err)
+	}
+	referenced := refsToSet(inUse)
+	var out []ResourceResult
+	for ref := range refsToSet(previous) {
+		if _, kept := applied[ref]; kept {
+			continue
+		}
+		if _, inUse := referenced[ref]; inUse {
+			continue
+		}
+		for _, bp := range blueprints {
+			md := bp.Metadata
+			if scopedRefFromMetadata(md.Name, md.Realm, md.Space, md.Stack) != ref ||
+				md.Labels[v1beta1.LabelShared] != "true" {
+				continue
+			}
+			pruneResult := ResourceResult{
+				Kind:    "CellBlueprint",
+				Name:    md.Name,
+				Action:  "pruned",
+				Details: scopeDetails(md.Realm, md.Space, md.Stack),
+			}
+			if delErr := b.runner.DeleteBlueprint(bp); delErr != nil {
+				pruneResult.Action = actionFailed
+				pruneResult.Error = fmt.Errorf("prune team %q: delete blueprint %q: %w", team, md.Name, delErr)
+			}
+			out = append(out, pruneResult)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
 }
 

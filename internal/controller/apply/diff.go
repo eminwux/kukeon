@@ -887,7 +887,7 @@ func diffContainerSpec(desired, actual *intmodel.ContainerSpec, rootContainer bo
 			result.ChangeType = ChangeTypeCompatible
 		}
 		result.ChangedFields = append(result.ChangedFields, "git")
-		result.Details["git"] = "git identity changed"
+		result.Details["git"] = "git identity or credentials changed"
 	}
 
 	return result
@@ -1043,7 +1043,23 @@ func gitEqual(a, b *intmodel.ContainerGit) bool {
 		gitIdentityEqual(a.Committer, b.Committer) &&
 		a.SigningKey == b.SigningKey &&
 		a.AllowedSigners == b.AllowedSigners &&
-		slicesEqual(a.Sign, b.Sign)
+		slicesEqual(a.Sign, b.Sign) &&
+		gitCredentialsEqual(a.Credentials, b.Credentials) &&
+		reflect.DeepEqual(a.Signing, b.Signing)
+}
+
+// gitCredentialsEqual compares two credential lists in declaration order,
+// treating nil and empty as equal.
+func gitCredentialsEqual(a, b []intmodel.GitCredential) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !reflect.DeepEqual(a[i], b[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func gitIsZero(g *intmodel.ContainerGit) bool {
@@ -1054,7 +1070,9 @@ func gitIsZero(g *intmodel.ContainerGit) bool {
 		gitIdentityIsZero(g.Committer) &&
 		g.SigningKey == "" &&
 		g.AllowedSigners == "" &&
-		len(g.Sign) == 0
+		len(g.Sign) == 0 &&
+		len(g.Credentials) == 0 &&
+		g.Signing == nil
 }
 
 func gitIdentityEqual(a, b *intmodel.GitIdentity) bool {
@@ -1193,8 +1211,8 @@ func reposEqual(a, b []intmodel.ContainerRepo) bool {
 		return false
 	}
 	for i := range a {
-		// ContainerRepo is a flat struct of comparable fields.
-		if a[i] != b[i] {
+		// The per-source git block is a pointer, so compare by value.
+		if !reflect.DeepEqual(a[i], b[i]) {
 			return false
 		}
 	}
@@ -1271,7 +1289,7 @@ func spaceDefaultsFill(d *intmodel.SpaceDefaults) *intmodel.ScopeDefaults {
 	if d == nil {
 		return nil
 	}
-	return &intmodel.ScopeDefaults{Values: d.Values, Repos: d.Repos, Secrets: d.Secrets}
+	return &intmodel.ScopeDefaults{Values: d.Values, Repos: d.Repos, Secrets: d.Secrets, Git: d.Git}
 }
 
 // scopeDefaultsEqual compares two CellConfig defaults blocks, treating nil and
@@ -1293,6 +1311,9 @@ func normalizeScopeDefaults(d *intmodel.ScopeDefaults) intmodel.ScopeDefaults {
 	}
 	if len(d.Secrets) > 0 {
 		out.Secrets = d.Secrets
+	}
+	if !gitIsZero(d.Git) {
+		out.Git = d.Git
 	}
 	return out
 }

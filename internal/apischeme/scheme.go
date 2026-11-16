@@ -46,6 +46,9 @@ func ConvertRealmDocToInternal(in ext.RealmDoc) (intmodel.Realm, error) {
 		if err := validateRealmImages(in.Spec.Images); err != nil {
 			return intmodel.Realm{}, err
 		}
+		if err := validateScopeDefaults("realm", in.Spec.Defaults); err != nil {
+			return intmodel.Realm{}, err
+		}
 		registryCreds := make([]intmodel.RegistryCredentials, len(in.Spec.RegistryCredentials))
 		for i, cred := range in.Spec.RegistryCredentials {
 			registryCreds[i] = intmodel.RegistryCredentials{
@@ -155,9 +158,7 @@ func ConvertSecretDocToInternal(in ext.SecretDoc) (intmodel.Secret, error) {
 				Stack: in.Metadata.Stack,
 				Cell:  in.Metadata.Cell,
 			},
-			Spec: intmodel.SecretSpec{
-				Data: in.Spec.Data,
-			},
+			Spec: secretSpecToInternal(in.Spec),
 		}, nil
 	default:
 		return intmodel.Secret{}, fmt.Errorf("unsupported apiVersion for Secret: %s", in.APIVersion)
@@ -176,9 +177,9 @@ func NormalizeSecret(req ext.SecretDoc) (intmodel.Secret, ext.Version, error) {
 }
 
 // ConvertSecretToExternal builds a metadata-only external SecretDoc from the
-// internal hub type (issue #622). Spec.Data is deliberately left zero: the
-// get/list verbs never echo the secret material, preserving the
-// never-round-tripped contract from #619.
+// internal hub type (issue #622). The material fields are deliberately left
+// zero: the get/list verbs never echo the secret material, preserving the
+// never-round-tripped contract from #619. Only Spec.Type is reported.
 func ConvertSecretToExternal(in intmodel.Secret) ext.SecretDoc {
 	return ext.SecretDoc{
 		APIVersion: ext.APIVersionV1Beta1,
@@ -190,7 +191,31 @@ func ConvertSecretToExternal(in intmodel.Secret) ext.SecretDoc {
 			Stack: in.Metadata.Stack,
 			Cell:  in.Metadata.Cell,
 		},
+		Spec: ext.SecretSpec{Type: in.Spec.Type},
 	}
+}
+
+// secretSpecToInternal copies a Secret's type and material into the internal
+// hub type.
+func secretSpecToInternal(in ext.SecretSpec) intmodel.SecretSpec {
+	out := intmodel.SecretSpec{Type: strings.TrimSpace(in.Type), Data: in.Data}
+	if in.BasicAuth != nil {
+		out.BasicAuth = &intmodel.SecretBasicAuth{
+			Username: in.BasicAuth.Username,
+			Password: in.BasicAuth.Password,
+			Token:    in.BasicAuth.Token,
+		}
+	}
+	if in.SSHKey != nil {
+		out.SSHKey = &intmodel.SecretSSHKey{
+			PrivateKey:  in.SSHKey.PrivateKey,
+			Passphrase:  in.SSHKey.Passphrase,
+			PublicKey:   in.SSHKey.PublicKey,
+			Certificate: in.SSHKey.Certificate,
+			KnownHosts:  in.SSHKey.KnownHosts,
+		}
+	}
+	return out
 }
 
 // ConvertSecretListToExternal maps a slice of internal Secrets to metadata-only
@@ -210,6 +235,9 @@ func ConvertSecretListToExternal(in []intmodel.Secret) []ext.SecretDoc {
 func ConvertSpaceDocToInternal(in ext.SpaceDoc) (intmodel.Space, error) {
 	switch in.APIVersion {
 	case VersionV1Beta1, "": // default/empty treated as v1beta1
+		if err := validateScopeDefaults("space", in.Spec.Defaults.Fill()); err != nil {
+			return intmodel.Space{}, err
+		}
 		// Map external state to internal state (indices differ due to Creating/Deleting states)
 		var intState intmodel.SpaceState
 		switch in.Status.State { //nolint:exhaustive // default branch covers remaining states
@@ -314,6 +342,9 @@ func NormalizeSpace(req ext.SpaceDoc) (intmodel.Space, ext.Version, error) {
 func ConvertStackDocToInternal(in ext.StackDoc) (intmodel.Stack, error) {
 	switch in.APIVersion {
 	case VersionV1Beta1, "": // default/empty treated as v1beta1
+		if err := validateScopeDefaults("stack", in.Spec.Defaults); err != nil {
+			return intmodel.Stack{}, err
+		}
 		return intmodel.Stack{
 			Metadata: intmodel.StackMetadata{
 				Name:       in.Metadata.Name,
@@ -440,7 +471,7 @@ func ConvertContainerDocToInternal(in ext.ContainerDoc) (intmodel.Container, err
 				Resources:              convertResourcesToInternal(in.Spec.Resources),
 				Secrets:                convertSecretsToInternal(in.Spec.Secrets),
 				Repos:                  reposToInternal(in.Spec.Repos),
-				Git:                    gitToInternal(in.Spec.Git),
+				Git:                    GitToInternal(in.Spec.Git),
 				CNIConfigPath:          in.Spec.CNIConfigPath,
 				RestartPolicy:          in.Spec.RestartPolicy,
 				RestartBackoffSeconds:  in.Spec.RestartBackoffSeconds,
@@ -543,7 +574,7 @@ func convertContainerSpecToInternal(in ext.ContainerSpec) intmodel.ContainerSpec
 		Resources:              convertResourcesToInternal(in.Resources),
 		Secrets:                convertSecretsToInternal(in.Secrets),
 		Repos:                  reposToInternal(in.Repos),
-		Git:                    gitToInternal(in.Git),
+		Git:                    GitToInternal(in.Git),
 		CNIConfigPath:          in.CNIConfigPath,
 		RestartPolicy:          in.RestartPolicy,
 		RestartBackoffSeconds:  in.RestartBackoffSeconds,
@@ -586,7 +617,7 @@ func BuildContainerSpecExternalFromInternal(in intmodel.ContainerSpec) ext.Conta
 		Resources:              buildResourcesExternalFromInternal(in.Resources),
 		Secrets:                buildSecretsExternalFromInternal(in.Secrets),
 		Repos:                  reposToExternal(in.Repos),
-		Git:                    gitToExternal(in.Git),
+		Git:                    GitToExternal(in.Git),
 		CNIConfigPath:          in.CNIConfigPath,
 		RestartPolicy:          in.RestartPolicy,
 		RestartBackoffSeconds:  in.RestartBackoffSeconds,
@@ -1143,6 +1174,7 @@ func reposToInternal(in []ext.ContainerRepo) []intmodel.ContainerRepo {
 			Ref:      r.Ref,
 			URL:      r.URL,
 			Required: r.Required,
+			Git:      RepoGitToInternal(r.Git),
 		}
 	}
 	return out
@@ -1162,6 +1194,7 @@ func reposToExternal(in []intmodel.ContainerRepo) []ext.ContainerRepo {
 			Ref:      r.Ref,
 			URL:      r.URL,
 			Required: r.Required,
+			Git:      RepoGitToExternal(r.Git),
 		}
 	}
 	return out
@@ -1241,91 +1274,6 @@ func stageStatusesToExternal(in []intmodel.StageStatus) []ext.StageStatus {
 	return out
 }
 
-// gitToInternal copies the external git sugar block into the internal model,
-// deep-copying the Author/Committer pointers and Sign slice. Issue #618.
-func gitToInternal(in *ext.ContainerGit) *intmodel.ContainerGit {
-	if in == nil {
-		return nil
-	}
-	out := &intmodel.ContainerGit{
-		SigningKey:     in.SigningKey,
-		Sign:           cloneStringSlice(in.Sign),
-		AllowedSigners: in.AllowedSigners,
-	}
-	if in.Author != nil {
-		out.Author = &intmodel.GitIdentity{Name: in.Author.Name, Email: in.Author.Email}
-	}
-	if in.Committer != nil {
-		out.Committer = &intmodel.GitIdentity{Name: in.Committer.Name, Email: in.Committer.Email}
-	}
-	return out
-}
-
-// gitToExternal is the inverse of gitToInternal.
-func gitToExternal(in *intmodel.ContainerGit) *ext.ContainerGit {
-	if in == nil {
-		return nil
-	}
-	out := &ext.ContainerGit{
-		SigningKey:     in.SigningKey,
-		Sign:           cloneStringSlice(in.Sign),
-		AllowedSigners: in.AllowedSigners,
-	}
-	if in.Author != nil {
-		out.Author = &ext.GitIdentity{Name: in.Author.Name, Email: in.Author.Email}
-	}
-	if in.Committer != nil {
-		out.Committer = &ext.GitIdentity{Name: in.Committer.Name, Email: in.Committer.Email}
-	}
-	return out
-}
-
-// validateContainerGit enforces the ContainerGit invariants (issue #618):
-//   - author and committer each require both name and email when present, so
-//     a half-specified identity never renders a GIT_AUTHOR_EMAIL= empty entry.
-//   - sign requires signingKey, since commit.gpgsign/tag.gpgsign with no
-//     user.signingkey makes git fail the commit at runtime rather than at
-//     apply time.
-//   - each sign entry must be a known target (commits or tags), rejected at
-//     apply time rather than silently dropped during expansion.
-func validateContainerGit(spec ext.ContainerSpec) error {
-	git := spec.Git
-	if git == nil {
-		return nil
-	}
-	if err := validateGitIdentity("author", git.Author); err != nil {
-		return fmt.Errorf("container %q: %w", spec.ID, err)
-	}
-	if err := validateGitIdentity("committer", git.Committer); err != nil {
-		return fmt.Errorf("container %q: %w", spec.ID, err)
-	}
-	for _, s := range git.Sign {
-		if s != ext.GitSignCommits && s != ext.GitSignTags {
-			return fmt.Errorf(
-				"container %q: git.sign %q: must be one of %q, %q",
-				spec.ID, s, ext.GitSignCommits, ext.GitSignTags,
-			)
-		}
-	}
-	if len(git.Sign) > 0 && git.SigningKey == "" {
-		return fmt.Errorf("container %q: git.sign requires git.signingKey to be set", spec.ID)
-	}
-	return nil
-}
-
-// validateGitIdentity rejects a git identity that sets only one of name/email
-// — both are required so the expanded GIT_*_NAME / GIT_*_EMAIL pair is never
-// half-empty.
-func validateGitIdentity(role string, id *ext.GitIdentity) error {
-	if id == nil {
-		return nil
-	}
-	if id.Name == "" || id.Email == "" {
-		return fmt.Errorf("git.%s requires both name and email", role)
-	}
-	return nil
-}
-
 func convertSpaceDefaultsToInternal(in *ext.SpaceDefaults) *intmodel.SpaceDefaults {
 	if in == nil {
 		return nil
@@ -1335,6 +1283,7 @@ func convertSpaceDefaultsToInternal(in *ext.SpaceDefaults) *intmodel.SpaceDefaul
 		Values:    copyStringMap(in.Values),
 		Repos:     repoFillsToInternal(in.Repos),
 		Secrets:   secretFillsToInternal(in.Secrets),
+		Git:       GitToInternal(in.Git),
 	}
 }
 
@@ -1347,6 +1296,7 @@ func buildSpaceDefaultsExternalFromInternal(in *intmodel.SpaceDefaults) *ext.Spa
 		Values:    copyStringMap(in.Values),
 		Repos:     repoFillsToExternal(in.Repos),
 		Secrets:   secretFillsToExternal(in.Secrets),
+		Git:       GitToExternal(in.Git),
 	}
 }
 
@@ -1413,7 +1363,9 @@ func convertCellProvenanceToInternal(in *ext.CellProvenance) *intmodel.CellProve
 			Space: in.BindingRef.Space,
 			Stack: in.BindingRef.Stack,
 		},
-		EnvOverrides: cloneStringSlice(in.EnvOverrides),
+		EnvOverrides:   cloneStringSlice(in.EnvOverrides),
+		Mode:           in.Mode,
+		ParamOverrides: copyStringMap(in.ParamOverrides),
 	}
 	if in.Params != nil {
 		params := make(map[string]string, len(in.Params))
@@ -1439,7 +1391,9 @@ func buildCellProvenanceExternalFromInternal(in *intmodel.CellProvenance) *ext.C
 			Space: in.BindingRef.Space,
 			Stack: in.BindingRef.Stack,
 		},
-		EnvOverrides: cloneStringSlice(in.EnvOverrides),
+		EnvOverrides:   cloneStringSlice(in.EnvOverrides),
+		Mode:           in.Mode,
+		ParamOverrides: copyStringMap(in.ParamOverrides),
 	}
 	if in.Params != nil {
 		params := make(map[string]string, len(in.Params))
@@ -1601,6 +1555,7 @@ func ConvertCellDocToInternal(in ext.CellDoc) (intmodel.Cell, error) {
 				Tty:                 convertCellTtyToInternal(in.Spec.Tty),
 				AutoDelete:          in.Spec.AutoDelete,
 				NestedCgroupRuntime: in.Spec.NestedCgroupRuntime,
+				Requires:            cloneStringSlice(in.Spec.Requires),
 				// RuntimeEnv is transport-only (v1beta1 carries yaml:"-"), so
 				// the round-trip thread runs through here on the inbound RPC
 				// path and is dropped at persistence time by
@@ -1685,6 +1640,7 @@ func BuildCellExternalFromInternal(in intmodel.Cell, apiVersion ext.Version) (ex
 				Tty:                 buildCellTtyExternalFromInternal(in.Spec.Tty),
 				AutoDelete:          in.Spec.AutoDelete,
 				NestedCgroupRuntime: in.Spec.NestedCgroupRuntime,
+				Requires:            cloneStringSlice(in.Spec.Requires),
 				// RuntimeEnv is deliberately NOT copied on the
 				// internal → external direction (issue #834). The
 				// v1beta1 metadata.json on disk is JSON-marshaled from

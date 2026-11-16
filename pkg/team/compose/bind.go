@@ -23,220 +23,429 @@ import (
 	"slices"
 	"strings"
 
-	model "github.com/eminwux/kukeon/pkg/api/model/kuketeams"
+	"github.com/eminwux/kukeon/internal/gitcred"
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	"github.com/eminwux/kukeon/pkg/team/component"
 	"github.com/eminwux/kukeon/pkg/team/config"
 )
 
-func bind(
-	p *Pair,
-	cfg *config.TeamsConfig,
-	selection config.Role,
-	role *model.Role,
-	sources []config.Source,
-	team string,
-	secrets *secretBindings,
-) error {
-	cc, bp := p.Config, p.Blueprint
-	if err := bindParameters(p, cfg, selection, role); err != nil {
-		return err
+// planSecrets decides, for one pair, which optional components it enables and
+// which runtime secret fills each blueprint secret slot.
+//
+// A role names what it needs three ways: `connectors` / `forges` (components
+// of the library), and the secret names in `harnesses.<h>.secrets` /
+// `needs.secrets`. A secret name selects, in order: the component slot that
+// lists it as an alias (`gh-token` enables the github connector), the harness
+// or harness-mode slot of that name, and otherwise an optional slot the shared
+// blueprint gains for it.
+//
+//nolint:funlen // the three ways a role names a secret, resolved in their documented order.
+func planSecrets(plan *pairPlan, lib []component.Component, secrets *secretBindings) error {
+	enable := func(name string) error {
+		i := slices.IndexFunc(lib, func(c component.Component) bool { return c.Metadata.Name == name })
+		if i < 0 {
+			return fmt.Errorf("role names unknown component %q", name)
+		}
+		for _, need := range append([]string{name}, lib[i].Spec.Needs...) {
+			if !slices.Contains(plan.components, need) {
+				plan.components = append(plan.components, need)
+			}
+		}
+		return nil
 	}
-	cc.Spec.Repos = map[string]api.CellConfigRepoFill{}
-	cc.Spec.Secrets = map[string]api.CellConfigSecretFill{}
-	required := union(role.Spec.Needs.Secrets, role.Spec.Harnesses[p.Harness].Secrets)
-	boundSecrets := map[string]bool{}
-	boundRepos := map[string]bool{}
-	ids := map[string]bool{}
-	for i := range bp.Spec.Cell.Containers {
-		container := &bp.Spec.Cell.Containers[i]
-		if container.ID == "" || ids[container.ID] || !published(container.Image) {
-			return errors.New("template requires unique container IDs and published images")
-		}
-		ids[container.ID] = true
-		// Carry configured identity, and only
-		// keep in-cell signing paths when the role explicitly requests that mount.
-		container.Git = containerGit(cfg.Spec.Git, slices.Contains(role.Spec.Needs.Mounts, "ssh"))
-		for j := range container.Volumes {
-			mount := &container.Volumes[j]
-			if mount.Source == "" && mount.Kind != api.VolumeKindTmpfs && mount.VolumeRef == nil {
-				return errors.New("template produced an unbound mount source")
-			}
-			if mount.Kind == api.VolumeKindVolume && mount.VolumeRef == nil {
-				if mount.Source == role.Metadata.Name+"-"+p.Harness {
-					mount.Source = stateVolumeName(team, selection.Name, p.Harness)
-				} else {
-					mount.Source = stateVolumeName(team, selection.Name, p.Harness, mount.Source)
-				}
-				mount.Ensure = true
-			}
-		}
-		if err := bindRepos(container, sources, cc, boundRepos); err != nil {
-			return err
-		}
-		if err := bindSecrets(p, secrets, required, container, boundSecrets); err != nil {
+	for _, name := range plan.role.Spec.Connectors {
+		if err := enableKind(lib, name, api.ComponentKindConnector, "connectors", enable); err != nil {
 			return err
 		}
 	}
-	for _, name := range required {
-		if !boundSecrets[name] {
-			return fmt.Errorf("template did not declare required secret slot %q", name)
-		}
-	}
-	for _, name := range union(role.Spec.Needs.Repos, []string{selection.Source}) {
-		if !boundRepos[name] {
-			return fmt.Errorf("template did not declare required repository slot %q", name)
+	for _, name := range plan.role.Spec.Forges {
+		if err := enableKind(lib, name, api.ComponentKindForge, "forges", enable); err != nil {
+			return err
 		}
 	}
 
+	harnessSlots := slices.Clone(plan.definition.Spec.Secrets)
+	for _, mode := range plan.definition.Spec.Modes {
+		harnessSlots = append(harnessSlots, mode.Secrets...)
+	}
+	bound := map[string]bool{}
+	fill := func(slot api.BlueprintSecretSlot, binding config.SecretBinding) {
+		slot.Mode = api.BlueprintSecretModeEnv
+		plan.fills = append(plan.fills, secretFill{slot: slot, binding: binding})
+		bound[slot.Name] = true
+	}
+	for _, name := range union(plan.role.Spec.Needs.Secrets, plan.settings.Secrets) {
+		binding, err := secrets.lookup(name)
+		if err != nil {
+			return err
+		}
+		if c, slot, ok := aliasSlot(lib, name); ok {
+			if err = enable(c); err != nil {
+				return err
+			}
+			if !bound[slot.Name] {
+				fill(api.BlueprintSecretSlot{Name: slot.Name, EnvName: slot.EnvName, Required: slot.Required}, binding)
+			}
+			continue
+		}
+		if i := slices.IndexFunc(harnessSlots, func(s api.BlueprintSecretSlot) bool { return s.Name == name }); i >= 0 {
+			if binding.EnvName != harnessSlots[i].EnvName {
+				return fmt.Errorf(
+					"secret %q: binding envName %s differs from the harness destination %s; a shared blueprint fixes secret destinations",
+					name,
+					binding.EnvName,
+					harnessSlots[i].EnvName,
+				)
+			}
+			fill(harnessSlots[i], binding)
+			continue
+		}
+		slot := api.BlueprintSecretSlot{Name: name, Mode: api.BlueprintSecretModeEnv, EnvName: binding.EnvName}
+		plan.extraSecrets = append(plan.extraSecrets, slot)
+		fill(slot, binding)
+	}
+	// Slots of the enabled components the role did not bind by an alias.
+	for _, c := range lib {
+		if !slices.Contains(plan.components, c.Metadata.Name) {
+			continue
+		}
+		for _, slot := range c.Spec.Secrets {
+			if bound[slot.Name] {
+				continue
+			}
+			binding, err := secrets.component(slot)
+			if err != nil {
+				return err
+			}
+			fill(api.BlueprintSecretSlot{Name: slot.Name, EnvName: slot.EnvName, Required: slot.Required}, binding)
+		}
+	}
+	// Keep the library's order so a Config lists components deterministically.
+	ordered := make([]string, 0, len(plan.components))
+	for _, c := range lib {
+		if slices.Contains(plan.components, c.Metadata.Name) {
+			ordered = append(ordered, c.Metadata.Name)
+		}
+	}
+	plan.components = ordered
 	return nil
 }
 
-func containerGit(g *config.Git, ssh bool) *api.ContainerGit {
-	if g == nil {
+func enableKind(lib []component.Component, name, kind, field string, enable func(string) error) error {
+	i := slices.IndexFunc(lib, func(c component.Component) bool { return c.Metadata.Name == name })
+	if i < 0 || lib[i].Spec.Kind != kind {
+		return fmt.Errorf("role %s: unknown %s component %q", field, kind, name)
+	}
+	return enable(name)
+}
+
+// aliasSlot finds the component secret slot a transition-era role secret name
+// selects.
+func aliasSlot(lib []component.Component, name string) (string, component.Secret, bool) {
+	for _, c := range lib {
+		for _, slot := range c.Spec.Secrets {
+			if slices.Contains(slot.Aliases, name) {
+				return c.Metadata.Name, slot, true
+			}
+		}
+	}
+	return "", component.Secret{}, false
+}
+
+// planParameters records the role-declared parameters the shared blueprint
+// does not already declare, and checks the operator supplied each.
+func planParameters(plan *pairPlan, cfg *config.TeamsConfig) error {
+	known := map[string]bool{"PROMPT": true, "AGENT_NAME": true, "AGENTS_REPO": true}
+	for name := range composed {
+		known[name] = true
+	}
+	for _, p := range plan.definition.Spec.Parameters {
+		known[p.Name] = true
+	}
+	for _, mode := range plan.definition.Spec.Modes {
+		for _, p := range mode.Parameters {
+			known[p.Name] = true
+		}
+	}
+	for _, name := range plan.role.Spec.Needs.Params {
+		if !parameterName.MatchString(name) {
+			return fmt.Errorf("role needs.params: invalid parameter name %q", name)
+		}
+		if known[name] {
+			continue
+		}
+		if _, supplied := cfg.Spec.Parameters[name]; !supplied && name != "ROLE" {
+			return fmt.Errorf("spec.parameters: missing required parameter %q", name)
+		}
+		plan.extraParams = append(plan.extraParams, name)
+	}
+	return nil
+}
+
+// bind writes the CellConfig of one pair: the answers to the shared
+// blueprint's form.
+func bind(
+	plan *pairPlan, bp *api.CellBlueprintDoc, cfg *config.TeamsConfig, team *config.Team, opts Options,
+) (Pair, error) {
+	name := resourceName(plan.team, plan.selection.Name, plan.hsel.Name)
+	cc := &api.CellConfigDoc{
+		APIVersion: api.APIVersionV1Beta1, Kind: api.KindCellConfig,
+		Metadata: api.CellConfigMetadata{
+			Name: name, Realm: opts.Scope.Realm, Space: opts.Scope.Space, Stack: opts.Scope.Stack,
+			Labels: map[string]string{api.LabelTeam: plan.team},
+		},
+		Spec: api.CellConfigSpec{
+			Blueprint:  api.CellConfigBlueprintRef{Name: bp.Metadata.Name, Realm: bp.Metadata.Realm},
+			Values:     map[string]string{},
+			Repos:      map[string]api.CellConfigRepoFill{},
+			Secrets:    map[string]api.CellConfigSecretFill{},
+			Components: slices.Clone(plan.components),
+		},
+	}
+	pair := Pair{Role: plan.selection.Name, Harness: plan.hsel.Name, Image: plan.image, Blueprint: bp, Config: cc}
+
+	// Capabilities the role needs beyond what the blueprint already requires.
+	for _, need := range plan.needs {
+		if !slices.Contains(bp.Spec.Requires, need) && need != plan.hsel.Name {
+			cc.Spec.Requires = append(cc.Spec.Requires, need)
+		}
+	}
+	if err := bindValues(plan, bp, cfg, cc); err != nil {
+		return Pair{}, err
+	}
+	if err := bindRepos(plan, cc, team); err != nil {
+		return Pair{}, err
+	}
+	for _, fill := range plan.fills {
+		ref := fill.binding.SecretRef
+		cc.Spec.Secrets[fill.slot.Name] = api.CellConfigSecretFill{
+			SecretRef: &api.ContainerSecretRef{
+				Name: ref.Name, Realm: ref.Realm, Space: ref.Space, Stack: ref.Stack, Cell: ref.Cell,
+			},
+		}
+		var source *config.SecretSource
+		if fill.binding.Source != nil {
+			copySource := *fill.binding.Source
+			source = &copySource
+		}
+		pair.Secrets = append(pair.Secrets, SecretRequirement{
+			Identifier: fill.slot.Name, Container: workContainer, Destination: fill.slot,
+			Reference: ref, Source: source,
+		})
+	}
+	return pair, nil
+}
+
+func bindValues(plan *pairPlan, bp *api.CellBlueprintDoc, cfg *config.TeamsConfig, cc *api.CellConfigDoc) error {
+	settings := plan.settings
+	root := plan.profile.Root
+	sandbox, approval := settings.Sandbox, settings.Approval
+	if sandbox == "" || root {
+		sandbox = "danger-full-access"
+	}
+	if approval == "" || root {
+		approval = "never"
+	}
+	initial := plan.selection.InitialPath
+	if initial == "" {
+		initial = home
+	}
+	initial = strings.Replace(initial, "$HOME", home, 1)
+	if initial != "/" && !config.SafePath(initial) {
+		return errors.New("INITIAL_PATH: require absolute safe launch directory")
+	}
+	if !config.SafePath(plan.roleSource.ClonePath) {
+		return errors.New("ROLE_SOURCE_DIR: require absolute safe checkout path")
+	}
+	facts := map[string]string{
+		"IMAGE":            plan.image.Image,
+		"ROLE_SOURCE_DIR":  plan.roleSource.ClonePath,
+		"ROLE_PATH":        plan.selection.Path,
+		"INITIAL_PATH":     initial,
+		"HARNESS_SETTINGS": settings.Settings,
+		"ROLE_NAME":        plan.role.Metadata.Name,
+		"SANDBOX":          sandbox,
+		"APPROVAL":         approval,
+		"PERMISSIONS":      settings.Permissions,
+		"AGENT_NAME":       cc.Metadata.Name,
+		"STATE_VOLUME":     plan.stateVolume(),
+	}
+	if project, ok := runtimeSource(plan.sources, projectSlot); ok {
+		facts["PROJECT_DIR"] = project.ClonePath
+	}
+	declared := allParameters(bp)
+	for name, param := range declared {
+		value, ok := facts[name]
+		if override, set := cfg.Spec.Parameters[name]; set && !composed[name] {
+			value, ok = override, true
+		}
+		if !ok && name == "ROLE" {
+			value, ok = plan.selection.Path, true
+		}
+		if !ok {
+			continue
+		}
+		// An empty fact leaves the blueprint default in charge (e.g. a role
+		// with no OpenCode permissions setting).
+		if value == "" && param.Default != nil {
+			continue
+		}
+		cc.Spec.Values[name] = value
+	}
+	for _, name := range plan.role.Spec.Needs.Params {
+		if _, ok := declared[name]; !ok {
+			return fmt.Errorf("template did not declare required parameter %q", name)
+		}
+	}
+	return nil
+}
+
+// stateVolume preserves the volume name each role's cells have always used,
+// so a harness login survives the move to shared blueprints.
+func (p *pairPlan) stateVolume() string {
+	if !slices.Contains(p.role.Spec.Needs.Repos, projectSlot) {
+		return stateVolumeName(p.team, p.selection.Name, p.hsel.Name)
+	}
+	project, _ := runtimeSource(p.sources, projectSlot)
+	legacy := path.Base(project.ClonePath) + "-" + p.role.Metadata.Name + "-" + p.hsel.Name
+	return stateVolumeName(p.team, p.selection.Name, p.hsel.Name, legacy)
+}
+
+// bindRepos fills the blueprint's repo slots from the team's runtime sources:
+// the role's own source into role-source, the project into project, and any
+// other cloned source into the slot named after it.
+func bindRepos(plan *pairPlan, cc *api.CellConfigDoc, team *config.Team) error {
+	for _, source := range plan.sources {
+		slot := source.Name
+		if source.Name == plan.roleSource.Name {
+			slot = roleSourceSlot
+		}
+		ref := source.Tag
+		if source.Commit != "" {
+			ref = source.Commit
+		}
+		// Add's project declaration distinguishes a tag from a same-named
+		// branch all the way through the runtime checkout contract.
+		if source.Name == projectSlot && team.ProjectSource != nil && team.ProjectSource.Tag != "" {
+			ref = "refs/tags/" + team.ProjectSource.Tag
+		}
+		url := source.URL
+		if strings.HasPrefix(url, "github.com/") {
+			url = "https://" + url
+		}
+		cc.Spec.Repos[slot] = api.CellConfigRepoFill{
+			URL: url, Branch: source.Branch, Ref: ref, Git: repoGit(source.Git),
+		}
+	}
+	if _, ok := cc.Spec.Repos[roleSourceSlot]; !ok {
+		return errors.New("sources: role source is not cloned at runtime")
+	}
+	return nil
+}
+
+func identity(in *config.Identity) *api.GitIdentity {
+	if in == nil {
 		return nil
 	}
-	out := &api.ContainerGit{}
-	if g.Author != nil {
-		out.Author = &api.GitIdentity{Name: g.Author.Name, Email: g.Author.Email}
+	return &api.GitIdentity{Name: in.Name, Email: in.Email}
+}
+
+func secretRef(in config.SecretRef) *api.ContainerSecretRef {
+	return &api.ContainerSecretRef{Name: in.Name, Realm: in.Realm, Space: in.Space, Stack: in.Stack, Cell: in.Cell}
+}
+
+func signing(in *config.GitSigning) *api.GitSigning {
+	if in == nil {
+		return nil
 	}
-	if g.Committer != nil {
-		out.Committer = &api.GitIdentity{Name: g.Committer.Name, Email: g.Committer.Email}
+	out := &api.GitSigning{SecretRef: secretRef(in.SecretRef)}
+	if in.AllowedSignersRef != nil {
+		out.AllowedSignersRef = secretRef(*in.AllowedSignersRef)
 	}
-	if ssh {
-		if g.SigningKey != "" {
-			out.SigningKey = "/home/user/.ssh/" + path.Base(g.SigningKey)
-		}
-		out.Sign = slices.Clone(g.Sign)
-		if g.AllowedSigners != "" {
-			out.AllowedSigners = "/home/user/.ssh/" + path.Base(g.AllowedSigners)
+	return out
+}
+
+// repoGit renders the identity one source states for itself into its repo
+// fill. Unset fields fall back to the cell's default identity at run time.
+func repoGit(in *config.SourceGit) *api.RepoGit {
+	if in == nil {
+		return nil
+	}
+	out := &api.RepoGit{
+		Author: identity(in.Author), Committer: identity(in.Committer),
+		Signing: signing(in.Signing), Sign: slices.Clone(in.Sign),
+	}
+	if c := in.Credential; c != nil {
+		out.Credential = &api.GitCredential{
+			SecretRef: secretRef(c.SecretRef), User: c.User, Port: c.Port, HostKeyPolicy: c.HostKeyPolicy,
 		}
 	}
 	return out
 }
 
-func bindParameters(p *Pair, cfg *config.TeamsConfig, selection config.Role, role *model.Role) error {
-	cc, bp := p.Config, p.Blueprint
-	cc.Spec.Values = map[string]string{}
-	parameters := map[string]bool{}
-	for _, param := range bp.Spec.Parameters {
-		if parameters[param.Name] {
-			return fmt.Errorf("duplicate blueprint parameter %q", param.Name)
-		}
-		parameters[param.Name] = true
-		if value, ok := cfg.Spec.Parameters[param.Name]; ok {
-			cc.Spec.Values[param.Name] = value
-		} else {
-			switch {
-			case param.Name == "ROLE":
-				cc.Spec.Values[param.Name] = selection.Path
-			case param.Name == "AGENT_NAME":
-				cc.Spec.Values[param.Name] = cc.Metadata.Name
-			case param.Required && param.Default == nil:
-				return fmt.Errorf("spec.parameters: missing required parameter %q", param.Name)
-			}
-		}
+// defaultGit renders TeamsConfig.spec.git as the scope-default git block every
+// team cell inherits. It names stored secrets only; the pre-stored-credential
+// host paths are reported, never rendered.
+func defaultGit(g *config.Git) (*api.ContainerGit, []string) {
+	if g == nil {
+		return nil, nil
 	}
-	for _, name := range role.Spec.Needs.Params {
-		if !parameters[name] {
-			return fmt.Errorf("template did not declare required parameter %q", name)
-		}
+	var notes []string
+	out := &api.ContainerGit{
+		Author: identity(g.Author), Committer: identity(g.Committer), Signing: signing(g.Signing),
 	}
-
-	return nil
+	for _, c := range g.Credentials {
+		out.Credentials = append(out.Credentials, api.GitCredential{
+			Host: c.Host, SecretRef: secretRef(c.SecretRef), User: c.User, Port: c.Port,
+			HostKeyPolicy: c.HostKeyPolicy,
+		})
+	}
+	if g.Signing != nil {
+		out.Sign = slices.Clone(g.Sign)
+	}
+	if g.SigningKey != "" || g.AllowedSigners != "" {
+		notes = append(notes,
+			"spec.git.signingKey / allowedSigners are host paths and no longer reach a cell; "+
+				"store the key as an ssh-key secret and name it in spec.git.signing "+
+				"(kuke team init --force --import-git-identity does both)",
+		)
+	}
+	if out.Author == nil && out.Committer == nil && out.Signing == nil && len(out.Credentials) == 0 {
+		return nil, notes
+	}
+	return out, notes
 }
 
-func bindRepos(
-	container *api.BlueprintContainer,
-	sources []config.Source,
-	cc *api.CellConfigDoc,
-	boundRepos map[string]bool,
-) error {
-	for j := range container.Repos {
-		slot := &container.Repos[j]
-		r, ok := runtimeSource(sources, slot.Name)
-		if !ok {
-			return fmt.Errorf("sources: missing clonePath for template repo %q", slot.Name)
+// credentialNotes names every runtime-cloned SSH source no stored credential
+// covers: with the host ~/.ssh no longer mounted, such a clone cannot
+// authenticate.
+func credentialNotes(git *api.ContainerGit, sources []config.Source) []string {
+	var notes []string
+	for _, source := range sources {
+		if source.ClonePath == "" || (source.Git != nil && source.Git.Credential != nil) {
+			continue
 		}
-		slot.URL = ""
-		slot.Target = r.ClonePath
-		slot.Branch = ""
-		slot.Ref = ""
-		ref := r.Tag
-		if r.Commit != "" {
-			ref = r.Commit
-		}
-		url := r.URL
+		url := source.URL
 		if strings.HasPrefix(url, "github.com/") {
 			url = "https://" + url
 		}
-		cc.Spec.Repos[slot.Name] = api.CellConfigRepoFill{URL: url, Branch: r.Branch, Ref: ref}
-		boundRepos[slot.Name] = true
+		remote := gitcred.ParseRemote(url)
+		if remote.Transport != gitcred.TransportSSH {
+			continue
+		}
+		covered := git != nil && slices.ContainsFunc(git.Credentials, func(c api.GitCredential) bool {
+			host, _, _ := strings.Cut(c.Host, "/")
+			return strings.EqualFold(host, remote.Host)
+		})
+		if !covered {
+			notes = append(notes, fmt.Sprintf(
+				"source %s is cloned over SSH but no stored git credential covers %s; "+
+					"add one to spec.git.credentials (kuke team init --force --import-git-identity imports your key)",
+				source.Name, remote.Host,
+			))
+		}
 	}
-
-	return nil
-}
-
-func bindSecrets(
-	p *Pair,
-	secrets *secretBindings,
-	required []string,
-	container *api.BlueprintContainer,
-	boundSecrets map[string]bool,
-) error {
-	cc := p.Config
-	destinations := map[string]bool{}
-	for j := range container.Secrets {
-		slot := &container.Secrets[j]
-		if !slices.Contains(required, slot.Name) {
-			return fmt.Errorf("template secret %q is not required by selected role/harness", slot.Name)
-		}
-		binding, err := secrets.lookup(slot.Name)
-		if err != nil {
-			return err
-		}
-		if slot.Mode != "" && slot.Mode != "env" {
-			return errors.New("only environment secret destinations are supported")
-		}
-		slot.Mode = "env"
-		slot.EnvName = binding.EnvName
-		slot.MountPath = ""
-		if destinations[slot.EnvName] {
-			return errors.New("conflicting secret environment destinations")
-		}
-		destinations[slot.EnvName] = true
-		for _, env := range container.Env {
-			if envName(env) == slot.EnvName {
-				return errors.New("secret destination conflicts with template environment")
-			}
-		}
-		ref := binding.SecretRef
-		cc.Spec.Secrets[slot.Name] = api.CellConfigSecretFill{
-			SecretRef: &api.ContainerSecretRef{
-				Name:  ref.Name,
-				Realm: ref.Realm,
-				Space: ref.Space,
-				Stack: ref.Stack,
-				Cell:  ref.Cell,
-			},
-		}
-		var source *config.SecretSource
-		if binding.Source != nil {
-			copySource := *binding.Source
-			source = &copySource
-		}
-		p.Secrets = append(
-			p.Secrets,
-			SecretRequirement{
-				Identifier:  slot.Name,
-				Container:   container.ID,
-				Destination: *slot,
-				Reference:   ref,
-				Source:      source,
-			},
-		)
-		boundSecrets[slot.Name] = true
-	}
-	return nil
+	return notes
 }
 
 func envName(value string) string { name, _, _ := strings.Cut(value, "="); return name }

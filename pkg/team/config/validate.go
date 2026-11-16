@@ -75,33 +75,105 @@ func validateGit(g *Git) error {
 			return err
 		}
 	}
+	if err := validateIdentities("spec.git", g.Author, g.Committer); err != nil {
+		return err
+	}
+	hosts := map[string]bool{}
+	for i, credential := range g.Credentials {
+		field := fmt.Sprintf("spec.git.credentials[%d]", i)
+		if err := unique(field+".host", credential.Host, hosts); err != nil {
+			return err
+		}
+		if strings.ContainsAny(credential.Host, " \t\r\n@") || strings.Contains(credential.Host, "://") {
+			return fmt.Errorf("%s.host: use a bare host or host/path prefix (no scheme or user)", field)
+		}
+		if err := validateCredential(field, credential.SecretRef, credential.Port, credential.HostKeyPolicy); err != nil {
+			return err
+		}
+	}
+	if len(g.Sign) > 0 && g.Signing == nil && blank(g.SigningKey) {
+		return errors.New("spec.git.signing: sign requires a stored signing secret (spec.git.signing.secretRef)")
+	}
+	return validateSigning("spec.git", g.Signing, g.Sign)
+}
+
+func validateIdentities(field string, author, committer *Identity) error {
 	for _, entry := range []struct {
 		name     string
 		identity *Identity
 	}{
-		{"author", g.Author}, {"committer", g.Committer},
+		{"author", author}, {"committer", committer},
 	} {
 		if entry.identity == nil {
 			continue
 		}
-		if err := required("spec.git."+entry.name+".name", entry.identity.Name); err != nil {
+		if err := required(field+"."+entry.name+".name", entry.identity.Name); err != nil {
 			return err
 		}
-		if err := required("spec.git."+entry.name+".email", entry.identity.Email); err != nil {
-			return err
-		}
-	}
-	for i, sign := range g.Sign {
-		if sign != "commits" && sign != "tags" {
-			return fmt.Errorf("spec.git.sign[%d]: expected commits or tags", i)
-		}
-	}
-	if len(g.Sign) > 0 {
-		if err := required("spec.git.signingKey", g.SigningKey); err != nil {
+		if err := required(field+"."+entry.name+".email", entry.identity.Email); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func validateCredential(field string, ref SecretRef, port int, policy string) error {
+	if err := validateSecretRef(field+".secretRef", ref); err != nil {
+		return err
+	}
+	if port < 0 || port > 65535 {
+		return fmt.Errorf("%s.port: expected 1-65535", field)
+	}
+	if policy != "" && policy != "strict" && policy != "accept-new" {
+		return fmt.Errorf("%s.hostKeyPolicy: expected strict or accept-new", field)
+	}
+	return nil
+}
+
+// validateSigning checks sign selections and the stored signing secret.
+func validateSigning(field string, signing *GitSigning, sign []string) error {
+	for i, selection := range sign {
+		if selection != "commits" && selection != "tags" {
+			return fmt.Errorf("%s.sign[%d]: expected commits or tags", field, i)
+		}
+	}
+	if signing == nil {
+		return nil
+	}
+	if err := validateSecretRef(field+".signing.secretRef", signing.SecretRef); err != nil {
+		return err
+	}
+	if signing.AllowedSignersRef != nil {
+		return validateSecretRef(field+".signing.allowedSignersRef", *signing.AllowedSignersRef)
+	}
+	return nil
+}
+
+func validateSecretRef(field string, ref SecretRef) error {
+	if !ValidName(ref.Name) || !ValidName(ref.Realm) ||
+		(ref.Space != "" && !ValidName(ref.Space)) || (ref.Stack != "" && !ValidName(ref.Stack)) ||
+		(ref.Cell != "" && !ValidName(ref.Cell)) {
+		return fmt.Errorf("%s: require a valid secret name and scope", field)
+	}
+	if (ref.Stack != "" && ref.Space == "") || (ref.Cell != "" && ref.Stack == "") {
+		return fmt.Errorf("%s: deeper scope requires all parent coordinates", field)
+	}
+	return nil
+}
+
+func validateSourceGit(field string, g *SourceGit) error {
+	if g == nil {
+		return nil
+	}
+	if err := validateIdentities(field, g.Author, g.Committer); err != nil {
+		return err
+	}
+	if c := g.Credential; c != nil {
+		if err := validateCredential(field+".credential", c.SecretRef, c.Port, c.HostKeyPolicy); err != nil {
+			return err
+		}
+	}
+	return validateSigning(field, g.Signing, g.Sign)
 }
 
 func validateSources(list []Source, sources map[string]bool) error {
@@ -137,6 +209,9 @@ func validateSources(list []Source, sources map[string]bool) error {
 		}
 		if count != 1 {
 			return fmt.Errorf("%s: require exactly one nonblank revision selector (branch, tag, commit)", field)
+		}
+		if err := validateSourceGit(field+".git", source.Git); err != nil {
+			return err
 		}
 	}
 	return nil

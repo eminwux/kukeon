@@ -22,10 +22,13 @@ import (
 	"io"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/apischeme"
+	"github.com/eminwux/kukeon/internal/cellblueprint"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/secretstore"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"gopkg.in/yaml.v3"
 )
@@ -465,12 +468,20 @@ func ValidateDocument(doc *Document) *ValidationError {
 				Err:   secretErr,
 			}
 		}
-		if strings.TrimSpace(doc.SecretDoc.Spec.Data) == "" {
+		if doc.SecretDoc.Metadata.Name == secretstore.TypesDir {
 			return &ValidationError{
 				Index: doc.Index,
 				Kind:  doc.Kind,
 				Name:  doc.SecretDoc.Metadata.Name,
-				Err:   errdefs.ErrSecretDataRequired,
+				Err:   errdefs.ErrSecretReservedName,
+			}
+		}
+		if specErr := validateSecretSpec(*doc.SecretDoc); specErr != nil {
+			return &ValidationError{
+				Index: doc.Index,
+				Kind:  doc.Kind,
+				Name:  doc.SecretDoc.Metadata.Name,
+				Err:   specErr,
 			}
 		}
 
@@ -491,6 +502,16 @@ func ValidateDocument(doc *Document) *ValidationError {
 	}
 
 	return nil
+}
+
+// validateSecretSpec enforces the per-type shape of a Secret's material (issue
+// #1472, step 1) through the same rules the daemon applies on write.
+func validateSecretSpec(doc v1beta1.SecretDoc) error {
+	internal, err := apischeme.ConvertSecretDocToInternal(doc)
+	if err != nil {
+		return err
+	}
+	return secretstore.ValidateSpec(internal.Spec)
 }
 
 // validateSecretSegment rejects a single secret name or scope coordinate that
@@ -540,6 +561,44 @@ func validateBlueprint(doc *Document) *ValidationError {
 		}
 		if secretErr := validateBlueprintSecretSlots(c.Secrets); secretErr != nil {
 			return &ValidationError{Index: doc.Index, Kind: doc.Kind, Name: bp.Metadata.Name, Err: secretErr}
+		}
+	}
+	for i := range bp.Spec.Components {
+		comp := bp.Spec.Components[i]
+		if secretErr := validateBlueprintSecretSlots(comp.Secrets); secretErr != nil {
+			return &ValidationError{
+				Index: doc.Index, Kind: doc.Kind, Name: bp.Metadata.Name,
+				Err: fmt.Errorf("component %q: %w", comp.Name, secretErr),
+			}
+		}
+		for name, mode := range comp.Modes {
+			if secretErr := validateBlueprintSecretSlots(mode.Secrets); secretErr != nil {
+				return &ValidationError{
+					Index: doc.Index, Kind: doc.Kind, Name: bp.Metadata.Name,
+					Err: fmt.Errorf("component %q mode %q: %w", comp.Name, name, secretErr),
+				}
+			}
+		}
+	}
+	// Blueprint contract (#1472): typed parameters, components, harness modes,
+	// and the git blocks of the template containers and their repos.
+	if declErr := cellblueprint.ValidateDeclaration(*bp); declErr != nil {
+		return &ValidationError{Index: doc.Index, Kind: doc.Kind, Name: bp.Metadata.Name, Err: declErr}
+	}
+	for _, c := range bp.Spec.Cell.Containers {
+		if gitErr := apischeme.ValidateGit(c.Git); gitErr != nil {
+			return &ValidationError{
+				Index: doc.Index, Kind: doc.Kind, Name: bp.Metadata.Name,
+				Err: fmt.Errorf("container %q: %w", c.ID, gitErr),
+			}
+		}
+		for _, r := range c.Repos {
+			if gitErr := apischeme.ValidateRepoGit(r.Git); gitErr != nil {
+				return &ValidationError{
+					Index: doc.Index, Kind: doc.Kind, Name: bp.Metadata.Name,
+					Err: fmt.Errorf("container %q repo %q: %w", c.ID, r.Name, gitErr),
+				}
+			}
 		}
 	}
 	return nil
@@ -657,7 +716,10 @@ func validateVolumeSegment(value string) error {
 // target required and absolute. Unlike the Cell/Container apply path
 // (validateRepos), url is NOT required: a repo with no url is a structural slot
 // a CellConfig fills (#624). A url supplied inline (directly or via ${PARAM})
-// is carried through to the materialized cell unchanged.
+// is carried through to the materialized cell unchanged. A target written as a
+// ${PARAM} reference — the checkout path is one of the answers a shared
+// blueprint asks for (#1472) — cannot be judged until it is resolved, so it is
+// checked for being absolute when the cell is materialized instead.
 func validateBlueprintRepos(repos []v1beta1.ContainerRepo) error {
 	for i, r := range repos {
 		name := strings.TrimSpace(r.Name)
@@ -668,7 +730,7 @@ func validateBlueprintRepos(repos []v1beta1.ContainerRepo) error {
 		if target == "" {
 			return fmt.Errorf("%w (repos[%d] %q)", errdefs.ErrRepoTargetRequired, i, name)
 		}
-		if !filepath.IsAbs(target) {
+		if !filepath.IsAbs(target) && !strings.Contains(target, "${") {
 			return fmt.Errorf("%w (repos[%d] %q target %q)", errdefs.ErrRepoTargetNotAbsolute, i, name, target)
 		}
 		if strings.TrimSpace(r.Branch) != "" && strings.TrimSpace(r.Ref) != "" {
@@ -748,6 +810,47 @@ func validateConfig(doc *Document) *ValidationError {
 				Index: doc.Index, Kind: doc.Kind, Name: cfg.Metadata.Name,
 				Err: fmt.Errorf("%w (secrets[%q])", errdefs.ErrConfigSecretFillRefRequired, name),
 			}
+		}
+	}
+	if contractErr := validateConfigContract(cfg); contractErr != nil {
+		return &ValidationError{Index: doc.Index, Kind: doc.Kind, Name: cfg.Metadata.Name, Err: contractErr}
+	}
+	return nil
+}
+
+// validateConfigContract checks the parts of a CellConfig that answer the
+// blueprint contract (#1472) and need no blueprint to be judged: the git
+// identity override, each repo fill's own identity, and the shape of the
+// components / modes selections. Whether a named component or mode exists is
+// checked against the referenced blueprint at reconcile and render time.
+func validateConfigContract(cfg *v1beta1.CellConfigDoc) error {
+	if err := apischeme.ValidateGit(cfg.Spec.Git); err != nil {
+		return err
+	}
+	for name, fill := range cfg.Spec.Repos {
+		if err := apischeme.ValidateRepoGit(fill.Git); err != nil {
+			return fmt.Errorf("repos[%q]: %w", name, err)
+		}
+	}
+	seen := map[string]struct{}{}
+	for _, name := range cfg.Spec.Components {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("%w: spec.components entries must not be empty", errdefs.ErrBlueprintComponent)
+		}
+		if _, dup := seen[name]; dup {
+			return fmt.Errorf("%w: spec.components lists %q twice", errdefs.ErrBlueprintComponent, name)
+		}
+		seen[name] = struct{}{}
+	}
+	if modes := cfg.Spec.Modes; modes != nil {
+		for _, name := range modes.Enabled {
+			if strings.TrimSpace(name) == "" {
+				return fmt.Errorf("%w: spec.modes.enabled entries must not be empty", errdefs.ErrBlueprintMode)
+			}
+		}
+		if modes.Default != "" && len(modes.Enabled) > 0 && !slices.Contains(modes.Enabled, modes.Default) {
+			return fmt.Errorf("%w: spec.modes.default %q is not in spec.modes.enabled",
+				errdefs.ErrBlueprintMode, modes.Default)
 		}
 	}
 	return nil

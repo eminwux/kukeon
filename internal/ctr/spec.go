@@ -30,6 +30,8 @@ import (
 	"github.com/containerd/containerd/v2/core/containers"
 	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/containerd/typeurl/v2"
+	"github.com/eminwux/kukeon/internal/gitcred"
+	"github.com/eminwux/kukeon/internal/gitcred/gitplan"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 )
@@ -185,6 +187,21 @@ type buildOpts struct {
 	runPath        string
 	extraLabels    map[string]string
 	kukeonGroupGID uint32
+	// requiredCapabilities are the image capabilities the container's cell
+	// requires (#1472); checked against the image at create.
+	requiredCapabilities []string
+}
+
+// WithRequiredCapabilities carries the cell's required image capabilities
+// (CellSpec.Requires) into container create, where they are checked against
+// the image's io.kukeon.capabilities label once the image is present. An empty
+// list is a no-op so callers can pass it unconditionally. Issue #1472, step 9.
+func WithRequiredCapabilities(capabilities []string) BuildOption {
+	return func(o *buildOpts) {
+		if len(capabilities) > 0 {
+			o.requiredCapabilities = append([]string(nil), capabilities...)
+		}
+	}
 }
 
 // WithAttachableInjection configures the host-side paths used when wrapping
@@ -292,6 +309,19 @@ func WithSecretRunPath(runPath string) BuildOption {
 			o.runPath = runPath
 		}
 	}
+}
+
+// specHasMount reports whether the OCI spec mounts anything at destination.
+func specHasMount(s *oci.Spec, destination string) bool {
+	if s == nil {
+		return false
+	}
+	for i := range s.Mounts {
+		if s.Mounts[i].Destination == destination {
+			return true
+		}
+	}
+	return false
 }
 
 // specHasMemoryLimit reports whether the spec already declares a positive
@@ -495,11 +525,12 @@ func BuildContainerSpec(
 	}
 
 	return ContainerSpec{
-		ID:            containerdID,
-		Image:         containerSpec.Image,
-		Labels:        labels,
-		SpecOpts:      specOpts,
-		CNIConfigPath: containerSpec.CNIConfigPath,
+		ID:                   containerdID,
+		Image:                containerSpec.Image,
+		Labels:               labels,
+		SpecOpts:             specOpts,
+		CNIConfigPath:        containerSpec.CNIConfigPath,
+		RequiredCapabilities: opts.requiredCapabilities,
 	}
 }
 
@@ -547,19 +578,40 @@ func nestedCgroupMount() runtimespec.Mount {
 
 // kukeonContainerEnv builds the final container env: a set of KUKEON_*
 // identity vars derived from the container spec's cell-context fields, plus
-// the GIT_AUTHOR_* / GIT_COMMITTER_* / GIT_CONFIG_* block expanded from
-// spec.Git (issue #618), all merged with the user-supplied spec.Env. User
-// entries override defaults on key collisions; empty cell-context fields and
-// an absent git block produce no entries. Order in the returned slice is:
-// surviving defaults in canonical order, then user entries in their declared
-// order. The merge is done here (rather than
+// GIT_CONFIG_SYSTEM pointing at the staged cell-global gitconfig when the
+// container declares a git block (issue #618, #1472), all merged with the
+// user-supplied spec.Env. User entries override defaults on key collisions;
+// empty cell-context fields and an absent git block produce no entries. Order
+// in the returned slice is: surviving defaults in canonical order, then user
+// entries in their declared order. The merge is done here (rather than
 // trusting oci.WithEnv) because containerd's replaceOrAppendEnvValues
 // dedupes only against keys already present in spec.Process.Env when WithEnv
 // runs, so two entries with the same key inside a single overrides slice
 // would both end up in the final env. Issue #351.
 func kukeonContainerEnv(spec intmodel.ContainerSpec) []string {
+	return mergeContainerEnv(spec, gitConfigEnv(spec))
+}
+
+// legacyGitContainerEnv is kukeonContainerEnv for a container created before
+// #1472: its OCI spec has no /.kukeon/git mount, so the git identity is
+// rendered as the GIT_AUTHOR_* / GIT_COMMITTER_* / GIT_CONFIG_* block it was
+// created with rather than pointing git at a config file it cannot see.
+func legacyGitContainerEnv(spec intmodel.ContainerSpec) []string {
+	return mergeContainerEnv(spec, gitEnv(spec.Git))
+}
+
+// gitConfigEnv points git's system scope at the staged cell-global gitconfig
+// when the container declares any git config (issue #1472).
+func gitConfigEnv(spec intmodel.ContainerSpec) []string {
+	if !gitcred.Needed(spec) {
+		return nil
+	}
+	return []string{gitplan.ConfigEnv + "=" + gitplan.ConfigPath()}
+}
+
+func mergeContainerEnv(spec intmodel.ContainerSpec, git []string) []string {
 	defaults := kukeonDefaultEnv(spec)
-	defaults = append(defaults, gitEnv(spec.Git)...)
+	defaults = append(defaults, git...)
 	switch {
 	case len(spec.Env) == 0:
 		return defaults
@@ -607,17 +659,16 @@ func kukeonDefaultEnv(spec intmodel.ContainerSpec) []string {
 	return out
 }
 
-// gitEnv expands a container's git identity/signing sugar (ContainerSpec.Git)
-// into the GIT_AUTHOR_* / GIT_COMMITTER_* / GIT_CONFIG_* env-var block git
-// reads natively, replacing the hand-rolled block team blueprint templates
-// duplicate per cell today. Returns nil when git is unset. The GIT_CONFIG_*
-// signing pairs are emitted in the canonical order — user.signingkey,
-// gpg.format, commit.gpgsign, tag.gpgsign, gpg.ssh.allowedSignersFile — with
-// GIT_CONFIG_COUNT tracking the live pair count, so a block that omits signing
-// renders no GIT_CONFIG_* entries at all. gpg.format=ssh is implied by a
-// non-empty signingKey (kukeon signs with SSH keys). The returned entries are
-// merged with the user's explicit env by kukeonContainerEnv, where an explicit
-// env: entry wins on key collision. Issue #618.
+// gitEnv expands a container's git identity/signing block into the
+// GIT_AUTHOR_* / GIT_COMMITTER_* / GIT_CONFIG_* env-var block git reads
+// natively. It is the pre-#1472 rendering, kept only for containers created
+// before the staged gitconfig existed (see legacyGitContainerEnv): new
+// containers get the same settings from the gitconfig file, where a repo's
+// local config can override them. Returns nil when git is unset. The
+// GIT_CONFIG_* signing pairs are emitted in the canonical order —
+// user.signingkey, gpg.format, commit.gpgsign, tag.gpgsign,
+// gpg.ssh.allowedSignersFile — with GIT_CONFIG_COUNT tracking the live pair
+// count. Issue #618.
 func gitEnv(git *intmodel.ContainerGit) []string {
 	if git == nil {
 		return nil
@@ -1032,7 +1083,11 @@ func WithFreshProcessEnv(spec intmodel.ContainerSpec, runPath string) oci.SpecOp
 		if err = oci.WithDefaultPathEnv(ctx, client, c, fresh); err != nil {
 			return err
 		}
-		if err = oci.WithEnv(kukeonContainerEnv(envSpec))(ctx, client, c, fresh); err != nil {
+		env := kukeonContainerEnv(envSpec)
+		if gitcred.Needed(envSpec) && !specHasMount(s, gitplan.MountPath) {
+			env = legacyGitContainerEnv(envSpec)
+		}
+		if err = oci.WithEnv(env)(ctx, client, c, fresh); err != nil {
 			return err
 		}
 		s.Process.Env = fresh.Process.Env

@@ -47,6 +47,18 @@ spec:
 
 The CellConfig fill every cell kukeond renders from a [`CellConfig`](config.md) inside this realm inherits. Same shape as the Config's own fill — `values`, `repos`, `secrets` — and merged **Realm → Space → Stack → CellConfig**, per key, deeper levels winning. See [Defaults merge](config.md#defaults-merge).
 
+`spec.defaults.git` is the default git identity, credentials and signing config of every such cell — set once here instead of on each Config. It has the shape of a container's [`git`](container.md#containergit) block: `author`, `committer` and `signing` are replaced by a deeper level that sets them, and `credentials[]` merge by `host`. See the [git credentials guide](../guides/git-credentials.md).
+
+```yaml
+spec:
+  defaults:
+    git:
+      author: { name: dev-bot, email: dev-bot@example.com }
+      credentials:
+        - { host: github.com, secretRef: { name: git-ssh, realm: default } }
+      signing: { secretRef: { name: git-ssh, realm: default } }
+```
+
 ```yaml
 spec:
   defaults:

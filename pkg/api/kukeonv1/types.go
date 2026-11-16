@@ -947,6 +947,9 @@ type ImageInfo struct {
 	Digest    string            `json:"digest"    yaml:"digest"`
 	MediaType string            `json:"mediaType" yaml:"mediaType"`
 	Labels    map[string]string `json:"labels"    yaml:"labels"`
+	// Capabilities are the capabilities the image declares in its
+	// io.kukeon.capabilities config label; empty when it declares none.
+	Capabilities []string `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`
 }
 
 // ListImagesResult lists the images present in a realm's containerd

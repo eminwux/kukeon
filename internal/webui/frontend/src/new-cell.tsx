@@ -3,24 +3,13 @@ import type { Doc, InventoryResource } from "./inventory";
 import { useResource } from "./request";
 import { cellAdvanced, containerFields } from "./creation-schema.mjs";
 import type { Field } from "./creation-schema.mjs";
+import { MergedValues, type RenderedValue } from "./merged-values";
 
 type ScopeMetadata = { name: string; realm?: string; space?: string; stack?: string };
 type CatalogDoc = { metadata: ScopeMetadata; spec?: Record<string, unknown>; kind?: string };
 type CellDoc = Doc & { spec: { realmId: string; spaceId: string; stackId: string; containers?: Container[]; provenance?: unknown } };
 type Container = { id: string; image?: string; attachable?: boolean; root?: boolean; [key: string]: unknown };
-type RenderedValue = { kind: string; key: string; value: string; origin: string };
 type Preview = { document: CellDoc; preview: string; digest?: string; values?: RenderedValue[] };
-
-// Shows each merged input of the daemon's render with the level that set it (#1418).
-function MergedValues({ values, digest }: { values: RenderedValue[]; digest?: string }) {
-  return <div className="merged-values"><h4>Merged values</h4>
-    <p className="description">Realm, Space and Stack defaults merge under the Config, deeper levels winning per key. Scalar values are hidden in the browser; use <code>kuke create cell --from-config … --dry-run --explain</code> to see them.</p>
-    {!values.length ? <p>No values, repositories, secrets or images were merged.</p> : <table aria-label="Merged values and their origin"><thead><tr><th scope="col">Kind</th><th scope="col">Key</th><th scope="col">Value</th><th scope="col">Origin</th></tr></thead><tbody>
-      {values.map(value => <tr key={`${value.kind}:${value.key}`}><td>{value.kind}</td><td><code>{value.key}</code></td><td>{value.value ? <code>{value.value}</code> : <span className="description">hidden</span>}</td><td><span className="badge">{value.origin}</span></td></tr>)}
-    </tbody></table>}
-    {digest && <p className="description">Render digest: <code>{digest}</code></p>}
-  </div>;
-}
 type FormValue = Record<string, unknown>;
 
 function scopedName(metadata: ScopeMetadata): string[] {

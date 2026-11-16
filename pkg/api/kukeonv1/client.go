@@ -275,6 +275,17 @@ type CellFromConfigRequest struct {
 	Start bool
 	// ExpectedDigest pins the digest of an earlier preview.
 	ExpectedDigest string
+	// Mode is the harness mode to create the cell in; empty selects the
+	// Config's default. Must be declared by the blueprint and enabled by the
+	// Config (#1472).
+	Mode string
+	// Params are per-cell values for the parameters the picked harness mode
+	// declares (e.g. the PROMPT of a headless run). They override the
+	// Config's values for this cell only; any other key is refused.
+	Params map[string]string
+	// Draft, on a preview, is an unsaved CellConfig to render instead of the
+	// stored one Config names. A create refuses it.
+	Draft *v1beta1.CellConfigDoc
 }
 
 // PreviewCellFromConfigArgs is the wire request for PreviewCellFromConfig.

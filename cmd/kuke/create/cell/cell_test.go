@@ -875,26 +875,47 @@ func TestCreateCell_MutualExclusion_FromBlueprintAndFromConfig(t *testing.T) {
 	}
 }
 
-func TestCreateCell_ParamRejectedWithFromConfig(t *testing.T) {
+// TestCreateCell_ParamAndModeForwardedWithFromConfig pins the #1472 contract:
+// --param / --mode on the --from-config path are not applied client-side (the
+// client never renders a Config) — they travel to the daemon, which accepts a
+// param only when the picked harness mode declares it.
+func TestCreateCell_ParamAndModeForwardedWithFromConfig(t *testing.T) {
 	t.Cleanup(viper.Reset)
+	lastConfigRequest = kukeonv1.CellFromConfigRequest{}
 
-	fc := &fakeClient{
+	cmd, _ := newTestExecCmd(t, &fakeClient{
 		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
-			t.Fatal("GetConfig must not be called when --param + --from-config is rejected")
 			return kukeonv1.GetConfigResult{}, nil
 		},
-	}
-	cmd, _ := newTestExecCmd(t, fc)
+	})
 	setFlag(t, cmd, "from-config", "prod")
-	setFlag(t, cmd, "param", "K=V")
+	setFlag(t, cmd, "param", "PROMPT=hello")
+	setFlag(t, cmd, "mode", "headless")
+	cmd.SetArgs([]string{"x"})
+
+	// The fake reports no such Config; the request it received is the assertion.
+	if err := cmd.Execute(); err == nil || !errors.Is(err, errdefs.ErrConfigNotFound) {
+		t.Fatalf("err=%v want ErrConfigNotFound from the fake", err)
+	}
+	if lastConfigRequest.Mode != "headless" {
+		t.Errorf("request Mode = %q, want headless", lastConfigRequest.Mode)
+	}
+	if lastConfigRequest.Params["PROMPT"] != "hello" {
+		t.Errorf("request Params = %v, want PROMPT=hello", lastConfigRequest.Params)
+	}
+}
+
+func TestCreateCell_ParamFileRejectedWithFromConfig(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	cmd, _ := newTestExecCmd(t, &fakeClient{})
+	setFlag(t, cmd, "from-config", "prod")
+	setFlag(t, cmd, "param-file", "/tmp/p")
 	cmd.SetArgs([]string{"x"})
 
 	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected error for --param + --from-config combination")
-	}
-	if !strings.Contains(err.Error(), "--param is not valid with --from-config") {
-		t.Errorf("err=%v want '--param is not valid with --from-config'", err)
+	if err == nil || !strings.Contains(err.Error(), "--param-file is not valid with --from-config") {
+		t.Errorf("err=%v want '--param-file is not valid with --from-config'", err)
 	}
 }
 

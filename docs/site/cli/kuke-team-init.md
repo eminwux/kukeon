@@ -1,7 +1,9 @@
 # kuke team init
 
 ```
-kuke team init [--force] [--host ENDPOINT] [--configuration PATH]
+kuke team init [--force] [--import-git-identity [--git-key PATH]
+               [--git-key-passphrase-file FILE] [--git-known-hosts FILE]]
+               [--host ENDPOINT] [--configuration PATH]
 ```
 
 Initialize the operator's team configuration and apply the kukeon operator
@@ -19,6 +21,17 @@ For the shared composition model, see [Teams](../concepts/team.md).
 | `--force`         | `false` | Replace an existing `~/.kuke/kuketeams.yaml` and reapply the initial operator declaration.   |
 | `--host`          | —       | kukeond Unix endpoint. Overrides `KUKEON_HOST` and `ClientConfiguration.spec.host`.          |
 | `--configuration` | —       | kuke `ClientConfiguration` path. Defaults to `KUKE_CONFIGURATION`, then `~/.kuke/kuke.yaml`. |
+
+Git identity import (see [Git identity and credentials](#git-identity-and-credentials)):
+
+| Flag                        | Default | Description                                                                                                                                               |
+| --------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--import-git-identity`     | `false` | Your consent to copy an SSH private key into the `ssh-key` secret `git-ssh` and use it for the team's git credentials (and signing, if you already sign). |
+| `--git-key`                 | —       | Private key to import. Default: the key git signs with, else `~/.ssh/id_ed25519`, `id_ecdsa`, `id_rsa`.                                                   |
+| `--git-key-passphrase-file` | —       | File holding the key's passphrase. Required for a passphrase-protected key.                                                                               |
+| `--git-known-hosts`         | —       | `known_hosts` file to pin for the imported key. Default: the built-in `github.com`, `gitlab.com` and `bitbucket.org` keys.                                |
+
+The last three require `--import-git-identity`.
 
 kuke's global flags (`--verbose`, `--log-level`, `--run-path`, `--no-daemon`)
 are accepted but have no effect on `kuke team` subcommands: they resolve the
@@ -81,8 +94,10 @@ spec:
       path: team/harnesses/claude
 ```
 
-This applies matching blueprints and CellConfigs named `kukeon-operator-codex`
-and `kukeon-operator-claude`. Init does not start them. The explicit entry keeps
+This applies the shared blueprints `codex` and `claude` — one per harness ×
+security profile, realm-wide, see [Teams](../concepts/team.md#shared-blueprints) —
+and the CellConfigs `kukeon-operator-codex` and `kukeon-operator-claude` that
+reference them. Init does not start them. The explicit entry keeps
 recomposition independent of global operator defaults. Configure reusable
 [global defaults](../concepts/team.md#reusable-defaults-after-init) separately.
 
@@ -107,8 +122,52 @@ a complete `0600` TeamEntry before mutating the daemon. Provision missing parent
 scopes with kuke (`kuke init` creates `default/default/default`). Init never
 creates, starts, restarts, or deletes cells. `ApplyDocumentsForTeam` receives
 the stable team name `kukeon`, so reruns update that team's resources and prune
-obsolete team-owned blueprints and configs. It does not prune credentials or
-running cells.
+obsolete team-owned configs. A shared blueprint the team stops using is removed
+only when no other CellConfig references it; if the realm already holds a
+different blueprint under a shared name that another team uses, this team's is
+applied as `<name>-<content digest>` instead of overwriting it. It does not
+prune credentials or running cells.
+
+## Git identity and credentials
+
+Team cells clone, push and sign with [stored git credentials](../guides/git-credentials.md).
+The host `~/.ssh` is never mounted, and init reads nothing from it unless you
+pass `--import-git-identity`.
+
+`spec.git` in `~/.kuke/kuketeams.yaml` is the operator's default identity. It
+names secrets, not host paths:
+
+```yaml
+spec:
+  git:
+    author: { name: Ada Lovelace, email: ada@example.com }
+    committer: { name: Ada Lovelace, email: ada@example.com }
+    credentials:
+      - host: github.com
+        secretRef: { name: git-ssh, realm: default }
+    signing:
+      secretRef: { name: git-ssh, realm: default }
+    sign: [commits, tags]
+```
+
+Init writes it as `spec.defaults.git` of the team's stack, so every team cell
+inherits it. Only that `git` block is touched: the stack's other defaults are
+kept, and credentials for other hosts are merged by host. A source may state its
+own identity (`sources[].git`), which is rendered into that repo's fill of each
+CellConfig.
+
+Init discovers `user.name` / `user.email` from your global git configuration.
+With `--import-git-identity` it also stores your SSH key as the secret
+`git-ssh`, binds it to every host the team's sources use, and — when your git
+configuration already signs commits or tags — makes it the signing key and
+stores your allowed-signers file as `git-allowed-signers`. An existing `git-ssh`
+secret is kept, never overwritten. Without the flag, init reports each SSH
+source no stored credential covers and each setting that no longer has an
+effect (the pre-stored-credential `signingKey` / `allowedSigners` host paths, a
+role's `needs.mounts: [ssh]`) as a note.
+
+Migrating an existing installation: see
+[Migrating to stored git credentials](../guides/migrate-to-stored-git-credentials.md).
 
 ## Authentication and secrets
 
@@ -178,7 +237,18 @@ Applied 4 resources; registered kukeon team: /home/me/.kuke/kuketeam.d/kukeon.ya
 No cells created or started.
 ```
 
-With `--force`, the first line reads `Reset configuration: …`. Diagnostics (for
+Missing runtime secrets and notes follow when there are any:
+
+```
+Missing secrets (cells will not start until they exist):
+  git-ssh  →  kuke create secret git-ssh --realm default --type ssh-key --from-file /path/to/private-key  (git credential; or --type basic-auth)
+Notes:
+  source agents is cloned over SSH but no stored git credential covers github.com; add one to spec.git.credentials (kuke team init --force --import-git-identity imports your key)
+```
+
+The resource count is the shared blueprints plus the CellConfigs, plus one when
+the stack's git defaults were written. With `--force`, the first line reads
+`Reset configuration: …`. Diagnostics (for
 example, Git settings that could not be discovered) are written to stderr.
 
 ## Validation

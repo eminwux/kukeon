@@ -468,7 +468,25 @@ var (
 	ErrSecretScopeIncomplete = errors.New(
 		"secret scope is incomplete: a deeper scope coordinate requires all shallower ones",
 	)
-	ErrSecretDataRequired  = errors.New("secret spec.data is required and must not be empty")
+	ErrSecretDataRequired = errors.New("secret spec.data is required and must not be empty")
+
+	// Typed-secret errors (issue #1472, step 1).
+
+	ErrSecretTypeUnknown = errors.New("secret spec.type must be one of opaque, basic-auth, ssh-key")
+	ErrSecretTypeFields  = errors.New("secret spec does not match its type")
+	// ErrSecretTypedRef is returned when a typed git credential is referenced
+	// through containers[].secrets[], which would expose it as one opaque
+	// value; typed secrets are consumed through git.credentials[] and
+	// git.signing only.
+	ErrSecretTypedRef = errors.New(
+		"typed secret cannot be consumed through secrets[]; reference it from git.credentials[] or git.signing",
+	)
+	// ErrSecretTypeMismatch is returned when a git credential or signing
+	// reference names a secret of the wrong type.
+	ErrSecretTypeMismatch = errors.New("referenced secret has the wrong type for this use")
+	// ErrSecretReservedName guards the sidecar directory typed secrets record
+	// their type in.
+	ErrSecretReservedName  = errors.New("secret name is reserved")
 	ErrSecretScopeNotFound = errors.New("secret scope does not exist")
 	ErrWriteSecret         = errors.New("failed to write secret bytes")
 
@@ -524,6 +542,27 @@ var (
 	// key, a required parameter left unset, or a malformed --param/--param-file
 	// argument).
 	ErrBlueprintInvalid = errors.New("blueprint is invalid")
+
+	// Blueprint contract errors (issue #1472, steps 8–11).
+
+	// ErrBlueprintParameterType is returned when a parameter declaration is
+	// malformed (unknown type, enum without values) or a resolved value does
+	// not fit the parameter's type.
+	ErrBlueprintParameterType = errors.New("blueprint parameter does not match its type")
+	// ErrBlueprintComponent is returned for a malformed component
+	// declaration or an attempt to enable a component the blueprint does not
+	// declare.
+	ErrBlueprintComponent = errors.New("blueprint component is invalid")
+	// ErrBlueprintComponentConflict is returned when two enabled components
+	// (or a component and the cell template) set the same parameter, env key
+	// or secret destination.
+	ErrBlueprintComponentConflict = errors.New("blueprint components conflict")
+	// ErrBlueprintMode is returned when a cell is created in a harness mode
+	// the blueprint does not declare or the CellConfig does not enable.
+	ErrBlueprintMode = errors.New("blueprint harness mode is not available")
+	// ErrImageCapabilityMissing is returned when a container image declares
+	// its capabilities and lacks one the cell requires.
+	ErrImageCapabilityMissing = errors.New("image is missing a required capability")
 
 	// CellBlueprint slot-declaration shape errors (issue #620).
 

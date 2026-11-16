@@ -367,6 +367,58 @@ The `secrets/` directory is `0700` and each secret file is `0600`, both owned by
 - The scope must already exist — apply does **not** auto-create a missing realm/space/stack/cell for a secret (unlike the hierarchy reconcilers). An unreachable scope exits non-zero with a `scope does not exist` message.
 - `spec.data` is never echoed back in any apply output, daemon log, or audit trail.
 
+### Git credentials (typed secrets)
+
+**Intent.** Let a cell clone, push and sign with a stored credential — no host `~/.ssh` mount, no token in env or URL. Full guide: [`docs/site/guides/git-credentials.md`](site/guides/git-credentials.md).
+
+**Sequence.**
+
+```bash
+# 1. store the credential (ssh-key or basic-auth)
+sudo kuke create secret git-ssh --realm default --type ssh-key --from-file ~/.ssh/id_ed25519
+printf %s "$TOKEN" | sudo kuke create secret forge-https --realm default \
+    --type basic-auth --username dev-bot --token-stdin
+
+# 2. bind it as the default identity of a scope (Realm / Space / Stack spec.defaults.git),
+#    or on one CellConfig (spec.git), or on one repo (repos.<slot>.git)
+sudo kuke apply -f stack-with-git-defaults.yaml
+
+# 3. check what a cell would use, without starting it
+sudo kuke create cell probe --from-config dev-claude --dry-run --explain
+```
+
+**Invariants.**
+
+- `--type` is `opaque` (default), `basic-auth` or `ssh-key`. `basic-auth` needs `--username` and exactly one of `--password-stdin` / `--token-stdin` / `--from-file` / `--token-file`; `ssh-key` needs `--from-file <private key>`. A flag belonging to another type exits non-zero.
+- `kuke get secrets` shows a `TYPE` column. No verb, log line, apply result or web UI response ever prints a secret's material — for any type.
+- A typed secret is consumed only through a `git` block. Referencing one from `containers[].secrets[]` fails the cell create; referencing an `opaque` secret as a git credential fails it too. Both errors name the secret and the expected type, never its content.
+- A secret referenced by a cell's git credentials or signing config cannot be deleted while that cell exists (same in-use guard as `secrets[]`).
+- The git identity is rendered as a container-global gitconfig (`GIT_CONFIG_SYSTEM`), not as `GIT_AUTHOR_*` / `GIT_CONFIG_*` env, so a repository's local config and a per-repo `git` block override it. Cells created before this change keep their env rendering until recreated.
+- The remote transport follows the credential bound to the host: `ssh-key` → SSH, `basic-auth` → HTTPS, regardless of how the repo URL is written.
+- Host keys are strict by default: the secret's pinned `knownHosts`, else the built-in `github.com` / `gitlab.com` / `bitbucket.org` keys. `hostKeyPolicy: accept-new` is opt-in per credential. A repo with no credential is cloned with the same strict policy plus the image's own `~/.ssh/known_hosts`.
+- An encrypted private key without a stored passphrase fails the cell create with a message naming the secret. With one, the key is served from a per-container `ssh-agent` and never written decrypted.
+- `--dry-run --explain` lists per repo the effective author, committer, credential (secret name + type) and signing key, each with the level that set it (`realm`, `space`, `stack`, `config`).
+
+### Harness mode per cell
+
+**Intent.** Use one CellConfig for both an attached session and a dispatched run.
+
+**Sequence.**
+
+```bash
+sudo kuke run --from-config dev-claude                                   # the Config's default mode
+sudo kuke run --from-config dev-claude --mode headless --param PROMPT="triage #42" -d
+```
+
+**Invariants.**
+
+- `--mode` must name a mode the blueprint's harness component declares and the Config enables (`spec.modes.enabled`); otherwise the create exits non-zero listing the allowed modes. With no `--mode`: the Config's `spec.modes.default`, else its only enabled mode, else `interactive`.
+- On a Config-sourced cell `--param KEY=VALUE` is accepted only for the picked mode's parameters; any other key exits non-zero and names the mode's parameters. `--param-file` stays rejected.
+- A create that names no mode but supplies a parameter exactly one enabled mode declares — via `--param` or, as dispatches were written before modes existed, `--env` — is created in that mode.
+- Required parameters and secret slots are checked for the picked mode only: a Config that fills a headless-only secret slot still creates an interactive cell, and an interactive cell does not need the headless `PROMPT`.
+- The picked mode and per-cell params are recorded on the cell (`kukeon.io/mode` label, provenance), so `kuke restart`, an `OutOfSync` re-render and `kuke create cell --clone` reproduce them.
+- A cell whose image declares `io.kukeon.capabilities` but lacks a capability required by the blueprint, an enabled component or the Config fails to create, naming the missing capability. An image with no such label is allowed with a warning.
+
 ### Inspect, log, attach
 
 **Intent.** Read what a running cell is doing.

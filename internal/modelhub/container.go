@@ -280,6 +280,9 @@ type ContainerRepo struct {
 	Ref      string
 	URL      string
 	Required bool
+	// Git is this source's own identity; unset fields fall back to the
+	// container's Git default. Issue #1472.
+	Git *RepoGit
 }
 
 // GitSignTarget enumerates the artefacts ContainerGit.Sign can enable signing
@@ -298,6 +301,38 @@ type ContainerGit struct {
 	SigningKey     string
 	Sign           []string
 	AllowedSigners string
+	Credentials    []GitCredential
+	Signing        *GitSigning
+}
+
+// Host-key policies; see the external v1beta1.GitHostKeyPolicy* constants.
+const (
+	GitHostKeyPolicyStrict    = "strict"
+	GitHostKeyPolicyAcceptNew = "accept-new"
+)
+
+// GitCredential mirrors v1beta1.GitCredential.
+type GitCredential struct {
+	Host          string
+	SecretRef     *ContainerSecretRef
+	User          string
+	Port          int
+	HostKeyPolicy string
+}
+
+// GitSigning mirrors v1beta1.GitSigning.
+type GitSigning struct {
+	SecretRef         *ContainerSecretRef
+	AllowedSignersRef *ContainerSecretRef
+}
+
+// RepoGit mirrors v1beta1.RepoGit.
+type RepoGit struct {
+	Author     *GitIdentity
+	Committer  *GitIdentity
+	Credential *GitCredential
+	Signing    *GitSigning
+	Sign       []string
 }
 
 // GitIdentity mirrors the v1beta1 GitIdentity payload.

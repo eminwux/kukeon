@@ -21,6 +21,7 @@ import { InventoryIndicator, NotificationProvider, useNotify } from "./notificat
 import { cellRemovalConfirmed, deleteOperationComplete, purgeOperationComplete, requestedPurgeOptions } from "./lifecycle-policy.js";
 
 const NewCellPage = lazy(async () => ({ default: (await import("./new-cell")).NewCellPage }));
+const NewConfigPage = lazy(async () => ({ default: (await import("./new-config")).NewConfigPage }));
 
 function validTime(value?: string): value is string {
   return !!value && !value.startsWith("0001-") && Number.isFinite(Date.parse(value));
@@ -242,7 +243,7 @@ function ResourcesNavigation({ route }: { route: Route }) {
   return <nav className="resources-nav panel" aria-label="Resources navigation">
     <a href="#/resources" aria-current={route.view === "dashboard" ? "page" : undefined}>Overview</a>
     {titles.map((title, depth) => <a key={title} href={listLink(depth)} aria-current={activeDepth === depth ? "page" : undefined}>{title}</a>)}
-    {Object.entries(catalogTitles).map(([kind, title]) => <a key={kind} href={`#/${kind}`} aria-current={route.view === kind ? "page" : undefined}>{title}</a>)}
+    {Object.entries(catalogTitles).map(([kind, title]) => <a key={kind} href={`#/${kind}`} aria-current={route.view === kind || (kind === "configs" && route.view === "new-config") ? "page" : undefined}>{title}</a>)}
     <a href={imagesLink()} aria-current={route.view === "images" ? "page" : undefined}>Images</a>
     <a href={daemonLink()} aria-current={route.view === "daemon" || route.view === "daemon-logs" ? "page" : undefined}>Daemon</a>
   </nav>;
@@ -475,7 +476,7 @@ function App() {
   const catalog = Object.keys(catalogTitles).includes(route.view);
   const images = route.view === "images";
   const daemonView = route.view === "daemon" || route.view === "daemon-logs";
-  const heading = route.view === "daemon" ? "Daemon" : route.view === "daemon-logs" ? "Daemon logs" : isWorkspace ? route.scope.at(-1) ?? "Cell" : route.view === "new-cell" ? "New Cell" : images ? route.scope[1] ?? "Images" : catalog ? route.scope.at(-1) ?? catalogTitles[route.view] : route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : "Resources";
+  const heading = route.view === "daemon" ? "Daemon" : route.view === "daemon-logs" ? "Daemon logs" : isWorkspace ? route.scope.at(-1) ?? "Cell" : route.view === "new-cell" ? "New Cell" : route.view === "new-config" ? "New Config" : images ? route.scope[1] ?? "Images" : catalog ? route.scope.at(-1) ?? catalogTitles[route.view] : route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : "Resources";
   // Only a scope path or realm qualifies the title; generic subtitles were dropped.
   const headingContext = isWorkspace ? route.scope.join(" / ") : images ? route.scope[1] ? route.scope[0] : "" : route.view === "resource" || (catalog && route.scope.length > 0) ? route.scope.join(" / ") : "";
   const daemonStatus = inventory.daemon.error?.code === "permission_denied" ? "Permission denied" : inventory.daemon.error ? "Unavailable" : inventory.daemon.loading ? "Checking…" : "Connected";
@@ -527,7 +528,7 @@ function App() {
         {!isWorkspace && !cellScreenScope && <ResourcesNavigation route={route} />}
         {!cellScreenScope && <div className="page-heading"><h1>{heading}</h1>{headingContext && <p className="page-context mono-id">{headingContext}</p>}</div>}
         <CellDetailsScreen title={heading ?? "Cell"} view={cellView} scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} operations={operations} onLifecycleAction={runCellLifecycle} />
-        {isWorkspace ? null : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} inventory={inventory} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} /> : <Dashboard inventory={inventory} />}
+        {isWorkspace ? null : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "new-config" ? <Suspense fallback={<p role="status">Loading Config creation form…</p>}><NewConfigPage key={JSON.stringify(route.blueprint ?? [])} revision={revision} inventory={inventory} blueprintScope={route.blueprint} onCreated={() => setRevision(value => value + 1)} /></Suspense> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} inventory={inventory} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} /> : <Dashboard inventory={inventory} />}
         <footer>Daemon inventory · {inventory.data ? <>Last refreshed <time dateTime={inventory.data.updatedAt}>{new Date(inventory.data.updatedAt).toLocaleTimeString()}</time></> : "Not refreshed yet"} · Refresh to retrieve the latest state.</footer>
       </div>
     </main>

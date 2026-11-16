@@ -24,6 +24,7 @@ import (
 	applypkg "github.com/eminwux/kukeon/internal/controller/apply"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/secretstore"
 	"github.com/eminwux/kukeon/internal/util/fs"
 )
 
@@ -56,6 +57,12 @@ func (b *Exec) CreateSecret(secret intmodel.Secret) (CreateSecretResult, error) 
 	var res CreateSecretResult
 
 	if err := validateSecretLookup(secret.Metadata); err != nil {
+		return res, err
+	}
+	if secret.Metadata.Name == secretstore.TypesDir {
+		return res, errdefs.ErrSecretReservedName
+	}
+	if err := secretstore.ValidateSpec(secret.Spec); err != nil {
 		return res, err
 	}
 
@@ -149,7 +156,8 @@ func (b *Exec) DeleteSecret(secret intmodel.Secret) (DeleteSecretResult, error) 
 }
 
 // secretReferences returns the scope paths of every persisted cell whose
-// container specs reference the given secret via secretRef. The match is by
+// container specs reference the given secret via secretRef (from secrets[] or
+// from a git credential / signing block). The match is by
 // resolved storage path (fs.SecretPath), so a reference and the target secret
 // are "the same secret" exactly when they resolve to the same on-disk file —
 // the identity the resolver (internal/ctr.readSecretRefValue) reads at
@@ -169,11 +177,7 @@ func (b *Exec) secretReferences(md intmodel.SecretMetadata) ([]string, error) {
 		scope := fmt.Sprintf("%s/%s/%s/%s",
 			cell.Spec.RealmName, cell.Spec.SpaceName, cell.Spec.StackName, cell.Metadata.Name)
 		for _, c := range cell.Spec.Containers {
-			for _, s := range c.Secrets {
-				if s.SecretRef == nil {
-					continue
-				}
-				ref := s.SecretRef
+			for _, ref := range containerSecretRefs(c) {
 				refPath := fs.SecretPath(b.opts.RunPath, ref.Realm, ref.Space, ref.Stack, ref.Cell, ref.Name)
 				if refPath != targetPath {
 					continue
@@ -187,6 +191,42 @@ func (b *Exec) secretReferences(md intmodel.SecretMetadata) ([]string, error) {
 		}
 	}
 	return refs, nil
+}
+
+// containerSecretRefs lists every kind: Secret a container references: its
+// secrets[], and the credentials and signing keys of its git block and of each
+// repo's own git (#1472).
+func containerSecretRefs(c intmodel.ContainerSpec) []intmodel.ContainerSecretRef {
+	var out []intmodel.ContainerSecretRef
+	add := func(ref *intmodel.ContainerSecretRef) {
+		if ref != nil {
+			out = append(out, *ref)
+		}
+	}
+	addSigning := func(signing *intmodel.GitSigning) {
+		if signing != nil {
+			add(signing.SecretRef)
+			add(signing.AllowedSignersRef)
+		}
+	}
+	for i := range c.Secrets {
+		add(c.Secrets[i].SecretRef)
+	}
+	if c.Git != nil {
+		for i := range c.Git.Credentials {
+			add(c.Git.Credentials[i].SecretRef)
+		}
+		addSigning(c.Git.Signing)
+	}
+	for i := range c.Repos {
+		if rg := c.Repos[i].Git; rg != nil {
+			if rg.Credential != nil {
+				add(rg.Credential.SecretRef)
+			}
+			addSigning(rg.Signing)
+		}
+	}
+	return out
 }
 
 // validateSecretLookup enforces the scope contract for a single-secret get or

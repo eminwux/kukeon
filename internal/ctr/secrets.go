@@ -24,7 +24,7 @@ import (
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	"github.com/eminwux/kukeon/internal/util/fs"
+	"github.com/eminwux/kukeon/internal/secretstore"
 )
 
 // DefaultSecretsStagingDir is the host directory the daemon uses to stage
@@ -188,18 +188,15 @@ func readSecretValue(s intmodel.ContainerSecret, runPath string) (string, error)
 // scope path; the path lets the operator confirm the scope, but the bytes are
 // never logged. Issue #623.
 func readSecretRefValue(ref intmodel.ContainerSecretRef, runPath, name string) (string, error) {
-	path := fs.SecretPath(runPath, ref.Realm, ref.Space, ref.Stack, ref.Cell, ref.Name)
-	data, err := os.ReadFile(path)
+	spec, err := secretstore.Read(runPath, ref)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return "", fmt.Errorf(
-				"%w (secret %q ref %q at %q)",
-				errdefs.ErrSecretRefNotFound, name, ref.Name, path,
-			)
-		}
-		return "", fmt.Errorf("failed to read referenced secret %q from %q: %w", ref.Name, path, err)
+		return "", fmt.Errorf("secret %q: %w", name, err)
 	}
-	return string(data), nil
+	if spec.EffectiveType() != intmodel.SecretTypeOpaque {
+		return "", fmt.Errorf(
+			"%w (secret %q ref %q is %s)", errdefs.ErrSecretTypedRef, name, ref.Name, spec.Type)
+	}
+	return spec.Data, nil
 }
 
 // writeSecretFile writes the secret value atomically with 0400 perms so the

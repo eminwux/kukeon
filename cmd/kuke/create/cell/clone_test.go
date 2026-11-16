@@ -288,7 +288,35 @@ func TestClone_ParamStacking(t *testing.T) {
 	}
 }
 
-func TestClone_RejectsParamOnConfigLineage(t *testing.T) {
+// TestClone_ForwardsParamAndModeOnConfigLineage pins the #1472 clone contract:
+// a Config-lineage clone re-renders through the daemon carrying the source's
+// mode and per-cell params, with --param / --mode stacking on top.
+func TestClone_ForwardsParamAndModeOnConfigLineage(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	lastConfigRequest = kukeonv1.CellFromConfigRequest{}
+	src := sourceConfigCell()
+	src.Spec.Provenance.Mode = "headless"
+	src.Spec.Provenance.ParamOverrides = map[string]string{"PROMPT": "first", "KEEP": "1"}
+	var got v1beta1.CellDoc
+	fc := cloneFakeClient(t, src, &got)
+	cmd, _ := newTestExecCmd(t, fc)
+	setSourceScope(t, cmd, src)
+	setFlag(t, cmd, "clone", src.Metadata.Name)
+	setFlag(t, cmd, "param", "PROMPT=second")
+	cmd.SetArgs([]string{"pclone"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if lastConfigRequest.Mode != "headless" {
+		t.Errorf("request Mode = %q, want the source's headless", lastConfigRequest.Mode)
+	}
+	if lastConfigRequest.Params["PROMPT"] != "second" || lastConfigRequest.Params["KEEP"] != "1" {
+		t.Errorf("request Params = %v, want PROMPT=second stacked on KEEP=1", lastConfigRequest.Params)
+	}
+}
+
+func TestClone_RejectsParamFileOnConfigLineage(t *testing.T) {
 	t.Cleanup(viper.Reset)
 	src := sourceConfigCell()
 	var got v1beta1.CellDoc
@@ -296,12 +324,11 @@ func TestClone_RejectsParamOnConfigLineage(t *testing.T) {
 	cmd, _ := newTestExecCmd(t, fc)
 	setSourceScope(t, cmd, src)
 	setFlag(t, cmd, "clone", src.Metadata.Name)
-	setFlag(t, cmd, "param", "TAG=x")
+	setFlag(t, cmd, "param-file", "/tmp/p")
 	cmd.SetArgs([]string{"badclone"})
 
-	err := cmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), "--param is not valid when cloning a Config-lineage cell") {
-		t.Fatalf("err = %v, want --param rejection on config-lineage clone", err)
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "--param-file") {
+		t.Fatalf("err = %v, want --param-file rejection on config-lineage clone", err)
 	}
 }
 

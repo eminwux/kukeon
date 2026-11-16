@@ -30,7 +30,7 @@ Today the stack schema requires both `metadata.name` and `spec.id`, and they sho
 
 ### `spec.defaults` (object, optional)
 
-`spec.defaults` (`values`, `repos`, `secrets`) is the CellConfig fill every cell kukeond renders from a [`CellConfig`](config.md) inside this stack inherits. It overrides the Realm and Space defaults and is overridden by the CellConfig per key. See [Defaults merge](config.md#defaults-merge).
+`spec.defaults` (`values`, `repos`, `secrets`, `git`) is the CellConfig fill every cell kukeond renders from a [`CellConfig`](config.md) inside this stack inherits. It overrides the Realm and Space defaults and is overridden by the CellConfig per key. See [Defaults merge](config.md#defaults-merge). `git` is the stack's default [git identity and credentials](realm.md#specdefaults-object-optional); `kuke team` writes the operator's identity here for the stack a team lives in.
 
 ```yaml
 spec:

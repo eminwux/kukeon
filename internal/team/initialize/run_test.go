@@ -37,6 +37,9 @@ func sourceFS() map[string]fs.FS { return map[string]fs.FS{"kukeon": os.DirFS(".
 
 func setupRun(t *testing.T) Options {
 	t.Helper()
+	// Run bootstraps from the real `git config --global`; keep the developer's
+	// identity out so resource counts do not depend on the host.
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	root := filepath.Join(t.TempDir(), ".kuke")
 	_, err := bootstrap.Run(t.Context(), bootstrap.Options{Root: root, Git: emptyGit{}})
 	if err != nil {

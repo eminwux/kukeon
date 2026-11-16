@@ -74,6 +74,25 @@ func TestBuildUsesAuthoredContextAndDockerfile(t *testing.T) {
 	}
 }
 
+// TestBuildStampsCapabilityLabel locks step 9 of #1472: every harness image is
+// built carrying its authored capabilities as io.kukeon.capabilities so the
+// daemon can check a cell's `requires` against it; base images declare none.
+func TestBuildStampsCapabilityLabel(t *testing.T) {
+	plan, err := harnessbuild.Build(buildSource(t), "", "registry.test/team", "v1", "linux/amd64", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := plan.Target["claude-root"].Labels["io.kukeon.capabilities"]
+	for _, capability := range []string{"claude", "git", "gh", "root"} {
+		if !slices.Contains(strings.Split(got, ","), capability) {
+			t.Errorf("claude-root label %q lacks capability %q", got, capability)
+		}
+	}
+	if len(plan.Target["base"].Labels) != 0 {
+		t.Errorf("base image must carry no capability label, got %v", plan.Target["base"].Labels)
+	}
+}
+
 func TestBuildRejectsCrossHarnessDuplicateNames(t *testing.T) {
 	source := buildSource(t)
 	filename := "harnesses/codex/harness.yaml"

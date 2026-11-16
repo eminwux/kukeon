@@ -26,6 +26,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/eminwux/kukeon/internal/cellblueprint"
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/compose"
 	"github.com/eminwux/kukeon/pkg/team/config"
@@ -40,7 +41,6 @@ func TestSharedRendererProfiles(t *testing.T) {
 		for _, project := range []bool{false, true} {
 			cfg, opts := fixture(t)
 			allHarnesses(cfg)
-			opts.HomeDir = "/host/user"
 			cfg.Spec.Secrets = []config.SecretBinding{routerBinding()}
 			source := copiedSource(t)
 			repos := ""
@@ -69,8 +69,27 @@ func TestSharedRendererProfiles(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if len(result.Blueprints) != len(result.Pairs) {
+				t.Fatalf("blueprints = %d, want one per harness", len(result.Blueprints))
+			}
 			for _, pair := range result.Pairs {
 				assertSharedProfile(t, pair, root, project)
+			}
+			// `needs.mounts: [ssh]` is still accepted, but mounts nothing: the
+			// operator is told once, and no document names the host ~/.ssh.
+			if !slices.ContainsFunc(result.Notes, func(note string) bool {
+				return strings.Contains(note, "role operator") && strings.Contains(note, "no longer mounts")
+			}) {
+				t.Fatalf("missing ssh-mount note: %v", result.Notes)
+			}
+			raw, err := result.MarshalYAML()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, absent := range []string{".ssh", "GIT_SSH_COMMAND", "/host/user"} {
+				if bytes.Contains(raw, []byte(absent)) {
+					t.Fatalf("rendered documents still contain %q", absent)
+				}
 			}
 		}
 	}
@@ -86,6 +105,10 @@ func TestExternalRendererContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	// No Make dependency. Preserve order, shell state, and template-like text.
+	// Dropping spec.modes makes this a harness with one startup, the form
+	// external harness definitions written before modes still use.
+	modes := h.Spec.Modes
+	h.Spec.Modes = nil
 	h.Spec.Shell = "/bin/sh"
 	h.Spec.OnInit = []harness.Script{{Script: "set -eu\nvalue='{{ opaque }}'\n"}, {Script: "printf '%s' \"$value\"\n"}}
 	raw, err := yaml.Marshal(h)
@@ -99,9 +122,16 @@ func TestExternalRendererContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := result.Pairs[0].Blueprint.Spec.Cell.Containers[0]
+	// A harness without modes keeps the built-in PROMPT parameter and env.
+	if got := cellblueprint.Modes(*result.Pairs[0].Blueprint); len(got) != 0 {
+		t.Fatalf("modes = %v, want none", got)
+	}
+	c := workOf(t, renderCell(t, result.Pairs[0], "", map[string]string{"PROMPT": "legacy prompt"}))
 	if c.Command != "/bin/sh" || len(c.Tty.OnInit) != 2 {
 		t.Fatal("shell/order lost")
+	}
+	if envOf(c)["PROMPT"] != "legacy prompt" {
+		t.Fatalf("PROMPT = %q", envOf(c)["PROMPT"])
 	}
 	var joined strings.Builder
 	for i, stage := range c.Tty.OnInit {
@@ -114,6 +144,33 @@ func TestExternalRendererContract(t *testing.T) {
 	output, err := cmd.CombinedOutput()
 	if err != nil || string(output) != "{{ opaque }}" {
 		t.Fatalf("shell state lost: %q %v", output, err)
+	}
+	// With modes, spec.onInit runs first in every mode, followed by the mode's own.
+	withModes := h
+	withModes.Spec.Modes = map[string]harness.Mode{}
+	for name, mode := range modes {
+		mode.OnInit = []harness.Script{{Script: "printf ' %s' " + name + "\n"}}
+		withModes.Spec.Modes[name] = mode
+	}
+	modeRaw, err := yaml.Marshal(withModes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source[filename].Data = modeRaw
+	result, err = compose.Compose(cfg, selectedTeam(cfg), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{interactive, headless} {
+		staged := work(t, result.Pairs[0], mode)
+		if len(staged.Tty.OnInit) != 3 || staged.Tty.OnInit[0].Script != h.Spec.OnInit[0].Script ||
+			staged.Tty.OnInit[2].Script != "printf ' %s' "+mode+"\n" {
+			t.Fatalf("%s stages = %+v", mode, staged.Tty.OnInit)
+		}
+		modeCmd := exec.CommandContext(t.Context(), staged.Command, "-c", script(staged))
+		if out, runErr := modeCmd.CombinedOutput(); runErr != nil || string(out) != "{{ opaque }} "+mode {
+			t.Fatalf("%s: shared prefix or mode stage lost: %q %v", mode, out, runErr)
+		}
 	}
 	for _, test := range []struct {
 		name   string
@@ -193,7 +250,15 @@ func runPackagedStartup(t *testing.T, name, prompt string, conflict bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := result.Pairs[0].Blueprint.Spec.Cell.Containers[0]
+	// The mode is picked per cell: a prompt makes it a headless run.
+	mode, params := interactive, map[string]string(nil)
+	if prompt != "" {
+		mode, params = headless, map[string]string{"PROMPT": prompt}
+	}
+	c := workOf(t, renderCell(t, result.Pairs[0], mode, params))
+	if got, set := envOf(c)["PROMPT"]; set != (prompt != "") || got != prompt {
+		t.Fatalf("%s cell PROMPT = %q (set=%v)", mode, got, set)
+	}
 	state := filepath.Join(root, "launch-args")
 	observer := "#!/bin/sh\npwd > \"$LAUNCH_DIR\"\nprintf '%s\\0' \"$@\" > \"$LAUNCH_STATE\"\nprintf '%s\\n' '{\"type\":\"result\",\"is_error\":false}'\n"
 	if err = os.WriteFile(filepath.Join(bin, name), []byte(observer), 0o700); err != nil {
@@ -225,7 +290,7 @@ func runPackagedStartup(t *testing.T, name, prompt string, conflict bool) {
 		scripts.WriteByte('\n')
 	}
 	for range 2 {
-		cmd := startupCommand(t, c, scripts.String(), home, initial, bin, state, prompt)
+		cmd := startupCommand(t, c, scripts.String(), home, initial, bin, state)
 		output, launchErr := cmd.CombinedOutput()
 		if conflict {
 			if launchErr == nil || !bytes.Contains(output, []byte("Refusing to replace")) {
@@ -297,8 +362,8 @@ func assertMaterializedRole(t *testing.T, home, policy, name string) {
 
 func startupCommand(
 	t *testing.T,
-	c api.BlueprintContainer,
-	script, home, initial, bin, state, prompt string,
+	c api.ContainerSpec,
+	script, home, initial, bin, state string,
 ) *exec.Cmd {
 	t.Helper()
 	cmd := exec.CommandContext(t.Context(), c.Command, "-c", script)
@@ -311,7 +376,6 @@ func startupCommand(
 		cmd.Env,
 		"HOME="+home,
 		"PATH="+bin+":"+os.Getenv("PATH"),
-		"PROMPT="+prompt,
 		"OPENROUTER_MODEL=test",
 		"LAUNCH_STATE="+state,
 		"LAUNCH_DIR="+state+"-dir",
@@ -324,14 +388,67 @@ func startupCommand(
 
 func assertSharedProfile(t *testing.T, pair compose.Pair, root, project bool) {
 	t.Helper()
-	c := pair.Blueprint.Spec.Cell.Containers[0]
-	if c.Privileged != root || pair.Blueprint.Spec.Cell.NestedCgroupRuntime != root ||
-		c.Command != "/bin/bash" ||
-		c.WorkingDir != "/home/user" {
-		t.Fatalf("profile lost for %s: %+v", pair.Harness, c)
+	// One blueprint per harness × security profile; the posture is fixed in it.
+	wantName := pair.Harness
+	if root {
+		wantName += "-root"
 	}
-	if len(c.Tmpfs) != map[bool]int{true: 2, false: 0}[root] {
-		t.Fatal("tmpfs profile lost")
+	bp := pair.Blueprint
+	if bp.Metadata.Name != wantName || pair.Config.Spec.Blueprint.Name != wantName {
+		t.Fatalf("blueprint = %q, want %q", bp.Metadata.Name, wantName)
+	}
+	if slices.Contains(bp.Spec.Requires, "root") != root || !slices.Contains(bp.Spec.Requires, "git") {
+		t.Fatalf("blueprint requires = %v", bp.Spec.Requires)
+	}
+	template := bp.Spec.Cell.Containers[0]
+	if template.Privileged != root || bp.Spec.Cell.NestedCgroupRuntime != root {
+		t.Fatalf("posture not fixed in blueprint %s", wantName)
+	}
+	for _, mode := range []string{interactive, headless} {
+		doc := renderCell(t, pair, mode, map[string]string{"PROMPT": "p"})
+		c := workOf(t, doc)
+		if c.Privileged != root || doc.Spec.NestedCgroupRuntime != root ||
+			c.Command != "/bin/bash" ||
+			c.WorkingDir != "/home/user" {
+			t.Fatalf("profile lost for %s: %+v", pair.Harness, c)
+		}
+		if len(c.Tmpfs) != map[bool]int{true: 2, false: 0}[root] {
+			t.Fatal("tmpfs profile lost")
+		}
+		if len(c.Repos) != map[bool]int{true: 2, false: 1}[project] {
+			t.Fatalf("cloned repositories changed: %+v", c.Repos)
+		}
+		foundState := false
+		for _, m := range c.Volumes {
+			if strings.Contains(m.Source, ".ssh") || strings.Contains(m.Target, ".ssh") {
+				t.Fatalf("host ssh directory mounted: %+v", m)
+			}
+			if m.Kind == api.VolumeKindVolume {
+				foundState = true
+				if !m.Ensure || m.Target != "/home/user/."+pair.Harness {
+					t.Fatalf("state binding changed: %+v", m)
+				}
+			}
+		}
+		if foundState != (pair.Harness != "opencode") {
+			t.Fatal("mounts lost")
+		}
+		env := envOf(c)
+		if _, set := env["GIT_SSH_COMMAND"]; set {
+			t.Fatal("GIT_SSH_COMMAND reached a cell")
+		}
+		if _, sandboxed := env["IS_SANDBOX"]; sandboxed != root {
+			t.Fatalf("IS_SANDBOX set = %v, want %v", sandboxed, root)
+		}
+		if pair.Harness == "codex" {
+			want := "workspace-write"
+			if root {
+				want = "danger-full-access"
+			}
+			if env["CODEX_SANDBOX"] != want {
+				t.Fatalf("CODEX_SANDBOX = %q, want %s", env["CODEX_SANDBOX"], want)
+			}
+		}
 	}
 	if len(pair.Config.Spec.Repos) != map[bool]int{true: 2, false: 1}[project] {
 		t.Fatal("repository bindings changed")
@@ -339,28 +456,11 @@ func assertSharedProfile(t *testing.T, pair compose.Pair, root, project bool) {
 	if project && pair.Config.Spec.Repos["project"].Ref != "v3" {
 		t.Fatal("source revision lost")
 	}
-	foundSSH, foundState := false, false
-	for _, m := range c.Volumes {
-		if m.Target == "/home/user/.ssh" {
-			foundSSH = m.Source == "/host/user/.ssh" && m.ReadOnly
-		}
-		if m.Kind == api.VolumeKindVolume {
-			foundState = true
-			if !m.Ensure || m.Target != "/home/user/."+pair.Harness {
-				t.Fatalf("state binding changed: %+v", m)
-			}
-		}
+	wantRequires := []string{"go"}
+	if !slices.Equal(pair.Config.Spec.Requires, wantRequires) {
+		t.Fatalf("config requires = %v, want %v (root is the blueprint's)", pair.Config.Spec.Requires, wantRequires)
 	}
-	if !foundSSH || foundState != (pair.Harness != "opencode") {
-		t.Fatal("mounts lost")
-	}
-	if pair.Harness == "codex" {
-		want := "CODEX_SANDBOX=workspace-write"
-		if root {
-			want = "CODEX_SANDBOX=danger-full-access"
-		}
-		if !slices.Contains(c.Env, want) {
-			t.Fatalf("missing %s", want)
-		}
+	if root && !slices.Contains(pair.Image.Capabilities, "root") {
+		t.Fatalf("root profile selected a non-root image: %+v", pair.Image)
 	}
 }

@@ -346,3 +346,121 @@ func TestNewSecretCmd_ListOutputShape(t *testing.T) {
 		}
 	})
 }
+
+// TestNewSecretCmd_TypeColumn pins the #1472 TYPE column: the table reports
+// each secret's type (an unset type reads as opaque, so secrets written before
+// typed secrets existed list correctly), on both the list and the named row,
+// and `-o yaml` carries the type and nothing else of the spec.
+func TestNewSecretCmd_TypeColumn(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	secrets := map[string]string{
+		"deploy-key":  v1beta1.SecretTypeSSHKey,
+		"forge-token": v1beta1.SecretTypeBasicAuth,
+		"legacy":      "",
+	}
+	fake := &fakeClient{
+		getSecretFn: func(doc v1beta1.SecretDoc) (kukeonv1.GetSecretResult, error) {
+			return kukeonv1.GetSecretResult{
+				Secret: v1beta1.SecretDoc{
+					Metadata: doc.Metadata,
+					Spec:     v1beta1.SecretSpec{Type: secrets[doc.Metadata.Name]},
+				},
+				MetadataExists: true,
+			}, nil
+		},
+		listSecretsFn: func(_, _, _, _ string) ([]v1beta1.SecretDoc, error) {
+			out := make([]v1beta1.SecretDoc, 0, len(secrets))
+			for _, name := range []string{"deploy-key", "forge-token", "legacy"} {
+				out = append(out, v1beta1.SecretDoc{
+					Metadata: v1beta1.SecretMetadata{Name: name, Realm: "r1"},
+					Spec:     v1beta1.SecretSpec{Type: secrets[name]},
+				})
+			}
+			return out, nil
+		},
+	}
+	run := func(t *testing.T, args ...string) string {
+		t.Helper()
+		t.Cleanup(viper.Reset)
+		cmd := secret.NewSecretCmd()
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+		cmd.SetContext(context.WithValue(context.Background(), secret.MockControllerKey{}, kukeonv1.Client(fake)))
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		return buf.String()
+	}
+	// rowType returns the TYPE cell of the row whose NAME is name, located by
+	// the header's column order rather than by offset.
+	rowType := func(t *testing.T, out, name string) string {
+		t.Helper()
+		typeCol := -1
+		for _, line := range strings.Split(out, "\n") {
+			fields := strings.Fields(line)
+			if len(fields) == 0 {
+				continue
+			}
+			if fields[0] == "NAME" {
+				for i, f := range fields {
+					if f == "TYPE" {
+						typeCol = i
+					}
+				}
+				if typeCol != 1 {
+					t.Fatalf("TYPE column index = %d, want 1 (right after NAME); header: %q", typeCol, line)
+				}
+				continue
+			}
+			if fields[0] == name {
+				if typeCol < 0 || typeCol >= len(fields) {
+					t.Fatalf("row %q has no TYPE cell: %q", name, line)
+				}
+				return fields[typeCol]
+			}
+		}
+		t.Fatalf("no row for %q in:\n%s", name, out)
+		return ""
+	}
+
+	want := map[string]string{
+		"deploy-key":  v1beta1.SecretTypeSSHKey,
+		"forge-token": v1beta1.SecretTypeBasicAuth,
+		"legacy":      v1beta1.SecretTypeOpaque,
+	}
+
+	t.Run("list", func(t *testing.T) {
+		out := run(t, "--realm", "r1")
+		for name, typ := range want {
+			if got := rowType(t, out, name); got != typ {
+				t.Errorf("list TYPE for %q = %q, want %q; got:\n%s", name, got, typ, out)
+			}
+		}
+	})
+
+	t.Run("named row", func(t *testing.T) {
+		for name, typ := range want {
+			out := run(t, name, "--realm", "r1")
+			if got := rowType(t, out, name); got != typ {
+				t.Errorf("named TYPE for %q = %q, want %q; got:\n%s", name, got, typ, out)
+			}
+		}
+	})
+
+	t.Run("-o yaml carries the type only", func(t *testing.T) {
+		out := run(t, "deploy-key", "--realm", "r1", "-o", "yaml")
+		if !strings.Contains(out, "type: "+v1beta1.SecretTypeSSHKey) {
+			t.Errorf("-o yaml should report the type; got:\n%s", out)
+		}
+		for _, line := range strings.Split(out, "\n") {
+			key, _, _ := strings.Cut(strings.TrimSpace(line), ":")
+			switch key {
+			case "data", "sshKey", "basicAuth", "privateKey", "password", "token":
+				t.Errorf("-o yaml emits material field %q; got:\n%s", key, out)
+			}
+		}
+	})
+}

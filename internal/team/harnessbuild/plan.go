@@ -25,6 +25,7 @@ import (
 	"slices"
 	"strings"
 
+	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/harness"
 )
 
@@ -37,7 +38,11 @@ type Target struct {
 	Platforms  []string          `json:"platforms"`
 	Tags       []string          `json:"tags"`
 	Contexts   map[string]string `json:"contexts,omitempty"`
-	Output     []string          `json:"output"`
+	// Labels stamps io.kukeon.capabilities from the image's authored
+	// capabilities so the daemon can check a cell's `requires` against the
+	// image it is created from (issue #1472). Base images declare none.
+	Labels map[string]string `json:"labels,omitempty"`
+	Output []string          `json:"output"`
 }
 
 type Group struct {
@@ -121,6 +126,9 @@ func Build(source fs.FS, directory, registry, tag, platforms string, subset []st
 		)
 		if targetErr != nil {
 			return nil, fmt.Errorf("image %q (%s): %w", image.Name, image.Build.Context, targetErr)
+		}
+		if len(image.Capabilities) > 0 {
+			target.Labels = map[string]string{api.ImageLabelCapabilities: strings.Join(image.Capabilities, ",")}
 		}
 		plan.Target[image.Name] = target
 	}

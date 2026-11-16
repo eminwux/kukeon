@@ -86,6 +86,9 @@ func newAddCommand(
 			if err == nil {
 				err = printMissingSecrets(cmd.OutOrStdout(), result.MissingSecrets)
 			}
+			if err == nil {
+				err = printNotes(cmd.OutOrStdout(), result.Notes)
+			}
 			return err
 		},
 	}
@@ -103,6 +106,23 @@ func newAddCommand(
 }
 
 func defaultAddCommand() *cobra.Command { return newAddCommand(os.UserHomeDir, initialize.Add) }
+
+// printNotes lists what the operator should know after a successful apply:
+// settings that no longer have an effect and sources without a git credential.
+func printNotes(w io.Writer, notes []string) error {
+	if len(notes) == 0 {
+		return nil
+	}
+	if _, err := fmt.Fprintln(w, "Notes:"); err != nil {
+		return err
+	}
+	for _, line := range notes {
+		if _, err := fmt.Fprintf(w, "  %s\n", line); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // printMissingSecrets reports runtime secrets the team needs but kukeon lacks;
 // application already succeeded, so this is guidance, not a failure.

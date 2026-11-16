@@ -93,3 +93,49 @@ func TestContainerSpecChanged_SecretRefScopeChange(t *testing.T) {
 		t.Error("expected containerSpecChanged=true for a SecretRef scope change")
 	}
 }
+
+// TestContainerSpecChanged_GitMountAppears guards the #1472 recreate gate: the
+// staged git directory is an OCI mount added at container create, so a git
+// declaration appearing or disappearing — on the container or on any of its
+// repos — must recreate. An edit inside an existing declaration must not: the
+// bundle is re-rendered from the spec on every start.
+func TestContainerSpecChanged_GitMountAppears(t *testing.T) {
+	ref := func(name string) *intmodel.ContainerSecretRef {
+		return &intmodel.ContainerSecretRef{Name: name, Realm: "default"}
+	}
+	plainRepo := intmodel.ContainerRepo{Name: "src", URL: "git@github.com:o/r.git", Target: "/src"}
+	gitRepo := plainRepo
+	gitRepo.Git = &intmodel.RepoGit{Credential: &intmodel.GitCredential{SecretRef: ref("repo-key")}}
+	gitBlock := func(secret string) *intmodel.ContainerGit {
+		return &intmodel.ContainerGit{
+			Author:      &intmodel.GitIdentity{Name: "Dev", Email: "dev@example.com"},
+			Credentials: []intmodel.GitCredential{{Host: "github.com", SecretRef: ref(secret)}},
+		}
+	}
+	spec := func(git *intmodel.ContainerGit, repos ...intmodel.ContainerRepo) intmodel.ContainerSpec {
+		return intmodel.ContainerSpec{Image: "busybox:latest", Command: "sleep", Git: git, Repos: repos}
+	}
+
+	cases := []struct {
+		name            string
+		desired, actual intmodel.ContainerSpec
+		want            bool
+	}{
+		{"container git added", spec(gitBlock("k")), spec(nil), true},
+		{"container git removed", spec(nil), spec(gitBlock("k")), true},
+		{"repo git added", spec(nil, gitRepo), spec(nil, plainRepo), true},
+		{"repo git removed", spec(nil, plainRepo), spec(nil, gitRepo), true},
+		// The mount already exists either way: no recreate.
+		{"credential edited", spec(gitBlock("rotated")), spec(gitBlock("k")), false},
+		{"repo git added next to container git", spec(gitBlock("k"), gitRepo), spec(gitBlock("k"), plainRepo), false},
+		{"container git replaced by repo git", spec(nil, gitRepo), spec(gitBlock("k"), plainRepo), false},
+		{"plain repo added, no git anywhere", spec(nil, plainRepo), spec(nil), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := containerSpecChanged(&tc.desired, &tc.actual); got != tc.want {
+				t.Errorf("containerSpecChanged = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

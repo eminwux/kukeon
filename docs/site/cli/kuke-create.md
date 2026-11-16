@@ -67,7 +67,7 @@ Four source modes (exactly one of `--image` / `--from-blueprint` / `--from-confi
 
 - `kuke create cell [name] --image <ref> [--command <cmd>]` — synthesizes a single attachable container from a bare image ref and persists it in a **stopped** state (the quick-start source, the create-side mirror of [`kuke run --image`](kuke-run.md)). Pair with `kuke start <name>`. `--command` overrides the synthesized entrypoint (default `/bin/sh`). No daemon-stored binding is resolved, so the binding render-time/override knobs `--param`/`--param-file`/`--env` are rejected with `--image` (use `--from-blueprint`/`--from-config` to parameterise or layer env). Mutually exclusive with `--from-blueprint`/`--from-config`/`--clone`.
 - `kuke create cell [name] --from-blueprint <bp> [--param K=V]... [--param-file <path>]` — resolves the daemon-stored CellBlueprint, applies scalar params, materialises the full Cell record (containers and all), and persists it in a **stopped** state. Pair with `kuke start <name>`. Differs from [`kuke run --from-blueprint`](kuke-run.md) (materialise + start + attach) by leaving the cell stopped for inspection or hand-off; Blueprint-lineage cells reach the recreate branch of `kuke restart`'s daemon-side reconcile (P7) — updates flow through restart, not in-place mutation.
-- `kuke create cell [name] --from-config <cfg> [--env K=V]... [--dry-run [--explain]]` — kukeond renders the cell from the daemon-stored CellConfig and its referenced Blueprint — merging the Realm → Space → Stack `spec.defaults` under the Config's `spec.values` + repo/secret slot fills, deeper levels winning per key (see [Defaults merge](../manifests/config.md#defaults-merge)) — and persists it in **stopped** state. `--dry-run` prints the rendered Cell without creating it; `--explain` prints every merged value with the level that set it and the rendered cell's digest. Pair with `kuke start <name>`. Later reconcile against the lineage Config flows through [`kuke restart <name>`](kuke-restart.md) (OutOfSync-driven, #821) once the cell is started.
+- `kuke create cell [name] --from-config <cfg> [--mode <m>] [--param K=V]... [--env K=V]... [--dry-run [--explain]]` — kukeond renders the cell from the daemon-stored CellConfig and its referenced Blueprint — merging the Realm → Space → Stack `spec.defaults` under the Config's `spec.values` + repo/secret slot fills, deeper levels winning per key (see [Defaults merge](../manifests/config.md#defaults-merge)) — and persists it in **stopped** state. `--dry-run` prints the rendered Cell without creating it; `--explain` prints every merged value with the level that set it — including the enabled components, the picked mode, the required image capabilities and the git identity and credential each repo uses — and the rendered cell's digest. `--mode` picks the [harness mode](../concepts/blueprint-contract.md#modes) the cell is created in (default: the Config's); `--param` is accepted only for that mode's parameters. Pair with `kuke start <name>`. Later reconcile against the lineage Config flows through [`kuke restart <name>`](kuke-restart.md) (OutOfSync-driven, #821) once the cell is started.
 - `kuke create cell [name] --clone <cell> [--param K=V]... | [--env K=V]...` — forks an existing cell's recipe: reads the source cell's `Spec.Provenance` (the Blueprint/Config binding it was materialised from plus any recorded per-cell overrides) and re-materialises from that same binding. The clone copies the source's provenance verbatim, inherits its `kukeon.io/config` / `kukeon.io/blueprint` lineage label, and is stamped with a `kukeon.io/source-cell=<src>` annotation. Additional `--param` (Blueprint-lineage source) or `--env` (Config-lineage source) **stack on top** of the source's recorded overrides, last-write-wins; the per-source symmetry below applies to the stacked overrides. A source cell with no provenance (a hand-built cell never materialised from a binding) cannot be cloned.
 
 **Cell name (unified `<prefix>-<6hex>` rule).** `NAME` is optional. When omitted, the cell name is generated: `<prefix>-<6hex>` for `--from-blueprint`/`--from-config` (prefix = the blueprint's `spec.prefix`, defaulting to its `metadata.name`), `<source-name>-<6hex>` for `--clone`, and `<image-short-name>-<6hex>` for `--image` (e.g. `docker.io/library/alpine:3` → `alpine-<6hex>`). An explicit `NAME` is used verbatim. The Config / Blueprint name is **not** the cell name — it survives only as the `kukeon.io/{config,blueprint}` lineage label (epic:cell-identity).
@@ -168,25 +168,43 @@ sudo kuke run --from-config prod   # stamp + start + attach a fresh cell from th
 ## kuke create secret
 
 ```
-kuke create secret [NAME] (--from-literal=KEY=VAL... | --from-file=<path>)
+kuke create secret [NAME] [--type opaque|basic-auth|ssh-key] <source flags>
                           [--realm <r>] [--space <s>] [--stack <t>]
 ```
 
-Create a `kind: Secret` within a scope. Two source modes:
+Create a `kind: Secret` within a scope. `--type` selects what it holds ([Secret manifest](../manifests/secret.md)); every value is write-only.
+
+**`--type opaque`** (default) — an arbitrary value, referenceable via `ContainerSecret.secretRef` from a `CellConfig`'s slot fill:
 
 - `kuke create secret <name> --from-literal=KEY=VAL` — inline value, repeatable. Multiple values are joined by newline.
 - `kuke create secret <name> --from-file=<path>` — read value from file.
 
-At least one of `--from-literal` or `--from-file` is required. The Secret is written to daemon storage and is referenceable via `ContainerSecret.secretRef` from a `CellConfig`'s slot fill.
+At least one of `--from-literal` or `--from-file` is required.
 
-| Flag                  | Default             | Description                           |
-| --------------------- | ------------------- | ------------------------------------- |
-| `<NAME>` (positional) | _(required)_        | The secret name                       |
-| `--realm`             | `default`           | Realm that owns the secret            |
-| `--space`             | `default`           | Space that owns the secret            |
-| `--stack`             | `default`           | Stack that owns the secret            |
-| `--from-literal`      | (empty, repeatable) | Specify a key-value pair as `KEY=VAL` |
-| `--from-file`         | `""`                | Read the secret value from a file     |
+**`--type basic-auth`** — a git credential for HTTPS remotes: `--username` plus exactly one of `--password-stdin`, `--token-stdin`, `--from-file` (password file) or `--token-file`.
+
+**`--type ssh-key`** — a git credential and signing key for SSH: `--from-file <private key>`, plus the optional passphrase, public key, certificate and pinned host keys.
+
+The two git types are used through a `git` block — see the [git credentials guide](../guides/git-credentials.md) — and cannot be consumed as a container `secrets[]` entry. A flag that belongs to another type is rejected.
+
+| Flag                  | Type         | Default             | Description                                                                 |
+| --------------------- | ------------ | ------------------- | --------------------------------------------------------------------------- |
+| `<NAME>` (positional) | all          | _(required)_        | The secret name                                                             |
+| `--realm`             | all          | `default`           | Realm that owns the secret                                                  |
+| `--space`             | all          | _(realm-scoped)_    | Space that owns the secret                                                  |
+| `--stack`             | all          | _(realm-scoped)_    | Stack that owns the secret (requires `--space`)                             |
+| `--type`              | all          | `opaque`            | `opaque`, `basic-auth` or `ssh-key`                                         |
+| `--from-literal`      | `opaque`     | (empty, repeatable) | Specify a key-value pair as `KEY=VAL`                                       |
+| `--from-file`         | all          | `""`                | `opaque`: the value. `basic-auth`: the password. `ssh-key`: the private key |
+| `--username`          | `basic-auth` | `""`                | The HTTP user                                                               |
+| `--password-stdin`    | `basic-auth` | `false`             | Read the password from stdin                                                |
+| `--token-stdin`       | `basic-auth` | `false`             | Read a token from stdin                                                     |
+| `--token-file`        | `basic-auth` | `""`                | Read a token from a file                                                    |
+| `--passphrase-stdin`  | `ssh-key`    | `false`             | Read the private key's passphrase from stdin                                |
+| `--passphrase-file`   | `ssh-key`    | `""`                | Read the private key's passphrase from a file                               |
+| `--public-key-file`   | `ssh-key`    | `""`                | The matching public key                                                     |
+| `--certificate-file`  | `ssh-key`    | `""`                | An OpenSSH user certificate for the key                                     |
+| `--known-hosts-file`  | `ssh-key`    | `""`                | Pinned host keys in `known_hosts` format                                    |
 
 ```bash
 # Inline value
@@ -194,7 +212,21 @@ sudo kuke create secret api-key --from-literal=API_KEY=sk-... --realm default
 
 # From file
 sudo kuke create secret tls-cert --from-file=./tls.crt --realm default
+
+# SSH key for git (clone, push, signing)
+sudo kuke create secret git-ssh --type ssh-key --from-file ~/.ssh/id_ed25519 --realm default
+
+# Passphrase-protected key with a certificate and pinned host keys
+sudo kuke create secret git-ssh --type ssh-key --from-file ~/.ssh/id_ed25519 \
+    --passphrase-file ./passphrase --certificate-file ~/.ssh/id_ed25519-cert.pub \
+    --known-hosts-file ./forge_known_hosts --realm default
+
+# HTTPS username + token
+printf %s "$TOKEN" | sudo kuke create secret forge-https --type basic-auth \
+    --username dev-bot --token-stdin --realm default
 ```
+
+`kuke get secrets` lists each secret's `TYPE`; no verb prints a value.
 
 ## kuke create registry-credential
 

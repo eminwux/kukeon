@@ -1,0 +1,16 @@
+# GitHub Issues forge: the cell tracks its work in GitHub issues and pull
+# requests through the `gh` CLI.
+#
+# v1 carries no binding of its own: it needs the `gh` capability and the
+# `github` connector's token, and the agent works against the repository it is
+# checked out in. How an explicit issue-destination binding reaches the agent
+# is still open (see issue #1472, step 15).
+apiVersion: kuketeams.io/v1
+kind: Component
+metadata:
+  name: github-issues
+spec:
+  kind: forge
+  description: Track issues and changes in GitHub through the gh CLI.
+  requires: [gh]
+  needs: [github]
