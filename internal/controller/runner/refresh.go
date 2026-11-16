@@ -202,17 +202,22 @@ func (r *Exec) RefreshRealm(realm intmodel.Realm) (intmodel.Realm, bool, error) 
 	return realm, updated, nil
 }
 
-// carryRealmLifecycle preserves the lifecycle/reason fields the refresh
-// path does not derive from filesystem/containerd checks. CreatedAt and
-// ReadyAt are set-once and must survive the locally-built newStatus;
-// Reason/Message belong to whoever last set them (the reconciler in the
-// future, or a Failed-path writer today). UpdatedAt is intentionally
-// not carried — UpdateRealmMetadata stamps it on every persist.
+// carryRealmLifecycle preserves the status fields the refresh path does
+// not derive from filesystem/containerd checks. CreatedAt and ReadyAt are
+// set-once and must survive the locally-built newStatus; Reason/Message
+// belong to whoever last set them (the reconciler in the future, or a
+// Failed-path writer today). SubtreeControllers (#328) is recorded by
+// provision/ensure and ObservedGeneration by the reconciler; refresh
+// re-derives neither, so a refresh-detected change must not erase them
+// (#1466). UpdatedAt is intentionally not carried — UpdateRealmMetadata
+// stamps it on every persist.
 func carryRealmLifecycle(orig intmodel.RealmStatus, next *intmodel.RealmStatus) {
 	next.CreatedAt = orig.CreatedAt
 	next.ReadyAt = orig.ReadyAt
 	next.Reason = orig.Reason
 	next.Message = orig.Message
+	next.SubtreeControllers = orig.SubtreeControllers
+	next.ObservedGeneration = orig.ObservedGeneration
 }
 
 // RefreshSpace refreshes the status of a space by checking CNI config.
@@ -293,6 +298,8 @@ func carrySpaceLifecycle(orig intmodel.SpaceStatus, next *intmodel.SpaceStatus) 
 	next.ReadyAt = orig.ReadyAt
 	next.Reason = orig.Reason
 	next.Message = orig.Message
+	next.SubtreeControllers = orig.SubtreeControllers
+	next.ObservedGeneration = orig.ObservedGeneration
 }
 
 // RefreshStack refreshes the status of a stack by checking cgroup.
@@ -344,6 +351,8 @@ func carryStackLifecycle(orig intmodel.StackStatus, next *intmodel.StackStatus) 
 	next.ReadyAt = orig.ReadyAt
 	next.Reason = orig.Reason
 	next.Message = orig.Message
+	next.SubtreeControllers = orig.SubtreeControllers
+	next.ObservedGeneration = orig.ObservedGeneration
 }
 
 // RefreshCell refreshes the status of a cell and its containers.
