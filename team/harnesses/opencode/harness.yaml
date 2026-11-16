@@ -29,8 +29,7 @@ spec:
             make -f /opt/kuketeams/harness/Makefile.start setup
 
             cd "$INITIAL_PATH" || exit 1
-            opencode --model "$OPENROUTER_MODEL" ./
-            exit $?
+            exec opencode --model "$OPENROUTER_MODEL" ./
     headless:
       description: Dispatched, unattended run of one prompt.
       parameters:
@@ -45,8 +44,7 @@ spec:
             make -f /opt/kuketeams/harness/Makefile.start setup
 
             cd "$INITIAL_PATH" || exit 1
-            opencode run "$PROMPT" "$@" --model "$OPENROUTER_MODEL" -f ./
-            exit $?
+            exec opencode run "$PROMPT" "$@" --model "$OPENROUTER_MODEL" -f ./
   skillPath: $HOME/.agents/skills
   images:
     - name: opencode
