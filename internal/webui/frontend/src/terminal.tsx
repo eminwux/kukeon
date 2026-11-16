@@ -114,6 +114,8 @@ function TerminalSession({ session, active, expanded, theme, update }: { session
   const terminal = useRef<Terminal | null>(null);
   const socket = useRef<WebSocket | null>(null);
   const fitNow = useRef<() => void>(() => {});
+  // Only a real size change reaches the container; a repeated fit must not SIGWINCH its process again.
+  const sentSize = useRef("");
   const activeNow = useRef(active);
   const wasInterrupted = useRef(false);
   activeNow.current = active;
@@ -135,7 +137,10 @@ function TerminalSession({ session, active, expanded, theme, update }: { session
         resizeFrame = 0;
         if (!activeNow.current || !mount.current?.clientWidth || !mount.current.clientHeight) return;
         fit.fit();
-        if (socket.current?.readyState === WebSocket.OPEN) socket.current.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+        const size = `${term.cols}x${term.rows}`;
+        if (socket.current?.readyState !== WebSocket.OPEN || size === sentSize.current) return;
+        sentSize.current = size;
+        socket.current.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
       });
     };
     fitNow.current = resize;
@@ -191,6 +196,7 @@ function TerminalSession({ session, active, expanded, theme, update }: { session
     let ready = false;
     let receivedOutput = false;
     connection.onopen = () => {
+      sentSize.current = "";
       fitNow.current();
     };
     connection.onmessage = event => {
@@ -309,7 +315,8 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
   const controls = scope && <div className="terminal-workspace-tools">
     {!empty && <span className={`terminal-connection-state ${headerTone}`} role="status" tabIndex={0} title={current?.message || headerState} data-tooltip={current?.message || headerState}><span className="state-dot" aria-hidden="true" /><span className="sr-only">{headerState}</span></span>}
     <div className="terminal-controls">
-      {containers.loading && <p role="status">Loading containers…</p>}
+      {/* Refreshes keep the previous list on screen; a transient line here would reflow the bar and resize the terminal. */}
+      {containers.loading && !containers.data && <p role="status">Loading containers…</p>}
       {containers.error && <ErrorNotice error={containers.error} kind="Containers" />}
       {containers.error && containers.data && <p className="stale">Container list is stale. Refresh before attaching.</p>}
       {!!options.length && <><label htmlFor="terminal-container" className="sr-only">Container</label><select id="terminal-container" className="mono-id" value={selected} onChange={event => manager.select(scope, event.target.value)}>{options.map(id => <option key={id} value={id}>{id}{eligible.some(container => container.id === id) ? "" : " (unavailable)"}</option>)}</select>
