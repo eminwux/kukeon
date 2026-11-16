@@ -166,10 +166,16 @@ func reviewedCellName(input createConfigRequest) (string, error) {
 	if requested == "" {
 		requested = resolvedName
 	}
-	if requested != "" {
-		if err := naming.ValidateHierarchyName("cell", requested); err != nil {
-			return "", fmt.Errorf("%w: %w", errdefs.ErrConfig, err)
-		}
+	if requested == "" {
+		return "", nil
+	}
+	// Re-checked inline so filepath.IsLocal dominates the returned name for
+	// static path-injection analysis (see configLookup).
+	if !filepath.IsLocal(requested) {
+		return "", fmt.Errorf("%w: unsafe cell name", errdefs.ErrConfig)
+	}
+	if err := naming.ValidateHierarchyName("cell", requested); err != nil {
+		return "", fmt.Errorf("%w: %w", errdefs.ErrConfig, err)
 	}
 	return requested, nil
 }
@@ -182,16 +188,24 @@ func configLookup(md v1beta1.CellConfigMetadata) (v1beta1.CellConfigMetadata, er
 	}
 	// Each coordinate is guarded inline (not through a loop or helper) so the
 	// filepath.IsLocal check visibly dominates the returned values for static
-	// path-injection analysis, matching getCatalog.
-	name, realm, space, stack := md.Name, md.Realm, md.Space, md.Stack
+	// path-injection analysis, matching getCatalog. An optional coordinate is
+	// copied only once checked, so its unset path carries the empty literal.
+	name, realm := md.Name, md.Realm
 	unsafe := func(label string) (v1beta1.CellConfigMetadata, error) {
 		return v1beta1.CellConfigMetadata{}, fmt.Errorf("%w: unsafe %s", errdefs.ErrConfig, label)
 	}
-	if space != "" && (!filepath.IsLocal(space) || !safePathSegment(space)) {
-		return unsafe("config space")
+	var space, stack string
+	if md.Space != "" {
+		if !filepath.IsLocal(md.Space) || !safePathSegment(md.Space) {
+			return unsafe("config space")
+		}
+		space = md.Space
 	}
-	if stack != "" && (!filepath.IsLocal(stack) || !safePathSegment(stack)) {
-		return unsafe("config stack")
+	if md.Stack != "" {
+		if !filepath.IsLocal(md.Stack) || !safePathSegment(md.Stack) {
+			return unsafe("config stack")
+		}
+		stack = md.Stack
 	}
 	if !filepath.IsLocal(name) || !safePathSegment(name) {
 		return unsafe("config name")
