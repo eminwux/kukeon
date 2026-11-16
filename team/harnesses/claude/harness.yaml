@@ -30,10 +30,11 @@ spec:
             make -f /opt/kuketeams/harness/Makefile.start setup
 
             cd "$INITIAL_PATH" || exit 1
-            claude \
+            # exec, and nothing after it: sbsh types this script into the PTY,
+            # so any later line would sit in claude's input (issue #1479).
+            exec claude \
               --settings "$ROLE_SOURCE_DIR/$ROLE_PATH/$HARNESS_SETTINGS" \
               --add-dir "$ROLE_SOURCE_DIR/$ROLE_PATH"
-            exit $?
     headless:
       description: Dispatched, unattended run of one prompt.
       parameters:
@@ -60,7 +61,9 @@ spec:
             # ends its turn to "wait for a wakeup" self-destructs mid-task
             # (issue #772). Instead, re-invoke claude on the SAME session
             # whenever a turn scheduled a wakeup, and exit only once a turn
-            # ends without one.
+            # ends without one. The loop is the script's last command and
+            # exits from inside, so no line is left in the PTY input after
+            # the command that starts claude (issue #1479).
             #
             # Caveat (claude >= 2.1.163; this image runs 2.1.170): claude
             # itself terminates background Bash tasks ~5s after a -p turn
@@ -73,8 +76,7 @@ spec:
             turn=1
             resume=0
             next_prompt="$PROMPT"
-            last_err=""
-            while [ "$turn" -le "$MAX_TURNS" ]; do
+            while :; do
               turnlog="/tmp/claude-turn-$turn.jsonl"
               if [ "$resume" -eq 0 ]; then
                 claude \
@@ -108,15 +110,14 @@ spec:
               # exit, not clean completion — otherwise a hard crash reads as
               # a normal "no wakeup, done" turn and exits 0.
               if [ -z "$result_err" ] || [ "$result_err" = "true" ]; then
-                last_err="true"
-                break
+                exit 1
               fi
-              last_err="false"
               # A ScheduleWakeup tool_use is the "yield, re-invoke me"
               # signal; its input carries the delay and the prompt to fire
               # on resume. No ScheduleWakeup this turn => the agent is done.
               wake=$(jq -rc 'select(.type=="assistant") | .message.content[]? | select(.type=="tool_use" and .name=="ScheduleWakeup") | .input' "$turnlog" 2>/dev/null | tail -1)
-              if [ -z "$wake" ]; then break; fi
+              if [ -z "$wake" ]; then exit 0; fi
+              if [ "$turn" -ge "$MAX_TURNS" ]; then exit 0; fi
               delay=$(printf '%s' "$wake" | jq -r '.delaySeconds // 60' 2>/dev/null)
               case "$delay" in ''|*[!0-9]*) delay=60 ;; esac
               # ScheduleWakeup's runtime clamp is [60, 3600]; mirror its floor.
@@ -129,8 +130,6 @@ spec:
               sleep "$delay"
               turn=$((turn + 1))
             done
-            if [ "$last_err" = "true" ]; then exit 1; fi
-            exit 0
   skillPath: $HOME/.claude/skills
   images:
     - name: claude

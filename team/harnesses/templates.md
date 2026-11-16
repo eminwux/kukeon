@@ -201,6 +201,13 @@ hooks, package installation, and resource provisioning remain outside this
 contract. Codex retains exec process semantics, Claude retains its prompt-mode
 supervisor loop, and OpenCode retains its prompt/interactive commands.
 
+Make the command that starts the harness the last thing in the script —
+`exec agent …`, or a supervisor loop that exits from inside. The stages are
+typed into the shell's terminal and the shell reads one command at a time, so
+any line after the launch (a trailing `exit $?`, say) stays in the terminal
+input and the harness reads it as keystrokes. `exec` also makes the harness's
+exit code the work container's.
+
 External harnesses can use another setup tool, with no Make requirement in the
 generic contract. A complete minimal external example is:
 
