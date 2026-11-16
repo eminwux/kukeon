@@ -406,7 +406,7 @@ func applyParamOverrides(
 	if len(params) == 0 {
 		return merged, values
 	}
-	combined := make(map[string]string, len(merged.Spec.Values)+len(params))
+	combined := make(map[string]string, len(merged.Spec.Values))
 	for k, v := range merged.Spec.Values {
 		combined[k] = v
 	}

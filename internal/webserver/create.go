@@ -180,17 +180,26 @@ func configLookup(md v1beta1.CellConfigMetadata) (v1beta1.CellConfigMetadata, er
 	if md.Realm == "" || md.Name == "" || (md.Stack != "" && md.Space == "") {
 		return v1beta1.CellConfigMetadata{}, fmt.Errorf("%w: select a scoped config", errdefs.ErrConfig)
 	}
-	for _, field := range []struct{ label, value string }{
-		{"config space", md.Space},
-		{"config stack", md.Stack},
-		{"config name", md.Name},
-		{"config realm", md.Realm},
-	} {
-		if field.value != "" && !safeSegment(field.value) {
-			return v1beta1.CellConfigMetadata{}, fmt.Errorf("%w: unsafe %s", errdefs.ErrConfig, field.label)
-		}
+	// Each coordinate is guarded inline (not through a loop or helper) so the
+	// filepath.IsLocal check visibly dominates the returned values for static
+	// path-injection analysis, matching getCatalog.
+	name, realm, space, stack := md.Name, md.Realm, md.Space, md.Stack
+	unsafe := func(label string) (v1beta1.CellConfigMetadata, error) {
+		return v1beta1.CellConfigMetadata{}, fmt.Errorf("%w: unsafe %s", errdefs.ErrConfig, label)
 	}
-	return v1beta1.CellConfigMetadata{Name: md.Name, Realm: md.Realm, Space: md.Space, Stack: md.Stack}, nil
+	if space != "" && (!filepath.IsLocal(space) || !safePathSegment(space)) {
+		return unsafe("config space")
+	}
+	if stack != "" && (!filepath.IsLocal(stack) || !safePathSegment(stack)) {
+		return unsafe("config stack")
+	}
+	if !filepath.IsLocal(name) || !safePathSegment(name) {
+		return unsafe("config name")
+	}
+	if !filepath.IsLocal(realm) || !safePathSegment(realm) {
+		return unsafe("config realm")
+	}
+	return v1beta1.CellConfigMetadata{Name: name, Realm: realm, Space: space, Stack: stack}, nil
 }
 
 // safeSegment reports whether value is a local, single path segment.
