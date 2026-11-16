@@ -77,6 +77,10 @@ func (r *Exec) provisionNewRealm(realm intmodel.Realm) (intmodel.Realm, error) {
 		_ = r.UpdateRealmMetadata(realm) // Best effort to save failed state
 		return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrCreateRealmNamespace, err)
 	}
+	// The namespace was either created or observed present just above, so
+	// record the positive observation (#1381) instead of leaving the field
+	// for a host-wide `kuke refresh` to fill in.
+	realm.Status.ContainerdNamespaceReady = true
 
 	// Create realm cgroup
 	cgroupPath, subtreeControllers, err := r.createRealmCgroup(realm)
@@ -90,6 +94,7 @@ func (r *Exec) provisionNewRealm(realm intmodel.Realm) (intmodel.Realm, error) {
 	// Update CgroupPath, SubtreeControllers (issue #328), and state in internal model
 	realm.Status.CgroupPath = cgroupPath
 	realm.Status.SubtreeControllers = subtreeControllers
+	realm.Status.CgroupReady = true
 	realm.Status.State = intmodel.RealmStateReady
 
 	// Always update metadata after cgroup creation to ensure CgroupPath is saved
@@ -150,6 +155,9 @@ func (r *Exec) ensureRealmContainerdNamespace(realm intmodel.Realm) (intmodel.Re
 			realm.Spec.Namespace,
 		)
 	}
+	// Observed present or just created: carry the positive observation into
+	// the realm the caller persists next (ensureRealmCgroup), #1381.
+	realm.Status.ContainerdNamespaceReady = true
 	return realm, nil
 }
 
@@ -176,6 +184,7 @@ func (r *Exec) provisionNewSpace(space intmodel.Space) (intmodel.Space, error) {
 	// Update CgroupPath, SubtreeControllers (issue #328), and state in internal model
 	space.Status.CgroupPath = cgroupPath
 	space.Status.SubtreeControllers = subtreeControllers
+	space.Status.CgroupReady = true
 	space.Status.State = intmodel.SpaceStateReady
 
 	// Realize egress policy on the host firewall. iptables rules are safe
@@ -718,6 +727,9 @@ func (r *Exec) ensureSpaceCgroup(space intmodel.Space) (intmodel.Space, error) {
 	// Always update metadata after ensureCgroupInternal to ensure CgroupPath is saved
 	// (closure may not have been called if cgroup already existed with path)
 	if spaceDoc.Status.CgroupPath != "" {
+		// ensureCgroupInternal returned nil, so the cgroup was either loaded
+		// or created on this pass — a positive observation (#1381).
+		space.Status.CgroupReady = true
 		if err := r.UpdateSpaceMetadata(space); err != nil {
 			return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateSpaceMetadata, err)
 		}
@@ -889,6 +901,9 @@ func (r *Exec) ensureRealmCgroup(realm intmodel.Realm) (intmodel.Realm, error) {
 	// 2. If cgroup existed and path was backfilled, closure saved it, but we ensure consistency
 	// 3. If cgroup existed with path already set, we ensure metadata matches
 	if realmDoc.Status.CgroupPath != "" {
+		// ensureCgroupInternal returned nil, so the cgroup was either loaded
+		// or created on this pass — a positive observation (#1381).
+		realm.Status.CgroupReady = true
 		if err := r.UpdateRealmMetadata(realm); err != nil {
 			return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateRealmMetadata, err)
 		}
@@ -941,6 +956,7 @@ func (r *Exec) provisionNewStack(stack intmodel.Stack) (intmodel.Stack, error) {
 	// Update CgroupPath, SubtreeControllers (issue #328), and state in internal model
 	stack.Status.CgroupPath = cgroupPath
 	stack.Status.SubtreeControllers = subtreeControllers
+	stack.Status.CgroupReady = true
 	stack.Status.State = intmodel.StackStateReady
 
 	// Update stack metadata
@@ -1047,6 +1063,9 @@ func (r *Exec) ensureStackCgroup(stack intmodel.Stack) (intmodel.Stack, error) {
 	// Always update metadata after ensureCgroupInternal to ensure CgroupPath is saved
 	// (closure may not have been called if cgroup already existed with path)
 	if stackDoc.Status.CgroupPath != "" {
+		// ensureCgroupInternal returned nil, so the cgroup was either loaded
+		// or created on this pass — a positive observation (#1381).
+		stack.Status.CgroupReady = true
 		if err := r.UpdateStackMetadata(stack); err != nil {
 			return intmodel.Stack{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateStackMetadata, err)
 		}

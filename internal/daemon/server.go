@@ -278,6 +278,8 @@ func (s *Server) runReconcileOnce() {
 			"cells_updated", res.CellsUpdated,
 			"cells_deleted", res.CellsDeleted,
 			"cells_errored", res.CellsErrored,
+			"parents_updated", res.ParentsUpdated,
+			"parents_errored", res.ParentsErrored,
 			"errors", res.Errors)
 	case len(res.Errors) > 0:
 		s.logger.WarnContext(s.ctx, "reconcile pass completed with errors",
@@ -285,12 +287,15 @@ func (s *Server) runReconcileOnce() {
 			"cells_updated", res.CellsUpdated,
 			"cells_deleted", res.CellsDeleted,
 			"cells_errored", res.CellsErrored,
+			"parents_updated", res.ParentsUpdated,
+			"parents_errored", res.ParentsErrored,
 			"errors", res.Errors)
 	default:
 		s.logger.InfoContext(s.ctx, "reconcile ok",
 			"cells_scanned", res.CellsScanned,
 			"cells_updated", res.CellsUpdated,
-			"cells_deleted", res.CellsDeleted)
+			"cells_deleted", res.CellsDeleted,
+			"parents_updated", res.ParentsUpdated)
 	}
 }
 

@@ -62,6 +62,9 @@ type deleteCellFakeClient struct {
 	// <ns>_history companion is torn down alongside the realm namespace.
 	deleteNamespaceFn  func(namespace string) error
 	cleanupNamespaceFn func(namespace, snapshotter string) error
+	// existsNamespaceFn drives the realm containerd-namespace probe for the
+	// parent health tests (#1381); unset reports the namespace absent.
+	existsNamespaceFn func(namespace string) (bool, error)
 }
 
 func (c *deleteCellFakeClient) Connect() error { return nil }
@@ -78,8 +81,14 @@ func (c *deleteCellFakeClient) DeleteNamespace(namespace string) error {
 func (c *deleteCellFakeClient) ListNamespaces() ([]string, error) {
 	return nil, nil
 }
-func (c *deleteCellFakeClient) GetNamespace(string) (string, error)  { return "", nil }
-func (c *deleteCellFakeClient) ExistsNamespace(string) (bool, error) { return false, nil }
+func (c *deleteCellFakeClient) GetNamespace(string) (string, error) { return "", nil }
+func (c *deleteCellFakeClient) ExistsNamespace(namespace string) (bool, error) {
+	if c.existsNamespaceFn != nil {
+		return c.existsNamespaceFn(namespace)
+	}
+	return false, nil
+}
+
 func (c *deleteCellFakeClient) CleanupNamespaceResources(namespace, snapshotter string) error {
 	if c.cleanupNamespaceFn != nil {
 		return c.cleanupNamespaceFn(namespace, snapshotter)
