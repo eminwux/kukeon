@@ -236,6 +236,9 @@ No cells created or started.
 ```
 
 The count is the team's shared blueprints (one per harness × security profile
-it uses) plus one CellConfig per role/harness pair, plus one when the stack's
-git defaults were written. Missing runtime secrets and notes are listed after
+it uses) plus one CellConfig per role/harness pair, plus one headless task CellConfig
+per role/harness pair × selected role task, plus one when the stack's git
+defaults were written. A pair's config is named `<team>-<role>-<harness>`, and
+each of its task configs is named `<team>-<role>-<harness>-<task>`. See
+[Tasks](../concepts/team.md#tasks). Missing runtime secrets and notes are listed after
 it, as for [`kuke team init`](kuke-team-init.md#output).

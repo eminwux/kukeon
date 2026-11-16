@@ -249,6 +249,18 @@ func validateSelections(d *Defaults) error {
 		if role.Harness != "" && !harnesses[role.Harness] {
 			return fmt.Errorf("%s.harness: unknown harness %q", field, role.Harness)
 		}
+		if role.Tasks != nil {
+			tasks := map[string]bool{}
+			for j, task := range *role.Tasks {
+				taskField := fmt.Sprintf("%s.tasks[%d]", field, j)
+				if err := unique(taskField, task, tasks); err != nil {
+					return err
+				}
+				if !ValidName(task) {
+					return fmt.Errorf("%s: invalid task name %q", taskField, task)
+				}
+			}
+		}
 		if role.Needs != nil {
 			for j, image := range role.Needs.Image {
 				if err := required(fmt.Sprintf("%s.needs.image[%d]", field, j), image); err != nil {

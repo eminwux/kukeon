@@ -166,6 +166,13 @@ func cloneSelections(d Defaults) Defaults {
 			needs.Image = slices.Clone(needs.Image)
 			d.Roles[i].Needs = &needs
 		}
+		if d.Roles[i].Tasks != nil {
+			tasks := slices.Clone(*d.Roles[i].Tasks)
+			if tasks == nil {
+				tasks = []string{}
+			}
+			d.Roles[i].Tasks = &tasks
+		}
 	}
 	return d
 }

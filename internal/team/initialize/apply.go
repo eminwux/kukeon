@@ -102,7 +102,7 @@ func apply(
 	if err != nil {
 		return out, err
 	}
-	expected := len(result.Blueprints) + len(result.Pairs)
+	expected := len(result.Blueprints) + result.Configs()
 	if stackDoc != nil {
 		raw = append(append(stackDoc, []byte("---\n")...), raw...)
 		expected++

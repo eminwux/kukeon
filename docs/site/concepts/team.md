@@ -190,6 +190,64 @@ kuke run acme-dev-claude                                               # interac
 kuke run acme-dev-claude --mode headless --param PROMPT="triage #42" -d
 ```
 
+### Tasks
+
+A role can declare named **tasks** in `role.yaml`: unattended runs that need no
+runtime arguments. Each task names one of the role's skills by base name, and
+can add a fixed argument string:
+
+```yaml
+# role.yaml
+spec:
+  skills: [dev/skills/pick-issue, dev/skills/pick-changes]
+  tasks:
+    - { name: pick-issue, skill: pick-issue }
+    - { name: pick-bug, skill: pick-issue, args: "--label bug" }
+    - { name: pick-changes, skill: pick-changes }
+```
+
+A team's role entry picks which of them it uses. If `tasks` is omitted, the team
+gets all of the role's tasks. `tasks: []` gives none, and a name the role does
+not declare fails `kuke team add`. A task whose `skill` is not one of the role's
+`spec.skills` also fails, with an error that names the role, the task and the
+skill.
+
+```yaml
+# kuketeam.yaml
+spec:
+  roles:
+    - { name: dev, source: agents, path: dev, tasks: [pick-issue, pick-bug] }
+```
+
+`kuke team add` renders each selected task as its own CellConfig per selected
+harness (the role entry's `harness` pin applies), named
+`<team>-<role>-<harness>-<task>` and labelled `kukeon.io/task: <task>` next to
+the team label. It has the same blueprint, values, repos, secrets, components
+and requires as the pair's config, plus:
+
+```yaml
+spec:
+  modes: { enabled: [headless], default: headless }
+  values:
+    { PROMPT: "Use the pick-issue skill with arguments: --label bug", ... }
+  autoDelete: true
+```
+
+The prompt is the same for every harness: `Use the <skill> skill`, followed by
+` with arguments: <args>` when `args` is set. Launch a task with no `--rm` and
+no `--param`. The cell deletes itself when the run ends:
+
+```bash
+kuke run -d acme-dev-claude-pick-bug
+```
+
+A harness without a `headless` mode gets no task configs, and the output says
+why. The pair's interactive config does not change. Tasks that need a value at
+run time (`issue <N>`) still go through it:
+`kuke run --rm -d acme-dev-claude --mode headless --param PROMPT="work on issue 22"`.
+When a task is deselected, or the role stops declaring it, the next
+`kuke team add` prunes its config along with the team's other obsolete configs.
+
 ### Connectors
 
 A role enables a connector by name:
@@ -323,7 +381,8 @@ missing.
 Pairs follow role order, then harness order. Each pair's config
 is named `<team>-<role>-<harness>`, with dots and punctuation runs collapsed
 to single hyphens: team `esp32`, role `pr-reviewer`, and harness `codex`
-produce `esp32-pr-reviewer-codex`. Different selections can collide on these
+produce `esp32-pr-reviewer-codex`. A task config appends the task name:
+`esp32-pr-reviewer-codex-pick-review-pr`. Different selections can collide on these
 readable names (`root-a`/`operator` and `root`/`a-operator`); choose distinct
 names in the same scope. `kukeon.io/team` labels keep the authored team name.
 Resources default to realm/space/stack `default`.

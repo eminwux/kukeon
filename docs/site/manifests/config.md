@@ -107,6 +107,10 @@ The mode itself is picked **per cell**, at create time — `kuke run <config> --
 
 Overrides the git identity, credentials and signing config the cell inherits from its Realm → Space → Stack defaults. Same shape as a container's [`git`](container.md#containergit): `author`, `committer` and `signing` replace the inherited value; `credentials[]` merge by `host`. See the [git credentials guide](../guides/git-credentials.md).
 
+### `spec.autoDelete` (bool, optional)
+
+When `true`, every cell materialized from this Config gets `Spec.AutoDelete`, so it is deleted once its run ends. This is the same deletion `kuke run --rm` asks for, without the flag. The value is OR'd with the blueprint's own `spec.cell.autoDelete`. It is set on the Config, not the blueprint, because a blueprint is shared across modes and roles. A re-render of an existing cell (OutOfSync, `kuke restart`) keeps it. `kuke team add` sets it on every [task config](../concepts/team.md#tasks).
+
 ## Slot fills
 
 A `CellConfig` fills the structural slots a [`CellBlueprint`](blueprint.md) declares. Slot matching is by **name**, across all of the blueprint's containers — the same slot name on two containers shares a single Config-side entry. The validation gates are:

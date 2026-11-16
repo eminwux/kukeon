@@ -30,10 +30,10 @@ type Role struct {
 // RoleSpec carries the role declaration.
 type RoleSpec struct {
 	// Skills lists skill directories (relative paths) the role loads.
-	Skills []string `json:"skills,omitempty"    yaml:"skills,omitempty"`
+	Skills []string `json:"skills,omitempty"     yaml:"skills,omitempty"`
 	// Harnesses maps a harness name to its per-role configuration. Keys must be
 	// known harnesses.
-	Harnesses map[string]RoleHarness `json:"harnesses,omitempty" yaml:"harnesses,omitempty"`
+	Harnesses map[string]RoleHarness `json:"harnesses,omitempty"  yaml:"harnesses,omitempty"`
 	// Connectors lists the connector components the role's cells enable, by
 	// name (e.g. `github`: the GitHub API token as GH_TOKEN plus the `gh`
 	// capability). A connector never supplies a git credential.
@@ -43,7 +43,24 @@ type RoleSpec struct {
 	Forges []string `json:"forges,omitempty"     yaml:"forges,omitempty"`
 	// Needs declares what the role depends on, split by kind so each dimension
 	// renders onto the right runtime type.
-	Needs RoleNeeds `json:"needs,omitempty"     yaml:"needs,omitempty"`
+	Needs RoleNeeds `json:"needs,omitempty"      yaml:"needs,omitempty"`
+	// Tasks are the named, argument-free unattended runs of the role. `kuke
+	// team add` renders each one a team selects as its own headless-only,
+	// self-deleting CellConfig (`<team>-<role>-<harness>-<task>`).
+	Tasks []RoleTask `json:"tasks,omitempty"      yaml:"tasks,omitempty"`
+}
+
+// RoleTask is one named task of a role: a skill the role loads, run headless
+// with an optional fixed argument string. The rendered prompt is
+// `Use the <skill> skill`, followed by ` with arguments: <args>` when Args is
+// set.
+type RoleTask struct {
+	// Name is the task's resource-name segment, unique within the role.
+	Name string `json:"name"           yaml:"name"`
+	// Skill is the base name of one of the role's spec.skills entries.
+	Skill string `json:"skill"          yaml:"skill"`
+	// Args is optional free text appended to the prompt.
+	Args string `json:"args,omitempty" yaml:"args,omitempty"`
 }
 
 // RoleHarness is the per-role configuration of a single harness. Different
