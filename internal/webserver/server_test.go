@@ -98,6 +98,26 @@ func TestAccessPolicy(t *testing.T) {
 	}
 }
 
+func TestAccessPolicyAllowsSameOriginAPI(t *testing.T) {
+	client := &realmClient{empty: true}
+	handler, err := newHandler("localhost:5129", "unix:///test", func(context.Context) (kukeonv1.Client, error) {
+		return client, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest(http.MethodGet, "http://localhost:5129/api/realms", nil)
+	r.Header.Set("Origin", "http://localhost:5129")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d: %s", w.Code, w.Body.String())
+	}
+	if !client.closed {
+		t.Fatal("client was not closed")
+	}
+}
+
 type versionClient struct {
 	kukeonv1.FakeClient
 

@@ -70,7 +70,7 @@ function RelatedCellList({ rows, inventory, configLabel }: { rows: Array<Row & {
     {!inventory.data && !inventory.loading && !inventory.error && <p className="empty-state">Cell inventory has not been retrieved.</p>}
     {rows.length > 0 && <ul className="state-list related-cell-list">{rows.map(row => {
       const scope = cellScope(row);
-      return <li key={JSON.stringify(scope)}><div><a className="resource-name" href={workspaceLink(scope)}>{row.doc.metadata.name}</a><p className="description">{scopeLabel(scope.slice(0, -1))}</p>{configLabel && row.config && <p className="description">Config: <a href={relationResourceLink("configs", [...scopeOf(row.config.metadata), row.config.metadata.name])}>{row.config.metadata.name}</a> · {scopeLabel(scopeOf(row.config.metadata))}</p>}</div><StateBadge state={row.doc.status?.state} /><a className="document-action" href={workspaceLink(scope)}>Open Workspace</a></li>;
+      return <li key={JSON.stringify(scope)}><div><a className="resource-name" href={workspaceLink(scope)}>{row.doc.metadata.name}</a><p className="description">{scopeLabel(scope.slice(0, -1))}</p>{configLabel && row.config && <p className="description">Config: <a href={relationResourceLink("configs", [...scopeOf(row.config.metadata), row.config.metadata.name])}>{row.config.metadata.name}</a> · {scopeLabel(scopeOf(row.config.metadata))}</p>}</div><StateBadge state={row.doc.status?.state} /><a className="document-action" href={workspaceLink(scope)}>Open terminal</a></li>;
     })}</ul>}
     {inventory.data && !rows.length && !inventory.loading && !inventory.error && !inventory.data.failures.length && <p className="description">No related Cells found.</p>}
   </>;

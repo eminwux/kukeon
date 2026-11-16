@@ -820,6 +820,19 @@ test("config references navigate across realms and missing targets report errors
   await expect(page.getByLabel("Complete blueprints JSON")).toContainText('"realm": "library"');
 });
 
+test("config lineage lists Cells with an Open terminal action and no Workspace copy", async ({ page }) => {
+  await mockCatalog(page);
+  await page.route("**/api/realms/prod/spaces/shared/stacks/services/cells", route => {
+    const cell = doc(["prod", "shared", "services", "api"]);
+    cell.spec.provenance = { bindingKind: "config", bindingRef: { name: "shared-name", realm: "prod", space: "shared", stack: "services" } };
+    return route.fulfill({ json: [cell] });
+  });
+  await page.goto(`${server.url}#/configs/prod/shared/services/shared-name`);
+  const lineage = page.locator(".related-resources").filter({ has: page.getByRole("heading", { name: "Cells using this Config" }) });
+  await expect(lineage.getByRole("link", { name: "Open terminal", exact: true })).toHaveAttribute("href", "#/workspace/prod/shared/services/api");
+  expect(await page.evaluate(() => document.body.innerText)).not.toMatch(/Kukeon|Workspace/);
+});
+
 test("explicit secret and volume references show usage and errors without ownership assumptions", async ({ page }) => {
   await mockCatalog(page, url => {
     if (url.pathname.endsWith("/blueprints/shared-name")) {
