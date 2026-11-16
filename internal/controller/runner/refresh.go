@@ -614,7 +614,9 @@ func (r *Exec) refreshContainerStatus(cell intmodel.Cell, containerSpec *intmode
 //     if any non-root exited non-zero; Unknown if any non-root reads back
 //     Unknown — the defensive read-side check that pairs with #301). The
 //     derivation never yields Stopped: that label is reserved for the
-//     operator stop/kill verbs (#1267).
+//     operator stop/kill verbs and create-only materialization (#1267),
+//     and a persisted Stopped from those origins is kept instead of
+//     re-derived (cellStoppedIsDurable, #1486).
 //
 // Container statuses are populated up front so the derivation reads
 // them straight from the snapshot instead of re-querying containerd
@@ -758,6 +760,33 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 	if err := r.populateCellContainerStatuses(&cell); err != nil {
 		r.logger.DebugContext(r.ctx, "populate container statuses failed",
 			"cell", cell.Metadata.Name, "error", err)
+	}
+
+	// Durable Stopped (#1486). A persisted Stopped from a create-only
+	// materialization (never started: ReadyObserved false) or an operator
+	// stop/kill (the OperatorStopped breadcrumb) is kept instead of
+	// re-derived: those cells' never-started / torn-down containers read back
+	// terminal with exit 0 (or 137 after a kill), which derivation would
+	// relabel Exited (a false "workload completed") or sticky Error. Container
+	// statuses and CgroupReady are still refreshed, mirroring the sticky path.
+	// A workload observed active (a task started outside kukeon) falls
+	// through to normal derivation. The reconciler's own wind-down Stopped
+	// (ReadyObserved, no breadcrumb) is not preserved, so it still settles to
+	// Exited on this tick and `--rm` reaping keeps working.
+	if cellStoppedIsDurable(originalStatus, cell) {
+		cell.Status.State = intmodel.CellStateStopped
+		cell.Status.ReadyObserved = originalStatus.ReadyObserved
+		updated := originalStatus.CgroupReady != cell.Status.CgroupReady ||
+			!containerStatusesEqual(originalStatus.Containers, cell.Status.Containers) ||
+			observedGenerationBehind(originalStatus, cell.Metadata.Generation)
+		if updated {
+			persisted, updateErr := r.persistCellStatusGuarded(cell)
+			if updateErr != nil {
+				return cell, ReconcileOutcome{}, fmt.Errorf("failed to update cell metadata: %w", updateErr)
+			}
+			updated = persisted
+		}
+		return cell, ReconcileOutcome{Updated: updated}, nil
 	}
 
 	// Run derivation whenever the filesystem check succeeded, even when the
@@ -913,10 +942,12 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 //
 // KillCell stamps CellStateStopped, but the cell got here because its
 // workloads self-exited cleanly (the reconciler derived CellStateExited, the
-// only state that fires shouldWindDownCell). Stopped is non-sticky (#1267), so
-// the next reconcile tick re-derives the now-root-dead cell back to Exited —
-// the operator-stop-vs-self-exit label settles correctly without a second
-// write here.
+// only state that fires shouldWindDownCell). This Stopped carries
+// ReadyObserved and no OperatorStopped breadcrumb (the workload was already
+// terminal when KillCell probed it), so cellStoppedIsDurable does not keep it
+// and the next reconcile tick re-derives the now-root-dead cell back to
+// Exited — the operator-stop-vs-self-exit label settles correctly without a
+// second write here (#1486).
 func (r *Exec) windDownCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcome, error) {
 	r.logger.InfoContext(r.ctx, "reconcile: winding down cell after non-root workloads exited",
 		"cell", cell.Metadata.Name,
@@ -979,15 +1010,45 @@ func (r *Exec) autoDeleteCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutco
 // non-AutoDelete wind-down both reach Stopped via KillCell, then rely on the
 // next reconcile tick re-deriving the now-terminal cell to Exited (so `--rm`
 // auto-deletes and a wound-down cell settles at the clean-exit label). Making
-// Stopped sticky would freeze those paths. The operator-stop-vs-self-exit
-// distinction is carried by the derivation never *producing* Stopped (#1267) —
-// a persisted Stopped originates only from the operator stop/kill verbs.
+// Stopped unconditionally sticky would freeze those paths. Instead, the
+// narrower cellStoppedIsDurable predicate keeps the two Stopped origins that
+// must survive a tick — a never-started create-only cell and an
+// operator-interrupted stop/kill (#1486) — while the wind-down Stopped is
+// still re-derived. The derivation itself never *produces* Stopped (#1267).
 //
 // Extracted as a pure function so the stickiness predicate is unit-testable
 // without spinning up a runner + containerd fake.
 func cellStateIsSticky(s intmodel.CellState) bool {
 	return s == intmodel.CellStateFailed ||
 		s == intmodel.CellStateError
+}
+
+// cellStoppedIsDurable reports whether ReconcileCell must keep a persisted
+// CellStateStopped instead of re-deriving it (#1486). original is the status
+// read before this tick; cell carries the freshly populated container
+// statuses. A Stopped is durable when it came from one of the two origins
+// whose label is an operator-visible fact rather than a transient hand-off:
+//
+//   - never-started (create-only materialization, markCellMaterialized):
+//     ReadyObserved is still false. Its containers have no task, so they read
+//     back terminal with exit 0 and derivation would claim Exited — a cell
+//     that never ran did not exit.
+//   - operator-interrupted (`kuke stop` / `kuke kill` of a live workload):
+//     the OperatorStopped breadcrumb (#1371) is set. Derivation would drift a
+//     clean stop to Exited and a kill (exit 137) to sticky Error.
+//
+// Either way the Stopped is kept only while no workload is active: a task
+// started outside kukeon makes the cell derive normally (Ready). The
+// reconciler's own wind-down Stopped (ReadyObserved, no breadcrumb) is not
+// durable, so it still settles to Exited and `--rm` reaping still fires.
+func cellStoppedIsDurable(original intmodel.CellStatus, cell intmodel.Cell) bool {
+	if original.State != intmodel.CellStateStopped {
+		return false
+	}
+	if original.ReadyObserved && !cellOperatorStopped(cell) {
+		return false
+	}
+	return !cellWorkloadActive(cell)
 }
 
 // cellStateAutoDeleteTriggers returns true for the post-reconcile cell
@@ -1663,9 +1724,10 @@ func deriveCellStateFromNonRootContainerStatuses(
 	// the cell in CellStateError (a workload crash); an all-clean set settles
 	// CellStateExited (a clean self-exit). The reconciler never yields
 	// CellStateStopped here — Stopped is reserved for operator `kuke stop`/
-	// `kill` (#1267). Note this is the derived label only: a persisted Stopped
-	// is non-sticky, so the next tick re-derives an operator-stopped cell to
-	// Exited — durable operator-stop preservation is deferred to #1268.
+	// `kill` (#1267). Note this is the derived label only: a persisted
+	// operator-stopped or never-started Stopped is kept upstream by
+	// ReconcileCell's cellStoppedIsDurable guard (#1486) and never reaches
+	// this derivation.
 	if anyFailed {
 		return intmodel.CellStateError
 	}

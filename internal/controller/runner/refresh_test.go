@@ -16,12 +16,18 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-//nolint:testpackage // tests the AutoDelete predicate which lives unexported
+//nolint:testpackage // tests unexported reconcile predicates and ReconcileCell against in-package fakes
 package runner
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 
+	cgroup2 "github.com/containerd/cgroups/v2/cgroup2"
+	containerd "github.com/containerd/containerd/v2/client"
+	"github.com/eminwux/kukeon/internal/ctr"
+	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
@@ -1105,6 +1111,223 @@ func TestNonRootWorkloadDegraded(t *testing.T) {
 			if got := nonRootWorkloadDegraded(spec, status); got != tc.want {
 				t.Errorf("nonRootWorkloadDegraded(policy=%q, exit=%d) = %v, want %v",
 					tc.policy, tc.exitCode, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCellStoppedIsDurable pins the #1486 predicate: a persisted Stopped is
+// kept only for the never-started and operator-interrupted origins, and only
+// while no workload is active.
+func TestCellStoppedIsDurable(t *testing.T) {
+	specs := []intmodel.ContainerSpec{{ID: "root", Root: true}, {ID: "work"}}
+	terminal := []intmodel.ContainerStatus{
+		{ID: "root", State: intmodel.ContainerStateStopped},
+		{ID: "work", State: intmodel.ContainerStateStopped},
+	}
+	active := []intmodel.ContainerStatus{
+		{ID: "root", State: intmodel.ContainerStateReady},
+		{ID: "work", State: intmodel.ContainerStateReady},
+	}
+	cases := []struct {
+		name          string
+		state         intmodel.CellState
+		readyObserved bool
+		operatorStop  bool
+		statuses      []intmodel.ContainerStatus
+		want          bool
+	}{
+		{"never_started", intmodel.CellStateStopped, false, false, terminal, true},
+		{"operator_stopped", intmodel.CellStateStopped, true, true, terminal, true},
+		{"wind_down", intmodel.CellStateStopped, true, false, terminal, false},
+		{"never_started_external_task", intmodel.CellStateStopped, false, false, active, false},
+		{"operator_stopped_external_task", intmodel.CellStateStopped, true, true, active, false},
+		{"not_stopped", intmodel.CellStateExited, false, true, terminal, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cell := intmodel.Cell{
+				Spec:   intmodel.CellSpec{Containers: specs},
+				Status: intmodel.CellStatus{Containers: tc.statuses},
+			}
+			if tc.operatorStop {
+				markCellOperatorStopped(&cell)
+			}
+			original := intmodel.CellStatus{State: tc.state, ReadyObserved: tc.readyObserved}
+			if got := cellStoppedIsDurable(original, cell); got != tc.want {
+				t.Errorf("cellStoppedIsDurable = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// durableStoppedFixture wires a runner whose fake containerd reports every
+// task through taskStatus, seeds the on-disk cell, and returns the in-memory
+// cell (root-only when rootOnly is set) for ReconcileCell to drive.
+func durableStoppedFixture(
+	t *testing.T,
+	rootOnly bool,
+	taskStatus func(id string) (containerd.Status, error),
+	status intmodel.CellStatus,
+) (*Exec, intmodel.Cell) {
+	t.Helper()
+	realm, space, stack, cellName := "default", "lab", "suite", "durable-stop"
+	rootID, workloadID := "root", "workload"
+	rootCID := space + "_" + stack + "_" + cellName + "_" + rootID
+	workCID := space + "_" + stack + "_" + cellName + "_" + workloadID
+
+	fake := &deleteCellFakeClient{
+		loadCgroupFn: func(string, string) (*cgroup2.Manager, error) {
+			return &cgroup2.Manager{}, nil
+		},
+		existsContainerFn: func(_, _ string) (bool, error) { return true, nil },
+		taskStatusFn:      func(_, id string) (containerd.Status, error) { return taskStatus(id) },
+		deleteContainerFn: func(_, _ string, _ ctr.ContainerDeleteOptions) error {
+			t.Errorf("DeleteContainer called — a preserved cell must not be reaped")
+			return nil
+		},
+	}
+	r := newDeleteCellTestExec(t, fake)
+	seedDeleteCellRealm(t, r, realm)
+	seedStopKillSpace(t, r, realm, space)
+	seedPostRebootCell(t, r, realm, space, stack, cellName, rootID, workloadID, rootCID, workCID)
+
+	containers := []intmodel.ContainerSpec{{ID: rootID, ContainerdID: rootCID, Root: true}}
+	if !rootOnly {
+		containers = append(containers, intmodel.ContainerSpec{ID: workloadID, ContainerdID: workCID})
+	}
+	return r, intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: cellName},
+		Spec: intmodel.CellSpec{
+			ID:         cellName,
+			RealmName:  realm,
+			SpaceName:  space,
+			StackName:  stack,
+			Containers: containers,
+		},
+		Status: status,
+	}
+}
+
+func taskNotFound(string) (containerd.Status, error) {
+	return containerd.Status{}, fmt.Errorf("%w: %w", errdefs.ErrTaskNotFound, errors.New("task: not found"))
+}
+
+func taskExited(code uint32) func(string) (containerd.Status, error) {
+	return func(string) (containerd.Status, error) {
+		return containerd.Status{Status: containerd.Stopped, ExitStatus: code}, nil
+	}
+}
+
+// reconcileTicks runs ReconcileCell n times, failing on an error or a reap.
+func reconcileTicks(t *testing.T, r *Exec, cell intmodel.Cell, n int) intmodel.Cell {
+	t.Helper()
+	for tick := 1; tick <= n; tick++ {
+		next, outcome, err := r.ReconcileCell(cell)
+		if err != nil {
+			t.Fatalf("tick %d: ReconcileCell: %v", tick, err)
+		}
+		if outcome.Deleted || outcome.Vanished {
+			t.Fatalf("tick %d: cell was reaped (outcome=%+v)", tick, outcome)
+		}
+		cell = next
+	}
+	return cell
+}
+
+// TestReconcileCell_MaterializedCellStaysStopped is the #1486 create-only
+// regression: a never-started cell's containers have no task and read back
+// terminal with exit 0, which derivation used to relabel Exited. It must stay
+// Stopped across ticks, for both non-root and root-only cells.
+func TestReconcileCell_MaterializedCellStaysStopped(t *testing.T) {
+	for _, rootOnly := range []bool{false, true} {
+		t.Run(fmt.Sprintf("rootOnly=%v", rootOnly), func(t *testing.T) {
+			r, cell := durableStoppedFixture(t, rootOnly, taskNotFound, intmodel.CellStatus{})
+			markCellMaterialized(&cell)
+			got := reconcileTicks(t, r, cell, 3)
+			if got.Status.State != intmodel.CellStateStopped {
+				t.Errorf("State = %v, want Stopped (a never-started cell did not exit)", got.Status.State)
+			}
+			if got.Status.ReadyObserved {
+				t.Errorf("ReadyObserved latched on a never-started cell")
+			}
+			persisted, err := r.GetCell(got)
+			if err != nil {
+				t.Fatalf("GetCell: %v", err)
+			}
+			if persisted.Status.State != intmodel.CellStateStopped {
+				t.Errorf("persisted State = %v, want Stopped", persisted.Status.State)
+			}
+		})
+	}
+}
+
+// TestReconcileCell_OperatorStoppedCellStaysStopped is the #1486 operator twin:
+// a clean `kuke stop` (exit 0) used to drift to Exited and a `kuke kill`
+// (exit 137) to sticky Error. Both must stay Stopped with the breadcrumb kept.
+func TestReconcileCell_OperatorStoppedCellStaysStopped(t *testing.T) {
+	for verb, code := range map[string]uint32{"stop": 0, "kill": 137} {
+		for _, rootOnly := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/rootOnly=%v", verb, rootOnly), func(t *testing.T) {
+				r, cell := durableStoppedFixture(t, rootOnly, taskExited(code),
+					intmodel.CellStatus{State: intmodel.CellStateStopped, ReadyObserved: true})
+				markCellOperatorStopped(&cell)
+				got := reconcileTicks(t, r, cell, 3)
+				if got.Status.State != intmodel.CellStateStopped {
+					t.Errorf("State = %v, want Stopped after operator %s", got.Status.State, verb)
+				}
+				if !cellOperatorStopped(got) {
+					t.Errorf("OperatorStopped breadcrumb lost (Reason=%q)", got.Status.Reason)
+				}
+				if !got.Status.ReadyObserved {
+					t.Errorf("ReadyObserved cleared; the latch must survive a preserved Stopped")
+				}
+			})
+		}
+	}
+}
+
+// TestReconcileCell_WindDownStoppedSettlesTerminal pins the internal
+// wind-down contract #1486 must not disturb: KillCell stamps Stopped on a
+// ReadyObserved cell with no breadcrumb, and the next tick still re-derives it
+// from the workload exit — Exited for a clean exit, sticky Error otherwise.
+func TestReconcileCell_WindDownStoppedSettlesTerminal(t *testing.T) {
+	cases := map[uint32]intmodel.CellState{
+		0: intmodel.CellStateExited,
+		1: intmodel.CellStateError,
+	}
+	for code, want := range cases {
+		t.Run(fmt.Sprintf("exit=%d", code), func(t *testing.T) {
+			r, cell := durableStoppedFixture(t, false, taskExited(code),
+				intmodel.CellStatus{State: intmodel.CellStateStopped, ReadyObserved: true})
+			got := reconcileTicks(t, r, cell, 1)
+			if got.Status.State != want {
+				t.Errorf("State = %v, want %v", got.Status.State, want)
+			}
+		})
+	}
+}
+
+// TestReconcileCell_StoppedWithExternalTaskDerivesReady pins the escape hatch:
+// a durable Stopped whose workload is observed running again (a task started
+// outside kukeon) derives normally instead of masking the live workload.
+func TestReconcileCell_StoppedWithExternalTaskDerivesReady(t *testing.T) {
+	running := func(string) (containerd.Status, error) {
+		return containerd.Status{Status: containerd.Running}, nil
+	}
+	for _, origin := range []string{"materialized", "operator-stopped"} {
+		t.Run(origin, func(t *testing.T) {
+			r, cell := durableStoppedFixture(t, false, running, intmodel.CellStatus{})
+			if origin == "materialized" {
+				markCellMaterialized(&cell)
+			} else {
+				cell.Status = intmodel.CellStatus{State: intmodel.CellStateStopped, ReadyObserved: true}
+				markCellOperatorStopped(&cell)
+			}
+			got := reconcileTicks(t, r, cell, 1)
+			if got.Status.State != intmodel.CellStateReady {
+				t.Errorf("State = %v, want Ready (an active workload must not be masked as Stopped)",
+					got.Status.State)
 			}
 		})
 	}
