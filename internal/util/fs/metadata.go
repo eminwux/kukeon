@@ -534,3 +534,12 @@ func ConvertContainerToExternal(internalContainer intmodel.Container) (*v1beta1.
 	}
 	return &containerDoc, nil
 }
+
+// SpaceLockPath returns the cross-process lock file for a space's network
+// lifecycle (EnsureSpace / DeleteSpace, issue #1469). The basename is a
+// sha256 digest of the NUL-joined realm/space identity, so distinct
+// identities never share a file whatever characters the names carry.
+func SpaceLockPath(baseRunPath, realmName, spaceName string) string {
+	digest := sha256.Sum256([]byte(realmName + "\x00" + spaceName))
+	return filepath.Join(baseRunPath, consts.KukeonLockSubdir, "space-"+hex.EncodeToString(digest[:16])+".lock")
+}

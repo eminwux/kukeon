@@ -32,7 +32,7 @@ import (
 // generateUniqueRealmName generates a unique realm name for tests.
 func generateUniqueRealmName(t *testing.T) string {
 	t.Helper()
-	return fmt.Sprintf("e-r-%s", uniqueNameID())
+	return recordNameOwner(t, fmt.Sprintf("e-r-%s", uniqueNameID()))
 }
 
 // verifyRealmMetadataExists verifies realm metadata file exists.
