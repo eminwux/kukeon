@@ -100,12 +100,15 @@ func (r *Exec) ReconcileRealmHealth(realm intmodel.Realm) (bool, error) {
 // ReconcileSpaceHealth re-probes the space's cgroup and persists cgroupReady
 // when it changed. Runs under the space lock and re-reads the document there,
 // matching EnsureSpace, so it cannot resurrect a concurrently deleted space.
-// Returns whether a status write landed.
+// Returns whether a status write landed. A space found gone on the re-read
+// drops its lock file, as DeleteSpace does.
 func (r *Exec) ReconcileSpaceHealth(space intmodel.Space) (bool, error) {
-	release := r.lockSpace(space.Spec.RealmName, space.Metadata.Name)
-	defer release()
+	release := r.lockSpaceRemovable(space.Spec.RealmName, space.Metadata.Name)
+	spaceGone := false
+	defer func() { release(spaceGone) }()
 	current, err := r.GetSpace(space)
 	if err != nil {
+		spaceGone = errors.Is(err, errdefs.ErrSpaceNotFound)
 		return false, err
 	}
 

@@ -85,10 +85,14 @@ func (r *Exec) CreateSpace(space intmodel.Space) (intmodel.Space, error) {
 func (r *Exec) EnsureSpace(space intmodel.Space) (intmodel.Space, error) {
 	// Re-read under the space lock: a concurrent DeleteSpace may have removed
 	// the space since the caller looked it up, and ensuring it now would
-	// re-create its egress chain with nothing left to remove it.
-	release := r.lockSpace(space.Spec.RealmName, space.Metadata.Name)
-	defer release()
+	// re-create its egress chain with nothing left to remove it. A space
+	// found gone here drops its lock file, as DeleteSpace does, so waking
+	// behind a delete does not re-create and leak it.
+	release := r.lockSpaceRemovable(space.Spec.RealmName, space.Metadata.Name)
+	spaceGone := false
+	defer func() { release(spaceGone) }()
 	if _, err := r.GetSpace(space); err != nil {
+		spaceGone = errors.Is(err, errdefs.ErrSpaceNotFound)
 		return intmodel.Space{}, err
 	}
 

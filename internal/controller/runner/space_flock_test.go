@@ -175,3 +175,62 @@ func TestDeleteSpace_RemovesSpaceLockFile(t *testing.T) {
 		t.Fatalf("lock file still present after DeleteSpace: %v", err)
 	}
 }
+
+// A space operation that wakes behind a cross-process DeleteSpace re-creates
+// the lock file DeleteSpace unlinked, then finds the space gone. It must drop
+// that file too, or every #1469-style race leaves a lock file behind.
+func TestSpaceOpsBehindDelete_LeaveNoLockFile(t *testing.T) {
+	ops := map[string]func(r *Exec, space intmodel.Space) error{
+		"EnsureSpace": func(r *Exec, space intmodel.Space) error {
+			_, err := r.EnsureSpace(space)
+			return err
+		},
+		"ReconcileSpaceHealth": func(r *Exec, space intmodel.Space) error {
+			_, err := r.ReconcileSpaceHealth(space)
+			return err
+		},
+	}
+	for name, op := range ops {
+		t.Run(name, func(t *testing.T) {
+			runPath := t.TempDir()
+			deleter := newProvisionTestExec(t, runPath, false)
+			waiter := newProvisionTestExec(t, runPath, false)
+			waiter.netPolicy = &recordingEnforcer{}
+			space := intmodel.Space{
+				Metadata: intmodel.SpaceMetadata{Name: flockTestSpace},
+				Spec:     intmodel.SpaceSpec{RealmName: flockTestRealm},
+				Status:   intmodel.SpaceStatus{State: intmodel.SpaceStateReady},
+			}
+			if err := deleter.UpdateSpaceMetadata(space); err != nil {
+				t.Fatalf("seed space: %v", err)
+			}
+
+			release := deleter.lockSpaceRemovable(flockTestRealm, flockTestSpace)
+			done := make(chan error, 1)
+			go func() { done <- op(waiter, space) }()
+			select {
+			case err := <-done:
+				release(false)
+				t.Fatalf("%s ran while another process held the space lock (err=%v)", name, err)
+			case <-time.After(flockBlocked):
+			}
+			if err := os.RemoveAll(fs.SpaceMetadataDir(runPath, flockTestRealm, flockTestSpace)); err != nil {
+				t.Fatal(err)
+			}
+			release(true)
+
+			select {
+			case err := <-done:
+				if !errors.Is(err, errdefs.ErrSpaceNotFound) {
+					t.Fatalf("%s error = %v, want ErrSpaceNotFound", name, err)
+				}
+			case <-time.After(flockDeadline):
+				t.Fatalf("%s never returned", name)
+			}
+			path := fs.SpaceLockPath(runPath, flockTestRealm, flockTestSpace)
+			if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("lock file left behind after %s found the space gone: %v", name, err)
+			}
+		})
+	}
+}
