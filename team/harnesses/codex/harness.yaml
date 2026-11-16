@@ -11,23 +11,42 @@ spec:
     AGENTS_ROLE: "${ROLE_NAME}"
     CODEX_SANDBOX: "${SANDBOX}"
     CODEX_APPROVAL: "${APPROVAL}"
-  onInit:
-    - script: |
-        set -euo pipefail
-        make -f /opt/kuketeams/harness/Makefile.start setup
-        cd "$INITIAL_PATH" || exit 1
-        sandbox=$CODEX_SANDBOX
-        approval=$CODEX_APPROVAL
-        set -- -c 'project_doc_fallback_filenames=["CLAUDE.md"]' -c 'project_doc_max_bytes=131072'
-        if [ -n "${PROMPT:-}" ]; then
-          exec codex "$@" --ask-for-approval never exec --json \
-            --cd "$PWD" --sandbox "$sandbox" -- "$PROMPT"
-        else
-          exec codex "$@" \
-            -c 'tui.status_line=["hostname","model-with-reasoning","current-dir"]' \
-            --ask-for-approval "$approval" \
-            --cd "$PWD" --sandbox "$sandbox"
-        fi
+  # The mode is picked per cell at create time (`--mode`), so one role config
+  # serves both an attached session and a dispatched run.
+  modes:
+    interactive:
+      description: Attachable session; the login persists in the state volume.
+      onInit:
+        - script: |
+            set -euo pipefail
+            make -f /opt/kuketeams/harness/Makefile.start setup
+            cd "$INITIAL_PATH" || exit 1
+            sandbox=$CODEX_SANDBOX
+            approval=$CODEX_APPROVAL
+            set -- -c 'project_doc_fallback_filenames=["CLAUDE.md"]' -c 'project_doc_max_bytes=131072'
+            exec codex "$@" \
+              -c 'tui.status_line=["hostname","model-with-reasoning","current-dir"]' \
+              --ask-for-approval "$approval" \
+              --cd "$PWD" --sandbox "$sandbox"
+    headless:
+      description: Dispatched, unattended run of one prompt.
+      parameters:
+        - name: PROMPT
+          required: true
+          description: Prompt the run starts from.
+      secrets:
+        # Optional: without it the run uses the login in the state volume.
+        - name: openai-api-key
+          envName: OPENAI_API_KEY
+      onInit:
+        - script: |
+            set -euo pipefail
+            make -f /opt/kuketeams/harness/Makefile.start setup
+            cd "$INITIAL_PATH" || exit 1
+            sandbox=$CODEX_SANDBOX
+            set -- -c 'project_doc_fallback_filenames=["CLAUDE.md"]' -c 'project_doc_max_bytes=131072'
+            exec codex "$@" --ask-for-approval never exec --json \
+              --cd "$PWD" --sandbox "$sandbox" -- "$PROMPT"
   skillPath: $HOME/.agents/skills
   images:
     - name: codex

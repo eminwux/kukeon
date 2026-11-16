@@ -85,6 +85,30 @@ type CellConfigSpec struct {
 	Repos map[string]CellConfigRepoFill `json:"repos,omitempty"   yaml:"repos,omitempty"`
 	// Secrets fills the blueprint's structural secret slots, keyed by slot name.
 	Secrets map[string]CellConfigSecretFill `json:"secrets,omitempty" yaml:"secrets,omitempty"`
+	// Requires adds image capabilities this Config's cells need on top of the
+	// blueprint's and its enabled components' (e.g. [go]).
+	Requires []string `json:"requires,omitempty"   yaml:"requires,omitempty"`
+	// Components enables the blueprint's optional components, by name.
+	Components []string `json:"components,omitempty" yaml:"components,omitempty"`
+	// Modes selects which of the blueprint's harness modes this Config's
+	// cells may be created in, and the default. Unset allows every mode the
+	// blueprint declares.
+	Modes *CellConfigModes `json:"modes,omitempty"      yaml:"modes,omitempty"`
+	// Git overrides the git identity, credentials and signing config the
+	// cell inherits from its Realm → Space → Stack defaults: author,
+	// committer and signing replace the inherited value, credentials merge
+	// by host.
+	Git *ContainerGit `json:"git,omitempty"        yaml:"git,omitempty"`
+}
+
+// CellConfigModes restricts and defaults the harness mode of a Config's cells.
+type CellConfigModes struct {
+	// Enabled lists the modes a cell may be created in. Empty allows every
+	// mode the blueprint declares.
+	Enabled []string `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	// Default is the mode used when a create names none. Must be enabled.
+	// Unset falls back to the only enabled mode, else "interactive".
+	Default string `json:"default,omitempty" yaml:"default,omitempty"`
 }
 
 // CellConfigBlueprintRef references a CellBlueprint by name and scope. Name and
@@ -116,6 +140,9 @@ type CellConfigRepoFill struct {
 	// Ref is an immutable pin (tag or full commit SHA) — see
 	// ContainerRepo.Ref. Mutually exclusive with Branch.
 	Ref string `json:"ref,omitempty"    yaml:"ref,omitempty"`
+	// Git is this source's own git identity (author, committer, credential,
+	// signing). Unset fields fall back to the cell's default identity.
+	Git *RepoGit `json:"git,omitempty"    yaml:"git,omitempty"`
 }
 
 // CellConfigSecretFill fills a structural secret slot the referenced blueprint

@@ -25,6 +25,7 @@ import (
 
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/gitcred"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
 )
@@ -221,6 +222,42 @@ func (r *Exec) volumePostCreateChown(namespace string, spec intmodel.ContainerSp
 		if chownErr := r.chownVolumeDirToUID(path, int(uid)); chownErr != nil {
 			return chownErr
 		}
+	}
+	return nil
+}
+
+// gitPostCreate re-stages the container's rendered git bundle and re-owns it
+// to the container's resolved process uid (issue #1472). It runs after every
+// container create and on the reuse path of a start, for the same two reasons
+// attachablePostCreateChown does: the uid is only known once containerd has
+// built the runtime spec, and the staging directory lives on a tmpfs that a
+// reboot empties while the reused container still bind-mounts it. A no-op for
+// a container that declares no git config.
+func (r *Exec) gitPostCreate(namespace string, spec intmodel.ContainerSpec) error {
+	mount, err := ctr.StageContainerGit(spec, r.opts.RunPath)
+	if err != nil {
+		return err
+	}
+	if mount == nil {
+		return nil
+	}
+	containerdID := spec.ContainerdID
+	if containerdID == "" {
+		containerdID = spec.ID
+	}
+	container, err := r.ctrClient.GetContainer(namespace, containerdID)
+	if err != nil {
+		return fmt.Errorf("get container %q: %w", containerdID, err)
+	}
+	uid, err := r.ctrClient.ContainerProcessUID(namespace, container)
+	if err != nil {
+		return fmt.Errorf("resolve process uid for %q: %w", containerdID, err)
+	}
+	if uid == 0 {
+		return nil
+	}
+	if err = gitcred.Chown(mount.Source, int(uid)); err != nil {
+		return fmt.Errorf("chown git staging dir %q to uid %d: %w", mount.Source, uid, err)
 	}
 	return nil
 }

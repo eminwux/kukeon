@@ -22,11 +22,13 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/apischeme"
+	"github.com/eminwux/kukeon/internal/cellblueprint"
 	"github.com/eminwux/kukeon/internal/cellconfig"
 	"github.com/eminwux/kukeon/internal/controller/runner"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/naming"
+	ext "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 const (
@@ -919,7 +921,7 @@ func ReconcileConfig(r runner.Runner, desired intmodel.CellConfig) (ReconcileRes
 		return result, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, bpErr)
 	}
 
-	if slotErr := cellconfig.ValidateSlotFill(cfgDoc, bpDoc); slotErr != nil {
+	if slotErr := validateConfigAgainstBlueprint(cfgDoc, bpDoc); slotErr != nil {
 		return result, slotErr
 	}
 
@@ -933,6 +935,36 @@ func ReconcileConfig(r runner.Runner, desired intmodel.CellConfig) (ReconcileRes
 		result.Action = actionUpdated
 	}
 	return result, nil
+}
+
+// ValidateConfig runs every check ReconcileConfig and CreateConfig make before
+// they persist a CellConfig — its scope exists, the referenced CellBlueprint
+// resolves, and the fills fit the blueprint's contract — without writing
+// anything. A draft Config (the web UI's form, before it is saved) is checked
+// with it so a preview fails for the same reasons a create would.
+func ValidateConfig(r runner.Runner, desired intmodel.CellConfig) error {
+	if err := ensureConfigScopeExists(r, desired.Metadata); err != nil {
+		return err
+	}
+	cfgDoc, err := apischeme.ConvertCellConfigToExternal(desired)
+	if err != nil {
+		return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+	ref := cfgDoc.Spec.Blueprint
+	bpCarrier, getErr := r.GetBlueprint(intmodel.CellBlueprint{
+		Metadata: intmodel.CellBlueprintMetadata{Name: ref.Name, Realm: ref.Realm, Space: ref.Space, Stack: ref.Stack},
+	})
+	if getErr != nil {
+		if errors.Is(getErr, errdefs.ErrBlueprintNotFound) {
+			return fmt.Errorf("%w: %q (realm %q)", errdefs.ErrConfigBlueprintNotFound, ref.Name, ref.Realm)
+		}
+		return fmt.Errorf("failed to read referenced blueprint %q: %w", ref.Name, getErr)
+	}
+	bpDoc, bpErr := apischeme.ConvertCellBlueprintToExternal(bpCarrier)
+	if bpErr != nil {
+		return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, bpErr)
+	}
+	return validateConfigAgainstBlueprint(cfgDoc, bpDoc)
 }
 
 // CreateConfig is the atomic create-only sibling of ReconcileConfig used by
@@ -978,7 +1010,7 @@ func CreateConfig(r runner.Runner, desired intmodel.CellConfig) (ReconcileResult
 		return result, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, bpErr)
 	}
 
-	if slotErr := cellconfig.ValidateSlotFill(cfgDoc, bpDoc); slotErr != nil {
+	if slotErr := validateConfigAgainstBlueprint(cfgDoc, bpDoc); slotErr != nil {
 		return result, slotErr
 	}
 
@@ -1089,4 +1121,31 @@ func rematerializeChanges(cell intmodel.Cell) []string {
 		changes = append(changes, fmt.Sprintf("container %q re-materialized", c.ID))
 	}
 	return changes
+}
+
+// validateConfigAgainstBlueprint is the apply-time gate of a CellConfig against
+// the blueprint it references. The blueprint is first flattened into its
+// validation view (cellblueprint.FlattenOptions.All): every component and
+// every harness mode is folded in, with nothing an optional component or a
+// mode contributes marked required — a Config is stored before any cell, and
+// therefore any mode, exists, so only the always-on slots can be demanded here
+// (the picked mode's required slots are checked when a cell is rendered). It
+// also rejects enabling a component, or enabling / defaulting to a mode, the
+// blueprint does not declare. Issue #1472, steps 10–11.
+func validateConfigAgainstBlueprint(cfgDoc ext.CellConfigDoc, bpDoc ext.CellBlueprintDoc) error {
+	view, err := cellblueprint.Flatten(bpDoc, cellblueprint.FlattenOptions{All: true})
+	if err != nil {
+		return err
+	}
+	if slotErr := cellconfig.ValidateSlotFill(cfgDoc, view.Doc); slotErr != nil {
+		return slotErr
+	}
+	opts := cellblueprint.FlattenOptions{Components: cfgDoc.Spec.Components}
+	if modes := cfgDoc.Spec.Modes; modes != nil {
+		opts.AllowedModes, opts.DefaultMode = modes.Enabled, modes.Default
+	}
+	if _, err = cellblueprint.Flatten(bpDoc, opts); err != nil {
+		return fmt.Errorf("config %q: %w", cfgDoc.Metadata.Name, err)
+	}
+	return nil
 }

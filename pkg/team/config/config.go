@@ -37,12 +37,60 @@ type Spec struct {
 	Parameters map[string]string `yaml:"parameters,omitempty"`
 }
 
+// Git is the operator's default git identity for every team cell. Credentials
+// and signing name stored secrets — never host paths: kuke team writes this
+// block as scope defaults, and cells clone, push and sign from the secrets
+// alone, without the operator's ~/.ssh.
 type Git struct {
-	Author         *Identity `yaml:"author,omitempty"`
-	Committer      *Identity `yaml:"committer,omitempty"`
-	SigningKey     string    `yaml:"signingKey,omitempty"`
-	Sign           []string  `yaml:"sign,omitempty"`
-	AllowedSigners string    `yaml:"allowedSigners,omitempty"`
+	Author    *Identity `yaml:"author,omitempty"`
+	Committer *Identity `yaml:"committer,omitempty"`
+	// Credentials bind stored git credential secrets (type ssh-key or
+	// basic-auth) to remote hosts. The remote transport follows the credential.
+	Credentials []GitCredential `yaml:"credentials,omitempty"`
+	// Signing names the stored ssh-key secret commits and tags are signed with.
+	Signing *GitSigning `yaml:"signing,omitempty"`
+	Sign    []string    `yaml:"sign,omitempty"`
+	// SigningKey and AllowedSigners are the pre-stored-credential host paths.
+	// They are still decoded so existing configurations load, but no host path
+	// reaches a cell any more: composition ignores them and reports how to
+	// import the key into a secret.
+	SigningKey     string `yaml:"signingKey,omitempty"`
+	AllowedSigners string `yaml:"allowedSigners,omitempty"`
+}
+
+// GitCredential binds a stored git credential secret to a host (or a
+// host/path URL prefix).
+type GitCredential struct {
+	Host          string    `yaml:"host"`
+	SecretRef     SecretRef `yaml:"secretRef"`
+	User          string    `yaml:"user,omitempty"`
+	Port          int       `yaml:"port,omitempty"`
+	HostKeyPolicy string    `yaml:"hostKeyPolicy,omitempty"`
+}
+
+// GitSigning names the stored ssh-key secret to sign with and, optionally, the
+// secret holding the allowed-signers file used to verify signatures.
+type GitSigning struct {
+	SecretRef         SecretRef  `yaml:"secretRef"`
+	AllowedSignersRef *SecretRef `yaml:"allowedSignersRef,omitempty"`
+}
+
+// SourceGit is the git identity one source states for itself. Unset fields
+// fall back to the default identity.
+type SourceGit struct {
+	Author     *Identity         `yaml:"author,omitempty"`
+	Committer  *Identity         `yaml:"committer,omitempty"`
+	Credential *SourceCredential `yaml:"credential,omitempty"`
+	Signing    *GitSigning       `yaml:"signing,omitempty"`
+	Sign       []string          `yaml:"sign,omitempty"`
+}
+
+// SourceCredential is the credential one source clones and pushes with.
+type SourceCredential struct {
+	SecretRef     SecretRef `yaml:"secretRef"`
+	User          string    `yaml:"user,omitempty"`
+	Port          int       `yaml:"port,omitempty"`
+	HostKeyPolicy string    `yaml:"hostKeyPolicy,omitempty"`
 }
 
 type Identity struct {
@@ -85,6 +133,8 @@ type Source struct {
 	Commit string `yaml:"commit,omitempty"`
 	// ClonePath opts this source into runtime cloning at an absolute in-cell path.
 	ClonePath string `yaml:"clonePath,omitempty"`
+	// Git states this source's own git identity; unset fields use the default.
+	Git *SourceGit `yaml:"git,omitempty"`
 }
 
 type Role struct {

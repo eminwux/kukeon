@@ -29,13 +29,15 @@ See [`kuke run --from-blueprint`](../cli/kuke-run.md) for the run-side verb and 
 
 A Blueprint is scopable at realm, space, or stack — never cell. A template scoped to a single cell is nonsensical: the blueprint exists to materialize cells, not to live inside one. The scope is the deepest non-empty coordinate, and a deeper coordinate may only be set when every shallower one is.
 
-| Field    | Type              | Required | Description                                                                                                             |
-| -------- | ----------------- | -------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `name`   | string            | yes      | The blueprint's name, unique within its scope.                                                                          |
-| `realm`  | string            | yes      | The always-required top-level scope coordinate.                                                                         |
-| `space`  | string            | no       | When set, scopes the blueprint to a space within `realm`.                                                               |
-| `stack`  | string            | no       | When set, scopes the blueprint to a stack within `space` (requires space).                                              |
-| `labels` | map[string]string | no       | Copied onto every cell materialized from this blueprint, in addition to the `kukeon.io/blueprint` lineage label.        |
+| Field    | Type              | Required | Description                                                                                                      |
+| -------- | ----------------- | -------- | ---------------------------------------------------------------------------------------------------------------- |
+| `name`   | string            | yes      | The blueprint's name, unique within its scope.                                                                   |
+| `realm`  | string            | yes      | The always-required top-level scope coordinate.                                                                  |
+| `space`  | string            | no       | When set, scopes the blueprint to a space within `realm`.                                                        |
+| `stack`  | string            | no       | When set, scopes the blueprint to a stack within `space` (requires space).                                       |
+| `labels` | map[string]string | no       | Copied onto every cell materialized from this blueprint, in addition to the `kukeon.io/blueprint` lineage label. |
+
+`kukeon.io/shared: "true"` marks a blueprint as shared: a realm-wide form any team's (or hand-written) Config may reference, such as the one blueprint per harness × security profile [`kuke team`](../concepts/team.md) renders. A shared blueprint is never stamped with a team label, and a team apply removes it only once no CellConfig references it.
 
 ## spec
 
@@ -47,12 +49,98 @@ Cell-name prefix used when generating the `<prefix>-<6hex>` name on each `kuke r
 
 Declared `${KEY}` substitution variables the cell body references. `kuke run --from-blueprint` resolves each parameter against `--param K=V`, the parameter's `default`, and (when permitted) the caller's environment, in that order. An undeclared `--param` errors at call time so typos surface immediately. A `required: true` parameter that resolves to no value errors.
 
-| Field         | Type   | Required | Description                                                                                                        |
-| ------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------ |
-| `name`        | string | yes      | The substitution variable's name (referenced as `${name}`).                                                        |
-| `description` | string | no       | Free-form documentation.                                                                                           |
-| `default`     | string | no       | Default value when `--param` is not supplied. Empty string is a valid default and short-circuits the env-fallback. |
-| `required`    | bool   | no       | When `true`, the blueprint fails to run if the parameter resolves to no value.                                     |
+| Field         | Type            | Required | Description                                                                                                        |
+| ------------- | --------------- | -------- | ------------------------------------------------------------------------------------------------------------------ |
+| `name`        | string          | yes      | The substitution variable's name (referenced as `${name}`).                                                        |
+| `description` | string          | no       | Free-form documentation; a form shows it next to the field.                                                        |
+| `default`     | string          | no       | Default value when `--param` is not supplied. Empty string is a valid default and short-circuits the env-fallback. |
+| `required`    | bool            | no       | When `true`, the blueprint fails to run if the parameter resolves to no value.                                     |
+| `type`        | string          | no       | `string` (default), `enum`, `path`, `image` or `bool`. A resolved value that does not fit is rejected at render.   |
+| `enum`        | array of string | no       | The accepted values of a `type: enum` parameter. Required for `enum`, rejected on every other type.                |
+| `group`       | string          | no       | The form section the parameter is shown under (e.g. `role`, `harness`). Presentation only.                         |
+
+A parameter with no `type` is a `string`, so blueprints written before types existed stay valid. `bool` accepts `true` / `false`; `image` accepts an image reference or a realm image name; `path` accepts an absolute or relative path.
+
+### `spec.requires[]` (array of string, optional)
+
+Image capabilities every cell stamped from this blueprint needs — for example `[claude, git]`. See [Image capabilities](../concepts/blueprint-contract.md#image-capabilities).
+
+### `spec.components[]` (list, optional)
+
+The concerns the blueprint is assembled from. Each component bundles the parameters, secret slots, env and capabilities of one concern, and the daemon folds the enabled ones into `spec.cell` when it renders a cell. See [Blueprint contract](../concepts/blueprint-contract.md) for the model.
+
+| Field         | Type                | Required | Description                                                                                                                                                             |
+| ------------- | ------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kind`        | string              | yes      | `harness` (the agent harness), `connector` (an external service's API credentials) or `forge` (an issue/change tracker).                                                |
+| `name`        | string              | yes      | Unique within the blueprint; a Config enables an optional component by this name.                                                                                       |
+| `description` | string              | no       | Shown next to the component's toggle.                                                                                                                                   |
+| `optional`    | bool                | no       | When `true` the component is part of a cell only if the Config lists it in [`spec.components`](config.md#speccomponents-array-of-string-optional). Otherwise always on. |
+| `container`   | string              | no       | Container the env, secrets and mode `onInit` land on. Defaults to `spec.cell.tty.default`, else the first attachable container, else the first non-root container.      |
+| `requires`    | array of string     | no       | Image capabilities the component needs.                                                                                                                                 |
+| `parameters`  | list of parameter   | no       | Same shape as `spec.parameters[]`; they join the blueprint's when the component is enabled.                                                                             |
+| `env`         | array of string     | no       | `KEY=value` entries added to the container; values may reference `${PARAM}`s.                                                                                           |
+| `secrets`     | list of secret slot | no       | Secret slots added to the container; a Config fills them by name.                                                                                                       |
+| `modes`       | map of name → mode  | no       | The ways a harness can be started. `harness` components only; at most one component of a blueprint declares modes.                                                      |
+
+A component never declares a git credential: git authenticates only from a [`git`](container.md#containergit) block. Two enabled components — or a component and the template — that set the same env key or the same secret destination fail the render.
+
+#### Component mode
+
+| Field         | Type                | Required | Description                                                            |
+| ------------- | ------------------- | -------- | ---------------------------------------------------------------------- |
+| `description` | string              | no       | Shown next to the mode.                                                |
+| `onInit`      | list of `TtyStage`  | no       | Replaces the container's `tty.onInit` stages for cells in this mode.   |
+| `parameters`  | list of parameter   | no       | Parameters only this mode takes (e.g. the `PROMPT` of a headless run). |
+| `env`         | array of string     | no       | Env entries only this mode sets.                                       |
+| `secrets`     | list of secret slot | no       | Secret slots only this mode has.                                       |
+
+Everything a mode declares applies only to cells created in it — in particular a `required` parameter or secret is required only then.
+
+```yaml
+spec:
+  requires: [claude, git]
+  parameters:
+    - {
+        name: IMAGE,
+        type: image,
+        default: ghcr.io/eminwux/kukeon/claude:v0.10.0,
+        group: image,
+      }
+    - { name: ROLE_PATH, type: path, required: true, group: role }
+  components:
+    - kind: harness
+      name: claude
+      requires: [claude]
+      parameters:
+        - {
+            name: ANTHROPIC_MODEL,
+            type: enum,
+            enum: [opus, sonnet],
+            default: opus,
+            group: harness,
+          }
+      env: ["ANTHROPIC_MODEL=${ANTHROPIC_MODEL}"]
+      modes:
+        interactive:
+          onInit: [{ script: "claude" }]
+        headless:
+          parameters: [{ name: PROMPT, required: true }]
+          env: ["PROMPT=${PROMPT}"]
+          secrets: [{ name: anthropic-api-key, envName: ANTHROPIC_API_KEY }]
+          onInit: [{ script: 'claude --print "$PROMPT"' }]
+    - kind: connector
+      name: github
+      optional: true
+      requires: [gh]
+      secrets: [{ name: github-token, envName: GH_TOKEN, required: true }]
+  cell:
+    containers:
+      - id: work
+        attachable: true
+        image: "${IMAGE}"
+        repos:
+          - { name: role-source, target: /home/user/role, required: true }
+```
 
 ### `spec.cell` (object, required)
 

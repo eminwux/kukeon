@@ -253,6 +253,8 @@ type runFlags struct {
 	name      string
 	paramArgs []string
 	paramFile string
+	// mode is the harness mode (`--mode`) of a --from-config / --clone run.
+	mode string
 	// envArgs are the validated `KEY=VALUE` --env entries. On the existing-cell
 	// and -f paths they thread onto Spec.RuntimeEnv (transport-only runtime
 	// injection, #834); on the --from-config/--clone paths they are the persisted
@@ -327,6 +329,7 @@ func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
 		&flags.configName:    "from-config",
 		&flags.cloneSource:   "clone",
 		&flags.paramFile:     "param-file",
+		&flags.mode:          "mode",
 	} {
 		v, err := cmd.Flags().GetString(name)
 		if err != nil {
@@ -414,6 +417,9 @@ func validateSourceFlagCompat(flags runFlags) error {
 	}
 	if flags.fused() {
 		return nil
+	}
+	if flags.mode != "" {
+		return errors.New("--mode is only valid with --from-config or --clone")
 	}
 	// --image is a create source: it takes --name (the cell it creates) but not
 	// the blueprint render-time knobs --param/--param-file.
@@ -560,6 +566,7 @@ func runFused(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) error 
 		CloneSource:        flags.cloneSource,
 		ParamArgs:          flags.paramArgs,
 		ParamFile:          flags.paramFile,
+		Mode:               flags.mode,
 		EnvArgs:            flags.envArgs,
 		IgnoreDiskPressure: flags.ignoreDiskPressure,
 	}
@@ -626,7 +633,10 @@ func runFromConfig(
 	if err := cell.ValidateOverrideSymmetry(src); err != nil {
 		return err
 	}
-	req := cell.ConfigRenderRequest(cmd, src, scope)
+	req, err := cell.ConfigRenderRequest(cmd, src, scope)
+	if err != nil {
+		return err
+	}
 	req.Start = true
 	req.AutoDelete = flags.autoDelete
 

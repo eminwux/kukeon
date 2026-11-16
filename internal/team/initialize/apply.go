@@ -24,6 +24,7 @@ import (
 	"net"
 	"net/rpc"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -31,10 +32,12 @@ import (
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/compose"
 	"github.com/eminwux/kukeon/pkg/team/config"
+	"gopkg.in/yaml.v3"
 )
 
 // Client deliberately has no cell lifecycle methods. Init can only read scope,
-// create explicitly sourced secrets, and apply blueprint/config documents.
+// create explicitly sourced secrets, and apply blueprint/config documents (plus
+// the team stack's git defaults).
 type Client interface {
 	Close() error
 	Ping(context.Context) error
@@ -44,69 +47,337 @@ type Client interface {
 	ListCells(context.Context, string, string, string) ([]api.CellDoc, error)
 	GetSecret(context.Context, api.SecretDoc) (kukeonv1.GetSecretResult, error)
 	CreateSecret(context.Context, api.SecretDoc) (kukeonv1.CreateSecretResult, error)
+	GetBlueprint(context.Context, api.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error)
+	ListConfigs(context.Context, string, string, string) ([]api.CellConfigDoc, error)
+	GetConfig(context.Context, api.CellConfigDoc) (kukeonv1.GetConfigResult, error)
 	ApplyDocumentsForTeam(context.Context, []byte, string) (kukeonv1.ApplyDocumentsResult, error)
 }
 
 var _ Client = (*kukeonv1.UnixClient)(nil)
+
+// applied reports what one application did.
+type applied struct {
+	// resources counts the accepted blueprints, configs and scope documents.
+	resources int
+	// missing lists one remediation line per runtime secret that does not exist.
+	missing []string
+	// notes are operator-facing remarks from application.
+	notes []string
+}
 
 // Apply preflights all sources/scopes before writing anything to the daemon.
 // It never retries an ambiguous write. Secrets stay outside the document stream.
 // Required secrets that are absent and have no creation source do not block
 // application; Apply returns one remediation line per missing runtime secret.
 func Apply(ctx context.Context, client Client, result *compose.Result) ([]string, error) {
-	return apply(ctx, client, result, "kuke team init")
+	out, err := apply(ctx, client, result, "kuke team init", nil)
+	return out.missing, err
 }
 
-func apply(ctx context.Context, client Client, result *compose.Result, command string) ([]string, error) {
+func apply(
+	ctx context.Context, client Client, result *compose.Result, command string, imported []api.SecretDoc,
+) (applied, error) {
+	var out applied
+	if result.Entry == nil || len(result.Pairs) == 0 {
+		return out, errors.New("preflight: empty team composition")
+	}
+	if err := client.Ping(ctx); err != nil {
+		return out, fmt.Errorf("kukeond connection/preflight: %w", err)
+	}
+	scope := config.SecretRef{Realm: result.Scope.Realm, Space: result.Scope.Space, Stack: result.Scope.Stack}
+	if err := checkScope(ctx, client, scope, command); err != nil {
+		return out, err
+	}
+	// Settle shared blueprint names before anything references them.
+	renamed, err := resolveSharedNames(ctx, client, result)
+	if err != nil {
+		return out, err
+	}
+	out.notes = append(out.notes, renamed...)
 	raw, err := result.MarshalYAML()
 	if err != nil {
-		return nil, err
+		return out, err
 	}
-	if result.Entry == nil || len(result.Pairs) == 0 {
-		return nil, errors.New("preflight: empty team composition")
+	stackDoc, err := gitDefaultsDocument(ctx, client, result)
+	if err != nil {
+		return out, err
 	}
-	if err = client.Ping(ctx); err != nil {
-		return nil, fmt.Errorf("kukeond connection/preflight: %w", err)
-	}
-	for _, pair := range result.Pairs {
-		md := pair.Blueprint.Metadata
-		if err = checkScope(ctx, client, config.SecretRef{Realm: md.Realm, Space: md.Space, Stack: md.Stack}, command); err != nil {
-			return nil, err
-		}
+	expected := len(result.Blueprints) + len(result.Pairs)
+	if stackDoc != nil {
+		raw = append(append(stackDoc, []byte("---\n")...), raw...)
+		expected++
 	}
 	secrets, missing, err := prepareSecrets(ctx, client, result, command)
 	if err != nil {
-		return nil, err
+		return out, err
 	}
+	gitMissing, err := missingGitSecrets(ctx, client, result, imported)
+	if err != nil {
+		return out, err
+	}
+	missing = append(missing, gitMissing...)
+	out.missing = missing
 	for _, secret := range secrets {
 		// Close most of the preflight/create window and reuse a competing
 		// creator's value. The existing API has no atomic create-only gate.
 		ref := secret.Metadata
-		lookup := secret
-		lookup.Spec.Data = ""
+		lookup := api.SecretDoc{APIVersion: secret.APIVersion, Kind: secret.Kind, Metadata: secret.Metadata}
 		got, lookupErr := client.GetSecret(ctx, lookup)
 		if lookupErr != nil {
-			return nil, requestError("recheck", "secret "+ref.Name, lookupErr)
+			return out, requestError("recheck", "secret "+ref.Name, lookupErr)
 		}
 		if got.MetadataExists {
 			continue
 		}
-		if _, err = client.CreateSecret(ctx, secret); err != nil {
-			return nil, requestError(
-				"creation (write not retried; rerun "+command+" to check existence)",
-				"secret "+ref.Name,
-				err,
-			)
+		if err = createSecret(ctx, client, secret, command); err != nil {
+			return out, err
+		}
+	}
+	for _, secret := range imported {
+		// An import is the operator's explicit request to store this key, so
+		// it replaces whatever the secret held: skipping an existing one would
+		// report success while cells kept the old key. The stored bytes cannot
+		// be read back to compare, so the replacement is always written and
+		// reported.
+		ref := secret.Metadata
+		lookup := api.SecretDoc{APIVersion: secret.APIVersion, Kind: secret.Kind, Metadata: secret.Metadata}
+		got, lookupErr := client.GetSecret(ctx, lookup)
+		if lookupErr != nil {
+			return out, requestError("recheck", "secret "+ref.Name, lookupErr)
+		}
+		if err = createSecret(ctx, client, secret, command); err != nil {
+			return out, err
+		}
+		if got.MetadataExists {
+			out.notes = append(out.notes, fmt.Sprintf(
+				"secret %q already existed and was replaced with the imported material.", ref.Name,
+			))
 		}
 	}
 	// CellConfigs only reference secrets structurally; kukeond resolves them at
 	// cell launch, so configs referencing a missing secret still apply.
-	applied, err := client.ApplyDocumentsForTeam(ctx, raw, result.Entry.Metadata.Name)
+	response, err := client.ApplyDocumentsForTeam(ctx, raw, result.Entry.Metadata.Name)
 	if err != nil {
-		return nil, fmt.Errorf("kukeond apply RPC failed (application may be partial; registration unchanged): %w", err)
+		return out, fmt.Errorf("kukeond apply RPC failed (application may be partial; registration unchanged): %w", err)
 	}
-	if err = checkResults(applied, len(result.Pairs)*resourcesPerPair, command); err != nil {
-		return nil, err
+	if err = checkResults(response, expected, command); err != nil {
+		return out, err
+	}
+	out.resources = expected
+	return out, nil
+}
+
+func createSecret(ctx context.Context, client Client, secret api.SecretDoc, command string) error {
+	if _, err := client.CreateSecret(ctx, secret); err != nil {
+		return requestError(
+			"creation (write not retried; rerun "+command+" to check existence)",
+			"secret "+secret.Metadata.Name,
+			err,
+		)
+	}
+	return nil
+}
+
+// resolveSharedNames decides the name each shared blueprint is stored under.
+// A blueprint keeps its plain `<harness>[-<profile>]` name unless the realm
+// already holds a *different* blueprint there that this team may not replace —
+// one another team's (or a hand-written) CellConfig references, or one kuke
+// team did not render. Then it takes a content-digest suffix instead of
+// overwriting, and the team's configs follow.
+func resolveSharedNames(ctx context.Context, client Client, result *compose.Result) ([]string, error) {
+	var notes []string
+	var foreign map[string]bool
+	team := result.Entry.Metadata.Name
+	for _, bp := range result.Blueprints {
+		md := bp.Metadata
+		got, err := client.GetBlueprint(ctx, api.CellBlueprintDoc{
+			APIVersion: api.APIVersionV1Beta1, Kind: api.KindCellBlueprint,
+			Metadata: api.CellBlueprintMetadata{Name: md.Name, Realm: md.Realm},
+		})
+		if err != nil {
+			return nil, requestError("lookup", "blueprint "+md.Name, err)
+		}
+		if !got.MetadataExists {
+			continue
+		}
+		existing := got.Blueprint.Metadata.Labels
+		shared := existing[api.LabelShared] == "true"
+		if shared && existing[api.LabelContentDigest] == md.Labels[api.LabelContentDigest] {
+			continue
+		}
+		if shared {
+			if foreign == nil {
+				if foreign, err = foreignBlueprintRefs(ctx, client, team, md.Realm); err != nil {
+					return nil, err
+				}
+			}
+			if !foreign[md.Name] {
+				// Only this team uses it: a new harness revision replaces it.
+				continue
+			}
+		}
+		name := compose.DigestName(bp)
+		notes = append(notes, fmt.Sprintf(
+			"blueprint %s already exists in realm %s with different content; applied this team's as %s",
+			md.Name, md.Realm, name,
+		))
+		result.RenameBlueprint(bp, name)
+	}
+	return notes, nil
+}
+
+// foreignBlueprintRefs names the realm-scoped blueprints of realm that a
+// CellConfig outside team references.
+func foreignBlueprintRefs(ctx context.Context, client Client, team, realm string) (map[string]bool, error) {
+	configs, err := client.ListConfigs(ctx, "", "", "")
+	if err != nil {
+		return nil, requestError("lookup", "configs", err)
+	}
+	out := map[string]bool{}
+	for _, listed := range configs {
+		if listed.Metadata.Labels[api.LabelTeam] == team {
+			continue
+		}
+		got, getErr := client.GetConfig(ctx, api.CellConfigDoc{
+			APIVersion: api.APIVersionV1Beta1, Kind: api.KindCellConfig, Metadata: listed.Metadata,
+		})
+		if getErr != nil {
+			return nil, requestError("lookup", "config "+listed.Metadata.Name, getErr)
+		}
+		if !got.MetadataExists {
+			continue
+		}
+		ref := got.Config.Spec.Blueprint
+		if ref.Realm == realm && ref.Space == "" && ref.Stack == "" {
+			out[ref.Name] = true
+		}
+	}
+	return out, nil
+}
+
+// gitDefaultsDocument returns the team stack's document with the operator's
+// default git identity written into spec.defaults.git, or nil when there is
+// nothing to write or it is already there. Only the git block is touched:
+// identity and signing are replaced, credentials are merged by host, and every
+// other default the stack carries is kept.
+func gitDefaultsDocument(ctx context.Context, client Client, result *compose.Result) ([]byte, error) {
+	if result.Git == nil {
+		return nil, nil
+	}
+	scope := result.Scope
+	stacks, err := client.ListStacks(ctx, scope.Realm, scope.Space)
+	if err != nil {
+		return nil, requestError("prerequisite lookup", "stack "+scope.Stack, err)
+	}
+	i := slices.IndexFunc(stacks, func(doc api.StackDoc) bool { return doc.Metadata.Name == scope.Stack })
+	if i < 0 {
+		return nil, fmt.Errorf("preflight: required stack %s is missing", scope.Stack)
+	}
+	current := stacks[i]
+	var defaults api.ScopeDefaults
+	if current.Spec.Defaults != nil {
+		defaults = *current.Spec.Defaults
+	}
+	merged := mergeGit(defaults.Git, result.Git)
+	if reflect.DeepEqual(defaults.Git, merged) {
+		return nil, nil
+	}
+	defaults.Git = merged
+	doc := api.StackDoc{
+		APIVersion: api.APIVersionV1Beta1, Kind: api.KindStack,
+		Metadata: api.StackMetadata{Name: current.Metadata.Name, Labels: current.Metadata.Labels},
+		Spec: api.StackSpec{
+			ID: current.Spec.ID, RealmID: scope.Realm, SpaceID: scope.Space, Defaults: &defaults,
+		},
+	}
+	if doc.Spec.ID == "" {
+		doc.Spec.ID = current.Metadata.Name
+	}
+	return yaml.Marshal(doc)
+}
+
+// mergeGit lays the team's git block over the stack's existing one.
+func mergeGit(existing, team *api.ContainerGit) *api.ContainerGit {
+	out := &api.ContainerGit{}
+	if existing != nil {
+		*out = *existing
+		out.Credentials = slices.Clone(existing.Credentials)
+		// The pre-stored-credential host paths never reach a cell.
+		out.SigningKey, out.AllowedSigners = "", ""
+	}
+	if team.Author != nil {
+		out.Author = team.Author
+	}
+	if team.Committer != nil {
+		out.Committer = team.Committer
+	}
+	if team.Signing != nil {
+		out.Signing, out.Sign = team.Signing, slices.Clone(team.Sign)
+	}
+	for _, credential := range team.Credentials {
+		j := slices.IndexFunc(out.Credentials, func(c api.GitCredential) bool { return c.Host == credential.Host })
+		if j < 0 {
+			out.Credentials = append(out.Credentials, credential)
+		} else {
+			out.Credentials[j] = credential
+		}
+	}
+	return out
+}
+
+// missingGitSecrets returns one remediation line per git credential or signing
+// secret that does not exist yet and is not about to be imported.
+func missingGitSecrets(
+	ctx context.Context, client Client, result *compose.Result, imported []api.SecretDoc,
+) ([]string, error) {
+	var refs []*api.ContainerSecretRef
+	collect := func(signing *api.GitSigning) {
+		if signing != nil {
+			refs = append(refs, signing.SecretRef, signing.AllowedSignersRef)
+		}
+	}
+	if result.Git != nil {
+		for _, credential := range result.Git.Credentials {
+			refs = append(refs, credential.SecretRef)
+		}
+		collect(result.Git.Signing)
+	}
+	for _, pair := range result.Pairs {
+		for _, fill := range pair.Config.Spec.Repos {
+			if fill.Git == nil {
+				continue
+			}
+			if fill.Git.Credential != nil {
+				refs = append(refs, fill.Git.Credential.SecretRef)
+			}
+			collect(fill.Git.Signing)
+		}
+	}
+	seen := map[api.ContainerSecretRef]bool{}
+	var missing []string
+	for _, ref := range refs {
+		if ref == nil || seen[*ref] {
+			continue
+		}
+		seen[*ref] = true
+		md := api.SecretMetadata{Name: ref.Name, Realm: ref.Realm, Space: ref.Space, Stack: ref.Stack, Cell: ref.Cell}
+		if slices.ContainsFunc(imported, func(doc api.SecretDoc) bool { return doc.Metadata == md }) {
+			continue
+		}
+		got, err := client.GetSecret(ctx, api.SecretDoc{
+			APIVersion: api.APIVersionV1Beta1, Kind: api.KindSecret, Metadata: md,
+		})
+		if err != nil {
+			return nil, requestError("lookup", "secret "+ref.Name, err)
+		}
+		if !got.MetadataExists {
+			missing = append(missing, fmt.Sprintf(
+				"%s  →  kuke create secret %s --realm %s --type ssh-key --from-file /path/to/private-key  (git credential; or --type basic-auth)",
+				ref.Name,
+				ref.Name,
+				ref.Realm,
+			))
+		}
 	}
 	return missing, nil
 }

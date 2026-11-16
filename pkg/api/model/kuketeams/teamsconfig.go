@@ -23,10 +23,10 @@ import (
 // TeamsConfig is the host-side, operator-owned global-facts document, stored at
 // ~/.kuke/kuketeams.yaml and maintained by `kuke team init`. It carries the
 // operator facts only — git identity/signing, registry, source clone URLs, and
-// secret sources. Per-project composition lives in its own TeamEntry document
-// under the ~/.kuke/kuketeam.d/ drop-in directory (one file per project), so a
-// corrupt or partial write touches a single project rather than the shared
-// roster.
+// secret sources. Per-team composition lives in its own TeamEntry document
+// under the ~/.kuke/kuketeam.d/ drop-in directory (one <team>.yaml file per
+// team), so a corrupt or partial write touches a single team rather than the
+// shared roster.
 type TeamsConfig struct {
 	APIVersion string          `json:"apiVersion" yaml:"apiVersion"`
 	Kind       string          `json:"kind"       yaml:"kind"`
@@ -35,8 +35,10 @@ type TeamsConfig struct {
 
 // TeamsConfigSpec carries the operator-owned composition.
 type TeamsConfigSpec struct {
-	// Git is the operator's git identity + signing config rendered into every
-	// team cell. It is a strict superset of v1beta1.ContainerGit.
+	// Git is the operator's default git identity, credentials and signing
+	// config. It names stored secrets, never host paths, and is written as
+	// scope defaults so every team cell inherits it. It is a strict superset
+	// of v1beta1.ContainerGit.
 	Git *TeamsConfigGit `json:"git,omitempty"       yaml:"git,omitempty"`
 	// Registry is the default container registry for resolving images.
 	Registry string `json:"registry,omitempty"  yaml:"registry,omitempty"`
@@ -60,16 +62,17 @@ type TeamsConfigSpec struct {
 }
 
 // TeamsConfigGit is a strict superset of v1beta1.ContainerGit — the embedded
-// runtime type contributes author, committer, signingKey, sign, and
-// allowedSigners — plus the SSHKey clone identity used to clone/push project and
-// agents repos. Embedding (rather than redeclaring) keeps it drift-proof: any
-// field added to ContainerGit is automatically carried here.
+// runtime type contributes author, committer, credentials, signing and sign.
+// Embedding (rather than redeclaring) keeps it drift-proof: any field added to
+// ContainerGit is automatically carried here.
 type TeamsConfigGit struct {
 	v1beta1.ContainerGit `yaml:",inline"`
 
-	// SSHKey is the host path to the SSH private key used as the
-	// GIT_SSH_COMMAND identity for clone/push (distinct from the signing key,
-	// which signs commits/tags). Optional.
+	// SSHKey was the host path to the SSH private key used as the
+	// GIT_SSH_COMMAND identity for clone/push.
+	//
+	// Deprecated: no host key reaches a cell. Store the key as an ssh-key
+	// Secret and bind it in credentials (issue #1472).
 	SSHKey string `json:"sshKey,omitempty" yaml:"sshKey,omitempty"`
 }
 

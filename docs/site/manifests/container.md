@@ -62,34 +62,34 @@ See [Concepts → Container](../concepts/container.md) for what a container is.
 
 ## spec
 
-| Field             | Type                       | Required | Description                                                                                                                                                                                                                  |
-| ----------------- | -------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`              | string                     | yes      | Container identifier (matches `metadata.name`)                                                                                                                                                                               |
-| `containerdId`    | string                     | no       | Populated by Kukeon with the containerd-level container id                                                                                                                                                                   |
-| `realmId`         | string                     | yes      | Realm that owns the container                                                                                                                                                                                                |
-| `spaceId`         | string                     | yes      | Space that owns the container                                                                                                                                                                                                |
-| `stackId`         | string                     | yes      | Stack that owns the container                                                                                                                                                                                                |
-| `cellId`          | string                     | yes      | Cell that owns the container                                                                                                                                                                                                 |
-| `root`            | bool                       | no       | Mark this as the cell's root container (owns the network namespace)                                                                                                                                                          |
-| `image`           | string                     | yes      | OCI image reference. Kukeon passes this to containerd's image pull.                                                                                                                                                          |
-| `command`         | string                     | no       | Command to run. If omitted, the image's `ENTRYPOINT` is used.                                                                                                                                                                |
-| `args`            | array of string            | no       | Arguments. Combined with `command`.                                                                                                                                                                                          |
-| `env`             | array of string            | no       | `KEY=VALUE` environment variables                                                                                                                                                                                            |
-| `ports`           | array of string            | no       | Reserved — port mapping semantics are not finalized                                                                                                                                                                          |
-| `volumes`         | array of `VolumeMount`     | no       | Bind-mount host paths into the container (see [VolumeMount](#volumemount))                                                                                                                                                   |
-| `networks`        | array of string            | no       | Additional CNI networks to join beyond the cell's default                                                                                                                                                                    |
-| `networksAliases` | array of string            | no       | DNS aliases for the container within its CNI networks                                                                                                                                                                        |
-| `privileged`      | bool                       | no       | Run privileged (full capabilities, **all** host devices, open device cgroup). For just one or two devices prefer the least-privilege [`devices`](#devices) field instead.                                                    |
-| `devices`         | array of string            | no       | Per-device host passthrough — grant only the named device nodes (e.g. `/dev/kvm`) instead of all of `/dev` (see [devices](#devices))                                                                                         |
-| `hostCgroup`      | bool                       | no       | Opt the container into its parent's cgroup namespace (see [Host cgroup mode](#host-cgroup-mode))                                                                                                                             |
-| `secrets`         | array of `ContainerSecret` | no       | Inject credentials resolved by the daemon — never written to status or YAML (see [ContainerSecret](#containersecret))                                                                                                        |
-| `repos`           | array of `ContainerRepo`   | no       | Git repos the kuketty wrapper clones before the workload starts — requires `attachable: true` (see [ContainerRepo](#containerrepo))                                                                                          |
-| `git`             | `ContainerGit`             | no       | Declarative git identity + signing, expanded into `GIT_AUTHOR_*`/`GIT_COMMITTER_*`/`GIT_CONFIG_*` env before start (see [ContainerGit](#containergit))                                                                       |
-| `cniConfigPath`   | string                     | no       | Override the CNI config directory for this container                                                                                                                                                                         |
-| `restartPolicy`   | string                     | no       | Per-container reap policy at the cell wind-down / auto-delete gate. One of `always`, `on-failure`, `never`. Empty defaults to `never` (matches the Kubernetes default restartPolicy; see [Restart policy](#restart-policy)). |
-| `restartBackoffSeconds` | int                  | no       | Minimum seconds between reconciler-driven restarts of this container. Unset uses the built-in `30s` default; `0` disables the floor. Requires a restarting policy (`always`/`on-failure`). See [Restart on exit](#restart-on-exit).                                                       |
-| `restartMaxRetries`     | int                  | no       | `on-failure` retry cap before the container is left terminal. Unset uses the built-in `5` default; must be ≥ 1. Requires `restartPolicy: on-failure`. See [Restart on exit](#restart-on-exit).                                                                                            |
-| `tty`             | `ContainerTty`             | no       | Shell-UX config for the kuketty wrapper (prompt, init scripts, logging) — requires `attachable: true` (see [ContainerTty](#containertty))                                                                                    |
+| Field                   | Type                       | Required | Description                                                                                                                                                                                                                         |
+| ----------------------- | -------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                    | string                     | yes      | Container identifier (matches `metadata.name`)                                                                                                                                                                                      |
+| `containerdId`          | string                     | no       | Populated by Kukeon with the containerd-level container id                                                                                                                                                                          |
+| `realmId`               | string                     | yes      | Realm that owns the container                                                                                                                                                                                                       |
+| `spaceId`               | string                     | yes      | Space that owns the container                                                                                                                                                                                                       |
+| `stackId`               | string                     | yes      | Stack that owns the container                                                                                                                                                                                                       |
+| `cellId`                | string                     | yes      | Cell that owns the container                                                                                                                                                                                                        |
+| `root`                  | bool                       | no       | Mark this as the cell's root container (owns the network namespace)                                                                                                                                                                 |
+| `image`                 | string                     | yes      | OCI image reference. Kukeon passes this to containerd's image pull.                                                                                                                                                                 |
+| `command`               | string                     | no       | Command to run. If omitted, the image's `ENTRYPOINT` is used.                                                                                                                                                                       |
+| `args`                  | array of string            | no       | Arguments. Combined with `command`.                                                                                                                                                                                                 |
+| `env`                   | array of string            | no       | `KEY=VALUE` environment variables                                                                                                                                                                                                   |
+| `ports`                 | array of string            | no       | Reserved — port mapping semantics are not finalized                                                                                                                                                                                 |
+| `volumes`               | array of `VolumeMount`     | no       | Bind-mount host paths into the container (see [VolumeMount](#volumemount))                                                                                                                                                          |
+| `networks`              | array of string            | no       | Additional CNI networks to join beyond the cell's default                                                                                                                                                                           |
+| `networksAliases`       | array of string            | no       | DNS aliases for the container within its CNI networks                                                                                                                                                                               |
+| `privileged`            | bool                       | no       | Run privileged (full capabilities, **all** host devices, open device cgroup). For just one or two devices prefer the least-privilege [`devices`](#devices) field instead.                                                           |
+| `devices`               | array of string            | no       | Per-device host passthrough — grant only the named device nodes (e.g. `/dev/kvm`) instead of all of `/dev` (see [devices](#devices))                                                                                                |
+| `hostCgroup`            | bool                       | no       | Opt the container into its parent's cgroup namespace (see [Host cgroup mode](#host-cgroup-mode))                                                                                                                                    |
+| `secrets`               | array of `ContainerSecret` | no       | Inject credentials resolved by the daemon — never written to status or YAML (see [ContainerSecret](#containersecret))                                                                                                               |
+| `repos`                 | array of `ContainerRepo`   | no       | Git repos the kuketty wrapper clones before the workload starts — requires `attachable: true` (see [ContainerRepo](#containerrepo))                                                                                                 |
+| `git`                   | `ContainerGit`             | no       | Default git identity, stored credentials and signing, rendered as a container-global gitconfig (see [ContainerGit](#containergit))                                                                                                  |
+| `cniConfigPath`         | string                     | no       | Override the CNI config directory for this container                                                                                                                                                                                |
+| `restartPolicy`         | string                     | no       | Per-container reap policy at the cell wind-down / auto-delete gate. One of `always`, `on-failure`, `never`. Empty defaults to `never` (matches the Kubernetes default restartPolicy; see [Restart policy](#restart-policy)).        |
+| `restartBackoffSeconds` | int                        | no       | Minimum seconds between reconciler-driven restarts of this container. Unset uses the built-in `30s` default; `0` disables the floor. Requires a restarting policy (`always`/`on-failure`). See [Restart on exit](#restart-on-exit). |
+| `restartMaxRetries`     | int                        | no       | `on-failure` retry cap before the container is left terminal. Unset uses the built-in `5` default; must be ≥ 1. Requires `restartPolicy: on-failure`. See [Restart on exit](#restart-on-exit).                                      |
+| `tty`                   | `ContainerTty`             | no       | Shell-UX config for the kuketty wrapper (prompt, init scripts, logging) — requires `attachable: true` (see [ContainerTty](#containertty))                                                                                           |
 
 !!! warning "Fields marked reserved"
 `ports` is accepted by the schema today but its semantics are still being designed. Values round-trip (you can read back what you applied), but the controller does not act on them. See [GitHub Issues](https://github.com/eminwux/kukeon/issues) for the backlog.
@@ -124,10 +124,10 @@ The same `restartPolicy` value also drives whether the reconciler **relaunches**
 
 **Tuning the backoff and cap.** The `30s` backoff floor and `5`-attempt `on-failure` cap above are the built-in defaults. Two optional per-container fields override them:
 
-| Field                   | Type | Default | Behavior                                                                                                                                                                                |
-| ----------------------- | ---- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Field                   | Type | Default | Behavior                                                                                                                                                                                 |
+| ----------------------- | ---- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `restartBackoffSeconds` | int  | `30`    | Minimum seconds between successive restarts of this container. `0` disables the floor (a restart fires on the next reconcile tick that observes the exit). Negative values are rejected. |
-| `restartMaxRetries`     | int  | `5`     | Maximum `on-failure` restart attempts before the container is left terminal and the cell settles into `Error`. Must be ≥ 1.                                                             |
+| `restartMaxRetries`     | int  | `5`     | Maximum `on-failure` restart attempts before the container is left terminal and the cell settles into `Error`. Must be ≥ 1.                                                              |
 
 Both fields are optional; **omit them and existing behavior is unchanged** (the built-in `30s` / `5` defaults apply). They only take effect under a restarting policy, so applying them with a policy that does not restart is a validation error:
 
@@ -294,6 +294,7 @@ Each entry in `spec.repos` declares a git repository the kuketty wrapper clones 
 | `branch`   | string | no       | Branch to check out (moving target). Empty clones the remote's default branch. Mutually exclusive with `ref`.                                                                                                          |
 | `ref`      | string | no       | Immutable pin — tag name or full commit SHA. Clones at detached HEAD; on restart fetches `--tags` and re-detaches without `pull --ff-only`, so an in-place restart stays idempotent. Mutually exclusive with `branch`. |
 | `required` | bool   | no       | When `true`, a clone/fetch failure makes the container fail before start. When `false` (default), the failure is logged and the container proceeds.                                                                    |
+| `git`      | object | no       | This repo's own git identity ([RepoGit](#repogit)). Unset fields fall back to the container's `git` block.                                                                                                             |
 
 Pick `branch` for "track the latest commit on this branch" (fetch + fast-forward on restart) or `ref` for "pin to this exact tag/commit forever" (no fast-forward, no divergence). Both keep the on-disk checkout across `kuke stop`/`kuke start`; setting both is rejected at apply time.
 
@@ -313,15 +314,15 @@ repos:
 
 ### ContainerGit
 
-`spec.git` is declarative sugar over the `GIT_AUTHOR_*` / `GIT_COMMITTER_*` / `GIT_CONFIG_*` environment-variable protocol git reads natively. The runtime expands it into that env block before container start, merged with explicit `spec.env` entries (which win on key collision).
+`spec.git` is the container's default git identity: who commits, how remotes authenticate and what signs. It names **stored secrets** — never host paths — so a container clones, pushes and signs without a key mounted from the host.
 
-| Field            | Type            | Required | Description                                                                                                            |
-| ---------------- | --------------- | -------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `author`         | `GitIdentity`   | no       | Git author identity (`GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL`)                                                           |
-| `committer`      | `GitIdentity`   | no       | Git committer identity (`GIT_COMMITTER_NAME` / `GIT_COMMITTER_EMAIL`)                                                  |
-| `signingKey`     | string          | no       | Absolute in-container path to the SSH signing key (`user.signingkey`); a non-empty value also sets `gpg.format=ssh`    |
-| `sign`           | array of string | no       | Artefacts to sign: `commits` (`commit.gpgsign=true`) and/or `tags` (`tag.gpgsign=true`). Requires `signingKey`.        |
-| `allowedSigners` | string          | no       | Absolute in-container path to git's SSH allowed-signers file (`gpg.ssh.allowedSignersFile`), used to verify signatures |
+| Field         | Type                    | Required | Description                                                                                       |
+| ------------- | ----------------------- | -------- | ------------------------------------------------------------------------------------------------- |
+| `author`      | `GitIdentity`           | no       | Git author identity (`author.name` / `author.email`).                                             |
+| `committer`   | `GitIdentity`           | no       | Git committer identity (`committer.name` / `committer.email`).                                    |
+| `credentials` | list of `GitCredential` | no       | Stored git credentials, each bound to a host.                                                     |
+| `signing`     | `GitSigning`            | no       | The stored SSH key commits and tags are signed with (`gpg.format=ssh`).                           |
+| `sign`        | array of string         | no       | Artefacts to sign: `commits` and/or `tags`. With `signing` set and `sign` empty, both are signed. |
 
 Each `GitIdentity` (`author` / `committer`) is a name/email pair:
 
@@ -330,18 +331,63 @@ Each `GitIdentity` (`author` / `committer`) is a name/email pair:
 | `name`              | string | yes      | Identity display name |
 | `email`             | string | yes      | Identity email        |
 
+| `GitCredential` field | Type   | Required | Description                                                                                                                                                                          |
+| --------------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `host`                | string | yes      | The remote host, or a `host/path` prefix (`github.com/acme`). The longest matching prefix wins.                                                                                      |
+| `secretRef`           | object | yes      | A `basic-auth` or `ssh-key` [Secret](secret.md). Same shape as a container `secretRef`.                                                                                              |
+| `user`                | string | no       | SSH login user. Defaults to the URL's user, else `git`.                                                                                                                              |
+| `port`                | int    | no       | SSH port. Defaults to the URL's port.                                                                                                                                                |
+| `hostKeyPolicy`       | string | no       | `strict` (default): the host key must be in the secret's `knownHosts`, else among the built-in `github.com` / `gitlab.com` / `bitbucket.org` keys. `accept-new`: trust on first use. |
+
+| `GitSigning` field  | Type   | Required | Description                                                                                                     |
+| ------------------- | ------ | -------- | --------------------------------------------------------------------------------------------------------------- |
+| `secretRef`         | object | yes      | The `ssh-key` Secret to sign with.                                                                              |
+| `allowedSignersRef` | object | no       | An `opaque` Secret holding git's allowed-signers file. Omitted, one is generated from the identity and the key. |
+
+**The remote transport follows the credential.** A repo whose host is bound to an `ssh-key` secret is cloned and pushed over SSH even when its URL is written as `https://…`, and one bound to a `basic-auth` secret goes over HTTPS — so an HTTPS URL can never make a push fall back to some other token in the environment.
+
+The block is rendered into a container-global gitconfig (`GIT_CONFIG_SYSTEM`), not into `GIT_AUTHOR_*` / `GIT_CONFIG_*` environment variables. Git reads it as the lowest-precedence scope, so a repository's local config — and each repo's own [`git`](#repogit) — overrides it. Credential material is staged as `0600` files on a tmpfs; it is never placed in the environment or in a URL. A passphrase-protected key is loaded into a per-container `ssh-agent` by the kuketty wrapper, which needs `ssh-agent` and `ssh-add` in the image and an `attachable` container.
+
 ```yaml
 git:
-  author:
-    name: Ada Lovelace
-    email: ada@example.com
-  committer:
-    name: Ada Lovelace
-    email: ada@example.com
-  signingKey: /run/secrets/git-signing.key
-  sign:
-    - commits
-  allowedSigners: /run/secrets/allowed_signers
+  author: { name: Ada Lovelace, email: ada@example.com }
+  committer: { name: Ada Lovelace, email: ada@example.com }
+  credentials:
+    - host: github.com
+      secretRef: { name: git-ssh, realm: default }
+    - host: git.internal.example
+      secretRef: { name: forge-https, realm: default }
+  signing:
+    secretRef: { name: git-ssh, realm: default }
+  sign: [commits, tags]
+```
+
+`signingKey` and `allowedSigners` — absolute in-container paths from before stored credentials — are still accepted and applied as `user.signingkey` / `gpg.ssh.allowedSignersFile`, but nothing mounts a key at those paths any more; prefer `signing`.
+
+#### RepoGit
+
+A repo's own identity, on a container `repos[]` entry or a [CellConfig repo fill](config.md#cellconfigrepofill). The wrapper clones with the repo's credential and writes the identity into that repository's **local** config (`user.*`, `user.signingkey`, `core.sshCommand` or a credential helper), so later commits and pushes made by the workload in that checkout use it too. Two repos in one container can therefore use different identities.
+
+| Field        | Type            | Required | Description                                                                          |
+| ------------ | --------------- | -------- | ------------------------------------------------------------------------------------ |
+| `author`     | `GitIdentity`   | no       | Overrides the default author for this repo.                                          |
+| `committer`  | `GitIdentity`   | no       | Overrides the default committer for this repo.                                       |
+| `credential` | `GitCredential` | no       | The credential this repo clones and pushes with (`host` is implied by the repo URL). |
+| `signing`    | `GitSigning`    | no       | The key this repo's commits and tags are signed with.                                |
+| `sign`       | array of string | no       | Overrides what is signed in this repo.                                               |
+
+```yaml
+repos:
+  - name: role-source # uses the default identity
+    url: git@github.com:acme/agents.git
+    target: /home/user/agents
+  - name: project
+    url: https://github.com/acme/app.git
+    target: /home/user/app
+    git:
+      author: { name: app-bot, email: bot@acme.example }
+      credential: { secretRef: { name: app-deploy, realm: default } }
+      signing: { secretRef: { name: app-deploy, realm: default } }
 ```
 
 ### ContainerTty

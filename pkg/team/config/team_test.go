@@ -85,6 +85,71 @@ func TestEntryCopiesAuthoredImageCapabilities(t *testing.T) {
 	}
 }
 
+// A source's own git identity is part of the authored declaration: the entry
+// records it without aliasing, it survives the registration round trip, and it
+// names secrets only.
+func TestEntryCopiesSourceGitIdentity(t *testing.T) {
+	deploy := config.SecretRef{Name: "deploy", Realm: "default"}
+	identity := func() *config.SourceGit {
+		signers := config.SecretRef{Name: "signers", Realm: "default"}
+		return &config.SourceGit{
+			Author:    &config.Identity{Name: "bot", Email: "bot@example.com"},
+			Committer: &config.Identity{Name: "bot", Email: "bot@example.com"},
+			Credential: &config.SourceCredential{
+				SecretRef:     deploy,
+				User:          "git",
+				Port:          2222,
+				HostKeyPolicy: "accept-new",
+			},
+			Signing: &config.GitSigning{SecretRef: deploy, AllowedSignersRef: &signers},
+			Sign:    []string{"commits"},
+		}
+	}
+	team := config.Root()
+	team.Spec.Sources = []config.Source{
+		{Name: "kukeon", URL: "https://example.test/roles", Branch: "main", ClonePath: "/opt/roles", Git: identity()},
+	}
+	team.ProjectSource = &config.Source{
+		Name: "project", URL: "git@example.test:team/project", Branch: "main", ClonePath: "/opt/project", Git: identity(),
+	}
+	entry, err := config.Entry(team)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, authored := range []*config.SourceGit{team.Spec.Sources[0].Git, team.ProjectSource.Git} {
+		authored.Author.Name = "changed"
+		authored.Committer.Email = "changed"
+		authored.Credential.SecretRef.Name = "changed"
+		authored.Signing.SecretRef.Name = "changed"
+		authored.Signing.AllowedSignersRef.Name = "changed"
+		authored.Sign[0] = "tags"
+	}
+	for _, recorded := range []*config.SourceGit{entry.Spec.Sources[0].Git, entry.ProjectSource.Git} {
+		if !reflect.DeepEqual(recorded, identity()) {
+			t.Fatalf("entry aliases the authored source identity: %+v", recorded)
+		}
+	}
+	raw, err := yaml.Marshal(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := config.DecodeEntry(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(entry, decoded) || !reflect.DeepEqual(decoded.Team().ProjectSource.Git, identity()) {
+		t.Fatalf("source identity lost in the registration round trip:\n%s", raw)
+	}
+	// A source without its own identity records none.
+	team.Spec.Sources[0].Git = nil
+	if entry, err = config.Entry(team); err != nil || entry.Spec.Sources[0].Git != nil {
+		t.Fatalf("entry invented a source identity: %v", err)
+	}
+	if raw, err = yaml.Marshal(entry.Spec.Sources[0]); err != nil || bytes.Contains(raw, []byte("git:")) {
+		t.Fatalf("empty identity serialized: %s", raw)
+	}
+}
+
 func TestStructuralSecretContract(t *testing.T) {
 	const base = `apiVersion: kuketeams.io/v1
 kind: TeamsConfig

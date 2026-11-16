@@ -217,3 +217,42 @@ func TestImageInventoryRejectsUnsafeRealm(t *testing.T) {
 		}
 	}
 }
+
+// TestImageInventoryReportsCapabilities locks the field the create form
+// filters its image picker on (#1472): an image's io.kukeon.capabilities, and
+// an empty array — never null — for an image that declares none.
+func TestImageInventoryReportsCapabilities(t *testing.T) {
+	c := &imageClient{images: []kukeonv1.ImageInfo{
+		{Name: "ghcr.io/eminwux/kukeon/claude:v1", Capabilities: []string{"claude", "git", "gh"}},
+		{Name: "docker.io/library/alpine:3.19"},
+	}}
+	w := serveImages(t, c, "/api/realms/dev/image-inventory")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body)
+	}
+	var body struct {
+		Images []map[string]any `json:"images"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	labeled, ok := body.Images[0]["capabilities"].([]any)
+	if !ok || len(labeled) != 3 || labeled[0] != "claude" || labeled[2] != "gh" {
+		t.Fatalf("labeled capabilities=%v", body.Images[0]["capabilities"])
+	}
+	unlabeled, ok := body.Images[1]["capabilities"].([]any)
+	if !ok || len(unlabeled) != 0 {
+		t.Fatalf("unlabeled capabilities=%v, want []", body.Images[1]["capabilities"])
+	}
+
+	w = serveImages(t, c, "/api/realms/dev/image-inventory/ghcr.io/eminwux/kukeon/claude:v1")
+	var detail struct {
+		Image map[string]any `json:"image"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &detail); err != nil || w.Code != http.StatusOK {
+		t.Fatalf("detail status=%d err=%v body=%s", w.Code, err, w.Body)
+	}
+	if got, isList := detail.Image["capabilities"].([]any); !isList || len(got) != 3 {
+		t.Fatalf("detail capabilities=%v", detail.Image["capabilities"])
+	}
+}

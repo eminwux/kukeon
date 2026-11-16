@@ -78,6 +78,8 @@ type SpaceDefaults struct {
 	Values  map[string]string
 	Repos   map[string]RepoFill
 	Secrets map[string]SecretFill
+	// Git is the space-level default git identity and credentials (#1472).
+	Git *ContainerGit
 }
 
 // SpaceContainerDefaults mirrors the isolation fields on ContainerSpec.

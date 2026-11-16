@@ -22,15 +22,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/apischeme"
+	"github.com/eminwux/kukeon/internal/cellblueprint"
 	"github.com/eminwux/kukeon/internal/cellconfig"
 	"github.com/eminwux/kukeon/internal/controller/runner"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/gitcred"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/buildinfo"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -46,6 +49,34 @@ type cellRender struct {
 	Cell   v1beta1.CellDoc
 	Digest string
 	Values []v1beta1.RenderedValue
+}
+
+// cellBinding is the per-cell input of a CellConfig render: everything a cell
+// carries beyond what its Config says. The create RPCs fill it from the
+// request; the OutOfSync reconciler and the restart re-apply rebuild it from
+// the live cell's provenance, so a re-render reproduces the cell as created.
+type cellBinding struct {
+	// Name is the cell's name.
+	Name string
+	// EnvOverrides are the per-cell `--env KEY=VALUE` overrides.
+	EnvOverrides []string
+	// Mode is the harness mode picked for the cell; empty selects the
+	// Config's default (#1472, step 11).
+	Mode string
+	// Params are per-cell `--param KEY=VALUE` values overriding the Config's.
+	Params map[string]string
+}
+
+// bindingFromCell rebuilds the binding a live cell was created with from its
+// recorded provenance.
+func bindingFromCell(cell intmodel.Cell) cellBinding {
+	binding := cellBinding{Name: cell.Metadata.Name}
+	if prov := cell.Spec.Provenance; prov != nil {
+		binding.EnvOverrides = prov.EnvOverrides
+		binding.Mode = prov.Mode
+		binding.Params = prov.ParamOverrides
+	}
+	return binding
 }
 
 // renderedImage is one realm image a render resolved.
@@ -69,19 +100,20 @@ type scopeLevels struct {
 }
 
 // renderCellFromConfig is the single place a CellConfig becomes a Cell (issue
-// #1418). It resolves the referenced Blueprint, merges the Realm → Space →
-// Stack defaults under the Config's own fill (deeper wins per key), runs
-// cellconfig.MaterializeWithName, re-applies the per-cell --env overrides,
-// resolves realm image handles to their reference + digest, and stamps the
-// provenance annotations. The create RPCs, the preview RPC, the OutOfSync
-// reconciler and the restart re-apply all go through it, so every caller
-// renders the same Cell for the same inputs.
-//
+// #1418). It resolves the referenced Blueprint, folds in the components the
+// Config enables and the harness mode picked for the cell (#1472), merges the
+// Realm → Space → Stack defaults — values, slot fills and the git identity —
+// under the Config's own fill (deeper wins per key), applies the per-cell
+// --param overrides, runs cellconfig.MaterializeWithName, re-applies the
+// per-cell --env overrides, resolves realm image handles to their reference +
+// digest, and stamps the provenance annotations. The create RPCs, the preview
+// RPC, the OutOfSync reconciler and the restart re-apply all go through it, so
+// every caller renders the same Cell for the same inputs.
 // The cell lands in the Config's scope with empty coordinates defaulted
 // (cellconfig.CellScope); that scope selects the defaults levels.
-func renderCellFromConfig(
-	r runner.Runner, cfg intmodel.CellConfig, cellName string, envOverrides []string,
-) (cellRender, error) {
+//
+//nolint:funlen // the single render pipeline, kept linear so its step order reads top to bottom.
+func renderCellFromConfig(r runner.Runner, cfg intmodel.CellConfig, binding cellBinding) (cellRender, error) {
 	cfgDoc, err := apischeme.ConvertCellConfigToExternal(cfg)
 	if err != nil {
 		return cellRender{}, fmt.Errorf("decode lineage config: %w", err)
@@ -91,6 +123,31 @@ func renderCellFromConfig(
 	if err != nil {
 		return cellRender{}, err
 	}
+
+	binding = inferMode(bpDoc, cfgDoc, binding)
+	flattenOpts := cellblueprint.FlattenOptions{Components: cfgDoc.Spec.Components, Mode: binding.Mode}
+	if modes := cfgDoc.Spec.Modes; modes != nil {
+		flattenOpts.AllowedModes, flattenOpts.DefaultMode = modes.Enabled, modes.Default
+	}
+	flat, err := cellblueprint.Flatten(bpDoc, flattenOpts)
+	if err != nil {
+		return cellRender{}, fmt.Errorf("config %q: %w", cfgDoc.Metadata.Name, err)
+	}
+	// A Config carries its own values; the one thing a cell may set for
+	// itself is what the mode it was created in asks for.
+	for key := range binding.Params {
+		if !slices.Contains(flat.ModeParameters, key) {
+			return cellRender{}, fmt.Errorf(
+				"%w: --param %q is not a parameter of harness mode %q (mode parameters: %s); "+
+					"set other values in the CellConfig",
+				errdefs.ErrBlueprintInvalid, key, flat.Mode, strings.Join(flat.ModeParameters, ", "))
+		}
+	}
+	contract := contractValues(bpDoc, cfgDoc, flat, binding)
+	if cfgDoc, err = dropInactiveSecretFills(cfgDoc, bpDoc, flat.Doc); err != nil {
+		return cellRender{}, fmt.Errorf("config %q: %w", cfgDoc.Metadata.Name, err)
+	}
+	bpDoc = flat.Doc
 
 	realmName, spaceName, stackName := cellconfig.CellScope(cfgDoc)
 	levels, err := loadScopeLevels(r, realmName, spaceName, stackName)
@@ -103,13 +160,42 @@ func renderCellFromConfig(
 		{Origin: v1beta1.RenderOriginSpace, Defaults: levels.space.Spec.Defaults.Fill()},
 		{Origin: v1beta1.RenderOriginStack, Defaults: levels.stack.Spec.Defaults},
 	})
+	merged, values = applyParamOverrides(merged, values, binding.Params)
+	values = append(values, contract...)
 
-	cellDoc, err := cellconfig.MaterializeWithName(merged, bpDoc, cellName)
+	cellDoc, err := cellconfig.MaterializeWithName(merged, bpDoc, binding.Name)
 	if err != nil {
 		return cellRender{}, fmt.Errorf("materialize cell: %w", err)
 	}
 	// Re-apply the cell's per-cell --env overrides last (P3 precedence, #1023).
-	cellconfig.ApplyEnvOverrides(&cellDoc, envOverrides)
+	cellconfig.ApplyEnvOverrides(&cellDoc, binding.EnvOverrides)
+
+	// Record what the Config alone does not say, so a re-render of this cell
+	// (OutOfSync, restart) picks the same mode and params; and stamp the
+	// capability requirement the container create enforces.
+	cellDoc.Spec.Requires = cellblueprint.NormalizeRequires(append(
+		append([]string(nil), bpDoc.Spec.Requires...), cfgDoc.Spec.Requires...))
+	if prov := cellDoc.Spec.Provenance; prov != nil {
+		prov.Mode = flat.Mode
+		if len(binding.Params) > 0 {
+			prov.ParamOverrides = make(map[string]string, len(binding.Params))
+			for k, v := range binding.Params {
+				prov.ParamOverrides[k] = v
+			}
+		}
+	}
+	if flat.Mode != "" {
+		if cellDoc.Metadata.Labels == nil {
+			cellDoc.Metadata.Labels = map[string]string{}
+		}
+		cellDoc.Metadata.Labels[cellblueprint.LabelMode] = flat.Mode
+	}
+
+	sourceValues, err := sourceIdentityValues(r, cellDoc, values)
+	if err != nil {
+		return cellRender{}, err
+	}
+	values = append(values, sourceValues...)
 
 	images, err := resolveRealmImages(r, &cellDoc, levels)
 	if err != nil {
@@ -148,12 +234,262 @@ func renderCellFromConfig(
 		Values  map[string]string                       `json:"values,omitempty"`
 		Repos   map[string]v1beta1.CellConfigRepoFill   `json:"repos,omitempty"`
 		Secrets map[string]v1beta1.CellConfigSecretFill `json:"secrets,omitempty"`
-	}{merged.Spec.Values, merged.Spec.Repos, merged.Spec.Secrets})
+		Git     *v1beta1.ContainerGit                   `json:"git,omitempty"`
+	}{merged.Spec.Values, merged.Spec.Repos, merged.Spec.Secrets, merged.Spec.Git})
 	annotations[cellconfig.AnnotationRenderOrigins] = formatOrigins(values)
 	annotations[cellconfig.AnnotationRenderKukeonVersion] = buildinfo.Version()
 	cellDoc.Metadata.Annotations = annotations
 
 	return cellRender{Cell: cellDoc, Digest: digest, Values: values}, nil
+}
+
+// inferMode picks the harness mode a cell's own inputs imply when the create
+// names none: a cell that supplies a parameter exactly one enabled mode
+// declares is created in that mode. `--param PROMPT=…` therefore needs no
+// `--mode headless`, and neither does `--env PROMPT=…` — the way a dispatched
+// run was started before modes existed (#1472, step 11), when one onInit
+// branched on $PROMPT. A mode parameter supplied only through --env is taken
+// as that parameter's value, so a required one is satisfied. An explicit mode,
+// or inputs that fit no mode or more than one, are left alone.
+func inferMode(bp v1beta1.CellBlueprintDoc, cfg v1beta1.CellConfigDoc, binding cellBinding) cellBinding {
+	if binding.Mode != "" || (len(binding.Params) == 0 && len(binding.EnvOverrides) == 0) {
+		return binding
+	}
+	env := map[string]string{}
+	for _, kv := range binding.EnvOverrides {
+		if key, value, ok := strings.Cut(kv, "="); ok && value != "" {
+			env[key] = value
+		}
+	}
+	supplied := func(name string) bool {
+		_, param := binding.Params[name]
+		_, override := env[name]
+		return param || override
+	}
+	var picked string
+	var parameters []v1beta1.CellBlueprintParameter
+	for _, comp := range bp.Spec.Components {
+		if comp.Optional && !slices.Contains(cfg.Spec.Components, comp.Name) {
+			continue
+		}
+		for name, mode := range comp.Modes {
+			if cfg.Spec.Modes != nil && len(cfg.Spec.Modes.Enabled) > 0 &&
+				!slices.Contains(cfg.Spec.Modes.Enabled, name) {
+				continue
+			}
+			if !slices.ContainsFunc(mode.Parameters, func(p v1beta1.CellBlueprintParameter) bool {
+				return supplied(p.Name)
+			}) {
+				continue
+			}
+			if picked != "" {
+				return binding // ambiguous: more than one mode fits
+			}
+			picked, parameters = name, mode.Parameters
+		}
+	}
+	if picked == "" {
+		return binding
+	}
+	binding.Mode = picked
+	params := make(map[string]string, len(binding.Params))
+	for k, v := range binding.Params {
+		params[k] = v
+	}
+	for _, p := range parameters {
+		if _, set := params[p.Name]; !set {
+			if value, ok := env[p.Name]; ok {
+				params[p.Name] = value
+			}
+		}
+	}
+	binding.Params = params
+	return binding
+}
+
+// dropInactiveSecretFills removes the Config's fills for secret slots that
+// belong to a part of the blueprint this cell does not use: a harness mode
+// other than the picked one, or an optional component the Config leaves off.
+// One Config serves cells in every mode it enables (#1472, step 11), so it
+// fills the headless API-key slot even when the cell being rendered is an
+// interactive one — where that slot is not declared at all and the strict
+// unknown-slot gate would otherwise refuse the Config. A fill for a slot no
+// component or mode declares is left in place and still fails that gate.
+func dropInactiveSecretFills(
+	cfg v1beta1.CellConfigDoc, bp, picked v1beta1.CellBlueprintDoc,
+) (v1beta1.CellConfigDoc, error) {
+	if len(cfg.Spec.Secrets) == 0 || len(bp.Spec.Components) == 0 {
+		return cfg, nil
+	}
+	all, err := cellblueprint.Flatten(bp, cellblueprint.FlattenOptions{All: true})
+	if err != nil {
+		return cfg, err
+	}
+	slots := func(doc v1beta1.CellBlueprintDoc) map[string]struct{} {
+		out := map[string]struct{}{}
+		for _, c := range doc.Spec.Cell.Containers {
+			for _, slot := range c.Secrets {
+				out[strings.TrimSpace(slot.Name)] = struct{}{}
+			}
+		}
+		return out
+	}
+	declared, active := slots(all.Doc), slots(picked)
+	kept := make(map[string]v1beta1.CellConfigSecretFill, len(cfg.Spec.Secrets))
+	for name, fill := range cfg.Spec.Secrets {
+		_, isDeclared := declared[strings.TrimSpace(name)]
+		_, isActive := active[strings.TrimSpace(name)]
+		if isDeclared && !isActive {
+			continue
+		}
+		kept[name] = fill
+	}
+	if len(kept) == 0 {
+		kept = nil
+	}
+	cfg.Spec.Secrets = kept
+	return cfg, nil
+}
+
+// contractValues explains the blueprint-contract choices of a render: the
+// enabled components, the picked harness mode and the required image
+// capabilities, each with the level that decided it.
+func contractValues(
+	bp v1beta1.CellBlueprintDoc, cfg v1beta1.CellConfigDoc, flat cellblueprint.Flattened, binding cellBinding,
+) []v1beta1.RenderedValue {
+	var out []v1beta1.RenderedValue
+	for _, name := range flat.Components {
+		for _, comp := range bp.Spec.Components {
+			if comp.Name != name {
+				continue
+			}
+			origin := v1beta1.RenderOriginBlueprint
+			if comp.Optional {
+				origin = v1beta1.RenderOriginConfig
+			}
+			out = append(out, v1beta1.RenderedValue{
+				Kind: v1beta1.RenderKindComponent, Key: name, Value: comp.Kind, Origin: origin,
+			})
+		}
+	}
+	if flat.Mode != "" {
+		origin := v1beta1.RenderOriginBlueprint
+		switch {
+		case binding.Mode != "":
+			origin = v1beta1.RenderOriginCell
+		case cfg.Spec.Modes != nil && (cfg.Spec.Modes.Default != "" || len(cfg.Spec.Modes.Enabled) > 0):
+			origin = v1beta1.RenderOriginConfig
+		}
+		out = append(out, v1beta1.RenderedValue{
+			Kind: v1beta1.RenderKindMode, Key: "mode", Value: flat.Mode, Origin: origin,
+		})
+	}
+	fromBlueprint := flat.Doc.Spec.Requires
+	for _, capability := range cellblueprint.NormalizeRequires(append(
+		append([]string(nil), fromBlueprint...), cfg.Spec.Requires...)) {
+		origin := v1beta1.RenderOriginConfig
+		if slices.Contains(fromBlueprint, capability) {
+			origin = v1beta1.RenderOriginBlueprint
+		}
+		out = append(out, v1beta1.RenderedValue{
+			Kind: v1beta1.RenderKindRequires, Key: capability, Value: capability, Origin: origin,
+		})
+	}
+	return out
+}
+
+// applyParamOverrides layers the per-cell --param values over the merged
+// Config values and re-attributes them to the cell in the explanation.
+func applyParamOverrides(
+	merged v1beta1.CellConfigDoc, values []v1beta1.RenderedValue, params map[string]string,
+) (v1beta1.CellConfigDoc, []v1beta1.RenderedValue) {
+	if len(params) == 0 {
+		return merged, values
+	}
+	combined := make(map[string]string, len(merged.Spec.Values))
+	for k, v := range merged.Spec.Values {
+		combined[k] = v
+	}
+	kept := values[:0:0]
+	for _, v := range values {
+		if _, overridden := params[v.Key]; v.Kind == v1beta1.RenderKindValue && overridden {
+			continue
+		}
+		kept = append(kept, v)
+	}
+	for k, v := range params {
+		combined[k] = v
+		kept = append(kept, v1beta1.RenderedValue{
+			Kind: v1beta1.RenderKindValue, Key: k, Value: v, Origin: v1beta1.RenderOriginCell,
+		})
+	}
+	merged.Spec.Values = combined
+	return merged, kept
+}
+
+// sourceIdentityValues explains, per repo, the git identity and credential the
+// cell will actually use (#1472): the clone URL after its transport followed
+// the credential, the author and committer, the credential's secret and type,
+// and the signing key. Each is attributed to the level that set it — the
+// level that filled the repo slot when the source states it itself, else the
+// level that set the default. Secret material is never read: only a secret's
+// type is looked up.
+func sourceIdentityValues(
+	r runner.Runner, cellDoc v1beta1.CellDoc, values []v1beta1.RenderedValue,
+) ([]v1beta1.RenderedValue, error) {
+	cell, err := apischeme.ConvertCellDocToInternal(cellDoc)
+	if err != nil {
+		return nil, fmt.Errorf("convert rendered cell: %w", err)
+	}
+	origins := map[string]string{}
+	for _, v := range values {
+		origins[v.Kind+":"+v.Key] = v.Origin
+	}
+	originOf := func(kind, key string) string {
+		if origin, ok := origins[kind+":"+key]; ok {
+			return origin
+		}
+		return v1beta1.RenderOriginBlueprint
+	}
+	typeOf := func(ref intmodel.ContainerSecretRef) string {
+		got, getErr := r.GetSecret(intmodel.Secret{Metadata: intmodel.SecretMetadata(ref)})
+		if getErr != nil {
+			return ""
+		}
+		return got.Spec.EffectiveType()
+	}
+
+	var out []v1beta1.RenderedValue
+	seen := map[string]struct{}{}
+	for _, c := range cell.Spec.Containers {
+		for _, id := range gitcred.Describe(c, typeOf) {
+			if _, dup := seen[id.Repo]; dup {
+				continue
+			}
+			seen[id.Repo] = struct{}{}
+			repoOrigin := originOf(v1beta1.RenderKindRepo, id.Repo)
+			add := func(key string, field gitcred.Field, defaultKey string) {
+				if field.Value == "" {
+					return
+				}
+				origin := originOf(v1beta1.RenderKindGit, defaultKey)
+				if field.FromSource {
+					origin = repoOrigin
+				}
+				out = append(out, v1beta1.RenderedValue{
+					Kind: v1beta1.RenderKindGit, Key: id.Repo + "." + key, Value: field.Value, Origin: origin,
+				})
+			}
+			add("author", id.Author, "default.author")
+			add("committer", id.Committer, "default.committer")
+			add("credential", id.Credential, "default.credential["+id.CredentialHost+"]")
+			add("signing", id.Signing, "default.signing")
+			out = append(out, v1beta1.RenderedValue{
+				Kind: v1beta1.RenderKindGit, Key: id.Repo + ".url", Value: id.URL, Origin: repoOrigin,
+			})
+		}
+	}
+	return out, nil
 }
 
 // lookupConfigBlueprint fetches and decodes the Blueprint a Config references.

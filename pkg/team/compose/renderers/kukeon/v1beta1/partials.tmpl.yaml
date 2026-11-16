@@ -1,7 +1,5 @@
 {{/* Startup is opaque shell source; YAML encoding preserves ordered blocks. */}}
 {{ define "onInit" }}{{ yamlIndent 12 . }}{{ end }}
-{{- define "repo_url" -}}{{- end -}}
-{{- define "repo_target" -}}{{ . }}{{- end -}}
 {{- define "mount_source" -}}
 {{- if eq . "kukeond-socket" -}}/run/kukeon/kukeond.sock
 {{- else if eq . "kuke-binary" -}}/usr/local/bin/kuke
@@ -9,8 +7,7 @@
 {{- end -}}
 {{- end -}}
 {{- define "mount_target" -}}
-{{- if eq . "ssh" -}}/home/user/.ssh
-{{- else if eq . "kukeond-socket" -}}/run/kukeon/kukeond.sock
+{{- if eq . "kukeond-socket" -}}/run/kukeon/kukeond.sock
 {{- else if eq . "kuke-binary" -}}/usr/local/bin/kuke
 {{- else if eq . "kukeon-install" -}}/opt/kukeon
 {{- end -}}

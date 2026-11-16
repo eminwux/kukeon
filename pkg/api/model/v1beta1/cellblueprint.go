@@ -22,14 +22,19 @@ package v1beta1
 // `kuke apply` is now the single entry point and `kuke run -b` / `kuke run -c`
 // are the run-time consumers.
 //
-// A Blueprint declares two fill channels (see #423 "L1↔L2 interface"):
-//
-//  1. Scalar parameters — `${KEY}` substitution using the CellBlueprintParameter
-//     shape. Filled inline by `kuke run -b --param K=V`.
+// A Blueprint declares the fill channels a CellConfig answers (see #423
+// "L1↔L2 interface", extended by #1472):
+//  1. Scalar parameters — typed `${KEY}` substitution using the
+//     CellBlueprintParameter shape. Filled inline by `kuke run -b --param K=V`
+//     or by a CellConfig's values.
 //  2. Structural slots — named repo/secret slots on each container that a
 //     CellConfig fills with structured values (repo URLs, secret sources).
-//     This kind ships the slot *declarations* only; the Config-side fill
-//     machinery lands in #624.
+//  3. Components — optional bundles a CellConfig enables by name.
+//  4. Harness modes — the start mode picked per cell at create time.
+//
+// What a blueprint never carries is identity: git author, credentials and
+// signing keys come from Realm/Space/Stack defaults, the CellConfig and its
+// repo fills.
 type CellBlueprintDoc struct {
 	APIVersion Version               `json:"apiVersion" yaml:"apiVersion"`
 	Kind       Kind                  `json:"kind"       yaml:"kind"`
@@ -62,11 +67,43 @@ type CellBlueprintMetadata struct {
 // the `<prefix>-<6hex>` name on each `kuke run -b`; when unset it defaults to
 // metadata.name. Every run produces a fresh hex-suffixed cell — the
 // "Blueprint = always fresh" invariant.
+//
+// A blueprint is a form and a CellConfig is the answers (issue #1472): typed
+// Parameters, repo and secret slots, optional Components and harness modes are
+// everything a consumer — `kuke team` or the web UI — needs to build a Config
+// for it without knowing the template body.
 type CellBlueprintSpec struct {
 	Prefix     string                   `json:"prefix,omitempty"     yaml:"prefix,omitempty"`
 	Parameters []CellBlueprintParameter `json:"parameters,omitempty" yaml:"parameters,omitempty"`
-	Cell       BlueprintCellSpec        `json:"cell"                 yaml:"cell"`
+	// Requires lists the image capabilities every cell stamped from this
+	// blueprint needs (e.g. [claude, git]). The full requirement of a cell is
+	// this list ∪ the requires of its enabled components ∪ the CellConfig's
+	// own requires; the daemon checks it against each container image's
+	// io.kukeon.capabilities label at create.
+	Requires []string `json:"requires,omitempty"   yaml:"requires,omitempty"`
+	// Components bundle the parameters, secrets, env and requires of one
+	// concern — a harness, a connector, a forge — so a CellConfig can switch
+	// an optional one on by name. The daemon flattens the enabled components
+	// into Cell at render time.
+	Components []BlueprintComponent `json:"components,omitempty" yaml:"components,omitempty"`
+	Cell       BlueprintCellSpec    `json:"cell"                 yaml:"cell"`
 }
+
+// Parameter types (CellBlueprintParameter.Type). An untyped parameter is a
+// string, so blueprints written before types existed stay valid.
+const (
+	// ParameterTypeString accepts any value. The default.
+	ParameterTypeString = "string"
+	// ParameterTypeEnum accepts one of the values listed in Enum.
+	ParameterTypeEnum = "enum"
+	// ParameterTypePath accepts a filesystem path (absolute or relative).
+	ParameterTypePath = "path"
+	// ParameterTypeImage accepts a container image reference or a realm
+	// image name.
+	ParameterTypeImage = "image"
+	// ParameterTypeBool accepts "true" or "false".
+	ParameterTypeBool = "bool"
+)
 
 // CellBlueprintParameter declares one `${KEY}` substitution variable used by a
 // CellBlueprint's body. Default is a pointer so YAML/JSON can distinguish "no
@@ -78,6 +115,83 @@ type CellBlueprintParameter struct {
 	Description string  `json:"description,omitempty" yaml:"description,omitempty"`
 	Default     *string `json:"default,omitempty"     yaml:"default,omitempty"`
 	Required    bool    `json:"required,omitempty"    yaml:"required,omitempty"`
+	// Type is one of string (default when empty), enum, path, image, bool. A
+	// resolved value that does not fit the type is rejected at render.
+	Type string `json:"type,omitempty"        yaml:"type,omitempty"`
+	// Enum lists the accepted values of an enum parameter.
+	Enum []string `json:"enum,omitempty"        yaml:"enum,omitempty"`
+	// Group labels the form section a consumer shows the parameter under
+	// (e.g. "role", "harness"). Presentation only.
+	Group string `json:"group,omitempty"       yaml:"group,omitempty"`
+}
+
+// Component kinds.
+const (
+	// ComponentKindHarness is the agent harness: its env, parameters, secrets
+	// and the modes it can be started in.
+	ComponentKindHarness = "harness"
+	// ComponentKindConnector connects the cell to an external service through
+	// that service's API credentials (e.g. the GitHub token for `gh`). A
+	// connector never contributes a git credential.
+	ComponentKindConnector = "connector"
+	// ComponentKindForge binds the cell to an issue/change tracker.
+	ComponentKindForge = "forge"
+)
+
+// Well-known harness mode names.
+const (
+	// ModeInteractive is an attachable TTY session.
+	ModeInteractive = "interactive"
+	// ModeHeadless is a dispatched, unattended run.
+	ModeHeadless = "headless"
+)
+
+// BlueprintComponent is one concern a blueprint is assembled from. A component
+// that is not Optional is always part of the cell; an Optional one is included
+// only when the CellConfig lists it in spec.components. Its Parameters join the
+// blueprint's, and its Env and Secrets are added to one container. Two enabled
+// components (or a component and the template) that set the same env key or
+// the same secret destination fail the render.
+type BlueprintComponent struct {
+	// Kind is harness, connector or forge. Required.
+	Kind string `json:"kind"                  yaml:"kind"`
+	// Name identifies the component within the blueprint; a CellConfig
+	// enables an optional component by this name. Required.
+	Name        string `json:"name"                  yaml:"name"`
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
+	// Optional marks a component a CellConfig must enable explicitly.
+	Optional bool `json:"optional,omitempty"    yaml:"optional,omitempty"`
+	// Container is the id of the container the Env, Secrets and mode onInit
+	// land on. Empty selects the cell's default attach container
+	// (spec.cell.tty.default), else the first attachable container, else the
+	// first non-root container.
+	Container string `json:"container,omitempty"   yaml:"container,omitempty"`
+	// Requires lists the image capabilities the component needs.
+	Requires   []string                 `json:"requires,omitempty"    yaml:"requires,omitempty"`
+	Parameters []CellBlueprintParameter `json:"parameters,omitempty"  yaml:"parameters,omitempty"`
+	// Env are `KEY=value` entries added to the container; values may
+	// reference `${PARAM}`s.
+	Env []string `json:"env,omitempty"         yaml:"env,omitempty"`
+	// Secrets are secret slots added to the container; a CellConfig fills
+	// them by name like any other slot.
+	Secrets []BlueprintSecretSlot `json:"secrets,omitempty"     yaml:"secrets,omitempty"`
+	// Modes are the ways a harness can be started, keyed by mode name
+	// ("interactive", "headless", …). Harness components only; at most one
+	// component of a blueprint may declare modes. The mode is picked per
+	// cell at create time.
+	Modes map[string]BlueprintComponentMode `json:"modes,omitempty"       yaml:"modes,omitempty"`
+}
+
+// BlueprintComponentMode is one way to start a harness. Everything it declares
+// applies only to cells created in that mode — in particular a required
+// parameter or secret is only required then.
+type BlueprintComponentMode struct {
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
+	// OnInit replaces the container's tty.onInit stages for this mode.
+	OnInit     []TtyStage               `json:"onInit,omitempty"      yaml:"onInit,omitempty"`
+	Parameters []CellBlueprintParameter `json:"parameters,omitempty"  yaml:"parameters,omitempty"`
+	Env        []string                 `json:"env,omitempty"         yaml:"env,omitempty"`
+	Secrets    []BlueprintSecretSlot    `json:"secrets,omitempty"     yaml:"secrets,omitempty"`
 }
 
 // CellProfileParameter is the pre-#986 name for CellBlueprintParameter, kept as

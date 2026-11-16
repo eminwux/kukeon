@@ -78,6 +78,7 @@ nav:
       - concepts/cgroups.md
       - concepts/system-realm.md
       - concepts/client-and-daemon.md
+      - concepts/blueprint-contract.md
       - concepts/team.md
   - Architecture:
       - architecture/overview.md
@@ -90,6 +91,8 @@ nav:
       - guides/run-claude-code.md
       - guides/local-dev.md
       - guides/private-registry.md
+      - guides/git-credentials.md
+      - guides/migrate-to-stored-git-credentials.md
       - guides/autocomplete.md
       - guides/troubleshooting.md
   - CLI Reference:

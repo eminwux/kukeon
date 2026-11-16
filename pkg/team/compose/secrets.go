@@ -21,6 +21,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/eminwux/kukeon/pkg/team/component"
 	"github.com/eminwux/kukeon/pkg/team/config"
 )
 
@@ -71,6 +72,37 @@ func (s *secretBindings) lookup(name string) (config.SecretBinding, error) {
 	if !slices.ContainsFunc(s.recorded, func(b config.SecretBinding) bool { return b.Name == name }) {
 		s.added = append(s.added, name)
 	}
+	return binding, nil
+}
+
+// component binds a component secret slot. The destination is the slot's, not
+// the team's: a shared blueprint fixes it. The runtime secret comes from the
+// team's binding for the slot, then from one for an alias, then from the
+// component's default secret in the team realm.
+func (s *secretBindings) component(slot component.Secret) (config.SecretBinding, error) {
+	for _, name := range append([]string{slot.Name}, slot.Aliases...) {
+		if _, ok := findBinding(s.recorded, name); ok {
+			return s.lookup(name)
+		}
+		if _, ok := findBinding(s.global, name); ok {
+			return s.lookup(name)
+		}
+	}
+	if binding, ok := s.used[slot.Name]; ok {
+		return binding, nil
+	}
+	name := slot.SecretName
+	if name == "" {
+		name = slot.Name
+	}
+	binding := config.SecretBinding{
+		Name: slot.Name, SecretRef: config.SecretRef{Name: name, Realm: s.realm}, EnvName: slot.EnvName,
+	}
+	if err := config.ValidateSecrets("secret "+slot.Name, []config.SecretBinding{binding}); err != nil {
+		return config.SecretBinding{}, err
+	}
+	s.used[slot.Name] = binding
+	s.added = append(s.added, slot.Name)
 	return binding, nil
 }
 

@@ -962,6 +962,151 @@ test("create from config previews, prevents duplicate submits and opens the scop
   await expect(page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link", { name: "Open prod / shared / services / new-cell" })).toBeVisible();
 });
 
+// A shared blueprint as `kuke team` renders it: the form below is derived from
+// this document alone.
+const formBlueprint = {
+  apiVersion: "v1beta1", kind: "CellBlueprint", metadata: { name: "claude", realm: "prod" },
+  spec: {
+    requires: ["git"],
+    parameters: [
+      { name: "IMAGE", type: "image", default: "ghcr.io/example/claude:v1", group: "image" },
+      { name: "ROLE_PATH", type: "path", required: true, group: "role", description: "Role directory." },
+    ],
+    components: [
+      { kind: "harness", name: "claude", requires: ["claude"], parameters: [{ name: "ANTHROPIC_MODEL", type: "enum", enum: ["opus", "sonnet"], default: "opus" }], modes: { interactive: {}, headless: { parameters: [{ name: "PROMPT", required: true }], secrets: [{ name: "anthropic-api-key", envName: "ANTHROPIC_API_KEY" }] } } },
+      { kind: "connector", name: "github", optional: true, requires: ["gh"], description: "GitHub API access.", secrets: [{ name: "github-token", envName: "GH_TOKEN", required: true }] },
+    ],
+    cell: { containers: [{ id: "work", image: "${IMAGE}", repos: [{ name: "role-source", target: "/home/user/agents", required: true }, { name: "project", target: "/home/user/project" }] }] },
+  },
+};
+test("a config is created from the form a blueprint describes, and the preview shows each repo's git identity", async ({ page }) => {
+  await mock(page, path => path === "/api/realms/prod/image-inventory" ? { json: { realm: "prod", namespace: "prod.kukeon.io", images: [
+    { name: "ghcr.io/example/claude-gh:v1", capabilities: ["claude", "git", "gh"], labels: {} },
+    { name: "ghcr.io/example/claude:v1", capabilities: ["claude", "git"], labels: {} },
+    { name: "ghcr.io/example/codex:v1", capabilities: ["codex", "git", "gh"], labels: {} },
+    { name: "docker.io/library/alpine:3", capabilities: [], labels: {} },
+  ] } } : path === "/api/realms" ? { json: [doc(["prod"])] } : undefined);
+  await page.route("**/api/catalog/**", async route => {
+    const url = new URL(route.request().url());
+    const [, , kind, name] = url.pathname.split("/").filter(Boolean);
+    if (kind === "blueprints") return route.fulfill({ json: name ? formBlueprint : [{ kind: "CellBlueprint", metadata: formBlueprint.metadata }] });
+    if (kind === "secrets") return route.fulfill({ json: [
+      { kind: "Secret", metadata: { name: "gh-token", realm: "prod" }, spec: {} },
+      { kind: "Secret", metadata: { name: "git-ssh", realm: "prod" }, spec: { type: "ssh-key" } },
+      { kind: "Secret", metadata: { name: "git-https", realm: "prod" }, spec: { type: "basic-auth" } },
+    ] });
+    return route.fulfill({ json: name ? { kind: "CellConfig", metadata: { name, realm: "prod", space: "shared", stack: "services" }, spec: { blueprint: { name: "claude", realm: "prod" } } } : [] });
+  });
+  const requests = [];
+  await page.route("**/api/configs/from-blueprint/*", async route => {
+    const input = route.request().postDataJSON();
+    requests.push({ action: route.request().url().split("/").at(-1), input });
+    const config = { apiVersion: "v1beta1", kind: "CellConfig", metadata: input.config, spec: input.spec };
+    if (route.request().url().endsWith("create")) return route.fulfill({ json: config });
+    await route.fulfill({ json: { config, preview: "reviewed", digest: "sha256:render", document: { metadata: { name: "dev-abc123" }, spec: { realmId: "prod" } }, values: [
+      { kind: "value", key: "ROLE_PATH", value: "", origin: "config" },
+      { kind: "git", key: "project.author", value: "bot <bot@example.com>", origin: "config" },
+      { kind: "git", key: "project.credential", value: "git-ssh (ssh-key)", origin: "config" },
+      { kind: "git", key: "project.url", value: "git@github.com:o/project.git", origin: "config" },
+      { kind: "git", key: "role-source.author", value: "dev <dev@example.com>", origin: "stack" },
+      { kind: "git", key: "role-source.credential", value: "git-ssh (ssh-key)", origin: "realm" },
+      { kind: "git", key: "role-source.url", value: "git@github.com:o/agents.git", origin: "config" },
+    ] } });
+  });
+  await page.goto(`${server.url}#/blueprints/prod/claude`);
+  await page.getByRole("link", { name: /Create Config from this Blueprint/ }).click();
+  await expect(page).toHaveURL(/#\/new-config\?blueprint=/);
+  await expect(page.getByRole("heading", { name: "Answer the claude form" })).toBeVisible();
+
+  // Typed inputs come from the blueprint: an enum select, a required path.
+  await expect(page.getByLabel("ANTHROPIC_MODEL")).toHaveValue("");
+  await page.getByLabel("ANTHROPIC_MODEL").selectOption("sonnet");
+  await page.getByLabel("Config name").fill("dev");
+  // The config's scope comes from the inventory; open coordinates stay realm-scoped.
+  await expect(page.getByLabel("Config realm")).toHaveValue("prod");
+  await page.getByLabel("Config space").selectOption("shared");
+  await page.getByLabel("Config stack").selectOption("services");
+  await page.getByLabel("ROLE_PATH").fill("dev");
+  await expect(page.getByRole("note")).toContainText("role-source");
+
+  // An optional component's slot appears only once enabled, and narrows the image picker.
+  const picker = page.getByLabel("IMAGE from realm images");
+  await expect(picker.getByRole("option")).toHaveText(["Choose from the realm's images…", "ghcr.io/example/claude-gh:v1", "ghcr.io/example/claude:v1", "docker.io/library/alpine:3 — capabilities unknown"]);
+  await expect(page.getByLabel("github-token secret")).toHaveCount(0);
+  await page.getByLabel(/^github connector/).check();
+  await expect(picker.getByRole("option")).toHaveText(["Choose from the realm's images…", "ghcr.io/example/claude-gh:v1", "docker.io/library/alpine:3 — capabilities unknown"]);
+  await expect(page.getByText("This image does not provide: gh.")).toBeVisible();
+  await picker.selectOption("ghcr.io/example/claude-gh:v1");
+  await expect(page.getByLabel("IMAGE", { exact: true })).toHaveValue("ghcr.io/example/claude-gh:v1");
+  await page.getByLabel("github-token secret").selectOption({ label: "gh-token — prod (opaque)" });
+
+  // A mode's own parameters show only when previewing that mode.
+  await expect(page.getByLabel("PROMPT")).toHaveCount(0);
+  await page.getByLabel("Preview as mode").selectOption("headless");
+  await expect(page.getByLabel("PROMPT")).toBeVisible();
+  await page.getByLabel("Preview as mode").selectOption("interactive");
+
+  // Repo slots, one with its own identity limited to git credential secrets.
+  await page.getByLabel("role-source URL").fill("git@github.com:o/agents.git");
+  await page.getByLabel("role-source branch").fill("main");
+  await page.getByLabel("project URL").fill("git@github.com:o/project.git");
+  await page.getByLabel("project uses its own git identity").check();
+  await page.getByLabel("Author name").fill("bot");
+  await page.getByLabel("Author email").fill("bot@example.com");
+  await expect(page.getByLabel("project credential secret").getByRole("option")).toHaveText(["None", "git-https — prod (basic-auth)", "git-ssh — prod (ssh-key)", "Name a secret…"]);
+  await page.getByLabel("project credential secret").selectOption({ label: "git-ssh — prod (ssh-key)" });
+  await expect(page.getByLabel("Signing key secret").getByRole("option")).toHaveText(["None", "git-ssh — prod (ssh-key)", "Name a secret…"]);
+
+  await page.getByRole("button", { name: "Preview Config", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Review Config" })).toBeVisible();
+  const project = page.getByRole("table", { name: "Git identity for project" });
+  await expect(project.getByRole("row").nth(1)).toHaveText(/author.*bot <bot@example.com>.*config/);
+  await expect(project.getByRole("row").nth(2)).toHaveText(/credential.*git-ssh \(ssh-key\).*config/);
+  await expect(page.getByRole("table", { name: "Git identity for role-source" }).getByRole("row").nth(2)).toHaveText(/credential.*git-ssh \(ssh-key\).*realm/);
+  await expect(page.getByRole("table", { name: "Merged values and their origin" }).getByRole("row")).toHaveCount(2);
+  expect(requests).toHaveLength(1);
+  expect(requests[0].input).toEqual({
+    config: { name: "dev", realm: "prod", space: "shared", stack: "services" }, mode: "interactive",
+    spec: {
+      blueprint: { name: "claude", realm: "prod" },
+      values: { IMAGE: "ghcr.io/example/claude-gh:v1", ROLE_PATH: "dev", ANTHROPIC_MODEL: "sonnet" },
+      repos: {
+        "role-source": { url: "git@github.com:o/agents.git", branch: "main" },
+        project: { url: "git@github.com:o/project.git", git: { author: { name: "bot", email: "bot@example.com" }, credential: { secretRef: { name: "git-ssh", realm: "prod" } } } },
+      },
+      secrets: { "github-token": { secretRef: { name: "gh-token", realm: "prod" } } },
+      components: ["github"],
+    },
+  });
+
+  // Changing an answer invalidates the review; the create sends the token.
+  await page.getByLabel("ROLE_PATH").fill("pm");
+  await expect(page.getByRole("button", { name: "Create Config", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Preview Config", exact: true }).click();
+  await page.getByRole("button", { name: "Create Config", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Config created" })).toBeVisible();
+  expect(requests.at(-1).action).toBe("create");
+  expect(requests.at(-1).input.preview).toBe("reviewed");
+  expect(requests.at(-1).input.spec.values.ROLE_PATH).toBe("pm");
+  await expect(page.getByRole("link", { name: "Open Config dev" })).toHaveAttribute("href", "#/configs/prod/shared/services/dev");
+  await page.getByRole("link", { name: /Create a Cell from it/ }).click();
+  await expect(page).toHaveURL(/#\/new-cell\?config=/);
+});
+
+test("the config preview of an existing config shows each repo's git identity", async ({ page }) => {
+  await mockCatalog(page);
+  await page.route("**/api/cells/from-config/*", route => route.fulfill({ json: { document: { metadata: { name: "new-cell" }, spec: { realmId: "prod", spaceId: "shared", stackId: "services" } }, preview: "reviewed", values: [
+    { kind: "repo", key: "project", value: "git@github.com:o/project.git", origin: "config" },
+    { kind: "git", key: "project.signing", value: "git-ssh (ssh-key)", origin: "space" },
+    { kind: "git", key: "project.url", value: "git@github.com:o/project.git", origin: "config" },
+  ] } }));
+  await page.goto(`${server.url}#/configs/prod/shared/services/shared-name`);
+  await page.getByRole("link", { name: /Create Cell from this Config/ }).click();
+  await page.getByRole("button", { name: "Preview Cell", exact: true }).click();
+  await expect(page.getByRole("table", { name: "Git identity for project" }).getByRole("row").nth(1)).toHaveText(/signing.*git-ssh \(ssh-key\).*space/);
+  await expect(page.getByRole("table", { name: "Merged values and their origin" }).getByRole("row")).toHaveCount(2);
+});
+
 test("kill and purge require explicit confirmation and pass only selected purge options", async ({ page }) => {
   const submitted = [];
   await mock(page, (path, request) => {

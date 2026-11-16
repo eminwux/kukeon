@@ -100,7 +100,7 @@ Supported fields (each mirrors `ContainerSpec`): `user`, `readOnlyRootFilesystem
 
 ### `spec.defaults` — CellConfig fill (object, optional)
 
-`spec.defaults.values`, `spec.defaults.repos` and `spec.defaults.secrets` are the CellConfig fill every cell kukeond renders from a [`CellConfig`](config.md) inside this space inherits. They override the Realm defaults and are overridden by the Stack defaults and the CellConfig per key. See [Defaults merge](config.md#defaults-merge).
+`spec.defaults.values`, `spec.defaults.repos`, `spec.defaults.secrets` and `spec.defaults.git` (the default [git identity and credentials](realm.md#specdefaults-object-optional)) are the CellConfig fill every cell kukeond renders from a [`CellConfig`](config.md) inside this space inherits. They override the Realm defaults and are overridden by the Stack defaults and the CellConfig per key. See [Defaults merge](config.md#defaults-merge).
 
 ```yaml
 spec:

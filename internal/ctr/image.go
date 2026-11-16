@@ -44,6 +44,9 @@ type ImageInfo struct {
 	Digest    string
 	MediaType string
 	Labels    map[string]string
+	// Capabilities are the capabilities the image declares in its
+	// io.kukeon.capabilities config label, sorted; nil when it declares none.
+	Capabilities []string
 }
 
 // ensureImageUnpacked ensures that an image is unpacked for the given snapshotter.
@@ -431,11 +434,12 @@ func (c *client) imageToInfo(namespace string, img containerd.Image) ImageInfo {
 	}
 
 	return ImageInfo{
-		Name:      img.Name(),
-		Size:      size,
-		CreatedAt: meta.CreatedAt,
-		Digest:    target.Digest.String(),
-		MediaType: target.MediaType,
-		Labels:    meta.Labels,
+		Name:         img.Name(),
+		Size:         size,
+		CreatedAt:    meta.CreatedAt,
+		Digest:       target.Digest.String(),
+		MediaType:    target.MediaType,
+		Labels:       meta.Labels,
+		Capabilities: c.imageCapabilities(namespace, img),
 	}
 }

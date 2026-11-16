@@ -94,7 +94,19 @@ func MergeDefaults(
 		secretOrigin[k] = v1beta1.RenderOriginConfig
 	}
 
+	// Git identity (#1472): Realm → Space → Stack → Config, deeper wins per
+	// field; credentials merge by host.
+	gitLayers := make([]GitLayer, 0, len(layers)+1)
+	for _, layer := range layers {
+		if layer.Defaults != nil {
+			gitLayers = append(gitLayers, GitLayer{Origin: layer.Origin, Git: layer.Defaults.Git})
+		}
+	}
+	gitLayers = append(gitLayers, GitLayer{Origin: v1beta1.RenderOriginConfig, Git: cfg.Spec.Git})
+	mergedGit, gitOrigins := MergeGit(gitLayers)
+
 	merged := cfg
+	merged.Spec.Git = mergedGit
 	merged.Spec.Values = nilIfEmpty(values)
 	merged.Spec.Repos = nil
 	if len(repos) > 0 {
@@ -105,11 +117,120 @@ func MergeDefaults(
 		merged.Spec.Secrets = secrets
 	}
 
-	return merged, explainMerge(
+	explained := explainMerge(
 		bp,
 		mergedFill{values, repos, secrets},
 		mergedOrigins{valueOrigin, repoOrigin, secretOrigin},
 	)
+	explained = append(explained, explainGit(mergedGit, gitOrigins)...)
+	SortRenderedValues(explained)
+	return merged, explained
+}
+
+// GitLayer is one level of the git-identity hierarchy fed to MergeGit.
+type GitLayer struct {
+	Origin string
+	Git    *v1beta1.ContainerGit
+}
+
+// GitOrigins records which level set each part of a merged git block.
+type GitOrigins struct {
+	Author, Committer, Signing, Sign string
+	// Credentials maps a credential host to the level that set it.
+	Credentials map[string]string
+}
+
+// MergeGit folds git blocks in the order given, later layers winning (issue
+// #1472, step 6): author, committer and the sign list are replaced whole; the
+// signing key group (signing, or the signingKey / allowedSigners paths) is
+// replaced whole by any layer that sets a key; credentials merge by host, a
+// later layer replacing the entry of a host an earlier one set and otherwise
+// appending in first-seen order. Returns nil when no layer sets anything.
+func MergeGit(layers []GitLayer) (*v1beta1.ContainerGit, GitOrigins) {
+	origins := GitOrigins{Credentials: map[string]string{}}
+	out := &v1beta1.ContainerGit{}
+	found := false
+	for _, layer := range layers {
+		g := layer.Git
+		if g == nil {
+			continue
+		}
+		found = true
+		if g.Author != nil {
+			author := *g.Author
+			out.Author, origins.Author = &author, layer.Origin
+		}
+		if g.Committer != nil {
+			committer := *g.Committer
+			out.Committer, origins.Committer = &committer, layer.Origin
+		}
+		if g.Signing != nil || g.SigningKey != "" {
+			out.Signing, out.SigningKey, out.AllowedSigners = nil, g.SigningKey, g.AllowedSigners
+			if g.Signing != nil {
+				signing := *g.Signing
+				out.Signing = &signing
+			}
+			origins.Signing = layer.Origin
+		} else if g.AllowedSigners != "" {
+			out.AllowedSigners = g.AllowedSigners
+		}
+		if len(g.Sign) > 0 {
+			out.Sign, origins.Sign = append([]string(nil), g.Sign...), layer.Origin
+		}
+		for _, cred := range g.Credentials {
+			host := strings.TrimSpace(cred.Host)
+			replaced := false
+			for i := range out.Credentials {
+				if strings.TrimSpace(out.Credentials[i].Host) == host {
+					out.Credentials[i], replaced = cred, true
+					break
+				}
+			}
+			if !replaced {
+				out.Credentials = append(out.Credentials, cred)
+			}
+			origins.Credentials[host] = layer.Origin
+		}
+	}
+	if !found {
+		return nil, origins
+	}
+	return out, origins
+}
+
+// explainGit lists the merged default identity with the level that set each
+// part. Credentials and signing keys are shown as secret coordinates only.
+func explainGit(git *v1beta1.ContainerGit, origins GitOrigins) []v1beta1.RenderedValue {
+	if git == nil {
+		return nil
+	}
+	var out []v1beta1.RenderedValue
+	add := func(key, value, origin string) {
+		if value != "" {
+			out = append(out, v1beta1.RenderedValue{
+				Kind: v1beta1.RenderKindGit, Key: key, Value: value, Origin: origin,
+			})
+		}
+	}
+	if git.Author != nil {
+		add("default.author", git.Author.Name+" <"+git.Author.Email+">", origins.Author)
+	}
+	if git.Committer != nil {
+		add("default.committer", git.Committer.Name+" <"+git.Committer.Email+">", origins.Committer)
+	}
+	switch {
+	case git.Signing != nil && git.Signing.SecretRef != nil:
+		add("default.signing", describeSecretFill(v1beta1.CellConfigSecretFill{SecretRef: git.Signing.SecretRef}),
+			origins.Signing)
+	case git.SigningKey != "":
+		add("default.signing", git.SigningKey, origins.Signing)
+	}
+	for _, cred := range git.Credentials {
+		host := strings.TrimSpace(cred.Host)
+		add("default.credential["+host+"]",
+			describeSecretFill(v1beta1.CellConfigSecretFill{SecretRef: cred.SecretRef}), origins.Credentials[host])
+	}
+	return out
 }
 
 type mergedFill struct {

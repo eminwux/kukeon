@@ -22,6 +22,8 @@ type ScopeDefaults struct {
 	Values  map[string]string
 	Repos   map[string]RepoFill
 	Secrets map[string]SecretFill
+	// Git is the scope's default git identity and credentials (#1472).
+	Git *ContainerGit
 }
 
 // RepoFill mirrors v1beta1.CellConfigRepoFill.
@@ -29,6 +31,7 @@ type RepoFill struct {
 	URL    string
 	Branch string
 	Ref    string
+	Git    *RepoGit
 }
 
 // SecretFill mirrors v1beta1.CellConfigSecretFill.

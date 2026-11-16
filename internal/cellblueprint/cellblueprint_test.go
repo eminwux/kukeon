@@ -339,3 +339,55 @@ func TestMaterialize_PrefixFallsBackToName(t *testing.T) {
 		t.Fatalf("name = %q, want prefix from metadata.name", cell.Metadata.Name)
 	}
 }
+
+// The inline --from-blueprint path stamps the capability requirement the
+// container create enforces, folding in the enabled components' own.
+func TestMaterialize_StampsRequires(t *testing.T) {
+	doc := baseDoc()
+	doc.Spec.Requires = []string{"git", " gh ", "git"}
+	resolved, err := cellblueprint.Resolve(doc, nil, nil)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	cell, err := cellblueprint.Materialize(resolved)
+	if err != nil {
+		t.Fatalf("Materialize: %v", err)
+	}
+	if got := cell.Spec.Requires; len(got) != 2 || got[0] != "gh" || got[1] != "git" {
+		t.Fatalf("Requires = %v, want [gh git]", got)
+	}
+
+	plain, err := cellblueprint.Materialize(baseDoc())
+	if err != nil {
+		t.Fatalf("Materialize: %v", err)
+	}
+	if len(plain.Spec.Requires) != 0 {
+		t.Fatalf("Requires = %v, want none for a blueprint that requires nothing", plain.Spec.Requires)
+	}
+}
+
+// A repo target left to a ${PARAM} is checked once the parameter is resolved:
+// --param DIR=work must not send a relative checkout path to the daemon.
+func TestMaterialize_ParameterizedRepoTarget(t *testing.T) {
+	doc := baseDoc()
+	doc.Spec.Parameters = append(doc.Spec.Parameters, v1beta1.CellBlueprintParameter{Name: "DIR"})
+	doc.Spec.Cell.Containers[0].Repos = []v1beta1.ContainerRepo{
+		{Name: "app", Target: "${DIR}", URL: "https://example.com/app.git"},
+	}
+	resolved, err := cellblueprint.Resolve(doc, map[string]string{"DIR": "/workspace/app"}, nil)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	cell, err := cellblueprint.Materialize(resolved)
+	if err != nil || cell.Spec.Containers[0].Repos[0].Target != "/workspace/app" {
+		t.Fatalf("absolute target: cell=%+v err=%v", cell.Spec.Containers, err)
+	}
+
+	resolved, err = cellblueprint.Resolve(doc, map[string]string{"DIR": "work"}, nil)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if _, err = cellblueprint.Materialize(resolved); !errors.Is(err, errdefs.ErrRepoTargetNotAbsolute) {
+		t.Fatalf("relative target: err = %v, want ErrRepoTargetNotAbsolute", err)
+	}
+}

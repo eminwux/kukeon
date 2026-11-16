@@ -73,6 +73,9 @@ func cellFromConfigRequest(req kukeonv1.CellFromConfigRequest) controller.CellFr
 		IgnoreDiskPressure: req.IgnoreDiskPressure,
 		Start:              req.Start,
 		ExpectedDigest:     req.ExpectedDigest,
+		Mode:               req.Mode,
+		Params:             req.Params,
+		Draft:              req.Draft,
 	}
 }
 

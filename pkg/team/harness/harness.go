@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"path"
 	"regexp"
 	"slices"
@@ -53,7 +54,25 @@ type Spec struct {
 	Parameters  []api.CellBlueprintParameter `json:"parameters,omitempty"  yaml:"parameters,omitempty"`
 	StatePath   string                       `json:"statePath,omitempty"   yaml:"statePath,omitempty"`
 	Mounts      []Mount                      `json:"mounts,omitempty"      yaml:"mounts,omitempty"`
-	Images      []Image                      `json:"images"                yaml:"images"`
+	// Secrets are the secret slots the harness exposes in every mode — name
+	// plus the fixed env destination. A team role fills one by naming it.
+	Secrets []api.BlueprintSecretSlot `json:"secrets,omitempty"     yaml:"secrets,omitempty"`
+	// Modes are the ways the harness can be started (interactive, headless,
+	// …). The mode is picked per cell at create time; a mode's parameters and
+	// secrets apply only to cells created in it. spec.onInit stages run first
+	// in every mode, followed by the mode's own. A harness without modes
+	// starts from spec.onInit alone.
+	Modes  map[string]Mode `json:"modes,omitempty"       yaml:"modes,omitempty"`
+	Images []Image         `json:"images"                yaml:"images"`
+}
+
+// Mode is one way to start the harness.
+type Mode struct {
+	Description string                       `json:"description,omitempty" yaml:"description,omitempty"`
+	OnInit      []Script                     `json:"onInit"                yaml:"onInit"`
+	Parameters  []api.CellBlueprintParameter `json:"parameters,omitempty"  yaml:"parameters,omitempty"`
+	Environment map[string]string            `json:"environment,omitempty" yaml:"environment,omitempty"`
+	Secrets     []api.BlueprintSecretSlot    `json:"secrets,omitempty"     yaml:"secrets,omitempty"`
 }
 
 // Script is opaque shell source, never a Go template. New lifecycle hooks are
@@ -121,38 +140,59 @@ func (h *Harness) Validate() error {
 			h.Spec.Renderer,
 		)
 	}
-	if h.Spec.SkillPath == "" || (h.Spec.Shell != "/bin/bash" && h.Spec.Shell != "/bin/sh") || len(h.Spec.OnInit) == 0 {
-		return errors.New("require skillPath, shell (/bin/bash or /bin/sh), and nonempty ordered spec.onInit scripts")
+	if h.Spec.SkillPath == "" || (h.Spec.Shell != "/bin/bash" && h.Spec.Shell != "/bin/sh") {
+		return errors.New("require skillPath and shell (/bin/bash or /bin/sh)")
 	}
-	for _, stage := range h.Spec.OnInit {
-		if strings.TrimSpace(stage.Script) == "" {
-			return errors.New("spec.onInit: script must not be empty")
+	if len(h.Spec.OnInit) == 0 && len(h.Spec.Modes) == 0 {
+		return errors.New("require nonempty ordered spec.onInit scripts or spec.modes")
+	}
+	if err := scripts("spec.onInit", h.Spec.OnInit); err != nil {
+		return err
+	}
+	// PROMPT stays a built-in parameter only for a harness without modes; a
+	// harness with modes declares it on the mode that reads it.
+	namesOfParams := map[string]bool{"AGENT_NAME": true}
+	if len(h.Spec.Modes) == 0 {
+		namesOfParams["PROMPT"] = true
+	}
+	if err := parameters("spec.parameters", h.Spec.Parameters, namesOfParams); err != nil {
+		return err
+	}
+	if err := environment("spec.environment", h.Spec.Environment); err != nil {
+		return err
+	}
+	if err := secretSlots("spec.secrets", h.Spec.Secrets, map[string]bool{}, map[string]bool{}); err != nil {
+		return err
+	}
+	for name, mode := range h.Spec.Modes {
+		field := "spec.modes." + name
+		if !namePattern.MatchString(name) {
+			return fmt.Errorf("%s: invalid mode name", field)
 		}
-	}
-	namesOfParams := map[string]bool{"PROMPT": true, "AGENT_NAME": true}
-	for _, param := range h.Spec.Parameters {
-		if !envPattern.MatchString(param.Name) || namesOfParams[param.Name] {
-			return errors.New("spec.parameters: invalid, reserved or duplicate name")
+		if len(mode.OnInit) == 0 {
+			return fmt.Errorf("%s.onInit: at least one script required", field)
 		}
-		namesOfParams[param.Name] = true
-	}
-	for name := range h.Spec.Environment {
-		if !envPattern.MatchString(name) ||
-			slices.Contains(
-				[]string{
-					"ROLE_SOURCE_DIR",
-					"ROLE_PATH",
-					"INITIAL_PATH",
-					"HARNESS_SETTINGS",
-					"PROMPT",
-					"AGENT_NAME",
-					"HOME",
-					"GIT_SSH_COMMAND",
-					"IS_SANDBOX",
-				},
-				name,
-			) {
-			return errors.New("spec.environment: invalid or reserved input name")
+		if err := scripts(field+".onInit", mode.OnInit); err != nil {
+			return err
+		}
+		// A mode may redeclare nothing the harness already declares.
+		if err := parameters(field+".parameters", mode.Parameters, maps.Clone(namesOfParams)); err != nil {
+			return err
+		}
+		if err := environment(field+".environment", mode.Environment); err != nil {
+			return err
+		}
+		for key := range mode.Environment {
+			if _, dup := h.Spec.Environment[key]; dup {
+				return fmt.Errorf("%s.environment: %s is already set by spec.environment", field, key)
+			}
+		}
+		names, destinations := map[string]bool{}, map[string]bool{}
+		for _, slot := range h.Spec.Secrets {
+			names[slot.Name], destinations[slot.EnvName] = true, true
+		}
+		if err := secretSlots(field+".secrets", mode.Secrets, names, destinations); err != nil {
+			return err
 		}
 	}
 	if len(h.Spec.Images) == 0 {
@@ -173,6 +213,69 @@ func (h *Harness) Validate() error {
 		if err := capabilities(image.Capabilities, h.Metadata.Name); err != nil {
 			return fmt.Errorf("image %q: %w", image.Name, err)
 		}
+	}
+	return nil
+}
+
+func scripts(field string, stages []Script) error {
+	for _, stage := range stages {
+		if strings.TrimSpace(stage.Script) == "" {
+			return fmt.Errorf("%s: script must not be empty", field)
+		}
+	}
+	return nil
+}
+
+func parameters(field string, list []api.CellBlueprintParameter, seen map[string]bool) error {
+	for _, param := range list {
+		if !envPattern.MatchString(param.Name) || seen[param.Name] {
+			return fmt.Errorf("%s: invalid, reserved or duplicate name", field)
+		}
+		seen[param.Name] = true
+	}
+	return nil
+}
+
+func environment(field string, values map[string]string) error {
+	for name := range values {
+		if !envPattern.MatchString(name) ||
+			slices.Contains(
+				[]string{
+					"ROLE_SOURCE_DIR",
+					"ROLE_PATH",
+					"INITIAL_PATH",
+					"HARNESS_SETTINGS",
+					"PROMPT",
+					"AGENT_NAME",
+					"AGENTS_REPO",
+					"HOME",
+					"GIT_SSH_COMMAND",
+					"GIT_CONFIG_SYSTEM",
+					"IS_SANDBOX",
+				},
+				name,
+			) {
+			return fmt.Errorf("%s: invalid or reserved input name", field)
+		}
+	}
+	return nil
+}
+
+// secretSlots checks env-destination secret slots; names and destinations
+// accumulate so a mode cannot collide with the harness-wide slots.
+func secretSlots(field string, slots []api.BlueprintSecretSlot, names, destinations map[string]bool) error {
+	for _, slot := range slots {
+		if !namePattern.MatchString(slot.Name) || names[slot.Name] {
+			return fmt.Errorf("%s: invalid or duplicate secret name %q", field, slot.Name)
+		}
+		names[slot.Name] = true
+		if (slot.Mode != "" && slot.Mode != api.BlueprintSecretModeEnv) || slot.MountPath != "" {
+			return fmt.Errorf("%s: secret %q: only environment destinations are supported", field, slot.Name)
+		}
+		if !envPattern.MatchString(slot.EnvName) || destinations[slot.EnvName] {
+			return fmt.Errorf("%s: secret %q: invalid or duplicate envName", field, slot.Name)
+		}
+		destinations[slot.EnvName] = true
 	}
 	return nil
 }

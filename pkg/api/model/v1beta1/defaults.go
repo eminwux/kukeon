@@ -33,11 +33,16 @@ type ScopeDefaults struct {
 	Repos map[string]CellConfigRepoFill `json:"repos,omitempty"   yaml:"repos,omitempty"`
 	// Secrets fill blueprint secret slots, keyed by slot name.
 	Secrets map[string]CellConfigSecretFill `json:"secrets,omitempty" yaml:"secrets,omitempty"`
+	// Git is the default git identity, credentials and signing config of
+	// every cell rendered from a CellConfig inside the scope (issue #1472).
+	// Author, committer and signing are overridden whole by a deeper level;
+	// credentials merge by host.
+	Git *ContainerGit `json:"git,omitempty"     yaml:"git,omitempty"`
 }
 
 // IsZero reports whether the defaults carry no fill at all.
 func (d *ScopeDefaults) IsZero() bool {
-	return d == nil || (len(d.Values) == 0 && len(d.Repos) == 0 && len(d.Secrets) == 0)
+	return d == nil || (len(d.Values) == 0 && len(d.Repos) == 0 && len(d.Secrets) == 0 && d.Git == nil)
 }
 
 // RealmImage names an image the realm provides to cells rendered from a
@@ -89,12 +94,26 @@ const (
 	RenderKindRepo   = "repo"
 	RenderKindSecret = "secret"
 	RenderKindImage  = "image"
+	// RenderKindGit reports the effective git identity: the cell default
+	// (keys "default.author", "default.credential[<host>]", …) and each
+	// source's resolved author, committer, credential, signing key and
+	// transport (keys "<repo>.author", "<repo>.credential", …).
+	RenderKindGit = "git"
+	// RenderKindComponent reports an enabled component.
+	RenderKindComponent = "component"
+	// RenderKindMode reports the harness mode the cell is created in.
+	RenderKindMode = "mode"
+	// RenderKindRequires reports the image capabilities the cell requires.
+	RenderKindRequires = "requires"
 
 	RenderOriginRealm     = "realm"
 	RenderOriginSpace     = "space"
 	RenderOriginStack     = "stack"
 	RenderOriginConfig    = "config"
 	RenderOriginBlueprint = "blueprint"
+	// RenderOriginCell marks a value chosen for the one cell being created:
+	// a --param override or an explicit --mode.
+	RenderOriginCell = "cell"
 )
 
 // RenderedValue is one resolved input of a daemon-side CellConfig render

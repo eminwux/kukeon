@@ -175,12 +175,17 @@ func printSecrets(cmd *cobra.Command, secrets []v1beta1.SecretDoc, format shared
 			cmd.Println("No secrets found.")
 			return nil
 		}
-		headers := []string{"NAME", "REALM", "SPACE", "STACK", "CELL"}
+		headers := []string{"NAME", "TYPE", "REALM", "SPACE", "STACK", "CELL"}
 		rows := make([][]string, 0, len(secrets))
 		for i := range secrets {
 			s := &secrets[i]
+			secretType := s.Spec.Type
+			if secretType == "" {
+				secretType = v1beta1.SecretTypeOpaque
+			}
 			rows = append(rows, []string{
 				s.Metadata.Name,
+				secretType,
 				dashIfEmpty(s.Metadata.Realm),
 				dashIfEmpty(s.Metadata.Space),
 				dashIfEmpty(s.Metadata.Stack),

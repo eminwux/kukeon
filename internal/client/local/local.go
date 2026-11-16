@@ -1161,12 +1161,13 @@ func (c *Client) PruneImages(_ context.Context, realm string) (kukeonv1.PruneIma
 
 func controllerImageToWire(img controller.ImageInfo) kukeonv1.ImageInfo {
 	return kukeonv1.ImageInfo{
-		Name:      img.Name,
-		Size:      img.Size,
-		CreatedAt: img.CreatedAt,
-		Digest:    img.Digest,
-		MediaType: img.MediaType,
-		Labels:    img.Labels,
+		Name:         img.Name,
+		Size:         img.Size,
+		CreatedAt:    img.CreatedAt,
+		Digest:       img.Digest,
+		MediaType:    img.MediaType,
+		Labels:       img.Labels,
+		Capabilities: img.Capabilities,
 	}
 }
 

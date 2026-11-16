@@ -1,0 +1,23 @@
+# GitHub connector: gives a cell the GitHub API through the `gh` CLI.
+#
+# The token is delivered as GH_TOKEN and nothing else. It is deliberately not a
+# git credential: clone, fetch, push and signing keep using the cell's git
+# identity (spec.git / repos[].git — an SSH key or basic-auth secret), so
+# enabling this connector can never make a push use the API token.
+apiVersion: kuketeams.io/v1
+kind: Component
+metadata:
+  name: github
+spec:
+  kind: connector
+  description: GitHub API access for the gh CLI (issues, pull requests, reviews).
+  requires: [gh]
+  secrets:
+    - name: github-token
+      envName: GH_TOKEN
+      required: true
+      # Runtime secret bound when the team declares no binding of its own, and
+      # the transition-era role spelling (`secrets: [gh-token]`) that enables
+      # this connector.
+      secretName: gh-token
+      aliases: [gh-token]

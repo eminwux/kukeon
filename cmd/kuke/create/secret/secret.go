@@ -19,6 +19,7 @@ package secret
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -38,10 +39,19 @@ func NewSecretCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "secret [name]",
 		Short: "Create a secret within a scope",
-		Long: "Create a secret within a scope. Two source modes:\n\n" +
-			"  - `kuke create secret <name> --from-literal=KEY=VAL` — inline value, repeatable\n" +
-			"  - `kuke create secret <name> --from-file=<path>` — read value from file\n\n" +
-			"At least one of --from-literal or --from-file is required.",
+		Long: "Create a secret within a scope. --type selects the kind of material:\n\n" +
+			"  opaque (default) — raw bytes, injected through containers[].secrets[]:\n" +
+			"    kuke create secret <name> --from-literal=KEY=VAL    (inline value, repeatable)\n" +
+			"    kuke create secret <name> --from-file=<path>        (value read from a file)\n\n" +
+			"  basic-auth — HTTPS git credential (username + password or token):\n" +
+			"    kuke create secret <name> --type basic-auth --username <user> --password-stdin\n" +
+			"    kuke create secret <name> --type basic-auth --username <user> --token-file <path>\n\n" +
+			"  ssh-key — SSH git credential and signing key (any OpenSSH key type):\n" +
+			"    kuke create secret <name> --type ssh-key --from-file ~/.ssh/id_ed25519 \\\n" +
+			"        [--passphrase-stdin | --passphrase-file <path>] [--public-key-file <path>] \\\n" +
+			"        [--certificate-file <path>] [--known-hosts-file <path>]\n\n" +
+			"Typed secrets are referenced from git.credentials[] and git.signing; their material is\n" +
+			"never echoed back, put in an environment variable, or embedded in a URL.",
 		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: false,
@@ -59,7 +69,18 @@ func NewSecretCmd() *cobra.Command {
 
 	cmd.Flags().StringArray("from-literal", nil,
 		"Specify a key-value pair as KEY=VAL; repeatable to provide multiple values (joined by newline)")
-	cmd.Flags().String("from-file", "", "Read the secret value from a file")
+	cmd.Flags().String("from-file", "",
+		"Read the secret value from a file (opaque: the value; basic-auth: the password; ssh-key: the private key)")
+	cmd.Flags().String("type", v1beta1.SecretTypeOpaque, "Secret type: opaque, basic-auth or ssh-key")
+	cmd.Flags().String("username", "", "basic-auth: the HTTP user")
+	cmd.Flags().Bool("password-stdin", false, "basic-auth: read the password from stdin")
+	cmd.Flags().Bool("token-stdin", false, "basic-auth: read a token from stdin")
+	cmd.Flags().String("token-file", "", "basic-auth: read a token from a file")
+	cmd.Flags().Bool("passphrase-stdin", false, "ssh-key: read the private key's passphrase from stdin")
+	cmd.Flags().String("passphrase-file", "", "ssh-key: read the private key's passphrase from a file")
+	cmd.Flags().String("public-key-file", "", "ssh-key: the matching public key file")
+	cmd.Flags().String("certificate-file", "", "ssh-key: an OpenSSH user certificate for the key")
+	cmd.Flags().String("known-hosts-file", "", "ssh-key: pinned host keys in known_hosts format")
 
 	// Register autocomplete functions for flags
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
@@ -90,9 +111,7 @@ func runCreateSecret(cmd *cobra.Command, args []string) error {
 			Space: strings.TrimSpace(flags.space),
 			Stack: strings.TrimSpace(flags.stack),
 		},
-		Spec: v1beta1.SecretSpec{
-			Data: flags.data,
-		},
+		Spec: flags.spec,
 	}
 
 	result, err := client.CreateSecret(cmd.Context(), doc)
@@ -109,7 +128,7 @@ type createSecretFlags struct {
 	realm string
 	space string
 	stack string
-	data  string
+	spec  v1beta1.SecretSpec
 }
 
 func parseCreateSecretFlags(cmd *cobra.Command, args []string) (createSecretFlags, error) {
@@ -141,18 +160,55 @@ func parseCreateSecretFlags(cmd *cobra.Command, args []string) (createSecretFlag
 		flags.stack = strings.TrimSpace(config.KUKE_CREATE_SECRET_STACK.ValueOrDefault())
 	}
 
-	literals, err := cmd.Flags().GetStringArray("from-literal")
+	secretType, err := cmd.Flags().GetString("type")
 	if err != nil {
 		return createSecretFlags{}, err
+	}
+	switch strings.TrimSpace(secretType) {
+	case "", v1beta1.SecretTypeOpaque:
+		flags.spec, err = opaqueSpec(cmd)
+	case v1beta1.SecretTypeBasicAuth:
+		flags.spec, err = basicAuthSpec(cmd)
+	case v1beta1.SecretTypeSSHKey:
+		flags.spec, err = sshKeySpec(cmd)
+	default:
+		err = fmt.Errorf("--type %q: want opaque, basic-auth or ssh-key", secretType)
+	}
+	if err != nil {
+		return createSecretFlags{}, err
+	}
+	return flags, nil
+}
+
+// rejectFlags errors when a flag that belongs to another secret type is set, so
+// a mistyped --type never silently drops material.
+func rejectFlags(cmd *cobra.Command, secretType string, names ...string) error {
+	for _, name := range names {
+		if cmd.Flags().Changed(name) {
+			return fmt.Errorf("--%s does not apply to --type %s", name, secretType)
+		}
+	}
+	return nil
+}
+
+func opaqueSpec(cmd *cobra.Command) (v1beta1.SecretSpec, error) {
+	if err := rejectFlags(cmd, v1beta1.SecretTypeOpaque,
+		"username", "password-stdin", "token-stdin", "token-file", "passphrase-stdin",
+		"passphrase-file", "public-key-file", "certificate-file", "known-hosts-file"); err != nil {
+		return v1beta1.SecretSpec{}, err
+	}
+	literals, err := cmd.Flags().GetStringArray("from-literal")
+	if err != nil {
+		return v1beta1.SecretSpec{}, err
 	}
 
 	fromFile, err := cmd.Flags().GetString("from-file")
 	if err != nil {
-		return createSecretFlags{}, err
+		return v1beta1.SecretSpec{}, err
 	}
 
 	if len(literals) == 0 && fromFile == "" {
-		return createSecretFlags{}, errors.New("at least one of --from-literal or --from-file is required")
+		return v1beta1.SecretSpec{}, errors.New("at least one of --from-literal or --from-file is required")
 	}
 
 	var parts []string
@@ -169,23 +225,148 @@ func parseCreateSecretFlags(cmd *cobra.Command, args []string) (createSecretFlag
 		}
 	}
 
+	var data string
 	if fromFile != "" {
-		data, err := os.ReadFile(fromFile)
-		if err != nil {
-			return createSecretFlags{}, fmt.Errorf("read --from-file %q: %w", fromFile, err)
+		raw, readErr := os.ReadFile(fromFile)
+		if readErr != nil {
+			return v1beta1.SecretSpec{}, fmt.Errorf("read --from-file %q: %w", fromFile, readErr)
 		}
-		flags.data = strings.TrimRight(string(data), "\n")
+		data = strings.TrimRight(string(raw), "\n")
 	}
 
 	// Append literal values after file content (if both specified)
 	if len(parts) > 0 {
-		if flags.data != "" {
-			flags.data += "\n"
+		if data != "" {
+			data += "\n"
 		}
-		flags.data += strings.Join(parts, "\n")
+		data += strings.Join(parts, "\n")
 	}
 
-	return flags, nil
+	return v1beta1.SecretSpec{Data: data}, nil
+}
+
+// basicAuthSpec builds a basic-auth secret from --username plus exactly one
+// password or token source. The value never appears on the command line.
+func basicAuthSpec(cmd *cobra.Command) (v1beta1.SecretSpec, error) {
+	if err := rejectFlags(cmd, v1beta1.SecretTypeBasicAuth,
+		"from-literal", "passphrase-stdin", "passphrase-file", "public-key-file",
+		"certificate-file", "known-hosts-file"); err != nil {
+		return v1beta1.SecretSpec{}, err
+	}
+	username, _ := cmd.Flags().GetString("username")
+	if strings.TrimSpace(username) == "" {
+		return v1beta1.SecretSpec{}, errors.New("--type basic-auth requires --username")
+	}
+	passwordFile, _ := cmd.Flags().GetString("from-file")
+	tokenFile, _ := cmd.Flags().GetString("token-file")
+	passwordStdin, _ := cmd.Flags().GetBool("password-stdin")
+	tokenStdin, _ := cmd.Flags().GetBool("token-stdin")
+	sources := 0
+	for _, set := range []bool{passwordFile != "", tokenFile != "", passwordStdin, tokenStdin} {
+		if set {
+			sources++
+		}
+	}
+	if sources != 1 {
+		return v1beta1.SecretSpec{}, errors.New(
+			"--type basic-auth requires exactly one of --password-stdin, --token-stdin, --from-file (password) or --token-file",
+		)
+	}
+	auth := &v1beta1.SecretBasicAuth{Username: strings.TrimSpace(username)}
+	var err error
+	switch {
+	case passwordStdin:
+		auth.Password, err = readLine(cmd.InOrStdin(), "stdin")
+	case tokenStdin:
+		auth.Token, err = readLine(cmd.InOrStdin(), "stdin")
+	case passwordFile != "":
+		auth.Password, err = readLineFile("--from-file", passwordFile)
+	default:
+		auth.Token, err = readLineFile("--token-file", tokenFile)
+	}
+	if err != nil {
+		return v1beta1.SecretSpec{}, err
+	}
+	return v1beta1.SecretSpec{Type: v1beta1.SecretTypeBasicAuth, BasicAuth: auth}, nil
+}
+
+// sshKeySpec builds an ssh-key secret from the private key file plus the
+// optional passphrase, public key, certificate and pinned host keys.
+func sshKeySpec(cmd *cobra.Command) (v1beta1.SecretSpec, error) {
+	if err := rejectFlags(cmd, v1beta1.SecretTypeSSHKey,
+		"from-literal", "username", "password-stdin", "token-stdin", "token-file"); err != nil {
+		return v1beta1.SecretSpec{}, err
+	}
+	keyFile, _ := cmd.Flags().GetString("from-file")
+	if keyFile == "" {
+		return v1beta1.SecretSpec{}, errors.New("--type ssh-key requires --from-file <private key>")
+	}
+	private, err := os.ReadFile(keyFile)
+	if err != nil {
+		return v1beta1.SecretSpec{}, fmt.Errorf("read --from-file %q: %w", keyFile, err)
+	}
+	key := &v1beta1.SecretSSHKey{PrivateKey: string(private)}
+
+	passphraseFile, _ := cmd.Flags().GetString("passphrase-file")
+	passphraseStdin, _ := cmd.Flags().GetBool("passphrase-stdin")
+	switch {
+	case passphraseStdin && passphraseFile != "":
+		return v1beta1.SecretSpec{}, errors.New("--passphrase-stdin and --passphrase-file are mutually exclusive")
+	case passphraseStdin:
+		key.Passphrase, err = readLine(cmd.InOrStdin(), "stdin")
+	case passphraseFile != "":
+		key.Passphrase, err = readLineFile("--passphrase-file", passphraseFile)
+	}
+	if err != nil {
+		return v1beta1.SecretSpec{}, err
+	}
+
+	for _, optional := range []struct {
+		flag string
+		dst  *string
+		line bool
+	}{
+		{"public-key-file", &key.PublicKey, true},
+		{"certificate-file", &key.Certificate, true},
+		{"known-hosts-file", &key.KnownHosts, false},
+	} {
+		path, _ := cmd.Flags().GetString(optional.flag)
+		if path == "" {
+			continue
+		}
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return v1beta1.SecretSpec{}, fmt.Errorf("read --%s %q: %w", optional.flag, path, readErr)
+		}
+		*optional.dst = string(raw)
+		if optional.line {
+			*optional.dst = strings.TrimSpace(string(raw))
+		}
+	}
+	return v1beta1.SecretSpec{Type: v1beta1.SecretTypeSSHKey, SSHKey: key}, nil
+}
+
+// readLine reads one secret value, dropping the trailing line ending a shell
+// pipe or an editor adds.
+func readLine(r io.Reader, source string) (string, error) {
+	raw, err := io.ReadAll(r)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", source, err)
+	}
+	value := strings.TrimRight(string(raw), "\r\n")
+	if value == "" {
+		return "", fmt.Errorf("%s is empty", source)
+	}
+	return value, nil
+}
+
+func readLineFile(flag, path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("read %s %q: %w", flag, path, err)
+	}
+	defer func() { _ = f.Close() }()
+	return readLine(f, flag+" "+path)
 }
 
 func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
@@ -203,5 +384,9 @@ func printSecretResult(cmd *cobra.Command, result kukeonv1.CreateSecretResult) {
 		result.Secret.Metadata.Space,
 		result.Secret.Metadata.Stack,
 	)
-	shared.PrintCreationOutcome(cmd, "data", result.Secret.Spec.Data != "", result.Created)
+	label := "data"
+	if t := result.Secret.Spec.Type; t != "" && t != v1beta1.SecretTypeOpaque {
+		label = "data (" + t + ")"
+	}
+	shared.PrintCreationOutcome(cmd, label, result.Secret.Spec.Data != "", result.Created)
 }

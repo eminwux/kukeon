@@ -6,10 +6,13 @@ harnesses select it with `spec.renderer: kukeon/v1beta1`. Go embeds the files in
 the executable; composition does not need a renderer checkout or network access.
 
 `pkg/team/harness` owns the strict, single-document `kuketeams.io/v1 Harness` schema.
-`pkg/team/compose` resolves it into `rendererInput` (input contract revision **1**),
-then executes the bundled blueprint and shared partials. That contract carries
-structured parameters, environment entries, repository and secret selectors,
-mounts, state path, scope, selected image, execution profile, and ordered scripts.
+`pkg/team/compose` resolves it into `rendererInput` (input contract revision **2**),
+then executes the bundled blueprint and shared partials. That contract renders a
+**shared** blueprint — one per harness × security profile, with no role facts in
+it — and carries typed parameters, the harness / connector / forge components,
+environment entries, secret slots, mounts, state path, realm, execution profile,
+and ordered scripts. Role facts (image, role path, settings, repositories,
+secrets, enabled connectors) are bound in each role's CellConfig instead.
 It contains no JSON lists or shell fragments standing in for structural fields.
 The generated document uses the pinned kukeon `v1beta1` models; these are a
 separate API from the local Harness and the renderer input contract.
@@ -77,7 +80,51 @@ spec:
 ```
 
 The Harness owns images and capabilities, `shell`, `onInit`, `environment`,
-optional `parameters`, optional `statePath`, and `mounts`.
+optional `parameters`, optional `secrets`, optional `modes`, optional
+`statePath`, and `mounts`. Image capabilities are stamped on each built image as
+the `io.kukeon.capabilities` label, which kukeond checks against a cell's
+`requires` when the cell is created.
+
+### Modes
+
+`spec.modes` declares the ways the harness starts; the packaged harnesses
+declare `interactive` and `headless`. The mode is picked per cell at create time
+(`kuke run <config> --mode headless --param PROMPT=…`), so one role config
+serves both an attached session and a dispatched run.
+
+```yaml
+spec:
+  secrets: # slots available in every mode; a role fills one by naming it
+    - { name: claude-code-oauth-token, envName: CLAUDE_CODE_OAUTH_TOKEN }
+  modes:
+    interactive:
+      description: Attachable session; the login persists in the state volume.
+      onInit:
+        - script: |
+            cd "$INITIAL_PATH" || exit 1
+            exec my-agent
+    headless:
+      description: Dispatched, unattended run of one prompt.
+      parameters:
+        - { name: PROMPT, required: true }
+      secrets:
+        - { name: anthropic-api-key, envName: ANTHROPIC_API_KEY }
+      onInit:
+        - script: |
+            cd "$INITIAL_PATH" || exit 1
+            exec my-agent --print "$PROMPT"
+```
+
+Each mode has its own `onInit` (required), `parameters`, `environment` and
+`secrets`; they apply only to cells created in that mode, so a `required`
+parameter or secret is required only then. `spec.onInit` stages, when present,
+run first in every mode. Every mode parameter is exported to the scripts as an
+environment variable of the same name. Secret slots take an environment
+destination only (`name` + `envName`); the destination is fixed by the Harness,
+because the blueprint is shared across roles and teams.
+
+A Harness with no `spec.modes` keeps the single-`onInit` form shown above, with
+the built-in `PROMPT` parameter (empty selects the interactive branch).
 The shell is explicitly `/bin/bash` or `/bin/sh` and becomes the work container's
 command. All packaged scripts use Bash, which their shared base images supply.
 External images must include the declared interpreter and every referenced asset.
@@ -90,23 +137,25 @@ both root and non-root images. External images selecting this renderer must
 provide that same effective HOME. Inputs are container environment values,
 never shell source substitutions:
 
-| Input                             | Meaning                                                                                                           |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `ROLE_SOURCE_DIR`                 | Validated absolute in-cell role-source checkout (`sources[].clonePath`).                                          |
-| `ROLE_PATH`                       | Safe source-relative selected role directory.                                                                     |
-| `INITIAL_PATH`                    | Absolute launch directory; omitted or `$HOME` resolves to `/home/user`.                                           |
-| `HARNESS_SETTINGS`                | Selected role-relative settings path, empty when unused.                                                          |
-| `PROMPT`                          | Blueprint parameter; empty selects interactive mode.                                                              |
-| `AGENT_NAME`                      | Bound resource identity unless explicitly supplied as a parameter.                                                |
-| `CODEX_SANDBOX`, `CODEX_APPROVAL` | Codex's declared environment mapping; role values, overridden to `danger-full-access` / `never` in root profiles. |
-| `OPENCODE_PERMISSIONS`            | OpenCode's declared mapping of role `permissions`.                                                                |
+| Input                             | Meaning                                                                                                             |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `ROLE_SOURCE_DIR`                 | Validated absolute in-cell role-source checkout (`sources[].clonePath`).                                            |
+| `ROLE_PATH`                       | Safe source-relative selected role directory.                                                                       |
+| `INITIAL_PATH`                    | Absolute launch directory; omitted or `$HOME` resolves to `/home/user`.                                             |
+| `HARNESS_SETTINGS`                | Selected role-relative settings path, empty when unused.                                                            |
+| `PROMPT`                          | The headless mode's parameter. In a Harness without `spec.modes`: a blueprint parameter, empty selects interactive. |
+| `AGENT_NAME`                      | Bound resource identity unless explicitly supplied as a parameter.                                                  |
+| `CODEX_SANDBOX`, `CODEX_APPROVAL` | Codex's declared environment mapping; role values, overridden to `danger-full-access` / `never` in root profiles.   |
+| `OPENCODE_PERMISSIONS`            | OpenCode's declared mapping of role `permissions`.                                                                  |
 
 `spec.environment` is a mapping of uppercase environment names to strings. It
 may refer to `${HOME}`, `${ROLE_SOURCE_DIR}`, `${ROLE_PATH}`, `${INITIAL_PATH}`,
 `${ROLE_NAME}`, `${SETTINGS}`, `${SANDBOX}`, `${APPROVAL}`, and `${PERMISSIONS}`,
-or to declared blueprint parameters. The renderer resolves its
-known inputs once; parameter references remain structural `${PARAM}` values in
-environment entries for kukeon to fill. `$HOME` notation in paths resolves before
+or to declared blueprint parameters. `${HOME}` is resolved once; every other
+input is a role fact and stays a structural `${PARAM}` reference to a typed
+blueprint parameter the role's CellConfig fills (`${SETTINGS}` maps to
+`HARNESS_SETTINGS`). A role-setting parameter (`ROLE_NAME`, `SANDBOX`,
+`APPROVAL`, `PERMISSIONS`) is declared only when the Harness reads it. `$HOME` notation in paths resolves before
 emission. Unsupported substitutions, unsafe paths, reserved environment keys,
 and parameters conflicting with startup inputs fail composition. Mounts retain
 separate source, target, and readOnly fields; lists and maps are never shell code.
@@ -202,9 +251,10 @@ checks reachability with Ping and leaves this version prerequisite to the
 operator. Automated version/range enforcement remains a documented limitation;
 no negotiation protocol or assumed capability endpoint is introduced here.
 
-No upstream model change is required for this migration: the pinned
-`CellBlueprintParameter`, `BlueprintContainer`, `ContainerTty.OnInit`, and
-`TtyStage.Script` already represent the emitted documents. The local Harness
+The emitted documents use the blueprint contract of the same kukeon release —
+typed `CellBlueprintParameter`s, `spec.requires`, `spec.components` with modes,
+and CellConfig `components` / `requires` — so the daemon must be at least as new
+as the `kuke` that composes. The local Harness
 schema changes independently. To add a kukeon field:
 
 1. Confirm the pinned runtime model **and daemon** support it; update the pin

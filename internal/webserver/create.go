@@ -166,10 +166,16 @@ func reviewedCellName(input createConfigRequest) (string, error) {
 	if requested == "" {
 		requested = resolvedName
 	}
-	if requested != "" {
-		if err := naming.ValidateHierarchyName("cell", requested); err != nil {
-			return "", fmt.Errorf("%w: %w", errdefs.ErrConfig, err)
-		}
+	if requested == "" {
+		return "", nil
+	}
+	// Re-checked inline so filepath.IsLocal dominates the returned name for
+	// static path-injection analysis (see configLookup).
+	if !filepath.IsLocal(requested) {
+		return "", fmt.Errorf("%w: unsafe cell name", errdefs.ErrConfig)
+	}
+	if err := naming.ValidateHierarchyName("cell", requested); err != nil {
+		return "", fmt.Errorf("%w: %w", errdefs.ErrConfig, err)
 	}
 	return requested, nil
 }
@@ -180,17 +186,34 @@ func configLookup(md v1beta1.CellConfigMetadata) (v1beta1.CellConfigMetadata, er
 	if md.Realm == "" || md.Name == "" || (md.Stack != "" && md.Space == "") {
 		return v1beta1.CellConfigMetadata{}, fmt.Errorf("%w: select a scoped config", errdefs.ErrConfig)
 	}
-	for _, field := range []struct{ label, value string }{
-		{"config space", md.Space},
-		{"config stack", md.Stack},
-		{"config name", md.Name},
-		{"config realm", md.Realm},
-	} {
-		if field.value != "" && !safeSegment(field.value) {
-			return v1beta1.CellConfigMetadata{}, fmt.Errorf("%w: unsafe %s", errdefs.ErrConfig, field.label)
-		}
+	// Each coordinate is guarded inline (not through a loop or helper) so the
+	// filepath.IsLocal check visibly dominates the returned values for static
+	// path-injection analysis, matching getCatalog. An optional coordinate is
+	// copied only once checked, so its unset path carries the empty literal.
+	name, realm := md.Name, md.Realm
+	unsafe := func(label string) (v1beta1.CellConfigMetadata, error) {
+		return v1beta1.CellConfigMetadata{}, fmt.Errorf("%w: unsafe %s", errdefs.ErrConfig, label)
 	}
-	return v1beta1.CellConfigMetadata{Name: md.Name, Realm: md.Realm, Space: md.Space, Stack: md.Stack}, nil
+	var space, stack string
+	if md.Space != "" {
+		if !filepath.IsLocal(md.Space) || !safePathSegment(md.Space) {
+			return unsafe("config space")
+		}
+		space = md.Space
+	}
+	if md.Stack != "" {
+		if !filepath.IsLocal(md.Stack) || !safePathSegment(md.Stack) {
+			return unsafe("config stack")
+		}
+		stack = md.Stack
+	}
+	if !filepath.IsLocal(name) || !safePathSegment(name) {
+		return unsafe("config name")
+	}
+	if !filepath.IsLocal(realm) || !safePathSegment(realm) {
+		return unsafe("config realm")
+	}
+	return v1beta1.CellConfigMetadata{Name: name, Realm: realm, Space: space, Stack: stack}, nil
 }
 
 // safeSegment reports whether value is a local, single path segment.

@@ -875,26 +875,47 @@ func TestCreateCell_MutualExclusion_FromBlueprintAndFromConfig(t *testing.T) {
 	}
 }
 
-func TestCreateCell_ParamRejectedWithFromConfig(t *testing.T) {
+// TestCreateCell_ParamAndModeForwardedWithFromConfig pins the #1472 contract:
+// --param / --mode on the --from-config path are not applied client-side (the
+// client never renders a Config) — they travel to the daemon, which accepts a
+// param only when the picked harness mode declares it.
+func TestCreateCell_ParamAndModeForwardedWithFromConfig(t *testing.T) {
 	t.Cleanup(viper.Reset)
+	lastConfigRequest = kukeonv1.CellFromConfigRequest{}
 
-	fc := &fakeClient{
+	cmd, _ := newTestExecCmd(t, &fakeClient{
 		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
-			t.Fatal("GetConfig must not be called when --param + --from-config is rejected")
 			return kukeonv1.GetConfigResult{}, nil
 		},
-	}
-	cmd, _ := newTestExecCmd(t, fc)
+	})
 	setFlag(t, cmd, "from-config", "prod")
-	setFlag(t, cmd, "param", "K=V")
+	setFlag(t, cmd, "param", "PROMPT=hello")
+	setFlag(t, cmd, "mode", "headless")
+	cmd.SetArgs([]string{"x"})
+
+	// The fake reports no such Config; the request it received is the assertion.
+	if err := cmd.Execute(); err == nil || !errors.Is(err, errdefs.ErrConfigNotFound) {
+		t.Fatalf("err=%v want ErrConfigNotFound from the fake", err)
+	}
+	if lastConfigRequest.Mode != "headless" {
+		t.Errorf("request Mode = %q, want headless", lastConfigRequest.Mode)
+	}
+	if lastConfigRequest.Params["PROMPT"] != "hello" {
+		t.Errorf("request Params = %v, want PROMPT=hello", lastConfigRequest.Params)
+	}
+}
+
+func TestCreateCell_ParamFileRejectedWithFromConfig(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	cmd, _ := newTestExecCmd(t, &fakeClient{})
+	setFlag(t, cmd, "from-config", "prod")
+	setFlag(t, cmd, "param-file", "/tmp/p")
 	cmd.SetArgs([]string{"x"})
 
 	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected error for --param + --from-config combination")
-	}
-	if !strings.Contains(err.Error(), "--param is not valid with --from-config") {
-		t.Errorf("err=%v want '--param is not valid with --from-config'", err)
+	if err == nil || !strings.Contains(err.Error(), "--param-file is not valid with --from-config") {
+		t.Errorf("err=%v want '--param-file is not valid with --from-config'", err)
 	}
 }
 
@@ -971,6 +992,55 @@ func TestCreateCell_FromBlueprint_ParamBakedAndRecorded(t *testing.T) {
 	}
 	if got := prov.Params["TAG"]; got != "v9" {
 		t.Errorf("Provenance.Params[TAG]=%q want v9", got)
+	}
+}
+
+// TestCreateCell_FromBlueprint_RequiresAndRepoTarget pins the two blueprint
+// contract checks on the --from-blueprint path (#1472): the cell handed to the
+// daemon carries the blueprint's capability requirement, and a repo target left
+// to a ${PARAM} is refused when the parameter resolves to a relative path.
+func TestCreateCell_FromBlueprint_RequiresAndRepoTarget(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	bp := blueprintDoc()
+	bp.Spec.Requires = []string{"git"}
+	bp.Spec.Parameters = append(bp.Spec.Parameters, v1beta1.CellBlueprintParameter{Name: "DIR"})
+	bp.Spec.Cell.Containers[0].Repos = []v1beta1.ContainerRepo{
+		{Name: "app", Target: "${DIR}", URL: "https://example.com/app.git"},
+	}
+	run := func(dir string) (v1beta1.CellDoc, bool, error) {
+		var sent v1beta1.CellDoc
+		called := false
+		fc := &fakeClient{
+			getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+				return kukeonv1.GetBlueprintResult{Blueprint: bp, MetadataExists: true}, nil
+			},
+			materializeCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+				sent, called = doc, true
+				return successResultFromDoc(doc), nil
+			},
+		}
+		cmd, _ := newTestExecCmd(t, fc)
+		setFlag(t, cmd, "realm", "bp-realm")
+		setFlag(t, cmd, "from-blueprint", "web")
+		setFlag(t, cmd, "param", "DIR="+dir)
+		cmd.SetArgs([]string{"web-1"})
+		err := cmd.Execute()
+		viper.Reset()
+		return sent, called, err
+	}
+
+	sent, called, err := run("/workspace/app")
+	if err != nil || !called {
+		t.Fatalf("absolute target: called=%v err=%v", called, err)
+	}
+	if len(sent.Spec.Requires) != 1 || sent.Spec.Requires[0] != "git" {
+		t.Errorf("Spec.Requires = %v, want [git] so the image capability check runs", sent.Spec.Requires)
+	}
+
+	_, called, err = run("work")
+	if !errors.Is(err, errdefs.ErrRepoTargetNotAbsolute) || called {
+		t.Fatalf("relative target: called=%v err=%v, want ErrRepoTargetNotAbsolute before any daemon call", called, err)
 	}
 }
 

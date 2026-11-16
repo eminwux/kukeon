@@ -263,3 +263,207 @@ func TestDeleteSecret_IgnoresNonMatchingRef(t *testing.T) {
 		t.Errorf("Deleted=%v deleteCalled=%v, want both true for non-matching ref", res.Deleted, deleteCalled)
 	}
 }
+
+// reachableSecretRunner is a fakeRunner whose realm lookups succeed and whose
+// WriteSecret records what it was handed.
+func reachableSecretRunner(wrote *[]intmodel.Secret) *fakeRunner {
+	return &fakeRunner{
+		GetRealmFn: func(realm intmodel.Realm) (intmodel.Realm, error) { return realm, nil },
+		WriteSecretFn: func(secret intmodel.Secret) (bool, error) {
+			*wrote = append(*wrote, secret)
+			return true, nil
+		},
+	}
+}
+
+// TestCreateSecret_TypedSecretsReachRunner confirms a valid typed secret is
+// written with its type and material intact (#1472, step 1).
+func TestCreateSecret_TypedSecretsReachRunner(t *testing.T) {
+	specs := []intmodel.SecretSpec{
+		{Data: "opaque-value"},
+		{
+			Type:      intmodel.SecretTypeBasicAuth,
+			BasicAuth: &intmodel.SecretBasicAuth{Username: "u", Token: "t"},
+		},
+		{
+			Type: intmodel.SecretTypeSSHKey,
+			SSHKey: &intmodel.SecretSSHKey{
+				PrivateKey: "-----BEGIN OPENSSH PRIVATE" + " KEY-----\nYm9keQ==\n-----END OPENSSH PRIVATE" + " KEY-----\n",
+			},
+		},
+	}
+	for _, spec := range specs {
+		t.Run(spec.EffectiveType(), func(t *testing.T) {
+			var wrote []intmodel.Secret
+			ctrl := setupTestController(t, reachableSecretRunner(&wrote))
+			res, err := ctrl.CreateSecret(intmodel.Secret{
+				Metadata: intmodel.SecretMetadata{Name: "cred", Realm: "default"},
+				Spec:     spec,
+			})
+			if err != nil {
+				t.Fatalf("CreateSecret() error = %v", err)
+			}
+			if !res.Created {
+				t.Errorf("Created = false, want true")
+			}
+			if len(wrote) != 1 || wrote[0].Spec.EffectiveType() != spec.EffectiveType() ||
+				wrote[0].Spec.BasicAuth != spec.BasicAuth || wrote[0].Spec.SSHKey != spec.SSHKey {
+				t.Errorf("runner received %+v, want the %s spec unchanged", wrote, spec.EffectiveType())
+			}
+		})
+	}
+}
+
+// TestCreateSecret_RejectsInvalidSpec confirms the per-type shape is enforced
+// before anything is written, and that the type sidecar directory's name is
+// reserved.
+func TestCreateSecret_RejectsInvalidSpec(t *testing.T) {
+	tests := []struct {
+		name    string
+		secret  string
+		spec    intmodel.SecretSpec
+		wantErr error
+	}{
+		{
+			name:   "basic-auth without credential",
+			secret: "cred",
+			spec: intmodel.SecretSpec{
+				Type:      intmodel.SecretTypeBasicAuth,
+				BasicAuth: &intmodel.SecretBasicAuth{Username: "u"},
+			},
+			wantErr: errdefs.ErrSecretTypeFields,
+		},
+		{
+			name:    "ssh-key with opaque data",
+			secret:  "cred",
+			spec:    intmodel.SecretSpec{Type: intmodel.SecretTypeSSHKey, Data: "x"},
+			wantErr: errdefs.ErrSecretTypeFields,
+		},
+		{
+			name:    "unknown type",
+			secret:  "cred",
+			spec:    intmodel.SecretSpec{Type: "oauth", Data: "x"},
+			wantErr: errdefs.ErrSecretTypeUnknown,
+		},
+		{
+			name:    "empty opaque data",
+			secret:  "cred",
+			spec:    intmodel.SecretSpec{},
+			wantErr: errdefs.ErrSecretDataRequired,
+		},
+		{
+			name:    "reserved name",
+			secret:  ".types",
+			spec:    intmodel.SecretSpec{Data: "x"},
+			wantErr: errdefs.ErrSecretReservedName,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var wrote []intmodel.Secret
+			ctrl := setupTestController(t, reachableSecretRunner(&wrote))
+			_, err := ctrl.CreateSecret(intmodel.Secret{
+				Metadata: intmodel.SecretMetadata{Name: tt.secret, Realm: "default"},
+				Spec:     tt.spec,
+			})
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("CreateSecret() error = %v, want %v", err, tt.wantErr)
+			}
+			if len(wrote) != 0 {
+				t.Errorf("runner.WriteSecret called for an invalid spec")
+			}
+		})
+	}
+}
+
+// TestDeleteSecret_RefusesWhenReferencedByGit extends the live-reference guard
+// to the secrets a container's git block names (#1472): default credentials,
+// the signing key, the allowed-signers secret, and each repo's own credential
+// and signing key. Deleting any of them would break the cell's next clone,
+// push or signed commit.
+func TestDeleteSecret_RefusesWhenReferencedByGit(t *testing.T) {
+	ref := func() *intmodel.ContainerSecretRef {
+		return &intmodel.ContainerSecretRef{Name: "tok", Realm: "default"}
+	}
+	other := &intmodel.ContainerSecretRef{Name: "other", Realm: "default"}
+	tests := []struct {
+		name      string
+		container intmodel.ContainerSpec
+	}{
+		{
+			name: "default credential",
+			container: intmodel.ContainerSpec{Git: &intmodel.ContainerGit{
+				Credentials: []intmodel.GitCredential{
+					{Host: "gitlab.com", SecretRef: other},
+					{Host: "github.com", SecretRef: ref()},
+				},
+			}},
+		},
+		{
+			name: "signing key",
+			container: intmodel.ContainerSpec{Git: &intmodel.ContainerGit{
+				Signing: &intmodel.GitSigning{SecretRef: ref()},
+			}},
+		},
+		{
+			name: "allowed signers",
+			container: intmodel.ContainerSpec{Git: &intmodel.ContainerGit{
+				Signing: &intmodel.GitSigning{SecretRef: other, AllowedSignersRef: ref()},
+			}},
+		},
+		{
+			name: "repo credential",
+			container: intmodel.ContainerSpec{Repos: []intmodel.ContainerRepo{{
+				Name: "src", Git: &intmodel.RepoGit{Credential: &intmodel.GitCredential{SecretRef: ref()}},
+			}}},
+		},
+		{
+			name: "repo signing key",
+			container: intmodel.ContainerSpec{Repos: []intmodel.ContainerRepo{
+				{Name: "plain"},
+				{Name: "src", Git: &intmodel.RepoGit{Signing: &intmodel.GitSigning{SecretRef: ref()}}},
+			}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var deleteCalled bool
+			ctrl := setupTestController(t, &fakeRunner{
+				ListCellsFn: func(_, _, _ string) ([]intmodel.Cell, error) {
+					return []intmodel.Cell{{
+						Metadata: intmodel.CellMetadata{Name: "api"},
+						Spec: intmodel.CellSpec{
+							RealmName: "default", SpaceName: "team-a", StackName: "web",
+							Containers: []intmodel.ContainerSpec{tt.container},
+						},
+					}}, nil
+				},
+				DeleteSecretFn: func(_ intmodel.Secret) error {
+					deleteCalled = true
+					return nil
+				},
+			})
+
+			_, err := ctrl.DeleteSecret(intmodel.Secret{
+				Metadata: intmodel.SecretMetadata{Name: "tok", Realm: "default"},
+			})
+			if !errors.Is(err, errdefs.ErrSecretInUse) {
+				t.Fatalf("DeleteSecret() error = %v, want ErrSecretInUse", err)
+			}
+			if deleteCalled {
+				t.Errorf("runner.DeleteSecret called, want skipped when referenced")
+			}
+			if !strings.Contains(err.Error(), "default/team-a/web/api") {
+				t.Errorf("error %q does not name the referencing cell", err)
+			}
+
+			// A secret none of the git blocks name is still deletable.
+			res, err := ctrl.DeleteSecret(intmodel.Secret{
+				Metadata: intmodel.SecretMetadata{Name: "unreferenced", Realm: "default"},
+			})
+			if err != nil || !res.Deleted {
+				t.Errorf("DeleteSecret(unreferenced) = %+v, %v; want deleted", res, err)
+			}
+		})
+	}
+}

@@ -91,6 +91,9 @@ type SpaceDefaults struct {
 	Values    map[string]string               `json:"values,omitempty"    yaml:"values,omitempty"`
 	Repos     map[string]CellConfigRepoFill   `json:"repos,omitempty"     yaml:"repos,omitempty"`
 	Secrets   map[string]CellConfigSecretFill `json:"secrets,omitempty"   yaml:"secrets,omitempty"`
+	// Git is the space-level default git identity, credentials and signing
+	// config (issue #1472); see ScopeDefaults.Git.
+	Git *ContainerGit `json:"git,omitempty"       yaml:"git,omitempty"`
 }
 
 // Fill returns the CellConfig-fill part of the Space defaults in the shared
@@ -99,7 +102,7 @@ func (d *SpaceDefaults) Fill() *ScopeDefaults {
 	if d == nil {
 		return nil
 	}
-	return &ScopeDefaults{Values: d.Values, Repos: d.Repos, Secrets: d.Secrets}
+	return &ScopeDefaults{Values: d.Values, Repos: d.Repos, Secrets: d.Secrets, Git: d.Git}
 }
 
 // SpaceContainerDefaults mirrors the isolation-related fields on ContainerSpec.

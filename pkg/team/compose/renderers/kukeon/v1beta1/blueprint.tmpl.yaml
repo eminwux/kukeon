@@ -1,17 +1,19 @@
 apiVersion: v1beta1
 kind: CellBlueprint
 metadata:
-  name: {{ .RoleName }}-{{ .Harness }}
+  name: {{ .Name }}
   realm: {{ .Realm }}
-  space: {{ .Space }}
-  stack: {{ .Stack }}
 
 {{- $isRoot := .Root }}
 {{- $home := "/home/user" }}
 spec:
-  prefix: {{ .RoleName }}-{{ .Harness }}
+  prefix: {{ .Name }}
+  requires:
+{{ yamlIndent 4 .Requires }}
   parameters:
 {{ yamlIndent 4 .Parameters }}
+  components:
+{{ yamlIndent 4 .Components }}
   cell:
     tty:
       default: work
@@ -23,7 +25,7 @@ spec:
     containers:
       - id: work
         attachable: true
-        image: {{ .Image | quote }}
+        image: "${IMAGE}"
         command: {{ .Shell }}
         workingDir: {{ $home }}
         {{- if $isRoot }}
@@ -31,21 +33,23 @@ spec:
         {{- end }}
         env:
 {{ yamlIndent 10 .Environment }}
+        {{- if .Secrets }}
         secrets:
-          {{- range .Secrets }}
-          - name: {{ . | quote }}
-            envName: {{ . | upper | replace "-" "_" | quote }}
-          {{- end }}
+{{ yamlIndent 10 .Secrets }}
+        {{- end }}
         volumes:
           {{- range .MountSelectors }}
-          - source: {{ if eq . "ssh" }}{{ $.HostHome }}/.ssh{{ else }}{{ template "mount_source" . }}{{ end }}
-            target: {{ if eq . "ssh" }}{{ $home }}/.ssh{{ else }}{{ template "mount_target" . }}{{ end }}
+          - source: {{ template "mount_source" . }}
+            target: {{ template "mount_target" . }}
             readOnly: {{ template "mount_readonly" . }}
           {{- end }}
           {{- if .StatePath }}
+          # Harness state (logins, sessions). The Config names the volume, so a
+          # role keeps its state across blueprint revisions.
           - kind: volume
-            source: {{ if .ProjectBound }}{{ .ProjectName }}-{{ end }}{{ .RoleName }}-{{ .Harness }}
+            source: "${STATE_VOLUME}"
             target: {{ .StatePath }}
+            ensure: true
           {{- end }}
           {{- range .Mounts }}
           - source: {{ .Source | quote }}
@@ -69,14 +73,20 @@ spec:
             sizeBytes: 4294967296
         {{- end }}
         repos:
-          {{- range .Repos }}
-          - name: {{ . | quote }}
-            url: {{ template "repo_url" . }}
-            target: {{ $home }}/{{ if eq . "project" }}{{ $.ProjectName }}{{ else }}{{ template "repo_target" . }}{{ end }}
-            branch: main
+          # The Config fills each slot with a URL, a revision and, optionally,
+          # that source's own git identity.
+          - name: role-source
+            target: "${ROLE_SOURCE_DIR}"
             required: true
+          - name: project
+            target: "${PROJECT_DIR}"
+          {{- range .ExtraRepos }}
+          - name: {{ .Name | quote }}
+            target: {{ .Target | quote }}
           {{- end }}
         tty:
           prompt: {{ .Prompt | quote }}
+          {{- if .OnInit }}
           onInit:
 {{ template "onInit" .OnInit }}
+          {{- end }}

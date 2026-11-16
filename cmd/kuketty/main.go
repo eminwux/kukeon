@@ -48,6 +48,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/eminwux/kukeon/internal/gitcred/gitplan"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	sbshlogging "github.com/eminwux/sbsh/pkg/logging"
 	sbshserver "github.com/eminwux/sbsh/pkg/terminal/server"
@@ -143,6 +144,16 @@ func workloadExitCode(err error) (code int, ok bool) {
 }
 
 func main() {
+	// SSH_ASKPASS mode: ssh-add runs this binary to obtain a key's passphrase
+	// (see loadAgentKeys). Print the mounted passphrase file and exit before
+	// any wrapper setup.
+	if file := os.Getenv(gitplan.AskpassFileEnv); file != "" {
+		prompt := ""
+		if len(os.Args) > 1 {
+			prompt = os.Args[1]
+		}
+		os.Exit(askpass(file, prompt, os.Stdout))
+	}
 	if err := run(os.Args[1:]); err != nil {
 		var usageErr *usageError
 		var wlErr *workloadExitError
@@ -224,7 +235,17 @@ func run(args []string) error {
 	// the task as Failed (the RPC below is never reached on that path — AC #5).
 	// An empty repos[] is a no-op. The per-repo outcomes feed the GetSetupStatus
 	// verb registered on the control server below (issue #642).
-	repoStatuses, err := processRepos(ctx, doc.Spec.Repos, logger)
+	// Stored git credentials (issue #1472): load the plan the daemon staged,
+	// start the per-container ssh-agent for passphrase-protected keys, and
+	// export its socket so both the clones below and the workload reach it.
+	gitPlan, err := gitplan.Load(gitplan.PlanPath())
+	if err != nil {
+		return err
+	}
+	stopAgent := startGitAgent(ctx, gitPlan, logger)
+	defer stopAgent()
+
+	repoStatuses, err := processRepos(ctx, doc.Spec.Repos, gitPlan, logger)
 	if err != nil {
 		return err
 	}

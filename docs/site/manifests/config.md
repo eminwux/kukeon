@@ -67,11 +67,12 @@ Structural repo slot fills, keyed by the blueprint's repo slot `name`. Each entr
 
 #### CellConfigRepoFill
 
-| Field    | Type   | Required | Description                                                                                                                                                        |
-| -------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `url`    | string | yes      | The clone URL filling the slot.                                                                                                                                    |
-| `branch` | string | no       | The branch to check out (moving target). Empty clones the remote's default. Mutually exclusive with `ref`.                                                         |
-| `ref`    | string | no       | Immutable pin — tag name or full commit SHA. Survives in-place restarts (see [ContainerRepo `ref`](container.md#containerrepo)). Mutually exclusive with `branch`. |
+| Field    | Type   | Required | Description                                                                                                                                                                 |
+| -------- | ------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `url`    | string | yes      | The clone URL filling the slot.                                                                                                                                             |
+| `branch` | string | no       | The branch to check out (moving target). Empty clones the remote's default. Mutually exclusive with `ref`.                                                                  |
+| `ref`    | string | no       | Immutable pin — tag name or full commit SHA. Survives in-place restarts (see [ContainerRepo `ref`](container.md#containerrepo)). Mutually exclusive with `branch`.          |
+| `git`    | object | no       | This source's own git identity — `author`, `committer`, `credential`, `signing`, `sign`. Unset fields use the cell's default identity. See [RepoGit](container.md#repogit). |
 
 ### `spec.secrets` (map[string][SecretFill](#cellconfigsecretfill), optional)
 
@@ -82,6 +83,29 @@ Structural secret slot fills, keyed by the blueprint's secret slot `name`. The b
 | Field       | Type   | Required | Description                                                                                                                                                                                                    |
 | ----------- | ------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `secretRef` | object | yes      | Points at the `kind: Secret` that provides the slot's bytes. Same shape as [Container `secretRef`](container.md) — `name` + `realm` (required), `space` / `stack` / `cell` (optional, deepest-non-empty wins). |
+
+### `spec.requires` (array of string, optional)
+
+Image capabilities this Config's cells need on top of the blueprint's and its enabled components' — for example `[go]`. See [Image capabilities](../concepts/blueprint-contract.md#image-capabilities).
+
+### `spec.components` (array of string, optional)
+
+The blueprint's **optional** components to enable, by name. A component that is not optional is always on and need not be listed; naming a component the blueprint does not declare is an apply-time error. Enabling a component adds its parameters, env, secret slots and required capabilities to the cell.
+
+### `spec.modes` (object, optional)
+
+Which of the blueprint's harness modes this Config's cells may be created in. Unset allows every mode the blueprint declares.
+
+| Field     | Type            | Required | Description                                                                                            |
+| --------- | --------------- | -------- | ------------------------------------------------------------------------------------------------------ |
+| `enabled` | array of string | no       | Modes a cell may be created in. Empty allows all.                                                      |
+| `default` | string          | no       | Mode used when a create names none. Must be enabled. Unset: the only enabled mode, else `interactive`. |
+
+The mode itself is picked **per cell**, at create time — `kuke run <config> --mode headless --param PROMPT=…` — so one Config serves both an attached session and a dispatched run. A Config may fill the secret slots of every mode it enables; only the picked mode's required slots and parameters are checked for a given cell.
+
+### `spec.git` (object, optional)
+
+Overrides the git identity, credentials and signing config the cell inherits from its Realm → Space → Stack defaults. Same shape as a container's [`git`](container.md#containergit): `author`, `committer` and `signing` replace the inherited value; `credentials[]` merge by `host`. See the [git credentials guide](../guides/git-credentials.md).
 
 ## Slot fills
 
@@ -101,7 +125,7 @@ kukeond is the only place a CellConfig becomes a Cell: `kuke create cell --from-
 Realm defaults → Space defaults → Stack defaults → CellConfig → (per-cell --env)
 ```
 
-Maps merge per key, and the deeper level wins. A blueprint parameter no level sets keeps its blueprint default. Repo and secret defaults apply only to slots the referenced blueprint declares — a realm-wide `github-token` secret default is simply ignored by a blueprint without that slot — while the Config's own fills stay strictly validated. A level default can satisfy a required slot the Config leaves open. Container `image` values that name a realm [`spec.images`](realm.md#specimages-array-optional) entry resolve to that image.
+Maps merge per key, and the deeper level wins. The `git` block merges the same way: identity and signing are replaced by the deepest level that sets them, and `credentials[]` merge by `host`. A blueprint parameter no level sets keeps its blueprint default. Repo and secret defaults apply only to slots the referenced blueprint declares — a realm-wide `github-token` secret default is simply ignored by a blueprint without that slot — while the Config's own fills stay strictly validated. A level default can satisfy a required slot the Config leaves open. Container `image` values that name a realm [`spec.images`](realm.md#specimages-array-optional) entry resolve to that image.
 
 `kuke create cell <name> --from-config <cfg> --dry-run --explain` prints every resolved value with the level that set it (`realm`, `space`, `stack`, `config`, or `blueprint`) and the rendered cell's digest; the web UI's create preview shows the same table (scalar values hidden).
 

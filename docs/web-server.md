@@ -297,7 +297,10 @@ reference to open its detail view. Both views are deep-linkable:
 one URL-encoded segment.
 
 The list and detail views show the image reference, size, creation time,
-digest, media type, and labels — the metadata `kuke get image` reports. A size
+digest, media type, and labels — the metadata `kuke get image` reports. The
+inventory API also returns each image's `capabilities` (its
+`io.kukeon.capabilities` label, split), which the New Config image picker
+filters on. A size
 or creation time containerd cannot resolve locally renders as **Unavailable**,
 never as `0 B`. Refresh re-reads the inventory. Loading, empty, permission,
 outdated-daemon, and request failures use the same notices as other resource
@@ -495,6 +498,53 @@ specifications. They use the same origin protections and strict request
 decoding. Unknown fields and daemon-owned Container values are rejected. Both
 endpoint pairs redact environment values and materialization inputs. Neither path
 reads daemon storage directly or introduces an independent resource store.
+
+### Create a Config from a Blueprint
+
+Choose **New Config** on the Blueprints or Configs list, or **Create Config from
+this Blueprint** on a Blueprint, to open a form generated entirely from the
+Blueprint document — the web server has no knowledge of any particular
+blueprint. A Blueprint is the form and the CellConfig is the answers (see
+[Blueprint contract](site/concepts/blueprint-contract.md)):
+
+- **Parameters** are grouped by their `group` and by component, with an input
+  that fits the declared `type`: a select for `enum`, a checkbox for `bool`, an
+  image picker for `image`. Defaults show as placeholders and required fields
+  are marked.
+- The **image picker** is fed by the target realm's image inventory and offers
+  the images whose `io.kukeon.capabilities` cover everything the cell requires
+  (the Blueprint's `requires`, the enabled components' and the Config's own).
+  An image with no capability label stays selectable and is marked as such; a
+  reference can still be typed.
+- **Optional components** (a connector, a forge) are toggles; their parameters
+  and secret slots appear only when enabled.
+- **Modes** choose which harness modes the Config's cells may be created in and
+  the default. **Preview as** renders a cell in one of them and reveals that
+  mode's parameters and secret slots.
+- **Repository slots** take a URL and a branch or ref, and optionally the
+  source's own git identity: author, a credential (`basic-auth` or `ssh-key`
+  secret) and a signing key (`ssh-key` secret). **Secret slots** pick a stored
+  Secret.
+
+**Preview** renders a cell from the unsaved Config through the daemon — the same
+render `kuke create cell <name> --from-config <cfg> --dry-run --explain` performs — and shows
+the merge explanation, including, per repository, the effective author,
+committer, credential and signing key and the level each came from (realm,
+space, stack, config). Secret material never appears: only secret names, types
+and origins. **Create** saves the Config through the daemon's create-config
+path; it does not create a cell. The From Config preview of **New Cell** shows
+the same per-repository identity block.
+
+The JSON POST endpoints `/api/configs/from-blueprint/preview` and
+`/api/configs/from-blueprint/create` accept `{config, spec, mode, preview}`:
+the Config's name and scope, the CellConfig `spec` verbatim (Blueprint
+reference, `values`, `repos`, `secrets`, `requires`, `components`, `modes`,
+`git`), the mode to preview a cell in, and — on create — the token the preview
+returned. They require the exact same Origin and `Content-Type:
+application/json`, decode strictly, and refuse a Config, Blueprint or secret
+coordinate that is not a safe single path segment. Create is refused when the
+form, the Blueprint or an inherited default changed since the reviewed preview,
+and when a Config of that name already exists in the scope.
 
 ### Attach to a terminal
 

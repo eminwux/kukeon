@@ -19,6 +19,9 @@ package compose_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -30,6 +33,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/team/bootstrap"
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/compose"
@@ -86,10 +90,22 @@ func TestRootDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, absent := range []string{"gh-token", "GH_TOKEN", "<no value>", "sourceDir", "secretRef:", "ROLE=${ROLE}"} {
+	for _, absent := range []string{"gh-token", "<no value>", "sourceDir", "secretRef:", "ROLE=${ROLE}", ".ssh", "GIT_SSH_COMMAND"} {
 		if strings.Contains(string(raw), absent) {
 			t.Fatalf("unexpected %q in documents", absent)
 		}
+	}
+	// The GitHub connector is part of the shared form, but a role that does not
+	// ask for it gets neither the component nor its token.
+	rendered, err := yaml.Marshal(result.Pairs[0].Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(rendered), "components:") || strings.Contains(string(rendered), "GH_TOKEN") {
+		t.Fatalf("operator config enables the GitHub connector: %s", rendered)
+	}
+	if _, set := envOf(work(t, result.Pairs[0], interactive))["GH_TOKEN"]; set {
+		t.Fatal("GH_TOKEN reached a cell that did not enable the connector")
 	}
 	if bytes.Count(raw, []byte("kind: CellBlueprint")) != 1 || bytes.Count(raw, []byte("kind: CellConfig")) != 1 {
 		t.Fatal("incorrect document stream")
@@ -150,9 +166,12 @@ func TestSelectedHarnessesAndBindings(t *testing.T) {
 	if len(result.Pairs) != 3 {
 		t.Fatal("did not render selected defaults")
 	}
+	if len(result.Blueprints) != 3 {
+		t.Fatalf("blueprints = %d, want one per harness", len(result.Blueprints))
+	}
 	claude, router := result.Pairs[1], result.Pairs[2]
-	claudeWork := claude.Blueprint.Spec.Cell.Containers[0]
-	if !strings.Contains(claudeWork.Tty.OnInit[0].Script, `"hasCompletedOnboarding": true`) {
+	claudeWork := work(t, claude, interactive)
+	if !strings.Contains(script(claudeWork), `"hasCompletedOnboarding": true`) {
 		t.Fatal("claude onboarding state must be seeded in-cell")
 	}
 	for _, mount := range claudeWork.Volumes {
@@ -168,12 +187,16 @@ func TestSelectedHarnessesAndBindings(t *testing.T) {
 	if ref.Name != "router-account" || ref.Realm != "auth" || ref.Space != "shared" || ref.Stack != "agents" {
 		t.Fatal("secret scope lost")
 	}
-	if router.Blueprint.Spec.Cell.Containers[0].Secrets[0].EnvName != "OPENROUTER_API_KEY" {
-		t.Fatal("incorrect destination")
-	}
-	script := router.Blueprint.Spec.Cell.Containers[0].Tty.OnInit[0].Script
-	if strings.Contains(script, "cat >") || !strings.Contains(script, "Makefile.start setup") {
-		t.Fatal("role settings would be overwritten or materialization missing")
+	for _, mode := range []string{interactive, headless} {
+		routerWork := work(t, router, mode)
+		if len(routerWork.Secrets) != 1 || routerWork.Secrets[0].Name != "OPENROUTER_API_KEY" ||
+			routerWork.Secrets[0].SecretRef == nil || routerWork.Secrets[0].SecretRef.Name != "router-account" {
+			t.Fatalf("%s: incorrect secret destination: %+v", mode, routerWork.Secrets)
+		}
+		launcher := script(routerWork)
+		if strings.Contains(launcher, "cat >") || !strings.Contains(launcher, "Makefile.start setup") {
+			t.Fatal("role settings would be overwritten or materialization missing")
+		}
 	}
 	cfg.Spec.Secrets = nil
 	cfg.Spec.Defaults.Roles[0].Harness = "codex"
@@ -244,6 +267,21 @@ func TestMandatoryRequirementsAndSourceDeclarations(t *testing.T) {
 	p := result.Pairs[0]
 	if p.Config.Spec.Values["REGION"] != "eu-test" || p.Secrets[0].Destination.EnvName != "SERVICE_ACCESS_TOKEN" {
 		t.Fatal("parameter/explicit destination not bound")
+	}
+	// A role secret no harness or component declares becomes an optional slot
+	// of the shared blueprint, filled by this role's config.
+	slots := p.Blueprint.Spec.Cell.Containers[0].Secrets
+	if len(slots) != 1 || slots[0].Name != "service-auth" || slots[0].EnvName != "SERVICE_ACCESS_TOKEN" ||
+		slots[0].Required {
+		t.Fatalf("extra secret slot = %+v", slots)
+	}
+	rendered := work(t, p, interactive)
+	if len(rendered.Secrets) != 1 || rendered.Secrets[0].Name != "SERVICE_ACCESS_TOKEN" ||
+		rendered.Secrets[0].SecretRef.Name != "service-account" {
+		t.Fatalf("cell secrets = %+v", rendered.Secrets)
+	}
+	if !slices.Contains(p.Config.Spec.Requires, "go") {
+		t.Fatalf("config requires = %v, want the role's go capability", p.Config.Spec.Requires)
 	}
 	if !slices.Contains(p.Image.Capabilities, "go") {
 		t.Fatal("mandatory image capability erased")
@@ -395,38 +433,106 @@ func TestEnvironmentIsNeverRead(t *testing.T) {
 
 func assertRootResources(t *testing.T, result *compose.Result) {
 	t.Helper()
-	if len(result.Pairs) != 1 {
-		t.Fatalf("pairs = %d", len(result.Pairs))
+	if len(result.Pairs) != 1 || len(result.Blueprints) != 1 {
+		t.Fatalf("pairs = %d blueprints = %d", len(result.Pairs), len(result.Blueprints))
 	}
 	p := result.Pairs[0]
-	if p.Config.Metadata.Name != "root-operator-codex" || p.Blueprint.Metadata.Name != p.Config.Metadata.Name ||
-		p.Blueprint.Spec.Prefix != p.Config.Metadata.Name || p.Config.Spec.Blueprint.Name != p.Config.Metadata.Name {
-		t.Fatal("unstable identity")
+	bp := result.Blueprints[0]
+	if p.Blueprint != bp {
+		t.Fatal("pair does not reference the shared blueprint document")
 	}
-	if p.Image.Image != publishedCodexImage(t) {
-		t.Fatalf("image = %+v", p.Image)
+	// The config keeps the team/role/harness identity; the blueprint is the
+	// shared realm-wide form named after the harness alone.
+	if p.Config.Metadata.Name != "root-operator-codex" || bp.Metadata.Name != "codex" ||
+		bp.Spec.Prefix != "codex" || p.Config.Spec.Blueprint.Name != "codex" {
+		t.Fatalf("unstable identity: config %q blueprint %q", p.Config.Metadata.Name, bp.Metadata.Name)
 	}
-	c := p.Blueprint.Spec.Cell.Containers[0]
-	if c.Privileged || p.Blueprint.Spec.Cell.NestedCgroupRuntime || len(p.Secrets) != 0 || c.Git != nil {
-		t.Fatal("operator gained privilege, secret, or Git signing requirements")
+	if bp.Metadata.Realm != "default" || bp.Metadata.Space != "" || bp.Metadata.Stack != "" {
+		t.Fatalf("shared blueprint must be realm-wide: %+v", bp.Metadata)
 	}
-	if p.Blueprint.Metadata.Labels["kukeon.io/team"] != "root" || p.Config.Metadata.Labels["kukeon.io/team"] != "root" {
+	ref := p.Config.Spec.Blueprint
+	if ref.Realm != "default" || ref.Space != "" || ref.Stack != "" {
+		t.Fatalf("config must reference the realm-wide blueprint: %+v", ref)
+	}
+	if bp.Metadata.Labels[api.LabelShared] != "true" || len(bp.Metadata.Labels[api.LabelContentDigest]) != 16 {
+		t.Fatalf("shared blueprint labels = %v", bp.Metadata.Labels)
+	}
+	if _, owned := bp.Metadata.Labels[api.LabelTeam]; owned {
+		t.Fatal("a shared blueprint belongs to no team")
+	}
+	if p.Config.Metadata.Labels[api.LabelTeam] != "root" {
 		t.Fatal("missing team ownership")
+	}
+	if p.Image.Image != publishedCodexImage(t) || p.Config.Spec.Values["IMAGE"] != p.Image.Image {
+		t.Fatalf("image = %+v values = %v", p.Image, p.Config.Spec.Values)
+	}
+	// Security posture is fixed in the blueprint; git identity never is.
+	c := bp.Spec.Cell.Containers[0]
+	if c.Privileged || bp.Spec.Cell.NestedCgroupRuntime || len(p.Secrets) != 0 || c.Git != nil ||
+		p.Config.Spec.Git != nil {
+		t.Fatal("operator gained privilege, secret, or Git signing requirements")
 	}
 	if p.Config.Metadata.Realm != "default" || p.Config.Metadata.Space != "default" ||
 		p.Config.Metadata.Stack != "default" {
 		t.Fatal("missing scope")
 	}
-	if c.Volumes[0].Source != "root-operator-codex" || !c.Volumes[0].Ensure {
-		t.Fatal("state volume missing team ownership/ensure")
+	// Role facts are answers in the config, not literals in the blueprint.
+	want := map[string]string{
+		"IMAGE":           publishedCodexImage(t),
+		"ROLE_SOURCE_DIR": "/home/user/kukeon-src",
+		"ROLE_PATH":       "team/roles/operator",
+		"INITIAL_PATH":    "/home/user",
+		"ROLE_NAME":       "operator",
+		"SANDBOX":         "workspace-write",
+		"APPROVAL":        "on-request",
+		"AGENT_NAME":      "root-operator-codex",
+		"STATE_VOLUME":    "root-operator-codex",
+	}
+	if !reflect.DeepEqual(p.Config.Spec.Values, want) {
+		t.Fatalf("config values = %v, want %v", p.Config.Spec.Values, want)
+	}
+	blueprint, err := yaml.Marshal(bp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fact := range []string{"team/roles/operator", "kukeon-src", "root-operator"} {
+		if strings.Contains(string(blueprint), fact) {
+			t.Fatalf("role fact %q baked into the shared blueprint", fact)
+		}
 	}
 	if len(p.Config.Spec.Repos) != 1 ||
-		p.Config.Spec.Repos["kukeon"].URL != "https://github.com/eminwux/kukeon" {
-		t.Fatal("missing explicit role source")
+		p.Config.Spec.Repos["role-source"].URL != "https://github.com/eminwux/kukeon" ||
+		p.Config.Spec.Repos["role-source"].Branch != "main" {
+		t.Fatalf("missing explicit role source: %+v", p.Config.Spec.Repos)
 	}
-	script := c.Tty.OnInit[0].Script
+	if !slices.Equal(p.Config.Spec.Requires, []string{"go"}) || len(p.Config.Spec.Components) != 0 {
+		t.Fatalf("config requires %v components %v", p.Config.Spec.Requires, p.Config.Spec.Components)
+	}
+	if !slices.Equal(bp.Spec.Requires, []string{"git"}) {
+		t.Fatalf("blueprint requires = %v", bp.Spec.Requires)
+	}
+	rendered := work(t, p, interactive)
+	state, ok := stateVolume(rendered)
+	if !ok || state.Source != "root-operator-codex" || !state.Ensure || state.Target != "/home/user/.codex" {
+		t.Fatalf("state volume missing team ownership/ensure: %+v", state)
+	}
+	if rendered.Image != publishedCodexImage(t) || len(rendered.Repos) != 1 ||
+		rendered.Repos[0].Target != "/home/user/kukeon-src" {
+		t.Fatalf("cell image/repos = %q %+v", rendered.Image, rendered.Repos)
+	}
+	env := envOf(rendered)
+	for key, value := range map[string]string{
+		"ROLE_SOURCE_DIR": "/home/user/kukeon-src", "ROLE_PATH": "team/roles/operator",
+		"INITIAL_PATH": "/home/user", "CODEX_SANDBOX": "workspace-write", "CODEX_APPROVAL": "on-request",
+		"AGENTS_ROLE": "operator", "AGENT_NAME": "root-operator-codex",
+	} {
+		if env[key] != value {
+			t.Fatalf("cell env %s = %q, want %q", key, env[key], value)
+		}
+	}
+	launcher := script(rendered)
 	for _, want := range []string{"make -f /opt/kuketeams/harness/Makefile.start setup", `cd "$INITIAL_PATH"`, "sandbox=$CODEX_SANDBOX", "approval=$CODEX_APPROVAL"} {
-		if !strings.Contains(script, want) {
+		if !strings.Contains(launcher, want) {
 			t.Fatalf("missing %q in launcher", want)
 		}
 	}
@@ -461,19 +567,31 @@ func TestRenderedLaunchScriptsAndExplicitProjectRepo(t *testing.T) {
 		if pair.Config.Spec.Repos["project"].Ref != "v2" || pair.Config.Spec.Blueprint.Realm != "ops" {
 			t.Fatal("repo revision or scope lost")
 		}
-		var scripts strings.Builder
-		for _, c := range pair.Blueprint.Spec.Cell.Containers {
-			for _, stage := range c.Tty.OnInit {
-				scripts.WriteString(stage.Script)
+		if pair.Blueprint.Metadata.Realm != "ops" || pair.Config.Metadata.Space != "agents" ||
+			pair.Config.Metadata.Stack != "root" {
+			t.Fatal("scope lost")
+		}
+		if pair.Config.Spec.Values["PROJECT_DIR"] != "/home/user/work/explicit-repo" {
+			t.Fatalf("project checkout = %q", pair.Config.Spec.Values["PROJECT_DIR"])
+		}
+		for _, mode := range []string{interactive, headless} {
+			rendered := work(t, pair, mode)
+			for _, stage := range rendered.Tty.OnInit {
 				command := exec.CommandContext(t.Context(), "bash", "-n")
 				command.Stdin = strings.NewReader(stage.Script)
 				if output, checkErr := command.CombinedOutput(); checkErr != nil {
-					t.Fatalf("%s shell syntax: %v: %s", pair.Harness, checkErr, output)
+					t.Fatalf("%s/%s shell syntax: %v: %s", pair.Harness, mode, checkErr, output)
 				}
 			}
-		}
-		if !strings.Contains(scripts.String(), `cd "$INITIAL_PATH"`) {
-			t.Fatalf("%s inferred project directory", pair.Harness)
+			if !strings.Contains(script(rendered), `cd "$INITIAL_PATH"`) {
+				t.Fatalf("%s/%s inferred project directory", pair.Harness, mode)
+			}
+			// The project slot is filled at the explicit checkout path.
+			if !slices.ContainsFunc(rendered.Repos, func(r api.ContainerRepo) bool {
+				return r.Name == "project" && r.Target == "/home/user/work/explicit-repo" && r.Ref == "v2"
+			}) {
+				t.Fatalf("%s/%s project repo = %+v", pair.Harness, mode, rendered.Repos)
+			}
 		}
 	}
 }
@@ -496,15 +614,25 @@ func TestSecretDestinationConflicts(t *testing.T) {
 		t.Fatalf("result=%v err=%v", result, err)
 	}
 	cfg.Spec.Secrets = cfg.Spec.Secrets[:1]
-	cfg.Spec.Secrets[0].EnvName = "PROMPT"
 	source["team/roles/operator/role.yaml"].Data = bytes.ReplaceAll(
 		source["team/roles/operator/role.yaml"].Data,
 		[]byte("[first-auth, second-auth]"),
 		[]byte("[first-auth]"),
 	)
-	result, err = compose.Compose(cfg, selectedTeam(cfg), opts)
-	if err == nil || result != nil || !strings.Contains(err.Error(), "conflicts with template") {
-		t.Fatalf("result=%v err=%v", result, err)
+	for _, tc := range []struct{ destination, want string }{
+		// An env var the template itself sets.
+		{"ROLE_PATH", "conflicts with template"},
+		// One only the headless mode sets: a cell created in that mode would
+		// fail, so composition refuses it for every mode.
+		{"PROMPT", `mode headless sets env "PROMPT"`},
+		// The destination of an optional connector no role here enables.
+		{"GH_TOKEN", `component github secret slot "github-token"`},
+	} {
+		cfg.Spec.Secrets[0].EnvName = tc.destination
+		result, err = compose.Compose(cfg, selectedTeam(cfg), opts)
+		if err == nil || result != nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("%s: result=%v err=%v", tc.destination, result, err)
+		}
 	}
 }
 
@@ -516,8 +644,10 @@ func TestSecretBindingsGeneratedAndRecorded(t *testing.T) {
 		Name: "openrouter-api-key", EnvName: "OPENROUTER_API_KEY",
 		SecretRef: config.SecretRef{Name: "openrouter-api-key", Realm: "default"},
 	}
+	// An operator edit of the recorded binding repoints the runtime secret. The
+	// destination is fixed by the harness's slot in the shared blueprint.
 	edited := routerBinding()
-	edited.EnvName = "ROUTER_KEY"
+	edited.SecretRef.Name = "edited-router-account"
 	stale := config.SecretBinding{
 		Name: "gh-token", EnvName: "GH_TOKEN", SecretRef: config.SecretRef{Name: "gh-token", Realm: "default"},
 	}
@@ -542,9 +672,11 @@ func TestSecretBindingsGeneratedAndRecorded(t *testing.T) {
 				t.Fatalf("entry secrets = %+v", result.Entry.Secrets)
 			}
 			pair := result.Pairs[0]
-			if pair.Blueprint.Spec.Cell.Containers[0].Secrets[0].EnvName != tc.want.EnvName ||
+			rendered := work(t, pair, interactive)
+			if len(rendered.Secrets) != 1 || rendered.Secrets[0].Name != tc.want.EnvName ||
 				pair.Config.Spec.Secrets[tc.want.Name].SecretRef.Name != tc.want.SecretRef.Name ||
-				pair.Secrets[0].Reference != tc.want.SecretRef {
+				pair.Secrets[0].Reference != tc.want.SecretRef ||
+				pair.Secrets[0].Destination.EnvName != tc.want.EnvName {
 				t.Fatal("binding not applied to resources")
 			}
 			// Recomposing from the recorded entry alone yields the same bindings.
@@ -558,6 +690,23 @@ func TestSecretBindingsGeneratedAndRecorded(t *testing.T) {
 	}
 }
 
+// A shared blueprint fixes the destination of a slot its harness declares, so a
+// binding cannot move it: every role using the blueprint would otherwise need
+// the same override.
+func TestHarnessSecretDestinationIsFixed(t *testing.T) {
+	cfg, opts := fixture(t)
+	allHarnesses(cfg)
+	cfg.Spec.Defaults.Roles[0].Harness = "opencode"
+	moved := routerBinding()
+	moved.EnvName = "ROUTER_KEY"
+	cfg.Spec.Secrets = []config.SecretBinding{moved}
+	result, err := compose.Compose(cfg, selectedTeam(cfg), opts)
+	if err == nil || result != nil || !strings.Contains(err.Error(), "differs from the harness destination") ||
+		!strings.Contains(err.Error(), "OPENROUTER_API_KEY") {
+		t.Fatalf("result=%v err=%v", result, err)
+	}
+}
+
 func TestGeneratedSecretDestinationConflicts(t *testing.T) {
 	cfg, opts := fixture(t)
 	source := copiedSource(t)
@@ -567,8 +716,11 @@ func TestGeneratedSecretDestinationConflicts(t *testing.T) {
 		[]byte("  needs:"),
 		[]byte("  needs:\n    secrets: [prompt]"),
 	)
+	// The generated default destination of a secret named prompt is PROMPT,
+	// which the headless mode's parameter owns.
 	result, err := compose.Compose(cfg, selectedTeam(cfg), opts)
-	if err == nil || result != nil || !strings.Contains(err.Error(), "conflicts with template") {
+	if err == nil || result != nil || !errors.Is(err, errdefs.ErrBlueprintComponentConflict) ||
+		!strings.Contains(err.Error(), `"PROMPT"`) {
 		t.Fatalf("result=%v err=%v", result, err)
 	}
 }
@@ -620,16 +772,30 @@ func TestEffectiveSourcesControlRuntimeClones(t *testing.T) {
 		t.Fatal(err)
 	}
 	pair := result.Pairs[0]
-	if len(pair.Config.Spec.Repos) != 3 || pair.Config.Spec.Repos["kukeon"].URL != "https://example.test/roles" ||
-		pair.Config.Spec.Repos["kukeon"].Ref != "abc123" || pair.Config.Spec.Repos["extra"].Branch != "topic" {
-		t.Fatalf("effective source clone declarations lost: %+v", pair.Config.Spec.Repos)
+	// The role's own source fills role-source, the project fills project, and
+	// any other cloned source fills the slot named after it.
+	repos := pair.Config.Spec.Repos
+	if len(repos) != 3 || repos["role-source"].URL != "https://example.test/roles" ||
+		repos["role-source"].Ref != "abc123" || repos["extra"].Branch != "topic" ||
+		repos["project"].Ref != "v3" {
+		t.Fatalf("effective source clone declarations lost: %+v", repos)
 	}
-	if !slices.Contains(pair.Blueprint.Spec.Cell.Containers[0].Env, "ROLE_SOURCE_DIR=/opt/roles") {
+	if pair.Config.Spec.Values["ROLE_SOURCE_DIR"] != "/opt/roles" ||
+		pair.Config.Spec.Values["PROJECT_DIR"] != "/opt/project" {
 		t.Fatal("global source path used instead of team override")
 	}
 	for _, selected := range result.Pairs {
-		if len(selected.Config.Spec.Repos) != 3 || len(selected.Blueprint.Spec.Cell.Containers[0].Repos) != 3 {
-			t.Fatalf("%s omitted explicitly requested clones", selected.Harness)
+		rendered := work(t, selected, interactive)
+		targets := map[string]string{}
+		for _, repo := range rendered.Repos {
+			targets[repo.Name] = repo.Target
+		}
+		want := map[string]string{"role-source": "/opt/roles", "extra": "/opt/extra", "project": "/opt/project"}
+		if len(selected.Config.Spec.Repos) != 3 || !reflect.DeepEqual(targets, want) {
+			t.Fatalf("%s omitted explicitly requested clones: %v", selected.Harness, targets)
+		}
+		if envOf(rendered)["ROLE_SOURCE_DIR"] != "/opt/roles" {
+			t.Fatalf("%s reads the role from %q", selected.Harness, envOf(rendered)["ROLE_SOURCE_DIR"])
 		}
 	}
 	team.Spec.Sources[0].ClonePath = ""
@@ -710,8 +876,9 @@ func TestLaunchPreservesSourceRevision(t *testing.T) {
 				if fill.Branch != project.Branch || fill.Ref != project.Tag+project.Commit {
 					t.Fatalf("%s lost source revision: %+v", pair.Harness, fill)
 				}
+				rendered := work(t, pair, interactive)
 				var launch strings.Builder
-				for _, stage := range pair.Blueprint.Spec.Cell.Containers[0].Tty.OnInit {
+				for _, stage := range rendered.Tty.OnInit {
 					if strings.Contains(stage.Script, "Makefile.start setup") ||
 						strings.Contains(stage.Script, `cd "$INITIAL_PATH"`) {
 						launch.WriteString(stage.Script + "\n")
@@ -720,9 +887,8 @@ func TestLaunchPreservesSourceRevision(t *testing.T) {
 				state := filepath.Join(root, pair.Harness+"-state")
 				cmd := exec.CommandContext(t.Context(), "bash", "-eu", "-c", launch.String())
 				cmd.Env = append(
-					append(os.Environ(), pair.Blueprint.Spec.Cell.Containers[0].Env...),
+					append(os.Environ(), rendered.Env...),
 					"PATH="+binDir+":"+os.Getenv("PATH"),
-					"PROMPT=",
 					"OPENROUTER_MODEL=test",
 					"LAUNCH_STATE="+state,
 				)
@@ -757,14 +923,57 @@ func TestReviewerConfigNamePreservesExistingState(t *testing.T) {
 	if pair.Config.Metadata.Name != "esp32-pr-reviewer-codex" {
 		t.Fatalf("unexpected cell config name: %q", pair.Config.Metadata.Name)
 	}
-	for _, container := range pair.Blueprint.Spec.Cell.Containers {
-		for _, volume := range container.Volumes {
-			if volume.Source == "esp32-pr-reviewer-codex-84a6981913a0eaf3" {
-				return
-			}
+	// The volume name is the one the per-role blueprints used, so a login made
+	// before blueprints were shared is still there.
+	const historic = "esp32-pr-reviewer-codex-84a6981913a0eaf3"
+	if pair.Config.Spec.Values["STATE_VOLUME"] != historic {
+		t.Fatalf("STATE_VOLUME = %q", pair.Config.Spec.Values["STATE_VOLUME"])
+	}
+	for _, mode := range []string{interactive, headless} {
+		if state, ok := stateVolume(work(t, pair, mode)); !ok || state.Source != historic {
+			t.Fatalf("PR #37 state-volume identity was not preserved in %s mode: %+v", mode, state)
 		}
 	}
-	t.Fatal("PR #37 state-volume identity was not preserved")
+}
+
+// historicStateVolume reimplements, independently of the composer, the name
+// the per-(team, role, harness) blueprints gave a role's state volume before
+// blueprints were shared. A project-bound role's template named the volume
+// <project>-<role>-<harness>, which the binder then qualified with the team.
+func historicStateVolume(team, role, harness string, project bool) string {
+	parts := []string{team, role, harness}
+	if project {
+		parts = append(parts, "work-operator-"+harness)
+	}
+	name := strings.Join(strings.FieldsFunc(strings.Join(parts, "-"), func(r rune) bool {
+		return r == '-' || r == '.'
+	}), "-")
+	if !strings.ContainsAny(strings.Join(parts, ""), ".-") {
+		return name
+	}
+	digest := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	return fmt.Sprintf("%s-%x", name, digest[:8])
+}
+
+// TestHistoricStateVolumeNames pins literal names of the per-role render, so
+// the composer and historicStateVolume cannot drift together.
+func TestHistoricStateVolumeNames(t *testing.T) {
+	for _, tc := range []struct {
+		team, role, harness string
+		project             bool
+		want                string
+	}{
+		{"root", "operator", "codex", false, "root-operator-codex"},
+		{"esp32", "pr-reviewer", "codex", false, "esp32-pr-reviewer-codex-84a6981913a0eaf3"},
+		{"root", "operator", "codex", true, "root-operator-codex-work-operator-codex-80eba5614fca520b"},
+		{"root", "operator", "claude", true, "root-operator-claude-work-operator-claude-10c6f6c0c245e416"},
+		{"root.a", "operator", "claude", false, "root-a-operator-claude-6abfcd9e2ace958c"},
+	} {
+		if got := historicStateVolume(tc.team, tc.role, tc.harness, tc.project); got != tc.want {
+			t.Errorf("historic name for %s/%s/%s project=%v = %q, want %q",
+				tc.team, tc.role, tc.harness, tc.project, got, tc.want)
+		}
+	}
 }
 
 func TestReadableResourceNamesAndIsolatedState(t *testing.T) {
@@ -789,6 +998,7 @@ func TestReadableResourceNamesAndIsolatedState(t *testing.T) {
 				})
 			}
 			volumes := map[string]string{}
+			digests := map[string]string{}
 			for _, selection := range []struct{ team, role string }{
 				{"root-a", "operator"},
 				{"root", "a-operator"},
@@ -827,26 +1037,39 @@ func TestReadableResourceNamesAndIsolatedState(t *testing.T) {
 						name != "root-operator-"+pair.Harness {
 						t.Fatalf("simple resource identity changed: %q", name)
 					}
-					if !config.ValidName(name) || pair.Blueprint.Metadata.Name != name ||
-						pair.Blueprint.Spec.Prefix != name || pair.Config.Spec.Blueprint.Name != name {
+					// Every team and role shares the one blueprint of its harness;
+					// only the config carries the team/role identity.
+					if !config.ValidName(name) || pair.Blueprint.Metadata.Name != pair.Harness ||
+						pair.Blueprint.Spec.Prefix != pair.Harness ||
+						pair.Config.Spec.Blueprint.Name != pair.Harness {
 						t.Fatalf("inconsistent resource identity for %s", owner)
 					}
-					if pair.Config.Metadata.Labels[api.LabelTeam] != selection.team ||
-						pair.Blueprint.Metadata.Labels[api.LabelTeam] != selection.team {
+					if pair.Config.Metadata.Labels[api.LabelTeam] != selection.team {
 						t.Fatalf("authored team label changed for %s", owner)
 					}
-					for _, container := range pair.Blueprint.Spec.Cell.Containers {
-						for _, volume := range container.Volumes {
-							if volume.Kind != api.VolumeKindVolume || volume.VolumeRef != nil {
-								continue
-							}
-							if previous, exists := volumes[volume.Source]; exists && previous != owner {
-								t.Fatalf("%s and %s share state volume %q", previous, owner, volume.Source)
-							}
-							volumes[volume.Source] = owner
-							if !runtimeID.MatchString(volume.Source) {
-								t.Fatalf("invalid runtime volume name %q for %s", volume.Source, owner)
-							}
+					if _, stamped := pair.Blueprint.Metadata.Labels[api.LabelTeam]; stamped {
+						t.Fatalf("shared blueprint carries a team label for %s", owner)
+					}
+					digest := pair.Blueprint.Metadata.Labels[api.LabelContentDigest]
+					if previous, seen := digests[pair.Harness]; seen && previous != digest {
+						t.Fatalf("%s rendered a different %s blueprint than another team", owner, pair.Harness)
+					}
+					digests[pair.Harness] = digest
+					state, hasState := stateVolume(work(t, pair, interactive))
+					if hasState != (pair.Harness != "opencode") {
+						t.Fatalf("state volume presence changed for %s", owner)
+					}
+					if hasState {
+						if state.Source != pair.Config.Spec.Values["STATE_VOLUME"] ||
+							state.Source != historicStateVolume(selection.team, selection.role, pair.Harness, project) {
+							t.Fatalf("state volume %q for %s is not the historic name", state.Source, owner)
+						}
+						if previous, exists := volumes[state.Source]; exists && previous != owner {
+							t.Fatalf("%s and %s share state volume %q", previous, owner, state.Source)
+						}
+						volumes[state.Source] = owner
+						if !runtimeID.MatchString(state.Source) {
+							t.Fatalf("invalid runtime volume name %q for %s", state.Source, owner)
 						}
 					}
 				}
@@ -927,8 +1150,9 @@ func TestInitialPathLaunchAcrossHarnesses(t *testing.T) {
 				}
 			}
 			for _, pair := range result.Pairs {
+				rendered := work(t, pair, interactive)
 				var launch strings.Builder
-				for _, stage := range pair.Blueprint.Spec.Cell.Containers[0].Tty.OnInit {
+				for _, stage := range rendered.Tty.OnInit {
 					if strings.Contains(stage.Script, "make -C") || strings.Contains(stage.Script, "cd ") {
 						launch.WriteString(stage.Script + "\n")
 					}
@@ -940,7 +1164,7 @@ func TestInitialPathLaunchAcrossHarnesses(t *testing.T) {
 				launchScript := strings.ReplaceAll(launch.String(), "/opt/kuketeams/harness/Makefile.start", adapter)
 				cmd := exec.CommandContext(t.Context(), "bash", "-u", "-c", launchScript)
 				cmd.Env = append(
-					append(os.Environ(), pair.Blueprint.Spec.Cell.Containers[0].Env...),
+					append(os.Environ(), rendered.Env...),
 					"INITIAL_PATH="+target,
 					"HOME="+home,
 					"CODEX_HOME="+home+"/.codex",
@@ -948,7 +1172,6 @@ func TestInitialPathLaunchAcrossHarnesses(t *testing.T) {
 					"XDG_CONFIG_HOME="+home+"/.config",
 					"OPENCODE_CONFIG="+home+"/.opencode-config",
 					"PATH="+bin+":"+os.Getenv("PATH"),
-					"PROMPT=",
 					"OPENROUTER_MODEL=test",
 					"LAUNCH_STATE="+state,
 				)
@@ -998,11 +1221,15 @@ func TestFreshOperatorComposition(t *testing.T) {
 	if len(result.Pairs) != 2 {
 		t.Fatalf("pairs=%d", len(result.Pairs))
 	}
-	for i, name := range []string{"kukeon-operator-codex", "kukeon-operator-claude"} {
+	for i, harnessName := range []string{"codex", "claude"} {
 		p := result.Pairs[i]
-		if p.Config.Metadata.Name != name || p.Blueprint.Metadata.Name != name || p.Config.Spec.Blueprint.Name != name {
+		if p.Config.Metadata.Name != "kukeon-operator-"+harnessName || p.Blueprint.Metadata.Name != harnessName ||
+			p.Config.Spec.Blueprint.Name != harnessName || result.Blueprints[i] != p.Blueprint {
 			t.Fatalf("incorrect pair identity: %+v", p)
 		}
+	}
+	if len(result.Blueprints) != 2 || result.Git != nil || len(result.Notes) != 0 {
+		t.Fatalf("blueprints=%d git=%v notes=%v", len(result.Blueprints), result.Git, result.Notes)
 	}
 }
 
@@ -1062,8 +1289,15 @@ func TestCatalogFollowsSelectedSourceAndPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := result.Pairs[0].Blueprint.Spec.Cell.Containers[0].Image; got != "registry.test/custom/codex:v9" {
-		t.Fatalf("did not bake selected source image: %s", got)
+	if got := work(t, result.Pairs[0], interactive).Image; got != "registry.test/custom/codex:v9" {
+		t.Fatalf("did not select the source's image: %s", got)
+	}
+	// The blueprint's own default is the catalog's plain image for the profile.
+	for _, param := range result.Blueprints[0].Spec.Parameters {
+		if param.Name == "IMAGE" && (param.Default == nil || *param.Default != "registry.test/custom/codex:v9" ||
+			param.Type != api.ParameterTypeImage) {
+			t.Fatalf("IMAGE parameter = %+v", param)
+		}
 	}
 	for _, test := range []struct {
 		name string

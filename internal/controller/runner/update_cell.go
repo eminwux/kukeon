@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/gitcred"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
@@ -297,6 +298,11 @@ func (r *Exec) UpdateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 // root container and its writable overlay. Root-container env remains outside
 // this in-place path.
 //
+// A git block appearing or disappearing also recreates: the staged git
+// directory is an OCI mount added at create (#1472). An edit *within* an
+// existing git block needs no recreate — the bundle is re-rendered from the
+// spec on every start.
+//
 // Other Breaking-on-root fields (privileged, user, readOnlyRootFilesystem,
 // capabilities, tmpfs, resources) are not yet gated here; their non-root
 // in-place gap predates #1154 and is tracked separately.
@@ -309,7 +315,8 @@ func containerSpecChanged(desired, actual *intmodel.ContainerSpec) bool {
 		!stringSlicesEqual(desired.Devices, actual.Devices) ||
 		(!actual.Root && !stringSlicesEqual(desired.Env, actual.Env)) ||
 		!volumeMountsEqual(desired.Volumes, actual.Volumes) ||
-		!containerSecretsEqual(desired.Secrets, actual.Secrets)
+		!containerSecretsEqual(desired.Secrets, actual.Secrets) ||
+		gitcred.Needed(*desired) != gitcred.Needed(*actual)
 }
 
 // volumeMountsEqual reports whether two VolumeMount slices are equal in

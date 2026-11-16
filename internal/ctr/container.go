@@ -341,6 +341,12 @@ func (c *client) CreateContainer(namespace string, spec ContainerSpec, creds []R
 		return nil, err
 	}
 
+	// Refuse an image that declares its capabilities and lacks one the cell
+	// requires, before any snapshot or container record exists (#1472).
+	if err = c.checkImageCapabilities(namespace, image, spec.RequiredCapabilities); err != nil {
+		return nil, err
+	}
+
 	// Ensure image is unpacked before creating container
 	// Use spec.Snapshotter if provided, otherwise empty string for default snapshotter
 	if err = c.ensureImageUnpacked(namespace, image, spec.Snapshotter); err != nil {
@@ -572,6 +578,25 @@ func (c *client) CreateContainerFromSpec(
 	}
 	if len(resolved.MountAdds) > 0 {
 		containerSpec.Volumes = append(containerSpec.Volumes, resolved.MountAdds...)
+	}
+
+	// Render the container's git identity, stored credentials and signing
+	// config into its staged git directory and mount it read-only (issue
+	// #1472). The runner re-stages and re-owns the directory on every start
+	// (StageContainerGit), so a reused container survives a wiped /run.
+	gitMount, err := StageContainerGit(containerSpec, bo.runPath)
+	if err != nil {
+		c.logger.ErrorContext(
+			c.ctx,
+			"failed to stage container git credentials",
+			"id", containerSpec.ID,
+			"cell", cellID,
+			"err", formatError(err),
+		)
+		return nil, fmt.Errorf("failed to stage git credentials: %w", err)
+	}
+	if gitMount != nil {
+		containerSpec.Volumes = append(containerSpec.Volumes, *gitMount)
 	}
 
 	// Resolve kind: volume mounts to their on-disk Volume directories before

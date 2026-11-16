@@ -38,6 +38,9 @@ type ImageInfo struct {
 	Digest    string
 	MediaType string
 	Labels    map[string]string
+	// Capabilities are the capabilities the image declares in its
+	// io.kukeon.capabilities config label (#1472).
+	Capabilities []string
 }
 
 // ListImagesResult reports the images present in a realm's containerd
@@ -224,11 +227,12 @@ func (b *Exec) PruneImages(realm string) (PruneImagesResult, error) {
 
 func ctrImageToControllerImage(img ctr.ImageInfo) ImageInfo {
 	return ImageInfo{
-		Name:      img.Name,
-		Size:      img.Size,
-		CreatedAt: img.CreatedAt,
-		Digest:    img.Digest,
-		MediaType: img.MediaType,
-		Labels:    img.Labels,
+		Name:         img.Name,
+		Size:         img.Size,
+		CreatedAt:    img.CreatedAt,
+		Digest:       img.Digest,
+		MediaType:    img.MediaType,
+		Labels:       img.Labels,
+		Capabilities: img.Capabilities,
 	}
 }

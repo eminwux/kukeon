@@ -16,6 +16,13 @@
 
 // Package compose produces team-owned kukeon documents without contacting a
 // daemon, fetching sources, reading credentials, or writing files.
+//
+// A team renders onto two kinds. A CellBlueprint is a shared, realm-wide form:
+// one per harness × security profile, self-describing (typed parameters,
+// components, modes) and free of role facts, so every role and team in the
+// realm — and the web UI — can use the same one. A CellConfig is the answers:
+// one per selected role/harness pair, carrying everything that differs between
+// two cells (role, repos, image, secrets, enabled connectors).
 package compose
 
 import (
@@ -33,8 +40,10 @@ import (
 	"github.com/distribution/reference"
 	model "github.com/eminwux/kukeon/pkg/api/model/kuketeams"
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	"github.com/eminwux/kukeon/pkg/team/component"
 	"github.com/eminwux/kukeon/pkg/team/config"
 	"github.com/eminwux/kukeon/pkg/team/harness"
+	"github.com/eminwux/kukeon/team/components"
 	"gopkg.in/yaml.v3"
 )
 
@@ -43,12 +52,12 @@ import (
 type Options struct {
 	Sources map[string]fs.FS
 	Scope   Scope
-	// HomeDir is needed only for an explicitly requested ssh mount; it is not
-	// discovered from the host.
-	HomeDir string
 	// Secrets are the bindings recorded in the team's existing TeamEntry; they
 	// take precedence over global spec.secrets and generated defaults.
 	Secrets []config.SecretBinding
+	// Components overrides the bundled component library (connectors and
+	// forges). Nil selects the library shipped with kuke.
+	Components fs.FS
 }
 
 const defaultScope = "default"
@@ -59,13 +68,26 @@ type Scope struct{ Realm, Space, Stack string }
 // Entry is a candidate for #13 to persist only after successful application.
 type Result struct {
 	Entry *config.TeamEntry
-	Pairs []Pair
+	// Scope is the normalized scope the team's CellConfigs live in.
+	Scope Scope
+	// Blueprints are the shared realm-wide blueprints the pairs reference, one
+	// per harness × security profile, in first-use order.
+	Blueprints []*api.CellBlueprintDoc
+	Pairs      []Pair
+	// Git is the operator's default git identity, credentials and signing
+	// config, to be written as scope defaults. Nil when none is configured.
+	Git *api.ContainerGit
+	// Notes are operator-facing remarks: settings that no longer have an
+	// effect and sources no stored credential covers.
+	Notes []string
 }
 
 type Pair struct {
-	Role      string
-	Harness   string
-	Image     harness.CatalogImage
+	Role    string
+	Harness string
+	Image   harness.CatalogImage
+	// Blueprint is the shared blueprint the Config references; several pairs
+	// point at the same document.
 	Blueprint *api.CellBlueprintDoc
 	Config    *api.CellConfigDoc
 	Secrets   []SecretRequirement
@@ -97,11 +119,25 @@ func Compose(cfg *config.TeamsConfig, team *config.Team, opts Options) (*Result,
 	if err != nil {
 		return nil, err
 	}
-	result := &Result{Entry: entry}
+	library := opts.Components
+	if library == nil {
+		library = components.FS
+	}
+	lib, err := component.Load(library)
+	if err != nil {
+		return nil, fmt.Errorf("component library: %w", err)
+	}
+	result := &Result{Entry: entry, Scope: scope}
 	secrets, err := newSecretBindings(opts.Secrets, cfg, scope.Realm)
 	if err != nil {
 		return nil, err
 	}
+	// Pass 1: resolve every selected pair, then group pairs by the shared
+	// blueprint they use so the blueprint is rendered once with everything
+	// its pairs need.
+	var plans []*pairPlan
+	groups := map[string]*group{}
+	var order []string
 	for _, role := range effective.Roles {
 		if !config.ValidName(role.Name) {
 			return nil, errors.New("role: invalid selection name")
@@ -110,40 +146,71 @@ func Compose(cfg *config.TeamsConfig, team *config.Team, opts Options) (*Result,
 			if !role.Selects(h) {
 				continue
 			}
-			pair, pairErr := composePair(cfg, team.Metadata.Name, role, h, effective.Sources, opts, secrets)
-			if pairErr != nil {
-				return nil, fmt.Errorf("compose %s/%s: %w", role.Name, h.Name, pairErr)
+			plan, planErr := planPair(cfg, team.Metadata.Name, role, h, effective.Sources, opts, lib, secrets)
+			if planErr != nil {
+				return nil, fmt.Errorf("compose %s/%s: %w", role.Name, h.Name, planErr)
 			}
-			// Add's project declaration distinguishes a tag from a same-named
-			// branch all the way through the runtime checkout contract.
-			if team.ProjectSource != nil {
-				fill, ok := pair.Config.Spec.Repos["project"]
-				if !ok {
-					return nil, errors.New("template did not declare project repository slot")
-				}
-				if team.ProjectSource.Tag != "" {
-					fill.Ref = "refs/tags/" + team.ProjectSource.Tag
-				}
-				pair.Config.Spec.Repos["project"] = fill
+			plans = append(plans, plan)
+			key := plan.blueprintName()
+			if groups[key] == nil {
+				groups[key] = &group{}
+				order = append(order, key)
 			}
-			result.Pairs = append(result.Pairs, pair)
+			if groupErr := groups[key].add(plan); groupErr != nil {
+				return nil, fmt.Errorf("compose %s/%s: %w", role.Name, h.Name, groupErr)
+			}
 		}
 	}
-	parameters := map[string]bool{}
-	for _, pair := range result.Pairs {
-		for _, param := range pair.Blueprint.Spec.Parameters {
-			parameters[param.Name] = true
+	// Pass 2: one blueprint per group.
+	blueprints := map[string]*api.CellBlueprintDoc{}
+	for _, key := range order {
+		bp, renderErr := render(key, groups[key], lib, opts)
+		if renderErr != nil {
+			return nil, fmt.Errorf("blueprint %s: %w", key, renderErr)
 		}
+		blueprints[key] = bp
+		result.Blueprints = append(result.Blueprints, bp)
+	}
+	// Pass 3: one config per pair.
+	declared := map[string]bool{}
+	for _, plan := range plans {
+		bp := blueprints[plan.blueprintName()]
+		pair, bindErr := bind(plan, bp, cfg, team, opts)
+		if bindErr != nil {
+			return nil, fmt.Errorf("compose %s/%s: %w", plan.selection.Name, plan.hsel.Name, bindErr)
+		}
+		for name := range allParameters(bp) {
+			declared[name] = true
+		}
+		result.Pairs = append(result.Pairs, pair)
 	}
 	for _, name := range slices.Sorted(maps.Keys(cfg.Spec.Parameters)) {
-		if !parameters[name] {
+		if !declared[name] {
 			return nil, fmt.Errorf("spec.parameters: unsupported parameter %q", name)
+		}
+		if composed[name] {
+			return nil, fmt.Errorf(
+				"spec.parameters: %q is set by composition from the role and source selections",
+				name,
+			)
 		}
 	}
 	if err = secrets.checkParameters(cfg.Spec.Parameters); err != nil {
 		return nil, err
 	}
 	result.Entry.Secrets = secrets.entry()
+	result.Git, result.Notes = defaultGit(cfg.Spec.Git)
+	result.Notes = append(result.Notes, credentialNotes(result.Git, effective.Sources)...)
+	for _, plan := range plans {
+		if slices.Contains(plan.role.Spec.Needs.Mounts, "ssh") {
+			result.Notes = append(result.Notes, fmt.Sprintf(
+				"role %s: needs.mounts ssh no longer mounts the host ~/.ssh; cells clone, push and sign with stored git credentials",
+				plan.selection.Name,
+			))
+		}
+	}
+	slices.Sort(result.Notes)
+	result.Notes = slices.Compact(result.Notes)
 	return result, nil
 }
 
@@ -163,47 +230,169 @@ func normalizeScope(s Scope) (Scope, error) {
 	return s, nil
 }
 
-func composePair(
+// profile is the security posture of a blueprint. It is fixed in the
+// blueprint — never a Config toggle — so each distinct posture is its own
+// blueprint variant.
+type profile struct {
+	// Root selects a privileged cell with a nested container runtime.
+	Root bool
+	// Mounts are the host-mount selectors, sorted.
+	Mounts []string
+}
+
+// hostMounts are the selectors that bind a host path into the cell. `ssh` is
+// deliberately absent: it is still accepted on a role, but mounts nothing.
+//
+//nolint:gochecknoglobals // package-level membership list, read-only.
+var hostMounts = []string{"kuke-binary", "kukeon-install", "kukeond-socket"}
+
+// name is the blueprint-name suffix of the profile: empty for the default
+// posture, `root`, `host` (all kukeon host mounts) or both.
+func (p profile) name() string {
+	var parts []string
+	if p.Root {
+		parts = append(parts, "root")
+	}
+	if slices.Equal(p.Mounts, hostMounts) {
+		parts = append(parts, "host")
+	} else {
+		parts = append(parts, p.Mounts...)
+	}
+	return strings.Join(parts, "-")
+}
+
+// pairPlan is one selected role/harness pair with everything read from its
+// definitions, before any document is rendered.
+type pairPlan struct {
+	team       string
+	selection  config.Role
+	hsel       config.Harness
+	role       *model.Role
+	settings   model.RoleHarness
+	definition *harness.Harness
+	catalog    *harness.ImageCatalog
+	image      harness.CatalogImage
+	needs      []string
+	profile    profile
+	// roleSource is the runtime source the role is read from in the cell.
+	roleSource config.Source
+	// sources are every runtime-cloned source of the team.
+	sources []config.Source
+	// components are the optional components the pair enables, by name.
+	components []string
+	// fills binds blueprint secret slots to runtime secrets.
+	fills []secretFill
+	// extraSecrets are role-declared secrets no component or harness slot
+	// covers; the shared blueprint gains an optional slot for each.
+	extraSecrets []api.BlueprintSecretSlot
+	// extraParams are role-declared parameters the blueprint does not declare.
+	extraParams []string
+}
+
+type secretFill struct {
+	slot    api.BlueprintSecretSlot
+	binding config.SecretBinding
+}
+
+func (p *pairPlan) blueprintName() string {
+	return resourceName(p.hsel.Name, p.profile.name())
+}
+
+// group collects the pairs sharing one blueprint. Role-specific leftovers
+// (extra secret slots, extra parameters, extra repos) are unioned so the
+// blueprint serves every pair of the team that uses it.
+type group struct {
+	plans        []*pairPlan
+	extraSecrets []api.BlueprintSecretSlot
+	extraParams  []string
+	extraRepos   []config.Source
+}
+
+func (g *group) add(plan *pairPlan) error {
+	g.plans = append(g.plans, plan)
+	for _, slot := range plan.extraSecrets {
+		i := slices.IndexFunc(g.extraSecrets, func(s api.BlueprintSecretSlot) bool { return s.Name == slot.Name })
+		if i < 0 {
+			g.extraSecrets = append(g.extraSecrets, slot)
+			continue
+		}
+		if g.extraSecrets[i].EnvName != slot.EnvName {
+			return fmt.Errorf("secret %q: conflicting environment destinations across roles", slot.Name)
+		}
+	}
+	for _, name := range plan.extraParams {
+		if !slices.Contains(g.extraParams, name) {
+			g.extraParams = append(g.extraParams, name)
+		}
+	}
+	for _, source := range plan.extraRepos() {
+		i := slices.IndexFunc(g.extraRepos, func(s config.Source) bool { return s.Name == source.Name })
+		if i < 0 {
+			g.extraRepos = append(g.extraRepos, source)
+		}
+	}
+	return nil
+}
+
+// extraRepos are the runtime sources beyond the two generic slots every
+// blueprint declares (role-source and project).
+func (p *pairPlan) extraRepos() []config.Source {
+	var out []config.Source
+	for _, source := range p.sources {
+		if source.Name == p.roleSource.Name || source.Name == projectSlot {
+			continue
+		}
+		out = append(out, source)
+	}
+	return out
+}
+
+// planPair reads and validates everything one selected role/harness pair
+// needs before any document is rendered.
+//
+//nolint:funlen // linear load-and-validate of one pair's definitions.
+func planPair(
 	cfg *config.TeamsConfig,
 	team string,
 	selection config.Role,
 	hsel config.Harness,
 	sources []config.Source,
 	opts Options,
+	lib []component.Component,
 	secrets *secretBindings,
-) (Pair, error) {
+) (*pairPlan, error) {
 	if !config.ValidName(hsel.Name) {
-		return Pair{}, errors.New("invalid harness selection name")
+		return nil, errors.New("invalid harness selection name")
 	}
 	rfs := opts.Sources[selection.Source]
 	hfs := opts.Sources[hsel.Source]
 	if rfs == nil || hfs == nil {
-		return Pair{}, errors.New("missing materialized role or harness source")
+		return nil, errors.New("missing materialized role or harness source")
 	}
 	var role model.Role
 	if err := load(rfs, path.Join(selection.Path, "role.yaml"), &role); err != nil {
-		return Pair{}, err
+		return nil, err
 	}
 	if role.APIVersion != config.APIVersion || role.Kind != "Role" || !config.ValidName(role.Metadata.Name) {
-		return Pair{}, errors.New("role.yaml: require kuketeams.io/v1 Role and valid metadata.name")
+		return nil, errors.New("role.yaml: require kuketeams.io/v1 Role and valid metadata.name")
 	}
 	settings, ok := role.Spec.Harnesses[hsel.Name]
 	if !ok {
-		return Pair{}, errors.New("role does not support selected harness")
+		return nil, errors.New("role does not support selected harness")
 	}
 	definition, err := harness.Load(hfs, hsel.Path)
 	if err != nil {
-		return Pair{}, err
+		return nil, err
 	}
 	if definition.Metadata.Name != hsel.Name {
-		return Pair{}, fmt.Errorf("%s/harness.yaml: metadata.name must match selected harness %q", hsel.Path, hsel.Name)
+		return nil, fmt.Errorf("%s/harness.yaml: metadata.name must match selected harness %q", hsel.Path, hsel.Name)
 	}
-	if err := checkAssets(rfs, selection.Path, &role, settings, hsel.Name); err != nil {
-		return Pair{}, err
+	if err = checkAssets(rfs, selection.Path, &role, settings, hsel.Name); err != nil {
+		return nil, err
 	}
 	catalog, err := harness.LoadCatalog(hfs, hsel.Path, definition.Metadata.Name)
 	if err != nil {
-		return Pair{}, err
+		return nil, err
 	}
 	var extra []string
 	if selection.Needs != nil {
@@ -212,45 +401,46 @@ func composePair(
 	needs := union(role.Spec.Needs.Image, extra)
 	image, err := SelectImage(catalog, hsel.Name, needs)
 	if err != nil {
-		return Pair{}, fmt.Errorf("%s/images.yaml: %w", hsel.Path, err)
+		return nil, fmt.Errorf("%s/images.yaml: %w", hsel.Path, err)
 	}
 	repo, ok := runtimeSource(sources, selection.Source)
 	if !ok {
-		return Pair{}, fmt.Errorf("sources: missing clonePath for required role source %q", selection.Source)
+		return nil, fmt.Errorf("sources: missing clonePath for required role source %q", selection.Source)
 	}
-	if settingsErr := checkSettings(hsel.Name, settings); settingsErr != nil {
-		return Pair{}, settingsErr
+	if err = checkSettings(hsel.Name, settings); err != nil {
+		return nil, err
 	}
-	bp, err := render(definition, &role, selection, repo, image, needs, sources, opts)
-	if err != nil {
-		return Pair{}, err
+	if !fs.ValidPath(selection.Path) || !config.SafePath("/"+selection.Path) {
+		return nil, errors.New("role path: require a safe source-relative path")
 	}
-	name := resourceName(team, selection.Name, hsel.Name)
-	bp.Metadata = api.CellBlueprintMetadata{
-		Name: name, Realm: opts.Scope.Realm, Space: opts.Scope.Space, Stack: opts.Scope.Stack,
-		Labels: map[string]string{api.LabelTeam: team},
+	plan := &pairPlan{
+		team: team, selection: selection, hsel: hsel, role: &role, settings: settings,
+		definition: definition, catalog: catalog, image: image, needs: needs, roleSource: repo,
+		profile: profile{Root: slices.Contains(needs, "root")},
 	}
-	bp.Spec.Prefix = name
-	cc := &api.CellConfigDoc{
-		APIVersion: api.APIVersionV1Beta1, Kind: api.KindCellConfig,
-		Metadata: api.CellConfigMetadata{
-			Name: name, Realm: opts.Scope.Realm, Space: opts.Scope.Space, Stack: opts.Scope.Stack,
-			Labels: map[string]string{api.LabelTeam: team},
-		},
-		Spec: api.CellConfigSpec{
-			Blueprint: api.CellConfigBlueprintRef{
-				Name:  name,
-				Realm: opts.Scope.Realm,
-				Space: opts.Scope.Space,
-				Stack: opts.Scope.Stack,
-			},
-		},
+	for _, mount := range role.Spec.Needs.Mounts {
+		if slices.Contains(hostMounts, mount) && !slices.Contains(plan.profile.Mounts, mount) {
+			plan.profile.Mounts = append(plan.profile.Mounts, mount)
+		}
 	}
-	pair := Pair{Role: selection.Name, Harness: hsel.Name, Image: image, Blueprint: bp, Config: cc}
-	if bindErr := bind(&pair, cfg, selection, &role, sources, team, secrets); bindErr != nil {
-		return Pair{}, bindErr
+	slices.Sort(plan.profile.Mounts)
+	for _, source := range sources {
+		if source.ClonePath != "" {
+			plan.sources = append(plan.sources, source)
+		}
 	}
-	return pair, nil
+	for _, name := range union(role.Spec.Needs.Repos, []string{selection.Source}) {
+		if _, found := runtimeSource(sources, name); !found {
+			return nil, fmt.Errorf("sources: missing clonePath for required repository %q", name)
+		}
+	}
+	if err = planSecrets(plan, lib, secrets); err != nil {
+		return nil, err
+	}
+	if err = planParameters(plan, cfg); err != nil {
+		return nil, err
+	}
+	return plan, nil
 }
 
 // resourceName joins authored components and normalizes punctuation runs so cell
@@ -351,6 +541,18 @@ func union(a, b []string) []string {
 	return slices.Compact(out)
 }
 
+// RenameBlueprint gives a shared blueprint a new name and repoints every
+// Config that references it. Application uses it to append a content digest
+// when the realm already holds a different blueprint under the same name.
+func (r *Result) RenameBlueprint(bp *api.CellBlueprintDoc, name string) {
+	bp.Metadata.Name = name
+	for i := range r.Pairs {
+		if r.Pairs[i].Blueprint == bp {
+			r.Pairs[i].Config.Spec.Blueprint.Name = name
+		}
+	}
+}
+
 // MarshalYAML returns only Blueprints then Configs. Secret values and creation
 // source declarations are never part of the daemon document stream.
 func (r *Result) MarshalYAML() ([]byte, error) {
@@ -361,8 +563,8 @@ func (r *Result) MarshalYAML() ([]byte, error) {
 	enc := yaml.NewEncoder(&out)
 	const yamlIndent = 2
 	enc.SetIndent(yamlIndent)
-	for _, p := range r.Pairs {
-		if err := enc.Encode(p.Blueprint); err != nil {
+	for _, bp := range r.Blueprints {
+		if err := enc.Encode(bp); err != nil {
 			return nil, err
 		}
 	}

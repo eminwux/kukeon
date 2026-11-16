@@ -23,6 +23,7 @@ import (
 	"text/tabwriter"
 
 	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
+	"github.com/eminwux/kukeon/internal/cellblueprint"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
@@ -35,8 +36,22 @@ import (
 // explicit empty one keeps a realm-scoped Config reachable — and the daemon
 // renders the cell (defaults merge, slot fills, realm images, name
 // allocation). The client never renders a CellConfig itself.
-func ConfigRenderRequest(cmd *cobra.Command, flags SourceFlags, scope ScopeVars) kukeonv1.CellFromConfigRequest {
+func ConfigRenderRequest(
+	cmd *cobra.Command, flags SourceFlags, scope ScopeVars,
+) (kukeonv1.CellFromConfigRequest, error) {
+	// Per-cell params: the daemon accepts them only for the picked harness
+	// mode's parameters (#1472).
+	var params map[string]string
+	if len(flags.ParamArgs) > 0 {
+		parsed, err := cellblueprint.ParseParamArgs(flags.ParamArgs)
+		if err != nil {
+			return kukeonv1.CellFromConfigRequest{}, err
+		}
+		params = parsed
+	}
 	return kukeonv1.CellFromConfigRequest{
+		Mode:   flags.Mode,
+		Params: params,
 		Config: v1beta1.CellConfigMetadata{
 			Name:  flags.ConfigName,
 			Realm: kukeshared.PickLookupRealm(cmd, scope.Realm),
@@ -46,7 +61,7 @@ func ConfigRenderRequest(cmd *cobra.Command, flags SourceFlags, scope ScopeVars)
 		Name:               flags.Name,
 		EnvOverrides:       append([]string(nil), flags.EnvArgs...),
 		IgnoreDiskPressure: flags.IgnoreDiskPressure,
-	}
+	}, nil
 }
 
 // createFromConfig implements `kuke create cell <name> --from-config <cfg>`:
@@ -59,7 +74,10 @@ func createFromConfig(
 	if err := ValidateOverrideSymmetry(flags); err != nil {
 		return err
 	}
-	req := ConfigRenderRequest(cmd, flags, scope)
+	req, err := ConfigRenderRequest(cmd, flags, scope)
+	if err != nil {
+		return err
+	}
 
 	if dryRun {
 		preview, err := client.PreviewCellFromConfig(cmd.Context(), req)

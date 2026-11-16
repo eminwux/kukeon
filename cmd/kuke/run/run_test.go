@@ -3102,43 +3102,45 @@ func TestRun_FromConfig_BlueprintMissing_Errors(t *testing.T) {
 	}
 }
 
-// TestRun_FromConfig_RejectsParamFlags pins the rejection of template-only
-// knobs on the <config> positional: --param/--param-file would silently shadow
-// the Config's spec.values and break the identity contract, so the run path
-// rejects them rather than apply. --name is *not* on this list since #833 —
-// `<config> --name X` is the AC's idempotent-attach escape valve, and
-// `<config> --new --name X` is the create-or-fail variant (both covered by
+// TestRun_FromConfig_ParamFlags pins the #1472 contract on the Config source:
+// --param is forwarded to the daemon (which accepts it only for the picked
+// harness mode's parameters, so it can never shadow the Config's spec.values),
+// while --param-file stays rejected client-side. --name is *not* on this list
+// since #833 — `<config> --name X` is the AC's idempotent-attach escape valve,
+// and `<config> --new --name X` is the create-or-fail variant (both covered by
 // their own tests).
-func TestRun_FromConfig_RejectsParamFlags(t *testing.T) {
+func TestRun_FromConfig_ParamFlags(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
-	for _, tc := range []struct {
-		name string
-		args []string
-		want string
-	}{
-		{
-			"--param",
-			[]string{"--from-config", "prod", "--param", "K=V", "-d"},
-			"--param is not valid with --from-config",
-		},
-		{
-			"--param-file",
-			[]string{"--from-config", "prod", "--param-file", "/tmp/p", "-d"},
-			"--param-file is not valid with --from-config",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Cleanup(viper.Reset)
-			fc := &fakeClient{}
-			cmd, _ := newCmd(t, fc)
-			cmd.SetArgs(tc.args)
-			err := cmd.Execute()
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("err=%v want substring %q", err, tc.want)
-			}
-		})
-	}
+	t.Run("--param-file rejected", func(t *testing.T) {
+		t.Cleanup(viper.Reset)
+		cmd, _ := newCmd(t, &fakeClient{})
+		cmd.SetArgs([]string{"--from-config", "prod", "--param-file", "/tmp/p", "-d"})
+		err := cmd.Execute()
+		if err == nil || !strings.Contains(err.Error(), "--param-file is not valid with --from-config") {
+			t.Fatalf("err=%v want --param-file rejection", err)
+		}
+	})
+
+	t.Run("--param and --mode forwarded", func(t *testing.T) {
+		t.Cleanup(viper.Reset)
+		lastConfigRequest = kukeonv1.CellFromConfigRequest{}
+		fc := &fakeClient{
+			getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+				return kukeonv1.GetConfigResult{}, nil
+			},
+		}
+		cmd, _ := newCmd(t, fc)
+		cmd.SetArgs([]string{"--from-config", "prod", "--param", "PROMPT=hi", "--mode", "headless", "-d"})
+		// The fake reports no such Config; the forwarded request is the assertion.
+		if err := cmd.Execute(); err == nil {
+			t.Fatal("expected the fake's config-not-found error")
+		}
+		if lastConfigRequest.Mode != "headless" || lastConfigRequest.Params["PROMPT"] != "hi" {
+			t.Errorf("request = mode %q params %v, want headless + PROMPT=hi",
+				lastConfigRequest.Mode, lastConfigRequest.Params)
+		}
+	})
 }
 
 // TestRun_PositionalConfig_MutexWithFlagSources covers epic:cell-identity

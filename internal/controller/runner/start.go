@@ -1092,6 +1092,7 @@ func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr erro
 		}
 		if !reuseExistingChild {
 			buildOpts := append(r.daemonDefaultBuildOpts(), attachOpts...)
+			buildOpts = append(buildOpts, ctr.WithRequiredCapabilities(internalCell.Spec.Requires))
 			buildOpts = append(buildOpts, ctr.WithExtraLabels(specHashLabels(containerSpec)))
 			// `kuke run --env` runtime-env merge (issue #834). Same shape as the
 			// CreateCell-side merge in provision.go: returns containerSpec
@@ -1153,6 +1154,11 @@ func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr erro
 		if volErr := r.volumePostCreateChown(namespace, containerSpec); volErr != nil {
 			return intmodel.Cell{}, fmt.Errorf(
 				"failed to chown volume dir for %s: %w", ctrContainerID, volErr,
+			)
+		}
+		if gitErr := r.gitPostCreate(namespace, containerSpec); gitErr != nil {
+			return intmodel.Cell{}, fmt.Errorf(
+				"failed to stage git credentials for %s: %w", ctrContainerID, gitErr,
 			)
 		}
 
@@ -1420,6 +1426,7 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (_ intmode
 	}
 	if !reuseExistingChild {
 		buildOpts := append(r.daemonDefaultBuildOpts(), attachOpts...)
+		buildOpts = append(buildOpts, ctr.WithRequiredCapabilities(cell.Spec.Requires))
 		buildOpts = append(buildOpts, ctr.WithExtraLabels(specHashLabels(*foundContainerSpec)))
 		_, err = r.ctrClient.CreateContainerFromSpec(namespace, *foundContainerSpec, creds, buildOpts...)
 		if err != nil {
@@ -1470,6 +1477,11 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (_ intmode
 	if volErr := r.volumePostCreateChown(namespace, *foundContainerSpec); volErr != nil {
 		return intmodel.Cell{}, fmt.Errorf(
 			"failed to chown volume dir for %s: %w", containerdID, volErr,
+		)
+	}
+	if gitErr := r.gitPostCreate(namespace, *foundContainerSpec); gitErr != nil {
+		return intmodel.Cell{}, fmt.Errorf(
+			"failed to stage git credentials for %s: %w", containerdID, gitErr,
 		)
 	}
 

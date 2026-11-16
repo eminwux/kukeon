@@ -25,19 +25,20 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/team/bootstrap"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
+	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/compose"
 	"github.com/eminwux/kukeon/pkg/team/config"
 	"gopkg.in/yaml.v3"
 )
 
 const (
-	operatorName     = "kukeon"
-	rootName         = "root" // Reserved legacy identity; never migrated by init.
-	resourcesPerPair = 2      // One blueprint and one config.
+	operatorName = "kukeon"
+	rootName     = "root" // Reserved legacy identity; never migrated by init.
 )
 
 // Options supplies operator paths and optional test/embedding dependencies.
@@ -47,6 +48,9 @@ type Options struct {
 	Force                           bool
 	Sources                         map[string]fs.FS
 	Client                          Client
+	// ImportGit, when Enabled, stores the operator's SSH key as a secret and
+	// points the configuration's git identity at it. Init only.
+	ImportGit GitImport
 }
 
 type Result struct {
@@ -56,6 +60,9 @@ type Result struct {
 	// MissingSecrets lists one remediation line per required runtime secret that
 	// does not exist yet; cells using it fail to start until it is created.
 	MissingSecrets []string
+	// Notes are operator-facing remarks: settings that no longer have an
+	// effect, sources no stored git credential covers, renamed blueprints.
+	Notes []string
 }
 
 // Run initializes only when configuration is absent, unless Force resets it.
@@ -89,7 +96,51 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 			return result, err
 		}
 	}
-	return runTeam(ctx, opts, boot.Config, team, recorded, result, "kuke team init")
+	var (
+		imported    []api.SecretDoc
+		importNotes []string
+	)
+	if opts.ImportGit.Enabled {
+		effective, resolveErr := config.Resolve(boot.Config, team)
+		if resolveErr != nil {
+			return result, resolveErr
+		}
+		imported, importNotes, err = importGitIdentity(boot.Config, effective.Sources, opts.Home, opts.ImportGit)
+		if err != nil {
+			return result, err
+		}
+	}
+	result, err = runTeam(ctx, opts, boot.Config, team, recorded, result, "kuke team init", imported)
+	result.Notes = append(result.Notes, importNotes...)
+	if err != nil || !opts.ImportGit.Enabled {
+		return result, err
+	}
+	// The secrets exist now; record that the configuration uses them.
+	if err = writeConfig(configPath, boot.Config); err != nil {
+		return result, fmt.Errorf(
+			"resources applied but %s was not updated with the imported git identity: %w; rerun kuke team init --force --import-git-identity",
+			configPath,
+			err,
+		)
+	}
+	return result, nil
+}
+
+// writeConfig atomically replaces the operator configuration.
+func writeConfig(path string, cfg *config.TeamsConfig) error {
+	var encoded bytes.Buffer
+	if err := config.Encode(&encoded, cfg); err != nil {
+		return err
+	}
+	stage, err := stageEntry(path, encoded.Bytes())
+	if err != nil {
+		return err
+	}
+	if err = os.Rename(stage, path); err != nil {
+		_ = os.Remove(stage)
+		return err
+	}
+	return nil
 }
 
 // runTeam is shared by init and add; staging precedes all daemon writes.
@@ -101,6 +152,7 @@ func runTeam(
 	recorded []config.SecretBinding,
 	result Result,
 	command string,
+	imported []api.SecretDoc,
 ) (Result, error) {
 	name := team.Metadata.Name
 	entryPath := filepath.Join(opts.Root, "kuketeam.d", name+".yaml")
@@ -118,7 +170,7 @@ func runTeam(
 		defer cleanup()
 	}
 	composed, err := compose.Compose(cfg, team, compose.Options{
-		Sources: sources, HomeDir: opts.Home,
+		Sources: sources,
 		Secrets: recorded,
 	})
 	if err != nil {
@@ -149,7 +201,7 @@ func runTeam(
 		}
 		defer func() { _ = client.Close() }()
 	}
-	missing, err := apply(ctx, client, composed, command)
+	done, err := apply(ctx, client, composed, command, imported)
 	if err != nil {
 		if command != "kuke team init" {
 			return result, fmt.Errorf(
@@ -170,8 +222,9 @@ func runTeam(
 			err, command,
 		)
 	}
-	result.EntryPath, result.Resources = entryPath, len(composed.Pairs)*resourcesPerPair
-	result.MissingSecrets = missing
+	result.EntryPath, result.Resources = entryPath, done.resources
+	result.MissingSecrets = done.missing
+	result.Notes = append(slices.Clone(composed.Notes), done.notes...)
 	return result, nil
 }
 

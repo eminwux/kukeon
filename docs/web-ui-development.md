@@ -71,11 +71,12 @@ bundle after `make web-ui`. These are development tools, separate from the
 `kuke serve` command, and do not connect to kukeond. Use `make web-ui && make kuke` followed by
 `./kuke serve` to exercise the same-origin API.
 
-The scoped relationship and manual specification schemas have focused Node unit
-tests that do not launch a browser or daemon:
+The scoped relationship, manual specification and blueprint-form schemas have
+focused Node unit tests that do not launch a browser or daemon (`npm run
+test:unit` runs them with the other unit tests):
 
 ```sh
-node --test internal/webui/frontend/src/relationships.test.mjs internal/webui/frontend/src/creation-schema.test.mjs
+node --test internal/webui/frontend/src/relationships.test.mjs internal/webui/frontend/src/creation-schema.test.mjs internal/webui/frontend/src/config-form.test.mjs
 ```
 
 ## Go integration and verification

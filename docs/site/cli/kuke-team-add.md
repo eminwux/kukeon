@@ -188,6 +188,16 @@ provision clone credentials for future cells. A cell still needs access to every
 requested repository, the published image, and its harness/provider
 authentication. `add` does not forward the host SSH agent or copy keys.
 
+Inside a cell, repositories are cloned and pushed with **stored** git
+credentials: the `spec.git` block of `~/.kuke/kuketeams.yaml`, which `add`
+writes as the git defaults of the team's stack (see
+[`kuke team init`](kuke-team-init.md#git-identity-and-credentials) and the
+[git credentials guide](../guides/git-credentials.md)). The transport follows
+the credential, not the URL: a project added by its HTTPS URL is still cloned
+and pushed over SSH when its host is bound to an SSH key, so an API token in the
+cell can never take over a push. `add` prints a note for every runtime-cloned
+SSH source no stored credential covers.
+
 ## Secrets
 
 Roles declare only requirement names. `add` binds each required secret for the
@@ -209,7 +219,8 @@ definitions, images, and required secret bindings and scopes, and stages a compl
 `ApplyDocumentsForTeam` with the team's stable ownership identity and publishes
 the registration by atomic rename only after full application success. Repeated
 add converges the same resources and one registration; obsolete team-owned
-blueprints and configs are pruned.
+configs are pruned, and a shared blueprint the team stops using is removed once
+no other CellConfig references it.
 
 Failure returns nonzero and preserves any previous accepted entry. A partial
 apply or ambiguous RPC failure can leave some daemon resources changed. Fix the
@@ -223,3 +234,8 @@ ambiguous writes.
 Applied 6 resources; registered team kukeon-dev: /home/me/.kuke/kuketeam.d/kukeon-dev.yaml
 No cells created or started.
 ```
+
+The count is the team's shared blueprints (one per harness × security profile
+it uses) plus one CellConfig per role/harness pair, plus one when the stack's
+git defaults were written. Missing runtime secrets and notes are listed after
+it, as for [`kuke team init`](kuke-team-init.md#output).

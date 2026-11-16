@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ErrorNotice, useResource } from "./request";
-import { catalogTitles, newCellLink, workspaceLink } from "./routes";
+import { catalogTitles, newCellLink, newConfigLink, workspaceLink } from "./routes";
 import { StateBadge } from "./status";
 import type { InventoryResource, Row } from "./inventory";
 import { cellsForBlueprint, cellsForConfig, configsForBlueprint, type ConfigDoc } from "./relationships.mjs";
@@ -120,7 +120,7 @@ function CatalogList({ kind, revision }: { kind: string; revision: number }) {
     {list.error && list.data && <p className="stale">Stale {kind} list — refresh failed.</p>}
     {kind === "secrets" && <p className="description">Metadata only. Secret values are never returned by this browser.</p>}
     <section className="panel" aria-label={`${catalogTitles[kind]} list`} aria-busy={list.loading}>
-      <div className="list-controls"><label className="search-field">Search<input type="search" value={query} placeholder={`Search ${kind}…`} onChange={e => { setQuery(e.target.value); setPage(0); }} /></label><label>Realm<select aria-label="Filter by realm" value={realm} onChange={e => { setRealm(e.target.value); setPage(0); }}><option value="">All realms</option>{[...new Set(list.data?.map(doc => doc.metadata.realm))].sort().map(name => <option key={name}>{name}</option>)}</select></label><span className="result-count">{rows.length} results</span></div>
+      <div className="list-controls"><label className="search-field">Search<input type="search" value={query} placeholder={`Search ${kind}…`} onChange={e => { setQuery(e.target.value); setPage(0); }} /></label><label>Realm<select aria-label="Filter by realm" value={realm} onChange={e => { setRealm(e.target.value); setPage(0); }}><option value="">All realms</option>{[...new Set(list.data?.map(doc => doc.metadata.realm))].sort().map(name => <option key={name}>{name}</option>)}</select></label><span className="result-count">{rows.length} results</span>{(kind === "blueprints" || kind === "configs") && <a className="document-action" href={newConfigLink()}>New Config</a>}</div>
       {list.loading && <p className="scope-filter" role="status">Loading {kind}…</p>}
       <div className="table-scroll"><table><thead><tr><th>Name</th><th>Scope</th><th>Type</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{rows.slice(currentPage * 25, (currentPage + 1) * 25).map(doc => { const scope = [...scopeOf(doc.metadata), doc.metadata.name]; return <tr key={JSON.stringify(scope)}><td><a className="resource-name" href={catalogLink(kind, scope)}>{doc.metadata.name}</a></td><td className="scope-cell">{scope.slice(0, -1).join(" / ")}</td><td>{doc.kind as string || catalogTitles[kind]}</td><td className="row-actions"><DocumentRowLink href={catalogLink(kind, scope, true)} label={scope.join(" / ")} /></td></tr>; })}</tbody></table></div>
       {!list.loading && !rows.length && <div className="empty-state"><h3>{list.error ? "Resources could not be loaded" : list.data?.length ? "No matching resources" : `No ${kind} found`}</h3></div>}
@@ -139,6 +139,7 @@ function CatalogDetails({ kind, scope, document, revision, inventory }: { kind: 
     {kind === "secrets" && <p className="description">Secret values are redacted. Only daemon-exposed metadata is available.</p>}
     {doc && <section className="panel"><div className="panel-heading"><h2>{document ? "API document" : "Resource overview"}</h2><span className="badge">Read only</span></div>{document ? <pre tabIndex={0} aria-label={`Complete ${kind} JSON`}>{JSON.stringify(doc, null, 2)}</pre> : <div className="panel-body"><dl className="details-grid"><dt>Name</dt><dd>{doc.metadata.name}</dd><dt>Scope</dt><dd>{scopeOf(doc.metadata).join(" / ")}</dd><dt>Kind</dt><dd>{doc.kind as string}</dd><dt>Labels</dt><dd>{Object.entries(doc.metadata.labels ?? {}).map(([key, value]) => <span className="badge label-badge" key={key}>{key}: {value}</span>)}{!Object.keys(doc.metadata.labels ?? {}).length && "No labels"}</dd>{kind === "volumes" && <><dt>Reclaim policy</dt><dd>{doc.spec?.reclaimPolicy as string || "Default (Delete)"}</dd></>}</dl><p className="description">Use View document for every API-exposed field.</p></div>}</section>}
     {doc && kind === "configs" && !document && <a className="new-cell-action config-create-action" href={newCellLink(scope)}>Create Cell from this Config <span aria-hidden="true">→</span></a>}
+    {doc && kind === "blueprints" && !document && <a className="new-cell-action config-create-action" href={newConfigLink(scope)}>Create Config from this Blueprint <span aria-hidden="true">→</span></a>}
     {doc && !document && <RelatedResources doc={doc} revision={revision} />}
     {doc && kind === "configs" && !document && <ConfigRelationships doc={doc} revision={revision} inventory={inventory} />}
     {doc && kind === "blueprints" && !document && <BlueprintRelationships doc={doc} revision={revision} inventory={inventory} />}

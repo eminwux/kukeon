@@ -103,24 +103,21 @@ type ContainerSpec struct {
 	Resources *ContainerResources   `json:"resources,omitempty"              yaml:"resources,omitempty"`
 	Secrets   []ContainerSecret     `json:"secrets,omitempty"                yaml:"secrets,omitempty"`
 	// Repos declares git repositories the container depends on. The kuketty
-	// wrapper clones (or fetches) each one in a pre-Serve step using the
-	// container's own git identity (~/.ssh, ~/.gitconfig, GIT_SSH_COMMAND),
-	// so the daemon never touches user-owned SSH keys. kuketty reads them
-	// straight from this ContainerDoc.Spec (it owns the spec→TerminalSpec
-	// build since issue #641) — there is no sidecar doc. Has no effect unless
-	// Attachable=true (kuketty owns the resolution step). Per-repo outcome
-	// surfaces in ContainerStatus.Repos over RPC in phase 1b (#642). Issue
-	// #617, phase 1a of #423.
+	// wrapper clones (or fetches) each one in a pre-Serve step with the git
+	// identity and credential resolved for that source (repos[].git over the
+	// container's git default), falling back to whatever the image itself
+	// provides (~/.ssh, ~/.gitconfig, GIT_SSH_COMMAND) when none is declared.
+	// kuketty reads them straight from this ContainerDoc.Spec (it owns the
+	// spec→TerminalSpec build since issue #641) — there is no sidecar doc. Has
+	// no effect unless Attachable=true (kuketty owns the resolution step).
+	// Per-repo outcome surfaces in ContainerStatus.Repos over RPC. Issue #617.
 	Repos []ContainerRepo `json:"repos,omitempty"                  yaml:"repos,omitempty"`
-	// Git declares the container's git identity and signing config as
-	// declarative sugar over the GIT_AUTHOR_* / GIT_COMMITTER_* / GIT_CONFIG_*
-	// environment-variable protocol git reads natively. The container runtime
-	// expands it into that env-var block before container start (merged with
-	// any explicit env: entries, which win on key collision), so cell
-	// templates carry a four-line git: block instead of the hand-rolled
-	// ~13-line GIT_* env duplication. The signingKey path stays per-container
-	// (root-cell vs non-root-cell key paths are not globalised). Issue #618,
-	// phase 2 of #423.
+	// Git declares the container's default git identity, stored credentials
+	// and signing config. The daemon renders it into a cell-global gitconfig
+	// (plus an ssh config, host keys and credential files) staged on the host
+	// and mounted read-only at /.kukeon/git; GIT_CONFIG_SYSTEM points git at
+	// it, so repo-local config and a per-source repos[].git can override it.
+	// Issue #618, #1472.
 	Git           *ContainerGit `json:"git,omitempty"                    yaml:"git,omitempty"`
 	CNIConfigPath string        `json:"cniConfigPath,omitempty"          yaml:"cniConfigPath,omitempty"`
 	RestartPolicy string        `json:"restartPolicy"                    yaml:"restartPolicy"`
@@ -421,6 +418,13 @@ type ContainerRepo struct {
 	// observes the container task as Failed. When false (the default) the
 	// failure is logged but the container proceeds.
 	Required bool `json:"required,omitempty" yaml:"required,omitempty"`
+	// Git is this source's own git identity: author, committer, credential
+	// and signing. Any field left unset falls back to the container's `git`
+	// default. kuketty clones with the source's credential and writes the
+	// identity into the repo's local config, so later commits and pushes in
+	// that checkout use it too — two repos in one container may use different
+	// identities. Issue #1472, step 7.
+	Git *RepoGit `json:"git,omitempty"      yaml:"git,omitempty"`
 }
 
 // GitSignTarget enumerates the artefacts ContainerGit.Sign can enable signing
@@ -433,13 +437,15 @@ const (
 	GitSignTags = "tags"
 )
 
-// ContainerGit is declarative sugar over the GIT_AUTHOR_* / GIT_COMMITTER_* /
-// GIT_CONFIG_* env-var protocol git reads natively. The container runtime
-// expands it into that env block before container start. Author/Committer
-// render the GIT_AUTHOR_*/GIT_COMMITTER_* identity vars; SigningKey, Sign, and
-// AllowedSigners render the GIT_CONFIG_* signing pairs (user.signingkey,
-// gpg.format=ssh, commit.gpgsign, tag.gpgsign, gpg.ssh.allowedSignersFile)
-// with GIT_CONFIG_COUNT tracking the live pair count. Issue #618.
+// ContainerGit is the container's default git identity, credentials and
+// signing config. The daemon renders it into a cell-global gitconfig file
+// mounted read-only under /.kukeon/git and selected with GIT_CONFIG_SYSTEM, so
+// a repo's local config (and a per-source ContainerRepo.Git) can override it —
+// unlike the GIT_AUTHOR_* / GIT_COMMITTER_* / GIT_CONFIG_* environment block it
+// rendered before #1472, which overrode every repo-local setting. Author and
+// Committer render author.* / committer.* (and user.*); SigningKey, Sign and
+// AllowedSigners render the signing keys (user.signingkey, gpg.format=ssh,
+// commit.gpgsign, tag.gpgsign, gpg.ssh.allowedSignersFile). Issue #618, #1472.
 type ContainerGit struct {
 	// Author sets git's author identity (GIT_AUTHOR_NAME / GIT_AUTHOR_EMAIL).
 	// Both name and email are required when present.
@@ -462,12 +468,82 @@ type ContainerGit struct {
 	// set this today, so the field exists for the env block to be a strict
 	// superset of what those templates render.
 	AllowedSigners string `json:"allowedSigners,omitempty" yaml:"allowedSigners,omitempty"`
+	// Credentials binds stored git credentials to remotes. Each entry names a
+	// host (or a URL prefix) and the kind: Secret that authenticates it: a
+	// basic-auth secret serves HTTPS through a git credential helper, an
+	// ssh-key secret serves SSH through a generated per-host ssh config. The
+	// material is mounted as files and never put in an environment variable
+	// or a URL, and a remote's transport follows the credential bound to it.
+	// Merged by Host across Realm → Space → Stack → CellConfig defaults.
+	// Issue #1472, steps 2–3.
+	Credentials []GitCredential `json:"credentials,omitempty"    yaml:"credentials,omitempty"`
+	// Signing signs commits and tags with a stored SSH key (gpg.format=ssh).
+	// It replaces the SigningKey / AllowedSigners in-container paths; setting
+	// both is a validation error. When Sign is empty a Signing block signs
+	// both commits and tags. Issue #1472, step 5.
+	Signing *GitSigning `json:"signing,omitempty"        yaml:"signing,omitempty"`
 }
 
 // GitIdentity is a name/email pair for a git author or committer identity.
 type GitIdentity struct {
 	Name  string `json:"name"  yaml:"name"`
 	Email string `json:"email" yaml:"email"`
+}
+
+// Host-key policies for an SSH git credential.
+const (
+	// GitHostKeyPolicyStrict (the default when empty) accepts only a host key
+	// pinned in the secret's knownHosts, or — when the secret pins none — the
+	// built-in keys for github.com, gitlab.com and bitbucket.org.
+	GitHostKeyPolicyStrict = "strict"
+	// GitHostKeyPolicyAcceptNew opts in to trust-on-first-use: an unseen host
+	// key is accepted and remembered; a changed key is still refused.
+	GitHostKeyPolicyAcceptNew = "accept-new"
+)
+
+// GitCredential binds a stored git credential to the remotes it serves.
+type GitCredential struct {
+	// Host selects the remotes: a host name ("github.com"), a host and port
+	// ("git.example.com:2222"), or a URL prefix ("github.com/eminwux",
+	// "https://github.com/eminwux"). The longest matching prefix wins.
+	// Required in git.credentials[]; must be empty on a repo's own
+	// git.credential (the repo's URL is the match).
+	Host string `json:"host,omitempty"          yaml:"host,omitempty"`
+	// SecretRef names the basic-auth or ssh-key Secret. Required.
+	SecretRef *ContainerSecretRef `json:"secretRef,omitempty"     yaml:"secretRef,omitempty"`
+	// User is the SSH login user (default "git"). ssh-key credentials only.
+	User string `json:"user,omitempty"          yaml:"user,omitempty"`
+	// Port is the SSH port (default 22, or the port in Host). ssh-key
+	// credentials only.
+	Port int `json:"port,omitempty"          yaml:"port,omitempty"`
+	// HostKeyPolicy is "strict" (default) or "accept-new". ssh-key
+	// credentials only.
+	HostKeyPolicy string `json:"hostKeyPolicy,omitempty" yaml:"hostKeyPolicy,omitempty"`
+}
+
+// GitSigning selects the stored SSH key git signs with.
+type GitSigning struct {
+	// SecretRef names the ssh-key Secret whose key signs. Required.
+	SecretRef *ContainerSecretRef `json:"secretRef,omitempty"         yaml:"secretRef,omitempty"`
+	// AllowedSignersRef names an opaque Secret holding git's SSH
+	// allowed-signers file (gpg.ssh.allowedSignersFile), used to verify
+	// signatures. When unset and the signing secret carries a public key, a
+	// one-line file trusting that key for the committer email is generated.
+	AllowedSignersRef *ContainerSecretRef `json:"allowedSignersRef,omitempty" yaml:"allowedSignersRef,omitempty"`
+}
+
+// RepoGit is a single source's git identity (ContainerRepo.Git, and a
+// CellConfig repo fill's `git`). Every field is optional and falls back to the
+// container's default identity.
+type RepoGit struct {
+	Author    *GitIdentity `json:"author,omitempty"     yaml:"author,omitempty"`
+	Committer *GitIdentity `json:"committer,omitempty"  yaml:"committer,omitempty"`
+	// Credential authenticates this source's remote. Host must be empty.
+	Credential *GitCredential `json:"credential,omitempty" yaml:"credential,omitempty"`
+	Signing    *GitSigning    `json:"signing,omitempty"    yaml:"signing,omitempty"`
+	// Sign lists what to sign in this checkout ("commits", "tags"). Empty
+	// inherits the default, or signs both when this source sets Signing.
+	Sign []string `json:"sign,omitempty"       yaml:"sign,omitempty"`
 }
 
 // ContainerCapabilities groups Linux capability deltas applied to the

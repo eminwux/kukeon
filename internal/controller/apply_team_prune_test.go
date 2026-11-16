@@ -71,6 +71,16 @@ func TestApplyDocuments_TeamPruneScopedToLabel(t *testing.T) {
 		ListConfigsFn: func(_, _, _ string) ([]intmodel.CellConfig, error) {
 			return storedCfg, nil
 		},
+		// A team apply reads each stored config's blueprint reference to tell
+		// which shared blueprints are still in use (issue #1472).
+		GetConfigFn: func(cfg intmodel.CellConfig) (intmodel.CellConfig, error) {
+			return storedConfigCarrier(
+				t,
+				cfg.Metadata.Name,
+				cfg.Metadata.Labels[v1beta1.LabelTeam],
+				cfg.Metadata.Name+"-bp",
+			), nil
+		},
 		DeleteConfigFn: func(cfg intmodel.CellConfig) error {
 			deletedCfg = append(deletedCfg, cfg.Metadata.Name)
 			return nil
@@ -261,4 +271,3 @@ func blueprintDoc(index int, name, realm string) parser.Document {
 		CellBlueprintDoc: bp,
 	}
 }
-

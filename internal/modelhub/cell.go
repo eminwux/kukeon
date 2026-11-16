@@ -55,6 +55,9 @@ type CellSpec struct {
 	// metadata so the daemon can re-toggle the full subtree controller set
 	// on the ensure-pass after a restart.
 	NestedCgroupRuntime bool
+	// Requires mirrors v1beta1.CellSpec.Requires: the image capabilities the
+	// cell's non-root containers must provide (#1472).
+	Requires []string
 	// RuntimeEnv mirrors v1beta1.CellSpec.RuntimeEnv. The wire side carries
 	// `kuke run --env KEY=VALUE` from the CLI; the daemon merges these
 	// entries into the attachable container's OCI process env at create /
@@ -89,6 +92,10 @@ type CellProvenance struct {
 	BindingRef   CellBindingRef
 	Params       map[string]string
 	EnvOverrides []string
+	// Mode and ParamOverrides record the create-time harness mode and
+	// `--param` overrides of a Config-bound cell (#1472).
+	Mode           string
+	ParamOverrides map[string]string
 }
 
 // CellBindingRef mirrors v1beta1.CellBindingRef. Issue #1021.
@@ -118,6 +125,14 @@ func CloneCellProvenance(in *CellProvenance) *CellProvenance {
 	}
 	if in.EnvOverrides != nil {
 		out.EnvOverrides = append([]string(nil), in.EnvOverrides...)
+	}
+	out.Mode = in.Mode
+	if in.ParamOverrides != nil {
+		overrides := make(map[string]string, len(in.ParamOverrides))
+		for k, v := range in.ParamOverrides {
+			overrides[k] = v
+		}
+		out.ParamOverrides = overrides
 	}
 	return out
 }
