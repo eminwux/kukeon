@@ -146,6 +146,12 @@ var (
 	// kukeond container is not provisioned (issue #1386, step 7). A kukeond
 	// launched outside its kuke-system cell has no shim log to read.
 	ErrDaemonLogUnavailable = errors.New("kukeond log source unavailable")
+	// ErrHealthReportNotFound marks a ReadHealthReport for an id kukeond
+	// does not hold, or for the newest report when none is stored (#1509).
+	ErrHealthReportNotFound = errors.New("health report not found")
+	// ErrHealthReportInvalid marks a SubmitHealthReport whose document fails
+	// schema validation (#1509). Nothing is stored.
+	ErrHealthReportInvalid = errors.New("invalid health report")
 	// ErrDaemonMethodUnsupported marks an RPC the running kukeond does not
 	// implement — the client is newer than the daemon and kukeond must be
 	// rebuilt/redeployed (e.g. `kuke init --kukeond-image ...`).

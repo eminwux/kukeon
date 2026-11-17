@@ -136,6 +136,12 @@ const (
 	// and so the lock outlives the space directory DeleteSpace removes.
 	KukeonLockSubdir = "locks"
 
+	// KukeonHealthSubdir is the basename of the per-RunPath directory that
+	// holds kukeond's stored health reports (issue #1509). Like the lock
+	// directory it lives outside the metadata tree, so no realm walker
+	// mistakes it for a realm.
+	KukeonHealthSubdir = "health"
+
 	// KukeondSocketShareSubdir is the basename of the directory, beside the
 	// kukeond socket, that holds a hard link to the live socket (issue #1483).
 	// Cells bind-mount this directory rather than the socket file: a file

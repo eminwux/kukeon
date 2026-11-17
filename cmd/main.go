@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,6 +49,12 @@ func getFactories(ctx context.Context) factoryMap {
 
 func execRoot(root *cobra.Command) int {
 	if err := root.Execute(); err != nil {
+		// A command that defines its own exit code (kuke health --exit-code)
+		// returns an error carrying it; everything else is a plain failure.
+		var coded interface{ ExitCode() int }
+		if errors.As(err, &coded) {
+			return coded.ExitCode()
+		}
 		return 1
 	}
 	return 0

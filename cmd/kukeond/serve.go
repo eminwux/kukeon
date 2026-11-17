@@ -119,7 +119,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		PIDFile:           filepath.Join(filepath.Dir(socketPath), "kukeond.pid"),
 		ReconcileInterval: reconcileInterval,
 		Controller: controller.Options{
-			RunPath:          runPath,
+			RunPath: runPath,
+			// The health digest inspects the socket's directory (issue #1509).
+			KukeondSocket:    socketPath,
 			ContainerdSocket: viper.GetString(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey),
 			// Forward the kukeon group GID into the runner so per-container
 			// Attachable tty directories created by daemon-mediated apply/start

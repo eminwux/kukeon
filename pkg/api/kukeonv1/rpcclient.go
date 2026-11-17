@@ -920,6 +920,58 @@ func (c *UnixClient) ReadDaemonLogs(ctx context.Context, req DaemonLogRequest) (
 	return reply.Result, nil
 }
 
+// ReadHealthDigest implements Client (issue #1509).
+func (c *UnixClient) ReadHealthDigest(ctx context.Context, req HealthDigestRequest) (HealthDigest, error) {
+	args := &ReadHealthDigestArgs{Request: req}
+	reply := &ReadHealthDigestReply{}
+	if err := c.call(ctx, MethodReadHealthDigest, args, reply); err != nil {
+		return HealthDigest{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
+// SubmitHealthReport implements Client (issue #1509).
+func (c *UnixClient) SubmitHealthReport(ctx context.Context, report HealthReport) (HealthReport, error) {
+	args := &SubmitHealthReportArgs{Report: report}
+	reply := &SubmitHealthReportReply{}
+	if err := c.call(ctx, MethodSubmitHealthReport, args, reply); err != nil {
+		return HealthReport{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
+// ListHealthReports implements Client (issue #1509).
+func (c *UnixClient) ListHealthReports(ctx context.Context) ([]HealthReportSummary, error) {
+	args := &ListHealthReportsArgs{}
+	reply := &ListHealthReportsReply{}
+	if err := c.call(ctx, MethodListHealthReports, args, reply); err != nil {
+		return nil, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
+// ReadHealthReport implements Client (issue #1509).
+func (c *UnixClient) ReadHealthReport(ctx context.Context, id string) (HealthReport, error) {
+	args := &ReadHealthReportArgs{ID: id}
+	reply := &ReadHealthReportReply{}
+	if err := c.call(ctx, MethodReadHealthReport, args, reply); err != nil {
+		return HealthReport{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
 // Ping implements Client.
 func (c *UnixClient) Ping(ctx context.Context) error {
 	args := &PingArgs{}
