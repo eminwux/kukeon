@@ -77,11 +77,14 @@ func registerHealthRoutes(mux *http.ServeMux, dial Dial) {
 			if err := decoder.Decode(&struct{}{}); err != io.EOF {
 				return nil, fmt.Errorf("%w: expected one JSON document", errdefs.ErrConfig)
 			}
-			if input.Config.Name == "" {
-				return nil, fmt.Errorf("%w: config.name is required", errdefs.ErrConfig)
+			// The same coordinate checks as creating a cell from a config: no
+			// request value reaches a daemon path lookup unvalidated.
+			lookup, err := configLookup(input.Config)
+			if err != nil {
+				return nil, err
 			}
 			stored, err := c.GetConfig(ctx, v1beta1.CellConfigDoc{
-				APIVersion: v1beta1.APIVersionV1Beta1, Kind: v1beta1.KindCellConfig, Metadata: input.Config,
+				APIVersion: v1beta1.APIVersionV1Beta1, Kind: v1beta1.KindCellConfig, Metadata: lookup,
 			})
 			if err != nil {
 				return nil, err
@@ -97,7 +100,7 @@ func registerHealthRoutes(mux *http.ServeMux, dial Dial) {
 				return nil, fmt.Errorf("%w: %s is not a majordomo health-sweep config", errdefs.ErrConfig, input.Config.Name)
 			}
 			created, err := c.CreateCellFromConfig(ctx, kukeonv1.CellFromConfigRequest{
-				Config: stored.Config.Metadata, Start: true,
+				Config: lookup, Start: true,
 			})
 			if err != nil {
 				return nil, err

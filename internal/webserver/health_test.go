@@ -170,6 +170,16 @@ func TestRunSweepNow(t *testing.T) {
 	if w = serveHealth(t, client, http.MethodPost, "/api/health/sweep", "application/json", `{"config":{"name":"x"},"extra":1}`); w.Code != http.StatusBadRequest {
 		t.Errorf("unknown field: %d", w.Code)
 	}
+	for _, unsafe := range []string{
+		`{"config":{"name":"../../etc/passwd","realm":"default"}}`,
+		`{"config":{"name":"x","realm":"../default"}}`,
+		`{"config":{"name":"x","realm":"default","space":"a/b"}}`,
+		`{"config":{"name":"x"}}`,
+	} {
+		if w = serveHealth(t, client, http.MethodPost, "/api/health/sweep", "application/json", unsafe); w.Code != http.StatusBadRequest {
+			t.Errorf("unsafe coordinates %s: %d %s", unsafe, w.Code, w.Body)
+		}
+	}
 	if len(client.created) != 1 {
 		t.Fatalf("a refused request created a cell: %+v", client.created)
 	}
