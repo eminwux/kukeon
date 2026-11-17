@@ -35,6 +35,7 @@ import (
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/team/bootstrap"
+	"github.com/eminwux/kukeon/internal/team/teamtest"
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/compose"
 	"github.com/eminwux/kukeon/pkg/team/config"
@@ -71,9 +72,12 @@ func fixture(t *testing.T) (*config.TeamsConfig, compose.Options) {
 	boot.Config.Spec.Defaults = config.Majordomo().Spec
 	boot.Config.Spec.Defaults.Harnesses = boot.Config.Spec.Defaults.Harnesses[:1]
 	return boot.Config, compose.Options{
-		Sources: map[string]fs.FS{"kukeon": os.DirFS("../../..")},
+		Sources: map[string]fs.FS{"kukeon": copiedSource(t)},
 	}
 }
+
+// shippedSource is the repository as it is, majordomo's extras included.
+func shippedSource() map[string]fs.FS { return map[string]fs.FS{"kukeon": os.DirFS("../../..")} }
 
 func TestRootDefaults(t *testing.T) {
 	cfg, opts := fixture(t)
@@ -219,30 +223,7 @@ func TestSelectedHarnessesAndBindings(t *testing.T) {
 
 func copiedSource(t *testing.T) fstest.MapFS {
 	t.Helper()
-	out := fstest.MapFS{}
-	err := fs.WalkDir(os.DirFS("../../.."), ".", func(name string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() && name != "." && name != "team" && name != "team/harnesses" && name != "team/roles" &&
-			!strings.HasPrefix(name, "team/harnesses/") &&
-			!strings.HasPrefix(name, "team/roles/") {
-			return fs.SkipDir
-		}
-		// team/roles/operator is a directory symlink kept for older releases;
-		// the walk reports it as a non-directory entry.
-		if info, e := os.Stat("../../../" + name); e == nil && info.IsDir() && !d.IsDir() {
-			return nil
-		}
-		if !d.IsDir() {
-			raw, e := os.ReadFile("../../../" + name)
-			if e != nil {
-				return e
-			}
-			out[name] = &fstest.MapFile{Data: raw}
-		}
-		return nil
-	})
+	out, err := teamtest.PlainSource("../../..")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1219,28 +1200,114 @@ func TestInitialPathLaunchAcrossHarnesses(t *testing.T) {
 	}
 }
 
+// TestFreshMajordomoComposition composes the kukeon team exactly as `kuke team
+// init` does on a new host, from the role as shipped (issue #1509): both
+// harness configs on the shared host blueprint with daemon access, and the
+// health sweep rendered hourly but suspended, with no secret required.
 func TestFreshMajordomoComposition(t *testing.T) {
 	boot, err := bootstrap.Run(t.Context(), bootstrap.Options{Root: t.TempDir(), Git: noGit{}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, opts := fixture(t)
-	result, err := compose.Compose(boot.Config, config.Majordomo(), opts)
+	result, err := compose.Compose(boot.Config, config.Majordomo(), compose.Options{Sources: shippedSource()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(result.Pairs) != 2 {
 		t.Fatalf("pairs=%d", len(result.Pairs))
 	}
+	wantMounts := mergeMounts(socketMounts, binaryMounts, installMounts)
 	for i, harnessName := range []string{"codex", "claude"} {
 		p := result.Pairs[i]
-		if p.Config.Metadata.Name != "kukeon-majordomo-"+harnessName || p.Blueprint.Metadata.Name != harnessName ||
-			p.Config.Spec.Blueprint.Name != harnessName || result.Blueprints[i] != p.Blueprint {
-			t.Fatalf("incorrect pair identity: %+v", p)
+		blueprint := harnessName + "-host"
+		if p.Config.Metadata.Name != "kukeon-majordomo-"+harnessName || p.Blueprint.Metadata.Name != blueprint ||
+			p.Config.Spec.Blueprint.Name != blueprint || result.Blueprints[i] != p.Blueprint {
+			t.Fatalf("incorrect pair identity: %s on %s", p.Config.Metadata.Name, p.Blueprint.Metadata.Name)
+		}
+		if p.Config.Metadata.Labels[api.LabelRole] != "majordomo" || p.Config.Metadata.Labels[api.LabelTeam] != "kukeon" ||
+			p.Config.Metadata.Labels[api.LabelTask] != "" {
+			t.Fatalf("%s labels = %v", p.Config.Metadata.Name, p.Config.Metadata.Labels)
+		}
+		if len(p.Secrets) != 0 || len(p.Config.Spec.Secrets) != 0 {
+			t.Fatalf("%s requires secrets: %v", p.Config.Metadata.Name, p.Config.Spec.Secrets)
+		}
+		container := work(t, p, interactive)
+		got := map[string]hostMount{}
+		for _, volume := range container.Volumes {
+			if volume.Kind == api.VolumeKindVolume || volume.Target == "/opt/cni" {
+				continue
+			}
+			got[volume.Target] = hostMount{volume.Source, volume.ReadOnly}
+		}
+		if !reflect.DeepEqual(got, wantMounts) {
+			t.Fatalf("%s host mounts = %v, want %v", harnessName, got, wantMounts)
+		}
+		if !slices.Contains(container.Env, "KUKEON_HOST=unix:///run/kukeon/kukeond/kukeond.sock") {
+			t.Fatalf("%s is not pointed at the host daemon: %v", harnessName, container.Env)
+		}
+
+		if len(p.Tasks) != 1 {
+			t.Fatalf("%s tasks = %d", harnessName, len(p.Tasks))
+		}
+		sweep := p.Tasks[0]
+		if sweep.Metadata.Name != p.Config.Metadata.Name+"-health-sweep" ||
+			sweep.Metadata.Labels[api.LabelTask] != "health-sweep" ||
+			sweep.Metadata.Labels[api.LabelRole] != "majordomo" ||
+			sweep.Spec.Values["PROMPT"] != "Use the health-sweep skill" || !sweep.Spec.AutoDelete ||
+			sweep.Spec.Values["STATE_VOLUME"] != p.Config.Spec.Values["STATE_VOLUME"] {
+			t.Fatalf("sweep config = %+v", sweep)
+		}
+		if sweep.Spec.Schedule == nil || sweep.Spec.Schedule.Cron != "@hourly" || !sweep.Spec.Schedule.Suspend {
+			t.Fatalf("sweep must ship hourly and suspended: %+v", sweep.Spec.Schedule)
 		}
 	}
 	if len(result.Blueprints) != 2 || result.Git != nil || len(result.Notes) != 0 {
 		t.Fatalf("blueprints=%d git=%v notes=%v", len(result.Blueprints), result.Git, result.Notes)
+	}
+}
+
+// TestMajordomoSweepOptIn is the per-install opt-in an edited team entry makes
+// (issue #1509): the sweep is switched on, told where to file, and given the
+// one credential filing needs.
+func TestMajordomoSweepOptIn(t *testing.T) {
+	boot, err := bootstrap.Run(t.Context(), bootstrap.Options{Root: t.TempDir(), Git: noGit{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	team := config.Majordomo()
+	on := false
+	role := &team.Spec.Roles[0]
+	role.Needs.Secrets = []string{"health-github-token"}
+	role.Tasks = &[]config.TaskSelection{{
+		Name: "health-sweep", Suspend: &on, Args: "--file-issues example/kukeon-ops",
+	}}
+	result, err := compose.Compose(boot.Config, team, compose.Options{Sources: shippedSource()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sweep := result.Pairs[0].Tasks[0]
+	if sweep.Spec.Schedule == nil || sweep.Spec.Schedule.Suspend || sweep.Spec.Schedule.Cron != "@hourly" {
+		t.Fatalf("schedule = %+v", sweep.Spec.Schedule)
+	}
+	if got := sweep.Spec.Values["PROMPT"]; got != "Use the health-sweep skill with arguments: --file-issues example/kukeon-ops" {
+		t.Fatalf("prompt = %q", got)
+	}
+	if _, bound := sweep.Spec.Secrets["health-github-token"]; !bound {
+		t.Fatalf("sweep secrets = %v", sweep.Spec.Secrets)
+	}
+	container := work(t, result.Pairs[0], headless)
+	if !slices.ContainsFunc(container.Secrets, func(s api.ContainerSecret) bool { return s.Name == "HEALTH_GITHUB_TOKEN" }) {
+		t.Fatalf("the token is not delivered as HEALTH_GITHUB_TOKEN: %+v", container.Secrets)
+	}
+	// The recorded entry keeps the opt-in, so a later --reapply renders the same.
+	raw, err := yaml.Marshal(result.Entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"health-github-token", "suspend: false", "--file-issues example/kukeon-ops"} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("recorded entry lacks %q:\n%s", want, raw)
+		}
 	}
 }
 

@@ -80,6 +80,13 @@ type definition struct {
 			Params  []string `yaml:"params"`
 			Secrets []string `yaml:"secrets"`
 		} `yaml:"needs"`
+		Tasks []struct {
+			Name     string `yaml:"name"`
+			Skill    string `yaml:"skill"`
+			Args     string `yaml:"args"`
+			Schedule string `yaml:"schedule"`
+			Suspend  bool   `yaml:"suspend"`
+		} `yaml:"tasks"`
 	} `yaml:"spec"`
 }
 
@@ -115,11 +122,22 @@ func TestDefaultRoleAssets(t *testing.T) {
 	if !reflect.DeepEqual(role.Spec.Needs.Image, selection.Needs.Image) {
 		t.Fatalf("role capabilities %v differ from bootstrap %v", role.Spec.Needs.Image, selection.Needs.Image)
 	}
-	if len(role.Spec.Needs.Repos)+len(role.Spec.Needs.Mounts)+len(role.Spec.Needs.Secrets) != 0 {
-		t.Fatal("majordomo should not require project repos, mounts, or non-provider secrets")
+	if len(role.Spec.Needs.Repos)+len(role.Spec.Needs.Secrets) != 0 {
+		t.Fatal("majordomo should not require project repos or non-provider secrets")
 	}
-	if len(role.Spec.Skills) != 1 {
+	// Daemon access comes from the three host mounts (issue #1509).
+	if want := []string{"kukeond-socket", "kuke-binary", "kukeon-install"}; !reflect.DeepEqual(role.Spec.Needs.Mounts, want) {
+		t.Fatalf("mounts = %v, want %v", role.Spec.Needs.Mounts, want)
+	}
+	if len(role.Spec.Skills) != 3 {
 		t.Fatalf("skills: %v", role.Spec.Skills)
+	}
+	// The health sweep ships scheduled but switched off, so no install spends
+	// model credits until its user turns it on.
+	if len(role.Spec.Tasks) != 1 || role.Spec.Tasks[0].Name != "health-sweep" ||
+		role.Spec.Tasks[0].Skill != "health-sweep" || role.Spec.Tasks[0].Schedule != "@hourly" ||
+		!role.Spec.Tasks[0].Suspend || role.Spec.Tasks[0].Args != "" {
+		t.Fatalf("tasks: %+v", role.Spec.Tasks)
 	}
 	for _, path := range role.Spec.Skills {
 		if filepath.IsAbs(path) || !filepath.IsLocal(path) {

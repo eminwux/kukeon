@@ -28,12 +28,21 @@ import (
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/team/bootstrap"
+	"github.com/eminwux/kukeon/internal/team/teamtest"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	"github.com/eminwux/kukeon/pkg/team/config"
 	"gopkg.in/yaml.v3"
 )
 
-func sourceFS() map[string]fs.FS { return map[string]fs.FS{"kukeon": os.DirFS("../../..")} }
+// sourceFS is the repository's team definitions with the majordomo role made
+// plain (no host mounts, no task), so these tests count only what they add.
+func sourceFS() map[string]fs.FS {
+	source, err := teamtest.PlainSource("../../..")
+	if err != nil {
+		panic(err)
+	}
+	return map[string]fs.FS{"kukeon": source}
+}
 
 func setupRun(t *testing.T) Options {
 	t.Helper()

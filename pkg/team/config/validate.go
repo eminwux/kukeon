@@ -267,6 +267,11 @@ func validateSelections(d *Defaults) error {
 					return err
 				}
 			}
+			for j, secret := range role.Needs.Secrets {
+				if !ValidName(secret) {
+					return fmt.Errorf("%s.needs.secrets[%d]: invalid secret name %q", field, j, secret)
+				}
+			}
 		}
 	}
 	return nil

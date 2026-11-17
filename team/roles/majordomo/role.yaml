@@ -5,6 +5,8 @@ metadata:
 spec:
   skills:
     - team/roles/majordomo/skills/create-cell-config
+    - team/roles/majordomo/skills/diagnose
+    - team/roles/majordomo/skills/health-sweep
   harnesses:
     claude:
       settings: config/claude.settings.json
@@ -18,3 +20,12 @@ spec:
   needs:
     image:
       - go
+    mounts:
+      - kukeond-socket
+      - kuke-binary
+      - kukeon-install
+  tasks:
+    - name: health-sweep
+      skill: health-sweep
+      schedule: "@hourly"
+      suspend: true

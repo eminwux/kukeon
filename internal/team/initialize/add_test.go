@@ -33,6 +33,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/eminwux/kukeon/internal/team/teamtest"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	"github.com/eminwux/kukeon/pkg/team/config"
 	"gopkg.in/yaml.v3"
@@ -637,6 +638,11 @@ func TestAddFetchesDefinitionsAndProjectWithoutLocalSources(t *testing.T) {
 			raw, readErr := os.ReadFile(filepath.Join(sourceRoot, path))
 			if readErr != nil {
 				return readErr
+			}
+			if filepath.ToSlash(filepath.Join(dir, path)) == teamtest.MajordomoRole {
+				if raw, readErr = teamtest.PlainRole(raw); readErr != nil {
+					return readErr
+				}
 			}
 			return os.WriteFile(target, raw, 0o600)
 		})

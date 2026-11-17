@@ -92,13 +92,16 @@ func selectTasks(role *model.Role, selection config.Role) ([]model.RoleTask, err
 	return out, nil
 }
 
-// resolveTaskSchedule applies the team's task entry over the role's schedule
-// defaults: a team `schedule` replaces the role's, a team `suspend` — true or
+// resolveTaskSchedule applies the team's task entry over the role's defaults:
+// a team `args` replaces the role's argument text, a team `schedule` replaces the role's, a team `suspend` — true or
 // false — replaces the role's. A `suspend` on a task that ends up with no
 // schedule is refused: there is nothing for it to switch.
 func resolveTaskSchedule(roleName string, selection config.Role, task model.RoleTask) (model.RoleTask, error) {
 	entry, _ := selection.TaskSelection(task.Name)
 	suspendSet := task.Suspend
+	if entry.Args != "" {
+		task.Args = entry.Args
+	}
 	if entry.Schedule != "" {
 		if _, err := cronspec.Parse(entry.Schedule); err != nil {
 			return task, fmt.Errorf("roles %s: tasks: %s: schedule: %w", selection.Name, task.Name, err)

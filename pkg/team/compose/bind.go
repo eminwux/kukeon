@@ -32,6 +32,9 @@ import (
 // planSecrets decides, for one pair, which optional components it enables and
 // which runtime secret fills each blueprint secret slot.
 //
+// A team entry may add secret names of its own (`roles[].needs.secrets`); they
+// resolve like the role's.
+//
 // A role names what it needs three ways: `connectors` / `forges` (components
 // of the library), and the secret names in `harnesses.<h>.secrets` /
 // `needs.secrets`. A secret name selects, in order: the component slot that
@@ -74,7 +77,12 @@ func planSecrets(plan *pairPlan, lib []component.Component, secrets *secretBindi
 		plan.fills = append(plan.fills, secretFill{slot: slot, binding: binding})
 		bound[slot.Name] = true
 	}
-	for _, name := range union(plan.role.Spec.Needs.Secrets, plan.settings.Secrets) {
+	names := union(plan.role.Spec.Needs.Secrets, plan.settings.Secrets)
+	// Secrets the team adds for this deployment (issue #1509).
+	if plan.selection.Needs != nil {
+		names = union(names, plan.selection.Needs.Secrets)
+	}
+	for _, name := range names {
 		binding, err := secrets.lookup(name)
 		if err != nil {
 			return err

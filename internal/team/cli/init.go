@@ -34,7 +34,7 @@ func newInitCommand(
 	run func(context.Context, initialize.Options) (initialize.Result, error),
 ) *cobra.Command {
 	var host, configuration string
-	var force bool
+	var force, reapply bool
 	var importGit initialize.GitImport
 	cmd := &cobra.Command{
 		Use:   "init",
@@ -48,6 +48,13 @@ func newInitCommand(
 					"--git-key, --git-key-passphrase-file and --git-known-hosts require --import-git-identity",
 				)
 			}
+			if reapply && force {
+				return errors.New("--reapply and --force are mutually exclusive: " +
+					"--reapply keeps the stored kukeon entry, --force replaces it with the initial declaration")
+			}
+			if reapply && importGit.Enabled {
+				return errors.New("--reapply does not import a git identity; use --force --import-git-identity")
+			}
 			home, err := homeDir()
 			if err != nil {
 				return fmt.Errorf("resolve operator home directory: %w", err)
@@ -60,6 +67,7 @@ func newInitCommand(
 					Host:          host,
 					Configuration: configuration,
 					Force:         force,
+					Reapply:       reapply,
 					ImportGit:     importGit,
 				},
 			)
@@ -74,6 +82,9 @@ func newInitCommand(
 			status := "Created configuration"
 			if force {
 				status = "Reset configuration"
+			}
+			if reapply {
+				status = "Kept configuration"
 			}
 			_, err = fmt.Fprintf(
 				cmd.OutOrStdout(),
@@ -102,6 +113,8 @@ func newInitCommand(
 	cmd.Flags().StringVar(&host, "host", "", "kukeond Unix endpoint (overrides KUKEON_HOST and kuke.yaml)")
 	cmd.Flags().
 		BoolVar(&force, "force", false, "Replace existing configuration and apply the initial majordomo declaration")
+	cmd.Flags().
+		BoolVar(&reapply, "reapply", false, "Recompose and apply the kukeon team from its stored entry (~/.kuke/kuketeam.d/kukeon.yaml), pruning obsolete configs; kuketeams.yaml is not touched")
 	cmd.Flags().
 		StringVar(&configuration, "configuration", "", "kuke ClientConfiguration path (default KUKE_CONFIGURATION or ~/.kuke/kuke.yaml)")
 	return cmd

@@ -46,6 +46,9 @@ const (
 type Options struct {
 	Root, Home, Host, Configuration string
 	Force                           bool
+	// Reapply recomposes the kukeon team from its stored entry instead of
+	// initializing. It never touches kuketeams.yaml and excludes Force.
+	Reapply bool
 	Sources                         map[string]fs.FS
 	Client                          Client
 	// ImportGit, when Enabled, stores the operator's SSH key as a secret and
@@ -68,6 +71,9 @@ type Result struct {
 // Run initializes only when configuration is absent, unless Force resets it.
 // Partial daemon application is not rolled back; a forced rerun converges the team.
 func Run(ctx context.Context, opts Options) (Result, error) {
+	if opts.Reapply {
+		return reapply(ctx, opts)
+	}
 	configPath := filepath.Join(opts.Root, "kuketeams.yaml")
 	if !opts.Force {
 		if _, err := os.Lstat(configPath); err == nil {
@@ -143,6 +149,52 @@ func writeConfig(path string, cfg *config.TeamsConfig) error {
 	return nil
 }
 
+// reapply recomposes the kukeon team from its stored entry and applies it
+// (issue #1509). The entry is the team's editable source: the place to switch
+// the health sweep on, for one. The daemon prunes the configs the new
+// composition no longer renders, and runTeam rewrites the entry only after a
+// fully successful apply. kuketeams.yaml is read, never written.
+func reapply(ctx context.Context, opts Options) (Result, error) {
+	if opts.Force {
+		return Result{}, errors.New("init: --reapply and --force are mutually exclusive: " +
+			"--reapply keeps the stored kukeon entry, --force replaces it with the initial declaration")
+	}
+	if opts.ImportGit.Enabled {
+		return Result{}, errors.New(
+			"init: --reapply does not import a git identity; use kuke team init --force --import-git-identity")
+	}
+	entryPath := filepath.Join(opts.Root, "kuketeam.d", majordomoName+".yaml")
+	if _, err := os.Stat(entryPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return Result{}, fmt.Errorf(
+				"init: --reapply needs the stored kukeon entry at %s, which does not exist; "+
+					"run kuke team init first (or kuke team init --force to start over)", entryPath)
+		}
+		return Result{}, fmt.Errorf("init: inspect %s: %w", entryPath, err)
+	}
+	configPath := filepath.Join(opts.Root, "kuketeams.yaml")
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		return Result{}, fmt.Errorf("init: --reapply cannot read %s: %w; run kuke team init first", configPath, err)
+	}
+	cfg, err := config.Decode(bytes.NewReader(raw))
+	if err != nil {
+		return Result{}, fmt.Errorf("init: global configuration %s: %w", configPath, err)
+	}
+	// Strict decode: an edit with an unknown or misspelled field stops here,
+	// before any source is fetched or anything reaches the daemon.
+	team, err := readNamedTeam(entryPath, majordomoName)
+	if err != nil {
+		return Result{}, err
+	}
+	recorded, err := readEntrySecrets(entryPath)
+	if err != nil {
+		return Result{}, err
+	}
+	result := Result{Bootstrap: bootstrap.Result{Path: configPath, Config: cfg}}
+	return runTeam(ctx, opts, cfg, team, recorded, result, "kuke team init --reapply", nil)
+}
+
 // runTeam is shared by init and add; staging precedes all daemon writes.
 func runTeam(
 	ctx context.Context,
@@ -203,7 +255,7 @@ func runTeam(
 	}
 	done, err := apply(ctx, client, composed, command, imported)
 	if err != nil {
-		if command != "kuke team init" {
+		if !strings.HasPrefix(command, "kuke team init") {
 			return result, fmt.Errorf(
 				"%w; after fixing the prerequisite, rerun %s with the same revision flags",
 				err,
