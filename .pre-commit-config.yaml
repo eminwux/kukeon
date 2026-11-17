@@ -24,7 +24,8 @@ repos:
         exclude: ^internal/webui/dist/
       - id: check-yaml
         args: ["--allow-multiple-documents", "--unsafe"]
-        exclude: ^examples/profiles/local\.yaml$
+        # *.tmpl.yaml are Go text/template sources, not YAML documents.
+        exclude: ^(examples/profiles/local\.yaml|.*\.tmpl\.ya?ml)$
       - id: check-json
       - id: check-toml
       - id: detect-private-key
@@ -63,7 +64,9 @@ repos:
     hooks:
       - id: prettier
         files: \.(md|json|yml|yaml)$
-        exclude: ^ROADMAP\.md$
+        # *.tmpl.yaml are Go text/template sources that render to YAML;
+        # prettier cannot parse the template directives.
+        exclude: ^(ROADMAP\.md|.*\.tmpl\.ya?ml)$
 
   - repo: https://github.com/jorisroovers/gitlint
     rev: v0.19.1
