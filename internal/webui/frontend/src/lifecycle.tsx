@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { availableLifecycleActions, canConfirmDestructiveAction } from "./lifecycle-policy.js";
-import { Icon } from "./icons";
+import { DocumentRowLink, Icon, RowAction, RowActions } from "./icons";
+import { resourceLink, workspaceLink } from "./routes";
 
 export type LifecycleAction = "start" | "stop" | "restart" | "kill" | "delete" | "purge";
 export type DestructiveAction = Extract<LifecycleAction, "kill" | "delete" | "purge">;
@@ -119,6 +120,45 @@ function AdvancedCellActions({
         </section>
       </div>
     </details>
+    {confirming && <CellActionConfirmation
+      action={confirming}
+      scope={scope}
+      onCancel={() => setConfirming(null)}
+      onConfirm={options => { setConfirming(null); onAction(scope, confirming, undefined, options); }}
+    />}
+  </>;
+}
+
+const actionTitle: Record<LifecycleAction, string> = { start: "Start", stop: "Stop", restart: "Restart", kill: "Kill", delete: "Delete", purge: "Purge" };
+
+// Quick actions for one row of the Cells table (#1494). Start/Stop/Restart run immediately, as on the
+// cell screen; Kill, Delete and Purge always open CellActionConfirmation first. Every action goes through
+// the same onAction (runCellLifecycle) as the cell screen, and an in-flight action disables the row.
+export function CellRowActions({
+  scope,
+  state,
+  operation,
+  onAction,
+}: {
+  scope: string[];
+  state?: string;
+  operation?: LifecycleFeedback;
+  onAction: (scope: string[], action: LifecycleAction, state?: string, options?: PurgeOptions) => void;
+}) {
+  const [confirming, setConfirming] = useState<DestructiveAction | null>(null);
+  const pending = operation?.phase === "pending";
+  const target = scope.join(" / ");
+  const button = (action: LifecycleAction, icon: LifecycleAction, run: () => void, danger = false) => {
+    const busy = pending && operation?.action === action;
+    return <RowAction key={action} icon={icon} label={`${actionTitle[action]} cell ${target}`} title={busy || danger ? `${actionTitle[action]}…` : actionTitle[action]} danger={danger} disabled={pending} busy={busy} onClick={run} />;
+  };
+  return <>
+    <RowActions busy={pending}>
+      {availableLifecycleActions(state).map(action => button(action, action, () => onAction(scope, action, state)))}
+      <RowAction icon="terminal" href={workspaceLink(scope)} label={`Open terminal for ${target}`} title="Open terminal" />
+      {(["kill", "delete", "purge"] as const).map(action => button(action, action, () => { if (!pending) setConfirming(action); }, true))}
+      <DocumentRowLink href={resourceLink(scope, true)} label={target} />
+    </RowActions>
     {confirming && <CellActionConfirmation
       action={confirming}
       scope={scope}

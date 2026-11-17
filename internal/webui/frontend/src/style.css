@@ -149,10 +149,19 @@ tbody tr:hover { background: var(--code); }
 /* The row action stays in the tab order and reveals itself on row hover or keyboard focus. */
 .row-actions { width: 1%; text-align: right; white-space: nowrap; }
 td:first-child .resource-name { white-space: nowrap; }
-.row-action { display: inline-grid; place-items: center; width: 24px; height: 24px; margin: -2px 0; border-radius: 6px; color: var(--muted); opacity: 0; }
+.row-action { display: inline-grid; place-items: center; width: 24px; height: 24px; margin: -2px 0; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); opacity: 0; }
 .row-action svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-tr:hover .row-action, li:hover .row-action, .row-action:focus-visible { opacity: 1; }
-.row-action:hover { color: var(--accent); background: var(--selected); }
+tr:hover .row-action, li:hover .row-action, tr:focus-within .row-action, .row-action:focus-visible { opacity: 1; }
+.row-action:hover:not(:disabled) { color: var(--accent); background: var(--selected); }
+/* Row quick actions (#1494): a compact icon group; destructive icons share the danger tokens. */
+.row-action-group { display: inline-flex; align-items: center; gap: 2px; vertical-align: middle; }
+.row-action.is-danger { color: var(--status-error); }
+.row-action.is-danger:hover:not(:disabled) { color: var(--status-error); background: var(--status-error-bg); }
+.row-action:disabled { cursor: not-allowed; }
+.row-action-group[aria-busy="true"] .row-action { opacity: .4; }
+.row-action-group[aria-busy="true"] .row-action.is-busy { opacity: 1; color: var(--status-pending); }
+.row-action.is-busy svg { animation: refresh-spin 1s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .row-action.is-busy svg { animation: none; } }
 @media (hover: none) { .row-action { opacity: 1; } }
 .document-action { display: inline-block; border: 1px solid var(--line); border-radius: 5px; padding: 6px 10px; font-size: 11px; white-space: nowrap; background: var(--panel); }
 .document-action:hover { border-color: var(--accent); color: var(--accent); }

@@ -16,7 +16,7 @@ import { RegistryCredentialsPanel, type RegistryCredential } from "./registry-cr
 import { ImagesPage } from "./image-inventory";
 import { NetworkPanel, networkKinds } from "./network";
 import { DaemonHealthPage, DaemonLogsPage } from "./daemon";
-import { CellLifecycleControls, type LifecycleAction, type LifecycleFeedback, type PurgeOptions } from "./lifecycle";
+import { CellLifecycleControls, CellRowActions, type LifecycleAction, type LifecycleFeedback, type PurgeOptions } from "./lifecycle";
 import { InventoryIndicator, NotificationProvider, useNotify } from "./notifications";
 import { cellRemovalConfirmed, deleteOperationComplete, purgeOperationComplete, requestedPurgeOptions } from "./lifecycle-policy.js";
 
@@ -66,7 +66,13 @@ function Dashboard({ inventory }: { inventory: Resource<Inventory> }) {
     </section>
   </>;
 }
-function ResourceList({ depth, inventory, parent }: { depth: number; inventory: Resource<Inventory>; parent: string[] }) {
+function ResourceList({ depth, inventory, parent, operations, onLifecycleAction }: {
+  depth: number;
+  inventory: Resource<Inventory>;
+  parent: string[];
+  operations: Record<string, LifecycleFeedback>;
+  onLifecycleAction: (scope: string[], action: LifecycleAction, state?: string, options?: PurgeOptions) => void;
+}) {
   const [search, setSearch] = useState("");
   const [realm, setRealm] = useState("");
   const [page, setPage] = useState(0);
@@ -78,7 +84,7 @@ function ResourceList({ depth, inventory, parent }: { depth: number; inventory: 
   return <section className="panel" aria-label={`${titles[depth]} list`}>
     <div className="list-controls"><label className="search-field">Search<input type="search" placeholder={`Search ${titles[depth].toLowerCase()}…`} value={search} onChange={e => { setSearch(e.target.value); setPage(0); }} /></label>{depth > 0 && <label>Realm<select aria-label="Filter by realm" value={realm} onChange={e => { setRealm(e.target.value); setPage(0); }}><option value="">All realms</option>{inventory.data?.rows[0].map(row => <option key={row.scope[0]}>{row.scope[0]}</option>)}</select></label>}<span className="result-count">{filtered.length} results</span></div>
     {parent.length > 0 && <p className="scope-filter">Scope: {parent.join(" / ")} <a href={listLink(depth)}>Clear scope</a></p>}
-    <div className="table-scroll"><table><thead><tr><th>Name</th><th>State</th><th>Scope</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{filtered.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(row => <tr key={JSON.stringify(row.scope)}><td><a className="resource-name" href={resourceLink(row.scope)}>{row.doc.metadata.name}</a></td><td><StateBadge state={row.doc.status?.state} /></td><td className="scope-cell">{row.scope.slice(0, -1).join(" / ") || "—"}</td><td className="row-actions"><DocumentRowLink href={resourceLink(row.scope, true)} label={row.scope.join(" / ")} /></td></tr>)}</tbody></table></div>
+    <div className="table-scroll"><table><thead><tr><th>Name</th><th>State</th><th>Scope</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{filtered.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(row => <tr key={JSON.stringify(row.scope)}><td><a className="resource-name" href={resourceLink(row.scope)}>{row.doc.metadata.name}</a></td><td><StateBadge state={row.doc.status?.state} /></td><td className="scope-cell">{row.scope.slice(0, -1).join(" / ") || "—"}</td><td className="row-actions">{depth === 3 ? <CellRowActions scope={row.scope} state={row.doc.status?.state} operation={operations[JSON.stringify(row.scope)]} onAction={onLifecycleAction} /> : <DocumentRowLink href={resourceLink(row.scope, true)} label={row.scope.join(" / ")} />}</td></tr>)}</tbody></table></div>
     {!filtered.length && <div className="empty-state"><h3>{inventory.loading ? "Loading resources…" : inventory.error || inventory.data?.failures.length ? "Resources could not be fully loaded" : scoped.length ? "No matching resources" : `No ${titles[depth].toLowerCase()} found`}</h3><p>{search || realm ? "Try another search or clear the filters." : "Refresh to retrieve the latest resource state."}</p></div>}
     <div className="pagination"><span>{filtered.length ? `${currentPage * pageSize + 1}–${Math.min((currentPage + 1) * pageSize, filtered.length)} of ${filtered.length}` : "0 results"}</span><button disabled={!currentPage} onClick={() => setPage(currentPage - 1)}>Previous</button><button disabled={(currentPage + 1) * pageSize >= filtered.length} onClick={() => setPage(currentPage + 1)}>Next</button></div>
   </section>;
@@ -281,6 +287,12 @@ function App() {
     const named = screenCell.current !== key || operation.action === "delete" || operation.action === "purge";
     notify({ key: `lifecycle:${key}`, tone: operation.phase, title: named ? scope.join(" / ") : undefined, message: operation.message });
   }
+  // A confirmed removal closes the cell's terminals. Only the removed cell's own screen navigates home;
+  // a removal started from the Cells table keeps the table, where the row drops on the next inventory read.
+  function leaveRemovedCell(scope: string[]) {
+    terminals.removeCell(scope);
+    if (screenCell.current === JSON.stringify(scope)) window.location.hash = homeLink;
+  }
   async function runCellLifecycle(scope: string[], action: LifecycleAction, state?: string, options?: PurgeOptions) {
     const key = JSON.stringify(scope);
     if (pendingOperations.current.has(key)) return;
@@ -318,8 +330,7 @@ function App() {
         if (action === "delete" || action === "purge") {
           presence = await readCellPresence(scope);
           if (presence === false) {
-            terminals.removeCell(scope);
-            window.location.hash = homeLink;
+            leaveRemovedCell(scope);
           } else if (failure.code === "unavailable") {
             terminals.interruptCell(scope, "The destructive action did not return a result. This cell's terminal may have been affected; refresh before reconnecting.");
           }
@@ -363,10 +374,7 @@ function App() {
       }
       if (action === "delete") {
         const presence = body.metadataDeleted ? false : await readCellPresence(scope);
-        if (cellRemovalConfirmed(body.metadataDeleted, presence)) {
-          terminals.removeCell(scope);
-          window.location.hash = homeLink;
-        }
+        if (cellRemovalConfirmed(body.metadataDeleted, presence)) leaveRemovedCell(scope);
         const complete = deleteOperationComplete(body);
         const outcome = body.metadataDeleted
           ? "kukeond reports that cell metadata was deleted."
@@ -382,10 +390,7 @@ function App() {
       }
       if (action === "purge") {
         const presence = body.metadataDeleted ? false : await readCellPresence(scope);
-        if (cellRemovalConfirmed(body.metadataDeleted, presence)) {
-          terminals.removeCell(scope);
-          window.location.hash = homeLink;
-        }
+        if (cellRemovalConfirmed(body.metadataDeleted, presence)) leaveRemovedCell(scope);
         const complete = purgeOperationComplete(body);
         const outcome = body.metadataDeleted
           ? "kukeond reports that cell metadata was deleted."
@@ -419,8 +424,7 @@ function App() {
       } else if (action === "delete" || action === "purge") {
         const presence = await readCellPresence(scope);
         if (presence === false) {
-          terminals.removeCell(scope);
-          window.location.hash = homeLink;
+          leaveRemovedCell(scope);
           outcome = " A fresh daemon read confirms the cell is gone; its terminal tabs were closed.";
         } else if (presence === true) {
           terminals.interruptCell(scope, "The destructive action response was lost. The cell still exists, but its runtime may have changed; refresh before reconnecting.");
@@ -528,7 +532,7 @@ function App() {
         {!isWorkspace && !cellScreenScope && <ResourcesNavigation route={route} />}
         {!cellScreenScope && <div className="page-heading"><h1>{heading}</h1>{headingContext && <p className="page-context mono-id">{headingContext}</p>}</div>}
         <CellDetailsScreen title={heading ?? "Cell"} view={cellView} scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} operations={operations} onLifecycleAction={runCellLifecycle} />
-        {isWorkspace ? null : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "new-config" ? <Suspense fallback={<p role="status">Loading Config creation form…</p>}><NewConfigPage key={JSON.stringify(route.blueprint ?? [])} revision={revision} inventory={inventory} blueprintScope={route.blueprint} onCreated={() => setRevision(value => value + 1)} /></Suspense> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} inventory={inventory} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} /> : <Dashboard inventory={inventory} />}
+        {isWorkspace ? null : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "new-config" ? <Suspense fallback={<p role="status">Loading Config creation form…</p>}><NewConfigPage key={JSON.stringify(route.blueprint ?? [])} revision={revision} inventory={inventory} blueprintScope={route.blueprint} onCreated={() => setRevision(value => value + 1)} /></Suspense> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} inventory={inventory} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} operations={operations} onLifecycleAction={runCellLifecycle} /> : <Dashboard inventory={inventory} />}
         <footer>Daemon inventory · {inventory.data ? <>Last refreshed <time dateTime={inventory.data.updatedAt}>{new Date(inventory.data.updatedAt).toLocaleTimeString()}</time></> : "Not refreshed yet"} · Refresh to retrieve the latest state.</footer>
       </div>
     </main>

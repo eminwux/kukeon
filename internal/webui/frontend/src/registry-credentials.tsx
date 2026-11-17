@@ -1,6 +1,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { ErrorNotice, type Failure } from "./request";
 import { useNotify } from "./notifications";
+import { RowAction, RowActions } from "./icons";
 
 // RegistryCredential is the redacted realm entry kuke serve returns (#1407):
 // the password is always blank, so it is never read from the document.
@@ -69,7 +70,7 @@ export function RegistryCredentialsPanel({ realm, credentials, onSaved }: { real
     <div className="panel-body">
       <p className="description">Pull credentials for private registries. Tokens are write-only and never shown; saving an entry for an existing server replaces it.</p>
       {credentials.length ? <table className="data-table"><thead><tr><th scope="col">Server</th><th scope="col">Username</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead><tbody>
-        {credentials.map(cred => <tr key={cred.serverAddress ?? ""}><td>{cred.serverAddress ? <code>{cred.serverAddress}</code> : serverLabel()}</td><td>{cred.username}</td><td><button type="button" aria-label={`Replace credential for ${serverLabel(cred.serverAddress)}`} onClick={() => edit(cred)}>Replace</button></td></tr>)}
+        {credentials.map(cred => <tr key={cred.serverAddress ?? ""}><td>{cred.serverAddress ? <code>{cred.serverAddress}</code> : serverLabel()}</td><td>{cred.username}</td><td className="row-actions"><RowActions><RowAction icon="edit" label={`Replace credential for ${serverLabel(cred.serverAddress)}`} title="Replace credential" onClick={() => edit(cred)} /></RowActions></td></tr>)}
       </tbody></table> : <p>No registry credentials are configured for this realm.</p>}
       <form className="registry-credential-form" aria-label="Add or replace registry credential" method="post" autoComplete="off" onSubmit={submit}>
         <label>Server (empty: from image reference)<input name="server" value={server} placeholder="ghcr.io" autoComplete="off" spellCheck={false} onChange={e => setServer(e.target.value)} /></label>
