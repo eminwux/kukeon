@@ -199,6 +199,18 @@ Refresh updates the current list/document and reference checks. Empty results,
 loading, retrieval failures, missing targets, and retained stale data are shown
 separately. No catalog data is read directly from daemon storage.
 
+Documents cannot be edited in the browser, but every Blueprint, Config, Volume,
+and Secret row has a **Delete** row action matching `kuke delete
+blueprint|config|volume|secret`. The confirmation names the kind and full scope
+and needs an acknowledgement before anything is sent. For Configs it lists the
+Cells created from the Config; for Blueprints it lists the Configs that reference
+it and their Cells. Only relationships the UI already loads are shown. Deleting
+a Config or Blueprint never deletes those dependents. Volume deletion removes the
+daemon-provisioned directory and its data. Secret values are never shown. The row
+is removed only when a fresh read reports the resource missing; daemon refusals,
+such as a Secret still referenced by a cell or a Volume mounted by a running
+cell, are shown verbatim and the row stays.
+
 ## Cgroup details
 
 Realm, space, stack, cell, and container detail views include a **Cgroup**
@@ -491,6 +503,8 @@ persist in this browser when local storage is available.
 
 - `GET /api/catalog/{blueprints|configs|volumes|secrets}` lists resources.
 - `GET /api/catalog/{kind}/{name}` reads a complete daemon-exposed document.
+- `POST /api/catalog/{kind}/{name}/delete` deletes one resource through the
+  daemon's `DeleteBlueprint`, `DeleteConfig`, `DeleteVolume`, or `DeleteSecret`.
 
 Optional list query parameters `realm`, `space`, `stack`, and (secrets only)
 `cell` filter the scope subtree. Detail queries require `realm` and use the exact
@@ -498,6 +512,15 @@ scope coordinates. Deeper coordinates require every shallower coordinate;
 non-secret cell scope and scope gaps return `invalid_request` (400). Names and
 query values must be URL-encoded. Missing resources return `not_found` (404).
 Secret responses never include `spec.data`.
+
+Delete takes the same scope query as a detail read. It requires
+`Content-Type: application/json` with an empty body or `{}`, and the same
+Host/Origin checks as every other request. A missing resource returns
+`not_found` (404). A Secret still referenced by a cell, or a Volume mounted by a
+running cell, returns `in_use` (409). Other daemon errors keep their usual
+mapping. Every error message is the daemon's own text. A success returns
+`kind`, `name`, `scope`, and `deleted`, and for Configs `backRefCells`: the
+Cells that still carry the Config's lineage label.
 
 ### Create a Cell
 

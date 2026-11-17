@@ -266,6 +266,9 @@ func apiErrorStatus(err error) (int, string) {
 		status, code = http.StatusNotFound, "log_unavailable"
 	case errors.Is(err, errdefs.ErrCellAlreadyExists):
 		status, code = http.StatusConflict, "already_exists"
+	case errors.Is(err, errdefs.ErrSecretInUse),
+		errors.Is(err, errdefs.ErrVolumeInUse):
+		status, code = http.StatusConflict, "in_use"
 	case errors.Is(err, fs.ErrPermission):
 		status, code = http.StatusForbidden, "permission_denied"
 	case errors.Is(err, errdefs.ErrBlueprintNotFound),
