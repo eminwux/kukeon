@@ -4,6 +4,10 @@ import {
   availableLifecycleActions,
   canConfirmDestructiveAction,
   cellRemovalConfirmed,
+  cellsWithin,
+  descendantCounts,
+  disruptsDaemon,
+  parentActionsAllowed,
   deleteOperationComplete,
   purgeOperationComplete,
   requestedPurgeOptions,
@@ -44,4 +48,28 @@ test("partial Delete and Purge results are not presented as complete", () => {
   assert.equal(purgeOperationComplete({ purgeSucceeded: true, metadataDeleted: true, cgroupDeleted: true }), true);
   assert.equal(purgeOperationComplete({ purgeSucceeded: false, metadataDeleted: true, cgroupDeleted: true }), false);
   assert.equal(purgeOperationComplete({ purgeSucceeded: true, metadataDeleted: false, cgroupDeleted: true }), false);
+});
+
+test("parent row actions are hidden only on the kuke-system realm row", () => {
+  assert.equal(parentActionsAllowed(["default"]), true);
+  assert.equal(parentActionsAllowed(["kuke-system"]), false);
+  assert.equal(parentActionsAllowed(["kuke-system", "kukeon"]), true);
+  assert.equal(parentActionsAllowed(["kuke-system", "kukeon", "kukeon"]), true);
+  assert.equal(parentActionsAllowed(["r", "s", "t", "c"]), false);
+  assert.equal(disruptsDaemon(["kuke-system", "kukeon"]), true);
+  assert.equal(disruptsDaemon(["default", "kuke-system"]), false);
+});
+
+test("descendant counts and removed cells come from the inventory beneath the scope", () => {
+  const rows = [
+    [{ scope: ["r"] }, { scope: ["r2"] }],
+    [{ scope: ["r", "s"] }, { scope: ["r", "s2"] }, { scope: ["r2", "s"] }],
+    [{ scope: ["r", "s", "t"] }, { scope: ["r", "s2", "t"] }],
+    [{ scope: ["r", "s", "t", "c1"] }, { scope: ["r", "s", "t", "c2"] }, { scope: ["r2", "s", "t", "c"] }],
+  ];
+  assert.deepEqual(descendantCounts(rows, ["r"]), [2, 2, 2]);
+  assert.deepEqual(descendantCounts(rows, ["r", "s"]), [1, 2]);
+  assert.deepEqual(descendantCounts(rows, ["r", "s2", "t"]), [0]);
+  assert.deepEqual(cellsWithin(rows, ["r", "s"]), [["r", "s", "t", "c1"], ["r", "s", "t", "c2"]]);
+  assert.deepEqual(cellsWithin(rows, ["r2"]), [["r2", "s", "t", "c"]]);
 });

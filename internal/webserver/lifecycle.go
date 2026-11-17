@@ -237,5 +237,8 @@ func lifecycleErrorStatus(err error) (int, string) {
 	if errors.Is(err, errdefs.ErrCellOperationInProgress) {
 		return http.StatusConflict, "operation_in_progress"
 	}
+	if errors.Is(err, errdefs.ErrResourceHasDependencies) {
+		return http.StatusConflict, "has_dependencies"
+	}
 	return apiErrorStatus(err)
 }

@@ -78,6 +78,45 @@ Permission errors, daemon rejections, and partial cleanup leave the cell visible
 when kukeond still reports it. Refresh inventory before retrying an action with
 an unknown outcome.
 
+## Realm, space, and stack Delete and Purge
+
+Rows in the Realms, Spaces, and Stacks tables carry **Delete** and **Purge**
+icons, matching `kuke delete|purge realm|space|stack`. Each icon opens a
+confirmation that names the exact target and the child counts already in the
+inventory. It also offers `--cascade` and `--force`, both unchecked. Delete
+requires an acknowledgment checkbox. Purge requires typing the full scope.
+Without `--cascade` or `--force`, kukeond refuses to remove a parent that has
+children. The UI shows that refusal verbatim, with a hint to enable cascade,
+and nothing changes.
+
+The `kuke-system` realm row has no Delete or Purge icon. For spaces and stacks
+inside `kuke-system`, the confirmation warns that the action can stop kukeond
+and disconnect the UI, and that `kuke init` recovers it.
+
+After the request, the UI reads the target again. Terminal tabs of cells under
+the target close only when that read confirms the target is gone. The inventory
+is then refreshed. Rows, their descendants, and sidebar cells disappear only
+when the refreshed read omits them. A partial result is reported as incomplete
+and lists the daemon's `deleted`/`purged` items.
+
+The JSON POST endpoints take an optional body `{ "force": false, "cascade": false }`
+(`Content-Type: application/json`; omitted fields default to `false`):
+
+| Path                                                                | Daemon call                  |
+| ------------------------------------------------------------------- | ---------------------------- |
+| `/api/realms/{realm}/{delete\|purge}`                               | `DeleteRealm` / `PurgeRealm` |
+| `/api/realms/{realm}/spaces/{space}/{delete\|purge}`                | `DeleteSpace` / `PurgeSpace` |
+| `/api/realms/{realm}/spaces/{space}/stacks/{stack}/{delete\|purge}` | `DeleteStack` / `PurgeStack` |
+
+A response contains `action`, `force`, `cascade`, the affected document, and
+the daemon result fields: `deleted`, plus `purged`, `metadataDeleted`,
+`cgroupDeleted`, `purgeSucceeded`, `realmDeleted`, `cniNetworkDeleted`, or
+`containerdNamespaceDeleted` where the daemon reports them. A child refusal
+returns `has_dependencies` (409). An action whose scope overlaps one already
+running returns `operation_in_progress` (409). An overlap is the same target,
+an ancestor, or a descendant. These routes use the same Host/Origin checks as
+every other route.
+
 Open **Administration** for the resource dashboard and navigation to Realms,
 Spaces, Stacks, Cells, Blueprints, Configs, Volumes, and Secrets. The dashboard
 shows counts and daemon-reported cell states. Containers are reached through

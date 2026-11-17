@@ -1389,6 +1389,91 @@ test("cells table row actions run lifecycle verbs, confirm destructive ones, and
   expect(posts.filter(path => /\/(purge|kill)$/.test(path))).toHaveLength(0);
 });
 
+test("space row Delete and Purge confirm the exact scope, surface child refusal and drop the row after a fresh read", async ({ page }) => {
+  const posts = [];
+  let purged = false;
+  await mock(page, async (path, request) => {
+    if (request.method() === "POST") {
+      const options = JSON.parse(request.postData() ?? "{}");
+      posts.push({ path, options });
+      if (!options.cascade) return { status: 409, json: { error: { code: "has_dependencies", message: 'resource has child resources: space "shared" has 1 stack(s). Use --cascade to delete them or --force to skip validation' } } };
+      purged = true;
+      return { json: { action: "purge", purgeSucceeded: true, metadataDeleted: true, force: options.force, cascade: options.cascade, deleted: ["stack:services"], purged: [] } };
+    }
+    if (purged && path === "/api/realms/dev/spaces/shared") return { status: 404, json: { error: { code: "not_found", message: "space not found" } } };
+    if (purged && path === "/api/realms/dev/spaces") return { json: [] };
+    return undefined;
+  });
+  await page.goto(`${server.url}#/spaces`);
+  const row = page.locator("tbody tr").filter({ has: page.getByRole("link", { name: "shared" }) }).filter({ has: page.locator(".scope-cell", { hasText: /^dev$/ }) });
+  const target = "dev / shared";
+  for (const name of ["Delete", "Purge"]) await expect(row.getByRole("button", { name: `${name} space ${target}` })).toHaveAttribute("title", `${name}…`);
+  await expect(row.getByRole("link", { name: `View document for ${target}` })).toBeVisible();
+
+  // Delete confirms the exact scope and child counts; cancelling sends nothing.
+  await row.getByRole("button", { name: `Delete space ${target}` }).click();
+  let dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("heading", { name: "Delete space" })).toBeVisible();
+  await expect(dialog.getByText(target, { exact: true })).toBeVisible();
+  await expect(dialog).toContainText("1 stack, 1 cell");
+  await expect(dialog.getByRole("checkbox", { name: /--cascade/ })).not.toBeChecked();
+  await expect(dialog.getByRole("checkbox", { name: /--force/ })).not.toBeChecked();
+  await expect(dialog.getByRole("button", { name: "Confirm Delete" })).toBeDisabled();
+  await expect(dialog.locator(".scope-action-warning")).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(posts).toHaveLength(0);
+
+  // Purge requires the typed full scope; without cascade the daemon refusal is shown and the row stays.
+  await row.getByRole("button", { name: `Purge space ${target}` }).click();
+  dialog = page.getByRole("dialog");
+  const confirm = dialog.getByRole("button", { name: "Confirm Purge" });
+  await expect(confirm).toBeDisabled();
+  await dialog.getByLabel("Type the full target above to enable Purge").fill("dev / share");
+  await expect(confirm).toBeDisabled();
+  await dialog.getByLabel("Type the full target above to enable Purge").fill(target);
+  await confirm.click();
+  const refusal = toasts(page).filter({ hasText: "Purge refused" });
+  await expect(refusal).toContainText('space "shared" has 1 stack(s)');
+  await expect(refusal).toContainText("Enable cascade");
+  await expect(row).toBeVisible();
+  expect(posts).toEqual([{ path: "/api/realms/dev/spaces/shared/purge", options: { force: false, cascade: false } }]);
+
+  // With cascade the purge succeeds and the row drops once the inventory read omits it.
+  await row.getByRole("button", { name: `Purge space ${target}` }).click();
+  dialog = page.getByRole("dialog");
+  await dialog.getByRole("checkbox", { name: /--cascade/ }).check();
+  await dialog.getByLabel("Type the full target above to enable Purge").fill(target);
+  await dialog.getByRole("button", { name: "Confirm Purge" }).click();
+  await expect(toasts(page).filter({ hasText: "Space purged" })).toContainText("fresh daemon read confirms the space is gone");
+  await expect(row).toHaveCount(0);
+  await expect(page.locator("tbody tr").filter({ has: page.locator(".scope-cell", { hasText: /^prod$/ }) })).toBeVisible();
+  expect(posts.at(-1)).toEqual({ path: "/api/realms/dev/spaces/shared/purge", options: { force: false, cascade: true } });
+});
+
+test("the kuke-system realm row has no Delete or Purge, and targets inside it warn about kukeond", async ({ page }) => {
+  await mock(page, path => path === "/api/realms" ? { json: [doc(["default"]), doc(["kuke-system"])] } : undefined);
+  await page.goto(`${server.url}#/realms`);
+  const realmRow = name => page.locator("tbody tr").filter({ has: page.getByRole("link", { name, exact: true }) });
+  await expect(realmRow("kuke-system").getByRole("link", { name: "View document for kuke-system" })).toBeVisible();
+  await expect(realmRow("kuke-system").getByRole("button")).toHaveCount(0);
+  await expect(realmRow("default").getByRole("button", { name: "Delete realm default" })).toBeVisible();
+  await expect(realmRow("default").getByRole("button", { name: "Purge realm default" })).toBeVisible();
+
+  await page.goto(`${server.url}#/stacks`);
+  const stackRow = page.locator("tbody tr").filter({ has: page.locator(".scope-cell", { hasText: "kuke-system / shared" }) });
+  await stackRow.getByRole("button", { name: "Delete stack kuke-system / shared / services" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.locator(".scope-action-warning")).toContainText("can stop kukeond and disconnect this UI");
+  await expect(dialog.locator(".scope-action-warning")).toContainText("kuke init");
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+
+  await page.goto(`${server.url}#/stacks`);
+  const defaultStack = page.locator("tbody tr").filter({ has: page.locator(".scope-cell", { hasText: "default / shared" }) });
+  await defaultStack.getByRole("button", { name: "Delete stack default / shared / services" }).click();
+  await expect(page.getByRole("dialog").locator(".scope-action-warning")).toHaveCount(0);
+});
+
 test("config and blueprint rows link to the pre-filled creation pages", async ({ page }) => {
   await mockCatalog(page);
   await page.goto(`${server.url}#/configs`);

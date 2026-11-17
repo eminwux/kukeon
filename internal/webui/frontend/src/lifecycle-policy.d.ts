@@ -4,3 +4,8 @@ export function requestedPurgeOptions(force?: boolean, cascade?: boolean): { for
 export function cellRemovalConfirmed(metadataDeleted: unknown, freshReadPresence: boolean | null): boolean;
 export function deleteOperationComplete(result: { metadataDeleted?: boolean; cgroupDeleted?: boolean }): boolean;
 export function purgeOperationComplete(result: { purgeSucceeded?: boolean; metadataDeleted?: boolean; cgroupDeleted?: boolean }): boolean;
+export const systemRealm: string;
+export function parentActionsAllowed(scope: string[]): boolean;
+export function disruptsDaemon(scope: string[]): boolean;
+export function descendantCounts(rows: { scope: string[] }[][], scope: string[]): number[];
+export function cellsWithin(rows: { scope: string[] }[][], scope: string[]): string[][];

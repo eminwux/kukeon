@@ -521,3 +521,6 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--er
 .creation-form .schema-section > .schema-check { margin: 8px 0; }
 .creation-review details > summary { cursor: pointer; font-size: 12px; }
 .list-controls > .document-action { align-self: end; }
+.scope-action-warning { padding: 10px 12px; border: 1px solid var(--status-error-line); border-radius: 7px; background: var(--status-error-bg); }
+.cell-action-dialog p.scope-action-warning { color: var(--status-error); }
+.scope-action-warning code { font-family: var(--mono); font-size: 12px; }
