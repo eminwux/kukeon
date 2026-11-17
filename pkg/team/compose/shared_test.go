@@ -33,24 +33,24 @@ import (
 	"github.com/eminwux/kukeon/pkg/team/config"
 )
 
-const operatorRole = "team/roles/operator/role.yaml"
+const majordomoRole = "team/roles/majordomo/role.yaml"
 
-// editRole rewrites the operator role document of a copied source.
+// editRole rewrites the majordomo role document of a copied source.
 func editRole(source fstest.MapFS, old, replacement string) {
-	source[operatorRole].Data = bytes.ReplaceAll(source[operatorRole].Data, []byte(old), []byte(replacement))
+	source[majordomoRole].Data = bytes.ReplaceAll(source[majordomoRole].Data, []byte(old), []byte(replacement))
 }
 
-// addRole copies the operator role to a second role directory so a team can
+// addRole copies the majordomo role to a second role directory so a team can
 // select two roles from one source.
 func addRole(source fstest.MapFS, name string) {
 	for file, data := range maps.Clone(source) {
-		rest, ok := strings.CutPrefix(file, "team/roles/operator/")
+		rest, ok := strings.CutPrefix(file, "team/roles/majordomo/")
 		if !ok {
 			continue
 		}
 		raw := slices.Clone(data.Data)
 		if rest == "role.yaml" {
-			raw = bytes.Replace(raw, []byte("name: operator"), []byte("name: "+name), 1)
+			raw = bytes.Replace(raw, []byte("name: majordomo"), []byte("name: "+name), 1)
 		}
 		source["team/roles/"+name+"/"+rest] = &fstest.MapFile{Data: raw}
 	}
@@ -98,24 +98,24 @@ func TestBlueprintsAreSharedPerHarnessAndProfile(t *testing.T) {
 	for _, pair := range result.Pairs {
 		byConfig[pair.Config.Metadata.Name] = pair
 	}
-	operator, reviewer, builder := byConfig["root-operator-codex"], byConfig["root-reviewer-codex"], byConfig["root-builder-codex"]
-	if operator.Blueprint != reviewer.Blueprint || operator.Blueprint != result.Blueprints[0] {
+	majordomo, reviewer, builder := byConfig["root-majordomo-codex"], byConfig["root-reviewer-codex"], byConfig["root-builder-codex"]
+	if majordomo.Blueprint != reviewer.Blueprint || majordomo.Blueprint != result.Blueprints[0] {
 		t.Fatal("roles on the same harness and profile must share one blueprint document")
 	}
-	if builder.Blueprint == operator.Blueprint || builder.Config.Spec.Blueprint.Name != "codex-root" {
+	if builder.Blueprint == majordomo.Blueprint || builder.Config.Spec.Blueprint.Name != "codex-root" {
 		t.Fatal("a root role must use the root blueprint variant")
 	}
 	// The reviewer's secret is an optional slot of the shared blueprint: its
 	// cell gets the secret, the operator's does not.
-	slots := operator.Blueprint.Spec.Cell.Containers[0].Secrets
+	slots := majordomo.Blueprint.Spec.Cell.Containers[0].Secrets
 	if len(slots) != 1 || slots[0].Name != "service-auth" || slots[0].Required {
 		t.Fatalf("shared blueprint slots = %+v", slots)
 	}
 	if got := work(t, reviewer, interactive).Secrets; len(got) != 1 || got[0].Name != "SERVICE_AUTH" {
 		t.Fatalf("reviewer secrets = %+v", got)
 	}
-	if got := work(t, operator, interactive).Secrets; len(got) != 0 {
-		t.Fatalf("operator inherited another role's secret: %+v", got)
+	if got := work(t, majordomo, interactive).Secrets; len(got) != 0 {
+		t.Fatalf("majordomo inherited another role's secret: %+v", got)
 	}
 	if len(builder.Blueprint.Spec.Cell.Containers[0].Secrets) != 0 {
 		t.Fatal("a role's leftover leaked into a blueprint it does not use")
@@ -318,7 +318,7 @@ func TestHarnessModesPerCell(t *testing.T) {
 	// Both modes share the state volume, so a login made attached serves runs.
 	a, _ := stateVolume(attached)
 	d, _ := stateVolume(dispatched)
-	if a.Source != "root-operator-claude" || a != d {
+	if a.Source != "root-majordomo-claude" || a != d {
 		t.Fatalf("state volumes differ across modes: %+v %+v", a, d)
 	}
 
@@ -470,7 +470,7 @@ func TestGitHubConnector(t *testing.T) {
 			cfg.Spec.Secrets = tc.bindings
 			source := copiedSource(t)
 			opts.Sources["kukeon"] = source
-			before := string(source[operatorRole].Data)
+			before := string(source[majordomoRole].Data)
 			if tc.top != "" {
 				editRole(source, "  needs:\n", "  "+tc.top+"\n  needs:\n")
 			}
@@ -480,7 +480,7 @@ func TestGitHubConnector(t *testing.T) {
 			if tc.ghImage {
 				editRole(source, "      - go\n", "      - go\n      - gh\n")
 			}
-			if string(source[operatorRole].Data) == before {
+			if string(source[majordomoRole].Data) == before {
 				t.Fatal("role fixture was not edited")
 			}
 			result, err := compose.Compose(cfg, selectedTeam(cfg), opts)

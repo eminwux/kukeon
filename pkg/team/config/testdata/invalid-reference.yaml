@@ -3,6 +3,6 @@ kind: TeamsConfig
 spec:
   defaults:
     roles:
-      - name: operator
+      - name: majordomo
         source: missing
-        path: roles/operator
+        path: roles/majordomo

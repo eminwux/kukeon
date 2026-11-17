@@ -48,7 +48,7 @@ import (
 //go:embed probe.py
 var probeScript string
 
-const resource = "kukeon-operator-codex"
+const resource = "kukeon-majordomo-codex"
 
 type executionReport struct {
 	StartedAt      string       `json:"started_at"`
@@ -80,12 +80,12 @@ type remoteDriver struct {
 	pinned                               string
 }
 
-// TestRemoteOperator explicitly reserves an unused kukeon identity, checks init,
-// and then requires a published image and authenticated operator evidence.
-func TestRemoteOperator(t *testing.T) {
+// TestRemoteMajordomo explicitly reserves an unused kukeon identity, checks init,
+// and then requires a published image and authenticated majordomo evidence.
+func TestRemoteMajordomo(t *testing.T) {
 	host := os.Getenv("KUKETEAMS_REMOTE_HOST")
 	if host == "" {
-		t.Skip("set KUKETEAMS_REMOTE_HOST explicitly; see docs/team-remote-operator-check.md")
+		t.Skip("set KUKETEAMS_REMOTE_HOST explicitly; see docs/team-remote-majordomo-check.md")
 	}
 	report := &executionReport{Outcome: "failed", StartedAt: time.Now().UTC().Format(time.RFC3339), Endpoint: host}
 	t.Cleanup(func() { writeReport(t, report) })
@@ -292,20 +292,20 @@ func (d *remoteDriver) initialize() {
 					ClonePath: "/home/user/kukeon-src",
 				},
 			},
-			Roles:     []config.Role{{Name: "operator", Source: "kukeon", Path: "team/roles/operator"}},
+			Roles:     []config.Role{{Name: "majordomo", Source: "kukeon", Path: "team/roles/majordomo"}},
 			Harnesses: []config.Harness{{Name: "codex", Source: "kukeon", Path: "team/harnesses/codex"}},
 		}},
 	}
 	if err := os.MkdirAll(filepath.Join(d.home, ".kuke"), 0o700); err != nil {
 		d.fail("prepare isolated home")
 	}
-	declaration := config.Operator()
+	declaration := config.Majordomo()
 	declaration.Spec = cfg.Spec.Defaults
 	cfg.Spec.Defaults = config.Defaults{}
 	d.writeYAML(filepath.Join(d.home, ".kuke", "kuketeams.yaml"), cfg)
 	preparedEntry, entryErr := config.Entry(declaration)
 	if entryErr != nil {
-		d.fail("prepare explicit operator declaration")
+		d.fail("prepare explicit majordomo declaration")
 	}
 	if err := os.MkdirAll(filepath.Join(d.home, ".kuke", "kuketeam.d"), 0o700); err != nil {
 		d.fail("prepare registration directory")
@@ -347,7 +347,7 @@ func (d *remoteDriver) initialize() {
 	containers := bp.Blueprint.Spec.Cell.Containers
 	if len(containers) != 1 || containers[0].ID != "work" || len(containers[0].Secrets) != 0 ||
 		len(cc.Config.Spec.Secrets) != 0 {
-		d.fail("unexpected base operator container or secret bindings")
+		d.fail("unexpected base majordomo container or secret bindings")
 	}
 	if cc.Config.Spec.Repos["kukeon"].Ref != d.report.SourceRevision {
 		d.fail("runtime repository revision is not pinned")
@@ -364,11 +364,11 @@ func (d *remoteDriver) verifyInitIsolation() {
 	}
 	afterSecrets, err := d.client.ListSecrets(d.ctx, "", "", "", "")
 	if err != nil || !reflect.DeepEqual(d.secrets, afterSecrets) {
-		d.fail("base operator initialization changed secret metadata")
+		d.fail("base majordomo initialization changed secret metadata")
 	}
 	d.report.Checks = append(
 		d.report.Checks,
-		"init applied/read back operator blueprint and config",
+		"init applied/read back majordomo blueprint and config",
 		"kukeon TeamEntry decoded",
 		"base Codex requires no secret bindings; secret metadata unchanged",
 		"runtime cell identities and recipes unchanged by init",
@@ -390,7 +390,7 @@ func (d *remoteDriver) checkImageAndAuth() {
 	)
 	if err != nil || !volume.MetadataExists {
 		d.fail(
-			"unmet prerequisite: pre-authenticated kukeon-operator-codex state volume is missing; see the setup guide",
+			"unmet prerequisite: pre-authenticated kukeon-majordomo-codex state volume is missing; see the setup guide",
 		)
 	}
 	named, err := reference.ParseNormalizedNamed(d.report.Image)
@@ -412,12 +412,12 @@ func (d *remoteDriver) checkImageAndAuth() {
 }
 
 func (d *remoteDriver) launch() {
-	name := fmt.Sprintf("operator-check-%d", time.Now().UnixNano())
+	name := fmt.Sprintf("majordomo-check-%d", time.Now().UnixNano())
 	d.report.Cell = name
 	d.t.Cleanup(d.cleanupCell)
-	prompt := "This is a read-only operator installation check. Use the available $create-cell-config skill only for inspection. First run cat to read its SKILL.md and bundled references/kukeon.md in full, even if their contents were already supplied. Do not create, apply, or launch anything, or inspect credentials. Then execute this exact Python probe and finish with a brief acknowledgement: python3 -c \"import base64; exec(compile(base64.b64decode('" + base64.StdEncoding.EncodeToString(
+	prompt := "This is a read-only majordomo installation check. Use the available $create-cell-config skill only for inspection. First run cat to read its SKILL.md and bundled references/kukeon.md in full, even if their contents were already supplied. Do not create, apply, or launch anything, or inspect credentials. Then execute this exact Python probe and finish with a brief acknowledgement: python3 -c \"import base64; exec(compile(base64.b64decode('" + base64.StdEncoding.EncodeToString(
 		[]byte(probeScript),
-	) + "'), '<operator-check>', 'exec'))\""
+	) + "'), '<majordomo-check>', 'exec'))\""
 	args := []string{
 		"--host",
 		d.host,
@@ -440,7 +440,7 @@ func (d *remoteDriver) launch() {
 	}
 	d.report.Commands = append(
 		d.report.Commands,
-		"kuke run --from-config kukeon-operator-codex --realm default --space default --stack default --name "+name+" --env PROMPT=<embedded read-only probe> --detach",
+		"kuke run --from-config kukeon-majordomo-codex --realm default --space default --stack default --name "+name+" --env PROMPT=<embedded read-only probe> --detach",
 	)
 	if _, err := d.run("kuke", args...); err != nil {
 		d.fail("explicit kuke run failed; check image pull, state volume, and runtime prerequisites")
@@ -523,7 +523,7 @@ func (d *remoteDriver) waitForEvidence() {
 		}
 	}
 	d.fail(
-		"timed out waiting for authenticated operator evidence; verify Codex authentication, model access, repository setup and log-path visibility",
+		"timed out waiting for authenticated majordomo evidence; verify Codex authentication, model access, repository setup and log-path visibility",
 	)
 }
 
@@ -549,7 +549,7 @@ func (d *remoteDriver) acceptEvidence(output []byte, running bool) bool {
 		"root task and work container observed running",
 		"cell uses verified published digest",
 		"authenticated Codex turn completed with command-generated probe",
-		"operator instructions, skill discovery/reads, effective sandbox/approval and image policy/hook verified",
+		"majordomo instructions, skill discovery/reads, effective sandbox/approval and image policy/hook verified",
 	)
 	return true
 }

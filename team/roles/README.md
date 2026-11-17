@@ -7,18 +7,23 @@ knowledge and skill references remain in the selected tree; installation code
 lives once in [`scripts/materialize-role.sh`](../scripts/materialize-role.sh).
 
 ```sh
-make -C /path/to/kukeon claude ROLE=team/roles/operator
-make -C /path/to/kukeon codex ROLE=team/roles/operator
-make -C /path/to/kukeon opencode-openrouter ROLE=team/roles/operator
+make -C /path/to/kukeon claude ROLE=team/roles/majordomo
+make -C /path/to/kukeon codex ROLE=team/roles/majordomo
+make -C /path/to/kukeon opencode-openrouter ROLE=team/roles/majordomo
 ```
 
 For an additional role, set `ROLE` to its existing `team/roles/<name>` directory.
-The operator also provides a thin role-local Makefile, so
-`make -C /path/to/kukeon/team/roles/operator codex` calls the same shared script.
+The majordomo role also provides a thin role-local Makefile, so
+`make -C /path/to/kukeon/team/roles/majordomo codex` calls the same shared script.
 Additional roles can use the same three-target wrapper without duplicating
 installation logic.
 
-The default `ROLE` is `team/roles/operator`. Paths resolve from the source checkout
+`team/roles/operator` is a symlink to `team/roles/majordomo`, the role's former
+name. Releases up to v0.10.0 read that path from the `main` branch in
+`kuke team init` and when a `kukeon-operator-*` cell starts, so it stays until
+those installs have upgraded. New references use `team/roles/majordomo`.
+
+The default `ROLE` is `team/roles/majordomo`. Paths resolve from the source checkout
 (the directory selected with `make -C`), independently of the caller's directory.
 The shared installer requires POSIX sh, make, and standard filesystem utilities;
 it does not require Go, YAML tooling, network access, a daemon, or authentication.
@@ -54,6 +59,6 @@ See the official [Claude memory](https://code.claude.com/docs/en/memory),
 [OpenCode rules](https://opencode.ai/docs/rules/), and
 [OpenCode skills](https://opencode.ai/docs/skills/) contracts.
 
-`make test` exercises operator installation plus a second role fixture with two
+`make test` exercises majordomo installation plus a second role fixture with two
 skills and no per-role executable code. Checks include role selection, native
 paths, directory overrides, reruns, conflict preservation, and bundled references.

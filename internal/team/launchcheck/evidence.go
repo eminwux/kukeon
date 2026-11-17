@@ -112,11 +112,11 @@ func (p *probeResult) validate(revision, requirements, hook string) error {
 		!p.ConfigLoaded ||
 		!p.CodexHome ||
 		!p.WorkingDirectory {
-		return errors.New("operator instruction, skill, or effective configuration evidence is incomplete")
+		return errors.New("majordomo instruction, skill, or effective configuration evidence is incomplete")
 	}
 	if p.SourceRevision != revision || p.RequirementsSHA256 != requirements || p.HookSHA256 != hook ||
 		!strings.HasPrefix(p.CodexVersion, "codex-cli ") {
-		return errors.New("operator source revision or image-owned harness assets do not match")
+		return errors.New("majordomo source revision or image-owned harness assets do not match")
 	}
 	return nil
 }

@@ -69,7 +69,7 @@ spec:
 ## 2. Re-render the team
 
 ```bash
-kuke team init --force          # the operator team
+kuke team init --force          # the kukeon team
 kuke team add <team> --source … # each added team, same arguments as before
 ```
 

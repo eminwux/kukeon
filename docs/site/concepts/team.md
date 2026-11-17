@@ -11,7 +11,7 @@ starts cells: launch them explicitly, for example with
 Two commands drive it:
 
 - [`kuke team init`](../cli/kuke-team-init.md) creates the global configuration
-  and applies the operator team `kukeon`.
+  and applies the `kukeon` team, whose one role is `majordomo`.
 - [`kuke team add`](../cli/kuke-team-add.md) composes a project team from a
   directory's `kuketeam.yaml` or from a named Git source.
 
@@ -26,7 +26,7 @@ Two commands drive it:
 | `harnesses/<harness>/`           | a source     | Harness definition (`harness.yaml`), image catalog (`images.yaml`), and image build context.               |
 
 All documents use `apiVersion: kuketeams.io/v1` and are decoded strictly
-(single document, no unknown fields). This repository ships the `operator`
+(single document, no unknown fields). This repository ships the `majordomo`
 role under `team/roles/` and the `claude`, `codex`, and `opencode` harnesses
 under `team/harnesses/`; other roles (dev, pm, pr-reviewer, …) can come from any Git
 source, such as the agents repository. The kukeon renderer that turns a pair
@@ -222,7 +222,7 @@ spec:
 `kuke team add` renders each selected task as its own CellConfig per selected
 harness (the role entry's `harness` pin applies), named
 `<team>-<role>-<harness>-<task>` and labelled `kukeon.io/task: <task>` next to
-the team label. It has the same blueprint, values, repos, secrets, components
+the team and role labels. It has the same blueprint, values, repos, secrets, components
 and requires as the pair's config, plus:
 
 ```yaml
@@ -381,12 +381,12 @@ per harness — this repository's `make claude`, `make codex`, and
 Startup then uses `INITIAL_PATH`; the harness source need not be checked out in
 the cell.
 
-The base operator clones over HTTPS and needs no git credential.
+The base majordomo clones over HTTPS and needs no git credential.
 
 ## Secret declarations
 
 Only selected role/harness requirements contribute bindings. The shipped
-operator has no `gh` or `gh-token` requirement. Claude and Codex can reuse an
+majordomo has no `gh` or `gh-token` requirement. Claude and Codex can reuse an
 existing authenticated session and declare no mandatory token. OpenCode's
 selected provider requires `openrouter-api-key`.
 
@@ -447,8 +447,10 @@ is named `<team>-<role>-<harness>`, with dots and punctuation runs collapsed
 to single hyphens: team `esp32`, role `pr-reviewer`, and harness `codex`
 produce `esp32-pr-reviewer-codex`. A task config appends the task name:
 `esp32-pr-reviewer-codex-pick-review-pr`. Different selections can collide on these
-readable names (`root-a`/`operator` and `root`/`a-operator`); choose distinct
-names in the same scope. `kukeon.io/team` labels keep the authored team name.
+readable names (`root-a`/`majordomo` and `root`/`a-majordomo`); choose distinct
+names in the same scope. `kukeon.io/team` labels keep the authored team name,
+and `kukeon.io/role` labels the role name from the team's `roles` list, on pair
+and task configs alike.
 Resources default to realm/space/stack `default`.
 
 Default harness state volumes use the readable resource name plus a

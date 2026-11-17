@@ -1,4 +1,4 @@
-"""Read-only evidence collected by the running operator, never credential files."""
+"""Read-only evidence collected by the running majordomo, never credential files."""
 import hashlib
 import json
 import os
@@ -38,7 +38,7 @@ def discovered_skill(injected, expected):
 def collect():
     home = Path('/home/user')
     checkout = home / 'kukeon-src'
-    role = checkout / 'team/roles/operator'
+    role = checkout / 'team/roles/majordomo'
     codex = home / '.codex'
     skill = home / '.agents/skills/create-cell-config'
     policy_text = (role / 'AGENTS.md').read_text().strip()

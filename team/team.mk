@@ -18,7 +18,7 @@ test-harnesses:
 # `make -C "$ROLE_SOURCE_DIR" <harness> ROLE="$ROLE_PATH"` against the role's
 # source checkout, so a repository that serves roles (this one included) must
 # expose one target per harness. One installer serves every role.
-ROLE ?= team/roles/operator
+ROLE ?= team/roles/majordomo
 .PHONY: claude codex opencode-openrouter
 claude codex opencode-openrouter:
 	@sh team/scripts/materialize-role.sh '$(ROLE)' '$@'
@@ -30,9 +30,9 @@ test-team-integration:
 	@test -n "$(KUKETEAMS_INTEGRATION_HOST)" || { echo 'Set KUKETEAMS_INTEGRATION_HOST to a disposable kukeond Unix endpoint' >&2; exit 1; }
 	go test -race ./internal/team/initialize -run '^TestKukeondIntegration$$' -count=1 -v
 
-# Launches the published Codex operator through `kuke team init` + `kuke run`
-# against an explicit endpoint; see docs/team-remote-operator-check.md.
-.PHONY: test-remote-operator
-test-remote-operator: kuke
-	@test -n "$(KUKETEAMS_REMOTE_HOST)" || { echo 'Set KUKETEAMS_REMOTE_HOST explicitly; see docs/team-remote-operator-check.md' >&2; exit 1; }
-	go test -race ./internal/team/launchcheck -run '^TestRemoteOperator$$' -count=1 -v -timeout 10m
+# Launches the published Codex majordomo through `kuke team init` + `kuke run`
+# against an explicit endpoint; see docs/team-remote-majordomo-check.md.
+.PHONY: test-remote-majordomo
+test-remote-majordomo: kuke
+	@test -n "$(KUKETEAMS_REMOTE_HOST)" || { echo 'Set KUKETEAMS_REMOTE_HOST explicitly; see docs/team-remote-majordomo-check.md' >&2; exit 1; }
+	go test -race ./internal/team/launchcheck -run '^TestRemoteMajordomo$$' -count=1 -v -timeout 10m

@@ -1,10 +1,10 @@
 apiVersion: kuketeams.io/v1
 kind: Role
 metadata:
-  name: operator
+  name: majordomo
 spec:
   skills:
-    - team/roles/operator/skills/create-cell-config
+    - team/roles/majordomo/skills/create-cell-config
   harnesses:
     claude:
       settings: config/claude.settings.json

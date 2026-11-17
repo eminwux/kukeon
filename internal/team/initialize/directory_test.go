@@ -332,7 +332,7 @@ func TestDirectoryExplicitEmptyLists(t *testing.T) {
 func TestDirectoryPersistsAuthoredSelectionsWithoutInput(t *testing.T) {
 	opts, _ := setupDirectoryAdd(t)
 	opts.Name = "chosen"
-	input := "apiVersion: kuketeams.io/v1\nkind: Team\nspec:\n  roles:\n    - {name: worker, source: kukeon, path: team/roles/operator, harness: codex}\n"
+	input := "apiVersion: kuketeams.io/v1\nkind: Team\nspec:\n  roles:\n    - {name: worker, source: kukeon, path: team/roles/majordomo, harness: codex}\n"
 	path := filepath.Join(opts.Directory, "kuketeam.yaml")
 	writeFixture(t, path, input)
 	if _, err := Add(t.Context(), opts); err != nil {

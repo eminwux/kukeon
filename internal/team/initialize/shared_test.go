@@ -34,7 +34,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// composeTeam composes the operator role on codex and claude for the team
+// composeTeam composes the majordomo role on codex and claude for the team
 // "root", after change adjusts the global configuration.
 func composeTeam(t *testing.T, change func(*config.TeamsConfig)) *compose.Result {
 	t.Helper()
@@ -44,7 +44,7 @@ func composeTeam(t *testing.T, change func(*config.TeamsConfig)) *compose.Result
 			Sources: []config.Source{{
 				Name: "kukeon", URL: "github.com/eminwux/kukeon", Branch: "main", ClonePath: "/home/user/kukeon-src",
 			}},
-			Roles: []config.Role{{Name: "operator", Source: "kukeon", Path: "team/roles/operator"}},
+			Roles: []config.Role{{Name: "majordomo", Source: "kukeon", Path: "team/roles/majordomo"}},
 			Harnesses: []config.Harness{
 				{Name: "codex", Source: "kukeon", Path: "team/harnesses/codex"},
 				{Name: "claude", Source: "kukeon", Path: "team/harnesses/claude"},
@@ -120,7 +120,7 @@ func TestResourceAccountingCountsSharedBlueprintsOnce(t *testing.T) {
 	f := newFake()
 	result := composeTeam(t, func(cfg *config.TeamsConfig) {
 		cfg.Spec.Defaults.Roles = append(cfg.Spec.Defaults.Roles,
-			config.Role{Name: "second", Source: "kukeon", Path: "team/roles/operator"})
+			config.Role{Name: "second", Source: "kukeon", Path: "team/roles/majordomo"})
 	})
 	if len(result.Pairs) != 4 || len(result.Blueprints) != 2 {
 		t.Fatalf("pairs=%d blueprints=%d", len(result.Pairs), len(result.Blueprints))
@@ -163,13 +163,13 @@ func TestSharedBlueprintNames(t *testing.T) {
 		{"same-content", func(f *fakeClient, r *compose.Result) {
 			f.blueprints["default/codex"] = storedShared("codex", r.Blueprints[0].Metadata.Labels[api.LabelContentDigest])
 			// Even when another team uses it: identical content is the same blueprint.
-			f.configs = []api.CellConfigDoc{configReferencing("other-operator-codex", "other", plain)}
+			f.configs = []api.CellConfigDoc{configReferencing("other-majordomo-codex", "other", plain)}
 		}, false},
 		{"different-content-used-by-another-team", func(f *fakeClient, _ *compose.Result) {
 			f.blueprints["default/codex"] = storedShared("codex", "0000000000000000")
 			f.configs = []api.CellConfigDoc{
-				configReferencing("root-operator-codex", "root", plain),
-				configReferencing("other-operator-codex", "other", plain),
+				configReferencing("root-majordomo-codex", "root", plain),
+				configReferencing("other-majordomo-codex", "other", plain),
 			}
 		}, true},
 		{"different-content-used-by-a-hand-written-config", func(f *fakeClient, _ *compose.Result) {
@@ -178,7 +178,7 @@ func TestSharedBlueprintNames(t *testing.T) {
 		}, true},
 		{"different-content-used-only-by-this-team", func(f *fakeClient, _ *compose.Result) {
 			f.blueprints["default/codex"] = storedShared("codex", "0000000000000000")
-			f.configs = []api.CellConfigDoc{configReferencing("root-operator-codex", "root", plain)}
+			f.configs = []api.CellConfigDoc{configReferencing("root-majordomo-codex", "root", plain)}
 		}, false},
 		{"different-content-unreferenced", func(f *fakeClient, _ *compose.Result) {
 			f.blueprints["default/codex"] = storedShared("codex", "0000000000000000")

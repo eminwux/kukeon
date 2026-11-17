@@ -62,7 +62,10 @@ func TestTeamEntryRoundTripsPreserveInheritance(t *testing.T) {
 func TestEntryCopiesAuthoredImageCapabilities(t *testing.T) {
 	team := config.Root()
 	team.Spec.Roles = []config.Role{
-		{Name: "operator", Source: "kukeon", Path: "team/roles/operator", Needs: &config.Needs{Image: []string{"go"}}},
+		{
+			Name: "majordomo", Source: "kukeon", Path: "team/roles/majordomo",
+			Needs: &config.Needs{Image: []string{"go"}},
+		},
 	}
 	entry, err := config.Entry(team)
 	if err != nil {

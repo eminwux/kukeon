@@ -1,6 +1,6 @@
-# Operator role
+# Majordomo role
 
-The operator inspects kukeon runtime/configuration and carries out explicitly
+The majordomo inspects kukeon runtime/configuration and carries out explicitly
 requested operations with verified outcomes. Its initial
 [`create-cell-config`](skills/create-cell-config/SKILL.md) skill inspects an
 existing blueprint, produces a CellConfig draft, and applies it when requested.
@@ -44,13 +44,13 @@ The repository's [shared materialization targets](../README.md) install this
 role for all three harnesses:
 
 ```sh
-make -C /path/to/kukeon claude ROLE=team/roles/operator
-make -C /path/to/kukeon codex ROLE=team/roles/operator
-make -C /path/to/kukeon opencode-openrouter ROLE=team/roles/operator
+make -C /path/to/kukeon claude ROLE=team/roles/majordomo
+make -C /path/to/kukeon codex ROLE=team/roles/majordomo
+make -C /path/to/kukeon opencode-openrouter ROLE=team/roles/majordomo
 ```
 
 The [role-local Makefile](Makefile) forwards the same targets to the shared
-installer; for example, `make -C /path/to/kukeon/roles/operator codex`.
+installer; for example, `make -C /path/to/kukeon/roles/majordomo codex`.
 The shared installer supports additional roles via
 `ROLE=team/roles/<name>`, preserves user assets, and links native user instruction and
 skill paths. Retain the source checkout at its absolute path while the cell runs.
@@ -58,22 +58,22 @@ skill paths. Retain the source checkout at its absolute path while the cell runs
 After installation, a manually provisioned dedicated cell can launch with:
 
 ```sh
-claude --settings /path/to/kukeon/team/roles/operator/config/claude.settings.json
+claude --settings /path/to/kukeon/team/roles/majordomo/config/claude.settings.json
 codex --sandbox workspace-write --ask-for-approval on-request
 # Set OPENROUTER_MODEL to the selected provider/model; authentication is supplied separately.
 opencode
 ```
 
-Init applies the `kukeon-operator-codex` and `kukeon-operator-claude`
+Init applies the `kukeon-majordomo-codex` and `kukeon-majordomo-claude`
 blueprints/configs without starting cells. Launch explicitly with kuke, for example:
 
 ```sh
-kuke run --from-config kukeon-operator-codex --realm default --space default --stack default --name operator
+kuke run --from-config kukeon-majordomo-codex --realm default --space default --stack default --name majordomo
 ```
 
 Both start in the in-cell `$HOME`. Set the accepted entry's role `initialPath`
 to an absolute in-cell directory or `$HOME/subdirectory` to change that location;
-role assets remain installed from `team/roles/operator` independently.
+role assets remain installed from `team/roles/majordomo` independently.
 
 The adapters do not bypass permission prompts or add privileges. Access outside
 Codex's workspace sandbox may need an approved escalation or an explicitly
@@ -83,7 +83,7 @@ configured runtime policy. Materialization does not launch an agent or a cell.
 
 Structure was adapted from `eminwux/agents` at
 `a5dbb59c3942621c5d52ba321b1d81e5987a5f3a` (`dev/role.yaml`, `pm/role.yaml`, role
-skill directories, and root Makefile). Operator instructions/configs are new.
+skill directories, and root Makefile). Majordomo instructions/configs are new.
 Harness paths/targets were checked against PR #11 at
 `848417202285ee7847ce8e2e7500414ff3754ec5`: `claude` installs `.claude/skills`,
 `codex` and `opencode-openrouter` install `.agents/skills`.
@@ -100,4 +100,4 @@ or cell startup is claimed by the structural tests.
 frontmatter/reference closure, settings, and isolated installation for all three
 harnesses (including overrides, reruns, and conflicts). Contract tests use the
 packaged harness manifests when available, otherwise the complete pinned #11
-manifests in `internal/team/operatorassets/testdata/`.
+manifests in `internal/team/majordomoassets/testdata/`.

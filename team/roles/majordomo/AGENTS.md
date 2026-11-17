@@ -1,4 +1,4 @@
-# Kukeon operator
+# Kukeon majordomo
 
 Operate kukeon on the user's behalf. Inspect the current runtime and configuration,
 understand the requested result, perform the requested operations, and report

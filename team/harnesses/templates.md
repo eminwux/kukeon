@@ -246,7 +246,7 @@ revision `58250581d283592cd59bda8c0d083f83940b6ae4` from
 `v0.9.2-0.20260831174915-58250581d283`. This is a single-revision compatibility
 baseline, not a claim that all v1beta1 daemons support these fields or that later
 releases have been certified. The recorded build label for that source is
-`v0.9.1-2-g5825058` (see [remote verification](../docs/remote-operator-check.md)).
+`v0.9.1-2-g5825058` (see [remote verification](../../docs/team-remote-majordomo-check.md)).
 
 There is actual daemon build information: kukeon's
 [`PingVersion`](https://github.com/eminwux/kukeon/blob/58250581d283592cd59bda8c0d083f83940b6ae4/pkg/api/kukeonv1/client.go#L192)

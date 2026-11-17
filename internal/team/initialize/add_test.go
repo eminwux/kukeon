@@ -56,7 +56,7 @@ func setupAddRun(t *testing.T) Options {
 	cfg := &config.TeamsConfig{
 		APIVersion: config.APIVersion,
 		Kind:       config.Kind,
-		Spec:       config.Spec{Defaults: config.Operator().Spec},
+		Spec:       config.Spec{Defaults: config.Majordomo().Spec},
 	}
 	cfg.Spec.Defaults.Harnesses = cfg.Spec.Defaults.Harnesses[:1]
 	var raw bytes.Buffer
@@ -715,7 +715,7 @@ func assertAcceptedAdd(t *testing.T, opts AddOptions, mode, commit string) {
 		}
 	}
 	fake := opts.Client.(*fakeClient)
-	if fake.team != "kukeon" || !bytes.Contains(fake.raw, []byte("kukeon-operator-codex")) ||
+	if fake.team != "kukeon" || !bytes.Contains(fake.raw, []byte("kukeon-majordomo-codex")) ||
 		!bytes.Contains(fake.raw, []byte(opts.Source)) ||
 		!bytes.Contains(fake.raw, []byte("/home/user/kukeon")) ||
 		!bytes.Contains(fake.raw, []byte("https://github.com/eminwux/kukeon")) {

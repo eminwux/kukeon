@@ -186,11 +186,11 @@ func TestRegistrationOnlyChangesAfterFullSuccess(t *testing.T) {
 	}
 }
 
-func TestRunForceResetsExistingOperatorDeclaration(t *testing.T) {
+func TestRunForceResetsExistingMajordomoDeclaration(t *testing.T) {
 	opts := setupRun(t)
-	team := config.Operator()
+	team := config.Majordomo()
 	team.Spec.Roles = []config.Role{
-		{Name: "custom", Source: "kukeon", Path: "team/roles/operator", Harness: "codex", InitialPath: "/opt/custom"},
+		{Name: "custom", Source: "kukeon", Path: "team/roles/majordomo", Harness: "codex", InitialPath: "/opt/custom"},
 	}
 	entry, err := config.Entry(team)
 	if err != nil {
@@ -211,14 +211,14 @@ func TestRunForceResetsExistingOperatorDeclaration(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(opts.Client.(*fakeClient).raw), "kukeon-custom-codex") {
-		t.Fatal("authored operator selection retained")
+		t.Fatal("authored majordomo selection retained")
 	}
 	after, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	accepted, err := config.DecodeEntry(bytes.NewReader(after))
-	if err != nil || accepted.Spec.Roles[0].Name != "operator" {
+	if err != nil || accepted.Spec.Roles[0].Name != "majordomo" {
 		t.Fatal("entry was not reset")
 	}
 }
@@ -237,7 +237,7 @@ func TestForceReplacesInvalidExistingEntry(t *testing.T) {
 			t.Fatal(err)
 		}
 		if opts.Client.(*fakeClient).applies != 1 {
-			t.Fatal("initial operator was not applied")
+			t.Fatal("initial majordomo was not applied")
 		}
 	}
 }

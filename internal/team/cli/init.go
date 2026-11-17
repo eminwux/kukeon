@@ -38,8 +38,8 @@ func newInitCommand(
 	var importGit initialize.GitImport
 	cmd := &cobra.Command{
 		Use:   "init",
-		Short: "Apply and register the kukeon operator team",
-		Long:  "Initialize ~/.kuke/kuketeams.yaml, fetch selected definitions, and apply the kukeon operator team to kukeond.\nAn existing configuration stops init; --force replaces it and reapplies the initial operator declaration.\nNo cells are created or started. The daemon and parent runtime scope must already exist.\n\nTeam cells clone, push and sign with stored git credentials; the host ~/.ssh is never mounted. --import-git-identity is your consent to copy an SSH private key (--git-key, else the key git signs with, else ~/.ssh/id_ed25519, id_ecdsa or id_rsa) into the ssh-key secret git-ssh and to bind it to the hosts the team clones from. Without it nothing is read from ~/.ssh and init reports which sources have no credential.",
+		Short: "Apply and register the kukeon team and its majordomo role",
+		Long:  "Initialize ~/.kuke/kuketeams.yaml, fetch selected definitions, and apply the kukeon team (the majordomo role) to kukeond.\nAn existing configuration stops init; --force replaces it and reapplies the initial majordomo declaration.\nNo cells are created or started. The daemon and parent runtime scope must already exist.\n\nTeam cells clone, push and sign with stored git credentials; the host ~/.ssh is never mounted. --import-git-identity is your consent to copy an SSH private key (--git-key, else the key git signs with, else ~/.ssh/id_ed25519, id_ecdsa or id_rsa) into the ssh-key secret git-ssh and to bind it to the hosts the team clones from. Without it nothing is read from ~/.ssh and init reports which sources have no credential.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if !importGit.Enabled &&
@@ -101,7 +101,7 @@ func newInitCommand(
 		"known_hosts file to pin for the imported key (default: built-in github.com, gitlab.com and bitbucket.org keys)")
 	cmd.Flags().StringVar(&host, "host", "", "kukeond Unix endpoint (overrides KUKEON_HOST and kuke.yaml)")
 	cmd.Flags().
-		BoolVar(&force, "force", false, "Replace existing configuration and apply the initial operator declaration")
+		BoolVar(&force, "force", false, "Replace existing configuration and apply the initial majordomo declaration")
 	cmd.Flags().
 		StringVar(&configuration, "configuration", "", "kuke ClientConfiguration path (default KUKE_CONFIGURATION or ~/.kuke/kuke.yaml)")
 	return cmd

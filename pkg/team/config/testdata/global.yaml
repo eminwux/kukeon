@@ -18,9 +18,9 @@ spec:
         url: github.com/eminwux/kukeon
         branch: main
     roles:
-      - name: operator
+      - name: majordomo
         source: kukeon
-        path: team/roles/operator
+        path: team/roles/majordomo
         needs:
           image: [go]
       - name: dev

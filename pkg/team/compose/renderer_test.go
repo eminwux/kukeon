@@ -56,8 +56,8 @@ func TestSharedRendererProfiles(t *testing.T) {
 					},
 				)
 			}
-			source["team/roles/operator/role.yaml"].Data = bytes.ReplaceAll(
-				source["team/roles/operator/role.yaml"].Data,
+			source["team/roles/majordomo/role.yaml"].Data = bytes.ReplaceAll(
+				source["team/roles/majordomo/role.yaml"].Data,
 				[]byte("  needs:"),
 				[]byte("  needs:\n"+repos+"    mounts: [ssh]"),
 			)
@@ -78,7 +78,7 @@ func TestSharedRendererProfiles(t *testing.T) {
 			// `needs.mounts: [ssh]` is still accepted, but mounts nothing: the
 			// operator is told once, and no document names the host ~/.ssh.
 			if !slices.ContainsFunc(result.Notes, func(note string) bool {
-				return strings.Contains(note, "role operator") && strings.Contains(note, "no longer mounts")
+				return strings.Contains(note, "role majordomo") && strings.Contains(note, "no longer mounts")
 			}) {
 				t.Fatalf("missing ssh-mount note: %v", result.Notes)
 			}

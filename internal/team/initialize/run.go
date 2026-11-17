@@ -14,7 +14,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-// Package initialize applies the operator team's configuration without managing cells.
+// Package initialize applies the kukeon team's configuration without managing cells.
 package initialize
 
 import (
@@ -37,8 +37,8 @@ import (
 )
 
 const (
-	operatorName = "kukeon"
-	rootName     = "root" // Reserved legacy identity; never migrated by init.
+	majordomoName = "kukeon"
+	rootName      = "root" // Reserved legacy identity; never migrated by init.
 )
 
 // Options supplies operator paths and optional test/embedding dependencies.
@@ -85,7 +85,7 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		return result, fmt.Errorf("init: configuration already exists at %s; use --force to reset it", configPath)
 	}
 	entryPath := filepath.Join(opts.Root, "kuketeam.d", "kukeon.yaml")
-	team := config.Operator()
+	team := config.Majordomo()
 	var recorded []config.SecretBinding
 	if !opts.Force {
 		team, err = readTeam(entryPath)
@@ -247,9 +247,9 @@ func readEntrySecrets(path string) ([]config.SecretBinding, error) {
 
 func readTeam(path string) (*config.Team, error) {
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		return config.Operator(), nil
+		return config.Majordomo(), nil
 	}
-	return readNamedTeam(path, operatorName)
+	return readNamedTeam(path, majordomoName)
 }
 
 func readNamedTeam(path, name string) (*config.Team, error) {
