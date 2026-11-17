@@ -146,13 +146,15 @@ Each fire creates and starts one cell from the Config, in the Config's default m
 
 The fire-time name makes a fire idempotent: a fire retried after a daemon restart finds the cell it already made and counts as fired.
 
+A Config's scheduled cells are the cells carrying its schedule label whose provenance points at that Config's own scope. Configs of the same name at realm, space and stack scope can fire into the same stack, and each counts only its own cells: another Config's cells never hold its fires back. When two such Configs fire at the same time they derive the same cell name; the one that comes second does not create a cell, records the collision in `status.schedule.lastError`, and fires again at its next fire time. Give same-named Configs that share a stack distinct names or fire times.
+
 kukeond runs the scheduler on its own timer, once a minute on the minute, so a schedule has one-minute precision. The timer does not depend on the reconcile loop: schedules still fire when the operator disables it with `--reconcile-interval 0`. A new or edited schedule is picked up on the next pass.
 
 The schedule is not part of the rendered cell. Adding, changing or removing `spec.schedule` never marks the Config's existing cells `OutOfSync`.
 
 #### Concurrency
 
-Under `Forbid`, a fire is skipped — and `status.schedule.skippedFires` goes up by one — while any cell labelled `kukeon.io/schedule=<config>` is `Pending`, `Ready`, `Degraded` or `Unknown`. Cells in `Stopped`, `Exited`, `Failed` or `Error` do not hold a fire back. A cell started by hand from the same Config (`kuke run --from-config`) has no schedule label, so it neither blocks a fire nor is blocked by one.
+Under `Forbid`, a fire is skipped — and `status.schedule.skippedFires` goes up by one — while any of the Config's scheduled cells (see above) is `Pending`, `Ready`, `Degraded` or `Unknown`. Cells in `Stopped`, `Exited`, `Failed` or `Error` do not hold a fire back. A cell started by hand from the same Config (`kuke run --from-config`) has no schedule label, so it neither blocks a fire nor is blocked by one.
 
 #### Missed fires
 

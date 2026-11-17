@@ -121,7 +121,7 @@ func (h *scheduleHarness) restartDaemon() {
 		if h.fireErr != nil {
 			return h.fireErr
 		}
-		h.cells = append(h.cells, scheduleCell(req.Name, req.Schedule, intmodel.CellStateReady))
+		h.cells = append(h.cells, scheduleCellFor(req.Name, req.Schedule, req.Config, intmodel.CellStateReady))
 		return nil
 	})
 	h.prev = time.Time{}
@@ -132,8 +132,21 @@ func (h *scheduleHarness) restartDaemon() {
 func (h *scheduleHarness) runner() *fakeRunner { return h.mock }
 
 // scheduleCell builds a cell in the default scope; schedule, when set, is the
-// Config whose schedule fired it.
+// name of the stack-scoped default/default/default Config whose schedule fired
+// it (the scope scheduledConfig uses).
 func scheduleCell(name, schedule string, state intmodel.CellState) intmodel.Cell {
+	return scheduleCellFor(name, schedule, intmodel.CellConfigMetadata{
+		Name: schedule, Realm: "default", Space: "default", Stack: "default",
+	}, state)
+}
+
+// scheduleCellFor builds a cell in the default scope; schedule, when set, is
+// the name of the Config at scope config whose schedule fired it, recorded the
+// way CreateCellFromConfig records it: the kukeon.io/schedule label plus a
+// config provenance pointing at the Config's own scope.
+func scheduleCellFor(
+	name, schedule string, config intmodel.CellConfigMetadata, state intmodel.CellState,
+) intmodel.Cell {
 	cell := intmodel.Cell{
 		Metadata: intmodel.CellMetadata{Name: name, Labels: map[string]string{}},
 		Spec:     intmodel.CellSpec{RealmName: "default", SpaceName: "default", StackName: "default"},
@@ -141,6 +154,12 @@ func scheduleCell(name, schedule string, state intmodel.CellState) intmodel.Cell
 	}
 	if schedule != "" {
 		cell.Metadata.Labels[ext.LabelSchedule] = schedule
+		cell.Spec.Provenance = &intmodel.CellProvenance{
+			BindingKind: ext.BindingKindConfig,
+			BindingRef: intmodel.CellBindingRef{
+				Name: config.Name, Realm: config.Realm, Space: config.Space, Stack: config.Stack,
+			},
+		}
 	}
 	return cell
 }
@@ -630,7 +649,11 @@ func TestRunSchedules_FireIsIdempotent(t *testing.T) {
 		h.configs[scheduleConfigName] = scheduledConfig("*/10 * * * *")
 		h.pass("2026-11-17T08:22:19Z")
 
+		// The cell appeared between the listing and the create.
 		h.fireErr = errdefs.ErrCellAlreadyExists
+		h.runner().GetCellFn = func(c intmodel.Cell) (intmodel.Cell, error) {
+			return scheduleCell(c.Metadata.Name, scheduleConfigName, intmodel.CellStateReady), nil
+		}
 		res := h.pass("2026-11-17T08:30:00Z")
 		status := h.status()
 		if status.LastError != "" || status.LastCell != "disk-watch-1794904200" {
@@ -958,4 +981,201 @@ func TestRunSchedules_MisreadListingDoesNotDropState(t *testing.T) {
 	}
 	h.pass("2026-11-17T08:23:00Z")
 	h.wantNext("2026-11-17T08:30:00Z")
+}
+
+// crossScopeHarness serves two Configs named nightly, one realm-scoped and one
+// stack-scoped at default/default/default. Both fire into the same stack, so
+// their cells sit side by side, labelled with the same Config name.
+type crossScopeHarness struct {
+	t        *testing.T
+	ctrl     *controller.Exec
+	mock     *fakeRunner
+	configs  map[string]ext.CellConfigDoc
+	statuses map[string]intmodel.CellConfigScheduleStatus
+	cells    []intmodel.Cell
+	fires    []controller.CellFromConfigRequest
+	prev     time.Time
+}
+
+const (
+	crossScopeRealm = "default"
+	crossScopeStack = "default/default/default"
+)
+
+func crossScopeConfig(scope, cron string) ext.CellConfigDoc {
+	doc := scheduledConfig(cron)
+	doc.Metadata.Name = "nightly"
+	if scope == crossScopeRealm {
+		doc.Metadata.Space, doc.Metadata.Stack = "", ""
+	}
+	return doc
+}
+
+func crossScopeKey(md intmodel.CellConfigMetadata) string {
+	if md.Stack != "" {
+		return crossScopeStack
+	}
+	return crossScopeRealm
+}
+
+func newCrossScopeHarness(t *testing.T, realmCron, stackCron string) *crossScopeHarness {
+	t.Helper()
+	h := &crossScopeHarness{
+		t: t,
+		configs: map[string]ext.CellConfigDoc{
+			crossScopeRealm: crossScopeConfig(crossScopeRealm, realmCron),
+			crossScopeStack: crossScopeConfig(crossScopeStack, stackCron),
+		},
+		statuses: map[string]intmodel.CellConfigScheduleStatus{},
+	}
+	cellNamed := func(name string) (intmodel.Cell, bool) {
+		for _, cell := range h.cells {
+			if cell.Metadata.Name == name {
+				return cell, true
+			}
+		}
+		return intmodel.Cell{}, false
+	}
+	h.mock = &fakeRunner{
+		ListConfigsFn: func(string, string, string) ([]intmodel.CellConfig, error) {
+			var out []intmodel.CellConfig
+			for _, key := range []string{crossScopeRealm, crossScopeStack} {
+				carrier := configCarrier(t, h.configs[key])
+				carrier.Document = nil
+				out = append(out, carrier)
+			}
+			return out, nil
+		},
+		GetConfigFn: func(c intmodel.CellConfig) (intmodel.CellConfig, error) {
+			return configCarrier(t, h.configs[crossScopeKey(c.Metadata)]), nil
+		},
+		GetConfigScheduleStatusFn: func(c intmodel.CellConfig) (intmodel.CellConfigScheduleStatus, bool, error) {
+			status, ok := h.statuses[crossScopeKey(c.Metadata)]
+			return status, ok, nil
+		},
+		WriteConfigScheduleStatusFn: func(c intmodel.CellConfig, status intmodel.CellConfigScheduleStatus) error {
+			status.ActiveCells = slices.Clone(status.ActiveCells)
+			h.statuses[crossScopeKey(c.Metadata)] = status
+			return nil
+		},
+		DeleteConfigScheduleStatusFn: func(intmodel.CellConfig) error { return nil },
+		ListCellsFn: func(string, string, string) ([]intmodel.Cell, error) {
+			return slices.Clone(h.cells), nil
+		},
+		GetCellFn: func(c intmodel.Cell) (intmodel.Cell, error) {
+			if cell, ok := cellNamed(c.Metadata.Name); ok {
+				return cell, nil
+			}
+			return intmodel.Cell{}, errdefs.ErrCellNotFound
+		},
+		ReconcileCellFn: func(c intmodel.Cell) (intmodel.Cell, runner.ReconcileOutcome, error) {
+			return c, runner.ReconcileOutcome{}, nil
+		},
+	}
+	h.ctrl = setupTestController(t, h.mock)
+	h.ctrl.SetScheduleFireForTest(func(req controller.CellFromConfigRequest) error {
+		h.fires = append(h.fires, req)
+		if _, exists := cellNamed(req.Name); exists {
+			return errdefs.ErrCellAlreadyExists
+		}
+		h.cells = append(h.cells, scheduleCellFor(req.Name, req.Schedule, req.Config, intmodel.CellStateReady))
+		return nil
+	})
+	return h
+}
+
+func (h *crossScopeHarness) pass(now string) controller.ScheduleResult {
+	h.t.Helper()
+	when := at(h.t, now)
+	res, err := h.ctrl.RunSchedules(h.prev, when)
+	if err != nil {
+		h.t.Fatalf("RunSchedules(%s) error = %v", now, err)
+	}
+	h.prev = when
+	return res
+}
+
+// TestRunSchedules_SameNamedConfigsInOtherScopes: a realm-scoped and a
+// stack-scoped Config of the same name fire into the same stack and label
+// their cells with the same name. Each one owns only the cells its own
+// schedule fired: the other's running cells neither block it under Forbid nor
+// show in its activeCells, and a fire whose name the other Config already took
+// is a failed fire, not a fire of a cell it never created.
+func TestRunSchedules_SameNamedConfigsInOtherScopes(t *testing.T) {
+	t.Run("Forbid and activeCells are per Config", func(t *testing.T) {
+		h := newCrossScopeHarness(t, "0 * * * *", "30 * * * *")
+		h.pass("2026-11-17T08:55:00Z")
+
+		h.pass("2026-11-17T09:00:00Z") // the realm Config fires; its cell keeps running
+		if len(h.fires) != 1 || h.fires[0].Config.Stack != "" {
+			t.Fatalf("fires = %+v, want one from the realm Config", h.fires)
+		}
+
+		res := h.pass("2026-11-17T09:30:00Z") // the stack Config is not held back by it
+		if len(h.fires) != 2 || h.fires[1].Config.Stack != "default" {
+			t.Fatalf("fires = %+v, want a second one from the stack Config", h.fires)
+		}
+		if res.Skipped != 0 {
+			t.Errorf("Skipped = %d, want 0", res.Skipped)
+		}
+
+		realm, stack := h.statuses[crossScopeRealm], h.statuses[crossScopeStack]
+		if want := []string{"nightly-1794906000"}; !slices.Equal(realm.ActiveCells, want) {
+			t.Errorf("realm activeCells = %v, want %v", realm.ActiveCells, want)
+		}
+		if want := []string{"nightly-1794907800"}; !slices.Equal(stack.ActiveCells, want) {
+			t.Errorf("stack activeCells = %v, want %v", stack.ActiveCells, want)
+		}
+		if realm.SkippedFires != 0 || stack.SkippedFires != 0 {
+			t.Errorf("skippedFires realm=%d stack=%d, want 0 and 0", realm.SkippedFires, stack.SkippedFires)
+		}
+	})
+
+	t.Run("a name the other Config took is not this Config's fire", func(t *testing.T) {
+		h := newCrossScopeHarness(t, "0 * * * *", "0 * * * *")
+		h.pass("2026-11-17T08:55:00Z")
+
+		// The realm Config is listed first and takes nightly-<09:00>.
+		res := h.pass("2026-11-17T09:00:00Z")
+		if res.Fired != 1 || res.Failed != 1 {
+			t.Fatalf("Fired=%d Failed=%d, want 1 and 1 (%v)", res.Fired, res.Failed, res.Errors)
+		}
+		realm, stack := h.statuses[crossScopeRealm], h.statuses[crossScopeStack]
+		if realm.LastCell != "nightly-1794906000" || realm.LastError != "" {
+			t.Errorf("realm lastCell=%q lastError=%q, want the fire recorded", realm.LastCell, realm.LastError)
+		}
+		if stack.LastCell != "" || stack.LastScheduleTime != nil {
+			t.Errorf("stack lastCell=%q lastScheduleTime=%v, want no fire recorded",
+				stack.LastCell, stack.LastScheduleTime)
+		}
+		if !strings.Contains(stack.LastError, "not created by this Config's schedule") {
+			t.Errorf("stack lastError = %q, want the name collision", stack.LastError)
+		}
+		if len(stack.ActiveCells) != 0 {
+			t.Errorf("stack activeCells = %v, want none", stack.ActiveCells)
+		}
+	})
+
+	t.Run("a create that finds the other Config's cell is not this Config's fire", func(t *testing.T) {
+		h := newCrossScopeHarness(t, "0 * * * *", "0 * * * *")
+		h.pass("2026-11-17T08:55:00Z")
+
+		// The realm Config's cell appears between the stack Config's listing
+		// and its create: hide it from the listing, so only the create and the
+		// follow-up read see it.
+		realmCell := scheduleCellFor("nightly-1794906000", "nightly",
+			intmodel.CellConfigMetadata{Name: "nightly", Realm: "default"}, intmodel.CellStateReady)
+		h.configs[crossScopeRealm] = crossScopeConfig(crossScopeRealm, "0 0 1 1 *")
+		h.cells = []intmodel.Cell{realmCell}
+		h.mock.ListCellsFn = func(string, string, string) ([]intmodel.Cell, error) { return nil, nil }
+
+		res := h.pass("2026-11-17T09:00:00Z")
+		if res.Fired != 0 || res.Failed != 1 {
+			t.Fatalf("Fired=%d Failed=%d, want 0 and 1 (%v)", res.Fired, res.Failed, res.Errors)
+		}
+		stack := h.statuses[crossScopeStack]
+		if stack.LastCell != "" || !strings.Contains(stack.LastError, "not created by this Config's schedule") {
+			t.Errorf("stack lastCell=%q lastError=%q, want the collision reported", stack.LastCell, stack.LastError)
+		}
+	})
 }

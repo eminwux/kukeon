@@ -194,14 +194,14 @@ func (b *Exec) runSchedule(
 	}
 	status := stored
 
-	cells, active, err := b.scheduledCells(cfgDoc)
+	cells, err := b.scheduledCells(cfgDoc)
 	if err != nil {
 		return fmt.Errorf("list scheduled cells: %w", err)
 	}
-	status.ActiveCells = active
+	status.ActiveCells = cells.active
 
 	if fireTime, due := b.advanceSchedule(&status, schedule, key, prev, now); due {
-		b.fireSchedule(result, &status, md, cells, fireTime)
+		b.fireSchedule(result, &status, cfgDoc, cells, fireTime)
 	}
 	result.Skipped += status.SkippedFires - stored.SkippedFires
 
@@ -328,16 +328,24 @@ func fireIsEligible(schedule *v1beta1.CellConfigSchedule, fireTime, prev, now ti
 //
 // The fire-time name makes a fire idempotent. A fire whose cell already exists
 // — the daemon restarted between creating it and recording it — counts as
-// fired. Under the Forbid policy (the only one) a fire is skipped while a cell
+// fired, but only when that cell is this Config's: a same-named Config in
+// another scope that fires into the same stack derives the same name, and its
+// cell is a collision, recorded as a failed fire. Under the Forbid policy (the only one) a fire is skipped while a cell
 // an earlier fire created is still running. A fire that fails records
 // lastError and is not retried: the next attempt is the next fire time.
 func (b *Exec) fireSchedule(
 	result *ScheduleResult,
 	status *intmodel.CellConfigScheduleStatus,
-	md intmodel.CellConfigMetadata,
-	cells map[string]struct{},
+	cfgDoc v1beta1.CellConfigDoc,
+	cells scheduledCellSet,
 	fireTime time.Time,
 ) {
+	md := intmodel.CellConfigMetadata{
+		Name:  cfgDoc.Metadata.Name,
+		Realm: cfgDoc.Metadata.Realm,
+		Space: cfgDoc.Metadata.Space,
+		Stack: cfgDoc.Metadata.Stack,
+	}
 	name := cellconfig.ScheduledCellName(md.Name, fireTime)
 	fired := func() {
 		status.LastScheduleTime = timeOrNil(fireTime)
@@ -346,8 +354,20 @@ func (b *Exec) fireSchedule(
 		result.Fired++
 	}
 
-	if _, exists := cells[name]; exists {
+	failed := func(err error) {
+		status.LastError = fmt.Sprintf("fire %s: %v", fireTime.UTC().Format(time.RFC3339), err)
+		result.Failed++
+		result.Errors = append(result.Errors,
+			fmt.Sprintf("config %s: %s", scheduleKey(md), status.LastError))
+	}
+
+	if _, exists := cells.owned[name]; exists {
 		fired()
+		return
+	}
+	if _, taken := cells.others[name]; taken {
+		failed(fmt.Errorf("%w: cell %q was not created by this Config's schedule",
+			errdefs.ErrCellAlreadyExists, name))
 		return
 	}
 	if len(status.ActiveCells) > 0 {
@@ -380,39 +400,96 @@ func (b *Exec) fireSchedule(
 		b.logger.InfoContext(b.ctx, "schedule: fired",
 			"config", scheduleKey(md), "cell", name, "fireTime", fireTime.UTC().Format(time.RFC3339))
 	case errors.Is(err, errdefs.ErrCellAlreadyExists):
-		fired()
+		// Created between the listing and the create. Count it as this fire
+		// only when the cell really is this Config's.
+		owned, ownErr := b.scheduledCellIsOwned(cfgDoc, name)
+		switch {
+		case ownErr != nil:
+			failed(fmt.Errorf("%w; checking its owner: %w", err, ownErr))
+		case owned:
+			fired()
+		default:
+			failed(fmt.Errorf("%w: cell %q was not created by this Config's schedule", err, name))
+		}
 	default:
-		status.LastError = fmt.Sprintf("fire %s: %v", fireTime.UTC().Format(time.RFC3339), err)
-		result.Failed++
-		result.Errors = append(result.Errors,
-			fmt.Sprintf("config %s: %s", scheduleKey(md), status.LastError))
+		failed(err)
 	}
+}
+
+// scheduledCellSet is what a pass knows about the cells in a scheduled
+// Config's cell scope.
+type scheduledCellSet struct {
+	// owned holds the cells this Config's schedule fired that still exist.
+	owned map[string]struct{}
+	// active holds, sorted, the owned cells still running.
+	active []string
+	// others holds every other cell in the scope, so a fire whose name is
+	// already taken by a cell that is not this Config's is told apart from
+	// one an earlier attempt created.
+	others map[string]struct{}
+}
+
+// cellIsScheduledBy reports whether cell was fired by the schedule of the
+// Config cfgDoc. The kukeon.io/schedule label carries only the Config's name,
+// and Configs of the same name can live at realm, space and stack scope and
+// fire into the same stack, so the cell's provenance must also point back at
+// this Config's own scope.
+func cellIsScheduledBy(cell intmodel.Cell, cfgDoc v1beta1.CellConfigDoc) bool {
+	if cell.Metadata.Labels[v1beta1.LabelSchedule] != cfgDoc.Metadata.Name {
+		return false
+	}
+	prov := cell.Spec.Provenance
+	if prov == nil || prov.BindingKind != v1beta1.BindingKindConfig {
+		return false
+	}
+	ref := prov.BindingRef
+	md := cfgDoc.Metadata
+	return strings.TrimSpace(ref.Name) == strings.TrimSpace(md.Name) &&
+		strings.TrimSpace(ref.Realm) == strings.TrimSpace(md.Realm) &&
+		strings.TrimSpace(ref.Space) == strings.TrimSpace(md.Space) &&
+		strings.TrimSpace(ref.Stack) == strings.TrimSpace(md.Stack)
+}
+
+// scheduledCellIsOwned reads the named cell in the Config's cell scope and
+// reports whether this Config's schedule fired it.
+func (b *Exec) scheduledCellIsOwned(cfgDoc v1beta1.CellConfigDoc, name string) (bool, error) {
+	realm, space, stack := cellconfig.CellScope(cfgDoc)
+	cell, err := b.runner.GetCell(intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: name},
+		Spec:     intmodel.CellSpec{RealmName: realm, SpaceName: space, StackName: stack},
+	})
+	if err != nil {
+		return false, err
+	}
+	return cellIsScheduledBy(cell, cfgDoc), nil
 }
 
 // scheduledCells returns the cells the Config's schedule has fired that still
 // exist — every cell in the Config's cell scope labelled
-// kukeon.io/schedule=<config> — and, sorted, the names of those still running.
-// A cell started by hand from the same Config carries no such label, so it is
-// in neither set.
+// kukeon.io/schedule=<config> whose provenance points at this Config's own
+// scope — and, sorted, the names of those still running. A cell started by
+// hand from the same Config carries no such label, and a cell fired by a
+// same-named Config in another scope points elsewhere, so neither is owned;
+// both are listed in others.
 //
 // Each cell is reconciled first, so the verdict reflects the cell's live state
 // (and a finished self-deleting cell is reaped) even when the operator has
 // turned the reconcile loop off.
-func (b *Exec) scheduledCells(cfgDoc v1beta1.CellConfigDoc) (map[string]struct{}, []string, error) {
+func (b *Exec) scheduledCells(cfgDoc v1beta1.CellConfigDoc) (scheduledCellSet, error) {
+	set := scheduledCellSet{owned: map[string]struct{}{}, others: map[string]struct{}{}}
 	realm, space, stack := cellconfig.CellScope(cfgDoc)
 	listed, err := b.runner.ListCells(realm, space, stack)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrRealmNotFound) || errors.Is(err, errdefs.ErrSpaceNotFound) ||
 			errors.Is(err, errdefs.ErrStackNotFound) {
-			return map[string]struct{}{}, nil, nil
+			return set, nil
 		}
-		return nil, nil, err
+		return scheduledCellSet{}, err
 	}
 
-	cells := map[string]struct{}{}
-	var active []string
 	for _, cell := range listed {
-		if cell.Metadata.Labels[v1beta1.LabelSchedule] != cfgDoc.Metadata.Name {
+		if !cellIsScheduledBy(cell, cfgDoc) {
+			set.others[cell.Metadata.Name] = struct{}{}
 			continue
 		}
 		reconciled, outcome, reconcileErr := b.runner.ReconcileCell(cell)
@@ -427,13 +504,13 @@ func (b *Exec) scheduledCells(cfgDoc v1beta1.CellConfigDoc) (map[string]struct{}
 		default:
 			cell = reconciled
 		}
-		cells[cell.Metadata.Name] = struct{}{}
+		set.owned[cell.Metadata.Name] = struct{}{}
 		if scheduleCellIsActive(cell.Status.State) {
-			active = append(active, cell.Metadata.Name)
+			set.active = append(set.active, cell.Metadata.Name)
 		}
 	}
-	slices.Sort(active)
-	return cells, active, nil
+	slices.Sort(set.active)
+	return set, nil
 }
 
 // scheduleCellIsActive reports whether a cell in this state holds back the
