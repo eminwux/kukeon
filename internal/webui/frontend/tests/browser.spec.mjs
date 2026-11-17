@@ -1305,6 +1305,109 @@ test("an unavailable delete response reconciles the cell before reporting its ou
   await expect.poll(() => closed).toBe(true);
 });
 
+test("cells table row actions run lifecycle verbs, confirm destructive ones, and lock the row while in flight", async ({ page }) => {
+  const posts = [];
+  let releaseStop;
+  let deleted = false;
+  await mock(page, async (path, request) => {
+    if (request.method() === "POST") {
+      posts.push(path);
+      if (path.endsWith("/stop")) { await new Promise(resolve => { releaseStop = resolve; }); return { json: { action: "stop" } }; }
+      if (path.endsWith("/start")) return { status: 409, json: { error: { code: "operation_in_progress", message: "another lifecycle operation is running for this cell" } } };
+      if (path.endsWith("/delete")) { deleted = true; return { json: { action: "delete", metadataDeleted: true, cgroupDeleted: true, containersDeleted: true } }; }
+    }
+    if (deleted && path === "/api/realms/dev/spaces/shared/stacks/services/cells") return { json: [] };
+    return undefined;
+  });
+  await page.goto(`${server.url}#/cells`);
+  const cellRow = prefix => page.locator("tbody tr").filter({ has: page.locator(".scope-cell", { hasText: prefix }) });
+  const devRow = cellRow("dev / shared / services");
+  const prodRow = cellRow("prod / shared / services");
+  const dev = "dev / shared / services / api";
+  // Ready rows offer Stop and Restart; any other state offers Start.
+  await expect(devRow.getByRole("button", { name: `Stop cell ${dev}` })).toHaveAttribute("title", "Stop");
+  await expect(devRow.getByRole("button", { name: `Restart cell ${dev}` })).toBeVisible();
+  await expect(devRow.getByRole("button", { name: /^Start cell / })).toHaveCount(0);
+  await expect(prodRow.getByRole("button", { name: "Start cell prod / shared / services / api" })).toBeVisible();
+  await expect(prodRow.getByRole("button", { name: /^Stop cell / })).toHaveCount(0);
+  await expect(devRow.getByRole("link", { name: `Open terminal for ${dev}` })).toHaveAttribute("href", "#/workspace/dev/shared/services/api");
+  await expect(devRow.getByRole("link", { name: `View document for ${dev}` })).toBeVisible();
+  for (const name of ["Kill", "Delete", "Purge"]) await expect(devRow.getByRole("button", { name: `${name} cell ${dev}` })).toHaveAttribute("title", `${name}…`);
+
+  // Stop runs without confirmation; while it is in flight every row icon is disabled with a progress state.
+  await devRow.getByRole("button", { name: `Stop cell ${dev}` }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(devRow.getByRole("button", { name: `Stop cell ${dev}` })).toHaveAttribute("aria-busy", "true");
+  for (const button of await devRow.getByRole("button").all()) await expect(button).toBeDisabled();
+  await expect(prodRow.getByRole("button", { name: /^Start cell / })).toBeEnabled();
+  expect(await devRow.locator(".row-action.is-busy").evaluate(el => getComputedStyle(el).opacity)).toBe("1");
+  releaseStop();
+  await expect(toasts(page)).toContainText("Cell stopped");
+  await expect(devRow.getByRole("button", { name: `Delete cell ${dev}` })).toBeEnabled();
+  expect(posts).toEqual(["/api/realms/dev/spaces/shared/stacks/services/cells/api/stop"]);
+
+  // A concurrent action on the same cell surfaces the daemon's per-cell lock error.
+  await prodRow.getByRole("button", { name: /^Start cell / }).click();
+  await expect(toasts(page).filter({ hasText: "Start failed" })).toContainText("Another operation is in progress");
+
+  // Delete opens the confirmation; dismissing it sends nothing.
+  await devRow.getByRole("button", { name: `Delete cell ${dev}` }).click();
+  let dialog = page.getByRole("dialog");
+  await expect(dialog.getByText(dev, { exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(posts.filter(path => path.endsWith("/delete"))).toHaveLength(0);
+
+  // Purge keeps its typed-scope confirmation.
+  await devRow.getByRole("button", { name: `Purge cell ${dev}` }).click();
+  dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("button", { name: "Confirm Purge" })).toBeDisabled();
+  // The dialog lives inside the nowrap, right-aligned actions cell; its copy must still wrap left-aligned at phone width.
+  const viewport = page.viewportSize();
+  await page.setViewportSize({ width: 390, height: 844 });
+  const description = dialog.locator("#cell-action-dialog-description");
+  const layout = await description.evaluate(el => { const style = getComputedStyle(el); return { height: el.getBoundingClientRect().height, lineHeight: parseFloat(style.lineHeight), whiteSpace: style.whiteSpace, textAlign: style.textAlign, overflow: el.scrollWidth - el.clientWidth }; });
+  expect(layout.whiteSpace).toBe("normal");
+  expect(layout.textAlign).toBe("left");
+  expect(layout.height).toBeGreaterThan(layout.lineHeight * 1.5);
+  expect(layout.overflow).toBeLessThanOrEqual(0);
+  expect(await dialog.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
+  await page.setViewportSize(viewport);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+
+  // A confirmed delete stays on the Cells table; the row drops once a fresh read omits it.
+  await devRow.getByRole("button", { name: `Delete cell ${dev}` }).click();
+  dialog = page.getByRole("dialog");
+  await dialog.getByLabel("I understand Delete removes this cell but does not perform Purge cleanup.").check();
+  await dialog.getByRole("button", { name: "Confirm Delete" }).click();
+  await expect(toasts(page).filter({ hasText: "Cell deleted" })).toHaveCount(1);
+  await expect(page).toHaveURL(/#\/cells$/);
+  await expect(devRow).toHaveCount(0);
+  await expect(prodRow).toBeVisible();
+  expect(posts.filter(path => /\/(purge|kill)$/.test(path))).toHaveLength(0);
+});
+
+test("config and blueprint rows link to the pre-filled creation pages", async ({ page }) => {
+  await mockCatalog(page);
+  await page.goto(`${server.url}#/configs`);
+  const scope = ["prod", "shared", "services", "shared-name"];
+  const catalogRow = () => page.locator("tbody tr").filter({ has: page.locator(".scope-cell", { hasText: /^prod \/ shared \/ services$/ }) });
+  const configRow = catalogRow();
+  const shortcut = configRow.getByRole("link", { name: `New cell from config ${scope.join(" / ")}` });
+  await expect(shortcut).toHaveAttribute("title", "New cell from this config");
+  await shortcut.focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/#\/new-cell\?config=/);
+  await expect(page.getByRole("combobox", { name: /^CellConfig/ })).toHaveValue(JSON.stringify(scope));
+
+  await page.goto(`${server.url}#/blueprints`);
+  const blueprint = catalogRow().getByRole("link", { name: `New config from blueprint ${scope.join(" / ")}` });
+  await expect(blueprint).toHaveAttribute("href", `#/new-config?blueprint=${encodeURIComponent(JSON.stringify(scope))}`);
+  await expect(catalogRow().getByRole("link", { name: /^New cell from/ })).toHaveCount(0);
+});
+
 test("lifecycle toasts update in place, auto-dismiss after a hover pause, and errors persist until dismissed", async ({ page }) => {
   await page.clock.install();
   const posts = [];
@@ -1910,7 +2013,14 @@ test("operator density: compact rows and header, quiet row actions, icon termina
   expect(await rows.evaluateAll(els => els.filter(el => el.getBoundingClientRect().bottom <= innerHeight).length)).toBeGreaterThanOrEqual(15);
   expect((await page.locator(".page-heading").boundingBox()).height).toBeLessThanOrEqual(100);
   await expect(page.locator(".eyebrow")).toHaveCount(0);
-  await expect(page.locator("tbody button")).toHaveCount(0);
+  // Row quick actions are icon-only (#1494): no table row carries a text button.
+  expect(await page.locator("tbody button").evaluateAll(els => els.filter(el => el.textContent.trim()).length)).toBe(0);
+  const quick = rows.first().locator(".row-actions");
+  for (const name of ["Kill", "Delete", "Purge"]) await expect(quick.getByRole("button", { name: new RegExp(`^${name} cell `) })).toHaveClass(/is-danger/);
+  await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
+  expect(await quick.getByRole("button", { name: /^Delete cell / }).evaluate(el => getComputedStyle(el).color)).toBe(await page.evaluate(() => { const probe = document.createElement("span"); probe.style.color = "var(--status-error)"; document.body.append(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; }));
+  for (const box of await rows.evaluateAll(els => els.map(el => el.getBoundingClientRect().height))) expect(box).toBeLessThanOrEqual(44);
+  await page.evaluate(() => { document.documentElement.dataset.theme = "light"; });
   await expect(page.locator("tbody").getByText("View document")).toHaveCount(0);
   expect(await page.locator(".scope-cell").first().evaluate(el => getComputedStyle(el).fontFamily)).toContain("monospace");
   const action = rows.first().getByRole("link", { name: /^View document for / });
