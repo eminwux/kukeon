@@ -104,3 +104,20 @@ func TestNilRoundTrip(t *testing.T) {
 		t.Error("FromAPIError(nil) should be nil")
 	}
 }
+
+func TestInUseRefusalsRoundTrip(t *testing.T) {
+	for kind, sentinel := range map[string]error{
+		"SecretInUse": errdefs.ErrSecretInUse,
+		"VolumeInUse": errdefs.ErrVolumeInUse,
+	} {
+		serverErr := fmt.Errorf("%w: referenced by cell r/s/t/web", sentinel)
+		apiErr := kukeonv1.ToAPIError(serverErr)
+		if apiErr.Kind != kind {
+			t.Fatalf("Kind = %q, want %s", apiErr.Kind, kind)
+		}
+		clientErr := kukeonv1.FromAPIError(apiErr)
+		if !errors.Is(clientErr, sentinel) || clientErr.Error() != serverErr.Error() {
+			t.Fatalf("round-tripped error %v lost %s sentinel or message", clientErr, kind)
+		}
+	}
+}

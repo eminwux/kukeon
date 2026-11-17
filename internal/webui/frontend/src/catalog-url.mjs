@@ -8,6 +8,12 @@ export function catalogAPI(kind, scope) {
   return `/api/catalog/${kind}/${encodeURIComponent(scope.at(-1) ?? "")}?${params}`;
 }
 
+// The delete route sits beside the detail route and takes the same scope query.
+export function catalogDeleteAPI(kind, scope) {
+  const [path, query] = catalogAPI(kind, scope).split("?");
+  return `${path}/delete?${query}`;
+}
+
 export function referenceScope(reference) {
   return [...coordinates.map(key => reference?.[key]), reference?.name].filter(value => typeof value === "string" && !!value);
 }

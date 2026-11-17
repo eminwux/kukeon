@@ -69,6 +69,8 @@ var kindToSentinel = map[string]error{
 	"CellAlreadyExists":       errdefs.ErrCellAlreadyExists,
 	"RenderDigestMismatch":    errdefs.ErrRenderDigestMismatch,
 	"DaemonLogUnavailable":    errdefs.ErrDaemonLogUnavailable,
+	"SecretInUse":             errdefs.ErrSecretInUse,
+	"VolumeInUse":             errdefs.ErrVolumeInUse,
 }
 
 // sentinelToKind is the reverse lookup, populated lazily.

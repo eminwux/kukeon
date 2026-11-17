@@ -263,6 +263,8 @@ button:disabled { cursor: default; opacity: .4; }
 .cell-action-option-help { margin: -8px 0 0 25px; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .cell-action-scope-confirmation { display: grid; gap: 7px; font-size: 12px; font-weight: 550; }
 .cell-action-scope-confirmation input { min-width: 0; width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--canvas); color: var(--text); font: inherit; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.catalog-delete-dependents { display: grid; gap: 8px; }
+.catalog-delete-dependents h3 { margin: 0; font-size: 12px; font-weight: 600; }
 .cell-action-dialog-buttons { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding-top: 4px; }
 .cell-action-dialog-buttons button { min-width: 104px; }
 .cell-action-dialog-buttons .danger-action:disabled { cursor: not-allowed; opacity: .55; }

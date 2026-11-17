@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { catalogAPI, referenceScope } from "./catalog-url.mjs";
+import { catalogAPI, catalogDeleteAPI, referenceScope } from "./catalog-url.mjs";
 
 function parse(url) {
   const parsed = new URL(url, "http://kukeon.invalid");
@@ -31,4 +31,9 @@ test("reference scope ignores non-string and empty coordinates", () => {
 
 test("names are path-encoded", () => {
   assert.equal(catalogAPI("configs", ["default", "a b"]), "/api/catalog/configs/a%20b?realm=default");
+});
+
+test("delete URLs append /delete to the path and keep the scope query", () => {
+  assert.deepEqual(parse(catalogDeleteAPI("secrets", ["default", "team", "agents", "cell", "token"])), { path: "/api/catalog/secrets/token/delete", params: { realm: "default", space: "team", stack: "agents", cell: "cell" } });
+  assert.equal(catalogDeleteAPI("configs", ["default", "a b"]), "/api/catalog/configs/a%20b/delete?realm=default");
 });

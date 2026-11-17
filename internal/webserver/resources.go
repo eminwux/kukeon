@@ -55,6 +55,7 @@ func resourceRoute(
 func registerResourceRoutes(mux *http.ServeMux, dial Dial) {
 	registerAttachRoute(mux, dial)
 	registerCatalogRoutes(mux, dial)
+	registerCatalogDeleteRoutes(mux, dial)
 	registerCreateRoutes(mux, dial)
 	registerConfigRoutes(mux, dial)
 	registerSpaceRoutes(mux, dial)

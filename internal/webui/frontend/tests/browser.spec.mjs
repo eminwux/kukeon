@@ -1408,6 +1408,78 @@ test("config and blueprint rows link to the pre-filled creation pages", async ({
   await expect(catalogRow().getByRole("link", { name: /^New cell from/ })).toHaveCount(0);
 });
 
+test("deleting a config confirms the full scope and known Cells, shows refusals verbatim and drops the row only after a fresh read", async ({ page }) => {
+  const target = ["prod", "shared", "services"];
+  const isTarget = url => target.every((value, i) => url.searchParams.get(["realm", "space", "stack"][i]) === value);
+  const posts = [];
+  let deleted = false;
+  let refuse = true;
+  await mockCatalog(page, url => {
+    if (url.pathname === "/api/catalog/configs/shared-name/delete") {
+      posts.push({ scope: Object.fromEntries(url.searchParams) });
+      if (refuse) return { status: 503, json: { error: { code: "unavailable", message: "failed to delete config document: read-only file system" } } };
+      deleted = true;
+      return { json: { kind: "configs", name: "shared-name", scope: [...target, ""], deleted: true } };
+    }
+    if (deleted && url.pathname === "/api/catalog/configs/shared-name" && isTarget(url)) return { status: 404, json: { error: { code: "not_found", message: "config not found" } } };
+    if (deleted && url.pathname === "/api/catalog/configs") {
+      const scopes = [["dev"], ["prod"], ["prod", "shared"]];
+      return { json: scopes.map(scope => catalogDoc("configs", scope)) };
+    }
+    if (url.pathname === "/api/catalog/secrets") {
+      const secret = catalogDoc("secrets", ["prod"]);
+      secret.spec = { type: "Opaque", data: "must-never-leak" };
+      return { json: [secret] };
+    }
+  });
+  await page.route("**/api/realms/prod/spaces/shared/stacks/services/cells", route => {
+    const cell = doc(["prod", "shared", "services", "api"]);
+    cell.spec.provenance = { bindingKind: "config", bindingRef: { name: "shared-name", realm: "prod", space: "shared", stack: "services" } };
+    return route.fulfill({ json: [cell] });
+  });
+  page.on("request", request => {
+    if (request.url().includes("/delete")) expect(request.headers()["content-type"]).toBe("application/json");
+  });
+  await page.goto(`${server.url}#/configs`);
+  const row = () => page.locator("tbody tr").filter({ has: page.locator(".scope-cell", { hasText: /^prod \/ shared \/ services$/ }) });
+  const deleteIcon = row().getByRole("button", { name: "Delete config prod / shared / services / shared-name" });
+  await expect(deleteIcon).toHaveClass(/is-danger/);
+  await expect(deleteIcon).toHaveAttribute("title", "Delete…");
+
+  await deleteIcon.click();
+  const dialog = page.getByRole("dialog", { name: "Delete config" });
+  await expect(dialog.locator(".cell-action-target")).toContainText("Config");
+  await expect(dialog.locator(".cell-action-target code")).toHaveText("prod / shared / services / shared-name");
+  await expect(dialog.getByRole("region", { name: "Known related resources" }).getByRole("link", { name: "api", exact: true })).toHaveAttribute("href", "#/workspace/prod/shared/services/api");
+  await expect(dialog.getByRole("button", { name: "Confirm Delete" })).toBeDisabled();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(posts).toHaveLength(0);
+
+  await deleteIcon.click();
+  await dialog.getByRole("checkbox").check();
+  await dialog.getByRole("button", { name: "Confirm Delete" }).click();
+  await expect(content(page).getByRole("alert")).toContainText("failed to delete config document: read-only file system");
+  await expect(row()).toHaveCount(1);
+  expect(posts).toEqual([{ scope: { realm: "prod", space: "shared", stack: "services" } }]);
+
+  refuse = false;
+  await deleteIcon.click();
+  await dialog.getByRole("checkbox").check();
+  await dialog.getByRole("button", { name: "Confirm Delete" }).click();
+  await expect(row()).toHaveCount(0);
+  await expect(toasts(page).filter({ hasText: "Config deleted." })).toBeVisible();
+  await expect(page.locator("tbody tr")).toHaveCount(3);
+  expect(posts).toHaveLength(2);
+
+  await page.goto(`${server.url}#/secrets`);
+  await page.locator("tbody tr").first().getByRole("button", { name: /^Delete secret / }).click();
+  const secretDialog = page.getByRole("dialog", { name: "Delete secret" });
+  await expect(secretDialog).toContainText("The value is never shown here.");
+  await expect(secretDialog.getByRole("region", { name: "Known related resources" })).toHaveCount(0);
+  expect(await page.evaluate(() => document.body.innerText)).not.toContain("must-never-leak");
+});
+
 test("lifecycle toasts update in place, auto-dismiss after a hover pause, and errors persist until dismissed", async ({ page }) => {
   await page.clock.install();
   const posts = [];
