@@ -48,7 +48,14 @@ repos:
         # Disable workspace mode so the hook only sees the root module
         # (go 1.24.5). cmd/kukebuild stays unlinted by pre-commit until
         # golangci-lint is bumped to a release built with go 1.25+ (#693).
-        entry: env GOWORK=off golangci-lint run --new-from-rev HEAD --fix
+        #
+        # No --fix: --new-from-rev HEAD only filters which issues are
+        # reported, but --fix re-runs the formatters (golines, gofumpt, gci)
+        # over every touched file, rewriting lines outside the staged diff
+        # and detaching trailing //nolint directives from the line they
+        # suppress (#1455). Report-only keeps the hook scoped to the
+        # contributor's own changes; fix reported lines by hand.
+        entry: env GOWORK=off golangci-lint run --new-from-rev HEAD
         args: ["./..."]
 
   - repo: https://github.com/pre-commit/mirrors-prettier
