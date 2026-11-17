@@ -312,14 +312,18 @@ func newReportCmd() *cobra.Command {
 }
 
 func newSubmitCmd() *cobra.Command {
-	var file string
+	var file, fileIssues string
 	cmd := &cobra.Command{
 		Use:   "submit -f <file>",
 		Short: "Validate and store a health report",
 		Long: "Validate a health report document (JSON or YAML; - reads stdin) and store it in\n" +
 			"kukeond. kukeond assigns id and createdAt when the document leaves them out, and\n" +
 			"marks findings the previous report already carried as recurring. Storing a report\n" +
-			"files nothing anywhere.",
+			"files nothing anywhere.\n\n" +
+			"--file-issues <owner>/<repo> is the opt-in exception: before storing, kuke opens one\n" +
+			"GitHub issue per kukeon finding (or comments on the open issue that already carries\n" +
+			"its signature) and records the URL in the report. workload and unclear findings are\n" +
+			"never filed. It needs a token in " + TokenEnv + ".",
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -346,6 +350,21 @@ func newSubmitCmd() *cobra.Command {
 				return report(cmd, err)
 			}
 			defer func() { _ = client.Close() }()
+			var filingErr error
+			var opened, commented int
+			if fileIssues != "" {
+				filer := &Filer{Repo: fileIssues, Token: os.Getenv(TokenEnv), API: os.Getenv(APIEnv)}
+				if filer.Version, err = client.PingVersion(cmd.Context()); err != nil || filer.Version == "" {
+					filer.Version = "unknown"
+				}
+				var previous *kukeonv1.HealthReport
+				if last, lastErr := client.ReadHealthReport(cmd.Context(), kukeonv1.HealthReportLatest); lastErr == nil {
+					previous = &last
+				}
+				// A filing failure does not lose the sweep: the report is
+				// still stored, with the URLs obtained so far.
+				opened, commented, filingErr = filer.File(cmd.Context(), &document, previous)
+			}
 			stored, err := client.SubmitHealthReport(cmd.Context(), document)
 			if err != nil {
 				return report(cmd, err)
@@ -358,10 +377,19 @@ func newSubmitCmd() *cobra.Command {
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Stored health report %s (%d findings, %d recurring)\n",
 				stored.ID, len(stored.Findings), recurring)
+			if fileIssues != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "Filed in %s: %d issues opened, %d commented\n",
+					fileIssues, opened, commented)
+			}
+			if filingErr != nil {
+				return report(cmd, fmt.Errorf("the report is stored, but filing did not complete: %w", filingErr))
+			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVarP(&file, "file", "f", "", "Report document (JSON or YAML); - reads stdin")
+	cmd.Flags().StringVar(&fileIssues, "file-issues", "",
+		"Opt-in: file kukeon findings as GitHub issues in <owner>/<repo> (needs "+TokenEnv+")")
 	return cmd
 }
 

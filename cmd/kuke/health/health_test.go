@@ -40,7 +40,10 @@ type fakeClient struct {
 	submitted kukeonv1.HealthReport
 	reports   []kukeonv1.HealthReport
 	err       error
+	version   string
 }
+
+func (f *fakeClient) PingVersion(context.Context) (string, error) { return f.version, nil }
 
 func (f *fakeClient) Close() error { return nil }
 

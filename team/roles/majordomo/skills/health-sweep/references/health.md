@@ -48,6 +48,7 @@ Each finding:
 | `classification` | yes | `kukeon`, `workload` or `unclear`. |
 | `severity` | yes | `info`, `warning`, `error` or `critical`. |
 | `title` | no | Short description. |
+| `count` | no | Occurrences in the window; copy a log group's `count`. |
 | `evidence` | yes | At least one entry. |
 | `suggestedCommands` | no | Commands for the reader. |
 | `issueUrl` | no | Written by `--file-issues`; only a `kukeon` finding may carry one. |

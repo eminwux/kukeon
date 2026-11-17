@@ -160,6 +160,9 @@ type HealthFinding struct {
 	// stored report already carried a finding with the same signature.
 	Recurring bool   `json:"recurring" yaml:"recurring"`
 	Title     string `json:"title,omitempty" yaml:"title,omitempty"`
+	// Count is how many times the finding occurred in the window, when the
+	// digest counted it (a log group's count). Zero means not counted.
+	Count int `json:"count,omitempty" yaml:"count,omitempty"`
 	// Evidence is what supports the finding: command output, log samples.
 	Evidence []string `json:"evidence" yaml:"evidence"`
 	// SuggestedCommands are commands the reader may run; nothing runs them.

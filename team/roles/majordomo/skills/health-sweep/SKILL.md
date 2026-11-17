@@ -70,6 +70,9 @@ Give each finding:
   departs from the digest's tag, into the report body.
 - `severity`: `critical` (kukeon cannot run cells), `error` (something is
   broken now), `warning` (degraded or at risk), `info`.
+- `title`: a short description of the symptom. It becomes the issue title
+  when filing is on.
+- `count`: for a log group, the digest's `count`.
 - `evidence`: the command outputs or log lines that support it, trimmed.
 - `suggestedCommands`: commands the reader could run, each a complete command.
   Suggestions only.
