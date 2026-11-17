@@ -1,10 +1,31 @@
 # Majordomo role
 
-The majordomo inspects kukeon runtime/configuration and carries out explicitly
-requested operations with verified outcomes. Its initial
-[`create-cell-config`](skills/create-cell-config/SKILL.md) skill inspects an
-existing blueprint, produces a CellConfig draft, and applies it when requested.
-Config creation never implicitly creates or starts a cell.
+Majordomo is the kukeon team member that knows kukeon. It inspects kukeon's
+runtime and configuration, diagnoses problems, and carries out explicitly
+requested operations with verified outcomes. It has three skills:
+
+- [`create-cell-config`](skills/create-cell-config/SKILL.md) inspects an
+  existing blueprint, produces a CellConfig draft, and applies it when
+  requested. Config creation never implicitly creates or starts a cell.
+- [`diagnose`](skills/diagnose/SKILL.md) gathers evidence about a problem,
+  explains the likely cause with that evidence, and proposes fixes as commands
+  with their effect. It applies a fix only when the user asks.
+- [`health-sweep`](skills/health-sweep/SKILL.md) is the read-only unattended
+  run: it reads kukeond's health digest and, if there are findings, stores one
+  triaged report in kukeond.
+
+It runs two ways:
+
+|           | Interactive                                                         | `health-sweep` task                                                                     |
+| --------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Config    | `kukeon-majordomo-<harness>`                                        | `kukeon-majordomo-<harness>-health-sweep`                                               |
+| Start     | `kuke run kukeon-majordomo-claude`, or the web UI's Majordomo panel | its hourly schedule once enabled, or `kuke run -d kukeon-majordomo-claude-health-sweep` |
+| Authority | Diagnoses freely; changes things only on explicit request           | Read-only: detects and reports, never remediates                                        |
+| Lifetime  | Long-lived                                                          | Deletes itself when it ends; shares the interactive config's state volume               |
+
+The sweep ships **suspended**. See
+[Teams → The majordomo health sweep](../../../docs/site/concepts/team.md#the-majordomo-health-sweep)
+for turning it on.
 
 [`AGENTS.md`](AGENTS.md) is the canonical role policy. [`CLAUDE.md`](CLAUDE.md) is
 a relative symlink adapter for harnesses expecting that filename. The role data is
@@ -16,10 +37,23 @@ kukeon TeamEntry selection; it does not dynamically install runtime prerequisite
 
 ## Prerequisites and authority
 
-- A compatible `kuke` client must be provisioned on PATH, configured for the
-  intended running kukeond endpoint, with access to that endpoint. The role and
-  public harness images do not provision that connection. Do not assume that
-  a socket is mounted or that a CLI install alone grants daemon access.
+- **Daemon access is provided.** `role.yaml` requests three host mounts
+  (`needs.mounts`), so a majordomo cell reaches the host's kukeond with no
+  manual provisioning:
+
+  | Mount            | In the cell                       | Provides                                                           |
+  | ---------------- | --------------------------------- | ------------------------------------------------------------------ |
+  | `kukeond-socket` | `/run/kukeon/kukeond` (read-only) | The daemon socket; `KUKEON_HOST` points `kuke` at it.              |
+  | `kuke-binary`    | `/usr/local/bin/kuke` (read-only) | The host's own `kuke` client, so client and daemon versions match. |
+  | `kukeon-install` | `/opt/kukeon` (read-only)         | The kukeon install the client and its shim resolve against.        |
+
+  The mounts select the shared `<harness>-host` blueprint. `kuke get cells`
+  therefore answers for the host as soon as the cell is up.
+
+- **In-cell `kuke status` host and state checks are not host facts.** Those
+  rows are evaluated by the `kuke` client in its own namespaces, so inside a
+  cell they describe the cell's container. Use `kuke health`, whose checks
+  kukeond evaluates on the host.
 - The blueprint and destination realm/space/stack must exist. Repository sources
   and secret identities must satisfy the selected blueprint. Inspect the actual
   schema and the installed CLI help; the skill records its inspected kukeon
@@ -34,9 +68,10 @@ kukeon TeamEntry selection; it does not dynamically install runtime prerequisite
   to `OPENROUTER_API_KEY`. Supply credentials through the configured mechanism,
   never role files. The installer neither checks nor modifies authentication.
 - `kukeon` is the initial team's name. This role requests no `root` capability,
-  privileged runtime, sudo, host filesystem/SSH mount, or GitHub token. An
-  authorized daemon connection can still mutate runtime resources: target and
-  operation authorization come from the user's request.
+  privileged runtime, sudo, SSH mount, or GitHub token; its only host mounts
+  are the three read-only ones above. The daemon connection can mutate runtime
+  resources: target and operation authorization come from the user's request,
+  and the `health-sweep` task is restricted to reads by its skill.
 
 ## Materialize into a dedicated cell home
 

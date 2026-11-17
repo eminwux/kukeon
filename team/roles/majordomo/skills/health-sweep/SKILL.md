@@ -19,7 +19,7 @@ Only these, and only as reads plus the one submission:
 - `kuke daemon logs` (it reads kukeond's log file directly and may be refused
   in this cell; the digest's `logErrors` already carry the error-level entries)
 - `kuke health report submit -f <file>` (with `--file-issues <owner/repo>`
-  only as described under *Filing*)
+  only as described under _Filing_)
 
 **Never run a command that mutates kukeon or a workload**: no `kuke apply`,
 `create`, `delete`, `purge`, `start`, `stop`, `kill`, `restart`, `run`,
@@ -66,8 +66,8 @@ Give each finding:
   - `workload` for the user's product: an `Error` cell (tagged `workload`),
     an application error.
   - `unclear` when the evidence does not decide. Do not guess.
-  Write the reasoning for every `unclear` verdict, and for any verdict that
-  departs from the digest's tag, into the report body.
+    Write the reasoning for every `unclear` verdict, and for any verdict that
+    departs from the digest's tag, into the report body.
 - `severity`: `critical` (kukeon cannot run cells), `error` (something is
   broken now), `warning` (degraded or at risk), `info`.
 - `title`: a short description of the symptom. It becomes the issue title

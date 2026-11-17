@@ -49,8 +49,8 @@ type Options struct {
 	// Reapply recomposes the kukeon team from its stored entry instead of
 	// initializing. It never touches kuketeams.yaml and excludes Force.
 	Reapply bool
-	Sources                         map[string]fs.FS
-	Client                          Client
+	Sources map[string]fs.FS
+	Client  Client
 	// ImportGit, when Enabled, stores the operator's SSH key as a secret and
 	// points the configuration's git identity at it. Init only.
 	ImportGit GitImport

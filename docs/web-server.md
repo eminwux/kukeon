@@ -177,7 +177,105 @@ ping over the selected socket with the server's permissions. The page shows:
 **Check again** repeats the check, as does the toolbar **Refresh**. A reachable
 daemon does not mean cells, containers, cgroups, networking, or other
 subsystems are healthy. To check those, review cell states in **Overview**,
-read the [daemon logs](#daemon-logs), or run `kuke status`.
+read the [daemon logs](#daemon-logs), open the [Health page](#health-page), or
+run `kuke health`.
+
+## Majordomo
+
+Majordomo is the kukeon team's own assistant (role `majordomo`, applied by
+`kuke team init`). The web UI gives it a permanent place instead of a chat
+window: its interactive session is an ordinary terminal attach, so it works the
+same for Claude, Codex and OpenCode, and the harness's own login and permission
+prompts appear in the panel unchanged.
+
+The UI finds majordomo by label, never by name: configs and cells labelled
+`kukeon.io/team: kukeon` and `kukeon.io/role: majordomo`, without a
+`kukeon.io/task` label.
+
+### Sidebar entry and enabling
+
+A **Majordomo** entry is always at the top of the sidebar (and on the collapsed
+rail). It shows the majordomo cell's state, **Not enabled** when the configs
+exist but no cell does, or **Needs kuke team init** when no majordomo config is
+found. Clicking it opens the panel.
+
+- **No majordomo configs**: the panel says to run `kuke team init` on the host.
+- **Configs, no cell**: pick a harness config and click **Enable majordomo**.
+  This creates one cell named `majordomo` from that config, through the same
+  create-from-config requests as [Create a Cell](#create-a-cell), and starts
+  it. If creation fails, the panel shows kukeond's error, which names the
+  missing prerequisite (for example a secret that does not exist).
+- **Stopped cell**: the panel shows its state and a **Start** button.
+- **Running cell**: the panel attaches.
+
+Once a majordomo cell exists the enable action is gone, so the UI never creates
+a second one.
+
+### Docked panel
+
+The panel docks on the right of every page. Open it from the sidebar entry or
+the toolbar button; the toolbar button also hides it.
+
+- **Collapsing does not detach.** The terminal session stays connected while
+  the panel is hidden and across every navigation, so majordomo's screen is as
+  you left it. Closing the browser tab ends the attach, not the cell.
+- **Resize** by dragging the panel's left edge, or focus it and use the arrow
+  keys (`Home`/`End` for the widest and narrowest). The width is remembered.
+- **Connection state** is shown in the panel header. When the connection drops,
+  **Reconnect** attaches again in one click. **Detach** closes the session
+  until you reconnect.
+
+The majordomo cell's own terminal screen (`#/workspace/…/majordomo`) points at
+the panel instead of opening a second terminal for the same session.
+
+### Ask majordomo
+
+An **Ask majordomo** button is on cell, config, blueprint, volume and daemon
+pages. On a failure it is highlighted and repeated next to the failure: a
+`Failed`, `Error` or `Degraded` cell (also on its row in the Cells table) and a
+failed daemon check.
+
+It opens the panel and pastes a question into majordomo's terminal **without
+sending it**, so you can edit it first. The question carries the resource's
+full scoped identity and current state, for example:
+
+```
+About the cell api in realm default, space default, stack default (state Failed; reason: CreateFailed; message: cni attach failed): what is going on with it, and what should I do?
+```
+
+The text is a single line, pasted as one bracketed paste when the harness has
+enabled bracketed paste (Claude and Codex do). If majordomo is not running yet,
+the question waits in the panel until a session is attached, and can be
+discarded.
+
+### Health page
+
+**Resources → Health** (`#/health`) shows what the
+[health sweep](site/concepts/team.md#the-majordomo-health-sweep) has reported.
+Everything on it is read from kukeond through `kuke serve`; the server reads no
+kukeon file itself.
+
+- **Sweep schedule**, from each health-sweep task config's `spec.schedule` and
+  `status.schedule`: the cron expression, whether it is suspended, the next and
+  last fire, and the last error. These are the values
+  `kuke get config <name> -o yaml` prints.
+- **Run sweep now** starts one sweep cell from that config, the same as
+  `kuke run -d <config>`. A sweep submits a report only if it finds something.
+- While sweeps are suspended, the page shows the entry edit and the
+  `kuke team init --reapply` command that turn them on. No control on the page
+  edits a schedule.
+- **Latest report**: its window, summary and findings. Each finding shows its
+  classification (`kukeon`, `workload` or `unclear`), whether it is recurring
+  or new, its evidence and suggested commands, and a link to the issue if one
+  was filed.
+- **History** lists the stored reports; **Show** displays an older one.
+- **Ask majordomo** on the report pastes a question naming it.
+
+| Method | Path                       | Purpose                                                                                                                                   |
+| ------ | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/api/health/reports`      | Stored reports, newest first.                                                                                                             |
+| `GET`  | `/api/health/reports/{id}` | One report; `latest` is the newest. `404` when there is none.                                                                             |
+| `POST` | `/api/health/sweep`        | Run one sweep. Body `{"config":{"name","realm","space","stack"}}`; only a config labelled as majordomo's `health-sweep` task is accepted. |
 
 ## Daemon logs
 

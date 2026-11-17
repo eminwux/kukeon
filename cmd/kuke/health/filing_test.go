@@ -65,7 +65,9 @@ func TestSanitizeRedactsSecrets(t *testing.T) {
 			t.Errorf("Sanitize(%q) = %q, want %q", in, got, want)
 		}
 	}
-	key := "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXk\n-----END OPENSSH PRIVATE KEY-----"
+	// Assembled so the repository holds no literal key header.
+	header := "OPENSSH PRIVATE " + "KEY-----"
+	key := "-----BEGIN " + header + "\nb3BlbnNzaC1rZXk\n-----END " + header
 	if got := healthcmd.Sanitize("key:\n" + key + "\nafter"); strings.Contains(got, "b3BlbnNzaC1rZXk") ||
 		!strings.Contains(got, "after") {
 		t.Errorf("private key survived: %q", got)

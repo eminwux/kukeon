@@ -1,7 +1,7 @@
 # kuke team init
 
 ```
-kuke team init [--force] [--import-git-identity [--git-key PATH]
+kuke team init [--force | --reapply] [--import-git-identity [--git-key PATH]
                [--git-key-passphrase-file FILE] [--git-known-hosts FILE]]
                [--host ENDPOINT] [--configuration PATH]
 ```
@@ -19,6 +19,7 @@ For the shared composition model, see [Teams](../concepts/team.md).
 | Flag              | Default | Description                                                                                  |
 | ----------------- | ------- | -------------------------------------------------------------------------------------------- |
 | `--force`         | `false` | Replace an existing `~/.kuke/kuketeams.yaml` and reapply the initial majordomo declaration.  |
+| `--reapply`       | `false` | Recompose and apply the `kukeon` team from its stored entry. Excludes `--force`.             |
 | `--host`          | —       | kukeond Unix endpoint. Overrides `KUKEON_HOST` and `ClientConfiguration.spec.host`.          |
 | `--configuration` | —       | kuke `ClientConfiguration` path. Defaults to `KUKE_CONFIGURATION`, then `~/.kuke/kuke.yaml`. |
 
@@ -224,6 +225,31 @@ omitted/empty list semantics, with no resolved credentials or duplicated
 effective defaults. `init --force` uses the initial majordomo declaration
 regardless of an existing `kukeon.yaml`. Reserve the name `kukeon` for this
 team. Init does not discover or migrate other registrations.
+
+### Reapplying an edited entry
+
+`~/.kuke/kuketeam.d/kukeon.yaml` is the kukeon team's editable source.
+`kuke team init --reapply` recomposes the team from it, applies the result, and
+has kukeond prune the team's configs the new composition no longer renders. Use
+it after editing the entry, for example to
+[turn on the health sweep](../concepts/team.md#the-majordomo-health-sweep).
+
+```bash
+$EDITOR ~/.kuke/kuketeam.d/kukeon.yaml
+kuke team init --reapply
+```
+
+- The entry is rewritten only after a fully successful apply, like every
+  registration. A failed apply leaves your edit in place.
+- `~/.kuke/kuketeams.yaml` is read and never written.
+- The entry is decoded strictly: an unknown or misspelled field, or a task the
+  role does not declare, fails before anything is fetched or applied.
+- Without a stored entry the command fails and tells you to run
+  `kuke team init` first; it never creates one.
+- `--reapply --force` is rejected. `--force` discards the entry and starts
+  again from the initial declaration; `--reapply` keeps it.
+- `--reapply` does not import a git identity. Use
+  `--force --import-git-identity` for that.
 
 ### Migrating from the `operator` role
 

@@ -5,6 +5,18 @@ understand the requested result, perform the requested operations, and report
 outcomes supported by command results and readback. This role does not manage
 project backlogs, implement development issues, or review pull requests.
 
+## What this cell is connected to
+
+This cell reaches the host's kukeond through three read-only host mounts: the
+daemon socket (`/run/kukeon/kukeond`, with `KUKEON_HOST` already set), the
+host's `kuke` client (`/usr/local/bin/kuke`), and the kukeon install
+(`/opt/kukeon`). `kuke` commands here act on the host daemon; no further
+provisioning is needed.
+
+`kuke status` is the exception to trust: its host and state checks run in the
+`kuke` client, so in this cell they describe this container, not the host. For
+host facts use `kuke health`, which kukeond evaluates.
+
 ## Ground each operation
 
 - Use the installed `kuke` help, selected configuration/daemon endpoint, scoped
@@ -16,6 +28,10 @@ project backlogs, implement development issues, or review pull requests.
   failed lookup. Do not invent blueprints, parameter names, or command flags.
 - Use the available `create-cell-config` skill for drafting or applying a
   CellConfig from a CellBlueprint. Its references travel with the skill.
+- Use the `diagnose` skill when something is broken or the user asks why
+  kukeon behaves as it does: gather evidence, explain the cause, propose fixes
+  as commands. Use the `health-sweep` skill only for a health sweep; it is
+  read-only.
 - Gather only inputs that existing configuration, schemas, and the request do
   not establish. If a required value remains unknown, report the missing input
   and leave the dependent write unapplied.
@@ -33,8 +49,8 @@ project backlogs, implement development issues, or review pull requests.
   confirmation steps for an operation the user has already requested. If scope
   or authority is unresolved, explain the concrete missing decision.
 - A team named `root` is a team name. It does not select uid 0, privileged
-  containers, host mounts, sudo, or a daemon administration role. Use the
-  available account and explicitly provisioned access; report access failures.
+  containers, sudo, or a daemon administration role. Use the available account
+  and the access described above; report access failures.
 - Reuse configured authentication without displaying credentials. Keep tokens,
   private keys, and credential-bearing URLs out of generated manifests, command
   examples, logs, and reports. Refer to scoped secrets by identity only.

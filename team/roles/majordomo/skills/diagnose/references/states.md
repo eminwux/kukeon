@@ -5,16 +5,16 @@ Written against the kukeon revision that ships this skill. Confirm against
 
 ## Cell states
 
-| `status.state` | Meaning | Owner |
-| --- | --- | --- |
-| `Pending` | Created, not yet started. | - |
-| `Ready` | Running. | - |
-| `Stopped` | Stopped by a user, or created and never started. | user |
-| `Exited` | The workload ran and exited `0`. | workload |
-| `Error` | The workload exited non-zero. | workload |
-| `Failed` | kukeon could not bring the cell up. | kukeon |
-| `Degraded` | Some containers are not running. | depends on the container |
-| `Unknown` | kukeond could not determine the state. | kukeon |
+| `status.state` | Meaning                                          | Owner                    |
+| -------------- | ------------------------------------------------ | ------------------------ |
+| `Pending`      | Created, not yet started.                        | -                        |
+| `Ready`        | Running.                                         | -                        |
+| `Stopped`      | Stopped by a user, or created and never started. | user                     |
+| `Exited`       | The workload ran and exited `0`.                 | workload                 |
+| `Error`        | The workload exited non-zero.                    | workload                 |
+| `Failed`       | kukeon could not bring the cell up.              | kukeon                   |
+| `Degraded`     | Some containers are not running.                 | depends on the container |
+| `Unknown`      | kukeond could not determine the state.           | kukeon                   |
 
 `Stopped`, `Exited`, `Error` and `Failed` cells can all be started again with
 `kuke start` or `kuke restart`; none needs a delete first.

@@ -312,6 +312,102 @@ A `schedule` or `suspend` edited by hand on a task config is therefore lost on
 the next `kuke team add`. Change it in `kuketeam.yaml` (or the role's defaults)
 instead.
 
+A team's entry can also replace a task's argument text with `args`, for example
+`{ name: pick-bug, args: "--label regression" }`. Like `schedule` and
+`suspend`, it overrides only that value.
+
+### The majordomo health sweep
+
+The `kukeon` team's `majordomo` role declares one task, `health-sweep`, with
+`schedule: "@hourly"` and `suspend: true`. `kuke team init` therefore renders
+`kukeon-majordomo-<harness>-health-sweep` **suspended**: no install spends
+model credits on sweeps until its user turns them on.
+
+A sweep is read-only. It reads kukeond's health digest
+([`kuke health`](../cli/kuke-health.md)), stops if the digest is clean, and
+otherwise triages each finding and stores one report in kukeond. It never
+restarts, deletes or changes anything; fixes appear in the report as suggested
+commands.
+
+To turn sweeps on, edit the kukeon team's stored entry and reapply it. The
+entry is the team's source: `kuke team init` writes it and
+`kuke team init --reapply` recomposes the team from it.
+
+```yaml
+# ~/.kuke/kuketeam.d/kukeon.yaml
+spec:
+  roles:
+    - name: majordomo
+      source: kukeon
+      path: team/roles/majordomo
+      initialPath: $HOME
+      needs:
+        image: [go]
+      tasks:
+        - { name: health-sweep, suspend: false }
+```
+
+```bash
+kuke team init --reapply
+kuke get config kukeon-majordomo-claude-health-sweep -o yaml   # spec.schedule, status.schedule
+```
+
+Change the cadence the same way, with `schedule: "*/30 * * * *"` in the task
+entry. Run one sweep by hand at any time, suspended or not:
+
+```bash
+kuke run -d kukeon-majordomo-claude-health-sweep
+kuke health reports
+kuke health report latest
+```
+
+The sweep cell deletes itself when it ends. It uses the same state volume as
+the interactive `kukeon-majordomo-<harness>` config, so it runs with the
+harness login you made there.
+
+### Filing kukeon defects as issues
+
+By default a sweep only stores its report. Filing the `kukeon` findings as
+GitHub issues is opt-in per install, and a default `kuke team init` needs no
+GitHub token. To opt in:
+
+1. Create the token as a secret named `health-github-token`:
+
+   ```bash
+   kuke create secret health-github-token --realm default --from-file /path/to/token
+   ```
+
+2. In the kukeon entry, give the role that secret and tell the sweep where to
+   file:
+
+   ```yaml
+   # ~/.kuke/kuketeam.d/kukeon.yaml
+   spec:
+     roles:
+       - name: majordomo
+         # ...
+         needs:
+           image: [go]
+           secrets: [health-github-token]
+         tasks:
+           - name: health-sweep
+             suspend: false
+             args: "--file-issues <owner>/<repo>"
+   ```
+
+3. Run `kuke team init --reapply`.
+
+`needs.secrets` in a team entry adds runtime secrets to a role for that team
+only; the role itself still requires none. The token reaches the sweep cell as
+`HEALTH_GITHUB_TOKEN`. The sweep then submits its report with
+`kuke health report submit --file-issues <owner>/<repo>`, and `kuke` does the
+filing: one issue per new `kukeon` finding, a comment on the open issue of a
+recurring one, and never anything for `workload` or `unclear` findings. See
+[`kuke health report submit`](../cli/kuke-health.md#filing-issues-opt-in) for
+the issue format and what is redacted.
+
+Do step 1 before step 3, so the secret exists when the sweep first runs.
+
 ### Connectors
 
 A role enables a connector by name:
