@@ -18,7 +18,8 @@ import { NetworkPanel, networkKinds } from "./network";
 import { DaemonHealthPage, DaemonLogsPage } from "./daemon";
 import { CellLifecycleControls, CellRowActions, type LifecycleAction, type LifecycleFeedback, type PurgeOptions } from "./lifecycle";
 import { InventoryIndicator, NotificationProvider, useNotify } from "./notifications";
-import { cellRemovalConfirmed, deleteOperationComplete, purgeOperationComplete, requestedPurgeOptions } from "./lifecycle-policy.js";
+import { cellRemovalConfirmed, cellsWithin, deleteOperationComplete, descendantCounts, parentActionsAllowed, purgeOperationComplete, requestedPurgeOptions } from "./lifecycle-policy.js";
+import { ParentRowActions, type ParentAction } from "./scope-actions";
 
 const NewCellPage = lazy(async () => ({ default: (await import("./new-cell")).NewCellPage }));
 const NewConfigPage = lazy(async () => ({ default: (await import("./new-config")).NewConfigPage }));
@@ -66,12 +67,13 @@ function Dashboard({ inventory }: { inventory: Resource<Inventory> }) {
     </section>
   </>;
 }
-function ResourceList({ depth, inventory, parent, operations, onLifecycleAction }: {
+function ResourceList({ depth, inventory, parent, operations, onLifecycleAction, onParentAction }: {
   depth: number;
   inventory: Resource<Inventory>;
   parent: string[];
   operations: Record<string, LifecycleFeedback>;
   onLifecycleAction: (scope: string[], action: LifecycleAction, state?: string, options?: PurgeOptions) => void;
+  onParentAction: (scope: string[], action: ParentAction, options: PurgeOptions) => void;
 }) {
   const [search, setSearch] = useState("");
   const [realm, setRealm] = useState("");
@@ -84,7 +86,7 @@ function ResourceList({ depth, inventory, parent, operations, onLifecycleAction 
   return <section className="panel" aria-label={`${titles[depth]} list`}>
     <div className="list-controls"><label className="search-field">Search<input type="search" placeholder={`Search ${titles[depth].toLowerCase()}…`} value={search} onChange={e => { setSearch(e.target.value); setPage(0); }} /></label>{depth > 0 && <label>Realm<select aria-label="Filter by realm" value={realm} onChange={e => { setRealm(e.target.value); setPage(0); }}><option value="">All realms</option>{inventory.data?.rows[0].map(row => <option key={row.scope[0]}>{row.scope[0]}</option>)}</select></label>}<span className="result-count">{filtered.length} results</span></div>
     {parent.length > 0 && <p className="scope-filter">Scope: {parent.join(" / ")} <a href={listLink(depth)}>Clear scope</a></p>}
-    <div className="table-scroll"><table><thead><tr><th>Name</th><th>State</th><th>Scope</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{filtered.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(row => <tr key={JSON.stringify(row.scope)}><td><a className="resource-name" href={resourceLink(row.scope)}>{row.doc.metadata.name}</a></td><td><StateBadge state={row.doc.status?.state} /></td><td className="scope-cell">{row.scope.slice(0, -1).join(" / ") || "—"}</td><td className="row-actions">{depth === 3 ? <CellRowActions scope={row.scope} state={row.doc.status?.state} operation={operations[JSON.stringify(row.scope)]} onAction={onLifecycleAction} /> : <DocumentRowLink href={resourceLink(row.scope, true)} label={row.scope.join(" / ")} />}</td></tr>)}</tbody></table></div>
+    <div className="table-scroll"><table><thead><tr><th>Name</th><th>State</th><th>Scope</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{filtered.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(row => <tr key={JSON.stringify(row.scope)}><td><a className="resource-name" href={resourceLink(row.scope)}>{row.doc.metadata.name}</a></td><td><StateBadge state={row.doc.status?.state} /></td><td className="scope-cell">{row.scope.slice(0, -1).join(" / ") || "—"}</td><td className="row-actions">{depth === 3 ? <CellRowActions scope={row.scope} state={row.doc.status?.state} operation={operations[JSON.stringify(row.scope)]} onAction={onLifecycleAction} /> : <ParentRowActions scope={row.scope} counts={descendantCounts(inventory.data?.rows ?? [], row.scope)} allowed={parentActionsAllowed(row.scope)} operation={operations[JSON.stringify(row.scope)]} onAction={onParentAction} />}</td></tr>)}</tbody></table></div>
     {!filtered.length && <div className="empty-state"><h3>{inventory.loading ? "Loading resources…" : inventory.error || inventory.data?.failures.length ? "Resources could not be fully loaded" : scoped.length ? "No matching resources" : `No ${titles[depth].toLowerCase()} found`}</h3><p>{search || realm ? "Try another search or clear the filters." : "Refresh to retrieve the latest resource state."}</p></div>}
     <div className="pagination"><span>{filtered.length ? `${currentPage * pageSize + 1}–${Math.min((currentPage + 1) * pageSize, filtered.length)} of ${filtered.length}` : "0 results"}</span><button disabled={!currentPage} onClick={() => setPage(currentPage - 1)}>Previous</button><button disabled={(currentPage + 1) * pageSize >= filtered.length} onClick={() => setPage(currentPage + 1)}>Next</button></div>
   </section>;
@@ -122,6 +124,16 @@ type LifecycleResponse = {
   killed?: boolean;
   containersDeleted?: boolean;
   cgroupDeleted?: boolean;
+  metadataDeleted?: boolean;
+  purgeSucceeded?: boolean;
+  force?: boolean;
+  cascade?: boolean;
+  deleted?: string[];
+  purged?: string[];
+};
+
+type ParentActionResponse = {
+  error?: { code?: string; message?: string };
   metadataDeleted?: boolean;
   purgeSucceeded?: boolean;
   force?: boolean;
@@ -441,6 +453,70 @@ function App() {
       setRevision(value => value + 1);
     }
   }
+  // Delete or purge a realm, space or stack (#1495). Rows, their descendants and sidebar cells drop only
+  // when the follow-up inventory read omits them; terminals close once a fresh read confirms removal.
+  async function runParentAction(scope: string[], action: ParentAction, options: PurgeOptions) {
+    const key = JSON.stringify(scope);
+    if (pendingOperations.current.has(key)) return;
+    pendingOperations.current.add(key);
+    const kind = kinds[scope.length - 1];
+    const verb = action === "delete" ? "Delete" : "Purge";
+    const cells = cellsWithin(inventory.data?.rows ?? [], scope);
+    recordOperation(scope, { action, phase: "pending", message: `${action === "delete" ? "Deleting" : "Purging"} ${kind}…` });
+    const confirmRemoval = async () => {
+      const presence = await readCellPresence(scope);
+      if (presence === false) {
+        for (const cell of cells) terminals.removeCell(cell);
+        const current = readRoute();
+        if (current.scope.length >= scope.length && scope.every((part, index) => current.scope[index] === part)) window.location.hash = homeLink;
+      }
+      const text = presence === false ? ` A fresh daemon read confirms the ${kind} is gone.`
+        : presence === true ? ` A fresh daemon read confirms the ${kind} still exists.`
+          : " The final state could not be confirmed; refresh before retrying.";
+      return { removed: presence === false, text };
+    };
+    try {
+      const response = await fetch(`${apiPath(scope)}/${action}`, {
+        method: "POST",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify(requestedPurgeOptions(options.force, options.cascade)),
+      });
+      let body: ParentActionResponse = {};
+      try { body = await response.json(); } catch { /* Use the HTTP status below. */ }
+      if (!response.ok) {
+        const failure = body.error ?? { code: "unavailable", message: `HTTP ${response.status}` };
+        const message = failure.message ?? "The daemon rejected the request.";
+        if (failure.code === "has_dependencies") {
+          recordOperation(scope, { action, phase: "error", message: `${verb} refused. ${message} Enable cascade to ${action} its children first.` });
+          return;
+        }
+        const reason = failure.code === "permission_denied" ? "Permission denied"
+          : failure.code === "unavailable" ? "Daemon unavailable"
+          : failure.code === "operation_in_progress" ? "Another operation is in progress"
+          : failure.code === "not_found" ? `The ${kind} no longer exists`
+          : failure.code === "invalid_request" ? "Invalid request"
+          : "Request failed";
+        const outcome = failure.code === "unavailable" || failure.code === "not_found" ? (await confirmRemoval()).text : "";
+        recordOperation(scope, { action, phase: "error", message: `${verb} failed. ${reason}: ${message}${outcome}` });
+        return;
+      }
+      const { removed, text: outcome } = await confirmRemoval();
+      const complete = removed && body.purgeSucceeded !== false && body.metadataDeleted !== false;
+      const effects = [
+        body.deleted?.length ? `Deleted: ${body.deleted.join(", ")}.` : "",
+        body.purged?.length ? `Purged: ${body.purged.join(", ")}.` : "",
+        body.purgeSucceeded === false ? "Comprehensive purge: incomplete." : "",
+        `Options passed: --force ${body.force ? "enabled" : "disabled"}, --cascade ${body.cascade ? "enabled" : "disabled"}.`,
+      ].filter(Boolean).join(" ");
+      recordOperation(scope, { action, phase: complete ? "success" : "error", message: complete ? `${kind[0].toUpperCase()}${kind.slice(1)} ${action}d. ${effects}${outcome}` : `${verb} incomplete. ${effects}${outcome}` });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The request could not reach the web server.";
+      recordOperation(scope, { action, phase: "error", message: `${verb} outcome unknown. Daemon unavailable: ${message}.${(await confirmRemoval()).text}` });
+    } finally {
+      pendingOperations.current.delete(key);
+      setRevision(value => value + 1);
+    }
+  }
   async function handleCellCreated(cell: Doc, start: boolean) {
     const spec = cell.spec as { realmId?: unknown; spaceId?: unknown; stackId?: unknown; containers?: { id?: unknown; attachable?: unknown; root?: unknown }[]; tty?: { default?: unknown } } | undefined;
     if (typeof spec?.realmId !== "string" || typeof spec.spaceId !== "string" || typeof spec.stackId !== "string") {
@@ -532,7 +608,7 @@ function App() {
         {!isWorkspace && !cellScreenScope && <ResourcesNavigation route={route} />}
         {!cellScreenScope && <div className="page-heading"><h1>{heading}</h1>{headingContext && <p className="page-context mono-id">{headingContext}</p>}</div>}
         <CellDetailsScreen title={heading ?? "Cell"} view={cellView} scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} operations={operations} onLifecycleAction={runCellLifecycle} />
-        {isWorkspace ? null : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "new-config" ? <Suspense fallback={<p role="status">Loading Config creation form…</p>}><NewConfigPage key={JSON.stringify(route.blueprint ?? [])} revision={revision} inventory={inventory} blueprintScope={route.blueprint} onCreated={() => setRevision(value => value + 1)} /></Suspense> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} operations={operations} onLifecycleAction={runCellLifecycle} /> : <Dashboard inventory={inventory} />}
+        {isWorkspace ? null : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "new-config" ? <Suspense fallback={<p role="status">Loading Config creation form…</p>}><NewConfigPage key={JSON.stringify(route.blueprint ?? [])} revision={revision} inventory={inventory} blueprintScope={route.blueprint} onCreated={() => setRevision(value => value + 1)} /></Suspense> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} operations={operations} onLifecycleAction={runCellLifecycle} onParentAction={runParentAction} /> : <Dashboard inventory={inventory} />}
         <footer>Daemon inventory · {inventory.data ? <>Last refreshed <time dateTime={inventory.data.updatedAt}>{new Date(inventory.data.updatedAt).toLocaleTimeString()}</time></> : "Not refreshed yet"} · Refresh to retrieve the latest state.</footer>
       </div>
     </main>
