@@ -1299,6 +1299,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Tasks">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scheduling-a-task" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scheduling a task
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -3558,6 +3575,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Tasks">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scheduling-a-task" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scheduling a task
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -3949,12 +3983,65 @@ run time (<code>issue &lt;N&gt;</code>) still go through it:
 <code>kuke run --rm -d acme-dev-claude --mode headless --param PROMPT="work on issue 22"</code>.
 When a task is deselected, or the role stops declaring it, the next
 <code>kuke team add</code> prunes its config along with the team's other obsolete configs.</p>
+<h4 id="scheduling-a-task">Scheduling a task<a class="headerlink" href="#scheduling-a-task" title="Permanent link">&para;</a></h4>
+<p>A task config can run on a schedule instead of by hand. How often a task runs
+is a deployment decision, so the team sets it. An entry in a role's <code>tasks</code> is
+either a task name or an object that also gives the task's cadence:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># kuketeam.yaml</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span><span class="nt">roles</span><span class="p">:</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dev</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">      </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">agents</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dev</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">      </span><span class="nt">tasks</span><span class="p">:</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pick-issue</span><span class="w"> </span><span class="c1"># runs only when started by hand</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">pick-bug</span><span class="p p-Indicator">,</span><span class="nt"> schedule</span><span class="p">:</span><span class="w"> </span><span class="s">"*/15</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*"</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">pick-nits</span><span class="p p-Indicator">,</span><span class="nt"> schedule</span><span class="p">:</span><span class="w"> </span><span class="s">"@daily"</span><span class="p p-Indicator">,</span><span class="nt"> suspend</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<p><code>schedule</code> is a five-field cron expression or one of <code>@hourly</code>, <code>@daily</code>,
+<code>@weekly</code>, <code>@monthly</code>, read in UTC. <code>suspend: true</code> keeps the schedule but
+switches it off.</p>
+<p>A role can ship defaults for both, so a team that just names the task gets
+them:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># role.yaml</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span><span class="nt">tasks</span><span class="p">:</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="nt">        name</span><span class="p">:</span><span class="w"> </span><span class="nv">pick-bug</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="nt">        skill</span><span class="p">:</span><span class="w"> </span><span class="nv">pick-issue</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="nt">        args</span><span class="p">:</span><span class="w"> </span><span class="s">"--label</span><span class="nv"> </span><span class="s">bug"</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="nt">        schedule</span><span class="p">:</span><span class="w"> </span><span class="s">"*/30</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*"</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="w">      </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="nt">        name</span><span class="p">:</span><span class="w"> </span><span class="nv">health-sweep</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="nt">        skill</span><span class="p">:</span><span class="w"> </span><span class="nv">health-sweep</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="nt">        schedule</span><span class="p">:</span><span class="w"> </span><span class="s">"@hourly"</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="nt">        suspend</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="w">      </span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<p>Each value a team's entry sets overrides the role's default for that value, and
+the other one is kept. The <code>pick-bug</code> entry above replaces the role's
+<code>*/30 * * * *</code> with <code>*/15 * * * *</code>. A role can ship a schedule that is off
+until a team opts in, as <code>health-sweep</code> does: the team turns it on with
+<code>{ name: health-sweep, suspend: false }</code>. A <code>suspend</code> on a task that ends up
+with no schedule fails <code>kuke team add</code>, because there is nothing for it to
+switch.</p>
+<p><code>kuke team add</code> renders the resolved values into the task config's
+<a href="../../manifests/config/#specschedule-object-optional"><code>spec.schedule</code></a>, and
+kukeond then fires the config on that schedule: each fire starts a
+<code>&lt;config&gt;-&lt;unix-fire-time&gt;</code> cell, and a fire is skipped while the previous one
+is still running. A task with no schedule renders as before. See what is
+scheduled, and when it next fires, with <code>kuke get configs</code>.</p>
+<p>Team configs are re-rendered: <code>kuke team add</code> rewrites every one of them whole.
+A <code>schedule</code> or <code>suspend</code> edited by hand on a task config is therefore lost on
+the next <code>kuke team add</code>. Change it in <code>kuketeam.yaml</code> (or the role's defaults)
+instead.</p>
 <h3 id="connectors">Connectors<a class="headerlink" href="#connectors" title="Permanent link">&para;</a></h3>
 <p>A role enables a connector by name:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># role.yaml</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span><span class="nt">connectors</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">github</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="c1"># GH_TOKEN for the gh CLI, plus the `gh` image capability</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">  </span><span class="nt">forges</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">github-issues</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="c1"># optional; implies the github connector</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># role.yaml</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">  </span><span class="nt">connectors</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">github</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="c1"># GH_TOKEN for the gh CLI, plus the `gh` image capability</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">  </span><span class="nt">forges</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">github-issues</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="c1"># optional; implies the github connector</span>
 </code></pre></div>
 <p>The <code>github</code> connector's token is used only for the GitHub API. It is never a
 git credential: clone, push and signing use the git identity below. The older
@@ -4033,19 +4120,19 @@ it there to fall back to the global binding or default). A requirement whose
 name cannot yield an environment identifier (e.g. it starts with a digit) must
 be bound explicitly. The project's <code>kind: Team</code> file never declares bindings.</p>
 <p>An explicit global binding looks like this:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Optional, under TeamsConfig.spec (or the same shape under TeamEntry secrets).</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nt">secrets</span><span class="p">:</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">openrouter-api-key</span><span class="w"> </span><span class="c1"># identifier in Role.spec.harnesses.opencode.secrets</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">    </span><span class="nt">secretRef</span><span class="p">:</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">provider-account</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">      </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auth</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">      </span><span class="nt">space</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">shared</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">      </span><span class="nt">stack</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">operators</span>
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="w">    </span><span class="nt">envName</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OPENROUTER_API_KEY</span>
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="w">    </span><span class="c1"># Optional fallback if application finds no runtime secret:</span>
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="w">    </span><span class="nt">source</span><span class="p">:</span>
-<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="w">      </span><span class="nt">env</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OPERATOR_OPENROUTER_KEY</span>
-<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="w">      </span><span class="c1"># Alternatively: file: /absolute/path/to/private/provider-key</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># Optional, under TeamsConfig.spec (or the same shape under TeamEntry secrets).</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="nt">secrets</span><span class="p">:</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">openrouter-api-key</span><span class="w"> </span><span class="c1"># identifier in Role.spec.harnesses.opencode.secrets</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">    </span><span class="nt">secretRef</span><span class="p">:</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">provider-account</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="w">      </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auth</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="w">      </span><span class="nt">space</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">shared</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="w">      </span><span class="nt">stack</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">operators</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="w">    </span><span class="nt">envName</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OPENROUTER_API_KEY</span>
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="w">    </span><span class="c1"># Optional fallback if application finds no runtime secret:</span>
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="w">    </span><span class="nt">source</span><span class="p">:</span>
+<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="w">      </span><span class="nt">env</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OPERATOR_OPENROUTER_KEY</span>
+<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="w">      </span><span class="c1"># Alternatively: file: /absolute/path/to/private/provider-key</span>
 </code></pre></div>
 <p><code>name</code>, the scoped <code>secretRef</code>, and <code>envName</code> are required. <code>source</code> is
 optional; when present it names exactly one environment <strong>variable</strong> or
@@ -4099,7 +4186,7 @@ when the team is applied or a cell is launched.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 16, 2026 22:19:24 UTC">November 16, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 17, 2026 21:43:14 UTC">November 17, 2026</span>
   </span>
 
     
