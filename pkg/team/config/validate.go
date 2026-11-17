@@ -253,11 +253,11 @@ func validateSelections(d *Defaults) error {
 			tasks := map[string]bool{}
 			for j, task := range *role.Tasks {
 				taskField := fmt.Sprintf("%s.tasks[%d]", field, j)
-				if err := unique(taskField, task, tasks); err != nil {
+				if err := unique(taskField, task.Name, tasks); err != nil {
 					return err
 				}
-				if !ValidName(task) {
-					return fmt.Errorf("%s: invalid task name %q", taskField, task)
+				if !ValidName(task.Name) {
+					return fmt.Errorf("%s: invalid task name %q", taskField, task.Name)
 				}
 			}
 		}

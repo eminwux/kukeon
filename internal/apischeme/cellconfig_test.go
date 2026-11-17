@@ -18,9 +18,12 @@ package apischeme_test
 
 import (
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/eminwux/kukeon/internal/apischeme"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	ext "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
@@ -101,5 +104,102 @@ func TestConvertCellConfig_UnsupportedVersion(t *testing.T) {
 	in.APIVersion = "v2"
 	if _, err := apischeme.ConvertCellConfigDocToInternal(in); err == nil {
 		t.Fatal("expected error for unsupported apiVersion, got nil")
+	}
+}
+
+// TestConvertCellConfig_Schedule covers the schedule of a Config (issue
+// #1503) across the carrier hop: spec.schedule round-trips in the document and
+// is lifted onto the carrier, an applied status is dropped from the stored
+// document, and the stored schedule state comes back as status.schedule.
+func TestConvertCellConfig_Schedule(t *testing.T) {
+	deadline := int64(300)
+	next := time.Date(2026, 11, 17, 8, 30, 0, 0, time.UTC)
+
+	in := sampleConfigDoc()
+	in.Spec.Schedule = &ext.CellConfigSchedule{
+		Cron:                    "*/10 * * * *",
+		Timezone:                "Europe/Madrid",
+		ConcurrencyPolicy:       ext.ConcurrencyPolicyForbid,
+		StartingDeadlineSeconds: &deadline,
+		Suspend:                 true,
+	}
+	// A status on the way in — `kuke get config -o yaml`, re-applied — is the
+	// daemon's to write, not the operator's.
+	in.Status = &ext.CellConfigStatus{Schedule: &ext.CellConfigScheduleStatus{SkippedFires: 99}}
+
+	internal, _, err := apischeme.NormalizeCellConfig(in)
+	if err != nil {
+		t.Fatalf("NormalizeCellConfig() error = %v", err)
+	}
+	if strings.Contains(string(internal.Document), "status") {
+		t.Errorf("stored document carries a status block:\n%s", internal.Document)
+	}
+	if got := internal.Schedule; got == nil || got.Cron != "*/10 * * * *" ||
+		got.Timezone != "Europe/Madrid" || !got.Suspend {
+		t.Errorf("carrier Schedule = %+v, want the lifted spec.schedule", got)
+	}
+
+	out, err := apischeme.ConvertCellConfigToExternal(internal)
+	if err != nil {
+		t.Fatalf("ConvertCellConfigToExternal() error = %v", err)
+	}
+	if !reflect.DeepEqual(out.Spec.Schedule, in.Spec.Schedule) {
+		t.Errorf("spec.schedule = %+v, want %+v", out.Spec.Schedule, in.Spec.Schedule)
+	}
+	if out.Status != nil {
+		t.Errorf("status = %+v, want none when no schedule state is stored", out.Status)
+	}
+
+	internal.ScheduleStatus = &intmodel.CellConfigScheduleStatus{
+		NextScheduleTime: &next,
+		LastCell:         "kukeon-dev-1794904200",
+		ActiveCells:      []string{"kukeon-dev-1794904200"},
+		SkippedFires:     2,
+		LastError:        "boom",
+	}
+	out, err = apischeme.ConvertCellConfigToExternal(internal)
+	if err != nil {
+		t.Fatalf("ConvertCellConfigToExternal() error = %v", err)
+	}
+	want := &ext.CellConfigStatus{Schedule: &ext.CellConfigScheduleStatus{
+		NextScheduleTime: &next,
+		LastCell:         "kukeon-dev-1794904200",
+		ActiveCells:      []string{"kukeon-dev-1794904200"},
+		SkippedFires:     2,
+		LastError:        "boom",
+	}}
+	if !reflect.DeepEqual(out.Status, want) {
+		t.Errorf("status = %+v, want %+v", out.Status.Schedule, want.Schedule)
+	}
+
+	// The list view carries no body, but does carry the schedule.
+	listed := apischeme.ConvertCellConfigMetadataToExternal(internal)
+	if listed.Spec.Schedule == nil || listed.Spec.Schedule.Cron != "*/10 * * * *" ||
+		listed.Spec.Schedule.Timezone != "Europe/Madrid" || !listed.Spec.Schedule.Suspend {
+		t.Errorf("listed spec.schedule = %+v, want the summary", listed.Spec.Schedule)
+	}
+	if !reflect.DeepEqual(listed.Status, want) {
+		t.Errorf("listed status = %+v, want %+v", listed.Status, want)
+	}
+	if listed.Spec.Blueprint.Name != "" || listed.Spec.Values != nil {
+		t.Errorf("the list view leaked the config body: %+v", listed.Spec)
+	}
+}
+
+// TestConvertCellConfig_UnscheduledDocumentIsUnchanged pins that a Config
+// without a schedule is stored byte-for-byte as before the schedule fields
+// existed, so its revision hash does not move.
+func TestConvertCellConfig_UnscheduledDocumentIsUnchanged(t *testing.T) {
+	internal, _, err := apischeme.NormalizeCellConfig(sampleConfigDoc())
+	if err != nil {
+		t.Fatalf("NormalizeCellConfig() error = %v", err)
+	}
+	for _, key := range []string{"schedule", "status"} {
+		if strings.Contains(string(internal.Document), key) {
+			t.Errorf("stored document of an unscheduled config mentions %q:\n%s", key, internal.Document)
+		}
+	}
+	if internal.Schedule != nil {
+		t.Errorf("carrier Schedule = %+v, want nil", internal.Schedule)
 	}
 }

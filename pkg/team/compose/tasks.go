@@ -22,6 +22,7 @@ import (
 	"path"
 	"slices"
 
+	"github.com/eminwux/kukeon/internal/cronspec"
 	model "github.com/eminwux/kukeon/pkg/api/model/kuketeams"
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/config"
@@ -31,12 +32,18 @@ import (
 const headlessMode = "headless"
 
 // selectTasks validates the role's declared tasks and returns the ones the
-// team's role entry selects, in the role's declaration order.
+// team's role entry selects, in the role's declaration order, each with its
+// schedule resolved.
 //
 // A task's name is a resource-name segment unique within the role; its skill
 // must be the base name of one of the role's spec.skills entries. The entry's
 // `tasks` selection selects every task when omitted, none when empty, and
 // fails on a name the role does not declare.
+//
+// A task's cadence is a deployment decision (issue #1503): the role declares a
+// default `schedule` and `suspend`, and each value the team's task entry sets
+// overrides the corresponding default. The returned tasks carry the resolved
+// values in their Schedule and Suspend fields.
 func selectTasks(role *model.Role, selection config.Role) ([]model.RoleTask, error) {
 	skills := map[string]bool{}
 	for _, skill := range role.Spec.Skills {
@@ -57,22 +64,58 @@ func selectTasks(role *model.Role, selection config.Role) ([]model.RoleTask, err
 				role.Metadata.Name, task.Name, task.Skill,
 			)
 		}
+		if task.Schedule != "" {
+			if _, err := cronspec.Parse(task.Schedule); err != nil {
+				return nil, fmt.Errorf("role %s: task %s: schedule: %w", role.Metadata.Name, task.Name, err)
+			}
+		}
 	}
 	if selection.Tasks != nil {
-		for _, name := range *selection.Tasks {
-			if !declared[name] {
+		for _, entry := range *selection.Tasks {
+			if !declared[entry.Name] {
 				return nil, fmt.Errorf("roles %s: tasks: role %s declares no task %q",
-					selection.Name, role.Metadata.Name, name)
+					selection.Name, role.Metadata.Name, entry.Name)
 			}
 		}
 	}
 	var out []model.RoleTask
 	for _, task := range role.Spec.Tasks {
-		if selection.SelectsTask(task.Name) {
-			out = append(out, task)
+		if !selection.SelectsTask(task.Name) {
+			continue
 		}
+		resolved, err := resolveTaskSchedule(role.Metadata.Name, selection, task)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, resolved)
 	}
 	return out, nil
+}
+
+// resolveTaskSchedule applies the team's task entry over the role's schedule
+// defaults: a team `schedule` replaces the role's, a team `suspend` — true or
+// false — replaces the role's. A `suspend` on a task that ends up with no
+// schedule is refused: there is nothing for it to switch.
+func resolveTaskSchedule(roleName string, selection config.Role, task model.RoleTask) (model.RoleTask, error) {
+	entry, _ := selection.TaskSelection(task.Name)
+	suspendSet := task.Suspend
+	if entry.Schedule != "" {
+		if _, err := cronspec.Parse(entry.Schedule); err != nil {
+			return task, fmt.Errorf("roles %s: tasks: %s: schedule: %w", selection.Name, task.Name, err)
+		}
+		task.Schedule = entry.Schedule
+	}
+	if entry.Suspend != nil {
+		task.Suspend = *entry.Suspend
+		suspendSet = true
+	}
+	if suspendSet && task.Schedule == "" {
+		return task, fmt.Errorf(
+			"roles %s: tasks: %s: suspend is set but the task has no schedule (role %s declares none)",
+			selection.Name, task.Name, roleName,
+		)
+	}
+	return task, nil
 }
 
 // taskPrompt is the harness-neutral prompt a task config runs headless with.
@@ -86,8 +129,10 @@ func taskPrompt(task model.RoleTask) string {
 
 // bindTasks renders one headless-only, self-deleting CellConfig per selected
 // task of the pair. Each carries the pair's blueprint ref, values, repos,
-// secrets, components and requires, plus the task's PROMPT. A harness without
-// a headless mode gets no task configs; the returned note says so.
+// secrets, components and requires, plus the task's PROMPT — and, for a task
+// with a resolved schedule, the spec.schedule kukeond fires it on (issue
+// #1503). A harness without a headless mode gets no task configs; the returned
+// note says so.
 func bindTasks(plan *pairPlan, base *api.CellConfigDoc) ([]*api.CellConfigDoc, string) {
 	if len(plan.tasks) == 0 {
 		return nil, ""
@@ -121,6 +166,9 @@ func bindTasks(plan *pairPlan, base *api.CellConfigDoc) ([]*api.CellConfigDoc, s
 			cc.Spec.Values = map[string]string{}
 		}
 		cc.Spec.Values["PROMPT"] = taskPrompt(task)
+		if task.Schedule != "" {
+			cc.Spec.Schedule = &api.CellConfigSchedule{Cron: task.Schedule, Suspend: task.Suspend}
+		}
 		out = append(out, cc)
 	}
 	return out, ""

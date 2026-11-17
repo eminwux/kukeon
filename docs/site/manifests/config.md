@@ -111,6 +111,95 @@ Overrides the git identity, credentials and signing config the cell inherits fro
 
 When `true`, every cell materialized from this Config gets `Spec.AutoDelete`, so it is deleted once its run ends. This is the same deletion `kuke run --rm` asks for, without the flag. The value is OR'd with the blueprint's own `spec.cell.autoDelete`. It is set on the Config, not the blueprint, because a blueprint is shared across modes and roles. A re-render of an existing cell (OutOfSync, `kuke restart`) keeps it. `kuke team add` sets it on every [task config](../concepts/team.md#tasks).
 
+### `spec.schedule` (object, optional)
+
+Makes the Config recurring: kukeond creates and starts a fresh cell from it on a cron schedule, doing on each fire what `kuke run -d --from-config <config>` does. Without it the Config is an ordinary one. A Config has one schedule; two cadences are two Configs.
+
+```yaml
+spec:
+  blueprint: { name: disk-watch, realm: default }
+  schedule:
+    cron: "*/10 * * * *"
+    timezone: Europe/Madrid
+    concurrencyPolicy: Forbid
+    startingDeadlineSeconds: 300
+    suspend: false
+```
+
+| Field                     | Type    | Required | Description                                                                                                                                          |
+| ------------------------- | ------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cron`                    | string  | yes      | Five fields — `minute hour day-of-month month day-of-week` — or one of `@hourly`, `@daily`, `@weekly`, `@monthly`. No seconds field and no `@every`. |
+| `timezone`                | string  | no       | The IANA time zone the expression is read in, for example `Europe/Madrid`. Default `UTC`.                                                            |
+| `concurrencyPolicy`       | string  | no       | What a fire does while a cell from an earlier fire is still running. Only `Forbid` (skip the fire) is supported, and it is the default.              |
+| `startingDeadlineSeconds` | integer | no       | How late a fire that was missed while kukeond was down may still start. Unset, missed fires are dropped. See [Missed fires](#missed-fires).          |
+| `suspend`                 | bool    | no       | `true` stops new fires and leaves running cells alone. Setting it back to `false` resumes from the next scheduled time; nothing is caught up.        |
+
+A `cron` field is a comma-separated list of `*`, a value, a range `a-b`, and any of those with a step `/n`. Months and days of week also take three-letter names (`jan`, `mon`); day of week runs `0`–`6` from Sunday, and `7` is also Sunday. When both day fields are restricted, a day matches if either one does.
+
+#### What a fire does
+
+Each fire creates and starts one cell from the Config, in the Config's default mode and with no per-fire overrides: the Config is the whole description. The cell is:
+
+- named `<config>-<unix-fire-time>`, for example `disk-watch-1794904200`;
+- labelled `kukeon.io/schedule=<config>`, next to the usual `kukeon.io/config` lineage label, so `kuke get cells -l kukeon.io/schedule=<config>` lists a schedule's cells;
+- always self-deleting, as if `spec.autoDelete` were set.
+
+The fire-time name makes a fire idempotent: a fire retried after a daemon restart finds the cell it already made and counts as fired.
+
+A Config's scheduled cells are the cells carrying its schedule label whose provenance points at that Config's own scope. Configs of the same name at realm, space and stack scope can fire into the same stack, and each counts only its own cells: another Config's cells never hold its fires back. When two such Configs fire at the same time they derive the same cell name; the one that comes second does not create a cell, records the collision in `status.schedule.lastError`, and fires again at its next fire time. Give same-named Configs that share a stack distinct names or fire times.
+
+kukeond runs the scheduler on its own timer, once a minute on the minute, so a schedule has one-minute precision. The timer does not depend on the reconcile loop: schedules still fire when the operator disables it with `--reconcile-interval 0`. A new or edited schedule is picked up on the next pass.
+
+The schedule is not part of the rendered cell. Adding, changing or removing `spec.schedule` never marks the Config's existing cells `OutOfSync`.
+
+#### Concurrency
+
+Under `Forbid`, a fire is skipped — and `status.schedule.skippedFires` goes up by one — while any of the Config's scheduled cells (see above) is `Pending`, `Ready`, `Degraded` or `Unknown`. Cells in `Stopped`, `Exited`, `Failed` or `Error` do not hold a fire back. A cell started by hand from the same Config (`kuke run --from-config`) has no schedule label, so it neither blocks a fire nor is blocked by one.
+
+#### Missed fires
+
+Fires that came due while kukeond was down are not replayed. When it comes back, at most one runs — the latest — and only if the schedule sets `startingDeadlineSeconds` and that fire is no older than the deadline. Every other missed fire is dropped and counted in `skippedFires`. Without `startingDeadlineSeconds`, all of them are dropped.
+
+#### Failures and edits
+
+- A fire that cannot create its cell — a missing blueprint or secret, a value that does not validate — records the reason in `status.schedule.lastError`. It is not retried before the next scheduled time, and later fires still run.
+- A changed `cron` or `timezone` takes effect from the new expression's next fire time.
+- Removing `spec.schedule`, or deleting the Config, stops future fires. Cells that are already running are left alone.
+
+#### Daylight saving time
+
+Fire times are wall-clock times in `timezone`. On the day clocks go forward, a time inside the skipped hour does not fire. On the day they go back, a time inside the repeated hour fires on both occurrences. An interval such as `*/10 * * * *` keeps its real-time spacing across both.
+
+#### Validation
+
+Applying a Config is refused when `cron` does not parse, `timezone` is unknown, `concurrencyPolicy` is anything other than `Forbid`, or `startingDeadlineSeconds` is negative. It is also refused when the Config's default mode is `interactive`, because nothing attaches to a cell the daemon starts: set [`spec.modes.default`](#specmodes-object-optional) to a mode that runs unattended, such as `headless`. A Config whose blueprint declares no modes is accepted.
+
+## status
+
+`status` is written by kukeond and is read-only: `kuke get config <name> -o yaml` shows it, and a `status` block in an applied document is ignored. Only a scheduled Config has one.
+
+```yaml
+status:
+  schedule:
+    lastScheduleTime: 2026-11-17T08:30:00Z
+    nextScheduleTime: 2026-11-17T08:40:00Z
+    lastCell: disk-watch-1794904200
+    activeCells: [disk-watch-1794904200]
+    skippedFires: 0
+    lastError: ""
+```
+
+| Field              | Type            | Description                                                                                                               |
+| ------------------ | --------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `lastScheduleTime` | timestamp       | The fire time of the last fire that created a cell.                                                                       |
+| `nextScheduleTime` | timestamp       | The next fire time. Unset while the schedule is suspended, and until kukeond's first pass after the schedule was applied. |
+| `lastCell`         | string          | The name of the cell the last fire created.                                                                               |
+| `activeCells`      | array of string | The schedule's cells that are still running — the ones a `Forbid` schedule waits for.                                     |
+| `skippedFires`     | integer         | How many fires did not run: skipped by the concurrency policy, or missed and past their starting deadline.                |
+| `lastError`        | string          | Why the last fire failed. Empty once a fire succeeds.                                                                     |
+
+All times are UTC. `kuke get configs` shows the same state in two columns: `SCHEDULE` (the cron expression, followed by the time zone when one is set) and `NEXT` (the next fire time, or `suspended`). Both are empty for an unscheduled Config.
+
 ## Slot fills
 
 A `CellConfig` fills the structural slots a [`CellBlueprint`](blueprint.md) declares. Slot matching is by **name**, across all of the blueprint's containers — the same slot name on two containers shares a single Config-side entry. The validation gates are:
@@ -161,6 +250,8 @@ The daemon writes the config document to a root-owned, world-readable file under
 
 The `configs/` directory is `0755` and each config document is `0644`, both owned by root. A config carries only references (a blueprint name, repo URLs, secretRefs) — no credential bytes — so the directory is world-readable, unlike `secrets/`. Because `configs/` nests inside the scope's metadata directory, the same teardown that reclaims a scope (`kuke purge` / `kuke delete`) reclaims its configs.
 
+The [`status.schedule`](#status) of a scheduled Config is stored beside the document, not in it, at `<scope>/config-status/<name>` with the same ownership and modes. Keeping it out of the document means an apply never overwrites it and the scheduler's writes never change the document. `kuke delete config` removes it with the Config.
+
 ## Invariants
 
 - **One Config → N cells (1:N binding).** Each `kuke run --from-config` / `kuke create cell --from-config` stamps a fresh `<prefix>-<6hex>` cell (or a `--name`-pinned one); the cell's identity is its [`CellDoc`](../concepts/cell.md), and the Config name lives on only as the `kukeon.io/config` lineage label.
@@ -168,6 +259,7 @@ The `configs/` directory is `0755` and each config document is `0644`, both owne
 - **Persisted provenance.** Every stamped cell records its binding in `Spec.Provenance` (kind, scoped ref, resolved params, `--env` overrides), so `kuke restart <cell>` can re-resolve it from the Config without re-supplying values.
 - **Apply-time slot validation.** A Config that fills an undeclared slot, or that leaves a required slot unfilled, errors at apply time against the referenced blueprint's current shape — not at run time.
 - **Cross-scope references.** A Config may reference a Blueprint in a different scope; the same is true of the `secretRef` inside each secret slot fill.
+- **A schedule is not part of the cell.** `spec.schedule` decides when kukeond creates cells from the Config, never what they contain: editing it leaves existing cells in sync, and a scheduled cell differs from a hand-started one only by its name, its `kukeon.io/schedule` label and being self-deleting.
 
 ## Minimal
 

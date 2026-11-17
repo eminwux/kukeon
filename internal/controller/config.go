@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/cellconfig"
 	applypkg "github.com/eminwux/kukeon/internal/controller/apply"
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -103,7 +104,31 @@ func (b *Exec) GetConfig(config intmodel.CellConfig) (GetConfigResult, error) {
 
 	res.MetadataExists = true
 	res.Config = got
+	res.Config.ScheduleStatus = b.configScheduleStatus(got)
 	return res, nil
+}
+
+// configScheduleStatus returns the stored schedule state of a Config that has
+// a spec.schedule (#1503), and nil for one that has none — so state the
+// scheduler has not yet pruned after a schedule was removed is never shown.
+// Best-effort: the document itself is what a get is for, so a body that does
+// not decode or state that cannot be read leaves the Config without status
+// rather than failing the get.
+func (b *Exec) configScheduleStatus(cfg intmodel.CellConfig) *intmodel.CellConfigScheduleStatus {
+	doc, err := apischeme.ConvertCellConfigToExternal(cfg)
+	if err != nil || doc.Spec.Schedule == nil {
+		return nil
+	}
+	status, found, err := b.runner.GetConfigScheduleStatus(cfg)
+	if err != nil {
+		b.logger.DebugContext(b.ctx, "get config: read schedule status",
+			"config", cfg.Metadata.Name, "error", err)
+		return nil
+	}
+	if !found {
+		return nil
+	}
+	return &status
 }
 
 // ListConfigs lists the metadata of every CellConfig bound to the filter scope
@@ -114,11 +139,32 @@ func (b *Exec) ListConfigs(realmName, spaceName, stackName string) ([]intmodel.C
 	if err := validateConfigScopeFilter(realmName, spaceName, stackName); err != nil {
 		return nil, err
 	}
-	return b.runner.ListConfigs(
+	configs, err := b.runner.ListConfigs(
 		strings.TrimSpace(realmName),
 		strings.TrimSpace(spaceName),
 		strings.TrimSpace(stackName),
 	)
+	if err != nil {
+		return nil, err
+	}
+	// A scheduled Config also carries its schedule state (#1503), so a list
+	// can show the next fire. Best-effort, like the rest of the list's
+	// per-document reads: unreadable state leaves the entry without it.
+	for i := range configs {
+		if configs[i].Schedule == nil {
+			continue
+		}
+		status, found, statusErr := b.runner.GetConfigScheduleStatus(configs[i])
+		if statusErr != nil {
+			b.logger.DebugContext(b.ctx, "list configs: read schedule status",
+				"config", configs[i].Metadata.Name, "error", statusErr)
+			continue
+		}
+		if found {
+			configs[i].ScheduleStatus = &status
+		}
+	}
+	return configs, nil
 }
 
 // DeleteConfig removes a single named, scoped CellConfig's daemon-stored

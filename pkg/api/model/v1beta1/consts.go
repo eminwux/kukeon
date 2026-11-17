@@ -92,6 +92,11 @@ const (
 	// headless (issue #1491). It sits beside LabelTeam, so a task config is
 	// pruned with the team's other configs once its task is deselected.
 	LabelTask = "kukeon.io/task"
+	// LabelSchedule names the CellConfig whose spec.schedule fired the cell
+	// (issue #1503). Only cells kukeond's scheduler creates carry it: a cell
+	// started by hand from the same Config does not, so it neither blocks a
+	// Forbid schedule nor is blocked by one.
+	LabelSchedule = "kukeon.io/schedule"
 	// LabelShared marks a CellBlueprint as shared: a realm-wide form any
 	// team's (or hand-written) CellConfig may reference, e.g. the one
 	// blueprint per harness × security profile `kuke team` renders (issue

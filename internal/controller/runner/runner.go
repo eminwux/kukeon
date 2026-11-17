@@ -242,6 +242,19 @@ type Runner interface {
 	// scoped CellConfig (issue #644). Returns errdefs.ErrConfigNotFound when the
 	// file is absent. Deleting a Config never touches the cell it materialized.
 	DeleteConfig(config intmodel.CellConfig) error
+	// GetConfigScheduleStatus reads the stored schedule state of a scheduled
+	// CellConfig (issue #1503); found is false when none is stored. The state
+	// lives beside the config document, never inside it.
+	GetConfigScheduleStatus(
+		config intmodel.CellConfig,
+	) (status intmodel.CellConfigScheduleStatus, found bool, err error)
+	// WriteConfigScheduleStatus atomically persists a CellConfig's schedule
+	// state. Only the daemon's scheduler writes it.
+	WriteConfigScheduleStatus(config intmodel.CellConfig, status intmodel.CellConfigScheduleStatus) error
+	// DeleteConfigScheduleStatus removes a CellConfig's stored schedule state;
+	// an absent one is not an error. DeleteConfig calls it for the Config it
+	// removes.
+	DeleteConfigScheduleStatus(config intmodel.CellConfig) error
 
 	ExistsCgroup(doc any) (bool, error)
 	// CgroupMountpoint returns the cgroup v2 mountpoint that every

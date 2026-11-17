@@ -165,9 +165,9 @@ func (r *Exec) DeleteStack(stack intmodel.Stack) error {
 // scanStackDirCellResidue returns the names of any subdirectories under
 // stackDir that look like surviving cell directories — anything that isn't
 // one of the reserved scope-bound subdirs (secrets/blueprints/configs/
-// volumes/volume-meta, see reservedScopeSubdirs) and isn't the stack's own
-// metadata.json or its lock sidecar. The names are sorted for stable error
-// messages. A missing stackDir returns nil, nil.
+// config-status/volumes/volume-meta, see reservedScopeSubdirs) and isn't the
+// stack's own metadata.json or its lock sidecar. The names are sorted for
+// stable error messages. A missing stackDir returns nil, nil.
 func scanStackDirCellResidue(stackDir string) ([]string, error) {
 	entries, err := os.ReadDir(stackDir)
 	if err != nil {

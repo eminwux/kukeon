@@ -82,6 +82,9 @@ type Exec struct {
 	// warn/threshold/rate-limit branches without a real full volume. Issue
 	// #1035.
 	diskSampler func(string) (diskpressure.Usage, error)
+	// schedules is the in-memory half of the CellConfig scheduler's state
+	// (schedule.go, issue #1503).
+	schedules scheduleState
 }
 
 type Options struct {

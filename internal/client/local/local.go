@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/apply/parser"
@@ -912,6 +913,13 @@ func (c *Client) ReconcileCells() (controller.ReconcileResult, error) {
 // over the kukeonv1 wire.
 func (c *Client) ReconcileSpaceNetworks() (controller.SpaceNetReconcileResult, error) {
 	return c.ctrl.ReconcileSpaceNetworks()
+}
+
+// RunSchedules runs one pass of the daemon-side CellConfig scheduler (#1503):
+// it fires every Config whose spec.schedule has come due since prev. Daemon-
+// internal: not surfaced over the kukeonv1 wire.
+func (c *Client) RunSchedules(prev, now time.Time) (controller.ScheduleResult, error) {
+	return c.ctrl.RunSchedules(prev, now)
 }
 
 // ---- Refresh ----

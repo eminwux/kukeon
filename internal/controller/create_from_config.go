@@ -63,6 +63,11 @@ type CellFromConfigRequest struct {
 	// before the Config exists (#1472, step 16). A create refuses it: a cell
 	// is only ever created from a stored Config.
 	Draft *v1beta1.CellConfigDoc
+	// Schedule names the CellConfig whose spec.schedule fires this cell
+	// (#1503). Only the daemon's scheduler sets it — it is not on the RPC
+	// request — and it labels the cell kukeon.io/schedule=<config> and makes
+	// it self-deleting.
+	Schedule string
 }
 
 // CellFromConfigPreview is the outcome of a render: the rendered cell, its
@@ -110,6 +115,7 @@ func (b *Exec) PreviewCellFromConfig(req CellFromConfigRequest) (CellFromConfigP
 
 	rendered, err := renderCellFromConfig(b.runner, cfg, cellBinding{
 		Name: name, EnvOverrides: req.EnvOverrides, Mode: strings.TrimSpace(req.Mode), Params: req.Params,
+		Schedule: strings.TrimSpace(req.Schedule),
 	})
 	if err != nil {
 		return CellFromConfigPreview{}, err

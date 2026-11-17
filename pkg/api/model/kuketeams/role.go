@@ -53,14 +53,24 @@ type RoleSpec struct {
 // RoleTask is one named task of a role: a skill the role loads, run headless
 // with an optional fixed argument string. The rendered prompt is
 // `Use the <skill> skill`, followed by ` with arguments: <args>` when Args is
-// set.
+// set. A task may also carry a default schedule (issue #1503).
 type RoleTask struct {
 	// Name is the task's resource-name segment, unique within the role.
-	Name string `json:"name"           yaml:"name"`
+	Name string `json:"name"               yaml:"name"`
 	// Skill is the base name of one of the role's spec.skills entries.
-	Skill string `json:"skill"          yaml:"skill"`
+	Skill string `json:"skill"              yaml:"skill"`
 	// Args is optional free text appended to the prompt.
-	Args string `json:"args,omitempty" yaml:"args,omitempty"`
+	Args string `json:"args,omitempty"     yaml:"args,omitempty"`
+	// Schedule is the role's default cadence for the task: a five-field cron
+	// expression or @hourly/@daily/@weekly/@monthly, read in UTC. `kuke team
+	// add` renders it as the task config's spec.schedule, so kukeond runs the
+	// task on it. A team's task entry may override it. Unset, the task runs
+	// only when started by hand.
+	Schedule string `json:"schedule,omitempty" yaml:"schedule,omitempty"`
+	// Suspend ships the schedule switched off: the task config is rendered
+	// with spec.schedule.suspend set, and fires only once a team's task entry
+	// says `suspend: false`. It needs a schedule, here or from the team.
+	Suspend bool `json:"suspend,omitempty"  yaml:"suspend,omitempty"`
 }
 
 // RoleHarness is the per-role configuration of a single harness. Different

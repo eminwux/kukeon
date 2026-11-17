@@ -22,10 +22,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
+	"gopkg.in/yaml.v3"
 )
 
 // configsDirMode is the mode of the per-scope configs/ directory. Like the
@@ -235,7 +237,9 @@ func (r *Exec) collectConfigSubtree(out *[]intmodel.CellConfig, realm, space, st
 // `kukeon.io/team=<team>` is the prune-apply discriminator, so callers can
 // filter without re-reading every document themselves. A document that fails
 // to parse contributes an entry with nil Labels and is logged at debug — the
-// list call is best-effort metadata, not strict.
+// list call is best-effort metadata, not strict. The same read lifts the
+// document's spec.schedule summary onto the carrier (issue #1503), so a list
+// can show a Config's cadence without returning its body.
 func (r *Exec) collectConfigsInScope(out *[]intmodel.CellConfig, realm, space, stack string) error {
 	dir := fs.ConfigsDir(r.opts.RunPath, realm, space, stack)
 	entries, err := os.ReadDir(dir)
@@ -253,7 +257,7 @@ func (r *Exec) collectConfigsInScope(out *[]intmodel.CellConfig, realm, space, s
 		if strings.HasPrefix(name, ".config-") && strings.HasSuffix(name, ".tmp") {
 			continue
 		}
-		labels := r.readLabelsFromDoc(fs.ConfigPath(r.opts.RunPath, realm, space, stack, name))
+		labels, schedule := r.readConfigListFields(fs.ConfigPath(r.opts.RunPath, realm, space, stack, name))
 		*out = append(*out, intmodel.CellConfig{
 			Metadata: intmodel.CellConfigMetadata{
 				Name:   name,
@@ -262,7 +266,138 @@ func (r *Exec) collectConfigsInScope(out *[]intmodel.CellConfig, realm, space, s
 				Stack:  stack,
 				Labels: labels,
 			},
+			Schedule: schedule,
 		})
+	}
+	return nil
+}
+
+// configListDoc is the minimum YAML structure a config list lifts from each
+// document: its labels (#1027) and its spec.schedule summary (#1503).
+type configListDoc struct {
+	Metadata struct {
+		Labels map[string]string `yaml:"labels"`
+	} `yaml:"metadata"`
+	Spec struct {
+		Schedule *struct {
+			Cron     string `yaml:"cron"`
+			Timezone string `yaml:"timezone"`
+			Suspend  bool   `yaml:"suspend"`
+		} `yaml:"schedule"`
+	} `yaml:"spec"`
+}
+
+// readConfigListFields reads the config document at path and returns its
+// metadata.labels and spec.schedule summary, both nil on any failure. Like
+// readLabelsFromDoc it logs at debug rather than failing: a half-written or
+// corrupt document must not fail the whole list.
+func (r *Exec) readConfigListFields(path string) (map[string]string, *intmodel.CellConfigSchedule) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		r.logger.DebugContext(r.ctx, "read config list fields: read file", "path", path, "error", err)
+		return nil, nil
+	}
+	var doc configListDoc
+	if err = yaml.Unmarshal(data, &doc); err != nil {
+		r.logger.DebugContext(r.ctx, "read config list fields: parse yaml", "path", path, "error", err)
+		return nil, nil
+	}
+	var labels map[string]string
+	if len(doc.Metadata.Labels) > 0 {
+		labels = doc.Metadata.Labels
+	}
+	var schedule *intmodel.CellConfigSchedule
+	if s := doc.Spec.Schedule; s != nil {
+		schedule = &intmodel.CellConfigSchedule{Cron: s.Cron, Timezone: s.Timezone, Suspend: s.Suspend}
+	}
+	return labels, schedule
+}
+
+// configScheduleStatusFile is the on-disk shape of a config's schedule state
+// (<scope>/config-status/<name>). It is daemon-private: the external shape is
+// v1beta1.CellConfigScheduleStatus.
+type configScheduleStatusFile struct {
+	LastScheduleTime *time.Time `yaml:"lastScheduleTime,omitempty"`
+	NextScheduleTime *time.Time `yaml:"nextScheduleTime,omitempty"`
+	LastCell         string     `yaml:"lastCell,omitempty"`
+	ActiveCells      []string   `yaml:"activeCells,omitempty"`
+	SkippedFires     int64      `yaml:"skippedFires"`
+	LastError        string     `yaml:"lastError,omitempty"`
+}
+
+// GetConfigScheduleStatus reads the stored schedule state of a single named,
+// scoped CellConfig (issue #1503). found is false (with no error) when none is
+// stored — the Config is unscheduled, or the scheduler has not seen it yet.
+func (r *Exec) GetConfigScheduleStatus(
+	config intmodel.CellConfig,
+) (intmodel.CellConfigScheduleStatus, bool, error) {
+	md := config.Metadata
+	path := fs.ConfigStatusPath(r.opts.RunPath, md.Realm, md.Space, md.Stack, md.Name)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return intmodel.CellConfigScheduleStatus{}, false, nil
+		}
+		return intmodel.CellConfigScheduleStatus{}, false,
+			fmt.Errorf("%w: read schedule status: %w", errdefs.ErrGetConfig, err)
+	}
+	var file configScheduleStatusFile
+	if err = yaml.Unmarshal(data, &file); err != nil {
+		return intmodel.CellConfigScheduleStatus{}, false,
+			fmt.Errorf("%w: parse schedule status %q: %w", errdefs.ErrGetConfig, path, err)
+	}
+	return intmodel.CellConfigScheduleStatus{
+		LastScheduleTime: file.LastScheduleTime,
+		NextScheduleTime: file.NextScheduleTime,
+		LastCell:         file.LastCell,
+		ActiveCells:      file.ActiveCells,
+		SkippedFires:     file.SkippedFires,
+		LastError:        file.LastError,
+	}, true, nil
+}
+
+// WriteConfigScheduleStatus atomically persists the schedule state of a single
+// named, scoped CellConfig to <scope>/config-status/<name> (issue #1503). Only
+// the daemon's scheduler writes it.
+func (r *Exec) WriteConfigScheduleStatus(
+	config intmodel.CellConfig, status intmodel.CellConfigScheduleStatus,
+) error {
+	md := config.Metadata
+	dir := fs.ConfigStatusDir(r.opts.RunPath, md.Realm, md.Space, md.Stack)
+	path := fs.ConfigStatusPath(r.opts.RunPath, md.Realm, md.Space, md.Stack, md.Name)
+
+	data, err := yaml.Marshal(configScheduleStatusFile{
+		LastScheduleTime: status.LastScheduleTime,
+		NextScheduleTime: status.NextScheduleTime,
+		LastCell:         status.LastCell,
+		ActiveCells:      status.ActiveCells,
+		SkippedFires:     status.SkippedFires,
+		LastError:        status.LastError,
+	})
+	if err != nil {
+		return fmt.Errorf("%w: marshal schedule status: %w", errdefs.ErrWriteConfig, err)
+	}
+	if err = os.MkdirAll(dir, configsDirMode); err != nil {
+		return fmt.Errorf("%w: create config status dir: %w", errdefs.ErrWriteConfig, err)
+	}
+	if err = os.Chmod(dir, configsDirMode); err != nil {
+		return fmt.Errorf("%w: chmod config status dir: %w", errdefs.ErrWriteConfig, err)
+	}
+	if err = atomicWriteFileMode(dir, path, ".config-status-*.tmp", data, configFileMode); err != nil {
+		return fmt.Errorf("%w: schedule status: %w", errdefs.ErrWriteConfig, err)
+	}
+	return nil
+}
+
+// DeleteConfigScheduleStatus removes the stored schedule state of a single
+// named, scoped CellConfig (issue #1503). An absent file is not an error: the
+// scheduler calls this for every Config that has lost its spec.schedule.
+func (r *Exec) DeleteConfigScheduleStatus(config intmodel.CellConfig) error {
+	md := config.Metadata
+	path := fs.ConfigStatusPath(r.opts.RunPath, md.Realm, md.Space, md.Stack, md.Name)
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("%w: remove schedule status: %w", errdefs.ErrDeleteConfig, err)
 	}
 	return nil
 }
@@ -282,6 +417,13 @@ func (r *Exec) DeleteConfig(config intmodel.CellConfig) error {
 			return errdefs.ErrConfigNotFound
 		}
 		return fmt.Errorf("%w: %w", errdefs.ErrDeleteConfig, err)
+	}
+	// The schedule state goes with the document, so a Config re-created under
+	// the same name starts from a clean slate. Best-effort: the document is
+	// already gone, and the scheduler ignores state without a Config.
+	if err := r.DeleteConfigScheduleStatus(config); err != nil {
+		r.logger.WarnContext(r.ctx, "config deleted but its schedule status was not removed",
+			"name", md.Name, "realm", md.Realm, "space", md.Space, "stack", md.Stack, "error", err)
 	}
 
 	r.logger.InfoContext(r.ctx, "config deleted",

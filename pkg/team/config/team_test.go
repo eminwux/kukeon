@@ -470,7 +470,19 @@ spec:
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, tasks := range []*[]string{nil, {}, {"pick-issue", "pick-bug"}} {
+	off, on := true, false
+	for _, tasks := range []*[]config.TaskSelection{
+		nil,
+		{},
+		{{Name: "pick-issue"}, {Name: "pick-bug"}},
+		// A task entry may also set the task's schedule for this team (#1503).
+		{
+			{Name: "pick-issue"},
+			{Name: "pick-bug", Schedule: "*/15 * * * *"},
+			{Name: "pick-nits", Schedule: "@daily", Suspend: &off},
+			{Name: "health-sweep", Suspend: &on},
+		},
+	} {
 		team := config.Root()
 		team.Spec.Roles = []config.Role{{Name: "dev", Source: "defs", Path: "dev", Tasks: tasks}}
 		if _, err = config.Resolve(cfg, team); err != nil {
@@ -493,11 +505,96 @@ spec:
 			t.Fatalf("SelectsTask(pick-bug) with %v = %v", tasks, got.SelectsTask("pick-bug"))
 		}
 	}
-	for _, bad := range [][]string{{"Bad_Name"}, {"a", "a"}, {""}} {
+	for _, bad := range [][]config.TaskSelection{
+		{{Name: "Bad_Name"}},
+		{{Name: "a"}, {Name: "a"}},
+		{{Name: "a"}, {Name: "a", Schedule: "@daily"}},
+		{{Name: ""}},
+	} {
 		team := config.Root()
 		team.Spec.Roles = []config.Role{{Name: "dev", Source: "defs", Path: "dev", Tasks: &bad}}
 		if _, err = config.Resolve(cfg, team); err == nil {
-			t.Fatalf("tasks %q accepted", bad)
+			t.Fatalf("tasks %+v accepted", bad)
+		}
+	}
+}
+
+// TestRoleTaskEntryYAMLForms pins the two spellings of a role entry's `tasks`
+// items (issue #1503): a bare task name, and a mapping that also sets the
+// task's schedule. A bare name is written back as a bare name.
+func TestRoleTaskEntryYAMLForms(t *testing.T) {
+	const teamYAML = `apiVersion: kuketeams.io/v1
+kind: Team
+metadata:
+  name: root
+spec:
+  roles:
+    - name: dev
+      source: defs
+      path: dev
+      tasks:
+        - pick-issue
+        - {name: pick-bug, schedule: "*/15 * * * *"}
+        - {name: pick-nits, schedule: "@daily", suspend: true}
+        - {name: health-sweep, suspend: false}
+`
+	team, err := config.DecodeTeam(strings.NewReader(teamYAML))
+	if err != nil {
+		t.Fatalf("DecodeTeam() error = %v", err)
+	}
+	tasks := *team.Spec.Roles[0].Tasks
+	if len(tasks) != 4 {
+		t.Fatalf("tasks = %+v, want 4 entries", tasks)
+	}
+	if tasks[0] != (config.TaskSelection{Name: "pick-issue"}) {
+		t.Errorf("bare name entry = %+v", tasks[0])
+	}
+	if tasks[1].Name != "pick-bug" || tasks[1].Schedule != "*/15 * * * *" || tasks[1].Suspend != nil {
+		t.Errorf("schedule entry = %+v", tasks[1])
+	}
+	if tasks[2].Schedule != "@daily" || tasks[2].Suspend == nil || !*tasks[2].Suspend {
+		t.Errorf("suspended entry = %+v", tasks[2])
+	}
+	// An explicit `suspend: false` is kept distinct from an omitted one: it is
+	// what turns on a schedule the role ships switched off.
+	if tasks[3].Schedule != "" || tasks[3].Suspend == nil || *tasks[3].Suspend {
+		t.Errorf("suspend: false entry = %+v", tasks[3])
+	}
+
+	role := team.Spec.Roles[0]
+	for _, name := range []string{"pick-issue", "pick-bug", "pick-nits", "health-sweep"} {
+		if !role.SelectsTask(name) {
+			t.Errorf("SelectsTask(%q) = false", name)
+		}
+	}
+	if role.SelectsTask("unlisted") {
+		t.Error("SelectsTask(unlisted) = true")
+	}
+	if entry, ok := role.TaskSelection("pick-bug"); !ok || entry.Schedule != "*/15 * * * *" {
+		t.Errorf("TaskSelection(pick-bug) = %+v, %v", entry, ok)
+	}
+
+	raw, err := yaml.Marshal(team)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "- pick-issue\n") {
+		t.Errorf("a bare task name was not written back as one:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "name: pick-bug") || !strings.Contains(string(raw), "suspend: false") {
+		t.Errorf("mapping entries were not written back:\n%s", raw)
+	}
+
+	for name, entry := range map[string]string{
+		"unknown field":       `{name: pick-bug, cron: "@daily"}`,
+		"non-string name":     `42`,
+		"non-boolean suspend": `{name: pick-bug, suspend: "yes"}`,
+		"non-string schedule": `{name: pick-bug, schedule: 5}`,
+		"a list":              `[pick-bug]`,
+	} {
+		bad := strings.Replace(teamYAML, "- pick-issue", "- "+entry, 1)
+		if _, err = config.DecodeTeam(strings.NewReader(bad)); err == nil {
+			t.Errorf("%s: task entry %s accepted", name, entry)
 		}
 	}
 }

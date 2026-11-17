@@ -18,6 +18,7 @@ package apischeme
 
 import (
 	"fmt"
+	"time"
 
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	ext "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -36,6 +37,9 @@ func ConvertCellConfigDocToInternal(in ext.CellConfigDoc) (intmodel.CellConfig, 
 		canonical := in
 		canonical.APIVersion = ext.APIVersionV1Beta1
 		canonical.Kind = ext.KindCellConfig
+		// Status is daemon-owned: a document that carries one (the output of
+		// `kuke get config -o yaml`, re-applied) is stored without it.
+		canonical.Status = nil
 		document, err := yaml.Marshal(canonical)
 		if err != nil {
 			return intmodel.CellConfig{}, fmt.Errorf("marshal CellConfig document: %w", err)
@@ -49,6 +53,7 @@ func ConvertCellConfigDocToInternal(in ext.CellConfigDoc) (intmodel.CellConfig, 
 				Labels: copyLabels(in.Metadata.Labels),
 			},
 			Document: document,
+			Schedule: scheduleSummary(in.Spec.Schedule),
 		}, nil
 	default:
 		return intmodel.CellConfig{}, fmt.Errorf("unsupported apiVersion for CellConfig: %s", in.APIVersion)
@@ -75,16 +80,52 @@ func ConvertCellConfigToExternal(in intmodel.CellConfig) (ext.CellConfigDoc, err
 	if err := yaml.Unmarshal(in.Document, &doc); err != nil {
 		return ext.CellConfigDoc{}, fmt.Errorf("unmarshal CellConfig document: %w", err)
 	}
+	doc.Status = configStatusToExternal(in.ScheduleStatus)
 	return doc, nil
+}
+
+// scheduleSummary lifts a document's spec.schedule onto the carrier.
+func scheduleSummary(in *ext.CellConfigSchedule) *intmodel.CellConfigSchedule {
+	if in == nil {
+		return nil
+	}
+	return &intmodel.CellConfigSchedule{Cron: in.Cron, Timezone: in.Timezone, Suspend: in.Suspend}
+}
+
+// configStatusToExternal builds the external status from the carrier's stored
+// schedule state; nil when there is none, so an unscheduled Config renders no
+// status block.
+func configStatusToExternal(in *intmodel.CellConfigScheduleStatus) *ext.CellConfigStatus {
+	if in == nil {
+		return nil
+	}
+	return &ext.CellConfigStatus{Schedule: &ext.CellConfigScheduleStatus{
+		LastScheduleTime: copyTime(in.LastScheduleTime),
+		NextScheduleTime: copyTime(in.NextScheduleTime),
+		LastCell:         in.LastCell,
+		ActiveCells:      append([]string(nil), in.ActiveCells...),
+		SkippedFires:     in.SkippedFires,
+		LastError:        in.LastError,
+	}}
+}
+
+func copyTime(in *time.Time) *time.Time {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	return &out
 }
 
 // ConvertCellConfigMetadataToExternal builds a metadata-only external
 // CellConfigDoc from the internal carrier's metadata (issue #644). Unlike
 // ConvertCellConfigToExternal it does not read the stored Document — the list
 // and delete verbs surface scope coordinates and name only, never the config
-// body (blueprint ref, values, slot fills).
+// body (blueprint ref, values, slot fills). The one exception is the schedule
+// (#1503): the carrier's lifted spec.schedule summary and stored schedule
+// state come along, so a list can show a Config's cadence and next fire.
 func ConvertCellConfigMetadataToExternal(in intmodel.CellConfig) ext.CellConfigDoc {
-	return ext.CellConfigDoc{
+	doc := ext.CellConfigDoc{
 		APIVersion: ext.APIVersionV1Beta1,
 		Kind:       ext.KindCellConfig,
 		Metadata: ext.CellConfigMetadata{
@@ -94,7 +135,16 @@ func ConvertCellConfigMetadataToExternal(in intmodel.CellConfig) ext.CellConfigD
 			Stack:  in.Metadata.Stack,
 			Labels: copyLabels(in.Metadata.Labels),
 		},
+		Status: configStatusToExternal(in.ScheduleStatus),
 	}
+	if in.Schedule != nil {
+		doc.Spec.Schedule = &ext.CellConfigSchedule{
+			Cron:     in.Schedule.Cron,
+			Timezone: in.Schedule.Timezone,
+			Suspend:  in.Schedule.Suspend,
+		}
+	}
+	return doc
 }
 
 // ConvertCellConfigListToExternal maps a slice of internal CellConfigs to

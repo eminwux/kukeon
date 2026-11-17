@@ -65,12 +65,21 @@ type cellBinding struct {
 	Mode string
 	// Params are per-cell `--param KEY=VALUE` values overriding the Config's.
 	Params map[string]string
+	// Schedule names the CellConfig whose spec.schedule fired the cell; empty
+	// for a cell created by hand. A scheduled cell carries the
+	// kukeon.io/schedule label and is always self-deleting (#1503). It is a
+	// property of the cell, not read from the Config's spec.schedule, so
+	// changing or removing the schedule never alters a re-render.
+	Schedule string
 }
 
 // bindingFromCell rebuilds the binding a live cell was created with from its
 // recorded provenance.
 func bindingFromCell(cell intmodel.Cell) cellBinding {
-	binding := cellBinding{Name: cell.Metadata.Name}
+	binding := cellBinding{
+		Name:     cell.Metadata.Name,
+		Schedule: cell.Metadata.Labels[v1beta1.LabelSchedule],
+	}
 	if prov := cell.Spec.Provenance; prov != nil {
 		binding.EnvOverrides = prov.EnvOverrides
 		binding.Mode = prov.Mode
@@ -189,6 +198,13 @@ func renderCellFromConfig(r runner.Runner, cfg intmodel.CellConfig, binding cell
 			cellDoc.Metadata.Labels = map[string]string{}
 		}
 		cellDoc.Metadata.Labels[cellblueprint.LabelMode] = flat.Mode
+	}
+	if binding.Schedule != "" {
+		if cellDoc.Metadata.Labels == nil {
+			cellDoc.Metadata.Labels = map[string]string{}
+		}
+		cellDoc.Metadata.Labels[v1beta1.LabelSchedule] = binding.Schedule
+		cellDoc.Spec.AutoDelete = true
 	}
 
 	sourceValues, err := sourceIdentityValues(r, cellDoc, values)

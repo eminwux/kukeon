@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
@@ -210,7 +211,7 @@ func printConfigs(cmd *cobra.Command, configs []v1beta1.CellConfigDoc, format sh
 			cmd.Println("No configs found.")
 			return nil
 		}
-		headers := []string{"NAME", "REALM", "SPACE", "STACK"}
+		headers := []string{"NAME", "REALM", "SPACE", "STACK", "SCHEDULE", "NEXT"}
 		rows := make([][]string, 0, len(configs))
 		for i := range configs {
 			c := &configs[i]
@@ -219,6 +220,8 @@ func printConfigs(cmd *cobra.Command, configs []v1beta1.CellConfigDoc, format sh
 				dashIfEmpty(c.Metadata.Realm),
 				dashIfEmpty(c.Metadata.Space),
 				dashIfEmpty(c.Metadata.Stack),
+				scheduleColumn(c),
+				nextColumn(c),
 			})
 		}
 		shared.PrintTable(cmd, headers, rows)
@@ -226,6 +229,39 @@ func printConfigs(cmd *cobra.Command, configs []v1beta1.CellConfigDoc, format sh
 	default:
 		return shared.PrintYAML(cmd, configs)
 	}
+}
+
+// scheduleColumn renders a Config's spec.schedule for the SCHEDULE column: the
+// cron expression, followed by its time zone when it is not UTC. Empty for an
+// unscheduled Config (issue #1503).
+func scheduleColumn(c *v1beta1.CellConfigDoc) string {
+	schedule := c.Spec.Schedule
+	if schedule == nil {
+		return ""
+	}
+	cron := strings.TrimSpace(schedule.Cron)
+	if tz := strings.TrimSpace(schedule.Timezone); tz != "" {
+		return cron + " (" + tz + ")"
+	}
+	return cron
+}
+
+// nextColumn renders the NEXT column: the schedule's next fire time in UTC,
+// or "suspended" while spec.schedule.suspend is set. Empty for an unscheduled
+// Config, and for a schedule kukeond has not picked up yet — the scheduler
+// fills status.schedule on its next pass, within a minute of the apply.
+func nextColumn(c *v1beta1.CellConfigDoc) string {
+	schedule := c.Spec.Schedule
+	if schedule == nil {
+		return ""
+	}
+	if schedule.Suspend {
+		return "suspended"
+	}
+	if c.Status == nil || c.Status.Schedule == nil || c.Status.Schedule.NextScheduleTime == nil {
+		return ""
+	}
+	return c.Status.Schedule.NextScheduleTime.UTC().Format(time.RFC3339)
 }
 
 // dashIfEmpty renders an unset scope coordinate as "-" so the table column

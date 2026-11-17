@@ -169,7 +169,13 @@ func cloneSelections(d Defaults) Defaults {
 		if d.Roles[i].Tasks != nil {
 			tasks := slices.Clone(*d.Roles[i].Tasks)
 			if tasks == nil {
-				tasks = []string{}
+				tasks = []TaskSelection{}
+			}
+			for j := range tasks {
+				if tasks[j].Suspend != nil {
+					suspend := *tasks[j].Suspend
+					tasks[j].Suspend = &suspend
+				}
 			}
 			d.Roles[i].Tasks = &tasks
 		}

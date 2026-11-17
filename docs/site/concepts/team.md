@@ -248,6 +248,70 @@ run time (`issue <N>`) still go through it:
 When a task is deselected, or the role stops declaring it, the next
 `kuke team add` prunes its config along with the team's other obsolete configs.
 
+#### Scheduling a task
+
+A task config can run on a schedule instead of by hand. How often a task runs
+is a deployment decision, so the team sets it. An entry in a role's `tasks` is
+either a task name or an object that also gives the task's cadence:
+
+```yaml
+# kuketeam.yaml
+spec:
+  roles:
+    - name: dev
+      source: agents
+      path: dev
+      tasks:
+        - pick-issue # runs only when started by hand
+        - { name: pick-bug, schedule: "*/15 * * * *" }
+        - { name: pick-nits, schedule: "@daily", suspend: true }
+```
+
+`schedule` is a five-field cron expression or one of `@hourly`, `@daily`,
+`@weekly`, `@monthly`, read in UTC. `suspend: true` keeps the schedule but
+switches it off.
+
+A role can ship defaults for both, so a team that just names the task gets
+them:
+
+```yaml
+# role.yaml
+spec:
+  tasks:
+    - {
+        name: pick-bug,
+        skill: pick-issue,
+        args: "--label bug",
+        schedule: "*/30 * * * *",
+      }
+    - {
+        name: health-sweep,
+        skill: health-sweep,
+        schedule: "@hourly",
+        suspend: true,
+      }
+```
+
+Each value a team's entry sets overrides the role's default for that value, and
+the other one is kept. The `pick-bug` entry above replaces the role's
+`*/30 * * * *` with `*/15 * * * *`. A role can ship a schedule that is off
+until a team opts in, as `health-sweep` does: the team turns it on with
+`{ name: health-sweep, suspend: false }`. A `suspend` on a task that ends up
+with no schedule fails `kuke team add`, because there is nothing for it to
+switch.
+
+`kuke team add` renders the resolved values into the task config's
+[`spec.schedule`](../manifests/config.md#specschedule-object-optional), and
+kukeond then fires the config on that schedule: each fire starts a
+`<config>-<unix-fire-time>` cell, and a fire is skipped while the previous one
+is still running. A task with no schedule renders as before. See what is
+scheduled, and when it next fires, with `kuke get configs`.
+
+Team configs are re-rendered: `kuke team add` rewrites every one of them whole.
+A `schedule` or `suspend` edited by hand on a task config is therefore lost on
+the next `kuke team add`. Change it in `kuketeam.yaml` (or the role's defaults)
+instead.
+
 ### Connectors
 
 A role enables a connector by name:

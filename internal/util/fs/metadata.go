@@ -347,6 +347,25 @@ func ConfigPath(baseRunPath, realmName, spaceName, stackName, configName string)
 	)
 }
 
+// ConfigStatusDir returns the per-scope directory that holds the schedule state
+// of the scope's scheduled CellConfigs (issue #1503) — a sibling of ConfigsDir,
+// so scope teardown reclaims it with the configs themselves.
+func ConfigStatusDir(baseRunPath, realmName, spaceName, stackName string) string {
+	return filepath.Join(
+		ConfigScopeDir(baseRunPath, realmName, spaceName, stackName),
+		consts.KukeonConfigStatusSubdir,
+	)
+}
+
+// ConfigStatusPath returns the host-side path of a single config's schedule
+// state file: <scope>/config-status/<name>.
+func ConfigStatusPath(baseRunPath, realmName, spaceName, stackName, configName string) string {
+	return filepath.Join(
+		ConfigStatusDir(baseRunPath, realmName, spaceName, stackName),
+		configName,
+	)
+}
+
 // VolumeScopeDir returns the metadata directory of the scope a `kind: Volume`
 // is bound to (issue #1018). Like a CellBlueprint a Volume is scopable at
 // realm/space/stack only — never cell — so the deepest coordinate this resolves
