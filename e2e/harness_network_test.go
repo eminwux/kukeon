@@ -109,14 +109,58 @@ func verifyE2ENetworkCleanup() error {
 		}
 	}
 	if len(leaked) > 0 {
-		// List every entry: a rule's comment names the realm and space.
+		// List every entry: a rule's comment names the realm and space,
+		// which map back to the tests that allocated them.
 		sort.Strings(leaked)
+		for i, artifact := range leaked {
+			leaked[i] = attributeEgressArtifact(artifact)
+		}
 		return fmt.Errorf(
 			"test-created egress iptables entries remain (not deleting them automatically):\n%s",
 			strings.Join(leaked, "\n"),
 		)
 	}
 	return checkNetworkPool(e2eNetwork.pool)
+}
+
+// nameOwners maps each generated realm/space name to the test that
+// allocated it. Tests run in parallel and a leaked egress rule only names
+// the realm and space, so the suite-level leak report needs this to say
+// which test leaked it (issue #1469).
+//
+//nolint:gochecknoglobals // suite-wide registry shared by parallel tests and TestMain
+var nameOwners sync.Map
+
+// recordNameOwner registers t as the owner of name and returns name.
+func recordNameOwner(t *testing.T, name string) string {
+	t.Helper()
+	nameOwners.Store(name, t.Name())
+	return name
+}
+
+// attributeEgressArtifact appends the owning tests to an egress rule whose
+// comment names a kukeon realm and space ("kukeon:<realm>:<space>:<kind>").
+// Artifacts without such a comment, or with unregistered names, are
+// returned unchanged.
+func attributeEgressArtifact(artifact string) string {
+	_, rest, found := strings.Cut(artifact, `--comment "kukeon:`)
+	if !found {
+		return artifact
+	}
+	parts := strings.SplitN(rest, ":", 3)
+	if len(parts) < 3 {
+		return artifact
+	}
+	var owners []string
+	for _, name := range parts[:2] {
+		if owner, ok := nameOwners.Load(name); ok {
+			owners = append(owners, fmt.Sprintf("%s from %s", name, owner))
+		}
+	}
+	if len(owners) == 0 {
+		return artifact
+	}
+	return artifact + " [" + strings.Join(owners, "; ") + "]"
 }
 
 // requireInitEgressRemoved fails t when, after every other cleanup of t
@@ -529,5 +573,24 @@ func TestE2ENetworkConfiguredSubnet(t *testing.T) {
 	e2eNetwork.mu.Unlock()
 	if assigned.Bits() != 24 || !reserved.Contains(assigned.Addr()) {
 		t.Fatalf("assigned %s outside %s", assigned, reserved)
+	}
+}
+
+func TestE2EAttributeEgressArtifact(t *testing.T) {
+	realm := recordNameOwner(t, "e-r-attr1")
+	space := recordNameOwner(t, "e-sp-attr2")
+	rule := `filter: -A KUKEON-EGRESS -i k-caddc8f8 -m comment --comment "kukeon:` +
+		realm + `:` + space + `:dispatch" -j KUKE-EGR-145a1e32`
+	want := rule + " [e-r-attr1 from " + t.Name() + "; e-sp-attr2 from " + t.Name() + "]"
+	if got := attributeEgressArtifact(rule); got != want {
+		t.Fatalf("attributeEgressArtifact = %q, want %q", got, want)
+	}
+	for _, unchanged := range []string{
+		"filter: chain KUKE-EGR-145a1e32",
+		`filter: -A KUKEON-EGRESS -m comment --comment "kukeon:e-r-unknown:e-sp-unknown:dispatch" -j X`,
+	} {
+		if got := attributeEgressArtifact(unchanged); got != unchanged {
+			t.Fatalf("attributeEgressArtifact(%q) = %q, want unchanged", unchanged, got)
+		}
 	}
 }

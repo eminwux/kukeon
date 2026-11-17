@@ -41,15 +41,19 @@ func (r *Exec) DeleteSpace(space intmodel.Space) error {
 	}
 
 	// Hold the space lock until the metadata is gone so a concurrent
-	// EnsureSpace cannot re-install the egress chain removed below.
-	release := r.lockSpace(realmName, spaceName)
-	defer release()
+	// EnsureSpace — in this process or another sharing the RunPath —
+	// cannot re-install the egress chain removed below. Once the space is
+	// gone its lock file goes with it.
+	release := r.lockSpaceRemovable(realmName, spaceName)
+	spaceGone := false
+	defer func() { release(spaceGone) }()
 
 	// Get the space document
 	internalSpace, err := r.GetSpace(space)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrSpaceNotFound) {
 			// Idempotent: space doesn't exist, consider it deleted
+			spaceGone = true
 			return nil
 		}
 		return fmt.Errorf("%w: %w", errdefs.ErrGetSpace, err)
@@ -157,5 +161,6 @@ func (r *Exec) DeleteSpace(space intmodel.Space) error {
 	)
 	_ = r.reclaimScopeMetadata(metadataRunPath)
 
+	spaceGone = true
 	return nil
 }

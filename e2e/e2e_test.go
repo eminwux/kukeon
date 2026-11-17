@@ -394,7 +394,7 @@ func verifyCgroupPathExists(t *testing.T, cgroupPath string) bool {
 // generateUniqueSpaceName generates a unique space name for tests.
 func generateUniqueSpaceName(t *testing.T) string {
 	t.Helper()
-	return fmt.Sprintf("e-sp-%s", uniqueNameID())
+	return recordNameOwner(t, fmt.Sprintf("e-sp-%s", uniqueNameID()))
 }
 
 // verifySpaceCNIConfigExists verifies CNI config file exists.

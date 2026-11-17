@@ -102,10 +102,29 @@ func (r *Exec) lockCell(cell intmodel.Cell) func() {
 // read the space before the delete could re-install the egress chain after
 // the delete removed it, leaving the chain with no space to own it. The
 // leading "space" segment keeps the key distinct from every cell key.
+//
+// The in-process mutex alone only serializes goroutines of one process, so
+// the lock also takes a flock on a per-space file under the RunPath
+// (issue #1469): the daemon's reconcile tick and a `--no-daemon` CLI
+// DeleteSpace against the same RunPath must exclude each other too.
 func (r *Exec) lockSpace(realmName, spaceName string) func() {
-	return r.lockManager().lock(strings.Join([]string{
-		"space", strings.TrimSpace(realmName), strings.TrimSpace(spaceName),
-	}, "\x00"))
+	release := r.lockSpaceRemovable(realmName, spaceName)
+	return func() { release(false) }
+}
+
+// lockSpaceRemovable is lockSpace for DeleteSpace: release(true) unlinks the
+// space's lock file while still holding it, so deleted spaces do not leave
+// lock files behind. Only a caller that has observed the space gone may pass
+// true.
+func (r *Exec) lockSpaceRemovable(realmName, spaceName string) func(remove bool) {
+	realmName = strings.TrimSpace(realmName)
+	spaceName = strings.TrimSpace(spaceName)
+	unlock := r.lockManager().lock(strings.Join([]string{"space", realmName, spaceName}, "\x00"))
+	fileLock := r.acquireSpaceFileLock(realmName, spaceName)
+	return func(remove bool) {
+		fileLock.release(remove)
+		unlock()
+	}
 }
 
 func (r *Exec) lockManager() *cellLockManager {

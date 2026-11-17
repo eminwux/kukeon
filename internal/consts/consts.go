@@ -115,6 +115,15 @@ const (
 	// the budget on the per-container short id, not the directory.
 	KukeonSocketSymlinkSubdir = "s"
 
+	// KukeonLockSubdir is the basename of the per-RunPath directory that
+	// holds cross-process lock files (issue #1469). The per-space lock that
+	// serializes EnsureSpace against DeleteSpace must also hold between the
+	// daemon and a `--no-daemon` CLI sharing the same RunPath, so it is a
+	// flock on a file here rather than an in-process mutex alone. It lives
+	// outside the metadata tree so no realm walker mistakes it for a realm,
+	// and so the lock outlives the space directory DeleteSpace removes.
+	KukeonLockSubdir = "locks"
+
 	// KukeondSocketShareSubdir is the basename of the directory, beside the
 	// kukeond socket, that holds a hard link to the live socket (issue #1483).
 	// Cells bind-mount this directory rather than the socket file: a file
