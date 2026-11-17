@@ -353,6 +353,95 @@ EOF
     PRESERVE_ENV_ADMIN="KUKEON_HOST,KUKEOND_SOCKET,KUKE_CONFIGURATION"
 fi
 
+# Pre-flight: writable install prefix and run path (issue #1413). Runs before
+# the build so a read-only mount — typical of a nested cell whose parent host
+# bind-mounts its own /opt/kukeon or kuke binary into the cell ro — fails in
+# seconds with the mount named, instead of after the full build as
+# `ln: ... Device or resource busy` (make install-dev) or
+# `open .../metadata.json.lock: read-only file system` (kuke daemon reset).
+#
+# INSTALL_PREFIX mirrors the Makefile default; `make dev-init INSTALL_PREFIX=…`
+# exports a command-line override into this script's environment, and the
+# nested `make install-dev` below inherits it through MAKEFLAGS. RUN_PATH is
+# the run path `kuke init` / `kuke daemon reset` write under — the parent of
+# METADATA_ROOT; neither dev-init profile overrides it.
+INSTALL_PREFIX="${INSTALL_PREFIX:-/usr/local/bin}"
+RUN_PATH="$(dirname "${METADATA_ROOT}")"
+
+# mount_for_path prints "<mountpoint> <options>" for the mount covering $1
+# (longest mount-point prefix in /proc/self/mountinfo). Prints nothing when
+# mountinfo is unreadable. Octal-escaped mount points (e.g. \040) are not
+# decoded — only the diagnostic text is affected.
+mount_for_path() {
+    awk -v p="$1" '
+        {
+            mp = $5
+            if (mp == "/" || p == mp || index(p, mp "/") == 1) {
+                if (length(mp) >= best) { best = length(mp); out = mp " " $6 }
+            }
+        }
+        END { if (out != "") print out }
+    ' /proc/self/mountinfo 2>/dev/null || true
+}
+
+# is_mount_point succeeds when $1 is itself a mount point (a file or directory
+# bind). `ln -sf` cannot replace a bind-mounted target (EBUSY), even when the
+# containing directory is writable.
+is_mount_point() {
+    awk -v p="$1" '$5 == p { f = 1 } END { exit !f }' /proc/self/mountinfo 2>/dev/null
+}
+
+# nearest_existing_dir walks $1 up to its closest existing ancestor directory —
+# on a fresh host RUN_PATH does not exist yet and `kuke init` creates it, so
+# the probe has to land on the directory that mkdir will write into.
+nearest_existing_dir() {
+    local d="$1"
+    while [ "${d}" != "/" ] && ! sudo test -d "${d}"; do
+        d="$(dirname "${d}")"
+    done
+    printf '%s' "${d}"
+}
+
+PREFLIGHT_REMEDIATION="Run 'make dev-init' on a host or in a kukeon-dev-root cell with a writable
+${RUN_PATH}, or override INSTALL_PREFIX (e.g. 'make dev-init INSTALL_PREFIX=\$HOME/.local/bin',
+which must also be on root's secure_path) to a writable directory."
+
+preflight_fail() {
+    local what="$1" path="$2" reason="$3" mnt
+    mnt="$(mount_for_path "${path}")"
+    printf '\npre-flight: %s %s is not writable: %s\n' "${what}" "${path}" "${reason}" >&2
+    if [ -n "${mnt}" ]; then
+        printf 'pre-flight: covering mount: %s (options: %s)\n' "${mnt%% *}" "${mnt#* }" >&2
+    fi
+    printf '%s\n' "${PREFLIGHT_REMEDIATION}" >&2
+    exit 1
+}
+
+# probe_writable_dir does a real temp-file write as root (every mutation below
+# is sudo'd) — `test -w` alone can pass on overlay/bind layouts that still
+# reject the write.
+probe_writable_dir() {
+    local what="$1" dir="$2" probe
+    if ! probe="$(sudo mktemp -p "${dir}" .kukeon-dev-init-probe.XXXXXX 2>/dev/null)"; then
+        preflight_fail "${what}" "${dir}" "temp-file write failed (read-only mount?)"
+    fi
+    sudo rm -f "${probe}"
+}
+
+step "Pre-flight: writable install prefix (${INSTALL_PREFIX}) and run path (${RUN_PATH})"
+if ! sudo test -d "${INSTALL_PREFIX}"; then
+    preflight_fail "INSTALL_PREFIX" "${INSTALL_PREFIX}" "directory does not exist"
+fi
+probe_writable_dir "INSTALL_PREFIX" "${INSTALL_PREFIX}"
+for bin in kuke kukeond kukebuild kukepause; do
+    if is_mount_point "${INSTALL_PREFIX}/${bin}"; then
+        preflight_fail "install target" "${INSTALL_PREFIX}/${bin}" \
+            "it is a bind-mount point, so 'make install-dev' cannot replace it (EBUSY)"
+    fi
+done
+probe_writable_dir "run path" "$(nearest_existing_dir "${METADATA_ROOT}")"
+echo "pre-flight: ${INSTALL_PREFIX} and ${RUN_PATH} are writable"
+
 step "Build kuke, kukepause, kukebuild (and the kukeond symlink)"
 make kuke kukepause kukebuild
 ln -sf kuke kukeond

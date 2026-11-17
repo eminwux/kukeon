@@ -9,6 +9,8 @@
 
 `KUKEON_HOST` is read via viper in `cmd/kuke/kuke.go`'s `loadConfig` and steers every `kuke` client call. `KUKEOND_SOCKET` steers the daemon-side serve args `kuke init` seeds for the kukeond cell _and_ the cleanup path in `kuke daemon reset`. Both flow into sudo'd children via `--preserve-env=KUKEON_HOST,KUKEOND_SOCKET` on every relevant invocation in the script.
 
+**Precondition (both modes): writable install prefix and run path.** The script mutates `INSTALL_PREFIX` (default `/usr/local/bin`, via `make install-dev`) and `/opt/kukeon` (via `kuke init` / `kuke daemon reset`). A nested cell whose parent bind-mounts its own `/opt/kukeon` or `kuke` binary into the cell read-only cannot run `make dev-init`. The `Pre-flight: writable install prefix … and run path …` step probes both with a root temp-file write, and checks that none of `kuke`/`kukeond`/`kukebuild`/`kukepause` under `INSTALL_PREFIX` is itself a bind-mount point. It runs before the build and fails fast, naming the covering mount (#1413). To fix, run on a host or in a `kukeon-dev-root` cell with a writable `/opt/kukeon`, or override `INSTALL_PREFIX`.
+
 ## Why the nested-mode redirect
 
 The parent daemon bind-mounts `/run/kukeon/tty/<container>/` into the nested cell at `/run/kukeon/tty/`. A nested daemon publishing under `/run/kukeon/` would share that parent directory and break the host's `kuke attach <this-cell>` plumbing on script exit (issues #547, #545). Publishing under `/run/kukeon-dev/` keeps the two lifecycles disjoint. The script's `EXIT` trap (`verify_parent_attach_intact`) sha256-snapshots the parent's `/.kukeon/kuketty/metadata.json` up front and re-checks it on every exit path, so a botched re-bootstrap fails loud here rather than at the operator's next `kuke attach`.
