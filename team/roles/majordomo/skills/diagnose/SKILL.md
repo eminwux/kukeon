@@ -19,14 +19,14 @@ absent: report the lookup error.
 
 Run the reads that apply. All of them are read-only.
 
-| Question                             | Command                                                                                                                          |
-| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| What does kukeond itself report?     | `kuke health` (add `--since 6h` to widen the window)                                                                             |
-| What is the resource's stored state? | `kuke get cell <name> --realm R --space S --stack K -o yaml`, likewise `get config`, `get blueprint`, `get volume`, `get secret` |
-| What did the workload print?         | `kuke log <cell> --realm R --space S --stack K` (add `--container <id>` for one container)                                       |
-| What did kukeond log?                | `kuke daemon logs`; if this cell is refused access to the log file, `kuke health` lists the error-level entries                  |
-| What state are sibling cells in?     | `kuke get cells --realm R`                                                                                                       |
-| What has a sweep already found?      | `kuke health reports`, `kuke health report latest`                                                                               |
+| Question                             | Command                                                                                                                                                                  |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| What does kukeond itself report?     | `kuke health` (add `--since 6h` to widen the window)                                                                                                                     |
+| What is the resource's stored state? | `kuke get cell <name> --realm R --space S --stack K -o yaml`, likewise `get config`, `get blueprint`, `get volume`, `get secret`                                         |
+| What did the workload print?         | `kuke log <cell> --realm R --space S --stack K` (add `--container <id>` for one container)                                                                               |
+| What did kukeond log?                | `kuke daemon logs`. It reads kukeond's log file directly and fails in a cell whose kukeon install is mounted read-only; `kuke health` then lists the error-level entries |
+| What state are sibling cells in?     | `kuke get cells --realm R`                                                                                                                                               |
+| What has a sweep already found?      | `kuke health reports`, `kuke health report latest`                                                                                                                       |
 
 Read the fields that carry the diagnosis ([state and field reference](references/states.md)):
 
