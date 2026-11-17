@@ -6,7 +6,7 @@ import { CatalogPage, RelatedResources } from "./catalog";
 import { TerminalWorkspace, useTerminalSessions, type TerminalManager } from "./terminal";
 import { CellSidebar } from "./cell-sidebar";
 import { useInventory, type Inventory, type InventoryResource, type Doc, type RuntimeStatus } from "./inventory";
-import { apiPath, catalogTitles, daemonLink, homeLink, imagesLink, kinds, titles, readRoute, resourceLink, listLink, newCellLink, workspaceLink, type Route } from "./routes";
+import { apiPath, catalogTitles, daemonLink, healthLink, homeLink, imagesLink, kinds, titles, readRoute, resourceLink, listLink, newCellLink, workspaceLink, type Route } from "./routes";
 import { BrandMark, SidebarRail, SidebarResizer, SidebarToggle, VersionRows, useSidebarLayout, versionInfo } from "./sidebar-shell";
 import { StateBadge } from "./status";
 import { DocumentRowLink, Icon } from "./icons";
@@ -20,6 +20,10 @@ import { CellLifecycleControls, CellRowActions, type LifecycleAction, type Lifec
 import { InventoryIndicator, NotificationProvider, useNotify } from "./notifications";
 import { cellRemovalConfirmed, cellsWithin, deleteOperationComplete, descendantCounts, parentActionsAllowed, purgeOperationComplete, requestedPurgeOptions } from "./lifecycle-policy.js";
 import { ParentRowActions, type ParentAction } from "./scope-actions";
+import { AskMajordomo, AskProvider, MajordomoPanel, MajordomoRailButton, MajordomoSidebarEntry, MajordomoToolbarButton, cellQuestion, useMajordomo, useMajordomoDock } from "./majordomo";
+import { HealthPage } from "./health";
+
+const failureStates = ["Failed", "Error", "Degraded"];
 
 const NewCellPage = lazy(async () => ({ default: (await import("./new-cell")).NewCellPage }));
 const NewConfigPage = lazy(async () => ({ default: (await import("./new-config")).NewConfigPage }));
@@ -27,7 +31,7 @@ const NewConfigPage = lazy(async () => ({ default: (await import("./new-config")
 function validTime(value?: string): value is string {
   return !!value && !value.startsWith("0001-") && Number.isFinite(Date.parse(value));
 }
-function StatusSummary({ status, kind }: { status?: RuntimeStatus; kind: string }) {
+function StatusSummary({ status, kind, scope }: { status?: RuntimeStatus; kind: string; scope?: string[] }) {
   const container = kind === "container";
   const observations = status?.containers ?? [];
   const finished = validTime(status?.finishTime) && ["Stopped", "Failed", "Exited", "Error"].includes(status?.state ?? "");
@@ -44,6 +48,7 @@ function StatusSummary({ status, kind }: { status?: RuntimeStatus; kind: string 
         {finished && status?.exitCode !== undefined && <div className="status-card"><span>Exit code</span><strong>{status.exitCode}</strong>{status.exitSignal && <small>Signal: {status.exitSignal}</small>}</div>}
       </div>
       {(status?.reason || status?.message) && <div className="status-message"><strong>{status.reason || "Status message"}</strong>{status.message && <p>{status.message}</p>}</div>}
+      {scope?.length === 4 && failureStates.includes(status?.state ?? "") && <div className="status-ask"><span>This cell is {status?.state}.</span><AskMajordomo prominent question={cellQuestion(scope, status)} subject={`cell ${scope.join(" / ")}`} /></div>}
       {(status?.outOfSync || status?.outOfSyncError) && <div className="error"><strong>{status.outOfSyncError ? "Configuration comparison failed" : "Configuration out of sync"}</strong><p>{status.outOfSyncError || status.outOfSyncReason || "The daemon reports a configuration mismatch."}</p></div>}
       {times.some(([, value]) => validTime(value)) && <dl className="status-times">{times.filter(([, value]) => validTime(value)).map(([label, value]) => <div key={label}><dt>{label}</dt><dd><time dateTime={value}>{new Date(value!).toLocaleString()}</time></dd></div>)}</dl>}
       {container && ([ ["Repository setup", status?.repos], ["Create stages", status?.stages] ] as const).map(([label, items]) => !!items?.length && <div className="setup-status" key={label}><h3>{label}</h3><ul className="state-list">{items.map((item, i) => <li key={i}><div><strong>{item.name ?? `Stage ${item.index ?? i}`}</strong>{item.error && <p className="setup-error">{item.error}</p>}</div><StateBadge state={item.state} /></li>)}</ul></div>)}
@@ -86,7 +91,7 @@ function ResourceList({ depth, inventory, parent, operations, onLifecycleAction,
   return <section className="panel" aria-label={`${titles[depth]} list`}>
     <div className="list-controls"><label className="search-field">Search<input type="search" placeholder={`Search ${titles[depth].toLowerCase()}…`} value={search} onChange={e => { setSearch(e.target.value); setPage(0); }} /></label>{depth > 0 && <label>Realm<select aria-label="Filter by realm" value={realm} onChange={e => { setRealm(e.target.value); setPage(0); }}><option value="">All realms</option>{inventory.data?.rows[0].map(row => <option key={row.scope[0]}>{row.scope[0]}</option>)}</select></label>}<span className="result-count">{filtered.length} results</span></div>
     {parent.length > 0 && <p className="scope-filter">Scope: {parent.join(" / ")} <a href={listLink(depth)}>Clear scope</a></p>}
-    <div className="table-scroll"><table><thead><tr><th>Name</th><th>State</th><th>Scope</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{filtered.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(row => <tr key={JSON.stringify(row.scope)}><td><a className="resource-name" href={resourceLink(row.scope)}>{row.doc.metadata.name}</a></td><td><StateBadge state={row.doc.status?.state} /></td><td className="scope-cell">{row.scope.slice(0, -1).join(" / ") || "—"}</td><td className="row-actions">{depth === 3 ? <CellRowActions scope={row.scope} state={row.doc.status?.state} operation={operations[JSON.stringify(row.scope)]} onAction={onLifecycleAction} /> : <ParentRowActions scope={row.scope} counts={descendantCounts(inventory.data?.rows ?? [], row.scope)} allowed={parentActionsAllowed(row.scope)} operation={operations[JSON.stringify(row.scope)]} onAction={onParentAction} />}</td></tr>)}</tbody></table></div>
+    <div className="table-scroll"><table><thead><tr><th>Name</th><th>State</th><th>Scope</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{filtered.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(row => <tr key={JSON.stringify(row.scope)}><td><a className="resource-name" href={resourceLink(row.scope)}>{row.doc.metadata.name}</a></td><td><StateBadge state={row.doc.status?.state} />{depth === 3 && failureStates.includes(row.doc.status?.state ?? "") && <AskMajordomo question={cellQuestion(row.scope, row.doc.status)} subject={`cell ${row.scope.join(" / ")}`} />}</td><td className="scope-cell">{row.scope.slice(0, -1).join(" / ") || "—"}</td><td className="row-actions">{depth === 3 ? <CellRowActions scope={row.scope} state={row.doc.status?.state} operation={operations[JSON.stringify(row.scope)]} onAction={onLifecycleAction} /> : <ParentRowActions scope={row.scope} counts={descendantCounts(inventory.data?.rows ?? [], row.scope)} allowed={parentActionsAllowed(row.scope)} operation={operations[JSON.stringify(row.scope)]} onAction={onParentAction} />}</td></tr>)}</tbody></table></div>
     {!filtered.length && <div className="empty-state"><h3>{inventory.loading ? "Loading resources…" : inventory.error || inventory.data?.failures.length ? "Resources could not be fully loaded" : scoped.length ? "No matching resources" : `No ${titles[depth].toLowerCase()} found`}</h3><p>{search || realm ? "Try another search or clear the filters." : "Refresh to retrieve the latest resource state."}</p></div>}
     <div className="pagination"><span>{filtered.length ? `${currentPage * pageSize + 1}–${Math.min((currentPage + 1) * pageSize, filtered.length)} of ${filtered.length}` : "0 results"}</span><button disabled={!currentPage} onClick={() => setPage(currentPage - 1)}>Previous</button><button disabled={(currentPage + 1) * pageSize >= filtered.length} onClick={() => setPage(currentPage + 1)}>Next</button></div>
   </section>;
@@ -154,7 +159,9 @@ async function readCellPresence(scope: string[]): Promise<boolean | null> {
 
 // cellTerminal (#/workspace/...) and cellRead (#/resource/...) share one mounted screen so switching
 // between them keeps the TerminalWorkspace, and therefore every attached session, alive.
-function CellDetailsScreen({ title, view, scope, revision, inventory, manager, theme, operations, onLifecycleAction }: {
+function CellDetailsScreen({ title, view, scope, revision, inventory, manager, theme, operations, onLifecycleAction, dockedCell, onOpenDock }: {
+  dockedCell: string;
+  onOpenDock: () => void;
   title: string;
   view: CellView;
   scope: string[] | null;
@@ -176,7 +183,7 @@ function CellDetailsScreen({ title, view, scope, revision, inventory, manager, t
   const cellState = detail.data?.status?.state ?? inventoryState;
   const operation = operations[scopeKey];
   const terminalView = view === "terminal";
-  const status = detail.data && <StatusSummary status={detail.data.status} kind="cell" />;
+  const status = detail.data && <StatusSummary status={detail.data.status} kind="cell" scope={scope ?? undefined} />;
   // Detail loading and failures live in a fixed-size badge in the title row, so nothing renders between
   // the row and the terminal and the row's height never changes.
   const detailState = !scope ? null
@@ -241,11 +248,12 @@ function CellDetailsScreen({ title, view, scope, revision, inventory, manager, t
           </svg>
         </a>
         <div className="cell-terminal-tools" ref={setTerminalToolsHost} hidden={!terminalView} />
+        <AskMajordomo prominent={failureStates.includes(cellState ?? "")} question={cellQuestion(scope, detail.data?.status ?? { state: cellState })} subject={`cell ${scope.join(" / ")}`} />
         <CellLifecycleControls scope={scope} state={cellState} operation={operation} onAction={onLifecycleAction} />
       </div>
     </div>}
     <section className="cell-terminal-view" aria-label="Cell terminal" hidden={!terminalView}>
-      <TerminalWorkspace scope={scope} revision={revision} inventory={inventory} manager={manager} theme={theme} visible={terminalView && !!scope} controlsHost={terminalToolsHost} onExpandedChange={setTerminalExpanded} />
+      <TerminalWorkspace scope={scope} revision={revision} inventory={inventory} manager={manager} theme={theme} visible={terminalView && !!scope} controlsHost={terminalToolsHost} onExpandedChange={setTerminalExpanded} dockedCell={dockedCell} onOpenDock={onOpenDock} />
     </section>
     <section className="cell-overview-content" aria-label="Cell details" hidden={terminalView}>{detail.error && <ErrorNotice error={detail.error} kind="Cell" />}{detail.error && detail.data && <p className="stale">Stale resource details — refresh failed.</p>}{overview}{status}{containerPanel}{scope && !terminalView && <NetworkPanel scope={scope} revision={revision} />}{scope && !terminalView && <CgroupPanel scope={scope} revision={revision} />}</section>
   </div>;
@@ -263,6 +271,7 @@ function ResourcesNavigation({ route }: { route: Route }) {
     {titles.map((title, depth) => <a key={title} href={listLink(depth)} aria-current={activeDepth === depth ? "page" : undefined}>{title}</a>)}
     {Object.entries(catalogTitles).map(([kind, title]) => <a key={kind} href={`#/${kind}`} aria-current={route.view === kind || (kind === "configs" && route.view === "new-config") ? "page" : undefined}>{title}</a>)}
     <a href={imagesLink()} aria-current={route.view === "images" ? "page" : undefined}>Images</a>
+    <a href={healthLink()} aria-current={route.view === "health" ? "page" : undefined}>Health</a>
     <a href={daemonLink()} aria-current={route.view === "daemon" || route.view === "daemon-logs" ? "page" : undefined}>Daemon</a>
   </nav>;
 }
@@ -292,6 +301,9 @@ function App() {
   const connection = useResource<{ endpoint: string; version: string; daemonVersion?: string }>("/api/connection", revision);
   const inventory = useInventory(revision);
   const terminals = useTerminalSessions(inventory);
+  const major = useMajordomo(inventory, revision);
+  const dock = useMajordomoDock();
+  const dockedCell = major.cell ? JSON.stringify(major.cell.scope) : "";
   function recordOperation(scope: string[], operation: LifecycleFeedback) {
     const key = JSON.stringify(scope);
     setOperations(old => ({ ...old, [key]: operation }));
@@ -556,14 +568,14 @@ function App() {
   const catalog = Object.keys(catalogTitles).includes(route.view);
   const images = route.view === "images";
   const daemonView = route.view === "daemon" || route.view === "daemon-logs";
-  const heading = route.view === "daemon" ? "Daemon" : route.view === "daemon-logs" ? "Daemon logs" : isWorkspace ? route.scope.at(-1) ?? "Cell" : route.view === "new-cell" ? "New Cell" : route.view === "new-config" ? "New Config" : images ? route.scope[1] ?? "Images" : catalog ? route.scope.at(-1) ?? catalogTitles[route.view] : route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : "Resources";
+  const heading = route.view === "health" ? "Health" : route.view === "daemon" ? "Daemon" : route.view === "daemon-logs" ? "Daemon logs" : isWorkspace ? route.scope.at(-1) ?? "Cell" : route.view === "new-cell" ? "New Cell" : route.view === "new-config" ? "New Config" : images ? route.scope[1] ?? "Images" : catalog ? route.scope.at(-1) ?? catalogTitles[route.view] : route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : "Resources";
   // Only a scope path or realm qualifies the title; generic subtitles were dropped.
   const headingContext = isWorkspace ? route.scope.join(" / ") : images ? route.scope[1] ? route.scope[0] : "" : route.view === "resource" || (catalog && route.scope.length > 0) ? route.scope.join(" / ") : "";
   const daemonStatus = inventory.daemon.error?.code === "permission_denied" ? "Permission denied" : inventory.daemon.error ? "Unavailable" : inventory.daemon.loading ? "Checking…" : "Connected";
   const daemonTone = inventory.daemon.error ? "failed" : inventory.daemon.loading ? "checking" : "";
   const versions = versionInfo(connection.data?.version, connection.data?.daemonVersion);
-  const shellStyle = { "--sidebar-width": `${sidebar.width}px` } as CSSProperties;
-  return <div className={`app-shell${cellTerminalActive ? " cell-screen-active" : ""}${sidebar.collapsed ? " sidebar-collapsed" : ""}`} style={shellStyle}>
+  const shellStyle = { "--sidebar-width": `${sidebar.width}px`, "--majordomo-width": `${dock.width}px` } as CSSProperties;
+  return <AskProvider value={dock.ask}><div className={`app-shell${cellTerminalActive ? " cell-screen-active" : ""}${sidebar.collapsed ? " sidebar-collapsed" : ""}${dock.open ? " majordomo-open" : ""}`} style={shellStyle}>
     <aside className={`sidebar ${menuOpen ? "is-open" : ""}`} id="cell-sidebar" aria-label="Cell sidebar">
       <button className="sidebar-close" aria-label="Close sidebar" onClick={() => setMenuOpen(false)}>×</button>
       <div className="sidebar-panel">
@@ -571,6 +583,7 @@ function App() {
           <a className="brand" href={homeLink}><BrandMark /><span className="brand-title">kukeon</span></a>
           <SidebarToggle collapsed={false} onToggle={() => sidebar.setCollapsed(true)} />
         </div>
+        <MajordomoSidebarEntry major={major} dock={dock} />
         <CellSidebar inventory={inventory} selectedScope={cellScreenScope ?? []} terminalStates={terminals.cellStates} />
         <section className="connection" aria-label="Daemon connection">
           <div className="connection-heading">
@@ -582,7 +595,7 @@ function App() {
           {connection.error && <ErrorNotice error={connection.error} />}
         </section>
       </div>
-      {sidebar.collapsed && <SidebarRail inventory={inventory} selectedScope={cellScreenScope ?? []} connection={{ status: daemonStatus, tone: daemonTone, info: versions }} onExpand={() => sidebar.setCollapsed(false)} />}
+      {sidebar.collapsed && <SidebarRail inventory={inventory} selectedScope={cellScreenScope ?? []} connection={{ status: daemonStatus, tone: daemonTone, info: versions }} onExpand={() => sidebar.setCollapsed(false)} majordomo={<MajordomoRailButton major={major} dock={dock} />} />}
       {!sidebar.collapsed && <SidebarResizer width={sidebar.width} onResize={sidebar.setWidth} />}
     </aside>
     <main className="workspace">
@@ -590,10 +603,11 @@ function App() {
         <button className="menu-toggle" aria-label="Toggle sidebar" aria-expanded={menuOpen} aria-controls="cell-sidebar" onClick={() => setMenuOpen(!menuOpen)}>☰</button>
         <span className="toolbar-connectivity" role="status" aria-label={`Daemon: ${daemonStatus}`} title={`Daemon: ${daemonStatus}`}><span className={`dot ${daemonTone}`} aria-hidden="true" /></span>
         <InventoryIndicator inventory={inventory} />
-        <nav className="breadcrumbs" aria-label="Resource scope">{isWorkspace || route.view === "resource" ? route.scope.map((name, i) => <a key={i} aria-label={`${kinds[i]}: ${name}`} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>) : <><a href={homeLink}>Resources</a>{daemonView ? route.view === "daemon" ? <span>Daemon</span> : <><a href={daemonLink()}>Daemon</a><span>Logs</span></> : images ? <><a href={imagesLink()}>Images</a>{route.scope[0] && (route.scope[1] ? <a href={imagesLink(route.scope[0])}>{route.scope[0]}</a> : <span>{route.scope[0]}</span>)}{route.scope[1] && <span>{route.scope[1]}</span>}</> : catalog ? <><a href={`#/${route.view}`}>{catalogTitles[route.view]}</a>{route.scope.slice(0, -1).map((name, i) => <a key={i} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}{route.scope.length > 0 && <span>{route.scope.at(-1)}</span>}</> : heading !== "Resources" && <span>{heading}</span>}</>}</nav>
+        <nav className="breadcrumbs" aria-label="Resource scope">{isWorkspace || route.view === "resource" ? route.scope.map((name, i) => <a key={i} aria-label={`${kinds[i]}: ${name}`} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>) : <><a href={homeLink}>Resources</a>{route.view === "health" ? <span>Health</span> : daemonView ? route.view === "daemon" ? <span>Daemon</span> : <><a href={daemonLink()}>Daemon</a><span>Logs</span></> : images ? <><a href={imagesLink()}>Images</a>{route.scope[0] && (route.scope[1] ? <a href={imagesLink(route.scope[0])}>{route.scope[0]}</a> : <span>{route.scope[0]}</span>)}{route.scope[1] && <span>{route.scope[1]}</span>}</> : catalog ? <><a href={`#/${route.view}`}>{catalogTitles[route.view]}</a>{route.scope.slice(0, -1).map((name, i) => <a key={i} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}{route.scope.length > 0 && <span>{route.scope.at(-1)}</span>}</> : heading !== "Resources" && <span>{heading}</span>}</>}</nav>
         <div className="toolbar-actions">
           <a className="header-action new-cell-toolbar-action" href={newCellLink()}>New Cell</a>
           <a className="header-action" href={homeLink} aria-current={!isWorkspace ? "page" : undefined}>Resources</a>
+          <MajordomoToolbarButton dock={dock} />
           <button className="icon-button refresh-button" type="button" aria-label="Refresh" title={inventory.loading ? "Refreshing…" : "Refresh"} aria-busy={inventory.loading} onClick={() => setRevision(value => value + 1)}>
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 11a8.1 8.1 0 0 0-14.9-4L3 10" /><path d="M3 4v6h6" /><path d="M4 13a8.1 8.1 0 0 0 14.9 4L21 14" /><path d="M21 20v-6h-6" /></svg>
           </button>
@@ -607,12 +621,13 @@ function App() {
       <div className={`workspace-content ${isWorkspace ? "cell-workspace-content" : ""}${cellTerminalActive ? " cell-screen-content" : ""}`}>
         {!isWorkspace && !cellScreenScope && <ResourcesNavigation route={route} />}
         {!cellScreenScope && <div className="page-heading"><h1>{heading}</h1>{headingContext && <p className="page-context mono-id">{headingContext}</p>}</div>}
-        <CellDetailsScreen title={heading ?? "Cell"} view={cellView} scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} operations={operations} onLifecycleAction={runCellLifecycle} />
-        {isWorkspace ? null : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "new-config" ? <Suspense fallback={<p role="status">Loading Config creation form…</p>}><NewConfigPage key={JSON.stringify(route.blueprint ?? [])} revision={revision} inventory={inventory} blueprintScope={route.blueprint} onCreated={() => setRevision(value => value + 1)} /></Suspense> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} operations={operations} onLifecycleAction={runCellLifecycle} onParentAction={runParentAction} /> : <Dashboard inventory={inventory} />}
+        <CellDetailsScreen title={heading ?? "Cell"} view={cellView} scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} operations={operations} onLifecycleAction={runCellLifecycle} dockedCell={dockedCell} onOpenDock={() => dock.setOpen(true)} />
+        {isWorkspace ? null : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "new-config" ? <Suspense fallback={<p role="status">Loading Config creation form…</p>}><NewConfigPage key={JSON.stringify(route.blueprint ?? [])} revision={revision} inventory={inventory} blueprintScope={route.blueprint} onCreated={() => setRevision(value => value + 1)} /></Suspense> : route.view === "health" ? <HealthPage revision={revision} major={major} onChanged={() => setRevision(value => value + 1)} /> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} operations={operations} onLifecycleAction={runCellLifecycle} onParentAction={runParentAction} /> : <Dashboard inventory={inventory} />}
         <footer>Daemon inventory · {inventory.data ? <>Last refreshed <time dateTime={inventory.data.updatedAt}>{new Date(inventory.data.updatedAt).toLocaleTimeString()}</time></> : "Not refreshed yet"} · Refresh to retrieve the latest state.</footer>
       </div>
     </main>
-  </div>;
+    <MajordomoPanel major={major} dock={dock} inventory={inventory} manager={terminals} theme={theme} revision={revision} onChanged={() => setRevision(value => value + 1)} />
+  </div></AskProvider>;
 }
 
 const root = document.getElementById("root");

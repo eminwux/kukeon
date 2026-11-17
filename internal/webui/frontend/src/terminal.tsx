@@ -10,18 +10,20 @@ import { Icon } from "./icons";
 
 type Container = { id: string; attachable?: boolean; root?: boolean };
 export type TerminalState = "connecting" | "attached" | "disconnected" | "interrupted";
-type Session = { id: string; scope: string[]; container: string; state: TerminalState; message: string; generation: number };
+export type Session = { id: string; scope: string[]; container: string; state: TerminalState; message: string; generation: number };
+// A paste waiting for its session: delivered once, when the session is attached and on screen.
+type PendingPaste = { text: string; nonce: number };
 const maxConnections = 20;
 const maxSessions = 20;
-const cellId = (scope: string[]) => JSON.stringify(scope);
-const sessionId = (scope: string[], container: string) => JSON.stringify([...scope, container]);
-const unavailableStates = new Set(["Stopped", "Stopping", "Exited", "Deleted", "Failed", "Error", "Pending", "Unknown"]);
+export const cellId = (scope: string[]) => JSON.stringify(scope);
+export const sessionId = (scope: string[], container: string) => JSON.stringify([...scope, container]);
+export const unavailableStates = new Set(["Stopped", "Stopping", "Exited", "Deleted", "Failed", "Error", "Pending", "Unknown"]);
 const terminalTheme = {
   background: "#000000", foreground: "#ffffff", cursor: "#ffffff", cursorAccent: "#000000", selectionBackground: "#4d4d4d",
   black: "#000000", red: "#cd0000", green: "#00cd00", yellow: "#cdcd00", blue: "#0000ee", magenta: "#cd00cd", cyan: "#00cdcd", white: "#e5e5e5",
   brightBlack: "#7f7f7f", brightRed: "#ff0000", brightGreen: "#00ff00", brightYellow: "#ffff00", brightBlue: "#5c5cff", brightMagenta: "#ff00ff", brightCyan: "#00ffff", brightWhite: "#ffffff",
 };
-type Theme = "system" | "light" | "dark";
+export type Theme = "system" | "light" | "dark";
 function terminalThemeFor(theme: Theme) {
   const dark = theme === "dark" || theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches;
   return { ...terminalTheme, background: dark ? "#0d1421" : "#f8fafc", foreground: dark ? "#e5e6ec" : "#20232b", cursor: dark ? "#e5e6ec" : "#20232b" };
@@ -32,6 +34,23 @@ export function useTerminalSessions(inventory: InventoryResource) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selection, setSelection] = useState<Record<string, string>>({});
   const retainedCells = useRef(new Set<string>());
+  const [pastes, setPastes] = useState<Record<string, PendingPaste>>({});
+  const pasteNonce = useRef(0);
+  // Queue text for a session's terminal. It is pasted, never typed: no Enter is sent, so the
+  // program in the container receives it without submitting it.
+  const paste = useCallback((id: string, text: string) => {
+    pasteNonce.current += 1;
+    const nonce = pasteNonce.current;
+    setPastes(old => ({ ...old, [id]: { text, nonce } }));
+  }, []);
+  const pasteDelivered = useCallback((id: string, nonce: number) => {
+    setPastes(old => {
+      if (old[id]?.nonce !== nonce) return old;
+      const next = { ...old };
+      delete next[id];
+      return next;
+    });
+  }, []);
   const select = useCallback((scope: string[], container: string) => {
     setSelection(old => ({ ...old, [cellId(scope)]: container }));
   }, []);
@@ -103,13 +122,13 @@ export function useTerminalSessions(inventory: InventoryResource) {
     }
     return result;
   }, [sessions]);
-  return { sessions, selection, select, attach, detach, removeCell, interruptCell, holdCell, releaseCell, update, cellStates };
+  return { sessions, selection, select, attach, detach, removeCell, interruptCell, holdCell, releaseCell, update, cellStates, pastes, paste, pasteDelivered };
 }
 
 export type TerminalManager = ReturnType<typeof useTerminalSessions>;
 type Manager = TerminalManager;
 
-function TerminalSession({ session, active, expanded, theme, update }: { session: Session; active: boolean; expanded: boolean; theme: Theme; update: Manager["update"] }) {
+export function TerminalSession({ session, active, expanded, theme, update, pending, onPasted }: { session: Session; active: boolean; expanded: boolean; theme: Theme; update: Manager["update"]; pending?: PendingPaste; onPasted?: Manager["pasteDelivered"] }) {
   const mount = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal | null>(null);
   const socket = useRef<WebSocket | null>(null);
@@ -235,6 +254,15 @@ function TerminalSession({ session, active, expanded, theme, update }: { session
     return () => cancelAnimationFrame(frame);
   }, [active]);
 
+  // Deliver a queued paste once the session is attached and on screen. xterm wraps it in
+  // bracketed-paste markers when the program asked for them, and sends it as one write.
+  useEffect(() => {
+    if (!pending || !active || session.state !== "attached" || socket.current?.readyState !== WebSocket.OPEN) return;
+    terminal.current?.paste(pending.text);
+    terminal.current?.focus();
+    onPasted?.(session.id, pending.nonce);
+  }, [pending, active, session.state, session.id, onPasted]);
+
   useEffect(() => {
     if (!active || !expanded) return;
     const frame = requestAnimationFrame(() => { fitNow.current(); terminal.current?.focus(); });
@@ -249,7 +277,9 @@ function TerminalSession({ session, active, expanded, theme, update }: { session
   </div>;
 }
 
-export function TerminalWorkspace({ scope, revision, inventory, manager, theme, visible = true, controlsHost, onExpandedChange }: { scope: string[] | null; revision: number; inventory: InventoryResource; manager: Manager; theme: Theme; visible?: boolean; controlsHost: HTMLDivElement | null; onExpandedChange: (expanded: boolean) => void }) {
+// dockedCell is the cell whose terminal lives in the majordomo panel. Its sessions are mounted
+// there and nowhere else, so this workspace neither renders nor attaches them.
+export function TerminalWorkspace({ scope, revision, inventory, manager, theme, visible = true, controlsHost, onExpandedChange, dockedCell = "", onOpenDock }: { scope: string[] | null; revision: number; inventory: InventoryResource; manager: Manager; theme: Theme; visible?: boolean; controlsHost: HTMLDivElement | null; onExpandedChange: (expanded: boolean) => void; dockedCell?: string; onOpenDock?: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const [skipAutoAttachFor, setSkipAutoAttachFor] = useState("");
   const expandButton = useRef<HTMLButtonElement>(null);
@@ -283,6 +313,7 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
   const containers = useResource<Container[]>(path, revision);
   const eligible = containers.data?.filter(container => container.attachable && !container.root) ?? [];
   const key = scope ? cellId(scope) : "";
+  const docked = !!key && key === dockedCell;
   const openInCell = manager.sessions.filter(item => cellId(item.scope) === key);
   const options = [...eligible.map(container => container.id), ...openInCell.map(item => item.container).filter(id => !eligible.some(container => container.id === id))];
   const selected = options.includes(manager.selection[key]) ? manager.selection[key] : options[0] ?? "";
@@ -296,9 +327,10 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
   const reconnectLimited = (current?.state === "disconnected" || current?.state === "interrupted") && connections >= maxConnections;
   useEffect(() => { setSkipAutoAttachFor(""); }, [key]);
   useEffect(() => {
-    if (!scope || containers.loading || containers.error || !selected || !selectedEligible || unavailable || atLimit || current || skipAutoAttachFor === currentId) return;
+    // Wait for the inventory: it is what tells whether this cell's terminal is docked.
+    if (!scope || docked || !inventory.data || containers.loading || containers.error || !selected || !selectedEligible || unavailable || atLimit || current || skipAutoAttachFor === currentId) return;
     manager.attach(scope, selected);
-  }, [key, selected, selectedEligible, containers.loading, containers.error, unavailable, atLimit, current, currentId, skipAutoAttachFor, manager.attach]);
+  }, [key, docked, !inventory.data, selected, selectedEligible, containers.loading, containers.error, unavailable, atLimit, current, currentId, skipAutoAttachFor, manager.attach]);
   const headerState = current?.state === "attached" ? "Attached"
     : current?.message || (skipAutoAttachFor === currentId && currentId ? "Detached" : atLimit ? "Connection limit reached" : unavailable ? `Unavailable: ${cellState}` : containers.loading ? "Loading containers…" : containers.error ? "Container list unavailable" : !eligible.length ? "No attachable containers" : !selectedEligible ? "Container unavailable" : "Connecting…");
   // With nothing to attach to, the terminal area carries the only (neutral) message.
@@ -328,7 +360,7 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
   const connectSlot = current?.state === "attached" || current?.state === "connecting" ? connectButton("Detach", false, () => { setSkipAutoAttachFor(current.id); manager.detach(current.id); })
     : current ? <>{connectButton("Reconnect", reconnectLimited || !selectedEligible || !!unavailable || !!containers.error, resume)}{connectButton("Detach", false, () => { setSkipAutoAttachFor(current.id); manager.detach(current.id); })}</>
     : skipAutoAttachFor === currentId && currentId ? connectButton("Attach", !!atLimit || !selectedEligible || !!unavailable || !!containers.error, resume) : null;
-  const controls = scope && <div className="terminal-workspace-tools">
+  const controls = scope && !docked && <div className="terminal-workspace-tools">
     {!empty && <span className={`terminal-connection-state ${headerTone}`} role="status" tabIndex={0} title={tooltip} data-tooltip={tooltip}><span className="state-dot" aria-hidden="true" /><span className="sr-only">{headerState}</span></span>}
     <div className="terminal-controls">
       {!!options.length && <><label htmlFor="terminal-container" className="sr-only">Container</label><select id="terminal-container" className="mono-id" value={selected} onChange={event => manager.select(scope, event.target.value)}>{options.map(id => <option key={id} value={id}>{id}{eligible.some(container => container.id === id) ? "" : " (unavailable)"}</option>)}</select>
@@ -339,9 +371,11 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
   return <>
     {controls && controlsHost && createPortal(controls, controlsHost)}
     <section className={`panel terminal-workspace${expanded ? " is-expanded" : ""}${empty ? " is-empty" : ""}`} id="cell-terminal" hidden={!scope} aria-label="Terminal workspace">
-      {empty && <p className="empty-state terminal-empty" role="status">No attachable containers are available.</p>}
-      {overlay && <div className="terminal-overlay">{overlay}</div>}
-      <div className="terminal-screens" id="terminal-screens" ref={screens}>{manager.sessions.map(session => <TerminalSession key={session.id} session={session} active={!!scope && visible && session.id === currentId} expanded={expanded} theme={theme} update={manager.update} />)}</div>
+      {docked ? <div className="empty-state terminal-docked" role="status"><p>This cell's terminal is docked in the Majordomo panel.</p><button type="button" onClick={onOpenDock}>Open the Majordomo panel</button></div> : <>
+        {empty && <p className="empty-state terminal-empty" role="status">No attachable containers are available.</p>}
+        {overlay && <div className="terminal-overlay">{overlay}</div>}
+      </>}
+      <div className="terminal-screens" id="terminal-screens" ref={screens}>{manager.sessions.filter(session => cellId(session.scope) !== dockedCell).map(session => <TerminalSession key={session.id} session={session} active={!!scope && visible && session.id === currentId} expanded={expanded} theme={theme} update={manager.update} pending={manager.pastes[session.id]} onPasted={manager.pasteDelivered} />)}</div>
     </section>
   </>;
 }

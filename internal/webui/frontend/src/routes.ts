@@ -26,6 +26,8 @@ export function readRoute(): Route {
       return { view: "new-config", scope: [], parent: [], document: false, blueprint: Array.isArray(blueprint) && blueprint.every(value => typeof value === "string") ? blueprint.slice(0, 4) : undefined };
     }
     // #/daemon (health) and #/daemon/logs live under Administration.
+    // #/health: majordomo's health reports and the sweep schedule.
+    if (parts[0] === "health") return { view: "health", scope: [], parent: [], document: false };
     if (parts[0] === "daemon") return { view: parts[1] === "logs" ? "daemon-logs" : "daemon", scope: [], parent: [], document: false };
     if (parts[0] === "workspace") return parts.length === 5 ? { view: "workspace", scope: parts.slice(1), parent: [], document: false } : HOME();
     if (path === "/resources" || path === "/administration" || path === "/dashboard") return { view: "dashboard", scope: [], parent: [], document: false };
@@ -51,6 +53,9 @@ export function newCellLink(config?: string[]): string {
 }
 export function newConfigLink(blueprint?: string[]): string {
   return "#/new-config" + (blueprint?.length ? `?blueprint=${encodeURIComponent(JSON.stringify(blueprint))}` : "");
+}
+export function healthLink(): string {
+  return "#/health";
 }
 export function daemonLink(section?: "logs"): string {
   return "#/daemon" + (section ? `/${section}` : "");
