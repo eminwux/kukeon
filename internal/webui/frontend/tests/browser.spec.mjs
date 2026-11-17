@@ -1363,6 +1363,17 @@ test("cells table row actions run lifecycle verbs, confirm destructive ones, and
   await devRow.getByRole("button", { name: `Purge cell ${dev}` }).click();
   dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("button", { name: "Confirm Purge" })).toBeDisabled();
+  // The dialog lives inside the nowrap, right-aligned actions cell; its copy must still wrap left-aligned at phone width.
+  const viewport = page.viewportSize();
+  await page.setViewportSize({ width: 390, height: 844 });
+  const description = dialog.locator("#cell-action-dialog-description");
+  const layout = await description.evaluate(el => { const style = getComputedStyle(el); return { height: el.getBoundingClientRect().height, lineHeight: parseFloat(style.lineHeight), whiteSpace: style.whiteSpace, textAlign: style.textAlign, overflow: el.scrollWidth - el.clientWidth }; });
+  expect(layout.whiteSpace).toBe("normal");
+  expect(layout.textAlign).toBe("left");
+  expect(layout.height).toBeGreaterThan(layout.lineHeight * 1.5);
+  expect(layout.overflow).toBeLessThanOrEqual(0);
+  expect(await dialog.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
+  await page.setViewportSize(viewport);
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
 

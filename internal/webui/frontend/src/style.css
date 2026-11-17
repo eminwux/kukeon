@@ -248,7 +248,8 @@ button:disabled { cursor: default; opacity: .4; }
 .cell-advanced-menu .cell-destructive-actions { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
 .danger-action { color: var(--status-error); border-color: var(--status-error-line); }
 .danger-action:hover:not(:disabled) { background: var(--status-error-bg); }
-.cell-action-dialog { width: min(560px, calc(100vw - 28px)); max-width: none; max-height: calc(100dvh - 28px); padding: 0; overflow: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--text); box-shadow: 0 24px 72px #0006; }
+/* Reset what the row-actions cell (nowrap, right-aligned) would otherwise pass down to a row-opened dialog. */
+.cell-action-dialog { white-space: normal; text-align: left; width: min(560px, calc(100vw - 28px)); max-width: none; max-height: calc(100dvh - 28px); padding: 0; overflow: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--text); box-shadow: 0 24px 72px #0006; }
 .cell-action-dialog::backdrop { background: #080b12a8; backdrop-filter: blur(2px); }
 .cell-action-dialog form { display: grid; gap: 14px; padding: clamp(18px, 4vw, 28px); }
 .cell-action-dialog h2 { font-size: 19px; font-weight: 600; }
