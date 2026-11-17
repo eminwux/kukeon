@@ -402,3 +402,146 @@ func TestDeleteConfig_NotFound(t *testing.T) {
 		t.Errorf("DeleteConfig() error = %v, want ErrConfigNotFound", err)
 	}
 }
+
+// TestConfigScheduleStatus_RoundTrip pins the issue #1503 storage contract:
+// a config's schedule state lives at <scope>/config-status/<name>, beside the
+// configs/ dir and world-readable like it, reads back as written, and reads as
+// "none" before anything is stored.
+func TestConfigScheduleStatus_RoundTrip(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+	cfg := intmodel.CellConfig{
+		Metadata: intmodel.CellConfigMetadata{Name: "disk-watch", Realm: "default", Space: "team-a", Stack: "web"},
+	}
+
+	got, found, err := r.GetConfigScheduleStatus(cfg)
+	if err != nil || found {
+		t.Fatalf("GetConfigScheduleStatus() before any write = %+v, %v, %v; want not found", got, found, err)
+	}
+
+	last := time.Date(2026, 11, 17, 8, 30, 0, 0, time.UTC)
+	next := time.Date(2026, 11, 17, 8, 40, 0, 0, time.UTC)
+	want := intmodel.CellConfigScheduleStatus{
+		LastScheduleTime: &last,
+		NextScheduleTime: &next,
+		LastCell:         "disk-watch-1794904200",
+		ActiveCells:      []string{"disk-watch-1794904200"},
+		SkippedFires:     3,
+		LastError:        "fire 2026-11-17T08:20:00Z: boom",
+	}
+	if err = r.WriteConfigScheduleStatus(cfg, want); err != nil {
+		t.Fatalf("WriteConfigScheduleStatus() error = %v", err)
+	}
+
+	path := fs.ConfigStatusPath(runPath, "default", "team-a", "web", "disk-watch")
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("schedule status not at %s: %v", path, err)
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Errorf("status file mode = %o, want 644", info.Mode().Perm())
+	}
+	dirInfo, err := os.Stat(fs.ConfigStatusDir(runPath, "default", "team-a", "web"))
+	if err != nil || dirInfo.Mode().Perm() != 0o755 {
+		t.Errorf("status dir mode = %v (err %v), want 755", dirInfo.Mode().Perm(), err)
+	}
+
+	got, found, err = r.GetConfigScheduleStatus(cfg)
+	if err != nil || !found {
+		t.Fatalf("GetConfigScheduleStatus() = %+v, %v, %v", got, found, err)
+	}
+	if !got.LastScheduleTime.Equal(last) || !got.NextScheduleTime.Equal(next) ||
+		got.LastCell != want.LastCell || !equalStrings(got.ActiveCells, want.ActiveCells) ||
+		got.SkippedFires != want.SkippedFires || got.LastError != want.LastError {
+		t.Errorf("status read back = %+v, want %+v", got, want)
+	}
+
+	// An overwrite replaces the state whole, including cleared fields.
+	if err = r.WriteConfigScheduleStatus(cfg, intmodel.CellConfigScheduleStatus{SkippedFires: 4}); err != nil {
+		t.Fatalf("WriteConfigScheduleStatus() overwrite error = %v", err)
+	}
+	got, found, err = r.GetConfigScheduleStatus(cfg)
+	if err != nil || !found {
+		t.Fatalf("GetConfigScheduleStatus() after overwrite = %+v, %v, %v", got, found, err)
+	}
+	if got.NextScheduleTime != nil || got.LastCell != "" || len(got.ActiveCells) != 0 || got.SkippedFires != 4 {
+		t.Errorf("status after overwrite = %+v, want only skippedFires=4", got)
+	}
+
+	if err = r.DeleteConfigScheduleStatus(cfg); err != nil {
+		t.Fatalf("DeleteConfigScheduleStatus() error = %v", err)
+	}
+	if err = r.DeleteConfigScheduleStatus(cfg); err != nil {
+		t.Errorf("DeleteConfigScheduleStatus() of an absent status = %v, want nil", err)
+	}
+	if got, found, err = r.GetConfigScheduleStatus(cfg); err != nil || found {
+		t.Errorf("GetConfigScheduleStatus() after delete = %+v, %v, %v; want not found", got, found, err)
+	}
+}
+
+// TestDeleteConfig_RemovesScheduleStatus: the schedule state goes with the
+// config, so one re-created under the same name starts from a clean slate.
+func TestDeleteConfig_RemovesScheduleStatus(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+
+	seedConfig(t, r, "web", "default", "team-a", "")
+	cfg := intmodel.CellConfig{Metadata: intmodel.CellConfigMetadata{Name: "web", Realm: "default", Space: "team-a"}}
+	if err := r.WriteConfigScheduleStatus(cfg, intmodel.CellConfigScheduleStatus{SkippedFires: 1}); err != nil {
+		t.Fatalf("WriteConfigScheduleStatus() error = %v", err)
+	}
+
+	if err := r.DeleteConfig(cfg); err != nil {
+		t.Fatalf("DeleteConfig() error = %v", err)
+	}
+	if _, err := os.Stat(fs.ConfigStatusPath(runPath, "default", "team-a", "", "web")); !os.IsNotExist(err) {
+		t.Errorf("schedule status still present after the config was deleted (err=%v)", err)
+	}
+}
+
+// TestListConfigs_LiftsScheduleAndSkipsStatusDir: a list lifts each config's
+// spec.schedule summary onto the carrier without returning the body, and the
+// config-status/ dir is never mistaken for a child scope or for configs.
+func TestListConfigs_LiftsScheduleAndSkipsStatusDir(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+
+	scheduled := intmodel.CellConfig{
+		Metadata: intmodel.CellConfigMetadata{Name: "disk-watch", Realm: "default"},
+		Document: []byte("metadata:\n  name: disk-watch\n  labels:\n    kukeon.io/team: ops\n" +
+			"spec:\n  schedule:\n    cron: \"*/10 * * * *\"\n    timezone: Europe/Madrid\n    suspend: true\n"),
+	}
+	if _, err := r.WriteConfig(scheduled); err != nil {
+		t.Fatalf("seed WriteConfig error = %v", err)
+	}
+	seedConfig(t, r, "plain", "default", "", "")
+	if err := r.WriteConfigScheduleStatus(scheduled, intmodel.CellConfigScheduleStatus{}); err != nil {
+		t.Fatalf("WriteConfigScheduleStatus() error = %v", err)
+	}
+
+	got, err := r.ListConfigs("", "", "")
+	if err != nil {
+		t.Fatalf("ListConfigs() error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("ListConfigs() = %d entries (%+v), want 2: config-status/ must not surface", len(got), got)
+	}
+	byName := map[string]intmodel.CellConfig{}
+	for _, c := range got {
+		byName[c.Metadata.Name] = c
+	}
+	lifted := byName["disk-watch"]
+	if lifted.Schedule == nil || lifted.Schedule.Cron != "*/10 * * * *" ||
+		lifted.Schedule.Timezone != "Europe/Madrid" || !lifted.Schedule.Suspend {
+		t.Errorf("listed Schedule = %+v, want the lifted spec.schedule", lifted.Schedule)
+	}
+	if lifted.Metadata.Labels["kukeon.io/team"] != "ops" {
+		t.Errorf("listed Labels = %v, want the team label still lifted", lifted.Metadata.Labels)
+	}
+	if lifted.Document != nil {
+		t.Errorf("a listed config carries its document")
+	}
+	if byName["plain"].Schedule != nil {
+		t.Errorf("an unscheduled config listed a Schedule: %+v", byName["plain"].Schedule)
+	}
+}

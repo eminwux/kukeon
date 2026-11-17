@@ -26,6 +26,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	configcmd "github.com/eminwux/kukeon/cmd/kuke/get/config"
 	"github.com/eminwux/kukeon/cmd/types"
@@ -34,6 +35,7 @@ import (
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"gopkg.in/yaml.v3"
 )
 
 func TestNewConfigCmd(t *testing.T) {
@@ -399,6 +401,138 @@ func TestNewConfigCmd_ListOutputShape(t *testing.T) {
 		}
 		if len(items) != 2 {
 			t.Errorf("populated list JSON has %d items, want 2; got:\n%s", len(items), out)
+		}
+	})
+}
+
+// TestNewConfigCmd_ScheduleColumns pins the #1503 table contract: `kuke get
+// configs` shows SCHEDULE and NEXT, filled for a scheduled Config and empty
+// for an unscheduled one, and `-o yaml` of a single Config shows
+// status.schedule.
+func TestNewConfigCmd_ScheduleColumns(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	next := time.Date(2026, 11, 17, 8, 40, 0, 0, time.UTC)
+	last := time.Date(2026, 11, 17, 8, 30, 0, 0, time.UTC)
+	scheduled := v1beta1.CellConfigDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindCellConfig,
+		Metadata: v1beta1.CellConfigMetadata{
+			Name: "disk-watch", Realm: "default", Space: "default", Stack: "default",
+		},
+		Spec: v1beta1.CellConfigSpec{
+			Schedule: &v1beta1.CellConfigSchedule{Cron: "*/10 * * * *"},
+		},
+		Status: &v1beta1.CellConfigStatus{Schedule: &v1beta1.CellConfigScheduleStatus{
+			LastScheduleTime: &last,
+			NextScheduleTime: &next,
+			LastCell:         "disk-watch-1794904200",
+			ActiveCells:      []string{"disk-watch-1794904200"},
+			SkippedFires:     2,
+		}},
+	}
+	zoned := v1beta1.CellConfigDoc{
+		Metadata: v1beta1.CellConfigMetadata{Name: "nightly", Realm: "default"},
+		Spec: v1beta1.CellConfigSpec{
+			Schedule: &v1beta1.CellConfigSchedule{Cron: "0 2 * * *", Timezone: "Europe/Madrid"},
+		},
+		// Applied a moment ago: kukeond has not computed the next fire yet.
+	}
+	suspended := v1beta1.CellConfigDoc{
+		Metadata: v1beta1.CellConfigMetadata{Name: "paused", Realm: "default"},
+		Spec: v1beta1.CellConfigSpec{
+			Schedule: &v1beta1.CellConfigSchedule{Cron: "@hourly", Suspend: true},
+		},
+		Status: &v1beta1.CellConfigStatus{Schedule: &v1beta1.CellConfigScheduleStatus{}},
+	}
+	plain := v1beta1.CellConfigDoc{Metadata: v1beta1.CellConfigMetadata{Name: "plain", Realm: "default"}}
+
+	fake := &fakeClient{
+		listConfigsFn: func(_, _, _ string) ([]v1beta1.CellConfigDoc, error) {
+			return []v1beta1.CellConfigDoc{scheduled, zoned, suspended, plain}, nil
+		},
+		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+			return kukeonv1.GetConfigResult{Config: scheduled, MetadataExists: true}, nil
+		},
+	}
+	run := func(t *testing.T, args ...string) string {
+		t.Helper()
+		t.Cleanup(viper.Reset)
+		cmd := configcmd.NewConfigCmd()
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+		cmd.SetContext(context.WithValue(context.Background(), configcmd.MockControllerKey{}, kukeonv1.Client(fake)))
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		return buf.String()
+	}
+	// rowFor returns the whitespace-collapsed table row of the named config.
+	rowFor := func(t *testing.T, out, name string) string {
+		t.Helper()
+		for _, line := range strings.Split(out, "\n") {
+			fields := strings.Fields(line)
+			if len(fields) > 0 && fields[0] == name {
+				return strings.Join(fields, " ")
+			}
+		}
+		t.Fatalf("no row for %q in:\n%s", name, out)
+		return ""
+	}
+
+	t.Run("list table", func(t *testing.T) {
+		out := run(t)
+		header := strings.Join(strings.Fields(strings.SplitN(out, "\n", 2)[0]), " ")
+		if header != "NAME REALM SPACE STACK SCHEDULE NEXT" {
+			t.Errorf("header = %q, want NAME REALM SPACE STACK SCHEDULE NEXT", header)
+		}
+		for name, want := range map[string]string{
+			"disk-watch": "disk-watch default default default */10 * * * * 2026-11-17T08:40:00Z",
+			// A time zone other than UTC is shown; NEXT is empty until
+			// kukeond's next pass.
+			"nightly": "nightly default - - 0 2 * * * (Europe/Madrid)",
+			"paused":  "paused default - - @hourly suspended",
+			// An unscheduled Config leaves both columns empty.
+			"plain": "plain default - -",
+		} {
+			if got := rowFor(t, out, name); got != want {
+				t.Errorf("row = %q, want %q", got, want)
+			}
+		}
+	})
+
+	t.Run("named table row carries the same columns", func(t *testing.T) {
+		out := run(t, "disk-watch")
+		if got, want := rowFor(t, out, "disk-watch"),
+			"disk-watch default default default */10 * * * * 2026-11-17T08:40:00Z"; got != want {
+			t.Errorf("row = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("-o yaml shows status.schedule", func(t *testing.T) {
+		out := run(t, "disk-watch", "-o", "yaml")
+		var doc v1beta1.CellConfigDoc
+		if err := yaml.Unmarshal([]byte(out), &doc); err != nil {
+			t.Fatalf("-o yaml is not a CellConfig document: %v\n%s", err, out)
+		}
+		status := doc.Status
+		if status == nil || status.Schedule == nil {
+			t.Fatalf("-o yaml carries no status.schedule:\n%s", out)
+		}
+		got := status.Schedule
+		if !got.NextScheduleTime.Equal(next) || !got.LastScheduleTime.Equal(last) ||
+			got.LastCell != "disk-watch-1794904200" || got.SkippedFires != 2 ||
+			len(got.ActiveCells) != 1 || got.ActiveCells[0] != "disk-watch-1794904200" {
+			t.Errorf("status.schedule = %+v", got)
+		}
+		for _, key := range []string{
+			"lastScheduleTime:", "nextScheduleTime:", "lastCell:", "activeCells:", "skippedFires:", "lastError:",
+		} {
+			if !strings.Contains(out, key) {
+				t.Errorf("-o yaml is missing %q:\n%s", key, out)
+			}
 		}
 	})
 }

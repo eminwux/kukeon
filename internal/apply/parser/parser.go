@@ -27,6 +27,7 @@ import (
 
 	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/cellblueprint"
+	"github.com/eminwux/kukeon/internal/cellconfig"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/secretstore"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -852,6 +853,26 @@ func validateConfigContract(cfg *v1beta1.CellConfigDoc) error {
 			return fmt.Errorf("%w: spec.modes.default %q is not in spec.modes.enabled",
 				errdefs.ErrBlueprintMode, modes.Default)
 		}
+	}
+	return validateConfigSchedule(cfg)
+}
+
+// validateConfigSchedule checks a CellConfig's spec.schedule (#1503): the cron
+// expression, time zone, concurrency policy and starting deadline, plus the
+// one mode check that needs no blueprint — a Config that names `interactive`
+// as its default mode cannot be scheduled, since nothing attaches to a cell
+// the daemon starts. A default the blueprint decides (no spec.modes.default)
+// is checked against the stored blueprint at reconcile time.
+func validateConfigSchedule(cfg *v1beta1.CellConfigDoc) error {
+	if cfg.Spec.Schedule == nil {
+		return nil
+	}
+	if err := cellconfig.ValidateSchedule(cfg.Spec.Schedule); err != nil {
+		return err
+	}
+	if modes := cfg.Spec.Modes; modes != nil && strings.TrimSpace(modes.Default) == v1beta1.ModeInteractive {
+		return fmt.Errorf("%w: spec.schedule cannot be set on a config whose default mode is %q",
+			errdefs.ErrConfigSchedule, v1beta1.ModeInteractive)
 	}
 	return nil
 }

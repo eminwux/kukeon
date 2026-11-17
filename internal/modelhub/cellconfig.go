@@ -16,17 +16,48 @@
 
 package modelhub
 
+import "time"
+
 // CellConfig is the internal carrier for a daemon-stored cell identity (kind:
-// CellConfig, issue #624). Like CellBlueprint it has no Status and the daemon
-// never interprets its body for storage: the canonical CellConfigDoc travels as
-// an opaque serialized Document — the daemon writes it under the scope and
-// reads it back. Scope coordinates are lifted onto the metadata so the storage
-// runner can resolve the on-disk path without parsing the body. Apply-time
-// slot-fill validation (which does need the body and the referenced blueprint)
+// CellConfig, issue #624). Like CellBlueprint the daemon never interprets its
+// body for storage: the canonical CellConfigDoc travels as an opaque
+// serialized Document — the daemon writes it under the scope and reads it
+// back. Scope coordinates are lifted onto the metadata so the storage runner
+// can resolve the on-disk path without parsing the body. Apply-time slot-fill
+// validation (which does need the body and the referenced blueprint)
 // re-derives the typed view from Document via apischeme.
+//
+// The schedule state of a Config with a spec.schedule (#1503) is the one piece
+// of status a Config has. It is stored beside the document, never inside it,
+// so the scheduler's writes cannot race an apply or change the document's
+// revision hash.
 type CellConfig struct {
 	Metadata CellConfigMetadata
 	Document []byte
+	// Schedule lifts the document's spec.schedule for the list path, which
+	// returns no Document. Nil for an unscheduled Config.
+	Schedule *CellConfigSchedule
+	// ScheduleStatus is the stored schedule state; nil when the scheduler has
+	// recorded none. The controller's get and list fill it.
+	ScheduleStatus *CellConfigScheduleStatus
+}
+
+// CellConfigSchedule is the summary of a Config's spec.schedule a list shows.
+type CellConfigSchedule struct {
+	Cron     string
+	Timezone string
+	Suspend  bool
+}
+
+// CellConfigScheduleStatus is what the scheduler last observed and did for a
+// scheduled Config. See external v1beta1.CellConfigScheduleStatus.
+type CellConfigScheduleStatus struct {
+	LastScheduleTime *time.Time
+	NextScheduleTime *time.Time
+	LastCell         string
+	ActiveCells      []string
+	SkippedFires     int64
+	LastError        string
 }
 
 // CellConfigMetadata identifies a Config by name and the scope it binds to. A

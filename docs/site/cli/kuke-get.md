@@ -11,10 +11,10 @@ Resources: `realm`, `space`, `stack`, `cell`, `container`, `image`, `blueprint`,
 
 ## Common flags
 
-| Flag                | Description                                                                                                                                                                                                   |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--output`, `-o`    | Output format: `yaml`, `json`, `table`, `wide`. Default: `table` for both a list and a single named resource (#1323). `wide` accepted by every `kuke get <kind>` for symmetry; per-kind wide columns vary (see each kind). |
-| `--selector`, `-l`  | Label selector (kubectl-style) to filter list results. Supports `=`, `==`, `!=`, existence (`key`), absence (`!key`), and comma-separated AND (e.g. `env=prod,tier!=db` or `env,!debug`). Rejected with a positional `NAME`. |
+| Flag               | Description                                                                                                                                                                                                                  |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--output`, `-o`   | Output format: `yaml`, `json`, `table`, `wide`. Default: `table` for both a list and a single named resource (#1323). `wide` accepted by every `kuke get <kind>` for symmetry; per-kind wide columns vary (see each kind).   |
+| `--selector`, `-l` | Label selector (kubectl-style) to filter list results. Supports `=`, `==`, `!=`, existence (`key`), absence (`!key`), and comma-separated AND (e.g. `env=prod,tier!=db` or `env,!debug`). Rejected with a positional `NAME`. |
 
 Plus all [global flags](kuke.md). Every `kuke get <kind>` accepts the explicit `--no-daemon` flag to bypass the daemon (inherited as a persistent flag from the parent `get` command); `KUKEON_NO_DAEMON=true` and `--run-path /opt/kukeon` (which auto-promotes the command into in-process mode) work as well.
 
@@ -44,18 +44,20 @@ All scope flags default to `default`. See the [realm default note](commands.md#c
 
 Per-kind column contracts. The default table is what `kuke get <kind>` (no `-o wide`) emits; `-o wide` appends the listed extras.
 
-| Kind | Default columns | `-o wide` appends |
-| --- | --- | --- |
-| `realm` | `NAME STATE AGE` | `NAMESPACE` |
-| `space` | `NAME REALM STATE AGE` | `EGRESS NET-DEFAULTS` |
-| `stack` | `NAME REALM SPACE STATE AGE` | _(none — stack carries no wide-only signals)_ |
-| `cell` | `NAME REALM SPACE STACK STATE SYNC AGE` | `CONTAINERS BRIDGE DIVERGENCE` |
-| `container` | `NAME REALM SPACE STACK CELL STATE RESTARTS AGE` | `IMAGE EXIT` |
-| `image` | `NAME REALM CREATED` (cross-realm default) | `DIGEST` |
-| `blueprint` | `NAME REALM SPACE STACK AGE` | _(none)_ |
-| `config` | `NAME REALM SPACE STACK AGE` | _(none)_ |
+| Kind        | Default columns                                  | `-o wide` appends                             |
+| ----------- | ------------------------------------------------ | --------------------------------------------- |
+| `realm`     | `NAME STATE AGE`                                 | `NAMESPACE`                                   |
+| `space`     | `NAME REALM STATE AGE`                           | `EGRESS NET-DEFAULTS`                         |
+| `stack`     | `NAME REALM SPACE STATE AGE`                     | _(none — stack carries no wide-only signals)_ |
+| `cell`      | `NAME REALM SPACE STACK STATE SYNC AGE`          | `CONTAINERS BRIDGE DIVERGENCE`                |
+| `container` | `NAME REALM SPACE STACK CELL STATE RESTARTS AGE` | `IMAGE EXIT`                                  |
+| `image`     | `NAME REALM CREATED` (cross-realm default)       | `DIGEST`                                      |
+| `blueprint` | `NAME REALM SPACE STACK AGE`                     | _(none)_                                      |
+| `config`    | `NAME REALM SPACE STACK SCHEDULE NEXT`           | _(none)_                                      |
 
 `SYNC` (`InSync`/`OutOfSync`/`-`) is computed for cells that carry a `kukeon.io/config=<name>` lineage label; non-lineage cells render `-`. The `-o wide` `DIVERGENCE` column expands an `OutOfSync` cell with a one-line summary of what diverged (image, env, mounts, …). See `kuke restart` for the reconcile verb.
+
+`SCHEDULE` and `NEXT` are filled for a CellConfig with a [`spec.schedule`](../manifests/config.md#specschedule-object-optional) and empty otherwise. `SCHEDULE` is the cron expression, followed by the time zone in parentheses when one is set. `NEXT` is the next fire time in UTC, or `suspended`; it stays empty until kukeond's first scheduler pass after the schedule was applied, at most a minute. `kuke get config <name> -o yaml` shows the full `status.schedule`.
 
 `-o wide` on `space` surfaces the egress allowlist (`EGRESS`) and the cell-default-deny posture (`NET-DEFAULTS yes/no`).
 

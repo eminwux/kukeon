@@ -139,6 +139,7 @@ func TestDeleteStack_AllowsKnownScopeSubdirs(t *testing.T) {
 		consts.KukeonSecretsSubdir,
 		consts.KukeonBlueprintsSubdir,
 		consts.KukeonConfigsSubdir,
+		consts.KukeonConfigStatusSubdir,
 		consts.KukeonVolumesSubdir,
 		consts.KukeonVolumeMetaSubdir,
 	} {

@@ -172,6 +172,12 @@ func newTestServerWithCtx(t *testing.T, ctx context.Context, interval time.Durat
 	srv.spaceNetReconcileFn = func() (controller.SpaceNetReconcileResult, error) {
 		return controller.SpaceNetReconcileResult{}, nil
 	}
+	// Likewise the CellConfig scheduler (#1503), which runs on its own timer
+	// whatever the reconcile interval: stub it so the default wiring does not
+	// walk the controller. Schedule-loop tests set it explicitly.
+	srv.scheduleFn = func(_, _ time.Time) (controller.ScheduleResult, error) {
+		return controller.ScheduleResult{}, nil
+	}
 	return srv
 }
 

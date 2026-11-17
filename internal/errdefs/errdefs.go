@@ -627,6 +627,12 @@ var (
 	// ErrConfigSecretFillRefRequired fires when a spec.secrets fill omits its
 	// secretRef (name + realm) — the fill exists to supply the secret source.
 	ErrConfigSecretFillRefRequired = errors.New("config secret slot fill requires secretRef name and realm")
+	// ErrConfigSchedule fires when a CellConfig's spec.schedule cannot be
+	// used: an unparseable cron expression, an unknown time zone, an
+	// unsupported concurrencyPolicy, a negative startingDeadlineSeconds, or a
+	// schedule on a Config whose cells default to the interactive mode (issue
+	// #1503).
+	ErrConfigSchedule = errors.New("config schedule is invalid")
 	// ErrConfigBlueprintNotFound fires at apply time when the referenced
 	// blueprint cannot be read from daemon storage at its named scope.
 	ErrConfigBlueprintNotFound = errors.New("config references a blueprint that does not exist")

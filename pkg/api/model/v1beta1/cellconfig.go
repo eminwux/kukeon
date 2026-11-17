@@ -16,6 +16,8 @@
 
 package v1beta1
 
+import "time"
+
 // CellConfigDoc is the top-level document for a daemon-stored cell *identity*
 // (kind: CellConfig, issue #624, phase 4b-i of #423). Where a CellBlueprint is
 // the parametrized template (the "what"), a CellConfig binds that template to a
@@ -27,12 +29,17 @@ package v1beta1
 // validation against the referenced Blueprint, and the stable-name + back-ref
 // identity primitives. The runtime state machine that drives
 // materialise/attach/start/refuse — and the `kuke run -c` verb it serves —
-// lands in #625; a Config carries no Status because it has no runtime here.
+// lands in #625.
+//
+// Status is daemon-owned and read-only: it is reported on a get and dropped
+// from an applied document. Today it carries only the schedule state of a
+// Config with a spec.schedule (#1503).
 type CellConfigDoc struct {
-	APIVersion Version            `json:"apiVersion" yaml:"apiVersion"`
-	Kind       Kind               `json:"kind"       yaml:"kind"`
-	Metadata   CellConfigMetadata `json:"metadata"   yaml:"metadata"`
-	Spec       CellConfigSpec     `json:"spec"       yaml:"spec"`
+	APIVersion Version            `json:"apiVersion"       yaml:"apiVersion"`
+	Kind       Kind               `json:"kind"             yaml:"kind"`
+	Metadata   CellConfigMetadata `json:"metadata"         yaml:"metadata"`
+	Spec       CellConfigSpec     `json:"spec"             yaml:"spec"`
+	Status     *CellConfigStatus  `json:"status,omitempty" yaml:"status,omitempty"`
 }
 
 // CellConfigMetadata identifies a Config by name and the scope it is bound to.
@@ -105,6 +112,66 @@ type CellConfigSpec struct {
 	// Config rather than the blueprint because a blueprint is shared across
 	// modes and roles (kuke team task configs, #1491).
 	AutoDelete bool `json:"autoDelete,omitempty" yaml:"autoDelete,omitempty"`
+	// Schedule, when set, has kukeond create and start a fresh cell from this
+	// Config on a cron schedule, as `kuke run -d --from-config` would (#1503).
+	// It is not part of the rendered cell: changing or removing it never marks
+	// the Config's existing cells OutOfSync.
+	Schedule *CellConfigSchedule `json:"schedule,omitempty"   yaml:"schedule,omitempty"`
+}
+
+// ConcurrencyPolicyForbid skips a scheduled fire while a cell an earlier fire
+// of the same Config created is still running. It is the only policy
+// supported, and the default.
+const ConcurrencyPolicyForbid = "Forbid"
+
+// CellConfigSchedule makes a Config recurring: on each fire kukeond creates
+// and starts the cell `<config>-<unix-fire-time>`, labelled
+// kukeon.io/schedule=<config> and always self-deleting. A schedule has
+// one-minute precision.
+type CellConfigSchedule struct {
+	// Cron is a five-field cron expression (minute, hour, day of month, month,
+	// day of week) or one of @hourly, @daily, @weekly, @monthly. Required.
+	Cron string `json:"cron"                              yaml:"cron"`
+	// Timezone is the IANA time zone the expression is read in. Default UTC.
+	Timezone string `json:"timezone,omitempty"                yaml:"timezone,omitempty"`
+	// ConcurrencyPolicy says what a fire does while a cell from an earlier
+	// fire is still running. Only "Forbid" (skip the fire) is supported; unset
+	// means Forbid.
+	ConcurrencyPolicy string `json:"concurrencyPolicy,omitempty"       yaml:"concurrencyPolicy,omitempty"`
+	// StartingDeadlineSeconds is how late a fire may still start. Unset, a
+	// fire missed while kukeond was down is dropped; set, the latest missed
+	// fire still runs if it is no older than this.
+	StartingDeadlineSeconds *int64 `json:"startingDeadlineSeconds,omitempty" yaml:"startingDeadlineSeconds,omitempty"`
+	// Suspend stops new fires without touching running cells. Clearing it
+	// resumes from the next scheduled time, with no catch-up.
+	Suspend bool `json:"suspend,omitempty"                 yaml:"suspend,omitempty"`
+}
+
+// CellConfigStatus is the daemon-reported state of a Config.
+type CellConfigStatus struct {
+	// Schedule is the state of the Config's spec.schedule; nil for a Config
+	// kukeond has not scheduled.
+	Schedule *CellConfigScheduleStatus `json:"schedule,omitempty" yaml:"schedule,omitempty"`
+}
+
+// CellConfigScheduleStatus is what kukeond's scheduler last observed and did
+// for a scheduled Config.
+type CellConfigScheduleStatus struct {
+	// LastScheduleTime is the fire time of the last fire that created a cell.
+	LastScheduleTime *time.Time `json:"lastScheduleTime,omitempty" yaml:"lastScheduleTime,omitempty"`
+	// NextScheduleTime is the next fire time; unset while suspended.
+	NextScheduleTime *time.Time `json:"nextScheduleTime,omitempty" yaml:"nextScheduleTime,omitempty"`
+	// LastCell is the name of the cell the last fire created.
+	LastCell string `json:"lastCell,omitempty"         yaml:"lastCell,omitempty"`
+	// ActiveCells names the cells earlier fires created that are still
+	// running (Pending, Ready, Degraded or Unknown) — the ones a Forbid
+	// schedule waits for.
+	ActiveCells []string `json:"activeCells,omitempty"      yaml:"activeCells,omitempty"`
+	// SkippedFires counts the fires that did not run: skipped by the
+	// concurrency policy, or missed and past their starting deadline.
+	SkippedFires int64 `json:"skippedFires"               yaml:"skippedFires"`
+	// LastError is why the last fire failed; empty once a fire succeeds.
+	LastError string `json:"lastError"                  yaml:"lastError"`
 }
 
 // CellConfigModes restricts and defaults the harness mode of a Config's cells.

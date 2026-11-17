@@ -45,6 +45,7 @@ func reservedScopeSubdir(name string) bool {
 	case consts.KukeonSecretsSubdir,
 		consts.KukeonBlueprintsSubdir,
 		consts.KukeonConfigsSubdir,
+		consts.KukeonConfigStatusSubdir,
 		consts.KukeonVolumesSubdir,
 		consts.KukeonVolumeMetaSubdir:
 		return true

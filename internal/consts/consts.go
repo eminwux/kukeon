@@ -64,6 +64,18 @@ const (
 	// root-owned but world-readable (0o755 / 0o644).
 	KukeonConfigsSubdir = "configs"
 
+	// KukeonConfigStatusSubdir is the basename of the per-scope subdirectory
+	// that holds the daemon-owned schedule state of scheduled CellConfigs
+	// (issue #1503): one `<name>` file per Config, a sibling of
+	// KukeonConfigsSubdir under the same scope dir. The state lives outside
+	// the config document so the scheduler's writes never race an apply (which
+	// rewrites the document whole) and never change the document's revision
+	// hash. It carries fire times and cell names only, so like the configs
+	// subdir it is root-owned and world-readable (0o755 / 0o644). It is a
+	// reserved scope subdir (see runner.reservedScopeSubdirs) so it is never
+	// mistaken for a phantom scope.
+	KukeonConfigStatusSubdir = "config-status"
+
 	// KukeonVolumesSubdir is the basename of the per-scope subdirectory that
 	// owns daemon-managed `kind: Volume` directories (issue #1018). Like the
 	// secrets/blueprints/configs subdirs it lives inside the scope's metadata

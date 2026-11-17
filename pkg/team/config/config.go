@@ -18,7 +18,11 @@
 // It performs no filesystem, environment, Git, daemon, or network discovery.
 package config
 
-import "slices"
+import (
+	"fmt"
+
+	"gopkg.in/yaml.v3"
+)
 
 const (
 	APIVersion = "kuketeams.io/v1"
@@ -150,14 +154,87 @@ type Role struct {
 	// spec.tasks) the team renders as headless task CellConfigs. Nil (the
 	// field omitted) selects every task the role declares; a non-nil empty
 	// list selects none. A pointer so an authored `tasks: []` survives a
-	// TeamEntry round-trip instead of being erased by omitempty.
-	Tasks *[]string `yaml:"tasks,omitempty"`
+	// TeamEntry round-trip instead of being erased by omitempty. An entry is
+	// a task name, or `{ name, schedule?, suspend? }` to set the task's
+	// cadence for this team (issue #1503).
+	Tasks *[]TaskSelection `yaml:"tasks,omitempty"`
+}
+
+// TaskSelection selects one of a role's declared tasks and, optionally, sets
+// its schedule for this team. In YAML it is either the task's name or a
+// mapping:
+//
+//	tasks:
+//	  - pick-issue
+//	  - { name: pick-bug, schedule: "*/15 * * * *" }
+//	  - { name: pick-nits, schedule: "@daily", suspend: true }
+//
+// A task's cadence is a deployment decision, so each value here overrides the
+// corresponding default the role declares for the task: Schedule replaces the
+// role's schedule, and Suspend — a pointer, so an explicit `false` is distinct
+// from omitted — replaces the role's suspend (`suspend: false` turns on a
+// schedule the role ships switched off).
+type TaskSelection struct {
+	// Name is the name of a task the role declares.
+	Name string `yaml:"name"`
+	// Schedule is a five-field cron expression or
+	// @hourly/@daily/@weekly/@monthly, read in UTC. Empty keeps the role's.
+	Schedule string `yaml:"schedule,omitempty"`
+	// Suspend switches the task's schedule off (true) or on (false). Nil
+	// keeps the role's.
+	Suspend *bool `yaml:"suspend,omitempty"`
+}
+
+// taskSelectionFields is TaskSelection without its YAML methods, for the
+// mapping form.
+type taskSelectionFields TaskSelection
+
+// UnmarshalYAML accepts a bare task name or a mapping.
+func (t *TaskSelection) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		*t = TaskSelection{Name: node.Value}
+		return nil
+	}
+	var fields taskSelectionFields
+	if err := node.Decode(&fields); err != nil {
+		return fmt.Errorf("task entry: %w", err)
+	}
+	*t = TaskSelection(fields)
+	return nil
+}
+
+// MarshalYAML writes a selection that sets no schedule as the bare task name,
+// so an entry authored as a name is recorded as one.
+func (t TaskSelection) MarshalYAML() (any, error) {
+	if t.Schedule == "" && t.Suspend == nil {
+		return t.Name, nil
+	}
+	return taskSelectionFields(t), nil
 }
 
 // SelectsTask reports whether the role entry selects the named task: every
 // task when Tasks is omitted, otherwise only the listed ones.
 func (r Role) SelectsTask(name string) bool {
-	return r.Tasks == nil || slices.Contains(*r.Tasks, name)
+	if r.Tasks == nil {
+		return true
+	}
+	_, ok := r.TaskSelection(name)
+	return ok
+}
+
+// TaskSelection returns the role entry's selection of the named task — the
+// place its schedule overrides live — and whether the entry lists it. An entry
+// that omits Tasks selects every task with no overrides, and reports false.
+func (r Role) TaskSelection(name string) (TaskSelection, bool) {
+	if r.Tasks == nil {
+		return TaskSelection{}, false
+	}
+	for _, task := range *r.Tasks {
+		if task.Name == name {
+			return task, true
+		}
+	}
+	return TaskSelection{}, false
 }
 
 type Needs struct {

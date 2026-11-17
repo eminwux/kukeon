@@ -86,6 +86,10 @@ type fakeRunner struct {
 	ListConfigsFn         func(realmName, spaceName, stackName string) ([]intmodel.CellConfig, error)
 	DeleteConfigFn        func(config intmodel.CellConfig) error
 
+	GetConfigScheduleStatusFn    func(config intmodel.CellConfig) (intmodel.CellConfigScheduleStatus, bool, error)
+	WriteConfigScheduleStatusFn  func(config intmodel.CellConfig, status intmodel.CellConfigScheduleStatus) error
+	DeleteConfigScheduleStatusFn func(config intmodel.CellConfig) error
+
 	// Cell methods
 	GetCellFn                 func(cell intmodel.Cell) (intmodel.Cell, error)
 	ListCellsFn               func(realmName, spaceName, stackName string) ([]intmodel.Cell, error)
@@ -433,6 +437,33 @@ func (f *fakeRunner) DeleteConfig(config intmodel.CellConfig) error {
 		return f.DeleteConfigFn(config)
 	}
 	return errors.New("unexpected call to DeleteConfig")
+}
+
+// GetConfigScheduleStatus defaults to "none stored" so tests of unscheduled
+// configs need not stub it.
+func (f *fakeRunner) GetConfigScheduleStatus(
+	config intmodel.CellConfig,
+) (intmodel.CellConfigScheduleStatus, bool, error) {
+	if f.GetConfigScheduleStatusFn != nil {
+		return f.GetConfigScheduleStatusFn(config)
+	}
+	return intmodel.CellConfigScheduleStatus{}, false, nil
+}
+
+func (f *fakeRunner) WriteConfigScheduleStatus(
+	config intmodel.CellConfig, status intmodel.CellConfigScheduleStatus,
+) error {
+	if f.WriteConfigScheduleStatusFn != nil {
+		return f.WriteConfigScheduleStatusFn(config, status)
+	}
+	return errors.New("unexpected call to WriteConfigScheduleStatus")
+}
+
+func (f *fakeRunner) DeleteConfigScheduleStatus(config intmodel.CellConfig) error {
+	if f.DeleteConfigScheduleStatusFn != nil {
+		return f.DeleteConfigScheduleStatusFn(config)
+	}
+	return errors.New("unexpected call to DeleteConfigScheduleStatus")
 }
 
 // Cell methods

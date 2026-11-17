@@ -75,6 +75,9 @@ func decodeDocument(r io.Reader, out any) error {
 	return nil
 }
 
+// strTag is the YAML tag of a string scalar.
+const strTag = "!!str"
+
 // checkNode validates the schema before decoding, retaining full field paths in
 // diagnostics and preventing aliases from bypassing unknown/duplicate-key checks.
 func checkNode(n *yaml.Node, typ reflect.Type, field string, active map[*yaml.Node]bool) error {
@@ -88,6 +91,14 @@ func checkNode(n *yaml.Node, typ reflect.Type, field string, active map[*yaml.No
 	}
 	for typ.Kind() == reflect.Pointer {
 		typ = typ.Elem()
+	}
+	// A role's task entry is a bare task name or a mapping (TaskSelection); the
+	// mapping form falls through to the struct check below.
+	if typ == reflect.TypeOf(TaskSelection{}) && n.Kind == yaml.ScalarNode {
+		if n.Tag != strTag {
+			return fmt.Errorf("%s: expected a task name or a mapping", location(field))
+		}
+		return nil
 	}
 	// Check scalar types before YAML can coerce them into strings.
 	switch typ.Kind() { //nolint:exhaustive // Other kinds cannot occur in this schema.
@@ -108,7 +119,7 @@ func checkNode(n *yaml.Node, typ reflect.Type, field string, active map[*yaml.No
 			if field != "" {
 				next = field + "." + name
 			}
-			if key.Kind != yaml.ScalarNode || key.Tag != "!!str" {
+			if key.Kind != yaml.ScalarNode || key.Tag != strTag {
 				return fmt.Errorf("%s: expected string field name (line %d)", location(field), key.Line)
 			}
 			if seen[name] {
@@ -136,7 +147,7 @@ func checkNode(n *yaml.Node, typ reflect.Type, field string, active map[*yaml.No
 		seen := map[string]bool{}
 		for i := 0; i < len(n.Content); i += 2 {
 			key := n.Content[i]
-			if key.Tag != "!!str" || seen[key.Value] {
+			if key.Tag != strTag || seen[key.Value] {
 				return fmt.Errorf("%s: invalid or duplicate key", location(field))
 			}
 			seen[key.Value] = true
@@ -154,7 +165,7 @@ func checkNode(n *yaml.Node, typ reflect.Type, field string, active map[*yaml.No
 			}
 		}
 	case reflect.String:
-		if n.Kind != yaml.ScalarNode || n.Tag != "!!str" {
+		if n.Kind != yaml.ScalarNode || n.Tag != strTag {
 			return fmt.Errorf("%s: expected string", location(field))
 		}
 		if (strings.HasPrefix(field, "spec.defaults.roles[") || strings.HasPrefix(field, "spec.roles[")) &&

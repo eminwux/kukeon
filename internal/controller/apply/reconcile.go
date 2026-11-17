@@ -1147,6 +1147,13 @@ func rematerializeChanges(cell intmodel.Cell) []string {
 // (the picked mode's required slots are checked when a cell is rendered). It
 // also rejects enabling a component, or enabling / defaulting to a mode, the
 // blueprint does not declare. Issue #1472, steps 10–11.
+//
+// A spec.schedule (#1503) is checked here too: its own shape again — `kuke
+// create config` and the web UI reach the daemon without the parser — and the
+// one rule only the blueprint can settle: the mode a scheduled cell is created
+// in (the Config's effective default) must not be `interactive`, because
+// nothing attaches to a cell the daemon starts. A blueprint that declares no
+// modes has no such default and is accepted.
 func validateConfigAgainstBlueprint(cfgDoc ext.CellConfigDoc, bpDoc ext.CellBlueprintDoc) error {
 	view, err := cellblueprint.Flatten(bpDoc, cellblueprint.FlattenOptions{All: true})
 	if err != nil {
@@ -1159,8 +1166,21 @@ func validateConfigAgainstBlueprint(cfgDoc ext.CellConfigDoc, bpDoc ext.CellBlue
 	if modes := cfgDoc.Spec.Modes; modes != nil {
 		opts.AllowedModes, opts.DefaultMode = modes.Enabled, modes.Default
 	}
-	if _, err = cellblueprint.Flatten(bpDoc, opts); err != nil {
+	flat, err := cellblueprint.Flatten(bpDoc, opts)
+	if err != nil {
 		return fmt.Errorf("config %q: %w", cfgDoc.Metadata.Name, err)
+	}
+	if cfgDoc.Spec.Schedule == nil {
+		return nil
+	}
+	if err = cellconfig.ValidateSchedule(cfgDoc.Spec.Schedule); err != nil {
+		return fmt.Errorf("config %q: %w", cfgDoc.Metadata.Name, err)
+	}
+	if flat.Mode == ext.ModeInteractive {
+		return fmt.Errorf(
+			"%w: config %q: spec.schedule cannot be set on a config whose default mode is %q; "+
+				"set spec.modes.default to a mode that runs unattended",
+			errdefs.ErrConfigSchedule, cfgDoc.Metadata.Name, ext.ModeInteractive)
 	}
 	return nil
 }

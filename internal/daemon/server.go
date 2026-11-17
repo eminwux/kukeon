@@ -87,9 +87,17 @@ type Server struct {
 	// Serve so they exercise the hook without touching iptables.
 	forwardAdmissionFn func() error
 
-	// stopCh is closed by Stop to terminate the reconcile loop independently
-	// of s.ctx; loopWG lets Stop block until the loop exits, so core.Close
-	// never races an in-flight reconcile pass.
+	// scheduleFn is the per-pass callable of the CellConfig scheduler (#1503):
+	// it fires every Config whose spec.schedule has come due since the
+	// previous pass. Defaults to core.RunSchedules; tests overwrite it before
+	// Serve. scheduleInterval is the period of the scheduler's own timer —
+	// one minute, the precision of a schedule; tests shorten it.
+	scheduleFn       func(prev, now time.Time) (controller.ScheduleResult, error)
+	scheduleInterval time.Duration
+
+	// stopCh is closed by Stop to terminate the reconcile and schedule loops
+	// independently of s.ctx; loopWG lets Stop block until both exit, so
+	// core.Close never races an in-flight pass.
 	stopCh chan struct{}
 	loopWG sync.WaitGroup
 
@@ -114,6 +122,8 @@ func NewServer(ctx context.Context, logger *slog.Logger, opts Options) *Server {
 	srv.reconcileFn = srv.core.ReconcileCells
 	srv.spaceNetReconcileFn = srv.core.ReconcileSpaceNetworks
 	srv.forwardAdmissionFn = srv.reassertForwardAdmission
+	srv.scheduleFn = srv.core.RunSchedules
+	srv.scheduleInterval = scheduleInterval
 	return srv
 }
 
@@ -174,8 +184,92 @@ func (s *Server) Serve() error {
 	// single bad space must not block the daemon from serving.
 	s.runSpaceNetworkReconcileOnce()
 	s.startReconcileLoop()
+	s.startScheduleLoop()
 	s.acceptLoop(listener)
 	return nil
+}
+
+// scheduleInterval is the period of the CellConfig scheduler's timer. A
+// schedule has one-minute precision, so the scheduler wakes once a minute, on
+// the minute.
+const scheduleInterval = time.Minute
+
+// scheduleTickSlack is added to the wait for the next minute boundary so a
+// timer that fires a hair early on the wall clock does not find the minute's
+// fire times still in the future and leave them for the following pass.
+const scheduleTickSlack = 50 * time.Millisecond
+
+// startScheduleLoop spawns the CellConfig scheduler (#1503). It runs on its
+// own timer and is deliberately not gated on ReconcileInterval: an operator
+// who turns the reconcile loop off with `--reconcile-interval 0` still gets
+// their scheduled Configs fired. Lifetime matches the reconcile loop's —
+// s.ctx or Stop ends it.
+func (s *Server) startScheduleLoop() {
+	s.logger.InfoContext(s.ctx, "starting schedule loop", "interval", s.scheduleInterval)
+	s.loopWG.Add(1)
+	go s.runScheduleLoop()
+}
+
+func (s *Server) runScheduleLoop() {
+	defer s.loopWG.Done()
+
+	// The first pass runs at once: it is the one that sees the fires missed
+	// while the daemon was down (prev is the zero time) and that gives a
+	// freshly applied schedule its nextScheduleTime. Every later pass runs on
+	// the minute.
+	var prev time.Time
+	timer := time.NewTimer(0)
+	defer timer.Stop()
+	for {
+		select {
+		case <-s.ctx.Done():
+			s.logger.InfoContext(s.ctx, "schedule loop stopped")
+			return
+		case <-s.stopCh:
+			s.logger.InfoContext(s.ctx, "schedule loop stopped")
+			return
+		case <-timer.C:
+		}
+		now := time.Now()
+		s.runScheduleOnce(prev, now)
+		prev = now
+		timer.Reset(untilNextScheduleTick(time.Now(), s.scheduleInterval))
+	}
+}
+
+// untilNextScheduleTick returns how long to wait from now until just past the
+// next whole multiple of interval on the wall clock.
+func untilNextScheduleTick(now time.Time, interval time.Duration) time.Duration {
+	return now.Truncate(interval).Add(interval).Sub(now) + scheduleTickSlack
+}
+
+// runScheduleOnce runs one scheduler pass, panic-guarded like runReconcileOnce
+// so nothing a Config does can take the loop or the daemon down. A pass that
+// did nothing logs at debug — it happens every minute — and one that fired,
+// skipped or failed something logs at info or warn.
+func (s *Server) runScheduleOnce(prev, now time.Time) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.ErrorContext(s.ctx, "schedule pass panicked; loop continues", "panic", r)
+		}
+	}()
+	res, err := s.scheduleFn(prev, now)
+	attrs := []any{
+		"scheduled", res.Scheduled,
+		"fired", res.Fired,
+		"skipped", res.Skipped,
+		"failed", res.Failed,
+	}
+	switch {
+	case err != nil:
+		s.logger.ErrorContext(s.ctx, "schedule pass failed", append(attrs, "error", err, "errors", res.Errors)...)
+	case len(res.Errors) > 0:
+		s.logger.WarnContext(s.ctx, "schedule pass completed with errors", append(attrs, "errors", res.Errors)...)
+	case res.Fired > 0 || res.Skipped > 0:
+		s.logger.InfoContext(s.ctx, "schedule pass ok", attrs...)
+	default:
+		s.logger.DebugContext(s.ctx, "schedule pass ok", attrs...)
+	}
 }
 
 // reassertForwardAdmission re-installs the KUKEON-FORWARD admission chain and

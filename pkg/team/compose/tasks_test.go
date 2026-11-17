@@ -24,8 +24,11 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/eminwux/kukeon/internal/apply/parser"
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/compose"
+	"github.com/eminwux/kukeon/pkg/team/config"
+	"gopkg.in/yaml.v3"
 )
 
 // roleTasks declares two tasks on the operator role: one bare, one with args.
@@ -130,10 +133,16 @@ func without(values map[string]string, drop string) map[string]string {
 }
 
 func TestRoleTaskSelection(t *testing.T) {
-	selected := func(names ...string) *[]string { return &names }
+	selected := func(names ...string) *[]config.TaskSelection {
+		out := make([]config.TaskSelection, 0, len(names))
+		for _, name := range names {
+			out = append(out, config.TaskSelection{Name: name})
+		}
+		return &out
+	}
 	for _, tc := range []struct {
 		name  string
-		tasks *[]string
+		tasks *[]config.TaskSelection
 		want  []string
 		err   string
 	}{
@@ -259,5 +268,204 @@ func TestTaskConfigMaterializesHeadlessCell(t *testing.T) {
 	// The interactive config's cell keeps the blueprint's AutoDelete (unset).
 	if renderCell(t, pair, interactive, nil).Spec.AutoDelete {
 		t.Fatal("interactive cell became AutoDelete")
+	}
+}
+
+// scheduledRoleTasks declares three tasks on the operator role: one with no
+// schedule, one with a default schedule, and one whose default schedule ships
+// switched off (issue #1503).
+const scheduledRoleTasks = `  tasks:
+    - { name: pick-issue, skill: create-cell-config }
+    - { name: pick-bug, skill: create-cell-config, args: "--label bug", schedule: "*/30 * * * *" }
+    - { name: health-sweep, skill: create-cell-config, schedule: "@hourly", suspend: true }
+  needs:
+`
+
+// TestRoleTaskSchedules: a task's schedule and suspend come from the role's
+// defaults, with each value the team's task entry sets overriding the
+// corresponding default, and are rendered into the task config's
+// spec.schedule. A task with no schedule renders none.
+func TestRoleTaskSchedules(t *testing.T) {
+	yes, no := true, false
+	type schedule = api.CellConfigSchedule
+	for _, tc := range []struct {
+		name  string
+		tasks *[]config.TaskSelection
+		want  map[string]*schedule
+	}{
+		{
+			name: "omitted selection takes the role defaults",
+			want: map[string]*schedule{
+				"pick-issue":   nil,
+				"pick-bug":     {Cron: "*/30 * * * *"},
+				"health-sweep": {Cron: "@hourly", Suspend: true},
+			},
+		},
+		{
+			name: "bare names take the role defaults",
+			tasks: &[]config.TaskSelection{
+				{Name: "pick-issue"}, {Name: "pick-bug"}, {Name: "health-sweep"},
+			},
+			want: map[string]*schedule{
+				"pick-issue":   nil,
+				"pick-bug":     {Cron: "*/30 * * * *"},
+				"health-sweep": {Cron: "@hourly", Suspend: true},
+			},
+		},
+		{
+			name: "team schedule overrides the role default",
+			tasks: &[]config.TaskSelection{
+				{Name: "pick-bug", Schedule: "*/15 * * * *"},
+			},
+			want: map[string]*schedule{"pick-bug": {Cron: "*/15 * * * *"}},
+		},
+		{
+			name: "team suspend false turns on a schedule the role ships off",
+			tasks: &[]config.TaskSelection{
+				{Name: "health-sweep", Suspend: &no},
+			},
+			want: map[string]*schedule{"health-sweep": {Cron: "@hourly"}},
+		},
+		{
+			name: "team suspend true switches off a role default",
+			tasks: &[]config.TaskSelection{
+				{Name: "pick-bug", Suspend: &yes},
+			},
+			want: map[string]*schedule{"pick-bug": {Cron: "*/30 * * * *", Suspend: true}},
+		},
+		{
+			name: "team schedules a task the role leaves unscheduled",
+			tasks: &[]config.TaskSelection{
+				{Name: "pick-issue", Schedule: "@daily", Suspend: &yes},
+				{Name: "health-sweep", Schedule: "0 */6 * * *"},
+			},
+			want: map[string]*schedule{
+				"pick-issue": {Cron: "@daily", Suspend: true},
+				// Only the schedule is overridden; suspend stays the role's.
+				"health-sweep": {Cron: "0 */6 * * *", Suspend: true},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, opts := fixture(t)
+			opts.Sources["kukeon"] = taskSource(t, scheduledRoleTasks)
+			cfg.Spec.Defaults.Roles[0].Tasks = tc.tasks
+			result, err := compose.Compose(cfg, selectedTeam(cfg), opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pair := result.Pairs[0]
+			if pair.Config.Spec.Schedule != nil {
+				t.Fatalf("the interactive config got a schedule: %+v", pair.Config.Spec.Schedule)
+			}
+			got := map[string]*schedule{}
+			for _, task := range pair.Tasks {
+				got[task.Metadata.Labels[api.LabelTask]] = task.Spec.Schedule
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("task schedules:\n got %s\nwant %s", describeSchedules(got), describeSchedules(tc.want))
+			}
+
+			// What is rendered must pass the apply-time validation it is
+			// about to meet: a parseable schedule on a headless-default Config.
+			for _, task := range pair.Tasks {
+				raw, marshalErr := yaml.Marshal(task)
+				if marshalErr != nil {
+					t.Fatal(marshalErr)
+				}
+				doc, parseErr := parser.ParseDocument(0, raw)
+				if parseErr != nil {
+					t.Fatalf("%s: %v", task.Metadata.Name, parseErr)
+				}
+				if validationErr := parser.ValidateDocument(doc); validationErr != nil {
+					t.Fatalf("%s does not validate: %v", task.Metadata.Name, validationErr)
+				}
+			}
+		})
+	}
+}
+
+func describeSchedules(schedules map[string]*api.CellConfigSchedule) string {
+	names := make([]string, 0, len(schedules))
+	for name := range schedules {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	var b strings.Builder
+	for _, name := range names {
+		if s := schedules[name]; s == nil {
+			b.WriteString(name + "=<none> ")
+		} else {
+			b.WriteString(name + "=" + s.Cron)
+			if s.Suspend {
+				b.WriteString("(suspended)")
+			}
+			b.WriteString(" ")
+		}
+	}
+	return b.String()
+}
+
+// TestRoleTaskScheduleRejections: a schedule that does not parse is refused
+// with the place it was written, and so is a suspend on a task that ends up
+// with no schedule to switch.
+func TestRoleTaskScheduleRejections(t *testing.T) {
+	yes, no := true, false
+	for _, tc := range []struct {
+		name      string
+		roleTasks string
+		tasks     *[]config.TaskSelection
+		err       string
+	}{
+		{
+			name:      "team suspend true on an unscheduled task",
+			roleTasks: scheduledRoleTasks,
+			tasks:     &[]config.TaskSelection{{Name: "pick-issue", Suspend: &yes}},
+			err:       "tasks: pick-issue: suspend is set but the task has no schedule",
+		},
+		{
+			name:      "team suspend false on an unscheduled task",
+			roleTasks: scheduledRoleTasks,
+			tasks:     &[]config.TaskSelection{{Name: "pick-issue", Suspend: &no}},
+			err:       "tasks: pick-issue: suspend is set but the task has no schedule",
+		},
+		{
+			name:      "team schedule does not parse",
+			roleTasks: scheduledRoleTasks,
+			tasks:     &[]config.TaskSelection{{Name: "pick-bug", Schedule: "every day"}},
+			err:       "tasks: pick-bug: schedule:",
+		},
+		{
+			name:      "team schedule uses a seconds field",
+			roleTasks: scheduledRoleTasks,
+			tasks:     &[]config.TaskSelection{{Name: "pick-bug", Schedule: "0 */5 * * * *"}},
+			err:       "tasks: pick-bug: schedule:",
+		},
+		{
+			name: "role suspend with no schedule anywhere",
+			roleTasks: `  tasks:
+    - { name: pick-issue, skill: create-cell-config, suspend: true }
+  needs:
+`,
+			err: "tasks: pick-issue: suspend is set but the task has no schedule",
+		},
+		{
+			name: "role schedule does not parse",
+			roleTasks: `  tasks:
+    - { name: pick-issue, skill: create-cell-config, schedule: "@every 5m" }
+  needs:
+`,
+			err: "task pick-issue: schedule:",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, opts := fixture(t)
+			opts.Sources["kukeon"] = taskSource(t, tc.roleTasks)
+			cfg.Spec.Defaults.Roles[0].Tasks = tc.tasks
+			_, err := compose.Compose(cfg, selectedTeam(cfg), opts)
+			if err == nil || !strings.Contains(err.Error(), tc.err) {
+				t.Fatalf("err = %v, want %q", err, tc.err)
+			}
+		})
 	}
 }
