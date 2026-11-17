@@ -44,9 +44,11 @@ func restoreRuntimeGlobals(t *testing.T) {
 	})
 }
 
-func bindKukeEnv(t *testing.T) {
-	t.Helper()
-	for _, v := range []config.Var{
+// clientConfigEnvVars lists the config.Var descriptors whose env var
+// applyClientConfiguration consults (via envSet) before layering a
+// ClientConfiguration field into viper.
+func clientConfigEnvVars() []config.Var {
+	return []config.Var{
 		config.KUKEON_ROOT_HOST,
 		config.KUKEON_ROOT_RUN_PATH,
 		config.KUKEON_ROOT_CONTAINERD_SOCKET,
@@ -54,7 +56,28 @@ func bindKukeEnv(t *testing.T) {
 		config.KUKEON_ROOT_NAMESPACE_SUFFIX,
 		config.KUKEON_ROOT_CGROUP_ROOT,
 		config.KUKEON_ROOT_POD_SUBNET_CIDR,
-	} {
+	}
+}
+
+// clearKukeEnv unsets every env var in clientConfigEnvVars for the duration
+// of the test. envSet treats an empty value as set, so t.Setenv(..., "")
+// alone is not enough: it registers the restore-on-cleanup, and the
+// os.Unsetenv that follows makes the var absent. Without this, an inherited
+// KUKEON_HOST (kukeon cells export it) makes applyClientConfiguration skip
+// the config-file layer and the layering assertions fail (#1498).
+func clearKukeEnv(t *testing.T) {
+	t.Helper()
+	for _, v := range clientConfigEnvVars() {
+		t.Setenv(v.EnvVar(), "")
+		if err := os.Unsetenv(v.EnvVar()); err != nil {
+			t.Fatalf("Unsetenv %s: %v", v.EnvVar(), err)
+		}
+	}
+}
+
+func bindKukeEnv(t *testing.T) {
+	t.Helper()
+	for _, v := range clientConfigEnvVars() {
 		if err := v.BindEnv(); err != nil {
 			t.Fatalf("BindEnv %s: %v", v.EnvVar(), err)
 		}
@@ -75,6 +98,7 @@ func TestNewKukeCmdHasConfigurationFlag(t *testing.T) {
 
 func TestApplyClientConfigurationDefaultsLayered(t *testing.T) {
 	t.Cleanup(viper.Reset)
+	clearKukeEnv(t)
 
 	viper.Reset()
 	cmd, err := NewKukeCmd()
@@ -141,6 +165,7 @@ func TestApplyClientConfigurationFlagOverridesConfig(t *testing.T) {
 
 func TestApplyClientConfigurationEnvOverridesConfig(t *testing.T) {
 	t.Cleanup(viper.Reset)
+	clearKukeEnv(t)
 
 	viper.Reset()
 	cmd, err := NewKukeCmd()
@@ -217,6 +242,7 @@ func TestLoadClientConfigurationAbsentFileNoError(t *testing.T) {
 
 func TestLoadClientConfigurationSeedsViper(t *testing.T) {
 	t.Cleanup(viper.Reset)
+	clearKukeEnv(t)
 	restoreRuntimeGlobals(t)
 
 	viper.Reset()
@@ -287,6 +313,7 @@ spec:
 // `.kukeon.io` suffix instead of the configured `dev.kukeon.io`.
 func TestLoadClientConfigurationHonorsKukeConfigurationEnv(t *testing.T) {
 	t.Cleanup(viper.Reset)
+	clearKukeEnv(t)
 	restoreRuntimeGlobals(t)
 
 	viper.Reset()
