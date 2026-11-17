@@ -16,8 +16,9 @@ Only these, and only as reads plus the one submission:
 - `kuke health ...` (the digest, `reports`, `report <id|latest>`)
 - `kuke get ...`
 - `kuke log ...`
-- `kuke daemon logs` (it reads kukeond's log file directly and may be refused
-  in this cell; the digest's `logErrors` already carry the error-level entries)
+- `kuke daemon logs` (it reads kukeond's log file directly, which fails in a cell
+  whose kukeon install is mounted read-only; the digest's `logErrors` already
+  carry the error-level entries)
 - `kuke health report submit -f <file>` (with `--file-issues <owner/repo>`
   only as described under _Filing_)
 
