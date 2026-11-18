@@ -131,12 +131,16 @@ func TestHealthReportRoutes(t *testing.T) {
 
 func TestRunSweepNow(t *testing.T) {
 	sweepLabels := map[string]string{
-		v1beta1.LabelTeam: "kukeon", v1beta1.LabelRole: "majordomo", v1beta1.LabelTask: "health-sweep",
+		v1beta1.LabelTeam: "kuke", v1beta1.LabelRole: "majordomo", v1beta1.LabelTask: "health-sweep",
 	}
 	client := &healthClient{configs: map[string]v1beta1.CellConfigDoc{
-		"kukeon-majordomo-claude-health-sweep": sweepConfig("kukeon-majordomo-claude-health-sweep", sweepLabels),
-		"kukeon-majordomo-claude": sweepConfig("kukeon-majordomo-claude", map[string]string{
-			v1beta1.LabelTeam: "kukeon", v1beta1.LabelRole: "majordomo",
+		"kuke-majordomo-claude-health-sweep": sweepConfig("kuke-majordomo-claude-health-sweep", sweepLabels),
+		"kuke-majordomo-claude": sweepConfig("kuke-majordomo-claude", map[string]string{
+			v1beta1.LabelTeam: "kuke", v1beta1.LabelRole: "majordomo",
+		}),
+		// A project team named kukeon (the init team's pre-#1527 name) is not majordomo.
+		"kukeon-majordomo-claude-health-sweep": sweepConfig("kukeon-majordomo-claude-health-sweep", map[string]string{
+			v1beta1.LabelTeam: "kukeon", v1beta1.LabelRole: "majordomo", v1beta1.LabelTask: "health-sweep",
 		}),
 		"other-dev-claude-health-sweep": sweepConfig("other-dev-claude-health-sweep", map[string]string{
 			v1beta1.LabelTeam: "other", v1beta1.LabelRole: "dev", v1beta1.LabelTask: "health-sweep",
@@ -146,17 +150,20 @@ func TestRunSweepNow(t *testing.T) {
 		return `{"config":{"name":"` + name + `","realm":"default","space":"default","stack":"default"}}`
 	}
 
-	w := serveHealth(t, client, http.MethodPost, "/api/health/sweep", "application/json", body("kukeon-majordomo-claude-health-sweep"))
+	w := serveHealth(
+		t, client, http.MethodPost, "/api/health/sweep", "application/json",
+		body("kuke-majordomo-claude-health-sweep"),
+	)
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "sweep-1a2b3c") {
 		t.Fatalf("run sweep: %d %s", w.Code, w.Body)
 	}
 	if len(client.created) != 1 || !client.created[0].Start || client.created[0].Name != "" ||
-		client.created[0].Config.Name != "kukeon-majordomo-claude-health-sweep" {
+		client.created[0].Config.Name != "kuke-majordomo-claude-health-sweep" {
 		t.Fatalf("create request = %+v", client.created)
 	}
 
 	// Only a majordomo health-sweep config runs here, whatever it is named.
-	for _, name := range []string{"kukeon-majordomo-claude", "other-dev-claude-health-sweep"} {
+	for _, name := range []string{"kuke-majordomo-claude", "kukeon-majordomo-claude-health-sweep", "other-dev-claude-health-sweep"} {
 		if w = serveHealth(t, client, http.MethodPost, "/api/health/sweep", "application/json", body(name)); w.Code != http.StatusBadRequest {
 			t.Errorf("%s: %d %s", name, w.Code, w.Body)
 		}

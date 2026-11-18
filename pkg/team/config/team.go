@@ -33,10 +33,15 @@ func Root() *Team {
 	return &Team{APIVersion: APIVersion, Kind: KindTeam, Metadata: Metadata{Name: "root"}}
 }
 
-// Majordomo returns the self-contained initial declaration of the kukeon team:
+// SystemTeamName is the team kuke team init registers: the operator's own
+// system team, named after the kuke- system prefix (cf. kuke-system) so it can
+// never share an identity with a project team such as kukeon's own (#1527).
+const SystemTeamName = "kuke"
+
+// Majordomo returns the self-contained initial declaration of the kuke team:
 // the majordomo role on both shipped harnesses.
 func Majordomo() *Team {
-	return &Team{APIVersion: APIVersion, Kind: KindTeam, Metadata: Metadata{Name: "kukeon"}, Spec: Defaults{
+	return &Team{APIVersion: APIVersion, Kind: KindTeam, Metadata: Metadata{Name: SystemTeamName}, Spec: Defaults{
 		Sources: []Source{
 			{Name: "kukeon", URL: "github.com/eminwux/kukeon", Branch: "main", ClonePath: "/home/user/kukeon-src"},
 		},

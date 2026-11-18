@@ -1200,7 +1200,7 @@ func TestInitialPathLaunchAcrossHarnesses(t *testing.T) {
 	}
 }
 
-// TestFreshMajordomoComposition composes the kukeon team exactly as `kuke team
+// TestFreshMajordomoComposition composes the kuke team exactly as `kuke team
 // init` does on a new host, from the role as shipped (issue #1509): both
 // harness configs on the shared host blueprint with daemon access, and the
 // health sweep rendered hourly but suspended, with no secret required.
@@ -1220,11 +1220,12 @@ func TestFreshMajordomoComposition(t *testing.T) {
 	for i, harnessName := range []string{"codex", "claude"} {
 		p := result.Pairs[i]
 		blueprint := harnessName + "-host"
-		if p.Config.Metadata.Name != "kukeon-majordomo-"+harnessName || p.Blueprint.Metadata.Name != blueprint ||
+		if p.Config.Metadata.Name != "kuke-majordomo-"+harnessName || p.Blueprint.Metadata.Name != blueprint ||
 			p.Config.Spec.Blueprint.Name != blueprint || result.Blueprints[i] != p.Blueprint {
 			t.Fatalf("incorrect pair identity: %s on %s", p.Config.Metadata.Name, p.Blueprint.Metadata.Name)
 		}
-		if p.Config.Metadata.Labels[api.LabelRole] != "majordomo" || p.Config.Metadata.Labels[api.LabelTeam] != "kukeon" ||
+		if p.Config.Metadata.Labels[api.LabelRole] != "majordomo" ||
+			p.Config.Metadata.Labels[api.LabelTeam] != "kuke" ||
 			p.Config.Metadata.Labels[api.LabelTask] != "" {
 			t.Fatalf("%s labels = %v", p.Config.Metadata.Name, p.Config.Metadata.Labels)
 		}

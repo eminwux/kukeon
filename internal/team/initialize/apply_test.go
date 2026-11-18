@@ -58,6 +58,11 @@ type fakeClient struct {
 	blueprintErr  error
 	// created records every secret document sent to CreateSecret.
 	created []api.SecretDoc
+	// deleted records every config name sent to DeleteConfig.
+	deleted []string
+	// prune makes a team apply delete that team's stored configs the applied
+	// set leaves out, as kukeond's per-team prune does.
+	prune bool
 }
 
 func newFake() *fakeClient {
@@ -128,6 +133,20 @@ func (f *fakeClient) persist(kind string, node *yaml.Node, team string) {
 		f.stackDefaults = doc.Spec.Defaults
 	}
 }
+func (f *fakeClient) DeleteConfig(_ context.Context, doc api.CellConfigDoc) (kukeonv1.DeleteConfigResult, error) {
+	f.deleted = append(f.deleted, doc.Metadata.Name)
+	kept := f.configs[:0]
+	for _, cfg := range f.configs {
+		md := cfg.Metadata
+		if md.Name != doc.Metadata.Name || md.Realm != doc.Metadata.Realm || md.Space != doc.Metadata.Space ||
+			md.Stack != doc.Metadata.Stack {
+			kept = append(kept, cfg)
+		}
+	}
+	f.configs = kept
+	return kukeonv1.DeleteConfigResult{Config: doc, Deleted: true}, nil
+}
+
 func (f *fakeClient) Close() error               { return nil }
 func (f *fakeClient) Ping(context.Context) error { return f.pingErr }
 func (f *fakeClient) ListRealms(context.Context) ([]api.RealmDoc, error) {
@@ -224,6 +243,19 @@ func (f *fakeClient) ApplyDocumentsForTeam(
 				resources,
 				kukeonv1.ApplyResourceResult{Kind: doc.Kind, Name: doc.Metadata.Name, Action: "created"},
 			)
+		}
+		if f.prune && f.applyErr == nil {
+			applied := map[string]bool{}
+			for _, r := range resources {
+				applied[r.Kind+"/"+r.Name] = true
+			}
+			kept := f.configs[:0]
+			for _, cfg := range f.configs {
+				if cfg.Metadata.Labels[api.LabelTeam] != team || applied["CellConfig/"+cfg.Metadata.Name] {
+					kept = append(kept, cfg)
+				}
+			}
+			f.configs = kept
 		}
 		return kukeonv1.ApplyDocumentsResult{Resources: resources}, f.applyErr
 	}

@@ -118,7 +118,7 @@ func TestInitPrintsNotes(t *testing.T) {
 		cmd := newInitCommand(func() (string, error) { return home, nil },
 			func(context.Context, initialize.Options) (initialize.Result, error) {
 				return initialize.Result{
-					EntryPath: filepath.Join(home, ".kuke", "kuketeam.d", "kukeon.yaml"),
+					EntryPath: filepath.Join(home, ".kuke", "kuketeam.d", "kuke.yaml"),
 					Resources: 5,
 					Bootstrap: bootstrap.Result{
 						Path:    filepath.Join(home, ".kuke", "kuketeams.yaml"),
@@ -136,7 +136,7 @@ func TestInitPrintsNotes(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := out.String()
-		if !strings.Contains(got, "Applied 5 resources; registered kukeon team:") ||
+		if !strings.Contains(got, "Applied 5 resources; registered kuke team:") ||
 			!strings.Contains(got, "  git-ssh  →  kuke create secret git-ssh --realm default --type ssh-key\n") {
 			t.Fatalf("output=%q", got)
 		}

@@ -29,7 +29,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// setupReapply initializes the kukeon team from the role as shipped (host
+// setupReapply initializes the kuke team from the role as shipped (host
 // mounts and the suspended health sweep included) and returns options for a
 // following --reapply against the same fake daemon.
 func setupReapply(t *testing.T) (Options, *fakeClient, string, string) {
@@ -40,12 +40,12 @@ func setupReapply(t *testing.T) (Options, *fakeClient, string, string) {
 		t.Fatal(err)
 	}
 	fake := opts.Client.(*fakeClient)
-	if !bytes.Contains(fake.raw, []byte("name: kukeon-majordomo-codex-health-sweep")) ||
+	if !bytes.Contains(fake.raw, []byte("name: kuke-majordomo-codex-health-sweep")) ||
 		!bytes.Contains(fake.raw, []byte("suspend: true")) {
 		t.Fatalf("init must render the sweep suspended:\n%s", fake.raw)
 	}
 	opts.Force, opts.Reapply = false, true
-	return opts, fake, filepath.Join(opts.Root, "kuketeam.d", "kukeon.yaml"), filepath.Join(opts.Root, "kuketeams.yaml")
+	return opts, fake, filepath.Join(opts.Root, "kuketeam.d", "kuke.yaml"), filepath.Join(opts.Root, "kuketeams.yaml")
 }
 
 func editEntry(t *testing.T, path string, edit func(*config.TeamEntry)) {
@@ -83,7 +83,7 @@ func TestReapplyEnablesTheSweepFromTheStoredEntry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fake.applies != applies+1 || fake.team != "kukeon" || result.EntryPath != entryPath {
+	if fake.applies != applies+1 || fake.team != "kuke" || result.EntryPath != entryPath {
 		t.Fatalf("applies=%d team=%q result=%+v", fake.applies, fake.team, result)
 	}
 	if !bytes.Contains(fake.raw, []byte("cron: '@hourly'")) && !bytes.Contains(fake.raw, []byte("cron: \"@hourly\"")) {
@@ -102,7 +102,7 @@ func TestReapplyEnablesTheSweepFromTheStoredEntry(t *testing.T) {
 }
 
 // A config the new composition no longer renders is absent from the apply
-// set; kukeond prunes every kukeon-labelled config the set does not include.
+// set; kukeond prunes every kuke-labelled config the set does not include.
 func TestReapplyDropsObsoleteConfigsFromTheApplySet(t *testing.T) {
 	opts, fake, entryPath, _ := setupReapply(t)
 	editEntry(t, entryPath, func(entry *config.TeamEntry) {
@@ -112,15 +112,15 @@ func TestReapplyDropsObsoleteConfigsFromTheApplySet(t *testing.T) {
 	if _, err := Run(t.Context(), opts); err != nil {
 		t.Fatal(err)
 	}
-	if fake.team != "kukeon" {
-		t.Fatalf("apply was not scoped to the kukeon team (prune key): %q", fake.team)
+	if fake.team != "kuke" {
+		t.Fatalf("apply was not scoped to the kuke team (prune key): %q", fake.team)
 	}
-	for _, gone := range []string{"health-sweep", "kukeon-majordomo-claude"} {
+	for _, gone := range []string{"health-sweep", "kuke-majordomo-claude"} {
 		if bytes.Contains(fake.raw, []byte(gone)) {
 			t.Errorf("%s is still in the apply set", gone)
 		}
 	}
-	if !bytes.Contains(fake.raw, []byte("name: kukeon-majordomo-codex")) {
+	if !bytes.Contains(fake.raw, []byte("name: kuke-majordomo-codex")) {
 		t.Fatal("the remaining config is missing")
 	}
 }

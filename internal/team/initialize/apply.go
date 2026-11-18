@@ -50,6 +50,7 @@ type Client interface {
 	GetBlueprint(context.Context, api.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error)
 	ListConfigs(context.Context, string, string, string) ([]api.CellConfigDoc, error)
 	GetConfig(context.Context, api.CellConfigDoc) (kukeonv1.GetConfigResult, error)
+	DeleteConfig(context.Context, api.CellConfigDoc) (kukeonv1.DeleteConfigResult, error)
 	ApplyDocumentsForTeam(context.Context, []byte, string) (kukeonv1.ApplyDocumentsResult, error)
 }
 
@@ -70,12 +71,16 @@ type applied struct {
 // Required secrets that are absent and have no creation source do not block
 // application; Apply returns one remediation line per missing runtime secret.
 func Apply(ctx context.Context, client Client, result *compose.Result) ([]string, error) {
-	out, err := apply(ctx, client, result, "kuke team init", nil)
+	out, err := apply(ctx, client, result, "kuke team init", nil, "")
 	return out.missing, err
 }
 
+// legacyTeam, when set, names a team whose configs the caller removes once
+// apply succeeds (the pre-#1527 init team): they do not make a shared
+// blueprint foreign, so its replacement keeps the plain names.
 func apply(
 	ctx context.Context, client Client, result *compose.Result, command string, imported []api.SecretDoc,
+	legacyTeam string,
 ) (applied, error) {
 	var out applied
 	if result.Entry == nil || len(result.Pairs) == 0 {
@@ -89,7 +94,7 @@ func apply(
 		return out, err
 	}
 	// Settle shared blueprint names before anything references them.
-	renamed, err := resolveSharedNames(ctx, client, result)
+	renamed, err := resolveSharedNames(ctx, client, result, legacyTeam)
 	if err != nil {
 		return out, err
 	}
@@ -183,8 +188,11 @@ func createSecret(ctx context.Context, client Client, secret api.SecretDoc, comm
 // already holds a *different* blueprint there that this team may not replace —
 // one another team's (or a hand-written) CellConfig references, or one kuke
 // team did not render. Then it takes a content-digest suffix instead of
-// overwriting, and the team's configs follow.
-func resolveSharedNames(ctx context.Context, client Client, result *compose.Result) ([]string, error) {
+// overwriting, and the team's configs follow. Configs of legacyTeam, which
+// is being replaced, are not counted as another team's.
+func resolveSharedNames(
+	ctx context.Context, client Client, result *compose.Result, legacyTeam string,
+) ([]string, error) {
 	var notes []string
 	var foreign map[string]bool
 	team := result.Entry.Metadata.Name
@@ -207,7 +215,7 @@ func resolveSharedNames(ctx context.Context, client Client, result *compose.Resu
 		}
 		if shared {
 			if foreign == nil {
-				if foreign, err = foreignBlueprintRefs(ctx, client, team, md.Realm); err != nil {
+				if foreign, err = foreignBlueprintRefs(ctx, client, md.Realm, team, legacyTeam); err != nil {
 					return nil, err
 				}
 			}
@@ -227,15 +235,15 @@ func resolveSharedNames(ctx context.Context, client Client, result *compose.Resu
 }
 
 // foreignBlueprintRefs names the realm-scoped blueprints of realm that a
-// CellConfig outside team references.
-func foreignBlueprintRefs(ctx context.Context, client Client, team, realm string) (map[string]bool, error) {
+// CellConfig outside teams references. Empty team names are ignored.
+func foreignBlueprintRefs(ctx context.Context, client Client, realm string, teams ...string) (map[string]bool, error) {
 	configs, err := client.ListConfigs(ctx, "", "", "")
 	if err != nil {
 		return nil, requestError("lookup", "configs", err)
 	}
 	out := map[string]bool{}
 	for _, listed := range configs {
-		if listed.Metadata.Labels[api.LabelTeam] == team {
+		if label := listed.Metadata.Labels[api.LabelTeam]; label != "" && slices.Contains(teams, label) {
 			continue
 		}
 		got, getErr := client.GetConfig(ctx, api.CellConfigDoc{

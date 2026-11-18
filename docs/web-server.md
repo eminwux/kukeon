@@ -182,15 +182,16 @@ run `kuke health`.
 
 ## Majordomo
 
-Majordomo is the kukeon team's own assistant (role `majordomo`, applied by
+Majordomo is the kuke team's own assistant (role `majordomo`, applied by
 `kuke team init`). The web UI gives it a permanent place instead of a chat
 window: its interactive session is an ordinary terminal attach, so it works the
 same for Claude, Codex and OpenCode, and the harness's own login and permission
 prompts appear in the panel unchanged.
 
 The UI finds majordomo by label, never by name: configs and cells labelled
-`kukeon.io/team: kukeon` and `kukeon.io/role: majordomo`, without a
-`kukeon.io/task` label.
+`kukeon.io/team: kuke` and `kukeon.io/role: majordomo`, without a
+`kukeon.io/task` label. A project team named `kukeon` (kukeon's own) is not
+majordomo, even if it selects that role.
 
 ### Sidebar entry and enabling
 

@@ -169,7 +169,7 @@ func TestInitOverUnixSocketAndClientConfiguration(t *testing.T) {
 			t.Fatalf("result=%+v error=%v", result, err)
 		}
 	}
-	if f.applies != 2 || f.team != "kukeon" {
+	if f.applies != 2 || f.team != "kuke" {
 		t.Fatal("wire did not carry stable team identity")
 	}
 }
@@ -182,7 +182,7 @@ func TestUnavailableSocketDoesNotRegister(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "connection/preflight") {
 		t.Fatalf("error=%v", err)
 	}
-	if _, err = os.Stat(filepath.Join(opts.Root, "kuketeam.d", "kukeon.yaml")); !os.IsNotExist(err) {
+	if _, err = os.Stat(filepath.Join(opts.Root, "kuketeam.d", "kuke.yaml")); !os.IsNotExist(err) {
 		t.Fatal("registered on transport failure")
 	}
 }

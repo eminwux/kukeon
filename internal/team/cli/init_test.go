@@ -49,7 +49,7 @@ func TestInitOutcomes(t *testing.T) {
 						return initialize.Result{}, sentinel
 					}
 					return initialize.Result{
-						EntryPath: filepath.Join(home, ".kuke", "kuketeam.d", "kukeon.yaml"),
+						EntryPath: filepath.Join(home, ".kuke", "kuketeam.d", "kuke.yaml"),
 						Resources: 2,
 						Bootstrap: bootstrap.Result{
 							Path:        path,
@@ -74,7 +74,7 @@ func TestInitOutcomes(t *testing.T) {
 			if err != nil || !strings.Contains(stdout.String(), status+": "+path) ||
 				!strings.Contains(
 					stdout.String(),
-					"registered kukeon team:",
+					"registered kuke team:",
 				) || stderr.String() != "discovery diagnostic\n" {
 				t.Fatalf("error=%v stdout=%q stderr=%q", err, &stdout, &stderr)
 			}

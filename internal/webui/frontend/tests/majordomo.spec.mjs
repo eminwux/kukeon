@@ -10,7 +10,7 @@ test.beforeEach(async () => { server = await startServer(); });
 test.afterEach(async () => { await server?.stop(); });
 
 const scope = ["default", "default", "default"];
-const majordomoLabels = { "kukeon.io/team": "kukeon", "kukeon.io/role": "majordomo" };
+const majordomoLabels = { "kukeon.io/team": "kuke", "kukeon.io/role": "majordomo" };
 const sweepLabels = { ...majordomoLabels, "kukeon.io/task": "health-sweep" };
 
 function config(name, labels, extra = {}) {
@@ -23,14 +23,16 @@ function cell(name, state, labels = {}, status = {}) {
     status: { state, ...status },
   };
 }
-// Configs as `kuke team init` applies them, plus two that must not be mistaken for majordomo: one
-// that only has the name, and a sweep task config (same team and role, but a task).
+// Configs as `kuke team init` applies them, plus three that must not be mistaken for majordomo: one
+// that only has the name, one of a project team named kukeon (the init team's pre-#1527 name), and a
+// sweep task config (same team and role, but a task).
 function teamConfigs({ suspend = true, status } = {}) {
   return [
-    config("kukeon-majordomo-claude", majordomoLabels),
+    config("kuke-majordomo-claude", majordomoLabels),
     config("assistant-b", majordomoLabels),
-    config("kukeon-majordomo-lookalike", { "kukeon.io/team": "other" }),
-    config("kukeon-majordomo-claude-health-sweep", sweepLabels, { spec: { schedule: { cron: "@hourly", suspend } }, status }),
+    config("kuke-majordomo-lookalike", { "kukeon.io/team": "other" }),
+    config("kukeon-majordomo-claude", { "kukeon.io/team": "kukeon", "kukeon.io/role": "majordomo" }),
+    config("kuke-majordomo-claude-health-sweep", sweepLabels, { spec: { schedule: { cron: "@hourly", suspend } }, status }),
   ];
 }
 
@@ -61,7 +63,7 @@ async function world(page, { cells = [], configs = [], reports = [], createError
     const [, , , kind, name] = url.pathname.split("/");
     const list = kind === "configs" ? state.configs
       : kind === "blueprints" ? [{ apiVersion: "kukeon.io/v1beta1", kind: "CellBlueprint", metadata: { name: "claude-host", realm: "default" }, spec: {} }]
-        : kind === "volumes" ? [{ apiVersion: "kukeon.io/v1beta1", kind: "Volume", metadata: { name: "kukeon-majordomo-claude", realm: "default", space: "default", stack: "default" }, spec: { reclaimPolicy: "Retain" } }] : [];
+        : kind === "volumes" ? [{ apiVersion: "kukeon.io/v1beta1", kind: "Volume", metadata: { name: "kuke-majordomo-claude", realm: "default", space: "default", stack: "default" }, spec: { reclaimPolicy: "Retain" } }] : [];
     if (!name) return route.fulfill({ json: list });
     const found = list.find(item => item.metadata.name === decodeURIComponent(name));
     return found ? route.fulfill({ json: found }) : route.fulfill({ status: 404, json: { error: { code: "not_found", message: "not found" } } });
@@ -80,7 +82,7 @@ async function world(page, { cells = [], configs = [], reports = [], createError
   await page.route("**/api/health/**", async route => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
-    if (request.method() === "POST") { state.sweeps.push(request.postDataJSON()); return route.fulfill({ json: { cell: { metadata: { name: "kukeon-majordomo-claude-health-sweep-1a2b3c" } } } }); }
+    if (request.method() === "POST") { state.sweeps.push(request.postDataJSON()); return route.fulfill({ json: { cell: { metadata: { name: "kuke-majordomo-claude-health-sweep-1a2b3c" } } } }); }
     if (path === "/api/health/reports") return route.fulfill({ json: state.reports.map(report => ({ id: report.id, createdAt: report.createdAt, since: report.since, until: report.until, summary: report.summary, findings: report.findings.length, recurring: report.findings.filter(f => f.recurring).length, filed: report.findings.filter(f => f.issueUrl).length })) });
     const id = decodeURIComponent(path.split("/").at(-1));
     const found = id === "latest" ? state.reports[0] : state.reports.find(report => report.id === id);
@@ -103,11 +105,11 @@ const panel = page => page.getByRole("complementary", { name: "Majordomo panel" 
 const entry = page => page.getByRole("region", { name: "Majordomo", exact: true }).getByRole("button");
 const connection = page => panel(page).locator(".terminal-connection-state");
 const pasted = state => state.messages.filter(message => Buffer.isBuffer(message)).map(message => message.toString());
-const runningMajordomo = () => cell("majordomo", "Ready", { ...majordomoLabels, "kukeon.io/config": "kukeon-majordomo-claude" });
+const runningMajordomo = () => cell("majordomo", "Ready", { ...majordomoLabels, "kukeon.io/config": "kuke-majordomo-claude" });
 
 test("the Majordomo sidebar entry is permanent and says when kuke team init is needed", async ({ page }) => {
   // The only config carries the name but not the labels, so majordomo is not installed.
-  const state = await world(page, { configs: [config("kukeon-majordomo-claude", { team: "platform" })] });
+  const state = await world(page, { configs: [config("kuke-majordomo-claude", { team: "platform" })] });
   await page.goto(`${server.url}#/resources`);
   await expect(entry(page)).toContainText("Majordomo");
   await expect(entry(page)).toContainText("Needs kuke team init");
@@ -127,7 +129,7 @@ test("Enable majordomo picks a labelled harness config, creates and starts one c
   await entry(page).click();
   // Configs are found by label: the lookalike name and the sweep task config are not offered.
   const harness = panel(page).getByLabel("Harness");
-  await expect(harness.locator("option")).toHaveText(["kukeon-majordomo-claude", "assistant-b"]);
+  await expect(harness.locator("option")).toHaveText(["kuke-majordomo-claude", "assistant-b"]);
   await harness.selectOption({ label: "assistant-b" });
   await panel(page).getByRole("button", { name: "Enable majordomo" }).click();
   await expect(connection(page)).toContainText("Attached");
@@ -140,7 +142,7 @@ test("Enable majordomo picks a labelled harness config, creates and starts one c
 });
 
 test("a creation error shows the daemon's message with the missing prerequisite", async ({ page }) => {
-  const message = "config kukeon-majordomo-claude: secret slot \"claude-code-oauth-token\" references secret default/claude-code-oauth-token, which does not exist";
+  const message = "config kuke-majordomo-claude: secret slot \"claude-code-oauth-token\" references secret default/claude-code-oauth-token, which does not exist";
   const state = await world(page, { configs: teamConfigs(), createError: message });
   await page.goto(`${server.url}#/resources`);
   await entry(page).click();
@@ -273,17 +275,17 @@ test("Ask majordomo is on the cell list's failed rows and on config, blueprint, 
   await rows.getByRole("button", { name: "Ask majordomo about cell default / default / default / web" }).click();
   expect(await question()).toContain("About the cell web in realm default, space default, stack default (state Degraded)");
 
-  await page.goto(`${server.url}#/configs/default/default/default/kukeon-majordomo-claude-health-sweep`);
-  await page.getByRole("button", { name: "Ask majordomo about CellConfig default / default / default / kukeon-majordomo-claude-health-sweep" }).click();
-  expect(await question()).toBe("About the CellConfig kukeon-majordomo-claude-health-sweep in realm default, space default, stack default (stored, blueprint claude-host, schedule @hourly (suspended)): explain what it is for and check whether anything is wrong with it.");
+  await page.goto(`${server.url}#/configs/default/default/default/kuke-majordomo-claude-health-sweep`);
+  await page.getByRole("button", { name: "Ask majordomo about CellConfig default / default / default / kuke-majordomo-claude-health-sweep" }).click();
+  expect(await question()).toBe("About the CellConfig kuke-majordomo-claude-health-sweep in realm default, space default, stack default (stored, blueprint claude-host, schedule @hourly (suspended)): explain what it is for and check whether anything is wrong with it.");
 
   await page.goto(`${server.url}#/blueprints/default/claude-host`);
   await page.getByRole("button", { name: "Ask majordomo about CellBlueprint default / claude-host" }).click();
   expect(await question()).toBe("About the CellBlueprint claude-host in realm default (stored): explain what it is for and check whether anything is wrong with it.");
 
-  await page.goto(`${server.url}#/volumes/default/default/default/kukeon-majordomo-claude`);
-  await page.getByRole("button", { name: "Ask majordomo about volume default / default / default / kukeon-majordomo-claude" }).click();
-  expect(await question()).toContain("About the volume kukeon-majordomo-claude in realm default, space default, stack default (stored, reclaim policy Retain)");
+  await page.goto(`${server.url}#/volumes/default/default/default/kuke-majordomo-claude`);
+  await page.getByRole("button", { name: "Ask majordomo about volume default / default / default / kuke-majordomo-claude" }).click();
+  expect(await question()).toContain("About the volume kuke-majordomo-claude in realm default, space default, stack default (stored, reclaim policy Retain)");
 
   await page.goto(`${server.url}#/daemon`);
   const daemonAsk = page.getByRole("region", { name: "Daemon connectivity" }).getByRole("button", { name: "Ask majordomo about the kukeond daemon" });
@@ -308,7 +310,7 @@ test("a question asked before majordomo runs waits in the panel and can be disca
 const reports = [
   {
     id: "20261117T100000.000000000Z", createdAt: "2026-11-17T10:00:00Z", since: "2026-11-17T09:00:00Z", until: "2026-11-17T10:00:00Z",
-    cell: { realm: "default", space: "default", stack: "default", name: "kukeon-majordomo-claude-health-sweep-aa11bb" },
+    cell: { realm: "default", space: "default", stack: "default", name: "kuke-majordomo-claude-health-sweep-aa11bb" },
     summary: "Three findings, one kukeon defect.", body: "# Health sweep\n\nThe api cell cannot attach to the network.",
     findings: [
       { signature: "cell default/default/default/api Failed", classification: "kukeon", severity: "error", recurring: true, title: "api fails to start: CNI attach error", evidence: ["status.reason: CreateFailed"], suggestedCommands: ["kuke restart api --realm default --space default --stack default"], issueUrl: "https://github.com/acme/ops/issues/7" },
@@ -332,7 +334,7 @@ test("the Health page shows the latest report, its findings and the history", as
   const report = page.getByRole("region", { name: "Health report" });
   await expect(report.getByRole("heading", { name: "Latest report" })).toBeVisible();
   await expect(report).toContainText("Three findings, one kukeon defect.");
-  await expect(report).toContainText("kukeon-majordomo-claude-health-sweep-aa11bb");
+  await expect(report).toContainText("kuke-majordomo-claude-health-sweep-aa11bb");
   const findings = report.getByRole("list", { name: "Findings" }).locator("> li");
   await expect(findings).toHaveCount(3);
   await expect(findings.nth(0)).toContainText("api fails to start: CNI attach error");
@@ -360,19 +362,19 @@ test("the Health page shows the latest report, its findings and the history", as
 });
 
 test("the Health page shows the sweep schedule from the task config, runs a sweep now and explains --reapply while suspended", async ({ page }) => {
-  const status = { schedule: { lastScheduleTime: "2026-11-17T09:00:00Z", nextScheduleTime: "2026-11-17T10:00:00Z", lastCell: "kukeon-majordomo-claude-health-sweep-aa11bb", lastError: "create cell: disk pressure" } };
+  const status = { schedule: { lastScheduleTime: "2026-11-17T09:00:00Z", nextScheduleTime: "2026-11-17T10:00:00Z", lastCell: "kuke-majordomo-claude-health-sweep-aa11bb", lastError: "create cell: disk pressure" } };
   const state = await world(page, { configs: teamConfigs({ suspend: true, status }), reports: [] });
   await page.goto(`${server.url}#/health`);
   const schedule = page.getByRole("region", { name: "Sweep schedule" });
   // Only the labelled sweep task config is listed.
   await expect(schedule.locator(".health-sweep")).toHaveCount(1);
-  await expect(schedule.getByRole("link", { name: "kukeon-majordomo-claude-health-sweep" })).toHaveAttribute("href", "#/configs/default/default/default/kukeon-majordomo-claude-health-sweep");
+  await expect(schedule.getByRole("link", { name: "kuke-majordomo-claude-health-sweep" })).toHaveAttribute("href", "#/configs/default/default/default/kuke-majordomo-claude-health-sweep");
   const rows = schedule.locator(".health-sweep dl");
   await expect(rows).toContainText("@hourly (UTC)");
   await expect(rows.locator("dd").nth(1)).toHaveText("Yes");
   await expect(rows.locator("time").nth(0)).toHaveAttribute("datetime", "2026-11-17T10:00:00Z");
   await expect(rows.locator("time").nth(1)).toHaveAttribute("datetime", "2026-11-17T09:00:00Z");
-  await expect(rows).toContainText("kukeon-majordomo-claude-health-sweep-aa11bb");
+  await expect(rows).toContainText("kuke-majordomo-claude-health-sweep-aa11bb");
   await expect(rows).toContainText("create cell: disk pressure");
 
   // Suspended: the edit and the command are shown, and nothing on the page edits the schedule.
@@ -383,9 +385,9 @@ test("the Health page shows the sweep schedule from the task config, runs a swee
   await expect(schedule.locator("input, select, textarea")).toHaveCount(0);
   await expect(schedule.getByRole("button")).toHaveCount(1);
 
-  await schedule.getByRole("button", { name: "Run sweep now with kukeon-majordomo-claude-health-sweep" }).click();
-  await expect(schedule.getByRole("status").filter({ hasText: "Sweep started" })).toContainText("kukeon-majordomo-claude-health-sweep-1a2b3c");
-  expect(state.sweeps).toEqual([{ config: { name: "kukeon-majordomo-claude-health-sweep", realm: "default", space: "default", stack: "default" } }]);
+  await schedule.getByRole("button", { name: "Run sweep now with kuke-majordomo-claude-health-sweep" }).click();
+  await expect(schedule.getByRole("status").filter({ hasText: "Sweep started" })).toContainText("kuke-majordomo-claude-health-sweep-1a2b3c");
+  expect(state.sweeps).toEqual([{ config: { name: "kuke-majordomo-claude-health-sweep", realm: "default", space: "default", stack: "default" } }]);
 
   await expect(page.getByRole("region", { name: "Health report" })).toContainText("No health report is stored.");
 });

@@ -11,7 +11,8 @@ starts cells: launch them explicitly, for example with
 Two commands drive it:
 
 - [`kuke team init`](../cli/kuke-team-init.md) creates the global configuration
-  and applies the `kukeon` team, whose one role is `majordomo`.
+  and applies the `kuke` team, whose one role is `majordomo`. `kuke` is the
+  operator's reserved system team; `add` refuses that name.
 - [`kuke team add`](../cli/kuke-team-add.md) composes a project team from a
   directory's `kuketeam.yaml` or from a named Git source.
 
@@ -318,9 +319,9 @@ A team's entry can also replace a task's argument text with `args`, for example
 
 ### The majordomo health sweep
 
-The `kukeon` team's `majordomo` role declares one task, `health-sweep`, with
+The `kuke` team's `majordomo` role declares one task, `health-sweep`, with
 `schedule: "@hourly"` and `suspend: true`. `kuke team init` therefore renders
-`kukeon-majordomo-<harness>-health-sweep` **suspended**: no install spends
+`kuke-majordomo-<harness>-health-sweep` **suspended**: no install spends
 model credits on sweeps until its user turns them on.
 
 A sweep is read-only. It reads kukeond's health digest
@@ -329,12 +330,12 @@ otherwise triages each finding and stores one report in kukeond. It never
 restarts, deletes or changes anything; fixes appear in the report as suggested
 commands.
 
-To turn sweeps on, edit the kukeon team's stored entry and reapply it. The
+To turn sweeps on, edit the kuke team's stored entry and reapply it. The
 entry is the team's source: `kuke team init` writes it and
 `kuke team init --reapply` recomposes the team from it.
 
 ```yaml
-# ~/.kuke/kuketeam.d/kukeon.yaml
+# ~/.kuke/kuketeam.d/kuke.yaml
 spec:
   roles:
     - name: majordomo
@@ -349,20 +350,20 @@ spec:
 
 ```bash
 kuke team init --reapply
-kuke get config kukeon-majordomo-claude-health-sweep -o yaml   # spec.schedule, status.schedule
+kuke get config kuke-majordomo-claude-health-sweep -o yaml   # spec.schedule, status.schedule
 ```
 
 Change the cadence the same way, with `schedule: "*/30 * * * *"` in the task
 entry. Run one sweep by hand at any time, suspended or not:
 
 ```bash
-kuke run -d kukeon-majordomo-claude-health-sweep
+kuke run -d kuke-majordomo-claude-health-sweep
 kuke health reports
 kuke health report latest
 ```
 
 The sweep cell deletes itself when it ends. It uses the same state volume as
-the interactive `kukeon-majordomo-<harness>` config, so it runs with the
+the interactive `kuke-majordomo-<harness>` config, so it runs with the
 harness login you made there.
 
 ### Filing kukeon defects as issues
@@ -377,11 +378,11 @@ GitHub token. To opt in:
    kuke create secret health-github-token --realm default --from-file /path/to/token
    ```
 
-2. In the kukeon entry, give the role that secret and tell the sweep where to
+2. In the kuke entry, give the role that secret and tell the sweep where to
    file:
 
    ```yaml
-   # ~/.kuke/kuketeam.d/kukeon.yaml
+   # ~/.kuke/kuketeam.d/kuke.yaml
    spec:
      roles:
        - name: majordomo
@@ -444,7 +445,7 @@ stores your existing key as a secret, with your explicit consent. A role's
 
 A source is the single declaration of its URL and branch/tag/commit. Optional
 `sources[].clonePath` requests a runtime clone at an absolute in-cell
-destination; omitting it requests no runtime clone. The initial `kukeon`
+destination; omitting it requests no runtime clone. The initial `kuke`
 TeamEntry clones its role source to `/home/user/kukeon-src`.
 
 The selected role's source and every `Role.spec.needs.repos` slot must resolve

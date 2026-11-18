@@ -48,7 +48,7 @@ import (
 //go:embed probe.py
 var probeScript string
 
-const resource = "kukeon-majordomo-codex"
+const resource = "kuke-majordomo-codex"
 
 type executionReport struct {
 	StartedAt      string       `json:"started_at"`
@@ -195,7 +195,7 @@ func (d *remoteDriver) reserve() {
 	}
 	for _, bp := range blueprints {
 		if reserved(bp.Metadata.Name, bp.Metadata.Labels) {
-			d.fail("unmet prerequisite: kukeon blueprint/team identity is already in use")
+			d.fail("unmet prerequisite: kuke blueprint/team identity is already in use")
 		}
 	}
 	configs, err := d.client.ListConfigs(d.ctx, "", "", "")
@@ -204,7 +204,7 @@ func (d *remoteDriver) reserve() {
 	}
 	for _, cc := range configs {
 		if reserved(cc.Metadata.Name, cc.Metadata.Labels) {
-			d.fail("unmet prerequisite: kukeon config/team identity is already in use")
+			d.fail("unmet prerequisite: kuke config/team identity is already in use")
 		}
 	}
 	d.cells, err = d.client.ListCells(d.ctx, "", "", "")
@@ -212,7 +212,7 @@ func (d *remoteDriver) reserve() {
 		d.fail("unmet prerequisite: cannot snapshot runtime cells")
 	}
 	for _, cell := range d.cells {
-		if cell.Metadata.Labels[api.LabelTeam] == "kukeon" {
+		if cell.Metadata.Labels[api.LabelTeam] == "kuke" {
 			d.fail("unmet prerequisite: an existing kukeon-team cell may share the test state")
 		}
 	}
@@ -245,7 +245,7 @@ func (d *remoteDriver) cleanupDocuments() {
 		return
 	}
 	for _, cc := range ccs {
-		if cc.Metadata.Name != resource || cc.Metadata.Labels[api.LabelTeam] != "kukeon" {
+		if cc.Metadata.Name != resource || cc.Metadata.Labels[api.LabelTeam] != "kuke" {
 			continue
 		}
 		if _, err = d.client.DeleteConfig(ctx, configLookup()); err != nil {
@@ -260,7 +260,7 @@ func (d *remoteDriver) cleanupDocuments() {
 		return
 	}
 	for _, bp := range bps {
-		if bp.Metadata.Name != resource || bp.Metadata.Labels[api.LabelTeam] != "kukeon" {
+		if bp.Metadata.Name != resource || bp.Metadata.Labels[api.LabelTeam] != "kuke" {
 			continue
 		}
 		if _, err = d.client.DeleteBlueprint(ctx, blueprintLookup()); err != nil {
@@ -310,7 +310,7 @@ func (d *remoteDriver) initialize() {
 	if err := os.MkdirAll(filepath.Join(d.home, ".kuke", "kuketeam.d"), 0o700); err != nil {
 		d.fail("prepare registration directory")
 	}
-	d.writeYAML(filepath.Join(d.home, ".kuke", "kuketeam.d", "kukeon.yaml"), preparedEntry)
+	d.writeYAML(filepath.Join(d.home, ".kuke", "kuketeam.d", "kuke.yaml"), preparedEntry)
 	d.clientPath = filepath.Join(d.home, "client.yaml")
 	d.writeYAML(
 		d.clientPath,
@@ -327,22 +327,22 @@ func (d *remoteDriver) initialize() {
 	if _, err := d.run(d.binary, "team", "init", "--host", d.host, "--configuration", d.clientPath); err != nil {
 		d.fail("kuke team init failed; check scope prerequisites and published source accessibility")
 	}
-	entryRaw, err := os.ReadFile(filepath.Join(d.home, ".kuke", "kuketeam.d", "kukeon.yaml"))
+	entryRaw, err := os.ReadFile(filepath.Join(d.home, ".kuke", "kuketeam.d", "kuke.yaml"))
 	if err != nil {
-		d.fail("kukeon registration is missing")
+		d.fail("kuke registration is missing")
 	}
 	entry, err := config.DecodeEntry(bytes.NewReader(entryRaw))
-	if err != nil || entry.Metadata.Name != "kukeon" {
-		d.fail("kukeon registration is invalid")
+	if err != nil || entry.Metadata.Name != "kuke" {
+		d.fail("kuke registration is invalid")
 	}
 	bp, err := d.client.GetBlueprint(d.ctx, blueprintLookup())
-	if err != nil || !bp.MetadataExists || bp.Blueprint.Metadata.Labels[api.LabelTeam] != "kukeon" {
-		d.fail("kukeon blueprint readback failed")
+	if err != nil || !bp.MetadataExists || bp.Blueprint.Metadata.Labels[api.LabelTeam] != "kuke" {
+		d.fail("kuke blueprint readback failed")
 	}
 	cc, err := d.client.GetConfig(d.ctx, configLookup())
-	if err != nil || !cc.MetadataExists || cc.Config.Metadata.Labels[api.LabelTeam] != "kukeon" ||
+	if err != nil || !cc.MetadataExists || cc.Config.Metadata.Labels[api.LabelTeam] != "kuke" ||
 		cc.Config.Spec.Blueprint.Name != resource {
-		d.fail("kukeon config readback failed")
+		d.fail("kuke config readback failed")
 	}
 	containers := bp.Blueprint.Spec.Cell.Containers
 	if len(containers) != 1 || containers[0].ID != "work" || len(containers[0].Secrets) != 0 ||
@@ -390,7 +390,7 @@ func (d *remoteDriver) checkImageAndAuth() {
 	)
 	if err != nil || !volume.MetadataExists {
 		d.fail(
-			"unmet prerequisite: pre-authenticated kukeon-majordomo-codex state volume is missing; see the setup guide",
+			"unmet prerequisite: pre-authenticated kuke-majordomo-codex state volume is missing; see the setup guide",
 		)
 	}
 	named, err := reference.ParseNormalizedNamed(d.report.Image)
@@ -440,7 +440,7 @@ func (d *remoteDriver) launch() {
 	}
 	d.report.Commands = append(
 		d.report.Commands,
-		"kuke run --from-config kukeon-majordomo-codex --realm default --space default --stack default --name "+name+" --env PROMPT=<embedded read-only probe> --detach",
+		"kuke run --from-config kuke-majordomo-codex --realm default --space default --stack default --name "+name+" --env PROMPT=<embedded read-only probe> --detach",
 	)
 	if _, err := d.run("kuke", args...); err != nil {
 		d.fail("explicit kuke run failed; check image pull, state volume, and runtime prerequisites")
@@ -460,7 +460,7 @@ func (d *remoteDriver) cleanupCell() {
 		if cell.Metadata.Name != d.report.Cell {
 			continue
 		}
-		if cell.Metadata.Labels[api.LabelTeam] != "kukeon" {
+		if cell.Metadata.Labels[api.LabelTeam] != "kuke" {
 			d.t.Error("cleanup: test cell ownership mismatch; left untouched")
 			continue
 		}
@@ -555,7 +555,7 @@ func (d *remoteDriver) acceptEvidence(output []byte, running bool) bool {
 }
 
 func reserved(name string, labels map[string]string) bool {
-	return name == resource || labels[api.LabelTeam] == "kukeon"
+	return name == resource || labels[api.LabelTeam] == "kuke"
 }
 
 func cellRecipes(cells []api.CellDoc) map[string]api.CellSpec {

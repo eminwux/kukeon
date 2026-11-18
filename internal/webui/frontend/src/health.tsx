@@ -40,10 +40,10 @@ function reportQuestion(report: Report): string {
 
 // The reapply edit a suspended sweep needs. Schedules are never edited from the browser.
 function EnableSweep({ config }: { config: ConfigDoc }) {
-  const edit = `# ~/.kuke/kuketeam.d/kukeon.yaml, under spec.roles[] for the majordomo role\ntasks:\n  - { name: ${sweepTask}, suspend: false }`;
+  const edit = `# ~/.kuke/kuketeam.d/kuke.yaml, under spec.roles[] for the majordomo role\ntasks:\n  - { name: ${sweepTask}, suspend: false }`;
   return <div className="health-enable" role="note">
     <strong>Sweeps are suspended.</strong>
-    <p>{config.metadata.name} ships switched off so no install spends model credits unasked. To turn sweeps on, edit the kukeon team entry on the host and reapply it:</p>
+    <p>{config.metadata.name} ships switched off so no install spends model credits unasked. To turn sweeps on, edit the kuke team entry on the host and reapply it:</p>
     <pre tabIndex={0}>{edit}</pre>
     <pre tabIndex={0}>kuke team init --reapply</pre>
     <p className="description">The schedule cannot be changed from this page.</p>
