@@ -2420,6 +2420,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#reserved-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reserved names
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-project-source-and-inherited-defaults" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3483,6 +3494,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#reserved-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reserved names
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-project-source-and-inherited-defaults" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3619,12 +3641,13 @@ operator home, the kukeond endpoint and the <code>ClientConfiguration</code> the
 <code>--name</code>, <code>--source</code>, or revision flags fail.</p>
 <h2 id="adding-a-named-team-from-a-git-source">Adding a named team from a Git source<a class="headerlink" href="#adding-a-named-team-from-a-git-source" title="Permanent link">&para;</a></h2>
 <p>Register a named team without a local project checkout or Team file:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>kuke<span class="w"> </span>team<span class="w"> </span>add<span class="w"> </span>kukeon-dev<span class="w"> </span>--source<span class="w"> </span>git@github.com:eminwux/kukeon.git
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>kuke<span class="w"> </span>team<span class="w"> </span>add<span class="w"> </span>kukeon-dev<span class="w"> </span>--source<span class="w"> </span>ssh://git@work-alias:2222/eminwux/kukeon.git<span class="w"> </span>--branch<span class="w"> </span>develop
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>kuke<span class="w"> </span>team<span class="w"> </span>add<span class="w"> </span>kukeon-dev<span class="w"> </span>--source<span class="w"> </span>https://github.com/eminwux/kukeon.git<span class="w"> </span>--tag<span class="w"> </span>v1.0.0
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>kuke<span class="w"> </span>team<span class="w"> </span>add<span class="w"> </span>kukeon-dev<span class="w"> </span>--source<span class="w"> </span>github.com/eminwux/kukeon<span class="w"> </span>--commit<span class="w"> </span>&lt;full-commit-object-id&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>kuke<span class="w"> </span>team<span class="w"> </span>add<span class="w"> </span>kukeon<span class="w"> </span>--source<span class="w"> </span>git@github.com:eminwux/kukeon.git
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>kuke<span class="w"> </span>team<span class="w"> </span>add<span class="w"> </span>kukeon<span class="w"> </span>--source<span class="w"> </span>ssh://git@work-alias:2222/eminwux/kukeon.git<span class="w"> </span>--branch<span class="w"> </span>develop
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>kuke<span class="w"> </span>team<span class="w"> </span>add<span class="w"> </span>kukeon<span class="w"> </span>--source<span class="w"> </span>https://github.com/eminwux/kukeon.git<span class="w"> </span>--tag<span class="w"> </span>v1.0.0
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>kuke<span class="w"> </span>team<span class="w"> </span>add<span class="w"> </span>kukeon<span class="w"> </span>--source<span class="w"> </span>github.com/eminwux/kukeon<span class="w"> </span>--commit<span class="w"> </span>&lt;full-commit-object-id&gt;
 </code></pre></div>
-<p>The positional argument names the team; <code>root</code> is reserved. Without a selector,
+<p>The positional argument names the team; <code>root</code> and <code>kuke</code> are
+<a href="#reserved-names">reserved</a>. Without a selector,
 native <code>git ls-remote --symref</code> discovers the remote HEAD branch and saves that
 branch name. A detached or missing remote HEAD requires an explicit selector.
 Branches remain floating selectors; tags select <code>refs/tags/&lt;name&gt;</code> and commits
@@ -3647,14 +3670,13 @@ authored file are never modified; uncommitted local content is not uploaded or
 used for definitions.</p>
 <p>Naming precedence is <code>--name</code>, the local <code>metadata.name</code>, then the directory
 basename. Names use lowercase letters, digits, dots or hyphens, start and end
-with a letter or digit, and cannot be <code>root</code>. Choose a name distinct from the
-operator's <code>kukeon</code> identity.</p>
-<p>For example, kukeon's own <code>kuketeam.yaml</code> composes the <code>kukeon-dev</code> team: roles
+with a letter or digit, and cannot be a <a href="#reserved-names">reserved name</a>.</p>
+<p>For example, kukeon's own <code>kuketeam.yaml</code> composes the <code>kukeon</code> team: roles
 from the agents repository, harnesses from this repository through the
 <code>project</code> source:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuketeams.io/v1</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Team</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="nt">metadata</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">kukeon-dev</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="nt">metadata</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">kukeon</span><span class="w"> </span><span class="p p-Indicator">}</span>
 <a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="nt">spec</span><span class="p">:</span>
 <a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span><span class="nt">sources</span><span class="p">:</span>
 <a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">agents</span>
@@ -3681,6 +3703,24 @@ origin or revision is guessed: missing Git metadata or origin, an unborn HEAD,
 or an unusable source/revision reports an error with override guidance. The
 selected revision must be available from the remote; push local-only commits
 and branches, or override them, before adding.</p>
+<h2 id="reserved-names">Reserved names<a class="headerlink" href="#reserved-names" title="Permanent link">&para;</a></h2>
+<p><code>add</code> refuses two team names, whether given positionally, with <code>--name</code>, or as
+the directory's <code>metadata.name</code>, with an error naming the reserved name before
+anything is fetched or applied:</p>
+<ul>
+<li><code>root</code> — the legacy root identity.</li>
+<li><code>kuke</code> — the operator's system team that <a href="../kuke-team-init/"><code>kuke team init</code></a>
+  registers at <code>~/.kuke/kuketeam.d/kuke.yaml</code>. A project team under that name
+  would overwrite its entry and prune its <code>kuke-majordomo-*</code> configs, which
+  carry the same <code>kukeon.io/team: kuke</code> label.</li>
+</ul>
+<p><code>add</code> also refuses a name whose <code>~/.kuke/kuketeam.d/&lt;name&gt;.yaml</code> is still the
+init team as registered before its rename to <code>kuke</code>: on a host not yet
+<a href="../kuke-team-init/#migrating-from-the-kukeon-team-name">migrated</a>, adding
+<code>kukeon</code> fails with <code>run kuke team init --force first</code>, since recording a
+project on that entry would stop init from migrating it.</p>
+<p>Any other name, <code>kukeon</code> included, is a project team: adding kukeon's own
+checkout leaves <code>kuke.yaml</code> and the <code>kuke-majordomo-*</code> configs untouched.</p>
 <h2 id="the-project-source-and-inherited-defaults">The project source and inherited defaults<a class="headerlink" href="#the-project-source-and-inherited-defaults" title="Permanent link">&para;</a></h2>
 <p>Prerequisites are Git, an existing valid <code>~/.kuke/kuketeams.yaml</code>, kukeond, and
 the parent <code>default/default/default</code> realm/space/stack metadata. <code>add</code> uses the
@@ -3689,7 +3729,7 @@ same endpoint and client configuration precedence as
 <p><code>init</code> leaves global defaults empty. Configure reusable sources, roles, and
 harnesses first (see <a href="../../concepts/team/#reusable-defaults-after-init">reusable defaults</a>),
 or provide explicit selections in the directory's Team declaration. The
-operator's own selections in <code>kukeon.yaml</code> do not become defaults for project
+operator's own selections in <code>kuke.yaml</code> do not become defaults for project
 teams. Omitted <code>spec.sources</code>, <code>spec.roles</code>, and <code>spec.harnesses</code> inherit
 global defaults; authored lists replace them, and an explicit <code>[]</code> selects none.</p>
 <p>The additional project source is named <code>project</code>, with the clone destination
@@ -3704,12 +3744,12 @@ omitted/explicit <code>spec</code> selections:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuketeams.io/v1</span>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">TeamEntry</span>
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="nt">metadata</span><span class="p">:</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kukeon-dev</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kukeon</span>
 <a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="nt">projectSource</span><span class="p">:</span>
 <a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">project</span>
 <a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">  </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">git@github.com:eminwux/kukeon.git</span>
 <a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">  </span><span class="nt">branch</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">main</span>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">  </span><span class="nt">clonePath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/home/user/kukeon-dev</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">  </span><span class="nt">clonePath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/home/user/kukeon</span>
 <a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="nt">secrets</span><span class="p">:</span><span class="w"> </span><span class="c1"># Generated when a selected role needs gh-token; edits are kept.</span>
 <a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">gh-token</span>
 <a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="w">    </span><span class="nt">secretRef</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">gh-token</span><span class="p p-Indicator">,</span><span class="nt"> realm</span><span class="p">:</span><span class="w"> </span><span class="nv">default</span><span class="w"> </span><span class="p p-Indicator">}</span>
@@ -3782,7 +3822,7 @@ prerequisite and rerun the same command, including any explicit revision flags.
 <code>add</code> does not roll back created secrets or resources, launch cells, or retry
 ambiguous writes.</p>
 <h2 id="output">Output<a class="headerlink" href="#output" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Applied 6 resources; registered team kukeon-dev: /home/me/.kuke/kuketeam.d/kukeon-dev.yaml
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Applied 6 resources; registered team kukeon: /home/me/.kuke/kuketeam.d/kukeon.yaml
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>No cells created or started.
 </code></pre></div>
 <p>The count is the team's shared blueprints (one per harness × security profile
@@ -3814,7 +3854,7 @@ it, as for <a href="../kuke-team-init/#output"><code>kuke team init</code></a>.<
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 16, 2026 22:19:24 UTC">November 16, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 18, 2026 11:34:14 UTC">November 18, 2026</span>
   </span>
 
     

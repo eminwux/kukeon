@@ -3768,7 +3768,8 @@ starts cells: launch them explicitly, for example with
 <p>Two commands drive it:</p>
 <ul>
 <li><a href="../../cli/kuke-team-init/"><code>kuke team init</code></a> creates the global configuration
-  and applies the <code>kukeon</code> team, whose one role is <code>majordomo</code>.</li>
+  and applies the <code>kuke</code> team, whose one role is <code>majordomo</code>. <code>kuke</code> is the
+  operator's reserved system team; <code>add</code> refuses that name.</li>
 <li><a href="../../cli/kuke-team-add/"><code>kuke team add</code></a> composes a project team from a
   directory's <code>kuketeam.yaml</code> or from a named Git source.</li>
 </ul>
@@ -4112,19 +4113,19 @@ instead.</p>
 <code>{ name: pick-bug, args: "--label regression" }</code>. Like <code>schedule</code> and
 <code>suspend</code>, it overrides only that value.</p>
 <h3 id="the-majordomo-health-sweep">The majordomo health sweep<a class="headerlink" href="#the-majordomo-health-sweep" title="Permanent link">&para;</a></h3>
-<p>The <code>kukeon</code> team's <code>majordomo</code> role declares one task, <code>health-sweep</code>, with
+<p>The <code>kuke</code> team's <code>majordomo</code> role declares one task, <code>health-sweep</code>, with
 <code>schedule: "@hourly"</code> and <code>suspend: true</code>. <code>kuke team init</code> therefore renders
-<code>kukeon-majordomo-&lt;harness&gt;-health-sweep</code> <strong>suspended</strong>: no install spends
+<code>kuke-majordomo-&lt;harness&gt;-health-sweep</code> <strong>suspended</strong>: no install spends
 model credits on sweeps until its user turns them on.</p>
 <p>A sweep is read-only. It reads kukeond's health digest
 (<a href="../../cli/kuke-health/"><code>kuke health</code></a>), stops if the digest is clean, and
 otherwise triages each finding and stores one report in kukeond. It never
 restarts, deletes or changes anything; fixes appear in the report as suggested
 commands.</p>
-<p>To turn sweeps on, edit the kukeon team's stored entry and reapply it. The
+<p>To turn sweeps on, edit the kuke team's stored entry and reapply it. The
 entry is the team's source: <code>kuke team init</code> writes it and
 <code>kuke team init --reapply</code> recomposes the team from it.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># ~/.kuke/kuketeam.d/kukeon.yaml</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># ~/.kuke/kuketeam.d/kuke.yaml</span>
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="nt">spec</span><span class="p">:</span>
 <a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">  </span><span class="nt">roles</span><span class="p">:</span>
 <a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">majordomo</span>
@@ -4137,16 +4138,16 @@ entry is the team's source: <code>kuke team init</code> writes it and
 <a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">health-sweep</span><span class="p p-Indicator">,</span><span class="nt"> suspend</span><span class="p">:</span><span class="w"> </span><span class="nv">false</span><span class="w"> </span><span class="p p-Indicator">}</span>
 </code></pre></div>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>kuke<span class="w"> </span>team<span class="w"> </span>init<span class="w"> </span>--reapply
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>kuke<span class="w"> </span>get<span class="w"> </span>config<span class="w"> </span>kukeon-majordomo-claude-health-sweep<span class="w"> </span>-o<span class="w"> </span>yaml<span class="w">   </span><span class="c1"># spec.schedule, status.schedule</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>kuke<span class="w"> </span>get<span class="w"> </span>config<span class="w"> </span>kuke-majordomo-claude-health-sweep<span class="w"> </span>-o<span class="w"> </span>yaml<span class="w">   </span><span class="c1"># spec.schedule, status.schedule</span>
 </code></pre></div>
 <p>Change the cadence the same way, with <code>schedule: "*/30 * * * *"</code> in the task
 entry. Run one sweep by hand at any time, suspended or not:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>kuke<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>kukeon-majordomo-claude-health-sweep
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>kuke<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>kuke-majordomo-claude-health-sweep
 <a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>kuke<span class="w"> </span>health<span class="w"> </span>reports
 <a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>kuke<span class="w"> </span>health<span class="w"> </span>report<span class="w"> </span>latest
 </code></pre></div>
 <p>The sweep cell deletes itself when it ends. It uses the same state volume as
-the interactive <code>kukeon-majordomo-&lt;harness&gt;</code> config, so it runs with the
+the interactive <code>kuke-majordomo-&lt;harness&gt;</code> config, so it runs with the
 harness login you made there.</p>
 <h3 id="filing-kukeon-defects-as-issues">Filing kukeon defects as issues<a class="headerlink" href="#filing-kukeon-defects-as-issues" title="Permanent link">&para;</a></h3>
 <p>By default a sweep only stores its report. Filing the <code>kukeon</code> findings as
@@ -4158,10 +4159,10 @@ GitHub token. To opt in:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>kuke<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>health-github-token<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--from-file<span class="w"> </span>/path/to/token
 </code></pre></div>
 <ol>
-<li>In the kukeon entry, give the role that secret and tell the sweep where to
+<li>In the kuke entry, give the role that secret and tell the sweep where to
    file:</li>
 </ol>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># ~/.kuke/kuketeam.d/kukeon.yaml</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># ~/.kuke/kuketeam.d/kuke.yaml</span>
 <a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="nt">spec</span><span class="p">:</span>
 <a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">  </span><span class="nt">roles</span><span class="p">:</span>
 <a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">majordomo</span>
@@ -4213,7 +4214,7 @@ stores your existing key as a secret, with your explicit consent. A role's
 <h2 id="runtime-repository-and-parameter-bindings">Runtime repository and parameter bindings<a class="headerlink" href="#runtime-repository-and-parameter-bindings" title="Permanent link">&para;</a></h2>
 <p>A source is the single declaration of its URL and branch/tag/commit. Optional
 <code>sources[].clonePath</code> requests a runtime clone at an absolute in-cell
-destination; omitting it requests no runtime clone. The initial <code>kukeon</code>
+destination; omitting it requests no runtime clone. The initial <code>kuke</code>
 TeamEntry clones its role source to <code>/home/user/kukeon-src</code>.</p>
 <p>The selected role's source and every <code>Role.spec.needs.repos</code> slot must resolve
 to an effective source with <code>clonePath</code>. Other effective sources with
@@ -4338,7 +4339,7 @@ when the team is applied or a cell is launched.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 18, 2026 09:03:59 UTC">November 18, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 18, 2026 11:34:14 UTC">November 18, 2026</span>
   </span>
 
     
