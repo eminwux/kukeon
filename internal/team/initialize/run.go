@@ -14,7 +14,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-// Package initialize applies the kukeon team's configuration without managing cells.
+// Package initialize applies the kuke team's configuration without managing cells.
 package initialize
 
 import (
@@ -37,8 +37,13 @@ import (
 )
 
 const (
-	majordomoName = "kukeon"
+	majordomoName = config.SystemTeamName
 	rootName      = "root" // Reserved legacy identity; never migrated by init.
+	// legacyName is what the init team was called before #1527. A host
+	// initialized then holds kuketeam.d/kukeon.yaml and kukeon-majordomo-*
+	// configs, which init --force migrates; kukeon is otherwise an ordinary
+	// project team name (kukeon's own kuketeam.yaml uses it).
+	legacyName = "kukeon"
 )
 
 // Options supplies operator paths and optional test/embedding dependencies.
@@ -46,7 +51,7 @@ const (
 type Options struct {
 	Root, Home, Host, Configuration string
 	Force                           bool
-	// Reapply recomposes the kukeon team from its stored entry instead of
+	// Reapply recomposes the kuke team from its stored entry instead of
 	// initializing. It never touches kuketeams.yaml and excludes Force.
 	Reapply bool
 	Sources map[string]fs.FS
@@ -54,6 +59,11 @@ type Options struct {
 	// ImportGit, when Enabled, stores the operator's SSH key as a secret and
 	// points the configuration's git identity at it. Init only.
 	ImportGit GitImport
+
+	// legacyTeam, when set, names a pre-#1527 init team whose configs runTeam
+	// deletes before applying, so the replacement team's shared blueprints are
+	// not held by them. Set only by a forced init that found that team.
+	legacyTeam string
 }
 
 type Result struct {
@@ -90,10 +100,19 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	if !opts.Force && !boot.Created {
 		return result, fmt.Errorf("init: configuration already exists at %s; use --force to reset it", configPath)
 	}
-	entryPath := filepath.Join(opts.Root, "kuketeam.d", "kukeon.yaml")
+	entryPath := filepath.Join(opts.Root, "kuketeam.d", majordomoName+".yaml")
 	team := config.Majordomo()
 	var recorded []config.SecretBinding
-	if !opts.Force {
+	legacyPath := filepath.Join(opts.Root, "kuketeam.d", legacyName+".yaml")
+	if opts.Force {
+		legacy, legacyErr := isLegacyEntry(legacyPath)
+		if legacyErr != nil {
+			return result, legacyErr
+		}
+		if legacy {
+			opts.legacyTeam = legacyName
+		}
+	} else {
 		team, err = readTeam(entryPath)
 		if err != nil {
 			return result, err
@@ -118,6 +137,16 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	}
 	result, err = runTeam(ctx, opts, boot.Config, team, recorded, result, "kuke team init", imported)
 	result.Notes = append(result.Notes, importNotes...)
+	if err == nil && opts.legacyTeam != "" {
+		if err = os.Remove(legacyPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return result, fmt.Errorf(
+				"team %s applied but the legacy entry %s was not removed: %w; remove it by hand",
+				majordomoName, legacyPath, err,
+			)
+		}
+		err = nil
+		result.Notes = append(result.Notes, migrationNote(legacyPath))
+	}
 	if err != nil || !opts.ImportGit.Enabled {
 		return result, err
 	}
@@ -149,7 +178,7 @@ func writeConfig(path string, cfg *config.TeamsConfig) error {
 	return nil
 }
 
-// reapply recomposes the kukeon team from its stored entry and applies it
+// reapply recomposes the kuke team from its stored entry and applies it
 // (issue #1509). The entry is the team's editable source: the place to switch
 // the health sweep on, for one. The daemon prunes the configs the new
 // composition no longer renders, and runTeam rewrites the entry only after a
@@ -157,7 +186,7 @@ func writeConfig(path string, cfg *config.TeamsConfig) error {
 func reapply(ctx context.Context, opts Options) (Result, error) {
 	if opts.Force {
 		return Result{}, errors.New("init: --reapply and --force are mutually exclusive: " +
-			"--reapply keeps the stored kukeon entry, --force replaces it with the initial declaration")
+			"--reapply keeps the stored kuke entry, --force replaces it with the initial declaration")
 	}
 	if opts.ImportGit.Enabled {
 		return Result{}, errors.New(
@@ -167,8 +196,9 @@ func reapply(ctx context.Context, opts Options) (Result, error) {
 	if _, err := os.Stat(entryPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return Result{}, fmt.Errorf(
-				"init: --reapply needs the stored kukeon entry at %s, which does not exist; "+
-					"run kuke team init first (or kuke team init --force to start over)", entryPath)
+				"init: --reapply needs the stored kuke entry at %s, which does not exist; "+
+					"run kuke team init first (or kuke team init --force to start over, "+
+					"which also migrates a host initialized under the old kukeon name)", entryPath)
 		}
 		return Result{}, fmt.Errorf("init: inspect %s: %w", entryPath, err)
 	}
@@ -252,6 +282,11 @@ func runTeam(
 			return result, fmt.Errorf("kukeond connection configuration: %w", err)
 		}
 		defer func() { _ = client.Close() }()
+	}
+	if opts.legacyTeam != "" {
+		if err = removeTeamConfigs(ctx, client, opts.legacyTeam); err != nil {
+			return result, err
+		}
 	}
 	done, err := apply(ctx, client, composed, command, imported)
 	if err != nil {

@@ -168,7 +168,7 @@ func TestReservedRootIdentities(t *testing.T) {
 		want   bool
 	}{
 		{resource, nil, true},
-		{"old-operator-role", map[string]string{"kukeon.io/team": "kukeon"}, true},
+		{"old-operator-role", map[string]string{"kukeon.io/team": "kuke"}, true},
 		{"other-team-role", map[string]string{"kukeon.io/team": "other"}, false},
 	} {
 		if got := reserved(tt.name, tt.labels); got != tt.want {

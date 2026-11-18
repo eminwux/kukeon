@@ -18,7 +18,7 @@ package kuketeams
 
 // TeamEntry is the host-side, per-team composition record stored at
 // ~/.kuke/kuketeam.d/<team>.yaml — one document per file. `kuke team init`
-// writes the kukeon team's entry (kuketeam.d/kukeon.yaml) and
+// writes the kuke team's entry (kuketeam.d/kuke.yaml) and
 // `kuke team add` writes one per added team. It replaces the former
 // TeamsConfig.spec.teams[] array: a drop-in directory (the systemd/sudoers.d
 // pattern) keeps each team isolated, so a corrupt or partial write touches one

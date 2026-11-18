@@ -1,6 +1,6 @@
 # Majordomo role
 
-Majordomo is the kukeon team member that knows kukeon. It inspects kukeon's
+Majordomo is the kuke team member that knows kukeon. It inspects kukeon's
 runtime and configuration, diagnoses problems, and carries out explicitly
 requested operations with verified outcomes. It has three skills:
 
@@ -16,12 +16,12 @@ requested operations with verified outcomes. It has three skills:
 
 It runs two ways:
 
-|           | Interactive                                                         | `health-sweep` task                                                                     |
-| --------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Config    | `kukeon-majordomo-<harness>`                                        | `kukeon-majordomo-<harness>-health-sweep`                                               |
-| Start     | `kuke run kukeon-majordomo-claude`, or the web UI's Majordomo panel | its hourly schedule once enabled, or `kuke run -d kukeon-majordomo-claude-health-sweep` |
-| Authority | Diagnoses freely; changes things only on explicit request           | Read-only: detects and reports, never remediates                                        |
-| Lifetime  | Long-lived                                                          | Deletes itself when it ends; shares the interactive config's state volume               |
+|           | Interactive                                                       | `health-sweep` task                                                                   |
+| --------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Config    | `kuke-majordomo-<harness>`                                        | `kuke-majordomo-<harness>-health-sweep`                                               |
+| Start     | `kuke run kuke-majordomo-claude`, or the web UI's Majordomo panel | its hourly schedule once enabled, or `kuke run -d kuke-majordomo-claude-health-sweep` |
+| Authority | Diagnoses freely; changes things only on explicit request         | Read-only: detects and reports, never remediates                                      |
+| Lifetime  | Long-lived                                                        | Deletes itself when it ends; shares the interactive config's state volume             |
 
 The sweep ships **suspended**. See
 [Teams → The majordomo health sweep](../../../docs/site/concepts/team.md#the-majordomo-health-sweep)
@@ -99,11 +99,11 @@ codex --sandbox workspace-write --ask-for-approval on-request
 opencode
 ```
 
-Init applies the `kukeon-majordomo-codex` and `kukeon-majordomo-claude`
+Init applies the `kuke-majordomo-codex` and `kuke-majordomo-claude`
 blueprints/configs without starting cells. Launch explicitly with kuke, for example:
 
 ```sh
-kuke run --from-config kukeon-majordomo-codex --realm default --space default --stack default --name majordomo
+kuke run --from-config kuke-majordomo-codex --realm default --space default --stack default --name majordomo
 ```
 
 Both start in the in-cell `$HOME`. Set the accepted entry's role `initialPath`

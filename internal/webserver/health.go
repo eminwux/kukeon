@@ -31,7 +31,7 @@ import (
 const (
 	// majordomoTeam and majordomoRole identify majordomo's configs by label
 	// (issue #1509); nothing here matches on a config name.
-	majordomoTeam = "kukeon"
+	majordomoTeam = "kuke"
 	majordomoRole = "majordomo"
 	sweepTask     = "health-sweep"
 	maxSweepBody  = 4 << 10

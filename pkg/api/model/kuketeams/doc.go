@@ -24,10 +24,10 @@
 //     operator facts only — git identity/signing, registry, source clone URLs,
 //     secret sources.
 //   - TeamEntry (host, `~/.kuke/kuketeam.d/<team>.yaml`, one per team) carries
-//     the per-team composition record: `kuke team init` writes the operator
-//     team's `kuketeam.d/kukeon.yaml`, and `kuke team add` writes one file per
-//     added team — a drop-in directory so a corrupt write touches one team,
-//     not all (#796).
+//     the per-team composition record: `kuke team init` writes the operator's
+//     system team's `kuketeam.d/kuke.yaml` (the reserved name `kuke`, #1527),
+//     and `kuke team add` writes one file per added team — a drop-in directory
+//     so a corrupt write touches one team, not all (#796).
 //   - Role / Harness / ImageCatalog live in the pinned agents source. They
 //     declare, respectively, a role's skills + harness configs + needs, a
 //     harness's base image + skill path + make target, and the prebuilt
@@ -64,8 +64,8 @@ const (
 	KindTeamsConfig = "TeamsConfig"
 	// KindTeamEntry identifies a host-side, per-team composition record
 	// (~/.kuke/kuketeam.d/<team>.yaml) — one document per team file.
-	// `kuke team init` writes the kukeon team's (kukeon.yaml); `kuke team
-	// add` writes each added team's.
+	// `kuke team init` writes the kuke team's (kuke.yaml); `kuke team
+	// add` writes each added team's, and refuses the reserved name kuke.
 	KindTeamEntry = "TeamEntry"
 	// KindRole identifies a per-role document (role.yaml) in the agents source.
 	KindRole = "Role"

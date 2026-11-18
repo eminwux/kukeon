@@ -133,10 +133,13 @@ func discoverDirectorySource(ctx context.Context, dir string, source *config.Sou
 }
 
 func validateAddName(name string) error {
-	if !config.ValidName(name) || name == rootName {
+	if !config.ValidName(name) {
 		return errors.New(
-			"add: require a lowercase team name containing letters, digits, dots or hyphens, starting and ending with a letter/digit; root is reserved; use --name",
+			"add: require a lowercase team name containing letters, digits, dots or hyphens, starting and ending with a letter/digit; root and kuke are reserved; use --name",
 		)
+	}
+	if name == rootName || name == majordomoName {
+		return fmt.Errorf("add: team name %q is reserved (root and kuke are reserved); use --name", name)
 	}
 	return nil
 }

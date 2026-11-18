@@ -50,6 +50,7 @@ type Client interface {
 	GetBlueprint(context.Context, api.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error)
 	ListConfigs(context.Context, string, string, string) ([]api.CellConfigDoc, error)
 	GetConfig(context.Context, api.CellConfigDoc) (kukeonv1.GetConfigResult, error)
+	DeleteConfig(context.Context, api.CellConfigDoc) (kukeonv1.DeleteConfigResult, error)
 	ApplyDocumentsForTeam(context.Context, []byte, string) (kukeonv1.ApplyDocumentsResult, error)
 }
 

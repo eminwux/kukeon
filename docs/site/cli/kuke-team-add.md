@@ -34,13 +34,14 @@ operator home, the kukeond endpoint and the `ClientConfiguration` themselves.
 Register a named team without a local project checkout or Team file:
 
 ```sh
-kuke team add kukeon-dev --source git@github.com:eminwux/kukeon.git
-kuke team add kukeon-dev --source ssh://git@work-alias:2222/eminwux/kukeon.git --branch develop
-kuke team add kukeon-dev --source https://github.com/eminwux/kukeon.git --tag v1.0.0
-kuke team add kukeon-dev --source github.com/eminwux/kukeon --commit <full-commit-object-id>
+kuke team add kukeon --source git@github.com:eminwux/kukeon.git
+kuke team add kukeon --source ssh://git@work-alias:2222/eminwux/kukeon.git --branch develop
+kuke team add kukeon --source https://github.com/eminwux/kukeon.git --tag v1.0.0
+kuke team add kukeon --source github.com/eminwux/kukeon --commit <full-commit-object-id>
 ```
 
-The positional argument names the team; `root` is reserved. Without a selector,
+The positional argument names the team; `root` and `kuke` are
+[reserved](#reserved-names). Without a selector,
 native `git ls-remote --symref` discovers the remote HEAD branch and saves that
 branch name. A detached or missing remote HEAD requires an explicit selector.
 Branches remain floating selectors; tags select `refs/tags/<name>` and commits
@@ -68,17 +69,16 @@ used for definitions.
 
 Naming precedence is `--name`, the local `metadata.name`, then the directory
 basename. Names use lowercase letters, digits, dots or hyphens, start and end
-with a letter or digit, and cannot be `root`. Choose a name distinct from the
-operator's `kukeon` identity.
+with a letter or digit, and cannot be a [reserved name](#reserved-names).
 
-For example, kukeon's own `kuketeam.yaml` composes the `kukeon-dev` team: roles
+For example, kukeon's own `kuketeam.yaml` composes the `kukeon` team: roles
 from the agents repository, harnesses from this repository through the
 `project` source:
 
 ```yaml
 apiVersion: kuketeams.io/v1
 kind: Team
-metadata: { name: kukeon-dev }
+metadata: { name: kukeon }
 spec:
   sources:
     - name: agents
@@ -108,6 +108,21 @@ or an unusable source/revision reports an error with override guidance. The
 selected revision must be available from the remote; push local-only commits
 and branches, or override them, before adding.
 
+## Reserved names
+
+`add` refuses two team names, whether given positionally, with `--name`, or as
+the directory's `metadata.name`, with an error naming the reserved name before
+anything is fetched or applied:
+
+- `root` — the legacy root identity.
+- `kuke` — the operator's system team that [`kuke team init`](kuke-team-init.md)
+  registers at `~/.kuke/kuketeam.d/kuke.yaml`. A project team under that name
+  would overwrite its entry and prune its `kuke-majordomo-*` configs, which
+  carry the same `kukeon.io/team: kuke` label.
+
+Any other name, `kukeon` included, is a project team: adding kukeon's own
+checkout leaves `kuke.yaml` and the `kuke-majordomo-*` configs untouched.
+
 ## The project source and inherited defaults
 
 Prerequisites are Git, an existing valid `~/.kuke/kuketeams.yaml`, kukeond, and
@@ -118,7 +133,7 @@ same endpoint and client configuration precedence as
 `init` leaves global defaults empty. Configure reusable sources, roles, and
 harnesses first (see [reusable defaults](../concepts/team.md#reusable-defaults-after-init)),
 or provide explicit selections in the directory's Team declaration. The
-operator's own selections in `kukeon.yaml` do not become defaults for project
+operator's own selections in `kuke.yaml` do not become defaults for project
 teams. Omitted `spec.sources`, `spec.roles`, and `spec.harnesses` inherit
 global defaults; authored lists replace them, and an explicit `[]` selects none.
 
@@ -137,12 +152,12 @@ omitted/explicit `spec` selections:
 apiVersion: kuketeams.io/v1
 kind: TeamEntry
 metadata:
-  name: kukeon-dev
+  name: kukeon
 projectSource:
   name: project
   url: git@github.com:eminwux/kukeon.git
   branch: main
-  clonePath: /home/user/kukeon-dev
+  clonePath: /home/user/kukeon
 secrets: # Generated when a selected role needs gh-token; edits are kept.
   - name: gh-token
     secretRef: { name: gh-token, realm: default }
@@ -231,7 +246,7 @@ ambiguous writes.
 ## Output
 
 ```
-Applied 6 resources; registered team kukeon-dev: /home/me/.kuke/kuketeam.d/kukeon-dev.yaml
+Applied 6 resources; registered team kukeon: /home/me/.kuke/kuketeam.d/kukeon.yaml
 No cells created or started.
 ```
 

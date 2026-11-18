@@ -6,12 +6,12 @@ import { StateBadge } from "./status";
 import { Icon } from "./icons";
 import { TerminalSession, cellId, sessionId, unavailableStates, type TerminalManager, type Theme } from "./terminal";
 
-// Majordomo is found by label, never by name: its configs and cells carry the kukeon team and the
+// Majordomo is found by label, never by name: its configs and cells carry the kuke team and the
 // majordomo role, and a task config additionally names its task.
 const teamLabel = "kukeon.io/team";
 const roleLabel = "kukeon.io/role";
 const taskLabel = "kukeon.io/task";
-const team = "kukeon";
+const team = "kuke";
 const role = "majordomo";
 export const sweepTask = "health-sweep";
 // The one interactive cell the web UI creates.

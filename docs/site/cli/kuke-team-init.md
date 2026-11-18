@@ -6,10 +6,15 @@ kuke team init [--force | --reapply] [--import-git-identity [--git-key PATH]
                [--host ENDPOINT] [--configuration PATH]
 ```
 
-Initialize the operator's team configuration and apply the `kukeon` team,
+Initialize the operator's team configuration and apply the `kuke` team,
 whose one role is `majordomo`, to kukeond. `init` creates no cells and starts nothing; launch a composed
 cell explicitly with kuke afterwards (for example
-`kuke run --from-config kukeon-majordomo-codex`).
+`kuke run --from-config kuke-majordomo-codex`).
+
+`kuke` is the operator's system team, named after the `kuke-` system prefix
+(cf. the `kuke-system` realm). The name is reserved: `kuke team add` refuses it,
+so a project team — including kukeon's own, which is named `kukeon` — can never
+take over its registration or its configs.
 
 To register a project team after `init`, use [`kuke team add`](kuke-team-add.md).
 For the shared composition model, see [Teams](../concepts/team.md).
@@ -19,7 +24,7 @@ For the shared composition model, see [Teams](../concepts/team.md).
 | Flag              | Default | Description                                                                                  |
 | ----------------- | ------- | -------------------------------------------------------------------------------------------- |
 | `--force`         | `false` | Replace an existing `~/.kuke/kuketeams.yaml` and reapply the initial majordomo declaration.  |
-| `--reapply`       | `false` | Recompose and apply the `kukeon` team from its stored entry. Excludes `--force`.             |
+| `--reapply`       | `false` | Recompose and apply the `kuke` team from its stored entry. Excludes `--force`.               |
 | `--host`          | —       | kukeond Unix endpoint. Overrides `KUKEON_HOST` and `ClientConfiguration.spec.host`.          |
 | `--configuration` | —       | kuke `ClientConfiguration` path. Defaults to `KUKE_CONFIGURATION`, then `~/.kuke/kuke.yaml`. |
 
@@ -43,11 +48,13 @@ operator home, the kukeond endpoint and the `ClientConfiguration` themselves.
 `kuke team init` creates `~/.kuke/kuketeams.yaml` only when it does not exist.
 If the file already exists, it exits with guidance to use `--force` and does not
 contact the daemon. `kuke team init --force` atomically replaces the global
-configuration with the initial document and applies the initial `kukeon` team.
-It replaces the accepted `kukeon` registration after successful application.
+configuration with the initial document and applies the initial `kuke` team.
+It replaces the accepted `kuke` registration after successful application, and
+[migrates](#migrating-from-the-kukeon-team-name) a host initialized while the
+team was still named `kukeon`.
 
 The command fetches only the sources used by the selected role/harness
-definitions into temporary Git checkouts, and composes the kukeon team's
+definitions into temporary Git checkouts, and composes the kuke team's
 blueprints and configs. Git must be installed and able to read those sources
 without a terminal prompt. `branch`, `tag`, and `commit` selectors are fetched
 explicitly; no checkout in the current directory is used. Fetched definitions
@@ -72,7 +79,7 @@ majordomo role and both harnesses come from the kukeon repository (`team/roles/`
 apiVersion: kuketeams.io/v1
 kind: TeamEntry
 metadata:
-  name: kukeon
+  name: kuke
 spec:
   sources:
     - name: kukeon
@@ -97,8 +104,8 @@ spec:
 
 This applies the shared blueprints `codex` and `claude` — one per harness ×
 security profile, realm-wide, see [Teams](../concepts/team.md#shared-blueprints) —
-and the CellConfigs `kukeon-majordomo-codex` and `kukeon-majordomo-claude` that
-reference them. Init does not start them. The explicit entry keeps
+and the CellConfigs `kuke-majordomo-codex` and `kuke-majordomo-claude`, labelled
+`kukeon.io/team: kuke`, that reference them. Init does not start them. The explicit entry keeps
 recomposition independent of global operator defaults. Configure reusable
 [global defaults](../concepts/team.md#reusable-defaults-after-init) separately.
 
@@ -122,7 +129,7 @@ checks that the parent metadata exists, checks secret prerequisites, and stages
 a complete `0600` TeamEntry before mutating the daemon. Provision missing parent
 scopes with kuke (`kuke init` creates `default/default/default`). Init never
 creates, starts, restarts, or deletes cells. `ApplyDocumentsForTeam` receives
-the stable team name `kukeon`, so reruns update that team's resources and prune
+the stable team name `kuke`, so reruns update that team's resources and prune
 obsolete team-owned configs. A shared blueprint the team stops using is removed
 only when no other CellConfig references it; if the realm already holds a
 different blueprint under a shared name that another team uses, this team's is
@@ -220,22 +227,23 @@ Secret rotation is not an init action; rotate explicitly with kuke.
 ## Registration and recovery
 
 The accepted authored declaration is saved atomically at
-`~/.kuke/kuketeam.d/kukeon.yaml`. It retains explicit selections and
+`~/.kuke/kuketeam.d/kuke.yaml`. It retains explicit selections and
 omitted/empty list semantics, with no resolved credentials or duplicated
 effective defaults. `init --force` uses the initial majordomo declaration
-regardless of an existing `kukeon.yaml`. Reserve the name `kukeon` for this
-team. Init does not discover or migrate other registrations.
+regardless of an existing `kuke.yaml`. The name `kuke` is reserved for this
+team. Init does not discover or migrate other registrations, apart from the
+legacy `kukeon.yaml` [below](#migrating-from-the-kukeon-team-name).
 
 ### Reapplying an edited entry
 
-`~/.kuke/kuketeam.d/kukeon.yaml` is the kukeon team's editable source.
+`~/.kuke/kuketeam.d/kuke.yaml` is the kuke team's editable source.
 `kuke team init --reapply` recomposes the team from it, applies the result, and
 has kukeond prune the team's configs the new composition no longer renders. Use
 it after editing the entry, for example to
 [turn on the health sweep](../concepts/team.md#the-majordomo-health-sweep).
 
 ```bash
-$EDITOR ~/.kuke/kuketeam.d/kukeon.yaml
+$EDITOR ~/.kuke/kuketeam.d/kuke.yaml
 kuke team init --reapply
 ```
 
@@ -251,26 +259,56 @@ kuke team init --reapply
 - `--reapply` does not import a git identity. Use
   `--force --import-git-identity` for that.
 
+### Migrating from the `kukeon` team name
+
+The init team was named `kukeon` before it became `kuke`. That collided with
+kukeon's own project team (`metadata.name: kukeon` in the repository's
+`kuketeam.yaml`): `kuke team add .` in a kukeon checkout overwrote the init
+team's entry and pruned its configs, since both carried
+`kukeon.io/team: kukeon`. A host initialized under the old name holds
+`~/.kuke/kuketeam.d/kukeon.yaml` and the configs `kukeon-majordomo-codex`,
+`kukeon-majordomo-claude` and `kukeon-majordomo-<harness>-health-sweep`.
+
+Run `kuke team init --force`. When `kukeon.yaml` is the legacy init declaration
+— a `kukeon` entry with no `projectSource` whose roles are only `majordomo`
+(or `operator`, see below) — init:
+
+1. deletes every config labelled `kukeon.io/team: kukeon`,
+2. applies `kuke-majordomo-codex` and `kuke-majordomo-claude` (and their
+   health-sweep configs) labelled `kukeon.io/team: kuke`, and registers
+   `~/.kuke/kuketeam.d/kuke.yaml`,
+3. removes `kukeon.yaml` and prints a note saying so.
+
+The legacy entry is removed only after the `kuke` team is fully applied and
+registered, so a failed run leaves it in place and rerunning `--force` finishes
+the migration. A `kukeon.yaml` holding any other declaration — a project team
+registered with `kuke team add`, or an init entry you added roles to — is left
+untouched, together with its configs. Like any `--force`, the migration starts
+from the initial declaration: re-make edits you had made to `kukeon.yaml` (an
+enabled health sweep, for one) in `kuke.yaml` and run `kuke team init --reapply`.
+Cells already created from the old configs are not touched.
+
+Log in to each harness once more afterwards. The state volume that holds the
+harness login is named after the config, so a `kuke-majordomo-*` cell starts
+with a new, empty volume. The old `kukeon-majordomo-*` volumes are left in
+place; delete them with `kuke delete volume` when you no longer need them.
+
 ### Migrating from the `operator` role
 
-The kukeon team's role was named `operator` before it became `majordomo`, and
-its configs were `kukeon-operator-codex` and `kukeon-operator-claude`. On a host
-initialized with the old name, run `kuke team init --force`: it applies
-`kukeon-majordomo-codex` and `kukeon-majordomo-claude` and prunes the
-`kukeon-operator-*` configs, which carry the same `kukeon.io/team: kukeon`
-label. Cells already created from the old configs are not touched.
-
-Log in to the harness once more afterwards. The state volume that holds the
-harness login is named after the config, so a `kukeon-majordomo-*` cell starts
-with a new, empty volume. The old `kukeon-operator-*` volumes are left in
-place; delete them with `kuke delete volume` when you no longer need them.
+The team's role was named `operator` before it became `majordomo`, and its
+configs were `kukeon-operator-codex` and `kukeon-operator-claude`. On a host
+initialized then, `kuke team init --force` migrates as above: the legacy entry
+counts as the init declaration, so the `kukeon-operator-*` configs (labelled
+`kukeon.io/team: kukeon`) are deleted and the `kuke-majordomo-*` configs
+applied. The same re-login applies; the old `kukeon-operator-*` volumes are left
+in place.
 
 Registration follows full blueprint/config success only. A secret failure, RPC
 failure, total resource failure, partial apply, prune failure, or incomplete
 response returns nonzero and leaves any prior TeamEntry unchanged. A first-time
 failure creates no registration. Successful resources and created secrets are
 not rolled back: rerun `kuke team init --force` after fixing the prerequisite to
-converge the same `kukeon` identity. A registration write failure after
+converge the same `kuke` identity. A registration write failure after
 application is reported as such and is also recovered by rerunning
 `init --force`.
 
@@ -278,7 +316,7 @@ application is reported as such and is also recovered by rerunning
 
 ```
 Created configuration: /home/me/.kuke/kuketeams.yaml
-Applied 4 resources; registered kukeon team: /home/me/.kuke/kuketeam.d/kukeon.yaml
+Applied 4 resources; registered kuke team: /home/me/.kuke/kuketeam.d/kuke.yaml
 No cells created or started.
 ```
 

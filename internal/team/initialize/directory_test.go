@@ -23,6 +23,7 @@ import (
 	"strings"
 	"testing"
 
+	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/config"
 	"gopkg.in/yaml.v3"
 )
@@ -446,5 +447,105 @@ func TestDirectoryLocalSSHConfiguration(t *testing.T) {
 				t.Fatal("private source did not reach composition and application")
 			}
 		})
+	}
+}
+
+// TestAddRejectsReservedNames: root and kuke (the init team) are refused as a
+// positional name, as --name, and as an authored metadata.name, before any
+// daemon call.
+func TestAddRejectsReservedNames(t *testing.T) {
+	for _, name := range []string{"root", "kuke"} {
+		for _, form := range []string{"positional", "flag", "metadata"} {
+			t.Run(name+"/"+form, func(t *testing.T) {
+				opts, _ := setupDirectoryAdd(t)
+				fake := newFake()
+				opts.Client = fake
+				switch form {
+				case "positional":
+					opts.Directory, opts.Name, opts.Source = "", name, "git@work-alias:owner/project.git"
+				case "flag":
+					opts.Name = name
+				case "metadata":
+					writeFixture(t, filepath.Join(opts.Directory, "kuketeam.yaml"),
+						"apiVersion: kuketeams.io/v1\nkind: Team\nmetadata: {name: "+name+"}\n")
+				}
+				_, err := Add(t.Context(), opts)
+				if err == nil || !strings.Contains(err.Error(), `"`+name+`" is reserved`) {
+					t.Fatalf("reserved name %s accepted or unexplained: %v", name, err)
+				}
+				if fake.applies != 0 || fake.creates != 0 || len(fake.deleted) != 0 {
+					t.Fatal("reserved name reached the daemon")
+				}
+				entry := filepath.Join(opts.Root, "kuketeam.d", name+".yaml")
+				if _, statErr := os.Stat(entry); !os.IsNotExist(statErr) {
+					t.Fatalf("reserved name registered: %v", statErr)
+				}
+			})
+		}
+	}
+}
+
+// TestAddKukeonProjectKeepsTheInitTeam is the #1527 collision: with the init
+// team applied, adding kukeon's own checkout (metadata.name: kukeon) registers
+// a separate team and leaves kuke.yaml and the kuke-majordomo-* configs alone.
+func TestAddKukeonProjectKeepsTheInitTeam(t *testing.T) {
+	opts, _ := setupDirectoryAdd(t)
+	fake := opts.Client.(*fakeClient)
+	fake.prune = true
+	globalPath := filepath.Join(opts.Root, "kuketeams.yaml")
+	global, err := os.ReadFile(globalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initOpts := opts.Options
+	initOpts.Force = true
+	if _, err = Run(t.Context(), initOpts); err != nil {
+		t.Fatal(err)
+	}
+	// Restore the add fixture's defaults; init --force reset them.
+	if err = os.WriteFile(globalPath, global, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	kukePath := filepath.Join(opts.Root, "kuketeam.d", "kuke.yaml")
+	kukeBefore, err := os.ReadFile(kukePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	majordomo := map[string]bool{}
+	for _, cfg := range fake.configs {
+		if cfg.Metadata.Labels[api.LabelTeam] == "kuke" {
+			majordomo[cfg.Metadata.Name] = true
+		}
+	}
+	if !majordomo["kuke-majordomo-codex"] || !majordomo["kuke-majordomo-claude"] {
+		t.Fatalf("init did not apply the majordomo configs: %v", majordomo)
+	}
+
+	writeFixture(t, filepath.Join(opts.Directory, "kuketeam.yaml"),
+		"apiVersion: kuketeams.io/v1\nkind: Team\nmetadata: {name: kukeon}\n")
+	result, err := Add(t.Context(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fake.team != "kukeon" || result.EntryPath != filepath.Join(opts.Root, "kuketeam.d", "kukeon.yaml") {
+		t.Fatalf("team=%q entry=%s", fake.team, result.EntryPath)
+	}
+	kukeAfter, err := os.ReadFile(kukePath)
+	if err != nil || !bytes.Equal(kukeBefore, kukeAfter) {
+		t.Fatalf("init entry changed by add: %v", err)
+	}
+	kept := map[string]bool{}
+	for _, cfg := range fake.configs {
+		if cfg.Metadata.Labels[api.LabelTeam] == "kuke" {
+			kept[cfg.Metadata.Name] = true
+		}
+	}
+	for name := range majordomo {
+		if !kept[name] {
+			t.Fatalf("add pruned init config %s", name)
+		}
+	}
+	if len(fake.deleted) != 0 {
+		t.Fatalf("add deleted %v", fake.deleted)
 	}
 }
