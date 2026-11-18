@@ -1879,6 +1879,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../kuke-health/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke health
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../kuke-get/" class="md-nav__link">
         
   
@@ -2393,6 +2421,34 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Registration and recovery">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#reapplying-an-edited-entry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reapplying an edited entry
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#migrating-from-the-operator-role" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Migrating from the operator role
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -3485,6 +3541,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Registration and recovery">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#reapplying-an-edited-entry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reapplying an edited entry
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#migrating-from-the-operator-role" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Migrating from the operator role
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -3530,14 +3614,14 @@
 
 
 <h1 id="kuke-team-init">kuke team init<a class="headerlink" href="#kuke-team-init" title="Permanent link">&para;</a></h1>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke team init [--force] [--import-git-identity [--git-key PATH]
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke team init [--force | --reapply] [--import-git-identity [--git-key PATH]
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>               [--git-key-passphrase-file FILE] [--git-known-hosts FILE]]
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>               [--host ENDPOINT] [--configuration PATH]
 </code></pre></div>
-<p>Initialize the operator's team configuration and apply the kukeon operator
-team to kukeond. <code>init</code> creates no cells and starts nothing; launch a composed
+<p>Initialize the operator's team configuration and apply the <code>kukeon</code> team,
+whose one role is <code>majordomo</code>, to kukeond. <code>init</code> creates no cells and starts nothing; launch a composed
 cell explicitly with kuke afterwards (for example
-<code>kuke run --from-config kukeon-operator-codex</code>).</p>
+<code>kuke run --from-config kukeon-majordomo-codex</code>).</p>
 <p>To register a project team after <code>init</code>, use <a href="../kuke-team-add/"><code>kuke team add</code></a>.
 For the shared composition model, see <a href="../../concepts/team/">Teams</a>.</p>
 <h2 id="flags">Flags<a class="headerlink" href="#flags" title="Permanent link">&para;</a></h2>
@@ -3553,7 +3637,12 @@ For the shared composition model, see <a href="../../concepts/team/">Teams</a>.<
 <tr>
 <td><code>--force</code></td>
 <td><code>false</code></td>
-<td>Replace an existing <code>~/.kuke/kuketeams.yaml</code> and reapply the initial operator declaration.</td>
+<td>Replace an existing <code>~/.kuke/kuketeams.yaml</code> and reapply the initial majordomo declaration.</td>
+</tr>
+<tr>
+<td><code>--reapply</code></td>
+<td><code>false</code></td>
+<td>Recompose and apply the <code>kukeon</code> team from its stored entry. Excludes <code>--force</code>.</td>
 </tr>
 <tr>
 <td><code>--host</code></td>
@@ -3607,7 +3696,7 @@ operator home, the kukeond endpoint and the <code>ClientConfiguration</code> the
 <p><code>kuke team init</code> creates <code>~/.kuke/kuketeams.yaml</code> only when it does not exist.
 If the file already exists, it exits with guidance to use <code>--force</code> and does not
 contact the daemon. <code>kuke team init --force</code> atomically replaces the global
-configuration with the initial document and applies the initial operator team.
+configuration with the initial document and applies the initial <code>kukeon</code> team.
 It replaces the accepted <code>kukeon</code> registration after successful application.</p>
 <p>The command fetches only the sources used by the selected role/harness
 definitions into temporary Git checkouts, and composes the kukeon team's
@@ -3623,8 +3712,8 @@ destinations still come from the authored configuration.</p>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nt">spec</span><span class="p">:</span>
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">defaults</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{}</span>
 </code></pre></div>
-<p>The initial accepted declaration contains the operator selections directly. The
-operator role and both harnesses come from the kukeon repository (<code>team/roles/</code> and
+<p>The initial accepted declaration contains the majordomo selections directly. The
+majordomo role and both harnesses come from the kukeon repository (<code>team/roles/</code> and
 <code>team/harnesses/</code>):</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuketeams.io/v1</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">TeamEntry</span>
@@ -3637,9 +3726,9 @@ operator role and both harnesses come from the kukeon repository (<code>team/rol
 <a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">      </span><span class="nt">branch</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">main</span>
 <a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">      </span><span class="nt">clonePath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/home/user/kukeon-src</span>
 <a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">  </span><span class="nt">roles</span><span class="p">:</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">operator</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">majordomo</span>
 <a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">      </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kukeon</span>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">team/roles/operator</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">team/roles/majordomo</span>
 <a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="w">      </span><span class="nt">initialPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">$HOME</span>
 <a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="w">      </span><span class="nt">needs</span><span class="p">:</span>
 <a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="w">        </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">go</span><span class="p p-Indicator">]</span>
@@ -3653,7 +3742,7 @@ operator role and both harnesses come from the kukeon repository (<code>team/rol
 </code></pre></div>
 <p>This applies the shared blueprints <code>codex</code> and <code>claude</code> — one per harness ×
 security profile, realm-wide, see <a href="../../concepts/team/#shared-blueprints">Teams</a> —
-and the CellConfigs <code>kukeon-operator-codex</code> and <code>kukeon-operator-claude</code> that
+and the CellConfigs <code>kukeon-majordomo-codex</code> and <code>kukeon-majordomo-claude</code> that
 reference them. Init does not start them. The explicit entry keeps
 recomposition independent of global operator defaults. Configure reusable
 <a href="../../concepts/team/#reusable-defaults-after-init">global defaults</a> separately.</p>
@@ -3721,7 +3810,7 @@ role's <code>needs.mounts: [ssh]</code>) as a note.</p>
 <a href="../../guides/migrate-to-stored-git-credentials/">Migrating to stored git credentials</a>.</p>
 <h2 id="authentication-and-secrets">Authentication and secrets<a class="headerlink" href="#authentication-and-secrets" title="Permanent link">&para;</a></h2>
 <p>Only selected role/harness requirements contribute secret lookups. The base
-operator with Codex or Claude does not require <code>gh</code> or <code>gh-token</code>. Selecting
+majordomo with Codex or Claude does not require <code>gh</code> or <code>gh-token</code>. Selecting
 OpenCode requires its configured provider binding, as described in
 <a href="../../concepts/team/#secret-declarations">secret declarations</a>.</p>
 <p>Each runtime secret is identified by all explicit reference coordinates. A
@@ -3756,9 +3845,42 @@ Secret rotation is not an init action; rotate explicitly with kuke.</p>
 <p>The accepted authored declaration is saved atomically at
 <code>~/.kuke/kuketeam.d/kukeon.yaml</code>. It retains explicit selections and
 omitted/empty list semantics, with no resolved credentials or duplicated
-effective defaults. <code>init --force</code> uses the initial operator declaration
+effective defaults. <code>init --force</code> uses the initial majordomo declaration
 regardless of an existing <code>kukeon.yaml</code>. Reserve the name <code>kukeon</code> for this
-operator. Init does not discover or migrate other registrations.</p>
+team. Init does not discover or migrate other registrations.</p>
+<h3 id="reapplying-an-edited-entry">Reapplying an edited entry<a class="headerlink" href="#reapplying-an-edited-entry" title="Permanent link">&para;</a></h3>
+<p><code>~/.kuke/kuketeam.d/kukeon.yaml</code> is the kukeon team's editable source.
+<code>kuke team init --reapply</code> recomposes the team from it, applies the result, and
+has kukeond prune the team's configs the new composition no longer renders. Use
+it after editing the entry, for example to
+<a href="../../concepts/team/#the-majordomo-health-sweep">turn on the health sweep</a>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nv">$EDITOR</span><span class="w"> </span>~/.kuke/kuketeam.d/kukeon.yaml
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>kuke<span class="w"> </span>team<span class="w"> </span>init<span class="w"> </span>--reapply
+</code></pre></div>
+<ul>
+<li>The entry is rewritten only after a fully successful apply, like every
+  registration. A failed apply leaves your edit in place.</li>
+<li><code>~/.kuke/kuketeams.yaml</code> is read and never written.</li>
+<li>The entry is decoded strictly: an unknown or misspelled field, or a task the
+  role does not declare, fails before anything is fetched or applied.</li>
+<li>Without a stored entry the command fails and tells you to run
+  <code>kuke team init</code> first; it never creates one.</li>
+<li><code>--reapply --force</code> is rejected. <code>--force</code> discards the entry and starts
+  again from the initial declaration; <code>--reapply</code> keeps it.</li>
+<li><code>--reapply</code> does not import a git identity. Use
+  <code>--force --import-git-identity</code> for that.</li>
+</ul>
+<h3 id="migrating-from-the-operator-role">Migrating from the <code>operator</code> role<a class="headerlink" href="#migrating-from-the-operator-role" title="Permanent link">&para;</a></h3>
+<p>The kukeon team's role was named <code>operator</code> before it became <code>majordomo</code>, and
+its configs were <code>kukeon-operator-codex</code> and <code>kukeon-operator-claude</code>. On a host
+initialized with the old name, run <code>kuke team init --force</code>: it applies
+<code>kukeon-majordomo-codex</code> and <code>kukeon-majordomo-claude</code> and prunes the
+<code>kukeon-operator-*</code> configs, which carry the same <code>kukeon.io/team: kukeon</code>
+label. Cells already created from the old configs are not touched.</p>
+<p>Log in to the harness once more afterwards. The state volume that holds the
+harness login is named after the config, so a <code>kukeon-majordomo-*</code> cell starts
+with a new, empty volume. The old <code>kukeon-operator-*</code> volumes are left in
+place; delete them with <code>kuke delete volume</code> when you no longer need them.</p>
 <p>Registration follows full blueprint/config success only. A secret failure, RPC
 failure, total resource failure, partial apply, prune failure, or incomplete
 response returns nonzero and leaves any prior TeamEntry unchanged. A first-time
@@ -3768,15 +3890,15 @@ converge the same <code>kukeon</code> identity. A registration write failure aft
 application is reported as such and is also recovered by rerunning
 <code>init --force</code>.</p>
 <h2 id="output">Output<a class="headerlink" href="#output" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Created configuration: /home/me/.kuke/kuketeams.yaml
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>Applied 4 resources; registered kukeon team: /home/me/.kuke/kuketeam.d/kukeon.yaml
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>No cells created or started.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Created configuration: /home/me/.kuke/kuketeams.yaml
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>Applied 4 resources; registered kukeon team: /home/me/.kuke/kuketeam.d/kukeon.yaml
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>No cells created or started.
 </code></pre></div>
 <p>Missing runtime secrets and notes follow when there are any:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Missing secrets (cells will not start until they exist):
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>  git-ssh  →  kuke create secret git-ssh --realm default --type ssh-key --from-file /path/to/private-key  (git credential; or --type basic-auth)
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>Notes:
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>  source agents is cloned over SSH but no stored git credential covers github.com; add one to spec.git.credentials (kuke team init --force --import-git-identity imports your key)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>Missing secrets (cells will not start until they exist):
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>  git-ssh  →  kuke create secret git-ssh --realm default --type ssh-key --from-file /path/to/private-key  (git credential; or --type basic-auth)
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>Notes:
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>  source agents is cloned over SSH but no stored git credential covers github.com; add one to spec.git.credentials (kuke team init --force --import-git-identity imports your key)
 </code></pre></div>
 <p>The resource count is the shared blueprints plus the CellConfigs, plus one when
 the stack's git defaults were written. With <code>--force</code>, the first line reads
@@ -3787,7 +3909,7 @@ example, Git settings that could not be discovered) are written to stderr.</p>
 Unix JSON-RPC transport tests. A separate check verifies actual daemon storage,
 reads back blueprints and configs, repeats application, and confirms that cells
 are unchanged:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nv">KUKETEAMS_INTEGRATION_HOST</span><span class="o">=</span>unix:///path/to/disposable/kukeond.sock<span class="w"> </span>make<span class="w"> </span>test-team-integration
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nv">KUKETEAMS_INTEGRATION_HOST</span><span class="o">=</span>unix:///path/to/disposable/kukeond.sock<span class="w"> </span>make<span class="w"> </span>test-team-integration
 </code></pre></div>
 <p>Use a disposable kukeond with existing <code>default/default/default</code> scope metadata.
 The check uses a unique <code>init-check-*</code> team and deletes only its generated
@@ -3814,7 +3936,7 @@ blueprints and configs on cleanup.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 16, 2026 11:01:05 UTC">November 16, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 18, 2026 09:03:59 UTC">November 18, 2026</span>
   </span>
 
     
