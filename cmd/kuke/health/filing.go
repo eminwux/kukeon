@@ -29,6 +29,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 )
@@ -103,7 +104,12 @@ func (f *Filer) Title(finding kukeonv1.HealthFinding) string {
 	symptom = strings.Join(strings.Fields(Sanitize(symptom, f.Token)), " ")
 	title := "health: " + area(finding.Signature) + ": " + symptom
 	if len(title) > maxTitle {
-		title = title[:maxTitle-3] + "..."
+		const ellipsis = "..."
+		cut := maxTitle - len(ellipsis)
+		for cut > 0 && !utf8.RuneStart(title[cut]) {
+			cut-- // never split a multi-byte rune
+		}
+		title = title[:cut] + ellipsis
 	}
 	return title
 }

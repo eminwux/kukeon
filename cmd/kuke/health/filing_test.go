@@ -24,6 +24,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 
 	healthcmd "github.com/eminwux/kukeon/cmd/kuke/health"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
@@ -339,5 +340,78 @@ func TestSubmitWithFileIssuesStoresTheIssueURL(t *testing.T) {
 	_, errOut, err := run(t, client, string(raw), "report", "submit", "-f", "-", "--file-issues", "acme/ops")
 	if err == nil || client.submitted.Summary == "" || !strings.Contains(errOut, "the report is stored") {
 		t.Fatalf("missing token: err=%v stderr=%q stored=%q", err, errOut, client.submitted.Summary)
+	}
+}
+
+func TestSubmitWithFileIssuesFilesNothingForAnInvalidReport(t *testing.T) {
+	gh := &github{}
+	server := httptest.NewServer(gh.handler(t))
+	defer server.Close()
+	t.Setenv(healthcmd.TokenEnv, "filing-token-0123456789")
+	t.Setenv(healthcmd.APIEnv, server.URL)
+
+	duplicate := sweepReport()
+	duplicate.Findings[1].Signature = duplicate.Findings[0].Signature
+	badSeverity := sweepReport()
+	badSeverity.Findings[0].Severity = "fatal"
+	noSummary := sweepReport()
+	noSummary.Summary = " "
+	storedID := sweepReport()
+	storedID.ID = "taken"
+
+	for name, document := range map[string]kukeonv1.HealthReport{
+		"duplicate signature": duplicate, "bad severity": badSeverity, "empty summary": noSummary,
+		"id already stored": storedID,
+	} {
+		raw, err := json.Marshal(document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		client := &fakeClient{version: "v0.11.0", reports: []kukeonv1.HealthReport{{ID: "taken", Summary: "x"}}}
+		_, errOut, err := run(t, client, string(raw), "report", "submit", "-f", "-", "--file-issues", "acme/ops")
+		if err == nil || !strings.Contains(errOut, "nothing was filed") {
+			t.Fatalf("%s: err=%v stderr=%q", name, err, errOut)
+		}
+		if len(gh.requests) != 0 || client.submitted.Summary != "" {
+			t.Fatalf("%s: rejected report reached GitHub or kukeond: requests=%v submitted=%q",
+				name, gh.requests, client.submitted.Summary)
+		}
+	}
+}
+
+func TestSubmitWithFileIssuesComparesWithTheReportKukeondWill(t *testing.T) {
+	gh := &github{}
+	server := httptest.NewServer(gh.handler(t))
+	defer server.Close()
+	t.Setenv(healthcmd.TokenEnv, "filing-token-0123456789")
+	t.Setenv(healthcmd.APIEnv, server.URL)
+
+	document := sweepReport()
+	document.CreatedAt = window.Add(3600e9)
+	kukeonSignature := document.Findings[0].Signature
+	client := &fakeClient{version: "v0.11.0", reports: []kukeonv1.HealthReport{
+		// Newer than the back-dated document: kukeond does not compare with it.
+		{ID: "newer", CreatedAt: window.Add(7200e9), Findings: []kukeonv1.HealthFinding{{Signature: kukeonSignature}}},
+		{ID: "older", CreatedAt: window, Findings: []kukeonv1.HealthFinding{}},
+	}}
+	raw, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = run(t, client, string(raw), "report", "submit", "-f", "-", "--file-issues", "acme/ops"); err != nil {
+		t.Fatal(err)
+	}
+	if body := gh.issues[0]["body"].(string); !strings.Contains(body, "first seen in this window") {
+		t.Fatalf("issue body compares with a report newer than the document:\n%s", body)
+	}
+}
+
+func TestTitleTruncatesOnARuneBoundary(t *testing.T) {
+	for _, lead := range []string{"", "x"} { // either byte parity at the cut
+		finding := kukeonv1.HealthFinding{Signature: "check host/cni", Title: lead + strings.Repeat("é", 200)}
+		title := (&healthcmd.Filer{}).Title(finding)
+		if !utf8.ValidString(title) || !strings.HasSuffix(title, "...") || len(title) > 120 {
+			t.Fatalf("title %q (%d bytes)", title, len(title))
+		}
 	}
 }

@@ -19,6 +19,7 @@
 package health
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,6 +30,8 @@ import (
 	"time"
 
 	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
+	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/health"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -320,7 +323,8 @@ func newSubmitCmd() *cobra.Command {
 			"kukeond. kukeond assigns id and createdAt when the document leaves them out, and\n" +
 			"marks findings the previous report already carried as recurring. Storing a report\n" +
 			"files nothing anywhere.\n\n" +
-			"--file-issues <owner>/<repo> is the opt-in exception: before storing, kuke opens one\n" +
+			"--file-issues <owner>/<repo> is the opt-in exception: once the document passes the\n" +
+			"same validation kukeond applies, and before storing, kuke opens one\n" +
 			"GitHub issue per kukeon finding (or comments on the open issue that already carries\n" +
 			"its signature) and records the URL in the report. workload and unclear findings are\n" +
 			"never filed. It needs a token in " + TokenEnv + ".",
@@ -357,10 +361,12 @@ func newSubmitCmd() *cobra.Command {
 				if filer.Version, err = client.PingVersion(cmd.Context()); err != nil || filer.Version == "" {
 					filer.Version = "unknown"
 				}
-				var previous *kukeonv1.HealthReport
-				if last, lastErr := client.ReadHealthReport(cmd.Context(), kukeonv1.HealthReportLatest); lastErr == nil {
-					previous = &last
+				// Filing is public and not undone, so a report kukeond
+				// would reject must not reach GitHub first.
+				if err = validateForFiling(cmd.Context(), client, document, time.Now()); err != nil {
+					return report(cmd, err)
 				}
+				previous := previousReport(cmd.Context(), client, document.CreatedAt)
 				// A filing failure does not lose the sweep: the report is
 				// still stored, with the URLs obtained so far.
 				opened, commented, filingErr = filer.File(cmd.Context(), &document, previous)
@@ -391,6 +397,71 @@ func newSubmitCmd() *cobra.Command {
 	cmd.Flags().StringVar(&fileIssues, "file-issues", "",
 		"Opt-in: file kukeon findings as GitHub issues in <owner>/<repo> (needs "+TokenEnv+")")
 	return cmd
+}
+
+// validateForFiling runs kukeond's schema check on document as it will be
+// submitted after filing: id and createdAt filled the way kukeond fills them
+// when absent, and issueUrl cleared on the findings the filer never files. It
+// also refuses an id kukeond already stores. Filing runs only when it passes.
+func validateForFiling(
+	ctx context.Context, client kukeonv1.Client, document kukeonv1.HealthReport, now time.Time,
+) error {
+	candidate := document
+	if document.Findings != nil {
+		candidate.Findings = make([]kukeonv1.HealthFinding, len(document.Findings))
+		copy(candidate.Findings, document.Findings)
+	}
+	if candidate.CreatedAt.IsZero() {
+		candidate.CreatedAt = now
+	}
+	if candidate.ID == "" {
+		candidate.ID = "pending"
+	}
+	for i := range candidate.Findings {
+		if candidate.Findings[i].Classification != kukeonv1.HealthClassKukeon {
+			candidate.Findings[i].IssueURL = ""
+		}
+	}
+	if err := health.Validate(&candidate); err != nil {
+		return fmt.Errorf("%w; nothing was filed", err)
+	}
+	if document.ID != "" && document.ID != kukeonv1.HealthReportLatest {
+		if _, err := client.ReadHealthReport(ctx, document.ID); err == nil {
+			return fmt.Errorf("%w: a report with id %q is already stored; nothing was filed",
+				errdefs.ErrHealthReportInvalid, document.ID)
+		}
+	}
+	return nil
+}
+
+// previousReport returns the report kukeond's recurring check will compare
+// against: the newest stored report not after createdAt, or the newest one
+// when kukeond assigns createdAt itself. nil when there is none.
+func previousReport(
+	ctx context.Context, client kukeonv1.Client, createdAt time.Time,
+) *kukeonv1.HealthReport {
+	id := kukeonv1.HealthReportLatest
+	if !createdAt.IsZero() {
+		summaries, err := client.ListHealthReports(ctx)
+		if err != nil {
+			return nil
+		}
+		id = ""
+		for _, summary := range summaries { // newest first
+			if !summary.CreatedAt.After(createdAt) {
+				id = summary.ID
+				break
+			}
+		}
+		if id == "" {
+			return nil
+		}
+	}
+	previous, err := client.ReadHealthReport(ctx, id)
+	if err != nil {
+		return nil
+	}
+	return &previous
 }
 
 // DecodeReport reads a report document strictly: an unknown field is an

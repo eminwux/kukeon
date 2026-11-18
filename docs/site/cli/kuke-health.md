@@ -198,8 +198,9 @@ scheduled one therefore reports the same finding as recurring, not as new.
 
 ### Filing issues (opt-in)
 
-By default nothing is filed. `--file-issues <owner>/<repo>` makes `kuke`, before
-it stores the report:
+By default nothing is filed. `--file-issues <owner>/<repo>` makes `kuke` first
+validate the report the way kukeond will (a report kukeond would reject files
+nothing), then, before it stores the report:
 
 - open one GitHub issue for each `kukeon` finding, titled
   `health: <area>: <symptom>`, whose body has the symptom, the evidence, the

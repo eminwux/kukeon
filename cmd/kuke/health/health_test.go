@@ -71,7 +71,9 @@ func (f *fakeClient) SubmitHealthReport(
 func (f *fakeClient) ListHealthReports(context.Context) ([]kukeonv1.HealthReportSummary, error) {
 	out := []kukeonv1.HealthReportSummary{}
 	for _, r := range f.reports {
-		out = append(out, kukeonv1.HealthReportSummary{ID: r.ID, Summary: r.Summary, Findings: len(r.Findings)})
+		out = append(out, kukeonv1.HealthReportSummary{
+			ID: r.ID, CreatedAt: r.CreatedAt, Summary: r.Summary, Findings: len(r.Findings),
+		})
 	}
 	return out, f.err
 }
