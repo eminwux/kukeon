@@ -1,15 +1,15 @@
 # kuke team init
 
 ```
-kuke team init [--force] [--import-git-identity [--git-key PATH]
+kuke team init [--force | --reapply] [--import-git-identity [--git-key PATH]
                [--git-key-passphrase-file FILE] [--git-known-hosts FILE]]
                [--host ENDPOINT] [--configuration PATH]
 ```
 
-Initialize the operator's team configuration and apply the kukeon operator
-team to kukeond. `init` creates no cells and starts nothing; launch a composed
+Initialize the operator's team configuration and apply the `kukeon` team,
+whose one role is `majordomo`, to kukeond. `init` creates no cells and starts nothing; launch a composed
 cell explicitly with kuke afterwards (for example
-`kuke run --from-config kukeon-operator-codex`).
+`kuke run --from-config kukeon-majordomo-codex`).
 
 To register a project team after `init`, use [`kuke team add`](kuke-team-add.md).
 For the shared composition model, see [Teams](../concepts/team.md).
@@ -18,7 +18,8 @@ For the shared composition model, see [Teams](../concepts/team.md).
 
 | Flag              | Default | Description                                                                                  |
 | ----------------- | ------- | -------------------------------------------------------------------------------------------- |
-| `--force`         | `false` | Replace an existing `~/.kuke/kuketeams.yaml` and reapply the initial operator declaration.   |
+| `--force`         | `false` | Replace an existing `~/.kuke/kuketeams.yaml` and reapply the initial majordomo declaration.  |
+| `--reapply`       | `false` | Recompose and apply the `kukeon` team from its stored entry. Excludes `--force`.             |
 | `--host`          | —       | kukeond Unix endpoint. Overrides `KUKEON_HOST` and `ClientConfiguration.spec.host`.          |
 | `--configuration` | —       | kuke `ClientConfiguration` path. Defaults to `KUKE_CONFIGURATION`, then `~/.kuke/kuke.yaml`. |
 
@@ -42,7 +43,7 @@ operator home, the kukeond endpoint and the `ClientConfiguration` themselves.
 `kuke team init` creates `~/.kuke/kuketeams.yaml` only when it does not exist.
 If the file already exists, it exits with guidance to use `--force` and does not
 contact the daemon. `kuke team init --force` atomically replaces the global
-configuration with the initial document and applies the initial operator team.
+configuration with the initial document and applies the initial `kukeon` team.
 It replaces the accepted `kukeon` registration after successful application.
 
 The command fetches only the sources used by the selected role/harness
@@ -63,8 +64,8 @@ spec:
   defaults: {}
 ```
 
-The initial accepted declaration contains the operator selections directly. The
-operator role and both harnesses come from the kukeon repository (`team/roles/` and
+The initial accepted declaration contains the majordomo selections directly. The
+majordomo role and both harnesses come from the kukeon repository (`team/roles/` and
 `team/harnesses/`):
 
 ```yaml
@@ -79,9 +80,9 @@ spec:
       branch: main
       clonePath: /home/user/kukeon-src
   roles:
-    - name: operator
+    - name: majordomo
       source: kukeon
-      path: team/roles/operator
+      path: team/roles/majordomo
       initialPath: $HOME
       needs:
         image: [go]
@@ -96,7 +97,7 @@ spec:
 
 This applies the shared blueprints `codex` and `claude` — one per harness ×
 security profile, realm-wide, see [Teams](../concepts/team.md#shared-blueprints) —
-and the CellConfigs `kukeon-operator-codex` and `kukeon-operator-claude` that
+and the CellConfigs `kukeon-majordomo-codex` and `kukeon-majordomo-claude` that
 reference them. Init does not start them. The explicit entry keeps
 recomposition independent of global operator defaults. Configure reusable
 [global defaults](../concepts/team.md#reusable-defaults-after-init) separately.
@@ -177,7 +178,7 @@ Migrating an existing installation: see
 ## Authentication and secrets
 
 Only selected role/harness requirements contribute secret lookups. The base
-operator with Codex or Claude does not require `gh` or `gh-token`. Selecting
+majordomo with Codex or Claude does not require `gh` or `gh-token`. Selecting
 OpenCode requires its configured provider binding, as described in
 [secret declarations](../concepts/team.md#secret-declarations).
 
@@ -221,9 +222,48 @@ Secret rotation is not an init action; rotate explicitly with kuke.
 The accepted authored declaration is saved atomically at
 `~/.kuke/kuketeam.d/kukeon.yaml`. It retains explicit selections and
 omitted/empty list semantics, with no resolved credentials or duplicated
-effective defaults. `init --force` uses the initial operator declaration
+effective defaults. `init --force` uses the initial majordomo declaration
 regardless of an existing `kukeon.yaml`. Reserve the name `kukeon` for this
-operator. Init does not discover or migrate other registrations.
+team. Init does not discover or migrate other registrations.
+
+### Reapplying an edited entry
+
+`~/.kuke/kuketeam.d/kukeon.yaml` is the kukeon team's editable source.
+`kuke team init --reapply` recomposes the team from it, applies the result, and
+has kukeond prune the team's configs the new composition no longer renders. Use
+it after editing the entry, for example to
+[turn on the health sweep](../concepts/team.md#the-majordomo-health-sweep).
+
+```bash
+$EDITOR ~/.kuke/kuketeam.d/kukeon.yaml
+kuke team init --reapply
+```
+
+- The entry is rewritten only after a fully successful apply, like every
+  registration. A failed apply leaves your edit in place.
+- `~/.kuke/kuketeams.yaml` is read and never written.
+- The entry is decoded strictly: an unknown or misspelled field, or a task the
+  role does not declare, fails before anything is fetched or applied.
+- Without a stored entry the command fails and tells you to run
+  `kuke team init` first; it never creates one.
+- `--reapply --force` is rejected. `--force` discards the entry and starts
+  again from the initial declaration; `--reapply` keeps it.
+- `--reapply` does not import a git identity. Use
+  `--force --import-git-identity` for that.
+
+### Migrating from the `operator` role
+
+The kukeon team's role was named `operator` before it became `majordomo`, and
+its configs were `kukeon-operator-codex` and `kukeon-operator-claude`. On a host
+initialized with the old name, run `kuke team init --force`: it applies
+`kukeon-majordomo-codex` and `kukeon-majordomo-claude` and prunes the
+`kukeon-operator-*` configs, which carry the same `kukeon.io/team: kukeon`
+label. Cells already created from the old configs are not touched.
+
+Log in to the harness once more afterwards. The state volume that holds the
+harness login is named after the config, so a `kukeon-majordomo-*` cell starts
+with a new, empty volume. The old `kukeon-operator-*` volumes are left in
+place; delete them with `kuke delete volume` when you no longer need them.
 
 Registration follows full blueprint/config success only. A secret failure, RPC
 failure, total resource failure, partial apply, prune failure, or incomplete

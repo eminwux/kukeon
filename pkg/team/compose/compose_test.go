@@ -35,6 +35,7 @@ import (
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/team/bootstrap"
+	"github.com/eminwux/kukeon/internal/team/teamtest"
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/compose"
 	"github.com/eminwux/kukeon/pkg/team/config"
@@ -68,12 +69,15 @@ func fixture(t *testing.T) (*config.TeamsConfig, compose.Options) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	boot.Config.Spec.Defaults = config.Operator().Spec
+	boot.Config.Spec.Defaults = config.Majordomo().Spec
 	boot.Config.Spec.Defaults.Harnesses = boot.Config.Spec.Defaults.Harnesses[:1]
 	return boot.Config, compose.Options{
-		Sources: map[string]fs.FS{"kukeon": os.DirFS("../../..")},
+		Sources: map[string]fs.FS{"kukeon": copiedSource(t)},
 	}
 }
+
+// shippedSource is the repository as it is, majordomo's extras included.
+func shippedSource() map[string]fs.FS { return map[string]fs.FS{"kukeon": os.DirFS("../../..")} }
 
 func TestRootDefaults(t *testing.T) {
 	cfg, opts := fixture(t)
@@ -102,7 +106,7 @@ func TestRootDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(rendered), "components:") || strings.Contains(string(rendered), "GH_TOKEN") {
-		t.Fatalf("operator config enables the GitHub connector: %s", rendered)
+		t.Fatalf("majordomo config enables the GitHub connector: %s", rendered)
 	}
 	if _, set := envOf(work(t, result.Pairs[0], interactive))["GH_TOKEN"]; set {
 		t.Fatal("GH_TOKEN reached a cell that did not enable the connector")
@@ -219,25 +223,7 @@ func TestSelectedHarnessesAndBindings(t *testing.T) {
 
 func copiedSource(t *testing.T) fstest.MapFS {
 	t.Helper()
-	out := fstest.MapFS{}
-	err := fs.WalkDir(os.DirFS("../../.."), ".", func(name string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() && name != "." && name != "team" && name != "team/harnesses" && name != "team/roles" &&
-			!strings.HasPrefix(name, "team/harnesses/") &&
-			!strings.HasPrefix(name, "team/roles/") {
-			return fs.SkipDir
-		}
-		if !d.IsDir() {
-			raw, e := os.ReadFile("../../../" + name)
-			if e != nil {
-				return e
-			}
-			out[name] = &fstest.MapFile{Data: raw}
-		}
-		return nil
-	})
+	out, err := teamtest.PlainSource("../../..")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,9 +234,9 @@ func TestMandatoryRequirementsAndSourceDeclarations(t *testing.T) {
 	cfg, opts := fixture(t)
 	source := copiedSource(t)
 	opts.Sources["kukeon"] = source
-	role := string(source["team/roles/operator/role.yaml"].Data)
+	role := string(source["team/roles/majordomo/role.yaml"].Data)
 	role = strings.Replace(role, "  needs:\n", "  needs:\n    secrets: [service-auth]\n    params: [REGION]\n", 1)
-	source["team/roles/operator/role.yaml"] = &fstest.MapFile{Data: []byte(role)}
+	source["team/roles/majordomo/role.yaml"] = &fstest.MapFile{Data: []byte(role)}
 	cfg.Spec.Defaults.Roles[0].Needs = &config.Needs{Image: []string{}} // mandatory go survives
 	cfg.Spec.Parameters = map[string]string{"REGION": "eu-test"}
 	cfg.Spec.Secrets = []config.SecretBinding{{
@@ -326,7 +312,7 @@ func TestActionableFailures(t *testing.T) {
 			"role",
 			"read definition",
 			func(_ *config.TeamsConfig, _ *compose.Options, s fstest.MapFS) {
-				delete(s, "team/roles/operator/role.yaml")
+				delete(s, "team/roles/majordomo/role.yaml")
 			},
 		},
 		{"renderer", "spec.renderer: unsupported", func(_ *config.TeamsConfig, _ *compose.Options, s fstest.MapFS) {
@@ -348,15 +334,15 @@ func TestActionableFailures(t *testing.T) {
 			},
 		},
 		{"unsupported-setting", "unsupported Codex", func(_ *config.TeamsConfig, _ *compose.Options, s fstest.MapFS) {
-			s["team/roles/operator/role.yaml"].Data = bytes.ReplaceAll(
-				s["team/roles/operator/role.yaml"].Data,
+			s["team/roles/majordomo/role.yaml"].Data = bytes.ReplaceAll(
+				s["team/roles/majordomo/role.yaml"].Data,
 				[]byte("workspace-write"),
 				[]byte("made-up"),
 			)
 		}},
 		{"parameter", "missing required parameter", func(_ *config.TeamsConfig, _ *compose.Options, s fstest.MapFS) {
-			s["team/roles/operator/role.yaml"].Data = bytes.ReplaceAll(
-				s["team/roles/operator/role.yaml"].Data,
+			s["team/roles/majordomo/role.yaml"].Data = bytes.ReplaceAll(
+				s["team/roles/majordomo/role.yaml"].Data,
 				[]byte("  needs:"),
 				[]byte("  needs:\n    params: [REGION]"),
 			)
@@ -381,8 +367,8 @@ func TestActionableFailures(t *testing.T) {
 			)
 		}},
 		{"mount", "unsupported mount", func(_ *config.TeamsConfig, _ *compose.Options, s fstest.MapFS) {
-			s["team/roles/operator/role.yaml"].Data = bytes.ReplaceAll(
-				s["team/roles/operator/role.yaml"].Data,
+			s["team/roles/majordomo/role.yaml"].Data = bytes.ReplaceAll(
+				s["team/roles/majordomo/role.yaml"].Data,
 				[]byte("  needs:"),
 				[]byte("  needs:\n    mounts: [unknown]"),
 			)
@@ -443,7 +429,7 @@ func assertRootResources(t *testing.T, result *compose.Result) {
 	}
 	// The config keeps the team/role/harness identity; the blueprint is the
 	// shared realm-wide form named after the harness alone.
-	if p.Config.Metadata.Name != "root-operator-codex" || bp.Metadata.Name != "codex" ||
+	if p.Config.Metadata.Name != "root-majordomo-codex" || bp.Metadata.Name != "codex" ||
 		bp.Spec.Prefix != "codex" || p.Config.Spec.Blueprint.Name != "codex" {
 		t.Fatalf("unstable identity: config %q blueprint %q", p.Config.Metadata.Name, bp.Metadata.Name)
 	}
@@ -463,6 +449,9 @@ func assertRootResources(t *testing.T, result *compose.Result) {
 	if p.Config.Metadata.Labels[api.LabelTeam] != "root" {
 		t.Fatal("missing team ownership")
 	}
+	if p.Config.Metadata.Labels[api.LabelRole] != "majordomo" {
+		t.Fatalf("missing role label: %v", p.Config.Metadata.Labels)
+	}
 	if p.Image.Image != publishedCodexImage(t) || p.Config.Spec.Values["IMAGE"] != p.Image.Image {
 		t.Fatalf("image = %+v values = %v", p.Image, p.Config.Spec.Values)
 	}
@@ -470,7 +459,7 @@ func assertRootResources(t *testing.T, result *compose.Result) {
 	c := bp.Spec.Cell.Containers[0]
 	if c.Privileged || bp.Spec.Cell.NestedCgroupRuntime || len(p.Secrets) != 0 || c.Git != nil ||
 		p.Config.Spec.Git != nil {
-		t.Fatal("operator gained privilege, secret, or Git signing requirements")
+		t.Fatal("majordomo gained privilege, secret, or Git signing requirements")
 	}
 	if p.Config.Metadata.Realm != "default" || p.Config.Metadata.Space != "default" ||
 		p.Config.Metadata.Stack != "default" {
@@ -480,13 +469,13 @@ func assertRootResources(t *testing.T, result *compose.Result) {
 	want := map[string]string{
 		"IMAGE":           publishedCodexImage(t),
 		"ROLE_SOURCE_DIR": "/home/user/kukeon-src",
-		"ROLE_PATH":       "team/roles/operator",
+		"ROLE_PATH":       "team/roles/majordomo",
 		"INITIAL_PATH":    "/home/user",
-		"ROLE_NAME":       "operator",
+		"ROLE_NAME":       "majordomo",
 		"SANDBOX":         "workspace-write",
 		"APPROVAL":        "on-request",
-		"AGENT_NAME":      "root-operator-codex",
-		"STATE_VOLUME":    "root-operator-codex",
+		"AGENT_NAME":      "root-majordomo-codex",
+		"STATE_VOLUME":    "root-majordomo-codex",
 	}
 	if !reflect.DeepEqual(p.Config.Spec.Values, want) {
 		t.Fatalf("config values = %v, want %v", p.Config.Spec.Values, want)
@@ -495,7 +484,7 @@ func assertRootResources(t *testing.T, result *compose.Result) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, fact := range []string{"team/roles/operator", "kukeon-src", "root-operator"} {
+	for _, fact := range []string{"team/roles/majordomo", "kukeon-src", "root-majordomo"} {
 		if strings.Contains(string(blueprint), fact) {
 			t.Fatalf("role fact %q baked into the shared blueprint", fact)
 		}
@@ -513,7 +502,7 @@ func assertRootResources(t *testing.T, result *compose.Result) {
 	}
 	rendered := work(t, p, interactive)
 	state, ok := stateVolume(rendered)
-	if !ok || state.Source != "root-operator-codex" || !state.Ensure || state.Target != "/home/user/.codex" {
+	if !ok || state.Source != "root-majordomo-codex" || !state.Ensure || state.Target != "/home/user/.codex" {
 		t.Fatalf("state volume missing team ownership/ensure: %+v", state)
 	}
 	if rendered.Image != publishedCodexImage(t) || len(rendered.Repos) != 1 ||
@@ -522,9 +511,9 @@ func assertRootResources(t *testing.T, result *compose.Result) {
 	}
 	env := envOf(rendered)
 	for key, value := range map[string]string{
-		"ROLE_SOURCE_DIR": "/home/user/kukeon-src", "ROLE_PATH": "team/roles/operator",
+		"ROLE_SOURCE_DIR": "/home/user/kukeon-src", "ROLE_PATH": "team/roles/majordomo",
 		"INITIAL_PATH": "/home/user", "CODEX_SANDBOX": "workspace-write", "CODEX_APPROVAL": "on-request",
-		"AGENTS_ROLE": "operator", "AGENT_NAME": "root-operator-codex",
+		"AGENTS_ROLE": "majordomo", "AGENT_NAME": "root-majordomo-codex",
 	} {
 		if env[key] != value {
 			t.Fatalf("cell env %s = %q, want %q", key, env[key], value)
@@ -544,8 +533,8 @@ func TestRenderedLaunchScriptsAndExplicitProjectRepo(t *testing.T) {
 	cfg.Spec.Secrets = []config.SecretBinding{routerBinding()}
 	source := copiedSource(t)
 	opts.Sources["kukeon"] = source
-	source["team/roles/operator/role.yaml"].Data = bytes.ReplaceAll(
-		source["team/roles/operator/role.yaml"].Data,
+	source["team/roles/majordomo/role.yaml"].Data = bytes.ReplaceAll(
+		source["team/roles/majordomo/role.yaml"].Data,
 		[]byte("  needs:"),
 		[]byte("  needs:\n    repos: [project]"),
 	)
@@ -600,8 +589,8 @@ func TestSecretDestinationConflicts(t *testing.T) {
 	cfg, opts := fixture(t)
 	source := copiedSource(t)
 	opts.Sources["kukeon"] = source
-	source["team/roles/operator/role.yaml"].Data = bytes.ReplaceAll(
-		source["team/roles/operator/role.yaml"].Data,
+	source["team/roles/majordomo/role.yaml"].Data = bytes.ReplaceAll(
+		source["team/roles/majordomo/role.yaml"].Data,
 		[]byte("  needs:"),
 		[]byte("  needs:\n    secrets: [first-auth, second-auth]"),
 	)
@@ -614,8 +603,8 @@ func TestSecretDestinationConflicts(t *testing.T) {
 		t.Fatalf("result=%v err=%v", result, err)
 	}
 	cfg.Spec.Secrets = cfg.Spec.Secrets[:1]
-	source["team/roles/operator/role.yaml"].Data = bytes.ReplaceAll(
-		source["team/roles/operator/role.yaml"].Data,
+	source["team/roles/majordomo/role.yaml"].Data = bytes.ReplaceAll(
+		source["team/roles/majordomo/role.yaml"].Data,
 		[]byte("[first-auth, second-auth]"),
 		[]byte("[first-auth]"),
 	)
@@ -711,8 +700,8 @@ func TestGeneratedSecretDestinationConflicts(t *testing.T) {
 	cfg, opts := fixture(t)
 	source := copiedSource(t)
 	opts.Sources["kukeon"] = source
-	source["team/roles/operator/role.yaml"].Data = bytes.ReplaceAll(
-		source["team/roles/operator/role.yaml"].Data,
+	source["team/roles/majordomo/role.yaml"].Data = bytes.ReplaceAll(
+		source["team/roles/majordomo/role.yaml"].Data,
 		[]byte("  needs:"),
 		[]byte("  needs:\n    secrets: [prompt]"),
 	)
@@ -848,8 +837,8 @@ func TestLaunchPreservesSourceRevision(t *testing.T) {
 			cfg.Spec.Defaults.Sources = append(cfg.Spec.Defaults.Sources, project)
 			cfg.Spec.Defaults.Roles[0].InitialPath = repoDir
 			source := copiedSource(t)
-			source["team/roles/operator/role.yaml"].Data = bytes.ReplaceAll(
-				source["team/roles/operator/role.yaml"].Data,
+			source["team/roles/majordomo/role.yaml"].Data = bytes.ReplaceAll(
+				source["team/roles/majordomo/role.yaml"].Data,
 				[]byte("  needs:"),
 				[]byte("  needs:\n    repos: [project]"),
 			)
@@ -943,7 +932,7 @@ func TestReviewerConfigNamePreservesExistingState(t *testing.T) {
 func historicStateVolume(team, role, harness string, project bool) string {
 	parts := []string{team, role, harness}
 	if project {
-		parts = append(parts, "work-operator-"+harness)
+		parts = append(parts, "work-majordomo-"+harness)
 	}
 	name := strings.Join(strings.FieldsFunc(strings.Join(parts, "-"), func(r rune) bool {
 		return r == '-' || r == '.'
@@ -963,11 +952,11 @@ func TestHistoricStateVolumeNames(t *testing.T) {
 		project             bool
 		want                string
 	}{
-		{"root", "operator", "codex", false, "root-operator-codex"},
+		{"root", "majordomo", "codex", false, "root-majordomo-codex"},
 		{"esp32", "pr-reviewer", "codex", false, "esp32-pr-reviewer-codex-84a6981913a0eaf3"},
-		{"root", "operator", "codex", true, "root-operator-codex-work-operator-codex-80eba5614fca520b"},
-		{"root", "operator", "claude", true, "root-operator-claude-work-operator-claude-10c6f6c0c245e416"},
-		{"root.a", "operator", "claude", false, "root-a-operator-claude-6abfcd9e2ace958c"},
+		{"root", "majordomo", "codex", true, "root-majordomo-codex-work-majordomo-codex-b2e12e8fb2d11c86"},
+		{"root", "majordomo", "claude", true, "root-majordomo-claude-work-majordomo-claude-4697e42f75c741b5"},
+		{"root.a", "majordomo", "claude", false, "root-a-majordomo-claude-a6ef3afb31a98bb9"},
 	} {
 		if got := historicStateVolume(tc.team, tc.role, tc.harness, tc.project); got != tc.want {
 			t.Errorf("historic name for %s/%s/%s project=%v = %q, want %q",
@@ -989,8 +978,8 @@ func TestReadableResourceNamesAndIsolatedState(t *testing.T) {
 			cfg.Spec.Secrets = []config.SecretBinding{routerBinding()}
 			if project {
 				source := copiedSource(t)
-				source["team/roles/operator/role.yaml"].Data = bytes.ReplaceAll(
-					source["team/roles/operator/role.yaml"].Data,
+				source["team/roles/majordomo/role.yaml"].Data = bytes.ReplaceAll(
+					source["team/roles/majordomo/role.yaml"].Data,
 					[]byte("  needs:"), []byte("  needs:\n    repos: [project]"))
 				opts.Sources["kukeon"] = source
 				cfg.Spec.Defaults.Sources = append(cfg.Spec.Defaults.Sources, config.Source{
@@ -1000,13 +989,13 @@ func TestReadableResourceNamesAndIsolatedState(t *testing.T) {
 			volumes := map[string]string{}
 			digests := map[string]string{}
 			for _, selection := range []struct{ team, role string }{
-				{"root-a", "operator"},
-				{"root", "a-operator"},
-				{"root--a", "operator"},
-				{"root", "a--operator"},
-				{"root", "operator"},
-				{"root.a", "operator"},
-				{"root", "a.operator"},
+				{"root-a", "majordomo"},
+				{"root", "a-majordomo"},
+				{"root--a", "majordomo"},
+				{"root", "a--majordomo"},
+				{"root", "majordomo"},
+				{"root.a", "majordomo"},
+				{"root", "a.majordomo"},
 				{"esp32", "pr-reviewer"},
 				{"esp32", "pr--reviewer"},
 				{"esp32", "pr..reviewer"},
@@ -1033,8 +1022,8 @@ func TestReadableResourceNamesAndIsolatedState(t *testing.T) {
 					if !runtimeID.MatchString("default_default_" + name + "-00b5e6_work") {
 						t.Fatalf("invalid derived container ID for %s", owner)
 					}
-					if selection.team == "root" && selection.role == "operator" &&
-						name != "root-operator-"+pair.Harness {
+					if selection.team == "root" && selection.role == "majordomo" &&
+						name != "root-majordomo-"+pair.Harness {
 						t.Fatalf("simple resource identity changed: %q", name)
 					}
 					// Every team and role shares the one blueprint of its harness;
@@ -1046,6 +1035,9 @@ func TestReadableResourceNamesAndIsolatedState(t *testing.T) {
 					}
 					if pair.Config.Metadata.Labels[api.LabelTeam] != selection.team {
 						t.Fatalf("authored team label changed for %s", owner)
+					}
+					if pair.Config.Metadata.Labels[api.LabelRole] != selection.role {
+						t.Fatalf("authored role label changed for %s", owner)
 					}
 					if _, stamped := pair.Blueprint.Metadata.Labels[api.LabelTeam]; stamped {
 						t.Fatalf("shared blueprint carries a team label for %s", owner)
@@ -1131,8 +1123,8 @@ func TestInitialPathLaunchAcrossHarnesses(t *testing.T) {
 				},
 			)
 			source := copiedSource(t)
-			source["team/roles/operator/role.yaml"].Data = bytes.ReplaceAll(
-				source["team/roles/operator/role.yaml"].Data,
+			source["team/roles/majordomo/role.yaml"].Data = bytes.ReplaceAll(
+				source["team/roles/majordomo/role.yaml"].Data,
 				[]byte("  needs:"),
 				[]byte("  needs:\n    repos: [project]"),
 			)
@@ -1208,28 +1200,114 @@ func TestInitialPathLaunchAcrossHarnesses(t *testing.T) {
 	}
 }
 
-func TestFreshOperatorComposition(t *testing.T) {
+// TestFreshMajordomoComposition composes the kukeon team exactly as `kuke team
+// init` does on a new host, from the role as shipped (issue #1509): both
+// harness configs on the shared host blueprint with daemon access, and the
+// health sweep rendered hourly but suspended, with no secret required.
+func TestFreshMajordomoComposition(t *testing.T) {
 	boot, err := bootstrap.Run(t.Context(), bootstrap.Options{Root: t.TempDir(), Git: noGit{}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, opts := fixture(t)
-	result, err := compose.Compose(boot.Config, config.Operator(), opts)
+	result, err := compose.Compose(boot.Config, config.Majordomo(), compose.Options{Sources: shippedSource()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(result.Pairs) != 2 {
 		t.Fatalf("pairs=%d", len(result.Pairs))
 	}
+	wantMounts := mergeMounts(socketMounts, binaryMounts, installMounts)
 	for i, harnessName := range []string{"codex", "claude"} {
 		p := result.Pairs[i]
-		if p.Config.Metadata.Name != "kukeon-operator-"+harnessName || p.Blueprint.Metadata.Name != harnessName ||
-			p.Config.Spec.Blueprint.Name != harnessName || result.Blueprints[i] != p.Blueprint {
-			t.Fatalf("incorrect pair identity: %+v", p)
+		blueprint := harnessName + "-host"
+		if p.Config.Metadata.Name != "kukeon-majordomo-"+harnessName || p.Blueprint.Metadata.Name != blueprint ||
+			p.Config.Spec.Blueprint.Name != blueprint || result.Blueprints[i] != p.Blueprint {
+			t.Fatalf("incorrect pair identity: %s on %s", p.Config.Metadata.Name, p.Blueprint.Metadata.Name)
+		}
+		if p.Config.Metadata.Labels[api.LabelRole] != "majordomo" || p.Config.Metadata.Labels[api.LabelTeam] != "kukeon" ||
+			p.Config.Metadata.Labels[api.LabelTask] != "" {
+			t.Fatalf("%s labels = %v", p.Config.Metadata.Name, p.Config.Metadata.Labels)
+		}
+		if len(p.Secrets) != 0 || len(p.Config.Spec.Secrets) != 0 {
+			t.Fatalf("%s requires secrets: %v", p.Config.Metadata.Name, p.Config.Spec.Secrets)
+		}
+		container := work(t, p, interactive)
+		got := map[string]hostMount{}
+		for _, volume := range container.Volumes {
+			if volume.Kind == api.VolumeKindVolume || volume.Target == "/opt/cni" {
+				continue
+			}
+			got[volume.Target] = hostMount{volume.Source, volume.ReadOnly}
+		}
+		if !reflect.DeepEqual(got, wantMounts) {
+			t.Fatalf("%s host mounts = %v, want %v", harnessName, got, wantMounts)
+		}
+		if !slices.Contains(container.Env, "KUKEON_HOST=unix:///run/kukeon/kukeond/kukeond.sock") {
+			t.Fatalf("%s is not pointed at the host daemon: %v", harnessName, container.Env)
+		}
+
+		if len(p.Tasks) != 1 {
+			t.Fatalf("%s tasks = %d", harnessName, len(p.Tasks))
+		}
+		sweep := p.Tasks[0]
+		if sweep.Metadata.Name != p.Config.Metadata.Name+"-health-sweep" ||
+			sweep.Metadata.Labels[api.LabelTask] != "health-sweep" ||
+			sweep.Metadata.Labels[api.LabelRole] != "majordomo" ||
+			sweep.Spec.Values["PROMPT"] != "Use the health-sweep skill" || !sweep.Spec.AutoDelete ||
+			sweep.Spec.Values["STATE_VOLUME"] != p.Config.Spec.Values["STATE_VOLUME"] {
+			t.Fatalf("sweep config = %+v", sweep)
+		}
+		if sweep.Spec.Schedule == nil || sweep.Spec.Schedule.Cron != "@hourly" || !sweep.Spec.Schedule.Suspend {
+			t.Fatalf("sweep must ship hourly and suspended: %+v", sweep.Spec.Schedule)
 		}
 	}
 	if len(result.Blueprints) != 2 || result.Git != nil || len(result.Notes) != 0 {
 		t.Fatalf("blueprints=%d git=%v notes=%v", len(result.Blueprints), result.Git, result.Notes)
+	}
+}
+
+// TestMajordomoSweepOptIn is the per-install opt-in an edited team entry makes
+// (issue #1509): the sweep is switched on, told where to file, and given the
+// one credential filing needs.
+func TestMajordomoSweepOptIn(t *testing.T) {
+	boot, err := bootstrap.Run(t.Context(), bootstrap.Options{Root: t.TempDir(), Git: noGit{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	team := config.Majordomo()
+	on := false
+	role := &team.Spec.Roles[0]
+	role.Needs.Secrets = []string{"health-github-token"}
+	role.Tasks = &[]config.TaskSelection{{
+		Name: "health-sweep", Suspend: &on, Args: "--file-issues example/kukeon-ops",
+	}}
+	result, err := compose.Compose(boot.Config, team, compose.Options{Sources: shippedSource()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sweep := result.Pairs[0].Tasks[0]
+	if sweep.Spec.Schedule == nil || sweep.Spec.Schedule.Suspend || sweep.Spec.Schedule.Cron != "@hourly" {
+		t.Fatalf("schedule = %+v", sweep.Spec.Schedule)
+	}
+	if got := sweep.Spec.Values["PROMPT"]; got != "Use the health-sweep skill with arguments: --file-issues example/kukeon-ops" {
+		t.Fatalf("prompt = %q", got)
+	}
+	if _, bound := sweep.Spec.Secrets["health-github-token"]; !bound {
+		t.Fatalf("sweep secrets = %v", sweep.Spec.Secrets)
+	}
+	container := work(t, result.Pairs[0], headless)
+	if !slices.ContainsFunc(container.Secrets, func(s api.ContainerSecret) bool { return s.Name == "HEALTH_GITHUB_TOKEN" }) {
+		t.Fatalf("the token is not delivered as HEALTH_GITHUB_TOKEN: %+v", container.Secrets)
+	}
+	// The recorded entry keeps the opt-in, so a later --reapply renders the same.
+	raw, err := yaml.Marshal(result.Entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"health-github-token", "suspend: false", "--file-issues example/kukeon-ops"} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("recorded entry lacks %q:\n%s", want, raw)
+		}
 	}
 }
 

@@ -104,7 +104,8 @@ export function VersionRows({ info }: { info: ReturnType<typeof versionInfo> }) 
 }
 
 // Collapsed icon rail: brand mark, expand button, one state dot per cell, then the connection dot.
-export function SidebarRail({ inventory, selectedScope, connection, onExpand }: {
+export function SidebarRail({ inventory, selectedScope, connection, onExpand, majordomo }: {
+  majordomo?: ReactNode;
   inventory: InventoryResource;
   selectedScope: string[];
   connection: { status: string; tone: string; info: ReturnType<typeof versionInfo> };
@@ -115,6 +116,7 @@ export function SidebarRail({ inventory, selectedScope, connection, onExpand }: 
   return <div className="sidebar-rail">
     <a className="rail-brand" href={homeLink} aria-label="kukeon home" title="kukeon"><BrandMark /></a>
     <SidebarToggle collapsed onToggle={onExpand} />
+    {majordomo}
     <nav className="rail-cells" aria-label="Cell shortcuts">
       <ul>{cells.map(row => {
         const fullName = row.scope.join(" / ");

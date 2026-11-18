@@ -1,7 +1,7 @@
-# Checking the published Codex operator (`kuke team`)
+# Checking the published Codex majordomo (`kuke team`)
 
 This opt-in check exercises the real `kuke team init` command followed by an
-explicit `kuke run --from-config kukeon-operator-codex`. Initialization applies
+explicit `kuke run --from-config kukeon-majordomo-codex`. Initialization applies
 configuration and registers the kukeon team; it does not start cells. A passing
 check requires a live work container, the published image's digest, and a
 completed authenticated Codex turn with command-generated installation evidence.
@@ -28,12 +28,12 @@ completed authenticated Codex turn with command-generated installation evidence.
 - A reachable, full source commit SHA in `eminwux/kukeon`. Both initialization
   and the in-cell clone use this commit. By default it is the driver's `HEAD`;
   set `KUKETEAMS_REMOTE_REVISION` when testing unpushed driver changes against an
-  already published source revision. Use matching operator/harness assets: their
+  already published source revision. Use matching majordomo/harness assets: their
   expected policy/hook hashes come from this checkout.
-- A dedicated, pre-authenticated `kukeon-operator-codex` Volume at
+- A dedicated, pre-authenticated `kukeon-majordomo-codex` Volume at
   `default/default/default`. The check does not log in, obtain credentials, copy
   another team's credentials, rotate secrets, or delete this volume. The base
-  operator's Codex role requires **no secret bindings**, including no `gh-token`
+  majordomo's Codex role requires **no secret bindings**, including no `gh-token`
   or mandatory API-key secret. Account/model access must already be configured
   in its Codex state. An absent volume fails before launch; an empty/expired
   login cannot produce the required authenticated turn and fails the check.
@@ -41,7 +41,7 @@ completed authenticated Codex turn with command-generated installation evidence.
 Prefer a disposable daemon. A shared daemon is supported only when the `kukeon`
 team identity is unused and exclusively reserved for this check. Before writing,
 its guard lists blueprints/configs across **all realms**, rejecting any kukeon-team
-label or conflicting operator resource name: team application can prune kukeon
+label or conflicting majordomo resource name: team application can prune kukeon
 resources across realms. Run only one kukeon check at a time and do not initialize
 another kukeon team concurrently. Other team names are left alone. The driver uses
 a temporary client HOME, explicit host/client configuration and runtime scope,
@@ -56,7 +56,7 @@ check. For example, author this one-cell manifest in a new local file:
 apiVersion: v1beta1
 kind: Cell
 metadata:
-  name: operator-auth-setup
+  name: majordomo-auth-setup
 spec:
   realmId: default
   spaceId: default
@@ -73,17 +73,17 @@ spec:
         - CODEX_HOME=/home/user/.codex
       volumes:
         - kind: volume
-          source: kukeon-operator-codex
+          source: kukeon-majordomo-codex
           target: /home/user/.codex
           ensure: true
 ```
 
 Use a fresh setup cell name and ensure the state volume belongs to this test.
-Run `kuke --host unix:///path/to/kukeond.sock run -f /path/to/operator-auth.yaml`.
+Run `kuke --host unix:///path/to/kukeond.sock run -f /path/to/majordomo-auth.yaml`.
 Inside that shell, perform your chosen supported `codex login` flow and check
 `codex login status` privately. Do not include login output, tokens, `auth.json`,
 or session transcripts in test evidence. Exit and delete only the setup cell
-with `kuke --host unix:///path/to/kukeond.sock delete cell operator-auth-setup
+with `kuke --host unix:///path/to/kukeond.sock delete cell majordomo-auth-setup
 --realm default --space default --stack default`, retaining the volume. The
 check expects no existing role instruction files or conflicting
 `AGENTS.override.md` in that dedicated state.
@@ -98,8 +98,8 @@ From a clean, published checkout whose `HEAD` is reachable on GitHub:
 
 ```sh
 KUKETEAMS_REMOTE_HOST=unix:///run/kukeon/kukeond.sock \
-KUKETEAMS_REMOTE_REPORT=/tmp/operator-check.json \
-make test-remote-operator
+KUKETEAMS_REMOTE_REPORT=/tmp/majordomo-check.json \
+make test-remote-majordomo
 ```
 
 The target builds the local `kuke` binary, then invokes the opt-in Go test
@@ -113,7 +113,7 @@ The driver:
 1. Runs `kuke team init` in an isolated client HOME with an explicit Codex-only
    `kukeon` entry and its source commit pinned. Fresh init normally selects both
    Codex and Claude; this check intentionally verifies Codex alone.
-   Reads back the operator blueprint/config and kukeon TeamEntry, checks repository
+   Reads back the majordomo blueprint/config and kukeon TeamEntry, checks repository
    pinning and absence of base-role secret bindings, and compares runtime cell
    identities/recipes and secret metadata before and after initialization.
 2. Fetches and hashes the catalog image's published manifest. Once authentication
@@ -121,7 +121,7 @@ The driver:
    that digest with a single `kuke apply -f`. This test-only pin prevents a stale
    or locally retagged image from satisfying the check. It does not change the
    production catalog or add image-pinning behavior to `init`.
-3. Runs `kuke run --from-config kukeon-operator-codex --name operator-check-<unique>
+3. Runs `kuke run --from-config kukeon-majordomo-codex --name majordomo-check-<unique>
 --realm default --space default --stack default --env PROMPT=<probe> --detach`.
    The supported `PROMPT` override selects the existing `codex exec --json`
    startup path, with workspace-write sandbox and approval never for the batch
@@ -150,7 +150,7 @@ the `failure` field instead of interpreting a partial report as a pass.
 ## Cleanup and recovery
 
 On success or ordinary failure, cleanup kills only the unique test cell and
-deletes only `kukeon-operator-codex` config/blueprint documents bearing its kukeon
+deletes only `kukeon-majordomo-codex` config/blueprint documents bearing its kukeon
 team label. It removes its temporary HOME/registration. It never deletes or
 rotates secrets, deletes state volumes, cascades a realm/space/stack, purges
 images, or touches unrelated teams and persistent data. The pre-authenticated

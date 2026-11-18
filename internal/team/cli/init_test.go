@@ -98,6 +98,36 @@ func TestInitForceIsForwarded(t *testing.T) {
 	}
 }
 
+func TestInitReapplyIsForwardedAndExcludesForce(t *testing.T) {
+	cmd := newInitCommand(func() (string, error) { return "/home/operator", nil },
+		func(_ context.Context, opts initialize.Options) (initialize.Result, error) {
+			if !opts.Reapply || opts.Force {
+				t.Fatalf("options = %+v", opts)
+			}
+			return initialize.Result{Bootstrap: bootstrap.Result{Path: opts.Root + "/kuketeams.yaml"}}, nil
+		})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"--reapply"})
+	if err := cmd.Execute(); err != nil || !strings.Contains(out.String(), "Kept configuration") {
+		t.Fatalf("output=%q err=%v", &out, err)
+	}
+
+	for _, args := range [][]string{{"--reapply", "--force"}, {"--reapply", "--import-git-identity"}} {
+		rejected := newInitCommand(func() (string, error) { return "/home/operator", nil },
+			func(context.Context, initialize.Options) (initialize.Result, error) {
+				t.Fatalf("%v must not run", args)
+				return initialize.Result{}, nil
+			})
+		rejected.SetOut(&out)
+		rejected.SetErr(&out)
+		rejected.SetArgs(args)
+		if err := rejected.Execute(); err == nil {
+			t.Fatalf("accepted %v", args)
+		}
+	}
+}
+
 func TestInitHelpAndUnsupportedFlagsHaveNoEffects(t *testing.T) {
 	for _, args := range [][]string{{"--help"}, {"--build"}, {"--config", "elsewhere"}, {"extra"}} {
 		cmd := newInitCommand(func() (string, error) {

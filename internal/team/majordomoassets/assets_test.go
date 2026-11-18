@@ -14,8 +14,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-// Package operatorassets_test checks the shipped role and native harness layouts.
-package operatorassets_test
+// Package majordomoassets_test checks the shipped role and native harness layouts.
+package majordomoassets_test
 
 import (
 	"bytes"
@@ -80,25 +80,32 @@ type definition struct {
 			Params  []string `yaml:"params"`
 			Secrets []string `yaml:"secrets"`
 		} `yaml:"needs"`
+		Tasks []struct {
+			Name     string `yaml:"name"`
+			Skill    string `yaml:"skill"`
+			Args     string `yaml:"args"`
+			Schedule string `yaml:"schedule"`
+			Suspend  bool   `yaml:"suspend"`
+		} `yaml:"tasks"`
 	} `yaml:"spec"`
 }
 
 func TestDefaultRoleAssets(t *testing.T) {
-	// Resolve the actual initial operator selection, rather than duplicating its path
+	// Resolve the actual initial majordomo selection, rather than duplicating its path
 	// in a fixture that could pass while init points at a different role.
 	result, err := bootstrap.Run(t.Context(), bootstrap.Options{Root: t.TempDir(), Git: noGit{}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	roles := config.Operator().Spec.Roles
+	roles := config.Majordomo().Spec.Roles
 	if len(result.Config.Spec.Defaults.Roles) != 0 {
-		t.Fatal("bootstrap seeded operator globally")
+		t.Fatal("bootstrap seeded majordomo globally")
 	}
 	if len(roles) != 1 {
 		t.Fatalf("default roles: %+v", roles)
 	}
 	selection := roles[0]
-	if selection.Name != "operator" || selection.Source != "kukeon" {
+	if selection.Name != "majordomo" || selection.Source != "kukeon" {
 		t.Fatalf("selection: %+v", selection)
 	}
 	root := repoRoot(t)
@@ -115,11 +122,22 @@ func TestDefaultRoleAssets(t *testing.T) {
 	if !reflect.DeepEqual(role.Spec.Needs.Image, selection.Needs.Image) {
 		t.Fatalf("role capabilities %v differ from bootstrap %v", role.Spec.Needs.Image, selection.Needs.Image)
 	}
-	if len(role.Spec.Needs.Repos)+len(role.Spec.Needs.Mounts)+len(role.Spec.Needs.Secrets) != 0 {
-		t.Fatal("operator should not require project repos, mounts, or non-provider secrets")
+	if len(role.Spec.Needs.Repos)+len(role.Spec.Needs.Secrets) != 0 {
+		t.Fatal("majordomo should not require project repos or non-provider secrets")
 	}
-	if len(role.Spec.Skills) != 1 {
+	// Daemon access comes from the three host mounts (issue #1509).
+	if want := []string{"kukeond-socket", "kuke-binary", "kukeon-install"}; !reflect.DeepEqual(role.Spec.Needs.Mounts, want) {
+		t.Fatalf("mounts = %v, want %v", role.Spec.Needs.Mounts, want)
+	}
+	if len(role.Spec.Skills) != 3 {
 		t.Fatalf("skills: %v", role.Spec.Skills)
+	}
+	// The health sweep ships scheduled but switched off, so no install spends
+	// model credits until its user turns it on.
+	if len(role.Spec.Tasks) != 1 || role.Spec.Tasks[0].Name != "health-sweep" ||
+		role.Spec.Tasks[0].Skill != "health-sweep" || role.Spec.Tasks[0].Schedule != "@hourly" ||
+		!role.Spec.Tasks[0].Suspend || role.Spec.Tasks[0].Args != "" {
+		t.Fatalf("tasks: %+v", role.Spec.Tasks)
 	}
 	for _, path := range role.Spec.Skills {
 		if filepath.IsAbs(path) || !filepath.IsLocal(path) {
@@ -225,7 +243,7 @@ func runMake(t *testing.T, dir, home, target string, overrides ...string) ([]byt
 	cmd.Env = append(
 		os.Environ(),
 		"HOME="+home,
-		"ROLE=team/roles/operator",
+		"ROLE=team/roles/majordomo",
 		"CODEX_HOME=",
 		"CLAUDE_CONFIG_DIR=",
 		"XDG_CONFIG_HOME=",
@@ -241,7 +259,7 @@ func copyMaterializationSource(t *testing.T) string {
 	t.Helper()
 	sourceDir := filepath.Join(t.TempDir(), "source with spaces")
 	root := repoRoot(t)
-	for _, path := range []string{"Makefile", "team/team.mk", "team/scripts/materialize-role.sh", "team/roles/operator"} {
+	for _, path := range []string{"Makefile", "team/team.mk", "team/scripts/materialize-role.sh", "team/roles/majordomo"} {
 		copyAsset(t, filepath.Join(root, path), filepath.Join(sourceDir, path))
 	}
 	return sourceDir
@@ -264,7 +282,7 @@ func TestMaterialization(t *testing.T) {
 			// A copied source with the shared installer must work offline,
 			// independently of any agents checkout, harness catalog, or daemon.
 			sourceDir := copyMaterializationSource(t)
-			roleDir := filepath.Join(sourceDir, "team/roles/operator")
+			roleDir := filepath.Join(sourceDir, "team/roles/majordomo")
 			for _, custom := range []bool{false, true} {
 				t.Run(map[bool]string{false: "native", true: "overrides"}[custom], func(t *testing.T) {
 					home := filepath.Join(t.TempDir(), "cell home")
@@ -391,7 +409,7 @@ func TestHarnessContracts(t *testing.T) {
 				strings.TrimPrefix(harness.Spec.SkillPath, "$HOME/"),
 				"create-cell-config/SKILL.md",
 			)
-			source := filepath.Join(root, "team/roles/operator/skills/create-cell-config/SKILL.md")
+			source := filepath.Join(root, "team/roles/majordomo/skills/create-cell-config/SKILL.md")
 			if !bytes.Equal(read(t, installed), read(t, source)) {
 				t.Fatal("skill not installed at harness-declared path")
 			}
@@ -404,7 +422,7 @@ func TestMultipleRoles(t *testing.T) {
 	copyAsset(t, "testdata/inspector", filepath.Join(sourceDir, "team/roles/inspector"))
 	for _, harness := range []string{"claude", "codex", "opencode-openrouter"} {
 		t.Run(harness, func(t *testing.T) {
-			for _, role := range []string{"operator", "inspector"} {
+			for _, role := range []string{"majordomo", "inspector"} {
 				t.Run(role, func(t *testing.T) {
 					home := t.TempDir()
 					configDir := filepath.Join(home, ".claude")
@@ -467,5 +485,18 @@ func TestMultipleRoles(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+// TestLegacyOperatorPathResolves keeps team/roles/operator readable. Releases
+// up to v0.10.0 select that path on the main branch from `kuke team init`, and
+// their kukeon-operator-* cells materialize the role from it at start, so
+// removing it would break installs that have not upgraded.
+func TestLegacyOperatorPathResolves(t *testing.T) {
+	root := repoRoot(t)
+	legacy := read(t, filepath.Join(root, "team/roles/operator/role.yaml"))
+	current := read(t, filepath.Join(root, "team/roles/majordomo/role.yaml"))
+	if !bytes.Equal(legacy, current) {
+		t.Fatal("team/roles/operator must resolve to the majordomo role")
 	}
 }

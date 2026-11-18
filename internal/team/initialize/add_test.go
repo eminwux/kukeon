@@ -33,6 +33,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/eminwux/kukeon/internal/team/teamtest"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	"github.com/eminwux/kukeon/pkg/team/config"
 	"gopkg.in/yaml.v3"
@@ -56,7 +57,7 @@ func setupAddRun(t *testing.T) Options {
 	cfg := &config.TeamsConfig{
 		APIVersion: config.APIVersion,
 		Kind:       config.Kind,
-		Spec:       config.Spec{Defaults: config.Operator().Spec},
+		Spec:       config.Spec{Defaults: config.Majordomo().Spec},
 	}
 	cfg.Spec.Defaults.Harnesses = cfg.Spec.Defaults.Harnesses[:1]
 	var raw bytes.Buffer
@@ -638,6 +639,11 @@ func TestAddFetchesDefinitionsAndProjectWithoutLocalSources(t *testing.T) {
 			if readErr != nil {
 				return readErr
 			}
+			if filepath.ToSlash(filepath.Join(dir, path)) == teamtest.MajordomoRole {
+				if raw, readErr = teamtest.PlainRole(raw); readErr != nil {
+					return readErr
+				}
+			}
 			return os.WriteFile(target, raw, 0o600)
 		})
 		if err != nil {
@@ -715,7 +721,7 @@ func assertAcceptedAdd(t *testing.T, opts AddOptions, mode, commit string) {
 		}
 	}
 	fake := opts.Client.(*fakeClient)
-	if fake.team != "kukeon" || !bytes.Contains(fake.raw, []byte("kukeon-operator-codex")) ||
+	if fake.team != "kukeon" || !bytes.Contains(fake.raw, []byte("kukeon-majordomo-codex")) ||
 		!bytes.Contains(fake.raw, []byte(opts.Source)) ||
 		!bytes.Contains(fake.raw, []byte("/home/user/kukeon")) ||
 		!bytes.Contains(fake.raw, []byte("https://github.com/eminwux/kukeon")) {

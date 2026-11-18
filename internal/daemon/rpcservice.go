@@ -364,6 +364,62 @@ func (s *KukeonV1Service) LogContainer(
 	return nil
 }
 
+// ReadHealthDigest evaluates kukeond's health in the daemon (issue #1509).
+func (s *KukeonV1Service) ReadHealthDigest(
+	args *kukeonv1.ReadHealthDigestArgs,
+	reply *kukeonv1.ReadHealthDigestReply,
+) error {
+	result, err := s.core.ReadHealthDigest(s.ctx, args.Request)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	if err != nil {
+		s.logger.DebugContext(s.ctx, "ReadHealthDigest returned error", "error", err)
+	}
+	return nil
+}
+
+// SubmitHealthReport stores a triaged health report (issue #1509).
+func (s *KukeonV1Service) SubmitHealthReport(
+	args *kukeonv1.SubmitHealthReportArgs,
+	reply *kukeonv1.SubmitHealthReportReply,
+) error {
+	result, err := s.core.SubmitHealthReport(s.ctx, args.Report)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	if err != nil {
+		s.logger.DebugContext(s.ctx, "SubmitHealthReport returned error", "error", err)
+	}
+	return nil
+}
+
+// ListHealthReports lists the stored health reports (issue #1509).
+func (s *KukeonV1Service) ListHealthReports(
+	_ *kukeonv1.ListHealthReportsArgs,
+	reply *kukeonv1.ListHealthReportsReply,
+) error {
+	result, err := s.core.ListHealthReports(s.ctx)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	if err != nil {
+		s.logger.DebugContext(s.ctx, "ListHealthReports returned error", "error", err)
+	}
+	return nil
+}
+
+// ReadHealthReport returns one stored health report (issue #1509).
+func (s *KukeonV1Service) ReadHealthReport(
+	args *kukeonv1.ReadHealthReportArgs,
+	reply *kukeonv1.ReadHealthReportReply,
+) error {
+	result, err := s.core.ReadHealthReport(s.ctx, args.ID)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	if err != nil {
+		s.logger.DebugContext(s.ctx, "ReadHealthReport returned error", "error", err)
+	}
+	return nil
+}
+
 // ReadDaemonLogs returns a bounded chunk of kukeond's own log stream
 // (issue #1386, step 7). Socket access is the only gate, matching every
 // other read RPC on this service.

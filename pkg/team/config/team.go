@@ -28,22 +28,23 @@ const (
 )
 
 // Root returns a legacy root declaration inheriting global defaults.
-// Init uses Operator instead; this helper does not migrate registrations.
+// Init uses Majordomo instead; this helper does not migrate registrations.
 func Root() *Team {
 	return &Team{APIVersion: APIVersion, Kind: KindTeam, Metadata: Metadata{Name: "root"}}
 }
 
-// Operator returns the self-contained initial operator declaration.
-func Operator() *Team {
+// Majordomo returns the self-contained initial declaration of the kukeon team:
+// the majordomo role on both shipped harnesses.
+func Majordomo() *Team {
 	return &Team{APIVersion: APIVersion, Kind: KindTeam, Metadata: Metadata{Name: "kukeon"}, Spec: Defaults{
 		Sources: []Source{
 			{Name: "kukeon", URL: "github.com/eminwux/kukeon", Branch: "main", ClonePath: "/home/user/kukeon-src"},
 		},
 		Roles: []Role{
 			{
-				Name:        "operator",
+				Name:        "majordomo",
 				Source:      "kukeon",
-				Path:        "team/roles/operator",
+				Path:        "team/roles/majordomo",
 				InitialPath: "$HOME",
 				Needs:       &Needs{Image: []string{"go"}},
 			},
@@ -164,6 +165,7 @@ func cloneSelections(d Defaults) Defaults {
 		if d.Roles[i].Needs != nil {
 			needs := *d.Roles[i].Needs
 			needs.Image = slices.Clone(needs.Image)
+			needs.Secrets = slices.Clone(needs.Secrets)
 			d.Roles[i].Needs = &needs
 		}
 		if d.Roles[i].Tasks != nil {

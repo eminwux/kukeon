@@ -34,12 +34,12 @@ func newInitCommand(
 	run func(context.Context, initialize.Options) (initialize.Result, error),
 ) *cobra.Command {
 	var host, configuration string
-	var force bool
+	var force, reapply bool
 	var importGit initialize.GitImport
 	cmd := &cobra.Command{
 		Use:   "init",
-		Short: "Apply and register the kukeon operator team",
-		Long:  "Initialize ~/.kuke/kuketeams.yaml, fetch selected definitions, and apply the kukeon operator team to kukeond.\nAn existing configuration stops init; --force replaces it and reapplies the initial operator declaration.\nNo cells are created or started. The daemon and parent runtime scope must already exist.\n\nTeam cells clone, push and sign with stored git credentials; the host ~/.ssh is never mounted. --import-git-identity is your consent to copy an SSH private key (--git-key, else the key git signs with, else ~/.ssh/id_ed25519, id_ecdsa or id_rsa) into the ssh-key secret git-ssh and to bind it to the hosts the team clones from. Without it nothing is read from ~/.ssh and init reports which sources have no credential.",
+		Short: "Apply and register the kukeon team and its majordomo role",
+		Long:  "Initialize ~/.kuke/kuketeams.yaml, fetch selected definitions, and apply the kukeon team (the majordomo role) to kukeond.\nAn existing configuration stops init; --force replaces it and reapplies the initial majordomo declaration.\nNo cells are created or started. The daemon and parent runtime scope must already exist.\n\nTeam cells clone, push and sign with stored git credentials; the host ~/.ssh is never mounted. --import-git-identity is your consent to copy an SSH private key (--git-key, else the key git signs with, else ~/.ssh/id_ed25519, id_ecdsa or id_rsa) into the ssh-key secret git-ssh and to bind it to the hosts the team clones from. Without it nothing is read from ~/.ssh and init reports which sources have no credential.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if !importGit.Enabled &&
@@ -47,6 +47,13 @@ func newInitCommand(
 				return errors.New(
 					"--git-key, --git-key-passphrase-file and --git-known-hosts require --import-git-identity",
 				)
+			}
+			if reapply && force {
+				return errors.New("--reapply and --force are mutually exclusive: " +
+					"--reapply keeps the stored kukeon entry, --force replaces it with the initial declaration")
+			}
+			if reapply && importGit.Enabled {
+				return errors.New("--reapply does not import a git identity; use --force --import-git-identity")
 			}
 			home, err := homeDir()
 			if err != nil {
@@ -60,6 +67,7 @@ func newInitCommand(
 					Host:          host,
 					Configuration: configuration,
 					Force:         force,
+					Reapply:       reapply,
 					ImportGit:     importGit,
 				},
 			)
@@ -74,6 +82,9 @@ func newInitCommand(
 			status := "Created configuration"
 			if force {
 				status = "Reset configuration"
+			}
+			if reapply {
+				status = "Kept configuration"
 			}
 			_, err = fmt.Fprintf(
 				cmd.OutOrStdout(),
@@ -101,7 +112,9 @@ func newInitCommand(
 		"known_hosts file to pin for the imported key (default: built-in github.com, gitlab.com and bitbucket.org keys)")
 	cmd.Flags().StringVar(&host, "host", "", "kukeond Unix endpoint (overrides KUKEON_HOST and kuke.yaml)")
 	cmd.Flags().
-		BoolVar(&force, "force", false, "Replace existing configuration and apply the initial operator declaration")
+		BoolVar(&force, "force", false, "Replace existing configuration and apply the initial majordomo declaration")
+	cmd.Flags().
+		BoolVar(&reapply, "reapply", false, "Recompose and apply the kukeon team from its stored entry (~/.kuke/kuketeam.d/kukeon.yaml), pruning obsolete configs; kuketeams.yaml is not touched")
 	cmd.Flags().
 		StringVar(&configuration, "configuration", "", "kuke ClientConfiguration path (default KUKE_CONFIGURATION or ~/.kuke/kuke.yaml)")
 	return cmd

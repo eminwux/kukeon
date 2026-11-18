@@ -170,8 +170,8 @@ type Role struct {
 //	  - { name: pick-nits, schedule: "@daily", suspend: true }
 //
 // A task's cadence is a deployment decision, so each value here overrides the
-// corresponding default the role declares for the task: Schedule replaces the
-// role's schedule, and Suspend — a pointer, so an explicit `false` is distinct
+// corresponding default the role declares for the task: Args replaces the
+// role's argument text, Schedule replaces the role's schedule, and Suspend — a pointer, so an explicit `false` is distinct
 // from omitted — replaces the role's suspend (`suspend: false` turns on a
 // schedule the role ships switched off).
 type TaskSelection struct {
@@ -183,6 +183,9 @@ type TaskSelection struct {
 	// Suspend switches the task's schedule off (true) or on (false). Nil
 	// keeps the role's.
 	Suspend *bool `yaml:"suspend,omitempty"`
+	// Args replaces the role's argument text for the task: the free text the
+	// rendered prompt appends after the skill name. Empty keeps the role's.
+	Args string `yaml:"args,omitempty"`
 }
 
 // taskSelectionFields is TaskSelection without its YAML methods, for the
@@ -206,7 +209,7 @@ func (t *TaskSelection) UnmarshalYAML(node *yaml.Node) error {
 // MarshalYAML writes a selection that sets no schedule as the bare task name,
 // so an entry authored as a name is recorded as one.
 func (t TaskSelection) MarshalYAML() (any, error) {
-	if t.Schedule == "" && t.Suspend == nil {
+	if t.Schedule == "" && t.Suspend == nil && t.Args == "" {
 		return t.Name, nil
 	}
 	return taskSelectionFields(t), nil
@@ -237,8 +240,14 @@ func (r Role) TaskSelection(name string) (TaskSelection, bool) {
 	return TaskSelection{}, false
 }
 
+// Needs are what a team adds to a role's own needs for this deployment.
 type Needs struct {
 	Image []string `yaml:"image,omitempty"`
+	// Secrets names runtime secrets the team gives the role's cells on top of
+	// the ones the role declares. A role that can use a credential without
+	// requiring it (majordomo's health sweep filing issues, issue #1509)
+	// leaves it out of role.yaml, and an install opts in by naming it here.
+	Secrets []string `yaml:"secrets,omitempty"`
 }
 
 type Harness struct {

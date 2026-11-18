@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "defaultMode": "default",
+    "allow": [
+      "Bash(kuke health:*)",
+      "Bash(kuke get:*)",
+      "Bash(kuke log:*)",
+      "Bash(kuke daemon logs:*)",
+      "Read(//tmp/health-sweep/**)",
+      "Edit(//tmp/health-sweep/**)"
+    ]
+  }
+}

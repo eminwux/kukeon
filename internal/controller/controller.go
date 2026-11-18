@@ -287,6 +287,23 @@ func (b *Exec) Close() error {
 	return b.runner.Close()
 }
 
+// KukeondSocket returns the unix socket path kukeond serves on, or "" when the
+// controller was built without one. The health digest inspects its directory.
+func (b *Exec) KukeondSocket() string {
+	return b.opts.KukeondSocket
+}
+
+// ContainerdSocket returns the containerd socket the controller talks to.
+func (b *Exec) ContainerdSocket() string {
+	return b.opts.ContainerdSocket
+}
+
+// ListContainerdNamespaces lists every containerd namespace, for the health
+// digest's reachability and residual-namespace checks.
+func (b *Exec) ListContainerdNamespaces() ([]string, error) {
+	return b.runner.ListContainerdNamespaces()
+}
+
 // RunPath returns the configured kukeon run path. Surfaced for callers that
 // need to derive host paths from the same root the controller writes to —
 // notably the in-process AttachContainer endpoint, which resolves the

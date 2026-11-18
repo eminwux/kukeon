@@ -287,6 +287,7 @@ func apiErrorStatus(err error) (int, string) {
 		),
 		errors.Is(err, errdefs.ErrCellNotFound),
 		errors.Is(err, errdefs.ErrContainerNotFound),
+		errors.Is(err, errdefs.ErrHealthReportNotFound),
 		errors.Is(err, errdefs.ErrImageNotFound):
 		status, code = http.StatusNotFound, "not_found"
 	case errors.Is(err, errdefs.ErrConfig),

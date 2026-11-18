@@ -31,7 +31,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// roleTasks declares two tasks on the operator role: one bare, one with args.
+// roleTasks declares two tasks on the majordomo role: one bare, one with args.
 const roleTasks = `  tasks:
     - { name: make-config, skill: create-cell-config }
     - { name: make-go, skill: create-cell-config, args: "--lang go" }
@@ -78,6 +78,7 @@ func TestRoleTasksRenderHeadlessConfigs(t *testing.T) {
 		want := *pair.Config
 		want.Metadata.Name = task.Metadata.Name
 		if task.Metadata.Labels[api.LabelTeam] != pair.Config.Metadata.Labels[api.LabelTeam] ||
+			task.Metadata.Labels[api.LabelRole] != "majordomo" ||
 			task.Metadata.Labels[api.LabelTask] != strings.TrimPrefix(task.Metadata.Name, base+"-") {
 			t.Fatalf("%s labels = %v", task.Metadata.Name, task.Metadata.Labels)
 		}
@@ -149,7 +150,7 @@ func TestRoleTaskSelection(t *testing.T) {
 		{name: "omitted selects every task", tasks: nil, want: []string{"make-config", "make-go"}},
 		{name: "empty selects none", tasks: selected(), want: nil},
 		{name: "a subset", tasks: selected("make-go"), want: []string{"make-go"}},
-		{name: "unknown task", tasks: selected("make-rust"), err: `role operator declares no task "make-rust"`},
+		{name: "unknown task", tasks: selected("make-rust"), err: `role majordomo declares no task "make-rust"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, opts := fixture(t)
@@ -201,7 +202,7 @@ func TestRoleTaskErrors(t *testing.T) {
 		{
 			name:  "unknown skill",
 			tasks: "  tasks:\n    - { name: pick, skill: pick-issue }\n  needs:\n",
-			err:   `role operator: task pick: skill "pick-issue" is not one of the role's spec.skills`,
+			err:   `role majordomo: task pick: skill "pick-issue" is not one of the role's spec.skills`,
 		},
 		{
 			name:  "duplicate name",
@@ -271,7 +272,7 @@ func TestTaskConfigMaterializesHeadlessCell(t *testing.T) {
 	}
 }
 
-// scheduledRoleTasks declares three tasks on the operator role: one with no
+// scheduledRoleTasks declares three tasks on the majordomo role: one with no
 // schedule, one with a default schedule, and one whose default schedule ships
 // switched off (issue #1503).
 const scheduledRoleTasks = `  tasks:

@@ -7,6 +7,7 @@ import { cellsForBlueprint, cellsForConfig, configsForBlueprint, type ConfigDoc 
 import { DocumentRowLink, RowAction, RowActions } from "./icons";
 import { catalogAPI, catalogDeleteAPI } from "./catalog-url.mjs";
 import { useNotify } from "./notifications";
+import { AskMajordomo, catalogQuestion } from "./majordomo";
 
 type Metadata = { name: string; realm?: string; space?: string; stack?: string; cell?: string; labels?: Record<string, string>; annotations?: Record<string, string> };
 type CatalogDoc = { metadata: Metadata; spec?: Record<string, unknown>; [key: string]: unknown };
@@ -224,11 +225,20 @@ function CatalogList({ kind, revision, inventory, onChanged }: { kind: string; r
     {confirming && <CatalogDeleteConfirmation kind={kind} doc={confirming} revision={revision} inventory={inventory} onCancel={() => setConfirming(null)} onConfirm={() => { const scope = [...scopeOf(confirming.metadata), confirming.metadata.name]; setConfirming(null); void runDelete(scope); }} />}
   </>;
 }
+// The catalog kinds majordomo can be asked about, and what each is called in a question.
+const askKinds: Record<string, string> = { configs: "CellConfig", blueprints: "CellBlueprint", volumes: "volume" };
+function catalogState(kind: string, doc: CatalogDoc): string {
+  const spec = (doc.spec ?? {}) as { blueprint?: { name?: string }; schedule?: { cron?: string; suspend?: boolean }; reclaimPolicy?: string };
+  const status = (doc as { status?: { schedule?: { lastError?: string } } }).status;
+  if (kind === "configs") return [`stored, blueprint ${spec.blueprint?.name ?? "not set"}`, spec.schedule ? `schedule ${spec.schedule.cron}${spec.schedule.suspend ? " (suspended)" : ""}` : "", status?.schedule?.lastError ? `last schedule error: ${status.schedule.lastError}` : ""].filter(Boolean).join(", ");
+  if (kind === "volumes") return `stored${spec.reclaimPolicy ? `, reclaim policy ${spec.reclaimPolicy}` : ""}`;
+  return "stored";
+}
 function CatalogDetails({ kind, scope, document, revision, inventory }: { kind: string; scope: string[]; document: boolean; revision: number; inventory: InventoryResource }) {
   const detail = useResource<CatalogDoc>(catalogAPI(kind, scope), revision);
   const doc = detail.data;
   return <>
-    <div className="detail-actions"><a href={`#/${kind}`}>← Back to {kind}</a><a className="document-action" href={catalogLink(kind, scope, !document)}>{document ? "Show overview" : "View document"}</a></div>
+    <div className="detail-actions"><a href={`#/${kind}`}>← Back to {kind}</a>{doc && askKinds[kind] && <AskMajordomo question={catalogQuestion(askKinds[kind], scope, catalogState(kind, doc))} subject={`${askKinds[kind]} ${scope.join(" / ")}`} />}<a className="document-action" href={catalogLink(kind, scope, !document)}>{document ? "Show overview" : "View document"}</a></div>
     {detail.loading && <p role="status">Loading {kind} document…</p>}
     {detail.error && <ErrorNotice error={detail.error} kind={catalogTitles[kind].replace(/s$/, "")} />}
     {detail.error && doc && <p className="stale">Stale {kind} document — refresh failed.</p>}

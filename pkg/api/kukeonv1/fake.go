@@ -177,6 +177,22 @@ func (FakeClient) ReadDaemonLogs(context.Context, DaemonLogRequest) (DaemonLogRe
 	return DaemonLogResult{}, ErrUnexpectedCall
 }
 
+func (FakeClient) ReadHealthDigest(context.Context, HealthDigestRequest) (HealthDigest, error) {
+	return HealthDigest{}, ErrUnexpectedCall
+}
+
+func (FakeClient) SubmitHealthReport(context.Context, HealthReport) (HealthReport, error) {
+	return HealthReport{}, ErrUnexpectedCall
+}
+
+func (FakeClient) ListHealthReports(context.Context) ([]HealthReportSummary, error) {
+	return nil, ErrUnexpectedCall
+}
+
+func (FakeClient) ReadHealthReport(context.Context, string) (HealthReport, error) {
+	return HealthReport{}, ErrUnexpectedCall
+}
+
 func (FakeClient) LogContainer(context.Context, v1beta1.ContainerDoc) (LogContainerResult, error) {
 	return LogContainerResult{}, ErrUnexpectedCall
 }

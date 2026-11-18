@@ -24,6 +24,8 @@ const glyphs = {
   edit: <><path d="M4.5 19.5h4l10-10a2.83 2.83 0 0 0-4-4l-10 10Z" /><path d="m13 7 4 4" /></>,
   terminal: <><rect x="3" y="4.5" width="18" height="15" rx="2" /><path d="m7 9.5 3 2.5-3 2.5" /><path d="M12.5 15H17" /></>,
   create: <path d="M12 5v14M5 12h14" />,
+  // Majordomo: a bell on its base.
+  majordomo: <><path d="M5.5 16.5a6.5 6.5 0 0 1 13 0Z" /><path d="M12 10V7.5" /><path d="M10 7.5h4" /><path d="M3.5 19.5h17" /></>,
   pending: <path d="M12 3.5a8.5 8.5 0 1 0 8.5 8.5" />,
 } satisfies Record<string, ReactNode>;
 export type IconName = keyof typeof glyphs;

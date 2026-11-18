@@ -1,0 +1,31 @@
+apiVersion: kuketeams.io/v1
+kind: Role
+metadata:
+  name: majordomo
+spec:
+  skills:
+    - team/roles/majordomo/skills/create-cell-config
+    - team/roles/majordomo/skills/diagnose
+    - team/roles/majordomo/skills/health-sweep
+  harnesses:
+    claude:
+      settings: config/claude.settings.json
+    codex:
+      sandbox: workspace-write
+      approval: on-request
+    opencode:
+      permissions: ask
+      secrets:
+        - openrouter-api-key
+  needs:
+    image:
+      - go
+    mounts:
+      - kukeond-socket
+      - kuke-binary
+      - kukeon-install
+  tasks:
+    - name: health-sweep
+      skill: health-sweep
+      schedule: "@hourly"
+      suspend: true

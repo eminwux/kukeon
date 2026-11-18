@@ -247,7 +247,7 @@ func compositionFor(t *testing.T, harness string, bindings []config.SecretBindin
 					ClonePath: "/home/user/kukeon-src",
 				},
 			},
-			Roles: []config.Role{{Name: "operator", Source: "kukeon", Path: "team/roles/operator"}},
+			Roles: []config.Role{{Name: "majordomo", Source: "kukeon", Path: "team/roles/majordomo"}},
 			Harnesses: []config.Harness{
 				{Name: harness, Source: "kukeon", Path: "team/harnesses/" + harness},
 			},
@@ -264,7 +264,7 @@ func compositionFor(t *testing.T, harness string, bindings []config.SecretBindin
 	return result
 }
 
-func TestBaseOperatorHasNoSecretPrerequisite(t *testing.T) {
+func TestBaseMajordomoHasNoSecretPrerequisite(t *testing.T) {
 	f := newFake()
 	if _, err := Apply(t.Context(), f, composition(t, "codex", nil)); err != nil {
 		t.Fatal(err)

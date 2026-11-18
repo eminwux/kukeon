@@ -556,6 +556,32 @@ sudo kuke status --verbose                       # remediation hint on OK rows t
 - The `PARITY` section is the cross-kind generalization of the two-line `kuke get realms` daemon-parity diff the `make dev-init` smoke pins — a divergence on any kind is the same regression class.
 - `--json` emits the `Report` shape (top-level `ok` bool plus a flat `checks` array; each row carries `section`, `name`, `status` as the `"OK"`/`"WARN"`/`"FAIL"` label, `detail`, optional `remediation`, and on storage rows an optional `storage` payload). `--verbose` prints the remediation hint on OK rows too, not just WARN/FAIL.
 
+### Health digest and reports (`kuke health`)
+
+**Intent.** Ask kukeond for its own health, from the host or from a cell, and read or store the triaged reports a majordomo health sweep produces. Reference: [`docs/site/cli/kuke-health.md`](site/cli/kuke-health.md).
+
+**Sequence.**
+
+```bash
+kuke health                                      # checks, kukeond log errors, Failed/Error cells
+kuke health --since 6h -o json                   # wider window, stable JSON schema
+kuke health --since last-report --exit-code      # 0 clean, 2 findings, 1 failure
+kuke health report submit -f report.yaml         # validate and store a triaged report
+kuke health reports                              # stored reports, newest first
+kuke health report latest                        # one report as markdown
+```
+
+**Invariants.**
+
+- The digest is evaluated in kukeond and reached over the daemon socket only (no `--no-daemon`). Run in a cell that mounts the kukeond socket, it reports the same host facts as on the host.
+- Checks cover the `kuke status` host and state set: `containerd`, `cgroup-v2`, `cni-plugins`, `run-dir`, `containerd-ns`. `cni-plugins` inspects the plugins kukeond itself executes, so a missing plugin is `fail`, not the advisory `WARN` of `kuke status`.
+- Error-level kukeond log entries in the window are grouped by a signature with timestamps, IDs and numbers masked; each group reports count, first/last seen and a sample. The default window is one hour; `--since last-report` starts at the newest report's `until`, falling back to one hour.
+- `Failed` cells are tagged `kukeon` and `Error` cells `workload`, each with full scope and since-time.
+- `--exit-code` exits 0 on a clean digest and 2 on findings, printing nothing to stderr in either case; any command failure exits 1. Without the flag, findings exit 0.
+- `report submit` rejects a document that fails the schema (unknown field, missing window, cell, summary or findings, a finding without signature, classification, severity or evidence) and stores nothing. kukeond assigns `id` and `createdAt` when omitted and sets `recurring` itself from the previous report.
+- kukeond keeps the newest 50 reports; they survive a daemon restart. Storing a report files nothing.
+- `--file-issues <owner>/<repo>` on `report submit` is the only path that leaves the host, needs `HEALTH_GITHUB_TOKEN`, files `kukeon` findings only, and still stores the report when filing fails (exit 1).
+
 ### `--no-daemon` future
 
 The `--no-daemon` flag was removed from the remaining daemon-routed workload commands (`apply`, `create`, `run`, `attach`, `delete`, `kill`, `start`, `stop`, `log`, `refresh`) by #222 — that workload-command removal is the current state. The flag is still accepted on `kuke init`, `kuke uninstall`, `kuke purge`, and every `kuke get <kind>` (the `get` kinds were retained per a user override on the original AC so the in-process escape hatch stays available for every resource lookup, not just `get realm` for the daemon-parity check, retired by #223 once `kuke status` (#202) absorbs it). For the true workload verbs (`apply`, `create *`, `run`, `attach`, `delete *`, `kill *`) the in-process branch is **no longer reachable at all**: #566/#588 routed them through the daemon-only client, which ignores `kukeon/noDaemon`, so `KUKEON_NO_DAEMON=true` and the `--run-path` promotion are inert for them. The promotion stays valid only for the surviving daemon-routed-but-promotable callers — `get *`, `purge *`, `log`, `refresh`, `restart`, `start`, `stop`, `doctor cgroups` — plus the bootstrap commands `init` and `uninstall`. The long-term arc deletes that surviving in-process branch entirely under #566.

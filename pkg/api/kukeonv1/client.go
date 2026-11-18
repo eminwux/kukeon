@@ -163,6 +163,18 @@ type Client interface {
 	// `kuke serve` web UI) can read and follow it over the socket (issue
 	// #1386, step 7). Read-only; see DaemonLogRequest for the cursor contract.
 	ReadDaemonLogs(ctx context.Context, req DaemonLogRequest) (DaemonLogResult, error)
+	// ReadHealthDigest evaluates kukeond's health checks in the daemon and
+	// returns them with the error-level log entries of the window and the
+	// cells in a terminal failure state (issue #1509). Read-only.
+	ReadHealthDigest(ctx context.Context, req HealthDigestRequest) (HealthDigest, error)
+	// SubmitHealthReport validates and stores a triaged health report,
+	// keeping only the newest reports. It returns the report as stored.
+	SubmitHealthReport(ctx context.Context, report HealthReport) (HealthReport, error)
+	// ListHealthReports lists the stored reports, newest first.
+	ListHealthReports(ctx context.Context) ([]HealthReportSummary, error)
+	// ReadHealthReport returns one stored report by id, or the newest for
+	// HealthReportLatest.
+	ReadHealthReport(ctx context.Context, id string) (HealthReport, error)
 	StopCell(ctx context.Context, doc v1beta1.CellDoc) (StopCellResult, error)
 	KillCell(ctx context.Context, doc v1beta1.CellDoc) (KillCellResult, error)
 
@@ -404,8 +416,14 @@ const (
 	MethodAttachContainer = ServiceName + ".AttachContainer"
 	MethodLogContainer    = ServiceName + ".LogContainer"
 	MethodReadDaemonLogs  = ServiceName + ".ReadDaemonLogs"
-	MethodStopCell        = ServiceName + ".StopCell"
-	MethodKillCell        = ServiceName + ".KillCell"
+
+	MethodReadHealthDigest   = ServiceName + ".ReadHealthDigest"
+	MethodSubmitHealthReport = ServiceName + ".SubmitHealthReport"
+	MethodListHealthReports  = ServiceName + ".ListHealthReports"
+	MethodReadHealthReport   = ServiceName + ".ReadHealthReport"
+
+	MethodStopCell = ServiceName + ".StopCell"
+	MethodKillCell = ServiceName + ".KillCell"
 
 	MethodDeleteRealm     = ServiceName + ".DeleteRealm"
 	MethodDeleteSpace     = ServiceName + ".DeleteSpace"

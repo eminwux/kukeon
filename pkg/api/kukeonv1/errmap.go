@@ -41,6 +41,8 @@ func (e *APIError) Error() string {
 // kindToSentinel maps wire Kind values to local errdefs sentinels.
 var kindToSentinel = map[string]error{
 	"CellNotFound":            errdefs.ErrCellNotFound,
+	"HealthReportNotFound":    errdefs.ErrHealthReportNotFound,
+	"HealthReportInvalid":     errdefs.ErrHealthReportInvalid,
 	"InvalidCellState":        errdefs.ErrInvalidCellState,
 	"PermissionDenied":        fs.ErrPermission,
 	"RealmNotFound":           errdefs.ErrRealmNotFound,

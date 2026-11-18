@@ -11,7 +11,7 @@ starts cells: launch them explicitly, for example with
 Two commands drive it:
 
 - [`kuke team init`](../cli/kuke-team-init.md) creates the global configuration
-  and applies the operator team `kukeon`.
+  and applies the `kukeon` team, whose one role is `majordomo`.
 - [`kuke team add`](../cli/kuke-team-add.md) composes a project team from a
   directory's `kuketeam.yaml` or from a named Git source.
 
@@ -26,7 +26,7 @@ Two commands drive it:
 | `harnesses/<harness>/`           | a source     | Harness definition (`harness.yaml`), image catalog (`images.yaml`), and image build context.               |
 
 All documents use `apiVersion: kuketeams.io/v1` and are decoded strictly
-(single document, no unknown fields). This repository ships the `operator`
+(single document, no unknown fields). This repository ships the `majordomo`
 role under `team/roles/` and the `claude`, `codex`, and `opencode` harnesses
 under `team/harnesses/`; other roles (dev, pm, pr-reviewer, …) can come from any Git
 source, such as the agents repository. The kukeon renderer that turns a pair
@@ -222,7 +222,7 @@ spec:
 `kuke team add` renders each selected task as its own CellConfig per selected
 harness (the role entry's `harness` pin applies), named
 `<team>-<role>-<harness>-<task>` and labelled `kukeon.io/task: <task>` next to
-the team label. It has the same blueprint, values, repos, secrets, components
+the team and role labels. It has the same blueprint, values, repos, secrets, components
 and requires as the pair's config, plus:
 
 ```yaml
@@ -312,6 +312,102 @@ A `schedule` or `suspend` edited by hand on a task config is therefore lost on
 the next `kuke team add`. Change it in `kuketeam.yaml` (or the role's defaults)
 instead.
 
+A team's entry can also replace a task's argument text with `args`, for example
+`{ name: pick-bug, args: "--label regression" }`. Like `schedule` and
+`suspend`, it overrides only that value.
+
+### The majordomo health sweep
+
+The `kukeon` team's `majordomo` role declares one task, `health-sweep`, with
+`schedule: "@hourly"` and `suspend: true`. `kuke team init` therefore renders
+`kukeon-majordomo-<harness>-health-sweep` **suspended**: no install spends
+model credits on sweeps until its user turns them on.
+
+A sweep is read-only. It reads kukeond's health digest
+([`kuke health`](../cli/kuke-health.md)), stops if the digest is clean, and
+otherwise triages each finding and stores one report in kukeond. It never
+restarts, deletes or changes anything; fixes appear in the report as suggested
+commands.
+
+To turn sweeps on, edit the kukeon team's stored entry and reapply it. The
+entry is the team's source: `kuke team init` writes it and
+`kuke team init --reapply` recomposes the team from it.
+
+```yaml
+# ~/.kuke/kuketeam.d/kukeon.yaml
+spec:
+  roles:
+    - name: majordomo
+      source: kukeon
+      path: team/roles/majordomo
+      initialPath: $HOME
+      needs:
+        image: [go]
+      tasks:
+        - { name: health-sweep, suspend: false }
+```
+
+```bash
+kuke team init --reapply
+kuke get config kukeon-majordomo-claude-health-sweep -o yaml   # spec.schedule, status.schedule
+```
+
+Change the cadence the same way, with `schedule: "*/30 * * * *"` in the task
+entry. Run one sweep by hand at any time, suspended or not:
+
+```bash
+kuke run -d kukeon-majordomo-claude-health-sweep
+kuke health reports
+kuke health report latest
+```
+
+The sweep cell deletes itself when it ends. It uses the same state volume as
+the interactive `kukeon-majordomo-<harness>` config, so it runs with the
+harness login you made there.
+
+### Filing kukeon defects as issues
+
+By default a sweep only stores its report. Filing the `kukeon` findings as
+GitHub issues is opt-in per install, and a default `kuke team init` needs no
+GitHub token. To opt in:
+
+1. Create the token as a secret named `health-github-token`:
+
+   ```bash
+   kuke create secret health-github-token --realm default --from-file /path/to/token
+   ```
+
+2. In the kukeon entry, give the role that secret and tell the sweep where to
+   file:
+
+   ```yaml
+   # ~/.kuke/kuketeam.d/kukeon.yaml
+   spec:
+     roles:
+       - name: majordomo
+         # ...
+         needs:
+           image: [go]
+           secrets: [health-github-token]
+         tasks:
+           - name: health-sweep
+             suspend: false
+             args: "--file-issues <owner>/<repo>"
+   ```
+
+3. Run `kuke team init --reapply`.
+
+`needs.secrets` in a team entry adds runtime secrets to a role for that team
+only; the role itself still requires none. The token reaches the sweep cell as
+`HEALTH_GITHUB_TOKEN`. The sweep then submits its report with
+`kuke health report submit --file-issues <owner>/<repo>`, and `kuke` does the
+filing: one issue per new `kukeon` finding, a comment on the open issue of a
+recurring one, and never anything for `workload` or `unclear` findings. See
+[`kuke health report submit`](../cli/kuke-health.md#filing-issues-opt-in) for
+the issue format and what is redacted.
+
+Do step 1 before step 3, so the secret exists when the sweep first runs.
+
 ### Connectors
 
 A role enables a connector by name:
@@ -381,12 +477,12 @@ per harness — this repository's `make claude`, `make codex`, and
 Startup then uses `INITIAL_PATH`; the harness source need not be checked out in
 the cell.
 
-The base operator clones over HTTPS and needs no git credential.
+The base majordomo clones over HTTPS and needs no git credential.
 
 ## Secret declarations
 
 Only selected role/harness requirements contribute bindings. The shipped
-operator has no `gh` or `gh-token` requirement. Claude and Codex can reuse an
+majordomo has no `gh` or `gh-token` requirement. Claude and Codex can reuse an
 existing authenticated session and declare no mandatory token. OpenCode's
 selected provider requires `openrouter-api-key`.
 
@@ -447,8 +543,10 @@ is named `<team>-<role>-<harness>`, with dots and punctuation runs collapsed
 to single hyphens: team `esp32`, role `pr-reviewer`, and harness `codex`
 produce `esp32-pr-reviewer-codex`. A task config appends the task name:
 `esp32-pr-reviewer-codex-pick-review-pr`. Different selections can collide on these
-readable names (`root-a`/`operator` and `root`/`a-operator`); choose distinct
-names in the same scope. `kukeon.io/team` labels keep the authored team name.
+readable names (`root-a`/`majordomo` and `root`/`a-majordomo`); choose distinct
+names in the same scope. `kukeon.io/team` labels keep the authored team name,
+and `kukeon.io/role` labels the role name from the team's `roles` list, on pair
+and task configs alike.
 Resources default to realm/space/stack `default`.
 
 Default harness state volumes use the readable resource name plus a

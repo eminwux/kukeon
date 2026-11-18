@@ -3,6 +3,7 @@ import { ErrorNotice, useResource, type Failure } from "./request";
 import { daemonLink } from "./routes";
 import type { InventoryResource } from "./inventory";
 import { MAX_CHARS, MAX_LINES, applyChunk, emptyLogBuffer, healthLabel, healthTone, type LogBuffer, type LogChunk } from "./log-buffer.js";
+import { AskMajordomo, oneLine } from "./majordomo";
 
 // DaemonHealth mirrors GET /api/daemon/health (issue #1386, step 6). It only
 // reports whether kukeond answered a Ping over the configured socket.
@@ -38,6 +39,11 @@ export function DaemonNav({ current }: { current: "health" | "logs" }) {
   </nav>;
 }
 
+function daemonQuestion(data: DaemonHealth): string {
+  const state = `connectivity ${healthLabel(data.status)}, kukeond version ${data.daemonVersion || "unknown"}, kuke serve version ${data.serverVersion}, response time ${data.latencyMs} ms${data.error ? `, error: ${data.error.message}` : ""}`;
+  return oneLine(`About the kukeond daemon at ${data.endpoint} (${state}): diagnose its health with "kuke health" and tell me what needs attention.`);
+}
+
 export function DaemonHealthPage({ revision, inventory }: { revision: number; inventory: InventoryResource }) {
   const [checks, setChecks] = useState(0);
   const health = useResource<DaemonHealth>("/api/daemon/health", revision + checks);
@@ -48,7 +54,7 @@ export function DaemonHealthPage({ revision, inventory }: { revision: number; in
     {health.error && <ErrorNotice error={health.error} kind="Daemon" />}
     {health.error && data && <p className="stale">Stale health result — the web server could not be reached.</p>}
     <section className="panel daemon-health" aria-label="Daemon connectivity" aria-busy={health.loading}>
-      <div className="panel-heading"><h2>Connectivity</h2><button type="button" onClick={() => setChecks(n => n + 1)} disabled={health.loading}>{health.loading ? "Checking…" : "Check again"}</button></div>
+      <div className="panel-heading"><h2>Connectivity</h2><div className="health-report-actions">{data && <AskMajordomo prominent={!!data.error} question={daemonQuestion(data)} subject="the kukeond daemon" />}<button type="button" onClick={() => setChecks(n => n + 1)} disabled={health.loading}>{health.loading ? "Checking…" : "Check again"}</button></div></div>
       <div className="panel-body">
         <div className="status-grid">
           <div className="status-card"><span>Connectivity</span><HealthBadge status={health.loading && !data ? undefined : data?.status} /></div>

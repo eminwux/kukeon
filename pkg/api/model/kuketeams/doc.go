@@ -64,7 +64,7 @@ const (
 	KindTeamsConfig = "TeamsConfig"
 	// KindTeamEntry identifies a host-side, per-team composition record
 	// (~/.kuke/kuketeam.d/<team>.yaml) — one document per team file.
-	// `kuke team init` writes the operator team's (kukeon.yaml); `kuke team
+	// `kuke team init` writes the kukeon team's (kukeon.yaml); `kuke team
 	// add` writes each added team's.
 	KindTeamEntry = "TeamEntry"
 	// KindRole identifies a per-role document (role.yaml) in the agents source.
