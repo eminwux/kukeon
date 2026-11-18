@@ -58,13 +58,11 @@ func isLegacyEntry(path string) (bool, error) {
 }
 
 // removeTeamConfigs deletes every daemon-stored CellConfig labelled with team,
-// as the daemon's per-team prune would: the legacy team's configs go before
-// the replacement is applied. Cells created from them are not touched, and the
-// shared blueprints they referenced stay for the replacement to reuse.
+// as the daemon's per-team prune would: the legacy team's configs go once its
+// replacement is applied (apply has already pinged the daemon). Cells created
+// from them are not touched, and the shared blueprints they referenced stay
+// for the replacement to reuse.
 func removeTeamConfigs(ctx context.Context, client Client, team string) error {
-	if err := client.Ping(ctx); err != nil {
-		return fmt.Errorf("kukeond connection/preflight: %w", err)
-	}
 	configs, err := client.ListConfigs(ctx, "", "", "")
 	if err != nil {
 		return requestError("lookup", "configs", err)

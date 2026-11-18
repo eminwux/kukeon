@@ -67,6 +67,18 @@ func Add(ctx context.Context, opts AddOptions) (Result, error) {
 	if err = validateAddName(opts.Name); err != nil {
 		return Result{}, err
 	}
+	// Registering over the pre-#1527 init entry would record a project source
+	// on it, after which init --force no longer recognizes and migrates it.
+	legacy, err := isLegacyEntry(filepath.Join(opts.Root, "kuketeam.d", opts.Name+".yaml"))
+	if err != nil {
+		return Result{}, err
+	}
+	if legacy {
+		return Result{}, fmt.Errorf(
+			"add: kuketeam.d/%s.yaml is the init team from before its rename to %s; run kuke team init --force first",
+			opts.Name, majordomoName,
+		)
+	}
 	source := team.ProjectSource
 	remote, err := gitremote.URL(source.URL)
 	if err != nil {

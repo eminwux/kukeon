@@ -485,6 +485,40 @@ func TestAddRejectsReservedNames(t *testing.T) {
 	}
 }
 
+// TestAddRefusesTheLegacyInitEntry: on a host not yet migrated from the
+// kukeon init team, add under that name (positional or from metadata.name)
+// is refused: recording a project source on the entry would stop init
+// --force from ever migrating it.
+func TestAddRefusesTheLegacyInitEntry(t *testing.T) {
+	for _, form := range []string{"positional", "metadata"} {
+		t.Run(form, func(t *testing.T) {
+			opts, _ := setupDirectoryAdd(t)
+			fake := newFake()
+			opts.Client = fake
+			switch form {
+			case "positional":
+				opts.Directory, opts.Name, opts.Source = "", legacyName, "git@work-alias:owner/project.git"
+			case "metadata":
+				writeFixture(t, filepath.Join(opts.Directory, "kuketeam.yaml"),
+					"apiVersion: kuketeams.io/v1\nkind: Team\nmetadata: {name: kukeon}\n")
+			}
+			path := filepath.Join(opts.Root, "kuketeam.d", "kukeon.yaml")
+			before := writeEntry(t, path, legacyEntry())
+			_, err := Add(t.Context(), opts)
+			if err == nil || !strings.Contains(err.Error(), "run kuke team init --force first") {
+				t.Fatalf("add over the legacy entry accepted or unexplained: %v", err)
+			}
+			if fake.applies != 0 || fake.creates != 0 || len(fake.deleted) != 0 {
+				t.Fatal("refused add reached the daemon")
+			}
+			after, readErr := os.ReadFile(path)
+			if readErr != nil || !bytes.Equal(before, after) {
+				t.Fatalf("legacy entry changed: %v", readErr)
+			}
+		})
+	}
+}
+
 // TestAddKukeonProjectKeepsTheInitTeam is the #1527 collision: with the init
 // team applied, adding kukeon's own checkout (metadata.name: kukeon) registers
 // a separate team and leaves kuke.yaml and the kuke-majordomo-* configs alone.

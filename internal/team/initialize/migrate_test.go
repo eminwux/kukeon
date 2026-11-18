@@ -183,6 +183,47 @@ func TestFailedMigrationKeepsTheLegacyEntry(t *testing.T) {
 	}
 }
 
+// TestFailedPreflightKeepsTheLegacyConfigs: the legacy configs are deleted
+// only after the kuke team is applied, so a daemon preflight failure leaves
+// the host with the kukeon-majordomo-* configs and entry it started with.
+func TestFailedPreflightKeepsTheLegacyConfigs(t *testing.T) {
+	for name, fail := range map[string]func(*fakeClient){
+		"missing-stack":  func(f *fakeClient) { f.missingStack = true },
+		"missing-realm":  func(f *fakeClient) { f.missingRealm = true },
+		"apply-rejected": func(f *fakeClient) { f.applyErr = errors.New("daemon refused") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			opts := setupRun(t)
+			fake := opts.Client.(*fakeClient)
+			fake.configs = legacyConfigs()
+			fail(fake)
+			legacyPath := filepath.Join(opts.Root, "kuketeam.d", "kukeon.yaml")
+			before := writeEntry(t, legacyPath, legacyEntry())
+			if _, err := Run(t.Context(), opts); err == nil {
+				t.Fatal("preflight failure accepted")
+			}
+			if len(fake.deleted) != 0 {
+				t.Fatalf("deleted %v before the replacement was applied", fake.deleted)
+			}
+			var names []string
+			for _, cfg := range fake.configs {
+				names = append(names, cfg.Metadata.Name)
+			}
+			want := []string{
+				"kukeon-majordomo-codex", "kukeon-majordomo-claude",
+				"kukeon-majordomo-claude-health-sweep", "platform-dev-codex",
+			}
+			if !slices.Equal(names, want) {
+				t.Fatalf("configs after failed preflight: %v", names)
+			}
+			after, err := os.ReadFile(legacyPath)
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatalf("legacy entry changed on failure: %v", err)
+			}
+		})
+	}
+}
+
 // TestIsLegacyEntry: only the init declaration under the kukeon name, from
 // either role era, counts as legacy; an unreadable file is left alone.
 func TestIsLegacyEntry(t *testing.T) {

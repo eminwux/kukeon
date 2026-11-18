@@ -273,15 +273,17 @@ Run `kuke team init --force`. When `kukeon.yaml` is the legacy init declaration
 — a `kukeon` entry with no `projectSource` whose roles are only `majordomo`
 (or `operator`, see below) — init:
 
-1. deletes every config labelled `kukeon.io/team: kukeon`,
-2. applies `kuke-majordomo-codex` and `kuke-majordomo-claude` (and their
-   health-sweep configs) labelled `kukeon.io/team: kuke`, and registers
+1. applies `kuke-majordomo-codex` and `kuke-majordomo-claude` (and their
+   health-sweep configs) labelled `kukeon.io/team: kuke`,
+2. deletes every config labelled `kukeon.io/team: kukeon`, and registers
    `~/.kuke/kuketeam.d/kuke.yaml`,
 3. removes `kukeon.yaml` and prints a note saying so.
 
-The legacy entry is removed only after the `kuke` team is fully applied and
-registered, so a failed run leaves it in place and rerunning `--force` finishes
-the migration. A `kukeon.yaml` holding any other declaration — a project team
+Nothing is deleted until the `kuke` team has passed the daemon preflight and
+been applied, so a missing stack or an unreadable secret source leaves the
+`kukeon` team as it was. The legacy entry is removed only after the `kuke` team
+is registered, so a failed run leaves it in place and rerunning `--force`
+finishes the migration. Until then, `kuke team add` refuses the name `kukeon`. A `kukeon.yaml` holding any other declaration — a project team
 registered with `kuke team add`, or an init entry you added roles to — is left
 untouched, together with its configs. Like any `--force`, the migration starts
 from the initial declaration: re-make edits you had made to `kukeon.yaml` (an

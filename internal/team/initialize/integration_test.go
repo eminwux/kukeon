@@ -66,7 +66,7 @@ func TestKukeondIntegration(t *testing.T) {
 			if !created[bp.Metadata.Name] {
 				continue
 			}
-			foreign, lookupErr := foreignBlueprintRefs(t.Context(), client, team.Metadata.Name, bp.Metadata.Realm)
+			foreign, lookupErr := foreignBlueprintRefs(t.Context(), client, bp.Metadata.Realm, team.Metadata.Name)
 			if lookupErr != nil || foreign[bp.Metadata.Name] {
 				continue
 			}

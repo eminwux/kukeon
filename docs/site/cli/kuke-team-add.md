@@ -120,6 +120,12 @@ anything is fetched or applied:
   would overwrite its entry and prune its `kuke-majordomo-*` configs, which
   carry the same `kukeon.io/team: kuke` label.
 
+`add` also refuses a name whose `~/.kuke/kuketeam.d/<name>.yaml` is still the
+init team as registered before its rename to `kuke`: on a host not yet
+[migrated](kuke-team-init.md#migrating-from-the-kukeon-team-name), adding
+`kukeon` fails with `run kuke team init --force first`, since recording a
+project on that entry would stop init from migrating it.
+
 Any other name, `kukeon` included, is a project team: adding kukeon's own
 checkout leaves `kuke.yaml` and the `kuke-majordomo-*` configs untouched.
 

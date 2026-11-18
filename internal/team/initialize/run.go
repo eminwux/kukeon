@@ -61,8 +61,9 @@ type Options struct {
 	ImportGit GitImport
 
 	// legacyTeam, when set, names a pre-#1527 init team whose configs runTeam
-	// deletes before applying, so the replacement team's shared blueprints are
-	// not held by them. Set only by a forced init that found that team.
+	// deletes once the replacement is applied; until then they do not hold the
+	// replacement's shared blueprints. Set only by a forced init that found
+	// that team.
 	legacyTeam string
 }
 
@@ -283,12 +284,7 @@ func runTeam(
 		}
 		defer func() { _ = client.Close() }()
 	}
-	if opts.legacyTeam != "" {
-		if err = removeTeamConfigs(ctx, client, opts.legacyTeam); err != nil {
-			return result, err
-		}
-	}
-	done, err := apply(ctx, client, composed, command, imported)
+	done, err := apply(ctx, client, composed, command, imported, opts.legacyTeam)
 	if err != nil {
 		if !strings.HasPrefix(command, "kuke team init") {
 			return result, fmt.Errorf(
@@ -301,6 +297,14 @@ func runTeam(
 	}
 	if err = ctx.Err(); err != nil {
 		return result, fmt.Errorf("resources applied but registration unchanged: %w; rerun %s", err, command)
+	}
+	// The replacement is applied, so removing the legacy team's configs can no
+	// longer leave the host with neither team: a preflight or apply failure
+	// above returned with them intact.
+	if opts.legacyTeam != "" {
+		if err = removeTeamConfigs(ctx, client, opts.legacyTeam); err != nil {
+			return result, err
+		}
 	}
 	if err = os.Rename(stage, entryPath); err != nil {
 		return result, fmt.Errorf(
