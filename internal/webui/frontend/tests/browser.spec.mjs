@@ -242,13 +242,17 @@ test("Workspace retains independent scoped terminals, focus and resize while swi
   await expect.poll(() => sockets.size).toBe(2);
   expect(closed).toEqual([]);
   expect(await devScreen.evaluate(el => el.isConnected)).toBe(true);
-  await panel.locator(".terminal-session:not([hidden]) .xterm-helper-textarea").press("p");
+  // Wait for the target cell's session to be the visible one: "Attached" was already true for the session being left.
+  const visibleSession = scope => panel.locator(".terminal-session:not([hidden])").filter({ has: page.locator(`.terminal-screen[aria-label="Terminal for ${scope} / shell"]`) });
+  await expect(visibleSession("prod / shared / services / api")).toBeVisible();
+  await visibleSession("prod / shared / services / api").locator(".xterm-helper-textarea").press("p");
   await expect.poll(() => messages.get(prodPath).some(message => Buffer.isBuffer(message) && message.toString() === "p")).toBe(true);
   expect(messages.get(devPath).some(message => Buffer.isBuffer(message) && message.toString() === "p")).toBe(false);
   await cells.getByRole("link", { name: "Open dev / shared / services / api" }).click();
   await expect(terminalTools(page).locator(".terminal-connection-state")).toHaveText("Attached");
   expect(await devScreen.evaluate(el => el === document.querySelector('.terminal-screen[aria-label="Terminal for dev / shared / services / api / shell"]'))).toBe(true);
-  await panel.locator(".terminal-session:not([hidden]) .xterm-helper-textarea").press("d");
+  await expect(visibleSession("dev / shared / services / api")).toBeVisible();
+  await visibleSession("dev / shared / services / api").locator(".xterm-helper-textarea").press("d");
   await expect.poll(() => messages.get(devPath).some(message => Buffer.isBuffer(message) && message.toString() === "d")).toBe(true);
   // Reactivating at an unchanged size sends nothing new; only a real size change below does.
   await expect.poll(() => messages.get(devPath).filter(message => typeof message === "string" && JSON.parse(message).type === "resize").length).toBeGreaterThanOrEqual(1);
