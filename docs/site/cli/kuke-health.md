@@ -173,24 +173,24 @@ body: |
   ...
 ```
 
-| Field                          | Required | Notes                                                                  |
-| ------------------------------ | -------- | ---------------------------------------------------------------------- |
-| `id`                           | no       | kukeond assigns one when omitted. A duplicate id is rejected.          |
-| `createdAt`                    | no       | kukeond sets it when omitted.                                          |
-| `since`, `until`               | yes      | The digest window the report covers; `until` must not precede `since`. |
-| `cell`                         | yes      | `realm`, `space`, `stack` and `name` of the submitting cell.           |
-| `summary`                      | yes      |                                                                        |
-| `findings`                     | yes      | A list; `[]` is valid.                                                 |
-| `body`                         | no       | Markdown.                                                              |
-| `findings[].signature`         | yes      | Unique within the report. Identifies the finding across reports.       |
-| `findings[].classification`    | yes      | `kukeon`, `workload` or `unclear`.                                     |
-| `findings[].severity`          | yes      | `info`, `warning`, `error` or `critical`.                              |
-| `findings[].evidence`          | yes      | At least one entry.                                                    |
-| `findings[].title`             | no       |                                                                        |
-| `findings[].count`             | no       | Occurrences in the window.                                             |
-| `findings[].suggestedCommands` | no       | Commands for the reader. Nothing runs them.                            |
-| `findings[].issueUrl`          | no       | An `https` URL, allowed only on a `kukeon` finding.                    |
-| `findings[].recurring`         | —        | Computed by kukeond; a submitted value is ignored.                     |
+| Field                          | Required | Notes                                                                       |
+| ------------------------------ | -------- | --------------------------------------------------------------------------- |
+| `id`                           | no       | kukeond assigns one when omitted. A duplicate id, or `latest`, is rejected. |
+| `createdAt`                    | no       | kukeond sets it when omitted.                                               |
+| `since`, `until`               | yes      | The digest window the report covers; `until` must not precede `since`.      |
+| `cell`                         | yes      | `realm`, `space`, `stack` and `name` of the submitting cell.                |
+| `summary`                      | yes      |                                                                             |
+| `findings`                     | yes      | A list; `[]` is valid.                                                      |
+| `body`                         | no       | Markdown.                                                                   |
+| `findings[].signature`         | yes      | Unique within the report. Identifies the finding across reports.            |
+| `findings[].classification`    | yes      | `kukeon`, `workload` or `unclear`.                                          |
+| `findings[].severity`          | yes      | `info`, `warning`, `error` or `critical`.                                   |
+| `findings[].evidence`          | yes      | At least one entry.                                                         |
+| `findings[].title`             | no       |                                                                             |
+| `findings[].count`             | no       | Occurrences in the window.                                                  |
+| `findings[].suggestedCommands` | no       | Commands for the reader. Nothing runs them.                                 |
+| `findings[].issueUrl`          | no       | An `https` URL, allowed only on a `kukeon` finding.                         |
+| `findings[].recurring`         | —        | Computed by kukeond; a submitted value is ignored.                          |
 
 On submission kukeond marks a finding **recurring** when the previous stored
 report already carried the same signature. A hand-started sweep that overlaps a
@@ -215,7 +215,9 @@ formats, `key=value` pairs whose key names a credential, private key blocks and
 URL userinfo.
 
 Filing needs a GitHub token in the `HEALTH_GITHUB_TOKEN` environment variable.
-If filing fails, the report is still stored and the command exits `1`. See
+If filing fails, the report is still stored and the command exits `1`. If the
+report cannot be stored after filing ran, the command prints the issues it
+opened or commented on to stderr and exits `1`. See
 [opting in to filing](../concepts/team.md#filing-kukeon-defects-as-issues) for
 how an install turns it on. `KUKE_HEALTH_GITHUB_API` overrides the API base URL
 for GitHub Enterprise.

@@ -260,6 +260,7 @@ func TestValidateRejectsSchemaViolations(t *testing.T) {
 	}
 	for name, mutate := range map[string]func(*kukeonv1.HealthReport){
 		"id":             func(r *kukeonv1.HealthReport) { r.ID = "../escape" },
+		"reserved id":    func(r *kukeonv1.HealthReport) { r.ID = kukeonv1.HealthReportLatest },
 		"created":        func(r *kukeonv1.HealthReport) { r.CreatedAt = time.Time{} },
 		"window":         func(r *kukeonv1.HealthReport) { r.Since = time.Time{} },
 		"window order":   func(r *kukeonv1.HealthReport) { r.Until = r.Since.Add(-time.Second) },
@@ -310,8 +311,8 @@ func TestStoreSubmitListReadSurviveReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.ID == "" || !stored.CreatedAt.Equal(at) || stored.SchemaVersion != kukeonv1.HealthSchemaVersion ||
-		stored.Findings[0].Recurring {
+	if stored.ID != health.ReportID(at) || !stored.CreatedAt.Equal(at) ||
+		stored.SchemaVersion != kukeonv1.HealthSchemaVersion || stored.Findings[0].Recurring {
 		t.Fatalf("stored = %+v", stored)
 	}
 

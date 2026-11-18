@@ -169,6 +169,11 @@ func (s *Store) LastUntil() (time.Time, bool, error) {
 	return reports[0].Until, true, nil
 }
 
+// ReportID is the id Submit assigns to a report submitted without one.
+func ReportID(createdAt time.Time) string {
+	return createdAt.UTC().Format("20060102T150405.000000000Z")
+}
+
 // Submit validates report, fills the daemon-assigned fields, marks findings
 // the previous report already carried as recurring, stores it, and drops the
 // reports beyond Keep. It returns the report as stored.
@@ -181,7 +186,7 @@ func (s *Store) Submit(report kukeonv1.HealthReport) (kukeonv1.HealthReport, err
 	}
 	report.CreatedAt = report.CreatedAt.UTC()
 	if report.ID == "" {
-		report.ID = report.CreatedAt.Format("20060102T150405.000000000Z")
+		report.ID = ReportID(report.CreatedAt)
 	}
 	report.SchemaVersion = kukeonv1.HealthSchemaVersion
 	if err := Validate(&report); err != nil {
@@ -272,8 +277,11 @@ func Validate(report *kukeonv1.HealthReport) error {
 	var problems []string
 	add := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
 
-	if !validID.MatchString(report.ID) {
+	switch {
+	case !validID.MatchString(report.ID):
 		add("id: must be 1-128 characters of letters, digits, '.', '_' or '-', starting with a letter or digit")
+	case report.ID == kukeonv1.HealthReportLatest:
+		add("id: %q is reserved for the newest report", kukeonv1.HealthReportLatest)
 	}
 	if report.CreatedAt.IsZero() {
 		add("createdAt: required")

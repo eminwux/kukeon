@@ -22,11 +22,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/eminwux/kukeon/cmd/kuke"
+	healthcmd "github.com/eminwux/kukeon/cmd/kuke/health"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/logging"
 	"github.com/spf13/cobra"
@@ -80,11 +82,46 @@ func TestExecRoot(t *testing.T) {
 			},
 			wantReturn: 1,
 		},
+		{
+			name: "health findings exit with their own code",
+			setupCmd: func() *cobra.Command {
+				cmd := &cobra.Command{
+					Use: "test",
+					RunE: func(_ *cobra.Command, _ []string) error {
+						return fmt.Errorf("digest: %w", healthcmd.FindingsError{})
+					},
+				}
+				cmd.SetArgs([]string{})
+				return cmd
+			},
+			wantReturn: healthcmd.ExitFindings,
+		},
+		{
+			name: "wrapped child exit code is a plain failure",
+			setupCmd: func() *cobra.Command {
+				cmd := &cobra.Command{
+					Use: "test",
+					RunE: func(_ *cobra.Command, _ []string) error {
+						err := exec.Command("sh", "-c", "exit 7").Run()
+						var exitErr *exec.ExitError
+						if !errors.As(err, &exitErr) || exitErr.ExitCode() != 7 {
+							return fmt.Errorf("setup: want exit status 7, got %w", err)
+						}
+						return fmt.Errorf("docker save failed: %w", err)
+					},
+				}
+				cmd.SetArgs([]string{})
+				return cmd
+			},
+			wantReturn: 1,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cmd := tt.setupCmd()
+			cmd.SilenceErrors = true
+			cmd.SilenceUsage = true
 			got := execRoot(cmd)
 			if got != tt.wantReturn {
 				t.Errorf("execRoot() = %d, want %d", got, tt.wantReturn)

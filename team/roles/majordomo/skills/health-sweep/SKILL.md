@@ -25,15 +25,22 @@ Only these, and only as reads plus the one submission:
 **Never run a command that mutates kukeon or a workload**: no `kuke apply`,
 `create`, `delete`, `purge`, `start`, `stop`, `kill`, `restart`, `run`,
 `refresh`, `init`, `uninstall`, `build`, `image`, `team`, or any `kuke daemon`
-subcommand other than `logs`. Do not edit files outside a scratch directory
-for the report draft. If a fix seems obvious, write it into the report as a
-suggested command; do not run it.
+subcommand other than `logs`. Do not write files anywhere but
+`/tmp/health-sweep/`, which holds the report draft. If a fix seems obvious,
+write it into the report as a suggested command; do not run it.
+
+On Claude, the role's settings pre-approve exactly these reads, the submission
+and that scratch directory. The task runs with nobody attached, so any other
+command or path is denied rather than asked about. Run each `kuke` command on
+its own, not chained with `;`, `&&` or a redirect, so it matches the approval.
 
 ## 1. Read the digest
 
 ```sh
-kuke health --since last-report -o json --exit-code > "$scratch/digest.json"; code=$?
+kuke health --since last-report -o json --exit-code
 ```
+
+Read the digest from the command's output and its exit code from the result:
 
 - Exit `0`: the digest is clean. **Stop here.** Submit nothing and end the run.
 - Exit `2`: the digest has findings. Continue.
@@ -87,7 +94,7 @@ That also covers a manual sweep that overlaps a scheduled one.
 
 ## 3. Write the report
 
-Write one YAML document to a scratch file:
+Write one YAML document to `/tmp/health-sweep/report.yaml`:
 
 ```yaml
 since: <digest.since>
@@ -119,7 +126,7 @@ with what happened, why it is classified as it is, and the suggested commands.
 ## 4. Submit
 
 ```sh
-kuke health report submit -f "$scratch/report.yaml"
+kuke health report submit -f /tmp/health-sweep/report.yaml
 ```
 
 Submit exactly one report per sweep. If kukeond rejects the document, read the
@@ -135,7 +142,7 @@ name a repository as `--file-issues <owner/repo>`, and the `HEALTH_GITHUB_TOKEN`
 environment variable is set. Then submit with the same flag:
 
 ```sh
-kuke health report submit -f "$scratch/report.yaml" --file-issues <owner/repo>
+kuke health report submit -f /tmp/health-sweep/report.yaml --file-issues <owner/repo>
 ```
 
 `kuke` does the filing, not you: it opens one issue per new `kukeon` finding,

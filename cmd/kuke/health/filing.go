@@ -114,9 +114,9 @@ func (f *Filer) Title(finding kukeonv1.HealthFinding) string {
 	return title
 }
 
-func frequency(finding kukeonv1.HealthFinding, report kukeonv1.HealthReport, recurring bool) string {
+func frequency(finding kukeonv1.HealthFinding, report kukeonv1.HealthReport, recurring bool, seenBefore string) string {
 	window := fmt.Sprintf("%s to %s", stamp(report.Since), stamp(report.Until))
-	seen := "first seen in this window"
+	seen := seenBefore
 	if recurring {
 		seen = "recurring: the previous health report also carried it"
 	}
@@ -150,16 +150,20 @@ func (f *Filer) Body(finding kukeonv1.HealthFinding, report kukeonv1.HealthRepor
 	var b strings.Builder
 	fmt.Fprintf(&b, "## Symptom\n\n%s\n\nSeverity: %s\n\n", Sanitize(symptom, f.Token), finding.Severity)
 	fmt.Fprintf(&b, "## Evidence\n\n%s\n", f.evidence(finding))
-	fmt.Fprintf(&b, "## Frequency\n\n%s\n\n", frequency(finding, report, recurring))
+	fmt.Fprintf(&b, "## Frequency\n\n%s\n\n", frequency(finding, report, recurring, "first seen in this window"))
 	fmt.Fprintf(&b, "## kukeon version\n\n%s\n\n", f.Version)
 	fmt.Fprintf(&b, "Signature: `%s`\n\n", Sanitize(finding.Signature, f.Token))
 	b.WriteString("Filed by a kukeon majordomo health sweep.\n\n" + marker(finding.Signature) + "\n")
 	return b.String()
 }
 
-func (f *Filer) comment(finding kukeonv1.HealthFinding, report kukeonv1.HealthReport) string {
+// comment renders the note added to an open issue that already tracks
+// finding. recurring is whether the previous report carried it too; when not,
+// the finding is back after at least one report without it.
+func (f *Filer) comment(finding kukeonv1.HealthFinding, report kukeonv1.HealthReport, recurring bool) string {
 	return fmt.Sprintf("Seen again by a health sweep.\n\n%s\n\nkukeon version: %s\n\n%s",
-		frequency(finding, report, true), f.Version, f.evidence(finding))
+		frequency(finding, report, recurring, "back again: the previous health report did not carry it"),
+		f.Version, f.evidence(finding))
 }
 
 func (f *Filer) do(ctx context.Context, method, path string, payload, into any) error {
@@ -282,7 +286,7 @@ func (f *Filer) File(
 		}
 		if existing >= 0 {
 			path := fmt.Sprintf("/repos/%s/issues/%d/comments", f.Repo, open[existing].Number)
-			payload := map[string]string{"body": f.comment(*finding, *report)}
+			payload := map[string]string{"body": f.comment(*finding, *report, recurring[finding.Signature])}
 			if err = f.do(ctx, http.MethodPost, path, payload, nil); err != nil {
 				return opened, commented, err
 			}

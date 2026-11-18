@@ -373,6 +373,11 @@ func newSubmitCmd() *cobra.Command {
 			}
 			stored, err := client.SubmitHealthReport(cmd.Context(), document)
 			if err != nil {
+				if opened+commented > 0 || filingErr != nil {
+					// The issues are public already: leave a record of
+					// them, since no stored report carries their URLs.
+					filedBeforeFailure(cmd, fileIssues, &document, opened, commented, filingErr)
+				}
 				return report(cmd, err)
 			}
 			recurring := 0
@@ -399,6 +404,24 @@ func newSubmitCmd() *cobra.Command {
 	return cmd
 }
 
+// filedBeforeFailure writes to stderr what filing did before a submission
+// failed: the counts, each issue URL, and the filing error if there was one.
+func filedBeforeFailure(
+	cmd *cobra.Command, repo string, document *kukeonv1.HealthReport, opened, commented int, filingErr error,
+) {
+	w := cmd.ErrOrStderr()
+	fmt.Fprintf(w, "The report was not stored, but filing in %s already ran: %d issues opened, %d commented\n",
+		repo, opened, commented)
+	for _, finding := range document.Findings {
+		if finding.IssueURL != "" {
+			fmt.Fprintf(w, "  %s: %s\n", finding.Signature, finding.IssueURL)
+		}
+	}
+	if filingErr != nil {
+		fmt.Fprintln(w, "Filing did not complete:", filingErr)
+	}
+}
+
 // validateForFiling runs kukeond's schema check on document as it will be
 // submitted after filing: id and createdAt filled the way kukeond fills them
 // when absent, and issueUrl cleared on the findings the filer never files. It
@@ -411,11 +434,17 @@ func validateForFiling(
 		candidate.Findings = make([]kukeonv1.HealthFinding, len(document.Findings))
 		copy(candidate.Findings, document.Findings)
 	}
+	// kukeond derives a missing id from createdAt, so a document with
+	// createdAt but no id is stored under a predictable id: check that one.
+	// Without createdAt, kukeond's own clock picks the id.
+	checkID := document.ID
 	if candidate.CreatedAt.IsZero() {
 		candidate.CreatedAt = now
+	} else if checkID == "" {
+		checkID = health.ReportID(candidate.CreatedAt)
 	}
 	if candidate.ID == "" {
-		candidate.ID = "pending"
+		candidate.ID = health.ReportID(candidate.CreatedAt)
 	}
 	for i := range candidate.Findings {
 		if candidate.Findings[i].Classification != kukeonv1.HealthClassKukeon {
@@ -425,10 +454,10 @@ func validateForFiling(
 	if err := health.Validate(&candidate); err != nil {
 		return fmt.Errorf("%w; nothing was filed", err)
 	}
-	if document.ID != "" && document.ID != kukeonv1.HealthReportLatest {
-		if _, err := client.ReadHealthReport(ctx, document.ID); err == nil {
+	if checkID != "" {
+		if _, err := client.ReadHealthReport(ctx, checkID); err == nil {
 			return fmt.Errorf("%w: a report with id %q is already stored; nothing was filed",
-				errdefs.ErrHealthReportInvalid, document.ID)
+				errdefs.ErrHealthReportInvalid, checkID)
 		}
 	}
 	return nil

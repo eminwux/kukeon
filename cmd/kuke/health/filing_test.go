@@ -18,6 +18,7 @@ package health_test
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -27,6 +28,7 @@ import (
 	"unicode/utf8"
 
 	healthcmd "github.com/eminwux/kukeon/cmd/kuke/health"
+	"github.com/eminwux/kukeon/internal/health"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 )
 
@@ -243,13 +245,27 @@ func TestFilingCommentsOnTheOpenIssueOfARecurringFinding(t *testing.T) {
 		t.Fatalf("recurring finding lost its issue: %q", second.Findings[0].IssueURL)
 	}
 	comment := gh.bodies[len(gh.bodies)-1]
-	if !strings.Contains(comment, "Seen again") || !strings.Contains(comment, "recurring") {
+	if !strings.Contains(comment, "Seen again") ||
+		!strings.Contains(comment, "recurring: the previous health report also carried it") {
 		t.Fatalf("comment = %s", comment)
 	}
 	for _, secret := range tokenShaped {
 		if strings.Contains(comment, secret) {
 			t.Errorf("comment leaks %q", secret)
 		}
+	}
+
+	// The issue is still open but the previous report did not carry the
+	// finding: the comment must not claim it did.
+	back := sweepReport()
+	_, commented, err = filer(server).File(t.Context(), &back, &kukeonv1.HealthReport{})
+	if err != nil || commented != 1 {
+		t.Fatalf("back again: commented=%d err=%v", commented, err)
+	}
+	comment = gh.bodies[len(gh.bodies)-1]
+	if strings.Contains(comment, "recurring") ||
+		!strings.Contains(comment, "the previous health report did not carry it") {
+		t.Fatalf("comment on a finding the previous report lacked = %s", comment)
 	}
 
 	// A recurring finding whose issue was closed gets a new one.
@@ -358,16 +374,25 @@ func TestSubmitWithFileIssuesFilesNothingForAnInvalidReport(t *testing.T) {
 	noSummary.Summary = " "
 	storedID := sweepReport()
 	storedID.ID = "taken"
+	// No id, but kukeond derives it from createdAt: resubmitting the same
+	// document lands on the stored id.
+	derivedID := sweepReport()
+	derivedID.CreatedAt = window.Add(3600e9)
+	reservedID := sweepReport()
+	reservedID.ID = kukeonv1.HealthReportLatest
 
 	for name, document := range map[string]kukeonv1.HealthReport{
 		"duplicate signature": duplicate, "bad severity": badSeverity, "empty summary": noSummary,
-		"id already stored": storedID,
+		"id already stored": storedID, "id derived from createdAt already stored": derivedID,
+		"reserved id": reservedID,
 	} {
 		raw, err := json.Marshal(document)
 		if err != nil {
 			t.Fatal(err)
 		}
-		client := &fakeClient{version: "v0.11.0", reports: []kukeonv1.HealthReport{{ID: "taken", Summary: "x"}}}
+		client := &fakeClient{version: "v0.11.0", reports: []kukeonv1.HealthReport{
+			{ID: health.ReportID(derivedID.CreatedAt), Summary: "x"}, {ID: "taken", Summary: "x"},
+		}}
 		_, errOut, err := run(t, client, string(raw), "report", "submit", "-f", "-", "--file-issues", "acme/ops")
 		if err == nil || !strings.Contains(errOut, "nothing was filed") {
 			t.Fatalf("%s: err=%v stderr=%q", name, err, errOut)
@@ -375,6 +400,32 @@ func TestSubmitWithFileIssuesFilesNothingForAnInvalidReport(t *testing.T) {
 		if len(gh.requests) != 0 || client.submitted.Summary != "" {
 			t.Fatalf("%s: rejected report reached GitHub or kukeond: requests=%v submitted=%q",
 				name, gh.requests, client.submitted.Summary)
+		}
+	}
+}
+
+func TestSubmitWithFileIssuesReportsFilingWhenTheSubmissionFails(t *testing.T) {
+	gh := &github{}
+	server := httptest.NewServer(gh.handler(t))
+	defer server.Close()
+	t.Setenv(healthcmd.TokenEnv, "filing-token-0123456789")
+	t.Setenv(healthcmd.APIEnv, server.URL)
+
+	raw, err := json.Marshal(sweepReport())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &fakeClient{version: "v0.11.0", err: errors.New("kukeond unavailable")}
+	_, errOut, err := run(t, client, string(raw), "report", "submit", "-f", "-", "--file-issues", "acme/ops")
+	if err == nil {
+		t.Fatal("a failed submission must fail the command")
+	}
+	for _, want := range []string{
+		"The report was not stored, but filing in acme/ops already ran: 1 issues opened, 0 commented",
+		"https://github.com/acme/ops/issues/1", "kukeond unavailable",
+	} {
+		if !strings.Contains(errOut, want) {
+			t.Fatalf("stderr lacks %q:\n%s", want, errOut)
 		}
 	}
 }
