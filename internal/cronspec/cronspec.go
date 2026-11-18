@@ -25,8 +25,11 @@
 // A field is a comma-separated list of `*`, a value, a range `a-b`, and any of
 // those followed by a step `/n` (`a/n` means `a-<max>/n`). Months and days of
 // week also accept three-letter English names; day of week runs 0-6 from
-// Sunday, with 7 accepted as Sunday. When both day fields are restricted a
-// time matches if either one does, as in Vixie cron.
+// Sunday, with 7 accepted as Sunday. As in Vixie cron, a day field that starts
+// with `*` — a bare `*` or a stepped `*/n` — is unrestricted: the two day
+// fields then combine with AND, so `0 0 */2 * mon` fires on Mondays that fall
+// on an odd day of the month. When neither day field starts with `*`, a time
+// matches if either one does.
 //
 // Fire times are wall-clock times in the schedule's time zone. Across a
 // daylight-saving transition that means a wall-clock time the clocks skip does
@@ -55,7 +58,7 @@ const searchYears = 8
 // Schedule is a parsed cron expression. The zero value never fires.
 type Schedule struct {
 	minute, hour, dom, month, dow uint64
-	// domStar and dowStar record that the day field was unrestricted, which
+	// domStar and dowStar record that the day field started with `*`, which
 	// decides whether the two day fields combine with AND or OR.
 	domStar, dowStar bool
 }
@@ -174,57 +177,55 @@ func Parse(expr string) (Schedule, error) {
 }
 
 // parse returns the bit set of the values a field expression selects, and
-// whether the field is an unrestricted `*`.
+// whether the field is unrestricted. As in Vixie cron, that is decided by the
+// field's first character alone: `*` and `*/n` are unrestricted, and so is a
+// list that begins with one (`*/2,5`), while `5,*` is not.
 func (f field) parse(expr string) (uint64, bool, error) {
 	var bits uint64
-	star := false
 	for _, item := range strings.Split(expr, ",") {
-		itemBits, itemStar, err := f.parseItem(item)
+		itemBits, err := f.parseItem(item)
 		if err != nil {
 			return 0, false, fmt.Errorf("%w: %s field %q: %w", ErrInvalid, f.name, expr, err)
 		}
 		bits |= itemBits
-		star = star || itemStar
 	}
-	return bits, star, nil
+	return bits, strings.HasPrefix(expr, "*"), nil
 }
 
-func (f field) parseItem(item string) (uint64, bool, error) {
+func (f field) parseItem(item string) (uint64, error) {
 	if item == "" {
-		return 0, false, errors.New("empty list entry")
+		return 0, errors.New("empty list entry")
 	}
 	rangePart, stepPart, hasStep := strings.Cut(item, "/")
 	step := 1
 	if hasStep {
 		n, err := strconv.Atoi(stepPart)
 		if err != nil || n <= 0 {
-			return 0, false, fmt.Errorf("step %q must be a positive integer", stepPart)
+			return 0, fmt.Errorf("step %q must be a positive integer", stepPart)
 		}
 		step = n
 	}
 
 	lo, hi := f.min, f.max
-	star := false
 	switch {
 	case rangePart == "*":
-		// A stepped star (`*/2`) restricts the field; a bare one does not.
-		star = !hasStep
+		// The whole field: lo and hi already span it.
 	case strings.Contains(rangePart, "-"):
 		from, to, _ := strings.Cut(rangePart, "-")
 		var err error
 		if lo, err = f.value(from); err != nil {
-			return 0, false, err
+			return 0, err
 		}
 		if hi, err = f.value(to); err != nil {
-			return 0, false, err
+			return 0, err
 		}
 		if lo > hi {
-			return 0, false, fmt.Errorf("range %q runs backwards", rangePart)
+			return 0, fmt.Errorf("range %q runs backwards", rangePart)
 		}
 	default:
 		v, err := f.value(rangePart)
 		if err != nil {
-			return 0, false, err
+			return 0, err
 		}
 		lo = v
 		if !hasStep {
@@ -236,7 +237,7 @@ func (f field) parseItem(item string) (uint64, bool, error) {
 	for v := lo; v <= hi; v += step {
 		bits |= 1 << v
 	}
-	return bits, star, nil
+	return bits, nil
 }
 
 func (f field) value(text string) (int, error) {

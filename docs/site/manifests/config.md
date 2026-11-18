@@ -134,7 +134,7 @@ spec:
 | `startingDeadlineSeconds` | integer | no       | How late a fire that was missed while kukeond was down may still start. Unset, missed fires are dropped. See [Missed fires](#missed-fires).          |
 | `suspend`                 | bool    | no       | `true` stops new fires and leaves running cells alone. Setting it back to `false` resumes from the next scheduled time; nothing is caught up.        |
 
-A `cron` field is a comma-separated list of `*`, a value, a range `a-b`, and any of those with a step `/n`. Months and days of week also take three-letter names (`jan`, `mon`); day of week runs `0`–`6` from Sunday, and `7` is also Sunday. When both day fields are restricted, a day matches if either one does.
+A `cron` field is a comma-separated list of `*`, a value, a range `a-b`, and any of those with a step `/n`. Months and days of week also take three-letter names (`jan`, `mon`); day of week runs `0`–`6` from Sunday, and `7` is also Sunday. As in Vixie cron, a day field that starts with `*` — a bare `*` or a stepped `*/n` — is unrestricted, and the two day fields then both have to match: `0 0 */2 * mon` fires on Mondays that fall on an odd day of the month. When neither day field starts with `*`, a day matches if either one does.
 
 #### What a fire does
 
