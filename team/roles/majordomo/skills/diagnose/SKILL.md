@@ -54,7 +54,11 @@ evidence shows from what you infer. If two causes fit, say so and name the
 read that would tell them apart. If the evidence does not support a cause, say
 that the cause is not established and what is missing.
 
-Say whose problem it is:
+Present it in the role's terminal output shape: a verdict line, the evidence,
+and the cause as a chain such as `evidence ──▶ cause ──▶ effect`, followed by an
+`owner:` tag. Use a diagram rather than paragraphs.
+
+Tag whose problem it is:
 
 - **kukeon**: a `Failed` cell, a failing `kuke health` check, an error-level
   kukeond log entry about kukeon's own work.
