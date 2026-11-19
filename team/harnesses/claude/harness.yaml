@@ -8,6 +8,9 @@ spec:
   statePath: $HOME/.claude
   environment:
     CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: "1"
+    # The cell is a container sandbox; this suppresses Claude Code's
+    # folder-trust dialog for every launch folder, $HOME included.
+    CLAUDE_CODE_SANDBOXED: "1"
     ANTHROPIC_MODEL: "${ANTHROPIC_MODEL}"
   parameters:
     - name: ANTHROPIC_MODEL
