@@ -35,9 +35,12 @@ import (
 )
 
 const (
-	// TokenEnv holds the GitHub token filing uses. It is set only on an
-	// install that opted in; nothing else in kukeon reads it.
-	TokenEnv = "HEALTH_GITHUB_TOKEN"
+	// TokenEnv holds the GitHub token filing uses. The github connector sets
+	// it, and only on an install that opted in by binding OptInSecret.
+	TokenEnv = "GH_TOKEN"
+	// OptInSecret is the team-entry secret that enables the github connector
+	// for majordomo: one binding serves the interactive cell and the sweep.
+	OptInSecret = "gh-token"
 	// APIEnv overrides the GitHub API base URL (GitHub Enterprise, tests).
 	APIEnv = "KUKE_HEALTH_GITHUB_API"
 
@@ -126,9 +129,18 @@ func frequency(finding kukeonv1.HealthFinding, report kukeonv1.HealthReport, rec
 	return fmt.Sprintf("present in %s; %s", window, seen)
 }
 
-func (f *Filer) evidence(finding kukeonv1.HealthFinding) string {
+// errNoToken is the error for filing without a token. It names the variable
+// and the opt-in that sets it.
+func errNoToken(what string) error {
+	return fmt.Errorf(
+		"%s needs a GitHub token in %s; this install has not opted in to filing. To opt in, create the %s secret "+
+			"and add it to the majordomo role's needs.secrets in the team entry, then run kuke team init --reapply",
+		what, TokenEnv, OptInSecret)
+}
+
+func (f *Filer) evidence(entries []string) string {
 	var b strings.Builder
-	for _, entry := range finding.Evidence {
+	for _, entry := range entries {
 		clean := strings.TrimRight(Sanitize(entry, f.Token), "\n")
 		if b.Len()+len(clean) > maxEvidence {
 			b.WriteString("[further evidence omitted; see the stored health report]\n")
@@ -149,7 +161,7 @@ func (f *Filer) Body(finding kukeonv1.HealthFinding, report kukeonv1.HealthRepor
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "## Symptom\n\n%s\n\nSeverity: %s\n\n", Sanitize(symptom, f.Token), finding.Severity)
-	fmt.Fprintf(&b, "## Evidence\n\n%s\n", f.evidence(finding))
+	fmt.Fprintf(&b, "## Evidence\n\n%s\n", f.evidence(finding.Evidence))
 	fmt.Fprintf(&b, "## Frequency\n\n%s\n\n", frequency(finding, report, recurring, "first seen in this window"))
 	fmt.Fprintf(&b, "## kukeon version\n\n%s\n\n", f.Version)
 	fmt.Fprintf(&b, "Signature: `%s`\n\n", Sanitize(finding.Signature, f.Token))
@@ -163,7 +175,7 @@ func (f *Filer) Body(finding kukeonv1.HealthFinding, report kukeonv1.HealthRepor
 func (f *Filer) comment(finding kukeonv1.HealthFinding, report kukeonv1.HealthReport, recurring bool) string {
 	return fmt.Sprintf("Seen again by a health sweep.\n\n%s\n\nkukeon version: %s\n\n%s",
 		frequency(finding, report, recurring, "back again: the previous health report did not carry it"),
-		f.Version, f.evidence(finding))
+		f.Version, f.evidence(finding.Evidence))
 }
 
 func (f *Filer) do(ctx context.Context, method, path string, payload, into any) error {
@@ -251,7 +263,7 @@ func (f *Filer) File(
 		return 0, 0, fmt.Errorf("--file-issues %q: expected <owner>/<repo>", f.Repo)
 	}
 	if f.Token == "" {
-		return 0, 0, fmt.Errorf("--file-issues needs a GitHub token in %s; this install has not opted in to filing", TokenEnv)
+		return 0, 0, errNoToken("--file-issues")
 	}
 	if f.API == "" {
 		f.API = defaultGitHubAPI

@@ -6,6 +6,7 @@ spec:
   skills:
     - team/roles/majordomo/skills/create-cell-config
     - team/roles/majordomo/skills/diagnose
+    - team/roles/majordomo/skills/file-kukeon-bug
     - team/roles/majordomo/skills/health-sweep
   harnesses:
     claude:

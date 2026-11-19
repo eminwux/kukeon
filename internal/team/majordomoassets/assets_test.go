@@ -129,7 +129,7 @@ func TestDefaultRoleAssets(t *testing.T) {
 	if want := []string{"kukeond-socket", "kuke-binary", "kukeon-install"}; !reflect.DeepEqual(role.Spec.Needs.Mounts, want) {
 		t.Fatalf("mounts = %v, want %v", role.Spec.Needs.Mounts, want)
 	}
-	if len(role.Spec.Skills) != 3 {
+	if len(role.Spec.Skills) != 4 {
 		t.Fatalf("skills: %v", role.Spec.Skills)
 	}
 	// The health sweep ships scheduled but switched off, so no install spends

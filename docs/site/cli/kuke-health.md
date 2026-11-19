@@ -5,6 +5,7 @@ kuke health [--since <duration|RFC3339|last-report>] [-o text|json|yaml] [--exit
 kuke health reports [-o text|json|yaml]
 kuke health report <id|latest> [-o markdown|json|yaml]
 kuke health report submit -f <file> [--file-issues <owner>/<repo>]
+kuke health issue -f <file>
 ```
 
 `kuke health` shows kukeond's **health digest**: host and state checks, the
@@ -214,13 +215,47 @@ evidence is stripped of secret values and credential-bearing URLs: known token
 formats, `key=value` pairs whose key names a credential, private key blocks and
 URL userinfo.
 
-Filing needs a GitHub token in the `HEALTH_GITHUB_TOKEN` environment variable.
-If filing fails, the report is still stored and the command exits `1`. If the
+Filing needs a GitHub token in the `GH_TOKEN` environment variable, which the
+`github` connector sets once the install binds the `gh-token` secret to the
+majordomo role. Without it, `--file-issues` fails naming `GH_TOKEN` and the
+opt-in, and the report is still stored. If filing fails, the report is still stored and the command exits `1`. If the
 report cannot be stored after filing ran, the command prints the issues it
 opened or commented on to stderr and exits `1`. See
 [opting in to filing](../concepts/team.md#filing-kukeon-defects-as-issues) for
 how an install turns it on. `KUKE_HEALTH_GITHUB_API` overrides the API base URL
 for GitHub Enterprise.
+
+## Rendering an issue for a diagnosed defect
+
+```bash
+kuke health issue -f draft.yaml
+```
+
+`kuke health issue` renders a kukeon defect found outside a sweep, by an
+interactive majordomo investigation, as the title, body, comment and signature
+marker a GitHub issue for it carries. It prints JSON and files nothing: the
+majordomo `file-kukeon-bug` skill files the result with `gh`. It uses the same
+title format, sanitizer and `kukeon-health-signature` marker as
+`--file-issues`, so an issue filed from it and a sweep-filed issue for the same
+signature dedupe against each other. The value of `GH_TOKEN`, when set, is
+redacted as well.
+
+The draft (JSON or YAML; `-` reads stdin) has the fields below. Unknown fields
+are rejected, and a draft not classified `kukeon` is refused.
+
+| Field            | Required | Notes                                                                       |
+| ---------------- | -------- | --------------------------------------------------------------------------- |
+| `signature`      | yes      | The sweep's signature when one applies, so the markers match.               |
+| `classification` | yes      | Must be `kukeon`.                                                           |
+| `severity`       | yes      | `info`, `warning`, `error` or `critical`.                                   |
+| `evidence`       | yes      | At least one entry.                                                         |
+| `title`          | no       | The symptom; the signature stands in when empty.                            |
+| `reproduction`   | no       | Steps or commands that reproduce the defect, rendered in their own section. |
+
+The output has `title`, `body` (a new issue's body, ending with the marker),
+`comment` (the note for an open issue that already carries the marker) and
+`marker`. The kukeon version comes from kukeond, or reads `unknown` when it is
+unreachable.
 
 ## When to use `kuke health` vs `kuke status`
 
