@@ -25,7 +25,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -2033,6 +2033,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#rendering-an-issue-for-a-diagnosed-defect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rendering an issue for a diagnosed defect
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#when-to-use-kuke-health-vs-kuke-status" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3572,6 +3583,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#rendering-an-issue-for-a-diagnosed-defect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rendering an issue for a diagnosed defect
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#when-to-use-kuke-health-vs-kuke-status" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3618,6 +3640,7 @@
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>kuke health reports [-o text|json|yaml]
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>kuke health report &lt;id|latest&gt; [-o markdown|json|yaml]
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>kuke health report submit -f &lt;file&gt; [--file-issues &lt;owner&gt;/&lt;repo&gt;]
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>kuke health issue -f &lt;file&gt;
 </code></pre></div>
 <p><code>kuke health</code> shows kukeond's <strong>health digest</strong>: host and state checks, the
 error-level entries of kukeond's own log, and the cells in a failed state. The
@@ -3950,13 +3973,73 @@ nothing), then, before it stores the report:</p>
 evidence is stripped of secret values and credential-bearing URLs: known token
 formats, <code>key=value</code> pairs whose key names a credential, private key blocks and
 URL userinfo.</p>
-<p>Filing needs a GitHub token in the <code>HEALTH_GITHUB_TOKEN</code> environment variable.
-If filing fails, the report is still stored and the command exits <code>1</code>. If the
+<p>Filing needs a GitHub token in the <code>GH_TOKEN</code> environment variable, which the
+<code>github</code> connector sets once the install binds the <code>gh-token</code> secret to the
+majordomo role. Without it, <code>--file-issues</code> fails naming <code>GH_TOKEN</code> and the
+opt-in, and the report is still stored. If filing fails, the report is still stored and the command exits <code>1</code>. If the
 report cannot be stored after filing ran, the command prints the issues it
 opened or commented on to stderr and exits <code>1</code>. See
 <a href="../../concepts/team/#filing-kukeon-defects-as-issues">opting in to filing</a> for
 how an install turns it on. <code>KUKE_HEALTH_GITHUB_API</code> overrides the API base URL
 for GitHub Enterprise.</p>
+<h2 id="rendering-an-issue-for-a-diagnosed-defect">Rendering an issue for a diagnosed defect<a class="headerlink" href="#rendering-an-issue-for-a-diagnosed-defect" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>kuke<span class="w"> </span>health<span class="w"> </span>issue<span class="w"> </span>-f<span class="w"> </span>draft.yaml
+</code></pre></div>
+<p><code>kuke health issue</code> renders a kukeon defect found outside a sweep, by an
+interactive majordomo investigation, as the title, body, comment and signature
+marker a GitHub issue for it carries. It prints JSON and files nothing: the
+majordomo <code>file-kukeon-bug</code> skill files the result with <code>gh</code>. It uses the same
+title format, sanitizer and <code>kukeon-health-signature</code> marker as
+<code>--file-issues</code>, so an issue filed from it and a sweep-filed issue for the same
+signature dedupe against each other. The value of <code>GH_TOKEN</code>, when set, is
+redacted as well.</p>
+<p>The draft (JSON or YAML; <code>-</code> reads stdin) has the fields below. Unknown fields
+are rejected, and a draft not classified <code>kukeon</code> is refused.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Required</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>signature</code></td>
+<td>yes</td>
+<td>The sweep's signature when one applies, so the markers match.</td>
+</tr>
+<tr>
+<td><code>classification</code></td>
+<td>yes</td>
+<td>Must be <code>kukeon</code>.</td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td>yes</td>
+<td><code>info</code>, <code>warning</code>, <code>error</code> or <code>critical</code>.</td>
+</tr>
+<tr>
+<td><code>evidence</code></td>
+<td>yes</td>
+<td>At least one entry.</td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td>no</td>
+<td>The symptom; the signature stands in when empty.</td>
+</tr>
+<tr>
+<td><code>reproduction</code></td>
+<td>no</td>
+<td>Steps or commands that reproduce the defect, rendered in their own section.</td>
+</tr>
+</tbody>
+</table>
+<p>The output has <code>title</code>, <code>body</code> (a new issue's body, ending with the marker),
+<code>comment</code> (the note for an open issue that already carries the marker) and
+<code>marker</code>. The kukeon version comes from kukeond, or reads <code>unknown</code> when it is
+unreachable.</p>
 <h2 id="when-to-use-kuke-health-vs-kuke-status">When to use <code>kuke health</code> vs <code>kuke status</code><a class="headerlink" href="#when-to-use-kuke-health-vs-kuke-status" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -4019,7 +4102,7 @@ down. Use <code>kuke health</code> for a running install, and always from inside
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 18, 2026 09:03:59 UTC">November 18, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 19, 2026 22:40:16 UTC">November 19, 2026</span>
   </span>
 
     
