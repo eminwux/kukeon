@@ -302,8 +302,9 @@ func TestFilingRefusals(t *testing.T) {
 
 	noToken := filer(server)
 	noToken.Token = ""
-	if _, _, err := noToken.File(t.Context(), &report, nil); err == nil || !strings.Contains(err.Error(), healthcmd.TokenEnv) {
-		t.Fatalf("missing token: %v", err)
+	_, _, err := noToken.File(t.Context(), &report, nil)
+	if err == nil || !strings.Contains(err.Error(), "GH_TOKEN") || !strings.Contains(err.Error(), "gh-token") {
+		t.Fatalf("missing token must name GH_TOKEN and the gh-token opt-in: %v", err)
 	}
 	badRepo := filer(server)
 	badRepo.Repo = "not a repo"
@@ -315,7 +316,7 @@ func TestFilingRefusals(t *testing.T) {
 	}
 
 	gh.fail = "POST /repos/acme/ops/issues"
-	_, _, err := filer(server).File(t.Context(), &report, nil)
+	_, _, err = filer(server).File(t.Context(), &report, nil)
 	if err == nil || !strings.Contains(err.Error(), "403") || strings.Contains(err.Error(), "filing-token") {
 		t.Fatalf("API failure: %v", err)
 	}

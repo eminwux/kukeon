@@ -120,7 +120,7 @@ func NewHealthCmd() *cobra.Command {
 		"Start of the window: a duration (90m), an RFC3339 time, or last-report (default 1h)")
 	cmd.Flags().StringVarP(&output, "output", "o", formatText, "Output format: text, json, yaml")
 	cmd.Flags().BoolVar(&exitCode, "exit-code", false, "Exit 2 when the digest has findings")
-	cmd.AddCommand(newReportsCmd(), newReportCmd())
+	cmd.AddCommand(newReportsCmd(), newReportCmd(), newIssueCmd())
 	return cmd
 }
 
@@ -327,7 +327,8 @@ func newSubmitCmd() *cobra.Command {
 			"same validation kukeond applies, and before storing, kuke opens one\n" +
 			"GitHub issue per kukeon finding (or comments on the open issue that already carries\n" +
 			"its signature) and records the URL in the report. workload and unclear findings are\n" +
-			"never filed. It needs a token in " + TokenEnv + ".",
+			"never filed. It needs a token in " + TokenEnv + ", which the github connector sets once the\n" +
+			"install opts in by binding the " + OptInSecret + " secret to the majordomo role.",
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -400,7 +401,7 @@ func newSubmitCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVarP(&file, "file", "f", "", "Report document (JSON or YAML); - reads stdin")
 	cmd.Flags().StringVar(&fileIssues, "file-issues", "",
-		"Opt-in: file kukeon findings as GitHub issues in <owner>/<repo> (needs "+TokenEnv+")")
+		"Opt-in: file kukeon findings as GitHub issues in <owner>/<repo> (needs "+TokenEnv+", set by the "+OptInSecret+" opt-in)")
 	return cmd
 }
 

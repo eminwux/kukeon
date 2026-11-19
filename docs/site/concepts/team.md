@@ -368,18 +368,19 @@ harness login you made there.
 
 ### Filing kukeon defects as issues
 
-By default a sweep only stores its report. Filing the `kukeon` findings as
-GitHub issues is opt-in per install, and a default `kuke team init` needs no
-GitHub token. To opt in:
+By default majordomo has no GitHub access: a sweep only stores its report, and
+the interactive cell cannot search or file issues. GitHub access is opt-in per
+install, and a default `kuke team init` needs no GitHub token. One secret turns
+it on for both the interactive cell and the sweep:
 
-1. Create the token as a secret named `health-github-token`:
+1. Create the token as a secret named `gh-token`:
 
    ```bash
-   kuke create secret health-github-token --realm default --from-file /path/to/token
+   kuke create secret gh-token --realm default --from-file /path/to/token
    ```
 
-2. In the kuke entry, give the role that secret and tell the sweep where to
-   file:
+2. In the kuke entry, give the role that secret, and tell the sweep where to
+   file if it should:
 
    ```yaml
    # ~/.kuke/kuketeam.d/kuke.yaml
@@ -389,7 +390,7 @@ GitHub token. To opt in:
          # ...
          needs:
            image: [go]
-           secrets: [health-github-token]
+           secrets: [gh-token] # enables the github connector: GH_TOKEN + gh
          tasks:
            - name: health-sweep
              suspend: false
@@ -399,15 +400,28 @@ GitHub token. To opt in:
 3. Run `kuke team init --reapply`.
 
 `needs.secrets` in a team entry adds runtime secrets to a role for that team
-only; the role itself still requires none. The token reaches the sweep cell as
-`HEALTH_GITHUB_TOKEN`. The sweep then submits its report with
+only; the role itself still requires none. `gh-token` enables the
+[`github` connector](#connectors), so the interactive `kuke-majordomo-<harness>`
+cell and its `health-sweep` task cell both get the token as `GH_TOKEN` and an
+image with `gh`. The token is never a git credential: clone and push keep using
+the git identity.
+
+With the token, the sweep submits its report with
 `kuke health report submit --file-issues <owner>/<repo>`, and `kuke` does the
 filing: one issue per new `kukeon` finding, a comment on the open issue of a
 recurring one, and never anything for `workload` or `unclear` findings. See
 [`kuke health report submit`](../cli/kuke-health.md#filing-issues-opt-in) for
 the issue format and what is redacted.
 
-Do step 1 before step 3, so the secret exists when the sweep first runs.
+In the interactive cell, ask majordomo to file a defect it diagnosed. Its
+`file-kukeon-bug` skill looks for an existing issue first, sweep-filed ones
+included, then comments on it or opens one, and reports the URL. It renders the
+issue with [`kuke health issue`](../cli/kuke-health.md#rendering-an-issue-for-a-diagnosed-defect),
+which uses the sweep's redaction and signature marker, so the two paths dedupe
+against each other. Without the opt-in it says filing is unavailable and how to
+turn it on.
+
+Do step 1 before step 3, so the secret exists when the cells first start.
 
 ### Connectors
 

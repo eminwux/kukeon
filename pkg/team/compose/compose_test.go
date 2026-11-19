@@ -1232,6 +1232,10 @@ func TestFreshMajordomoComposition(t *testing.T) {
 		if len(p.Secrets) != 0 || len(p.Config.Spec.Secrets) != 0 {
 			t.Fatalf("%s requires secrets: %v", p.Config.Metadata.Name, p.Config.Spec.Secrets)
 		}
+		// GitHub is opt-in (issue #1532): no gh-token binding, no connector.
+		if slices.Contains(p.Config.Spec.Components, "github") {
+			t.Fatalf("%s enables the github connector by default", p.Config.Metadata.Name)
+		}
 		container := work(t, p, interactive)
 		got := map[string]hostMount{}
 		for _, volume := range container.Volumes {
@@ -1268,8 +1272,9 @@ func TestFreshMajordomoComposition(t *testing.T) {
 }
 
 // TestMajordomoSweepOptIn is the per-install opt-in an edited team entry makes
-// (issue #1509): the sweep is switched on, told where to file, and given the
-// one credential filing needs.
+// (issues #1509, #1532): the sweep is switched on and told where to file, and
+// one gh-token binding enables the github connector for the whole role, so the
+// interactive cell and the sweep cell both get GH_TOKEN and a gh image.
 func TestMajordomoSweepOptIn(t *testing.T) {
 	boot, err := bootstrap.Run(t.Context(), bootstrap.Options{Root: t.TempDir(), Git: noGit{}})
 	if err != nil {
@@ -1278,7 +1283,7 @@ func TestMajordomoSweepOptIn(t *testing.T) {
 	team := config.Majordomo()
 	on := false
 	role := &team.Spec.Roles[0]
-	role.Needs.Secrets = []string{"health-github-token"}
+	role.Needs.Secrets = []string{"gh-token"}
 	role.Tasks = &[]config.TaskSelection{{
 		Name: "health-sweep", Suspend: &on, Args: "--file-issues example/kukeon-ops",
 	}}
@@ -1286,26 +1291,49 @@ func TestMajordomoSweepOptIn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sweep := result.Pairs[0].Tasks[0]
-	if sweep.Spec.Schedule == nil || sweep.Spec.Schedule.Suspend || sweep.Spec.Schedule.Cron != "@hourly" {
-		t.Fatalf("schedule = %+v", sweep.Spec.Schedule)
-	}
-	if got := sweep.Spec.Values["PROMPT"]; got != "Use the health-sweep skill with arguments: --file-issues example/kukeon-ops" {
-		t.Fatalf("prompt = %q", got)
-	}
-	if _, bound := sweep.Spec.Secrets["health-github-token"]; !bound {
-		t.Fatalf("sweep secrets = %v", sweep.Spec.Secrets)
-	}
-	container := work(t, result.Pairs[0], headless)
-	if !slices.ContainsFunc(container.Secrets, func(s api.ContainerSecret) bool { return s.Name == "HEALTH_GITHUB_TOKEN" }) {
-		t.Fatalf("the token is not delivered as HEALTH_GITHUB_TOKEN: %+v", container.Secrets)
+	for _, p := range result.Pairs {
+		sweep := p.Tasks[0]
+		if sweep.Spec.Schedule == nil || sweep.Spec.Schedule.Suspend || sweep.Spec.Schedule.Cron != "@hourly" {
+			t.Fatalf("schedule = %+v", sweep.Spec.Schedule)
+		}
+		if got := sweep.Spec.Values["PROMPT"]; got != "Use the health-sweep skill with arguments: --file-issues example/kukeon-ops" {
+			t.Fatalf("prompt = %q", got)
+		}
+		if !reflect.DeepEqual(sweep.Spec.Secrets, p.Config.Spec.Secrets) || len(sweep.Spec.Secrets) != 1 {
+			t.Fatalf(
+				"%s: sweep secrets %v, interactive secrets %v",
+				p.Harness,
+				sweep.Spec.Secrets,
+				p.Config.Spec.Secrets,
+			)
+		}
+		if !slices.Contains(p.Image.Capabilities, "gh") {
+			t.Fatalf("%s: image %s does not provide gh: %v", p.Harness, p.Image.Image, p.Image.Capabilities)
+		}
+		// The enabled connector requires gh of the image; the image selected
+		// for needs.image [go] provides it, so gh is on PATH in both cells.
+		connector := slices.IndexFunc(p.Blueprint.Spec.Components, func(c api.BlueprintComponent) bool {
+			return c.Name == "github" && slices.Contains(c.Requires, "gh")
+		})
+		if !slices.Contains(p.Config.Spec.Components, "github") || connector < 0 {
+			t.Fatalf("%s: the github connector is not enabled: components=%v", p.Harness, p.Config.Spec.Components)
+		}
+		for _, mode := range []string{interactive, headless} {
+			container := work(t, p, mode)
+			if !slices.ContainsFunc(
+				container.Secrets,
+				func(s api.ContainerSecret) bool { return s.Name == "GH_TOKEN" },
+			) {
+				t.Fatalf("%s %s: the token is not delivered as GH_TOKEN: %+v", p.Harness, mode, container.Secrets)
+			}
+		}
 	}
 	// The recorded entry keeps the opt-in, so a later --reapply renders the same.
 	raw, err := yaml.Marshal(result.Entry)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"health-github-token", "suspend: false", "--file-issues example/kukeon-ops"} {
+	for _, want := range []string{"gh-token", "suspend: false", "--file-issues example/kukeon-ops"} {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("recorded entry lacks %q:\n%s", want, raw)
 		}

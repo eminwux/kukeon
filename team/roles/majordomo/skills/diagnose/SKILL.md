@@ -88,3 +88,10 @@ resource back, and report the state you observed afterwards.
 
 Keep secret values, tokens and credential-bearing URLs out of everything you
 print. Refer to a secret by its name and scope.
+
+## 6. Filing
+
+When the cause is a **kukeon** defect and the user asks to report it, use the
+`file-kukeon-bug` skill. It checks for an
+existing issue first and needs `GH_TOKEN`; without it, it says how to opt in.
+Workload and configuration problems are not filed.

@@ -580,7 +580,8 @@ kuke health report latest                        # one report as markdown
 - `--exit-code` exits 0 on a clean digest and 2 on findings, printing nothing to stderr in either case; any command failure exits 1. Without the flag, findings exit 0.
 - `report submit` rejects a document that fails the schema (unknown field, missing window, cell, summary or findings, a finding without signature, classification, severity or evidence) and stores nothing. kukeond assigns `id` and `createdAt` when omitted and sets `recurring` itself from the previous report.
 - kukeond keeps the newest 50 reports; they survive a daemon restart. Storing a report files nothing.
-- `--file-issues <owner>/<repo>` on `report submit` is the only path that leaves the host, needs `HEALTH_GITHUB_TOKEN`, files `kukeon` findings only, and still stores the report when filing fails (exit 1).
+- `--file-issues <owner>/<repo>` on `report submit` is the only path that leaves the host, needs `GH_TOKEN` (set by the `github` connector when the install binds the `gh-token` secret to majordomo), files `kukeon` findings only, and still stores the report when filing fails (exit 1); the missing-token error names `GH_TOKEN` and the opt-in.
+- `kuke health issue -f <draft>` renders a diagnosed kukeon defect as JSON (`title`, `body`, `comment`, `marker`) with the same sanitizer, title format and signature marker as `--file-issues`, files nothing, and refuses a draft not classified `kukeon` (exit 1).
 
 ### `--no-daemon` future
 
