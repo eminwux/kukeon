@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -149,20 +150,39 @@ func (s scopeRef) level() string {
 // checkScope validates browser-supplied scope coordinates before any of them
 // reaches the daemon's metadata paths.
 func checkScope(s scopeRef) (scopeRef, error) {
-	out := scopeRef{
-		Realm: strings.TrimSpace(s.Realm), Space: strings.TrimSpace(s.Space), Stack: strings.TrimSpace(s.Stack),
-	}
-	if out.Realm == "" {
+	realm := strings.TrimSpace(s.Realm)
+	rawSpace, rawStack := strings.TrimSpace(s.Space), strings.TrimSpace(s.Stack)
+	if realm == "" {
 		return scopeRef{}, errdefs.ErrRealmNameRequired
 	}
-	if out.Stack != "" && out.Space == "" {
+	if rawStack != "" && rawSpace == "" {
 		return scopeRef{}, fmt.Errorf("%w: scope coordinates cannot contain gaps", errdefs.ErrConfig)
 	}
-	if !safeSegment(out.Realm) || (out.Space != "" && !safeSegment(out.Space)) ||
-		(out.Stack != "" && !safeSegment(out.Stack)) {
+	// Each coordinate is guarded inline (not through a loop, helper or struct
+	// field) so the filepath.IsLocal check visibly dominates the returned
+	// values for static path-injection analysis, matching configLookup. An
+	// optional coordinate is copied only once checked, so its unset path
+	// carries the empty literal.
+	unsafe := func() (scopeRef, error) {
 		return scopeRef{}, fmt.Errorf("%w: unsafe scope coordinate", errdefs.ErrConfig)
 	}
-	return out, nil
+	if !filepath.IsLocal(realm) || !safePathSegment(realm) {
+		return unsafe()
+	}
+	var space, stack string
+	if rawSpace != "" {
+		if !filepath.IsLocal(rawSpace) || !safePathSegment(rawSpace) {
+			return unsafe()
+		}
+		space = rawSpace
+	}
+	if rawStack != "" {
+		if !filepath.IsLocal(rawStack) || !safePathSegment(rawStack) {
+			return unsafe()
+		}
+		stack = rawStack
+	}
+	return scopeRef{Realm: realm, Space: space, Stack: stack}, nil
 }
 
 // checkSecretRef validates a browser-supplied Secret reference.
@@ -170,21 +190,36 @@ func checkSecretRef(ref *v1beta1.ContainerSecretRef) (*v1beta1.ContainerSecretRe
 	if ref == nil {
 		return nil, nil //nolint:nilnil // no reference is a valid input: it clears a choice
 	}
-	out := v1beta1.ContainerSecretRef{
-		Name:  strings.TrimSpace(ref.Name),
-		Realm: strings.TrimSpace(ref.Realm),
-		Space: strings.TrimSpace(ref.Space),
-		Stack: strings.TrimSpace(ref.Stack),
-	}
-	if out.Name == "" || out.Realm == "" || (out.Stack != "" && out.Space == "") || ref.Cell != "" {
+	name, realm := strings.TrimSpace(ref.Name), strings.TrimSpace(ref.Realm)
+	rawSpace, rawStack := strings.TrimSpace(ref.Space), strings.TrimSpace(ref.Stack)
+	if name == "" || realm == "" || (rawStack != "" && rawSpace == "") || ref.Cell != "" {
 		return nil, fmt.Errorf("%w: name a secret by name and realm (space and stack optional)", errdefs.ErrConfig)
 	}
-	for _, segment := range []string{out.Name, out.Realm, out.Space, out.Stack} {
-		if segment != "" && !safeSegment(segment) {
-			return nil, fmt.Errorf("%w: unsafe secret reference", errdefs.ErrConfig)
-		}
+	// Guarded inline, optional coordinates copied only once checked: see
+	// checkScope.
+	unsafe := func() (*v1beta1.ContainerSecretRef, error) {
+		return nil, fmt.Errorf("%w: unsafe secret reference", errdefs.ErrConfig)
 	}
-	return &out, nil
+	if !filepath.IsLocal(name) || !safePathSegment(name) {
+		return unsafe()
+	}
+	if !filepath.IsLocal(realm) || !safePathSegment(realm) {
+		return unsafe()
+	}
+	var space, stack string
+	if rawSpace != "" {
+		if !filepath.IsLocal(rawSpace) || !safePathSegment(rawSpace) {
+			return unsafe()
+		}
+		space = rawSpace
+	}
+	if rawStack != "" {
+		if !filepath.IsLocal(rawStack) || !safePathSegment(rawStack) {
+			return unsafe()
+		}
+		stack = rawStack
+	}
+	return &v1beta1.ContainerSecretRef{Name: name, Realm: realm, Space: space, Stack: stack}, nil
 }
 
 // decodeJSONBody decodes exactly one JSON document of at most limit bytes
@@ -882,7 +917,9 @@ func (a connectorAPI) identitySecret(conn *connector.Connector, input identityRe
 	if name == "" {
 		return empty, errdefs.ErrSecretNameRequired
 	}
-	if !safeSegment(name) || strings.HasPrefix(name, ".") {
+	// Guarded inline so the check dominates the name for static
+	// path-injection analysis: see checkScope.
+	if !filepath.IsLocal(name) || !safePathSegment(name) || strings.HasPrefix(name, ".") {
 		return empty, fmt.Errorf("%w: unsafe secret name", errdefs.ErrConfig)
 	}
 	method, _ := conn.Method("")

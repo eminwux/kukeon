@@ -19,6 +19,7 @@ package webserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -845,6 +846,48 @@ func TestConnectorErrorCodes(t *testing.T) {
 		status, code := apiErrorStatus(renderError(err))
 		if status != want[0] || code != want[1] {
 			t.Errorf("%v: status=%d code=%q, want %v", err, status, code, want)
+		}
+	}
+}
+
+// TestCheckScope_GuardsEveryCoordinate pins the inline path guards: a
+// traversal or separator in any coordinate is refused, unset optional
+// coordinates stay empty, and set ones are trimmed.
+func TestCheckScope_GuardsEveryCoordinate(t *testing.T) {
+	got, err := checkScope(scopeRef{Realm: " dev ", Space: " s ", Stack: " k "})
+	if err != nil || got != (scopeRef{Realm: "dev", Space: "s", Stack: "k"}) {
+		t.Fatalf("checkScope(valid) = %+v, %v", got, err)
+	}
+	if got, err = checkScope(scopeRef{Realm: "dev"}); err != nil || got != (scopeRef{Realm: "dev"}) {
+		t.Fatalf("checkScope(realm only) = %+v, %v", got, err)
+	}
+	for name, s := range map[string]scopeRef{
+		"realm traversal": {Realm: ".."},
+		"space traversal": {Realm: "dev", Space: ".."},
+		"stack traversal": {Realm: "dev", Space: "s", Stack: "../x"},
+		"space separator": {Realm: "dev", Space: "a/b"},
+	} {
+		if _, err = checkScope(s); !errors.Is(err, errdefs.ErrConfig) {
+			t.Errorf("%s: checkScope(%+v) = %v, want ErrConfig", name, s, err)
+		}
+	}
+}
+
+// TestCheckSecretRef_GuardsEveryCoordinate is the same pin for a Secret
+// reference.
+func TestCheckSecretRef_GuardsEveryCoordinate(t *testing.T) {
+	got, err := checkSecretRef(&v1beta1.ContainerSecretRef{Name: " gh ", Realm: "dev", Space: "s"})
+	if err != nil || *got != (v1beta1.ContainerSecretRef{Name: "gh", Realm: "dev", Space: "s"}) {
+		t.Fatalf("checkSecretRef(valid) = %+v, %v", got, err)
+	}
+	for name, ref := range map[string]v1beta1.ContainerSecretRef{
+		"name traversal":  {Name: "..", Realm: "dev"},
+		"realm traversal": {Name: "gh", Realm: "../x"},
+		"space traversal": {Name: "gh", Realm: "dev", Space: ".."},
+		"stack traversal": {Name: "gh", Realm: "dev", Space: "s", Stack: ".."},
+	} {
+		if _, err = checkSecretRef(&ref); !errors.Is(err, errdefs.ErrConfig) {
+			t.Errorf("%s: checkSecretRef(%+v) = %v, want ErrConfig", name, ref, err)
 		}
 	}
 }
