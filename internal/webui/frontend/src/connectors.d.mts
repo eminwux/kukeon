@@ -12,6 +12,7 @@ export const secretBasicAuth: string;
 export const secretSSHKey: string;
 export const scopeLevels: string[];
 export const stateResolved: string;
+export const statePending: string;
 export const teamLabel: string;
 export const defaultScopeName: string;
 
@@ -74,6 +75,9 @@ export function groupComponents<T extends GroupMember>(components: T[] | undefin
 export function defaultGroupChoices(components: GroupMember[] | undefined, connectors: Connector[] | undefined): Record<string, string>;
 export function pickableStatuses(statuses: ConnectorStatus[] | undefined): ConnectorStatus[];
 export function changedPicks(statuses: ConnectorStatus[] | undefined, picks: Record<string, Partial<SecretRef> | undefined> | undefined): Record<string, SecretRef>;
+export function methodChoices(connector: Connector | undefined): ConnectorMethod[];
+export function changedMethods(statuses: ConnectorStatus[] | undefined, picks: Record<string, string | undefined> | undefined): Record<string, string>;
+export function methodStatuses(statuses: ConnectorStatus[] | undefined, connectors: Connector[] | undefined, picks: Record<string, string | undefined> | undefined): ConnectorStatus[];
 export function unresolvedConnectors(statuses: ConnectorStatus[] | undefined, picks: Record<string, Partial<SecretRef> | undefined> | undefined): ConnectorStatus[];
 export function identityFields(connector: { fields?: ConnectorField[] } | undefined, type: string): FormField[];
 export function secretTypesOf(connector: { secretTypes?: string[] } | undefined): string[];

@@ -2837,7 +2837,8 @@ test("New Cell pre-selects each connector's effective identity, sends only chang
   await expect(picker.getByRole("option")).toHaveText(["Use the Config's identity", "example-default — dev (opaque)", "example-team — dev (opaque)", "example-other — dev / shared / services (opaque)", "Name a secret…"]);
   await expect(item).toContainText("set by team kukeon");
   await expect(panel.getByRole("listitem", { name: "Demo connector" })).toContainText("Login kept in state volume kukeon-dev-demo");
-  await expect(panel.getByRole("listitem", { name: "Demo connector" }).getByRole("combobox")).toHaveCount(0);
+  // A login has no identity to pick; its only control is the method picker (#1551).
+  await expect(panel.getByRole("listitem", { name: "Demo connector" }).getByRole("combobox", { name: /^Demo identity/ })).toHaveCount(0);
   await previewButton.click();
   await expect(review.getByRole("row", { name: /^Example/ })).toContainText("example-team");
   await expect(review.getByRole("row", { name: /^Demo/ })).toContainText("Login kept in state volume");
@@ -2912,6 +2913,48 @@ test("New Cell pre-selects each connector's effective identity, sends only chang
   expect(previews().at(-1).body).not.toHaveProperty("connectors");
 });
 
+
+test("New Cell picks another method of a connector for this cell only and sends it with that method's identity", async ({ page }) => {
+  const world = await mockConnectors(page);
+  const previews = () => world.posts("/api/cells/from-config/preview");
+  const previewButton = page.getByRole("button", { name: /^(Preview Cell|Refresh preview)$/ });
+  const panel = connectorsPanel(page);
+  const demo = panel.getByRole("listitem", { name: "Demo connector" });
+  const method = panel.getByRole("combobox", { name: "Demo method" });
+  const review = page.getByRole("table", { name: "Connector identities" });
+
+  // The Config uses the login: the method starts on it and there is no identity to pick.
+  await page.goto(`${server.url}${newCellFor("teams")}`);
+  await expect(method).toHaveValue("login");
+  await expect(method.getByRole("option")).toHaveText(["login (the Config's)", "key"]);
+  await expect(demo.getByRole("combobox", { name: /^Demo identity/ })).toHaveCount(0);
+  await expect(panel.getByRole("combobox", { name: /method$/ })).toHaveCount(1);
+
+  // Another method takes an identity: its picker appears, and the preview fails until one resolves.
+  await method.selectOption("key");
+  await expect(demo).toContainText("Picked for this cell");
+  const picker = demo.getByRole("combobox", { name: /^Demo identity/ });
+  await expect(picker.locator("option:checked")).toHaveText("Use the default identity for this method");
+  await previewButton.click();
+  await expect(page.getByText(/requires connector "demo"/)).toBeVisible();
+  expect(previews().at(-1).body.methods).toEqual({ demo: "key" });
+  expect(previews().at(-1).body).not.toHaveProperty("connectors");
+
+  await picker.selectOption({ label: "demo-key-1 — dev (opaque)" });
+  await previewButton.click();
+  await expect(review.getByRole("row", { name: /^Demo/ })).toContainText("demo-key-1");
+  await expect(review.getByRole("row", { name: /^Demo/ })).toContainText("key");
+  expect(previews().at(-1).body.methods).toEqual({ demo: "key" });
+  expect(previews().at(-1).body.connectors).toEqual({ demo: { name: "demo-key-1", realm: "dev" } });
+
+  // Back on the Config's method, neither the method nor the identity is sent.
+  await method.selectOption("login");
+  await expect(demo.getByRole("combobox", { name: /^Demo identity/ })).toHaveCount(0);
+  await previewButton.click();
+  await expect(review.getByRole("row", { name: /^Demo/ })).toContainText("Login kept in state volume");
+  expect(previews().at(-1).body).not.toHaveProperty("methods");
+  expect(previews().at(-1).body).not.toHaveProperty("connectors");
+});
 test("New Config offers one method per group and an identity picker per connector showing its default", async ({ page }) => {
   const world = await mockConnectors(page);
   world.defaults.dev = { "example-token:token": { name: "example-default", realm: "dev" } };

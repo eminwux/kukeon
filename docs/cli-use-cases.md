@@ -420,6 +420,9 @@ sudo kuke get configs -o wide
 
 # 4. use another identity for one cell
 sudo kuke create cell --from-config team-dev-claude --connector github=other-github
+
+# 5. use another method for one cell (the Config stays on its own)
+sudo kuke create cell --from-config team-dev-codex --connector-method codex=api-key --connector codex=my-openai-key
 ```
 
 **Invariants.**
@@ -431,6 +434,7 @@ sudo kuke create cell --from-config team-dev-claude --connector github=other-git
 - A Config whose required connector resolves to no identity cannot be previewed (`--dry-run`) or created: the command exits non-zero with an error naming the connector. A named identity that is missing, tagged for another connector or of a type the connector does not accept exits non-zero too, also for an optional connector.
 - A Config that enables two components of one group (two ways to authenticate one harness) is rejected at apply.
 - `--connector <connector>=<secret>[@realm[/space[/stack]]]` is valid with `--from-config` only (`kuke create cell`, `kuke run`). A connector the Config does not require exits non-zero. The override is recorded in `spec.provenance.connectorOverrides` and is used again by `kuke restart`, a reconcile-driven recreate and `--clone`.
+- `--connector-method <connector>=<method>` is valid with `--from-config` only (`kuke create cell`, `kuke run`). It enables that method's blueprint component in place of the one the Config enables, without changing the Config. A connector the blueprint declares no methods for, or an unknown method, exits non-zero naming the valid choices. The method's identity resolves as for any method (`--connector` > the Config's fill > Stack > Space > Realm); none resolving exits non-zero naming the connector. The choice is recorded in `spec.provenance.connectorMethods` and is used again by `kuke restart`, a reconcile-driven recreate and `--clone`.
 - `git.identityRef` (scope defaults, a Config's `git`, a repo fill's `git`) is expanded by the daemon into author, committer, credentials and signing; fields written next to it win. A cell document or blueprint container that carries `git.identityRef` is rejected.
 - `kuke create registry-credential` stores the credential as a `basic-auth` Secret of the realm and binds the server to it with `secretRef`; re-running it for a server whose entry is still inline moves the password into the Secret. `kuke get realm -o yaml|json` never prints a registry password, inline entries included.
 

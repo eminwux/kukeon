@@ -222,6 +222,32 @@ func TestSecretRefs(t *testing.T) {
 	}
 }
 
+func TestParseMethods(t *testing.T) {
+	got, err := connector.ParseMethods([]string{"codex=api-key", " claude = subscription "})
+	want := map[string]string{"codex": "api-key", "claude": "subscription"}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("methods = %+v %v", got, err)
+	}
+	if got, err = connector.ParseMethods(nil); got != nil || err != nil {
+		t.Fatalf("no arguments = %+v %v", got, err)
+	}
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"codex"}, "want <connector>=<method>"},
+		{[]string{"=api-key"}, "want <connector>=<method>"},
+		{[]string{"codex="}, "want <connector>=<method>"},
+		{[]string{"codex=Api Key"}, "want <connector>=<method>"},
+		{[]string{"codex=login", "codex=api-key"}, `names "codex" more than once`},
+	} {
+		_, err = connector.ParseMethods(tc.args)
+		if !errors.Is(err, errdefs.ErrConnectorInvalid) || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("%v: err = %v, want %q", tc.args, err, tc.want)
+		}
+	}
+}
+
 func TestParseOverrides(t *testing.T) {
 	got, err := connector.ParseOverrides([]string{"forge=work-token", " scm = key@lab/team "}, "ops")
 	want := map[string]v1beta1.ContainerSecretRef{

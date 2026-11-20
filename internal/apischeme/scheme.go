@@ -1394,9 +1394,10 @@ func convertCellProvenanceToInternal(in *ext.CellProvenance) *intmodel.CellProve
 			Space: in.BindingRef.Space,
 			Stack: in.BindingRef.Stack,
 		},
-		EnvOverrides:   cloneStringSlice(in.EnvOverrides),
-		Mode:           in.Mode,
-		ParamOverrides: copyStringMap(in.ParamOverrides),
+		EnvOverrides:     cloneStringSlice(in.EnvOverrides),
+		Mode:             in.Mode,
+		ParamOverrides:   copyStringMap(in.ParamOverrides),
+		ConnectorMethods: copyStringMap(in.ConnectorMethods),
 	}
 	if in.ConnectorOverrides != nil {
 		out.ConnectorOverrides = make(map[string]intmodel.ContainerSecretRef, len(in.ConnectorOverrides))
@@ -1428,9 +1429,10 @@ func buildCellProvenanceExternalFromInternal(in *intmodel.CellProvenance) *ext.C
 			Space: in.BindingRef.Space,
 			Stack: in.BindingRef.Stack,
 		},
-		EnvOverrides:   cloneStringSlice(in.EnvOverrides),
-		Mode:           in.Mode,
-		ParamOverrides: copyStringMap(in.ParamOverrides),
+		EnvOverrides:     cloneStringSlice(in.EnvOverrides),
+		Mode:             in.Mode,
+		ParamOverrides:   copyStringMap(in.ParamOverrides),
+		ConnectorMethods: copyStringMap(in.ConnectorMethods),
 	}
 	if in.ConnectorOverrides != nil {
 		out.ConnectorOverrides = make(map[string]ext.ContainerSecretRef, len(in.ConnectorOverrides))

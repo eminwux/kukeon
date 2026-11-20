@@ -222,6 +222,7 @@ such names of one connector are alternatives — the first method wins and
 ```bash
 sudo kuke create cell --from-config team-dev-claude --connector github=other-github
 sudo kuke run -c team-dev-claude --connector git=release-key@ops
+sudo kuke create cell --from-config team-dev-codex --connector-method codex=api-key --connector codex=my-openai-key
 ```
 
 `--connector <connector>=<secret>[@realm[/space[/stack]]]` uses another identity
@@ -229,14 +230,28 @@ for this one cell. The override is recorded in the cell's provenance
 (`spec.provenance.connectorOverrides`), so `kuke restart` and a
 reconcile-driven recreate render the cell with the same identity, and
 `kuke create cell --clone` carries it over. The flag is valid with
-`--from-config` only. Only the identity is overridable:
-the method is the Config's. An unknown connector, a missing Secret, or a Secret
+`--from-config` only. An unknown connector, a missing Secret, or a Secret
 tagged for another connector is rejected before anything is created.
 
+`--connector-method <connector>=<method>` uses another method of a connector
+for this one cell — for example a codex Config on `login` started once with
+`api-key`. The blueprint already carries every method of the connector as one
+exclusive group, so the cell enables the picked method's component in place of
+the one the Config enables; the Config itself is not changed. The new method's
+identity resolves as usual: a `--connector` override, the Config's fill, then
+the Stack, Space and Realm defaults — a Config's fill for its own method's slot
+does not carry over. The choice is recorded in
+`spec.provenance.connectorMethods` and kept by `kuke restart`, a
+reconcile-driven recreate and `--clone`. A connector the blueprint declares no
+methods for, or a method it does not declare, is rejected. Valid with
+`--from-config` only.
+
 In the web UI's New Cell flow every required connector is pre-selected with its
-effective identity; choosing another sends the same override, and the preview
-shows the identities the cell will use. Configs owned by a team show theirs
-read-only.
+effective method and identity. A connector with several methods offers a method
+picker; choosing another identity or method sends the same overrides, and the
+preview shows the methods and identities the cell will use. A per-cell pick is
+allowed on a team-owned Config too: only the Config's own page shows its
+identities read-only, because `kuke team add` re-renders it.
 
 ## Why login volumes are not shared across roles
 

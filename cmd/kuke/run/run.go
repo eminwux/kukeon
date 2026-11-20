@@ -255,7 +255,10 @@ type runFlags struct {
 	// connectorArgs are the `--connector <connector>=<secret>` per-cell
 	// identity overrides (--from-config).
 	connectorArgs []string
-	paramFile     string
+	// connectorMethodArgs are the `--connector-method <connector>=<method>`
+	// per-cell method choices (--from-config).
+	connectorMethodArgs []string
+	paramFile           string
 	// mode is the harness mode (`--mode`) of a --from-config / --clone run.
 	mode string
 	// envArgs are the validated `KEY=VALUE` --env entries. On the existing-cell
@@ -366,6 +369,12 @@ func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
 	}
 	flags.connectorArgs = connectorArgs
 
+	connectorMethodArgs, err := cmd.Flags().GetStringArray("connector-method")
+	if err != nil {
+		return runFlags{}, err
+	}
+	flags.connectorMethodArgs = connectorMethodArgs
+
 	envRaw, err := cmd.Flags().GetStringArray("env")
 	if err != nil {
 		return runFlags{}, err
@@ -426,6 +435,9 @@ func validateSourceFlagCompat(flags runFlags) error {
 	}
 	if len(flags.connectorArgs) > 0 && flags.configName == "" {
 		return errors.New("--connector is only valid with --from-config")
+	}
+	if len(flags.connectorMethodArgs) > 0 && flags.configName == "" {
+		return errors.New("--connector-method is only valid with --from-config")
 	}
 	if flags.fused() {
 		return nil
@@ -569,19 +581,20 @@ func applyRuntimeKnobs(cellDoc *v1beta1.CellDoc, flags runFlags) {
 // would call MaterializeCell and leave it stopped) and attaches.
 func runFused(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) error {
 	src := cell.SourceFlags{
-		Name:               flags.name,
-		Realm:              pickLocation("", &config.KUKE_RUN_REALM),
-		Space:              pickLocation("", &config.KUKE_RUN_SPACE),
-		Stack:              pickLocation("", &config.KUKE_RUN_STACK),
-		BlueprintName:      flags.blueprintName,
-		ConfigName:         flags.configName,
-		CloneSource:        flags.cloneSource,
-		ParamArgs:          flags.paramArgs,
-		ConnectorArgs:      flags.connectorArgs,
-		ParamFile:          flags.paramFile,
-		Mode:               flags.mode,
-		EnvArgs:            flags.envArgs,
-		IgnoreDiskPressure: flags.ignoreDiskPressure,
+		Name:                flags.name,
+		Realm:               pickLocation("", &config.KUKE_RUN_REALM),
+		Space:               pickLocation("", &config.KUKE_RUN_SPACE),
+		Stack:               pickLocation("", &config.KUKE_RUN_STACK),
+		BlueprintName:       flags.blueprintName,
+		ConfigName:          flags.configName,
+		CloneSource:         flags.cloneSource,
+		ParamArgs:           flags.paramArgs,
+		ConnectorArgs:       flags.connectorArgs,
+		ConnectorMethodArgs: flags.connectorMethodArgs,
+		ParamFile:           flags.paramFile,
+		Mode:                flags.mode,
+		EnvArgs:             flags.envArgs,
+		IgnoreDiskPressure:  flags.ignoreDiskPressure,
 	}
 	// The scope-Var bundle `kuke run` feeds cell.Materialize for binding-lookup
 	// scope (built inline rather than as a package global per gochecknoglobals).

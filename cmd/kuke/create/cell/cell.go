@@ -221,8 +221,17 @@ func RegisterSourceFlags(cmd *cobra.Command) {
 			"repeatable. Valid with --from-config. The connector must be one the Config requires "+
 			"(`kuke get config <name>` lists them) and the secret one of its identities; a secret "+
 			"named without a scope is looked up in the Config's realm. It overrides the identity "+
-			"the Config or a Realm/Space/Stack default resolves — the method stays the Config's — "+
-			"and is recorded in Spec.Provenance.connectorOverrides, so a restart and a recreate "+
+			"the Config or a Realm/Space/Stack default resolves, for the method the cell uses "+
+			"(see --connector-method), and is recorded in Spec.Provenance.connectorOverrides, so a "+
+			"restart and a recreate keep it.")
+
+	cmd.Flags().StringArray("connector-method", nil,
+		"Method of a connector for this cell only, as <connector>=<method> (e.g. codex=api-key); "+
+			"repeatable. Valid with --from-config. The connector must be one the Config's "+
+			"blueprint declares methods for (`kuke get config <name>` lists the connectors). The "+
+			"method's component is enabled in place of the one the Config enables, its identity "+
+			"resolves as usual (--connector, the Config, Realm/Space/Stack defaults), and the "+
+			"choice is recorded in Spec.Provenance.connectorMethods, so a restart and a recreate "+
 			"keep it.")
 
 	cmd.Flags().Bool("ignore-disk-pressure", false,
@@ -271,6 +280,9 @@ type SourceFlags struct {
 	// per-cell identity overrides, valid on the --from-config path. Issue
 	// #1548.
 	ConnectorArgs []string
+	// ConnectorMethodArgs holds the `--connector-method <connector>=<method>`
+	// per-cell method choices, valid on the --from-config path. Issue #1551.
+	ConnectorMethodArgs []string
 	// IgnoreDiskPressure threads `--ignore-disk-pressure` onto the
 	// transport-only Spec.IgnoreDiskPressure field so the daemon's
 	// CreateCell guard is bypassed for this invocation. Issue #1035.
@@ -373,6 +385,13 @@ func parseCreateCellFlags(cmd *cobra.Command, args []string) (SourceFlags, error
 		}
 		flags.ConnectorArgs = connectorArgs
 	}
+	if cmd.Flags().Lookup("connector-method") != nil {
+		methodArgs, methodErr := cmd.Flags().GetStringArray("connector-method")
+		if methodErr != nil {
+			return SourceFlags{}, methodErr
+		}
+		flags.ConnectorMethodArgs = methodArgs
+	}
 
 	return flags, nil
 }
@@ -399,6 +418,12 @@ func ValidateOverrideSymmetry(flags SourceFlags) error {
 	if len(flags.ConnectorArgs) > 0 && flags.ConfigName == "" {
 		return errors.New(
 			"--connector is only valid with --from-config; a connector identity is picked for a cell " +
+				"created from a CellConfig",
+		)
+	}
+	if len(flags.ConnectorMethodArgs) > 0 && flags.ConfigName == "" {
+		return errors.New(
+			"--connector-method is only valid with --from-config; a connector method is picked for a cell " +
 				"created from a CellConfig",
 		)
 	}
@@ -583,6 +608,18 @@ func rejectBindingKnobsWithImage(cmd *cobra.Command) error {
 		if len(connectorArgs) > 0 {
 			return errors.New(
 				"--connector is only valid with --from-config; a connector identity is picked for a cell " +
+					"created from a CellConfig",
+			)
+		}
+	}
+	if cmd.Flags().Lookup("connector-method") != nil {
+		methodArgs, methodErr := cmd.Flags().GetStringArray("connector-method")
+		if methodErr != nil {
+			return methodErr
+		}
+		if len(methodArgs) > 0 {
+			return errors.New(
+				"--connector-method is only valid with --from-config; a connector method is picked for a cell " +
 					"created from a CellConfig",
 			)
 		}

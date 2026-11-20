@@ -76,6 +76,9 @@ type cellBinding struct {
 	// Connectors are the per-cell `--connector <connector>=<secret>`
 	// identities, keyed by connector name (#1548).
 	Connectors map[string]v1beta1.ContainerSecretRef
+	// Methods are the per-cell `--connector-method <connector>=<method>`
+	// choices, keyed by connector name (#1551).
+	Methods map[string]string
 }
 
 // bindingFromCell rebuilds the binding a live cell was created with from its
@@ -90,6 +93,7 @@ func bindingFromCell(cell intmodel.Cell) cellBinding {
 		binding.Mode = prov.Mode
 		binding.Params = prov.ParamOverrides
 		binding.Connectors = connectorOverridesFromProvenance(prov.ConnectorOverrides)
+		binding.Methods = prov.ConnectorMethods
 	}
 	return binding
 }
@@ -167,6 +171,12 @@ func renderCellFromConfig(r runner.Runner, cfg intmodel.CellConfig, binding cell
 			prov.ConnectorOverrides = make(map[string]v1beta1.ContainerSecretRef, len(binding.Connectors))
 			for name, ref := range binding.Connectors {
 				prov.ConnectorOverrides[name] = ref
+			}
+		}
+		if len(binding.Methods) > 0 {
+			prov.ConnectorMethods = make(map[string]string, len(binding.Methods))
+			for name, method := range binding.Methods {
+				prov.ConnectorMethods[name] = method
 			}
 		}
 	}
@@ -271,7 +281,15 @@ func resolveConfig(r runner.Runner, cfg intmodel.CellConfig, binding cellBinding
 	}
 
 	binding = inferMode(bpDoc, cfgDoc, binding)
-	flattenOpts := cellblueprint.FlattenOptions{Components: cfgDoc.Spec.Components, Mode: binding.Mode}
+	// The method a single cell picked for a connector (#1551) swaps the
+	// component of that connector the Config enables for the method's own.
+	components, methods, err := cellMethodComponents(
+		cfgDoc.Metadata.Name, bpDoc, cfgDoc.Spec.Components, binding.Methods)
+	if err != nil {
+		return configResolution{}, err
+	}
+	binding.Methods = methods
+	flattenOpts := cellblueprint.FlattenOptions{Components: components, Mode: binding.Mode}
 	if modes := cfgDoc.Spec.Modes; modes != nil {
 		flattenOpts.AllowedModes, flattenOpts.DefaultMode = modes.Enabled, modes.Default
 	}
@@ -476,7 +494,11 @@ func contractValues(
 				continue
 			}
 			origin := v1beta1.RenderOriginBlueprint
-			if comp.Optional {
+			switch {
+			case comp.Connector != nil && comp.Connector.Method != "" &&
+				binding.Methods[comp.Connector.Name] == comp.Connector.Method:
+				origin = v1beta1.RenderOriginCell
+			case comp.Optional:
 				origin = v1beta1.RenderOriginConfig
 			}
 			out = append(out, v1beta1.RenderedValue{

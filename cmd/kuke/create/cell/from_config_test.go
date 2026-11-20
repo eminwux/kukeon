@@ -157,3 +157,67 @@ func TestCreateCell_ConnectorFlagRejections(t *testing.T) {
 		})
 	}
 }
+
+// TestCreateCell_FromConfig_ConnectorMethods: `--connector-method
+// <connector>=<method>` reaches the daemon as a per-cell method keyed by
+// connector name (issue #1551), next to a --connector identity for it; the
+// CLI does not interpret the names — the daemon checks them against the
+// Config's blueprint.
+func TestCreateCell_FromConfig_ConnectorMethods(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	cmd, out := newTestExecCmd(t, dryRunClient(t))
+	setFlag(t, cmd, "realm", "cfg-realm")
+	setFlag(t, cmd, "from-config", "prod")
+	setFlag(t, cmd, "dry-run", "true")
+	setFlag(t, cmd, "connector-method", "codex=api-key")
+	setFlag(t, cmd, "connector", "codex=openai-key")
+	cmd.SetArgs([]string{"prod-1"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	want := map[string]string{"codex": "api-key"}
+	if got := lastConfigRequest.ConnectorMethods; !reflect.DeepEqual(got, want) {
+		t.Errorf("request methods = %+v, want %+v", got, want)
+	}
+	if got := lastConfigRequest.ConnectorOverrides["codex"].Name; got != "openai-key" {
+		t.Errorf("request override = %q, want openai-key", got)
+	}
+	// The rendered cell records the method, so a restart and a recreate keep it.
+	if !strings.Contains(out.String(), "connectorMethods:") || !strings.Contains(out.String(), "api-key") {
+		t.Errorf("rendered cell does not record the method:\n%s", out.String())
+	}
+}
+
+// TestCreateCell_ConnectorMethodFlagRejections: a malformed choice, one
+// connector named twice, and --connector-method without --from-config are
+// refused before the daemon is asked for anything.
+func TestCreateCell_ConnectorMethodFlagRejections(t *testing.T) {
+	for name, tc := range map[string]struct {
+		source  [2]string
+		values  []string
+		wantErr string
+	}{
+		"no method":         {[2]string{"from-config", "prod"}, []string{"codex"}, "want <connector>=<method>"},
+		"empty method":      {[2]string{"from-config", "prod"}, []string{"codex="}, "want <connector>=<method>"},
+		"bad method":        {[2]string{"from-config", "prod"}, []string{"codex=API KEY"}, "want <connector>=<method>"},
+		"named twice":       {[2]string{"from-config", "prod"}, []string{"codex=login", "codex=api-key"}, "more than once"},
+		"with a blueprint":  {[2]string{"from-blueprint", "web"}, []string{"codex=api-key"}, "only valid with --from-config"},
+		"with a clone":      {[2]string{"clone", "src"}, []string{"codex=api-key"}, "only valid with --from-config"},
+		"with a bare image": {[2]string{"image", "busybox"}, []string{"codex=api-key"}, "only valid with --from-config"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+			cmd, _ := newTestExecCmd(t, &fakeClient{})
+			setFlag(t, cmd, "realm", "cfg-realm")
+			setFlag(t, cmd, tc.source[0], tc.source[1])
+			for _, value := range tc.values {
+				setFlag(t, cmd, "connector-method", value)
+			}
+			cmd.SetArgs([]string{"prod-1"})
+			err := cmd.Execute()
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Execute error = %v, want it to contain %q", err, tc.wantErr)
+			}
+		})
+	}
+}

@@ -835,6 +835,43 @@ func TestCreateFromConfigSendsConnectorOverrides(t *testing.T) {
 	}
 }
 
+// TestCreateFromConfigSendsConnectorMethods: the New Cell flow forwards the
+// methods picked for the cell (#1551) and refuses malformed names before the
+// daemon sees them.
+func TestCreateFromConfigSendsConnectorMethods(t *testing.T) {
+	c := devScopes()
+	c.configs = []v1beta1.CellConfigDoc{exampleConfig("mine", "", v1beta1.ConnectorResolved)}
+	handler := connectorHandler(t, c)
+	preview := func(methods string) int {
+		w := connectorRequest(t, handler, http.MethodPost, "/api/cells/from-config/preview",
+			`{"config":{"name":"mine","realm":"dev"},"name":"cell-1","env":[]`+methods+`}`)
+		return w.Code
+	}
+	if code := preview(""); code != http.StatusOK {
+		t.Fatalf("preview status=%d", code)
+	}
+	if len(c.previews[0].ConnectorMethods) != 0 {
+		t.Errorf("no pick sent methods: %+v", c.previews[0].ConnectorMethods)
+	}
+	if code := preview(`,"methods":{"codex":"api-key"}`); code != http.StatusOK {
+		t.Fatalf("preview with a method status=%d", code)
+	}
+	want := map[string]string{"codex": "api-key"}
+	if got := c.previews[1].ConnectorMethods; !reflect.DeepEqual(got, want) {
+		t.Errorf("methods = %+v, want %+v", got, want)
+	}
+	for name, body := range map[string]string{
+		"bad connector": `,"methods":{"Not A Name":"api-key"}`,
+		"bad method":    `,"methods":{"codex":"../x"}`,
+		"empty method":  `,"methods":{"codex":""}`,
+		"not a string":  `,"methods":{"codex":1}`,
+	} {
+		if code := preview(body); code != http.StatusBadRequest {
+			t.Errorf("%s: status=%d, want 400", name, code)
+		}
+	}
+}
+
 // TestConnectorErrorCodes: a render that fails on a connector answers with a
 // code the UI acts on, not a generic invalid request.
 func TestConnectorErrorCodes(t *testing.T) {
@@ -842,6 +879,7 @@ func TestConnectorErrorCodes(t *testing.T) {
 		errdefs.ErrConnectorUnresolved: {http.StatusConflict, "connector_unresolved"},
 		errdefs.ErrConnectorIdentity:   {http.StatusBadRequest, "connector_invalid"},
 		errdefs.ErrConnectorUnknown:    {http.StatusBadRequest, "connector_invalid"},
+		errdefs.ErrConnectorMethod:     {http.StatusBadRequest, "connector_invalid"},
 	} {
 		status, code := apiErrorStatus(renderError(err))
 		if status != want[0] || code != want[1] {

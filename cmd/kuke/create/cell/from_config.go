@@ -58,10 +58,17 @@ func ConfigRenderRequest(
 	if err != nil {
 		return kukeonv1.CellFromConfigRequest{}, err
 	}
+	// Per-cell connector methods (#1551): the daemon checks each against the
+	// methods the Config's blueprint declares.
+	methods, err := connector.ParseMethods(flags.ConnectorMethodArgs)
+	if err != nil {
+		return kukeonv1.CellFromConfigRequest{}, err
+	}
 	return kukeonv1.CellFromConfigRequest{
 		Mode:               flags.Mode,
 		Params:             params,
 		ConnectorOverrides: overrides,
+		ConnectorMethods:   methods,
 		Config: v1beta1.CellConfigMetadata{
 			Name:  flags.ConfigName,
 			Realm: realm,

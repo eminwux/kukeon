@@ -1119,6 +1119,26 @@ func readableSecret(spec v1beta1.SecretSpec) v1beta1.SecretSpec {
 	return v1beta1.SecretSpec{Type: spec.Type, Connector: spec.Connector, Identity: spec.Identity}
 }
 
+// connectorMethods validates the per-cell method picks of a from-config
+// create (#1551): connector and method names are passed through — the daemon
+// checks them against the Config's blueprint — once they are well formed.
+func connectorMethods(in map[string]string) (map[string]string, error) {
+	if len(in) == 0 {
+		return nil, nil //nolint:nilnil // no pick is a valid input, not an error
+	}
+	out := make(map[string]string, len(in))
+	for name, method := range in {
+		if !intconnector.ValidName(name) {
+			return nil, fmt.Errorf("%w: invalid connector name", errdefs.ErrConfig)
+		}
+		if !intconnector.ValidName(method) {
+			return nil, fmt.Errorf("%w: invalid method name for connector %q", errdefs.ErrConfig, name)
+		}
+		out[name] = method
+	}
+	return out, nil
+}
+
 // connectorErrorStatus classifies the connector failures of a render so the
 // UI can tell "this Config needs an identity" from a malformed request.
 func connectorErrorStatus(err error) (int, string, bool) {
@@ -1127,6 +1147,7 @@ func connectorErrorStatus(err error) (int, string, bool) {
 		return http.StatusConflict, "connector_unresolved", true
 	case errors.Is(err, errdefs.ErrConnectorIdentity),
 		errors.Is(err, errdefs.ErrConnectorUnknown),
+		errors.Is(err, errdefs.ErrConnectorMethod),
 		errors.Is(err, errdefs.ErrConnectorInvalid):
 		return http.StatusBadRequest, "connector_invalid", true
 	}

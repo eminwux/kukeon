@@ -338,3 +338,28 @@ func ParseOverrides(args []string, realm string) (map[string]v1beta1.ContainerSe
 	}
 	return out, nil
 }
+
+// ParseMethods reads per-cell connector methods written
+// `<connector>=<method>` — the argument of `--connector-method` (#1551) —
+// into a map keyed by connector name. The daemon checks each against the
+// methods the Config's blueprint declares.
+func ParseMethods(args []string) (map[string]string, error) {
+	if len(args) == 0 {
+		return nil, nil //nolint:nilnil // no choice is a valid input, not an error
+	}
+	out := make(map[string]string, len(args))
+	for _, arg := range args {
+		name, method, ok := strings.Cut(arg, "=")
+		name, method = strings.TrimSpace(name), strings.TrimSpace(method)
+		if !ok || !ValidName(name) || !ValidName(method) {
+			return nil, fmt.Errorf(
+				"%w: --connector-method %q: want <connector>=<method>", errdefs.ErrConnectorInvalid, arg)
+		}
+		if _, dup := out[name]; dup {
+			return nil, fmt.Errorf(
+				"%w: --connector-method names %q more than once", errdefs.ErrConnectorInvalid, name)
+		}
+		out[name] = method
+	}
+	return out, nil
+}
