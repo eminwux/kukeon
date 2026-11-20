@@ -1182,6 +1182,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/connectors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -3680,7 +3708,7 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>kuke create cell [NAME] --realm &lt;r&gt; --space &lt;s&gt; --stack &lt;t&gt;
 <a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>                       ( --image &lt;ref&gt; [--command &lt;cmd&gt;]
 <a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>                       | --from-blueprint &lt;bp&gt; [--param K=V]... [--param-file &lt;path&gt;]
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>                       | --from-config &lt;cfg&gt; [--env K=V]... [--dry-run [--explain]]
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>                       | --from-config &lt;cfg&gt; [--env K=V]... [--connector C=SECRET]... [--dry-run [--explain]]
 <a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>                       | --clone &lt;cell&gt; [--param K=V]... [--env K=V]... )
 </code></pre></div>
 <p>Four source modes (exactly one of <code>--image</code> / <code>--from-blueprint</code> / <code>--from-config</code> / <code>--clone</code> is required):</p>
@@ -3691,6 +3719,7 @@
 <li><code>kuke create cell [name] --clone &lt;cell&gt; [--param K=V]... | [--env K=V]...</code> — forks an existing cell's recipe: reads the source cell's <code>Spec.Provenance</code> (the Blueprint/Config binding it was materialised from plus any recorded per-cell overrides) and re-materialises from that same binding. The clone copies the source's provenance verbatim, inherits its <code>kukeon.io/config</code> / <code>kukeon.io/blueprint</code> lineage label, and is stamped with a <code>kukeon.io/source-cell=&lt;src&gt;</code> annotation. Additional <code>--param</code> (Blueprint-lineage source) or <code>--env</code> (Config-lineage source) <strong>stack on top</strong> of the source's recorded overrides, last-write-wins; the per-source symmetry below applies to the stacked overrides. A source cell with no provenance (a hand-built cell never materialised from a binding) cannot be cloned.</li>
 </ul>
 <p><strong>Cell name (unified <code>&lt;prefix&gt;-&lt;6hex&gt;</code> rule).</strong> <code>NAME</code> is optional. When omitted, the cell name is generated: <code>&lt;prefix&gt;-&lt;6hex&gt;</code> for <code>--from-blueprint</code>/<code>--from-config</code> (prefix = the blueprint's <code>spec.prefix</code>, defaulting to its <code>metadata.name</code>), <code>&lt;source-name&gt;-&lt;6hex&gt;</code> for <code>--clone</code>, and <code>&lt;image-short-name&gt;-&lt;6hex&gt;</code> for <code>--image</code> (e.g. <code>docker.io/library/alpine:3</code> → <code>alpine-&lt;6hex&gt;</code>). An explicit <code>NAME</code> is used verbatim. The Config / Blueprint name is <strong>not</strong> the cell name — it survives only as the <code>kukeon.io/{config,blueprint}</code> lineage label (epic:cell-identity).</p>
+<p><strong><code>--connector</code> (per-cell identity).</strong> <code>--connector &lt;connector&gt;=&lt;secret&gt;[@realm[/space[/stack]]]</code> uses another stored identity for one <a href="../../concepts/connectors/">connector</a> of this cell — for example <code>--connector github=other-github</code>. It is valid with <code>--from-config</code> only and repeatable, once per connector; <code>--clone</code> of such a cell carries the source's overrides over unchanged. A secret named without a scope is looked up in the cell's realm. The override wins over the Config's fill and every Realm/Space/Stack default, is recorded in <code>Spec.Provenance.connectorOverrides</code>, and so survives <code>kuke restart</code> and a reconcile-driven recreate. A connector the Config does not require, a missing Secret, or a Secret tagged for another connector or of a type the connector does not accept is rejected. A Config whose required connector resolves to no identity cannot be previewed or created: the error names the connector.</p>
 <p><strong><code>--param</code> / <code>--env</code> symmetry.</strong> Blueprints take render-time <code>--param</code>; Configs take persisted per-cell <code>--env</code>. <code>--param</code>/<code>--param-file</code> are valid with <code>--from-blueprint</code> and rejected with <code>--from-config</code> (a Config carries its own <code>spec.values</code> — edit the Config instead); symmetrically, <code>--env KEY=VALUE</code> is valid with <code>--from-config</code> (a per-cell override layered on the Config's resolved values, baked into the CellDoc and recorded in <code>Spec.Provenance.envOverrides</code>) and rejected with <code>--from-blueprint</code>. On <code>--clone</code>, the source's lineage decides which applies: <code>--param</code> on a Blueprint-lineage source, <code>--env</code> on a Config-lineage source. The same <code>cell.ValidateOverrideSymmetry</code> gate enforces this on <code>kuke run</code> and <code>kuke create cell</code> alike.</p>
 <table>
 <thead>
@@ -3760,6 +3789,11 @@
 <td><code>--env</code></td>
 <td>(empty, repeatable)</td>
 <td>Persisted per-cell override <code>KEY=VALUE</code>. Valid with <code>--from-config</code> (and a Config-lineage <code>--clone</code>); baked into the CellDoc + <code>Spec.Provenance.envOverrides</code>. Rejected with <code>--from-blueprint</code></td>
+</tr>
+<tr>
+<td><code>--connector</code></td>
+<td>(empty, repeatable)</td>
+<td>Per-cell identity override <code>CONNECTOR=SECRET[@realm[/space[/stack]]]</code>. Valid with <code>--from-config</code> only; recorded in <code>Spec.Provenance.connectorOverrides</code></td>
 </tr>
 <tr>
 <td><code>--dry-run</code></td>
@@ -3886,7 +3920,8 @@
 </code></pre></div>
 <h2 id="kuke-create-secret">kuke create secret<a class="headerlink" href="#kuke-create-secret" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>kuke create secret [NAME] [--type opaque|basic-auth|ssh-key] &lt;source flags&gt;
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>                          [--realm &lt;r&gt;] [--space &lt;s&gt;] [--stack &lt;t&gt;]
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>                          [--connector &lt;c&gt; [--identity FIELD=VALUE]... [--&lt;field&gt; &lt;value&gt;]...]
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>                          [--realm &lt;r&gt;] [--space &lt;s&gt;] [--stack &lt;t&gt;]
 </code></pre></div>
 <p>Create a <code>kind: Secret</code> within a scope. <code>--type</code> selects what it holds (<a href="../../manifests/secret/">Secret manifest</a>); every value is write-only.</p>
 <p><strong><code>--type opaque</code></strong> (default) — an arbitrary value, referenceable via <code>ContainerSecret.secretRef</code> from a <code>CellConfig</code>'s slot fill:</p>
@@ -3898,6 +3933,7 @@
 <p><strong><code>--type basic-auth</code></strong> — a git credential for HTTPS remotes: <code>--username</code> plus exactly one of <code>--password-stdin</code>, <code>--token-stdin</code>, <code>--from-file</code> (password file) or <code>--token-file</code>.</p>
 <p><strong><code>--type ssh-key</code></strong> — a git credential and signing key for SSH: <code>--from-file &lt;private key&gt;</code>, plus the optional passphrase, public key, certificate and pinned host keys.</p>
 <p>The two git types are used through a <code>git</code> block — see the <a href="../../guides/git-credentials/">git credentials guide</a> — and cannot be consumed as a container <code>secrets[]</code> entry. A flag that belongs to another type is rejected.</p>
+<p><strong><code>--connector &lt;name&gt;</code></strong> tags the secret as an identity of a <a href="../../concepts/connectors/">connector</a>, so it can be picked by name for a team, a Config or one cell. The secret is validated against the connector: its type must be one the connector accepts (when <code>--type</code> is omitted and the connector accepts exactly one type, that type is used), required identity fields must be set, and each value must read as its declared type. The connector's readable identity fields are set with <code>--identity FIELD=VALUE</code> (repeatable) or with the flag of the same name — every field of every connector in the catalog is a flag, in kebab case (<code>--author</code>, <code>--hosts</code>, <code>--allowed-signers-ref</code>, …). <code>kuke create secret --help</code> lists the connectors and the field flags. An unknown connector, an unknown field, or a field given without <code>--connector</code> is rejected.</p>
 <table>
 <thead>
 <tr>
@@ -4004,6 +4040,24 @@
 <td><code>""</code></td>
 <td>Pinned host keys in <code>known_hosts</code> format</td>
 </tr>
+<tr>
+<td><code>--connector</code></td>
+<td>all</td>
+<td><code>""</code></td>
+<td>Connector the secret is an identity of</td>
+</tr>
+<tr>
+<td><code>--identity</code></td>
+<td>all</td>
+<td>(empty, repeatable)</td>
+<td>A readable identity field of the connector, <code>FIELD=VALUE</code></td>
+</tr>
+<tr>
+<td><code>--&lt;field&gt;</code></td>
+<td>all</td>
+<td><code>""</code></td>
+<td>One flag per identity field of the catalog (<code>--author</code>, <code>--hosts</code>, …)</td>
+</tr>
 </tbody>
 </table>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="c1"># Inline value</span>
@@ -4023,20 +4077,32 @@
 <a id="__codelineno-14-15" name="__codelineno-14-15" href="#__codelineno-14-15"></a><span class="c1"># HTTPS username + token</span>
 <a id="__codelineno-14-16" name="__codelineno-14-16" href="#__codelineno-14-16"></a><span class="nb">printf</span><span class="w"> </span>%s<span class="w"> </span><span class="s2">"</span><span class="nv">$TOKEN</span><span class="s2">"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>forge-https<span class="w"> </span>--type<span class="w"> </span>basic-auth<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-14-17" name="__codelineno-14-17" href="#__codelineno-14-17"></a><span class="w">    </span>--username<span class="w"> </span>dev-bot<span class="w"> </span>--token-stdin<span class="w"> </span>--realm<span class="w"> </span>default
+<a id="__codelineno-14-18" name="__codelineno-14-18" href="#__codelineno-14-18"></a>
+<a id="__codelineno-14-19" name="__codelineno-14-19" href="#__codelineno-14-19"></a><span class="c1"># An identity of the github connector</span>
+<a id="__codelineno-14-20" name="__codelineno-14-20" href="#__codelineno-14-20"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>work-github<span class="w"> </span>--connector<span class="w"> </span>github<span class="w"> </span>--from-file<span class="w"> </span>./token
+<a id="__codelineno-14-21" name="__codelineno-14-21" href="#__codelineno-14-21"></a>
+<a id="__codelineno-14-22" name="__codelineno-14-22" href="#__codelineno-14-22"></a><span class="c1"># A git identity: the key plus its readable facts</span>
+<a id="__codelineno-14-23" name="__codelineno-14-23" href="#__codelineno-14-23"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>bot-key<span class="w"> </span>--connector<span class="w"> </span>git<span class="w"> </span>--type<span class="w"> </span>ssh-key<span class="w"> </span>--from-file<span class="w"> </span>~/.ssh/id_ed25519<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-14-24" name="__codelineno-14-24" href="#__codelineno-14-24"></a><span class="w">    </span>--author<span class="w"> </span><span class="s1">'Dev Bot &lt;bot@example.com&gt;'</span><span class="w"> </span>--hosts<span class="w"> </span>github.com<span class="w"> </span>--sign<span class="w"> </span>commits,tags
 </code></pre></div>
-<p><code>kuke get secrets</code> lists each secret's <code>TYPE</code>; no verb prints a value.</p>
+<p><code>kuke get secrets</code> lists each secret's <code>TYPE</code> and <code>CONNECTOR</code> (<code>-o wide</code> adds its readable <code>IDENTITY</code> fields); no verb prints a value.</p>
 <h2 id="kuke-create-registry-credential">kuke create registry-credential<a class="headerlink" href="#kuke-create-registry-credential" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>kuke create registry-credential &lt;realm&gt; --username &lt;u&gt; (--password-stdin | --from-file &lt;path&gt;)
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>                                         [--server &lt;host&gt;]
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>                                         [--server &lt;host&gt;] [--secret-name &lt;name&gt;]
 </code></pre></div>
 <p>Attach private-registry pull credentials to an <strong>existing</strong> realm. The command
-reads the realm, upserts an entry onto its <code>spec.registryCredentials</code> keyed by
-<code>--server</code>, and re-applies the realm. The reconciler converges the change as a
-<em>compatible</em> update — no realm recreate and no cell disruption — so cells in the
-realm can immediately pull images that previously returned <code>403 Forbidden</code>.</p>
-<p>Re-running with the same <code>--server</code> updates that entry in place (username +
-token) rather than appending a duplicate; a different <code>--server</code> appends a new
-entry. Existing entries for other servers are preserved.</p>
+stores the username and token as a <code>basic-auth</code> Secret of the realm — an
+identity of the <code>registry</code> <a href="../../concepts/connectors/#registry">connector</a> —
+upserts an entry onto the realm's <code>spec.registryCredentials</code> that names the
+Secret, keyed by <code>--server</code>, and re-applies the realm. The realm document never
+carries the token. The reconciler converges the change as a <em>compatible</em> update
+— no realm recreate and no cell disruption — so cells in the realm can
+immediately pull images that previously returned <code>403 Forbidden</code>.</p>
+<p>Re-running with the same <code>--server</code> rotates the Secret and updates that entry in
+place rather than appending a duplicate; a different <code>--server</code> appends a new
+entry. Existing entries for other servers are preserved. An entry for the server
+that still carries an inline <code>username</code> and <code>password</code> is replaced by the
+Secret-backed one, which is how an existing inline password moves into a Secret.</p>
 <p>The token never enters argv: supply it via <code>--password-stdin</code> (read from stdin,
 docker-login style) or <code>--from-file</code> (read from a file). Exactly one of the two
 is required.</p>
@@ -4073,6 +4139,11 @@ is required.</p>
 <td><code>--server</code></td>
 <td><code>""</code> (matches image's host)</td>
 <td>Registry host the credential applies to (e.g. <code>ghcr.io</code>); empty matches the registry extracted from the image reference at pull time</td>
+</tr>
+<tr>
+<td><code>--secret-name</code></td>
+<td><code>registry-&lt;server&gt;</code></td>
+<td>Name of the Secret that stores the credential (<code>ghcr.io</code> → <code>registry-ghcr-io</code>; an empty <code>--server</code> → <code>registry-default</code>)</td>
 </tr>
 </tbody>
 </table>
@@ -4114,7 +4185,7 @@ is required.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 16, 2026 11:01:05 UTC">November 16, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 20, 2026 13:37:15 UTC">November 20, 2026</span>
   </span>
 
     

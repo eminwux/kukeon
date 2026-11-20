@@ -1182,6 +1182,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/connectors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -3556,12 +3584,11 @@
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="nt">spec</span><span class="p">:</span>
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kukeon-main</span>
 <a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">  </span><span class="nt">registryCredentials</span><span class="p">:</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">username</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">myuser</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">      </span><span class="nt">password</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mypass</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">      </span><span class="nt">serverAddress</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">registry.example.com</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="nt">status</span><span class="p">:</span>
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="w">  </span><span class="nt">state</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Ready</span>
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="w">  </span><span class="nt">cgroupPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/kukeon/main</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">serverAddress</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">registry.example.com</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">      </span><span class="nt">secretRef</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">registry-registry-example-com</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="nt">status</span><span class="p">:</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="w">  </span><span class="nt">state</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Ready</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="w">  </span><span class="nt">cgroupPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/kukeon/main</span>
 </code></pre></div>
 <p>See <a href="../../concepts/realm/">Concepts → Realm</a> for what a realm is.</p>
 <h2 id="spec">spec<a class="headerlink" href="#spec" title="Permanent link">&para;</a></h2>
@@ -3580,31 +3607,39 @@
 </thead>
 <tbody>
 <tr>
-<td><code>username</code></td>
-<td>string</td>
-<td>yes</td>
-<td>Registry username</td>
-</tr>
-<tr>
-<td><code>password</code></td>
-<td>string</td>
-<td>yes</td>
-<td>Registry password or token</td>
-</tr>
-<tr>
 <td><code>serverAddress</code></td>
 <td>string</td>
 <td>no</td>
 <td>Registry server (e.g., <code>docker.io</code>, <code>ghcr.io</code>). If omitted, applies to the registry in the image reference.</td>
 </tr>
+<tr>
+<td><code>secretRef</code></td>
+<td>object</td>
+<td>one of</td>
+<td>A <code>basic-auth</code> <a href="../secret/">Secret</a> of this realm holding the username and password — an identity of the <code>registry</code> <a href="../../concepts/connectors/#registry">connector</a>. <code>name</code> is required; the realm is always the Realm's own.</td>
+</tr>
+<tr>
+<td><code>username</code></td>
+<td>string</td>
+<td>one of</td>
+<td>Inline registry username (the form that predates <code>secretRef</code>)</td>
+</tr>
+<tr>
+<td><code>password</code></td>
+<td>string</td>
+<td>one of</td>
+<td>Inline registry password or token. Write-only: <code>kuke get realm</code> and the web UI never print it.</td>
+</tr>
 </tbody>
 </table>
+<p>An entry carries either <code>secretRef</code> or an inline <code>username</code> and <code>password</code>, not both. Prefer <code>secretRef</code>: the password then lives in a root-only secret file instead of the realm's metadata, and rotating it is one <code>kuke create secret</code>.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">spec</span><span class="p">:</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">registryCredentials</span><span class="p">:</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">username</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">eminwux</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">      </span><span class="nt">password</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${{ GHCR_TOKEN }}</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">      </span><span class="nt">serverAddress</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ghcr.io</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">serverAddress</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ghcr.io</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">      </span><span class="nt">secretRef</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">registry-ghcr-io</span><span class="w"> </span><span class="p p-Indicator">}</span>
 </code></pre></div>
+<p><a href="../../cli/kuke-create/#kuke-create-registry-credential"><code>kuke create registry-credential</code></a> writes the Secret and this entry in one step, and moves an existing inline entry for the same server into a Secret. A Realm applied with an inline entry whose <code>password</code> is left out keeps the stored password, so the output of <code>kuke get realm -o yaml</code> — which never contains one — can be edited and re-applied.</p>
+<p>A <code>secretRef</code> that cannot be read when an image is pulled (the Secret is missing or is not <code>basic-auth</code>) is logged and skipped: the pull proceeds without that credential and fails with the registry's own error if the image is private.</p>
 <h3 id="specdefaults-object-optional"><code>spec.defaults</code> (object, optional)<a class="headerlink" href="#specdefaults-object-optional" title="Permanent link">&para;</a></h3>
 <p>The CellConfig fill every cell kukeond renders from a <a href="../config/"><code>CellConfig</code></a> inside this realm inherits. Same shape as the Config's own fill — <code>values</code>, <code>repos</code>, <code>secrets</code> — and merged <strong>Realm → Space → Stack → CellConfig</strong>, per key, deeper levels winning. See <a href="../config/#defaults-merge">Defaults merge</a>.</p>
 <p><code>spec.defaults.git</code> is the default git identity, credentials and signing config of every such cell — set once here instead of on each Config. It has the shape of a container's <a href="../container/#containergit"><code>git</code></a> block: <code>author</code>, <code>committer</code> and <code>signing</code> are replaced by a deeper level that sets them, and <code>credentials[]</code> merge by <code>host</code>. See the <a href="../../guides/git-credentials/">git credentials guide</a>.</p>
@@ -3778,7 +3813,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 16, 2026 11:01:05 UTC">November 16, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 20, 2026 13:37:15 UTC">November 20, 2026</span>
   </span>
 
     

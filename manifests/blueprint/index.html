@@ -1182,6 +1182,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/connectors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2852,6 +2880,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#component-connector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Component connector
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#component-mode" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3602,6 +3641,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#component-connector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Component connector
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#component-mode" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3926,6 +3976,80 @@
 <td>no</td>
 <td>The ways a harness can be started. <code>harness</code> components only; at most one component of a blueprint declares modes.</td>
 </tr>
+<tr>
+<td><code>group</code></td>
+<td>string</td>
+<td>no</td>
+<td>Mutual-exclusion group. The components of one group are alternatives — the ways one harness authenticates — and a Config that enables two of them is rejected.</td>
+</tr>
+<tr>
+<td><code>connector</code></td>
+<td>object</td>
+<td>no</td>
+<td>The definition of the <a href="../../concepts/connectors/">connector</a> the component delivers. <code>connector</code> components only. See below.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="component-connector">Component connector<a class="headerlink" href="#component-connector" title="Permanent link">&para;</a></h4>
+<p><code>kuke team</code> copies a connector's definition from its catalog into every component that delivers it, so the daemon — which keeps no catalog — can validate and resolve identities from the blueprint alone.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>string</td>
+<td>yes</td>
+<td>The connector's name. A Secret tagged with another connector is refused for this component.</td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td>string</td>
+<td>no</td>
+<td>Display name.</td>
+</tr>
+<tr>
+<td><code>method</code></td>
+<td>string</td>
+<td>no</td>
+<td>The connector method this component is.</td>
+</tr>
+<tr>
+<td><code>delivery</code></td>
+<td>string</td>
+<td>yes</td>
+<td><code>env</code> or <code>file</code> (exactly one secret slot of that mode), <code>stateVolume</code> (no slot: a login in the state volume) or <code>git</code> (no slot).</td>
+</tr>
+<tr>
+<td><code>secretTypes</code></td>
+<td>array of string</td>
+<td>no</td>
+<td>Secret types an identity may have: <code>opaque</code>, <code>basic-auth</code>, <code>ssh-key</code>.</td>
+</tr>
+<tr>
+<td><code>scopes</code></td>
+<td>array of string</td>
+<td>no</td>
+<td>Levels a default may be set at: <code>realm</code>, <code>space</code>, <code>stack</code>. Empty allows all.</td>
+</tr>
+<tr>
+<td><code>fields</code></td>
+<td>list</td>
+<td>no</td>
+<td>Schema of the identity's readable fields: <code>name</code>, <code>type</code> (<code>string</code>, <code>list</code>, <code>person</code>, <code>secret</code>), <code>required</code>, <code>enum</code>, <code>secretTypes</code>, <code>help</code>.</td>
+</tr>
+<tr>
+<td><code>optional</code></td>
+<td>bool</td>
+<td>no</td>
+<td>A cell may be created while the connector has no identity.</td>
+</tr>
 </tbody>
 </table>
 <p>A component never declares a git credential: git authenticates only from a <a href="../container/#containergit"><code>git</code></a> block. Two enabled components — or a component and the template — that set the same env key or the same secret destination fail the render.</p>
@@ -4057,6 +4181,7 @@
 </table>
 <h3 id="speccellcontainers-list-required"><code>spec.cell.containers[]</code> (list, required)<a class="headerlink" href="#speccellcontainers-list-required" title="Permanent link">&para;</a></h3>
 <p>Each container carries the user-authorable subset of <a href="../container/">ContainerSpec</a> — <code>id</code>, <code>image</code>, <code>command</code>, <code>args</code>, <code>env</code>, <code>volumes</code>, <code>networks</code>, <code>ports</code>, <code>resources</code>, <code>git</code>, <code>tty</code>, the host-namespace toggles, capability sets, and <code>restartPolicy</code>. Daemon-stamped identity fields (<code>containerdId</code>, <code>realmId</code>, <code>spaceId</code>, <code>stackId</code>, <code>cellId</code>) are intentionally absent: materialization fills them from the blueprint's metadata and the generated cell name.</p>
+<p>A blueprint's <code>git</code> blocks — on a container or on one of its <code>repos[]</code> — may not carry <code>identityRef</code>: a git identity is chosen per team, Config or cell and named in the <code>CellConfig</code>, the cell's <code>--connector</code>, or a Realm, Space or Stack default (see <a href="../../concepts/connectors/">Connectors</a>). <code>kuke apply</code> refuses a blueprint that sets one.</p>
 <p>In addition to the regular container fields, a blueprint container declares two slot channels:</p>
 <h4 id="speccellcontainersrepos-list-optional"><code>spec.cell.containers[].repos[]</code> (list, optional)<a class="headerlink" href="#speccellcontainersrepos-list-optional" title="Permanent link">&para;</a></h4>
 <p>Same shape as <a href="../container/">ContainerRepo</a>. Unlike a hand-written <code>Cell</code> / <code>Container</code>, <code>url</code> is <strong>not</strong> required at apply time. A repo with no <code>url</code> is a structural slot a <code>CellConfig</code> fills; a repo whose <code>url</code> is supplied inline (directly or via a <code>${KEY}</code> parameter) runs as-is under <code>kuke run --from-blueprint</code>. The slot's <code>name</code> is the identity a <code>CellConfig</code> matches on.</p>
@@ -4159,7 +4284,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 16, 2026 11:01:05 UTC">November 16, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 20, 2026 13:37:15 UTC">November 20, 2026</span>
   </span>
 
     

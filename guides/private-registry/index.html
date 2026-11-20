@@ -1182,6 +1182,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/connectors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -3507,6 +3535,10 @@ private registries without sharing a login. See
 <p>A credential is keyed by its registry host (<code>serverAddress</code>). A realm can hold
 credentials for multiple registries at once; each entry applies to the registry
 it names.</p>
+<p>The username and token are stored as a <code>basic-auth</code>
+<a href="../../manifests/secret/">Secret</a> of the realm — an identity of the <code>registry</code>
+<a href="../../concepts/connectors/#registry">connector</a> — and the realm's entry names
+that Secret. The realm document itself never has to carry a password.</p>
 <h2 id="imperative-kuke-create-registry-credential">Imperative: <code>kuke create registry-credential</code><a class="headerlink" href="#imperative-kuke-create-registry-credential" title="Permanent link">&para;</a></h2>
 <p>The quickest way to attach a credential to an <strong>existing</strong> realm:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Pipe a token in from stdin (keeps it out of shell history)</span>
@@ -3517,20 +3549,27 @@ it names.</p>
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>registry-credential<span class="w"> </span>default<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">    </span>--server<span class="w"> </span>ghcr.io<span class="w"> </span>--username<span class="w"> </span>my-user<span class="w"> </span>--from-file<span class="w"> </span>./ghcr-token.txt
 </code></pre></div>
-<p>The command reads the realm, upserts an entry onto its
-<code>spec.registryCredentials</code> keyed by <code>--server</code>, and re-applies the realm. The
-reconciler converges the change as a <em>compatible</em> update — no realm recreate and
-no cell disruption — so cells in the realm can immediately pull images that
-previously returned <code>403 Forbidden</code>.</p>
+<p>The command writes the credential as a Secret of the realm named
+<code>registry-&lt;server&gt;</code> (<code>ghcr.io</code> → <code>registry-ghcr-io</code>; <code>--secret-name</code> overrides
+it), upserts an entry onto the realm's <code>spec.registryCredentials</code> that names the
+Secret, keyed by <code>--server</code>, and re-applies the realm. The reconciler converges
+the change as a <em>compatible</em> update — no realm recreate and no cell disruption —
+so cells in the realm can immediately pull images that previously returned
+<code>403 Forbidden</code>.</p>
 <p>A few behaviors worth knowing:</p>
 <ul>
 <li><strong>The token never enters argv.</strong> Supply it via <code>--password-stdin</code> (read from
   stdin, docker-login style) or <code>--from-file</code> (read from a file). Exactly one of
   the two is required.</li>
-<li><strong>Re-running upserts.</strong> Re-running with the same <code>--server</code> updates that entry
-  in place (username + token) rather than appending a duplicate; a different
+<li><strong>Re-running upserts.</strong> Re-running with the same <code>--server</code> rotates the Secret
+  and updates that entry in place rather than appending a duplicate; a different
   <code>--server</code> appends a new entry. Existing entries for other servers are
   preserved.</li>
+<li><strong>Re-running migrates.</strong> An entry that still carries an inline <code>username</code> and
+  <code>password</code> (written before Secret-backed entries existed) is replaced by the
+  Secret-backed one, so the password leaves the realm document.</li>
+<li><strong>Passwords are never printed.</strong> <code>kuke get realm -o yaml</code> and <code>-o json</code> omit
+  every registry password, inline entries included.</li>
 <li><strong><code>--server</code> defaults to the image's host.</strong> Leave <code>--server</code> empty and the
   credential matches the registry extracted from the image reference at pull
   time; set it explicitly (e.g. <code>ghcr.io</code>) to scope the credential to one host.</li>
@@ -3547,9 +3586,13 @@ the unit of version control; imperative commands are not.</p>
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">myrealm</span>
 <a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="nt">spec</span><span class="p">:</span>
 <a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span><span class="nt">registryCredentials</span><span class="p">:</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">username</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">eminwux</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">      </span><span class="nt">password</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${{ GHCR_TOKEN }}</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">      </span><span class="nt">serverAddress</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ghcr.io</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">serverAddress</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ghcr.io</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">      </span><span class="nt">secretRef</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">registry-ghcr-io</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<p>The Secret is created separately, so the token is not in the manifest you
+commit:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nb">printf</span><span class="w"> </span>%s<span class="w"> </span><span class="s2">"</span><span class="nv">$GHCR_TOKEN</span><span class="s2">"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>registry-ghcr-io<span class="w"> </span>--realm<span class="w"> </span>myrealm<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">    </span>--connector<span class="w"> </span>registry<span class="w"> </span>--type<span class="w"> </span>basic-auth<span class="w"> </span>--username<span class="w"> </span>eminwux<span class="w"> </span>--password-stdin
 </code></pre></div>
 <table>
 <thead>
@@ -3561,22 +3604,30 @@ the unit of version control; imperative commands are not.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>username</code></td>
-<td>yes</td>
-<td>Registry username</td>
-</tr>
-<tr>
-<td><code>password</code></td>
-<td>yes</td>
-<td>Registry password or token</td>
-</tr>
-<tr>
 <td><code>serverAddress</code></td>
 <td>no</td>
 <td>Registry server (e.g. <code>docker.io</code>, <code>ghcr.io</code>). If omitted, applies to the registry in the image reference.</td>
 </tr>
+<tr>
+<td><code>secretRef</code></td>
+<td>one of</td>
+<td>The <code>basic-auth</code> Secret of this realm that holds the username and password</td>
+</tr>
+<tr>
+<td><code>username</code></td>
+<td>one of</td>
+<td>Inline registry username (the older form)</td>
+</tr>
+<tr>
+<td><code>password</code></td>
+<td>one of</td>
+<td>Inline registry password or token (the older form; write-only)</td>
+</tr>
 </tbody>
 </table>
+<p>An entry carries <code>secretRef</code> or the inline pair, not both. Inline entries keep
+working; re-run <code>kuke create registry-credential</code> for the server to move one
+into a Secret.</p>
 <p>See <a href="../../manifests/realm/#specregistrycredentials-array-optional">Manifests → Realm</a> for the
 full field reference.</p>
 <h2 id="pushing-images-build-time-credentials">Pushing images: build-time credentials<a class="headerlink" href="#pushing-images-build-time-credentials" title="Permanent link">&para;</a></h2>
@@ -3615,7 +3666,7 @@ fully qualified <code>REGISTRY/REPO:TAG</code>.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 12, 2026 17:11:09 UTC">June 12, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 20, 2026 13:37:15 UTC">November 20, 2026</span>
   </span>
 
     

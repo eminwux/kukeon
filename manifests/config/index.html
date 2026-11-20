@@ -1182,6 +1182,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/connectors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -3064,6 +3092,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="status">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#statusconnectors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        status.connectors
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -3935,6 +3980,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="status">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#statusconnectors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        status.connectors
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -4170,7 +4232,7 @@
 <td><code>git</code></td>
 <td>object</td>
 <td>no</td>
-<td>This source's own git identity — <code>author</code>, <code>committer</code>, <code>credential</code>, <code>signing</code>, <code>sign</code>. Unset fields use the cell's default identity. See <a href="../container/#repogit">RepoGit</a>.</td>
+<td>This source's own git identity — <code>author</code>, <code>committer</code>, <code>credential</code>, <code>signing</code>, <code>sign</code>, or an <code>identityRef</code> naming a stored git identity that supplies them. Unset fields use the cell's default identity. See <a href="../container/#repogit">RepoGit</a>.</td>
 </tr>
 </tbody>
 </table>
@@ -4198,7 +4260,8 @@
 <h3 id="specrequires-array-of-string-optional"><code>spec.requires</code> (array of string, optional)<a class="headerlink" href="#specrequires-array-of-string-optional" title="Permanent link">&para;</a></h3>
 <p>Image capabilities this Config's cells need on top of the blueprint's and its enabled components' — for example <code>[go]</code>. See <a href="../../concepts/blueprint-contract/#image-capabilities">Image capabilities</a>.</p>
 <h3 id="speccomponents-array-of-string-optional"><code>spec.components</code> (array of string, optional)<a class="headerlink" href="#speccomponents-array-of-string-optional" title="Permanent link">&para;</a></h3>
-<p>The blueprint's <strong>optional</strong> components to enable, by name. A component that is not optional is always on and need not be listed; naming a component the blueprint does not declare is an apply-time error. Enabling a component adds its parameters, env, secret slots and required capabilities to the cell.</p>
+<p>The blueprint's <strong>optional</strong> components to enable, by name. A component that is not optional is always on and need not be listed; naming a component the blueprint does not declare is an apply-time error. Enabling a component adds its parameters, env, secret slots and required capabilities to the cell. Components that share a <code>group</code> are alternatives: enabling two of one group — <code>claude-subscription</code> and <code>claude-api-key</code>, say — is an apply-time error.</p>
+<p>A <code>connector</code> component makes its <a href="../../concepts/connectors/">connector</a> a requirement of the Config's cells. Which identity fills it is resolved at render time: a per-cell <code>--connector</code>, else this Config's <code>spec.secrets</code> fill (or <code>spec.git.identityRef</code>), else the Stack, Space and Realm defaults.</p>
 <h3 id="specmodes-object-optional"><code>spec.modes</code> (object, optional)<a class="headerlink" href="#specmodes-object-optional" title="Permanent link">&para;</a></h3>
 <p>Which of the blueprint's harness modes this Config's cells may be created in. Unset allows every mode the blueprint declares.</p>
 <table>
@@ -4228,18 +4291,24 @@
 <p>The mode itself is picked <strong>per cell</strong>, at create time — <code>kuke run &lt;config&gt; --mode headless --param PROMPT=…</code> — so one Config serves both an attached session and a dispatched run. A Config may fill the secret slots of every mode it enables; only the picked mode's required slots and parameters are checked for a given cell.</p>
 <h3 id="specgit-object-optional"><code>spec.git</code> (object, optional)<a class="headerlink" href="#specgit-object-optional" title="Permanent link">&para;</a></h3>
 <p>Overrides the git identity, credentials and signing config the cell inherits from its Realm → Space → Stack defaults. Same shape as a container's <a href="../container/#containergit"><code>git</code></a>: <code>author</code>, <code>committer</code> and <code>signing</code> replace the inherited value; <code>credentials[]</code> merge by <code>host</code>. See the <a href="../../guides/git-credentials/">git credentials guide</a>.</p>
+<p><code>identityRef</code> names a stored <a href="../../concepts/connectors/#git">git identity</a> — an <code>ssh-key</code> or <code>basic-auth</code> Secret tagged <code>git</code> — instead of spelling the block out. At render time the daemon expands it at the level it is written on into author, committer, a credential for each of the identity's hosts and, for an SSH key, signing with the same key; the result then merges like any other level. Fields written next to the reference win over the identity's. <code>identityRef</code> is valid here, on a repo fill's <code>git</code>, and on a Realm, Space or Stack <code>spec.defaults.git</code>; a rendered cell never carries it. A reference to a Secret that is missing, is tagged for another connector, or lacks a required field (<code>hosts</code>) fails the render.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">git</span><span class="p">:</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="nt">identityRef</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">bot-key</span><span class="p p-Indicator">,</span><span class="nt"> realm</span><span class="p">:</span><span class="w"> </span><span class="nv">default</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span><span class="nt">author</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Release Bot</span><span class="p p-Indicator">,</span><span class="nt"> email</span><span class="p">:</span><span class="w"> </span><span class="nv">release@example.com</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w"> </span><span class="c1"># overrides the identity's author</span>
+</code></pre></div>
 <h3 id="specautodelete-bool-optional"><code>spec.autoDelete</code> (bool, optional)<a class="headerlink" href="#specautodelete-bool-optional" title="Permanent link">&para;</a></h3>
 <p>When <code>true</code>, every cell materialized from this Config gets <code>Spec.AutoDelete</code>, so it is deleted once its run ends. This is the same deletion <code>kuke run --rm</code> asks for, without the flag. The value is OR'd with the blueprint's own <code>spec.cell.autoDelete</code>. It is set on the Config, not the blueprint, because a blueprint is shared across modes and roles. A re-render of an existing cell (OutOfSync, <code>kuke restart</code>) keeps it. <code>kuke team add</code> sets it on every <a href="../../concepts/team/#tasks">task config</a>.</p>
 <h3 id="specschedule-object-optional"><code>spec.schedule</code> (object, optional)<a class="headerlink" href="#specschedule-object-optional" title="Permanent link">&para;</a></h3>
 <p>Makes the Config recurring: kukeond creates and starts a fresh cell from it on a cron schedule, doing on each fire what <code>kuke run -d --from-config &lt;config&gt;</code> does. Without it the Config is an ordinary one. A Config has one schedule; two cadences are two Configs.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">blueprint</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">disk-watch</span><span class="p p-Indicator">,</span><span class="nt"> realm</span><span class="p">:</span><span class="w"> </span><span class="nv">default</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">schedule</span><span class="p">:</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span><span class="nt">cron</span><span class="p">:</span><span class="w"> </span><span class="s">"*/10</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*"</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">    </span><span class="nt">timezone</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Europe/Madrid</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">    </span><span class="nt">concurrencyPolicy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Forbid</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="nt">startingDeadlineSeconds</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">300</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">    </span><span class="nt">suspend</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">blueprint</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">disk-watch</span><span class="p p-Indicator">,</span><span class="nt"> realm</span><span class="p">:</span><span class="w"> </span><span class="nv">default</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="nt">schedule</span><span class="p">:</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">    </span><span class="nt">cron</span><span class="p">:</span><span class="w"> </span><span class="s">"*/10</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*"</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">    </span><span class="nt">timezone</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Europe/Madrid</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">    </span><span class="nt">concurrencyPolicy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Forbid</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">    </span><span class="nt">startingDeadlineSeconds</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">300</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">    </span><span class="nt">suspend</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
 </code></pre></div>
 <table>
 <thead>
@@ -4310,15 +4379,15 @@
 <h4 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h4>
 <p>Applying a Config is refused when <code>cron</code> does not parse, <code>timezone</code> is unknown, <code>concurrencyPolicy</code> is anything other than <code>Forbid</code>, or <code>startingDeadlineSeconds</code> is negative. It is also refused when the Config's default mode is <code>interactive</code>, because nothing attaches to a cell the daemon starts: set <a href="#specmodes-object-optional"><code>spec.modes.default</code></a> to a mode that runs unattended, such as <code>headless</code>. A Config whose blueprint declares no modes is accepted.</p>
 <h2 id="status">status<a class="headerlink" href="#status" title="Permanent link">&para;</a></h2>
-<p><code>status</code> is written by kukeond and is read-only: <code>kuke get config &lt;name&gt; -o yaml</code> shows it, and a <code>status</code> block in an applied document is ignored. Only a scheduled Config has one.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">status</span><span class="p">:</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">schedule</span><span class="p">:</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="nt">lastScheduleTime</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2026-11-17T08:30:00Z</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">    </span><span class="nt">nextScheduleTime</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2026-11-17T08:40:00Z</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">    </span><span class="nt">lastCell</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">disk-watch-1794904200</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">    </span><span class="nt">activeCells</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">disk-watch-1794904200</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">    </span><span class="nt">skippedFires</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">    </span><span class="nt">lastError</span><span class="p">:</span><span class="w"> </span><span class="s">""</span>
+<p><code>status</code> is written by kukeond and is read-only: <code>kuke get config &lt;name&gt; -o yaml</code> shows it, and a <code>status</code> block in an applied document is ignored. A Config has one when it is scheduled or requires a connector.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">status</span><span class="p">:</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">schedule</span><span class="p">:</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="nt">lastScheduleTime</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2026-11-17T08:30:00Z</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">    </span><span class="nt">nextScheduleTime</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2026-11-17T08:40:00Z</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">    </span><span class="nt">lastCell</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">disk-watch-1794904200</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">    </span><span class="nt">activeCells</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">disk-watch-1794904200</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">    </span><span class="nt">skippedFires</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">    </span><span class="nt">lastError</span><span class="p">:</span><span class="w"> </span><span class="s">""</span>
 </code></pre></div>
 <table>
 <thead>
@@ -4362,6 +4431,87 @@
 </tbody>
 </table>
 <p>All times are UTC. <code>kuke get configs</code> shows the same state in two columns: <code>SCHEDULE</code> (the cron expression, followed by the time zone when one is set) and <code>NEXT</code> (the next fire time, or <code>suspended</code>). Both are empty for an unscheduled Config.</p>
+<h3 id="statusconnectors"><code>status.connectors</code><a class="headerlink" href="#statusconnectors" title="Permanent link">&para;</a></h3>
+<p>How each <a href="../../concepts/connectors/">connector</a> the Config requires resolves right now, computed on every get and list — so it follows a change of a Realm, Space or Stack default with no re-apply.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">status</span><span class="p">:</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">connectors</span><span class="p">:</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">connector</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">github</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">      </span><span class="nt">component</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">github</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">      </span><span class="nt">method</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">token</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">      </span><span class="nt">delivery</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">env</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">      </span><span class="nt">slot</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">github-token</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">      </span><span class="nt">state</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">resolved</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">      </span><span class="nt">required</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="w">      </span><span class="nt">identity</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">work-github</span><span class="p p-Indicator">,</span><span class="nt"> realm</span><span class="p">:</span><span class="w"> </span><span class="nv">default</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="w">      </span><span class="nt">origin</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">realm</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">connector</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude</span>
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="w">      </span><span class="nt">component</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-login</span>
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="w">      </span><span class="nt">method</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">login</span>
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="w">      </span><span class="nt">delivery</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">stateVolume</span>
+<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a><span class="w">      </span><span class="nt">state</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">resolved</span>
+<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a><span class="w">      </span><span class="nt">volume</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">team-dev-claude</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>connector</code></td>
+<td>string</td>
+<td>The connector's name; <code>title</code> is its display name.</td>
+</tr>
+<tr>
+<td><code>component</code></td>
+<td>string</td>
+<td>The blueprint component that requires it; <code>method</code> is the connector method that component is.</td>
+</tr>
+<tr>
+<td><code>delivery</code></td>
+<td>string</td>
+<td>How the identity reaches the cell: <code>env</code>, <code>file</code>, <code>stateVolume</code> or <code>git</code>.</td>
+</tr>
+<tr>
+<td><code>slot</code></td>
+<td>string</td>
+<td>The secret slot the identity fills (<code>env</code> and <code>file</code>).</td>
+</tr>
+<tr>
+<td><code>state</code></td>
+<td>string</td>
+<td><code>resolved</code> or <code>unresolved</code>.</td>
+</tr>
+<tr>
+<td><code>required</code></td>
+<td>bool</td>
+<td>A cell cannot be created while the connector is unresolved.</td>
+</tr>
+<tr>
+<td><code>identity</code></td>
+<td>object</td>
+<td>The Secret that fills the connector. Absent when unresolved, and for a login kept in a state volume.</td>
+</tr>
+<tr>
+<td><code>origin</code></td>
+<td>string</td>
+<td>The level the identity comes from: <code>config</code>, <code>stack</code>, <code>space</code> or <code>realm</code> (<code>cell</code> in a create preview).</td>
+</tr>
+<tr>
+<td><code>volume</code></td>
+<td>string</td>
+<td>The state volume holding the login of a <code>stateVolume</code> connector.</td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td>string</td>
+<td>Why the connector is unresolved, or what is wrong with the identity it names.</td>
+</tr>
+</tbody>
+</table>
 <h2 id="slot-fills">Slot fills<a class="headerlink" href="#slot-fills" title="Permanent link">&para;</a></h2>
 <p>A <code>CellConfig</code> fills the structural slots a <a href="../blueprint/"><code>CellBlueprint</code></a> declares. Slot matching is by <strong>name</strong>, across all of the blueprint's containers — the same slot name on two containers shares a single Config-side entry. The validation gates are:</p>
 <ul>
@@ -4372,7 +4522,7 @@
 <p>The two channels are independent: scalar <code>values</code> are blueprint-side parameters resolved at run time (see the blueprint's <a href="../blueprint/"><code>spec.parameters[]</code></a>), while <code>repos:</code> and <code>secrets:</code> are structural slot fills validated at apply time. A <code>${KEY}</code> parameter is not a slot, and a slot is not a <code>${KEY}</code> parameter.</p>
 <h2 id="defaults-merge">Defaults merge<a class="headerlink" href="#defaults-merge" title="Permanent link">&para;</a></h2>
 <p>kukeond is the only place a CellConfig becomes a Cell: <code>kuke create cell --from-config</code>, <code>kuke run --from-config</code>, <code>kuke create cell --clone</code>, the web UI, the <code>OutOfSync</code> reconciler and the <code>kuke restart</code> re-apply all ask the daemon to render. The render merges the <code>spec.defaults</code> of the cell's <a href="../realm/#specdefaults-object-optional">Realm</a>, <a href="../space/">Space</a> and <a href="../stack/">Stack</a> under the Config's own fill:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Realm defaults → Space defaults → Stack defaults → CellConfig → (per-cell --env)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Realm defaults → Space defaults → Stack defaults → CellConfig → (per-cell --env, --connector)
 </code></pre></div>
 <p>Maps merge per key, and the deeper level wins. The <code>git</code> block merges the same way: identity and signing are replaced by the deepest level that sets them, and <code>credentials[]</code> merge by <code>host</code>. A blueprint parameter no level sets keeps its blueprint default. Repo and secret defaults apply only to slots the referenced blueprint declares — a realm-wide <code>github-token</code> secret default is simply ignored by a blueprint without that slot — while the Config's own fills stay strictly validated. A level default can satisfy a required slot the Config leaves open. Container <code>image</code> values that name a realm <a href="../realm/#specimages-array-optional"><code>spec.images</code></a> entry resolve to that image.</p>
 <p><code>kuke create cell &lt;name&gt; --from-config &lt;cfg&gt; --dry-run --explain</code> prints every resolved value with the level that set it (<code>realm</code>, <code>space</code>, <code>stack</code>, <code>config</code>, or <code>blueprint</code>) and the rendered cell's digest; the web UI's create preview shows the same table (scalar values hidden).</p>
@@ -4383,15 +4533,15 @@
 <p>The lineage contract:</p>
 <ul>
 <li>Every cell stamped from a Config carries the <code>kukeon.io/config=&lt;name&gt;</code> <strong>lineage label</strong> (a back-reference, not an identity constraint). List a Config's stamped cells with <code>kuke get cells -l kukeon.io/config=&lt;name&gt;</code>.</li>
-<li>Every stamped cell also persists a <code>Spec.Provenance</code> block recording the binding it came from (kind, scoped ref, resolved params, and any <code>--env</code> per-cell overrides), so a later re-resolve rebuilds the cell from the same Config without re-supplying values.</li>
+<li>Every stamped cell also persists a <code>Spec.Provenance</code> block recording the binding it came from (kind, scoped ref, resolved params, and any <code>--env</code> and <code>--connector</code> per-cell overrides), so a later re-resolve rebuilds the cell from the same Config without re-supplying values.</li>
 <li>Editing the Config does <strong>not</strong> push to live cells. A stamped cell whose spec has drifted from the current Config surfaces as informational <code>OutOfSync</code> in the <code>SYNC</code> column of <code>kuke get cell -o wide</code>; an operator pulls it back in line explicitly with <a href="../../cli/kuke-restart/"><code>kuke restart &lt;cell&gt;</code></a> (or <code>kuke restart -l &lt;selector&gt;</code> to roll a fleet). <code>kuke run</code> / <code>kuke create cell</code> never mutate a live cell.</li>
 </ul>
 <p>This is the structural parallel with a <a href="../blueprint/"><code>CellBlueprint</code></a>: both are always-fresh templates (<code>&lt;prefix&gt;-&lt;6hex&gt;</code> per invocation). A Blueprint binds only scalar <code>${KEY}</code> parameters; a Config additionally binds structural repo/secret slot sources, so a blueprint with required slots can only run through a Config.</p>
 <h2 id="storage-layout">Storage layout<a class="headerlink" href="#storage-layout" title="Permanent link">&para;</a></h2>
 <p>The daemon writes the config document to a root-owned, world-readable file under the scope's metadata tree:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>&lt;runPath&gt;/data/&lt;realm&gt;/configs/&lt;name&gt;                         # realm-scoped
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>&lt;runPath&gt;/data/&lt;realm&gt;/&lt;space&gt;/configs/&lt;name&gt;                 # space-scoped
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>&lt;runPath&gt;/data/&lt;realm&gt;/&lt;space&gt;/&lt;stack&gt;/configs/&lt;name&gt;         # stack-scoped
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>&lt;runPath&gt;/data/&lt;realm&gt;/configs/&lt;name&gt;                         # realm-scoped
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>&lt;runPath&gt;/data/&lt;realm&gt;/&lt;space&gt;/configs/&lt;name&gt;                 # space-scoped
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>&lt;runPath&gt;/data/&lt;realm&gt;/&lt;space&gt;/&lt;stack&gt;/configs/&lt;name&gt;         # stack-scoped
 </code></pre></div>
 <p>The <code>configs/</code> directory is <code>0755</code> and each config document is <code>0644</code>, both owned by root. A config carries only references (a blueprint name, repo URLs, secretRefs) — no credential bytes — so the directory is world-readable, unlike <code>secrets/</code>. Because <code>configs/</code> nests inside the scope's metadata directory, the same teardown that reclaims a scope (<code>kuke purge</code> / <code>kuke delete</code>) reclaims its configs.</p>
 <p>The <a href="#status"><code>status.schedule</code></a> of a scheduled Config is stored beside the document, not in it, at <code>&lt;scope&gt;/config-status/&lt;name&gt;</code> with the same ownership and modes. Keeping it out of the document means an apply never overwrites it and the scheduler's writes never change the document. <code>kuke delete config</code> removes it with the Config.</p>
@@ -4399,31 +4549,31 @@
 <ul>
 <li><strong>One Config → N cells (1:N binding).</strong> Each <code>kuke run --from-config</code> / <code>kuke create cell --from-config</code> stamps a fresh <code>&lt;prefix&gt;-&lt;6hex&gt;</code> cell (or a <code>--name</code>-pinned one); the cell's identity is its <a href="../../concepts/cell/"><code>CellDoc</code></a>, and the Config name lives on only as the <code>kukeon.io/config</code> lineage label.</li>
 <li><strong>Lineage label.</strong> Every stamped cell carries the <code>kukeon.io/config=&lt;name&gt;</code> label, so an operator can list all of a Config's cells with <code>kuke get cells -l kukeon.io/config=&lt;name&gt;</code>.</li>
-<li><strong>Persisted provenance.</strong> Every stamped cell records its binding in <code>Spec.Provenance</code> (kind, scoped ref, resolved params, <code>--env</code> overrides), so <code>kuke restart &lt;cell&gt;</code> can re-resolve it from the Config without re-supplying values.</li>
+<li><strong>Persisted provenance.</strong> Every stamped cell records its binding in <code>Spec.Provenance</code> (kind, scoped ref, resolved params, <code>--env</code> and <code>--connector</code> overrides), so <code>kuke restart &lt;cell&gt;</code> can re-resolve it from the Config without re-supplying values.</li>
 <li><strong>Apply-time slot validation.</strong> A Config that fills an undeclared slot, or that leaves a required slot unfilled, errors at apply time against the referenced blueprint's current shape — not at run time.</li>
 <li><strong>Cross-scope references.</strong> A Config may reference a Blueprint in a different scope; the same is true of the <code>secretRef</code> inside each secret slot fill.</li>
 <li><strong>A schedule is not part of the cell.</strong> <code>spec.schedule</code> decides when kukeond creates cells from the Config, never what they contain: editing it leaves existing cells in sync, and a scheduled cell differs from a hand-started one only by its name, its <code>kukeon.io/schedule</code> label and being self-deleting.</li>
 </ul>
 <h2 id="minimal">Minimal<a class="headerlink" href="#minimal" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellConfig</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="nt">metadata</span><span class="p">:</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">prod</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">  </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuke-system</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">  </span><span class="nt">blueprint</span><span class="p">:</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-code</span>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">    </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuke-system</span>
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="w">  </span><span class="nt">values</span><span class="p">:</span>
-<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="w">    </span><span class="nt">MODEL</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-opus-4-7</span>
-<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="w">  </span><span class="nt">repos</span><span class="p">:</span>
-<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="w">    </span><span class="nt">workspace</span><span class="p">:</span>
-<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="w">      </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://github.com/example/repo</span>
-<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="w">  </span><span class="nt">secrets</span><span class="p">:</span>
-<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a><span class="w">    </span><span class="nt">anthropic-token</span><span class="p">:</span>
-<a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a><span class="w">      </span><span class="nt">secretRef</span><span class="p">:</span>
-<a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">anthropic-token</span>
-<a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a><span class="w">        </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuke-system</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellConfig</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">prod</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">  </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuke-system</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">  </span><span class="nt">blueprint</span><span class="p">:</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-code</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="w">    </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuke-system</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="w">  </span><span class="nt">values</span><span class="p">:</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="w">    </span><span class="nt">MODEL</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-opus-4-7</span>
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="w">  </span><span class="nt">repos</span><span class="p">:</span>
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="w">    </span><span class="nt">workspace</span><span class="p">:</span>
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="w">      </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://github.com/example/repo</span>
+<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="w">  </span><span class="nt">secrets</span><span class="p">:</span>
+<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="w">    </span><span class="nt">anthropic-token</span><span class="p">:</span>
+<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a><span class="w">      </span><span class="nt">secretRef</span><span class="p">:</span>
+<a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">anthropic-token</span>
+<a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a><span class="w">        </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuke-system</span>
 </code></pre></div>
 <p>A realm-scoped Config named <code>prod</code> that instantiates the <code>claude-code</code> blueprint (also realm-scoped), overrides the <code>MODEL</code> scalar parameter, fills the <code>workspace</code> repo slot, and fills the <code>anthropic-token</code> secret slot from the existing <code>kind: Secret</code> of the same name. Stamp a cell with <code>sudo kuke run --from-config prod --realm kuke-system</code>; each invocation stamps a fresh <code>&lt;prefix&gt;-&lt;6hex&gt;</code> cell (pin one with <code>--name</code>).</p>
 
@@ -4448,7 +4598,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 20, 2026 07:05:23 UTC">November 20, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 20, 2026 13:37:15 UTC">November 20, 2026</span>
   </span>
 
     

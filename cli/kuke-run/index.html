@@ -1182,6 +1182,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/connectors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -3600,6 +3628,11 @@
 <td><code>KEY=VALUE</code> env entry; repeatable. <strong>Dual semantics by source path:</strong> on the <code>&lt;cell&gt;</code> positional and <code>-f</code> paths it is transport-only runtime injection (<code>Spec.RuntimeEnv</code>, #834) into the attachable container's OCI process env at start time; on the <code>--from-config</code>/<code>--clone</code> paths it is the <strong>persisted per-cell override</strong> baked into the materialised <code>CellDoc</code> (<code>Spec.Provenance.EnvOverrides</code>, #1023). Rejected with <code>--from-blueprint</code> (use <code>--param</code> for render-time overrides)</td>
 </tr>
 <tr>
+<td><code>--connector</code></td>
+<td>(empty, repeatable)</td>
+<td>Per-cell identity override <code>CONNECTOR=SECRET[@realm[/space[/stack]]]</code>: use another stored identity for one <a href="../../concepts/connectors/#per-cell-overrides">connector</a> of this cell. Valid with <code>--from-config</code> only; recorded in <code>Spec.Provenance.connectorOverrides</code>, so it survives <code>kuke restart</code> and a recreate</td>
+</tr>
+<tr>
 <td><code>--detach</code>, <code>-d</code></td>
 <td><code>false</code></td>
 <td>Return immediately after start without attaching</td>
@@ -3660,7 +3693,7 @@
 <p>The <code>--from-blueprint</code>/<code>--from-config</code>/<code>--clone</code> flags run daemon-stored templates (or fork an existing cell's recipe) instead of an on-disk file. They share their definitions with <a href="../kuke-create/#kuke-create-cell"><code>kuke create cell</code></a> (<code>cell.RegisterSourceFlags</code>) so the un-fused <code>kuke create cell --from-...</code> + <code>kuke start &lt;name&gt;</code> and the fused <code>kuke run --from-...</code> produce identical CellDocs.</p>
 <ul>
 <li><strong><code>--from-blueprint &lt;bp&gt;</code></strong> — a CellBlueprint is a template with declared <code>spec.parameters[]</code>. Scalar <code>--param KEY=VALUE</code> (or <code>--param-file</code>) overrides the Blueprint's defaults. <code>--env</code> is rejected here (Blueprints take render-time <code>--param</code>, not runtime env overrides — <code>cell.ValidateOverrideSymmetry</code> enforces the rejection).</li>
-<li><strong><code>--from-config &lt;cfg&gt;</code></strong> — a CellConfig binds a CellBlueprint reference to concrete scalar values plus structural slot fills (repo bindings, secret references). <code>--param-file</code> is rejected and <code>--param</code> is limited to the picked mode's parameters (the Config owns its values — edit it instead); <code>--mode</code> picks the harness mode, and a cell that supplies a parameter only one mode declares is created in that mode. <code>--env KEY=VALUE</code> is the <strong>persisted per-cell override</strong> baked into the materialised CellDoc (<code>Spec.Provenance.EnvOverrides</code>, #1023) — symmetric with <code>kuke create cell --from-config --env</code>. The override survives re-resolution from provenance (P5) and <code>kuke restart</code>'s daemon-side reconcile (P7).</li>
+<li><strong><code>--from-config &lt;cfg&gt;</code></strong> — a CellConfig binds a CellBlueprint reference to concrete scalar values plus structural slot fills (repo bindings, secret references). <code>--param-file</code> is rejected and <code>--param</code> is limited to the picked mode's parameters (the Config owns its values — edit it instead); <code>--mode</code> picks the harness mode, and a cell that supplies a parameter only one mode declares is created in that mode. <code>--env KEY=VALUE</code> is the <strong>persisted per-cell override</strong> baked into the materialised CellDoc (<code>Spec.Provenance.EnvOverrides</code>, #1023) — symmetric with <code>kuke create cell --from-config --env</code>. The override survives re-resolution from provenance (P5) and <code>kuke restart</code>'s daemon-side reconcile (P7). <code>--connector &lt;connector&gt;=&lt;secret&gt;</code> picks another stored identity for one connector of this cell, recorded the same way; a Config whose required connector resolves to no identity fails with an error naming the connector.</li>
 <li><strong><code>--clone &lt;cell&gt;</code></strong> — forks an existing cell's <code>CellDoc</code> into a fresh cell. The clone copies the source's container spec, scope, and provenance binding (the new cell stays tied to its original Blueprint/Config for re-resolution); it does <strong>not</strong> copy the source's runtime overlay. Use when you want a sibling of an existing dev cell that drifts independently from this point on.</li>
 </ul>
 <p>The fused form is always create + start + attach: a <code>--name X</code> collision against a live cell exits non-zero with a <code>kuke run X</code> pointer for the start+attach-existing path. Without <code>--name</code>, the generated <code>&lt;prefix&gt;-&lt;6hex&gt;</code> is probed free against the daemon at the cell's scope, so the generated path can't collide.</p>
@@ -3737,7 +3770,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 16, 2026 11:01:05 UTC">November 16, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 20, 2026 13:37:15 UTC">November 20, 2026</span>
   </span>
 
     
