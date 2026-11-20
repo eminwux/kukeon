@@ -184,11 +184,29 @@ type gitIdentityExpander struct {
 	// desc is the git connector descriptor the blueprint carries; nil when it
 	// has no git connector component.
 	desc *v1beta1.BlueprintConnector
-	// refs records the identity each level named, by origin.
+	// refs records the identity each level's default git block named and that
+	// was read, by origin.
 	refs map[string]v1beta1.ContainerSecretRef
-	// err is the first reference that could not be expanded. A render fails on
-	// it; a status reports it.
+	// named records the levels whose default git block named an identity,
+	// whether or not it could be read.
+	named map[string]bool
+	// errs is the expansion error of each level's default git block, by origin;
+	// repoErrs that of each repo fill, by origin and then repo name. A level a
+	// deeper one overrides does not reach the cell, so only the winning level's
+	// error counts — see settle.
+	errs     map[string]error
+	repoErrs map[string]map[string]error
+	// err is the expansion error that reaches the cell, set by settle once the
+	// levels are merged. A render fails on it; a status reports it.
 	err error
+}
+
+// gitLevels are the levels a git identity can be named at, deepest first.
+func gitLevels() []string {
+	return []string{
+		v1beta1.RenderOriginCell, v1beta1.RenderOriginConfig,
+		v1beta1.RenderOriginStack, v1beta1.RenderOriginSpace, v1beta1.RenderOriginRealm,
+	}
 }
 
 // gitIdentity is a git identity Secret, read.
@@ -277,10 +295,44 @@ func (e *gitIdentityExpander) load(ref v1beta1.ContainerSecretRef) (gitIdentity,
 	return id, nil
 }
 
-// fail records the first expansion error.
-func (e *gitIdentityExpander) fail(origin string, err error) {
-	if e.err == nil {
-		e.err = fmt.Errorf("%s: %w", origin, err)
+// settle picks, once the levels are merged, the expansion error that reaches
+// the cell: that of the deepest level whose default git block names an
+// identity, and that of each repo fill that wins its repo (values carries the
+// level each repo fill came from). An identity a deeper level overrides is
+// shadowed: it fails neither the render nor the status, as a shadowed secret
+// fill does not. Without a git connector the Config does not ask for a git
+// identity, so a Realm, Space or Stack default that cannot be read does not fail
+// it — otherwise one broken default would take down every cell in its scope;
+// an identity the Config itself names still does.
+func (e *gitIdentityExpander) settle(values []v1beta1.RenderedValue) {
+	e.err = nil
+	for _, origin := range gitLevels() {
+		if !e.named[origin] {
+			continue
+		}
+		own := origin == v1beta1.RenderOriginCell || origin == v1beta1.RenderOriginConfig
+		if err := e.errs[origin]; err != nil && (e.desc != nil || own) {
+			e.err = err
+			return
+		}
+		break
+	}
+	repoOrigins := map[string]string{}
+	for _, v := range values {
+		if v.Kind == v1beta1.RenderKindRepo {
+			repoOrigins[v.Key] = v.Origin
+		}
+	}
+	names := make([]string, 0, len(repoOrigins))
+	for name := range repoOrigins {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if err := e.repoErrs[repoOrigins[name]][name]; err != nil {
+			e.err = err
+			return
+		}
 	}
 }
 
@@ -292,9 +344,16 @@ func (e *gitIdentityExpander) container(origin string, git *v1beta1.ContainerGit
 	}
 	explicit := *git
 	explicit.IdentityRef = nil
+	if e.named == nil {
+		e.named = map[string]bool{}
+	}
+	e.named[origin] = true
 	id, err := e.load(*git.IdentityRef)
 	if err != nil {
-		e.fail(origin, err)
+		if e.errs == nil {
+			e.errs = map[string]error{}
+		}
+		e.errs[origin] = fmt.Errorf("%s: %w", origin, err)
 		return &explicit
 	}
 	if e.refs == nil {
@@ -323,7 +382,7 @@ func (e *gitIdentityExpander) container(origin string, git *v1beta1.ContainerGit
 // that source's author, committer, credential and — for an SSH key — signing
 // key. The identity's hosts are not consulted: naming it on a repo says it is
 // the one that repo uses.
-func (e *gitIdentityExpander) repo(origin string, git *v1beta1.RepoGit) *v1beta1.RepoGit {
+func (e *gitIdentityExpander) repo(origin, name string, git *v1beta1.RepoGit) *v1beta1.RepoGit {
 	if git == nil || git.IdentityRef == nil {
 		return git
 	}
@@ -331,7 +390,13 @@ func (e *gitIdentityExpander) repo(origin string, git *v1beta1.RepoGit) *v1beta1
 	out.IdentityRef = nil
 	id, err := e.load(*git.IdentityRef)
 	if err != nil {
-		e.fail(origin, err)
+		if e.repoErrs == nil {
+			e.repoErrs = map[string]map[string]error{}
+		}
+		if e.repoErrs[origin] == nil {
+			e.repoErrs[origin] = map[string]error{}
+		}
+		e.repoErrs[origin][name] = fmt.Errorf("%s repo %s: %w", origin, name, err)
 		return &out
 	}
 	if out.Author == nil {
@@ -372,7 +437,7 @@ func (e *gitIdentityExpander) repos(
 	}
 	out := make(map[string]v1beta1.CellConfigRepoFill, len(fills))
 	for name, fill := range fills {
-		fill.Git = e.repo(origin+" repo "+name, fill.Git)
+		fill.Git = e.repo(origin, name, fill.Git)
 		out[name] = fill
 	}
 	return out
@@ -390,15 +455,16 @@ func (e *gitIdentityExpander) defaults(origin string, d *v1beta1.ScopeDefaults) 
 }
 
 // identity returns the git identity that wins the merge — the one the deepest
-// level named — and that level.
+// level named — and that level; nil when that identity could not be read.
 func (e *gitIdentityExpander) identity() (*v1beta1.ContainerSecretRef, string) {
-	for _, origin := range []string{
-		v1beta1.RenderOriginCell, v1beta1.RenderOriginConfig,
-		v1beta1.RenderOriginStack, v1beta1.RenderOriginSpace, v1beta1.RenderOriginRealm,
-	} {
+	for _, origin := range gitLevels() {
+		if !e.named[origin] {
+			continue
+		}
 		if ref, ok := e.refs[origin]; ok {
 			return &ref, origin
 		}
+		return nil, ""
 	}
 	return nil, ""
 }

@@ -28,6 +28,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/connector"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/compose"
@@ -320,11 +321,11 @@ func gitDefaultsDocument(ctx context.Context, client Client, result *compose.Res
 // default is written once: a slot the Realm, the Space or the Stack already
 // fills is left exactly as it is, so re-running `kuke team` never undoes a
 // default the operator changed — and changing it reaches every Config that
-// did not choose an identity, with no re-render. The second return names the
-// slots that were already filled.
+// did not choose an identity, with no re-render. The second return maps each
+// slot that was already filled to the identity it inherits.
 func secretDefaultsDocument(
 	ctx context.Context, client Client, result *compose.Result,
-) ([]byte, map[string]bool, error) {
+) ([]byte, map[string]config.SecretRef, error) {
 	if len(result.DefaultSecrets) == 0 {
 		return nil, nil, nil
 	}
@@ -354,7 +355,7 @@ func secretDefaultsDocument(
 	}
 	added := false
 	for _, slot := range result.DefaultSecrets {
-		if inherited[slot.Slot] {
+		if _, filled := inherited[slot.Slot]; filled {
 			continue
 		}
 		ref := slot.Reference
@@ -380,20 +381,32 @@ func secretDefaultsDocument(
 	return raw, inherited, nil
 }
 
-// filledDefaultSlots names the secret slots the team's Realm, Space or Stack
-// already gives a default identity.
+// filledDefaultSlots maps each secret slot the team's Realm, Space or Stack
+// already gives a default identity to the identity a Config that fills none
+// inherits: the deepest level's, with an unset realm read as the team's.
 func filledDefaultSlots(
 	ctx context.Context, client Client, scope compose.Scope, realm api.RealmDoc,
-) (map[string]bool, error) {
-	filled := map[string]bool{}
+) (map[string]config.SecretRef, error) {
+	filled := map[string]config.SecretRef{}
 	mark := func(defaults *api.ScopeDefaults) {
 		if defaults == nil {
 			return
 		}
 		for slot, fill := range defaults.Secrets {
-			if fill.SecretRef != nil {
-				filled[slot] = true
+			if fill.SecretRef == nil {
+				continue
 			}
+			ref := config.SecretRef{
+				Name:  strings.TrimSpace(fill.SecretRef.Name),
+				Realm: strings.TrimSpace(fill.SecretRef.Realm),
+				Space: strings.TrimSpace(fill.SecretRef.Space),
+				Stack: strings.TrimSpace(fill.SecretRef.Stack),
+				Cell:  strings.TrimSpace(fill.SecretRef.Cell),
+			}
+			if ref.Realm == "" {
+				ref.Realm = scope.Realm
+			}
+			filled[slot] = ref
 		}
 	}
 	mark(realm.Spec.Defaults)
@@ -453,6 +466,15 @@ func missingGitSecrets(
 	ctx context.Context, client Client, result *compose.Result, imported []api.SecretDoc,
 ) ([]string, error) {
 	var refs []*api.ContainerSecretRef
+	// identities are the refs named as git.identityRef: a tagged git identity,
+	// not a bare credential, so their remediation creates one.
+	identities := map[api.ContainerSecretRef]bool{}
+	identity := func(ref *api.ContainerSecretRef) {
+		if ref != nil {
+			identities[*ref] = true
+			refs = append(refs, ref)
+		}
+	}
 	collect := func(signing *api.GitSigning) {
 		if signing != nil {
 			refs = append(refs, signing.SecretRef, signing.AllowedSignersRef)
@@ -467,13 +489,13 @@ func missingGitSecrets(
 	for _, pair := range result.Pairs {
 		// The team's git identity (`connectors.git.identity`) is one Secret.
 		if git := pair.Config.Spec.Git; git != nil {
-			refs = append(refs, git.IdentityRef)
+			identity(git.IdentityRef)
 		}
 		for _, fill := range pair.Config.Spec.Repos {
 			if fill.Git == nil {
 				continue
 			}
-			refs = append(refs, fill.Git.IdentityRef)
+			identity(fill.Git.IdentityRef)
 			if fill.Git.Credential != nil {
 				refs = append(refs, fill.Git.Credential.SecretRef)
 			}
@@ -497,16 +519,40 @@ func missingGitSecrets(
 		if err != nil {
 			return nil, requestError("lookup", "secret "+ref.Name, err)
 		}
-		if !got.MetadataExists {
-			missing = append(missing, fmt.Sprintf(
-				"%s  →  kuke create secret %s --realm %s --type ssh-key --from-file /path/to/private-key  (git credential; or --type basic-auth)",
-				ref.Name,
-				ref.Name,
-				ref.Realm,
-			))
+		if got.MetadataExists {
+			continue
 		}
+		if identities[*ref] {
+			missing = append(missing, missingGitIdentity(*ref))
+			continue
+		}
+		missing = append(missing, fmt.Sprintf(
+			"%s  →  kuke create secret %s --realm %s --type ssh-key --from-file /path/to/private-key  (git credential; or --type basic-auth)",
+			ref.Name,
+			ref.Name,
+			ref.Realm,
+		))
 	}
 	return missing, nil
+}
+
+// missingGitIdentity is the remediation line for a missing git.identityRef
+// Secret. The render accepts only a Secret tagged for the git connector, with
+// the hosts it serves, so the command creates one that way — the form
+// docs/site/concepts/connectors.md shows.
+func missingGitIdentity(ref api.ContainerSecretRef) string {
+	createCommand := "kuke create secret " + ref.Name + " --realm " + ref.Realm
+	if ref.Space != "" {
+		createCommand += " --space " + ref.Space
+	}
+	if ref.Stack != "" {
+		createCommand += " --stack " + ref.Stack
+	}
+	return fmt.Sprintf(
+		"%s  →  %s --connector %s --type ssh-key --from-file /path/to/private-key "+
+			"--hosts github.com --author 'Name <email>'  (git identity; or --type basic-auth)",
+		ref.Name, createCommand, connector.GitIdentityTag,
+	)
 }
 
 func checkResults(result kukeonv1.ApplyDocumentsResult, expected int, command string) error {
@@ -544,23 +590,27 @@ func checkResults(result kukeonv1.ApplyDocumentsResult, expected int, command st
 	return nil
 }
 
-// inherited names the slots a scope default set before this application
-// already fills: their Secret is whatever the operator pointed the default at,
-// not the one this team would have generated, so the generated one is neither
-// created nor reported missing.
+// inherited maps the slots a scope default set before this application
+// already fills to the identity it names. When that is another Secret than the
+// one this team would generate — the operator pointed the default elsewhere —
+// the generated one is neither created nor reported missing. When it is the
+// same — the default an earlier run of this team wrote — the Secret is still
+// the team's, so it is created from its source or reported missing as on the
+// first run.
 func prepareSecrets(
 	ctx context.Context,
 	client Client,
 	result *compose.Result,
 	command string,
-	inherited map[string]bool,
+	inherited map[string]config.SecretRef,
 ) ([]api.SecretDoc, []string, error) {
 	// Deduplicate by complete runtime identity, not role/harness identifier.
 	requirements := map[config.SecretRef]*config.SecretSource{}
 	var order []config.SecretRef
 	for _, pair := range result.Pairs {
 		for _, required := range pair.Secrets {
-			if required.Default && inherited[required.Destination.Name] {
+			if ref, filled := inherited[required.Destination.Name]; required.Default && filled &&
+				ref != required.Reference {
 				continue
 			}
 			previous, exists := requirements[required.Reference]

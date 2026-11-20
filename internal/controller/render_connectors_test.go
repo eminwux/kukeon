@@ -657,3 +657,101 @@ func TestPreviewCellFromConfig_GitIdentityRefRejected(t *testing.T) {
 		})
 	}
 }
+
+// TestPreviewCellFromConfig_ShadowedGitIdentity: a git identity that cannot be
+// read fails the render only when it is the one that reaches the cell. One a
+// deeper level overrides — the Config's own, a cell override, a repo fill the
+// Config states — is shadowed, and a Config with no git connector is not failed
+// by a broken Realm default it never asked for.
+func TestPreviewCellFromConfig_ShadowedGitIdentity(t *testing.T) {
+	broken := &intmodel.ContainerSecretRef{Name: "missing-git", Realm: "kuke-system"}
+	newFixture := func() *connectorFixture {
+		return &connectorFixture{
+			scope: renderScope{realmDefaults: &intmodel.ScopeDefaults{
+				Git: &intmodel.ContainerGit{IdentityRef: broken},
+				Repos: map[string]intmodel.RepoFill{"project": {
+					URL: "https://github.com/eminwux/kukeon.git",
+					Git: &intmodel.RepoGit{IdentityRef: broken},
+				}},
+			}},
+			secrets: map[string]intmodel.SecretSpec{
+				"kuke-system/my-git": gitIdentitySecret(map[string]string{
+					"author": "Me <me@example.com>", "hosts": "github.com",
+				}),
+			},
+		}
+	}
+	// The Config states its own repo fill, so the Realm's broken repo identity
+	// is shadowed in every case below.
+	withRepo := func(cfg ext.CellConfigDoc) ext.CellConfigDoc {
+		cfg.Spec.Repos = map[string]ext.CellConfigRepoFill{"project": {URL: "https://github.com/eminwux/kukeon.git"}}
+		return cfg
+	}
+
+	t.Run("the realm default is the winning identity", func(t *testing.T) {
+		cfg := withRepo(connectorConfig("git"))
+		_, err := setupTestController(t, newConnectorRunner(t, newFixture(), cfg)).
+			PreviewCellFromConfig(previewRequest())
+		if !errors.Is(err, errdefs.ErrConnectorIdentity) || !strings.Contains(err.Error(), "missing-git") {
+			t.Fatalf("error = %v, want ErrConnectorIdentity naming missing-git", err)
+		}
+	})
+
+	t.Run("the config names its own identity", func(t *testing.T) {
+		cfg := withRepo(connectorConfig("git"))
+		cfg.Spec.Git = &ext.ContainerGit{IdentityRef: contractSecretRef("my-git")}
+		preview, err := setupTestController(t, newConnectorRunner(t, newFixture(), cfg)).
+			PreviewCellFromConfig(previewRequest())
+		if err != nil {
+			t.Fatalf("PreviewCellFromConfig: %v", err)
+		}
+		if status := connectorStatus(t, preview.Connectors, "git"); status.State != ext.ConnectorResolved ||
+			status.Origin != ext.RenderOriginConfig || status.Identity == nil || status.Identity.Name != "my-git" {
+			t.Errorf("git status = %+v, want my-git resolved at the config level", status)
+		}
+	})
+
+	t.Run("a cell override names another identity", func(t *testing.T) {
+		cfg := withRepo(connectorConfig("git"))
+		cfg.Spec.Git = &ext.ContainerGit{IdentityRef: contractSecretRef("also-missing")}
+		req := previewRequest()
+		req.ConnectorOverrides = map[string]ext.ContainerSecretRef{"git": {Name: "my-git"}}
+		preview, err := setupTestController(t, newConnectorRunner(t, newFixture(), cfg)).PreviewCellFromConfig(req)
+		if err != nil {
+			t.Fatalf("PreviewCellFromConfig: %v", err)
+		}
+		if git := preview.Cell.Spec.Containers[0].Git; git == nil || git.Author.Email != "me@example.com" {
+			t.Errorf("git = %+v, want the overriding identity", git)
+		}
+		if status := connectorStatus(t, preview.Connectors, "git"); status.Origin != ext.RenderOriginCell ||
+			status.Identity == nil || status.Identity.Name != "my-git" {
+			t.Errorf("git status = %+v, want my-git from the cell", status)
+		}
+	})
+
+	t.Run("a config with no git connector", func(t *testing.T) {
+		cfg := withRepo(connectorConfig())
+		if _, err := setupTestController(t, newConnectorRunner(t, newFixture(), cfg)).
+			PreviewCellFromConfig(previewRequest()); err != nil {
+			t.Fatalf("PreviewCellFromConfig: %v, want the broken realm default ignored", err)
+		}
+		// An identity the Config names itself still fails it.
+		cfg.Spec.Git = &ext.ContainerGit{IdentityRef: contractSecretRef("also-missing")}
+		_, err := setupTestController(t, newConnectorRunner(t, newFixture(), cfg)).
+			PreviewCellFromConfig(previewRequest())
+		if !errors.Is(err, errdefs.ErrConnectorIdentity) || !strings.Contains(err.Error(), "also-missing") {
+			t.Fatalf("error = %v, want ErrConnectorIdentity naming also-missing", err)
+		}
+	})
+
+	t.Run("the realm repo fill wins its repo", func(t *testing.T) {
+		cfg := connectorConfig("git")
+		cfg.Spec.Repos = nil
+		cfg.Spec.Git = &ext.ContainerGit{IdentityRef: contractSecretRef("my-git")}
+		_, err := setupTestController(t, newConnectorRunner(t, newFixture(), cfg)).
+			PreviewCellFromConfig(previewRequest())
+		if !errors.Is(err, errdefs.ErrConnectorIdentity) || !strings.Contains(err.Error(), "repo project") {
+			t.Fatalf("error = %v, want ErrConnectorIdentity naming repo project", err)
+		}
+	})
+}

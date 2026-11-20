@@ -174,6 +174,8 @@ The cell template body. It mirrors a [`Cell`](cell.md) manifest's user-authorabl
 
 Each container carries the user-authorable subset of [ContainerSpec](container.md) — `id`, `image`, `command`, `args`, `env`, `volumes`, `networks`, `ports`, `resources`, `git`, `tty`, the host-namespace toggles, capability sets, and `restartPolicy`. Daemon-stamped identity fields (`containerdId`, `realmId`, `spaceId`, `stackId`, `cellId`) are intentionally absent: materialization fills them from the blueprint's metadata and the generated cell name.
 
+A blueprint's `git` blocks — on a container or on one of its `repos[]` — may not carry `identityRef`: a git identity is chosen per team, Config or cell and named in the `CellConfig`, the cell's `--connector`, or a Realm, Space or Stack default (see [Connectors](../concepts/connectors.md)). `kuke apply` refuses a blueprint that sets one.
+
 In addition to the regular container fields, a blueprint container declares two slot channels:
 
 #### `spec.cell.containers[].repos[]` (list, optional)

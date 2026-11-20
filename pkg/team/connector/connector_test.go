@@ -54,6 +54,8 @@ func TestEmbeddedCatalog(t *testing.T) {
 		t.Fatalf("catalog names = %v", catalog.Names())
 	}
 	deliveries := map[string]int{}
+	// A component name identifies one connector method in a blueprint.
+	components := map[string]string{}
 	for i := range catalog.Connectors {
 		conn := &catalog.Connectors[i]
 		name := conn.Metadata.Name
@@ -80,10 +82,11 @@ func TestEmbeddedCatalog(t *testing.T) {
 			}
 		}
 		for _, m := range conn.Spec.Methods {
-			found, foundMethod, isComponent := catalog.ByComponent(conn.ComponentName(m))
-			if !isComponent || found != conn || foundMethod.Name != m.Name {
-				t.Fatalf("%s: ByComponent(%q) = %v %v", name, conn.ComponentName(m), found, foundMethod)
+			component := conn.ComponentName(m)
+			if other, dup := components[component]; dup {
+				t.Fatalf("%s/%s: component name %q is also %s", name, m.Name, component, other)
 			}
+			components[component] = name + "/" + m.Name
 			desc := conn.Descriptor(m)
 			if desc.Name != name || desc.Method != m.Name || desc.Delivery != m.Delivery {
 				t.Fatalf("%s/%s: descriptor = %+v", name, m.Name, desc)
@@ -95,9 +98,6 @@ func TestEmbeddedCatalog(t *testing.T) {
 	}
 	if _, ok := catalog.ForHarness("no-such-harness"); ok {
 		t.Fatal("ForHarness matched an unknown harness")
-	}
-	if _, _, ok := catalog.ByComponent("no-such-component"); ok {
-		t.Fatal("ByComponent matched an unknown component")
 	}
 }
 

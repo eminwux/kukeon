@@ -381,25 +381,6 @@ func (c *Catalog) ForHarness(harness string) (*Connector, bool) {
 	return nil, false
 }
 
-// ByComponent returns the connector and method a blueprint component delivers.
-func (c *Catalog) ByComponent(name string) (*Connector, Method, bool) {
-	if c == nil {
-		return nil, Method{}, false
-	}
-	for i := range c.Connectors {
-		conn := &c.Connectors[i]
-		if len(conn.Spec.Methods) == 0 && conn.Spec.Delivery == api.ConnectorDeliveryGit && conn.Metadata.Name == name {
-			return conn, Method{}, true
-		}
-		for _, method := range conn.Spec.Methods {
-			if conn.ComponentName(method) == name {
-				return conn, method, true
-			}
-		}
-	}
-	return nil, Method{}, false
-}
-
 // Components renders the catalog as blueprint component definitions: one per
 // method, plus one for a git-delivered connector (it has no secret slot — it
 // only states that the cell needs a git identity). A registry connector is a

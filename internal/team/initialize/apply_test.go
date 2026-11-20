@@ -620,12 +620,17 @@ func TestDefaultIdentityIsWrittenOnce(t *testing.T) {
 		t.Fatalf("missing = %q", missing)
 	}
 
-	// Applied: the next run finds the default and leaves the Realm alone.
-	if _, err = Apply(t.Context(), f, result); err != nil {
+	// Applied: the next run finds the default and leaves the Realm alone. The
+	// default is the one this team wrote, so its Secret is still the team's:
+	// still missing, it is still reported.
+	if missing, err = Apply(t.Context(), f, result); err != nil {
 		t.Fatal(err)
 	}
 	if _, written = realmDocument(t, f.raw); written {
 		t.Fatalf("the Realm default was written a second time:\n%s", f.raw)
+	}
+	if len(missing) != 1 || !strings.Contains(missing[0], "kuke create secret "+slot+" --realm default") {
+		t.Fatalf("second run: missing = %q, want the team's own default Secret reported", missing)
 	}
 
 	// The operator points the default at another identity. Re-running keeps
@@ -657,5 +662,50 @@ func TestDefaultIdentityIsWrittenOnce(t *testing.T) {
 	}
 	if _, written = realmDocument(t, g.raw); written || len(missing) != 0 || g.realmDefaults != nil {
 		t.Fatalf("a Stack default did not stop the Realm default: written=%v missing=%q", written, missing)
+	}
+}
+
+// TestMissingGitIdentityHint: a missing git.identityRef Secret — on a Config or
+// on one of its repo fills — is reported with the `--connector git` command
+// that creates a tagged identity the render accepts; a missing credential named
+// directly keeps the plain ssh-key form.
+func TestMissingGitIdentityHint(t *testing.T) {
+	identity := &api.ContainerSecretRef{Name: "bot-key", Realm: "default", Stack: "team"}
+	repoIdentity := &api.ContainerSecretRef{Name: "repo-key", Realm: "default"}
+	result := &compose.Result{
+		Git: &api.ContainerGit{Credentials: []api.GitCredential{
+			{Host: "github.com", SecretRef: &api.ContainerSecretRef{Name: "plain-key", Realm: "default"}},
+		}},
+		Pairs: []compose.Pair{{Config: &api.CellConfigDoc{Spec: api.CellConfigSpec{
+			Git: &api.ContainerGit{IdentityRef: identity},
+			Repos: map[string]api.CellConfigRepoFill{
+				"project": {Git: &api.RepoGit{IdentityRef: repoIdentity}},
+			},
+		}}}},
+	}
+	missing, err := missingGitSecrets(t.Context(), newFake(), result, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := map[string]string{}
+	for _, line := range missing {
+		name, _, _ := strings.Cut(line, "  →  ")
+		lines[name] = line
+	}
+	for name, want := range map[string]string{
+		"bot-key":  "kuke create secret bot-key --realm default --stack team --connector git --type ssh-key",
+		"repo-key": "kuke create secret repo-key --realm default --connector git --type ssh-key",
+	} {
+		if !strings.Contains(lines[name], want) || !strings.Contains(lines[name], "--hosts ") {
+			t.Errorf("%s hint = %q, want it to contain %q and --hosts", name, lines[name], want)
+		}
+	}
+	plain := lines["plain-key"]
+	if !strings.Contains(plain, "kuke create secret plain-key --realm default --type ssh-key") ||
+		strings.Contains(plain, "--connector") {
+		t.Errorf("plain-key hint = %q, want the untagged credential form", plain)
+	}
+	if len(missing) != 3 {
+		t.Errorf("missing = %q, want three lines", missing)
 	}
 }

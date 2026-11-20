@@ -340,6 +340,7 @@ func resolveConfig(r runner.Runner, cfg intmodel.CellConfig, binding cellBinding
 	}, cellLayer)
 	merged, values = applyParamOverrides(merged, values, binding.Params)
 	values = append(values, contract...)
+	git.settle(values)
 
 	return configResolution{
 		cfgDoc:     cfgDoc,

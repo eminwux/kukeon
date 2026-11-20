@@ -327,9 +327,15 @@ Missing runtime secrets and notes follow when there are any:
 ```
 Missing secrets (cells will not start until they exist):
   git-ssh  →  kuke create secret git-ssh --realm default --type ssh-key --from-file /path/to/private-key  (git credential; or --type basic-auth)
+  bot-key  →  kuke create secret bot-key --realm default --connector git --type ssh-key --from-file /path/to/private-key --hosts github.com --author 'Name <email>'  (git identity; or --type basic-auth)
 Notes:
   source agents is cloned over SSH but no stored git credential covers github.com; add one to spec.git.credentials (kuke team init --force --import-git-identity imports your key)
 ```
+
+A Secret named as a git identity (`spec.connectors.git.identity`) is listed
+with the `--connector git` form, since a cell renders only with a Secret tagged
+for the git connector; replace the example host and author with your own. A
+credential named directly keeps the plain `--type ssh-key` form.
 
 The resource count is the shared blueprints plus the CellConfigs, plus one when
 the stack's git defaults were written. With `--force`, the first line reads

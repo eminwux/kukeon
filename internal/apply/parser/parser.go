@@ -587,6 +587,12 @@ func validateBlueprint(doc *Document) *ValidationError {
 		return &ValidationError{Index: doc.Index, Kind: doc.Kind, Name: bp.Metadata.Name, Err: declErr}
 	}
 	for _, c := range bp.Spec.Cell.Containers {
+		if c.Git != nil && c.Git.IdentityRef != nil {
+			return &ValidationError{
+				Index: doc.Index, Kind: doc.Kind, Name: bp.Metadata.Name,
+				Err: fmt.Errorf("container %q: %w", c.ID, errBlueprintIdentityRef),
+			}
+		}
 		if gitErr := apischeme.ValidateGitLayer(c.Git); gitErr != nil {
 			return &ValidationError{
 				Index: doc.Index, Kind: doc.Kind, Name: bp.Metadata.Name,
@@ -594,6 +600,12 @@ func validateBlueprint(doc *Document) *ValidationError {
 			}
 		}
 		for _, r := range c.Repos {
+			if r.Git != nil && r.Git.IdentityRef != nil {
+				return &ValidationError{
+					Index: doc.Index, Kind: doc.Kind, Name: bp.Metadata.Name,
+					Err: fmt.Errorf("container %q repo %q: %w", c.ID, r.Name, errBlueprintIdentityRef),
+				}
+			}
 			if gitErr := apischeme.ValidateRepoGit(r.Git); gitErr != nil {
 				return &ValidationError{
 					Index: doc.Index, Kind: doc.Kind, Name: bp.Metadata.Name,
@@ -604,6 +616,15 @@ func validateBlueprint(doc *Document) *ValidationError {
 	}
 	return nil
 }
+
+// errBlueprintIdentityRef rejects a git.identityRef on a blueprint container or
+// repo. An identity is chosen per team, Config or cell (#1548) and expanded
+// only from the Config, the cell and the Realm/Space/Stack defaults: one on a
+// blueprint would be dropped by the merge, so it is refused where it is
+// written.
+var errBlueprintIdentityRef = fmt.Errorf(
+	"%w: git.identityRef is not allowed on a blueprint; name the identity in the CellConfig's git block "+
+		"or repo fill, or as a Realm, Space or Stack default", errdefs.ErrBlueprintInvalid)
 
 // validateBlueprintScope enforces the Blueprint scope-coordinate contract:
 // metadata.realm is always required, a deeper coordinate may only be set when
