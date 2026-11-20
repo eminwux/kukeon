@@ -107,6 +107,16 @@ func TestNextUTC(t *testing.T) {
 		// comes before Monday the 23rd).
 		{"day fields combine with or", "0 0 20 * mon", "2026-11-17T08:22:19Z", "2026-11-20T00:00:00Z"},
 		{"day fields combine with or (weekday)", "0 0 28 * mon", "2026-11-17T08:22:19Z", "2026-11-23T00:00:00Z"},
+		// A day field that starts with `*` is unrestricted even when stepped, so
+		// the day fields combine with and: the first Monday on an odd day is
+		// the 23rd, not Thursday the 19th.
+		{"stepped star day of month combines with and", "0 0 */2 * mon", "2026-11-17T08:22:19Z", "2026-11-23T00:00:00Z"},
+		// Day of week */2 is Sun, Tue, Thu, Sat; the first 13th on one of them is
+		// Sunday 13 December, not Thursday the 19th.
+		{"stepped star day of week combines with and", "0 0 13 * */2", "2026-11-17T08:22:19Z", "2026-12-13T00:00:00Z"},
+		// Only the field's first character counts, as in Vixie cron.
+		{"list starting with star combines with and", "0 0 *,20 * mon", "2026-11-17T08:22:19Z", "2026-11-23T00:00:00Z"},
+		{"list not starting with star combines with or", "0 0 20,* * mon", "2026-11-17T08:22:19Z", "2026-11-18T00:00:00Z"},
 		{"leap day", "0 0 29 2 *", "2026-11-17T08:22:19Z", "2028-02-29T00:00:00Z"},
 		{"short months are skipped", "0 0 31 * *", "2026-11-17T08:22:19Z", "2026-12-31T00:00:00Z"},
 	} {
