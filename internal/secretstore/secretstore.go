@@ -28,12 +28,122 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
 )
+
+// MetaDir is the per-scope sidecar directory (under the secrets directory)
+// holding one JSON file per secret that carries readable identity facts: the
+// connector it is an identity of and that connector's identity fields (issue
+// #1548). Like TypesDir it is a directory, so the secret listing never
+// reports it, and it never holds key material.
+const MetaDir = ".meta"
+
+// Meta is the readable part of a secret beyond its type.
+type Meta struct {
+	Connector string            `json:"connector,omitempty"`
+	Identity  map[string]string `json:"identity,omitempty"`
+}
+
+// IsZero reports whether the secret carries no readable identity facts.
+func (m Meta) IsZero() bool { return m.Connector == "" && len(m.Identity) == 0 }
+
+// maxIdentityValue bounds one identity field value: the fields are short
+// readable facts (a name, a host list), never a key.
+const maxIdentityValue = 1024
+
+var (
+	connectorNameRE = regexp.MustCompile(`^[a-z0-9]+(?:[._-][a-z0-9]+)*$`)
+	identityFieldRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
+)
+
+// ValidateMeta checks the readable identity facts of a secret: the connector
+// tag is a lowercase identifier, identity fields need a connector, and every
+// field is a short single-line value. It does not know any connector's field
+// schema — the daemon keeps no catalog — so the names and types of the fields
+// are checked where a schema is at hand (kuke and the web UI at create, the
+// daemon when it resolves the secret for a cell).
+func ValidateMeta(spec intmodel.SecretSpec) error {
+	connector := strings.TrimSpace(spec.Connector)
+	if connector != "" && !connectorNameRE.MatchString(connector) {
+		return fmt.Errorf(
+			"%w: spec.connector %q must be a lowercase identifier",
+			errdefs.ErrSecretTypeFields,
+			connector,
+		)
+	}
+	if connector == "" && len(spec.Identity) > 0 {
+		return fmt.Errorf("%w: spec.identity requires spec.connector", errdefs.ErrSecretTypeFields)
+	}
+	for name, value := range spec.Identity {
+		if !identityFieldRE.MatchString(name) {
+			return fmt.Errorf("%w: spec.identity field %q is not an identifier", errdefs.ErrSecretTypeFields, name)
+		}
+		if len(value) > maxIdentityValue || strings.ContainsAny(value, "\n\r\x00") {
+			return fmt.Errorf(
+				"%w: spec.identity.%s must be a single line of at most %d bytes",
+				errdefs.ErrSecretTypeFields, name, maxIdentityValue)
+		}
+		if strings.Contains(value, "PRIVATE KEY-----") {
+			return fmt.Errorf(
+				"%w: spec.identity.%s looks like key material; identity fields are readable",
+				errdefs.ErrSecretTypeFields, name)
+		}
+	}
+	return nil
+}
+
+// MetaPath returns the sidecar file recording a secret's readable identity.
+func MetaPath(runPath string, md intmodel.SecretMetadata) string {
+	return filepath.Join(
+		fs.SecretsDir(runPath, md.Realm, md.Space, md.Stack, md.Cell), MetaDir, md.Name)
+}
+
+// WriteMeta records the secret's readable identity facts, or clears the
+// sidecar when there are none.
+func WriteMeta(runPath string, md intmodel.SecretMetadata, meta Meta) error {
+	path := MetaPath(runPath, md)
+	if meta.IsZero() {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("clear secret identity: %w", err)
+		}
+		return nil
+	}
+	raw, err := json.Marshal(meta)
+	if err != nil {
+		return fmt.Errorf("encode secret identity: %w", err)
+	}
+	return writeSidecar(path, string(raw), "identity")
+}
+
+// RemoveMeta deletes the identity sidecar; a missing sidecar is not an error.
+func RemoveMeta(runPath string, md intmodel.SecretMetadata) error {
+	if err := os.Remove(MetaPath(runPath, md)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// ReadMeta returns the secret's readable identity facts without reading its
+// material: the zero Meta when no sidecar exists.
+func ReadMeta(runPath string, md intmodel.SecretMetadata) (Meta, error) {
+	raw, err := os.ReadFile(MetaPath(runPath, md))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return Meta{}, nil
+		}
+		return Meta{}, err
+	}
+	var meta Meta
+	if err = json.Unmarshal(raw, &meta); err != nil {
+		return Meta{}, errors.New("stored secret identity is unreadable; re-create the secret")
+	}
+	return meta, nil
+}
 
 // TypesDir is the per-scope sidecar directory (under the secrets directory)
 // holding one file per typed secret whose content is the secret's type. It is
@@ -49,8 +159,17 @@ type typedMaterial struct {
 	SSHKey    *intmodel.SecretSSHKey    `json:"sshKey,omitempty"`
 }
 
-// ValidateSpec enforces the per-type shape of a secret's material.
+// ValidateSpec enforces the per-type shape of a secret's material and the
+// shape of its readable identity facts.
 func ValidateSpec(spec intmodel.SecretSpec) error {
+	if err := validateMaterial(spec); err != nil {
+		return err
+	}
+	return ValidateMeta(spec)
+}
+
+// validateMaterial enforces the per-type shape of a secret's material.
+func validateMaterial(spec intmodel.SecretSpec) error {
 	switch spec.EffectiveType() {
 	case intmodel.SecretTypeOpaque:
 		if spec.BasicAuth != nil || spec.SSHKey != nil {
@@ -130,31 +249,37 @@ func WriteType(runPath string, md intmodel.SecretMetadata, secretType string) er
 		}
 		return nil
 	}
+	return writeSidecar(path, secretType, "type")
+}
+
+// writeSidecar atomically writes one sidecar file (a secret's type or its
+// readable identity) next to the secret bytes, root read/write only.
+func writeSidecar(path, content, what string) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("create secret types dir: %w", err)
+		return fmt.Errorf("create secret %s dir: %w", what, err)
 	}
 	if err := os.Chmod(dir, 0o700); err != nil { //nolint:gosec // a directory: 0700 is owner-only traversal
-		return fmt.Errorf("chmod secret types dir: %w", err)
+		return fmt.Errorf("chmod secret %s dir: %w", what, err)
 	}
-	tmp, err := os.CreateTemp(dir, ".type-*.tmp")
+	tmp, err := os.CreateTemp(dir, ".sidecar-*.tmp")
 	if err != nil {
-		return fmt.Errorf("create temp secret type: %w", err)
+		return fmt.Errorf("create temp secret %s: %w", what, err)
 	}
 	tmpName := tmp.Name()
 	defer func() { _ = os.Remove(tmpName) }()
-	if _, err = tmp.WriteString(secretType); err != nil {
+	if _, err = tmp.WriteString(content); err != nil {
 		_ = tmp.Close()
-		return fmt.Errorf("write secret type: %w", err)
+		return fmt.Errorf("write secret %s: %w", what, err)
 	}
 	if err = tmp.Close(); err != nil {
-		return fmt.Errorf("close secret type: %w", err)
+		return fmt.Errorf("close secret %s: %w", what, err)
 	}
 	if err = os.Chmod(tmpName, typeFileMode); err != nil {
-		return fmt.Errorf("chmod secret type: %w", err)
+		return fmt.Errorf("chmod secret %s: %w", what, err)
 	}
 	if err = os.Rename(tmpName, path); err != nil {
-		return fmt.Errorf("rename secret type into place: %w", err)
+		return fmt.Errorf("rename secret %s into place: %w", what, err)
 	}
 	return nil
 }
@@ -214,7 +339,7 @@ func Read(runPath string, ref intmodel.ContainerSecretRef) (intmodel.SecretSpec,
 			"referenced secret %q: stored %s material is unreadable; re-create the secret", ref.Name, secretType)
 	}
 	spec := intmodel.SecretSpec{Type: secretType, BasicAuth: body.BasicAuth, SSHKey: body.SSHKey}
-	if err = ValidateSpec(spec); err != nil {
+	if err = validateMaterial(spec); err != nil {
 		return intmodel.SecretSpec{}, fmt.Errorf("referenced secret %q: %w", ref.Name, err)
 	}
 	return spec, nil

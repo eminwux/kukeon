@@ -152,6 +152,12 @@ type CellConfigStatus struct {
 	// Schedule is the state of the Config's spec.schedule; nil for a Config
 	// kukeond has not scheduled.
 	Schedule *CellConfigScheduleStatus `json:"schedule,omitempty" yaml:"schedule,omitempty"`
+	// Connectors reports, for every connector the Config requires, the
+	// identity a cell created from it now would use and the level it comes
+	// from, or that nothing resolves it (issue #1548). Computed on read from
+	// the Config, its blueprint and the Realm, Space and Stack defaults — it
+	// is never stored, so changing a default shows here at once.
+	Connectors []ConnectorStatus `json:"connectors,omitempty" yaml:"connectors,omitempty"`
 }
 
 // CellConfigScheduleStatus is what kukeond's scheduler last observed and did

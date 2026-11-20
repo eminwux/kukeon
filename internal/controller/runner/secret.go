@@ -52,6 +52,11 @@ func (r *Exec) WriteSecret(secret intmodel.Secret) (bool, error) {
 	dir := fs.SecretsDir(r.opts.RunPath, md.Realm, md.Space, md.Stack, md.Cell)
 	path := fs.SecretPath(r.opts.RunPath, md.Realm, md.Space, md.Stack, md.Cell, md.Name)
 
+	// The readable identity facts are stored in the clear; refuse a malformed
+	// set before anything is written.
+	if err := secretstore.ValidateMeta(secret.Spec); err != nil {
+		return false, fmt.Errorf("%w: %w", errdefs.ErrWriteSecret, err)
+	}
 	if err := os.MkdirAll(dir, secretsDirMode); err != nil {
 		return false, fmt.Errorf("%w: create secrets dir: %w", errdefs.ErrWriteSecret, err)
 	}
@@ -86,7 +91,15 @@ func (r *Exec) WriteSecret(secret intmodel.Secret) (bool, error) {
 	if secret.Spec.EffectiveType() == intmodel.SecretTypeOpaque {
 		steps = []func() error{writeBytes, writeType}
 	}
-	for _, step := range steps {
+	// The readable identity facts go last: they describe the material that is
+	// now in place, and a crash before this step leaves a secret that works
+	// but is untagged rather than a tag over the previous secret's bytes.
+	writeMeta := func() error {
+		return secretstore.WriteMeta(r.opts.RunPath, md, secretstore.Meta{
+			Connector: secret.Spec.Connector, Identity: secret.Spec.Identity,
+		})
+	}
+	for _, step := range append(steps, writeMeta) {
 		if err = step(); err != nil {
 			return false, fmt.Errorf("%w: %w", errdefs.ErrWriteSecret, err)
 		}
@@ -100,6 +113,7 @@ func (r *Exec) WriteSecret(secret intmodel.Secret) (bool, error) {
 	r.logger.InfoContext(r.ctx, "secret "+action,
 		"name", md.Name,
 		"type", secret.Spec.EffectiveType(),
+		"connector", secret.Spec.Connector,
 		"realm", md.Realm,
 		"space", md.Space,
 		"stack", md.Stack,
@@ -129,13 +143,27 @@ func (r *Exec) GetSecret(secret intmodel.Secret) (intmodel.Secret, error) {
 		return intmodel.Secret{}, errdefs.ErrSecretNotFound
 	}
 
-	// Metadata-only: scope + name come from the path and the type from its
-	// sidecar, never the bytes.
-	secretType, err := secretstore.ReadType(r.opts.RunPath, md)
+	// Metadata-only: scope + name come from the path, the type and the
+	// readable identity facts from their sidecars, never the bytes.
+	spec, err := readableSecretSpec(r.opts.RunPath, md)
 	if err != nil {
 		return intmodel.Secret{}, fmt.Errorf("%w: %w", errdefs.ErrGetSecret, err)
 	}
-	return intmodel.Secret{Metadata: md, Spec: intmodel.SecretSpec{Type: secretType}}, nil
+	return intmodel.Secret{Metadata: md, Spec: spec}, nil
+}
+
+// readableSecretSpec loads the part of a secret a get or list may report: its
+// type and its readable identity facts. The material is never read.
+func readableSecretSpec(runPath string, md intmodel.SecretMetadata) (intmodel.SecretSpec, error) {
+	secretType, err := secretstore.ReadType(runPath, md)
+	if err != nil {
+		return intmodel.SecretSpec{}, err
+	}
+	meta, err := secretstore.ReadMeta(runPath, md)
+	if err != nil {
+		return intmodel.SecretSpec{}, err
+	}
+	return intmodel.SecretSpec{Type: secretType, Connector: meta.Connector, Identity: meta.Identity}, nil
 }
 
 // ListSecrets enumerates the metadata of every Secret bound to the scope
@@ -238,11 +266,11 @@ func (r *Exec) collectSecretsInScope(out *[]intmodel.Secret, realm, space, stack
 			continue
 		}
 		md := intmodel.SecretMetadata{Name: name, Realm: realm, Space: space, Stack: stack, Cell: cell}
-		secretType, typeErr := secretstore.ReadType(r.opts.RunPath, md)
-		if typeErr != nil {
-			return fmt.Errorf("secret %q: %w", name, typeErr)
+		spec, specErr := readableSecretSpec(r.opts.RunPath, md)
+		if specErr != nil {
+			return fmt.Errorf("secret %q: %w", name, specErr)
 		}
-		*out = append(*out, intmodel.Secret{Metadata: md, Spec: intmodel.SecretSpec{Type: secretType}})
+		*out = append(*out, intmodel.Secret{Metadata: md, Spec: spec})
 	}
 	return nil
 }
@@ -264,6 +292,9 @@ func (r *Exec) DeleteSecret(secret intmodel.Secret) error {
 
 	if err := secretstore.RemoveType(r.opts.RunPath, md); err != nil {
 		return fmt.Errorf("%w: remove type: %w", errdefs.ErrDeleteSecret, err)
+	}
+	if err := secretstore.RemoveMeta(r.opts.RunPath, md); err != nil {
+		return fmt.Errorf("%w: remove identity: %w", errdefs.ErrDeleteSecret, err)
 	}
 
 	// Log the scope + name only — never the bytes.

@@ -590,3 +590,30 @@ td .ask-majordomo { margin-left: 8px; vertical-align: middle; }
   .majordomo-open .terminal-workspace.is-expanded { right: 8px; }
   .majordomo-open .toast-stack { right: 16px; }
 }
+/* Connectors (#1548): identities, scope defaults and the per-Config and per-cell pickers. */
+.badge.needs-connector { color: var(--status-warning); background: var(--status-warning-bg); border-color: var(--status-warning-line); font-weight: 600; white-space: nowrap; }
+.connectors-intro { margin: 0 0 14px; }
+.connector-methods { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.connector-status-list li { align-items: start; }
+.connector-status { display: grid; gap: 8px; min-width: 0; flex: 1 1 auto; }
+.connector-status > .description, .connector-status > .setup-error, .connector-status > .field-error { margin: 0; }
+.connector-status > .document-action { justify-self: start; }
+.connector-team { margin: 0 0 12px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--code); font-size: 12px; }
+.connector-fixes { display: grid; gap: 10px; }
+.connector-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.connector-actions button, .connector-row-actions button { font-size: 12px; }
+.connector-row-actions { white-space: nowrap; text-align: right; }
+.connector-row-actions button + button { margin-left: 6px; }
+.connector-fix, .connector-default, .connector-store, .identity-form { display: grid; gap: 12px; min-width: 0; margin-top: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--code); }
+.connector-fix > .description, .connector-default > .description, .identity-form > .description { margin: 0; }
+.connector-fix .identity-form, .connector-fix select, .connector-default select, .connector-store select, .identity-form select { background: var(--panel); }
+.connector-fix .schema-field, .connector-default .schema-field, .connector-store .schema-field, .scope-picker .schema-field { display: grid; gap: 6px; font-size: 12px; }
+.connector-fix select, .connector-default select, .connector-store select, .scope-picker select, .connector-status select { width: 100%; padding: 9px 12px; border-radius: 6px; font-size: 13px; }
+.connector-default h3, .connector-store h3 { margin: 0; font-size: 13px; }
+.connector-default table, .connector-identities table { background: var(--panel); }
+.connector-effective { margin: 0; font-size: 12px; }
+.identity-form .identity-key { grid-column: 1 / -1; }
+.identity-form textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.identity-form .error, .connector-fix .error, .connector-default .error { margin: 0; }
+.connector-identities-preview .setup-error { margin: 4px 0 0; }
+.connector-login { margin: 0; }

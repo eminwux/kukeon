@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/connector"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -45,13 +46,17 @@ type registryCredentialResult struct {
 	Realm    string `json:"realm"`
 	Server   string `json:"server"`
 	Username string `json:"username"`
-	Action   string `json:"action"`
+	// Secret is the realm Secret the credential was stored in.
+	Secret string `json:"secret"`
+	Action string `json:"action"`
 }
 
 // registerRegistryCredentialRoutes upserts a realm's pull credential by
-// server, mirroring `kuke create registry-credential` (#1130, #1407): read
-// the realm, replace the entry with the same server (or append), and
-// re-apply the realm through the daemon's write-through apply path.
+// server, mirroring `kuke create registry-credential` (#1130, #1407, #1548):
+// store the credential as a basic-auth Secret of the realm, read the realm,
+// bind the server to that Secret (replacing the entry with the same server, or
+// appending), and re-apply the realm through the daemon's write-through apply
+// path. The realm document never carries the token.
 func registerRegistryCredentialRoutes(mux *http.ServeMux, dial Dial) {
 	mux.HandleFunc("POST /api/realms/{realm}/registry-credentials",
 		resourceRoute(dial, func(ctx context.Context, c kukeonv1.Client, r *http.Request) (any, error) {
@@ -63,12 +68,13 @@ func registerRegistryCredentialRoutes(mux *http.ServeMux, dial Dial) {
 			if err != nil {
 				return nil, err
 			}
-			action, err := upsertRealmCredential(ctx, c, realm, input)
+			secret := connector.RegistrySecretName(input.Server)
+			action, err := upsertRealmCredential(ctx, c, realm, secret, input)
 			if err != nil {
 				return nil, redactCreationError(err, []string{input.Password})
 			}
 			return registryCredentialResult{
-				Realm: realm, Server: input.Server, Username: input.Username, Action: action,
+				Realm: realm, Server: input.Server, Username: input.Username, Secret: secret, Action: action,
 			}, nil
 		}))
 }
@@ -112,6 +118,7 @@ func upsertRealmCredential(
 	ctx context.Context,
 	c kukeonv1.Client,
 	realm string,
+	secret string,
 	input registryCredentialRequest,
 ) (string, error) {
 	current, err := c.GetRealm(ctx, v1beta1.RealmDoc{Metadata: v1beta1.RealmMetadata{Name: realm}})
@@ -121,19 +128,21 @@ func upsertRealmCredential(
 	if !current.MetadataExists {
 		return "", errdefs.ErrRealmNotFound
 	}
+	// The credential itself is a Secret of the realm; creating one that
+	// exists replaces its value, so saving again rotates the token.
+	if _, err = c.CreateSecret(ctx, connector.RegistrySecret(
+		realm, secret, input.Username, input.Password,
+	)); err != nil {
+		return "", err
+	}
 	// The apply diff replaces registryCredentials wholesale, so the other
 	// entries are carried forward from the live document.
 	desired := current.Realm
 	desired.APIVersion = v1beta1.APIVersionV1Beta1
 	desired.Kind = v1beta1.KindRealm
 	desired.Status = v1beta1.RealmStatus{}
-	desired.Spec.RegistryCredentials = upsertRegistryCredential(
-		append([]v1beta1.RegistryCredentials(nil), desired.Spec.RegistryCredentials...),
-		v1beta1.RegistryCredentials{
-			Username:      input.Username,
-			Password:      input.Password,
-			ServerAddress: input.Server,
-		},
+	desired.Spec.RegistryCredentials = connector.UpsertRegistryCredential(
+		desired.Spec.RegistryCredentials, input.Server, realm, secret,
 	)
 	rawYAML, err := yaml.Marshal(desired)
 	if err != nil {
@@ -158,31 +167,9 @@ func upsertRealmCredential(
 	return "applied", nil
 }
 
-// upsertRegistryCredential matches `kuke create registry-credential`: exact
-// ServerAddress match replaces the entry, otherwise the entry is appended,
-// so the empty-server default upserts against itself.
-func upsertRegistryCredential(
-	existing []v1beta1.RegistryCredentials,
-	cred v1beta1.RegistryCredentials,
-) []v1beta1.RegistryCredentials {
-	for i := range existing {
-		if existing[i].ServerAddress == cred.ServerAddress {
-			existing[i] = cred
-			return existing
-		}
-	}
-	return append(existing, cred)
-}
-
 // redactRealm clears registry passwords from browser responses, including
 // the full-document view. Server and username stay visible.
 func redactRealm(doc v1beta1.RealmDoc) v1beta1.RealmDoc {
-	if len(doc.Spec.RegistryCredentials) == 0 {
-		return doc
-	}
-	doc.Spec.RegistryCredentials = append([]v1beta1.RegistryCredentials(nil), doc.Spec.RegistryCredentials...)
-	for i := range doc.Spec.RegistryCredentials {
-		doc.Spec.RegistryCredentials[i].Password = ""
-	}
+	doc.Spec.RegistryCredentials = connector.RedactRegistryPasswords(doc.Spec.RegistryCredentials)
 	return doc
 }

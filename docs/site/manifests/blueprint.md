@@ -81,6 +81,23 @@ The concerns the blueprint is assembled from. Each component bundles the paramet
 | `env`         | array of string     | no       | `KEY=value` entries added to the container; values may reference `${PARAM}`s.                                                                                           |
 | `secrets`     | list of secret slot | no       | Secret slots added to the container; a Config fills them by name.                                                                                                       |
 | `modes`       | map of name → mode  | no       | The ways a harness can be started. `harness` components only; at most one component of a blueprint declares modes.                                                      |
+| `group`       | string              | no       | Mutual-exclusion group. The components of one group are alternatives — the ways one harness authenticates — and a Config that enables two of them is rejected.          |
+| `connector`   | object              | no       | The definition of the [connector](../concepts/connectors.md) the component delivers. `connector` components only. See below.                                            |
+
+#### Component connector
+
+`kuke team` copies a connector's definition from its catalog into every component that delivers it, so the daemon — which keeps no catalog — can validate and resolve identities from the blueprint alone.
+
+| Field         | Type            | Required | Description                                                                                                                                 |
+| ------------- | --------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`        | string          | yes      | The connector's name. A Secret tagged with another connector is refused for this component.                                                 |
+| `title`       | string          | no       | Display name.                                                                                                                               |
+| `method`      | string          | no       | The connector method this component is.                                                                                                     |
+| `delivery`    | string          | yes      | `env` or `file` (exactly one secret slot of that mode), `stateVolume` (no slot: a login in the state volume) or `git` (no slot).            |
+| `secretTypes` | array of string | no       | Secret types an identity may have: `opaque`, `basic-auth`, `ssh-key`.                                                                       |
+| `scopes`      | array of string | no       | Levels a default may be set at: `realm`, `space`, `stack`. Empty allows all.                                                                |
+| `fields`      | list            | no       | Schema of the identity's readable fields: `name`, `type` (`string`, `list`, `person`, `secret`), `required`, `enum`, `secretTypes`, `help`. |
+| `optional`    | bool            | no       | A cell may be created while the connector has no identity.                                                                                  |
 
 A component never declares a git credential: git authenticates only from a [`git`](container.md#containergit) block. Two enabled components — or a component and the template — that set the same env key or the same secret destination fail the render.
 
@@ -156,6 +173,8 @@ The cell template body. It mirrors a [`Cell`](cell.md) manifest's user-authorabl
 ### `spec.cell.containers[]` (list, required)
 
 Each container carries the user-authorable subset of [ContainerSpec](container.md) — `id`, `image`, `command`, `args`, `env`, `volumes`, `networks`, `ports`, `resources`, `git`, `tty`, the host-namespace toggles, capability sets, and `restartPolicy`. Daemon-stamped identity fields (`containerdId`, `realmId`, `spaceId`, `stackId`, `cellId`) are intentionally absent: materialization fills them from the blueprint's metadata and the generated cell name.
+
+A blueprint's `git` blocks — on a container or on one of its `repos[]` — may not carry `identityRef`: a git identity is chosen per team, Config or cell and named in the `CellConfig`, the cell's `--connector`, or a Realm, Space or Stack default (see [Connectors](../concepts/connectors.md)). `kuke apply` refuses a blueprint that sets one.
 
 In addition to the regular container fields, a blueprint container declares two slot channels:
 

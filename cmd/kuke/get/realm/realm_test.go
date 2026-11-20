@@ -220,6 +220,75 @@ func TestNewRealmCmd_NamedSingleRow(t *testing.T) {
 	})
 }
 
+// TestNewRealmCmd_NeverPrintsRegistryPassword pins issue #1548: no output
+// format of `kuke get realm` — one realm or the list — carries a registry
+// password, whether the entry is a legacy inline one or names a Secret. The
+// rest of the entry (server, username, secretRef) is still shown.
+func TestNewRealmCmd_NeverPrintsRegistryPassword(t *testing.T) {
+	const password = "hunter2-do-not-print"
+	doc := v1beta1.RealmDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindRealm,
+		Metadata:   v1beta1.RealmMetadata{Name: "r1"},
+		Spec: v1beta1.RealmSpec{
+			Namespace: "ns1",
+			RegistryCredentials: []v1beta1.RegistryCredentials{
+				{ServerAddress: "legacy.example.com", Username: "old-user", Password: password},
+				{
+					ServerAddress: "ghcr.io",
+					SecretRef:     &v1beta1.ContainerSecretRef{Name: "registry-ghcr-io", Realm: "r1"},
+				},
+			},
+		},
+	}
+	fake := &fakeClient{
+		getRealmFn: func(_ v1beta1.RealmDoc) (kukeonv1.GetRealmResult, error) {
+			return kukeonv1.GetRealmResult{Realm: doc, MetadataExists: true}, nil
+		},
+		listRealmsFn: func() ([]v1beta1.RealmDoc, error) { return []v1beta1.RealmDoc{doc}, nil },
+	}
+
+	for _, args := range [][]string{
+		{"r1", "-o", "yaml"},
+		{"r1", "-o", "json"},
+		{"r1", "-o", "wide"},
+		{"r1"},
+		{"-o", "yaml"},
+		{"-o", "json"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+			cmd := realm.NewRealmCmd()
+			buf := &bytes.Buffer{}
+			cmd.SetOut(buf)
+			cmd.SetErr(buf)
+			cmd.SetContext(context.WithValue(
+				context.Background(), realm.MockControllerKey{}, kukeonv1.Client(fake)))
+			cmd.SetArgs(args)
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			out := buf.String()
+			if strings.Contains(out, password) {
+				t.Fatalf("output carries the registry password:\n%s", out)
+			}
+			if strings.Contains(out, "password") {
+				t.Errorf("output carries a password field:\n%s", out)
+			}
+			if len(args) >= 2 && (args[len(args)-1] == "yaml" || args[len(args)-1] == "json") {
+				for _, want := range []string{"legacy.example.com", "old-user", "registry-ghcr-io"} {
+					if !strings.Contains(out, want) {
+						t.Errorf("output lost %q:\n%s", want, out)
+					}
+				}
+			}
+		})
+	}
+	if got := doc.Spec.RegistryCredentials[0].Password; got != password {
+		t.Errorf("printing modified the realm document (password = %q)", got)
+	}
+}
+
 func TestNewRealmCmd_Structure(t *testing.T) {
 	cmd := realm.NewRealmCmd()
 	if cmd.Use != "realm [name]" {

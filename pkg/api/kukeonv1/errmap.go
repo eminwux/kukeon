@@ -72,6 +72,9 @@ var kindToSentinel = map[string]error{
 	"RenderDigestMismatch":    errdefs.ErrRenderDigestMismatch,
 	"DaemonLogUnavailable":    errdefs.ErrDaemonLogUnavailable,
 	"SecretInUse":             errdefs.ErrSecretInUse,
+	"ConnectorUnresolved":     errdefs.ErrConnectorUnresolved,
+	"ConnectorUnknown":        errdefs.ErrConnectorUnknown,
+	"ConnectorIdentity":       errdefs.ErrConnectorIdentity,
 	"VolumeInUse":             errdefs.ErrVolumeInUse,
 }
 

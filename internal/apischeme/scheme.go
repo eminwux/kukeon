@@ -49,12 +49,20 @@ func ConvertRealmDocToInternal(in ext.RealmDoc) (intmodel.Realm, error) {
 		if err := validateScopeDefaults("realm", in.Spec.Defaults); err != nil {
 			return intmodel.Realm{}, err
 		}
+		if err := validateRegistryCredentials(in.Metadata.Name, in.Spec.RegistryCredentials); err != nil {
+			return intmodel.Realm{}, err
+		}
 		registryCreds := make([]intmodel.RegistryCredentials, len(in.Spec.RegistryCredentials))
 		for i, cred := range in.Spec.RegistryCredentials {
 			registryCreds[i] = intmodel.RegistryCredentials{
 				Username:      cred.Username,
 				Password:      cred.Password,
 				ServerAddress: cred.ServerAddress,
+				SecretRef:     secretRefToInternal(cred.SecretRef),
+			}
+			if ref := registryCreds[i].SecretRef; ref != nil {
+				ref.Name = strings.TrimSpace(ref.Name)
+				ref.Realm = strings.TrimSpace(in.Metadata.Name)
 			}
 		}
 		return intmodel.Realm{
@@ -98,6 +106,7 @@ func BuildRealmExternalFromInternal(in intmodel.Realm, apiVersion ext.Version) (
 				Username:      cred.Username,
 				Password:      cred.Password,
 				ServerAddress: cred.ServerAddress,
+				SecretRef:     secretRefToExternal(cred.SecretRef),
 			}
 		}
 		return ext.RealmDoc{
@@ -179,7 +188,8 @@ func NormalizeSecret(req ext.SecretDoc) (intmodel.Secret, ext.Version, error) {
 // ConvertSecretToExternal builds a metadata-only external SecretDoc from the
 // internal hub type (issue #622). The material fields are deliberately left
 // zero: the get/list verbs never echo the secret material, preserving the
-// never-round-tripped contract from #619. Only Spec.Type is reported.
+// never-round-tripped contract from #619. Only the readable fields — Spec.Type,
+// Spec.Connector and Spec.Identity — are reported.
 func ConvertSecretToExternal(in intmodel.Secret) ext.SecretDoc {
 	return ext.SecretDoc{
 		APIVersion: ext.APIVersionV1Beta1,
@@ -191,14 +201,23 @@ func ConvertSecretToExternal(in intmodel.Secret) ext.SecretDoc {
 			Stack: in.Metadata.Stack,
 			Cell:  in.Metadata.Cell,
 		},
-		Spec: ext.SecretSpec{Type: in.Spec.Type},
+		Spec: ext.SecretSpec{
+			Type:      in.Spec.Type,
+			Connector: in.Spec.Connector,
+			Identity:  cloneStringMap(in.Spec.Identity),
+		},
 	}
 }
 
 // secretSpecToInternal copies a Secret's type and material into the internal
 // hub type.
 func secretSpecToInternal(in ext.SecretSpec) intmodel.SecretSpec {
-	out := intmodel.SecretSpec{Type: strings.TrimSpace(in.Type), Data: in.Data}
+	out := intmodel.SecretSpec{
+		Type:      strings.TrimSpace(in.Type),
+		Connector: strings.TrimSpace(in.Connector),
+		Identity:  cloneStringMap(in.Identity),
+		Data:      in.Data,
+	}
 	if in.BasicAuth != nil {
 		out.BasicAuth = &intmodel.SecretBasicAuth{
 			Username: in.BasicAuth.Username,
@@ -1332,6 +1351,18 @@ func buildSpaceContainerDefaultsExternalFromInternal(in *intmodel.SpaceContainer
 // the external and internal models do not alias the same backing array.
 // Returns nil for nil/empty input so the resulting Status field stays nil
 // and `omitempty`-tagged JSON/YAML emit nothing (issue #328).
+// cloneStringMap copies a string map; an empty map becomes nil.
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
 func cloneStringSlice(in []string) []string {
 	if len(in) == 0 {
 		return nil
@@ -1367,6 +1398,12 @@ func convertCellProvenanceToInternal(in *ext.CellProvenance) *intmodel.CellProve
 		Mode:           in.Mode,
 		ParamOverrides: copyStringMap(in.ParamOverrides),
 	}
+	if in.ConnectorOverrides != nil {
+		out.ConnectorOverrides = make(map[string]intmodel.ContainerSecretRef, len(in.ConnectorOverrides))
+		for name, ref := range in.ConnectorOverrides {
+			out.ConnectorOverrides[name] = *secretRefToInternal(&ref)
+		}
+	}
 	if in.Params != nil {
 		params := make(map[string]string, len(in.Params))
 		for k, v := range in.Params {
@@ -1394,6 +1431,12 @@ func buildCellProvenanceExternalFromInternal(in *intmodel.CellProvenance) *ext.C
 		EnvOverrides:   cloneStringSlice(in.EnvOverrides),
 		Mode:           in.Mode,
 		ParamOverrides: copyStringMap(in.ParamOverrides),
+	}
+	if in.ConnectorOverrides != nil {
+		out.ConnectorOverrides = make(map[string]ext.ContainerSecretRef, len(in.ConnectorOverrides))
+		for name, ref := range in.ConnectorOverrides {
+			out.ConnectorOverrides[name] = *secretRefToExternal(&ref)
+		}
 	}
 	if in.Params != nil {
 		params := make(map[string]string, len(in.Params))

@@ -311,6 +311,25 @@ func TestValidateDocument_Blueprint_Git(t *testing.T) {
 `,
 			wantErr: `repo "src": git.author requires both name and email`,
 		},
+		{
+			// An identity is chosen per team, Config or cell (#1548); the
+			// merge never reads one off a blueprint.
+			name: "container identityRef",
+			tail: `        git:
+          identityRef: {name: bot-key, realm: default}
+`,
+			wantErr: `container "main": blueprint is invalid: git.identityRef is not allowed on a blueprint`,
+		},
+		{
+			name: "repo identityRef",
+			tail: `        repos:
+          - name: src
+            target: /workspace/src
+            git:
+              identityRef: {name: bot-key, realm: default}
+`,
+			wantErr: `container "main" repo "src": blueprint is invalid: git.identityRef is not allowed on a blueprint`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -19,6 +19,7 @@ package config
 import (
 	"errors"
 	"io"
+	"maps"
 	"slices"
 )
 
@@ -79,6 +80,9 @@ func Resolve(cfg *TeamsConfig, team *Team) (Defaults, error) {
 	}
 	if d.Harnesses == nil {
 		d.Harnesses = cfg.Spec.Defaults.Harnesses
+	}
+	if d.Connectors == nil {
+		d.Connectors = cfg.Spec.Defaults.Connectors
 	}
 	if team.ProjectSource != nil {
 		if team.ProjectSource.Name != "project" {
@@ -160,6 +164,7 @@ func (e TeamEntry) Team() *Team {
 }
 
 func cloneSelections(d Defaults) Defaults {
+	d.Connectors = maps.Clone(d.Connectors)
 	d.Sources = slices.Clone(d.Sources)
 	for i := range d.Sources {
 		d.Sources[i].Git = cloneSourceGit(d.Sources[i].Git)
@@ -167,6 +172,7 @@ func cloneSelections(d Defaults) Defaults {
 	d.Harnesses = slices.Clone(d.Harnesses)
 	d.Roles = slices.Clone(d.Roles)
 	for i := range d.Roles {
+		d.Roles[i].Connectors = maps.Clone(d.Roles[i].Connectors)
 		if d.Roles[i].Needs != nil {
 			needs := *d.Roles[i].Needs
 			needs.Image = slices.Clone(needs.Image)

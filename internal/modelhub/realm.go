@@ -51,6 +51,9 @@ type RegistryCredentials struct {
 	// ServerAddress is the registry server address (e.g., "docker.io", "registry.example.com").
 	// If empty, credentials apply to the registry extracted from the image reference.
 	ServerAddress string
+	// SecretRef names the realm-scoped basic-auth Secret holding the
+	// credential (issue #1548); set instead of Username and Password.
+	SecretRef *ContainerSecretRef
 }
 
 type RealmStatus struct {

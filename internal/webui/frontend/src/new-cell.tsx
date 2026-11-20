@@ -5,12 +5,15 @@ import { cellAdvanced, containerFields } from "./creation-schema.mjs";
 import type { Field } from "./creation-schema.mjs";
 import { MergedValues, type RenderedValue } from "./merged-values";
 import { catalogAPI, referenceScope } from "./catalog-url.mjs";
+import { ConnectorFixes, ConnectorIdentities, ConnectorStateBadge, IdentitySelect, StatusIdentity } from "./connector-ui";
+import { blocksCells, changedPicks, connectorStatuses, connectorTitle, identitiesFor, stateResolved, takesIdentity, teamOf, unresolvedConnectors } from "./connectors.mjs";
+import type { Connector, ConnectorStatus, SecretRef } from "./connectors.mjs";
 
-type ScopeMetadata = { name: string; realm?: string; space?: string; stack?: string };
-type CatalogDoc = { metadata: ScopeMetadata; spec?: Record<string, unknown>; kind?: string };
+type ScopeMetadata = { name: string; realm?: string; space?: string; stack?: string; labels?: Record<string, string> };
+type CatalogDoc = { metadata: ScopeMetadata; spec?: Record<string, unknown>; kind?: string; status?: unknown };
 type CellDoc = Doc & { spec: { realmId: string; spaceId: string; stackId: string; containers?: Container[]; provenance?: unknown } };
 type Container = { id: string; image?: string; attachable?: boolean; root?: boolean; [key: string]: unknown };
-type Preview = { document: CellDoc; preview: string; digest?: string; values?: RenderedValue[] };
+type Preview = { document: CellDoc; preview: string; digest?: string; values?: RenderedValue[]; connectors?: ConnectorStatus[] };
 type FormValue = Record<string, unknown>;
 
 function scopedName(metadata: ScopeMetadata): string[] {
@@ -82,7 +85,17 @@ function ConfigCreation({ revision, inventory, configScope, onCreated }: { revis
   const configRows = (configs.data ?? []).map(doc => ({ doc, scope: scopedName(doc.metadata) }));
   const filtered = configRows.filter(({ scope }) => scopeLabel(scope).toLowerCase().includes(query.toLowerCase()));
   const config = configRows.find(row => JSON.stringify(row.scope) === selected);
-  const detail = useResource<CatalogDoc>(config ? catalogAPI("configs", config.scope) : null, revision);
+  // A saved default or Config pick re-reads the Config, so its connector status follows at once.
+  const [saved, setSaved] = useState(0);
+  const detail = useResource<CatalogDoc>(config ? catalogAPI("configs", config.scope) : null, revision + saved);
+  // Each connector the Config requires starts on the identity it resolves to; a pick is for this cell only.
+  const statuses = connectorStatuses(detail.data);
+  const connectors = useResource<Connector[]>(statuses.length ? "/api/connectors" : null, revision);
+  const secrets = useResource<unknown[]>(statuses.some(status => takesIdentity(status.delivery)) ? "/api/catalog/secrets" : null, revision + saved);
+  const [picks, setPicks] = useState<Record<string, Partial<SecretRef> | undefined>>({});
+  const overrides = changedPicks(statuses, picks);
+  const unresolved = unresolvedConnectors(statuses, picks);
+  const team = teamOf(detail.data);
   const blueprintRef = detail.data?.spec?.blueprint as FormValue | undefined;
   const blueprintValid = !!blueprintRef && typeof blueprintRef.name === "string" && !!blueprintRef.name && typeof blueprintRef.realm === "string" && !!blueprintRef.realm && !(blueprintRef.stack && !blueprintRef.space);
   const blueprintPath = blueprintValid && blueprintRef ? blueprintAPI(blueprintRef) : null;
@@ -103,11 +116,14 @@ function ConfigCreation({ revision, inventory, configScope, onCreated }: { revis
     if (!config || pending) return;
     setPending(true); setStage(create ? "create" : "preview"); setError("");
     try {
-      const body = { config: { name: config.doc.metadata.name, realm: config.doc.metadata.realm, space: config.doc.metadata.space, stack: config.doc.metadata.stack }, name: name.trim(), ...(create && preview ? { resolvedName: preview.document.metadata.name, preview: preview.preview } : {}), env: env.split("\n").filter(Boolean), ignoreDiskPressure };
+      // Only the picks that differ from the Config's own identity are sent, as per-cell overrides.
+      const body = { config: { name: config.doc.metadata.name, realm: config.doc.metadata.realm, space: config.doc.metadata.space, stack: config.doc.metadata.stack }, name: name.trim(), ...(create && preview ? { resolvedName: preview.document.metadata.name, preview: preview.preview } : {}), env: env.split("\n").filter(Boolean), ignoreDiskPressure, ...(Object.keys(overrides).length ? { connectors: overrides } : {}) };
       const response = await fetch(`/api/cells/from-config/${create ? "create" : "preview"}`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(body) });
       const result = await response.json();
       if (!response.ok) {
         const message = result.error?.message ?? result.message ?? `Request failed (HTTP ${response.status})`;
+        // A connector the daemon could not resolve: re-read the Config so the flag and its fixes show.
+        if (result.error?.code === "connector_unresolved" || result.error?.code === "connector_invalid") setSaved(value => value + 1);
         throw new Error(create && (result.error?.code === "unavailable" || response.status >= 500) ? `The creation outcome could not be confirmed. Refresh the Cell inventory before retrying. ${message}` : message);
       }
       if (create) onCreated(result as CellDoc, start);
@@ -118,11 +134,28 @@ function ConfigCreation({ revision, inventory, configScope, onCreated }: { revis
     }
     finally { setPending(false); }
   }
+  const previewBlocked = (preview?.connectors ?? []).some(blocksCells);
+  const connectorPanel = config && detail.data && statuses.length > 0 && <section className="panel cell-connectors" aria-label="Connectors"><div className="panel-heading"><h2>Connectors</h2>{unresolved.length ? <span className="badge needs-connector">Needs connector: {[...new Set(unresolved.map(connectorTitle))].join(", ")}</span> : <span className="badge">{Object.keys(overrides).length ? `${Object.keys(overrides).length} picked for this cell` : "Config identities"}</span>}</div><div className="panel-body">
+    <p className="description">Each connector starts on the identity this Config resolves to. Pick another identity of the same connector to use it for this cell only; the Config and the defaults are not changed.</p>
+    {team && <p className="connector-team" role="note">This Config's identities are set by team <code>{team}</code>. A pick here still applies to this cell only.</p>}
+    {secrets.error && <p className="stale">Identities could not be listed: {secrets.error.message}. Name a secret by hand instead.</p>}
+    <ul className="state-list connector-status-list">{statuses.map(status => {
+      const title = connectorTitle(status);
+      const picked = overrides[status.connector];
+      const flagged = unresolved.includes(status);
+      return <li key={`${status.connector}:${status.component}`} aria-label={`${title} connector`}><div className="connector-status">
+        <div><strong>{title}</strong> <span className="badge">{status.connector}</span>{status.method && <> <span className="badge">{status.method}</span></>} {picked ? <span className="badge">Picked for this cell</span> : <ConnectorStateBadge status={status} />}</div>
+        {takesIdentity(status.delivery) ? <IdentitySelect label={`${title} identity`} identities={identitiesFor(secrets.data, status.connector)} value={picks[status.connector] ?? status.identity} extra={[status.identity]} emptyLabel={status.identity ? "Use the Config's identity" : status.required ? "No identity — required" : "No identity"} disabled={pending} required={status.required} realm={config.doc.metadata.realm} onChange={ref => { setPicks(old => ({ ...old, [status.connector]: ref })); setPreview(undefined); setStart(false); }} help={<>The Config resolves to: <StatusIdentity status={status} team={team} /></>} /> : <p className="description"><StatusIdentity status={status} team={team} /></p>}
+        {flagged && <p className="field-error" role="alert">{title} has no usable identity{status.message ? `: ${status.message}` : ""}. Pick one for this cell above, set a default, or pick one for the Config.</p>}
+        {status.state !== stateResolved && <ConnectorFixes status={status} connector={connectors.data?.find(item => item.name === status.connector)} config={detail.data!.metadata} identities={identitiesFor(secrets.data, status.connector)} secrets={secrets.data} onChanged={() => { setSaved(value => value + 1); setPreview(undefined); setStart(false); }} />}
+      </div></li>;
+    })}</ul>
+  </div></section>;
   return <div className="creation-layout">
     <section className="panel"><div className="panel-heading"><h2>Choose a CellConfig</h2><span className="badge">Existing config</span></div><div className="panel-body creation-form">
       {configs.loading && <p role="status">Loading CellConfigs…</p>}{configs.error && <div className="error" role="alert"><strong>CellConfigs unavailable</strong><p>{configs.error.message}</p></div>}{configs.error && configs.data && <p className="stale">Showing stale CellConfigs.</p>}
       <label>Search CellConfigs<input type="search" value={query} placeholder="Name or full scope" onChange={event => setQuery(event.target.value)} /></label>
-      <label>CellConfig<select value={selected} onChange={event => { setSelected(event.target.value); setPreview(undefined); setStart(false); setError(""); }}><option value="">Select a CellConfig…</option>{filtered.map(row => <option key={JSON.stringify(row.scope)} value={JSON.stringify(row.scope)}>{row.doc.metadata.name} — {scopeLabel(row.scope.slice(0, -1))}</option>)}</select></label>
+      <label>CellConfig<select value={selected} onChange={event => { setSelected(event.target.value); setPicks({}); setPreview(undefined); setStart(false); setError(""); }}><option value="">Select a CellConfig…</option>{filtered.map(row => <option key={JSON.stringify(row.scope)} value={JSON.stringify(row.scope)}>{row.doc.metadata.name} — {scopeLabel(row.scope.slice(0, -1))}</option>)}</select></label>
       {!configs.loading && !configs.error && !configRows.length && <p className="description">No CellConfigs are available.</p>}
       {inventory.data?.failures.length ? <p className="stale">Inventory is incomplete. Target scope may be unavailable.</p> : null}
     </div></section>
@@ -133,14 +166,16 @@ function ConfigCreation({ revision, inventory, configScope, onCreated }: { revis
           <h3>Referenced Blueprint</h3>{!blueprintRef ? <p className="error" role="alert">This config does not contain a Blueprint reference.</p> : !blueprintValid ? <p className="error" role="alert">The Blueprint reference is incomplete: {scopeLabel(blueprintScope)}</p> : blueprint.loading ? <p role="status">Checking referenced Blueprint…</p> : blueprint.error ? <div className="error" role="alert"><strong>{blueprint.error.code === "not_found" ? "Blueprint reference is missing" : "Blueprint could not be loaded"}</strong><p>{blueprint.error.message}</p><p>Reference: {scopeLabel(blueprintScope)}</p></div> : blueprint.data ? <p><a className="resource-name" href={catalogLink("blueprints", blueprintScope)}>{blueprint.data.metadata.name}</a> <span className="description">{scopeLabel(blueprintScope.slice(0, -1))}</span></p> : <p className="description">Blueprint details are unavailable.</p>}
         </>}
       </div></section>
+      {connectorPanel}
       <section className="panel"><div className="panel-heading"><h2>Create a stopped Cell</h2></div><form className="panel-body creation-form" onSubmit={event => { event.preventDefault(); void submit(false); }}>
         <label>Cell name (optional)<input value={name} disabled={pending} onChange={event => { setName(event.target.value); setPreview(undefined); setStart(false); }} /><small>Leave blank to let kukeon choose a name using its existing naming algorithm.</small></label>
         <label>Environment overrides<textarea value={env} disabled={pending} placeholder="KEY=VALUE, one per line" onChange={event => { setEnv(event.target.value); setPreview(undefined); setStart(false); }} /></label>
         <label className="schema-check"><input type="checkbox" checked={ignoreDiskPressure} disabled={pending} onChange={event => { setIgnoreDiskPressure(event.target.checked); setPreview(undefined); setStart(false); }} /> Ignore disk pressure for this creation</label>
         <p className="description">The daemon renders the existing config and blueprint, merging the Realm, Space and Stack defaults. Environment values are redacted in the preview. Creation leaves the Cell stopped.</p>
         {error && <p className="error" role="alert">{error}</p>}{pending && <p role="status">{stage === "create" ? "Creating Cell…" : "Preparing preview…"}</p>}
-        {preview && <div className="creation-review"><h3>Review Cell document</h3><p>Resolved Cell name: <strong>{preview.document.metadata.name}</strong></p><p className="description">The reviewed automatic name is sent back unchanged when creating, so preview and creation use the same name. kukeon may add its default root container during materialization.</p>{preview.values && <MergedValues values={preview.values} digest={preview.digest} />}<pre tabIndex={0} aria-label="Complete Cell preview">{JSON.stringify(preview.document, null, 2)}</pre><label className="schema-check"><input type="checkbox" checked={start} disabled={pending} onChange={event => setStart(event.target.checked)} /> {supportsAttach ? "Start and attach after creation" : "Start after creation"}</label><button type="button" disabled={pending || stackMissing} onClick={() => void submit(true)}>Create Cell</button></div>}
-        <button type="submit" disabled={pending || !detail.data || !blueprint.data || stackMissing}>{preview ? "Refresh preview" : "Preview Cell"}</button>
+        {preview && <div className="creation-review"><h3>Review Cell document</h3><p>Resolved Cell name: <strong>{preview.document.metadata.name}</strong></p><p className="description">The reviewed automatic name is sent back unchanged when creating, so preview and creation use the same name. kukeon may add its default root container during materialization.</p>{preview.connectors && <ConnectorIdentities statuses={preview.connectors} team={team} />}{preview.values && <MergedValues values={preview.values} digest={preview.digest} />}<pre tabIndex={0} aria-label="Complete Cell preview">{JSON.stringify(preview.document, null, 2)}</pre><label className="schema-check"><input type="checkbox" checked={start} disabled={pending} onChange={event => setStart(event.target.checked)} /> {supportsAttach ? "Start and attach after creation" : "Start after creation"}</label><button type="button" disabled={pending || stackMissing || previewBlocked || unresolved.length > 0} onClick={() => void submit(true)}>Create Cell</button></div>}
+        {unresolved.length > 0 && !preview && <><p className="field-error" role="alert">Create is disabled until every required connector resolves: {[...new Set(unresolved.map(connectorTitle))].join(", ")}.</p><button type="button" disabled>Create Cell</button></>}
+        <button type="submit" disabled={pending || !detail.data || !blueprint.data || stackMissing || unresolved.length > 0}>{preview ? "Refresh preview" : "Preview Cell"}</button>
       </form></section>
     </>}
   </div>;

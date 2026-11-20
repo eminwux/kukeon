@@ -277,9 +277,26 @@ func TestHarnessModesPerCell(t *testing.T) {
 	if got := cellblueprint.Modes(*pair.Blueprint); !slices.Equal(got, []string{headless, interactive}) {
 		t.Fatalf("modes = %v", got)
 	}
-	// The config is mode-neutral: no PROMPT, both fills present.
-	if _, set := pair.Config.Spec.Values["PROMPT"]; set || len(pair.Config.Spec.Secrets) != 2 {
+	// The config is mode-neutral: no PROMPT. The two secrets the role lists
+	// are the old names of two ways to authenticate, which are alternatives
+	// (issue #1548): the first one named picks the method, its identity is
+	// left to the Realm default, and composition says so.
+	if _, set := pair.Config.Spec.Values["PROMPT"]; set || len(pair.Config.Spec.Secrets) != 0 {
 		t.Fatalf("config values %v secrets %v", pair.Config.Spec.Values, pair.Config.Spec.Secrets)
+	}
+	if !slices.Equal(pair.Config.Spec.Components, []string{"claude-subscription"}) {
+		t.Fatalf("components = %v, want the one method the role's first secret selects", pair.Config.Spec.Components)
+	}
+	if !slices.ContainsFunc(result.Notes, func(note string) bool {
+		return strings.Contains(note, "subscription and api-key") && strings.Contains(note, "alternatives")
+	}) {
+		t.Fatalf("notes = %v, want the two methods reported as alternatives", result.Notes)
+	}
+	if want := []compose.DefaultSecret{{
+		Slot:      "claude-code-oauth-token",
+		Reference: config.SecretRef{Name: "claude-code-oauth-token", Realm: "default"},
+	}}; !reflect.DeepEqual(result.DefaultSecrets, want) {
+		t.Fatalf("default secrets = %+v", result.DefaultSecrets)
 	}
 	if template := pair.Blueprint.Spec.Cell.Containers[0]; template.Tty == nil || len(template.Tty.OnInit) != 0 {
 		t.Fatalf("a harness with modes keeps its startup in the modes: %+v", template.Tty)
@@ -294,7 +311,7 @@ func TestHarnessModesPerCell(t *testing.T) {
 		t.Fatalf("interactive launcher: %s", launcher)
 	}
 	if names := secretNames(attached); !slices.Equal(names, []string{"CLAUDE_CODE_OAUTH_TOKEN"}) {
-		t.Fatalf("interactive secrets = %v (the API key is the headless mode's)", names)
+		t.Fatalf("interactive secrets = %v", names)
 	}
 	if envOf(attached)["HARNESS_SETTINGS"] != "config/claude.settings.json" ||
 		envOf(attached)["ANTHROPIC_MODEL"] != "opus" {
@@ -309,10 +326,8 @@ func TestHarnessModesPerCell(t *testing.T) {
 		strings.Contains(launcher, "${PROMPT}") {
 		t.Fatalf("headless launcher: %s", launcher)
 	}
-	if names := secretNames(dispatched); !slices.Equal(
-		names,
-		[]string{"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"},
-	) {
+	// The method is the Config's, so both modes authenticate the same way.
+	if names := secretNames(dispatched); !slices.Equal(names, []string{"CLAUDE_CODE_OAUTH_TOKEN"}) {
 		t.Fatalf("headless secrets = %v", names)
 	}
 	// Both modes share the state volume, so a login made attached serves runs.
@@ -387,10 +402,50 @@ func TestBlueprintIsASelfDescribingForm(t *testing.T) {
 	if _, legacy := params["PROMPT"]; legacy {
 		t.Error("PROMPT must be the headless mode's parameter, not the blueprint's")
 	}
-	if len(bp.Spec.Components) != 3 {
-		t.Fatalf("components = %+v", bp.Spec.Components)
+	byName := map[string]api.BlueprintComponent{}
+	var order []string
+	for _, c := range bp.Spec.Components {
+		byName[c.Name] = c
+		order = append(order, c.Name)
 	}
-	harnessComp, connector, forge := bp.Spec.Components[0], bp.Spec.Components[1], bp.Spec.Components[2]
+	// The harness, the ways it authenticates (one exclusive group), then the
+	// connectors and forges a role may enable.
+	if want := []string{
+		"codex", "codex-login", "codex-api-key", "codex-access-token", "git", "github", "github-issues",
+	}; !slices.Equal(order, want) {
+		t.Fatalf("components = %v, want %v", order, want)
+	}
+	harnessComp, connector, forge := byName["codex"], byName["github"], byName["github-issues"]
+	for _, name := range []string{"codex-login", "codex-api-key", "codex-access-token"} {
+		auth := byName[name]
+		if auth.Kind != api.ComponentKindConnector || !auth.Optional || auth.Group != "codex-auth" ||
+			auth.Connector == nil || auth.Connector.Name != "codex" || auth.Connector.Title == "" ||
+			!slices.Equal(auth.Connector.SecretTypes, []string{api.SecretTypeOpaque}) {
+			t.Fatalf("auth component %s = %+v (connector %+v)", name, auth, auth.Connector)
+		}
+	}
+	if login := byName["codex-login"]; login.Connector.Delivery != api.ConnectorDeliveryStateVolume ||
+		login.Connector.Method != "login" || len(login.Secrets) != 0 {
+		t.Fatalf("codex-login = %+v (connector %+v)", login, login.Connector)
+	}
+	if key := byName["codex-api-key"]; key.Connector.Delivery != api.ConnectorDeliveryEnv ||
+		len(key.Secrets) != 1 || key.Secrets[0].Name != "openai-api-key" ||
+		key.Secrets[0].EnvName != "OPENAI_API_KEY" || !key.Secrets[0].Required {
+		t.Fatalf("codex-api-key = %+v", key)
+	}
+	// The git connector carries the identity schema the daemon and the UI
+	// validate against, and no slot of its own.
+	if git := byName["git"]; git.Group != "" || git.Connector == nil ||
+		git.Connector.Delivery != api.ConnectorDeliveryGit || !git.Connector.Optional || len(git.Secrets) != 0 ||
+		!slices.ContainsFunc(git.Connector.Fields, func(f api.ConnectorField) bool {
+			return f.Name == "hosts" && f.Required && f.Type == api.ConnectorFieldList
+		}) {
+		t.Fatalf("git connector component = %+v (connector %+v)", git, git.Connector)
+	}
+	if connector.Group != "" || connector.Connector == nil || connector.Connector.Name != "github" ||
+		connector.Connector.Delivery != api.ConnectorDeliveryEnv {
+		t.Fatalf("github connector descriptor = %+v", connector.Connector)
+	}
 	if harnessComp.Kind != api.ComponentKindHarness || harnessComp.Name != "codex" || harnessComp.Optional ||
 		!slices.Equal(harnessComp.Requires, []string{"codex"}) {
 		t.Fatalf("harness component = %+v", harnessComp)
@@ -487,13 +542,32 @@ func TestGitHubConnector(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			// An identity the operator bound is a Config fill; the default
+			// one is left to the Realm default, written once on application.
+			chosen := len(tc.bindings) > 0
+			wantDefaults := []compose.DefaultSecret{{
+				Slot: "github-token", Reference: config.SecretRef{Name: "gh-token", Realm: "default"},
+			}}
+			if chosen {
+				wantDefaults = nil
+			}
+			if !reflect.DeepEqual(result.DefaultSecrets, wantDefaults) {
+				t.Fatalf("default secrets = %+v, want %+v", result.DefaultSecrets, wantDefaults)
+			}
 			for _, pair := range result.Pairs {
-				if !slices.Equal(pair.Config.Spec.Components, tc.components) {
-					t.Fatalf("%s components = %v, want %v", pair.Harness, pair.Config.Spec.Components, tc.components)
+				// Every harness Config also says how the harness
+				// authenticates: its login, with nothing chosen.
+				want := append([]string{pair.Harness + "-login"}, tc.components...)
+				if !slices.Equal(pair.Config.Spec.Components, want) {
+					t.Fatalf("%s components = %v, want %v", pair.Harness, pair.Config.Spec.Components, want)
 				}
-				fill := pair.Config.Spec.Secrets["github-token"]
-				if len(pair.Config.Spec.Secrets) != 1 || fill.SecretRef == nil || fill.SecretRef.Name != tc.secret {
+				fill, filled := pair.Config.Spec.Secrets["github-token"]
+				if filled != chosen || len(pair.Config.Spec.Secrets) > 1 ||
+					(filled && (fill.SecretRef == nil || fill.SecretRef.Name != tc.secret)) {
 					t.Fatalf("%s secret fills = %+v", pair.Harness, pair.Config.Spec.Secrets)
+				}
+				if pair.Secrets[0].Default == chosen {
+					t.Fatalf("%s requirement default = %v, chosen = %v", pair.Harness, pair.Secrets[0].Default, chosen)
 				}
 				if len(pair.Secrets) != 1 || pair.Secrets[0].Identifier != "github-token" ||
 					pair.Secrets[0].Destination.EnvName != "GH_TOKEN" || pair.Secrets[0].Reference.Name != tc.secret {
@@ -585,8 +659,16 @@ spec:
 		c.Secrets[0].SecretRef.Realm != "default" {
 		t.Fatalf("custom connector not applied: env=%v secrets=%+v", envOf(c), c.Secrets)
 	}
-	if len(pair.Blueprint.Spec.Components) != 2 {
-		t.Fatalf("bundled components leaked into an overridden library: %+v", pair.Blueprint.Spec.Components)
+	// The override replaces the component library, not the connector catalog
+	// (Options.Connectors): the bundled forge is gone, the custom connector is
+	// in, and the catalog's connectors are still on the form.
+	names := []string{}
+	for _, c := range pair.Blueprint.Spec.Components {
+		names = append(names, c.Name)
+	}
+	if slices.Contains(names, "github-issues") || !slices.Contains(names, "tracker") ||
+		!slices.Contains(names, "github") {
+		t.Fatalf("components of an overridden library = %v", names)
 	}
 	opts.Components = fstest.MapFS{"bad/component.yaml": &fstest.MapFile{Data: []byte("kind: Component\n")}}
 	if result, err = compose.Compose(cfg, selectedTeam(cfg), opts); err == nil || result != nil ||

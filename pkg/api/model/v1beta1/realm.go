@@ -47,15 +47,25 @@ type RealmSpec struct {
 	Images []RealmImage `json:"images,omitempty"              yaml:"images,omitempty"`
 }
 
-// RegistryCredentials contains authentication information for a container registry.
+// RegistryCredentials binds a pull credential to a container registry. The
+// credential is a Secret (SecretRef) — the registry connector (issue #1548).
+// An entry written before that carries Username and Password inline; it still
+// loads and still pulls.
 type RegistryCredentials struct {
-	// Username is the registry username.
-	Username string `json:"username"                yaml:"username"`
-	// Password is the registry password or token.
-	Password string `json:"password"                yaml:"password"`
+	// Username is the registry username of an inline entry.
+	Username string `json:"username,omitempty"      yaml:"username,omitempty"`
+	// Password is the registry password or token of an inline entry. It is
+	// write-only: `kuke get realm` and the web UI never show it, and an
+	// inline entry applied without one keeps the password already stored for
+	// the same server and username.
+	Password string `json:"password,omitempty"      yaml:"password,omitempty"`
 	// ServerAddress is the registry server address (e.g., "docker.io", "registry.example.com").
 	// If empty, credentials apply to the registry extracted from the image reference.
 	ServerAddress string `json:"serverAddress,omitempty" yaml:"serverAddress,omitempty"`
+	// SecretRef names the basic-auth Secret holding the credential. It must
+	// be scoped to this Realm (no space, stack or cell); an omitted realm is
+	// this one. Mutually exclusive with Username and Password.
+	SecretRef *ContainerSecretRef `json:"secretRef,omitempty"     yaml:"secretRef,omitempty"`
 }
 
 type RealmStatus struct {

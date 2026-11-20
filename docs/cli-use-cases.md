@@ -390,7 +390,7 @@ sudo kuke create cell probe --from-config dev-claude --dry-run --explain
 **Invariants.**
 
 - `--type` is `opaque` (default), `basic-auth` or `ssh-key`. `basic-auth` needs `--username` and exactly one of `--password-stdin` / `--token-stdin` / `--from-file` / `--token-file`; `ssh-key` needs `--from-file <private key>`. A flag belonging to another type exits non-zero.
-- `kuke get secrets` shows a `TYPE` column. No verb, log line, apply result or web UI response ever prints a secret's material — for any type.
+- `kuke get secrets` shows `TYPE` and `CONNECTOR` columns. No verb, log line, apply result or web UI response ever prints a secret's material — for any type.
 - A typed secret is consumed only through a `git` block. Referencing one from `containers[].secrets[]` fails the cell create; referencing an `opaque` secret as a git credential fails it too. Both errors name the secret and the expected type, never its content.
 - A secret referenced by a cell's git credentials or signing config cannot be deleted while that cell exists (same in-use guard as `secrets[]`).
 - The git identity is rendered as a container-global gitconfig (`GIT_CONFIG_SYSTEM`), not as `GIT_AUTHOR_*` / `GIT_CONFIG_*` env, so a repository's local config and a per-repo `git` block override it. Cells created before this change keep their env rendering until recreated.
@@ -398,6 +398,41 @@ sudo kuke create cell probe --from-config dev-claude --dry-run --explain
 - Host keys are strict by default: the secret's pinned `knownHosts`, else the built-in `github.com` / `gitlab.com` / `bitbucket.org` keys. `hostKeyPolicy: accept-new` is opt-in per credential. A repo with no credential is cloned with the same strict policy plus the image's own `~/.ssh/known_hosts`.
 - An encrypted private key without a stored passphrase fails the cell create with a message naming the secret. With one, the key is served from a per-container `ssh-agent` and never written decrypted.
 - `--dry-run --explain` lists per repo the effective author, committer, credential (secret name + type) and signing key, each with the level that set it (`realm`, `space`, `stack`, `config`).
+
+### Connectors and identities
+
+**Intent.** Store a credential once, pick it by name for a team, a Config or one cell, and replace it in one place. Concept and catalog: [`docs/site/concepts/connectors.md`](site/concepts/connectors.md).
+
+**Sequence.**
+
+```bash
+# 1. store an identity: a Secret tagged with its connector
+sudo kuke create secret work-github --connector github --from-file ./token
+sudo kuke create secret bot-key --connector git --type ssh-key --from-file ~/.ssh/id_ed25519 \
+    --author 'Dev Bot <bot@example.com>' --hosts github.com --sign commits,tags
+
+# 2. make it the default of a scope (Realm / Space / Stack spec.defaults.secrets.<slot>,
+#    spec.defaults.git.identityRef), or name it for a team under `connectors`
+sudo kuke apply -f realm-with-defaults.yaml
+
+# 3. see how every Config resolves, and what is missing
+sudo kuke get configs -o wide
+
+# 4. use another identity for one cell
+sudo kuke create cell --from-config team-dev-claude --connector github=other-github
+```
+
+**Invariants.**
+
+- `--connector <name>` on `kuke create secret` validates the secret against that connector: an unknown connector, a type the connector does not accept, an unknown identity field, a missing required field or a value that does not read as its declared type exits non-zero and stores nothing. An identity field without `--connector` exits non-zero.
+- `kuke get secrets` shows `TYPE` and `CONNECTOR`; `-o wide` adds the readable `IDENTITY` fields. No output, log line or error carries secret material.
+- The identity of a connector resolves per cell as: `--connector` override > the Config's fill > Stack default > Space default > Realm default. A Config that chose no identity has no fill, so changing a default changes its next cell with no re-apply of the Config.
+- `kuke get configs -o wide` prints a `CONNECTORS` column (`github=work-github (realm)`, `claude=login`, `github=MISSING`); `-o yaml` carries the same resolution in `status.connectors`.
+- A Config whose required connector resolves to no identity cannot be previewed (`--dry-run`) or created: the command exits non-zero with an error naming the connector. A named identity that is missing, tagged for another connector or of a type the connector does not accept exits non-zero too, also for an optional connector.
+- A Config that enables two components of one group (two ways to authenticate one harness) is rejected at apply.
+- `--connector <connector>=<secret>[@realm[/space[/stack]]]` is valid with `--from-config` only (`kuke create cell`, `kuke run`). A connector the Config does not require exits non-zero. The override is recorded in `spec.provenance.connectorOverrides` and is used again by `kuke restart`, a reconcile-driven recreate and `--clone`.
+- `git.identityRef` (scope defaults, a Config's `git`, a repo fill's `git`) is expanded by the daemon into author, committer, credentials and signing; fields written next to it win. A cell document or blueprint container that carries `git.identityRef` is rejected.
+- `kuke create registry-credential` stores the credential as a `basic-auth` Secret of the realm and binds the server to it with `secretRef`; re-running it for a server whose entry is still inline moves the password into the Secret. `kuke get realm -o yaml|json` never prints a registry password, inline entries included.
 
 ### Harness mode per cell
 

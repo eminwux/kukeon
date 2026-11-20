@@ -474,14 +474,78 @@ keeping every other entry. **Replace** on a row pre-fills its server and
 username; the token must be typed again. The token is sent only in the JSON
 body of `POST /api/realms/{realm}/registry-credentials`
 (`{ "server", "username", "password" }`), cleared from the form on submit, and
-never written to the URL or browser storage. The response is
-`{ "realm", "server", "username", "action" }`, without the token. kukeond
-applies the updated realm as a compatible change (no realm recreate), and the
-overview reloads after a successful save. Validation, permission, and daemon
+never written to the URL or browser storage. The server stores it as a
+`basic-auth` Secret of the realm — an identity of the `registry`
+[connector](site/concepts/connectors.md#registry), named `registry-<server>` —
+and binds the server to that Secret on the realm, so the realm document never
+carries the token; an entry that still has an inline password is replaced by
+the Secret-backed one. The response is
+`{ "realm", "server", "username", "secret", "action" }`, without the token.
+kukeond applies the updated realm as a compatible change (no realm recreate),
+and the overview reloads after a successful save. Validation, permission, and daemon
 errors use the standard notices and never repeat the submitted token.
 
 Every realm response (`/api/realms`, `/api/realms/{name}`, and its **View
 document** view) returns registry credentials with an empty `password`.
+
+## Connectors
+
+**Connectors** in the sidebar lists the [connectors](site/concepts/connectors.md)
+the `kuke` binary embeds: the kinds of access a cell needs. Nothing on the page
+is written per connector — it renders what `GET /api/connectors` returns, so a
+connector added as one `connector.yaml` appears here with its identity form,
+its methods and its defaults.
+
+The list shows, per connector, how it is delivered (one line per method), how
+many identities are stored, how many Configs require it, and how many of those
+have no identity. A connector with such Configs carries a **Needs a default**
+badge and a **Set a default** link that opens the connector on the first
+affected Config's scope.
+
+A connector's page (`#/connectors/<name>`) has:
+
+- **Identities** — the Secrets tagged with the connector: name, scope, type and
+  the readable identity fields. Values are write-only and never returned to the
+  browser. The form below the table stores a new identity at a chosen Realm,
+  Space or Stack; its fields come from the connector's descriptor (a token, a
+  username and password, or an SSH key with its optional parts). **Rotate**
+  replaces the value stored under an existing name; **Delete** uses the same
+  confirmation as the Secrets catalog, and a Secret still referenced by a cell
+  is refused.
+- **Defaults** — for a chosen scope, what each level (Realm, Space, Stack) sets
+  as the default identity of each method, and which one is **Effective**. The
+  deepest level wins. **Set default** writes one level, **Clear** removes it. A
+  change takes effect at once: no Config is re-rendered. A connector that can
+  only be defaulted at some levels says so on the others.
+- **Needs a default** — the Configs that require the connector and resolve to
+  no identity, each with a link that opens the defaults on that Config's scope.
+- For the connector that authenticates image pulls, the Realm's registry
+  entries and the [Registry credentials](#registry-credentials) form instead of
+  scoped defaults: a registry credential belongs to one Realm.
+
+A method that keeps its login in the harness state volume has no identity and
+no default; the page says so and shows no picker for it.
+
+Elsewhere in the UI:
+
+- The **Configs** list marks a Config that cannot create cells yet with a
+  **Needs connector** badge. Its detail page has **Connector identities**: the
+  identity each connector resolves to and the level that decided it (the
+  Config, or the Stack, Space or Realm default). An unresolved connector offers
+  **Set default** (stores a default for the Config's scope, creating the
+  identity inline when none exists) and **Pick for this Config** (saved in the
+  Config itself; it wins over the defaults for this Config only). **Use the
+  default instead** removes a Config's own pick. A Config owned by a team is
+  read-only here: its identities are set by the team's `kuketeam.yaml`.
+- **New Config** shows the methods of a connector as one required choice — the
+  methods of a group are alternatives and a Config enables exactly one — and an
+  identity picker per connector that takes one. Leaving the picker on
+  **Default** keeps the Config inheriting the scope's default; the form will
+  not submit when a required connector has neither.
+- **New Cell** starts each connector on the identity the Config resolves to.
+  Picking another identity of the same connector uses it for this cell only;
+  the Config and the defaults are not changed. The preview names the identity
+  each connector resolved to and where it came from, and never any material.
 
 ## Options and permissions
 
@@ -659,6 +723,46 @@ running cell, returns `in_use` (409). Other daemon errors keep their usual
 mapping. Every error message is the daemon's own text. A success returns
 `kind`, `name`, `scope`, and `deleted`, and for Configs `backRefCells`: the
 Cells that still carry the Config's lineage label.
+
+### Connectors HTTP API
+
+- `GET /api/connectors` returns the connector catalog: per connector `name`,
+  `title`, `description`, `scopes`, `secretTypes`, `fields`, `optional`,
+  `harness`, `group`, and `methods` (`name`, `component`, `default`,
+  `delivery`, and the `slot`, `envName` or `mountPath` it delivers to). A
+  connector whose delivery is code has a top-level `delivery` and no methods.
+- `GET /api/connectors/status` returns, per connector, the number of `configs`
+  that require it and `missing`: the Configs that resolve to no identity
+  (`config`, `component`, `method`, `slot`, `delivery`, `message`).
+- `GET /api/connectors/defaults?realm=&space=&stack=` returns, per connector
+  method, the default each level of that scope sets (`levels`, keyed `realm`,
+  `space`, `stack`), the `effective` one and its `origin`.
+- `POST /api/connectors/{connector}/defaults` sets or clears one level's
+  default. Body `{ "scope": {"realm","space","stack"}, "method", "identity" }`;
+  the level is the deepest coordinate `scope` names, `identity` is a Secret
+  reference (`name`, `realm`, optional `space` and `stack`), and `null` clears
+  it. Response `{ "connector", "method", "scope", "level", "identity",
+"action" }`.
+- `POST /api/connectors/{connector}/identities` creates or rotates an identity.
+  Body `{ "scope", "name", "type", "identity" }` plus the material for the
+  type: `value`, or `username` and `password`, or `privateKey` with optional
+  `passphrase`, `publicKey`, `certificate` and `knownHosts`. Response
+  `{ "name", "scope", "connector", "type", "identity", "action" }`: the
+  material is never echoed.
+- `POST /api/configs/connector` picks an identity for one Config, or clears the
+  pick with a `null` identity. Body `{ "config", "connector", "identity" }`. A
+  team-owned Config is refused.
+
+The POST endpoints require the exact same Origin and
+`Content-Type: application/json`, and reject unknown fields. An identity of
+the wrong connector or type, or an unknown connector, returns
+`connector_invalid` (400). A render that leaves a required connector without
+an identity returns `connector_unresolved` (409) from the preview and create
+endpoints, which is what the **Set default** and **Pick for this Config**
+actions answer. The Cell endpoints `/api/cells/from-config/preview` and
+`/api/cells/from-config/create` additionally accept `connectors`: the
+identities picked for that cell only, keyed by connector name; their preview
+returns the resolution of every connector under `connectors`.
 
 ### Create a Cell
 

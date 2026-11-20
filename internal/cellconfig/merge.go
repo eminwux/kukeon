@@ -49,6 +49,34 @@ type DefaultsLayer struct {
 func MergeDefaults(
 	cfg v1beta1.CellConfigDoc, bp v1beta1.CellBlueprintDoc, layers []DefaultsLayer,
 ) (v1beta1.CellConfigDoc, []v1beta1.RenderedValue) {
+	return MergeDefaultsForCell(cfg, bp, layers, nil)
+}
+
+// gitLayersFor lists the git identity layers of a render, shallowest first
+// (#1472): Realm → Space → Stack → Config, then what the cell chose for itself.
+// A deeper layer wins per field; credentials merge by host.
+func gitLayersFor(cfg v1beta1.CellConfigDoc, layers []DefaultsLayer, cell *v1beta1.ScopeDefaults) []GitLayer {
+	out := make([]GitLayer, 0, len(layers)+1)
+	for _, layer := range layers {
+		if layer.Defaults != nil {
+			out = append(out, GitLayer{Origin: layer.Origin, Git: layer.Defaults.Git})
+		}
+	}
+	out = append(out, GitLayer{Origin: v1beta1.RenderOriginConfig, Git: cfg.Spec.Git})
+	if cell != nil {
+		out = append(out, GitLayer{Origin: v1beta1.RenderOriginCell, Git: cell.Git})
+	}
+	return out
+}
+
+// MergeDefaultsForCell is MergeDefaults with one more level applied after the
+// Config: what a single cell chose for itself at create time (issue #1548).
+// Only the cell's secret fills and git identity are read — a cell's values
+// have their own channel (the mode parameters) — and they win over the Config
+// and every scope default, attributed to the cell.
+func MergeDefaultsForCell(
+	cfg v1beta1.CellConfigDoc, bp v1beta1.CellBlueprintDoc, layers []DefaultsLayer, cell *v1beta1.ScopeDefaults,
+) (v1beta1.CellConfigDoc, []v1beta1.RenderedValue) {
 	repoSlots, secretSlots := declaredSlots(bp)
 
 	values := map[string]string{}
@@ -93,17 +121,14 @@ func MergeDefaults(
 		secrets[k] = v
 		secretOrigin[k] = v1beta1.RenderOriginConfig
 	}
-
-	// Git identity (#1472): Realm → Space → Stack → Config, deeper wins per
-	// field; credentials merge by host.
-	gitLayers := make([]GitLayer, 0, len(layers)+1)
-	for _, layer := range layers {
-		if layer.Defaults != nil {
-			gitLayers = append(gitLayers, GitLayer{Origin: layer.Origin, Git: layer.Defaults.Git})
+	if cell != nil {
+		for k, v := range cell.Secrets {
+			secrets[k] = v
+			secretOrigin[k] = v1beta1.RenderOriginCell
 		}
 	}
-	gitLayers = append(gitLayers, GitLayer{Origin: v1beta1.RenderOriginConfig, Git: cfg.Spec.Git})
-	mergedGit, gitOrigins := MergeGit(gitLayers)
+
+	mergedGit, gitOrigins := MergeGit(gitLayersFor(cfg, layers, cell))
 
 	merged := cfg
 	merged.Spec.Git = mergedGit

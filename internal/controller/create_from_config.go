@@ -68,6 +68,11 @@ type CellFromConfigRequest struct {
 	// request — and it labels the cell kukeon.io/schedule=<config> and makes
 	// it self-deleting.
 	Schedule string
+	// ConnectorOverrides pick, for this cell only, the identity of a
+	// connector the Config requires, keyed by connector name (issue #1548).
+	// A reference without a realm is looked up in the cell's own realm. The
+	// method stays the Config's. Recorded in the cell's provenance.
+	ConnectorOverrides map[string]v1beta1.ContainerSecretRef
 }
 
 // CellFromConfigPreview is the outcome of a render: the rendered cell, its
@@ -76,6 +81,8 @@ type CellFromConfigPreview struct {
 	Cell   v1beta1.CellDoc
 	Digest string
 	Values []v1beta1.RenderedValue
+	// Connectors is how each connector the Config requires resolved.
+	Connectors []v1beta1.ConnectorStatus
 }
 
 // CellFromConfigResult is the outcome of CreateCellFromConfig.
@@ -115,7 +122,7 @@ func (b *Exec) PreviewCellFromConfig(req CellFromConfigRequest) (CellFromConfigP
 
 	rendered, err := renderCellFromConfig(b.runner, cfg, cellBinding{
 		Name: name, EnvOverrides: req.EnvOverrides, Mode: strings.TrimSpace(req.Mode), Params: req.Params,
-		Schedule: strings.TrimSpace(req.Schedule),
+		Schedule: strings.TrimSpace(req.Schedule), Connectors: req.ConnectorOverrides,
 	})
 	if err != nil {
 		return CellFromConfigPreview{}, err

@@ -90,6 +90,9 @@ func (f *fakeClient) renderFromConfig(
 		if len(req.Params) > 0 {
 			prov.ParamOverrides = req.Params
 		}
+		if len(req.ConnectorOverrides) > 0 {
+			prov.ConnectorOverrides = req.ConnectorOverrides
+		}
 	}
 	if req.AutoDelete {
 		doc.Spec.AutoDelete = true

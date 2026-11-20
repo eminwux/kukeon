@@ -70,13 +70,25 @@ const (
 
 // SecretSpec carries the secret material supplied at apply time. Every material
 // field is write-only from the operator's perspective: it is persisted to the
-// daemon-managed file and never echoed back. Type is the only field `kuke get
-// secret` reports. The omitempty tags keep a zero value out of any incidental
-// serialization, but the material itself is never serialized into a result or
-// status by design.
+// daemon-managed file and never echoed back. Type, Connector and Identity are
+// the readable fields `kuke get secret` reports. The omitempty tags keep a zero
+// value out of any incidental serialization, but the material itself is never
+// serialized into a result or status by design.
 type SecretSpec struct {
 	// Type is one of opaque (default when empty), basic-auth or ssh-key.
 	Type string `json:"type,omitempty"      yaml:"type,omitempty"`
+	// Connector tags the secret as an identity of one connector (for example
+	// "claude", "github", "git", "registry"; issue #1548). It is readable and
+	// an open string: the daemon keeps no connector catalog, so a secret may
+	// name a connector a newer kuke defines. Pickers list the secrets whose
+	// tag matches; an untagged secret can still be named by hand.
+	Connector string `json:"connector,omitempty" yaml:"connector,omitempty"`
+	// Identity holds the readable, non-secret facts of the identity, keyed by
+	// the field names the connector declares (a git identity carries author,
+	// committer, hosts, sign and allowedSignersRef). Every value is a string;
+	// the connector's field type says how it is read (a list is
+	// comma-separated). Never put key material here.
+	Identity map[string]string `json:"identity,omitempty"  yaml:"identity,omitempty"`
 	// Data is the raw secret material of an opaque secret.
 	Data string `json:"data,omitempty"      yaml:"data,omitempty"`
 	// BasicAuth is the material of a basic-auth secret.

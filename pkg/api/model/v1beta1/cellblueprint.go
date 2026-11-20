@@ -161,6 +161,14 @@ type BlueprintComponent struct {
 	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 	// Optional marks a component a CellConfig must enable explicitly.
 	Optional bool `json:"optional,omitempty"    yaml:"optional,omitempty"`
+	// Group names a set of mutually exclusive components (for example
+	// "claude-auth": the ways a claude cell authenticates). A CellConfig that
+	// enables two components of one group is rejected (issue #1548).
+	Group string `json:"group,omitempty"       yaml:"group,omitempty"`
+	// Connector is the connector definition this component delivers, copied
+	// from the catalog when the blueprint is rendered. Connector components
+	// only.
+	Connector *BlueprintConnector `json:"connector,omitempty"   yaml:"connector,omitempty"`
 	// Container is the id of the container the Env, Secrets and mode onInit
 	// land on. Empty selects the cell's default attach container
 	// (spec.cell.tty.default), else the first attachable container, else the

@@ -139,12 +139,24 @@ func TestImportGitIdentityBuildsSecretsAndRewritesConfig(t *testing.T) {
 	wantKey := api.SecretDoc{
 		APIVersion: api.APIVersionV1Beta1, Kind: api.KindSecret,
 		Metadata: api.SecretMetadata{Name: "git-ssh", Realm: "default"},
-		Spec: api.SecretSpec{Type: api.SecretTypeSSHKey, SSHKey: &api.SecretSSHKey{
-			PrivateKey:  plainKey,
-			PublicKey:   publicKeyLine,
-			Certificate: "ssh-ed25519-cert-v01@openssh.com AAAACertificate operator",
-			KnownHosts:  "git.example.com ssh-ed25519 AAAAPinned\n",
-		}},
+		Spec: api.SecretSpec{
+			Type: api.SecretTypeSSHKey,
+			// The imported key is a git identity (#1548): one reference
+			// names its hosts, author, signing and allowed signers.
+			Connector: "git",
+			Identity: map[string]string{
+				"hosts":             "github.com",
+				"author":            "Dev <dev@example.com>",
+				"sign":              "commits,tags",
+				"allowedSignersRef": "git-allowed-signers",
+			},
+			SSHKey: &api.SecretSSHKey{
+				PrivateKey:  plainKey,
+				PublicKey:   publicKeyLine,
+				Certificate: "ssh-ed25519-cert-v01@openssh.com AAAACertificate operator",
+				KnownHosts:  "git.example.com ssh-ed25519 AAAAPinned\n",
+			},
+		},
 	}
 	if !reflect.DeepEqual(keyDoc, wantKey) {
 		t.Fatalf("key secret = %+v", keyDoc)

@@ -9,9 +9,8 @@ metadata:
 spec:
   namespace: kukeon-main
   registryCredentials:
-    - username: myuser
-      password: mypass
-      serverAddress: registry.example.com
+    - serverAddress: registry.example.com
+      secretRef: { name: registry-registry-example-com }
 status:
   state: Ready
   cgroupPath: /kukeon/main
@@ -29,19 +28,25 @@ The containerd namespace this realm uses for its images, containers, and tasks. 
 
 Authentication for image registries. Scoped to the realm — two realms can use different credentials for the same registry.
 
-| Field           | Type   | Required | Description                                                                                                 |
-| --------------- | ------ | -------- | ----------------------------------------------------------------------------------------------------------- |
-| `username`      | string | yes      | Registry username                                                                                           |
-| `password`      | string | yes      | Registry password or token                                                                                  |
-| `serverAddress` | string | no       | Registry server (e.g., `docker.io`, `ghcr.io`). If omitted, applies to the registry in the image reference. |
+| Field           | Type   | Required | Description                                                                                                                                                                                                                  |
+| --------------- | ------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `serverAddress` | string | no       | Registry server (e.g., `docker.io`, `ghcr.io`). If omitted, applies to the registry in the image reference.                                                                                                                  |
+| `secretRef`     | object | one of   | A `basic-auth` [Secret](secret.md) of this realm holding the username and password — an identity of the `registry` [connector](../concepts/connectors.md#registry). `name` is required; the realm is always the Realm's own. |
+| `username`      | string | one of   | Inline registry username (the form that predates `secretRef`)                                                                                                                                                                |
+| `password`      | string | one of   | Inline registry password or token. Write-only: `kuke get realm` and the web UI never print it.                                                                                                                               |
+
+An entry carries either `secretRef` or an inline `username` and `password`, not both. Prefer `secretRef`: the password then lives in a root-only secret file instead of the realm's metadata, and rotating it is one `kuke create secret`.
 
 ```yaml
 spec:
   registryCredentials:
-    - username: eminwux
-      password: ${{ GHCR_TOKEN }}
-      serverAddress: ghcr.io
+    - serverAddress: ghcr.io
+      secretRef: { name: registry-ghcr-io }
 ```
+
+[`kuke create registry-credential`](../cli/kuke-create.md#kuke-create-registry-credential) writes the Secret and this entry in one step, and moves an existing inline entry for the same server into a Secret. A Realm applied with an inline entry whose `password` is left out keeps the stored password, so the output of `kuke get realm -o yaml` — which never contains one — can be edited and re-applied.
+
+A `secretRef` that cannot be read when an image is pulled (the Secret is missing or is not `basic-auth`) is logged and skipped: the pull proceeds without that credential and fails with the registry's own error if the image is private.
 
 ### `spec.defaults` (object, optional)
 

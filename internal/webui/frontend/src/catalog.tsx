@@ -8,6 +8,7 @@ import { DocumentRowLink, RowAction, RowActions } from "./icons";
 import { catalogAPI, catalogDeleteAPI } from "./catalog-url.mjs";
 import { useNotify } from "./notifications";
 import { AskMajordomo, catalogQuestion } from "./majordomo";
+import { ConfigConnectors, NeedsConnectorBadge } from "./connector-ui";
 
 type Metadata = { name: string; realm?: string; space?: string; stack?: string; cell?: string; labels?: Record<string, string>; annotations?: Record<string, string> };
 type CatalogDoc = { metadata: Metadata; spec?: Record<string, unknown>; [key: string]: unknown };
@@ -134,7 +135,7 @@ function DeleteDependents({ kind, doc, revision, inventory }: { kind: string; do
     {matches.length > 0 && <><h3>Cells created through those Configs</h3><RelatedCellList rows={cellRows} inventory={inventory} configLabel /></>}
   </section>;
 }
-function CatalogDeleteConfirmation({ kind, doc, revision, inventory, onCancel, onConfirm }: { kind: string; doc: CatalogDoc; revision: number; inventory: InventoryResource; onCancel: () => void; onConfirm: () => void }) {
+export function CatalogDeleteConfirmation({ kind, doc, revision, inventory, onCancel, onConfirm }: { kind: string; doc: CatalogDoc; revision: number; inventory: InventoryResource; onCancel: () => void; onConfirm: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [acknowledged, setAcknowledged] = useState(false);
   const scope = [...scopeOf(doc.metadata), doc.metadata.name];
@@ -218,7 +219,7 @@ function CatalogList({ kind, revision, inventory, onChanged }: { kind: string; r
     <section className="panel" aria-label={`${catalogTitles[kind]} list`} aria-busy={list.loading}>
       <div className="list-controls"><label className="search-field">Search<input type="search" value={query} placeholder={`Search ${kind}…`} onChange={e => { setQuery(e.target.value); setPage(0); }} /></label><label>Realm<select aria-label="Filter by realm" value={realm} onChange={e => { setRealm(e.target.value); setPage(0); }}><option value="">All realms</option>{[...new Set(list.data?.map(doc => doc.metadata.realm))].sort().map(name => <option key={name}>{name}</option>)}</select></label><span className="result-count">{rows.length} results</span>{(kind === "blueprints" || kind === "configs") && <a className="document-action" href={newConfigLink()}>New Config</a>}</div>
       {list.loading && <p className="scope-filter" role="status">Loading {kind}…</p>}
-      <div className="table-scroll"><table><thead><tr><th>Name</th><th>Scope</th><th>Type</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{rows.slice(currentPage * 25, (currentPage + 1) * 25).map(doc => { const scope = [...scopeOf(doc.metadata), doc.metadata.name]; return <tr key={JSON.stringify(scope)}><td><a className="resource-name" href={catalogLink(kind, scope)}>{doc.metadata.name}</a></td><td className="scope-cell">{scope.slice(0, -1).join(" / ")}</td><td>{doc.kind as string || catalogTitles[kind]}</td><td className="row-actions"><RowActions>{kind === "configs" && <RowAction icon="create" href={newCellLink(scope)} label={`New cell from config ${scope.join(" / ")}`} title="New cell from this config" />}{kind === "blueprints" && <RowAction icon="create" href={newConfigLink(scope)} label={`New config from blueprint ${scope.join(" / ")}`} title="New config from this blueprint" />}<DocumentRowLink href={catalogLink(kind, scope, true)} label={scope.join(" / ")} /><RowAction icon="delete" danger label={`Delete ${singular[kind].toLowerCase()} ${scope.join(" / ")}`} title="Delete…" disabled={pending.has(JSON.stringify(scope))} busy={pending.has(JSON.stringify(scope))} onClick={() => setConfirming(doc)} /></RowActions></td></tr>; })}</tbody></table></div>
+      <div className="table-scroll"><table><thead><tr><th>Name</th><th>Scope</th><th>Type</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{rows.slice(currentPage * 25, (currentPage + 1) * 25).map(doc => { const scope = [...scopeOf(doc.metadata), doc.metadata.name]; return <tr key={JSON.stringify(scope)}><td><a className="resource-name" href={catalogLink(kind, scope)}>{doc.metadata.name}</a>{kind === "configs" && <> <NeedsConnectorBadge config={doc} /></>}</td><td className="scope-cell">{scope.slice(0, -1).join(" / ")}</td><td>{doc.kind as string || catalogTitles[kind]}</td><td className="row-actions"><RowActions>{kind === "configs" && <RowAction icon="create" href={newCellLink(scope)} label={`New cell from config ${scope.join(" / ")}`} title="New cell from this config" />}{kind === "blueprints" && <RowAction icon="create" href={newConfigLink(scope)} label={`New config from blueprint ${scope.join(" / ")}`} title="New config from this blueprint" />}<DocumentRowLink href={catalogLink(kind, scope, true)} label={scope.join(" / ")} /><RowAction icon="delete" danger label={`Delete ${singular[kind].toLowerCase()} ${scope.join(" / ")}`} title="Delete…" disabled={pending.has(JSON.stringify(scope))} busy={pending.has(JSON.stringify(scope))} onClick={() => setConfirming(doc)} /></RowActions></td></tr>; })}</tbody></table></div>
       {!list.loading && !rows.length && <div className="empty-state"><h3>{list.error ? "Resources could not be loaded" : list.data?.length ? "No matching resources" : `No ${kind} found`}</h3></div>}
       <div className="pagination"><span>{rows.length ? `${currentPage * 25 + 1}–${Math.min((currentPage + 1) * 25, rows.length)} of ${rows.length}` : "0 results"}</span><button disabled={!currentPage} onClick={() => setPage(currentPage - 1)}>Previous</button><button disabled={(currentPage + 1) * 25 >= rows.length} onClick={() => setPage(currentPage + 1)}>Next</button></div>
     </section>
@@ -234,7 +235,7 @@ function catalogState(kind: string, doc: CatalogDoc): string {
   if (kind === "volumes") return `stored${spec.reclaimPolicy ? `, reclaim policy ${spec.reclaimPolicy}` : ""}`;
   return "stored";
 }
-function CatalogDetails({ kind, scope, document, revision, inventory }: { kind: string; scope: string[]; document: boolean; revision: number; inventory: InventoryResource }) {
+function CatalogDetails({ kind, scope, document, revision, inventory, onChanged }: { kind: string; scope: string[]; document: boolean; revision: number; inventory: InventoryResource; onChanged: () => void }) {
   const detail = useResource<CatalogDoc>(catalogAPI(kind, scope), revision);
   const doc = detail.data;
   return <>
@@ -246,6 +247,7 @@ function CatalogDetails({ kind, scope, document, revision, inventory }: { kind: 
     {doc && <section className="panel"><div className="panel-heading"><h2>{document ? "API document" : "Resource overview"}</h2><span className="badge" title={`Edits are not supported here. Delete ${kind} from the list.`}>No edits — delete from list</span></div>{document ? <pre tabIndex={0} aria-label={`Complete ${kind} JSON`}>{JSON.stringify(doc, null, 2)}</pre> : <div className="panel-body"><dl className="details-grid"><dt>Name</dt><dd>{doc.metadata.name}</dd><dt>Scope</dt><dd>{scopeOf(doc.metadata).join(" / ")}</dd><dt>Kind</dt><dd>{doc.kind as string}</dd><dt>Labels</dt><dd>{Object.entries(doc.metadata.labels ?? {}).map(([key, value]) => <span className="badge label-badge" key={key}>{key}: {value}</span>)}{!Object.keys(doc.metadata.labels ?? {}).length && "No labels"}</dd>{kind === "volumes" && <><dt>Reclaim policy</dt><dd>{doc.spec?.reclaimPolicy as string || "Default (Delete)"}</dd></>}</dl><p className="description">Use View document for every API-exposed field.</p></div>}</section>}
     {doc && kind === "configs" && !document && <a className="new-cell-action config-create-action" href={newCellLink(scope)}>Create Cell from this Config <span aria-hidden="true">→</span></a>}
     {doc && kind === "blueprints" && !document && <a className="new-cell-action config-create-action" href={newConfigLink(scope)}>Create Config from this Blueprint <span aria-hidden="true">→</span></a>}
+    {doc && kind === "configs" && !document && <ConfigConnectors doc={doc} scope={scope} revision={revision} onChanged={onChanged} />}
     {doc && !document && <RelatedResources doc={doc} revision={revision} />}
     {doc && kind === "configs" && !document && <ConfigRelationships doc={doc} revision={revision} inventory={inventory} />}
     {doc && kind === "blueprints" && !document && <BlueprintRelationships doc={doc} revision={revision} inventory={inventory} />}

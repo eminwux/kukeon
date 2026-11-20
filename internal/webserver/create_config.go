@@ -96,11 +96,12 @@ func registerConfigRoutes(mux *http.ServeMux, dial Dial) {
 				token := fmt.Sprintf("%x", sha256.Sum256(append(encoded, []byte(rendered.Digest)...)))
 				if strings.HasSuffix(r.URL.Path, "/preview") {
 					return map[string]any{
-						"config":   doc,
-						"document": redactCell(rendered.Cell),
-						"preview":  token,
-						"digest":   rendered.Digest,
-						"values":   redactRenderedValues(rendered.Values, nil),
+						"config":     doc,
+						"document":   redactCell(rendered.Cell),
+						"preview":    token,
+						"digest":     rendered.Digest,
+						"values":     redactRenderedValues(rendered.Values, nil),
+						"connectors": connectorStatuses(rendered.Connectors),
 					}, nil
 				}
 				if input.Preview != token {
@@ -157,9 +158,11 @@ func draftConfig(input createFromBlueprintRequest) (v1beta1.CellConfigDoc, error
 	for _, fill := range spec.Repos {
 		if fill.Git != nil {
 			gitRefs(fill.Git.Credential, fill.Git.Signing)
+			refs = append(refs, fill.Git.IdentityRef)
 		}
 	}
 	if spec.Git != nil {
+		refs = append(refs, spec.Git.IdentityRef)
 		for i := range spec.Git.Credentials {
 			gitRefs(&spec.Git.Credentials[i], nil)
 		}

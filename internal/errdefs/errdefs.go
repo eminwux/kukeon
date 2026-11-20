@@ -566,6 +566,25 @@ var (
 	// ErrBlueprintMode is returned when a cell is created in a harness mode
 	// the blueprint does not declare or the CellConfig does not enable.
 	ErrBlueprintMode = errors.New("blueprint harness mode is not available")
+	// Connector errors (issue #1548).
+
+	// ErrConnectorInvalid is returned for a malformed connector definition.
+	ErrConnectorInvalid = errors.New("connector definition is invalid")
+	// ErrConnectorIdentity is returned when a Secret cannot be an identity of
+	// the connector it is used for: it is tagged for another connector, its
+	// type is not one the connector accepts, or its readable identity fields
+	// do not fit the connector's schema.
+	ErrConnectorIdentity = errors.New("secret is not an identity of the connector")
+	// ErrConnectorUnresolved is returned when a cell is previewed or created
+	// while a connector its CellConfig requires has no identity: no cell
+	// override, Config fill or Stack/Space/Realm default supplies one.
+	ErrConnectorUnresolved = errors.New("connector has no identity")
+	// ErrConnectorUnknown is returned when a per-cell override names a
+	// connector the CellConfig does not require.
+	ErrConnectorUnknown = errors.New("config does not require the connector")
+	// ErrBlueprintComponentGroup is returned when a CellConfig enables two
+	// components of one group.
+	ErrBlueprintComponentGroup = errors.New("components of one group are mutually exclusive")
 	// ErrImageCapabilityMissing is returned when a container image declares
 	// its capabilities and lacks one the cell requires.
 	ErrImageCapabilityMissing = errors.New("image is missing a required capability")

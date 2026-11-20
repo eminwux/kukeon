@@ -252,7 +252,10 @@ type runFlags struct {
 	// (default a generated <prefix>-<6hex>). Rejected with the positional and -f.
 	name      string
 	paramArgs []string
-	paramFile string
+	// connectorArgs are the `--connector <connector>=<secret>` per-cell
+	// identity overrides (--from-config).
+	connectorArgs []string
+	paramFile     string
 	// mode is the harness mode (`--mode`) of a --from-config / --clone run.
 	mode string
 	// envArgs are the validated `KEY=VALUE` --env entries. On the existing-cell
@@ -357,6 +360,12 @@ func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
 	}
 	flags.paramArgs = paramArgs
 
+	connectorArgs, err := cmd.Flags().GetStringArray("connector")
+	if err != nil {
+		return runFlags{}, err
+	}
+	flags.connectorArgs = connectorArgs
+
 	envRaw, err := cmd.Flags().GetStringArray("env")
 	if err != nil {
 		return runFlags{}, err
@@ -414,6 +423,9 @@ func validateSourceFlagCompat(flags runFlags) error {
 	// the --image path; reject it elsewhere rather than silently dropping it.
 	if flags.command != "" && flags.image == "" {
 		return errors.New("--command is only valid with --image")
+	}
+	if len(flags.connectorArgs) > 0 && flags.configName == "" {
+		return errors.New("--connector is only valid with --from-config")
 	}
 	if flags.fused() {
 		return nil
@@ -565,6 +577,7 @@ func runFused(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) error 
 		ConfigName:         flags.configName,
 		CloneSource:        flags.cloneSource,
 		ParamArgs:          flags.paramArgs,
+		ConnectorArgs:      flags.connectorArgs,
 		ParamFile:          flags.paramFile,
 		Mode:               flags.mode,
 		EnvArgs:            flags.envArgs,

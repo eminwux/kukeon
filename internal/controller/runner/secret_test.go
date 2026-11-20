@@ -552,3 +552,93 @@ func TestDeleteSecret_RemovesTypeSidecar(t *testing.T) {
 		t.Errorf("re-created secret type = %q, want opaque", got.Spec.Type)
 	}
 }
+
+// TestSecretIdentity_RoundTrip confirms the readable identity facts of a
+// secret (issue #1548) — its connector tag and identity fields — are stored
+// next to the bytes, reported by get and list without any material, replaced
+// on overwrite and reclaimed on delete.
+func TestSecretIdentity_RoundTrip(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+
+	md := intmodel.SecretMetadata{Name: "work-token", Realm: "default"}
+	tagged := intmodel.Secret{
+		Metadata: md,
+		Spec: intmodel.SecretSpec{
+			Data: "do-not-echo", Connector: "forge",
+			Identity: map[string]string{"account": "work"},
+		},
+	}
+	plain := intmodel.Secret{
+		Metadata: intmodel.SecretMetadata{Name: "plain", Realm: "default"},
+		Spec:     intmodel.SecretSpec{Data: "do-not-echo"},
+	}
+	for _, s := range []intmodel.Secret{tagged, plain} {
+		if _, err := r.WriteSecret(s); err != nil {
+			t.Fatalf("WriteSecret(%s) error = %v", s.Metadata.Name, err)
+		}
+	}
+
+	check := func(source string, s intmodel.Secret) {
+		t.Helper()
+		if s.Spec.HasMaterial() {
+			t.Errorf("%s %q carries secret material: %+v", source, s.Metadata.Name, s.Spec)
+		}
+		switch s.Metadata.Name {
+		case "work-token":
+			if s.Spec.Connector != "forge" || len(s.Spec.Identity) != 1 || s.Spec.Identity["account"] != "work" {
+				t.Errorf("%s work-token identity = %q %v", source, s.Spec.Connector, s.Spec.Identity)
+			}
+		default:
+			if s.Spec.Connector != "" || len(s.Spec.Identity) != 0 {
+				t.Errorf("%s %q is tagged: %q %v", source, s.Metadata.Name, s.Spec.Connector, s.Spec.Identity)
+			}
+		}
+	}
+	got, err := r.GetSecret(intmodel.Secret{Metadata: md})
+	if err != nil {
+		t.Fatalf("GetSecret() error = %v", err)
+	}
+	check("get", got)
+	listed, err := r.ListSecrets("default", "", "", "")
+	if err != nil {
+		t.Fatalf("ListSecrets() error = %v", err)
+	}
+	// The .meta sidecar directory must never surface as a secret.
+	if len(listed) != 2 {
+		t.Fatalf("ListSecrets() returned %d secrets, want 2: %+v", len(listed), listed)
+	}
+	for _, s := range listed {
+		check("list", s)
+	}
+
+	// Overwriting with an untagged secret drops the identity, so the new
+	// bytes are never reported under the old account.
+	if _, err = r.WriteSecret(intmodel.Secret{Metadata: md, Spec: intmodel.SecretSpec{Data: "rotated"}}); err != nil {
+		t.Fatalf("WriteSecret(untagged) error = %v", err)
+	}
+	if got, err = r.GetSecret(intmodel.Secret{Metadata: md}); err != nil || got.Spec.Connector != "" ||
+		len(got.Spec.Identity) != 0 {
+		t.Fatalf("after an untagged overwrite: %+v, %v", got.Spec, err)
+	}
+
+	if _, err = r.WriteSecret(tagged); err != nil {
+		t.Fatalf("WriteSecret(tagged) error = %v", err)
+	}
+	if err = r.DeleteSecret(intmodel.Secret{Metadata: md}); err != nil {
+		t.Fatalf("DeleteSecret() error = %v", err)
+	}
+	if _, statErr := os.Stat(secretstore.MetaPath(runPath, md)); !os.IsNotExist(statErr) {
+		t.Errorf("identity sidecar still present after delete (err=%v)", statErr)
+	}
+
+	// A malformed identity is refused before anything is written.
+	bad := tagged
+	bad.Spec.Identity = map[string]string{"account": "two\nlines"}
+	if _, err = r.WriteSecret(bad); err == nil {
+		t.Fatal("WriteSecret accepted a multi-line identity field")
+	}
+	if _, err = r.GetSecret(intmodel.Secret{Metadata: md}); err == nil {
+		t.Fatal("a rejected secret was stored")
+	}
+}

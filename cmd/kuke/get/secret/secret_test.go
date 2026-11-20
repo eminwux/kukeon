@@ -464,3 +464,87 @@ func TestNewSecretCmd_TypeColumn(t *testing.T) {
 		}
 	})
 }
+
+// TestNewSecretCmd_ConnectorAndIdentity pins issue #1548: `kuke get secret`
+// shows the connector a secret is an identity of — a CONNECTOR column, "-" for
+// an untagged secret — `-o wide` adds its readable identity fields, and the
+// structured formats carry both. Nothing of the material is ever reported.
+func TestNewSecretCmd_ConnectorAndIdentity(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	tagged := v1beta1.SecretDoc{
+		Metadata: v1beta1.SecretMetadata{Name: "git-ssh", Realm: "r1"},
+		Spec: v1beta1.SecretSpec{
+			Type:      v1beta1.SecretTypeSSHKey,
+			Connector: "git",
+			Identity:  map[string]string{"hosts": "github.com", "author": "Ada <ada@example.com>"},
+		},
+	}
+	plain := v1beta1.SecretDoc{Metadata: v1beta1.SecretMetadata{Name: "legacy", Realm: "r1"}}
+	fake := &fakeClient{
+		getSecretFn: func(v1beta1.SecretDoc) (kukeonv1.GetSecretResult, error) {
+			return kukeonv1.GetSecretResult{Secret: tagged, MetadataExists: true}, nil
+		},
+		listSecretsFn: func(_, _, _, _ string) ([]v1beta1.SecretDoc, error) {
+			return []v1beta1.SecretDoc{tagged, plain}, nil
+		},
+	}
+	run := func(t *testing.T, args ...string) string {
+		t.Helper()
+		t.Cleanup(viper.Reset)
+		cmd := secret.NewSecretCmd()
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+		cmd.SetContext(context.WithValue(context.Background(), secret.MockControllerKey{}, kukeonv1.Client(fake)))
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		return buf.String()
+	}
+	row := func(t *testing.T, out, name string) []string {
+		t.Helper()
+		for _, line := range strings.Split(out, "\n") {
+			if fields := strings.Fields(line); len(fields) > 0 && fields[0] == name {
+				return fields
+			}
+		}
+		t.Fatalf("no row for %q in:\n%s", name, out)
+		return nil
+	}
+
+	out := run(t, "--realm", "r1")
+	if header := row(t, out, "NAME"); len(header) < 3 || header[2] != "CONNECTOR" {
+		t.Fatalf("header = %v, want CONNECTOR right after TYPE", header)
+	}
+	if got := row(t, out, "git-ssh")[2]; got != "git" {
+		t.Errorf("CONNECTOR of git-ssh = %q, want git", got)
+	}
+	if got := row(t, out, "legacy")[2]; got != "-" {
+		t.Errorf("CONNECTOR of an untagged secret = %q, want -", got)
+	}
+	if strings.Contains(out, "IDENTITY") || strings.Contains(out, "ada@example.com") {
+		t.Errorf("the default table shows identity fields:\n%s", out)
+	}
+
+	wide := run(t, "--realm", "r1", "-o", "wide")
+	if !strings.Contains(wide, "IDENTITY") ||
+		!strings.Contains(wide, "author=Ada <ada@example.com>; hosts=github.com") {
+		t.Errorf("-o wide does not list the identity fields:\n%s", wide)
+	}
+
+	for _, format := range []string{"yaml", "json"} {
+		doc := run(t, "git-ssh", "--realm", "r1", "-o", format)
+		for _, want := range []string{"connector", "git", "identity", "github.com", "ada@example.com"} {
+			if !strings.Contains(doc, want) {
+				t.Errorf("-o %s lost %q:\n%s", format, want, doc)
+			}
+		}
+		for _, never := range []string{"privateKey", "PRIVATE KEY", "\n  data:", `"data"`, "basicAuth", "sshKey"} {
+			if strings.Contains(doc, never) {
+				t.Errorf("-o %s carries material (%q):\n%s", format, never, doc)
+			}
+		}
+	}
+}

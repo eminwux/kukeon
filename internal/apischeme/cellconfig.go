@@ -80,7 +80,7 @@ func ConvertCellConfigToExternal(in intmodel.CellConfig) (ext.CellConfigDoc, err
 	if err := yaml.Unmarshal(in.Document, &doc); err != nil {
 		return ext.CellConfigDoc{}, fmt.Errorf("unmarshal CellConfig document: %w", err)
 	}
-	doc.Status = configStatusToExternal(in.ScheduleStatus)
+	doc.Status = configStatusToExternal(in)
 	return doc, nil
 }
 
@@ -93,20 +93,42 @@ func scheduleSummary(in *ext.CellConfigSchedule) *intmodel.CellConfigSchedule {
 }
 
 // configStatusToExternal builds the external status from the carrier's stored
-// schedule state; nil when there is none, so an unscheduled Config renders no
-// status block.
-func configStatusToExternal(in *intmodel.CellConfigScheduleStatus) *ext.CellConfigStatus {
-	if in == nil {
+// schedule state and the connector resolution the controller computed; nil
+// when there is neither, so a Config with nothing to report renders no status
+// block.
+func configStatusToExternal(cfg intmodel.CellConfig) *ext.CellConfigStatus {
+	in := cfg.ScheduleStatus
+	if in == nil && len(cfg.Connectors) == 0 {
 		return nil
 	}
-	return &ext.CellConfigStatus{Schedule: &ext.CellConfigScheduleStatus{
-		LastScheduleTime: copyTime(in.LastScheduleTime),
-		NextScheduleTime: copyTime(in.NextScheduleTime),
-		LastCell:         in.LastCell,
-		ActiveCells:      append([]string(nil), in.ActiveCells...),
-		SkippedFires:     in.SkippedFires,
-		LastError:        in.LastError,
-	}}
+	out := &ext.CellConfigStatus{Connectors: cloneConnectorStatuses(cfg.Connectors)}
+	if in != nil {
+		out.Schedule = &ext.CellConfigScheduleStatus{
+			LastScheduleTime: copyTime(in.LastScheduleTime),
+			NextScheduleTime: copyTime(in.NextScheduleTime),
+			LastCell:         in.LastCell,
+			ActiveCells:      append([]string(nil), in.ActiveCells...),
+			SkippedFires:     in.SkippedFires,
+			LastError:        in.LastError,
+		}
+	}
+	return out
+}
+
+// cloneConnectorStatuses deep-copies the connector statuses of a Config.
+func cloneConnectorStatuses(in []ext.ConnectorStatus) []ext.ConnectorStatus {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]ext.ConnectorStatus, len(in))
+	for i, status := range in {
+		out[i] = status
+		if status.Identity != nil {
+			identity := *status.Identity
+			out[i].Identity = &identity
+		}
+	}
+	return out
 }
 
 func copyTime(in *time.Time) *time.Time {
@@ -135,7 +157,7 @@ func ConvertCellConfigMetadataToExternal(in intmodel.CellConfig) ext.CellConfigD
 			Stack:  in.Metadata.Stack,
 			Labels: copyLabels(in.Metadata.Labels),
 		},
-		Status: configStatusToExternal(in.ScheduleStatus),
+		Status: configStatusToExternal(in),
 	}
 	if in.Schedule != nil {
 		doc.Spec.Schedule = &ext.CellConfigSchedule{

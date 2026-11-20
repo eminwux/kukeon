@@ -43,6 +43,7 @@ func GitToInternal(in *ext.ContainerGit) *intmodel.ContainerGit {
 		Sign:           cloneStringSlice(in.Sign),
 		AllowedSigners: in.AllowedSigners,
 		Signing:        gitSigningToInternal(in.Signing),
+		IdentityRef:    secretRefToInternal(in.IdentityRef),
 	}
 	if len(in.Credentials) > 0 {
 		out.Credentials = make([]intmodel.GitCredential, len(in.Credentials))
@@ -65,6 +66,7 @@ func GitToExternal(in *intmodel.ContainerGit) *ext.ContainerGit {
 		Sign:           cloneStringSlice(in.Sign),
 		AllowedSigners: in.AllowedSigners,
 		Signing:        gitSigningToExternal(in.Signing),
+		IdentityRef:    secretRefToExternal(in.IdentityRef),
 	}
 	if len(in.Credentials) > 0 {
 		out.Credentials = make([]ext.GitCredential, len(in.Credentials))
@@ -81,11 +83,12 @@ func RepoGitToInternal(in *ext.RepoGit) *intmodel.RepoGit {
 		return nil
 	}
 	return &intmodel.RepoGit{
-		Author:     gitIdentityToInternal(in.Author),
-		Committer:  gitIdentityToInternal(in.Committer),
-		Credential: gitCredentialToInternal(in.Credential),
-		Signing:    gitSigningToInternal(in.Signing),
-		Sign:       cloneStringSlice(in.Sign),
+		Author:      gitIdentityToInternal(in.Author),
+		Committer:   gitIdentityToInternal(in.Committer),
+		Credential:  gitCredentialToInternal(in.Credential),
+		Signing:     gitSigningToInternal(in.Signing),
+		Sign:        cloneStringSlice(in.Sign),
+		IdentityRef: secretRefToInternal(in.IdentityRef),
 	}
 }
 
@@ -95,11 +98,12 @@ func RepoGitToExternal(in *intmodel.RepoGit) *ext.RepoGit {
 		return nil
 	}
 	return &ext.RepoGit{
-		Author:     gitIdentityToExternal(in.Author),
-		Committer:  gitIdentityToExternal(in.Committer),
-		Credential: gitCredentialToExternal(in.Credential),
-		Signing:    gitSigningToExternal(in.Signing),
-		Sign:       cloneStringSlice(in.Sign),
+		Author:      gitIdentityToExternal(in.Author),
+		Committer:   gitIdentityToExternal(in.Committer),
+		Credential:  gitCredentialToExternal(in.Credential),
+		Signing:     gitSigningToExternal(in.Signing),
+		Sign:        cloneStringSlice(in.Sign),
+		IdentityRef: secretRefToExternal(in.IdentityRef),
 	}
 }
 
@@ -173,6 +177,12 @@ func validateContainerGit(spec ext.ContainerSpec) error {
 		if err := ValidateRepoGit(spec.Repos[i].Git); err != nil {
 			return fmt.Errorf("container %q: repos[%d] %q: %w", spec.ID, i, spec.Repos[i].Name, err)
 		}
+		if g := spec.Repos[i].Git; g != nil && g.IdentityRef != nil {
+			return fmt.Errorf(
+				"container %q: repos[%d] %q: git.identityRef is resolved from a CellConfig repo fill; "+
+					"a cell states the repo's author, credential and signing directly",
+				spec.ID, i, spec.Repos[i].Name)
+		}
 	}
 	return nil
 }
@@ -187,6 +197,11 @@ func ValidateGit(git *ext.ContainerGit) error {
 	}
 	if git != nil && len(git.Sign) > 0 && git.SigningKey == "" && git.Signing == nil {
 		return errors.New("git.sign requires git.signingKey or git.signing to be set")
+	}
+	if git != nil && git.IdentityRef != nil {
+		return errors.New(
+			"git.identityRef is resolved from a CellConfig or a Realm, Space or Stack default; " +
+				"a cell or blueprint container states author, credentials and signing directly")
 	}
 	return nil
 }
@@ -220,6 +235,11 @@ func ValidateGitLayer(git *ext.ContainerGit) error {
 	}
 	if git.Signing != nil && (git.SigningKey != "" || git.AllowedSigners != "") {
 		return errors.New("git.signing cannot be combined with git.signingKey or git.allowedSigners")
+	}
+	if git.IdentityRef != nil {
+		if err := validateGitSecretRef("git.identityRef", git.IdentityRef); err != nil {
+			return err
+		}
 	}
 	hosts := map[string]struct{}{}
 	for i := range git.Credentials {
@@ -259,6 +279,11 @@ func ValidateRepoGit(git *ext.RepoGit) error {
 	}
 	if err := validateGitSigning("git.signing", git.Signing); err != nil {
 		return err
+	}
+	if git.IdentityRef != nil {
+		if err := validateGitSecretRef("git.identityRef", git.IdentityRef); err != nil {
+			return err
+		}
 	}
 	if git.Credential != nil {
 		if strings.TrimSpace(git.Credential.Host) != "" {

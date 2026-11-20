@@ -43,7 +43,31 @@ What the secret holds. Defaults to `opaque`.
 | `basic-auth` | `spec.basicAuth`: a username plus a password **or** a token.       | Git over HTTPS — [`git.credentials[]`](container.md#containergit)       |
 | `ssh-key`    | `spec.sshKey`: an OpenSSH private key and its optional companions. | Git over SSH and SSH signing — `git.credentials[]`, `git.signing`       |
 
-`basic-auth` and `ssh-key` are **git credentials**. They are consumed only through a `git` block and cannot be referenced from a container's `secrets[]`; an `opaque` secret cannot be used as a git credential. See the [git credentials guide](../guides/git-credentials.md).
+`basic-auth` and `ssh-key` are **git credentials**. They are consumed only through a `git` block and cannot be referenced from a container's `secrets[]`; an `opaque` secret cannot be used as a git credential. See the [git credentials guide](../guides/git-credentials.md). A `basic-auth` secret is also what a Realm's [`registryCredentials[].secretRef`](realm.md#specregistrycredentials-array-optional) names.
+
+### `spec.connector` (string, optional)
+
+Tags the secret as an **identity** of a [connector](../concepts/connectors.md) — `claude`, `github`, `git`, `registry`, … — so it can be picked by name for a team, a Config or a single cell. The tag is a lowercase identifier. A tagged secret is accepted only where that connector is asked for; an untagged one is accepted anywhere its type fits.
+
+### `spec.identity` (map of string, optional)
+
+The connector's readable identity fields — for a git identity, `author`, `committer`, `hosts`, `sign` and `allowedSignersRef`. Requires `spec.connector`. Each value is one line of at most 1024 bytes, and is checked against the connector's field schema where one is at hand (`kuke create secret --connector`, the web UI, and the daemon when it resolves the identity for a cell). These are facts about the secret, not material: never put a key or a token here.
+
+```yaml
+apiVersion: v1beta1
+kind: Secret
+metadata: { name: bot-key, realm: default }
+spec:
+  type: ssh-key
+  connector: git
+  identity:
+    author: Dev Bot <bot@example.com>
+    hosts: github.com
+    sign: commits,tags
+  sshKey:
+    privateKey: |
+      <contents of ~/.ssh/id_ed25519>
+```
 
 ### `spec.data` (string, required for `opaque`)
 
@@ -67,7 +91,7 @@ The raw secret material supplied at apply time. Must be non-empty; an empty `dat
 | `certificate` | string | no       | An OpenSSH user certificate presented together with the key.                                                                     |
 | `knownHosts`  | string | no       | Pinned host keys in `known_hosts` format. Omitted, the built-in keys of `github.com`, `gitlab.com` and `bitbucket.org` are used. |
 
-Every field of every type is **write-only**: it is persisted to the daemon-managed file and never echoed back in apply output, `kuke get secret`, the web UI, a daemon log or an audit trail. Only the secret's name, scope and `type` are readable.
+Every material field of every type is **write-only**: it is persisted to the daemon-managed file and never echoed back in apply output, `kuke get secret`, the web UI, a daemon log or an audit trail. Only the secret's name, scope, `type`, `connector` and `identity` are readable.
 
 ## Storage layout
 
@@ -79,6 +103,8 @@ The daemon writes the bytes to a root-owned file under the scope's metadata tree
 <runPath>/data/<realm>/<space>/<stack>/secrets/<name>         # stack-scoped
 <runPath>/data/<realm>/<space>/<stack>/<cell>/secrets/<name>  # cell-scoped
 ```
+
+A secret's type and its readable identity are kept in root-only sidecar files next to it (`secrets/.types/<name>`, `secrets/.meta/<name>`), so a get or list never opens the material.
 
 The `secrets/` directory is `0700` and each secret file is `0600`, both owned by root — stricter than the `0o2750` setgid metadata directories, so the `kuke` group cannot read secret material. Because `secrets/` nests inside the scope's metadata directory, the same teardown that reclaims a scope (`kuke purge` / `kuke delete`) reclaims its secrets too. There is no crypto-at-rest in v1.
 

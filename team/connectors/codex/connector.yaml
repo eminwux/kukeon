@@ -1,0 +1,39 @@
+# Codex connector: how a Codex cell authenticates.
+#
+# The three methods are mutually exclusive (group codex-auth); `kuke team`
+# enables exactly one on every codex Config. `login` is the default: on a
+# personal ChatGPT plan `codex login` is the only option, and it is what a cell
+# did before connectors existed.
+apiVersion: kuketeams.io/v1
+kind: Connector
+metadata:
+  name: codex
+spec:
+  title: Codex
+  description: How a Codex cell authenticates.
+  harness: codex
+  group: codex-auth
+  scopes: [realm, space, stack]
+  identity:
+    secretTypes: [opaque]
+  methods:
+    - name: login
+      default: true
+      delivery: stateVolume
+      description: >-
+        The `codex login` kept in the harness state volume. Its refresh token
+        is single-use, so the login cannot be copied between roles.
+    - name: api-key
+      delivery: env
+      description: An OpenAI API key, billed per token.
+      secret:
+        name: openai-api-key
+        envName: OPENAI_API_KEY
+    - name: access-token
+      delivery: env
+      description: >-
+        A Codex access token. OpenAI issues these for ChatGPT Business and
+        Enterprise workspaces only.
+      secret:
+        name: codex-access-token
+        envName: CODEX_ACCESS_TOKEN

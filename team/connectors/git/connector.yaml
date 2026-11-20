@@ -1,0 +1,40 @@
+# Git connector: the identity a cell clones, pushes and signs with.
+#
+# An identity is one ssh-key or basic-auth Secret that also carries the
+# readable facts below. `git.identityRef` names it — on Realm, Space or Stack
+# defaults, on a Config's `git` block, or on one repo's `git` — and the daemon
+# expands it into author, committer, a credential for each host and, for an SSH
+# key, signing with the same key. Explicit fields next to the reference win.
+apiVersion: kuketeams.io/v1
+kind: Connector
+metadata:
+  name: git
+spec:
+  title: Git
+  description: The identity a cell clones, pushes and signs with.
+  delivery: git
+  # A cell starts without a git identity: a public repo clones anonymously.
+  optional: true
+  scopes: [realm, space, stack]
+  identity:
+    secretTypes: [ssh-key, basic-auth]
+    fields:
+      - name: author
+        type: person
+        help: Commit author, as `Name <email>`.
+      - name: committer
+        type: person
+        help: Committer, as `Name <email>`. Defaults to git's own fallback, the author.
+      - name: hosts
+        type: list
+        required: true
+        help: Hosts or URL prefixes the secret authenticates (github.com, gitlab.com/group).
+      - name: sign
+        type: list
+        enum: [commits, tags]
+        secretTypes: [ssh-key]
+        help: What to sign with the key - commits, tags or both.
+      - name: allowedSignersRef
+        type: secret
+        secretTypes: [ssh-key]
+        help: Secret holding the allowed-signers file used to verify signatures.

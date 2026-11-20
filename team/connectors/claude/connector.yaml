@@ -1,0 +1,39 @@
+# Claude connector: how a Claude Code cell authenticates.
+#
+# The three methods are mutually exclusive (group claude-auth); `kuke team`
+# enables exactly one on every claude Config. `login` is the default because it
+# is what a cell did before connectors existed: with no token in its
+# environment, Claude Code uses the login kept in the harness state volume.
+apiVersion: kuketeams.io/v1
+kind: Connector
+metadata:
+  name: claude
+spec:
+  title: Claude
+  description: How a Claude Code cell authenticates.
+  harness: claude
+  group: claude-auth
+  scopes: [realm, space, stack]
+  identity:
+    secretTypes: [opaque]
+  methods:
+    - name: login
+      default: true
+      delivery: stateVolume
+      description: >-
+        The login kept in the harness state volume. Log in once from an
+        interactive cell; every cell of the same role reuses it.
+    - name: subscription
+      delivery: env
+      description: >-
+        A subscription token from `claude setup-token` (Pro, Max, Team or
+        Enterprise), valid for one year. One token serves every role.
+      secret:
+        name: claude-code-oauth-token
+        envName: CLAUDE_CODE_OAUTH_TOKEN
+    - name: api-key
+      delivery: env
+      description: An Anthropic API key, billed per token.
+      secret:
+        name: anthropic-api-key
+        envName: ANTHROPIC_API_KEY

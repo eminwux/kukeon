@@ -42,8 +42,10 @@ import (
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/component"
 	"github.com/eminwux/kukeon/pkg/team/config"
+	"github.com/eminwux/kukeon/pkg/team/connector"
 	"github.com/eminwux/kukeon/pkg/team/harness"
 	"github.com/eminwux/kukeon/team/components"
+	"github.com/eminwux/kukeon/team/connectors"
 	"gopkg.in/yaml.v3"
 )
 
@@ -55,9 +57,13 @@ type Options struct {
 	// Secrets are the bindings recorded in the team's existing TeamEntry; they
 	// take precedence over global spec.secrets and generated defaults.
 	Secrets []config.SecretBinding
-	// Components overrides the bundled component library (connectors and
-	// forges). Nil selects the library shipped with kuke.
+	// Components overrides the bundled component library (forges, and
+	// connectors defined outside the catalog). Nil selects the library
+	// shipped with kuke.
 	Components fs.FS
+	// Connectors overrides the bundled connector catalog. Nil selects the
+	// catalog shipped with kuke.
+	Connectors fs.FS
 }
 
 const defaultScope = "default"
@@ -77,6 +83,10 @@ type Result struct {
 	// Git is the operator's default git identity, credentials and signing
 	// config, to be written as scope defaults. Nil when none is configured.
 	Git *api.ContainerGit
+	// DefaultSecrets are the secret slots the Configs leave to the scope
+	// defaults, each with the Secret the Realm default points at when none is
+	// set yet. Sorted by slot.
+	DefaultSecrets []DefaultSecret
 	// Notes are operator-facing remarks: settings that no longer have an
 	// effect and sources no stored credential covers.
 	Notes []string
@@ -105,6 +115,9 @@ type SecretRequirement struct {
 	Destination api.BlueprintSecretSlot
 	Reference   config.SecretRef
 	Source      *config.SecretSource
+	// Default marks a slot the Config does not fill: Reference is the Secret
+	// the Realm default points at unless a default already exists.
+	Default bool
 }
 
 // Compose resolves whole-list inheritance and selected role/harness pairs. The
@@ -127,7 +140,18 @@ func Compose(cfg *config.TeamsConfig, team *config.Team, opts Options) (*Result,
 	if library == nil {
 		library = components.FS
 	}
-	lib, err := component.Load(library)
+	catalogFS := opts.Connectors
+	if catalogFS == nil {
+		catalogFS = connectors.FS
+	}
+	catalog, err := connector.Load(catalogFS)
+	if err != nil {
+		return nil, fmt.Errorf("connector catalog: %w", err)
+	}
+	if err = checkChoices(catalog, effective); err != nil {
+		return nil, err
+	}
+	lib, err := component.Load(library, catalog.Components()...)
 	if err != nil {
 		return nil, fmt.Errorf("component library: %w", err)
 	}
@@ -150,7 +174,8 @@ func Compose(cfg *config.TeamsConfig, team *config.Team, opts Options) (*Result,
 			if !role.Selects(h) {
 				continue
 			}
-			plan, planErr := planPair(cfg, team.Metadata.Name, role, h, effective.Sources, opts, lib, secrets)
+			plan, planErr := planPair(
+				cfg, team.Metadata.Name, role, h, effective, opts, lib, catalog, secrets)
 			if planErr != nil {
 				return nil, fmt.Errorf("compose %s/%s: %w", role.Name, h.Name, planErr)
 			}
@@ -168,7 +193,7 @@ func Compose(cfg *config.TeamsConfig, team *config.Team, opts Options) (*Result,
 	// Pass 2: one blueprint per group.
 	blueprints := map[string]*api.CellBlueprintDoc{}
 	for _, key := range order {
-		bp, renderErr := render(key, groups[key], lib, opts)
+		bp, renderErr := render(key, groups[key], lib, catalog, opts)
 		if renderErr != nil {
 			return nil, fmt.Errorf("blueprint %s: %w", key, renderErr)
 		}
@@ -208,6 +233,18 @@ func Compose(cfg *config.TeamsConfig, team *config.Team, opts Options) (*Result,
 		return nil, err
 	}
 	result.Entry.Secrets = secrets.entry()
+	defaults := map[string]config.SecretRef{}
+	for _, plan := range plans {
+		result.Notes = append(result.Notes, plan.notes...)
+		for _, fill := range plan.fills {
+			if fill.isDefault {
+				defaults[fill.slot.Name] = fill.binding.SecretRef
+			}
+		}
+	}
+	for _, slot := range slices.Sorted(maps.Keys(defaults)) {
+		result.DefaultSecrets = append(result.DefaultSecrets, DefaultSecret{Slot: slot, Reference: defaults[slot]})
+	}
 	gitDefaults, gitNotes := defaultGit(cfg.Spec.Git)
 	result.Git, result.Notes = gitDefaults, append(result.Notes, gitNotes...)
 	result.Notes = append(result.Notes, credentialNotes(result.Git, effective.Sources)...)
@@ -299,11 +336,23 @@ type pairPlan struct {
 	extraParams []string
 	// tasks are the role tasks the team selects, rendered as task configs.
 	tasks []model.RoleTask
+	// realm is the team's realm: where an identity named without a scope is
+	// looked up.
+	realm string
+	// choices are the team's spec.connectors; the role entry's override them.
+	choices map[string]config.ConnectorChoice
+	// git is the Config's git block: the git identity the team chose.
+	git *api.ContainerGit
+	// notes are operator-facing remarks about the pair.
+	notes []string
 }
 
 type secretFill struct {
 	slot    api.BlueprintSecretSlot
 	binding config.SecretBinding
+	// isDefault marks a slot left to the scope defaults instead of being
+	// written into the Config.
+	isDefault bool
 }
 
 func (p *pairPlan) blueprintName() string {
@@ -368,11 +417,13 @@ func planPair(
 	team string,
 	selection config.Role,
 	hsel config.Harness,
-	sources []config.Source,
+	effective config.Defaults,
 	opts Options,
 	lib []component.Component,
+	connectorCatalog *connector.Catalog,
 	secrets *secretBindings,
 ) (*pairPlan, error) {
+	sources := effective.Sources
 	if !config.ValidName(hsel.Name) {
 		return nil, errors.New("invalid harness selection name")
 	}
@@ -433,6 +484,7 @@ func planPair(
 		team: team, selection: selection, hsel: hsel, role: &role, settings: settings,
 		definition: definition, catalog: catalog, image: image, needs: needs, roleSource: repo,
 		profile: profile{Root: slices.Contains(needs, "root")}, tasks: tasks,
+		realm: opts.Scope.Realm, choices: effective.Connectors,
 	}
 	for _, mount := range role.Spec.Needs.Mounts {
 		if slices.Contains(hostMounts, mount) && !slices.Contains(plan.profile.Mounts, mount) {
@@ -450,7 +502,7 @@ func planPair(
 			return nil, fmt.Errorf("sources: missing clonePath for required repository %q", name)
 		}
 	}
-	if err = planSecrets(plan, lib, secrets); err != nil {
+	if err = planSecrets(plan, lib, connectorCatalog, secrets); err != nil {
 		return nil, err
 	}
 	if err = planParameters(plan, cfg); err != nil {

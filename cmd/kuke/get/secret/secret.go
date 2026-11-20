@@ -19,6 +19,7 @@ package secret
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/eminwux/kukeon/cmd/config"
@@ -175,7 +176,14 @@ func printSecrets(cmd *cobra.Command, secrets []v1beta1.SecretDoc, format shared
 			cmd.Println("No secrets found.")
 			return nil
 		}
-		headers := []string{"NAME", "TYPE", "REALM", "SPACE", "STACK", "CELL"}
+		// CONNECTOR is the connector the secret is an identity of; -o wide
+		// adds its readable identity fields (issue #1548). The material is
+		// never part of a get.
+		wide := format == shared.OutputFormatWide
+		headers := []string{"NAME", "TYPE", "CONNECTOR", "REALM", "SPACE", "STACK", "CELL"}
+		if wide {
+			headers = append(headers, "IDENTITY")
+		}
 		rows := make([][]string, 0, len(secrets))
 		for i := range secrets {
 			s := &secrets[i]
@@ -183,14 +191,19 @@ func printSecrets(cmd *cobra.Command, secrets []v1beta1.SecretDoc, format shared
 			if secretType == "" {
 				secretType = v1beta1.SecretTypeOpaque
 			}
-			rows = append(rows, []string{
+			row := []string{
 				s.Metadata.Name,
 				secretType,
+				dashIfEmpty(s.Spec.Connector),
 				dashIfEmpty(s.Metadata.Realm),
 				dashIfEmpty(s.Metadata.Space),
 				dashIfEmpty(s.Metadata.Stack),
 				dashIfEmpty(s.Metadata.Cell),
-			})
+			}
+			if wide {
+				row = append(row, dashIfEmpty(identitySummary(s.Spec.Identity)))
+			}
+			rows = append(rows, row)
 		}
 		shared.PrintTable(cmd, headers, rows)
 		return nil
@@ -206,4 +219,19 @@ func dashIfEmpty(s string) string {
 		return "-"
 	}
 	return s
+}
+
+// identitySummary renders a secret's readable identity fields as
+// `field=value; field=value`, sorted by field.
+func identitySummary(identity map[string]string) string {
+	fields := make([]string, 0, len(identity))
+	for field := range identity {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+	parts := make([]string, 0, len(fields))
+	for _, field := range fields {
+		parts = append(parts, field+"="+identity[field])
+	}
+	return strings.Join(parts, "; ")
 }

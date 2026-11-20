@@ -61,6 +61,17 @@ type Spec struct {
 	Parameters  []api.CellBlueprintParameter `json:"parameters,omitempty"  yaml:"parameters,omitempty"`
 	Environment map[string]string            `json:"environment,omitempty" yaml:"environment,omitempty"`
 	Secrets     []Secret                     `json:"secrets,omitempty"     yaml:"secrets,omitempty"`
+
+	// The fields below are set only on a component rendered from the
+	// connector catalog (team/connectors); a component.yaml cannot state them.
+
+	// Group is the mutual-exclusion group of a connector's method components.
+	Group string `json:"-" yaml:"-"`
+	// Connector is the connector definition the component delivers.
+	Connector *api.BlueprintConnector `json:"-" yaml:"-"`
+	// Harness names the harness the connector authenticates; such a component
+	// is rendered only into that harness's blueprints.
+	Harness string `json:"-" yaml:"-"`
 }
 
 // Secret is a secret slot with a fixed env destination. A component never
@@ -69,6 +80,9 @@ type Secret struct {
 	Name     string `json:"name"                 yaml:"name"`
 	EnvName  string `json:"envName"              yaml:"envName"`
 	Required bool   `json:"required,omitempty"   yaml:"required,omitempty"`
+	// MountPath is set only on a file-delivered connector method's slot: the
+	// secret is mounted there instead of exported as EnvName.
+	MountPath string `json:"-"                    yaml:"-"`
 	// SecretName is the runtime secret bound by default; empty binds a secret
 	// named like the slot.
 	SecretName string `json:"secretName,omitempty" yaml:"secretName,omitempty"`
@@ -83,28 +97,37 @@ var (
 )
 
 // Load decodes and validates every `<name>/component.yaml` in source,
-// connectors before forges and by name within a kind. A nil source is an empty library.
-func Load(source fs.FS) ([]Component, error) {
-	if source == nil {
-		return nil, nil
-	}
-	files, err := fs.Glob(source, "*/component.yaml")
-	if err != nil {
-		return nil, err
-	}
-	sort.Strings(files)
+// connectors before forges and by name within a kind. A nil source is an empty
+// library. catalog holds the components rendered from the connector catalog:
+// they come first, a library component may need one, and none may share a
+// name with one.
+func Load(source fs.FS, catalog ...Component) ([]Component, error) {
 	names := map[string]bool{}
-	var out []Component
-	for _, filename := range files {
-		var c Component
-		if err = read(source, filename, &c); err != nil {
+	out := slices.Clone(catalog)
+	for _, c := range catalog {
+		names[c.Metadata.Name] = true
+	}
+	var files []string
+	if source != nil {
+		var err error
+		if files, err = fs.Glob(source, "*/component.yaml"); err != nil {
 			return nil, err
 		}
-		if err = c.Validate(); err != nil {
+	}
+	sort.Strings(files)
+	for _, filename := range files {
+		var c Component
+		if err := read(source, filename, &c); err != nil {
+			return nil, err
+		}
+		if err := c.Validate(); err != nil {
 			return nil, fmt.Errorf("%s: %w", filename, err)
 		}
 		if c.Metadata.Name != path.Base(path.Dir(filename)) {
 			return nil, fmt.Errorf("%s: metadata.name must match its directory", filename)
+		}
+		if names[c.Metadata.Name] {
+			return nil, fmt.Errorf("%s: a connector already defines component %q", filename, c.Metadata.Name)
 		}
 		names[c.Metadata.Name] = true
 		out = append(out, c)

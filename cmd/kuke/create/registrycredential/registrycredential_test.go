@@ -38,6 +38,13 @@ type fakeClient struct {
 	kukeonv1.FakeClient
 	getRealmFn func(doc v1beta1.RealmDoc) (kukeonv1.GetRealmResult, error)
 	applyFn    func(rawYAML []byte) (kukeonv1.ApplyDocumentsResult, error)
+	// secrets records every Secret the command stored.
+	secrets []v1beta1.SecretDoc
+}
+
+func (f *fakeClient) CreateSecret(_ context.Context, doc v1beta1.SecretDoc) (kukeonv1.CreateSecretResult, error) {
+	f.secrets = append(f.secrets, doc)
+	return kukeonv1.CreateSecretResult{Secret: doc, Created: true}, nil
 }
 
 func (f *fakeClient) GetRealm(_ context.Context, doc v1beta1.RealmDoc) (kukeonv1.GetRealmResult, error) {
@@ -101,9 +108,12 @@ func TestRegistryCredentialUpsert(t *testing.T) {
 		getRealm func(doc v1beta1.RealmDoc) (kukeonv1.GetRealmResult, error)
 		// assertApplied inspects the desired realm doc sent to ApplyDocuments.
 		assertApplied func(t *testing.T, doc v1beta1.RealmDoc)
-		wantErr       string
-		wantOut       string
-		wantNoApply   bool
+		// wantSecret is the Secret the credential is stored in: its name and
+		// the username and password it carries.
+		wantSecret  [3]string
+		wantErr     string
+		wantOut     string
+		wantNoApply bool
 	}{
 		{
 			name:  "stdin happy path appends to empty list",
@@ -123,11 +133,16 @@ func TestRegistryCredentialUpsert(t *testing.T) {
 					t.Fatalf("want 1 credential, got %d", len(doc.Spec.RegistryCredentials))
 				}
 				c := doc.Spec.RegistryCredentials[0]
-				if c.ServerAddress != "ghcr.io" || c.Username != "alice" || c.Password != "s3cr3t" {
-					t.Errorf("unexpected credential: %+v", c)
+				if c.ServerAddress != "ghcr.io" || c.SecretRef == nil ||
+					c.SecretRef.Name != "registry-ghcr-io" || c.SecretRef.Realm != "default" {
+					t.Errorf("unexpected credential: %+v (secretRef %+v)", c, c.SecretRef)
+				}
+				if c.Username != "" || c.Password != "" {
+					t.Errorf("the realm entry carries the login inline: %+v", c)
 				}
 			},
-			wantOut: `applied to realm "default"`,
+			wantSecret: [3]string{"registry-ghcr-io", "alice", "s3cr3t"},
+			wantOut:    `applied to realm "default"`,
 		},
 		{
 			name:  "upsert replaces matching server in place",
@@ -152,14 +167,20 @@ func TestRegistryCredentialUpsert(t *testing.T) {
 						docker = c
 					}
 				}
-				if ghcr.Username != "bob" || ghcr.Password != "newtoken" {
-					t.Errorf("ghcr.io not updated in place: %+v", ghcr)
+				// The inline password of the server moved into a Secret.
+				if ghcr.SecretRef == nil || ghcr.SecretRef.Name != "registry-ghcr-io" ||
+					ghcr.Username != "" || ghcr.Password != "" {
+					t.Errorf("ghcr.io not replaced by a secret-backed entry: %+v", ghcr)
 				}
-				if docker.Username != "carol" || docker.Password != "keep" {
+				if docker.Username != "carol" || docker.Password != "keep" || docker.SecretRef != nil {
 					t.Errorf("docker.io entry not preserved: %+v", docker)
 				}
+				if doc.Spec.RegistryCredentials[0].ServerAddress != "ghcr.io" {
+					t.Errorf("ghcr.io entry moved: %+v", doc.Spec.RegistryCredentials)
+				}
 			},
-			wantOut: "updated",
+			wantSecret: [3]string{"registry-ghcr-io", "bob", "newtoken"},
+			wantOut:    "updated",
 		},
 		{
 			name:  "appends when server differs",
@@ -179,7 +200,7 @@ func TestRegistryCredentialUpsert(t *testing.T) {
 		},
 		{
 			name:  "empty server upserts against itself",
-			args:  []string{"default", "--username", "bob", "--password-stdin"},
+			args:  []string{"default", "--username", "bob", "--password-stdin", "--secret-name", "my-registry"},
 			stdin: "tok2",
 			getRealm: func(_ v1beta1.RealmDoc) (kukeonv1.GetRealmResult, error) {
 				return existingRealm("default.kukeon.io", []v1beta1.RegistryCredentials{
@@ -190,11 +211,13 @@ func TestRegistryCredentialUpsert(t *testing.T) {
 				if len(doc.Spec.RegistryCredentials) != 1 {
 					t.Fatalf("want 1 credential (in-place), got %d", len(doc.Spec.RegistryCredentials))
 				}
-				if doc.Spec.RegistryCredentials[0].Username != "bob" {
-					t.Errorf("empty-server entry not updated: %+v", doc.Spec.RegistryCredentials[0])
+				c := doc.Spec.RegistryCredentials[0]
+				if c.SecretRef == nil || c.SecretRef.Name != "my-registry" || c.Password != "" {
+					t.Errorf("empty-server entry not updated: %+v", c)
 				}
 			},
-			wantOut: "default: image reference",
+			wantSecret: [3]string{"my-registry", "bob", "tok2"},
+			wantOut:    "default: image reference",
 		},
 		{
 			name:  "unknown realm errors",
@@ -275,6 +298,28 @@ func TestRegistryCredentialUpsert(t *testing.T) {
 			if tt.wantNoApply && applied {
 				t.Error("ApplyDocuments should not have been called")
 			}
+			if tt.wantNoApply && len(fake.secrets) != 0 {
+				t.Errorf("a secret was stored for a rejected command: %+v", fake.secrets[0].Metadata)
+			}
+			if tt.wantSecret[0] != "" {
+				if len(fake.secrets) != 1 {
+					t.Fatalf("stored %d secrets, want 1", len(fake.secrets))
+				}
+				got := fake.secrets[0]
+				if got.Metadata.Name != tt.wantSecret[0] || got.Metadata.Realm != "default" ||
+					got.Metadata.Space != "" || got.Spec.Type != v1beta1.SecretTypeBasicAuth ||
+					got.Spec.Connector != "registry" || got.Spec.BasicAuth == nil ||
+					got.Spec.BasicAuth.Username != tt.wantSecret[1] || got.Spec.BasicAuth.Password != tt.wantSecret[2] {
+					t.Errorf("stored secret = %+v, want %v as a realm basic-auth registry identity",
+						got.Metadata, tt.wantSecret)
+				}
+				if strings.Contains(string(captured), tt.wantSecret[2]) {
+					t.Error("the applied realm document carries the token")
+				}
+				if strings.Contains(out.String(), tt.wantSecret[2]) {
+					t.Error("the command output carries the token")
+				}
+			}
 
 			if tt.assertApplied != nil {
 				if !applied {
@@ -324,8 +369,12 @@ func TestRegistryCredentialFromFile(t *testing.T) {
 	if len(doc.Spec.RegistryCredentials) != 1 {
 		t.Fatalf("want 1 credential, got %d", len(doc.Spec.RegistryCredentials))
 	}
-	if got := doc.Spec.RegistryCredentials[0].Password; got != "file-token" {
-		t.Errorf("token not read from file (trailing newline stripped): %q", got)
+	if ref := doc.Spec.RegistryCredentials[0].SecretRef; ref == nil || ref.Name != "registry-ghcr-io" {
+		t.Errorf("credential is not secret-backed: %+v", doc.Spec.RegistryCredentials[0])
+	}
+	if len(fake.secrets) != 1 || fake.secrets[0].Spec.BasicAuth == nil ||
+		fake.secrets[0].Spec.BasicAuth.Password != "file-token" {
+		t.Errorf("token not read from file (trailing newline stripped): %+v", fake.secrets)
 	}
 }
 
@@ -335,7 +384,7 @@ func TestRegistryCredentialNoPasswordFlag(t *testing.T) {
 	if cmd.Flags().Lookup("password") != nil {
 		t.Error("a plaintext --password flag must not exist")
 	}
-	for _, name := range []string{"server", "username", "password-stdin", "from-file"} {
+	for _, name := range []string{"server", "username", "password-stdin", "from-file", "secret-name"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Errorf("expected %q flag to exist", name)
 		}

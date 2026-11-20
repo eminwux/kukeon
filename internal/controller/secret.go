@@ -59,7 +59,7 @@ func (b *Exec) CreateSecret(secret intmodel.Secret) (CreateSecretResult, error) 
 	if err := validateSecretLookup(secret.Metadata); err != nil {
 		return res, err
 	}
-	if secret.Metadata.Name == secretstore.TypesDir {
+	if secret.Metadata.Name == secretstore.TypesDir || secret.Metadata.Name == secretstore.MetaDir {
 		return res, errdefs.ErrSecretReservedName
 	}
 	if err := secretstore.ValidateSpec(secret.Spec); err != nil {

@@ -18,10 +18,15 @@
 // imperative path to attach pull credentials to an existing realm's
 // spec.registryCredentials without round-tripping through a hand-edited YAML
 // manifest. The token enters via stdin or a file only, never argv, mirroring
-// `kuke create secret --from-file`. The command reads the realm, upserts the
-// credential keyed by --server, and re-applies the realm through the daemon's
-// write-through apply path, which the reconciler converges as a compatible
-// change (no realm recreate, no cell disruption).
+// `kuke create secret --from-file`.
+//
+// The credential is stored as a Secret (issue #1548): the command writes a
+// realm-scoped basic-auth Secret tagged as a registry identity, reads the
+// realm, binds --server to that Secret (replacing whatever the realm had for
+// the server — which is how an inline password written by an older kuke moves
+// into a Secret), and re-applies the realm through the daemon's write-through
+// apply path, which the reconciler converges as a compatible change (no realm
+// recreate, no cell disruption). The realm document never carries the token.
 package registrycredential
 
 import (
@@ -33,6 +38,7 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
+	"github.com/eminwux/kukeon/internal/connector"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
@@ -48,17 +54,22 @@ func NewRegistryCredentialCmd() *cobra.Command {
 		Aliases: []string{"registry-cred", "regcred"},
 		Short:   "Attach pull credentials to a realm",
 		Long: "Attach private-registry pull credentials to an existing realm.\n\n" +
-			"Upserts an entry on the realm's spec.registryCredentials keyed by --server\n" +
-			"and re-applies the realm; the reconciler converges it as a compatible change\n" +
-			"(no realm recreate). Re-running with the same --server updates the entry in\n" +
-			"place rather than appending a duplicate.\n\n" +
+			"Stores the credential as a basic-auth Secret of the realm (an identity of the\n" +
+			"registry connector) and binds --server to it on the realm's\n" +
+			"spec.registryCredentials; the realm document never carries the token. The\n" +
+			"realm is re-applied and the reconciler converges it as a compatible change (no\n" +
+			"realm recreate). Re-running with the same --server rotates the Secret and\n" +
+			"updates the entry in place rather than appending a duplicate; an entry that\n" +
+			"still carries an inline password is replaced by the Secret-backed one.\n\n" +
 			"The token is read from stdin or a file only — never from an argv flag:\n\n" +
 			"  - kuke create registry-credential <realm> --server ghcr.io --username <u> --password-stdin\n" +
 			"  - kuke create registry-credential <realm> --server ghcr.io --username <u> --from-file <path>\n\n" +
 			"Exactly one of --password-stdin or --from-file is required.\n\n" +
 			"--server is the registry host the credential applies to (e.g. ghcr.io). It\n" +
 			"defaults to empty, which matches the registry extracted from the image\n" +
-			"reference at pull time.",
+			"reference at pull time.\n\n" +
+			"The Secret is named registry-<server> (ghcr.io becomes registry-ghcr-io) unless\n" +
+			"--secret-name says otherwise.",
 		Args:          cobra.ExactArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: false,
@@ -69,6 +80,7 @@ func NewRegistryCredentialCmd() *cobra.Command {
 	cmd.Flags().String("username", "", "Registry username")
 	cmd.Flags().Bool("password-stdin", false, "Read the registry token from stdin (docker login style)")
 	cmd.Flags().String("from-file", "", "Read the registry token from a file")
+	cmd.Flags().String("secret-name", "", "Name of the Secret that stores the credential (default: registry-<server>)")
 
 	cmd.ValidArgsFunction = config.CompleteRealmNames
 
@@ -101,17 +113,20 @@ func runCreateRegistryCredential(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("realm %q not found", flags.realm)
 	}
 
+	// The credential itself goes into a Secret of the realm; creating one
+	// that exists replaces its value, so a re-run rotates the token.
+	if _, err = client.CreateSecret(cmd.Context(), connector.RegistrySecret(
+		flags.realm, flags.secretName, flags.username, flags.token,
+	)); err != nil {
+		return fmt.Errorf("store registry credential as secret %q: %w", flags.secretName, err)
+	}
+
 	desired := current.Realm
 	desired.APIVersion = v1beta1.APIVersionV1Beta1
 	desired.Kind = v1beta1.KindRealm
 	desired.Status = v1beta1.RealmStatus{}
-	desired.Spec.RegistryCredentials = upsertCredential(
-		desired.Spec.RegistryCredentials,
-		v1beta1.RegistryCredentials{
-			Username:      flags.username,
-			Password:      flags.token,
-			ServerAddress: flags.server,
-		},
+	desired.Spec.RegistryCredentials = connector.UpsertRegistryCredential(
+		desired.Spec.RegistryCredentials, flags.server, flags.realm, flags.secretName,
 	)
 
 	rawYAML, err := yaml.Marshal(desired)
@@ -127,25 +142,13 @@ func runCreateRegistryCredential(cmd *cobra.Command, args []string) error {
 	return printApplyResult(cmd, flags, result)
 }
 
-// upsertCredential replaces an existing entry whose ServerAddress matches the
-// incoming credential's ServerAddress (username + password updated), or appends
-// a new entry when no match is found. Matching is exact on ServerAddress so the
-// empty-server default ("matches by image reference") upserts against itself.
-func upsertCredential(existing []v1beta1.RegistryCredentials, cred v1beta1.RegistryCredentials) []v1beta1.RegistryCredentials {
-	for i := range existing {
-		if existing[i].ServerAddress == cred.ServerAddress {
-			existing[i] = cred
-			return existing
-		}
-	}
-	return append(existing, cred)
-}
-
 type registryCredentialFlags struct {
 	realm    string
 	server   string
 	username string
 	token    string
+	// secretName is the Secret the credential is stored in.
+	secretName string
 }
 
 func parseRegistryCredentialFlags(cmd *cobra.Command, args []string) (registryCredentialFlags, error) {
@@ -207,6 +210,15 @@ func parseRegistryCredentialFlags(cmd *cobra.Command, args []string) (registryCr
 		return registryCredentialFlags{}, errors.New("registry token is empty")
 	}
 
+	secretName, err := cmd.Flags().GetString("secret-name")
+	if err != nil {
+		return registryCredentialFlags{}, err
+	}
+	flags.secretName = strings.TrimSpace(secretName)
+	if flags.secretName == "" {
+		flags.secretName = connector.RegistrySecretName(flags.server)
+	}
+
 	return flags, nil
 }
 
@@ -246,16 +258,16 @@ func printApplyResult(cmd *cobra.Command, flags registryCredentialFlags, result 
 			return fmt.Errorf("apply realm %q failed", resource.Name)
 		default:
 			cmd.Printf(
-				"Registry credential for %s (user %q) applied to realm %q: %s\n",
-				server, flags.username, flags.realm, resource.Action,
+				"Registry credential for %s (user %q) stored in secret %q and applied to realm %q: %s\n",
+				server, flags.username, flags.secretName, flags.realm, resource.Action,
 			)
 			return nil
 		}
 	}
 
 	cmd.Printf(
-		"Registry credential for %s (user %q) applied to realm %q\n",
-		server, flags.username, flags.realm,
+		"Registry credential for %s (user %q) stored in secret %q and applied to realm %q\n",
+		server, flags.username, flags.secretName, flags.realm,
 	)
 	return nil
 }

@@ -1251,8 +1251,16 @@ func registryCredentialsEqual(a, b []intmodel.RegistryCredentials) bool {
 	}
 	for i := range a {
 		if a[i].Username != b[i].Username ||
-			a[i].Password != b[i].Password ||
 			a[i].ServerAddress != b[i].ServerAddress {
+			return false
+		}
+		if (a[i].SecretRef == nil) != (b[i].SecretRef == nil) ||
+			(a[i].SecretRef != nil && *a[i].SecretRef != *b[i].SecretRef) {
+			return false
+		}
+		// A desired inline entry without a password keeps the stored one
+		// (a Realm read back never carries it), so it is not a change.
+		if a[i].Password != b[i].Password && (a[i].Password != "" || a[i].SecretRef != nil) {
 			return false
 		}
 	}

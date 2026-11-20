@@ -55,6 +55,9 @@ type fakeClient struct {
 	configs       []api.CellConfigDoc
 	stackDefaults *api.ScopeDefaults
 	stackLabels   map[string]string
+	// The team realm's spec, as far as an applied Realm document can change it.
+	realmDefaults *api.ScopeDefaults
+	realmCreds    []api.RegistryCredentials
 	blueprintErr  error
 	// created records every secret document sent to CreateSecret.
 	created []api.SecretDoc
@@ -131,8 +134,15 @@ func (f *fakeClient) persist(kind string, node *yaml.Node, team string) {
 			panic(err)
 		}
 		f.stackDefaults = doc.Spec.Defaults
+	case "Realm":
+		var doc api.RealmDoc
+		if err := node.Decode(&doc); err != nil {
+			panic(err)
+		}
+		f.realmDefaults, f.realmCreds = doc.Spec.Defaults, doc.Spec.RegistryCredentials
 	}
 }
+
 func (f *fakeClient) DeleteConfig(_ context.Context, doc api.CellConfigDoc) (kukeonv1.DeleteConfigResult, error) {
 	f.deleted = append(f.deleted, doc.Metadata.Name)
 	kept := f.configs[:0]
@@ -154,7 +164,12 @@ func (f *fakeClient) ListRealms(context.Context) ([]api.RealmDoc, error) {
 		return nil, nil
 	}
 	return []api.RealmDoc{
-		{Metadata: api.RealmMetadata{Name: "default"}},
+		{
+			Metadata: api.RealmMetadata{Name: "default"},
+			Spec: api.RealmSpec{
+				Namespace: "default.kukeon.io", RegistryCredentials: f.realmCreds, Defaults: f.realmDefaults,
+			},
+		},
 		{Metadata: api.RealmMetadata{Name: "auth"}},
 	}, nil
 }
@@ -535,5 +550,162 @@ func TestSecretScopesRemainExplicit(t *testing.T) {
 				t.Fatal("rotated scoped credential or kept reporting it missing")
 			}
 		})
+	}
+}
+
+// realmDocument returns the Realm document of an apply stream, if it has one.
+func realmDocument(t *testing.T, raw []byte) (api.RealmDoc, bool) {
+	t.Helper()
+	decoder := yaml.NewDecoder(bytes.NewReader(raw))
+	for {
+		var node yaml.Node
+		if err := decoder.Decode(&node); errors.Is(err, io.EOF) {
+			return api.RealmDoc{}, false
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		var doc api.RealmDoc
+		if err := node.Decode(&doc); err != nil {
+			t.Fatal(err)
+		}
+		if doc.Kind == api.KindRealm {
+			return doc, true
+		}
+	}
+}
+
+// TestDefaultIdentityIsWrittenOnce is the application side of issue #1548: a
+// slot the team's Configs leave to the scope defaults gets a Realm default the
+// first time, and never again — so the default the operator changes later is
+// the one every Config inherits, with no re-render.
+func TestDefaultIdentityIsWrittenOnce(t *testing.T) {
+	const slot = "openrouter-api-key"
+	result := composition(t, "opencode", nil)
+	if len(result.DefaultSecrets) != 1 || result.DefaultSecrets[0].Slot != slot {
+		t.Fatalf("precondition: default secrets = %+v", result.DefaultSecrets)
+	}
+	if fill, filled := result.Pairs[0].Config.Spec.Secrets[slot]; filled {
+		t.Fatalf("precondition: the Config fills the slot itself: %+v", fill)
+	}
+
+	f := newFake()
+	// What the Realm already carries must survive the apply that adds a default.
+	f.realmCreds = []api.RegistryCredentials{{ServerAddress: "ghcr.io", Username: "bot", Password: "inline"}}
+	f.realmDefaults = &api.ScopeDefaults{
+		Values: map[string]string{"REGION": "eu"},
+		Secrets: map[string]api.CellConfigSecretFill{
+			"other": {SecretRef: &api.ContainerSecretRef{Name: "o", Realm: "default"}},
+		},
+	}
+	missing, err := Apply(t.Context(), f, result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	realm, written := realmDocument(t, f.raw)
+	if !written {
+		t.Fatalf("no Realm document in the first apply:\n%s", f.raw)
+	}
+	fill := realm.Spec.Defaults.Secrets[slot]
+	if realm.Metadata.Name != "default" || fill.SecretRef == nil || fill.SecretRef.Name != slot ||
+		fill.SecretRef.Realm != "default" {
+		t.Fatalf("realm default = %+v", realm.Spec.Defaults)
+	}
+	if realm.Spec.Defaults.Values["REGION"] != "eu" || realm.Spec.Defaults.Secrets["other"].SecretRef.Name != "o" ||
+		realm.Spec.Namespace != "default.kukeon.io" || len(realm.Spec.RegistryCredentials) != 1 ||
+		realm.Spec.RegistryCredentials[0].Password != "inline" {
+		t.Fatalf("the Realm's existing spec was not carried: %+v", realm.Spec)
+	}
+	// The Secret behind the new default does not exist yet: say how to create it.
+	if len(missing) != 1 || !strings.Contains(missing[0], "kuke create secret "+slot+" --realm default") {
+		t.Fatalf("missing = %q", missing)
+	}
+
+	// Applied: the next run finds the default and leaves the Realm alone. The
+	// default is the one this team wrote, so its Secret is still the team's:
+	// still missing, it is still reported.
+	if missing, err = Apply(t.Context(), f, result); err != nil {
+		t.Fatal(err)
+	}
+	if _, written = realmDocument(t, f.raw); written {
+		t.Fatalf("the Realm default was written a second time:\n%s", f.raw)
+	}
+	if len(missing) != 1 || !strings.Contains(missing[0], "kuke create secret "+slot+" --realm default") {
+		t.Fatalf("second run: missing = %q, want the team's own default Secret reported", missing)
+	}
+
+	// The operator points the default at another identity. Re-running keeps
+	// it, and no longer asks for the Secret the first default named.
+	f.realmDefaults.Secrets[slot] = api.CellConfigSecretFill{
+		SecretRef: &api.ContainerSecretRef{Name: "work-account", Realm: "default"},
+	}
+	if missing, err = Apply(t.Context(), f, result); err != nil {
+		t.Fatal(err)
+	}
+	if _, written = realmDocument(t, f.raw); written || len(missing) != 0 {
+		t.Fatalf("an operator's default was not respected: written=%v missing=%q", written, missing)
+	}
+	if f.realmDefaults.Secrets[slot].SecretRef.Name != "work-account" {
+		t.Fatalf("realm default = %+v", f.realmDefaults.Secrets[slot])
+	}
+	// The Config still has no fill: it inherits whatever the default is.
+	if strings.Contains(string(f.raw), "work-account") || strings.Contains(string(f.raw), "secretRef:") {
+		t.Fatalf("an identity was baked into the Configs:\n%s", f.raw)
+	}
+
+	// A default at a deeper level counts too: nothing is added to the Realm.
+	g := newFake()
+	g.stackDefaults = &api.ScopeDefaults{Secrets: map[string]api.CellConfigSecretFill{
+		slot: {SecretRef: &api.ContainerSecretRef{Name: "stack-account", Realm: "default"}},
+	}}
+	if missing, err = Apply(t.Context(), g, result); err != nil {
+		t.Fatal(err)
+	}
+	if _, written = realmDocument(t, g.raw); written || len(missing) != 0 || g.realmDefaults != nil {
+		t.Fatalf("a Stack default did not stop the Realm default: written=%v missing=%q", written, missing)
+	}
+}
+
+// TestMissingGitIdentityHint: a missing git.identityRef Secret — on a Config or
+// on one of its repo fills — is reported with the `--connector git` command
+// that creates a tagged identity the render accepts; a missing credential named
+// directly keeps the plain ssh-key form.
+func TestMissingGitIdentityHint(t *testing.T) {
+	identity := &api.ContainerSecretRef{Name: "bot-key", Realm: "default", Stack: "team"}
+	repoIdentity := &api.ContainerSecretRef{Name: "repo-key", Realm: "default"}
+	result := &compose.Result{
+		Git: &api.ContainerGit{Credentials: []api.GitCredential{
+			{Host: "github.com", SecretRef: &api.ContainerSecretRef{Name: "plain-key", Realm: "default"}},
+		}},
+		Pairs: []compose.Pair{{Config: &api.CellConfigDoc{Spec: api.CellConfigSpec{
+			Git: &api.ContainerGit{IdentityRef: identity},
+			Repos: map[string]api.CellConfigRepoFill{
+				"project": {Git: &api.RepoGit{IdentityRef: repoIdentity}},
+			},
+		}}}},
+	}
+	missing, err := missingGitSecrets(t.Context(), newFake(), result, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := map[string]string{}
+	for _, line := range missing {
+		name, _, _ := strings.Cut(line, "  →  ")
+		lines[name] = line
+	}
+	for name, want := range map[string]string{
+		"bot-key":  "kuke create secret bot-key --realm default --stack team --connector git --type ssh-key",
+		"repo-key": "kuke create secret repo-key --realm default --connector git --type ssh-key",
+	} {
+		if !strings.Contains(lines[name], want) || !strings.Contains(lines[name], "--hosts ") {
+			t.Errorf("%s hint = %q, want it to contain %q and --hosts", name, lines[name], want)
+		}
+	}
+	plain := lines["plain-key"]
+	if !strings.Contains(plain, "kuke create secret plain-key --realm default --type ssh-key") ||
+		strings.Contains(plain, "--connector") {
+		t.Errorf("plain-key hint = %q, want the untagged credential form", plain)
+	}
+	if len(missing) != 3 {
+		t.Errorf("missing = %q, want three lines", missing)
 	}
 }

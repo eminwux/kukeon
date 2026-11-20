@@ -468,3 +468,120 @@ func TestRead_ErrorsNeverEchoMaterial(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateMeta(t *testing.T) {
+	opaque := func(connector string, identity map[string]string) intmodel.SecretSpec {
+		return intmodel.SecretSpec{Data: "token", Connector: connector, Identity: identity}
+	}
+	for _, tc := range []struct {
+		name string
+		spec intmodel.SecretSpec
+		want string // empty: accepted
+	}{
+		{"untagged", opaque("", nil), ""},
+		{"tagged", opaque("forge", map[string]string{"account": "work", "hosts": "a.example, b.example"}), ""},
+		{"tag is not an identifier", opaque("Forge Hub", nil), "spec.connector"},
+		{"identity without a tag", opaque("", map[string]string{"account": "work"}), "spec.identity requires spec.connector"},
+		{"field is not an identifier", opaque("forge", map[string]string{"my field": "x"}), "is not an identifier"},
+		{"multi-line value", opaque("forge", map[string]string{"account": "a\nb"}), "must be a single line"},
+		{"oversized value", opaque("forge", map[string]string{"account": strings.Repeat("a", 1025)}), "at most 1024 bytes"},
+		{
+			"key material in a readable field",
+			opaque("forge", map[string]string{"account": "-----BEGIN OPENSSH PRIVATE" + " KEY-----"}),
+			"looks like key material",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// ValidateSpec applies the same checks on every create.
+			for _, err := range []error{secretstore.ValidateMeta(tc.spec), secretstore.ValidateSpec(tc.spec)} {
+				if tc.want == "" {
+					if err != nil {
+						t.Fatal(err)
+					}
+					continue
+				}
+				if !errors.Is(err, errdefs.ErrSecretTypeFields) || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("err = %v, want %q", err, tc.want)
+				}
+				if strings.Contains(err.Error(), "PRIVATE KEY") {
+					t.Fatalf("error echoes the value: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// The identity sidecar records the readable facts of a secret — and only
+// those — next to its bytes, with the same lifecycle as the type sidecar.
+func TestWriteMeta_Lifecycle(t *testing.T) {
+	runPath := t.TempDir()
+	md := intmodel.SecretMetadata{Name: "key", Realm: "r", Space: "s"}
+
+	if got, err := secretstore.ReadMeta(runPath, md); err != nil || !got.IsZero() {
+		t.Fatalf("ReadMeta without sidecar = %+v, %v; want zero", got, err)
+	}
+	if err := secretstore.RemoveMeta(runPath, md); err != nil {
+		t.Fatalf("RemoveMeta on missing sidecar: %v", err)
+	}
+	if err := secretstore.WriteMeta(runPath, md, secretstore.Meta{}); err != nil {
+		t.Fatalf("WriteMeta(zero) on missing sidecar: %v", err)
+	}
+
+	want := secretstore.Meta{Connector: "forge", Identity: map[string]string{"account": "work"}}
+	if err := secretstore.WriteMeta(runPath, md, want); err != nil {
+		t.Fatalf("WriteMeta: %v", err)
+	}
+	path := secretstore.MetaPath(runPath, md)
+	if dir := filepath.Join(fs.SecretsDir(runPath, "r", "s", "", ""), secretstore.MetaDir); filepath.Dir(path) != dir {
+		t.Errorf("MetaPath = %q, want it under %q", path, dir)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat sidecar: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("sidecar mode = %o, want 600", info.Mode().Perm())
+	}
+	if dirInfo, statErr := os.Stat(filepath.Dir(path)); statErr != nil || dirInfo.Mode().Perm() != 0o700 {
+		t.Errorf("meta dir = %v, %v; want mode 700", dirInfo, statErr)
+	}
+	got, err := secretstore.ReadMeta(runPath, md)
+	if err != nil || got.Connector != want.Connector || got.Identity["account"] != "work" || len(got.Identity) != 1 {
+		t.Fatalf("ReadMeta = %+v, %v", got, err)
+	}
+	if entries, readErr := os.ReadDir(filepath.Dir(path)); readErr != nil || len(entries) != 1 {
+		t.Errorf("meta dir holds %d entries (%v), want only the sidecar", len(entries), readErr)
+	}
+
+	// Re-tagging replaces the sidecar; the zero Meta clears it.
+	if err = secretstore.WriteMeta(runPath, md, secretstore.Meta{Connector: "other"}); err != nil {
+		t.Fatalf("WriteMeta retag: %v", err)
+	}
+	if got, _ = secretstore.ReadMeta(runPath, md); got.Connector != "other" || len(got.Identity) != 0 {
+		t.Errorf("ReadMeta after retag = %+v", got)
+	}
+	if err = secretstore.WriteMeta(runPath, md, secretstore.Meta{}); err != nil {
+		t.Fatalf("WriteMeta clear: %v", err)
+	}
+	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("sidecar still present after clearing: %v", statErr)
+	}
+
+	if err = secretstore.WriteMeta(runPath, md, want); err != nil {
+		t.Fatal(err)
+	}
+	if err = secretstore.RemoveMeta(runPath, md); err != nil {
+		t.Fatalf("RemoveMeta: %v", err)
+	}
+	if got, _ = secretstore.ReadMeta(runPath, md); !got.IsZero() {
+		t.Errorf("ReadMeta after RemoveMeta = %+v", got)
+	}
+
+	// A damaged sidecar is an error, not a silently untagged secret.
+	if err = os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = secretstore.ReadMeta(runPath, md); err == nil || !strings.Contains(err.Error(), "unreadable") {
+		t.Fatalf("ReadMeta on a damaged sidecar: %v", err)
+	}
+}

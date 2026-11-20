@@ -482,6 +482,15 @@ type ContainerGit struct {
 	// both is a validation error. When Sign is empty a Signing block signs
 	// both commits and tags. Issue #1472, step 5.
 	Signing *GitSigning `json:"signing,omitempty"        yaml:"signing,omitempty"`
+	// IdentityRef names one git identity: an ssh-key or basic-auth Secret
+	// tagged `git` whose readable identity fields carry the author, the
+	// committer, the hosts it authenticates and what to sign (issue #1548).
+	// The daemon expands it when it renders a cell from a CellConfig — into
+	// author, committer, one credentials[] entry per host and, for an SSH
+	// key, signing with the same key. Explicit fields in the same block
+	// override the expanded ones. It is accepted on Realm, Space and Stack
+	// defaults and on a CellConfig's git; a rendered cell never carries it.
+	IdentityRef *ContainerSecretRef `json:"identityRef,omitempty"    yaml:"identityRef,omitempty"`
 }
 
 // GitIdentity is a name/email pair for a git author or committer identity.
@@ -544,6 +553,11 @@ type RepoGit struct {
 	// Sign lists what to sign in this checkout ("commits", "tags"). Empty
 	// inherits the default, or signs both when this source sets Signing.
 	Sign []string `json:"sign,omitempty"       yaml:"sign,omitempty"`
+	// IdentityRef names the git identity this source uses, as on
+	// ContainerGit: the daemon expands it into this source's author,
+	// committer, credential and signing key when it renders the cell.
+	// Accepted on a CellConfig repo fill and a scope default's repo fill.
+	IdentityRef *ContainerSecretRef `json:"identityRef,omitempty" yaml:"identityRef,omitempty"`
 }
 
 // ContainerCapabilities groups Linux capability deltas applied to the

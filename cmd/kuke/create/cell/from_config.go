@@ -24,6 +24,7 @@ import (
 
 	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/internal/cellblueprint"
+	"github.com/eminwux/kukeon/internal/connector"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
@@ -49,12 +50,21 @@ func ConfigRenderRequest(
 		}
 		params = parsed
 	}
+	// Per-cell connector identities (#1548): the daemon checks each against
+	// the connectors the Config requires. A secret named without a scope is
+	// looked up in the Config's realm.
+	realm := kukeshared.PickLookupRealm(cmd, scope.Realm)
+	overrides, err := connector.ParseOverrides(flags.ConnectorArgs, realm)
+	if err != nil {
+		return kukeonv1.CellFromConfigRequest{}, err
+	}
 	return kukeonv1.CellFromConfigRequest{
-		Mode:   flags.Mode,
-		Params: params,
+		Mode:               flags.Mode,
+		Params:             params,
+		ConnectorOverrides: overrides,
 		Config: v1beta1.CellConfigMetadata{
 			Name:  flags.ConfigName,
-			Realm: kukeshared.PickLookupRealm(cmd, scope.Realm),
+			Realm: realm,
 			Space: kukeshared.ExplicitScope(cmd, "space", scope.Space),
 			Stack: kukeshared.ExplicitScope(cmd, "stack", scope.Stack),
 		},

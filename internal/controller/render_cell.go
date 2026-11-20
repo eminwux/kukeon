@@ -49,6 +49,8 @@ type cellRender struct {
 	Cell   v1beta1.CellDoc
 	Digest string
 	Values []v1beta1.RenderedValue
+	// Connectors is how each connector the Config requires resolved (#1548).
+	Connectors []v1beta1.ConnectorStatus
 }
 
 // cellBinding is the per-cell input of a CellConfig render: everything a cell
@@ -71,6 +73,9 @@ type cellBinding struct {
 	// property of the cell, not read from the Config's spec.schedule, so
 	// changing or removing the schedule never alters a re-render.
 	Schedule string
+	// Connectors are the per-cell `--connector <connector>=<secret>`
+	// identities, keyed by connector name (#1548).
+	Connectors map[string]v1beta1.ContainerSecretRef
 }
 
 // bindingFromCell rebuilds the binding a live cell was created with from its
@@ -84,6 +89,7 @@ func bindingFromCell(cell intmodel.Cell) cellBinding {
 		binding.EnvOverrides = prov.EnvOverrides
 		binding.Mode = prov.Mode
 		binding.Params = prov.ParamOverrides
+		binding.Connectors = connectorOverridesFromProvenance(prov.ConnectorOverrides)
 	}
 	return binding
 }
@@ -123,54 +129,19 @@ type scopeLevels struct {
 //
 //nolint:funlen // the single render pipeline, kept linear so its step order reads top to bottom.
 func renderCellFromConfig(r runner.Runner, cfg intmodel.CellConfig, binding cellBinding) (cellRender, error) {
-	cfgDoc, err := apischeme.ConvertCellConfigToExternal(cfg)
-	if err != nil {
-		return cellRender{}, fmt.Errorf("decode lineage config: %w", err)
-	}
-
-	bpDoc, err := lookupConfigBlueprint(r, cfgDoc)
+	resolved, err := resolveConfig(r, cfg, binding)
 	if err != nil {
 		return cellRender{}, err
 	}
-
-	binding = inferMode(bpDoc, cfgDoc, binding)
-	flattenOpts := cellblueprint.FlattenOptions{Components: cfgDoc.Spec.Components, Mode: binding.Mode}
-	if modes := cfgDoc.Spec.Modes; modes != nil {
-		flattenOpts.AllowedModes, flattenOpts.DefaultMode = modes.Enabled, modes.Default
-	}
-	flat, err := cellblueprint.Flatten(bpDoc, flattenOpts)
-	if err != nil {
-		return cellRender{}, fmt.Errorf("config %q: %w", cfgDoc.Metadata.Name, err)
-	}
-	// A Config carries its own values; the one thing a cell may set for
-	// itself is what the mode it was created in asks for.
-	for key := range binding.Params {
-		if !slices.Contains(flat.ModeParameters, key) {
-			return cellRender{}, fmt.Errorf(
-				"%w: --param %q is not a parameter of harness mode %q (mode parameters: %s); "+
-					"set other values in the CellConfig",
-				errdefs.ErrBlueprintInvalid, key, flat.Mode, strings.Join(flat.ModeParameters, ", "))
-		}
-	}
-	contract := contractValues(bpDoc, cfgDoc, flat, binding)
-	if cfgDoc, err = dropInactiveSecretFills(cfgDoc, bpDoc, flat.Doc); err != nil {
-		return cellRender{}, fmt.Errorf("config %q: %w", cfgDoc.Metadata.Name, err)
-	}
-	bpDoc = flat.Doc
-
-	realmName, spaceName, stackName := cellconfig.CellScope(cfgDoc)
-	levels, err := loadScopeLevels(r, realmName, spaceName, stackName)
-	if err != nil {
+	// A cell is only rendered when every connector it needs has an identity
+	// it can use (#1548): the error names the connector, where an unfilled
+	// slot would only name a slot.
+	if err = connectorError(resolved.cfgDoc.Metadata.Name, resolved.connectors, resolved.git); err != nil {
 		return cellRender{}, err
 	}
-
-	merged, values := cellconfig.MergeDefaults(cfgDoc, bpDoc, []cellconfig.DefaultsLayer{
-		{Origin: v1beta1.RenderOriginRealm, Defaults: levels.realm.Spec.Defaults},
-		{Origin: v1beta1.RenderOriginSpace, Defaults: levels.space.Spec.Defaults.Fill()},
-		{Origin: v1beta1.RenderOriginStack, Defaults: levels.stack.Spec.Defaults},
-	})
-	merged, values = applyParamOverrides(merged, values, binding.Params)
-	values = append(values, contract...)
+	cfgDoc, bpDoc, flat, levels := resolved.cfgDoc, resolved.bpDoc, resolved.flat, resolved.levels
+	merged, values := resolved.merged, resolved.values
+	binding = resolved.binding
 
 	cellDoc, err := cellconfig.MaterializeWithName(merged, bpDoc, binding.Name)
 	if err != nil {
@@ -190,6 +161,12 @@ func renderCellFromConfig(r runner.Runner, cfg intmodel.CellConfig, binding cell
 			prov.ParamOverrides = make(map[string]string, len(binding.Params))
 			for k, v := range binding.Params {
 				prov.ParamOverrides[k] = v
+			}
+		}
+		if len(binding.Connectors) > 0 {
+			prov.ConnectorOverrides = make(map[string]v1beta1.ContainerSecretRef, len(binding.Connectors))
+			for name, ref := range binding.Connectors {
+				prov.ConnectorOverrides[name] = ref
 			}
 		}
 	}
@@ -256,7 +233,126 @@ func renderCellFromConfig(r runner.Runner, cfg intmodel.CellConfig, binding cell
 	annotations[cellconfig.AnnotationRenderKukeonVersion] = buildinfo.Version()
 	cellDoc.Metadata.Annotations = annotations
 
-	return cellRender{Cell: cellDoc, Digest: digest, Values: values}, nil
+	return cellRender{Cell: cellDoc, Digest: digest, Values: values, Connectors: resolved.connectors}, nil
+}
+
+// configResolution is a CellConfig with everything a cell inherits folded in,
+// one step short of a Cell: the blueprint with the Config's components and the
+// cell's mode applied, the Realm, Space and Stack levels, the merged fill with
+// its origins, and how each connector the Config requires resolves. A render
+// materializes it; a Config get reports its connectors.
+type configResolution struct {
+	cfgDoc  v1beta1.CellConfigDoc
+	bpDoc   v1beta1.CellBlueprintDoc
+	flat    cellblueprint.Flattened
+	levels  scopeLevels
+	merged  v1beta1.CellConfigDoc
+	values  []v1beta1.RenderedValue
+	binding cellBinding
+
+	connectors []v1beta1.ConnectorStatus
+	git        *gitIdentityExpander
+}
+
+// resolveConfig runs the first half of the render: everything up to the merged
+// Config. It fails on what makes the Config unrenderable for any cell — a
+// missing blueprint, a component or mode the blueprint does not have, a
+// per-cell input the Config does not take — and reports, without failing, how
+// the connectors resolve.
+func resolveConfig(r runner.Runner, cfg intmodel.CellConfig, binding cellBinding) (configResolution, error) {
+	cfgDoc, err := apischeme.ConvertCellConfigToExternal(cfg)
+	if err != nil {
+		return configResolution{}, fmt.Errorf("decode lineage config: %w", err)
+	}
+
+	bpDoc, err := lookupConfigBlueprint(r, cfgDoc)
+	if err != nil {
+		return configResolution{}, err
+	}
+
+	binding = inferMode(bpDoc, cfgDoc, binding)
+	flattenOpts := cellblueprint.FlattenOptions{Components: cfgDoc.Spec.Components, Mode: binding.Mode}
+	if modes := cfgDoc.Spec.Modes; modes != nil {
+		flattenOpts.AllowedModes, flattenOpts.DefaultMode = modes.Enabled, modes.Default
+	}
+	flat, err := cellblueprint.Flatten(bpDoc, flattenOpts)
+	if err != nil {
+		return configResolution{}, fmt.Errorf("config %q: %w", cfgDoc.Metadata.Name, err)
+	}
+	// A Config carries its own values; the one thing a cell may set for
+	// itself is what the mode it was created in asks for.
+	for key := range binding.Params {
+		if !slices.Contains(flat.ModeParameters, key) {
+			return configResolution{}, fmt.Errorf(
+				"%w: --param %q is not a parameter of harness mode %q (mode parameters: %s); "+
+					"set other values in the CellConfig",
+				errdefs.ErrBlueprintInvalid, key, flat.Mode, strings.Join(flat.ModeParameters, ", "))
+		}
+	}
+	contract := contractValues(bpDoc, cfgDoc, flat, binding)
+	requirements := connectorRequirements(bpDoc, flat.Components)
+	if cfgDoc, err = dropInactiveSecretFills(cfgDoc, bpDoc, flat.Doc); err != nil {
+		return configResolution{}, fmt.Errorf("config %q: %w", cfgDoc.Metadata.Name, err)
+	}
+	bpDoc = flat.Doc
+
+	realmName, spaceName, stackName := cellconfig.CellScope(cfgDoc)
+	levels, err := loadScopeLevels(r, realmName, spaceName, stackName)
+	if err != nil {
+		return configResolution{}, err
+	}
+
+	// The identity a single cell picked for a connector (#1548) is one more
+	// level, applied over the Config.
+	cellLayer, overrides, err := cellConnectorLayer(cfgDoc.Metadata.Name, realmName, requirements, binding.Connectors)
+	if err != nil {
+		return configResolution{}, err
+	}
+	binding.Connectors = overrides
+
+	// Expand every git.identityRef into the identity it names, level by
+	// level, so the merge below sees ordinary git blocks.
+	git := &gitIdentityExpander{r: r}
+	for i := range requirements {
+		if requirements[i].Connector.Delivery == v1beta1.ConnectorDeliveryGit {
+			git.desc = &requirements[i].Connector
+		}
+	}
+	cfgDoc.Spec.Git = git.container(v1beta1.RenderOriginConfig, cfgDoc.Spec.Git)
+	cfgDoc.Spec.Repos = git.repos(v1beta1.RenderOriginConfig, cfgDoc.Spec.Repos)
+	if cellLayer != nil {
+		cellLayer.Git = git.container(v1beta1.RenderOriginCell, cellLayer.Git)
+	}
+
+	merged, values := cellconfig.MergeDefaultsForCell(cfgDoc, bpDoc, []cellconfig.DefaultsLayer{
+		{
+			Origin:   v1beta1.RenderOriginRealm,
+			Defaults: git.defaults(v1beta1.RenderOriginRealm, levels.realm.Spec.Defaults),
+		},
+		{
+			Origin:   v1beta1.RenderOriginSpace,
+			Defaults: git.defaults(v1beta1.RenderOriginSpace, levels.space.Spec.Defaults.Fill()),
+		},
+		{
+			Origin:   v1beta1.RenderOriginStack,
+			Defaults: git.defaults(v1beta1.RenderOriginStack, levels.stack.Spec.Defaults),
+		},
+	}, cellLayer)
+	merged, values = applyParamOverrides(merged, values, binding.Params)
+	values = append(values, contract...)
+	git.settle(values)
+
+	return configResolution{
+		cfgDoc:     cfgDoc,
+		bpDoc:      bpDoc,
+		flat:       flat,
+		levels:     levels,
+		merged:     merged,
+		values:     values,
+		binding:    binding,
+		connectors: connectorStatuses(r, requirements, merged, values, git),
+		git:        git,
+	}, nil
 }
 
 // inferMode picks the harness mode a cell's own inputs imply when the create

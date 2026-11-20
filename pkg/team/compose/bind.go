@@ -27,6 +27,7 @@ import (
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/component"
 	"github.com/eminwux/kukeon/pkg/team/config"
+	"github.com/eminwux/kukeon/pkg/team/connector"
 )
 
 // planSecrets decides, for one pair, which optional components it enables and
@@ -35,15 +36,23 @@ import (
 // A team entry may add secret names of its own (`roles[].needs.secrets`); they
 // resolve like the role's.
 //
-// A role names what it needs three ways: `connectors` / `forges` (components
-// of the library), and the secret names in `harnesses.<h>.secrets` /
-// `needs.secrets`. A secret name selects, in order: the component slot that
-// lists it as an alias (`gh-token` enables the github connector), the harness
-// or harness-mode slot of that name, and otherwise an optional slot the shared
-// blueprint gains for it.
+// A role names what it needs three ways: `connectors` / `forges` (connectors
+// of the catalog and components of the library), and the secret names in
+// `harnesses.<h>.secrets` / `needs.secrets`. A secret name selects, in order:
+// the component slot of that name or that lists it as an alias (`gh-token`
+// enables the github connector), the harness or harness-mode slot of that
+// name, and otherwise an optional slot the shared blueprint gains for it.
 //
-//nolint:funlen // the three ways a role names a secret, resolved in their documented order.
-func planSecrets(plan *pairPlan, lib []component.Component, secrets *secretBindings) error {
+// A slot is filled in the Config only when its identity was chosen: by the
+// team's `connectors`, or by a TeamEntry / TeamsConfig binding that names
+// something other than the default secret. Every other slot is left to the
+// Realm → Space → Stack defaults (issue #1548), so it resolves when a cell is
+// created and follows a later change of a default.
+//
+//nolint:funlen,gocyclo,cyclop // the ways a role names a secret, resolved in their documented order.
+func planSecrets(
+	plan *pairPlan, lib []component.Component, catalog *connector.Catalog, secrets *secretBindings,
+) error {
 	enable := func(name string) error {
 		i := slices.IndexFunc(lib, func(c component.Component) bool { return c.Metadata.Name == name })
 		if i < 0 {
@@ -56,10 +65,13 @@ func planSecrets(plan *pairPlan, lib []component.Component, secrets *secretBindi
 		}
 		return nil
 	}
-	for _, name := range plan.role.Spec.Connectors {
-		if err := enableKind(lib, name, api.ComponentKindConnector, "connectors", enable); err != nil {
-			return err
-		}
+	names := union(plan.role.Spec.Needs.Secrets, plan.settings.Secrets)
+	// Secrets the team adds for this deployment (issue #1509).
+	if plan.selection.Needs != nil {
+		names = union(names, plan.selection.Needs.Secrets)
+	}
+	if err := planConnectors(plan, lib, catalog, names, enable); err != nil {
+		return err
 	}
 	for _, name := range plan.role.Spec.Forges {
 		if err := enableKind(lib, name, api.ComponentKindForge, "forges", enable); err != nil {
@@ -72,27 +84,45 @@ func planSecrets(plan *pairPlan, lib []component.Component, secrets *secretBindi
 		harnessSlots = append(harnessSlots, mode.Secrets...)
 	}
 	bound := map[string]bool{}
-	fill := func(slot api.BlueprintSecretSlot, binding config.SecretBinding) {
-		slot.Mode = api.BlueprintSecretModeEnv
-		plan.fills = append(plan.fills, secretFill{slot: slot, binding: binding})
+	fill := func(slot api.BlueprintSecretSlot, binding config.SecretBinding, isDefault bool) {
+		if slot.Mode == "" {
+			slot.Mode = api.BlueprintSecretModeEnv
+		}
+		plan.fills = append(plan.fills, secretFill{slot: slot, binding: binding, isDefault: isDefault})
 		bound[slot.Name] = true
 	}
-	names := union(plan.role.Spec.Needs.Secrets, plan.settings.Secrets)
-	// Secrets the team adds for this deployment (issue #1509).
-	if plan.selection.Needs != nil {
-		names = union(names, plan.selection.Needs.Secrets)
+	groupTaken := func(c component.Component) bool {
+		if c.Spec.Group == "" {
+			return false
+		}
+		return slices.ContainsFunc(lib, func(other component.Component) bool {
+			return other.Spec.Group == c.Spec.Group && other.Metadata.Name != c.Metadata.Name &&
+				slices.Contains(plan.components, other.Metadata.Name)
+		})
 	}
+	// A role-listed secret name that selects a component slot keeps the
+	// binding recorded under that name.
+	named := map[string]namedBinding{}
 	for _, name := range names {
-		binding, err := secrets.lookup(name)
+		binding, isDefault, err := secrets.lookup(name)
 		if err != nil {
 			return err
 		}
-		if c, slot, ok := aliasSlot(lib, name); ok {
-			if err = enable(c); err != nil {
+		if c, slot, ok := aliasSlot(lib, name); ok && rendersInto(c, plan.definition, catalog) {
+			// The method the team chose (or an earlier name selected) wins
+			// over another method of the same group.
+			if groupTaken(c) {
+				continue
+			}
+			if err = enable(c.Metadata.Name); err != nil {
 				return err
 			}
-			if !bound[slot.Name] {
-				fill(api.BlueprintSecretSlot{Name: slot.Name, EnvName: slot.EnvName, Required: slot.Required}, binding)
+			secretName := slot.SecretName
+			if secretName == "" {
+				secretName = slot.Name
+			}
+			if _, set := named[slot.Name]; !set {
+				named[slot.Name] = namedBinding{binding: binding, isDefault: secrets.isDefault(binding, secretName)}
 			}
 			continue
 		}
@@ -105,14 +135,14 @@ func planSecrets(plan *pairPlan, lib []component.Component, secrets *secretBindi
 					harnessSlots[i].EnvName,
 				)
 			}
-			fill(harnessSlots[i], binding)
+			fill(harnessSlots[i], binding, isDefault)
 			continue
 		}
 		slot := api.BlueprintSecretSlot{Name: name, Mode: api.BlueprintSecretModeEnv, EnvName: binding.EnvName}
 		plan.extraSecrets = append(plan.extraSecrets, slot)
-		fill(slot, binding)
+		fill(slot, binding, isDefault)
 	}
-	// Slots of the enabled components the role did not bind by an alias.
+	// The slots of the enabled components.
 	for _, c := range lib {
 		if !slices.Contains(plan.components, c.Metadata.Name) {
 			continue
@@ -121,11 +151,24 @@ func planSecrets(plan *pairPlan, lib []component.Component, secrets *secretBindi
 			if bound[slot.Name] {
 				continue
 			}
-			binding, err := secrets.component(slot)
+			rendered := componentSlot(slot)
+			chosen, ok, err := identityChoice(plan, c)
 			if err != nil {
 				return err
 			}
-			fill(api.BlueprintSecretSlot{Name: slot.Name, EnvName: slot.EnvName, Required: slot.Required}, binding)
+			if ok {
+				fill(rendered, config.SecretBinding{Name: slot.Name, SecretRef: chosen, EnvName: slot.EnvName}, false)
+				continue
+			}
+			if nb, set := named[slot.Name]; set {
+				fill(rendered, nb.binding, nb.isDefault)
+				continue
+			}
+			binding, isDefault, err := secrets.component(slot)
+			if err != nil {
+				return err
+			}
+			fill(rendered, binding, isDefault)
 		}
 	}
 	// Keep the library's order so a Config lists components deterministically.
@@ -139,6 +182,21 @@ func planSecrets(plan *pairPlan, lib []component.Component, secrets *secretBindi
 	return nil
 }
 
+type namedBinding struct {
+	binding   config.SecretBinding
+	isDefault bool
+}
+
+// componentSlot renders a library secret slot as the blueprint slot it
+// becomes: an env variable, or a mounted file for a file-delivered connector.
+func componentSlot(slot component.Secret) api.BlueprintSecretSlot {
+	out := api.BlueprintSecretSlot{Name: slot.Name, EnvName: slot.EnvName, Required: slot.Required}
+	if slot.MountPath != "" {
+		out.Mode, out.MountPath, out.EnvName = api.BlueprintSecretModeFile, slot.MountPath, ""
+	}
+	return out
+}
+
 func enableKind(lib []component.Component, name, kind, field string, enable func(string) error) error {
 	i := slices.IndexFunc(lib, func(c component.Component) bool { return c.Metadata.Name == name })
 	if i < 0 || lib[i].Spec.Kind != kind {
@@ -147,17 +205,17 @@ func enableKind(lib []component.Component, name, kind, field string, enable func
 	return enable(name)
 }
 
-// aliasSlot finds the component secret slot a transition-era role secret name
-// selects.
-func aliasSlot(lib []component.Component, name string) (string, component.Secret, bool) {
+// aliasSlot finds the component secret slot a role secret name selects: the
+// slot of that name, or one that lists it as a transition-era alias.
+func aliasSlot(lib []component.Component, name string) (component.Component, component.Secret, bool) {
 	for _, c := range lib {
 		for _, slot := range c.Spec.Secrets {
-			if slices.Contains(slot.Aliases, name) {
-				return c.Metadata.Name, slot, true
+			if slot.Name == name || slices.Contains(slot.Aliases, name) {
+				return c, slot, true
 			}
 		}
 	}
-	return "", component.Secret{}, false
+	return component.Component{}, component.Secret{}, false
 }
 
 // planParameters records the role-declared parameters the shared blueprint
@@ -224,12 +282,21 @@ func bind(
 	if err := bindRepos(plan, cc, team); err != nil {
 		return Pair{}, err
 	}
+	// The identity the team chose for git goes into the Config (issue #1548).
+	if plan.git != nil {
+		git := *plan.git
+		cc.Spec.Git = &git
+	}
 	for _, fill := range plan.fills {
 		ref := fill.binding.SecretRef
-		cc.Spec.Secrets[fill.slot.Name] = api.CellConfigSecretFill{
-			SecretRef: &api.ContainerSecretRef{
-				Name: ref.Name, Realm: ref.Realm, Space: ref.Space, Stack: ref.Stack, Cell: ref.Cell,
-			},
+		// A default is not a fill: the Config inherits it from the scope
+		// defaults when a cell is created.
+		if !fill.isDefault {
+			cc.Spec.Secrets[fill.slot.Name] = api.CellConfigSecretFill{
+				SecretRef: &api.ContainerSecretRef{
+					Name: ref.Name, Realm: ref.Realm, Space: ref.Space, Stack: ref.Stack, Cell: ref.Cell,
+				},
+			}
 		}
 		var source *config.SecretSource
 		if fill.binding.Source != nil {
@@ -238,7 +305,7 @@ func bind(
 		}
 		pair.Secrets = append(pair.Secrets, SecretRequirement{
 			Identifier: fill.slot.Name, Container: workContainer, Destination: fill.slot,
-			Reference: ref, Source: source,
+			Reference: ref, Source: source, Default: fill.isDefault,
 		})
 	}
 	return pair, nil

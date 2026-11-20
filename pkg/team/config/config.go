@@ -107,18 +107,39 @@ type Identity struct {
 // Defaults preserves nil (omitted/inherit) versus non-nil empty (select none)
 // selection lists. Consumers must retain that distinction during inheritance.
 type Defaults struct {
-	Sources   []Source  `yaml:"sources,omitempty"`
-	Roles     []Role    `yaml:"roles,omitempty"`
-	Harnesses []Harness `yaml:"harnesses,omitempty"`
+	// Connectors are the team's connector choices, keyed by connector name
+	// (issue #1548): which method a connector is delivered by and which stored
+	// identity fills it. A connector left out — or an entry with no identity —
+	// uses the default method and inherits its identity from the Stack, Space
+	// and Realm defaults. Nil inherits the global defaults' map.
+	Connectors map[string]ConnectorChoice `yaml:"connectors,omitempty"`
+	Sources    []Source                   `yaml:"sources,omitempty"`
+	Roles      []Role                     `yaml:"roles,omitempty"`
+	Harnesses  []Harness                  `yaml:"harnesses,omitempty"`
+}
+
+// ConnectorChoice is what a team (or one of its roles) decides for one
+// connector. Both fields are optional.
+type ConnectorChoice struct {
+	// Method picks one of the connector's methods (for example `subscription`,
+	// `api-key` or `login` for claude). Empty selects the connector's default.
+	Method string `yaml:"method,omitempty"`
+	// Identity names the stored Secret that fills the connector, written
+	// `name[@realm[/space[/stack]]]`; without a scope it is looked up in the
+	// team's realm. Empty leaves the identity to the scope defaults, so a
+	// later change of a default reaches the team's cells without a re-render.
+	Identity string `yaml:"identity,omitempty"`
 }
 
 // MarshalYAML keeps explicit empty lists instead of erasing them with omitempty.
 func (d Defaults) MarshalYAML() (any, error) {
 	var out struct {
-		Sources   *[]Source  `yaml:"sources,omitempty"`
-		Roles     *[]Role    `yaml:"roles,omitempty"`
-		Harnesses *[]Harness `yaml:"harnesses,omitempty"`
+		Connectors map[string]ConnectorChoice `yaml:"connectors,omitempty"`
+		Sources    *[]Source                  `yaml:"sources,omitempty"`
+		Roles      *[]Role                    `yaml:"roles,omitempty"`
+		Harnesses  *[]Harness                 `yaml:"harnesses,omitempty"`
 	}
+	out.Connectors = d.Connectors
 	if d.Sources != nil {
 		out.Sources = &d.Sources
 	}
@@ -150,6 +171,13 @@ type Role struct {
 	InitialPath string `yaml:"initialPath,omitempty"`
 	Needs       *Needs `yaml:"needs,omitempty"`
 	Harness     string `yaml:"harness,omitempty"`
+	// Connectors are this role's connector choices, keyed by connector name.
+	// An entry wins over the team's spec.connectors entry for the same
+	// connector, and gives the role's cells the connector even when the role
+	// itself does not ask for it. An entry that names no method keeps the
+	// team's method (and its identity, unless the entry names one); an entry
+	// that names a method states the whole choice.
+	Connectors map[string]ConnectorChoice `yaml:"connectors,omitempty"`
 	// Tasks selects which of the role's declared tasks (role.yaml
 	// spec.tasks) the team renders as headless task CellConfigs. Nil (the
 	// field omitted) selects every task the role declares; a non-nil empty

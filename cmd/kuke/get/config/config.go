@@ -211,18 +211,28 @@ func printConfigs(cmd *cobra.Command, configs []v1beta1.CellConfigDoc, format sh
 			cmd.Println("No configs found.")
 			return nil
 		}
+		// -o wide adds how each connector the Config requires resolves
+		// (issue #1548); the structured formats carry it as status.connectors.
+		wide := format == shared.OutputFormatWide
 		headers := []string{"NAME", "REALM", "SPACE", "STACK", "SCHEDULE", "NEXT"}
+		if wide {
+			headers = append(headers, "CONNECTORS")
+		}
 		rows := make([][]string, 0, len(configs))
 		for i := range configs {
 			c := &configs[i]
-			rows = append(rows, []string{
+			row := []string{
 				c.Metadata.Name,
 				dashIfEmpty(c.Metadata.Realm),
 				dashIfEmpty(c.Metadata.Space),
 				dashIfEmpty(c.Metadata.Stack),
 				scheduleColumn(c),
 				nextColumn(c),
-			})
+			}
+			if wide {
+				row = append(row, dashIfEmpty(connectorsColumn(c)))
+			}
+			rows = append(rows, row)
 		}
 		shared.PrintTable(cmd, headers, rows)
 		return nil
@@ -262,6 +272,42 @@ func nextColumn(c *v1beta1.CellConfigDoc) string {
 		return ""
 	}
 	return c.Status.Schedule.NextScheduleTime.UTC().Format(time.RFC3339)
+}
+
+// connectorsColumn renders the CONNECTORS column: one `<connector>=<what fills
+// it>` entry per connector the Config requires. What fills it is the identity
+// and the level it comes from (`gh-token (realm)`), the method for a connector
+// that keeps a login in the state volume (`login`), `MISSING` for a required
+// connector nothing resolves — a cell cannot be created until one does — and
+// `none` for one the cell starts without.
+func connectorsColumn(c *v1beta1.CellConfigDoc) string {
+	if c.Status == nil {
+		return ""
+	}
+	parts := make([]string, 0, len(c.Status.Connectors))
+	for _, status := range c.Status.Connectors {
+		var value string
+		switch {
+		case status.State == v1beta1.ConnectorResolved && status.Identity != nil:
+			value = status.Identity.Name
+			if status.Origin != "" {
+				value += " (" + status.Origin + ")"
+			}
+		case status.State == v1beta1.ConnectorResolved && status.Method != "":
+			value = status.Method
+		case status.State == v1beta1.ConnectorResolved:
+			value = "set"
+			if status.Origin != "" {
+				value += " (" + status.Origin + ")"
+			}
+		case status.Required || status.Identity != nil:
+			value = "MISSING"
+		default:
+			value = "none"
+		}
+		parts = append(parts, status.Connector+"="+value)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // dashIfEmpty renders an unset scope coordinate as "-" so the table column

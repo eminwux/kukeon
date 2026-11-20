@@ -3,6 +3,8 @@
 // form from the CellBlueprint document alone and turns the operator's answers
 // into a CellConfig spec. No DOM, no network — unit-tested with node --test.
 
+import { deliveryEnv, deliveryFile, deliveryGit } from "./connectors.mjs";
+
 const list = value => Array.isArray(value) ? value : [];
 const text = value => typeof value === "string" ? value : "";
 const trimmed = value => text(value).trim();
@@ -24,6 +26,16 @@ function parameters(raw) { return list(raw).map(parameter).filter(item => item.n
 function secretSlots(raw) {
   return list(raw).filter(slot => text(slot?.name)).map(slot => ({ name: slot.name, envName: text(slot.envName), required: slot.required === true }));
 }
+// connectorOf reads the connector definition a connector component carries
+// (#1548): which connector it delivers, by which method and handler.
+function connectorOf(raw) {
+  if (!raw || typeof raw !== "object" || !text(raw.name)) return null;
+  return {
+    name: raw.name, title: text(raw.title), method: text(raw.method), delivery: text(raw.delivery), optional: raw.optional === true,
+    secretTypes: list(raw.secretTypes).filter(value => typeof value === "string"),
+    scopes: list(raw.scopes).filter(value => typeof value === "string"),
+  };
+}
 
 // blueprintForm reads the form contract out of a CellBlueprint document:
 // typed parameters, requires, components with their modes, and the repo and
@@ -36,6 +48,8 @@ export function blueprintForm(blueprint) {
     name: component.name,
     description: text(component.description),
     optional: component.optional === true,
+    group: text(component.group),
+    connector: connectorOf(component.connector),
     requires: unique(list(component.requires)),
     parameters: parameters(component.parameters),
     secrets: secretSlots(component.secrets),
@@ -71,10 +85,19 @@ export function blueprintForm(blueprint) {
   };
 }
 
-// emptyAnswers is a blank form for a blueprint: nothing optional enabled and
-// every mode allowed.
+// emptyAnswers is a blank form for a blueprint: nothing optional enabled, every
+// mode allowed, every group on its first member and every connector on its
+// default identity.
 export function emptyAnswers(form) {
-  return { values: {}, components: [], requires: "", prefix: "", modes: { enabled: [...form.modes], default: "" }, repos: {}, secrets: {}, git: null };
+  return { values: {}, components: [], groups: {}, connectors: {}, requires: "", prefix: "", modes: { enabled: [...form.modes], default: "" }, repos: {}, secrets: {}, git: null };
+}
+
+// groupChoice is the member of a mutually exclusive group the answers enable:
+// exactly one, the first when nothing was chosen.
+export function groupChoice(form, answers, group) {
+  const members = form.components.filter(component => component.optional && component.group === group);
+  const chosen = answers?.groups?.[group];
+  return members.some(component => component.name === chosen) ? chosen : members[0]?.name ?? "";
 }
 
 function enabledModes(form, answers) {
@@ -97,8 +120,12 @@ export function previewMode(form, answers, requested = "") {
 
 function activeComponents(form, answers) {
   const enabled = list(answers?.components);
-  return form.components.filter(component => !component.optional || enabled.includes(component.name));
+  return form.components.filter(component => !component.optional
+    || (component.group ? groupChoice(form, answers, component.group) === component.name : enabled.includes(component.name)));
 }
+// slotDelivery reports a connector whose identity fills a secret slot. The
+// handler names are spelled once, in connectors.mjs.
+function slotDelivery(connector) { return connector?.delivery === deliveryEnv || connector?.delivery === deliveryFile; }
 
 // formSections lists what the form shows for the current answers: the
 // blueprint's own parameters grouped by `group`, then one section per active
@@ -118,7 +145,7 @@ export function formSections(form, answers, mode = "") {
   const picked = previewMode(form, answers, mode);
   for (const component of activeComponents(form, answers)) {
     const active = component.modes.find(entry => entry.name === picked);
-    if (component.parameters.length || component.secrets.length) sections.push({ key: `component:${component.name}`, title: component.name, kind: component.kind || "component", description: component.description, parameters: component.parameters, secrets: component.secrets });
+    if (component.parameters.length || component.secrets.length || component.connector) sections.push({ key: `component:${component.name}`, title: component.name, kind: component.kind || "component", description: component.description, parameters: component.parameters, secrets: component.secrets, ...(component.connector ? { connector: component.connector, component: component.name } : {}) });
     if (active && (active.parameters.length || active.secrets.length)) sections.push({ key: `mode:${component.name}:${active.name}`, title: `${component.name} · ${active.name} mode`, kind: "mode", description: active.description, parameters: active.parameters, secrets: active.secrets });
   }
   return sections;
@@ -268,18 +295,28 @@ export function buildSpec(blueprintRef, form, answers) {
     const ref = secretRef(answers.secrets?.[slot.name]);
     if (ref) secrets[slot.name] = { secretRef: ref };
   }
+  // A connector's identity pick is a fill of its slot; "Default" writes none,
+  // so the Config keeps inheriting the Realm, Space and Stack default.
+  let gitIdentity;
+  for (const component of components) {
+    const ref = secretRef(answers.connectors?.[component.name]);
+    if (!component.connector || !ref) continue;
+    delete ref.cell;
+    if (slotDelivery(component.connector) && component.secrets[0]) secrets[component.secrets[0].name] = { secretRef: ref };
+    else if (component.connector.delivery === deliveryGit) gitIdentity = ref;
+  }
   if (Object.keys(secrets).length) spec.secrets = secrets;
 
   const requires = unique(text(answers.requires).split(/[\s,]+/));
   if (requires.length) spec.requires = requires;
-  const enabled = form.components.filter(component => component.optional && list(answers.components).includes(component.name)).map(component => component.name);
+  const enabled = components.filter(component => component.optional).map(component => component.name);
   if (enabled.length) spec.components = enabled;
   if (form.modes.length) {
     const fallback = modes.includes(trimmed(answers.modes?.default)) ? trimmed(answers.modes.default) : "";
     if (modes.length < form.modes.length || fallback) spec.modes = { ...(modes.length < form.modes.length ? { enabled: modes } : {}), ...(fallback ? { default: fallback } : {}) };
   }
   const git = defaultGit(answers.git);
-  if (git) spec.git = git;
+  if (git || gitIdentity) spec.git = { ...(gitIdentity ? { identityRef: gitIdentity } : {}), ...git };
   return spec;
 }
 
@@ -292,6 +329,8 @@ export function missingAnswers(form, answers, mode = "") {
       const value = answers.values?.[item.name];
       if (item.required && !item.hasDefault && item.type !== "bool" && !(typeof value === "string" && value !== "")) missing.push(item.name);
     }
+    // A connector's slot may resolve from a scope default; connectorsWithoutIdentity reports those.
+    if (section.connector && slotDelivery(section.connector)) continue;
     for (const slot of section.secrets) if (slot.required && !secretRef(answers.secrets?.[slot.name])) missing.push(slot.name);
   }
   for (const slot of form.repoSlots) if (slot.required && !trimmed(answers.repos?.[slot.name]?.url)) missing.push(slot.name);
@@ -354,4 +393,28 @@ export function secretChoices(secrets, types) {
     .map(doc => ({ name: doc.metadata.name, realm: doc.metadata.realm, space: text(doc.metadata.space), stack: text(doc.metadata.stack), cell: text(doc.metadata.cell), type: text(doc.spec?.type) || "opaque" }))
     .filter(choice => !types?.length || types.includes(choice.type))
     .sort((a, b) => [a.realm, a.space, a.stack, a.cell, a.name].join("/").localeCompare([b.realm, b.space, b.stack, b.cell, b.name].join("/")));
+}
+
+// connectorSections are the sections of a form that carry a connector, i.e.
+// the connector components the answers enable.
+export function connectorSections(form, answers, mode = "") {
+  return formSections(form, answers, mode).filter(section => section.connector);
+}
+
+// connectorsWithoutIdentity names the required connectors of the form that
+// nothing fills: no identity picked for the Config and, per the scope defaults
+// read for its target (GET /api/connectors/defaults), no default either.
+// Unknown defaults (not loaded) report nothing.
+export function connectorsWithoutIdentity(form, answers, defaults, mode = "") {
+  if (!Array.isArray(defaults)) return [];
+  const missing = [];
+  for (const section of connectorSections(form, answers, mode)) {
+    const { connector } = section;
+    const name = section.component;
+    if (connector.optional || !(slotDelivery(connector) || connector.delivery === deliveryGit)) continue;
+    if (secretRef(answers.connectors?.[name])) continue;
+    const row = defaults.find(item => item?.connector === connector.name && item.component === name);
+    if (!row?.effective) missing.push(connector.title || connector.name);
+  }
+  return missing;
 }

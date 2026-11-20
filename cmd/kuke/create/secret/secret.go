@@ -28,6 +28,7 @@ import (
 	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	"github.com/eminwux/kukeon/pkg/team/connector"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -35,7 +36,23 @@ import (
 // MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
 
+// NewSecretCmd builds `kuke create secret` over the connector catalog embedded
+// in kuke.
 func NewSecretCmd() *cobra.Command {
+	catalog, err := connector.Default()
+	if err != nil {
+		// The embedded catalog is validated by its own tests; a broken one
+		// leaves the command usable for plain secrets.
+		catalog = &connector.Catalog{}
+	}
+	return NewSecretCmdWithCatalog(catalog)
+}
+
+// NewSecretCmdWithCatalog builds `kuke create secret` over a connector
+// catalog: `--connector` accepts its connectors and their identity fields
+// become flags.
+func NewSecretCmdWithCatalog(catalog *connector.Catalog) *cobra.Command {
+	var fieldFlags []identityFlag
 	cmd := &cobra.Command{
 		Use:   "secret [name]",
 		Short: "Create a secret within a scope",
@@ -51,11 +68,22 @@ func NewSecretCmd() *cobra.Command {
 			"        [--passphrase-stdin | --passphrase-file <path>] [--public-key-file <path>] \\\n" +
 			"        [--certificate-file <path>] [--known-hosts-file <path>]\n\n" +
 			"Typed secrets are referenced from git.credentials[] and git.signing; their material is\n" +
-			"never echoed back, put in an environment variable, or embedded in a URL.",
+			"never echoed back, put in an environment variable, or embedded in a URL.\n\n" +
+			"--connector tags the secret as an identity of a connector — a kind of access a cell\n" +
+			"needs (a harness login, an API token, a git identity, a registry credential) — so it\n" +
+			"can be chosen by name for a team, a CellConfig or a single cell. The connector's\n" +
+			"readable identity fields are flags of their own, or --identity FIELD=VALUE:\n" +
+			"    kuke create secret <name> --connector <connector> --from-file ./token\n" +
+			"    kuke create secret <name> --connector <connector> --type ssh-key \\\n" +
+			"        --from-file ~/.ssh/id_ed25519 --identity FIELD=VALUE\n" +
+			"Connectors: " + strings.Join(catalog.Names(), ", ") + ".\n" +
+			"The tag and the identity fields are readable (`kuke get secret`); the material never is.",
 		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: false,
-		RunE:          runCreateSecret,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCreateSecret(cmd, args, catalog, fieldFlags)
+		},
 	}
 
 	cmd.Flags().String("realm", "", "Realm that owns the secret")
@@ -82,6 +110,8 @@ func NewSecretCmd() *cobra.Command {
 	cmd.Flags().String("certificate-file", "", "ssh-key: an OpenSSH user certificate for the key")
 	cmd.Flags().String("known-hosts-file", "", "ssh-key: pinned host keys in known_hosts format")
 
+	fieldFlags = registerConnectorFlags(cmd, catalog)
+
 	// Register autocomplete functions for flags
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
 	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
@@ -90,8 +120,10 @@ func NewSecretCmd() *cobra.Command {
 	return cmd
 }
 
-func runCreateSecret(cmd *cobra.Command, args []string) error {
-	flags, err := parseCreateSecretFlags(cmd, args)
+func runCreateSecret(
+	cmd *cobra.Command, args []string, catalog *connector.Catalog, fieldFlags []identityFlag,
+) error {
+	flags, err := parseCreateSecretFlags(cmd, args, catalog, fieldFlags)
 	if err != nil {
 		return err
 	}
@@ -131,7 +163,9 @@ type createSecretFlags struct {
 	spec  v1beta1.SecretSpec
 }
 
-func parseCreateSecretFlags(cmd *cobra.Command, args []string) (createSecretFlags, error) {
+func parseCreateSecretFlags(
+	cmd *cobra.Command, args []string, catalog *connector.Catalog, fieldFlags []identityFlag,
+) (createSecretFlags, error) {
 	flags := createSecretFlags{}
 
 	name, err := shared.RequireNameArgOrDefault(
@@ -160,8 +194,15 @@ func parseCreateSecretFlags(cmd *cobra.Command, args []string) (createSecretFlag
 		flags.stack = strings.TrimSpace(config.KUKE_CREATE_SECRET_STACK.ValueOrDefault())
 	}
 
+	choice, err := resolveConnector(cmd, catalog, fieldFlags)
+	if err != nil {
+		return createSecretFlags{}, err
+	}
 	secretType, err := cmd.Flags().GetString("type")
 	if err != nil {
+		return createSecretFlags{}, err
+	}
+	if secretType, err = choice.secretType(cmd, secretType); err != nil {
 		return createSecretFlags{}, err
 	}
 	switch strings.TrimSpace(secretType) {
@@ -175,6 +216,9 @@ func parseCreateSecretFlags(cmd *cobra.Command, args []string) (createSecretFlag
 		err = fmt.Errorf("--type %q: want opaque, basic-auth or ssh-key", secretType)
 	}
 	if err != nil {
+		return createSecretFlags{}, err
+	}
+	if err = choice.tag(cmd, fieldFlags, &flags.spec); err != nil {
 		return createSecretFlags{}, err
 	}
 	return flags, nil
@@ -389,4 +433,7 @@ func printSecretResult(cmd *cobra.Command, result kukeonv1.CreateSecretResult) {
 		label = "data (" + t + ")"
 	}
 	shared.PrintCreationOutcome(cmd, label, result.Secret.Spec.Data != "", result.Created)
+	if tag := result.Secret.Spec.Connector; tag != "" {
+		cmd.Printf("  - connector: %s\n", tag)
+	}
 }

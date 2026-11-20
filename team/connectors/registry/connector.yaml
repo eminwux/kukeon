@@ -1,0 +1,16 @@
+# Registry connector: the credential a Realm pulls private images with.
+#
+# An identity is a basic-auth Secret in the Realm; a Realm's
+# spec.registryCredentials[] entry binds it to a registry server through
+# `secretRef`. It is a Realm concern only: it never appears on a Config.
+apiVersion: kuketeams.io/v1
+kind: Connector
+metadata:
+  name: registry
+spec:
+  title: Container registry
+  description: The credential a Realm pulls private images with.
+  delivery: registry
+  scopes: [realm]
+  identity:
+    secretTypes: [basic-auth]
