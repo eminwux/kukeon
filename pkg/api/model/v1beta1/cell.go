@@ -158,6 +158,12 @@ type CellProvenance struct {
 	// cell was created from a Config, overriding the Config's values for this
 	// cell only (e.g. the PROMPT of a headless run).
 	ParamOverrides map[string]string `json:"paramOverrides,omitempty" yaml:"paramOverrides,omitempty"`
+	// ConnectorOverrides are the `--connector <connector>=<secret>` entries
+	// supplied when the cell was created from a Config: the identity this
+	// one cell uses for a connector instead of the one its Config or a scope
+	// default resolves, keyed by connector name. Persisted so a restart and a
+	// reconcile-driven recreate keep the identity. Issue #1548.
+	ConnectorOverrides map[string]ContainerSecretRef `json:"connectorOverrides,omitempty" yaml:"connectorOverrides,omitempty"`
 }
 
 // CellBindingRef is a scoped reference to the Config or Blueprint a cell was
@@ -197,6 +203,13 @@ func CloneCellProvenance(in *CellProvenance) *CellProvenance {
 			overrides[k] = v
 		}
 		out.ParamOverrides = overrides
+	}
+	if in.ConnectorOverrides != nil {
+		overrides := make(map[string]ContainerSecretRef, len(in.ConnectorOverrides))
+		for k, v := range in.ConnectorOverrides {
+			overrides[k] = v
+		}
+		out.ConnectorOverrides = overrides
 	}
 	return out
 }

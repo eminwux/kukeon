@@ -42,6 +42,15 @@ type credentialClient struct {
 	applyErr error
 	result   kukeonv1.ApplyDocumentsResult
 	applied  []byte
+	// secrets records every Secret the handler stored.
+	secrets []v1beta1.SecretDoc
+}
+
+func (c *credentialClient) CreateSecret(
+	_ context.Context, doc v1beta1.SecretDoc,
+) (kukeonv1.CreateSecretResult, error) {
+	c.secrets = append(c.secrets, doc)
+	return kukeonv1.CreateSecretResult{Secret: doc, Created: true}, nil
 }
 
 func (c *credentialClient) Close() error { return nil }
@@ -160,13 +169,38 @@ func TestRegistryCredentialReplacesSameServerAndPreservesOthers(t *testing.T) {
 	if !strings.Contains(w.Body.String(), `"action":"updated"`) {
 		t.Fatalf("body=%s", w.Body)
 	}
-	creds := appliedCredentials(t, c.applied)
-	want := []v1beta1.RegistryCredentials{
-		{Username: "robot", Password: "new-token", ServerAddress: "ghcr.io"},
-		{Username: "fallback", Password: storedToken + "-2"},
+	if !strings.Contains(w.Body.String(), `"secret":"registry-ghcr-io"`) {
+		t.Fatalf("body does not name the secret: %s", w.Body)
 	}
-	if fmt.Sprint(creds) != fmt.Sprint(want) {
-		t.Fatalf("applied=%v want=%v", creds, want)
+	// The token is stored as a basic-auth Secret of the realm, tagged as a
+	// registry identity, and never reaches the realm document.
+	if len(c.secrets) != 1 {
+		t.Fatalf("stored %d secrets, want 1", len(c.secrets))
+	}
+	secret := c.secrets[0]
+	if secret.Metadata.Name != "registry-ghcr-io" || secret.Metadata.Realm != "dev" ||
+		secret.Spec.Type != v1beta1.SecretTypeBasicAuth || secret.Spec.Connector != "registry" ||
+		secret.Spec.BasicAuth == nil || secret.Spec.BasicAuth.Username != "robot" ||
+		secret.Spec.BasicAuth.Password != "new-token" {
+		t.Fatalf("stored secret = %+v", secret.Metadata)
+	}
+	if strings.Contains(string(c.applied), "new-token") {
+		t.Fatalf("applied realm carries the token: %s", c.applied)
+	}
+	creds := appliedCredentials(t, c.applied)
+	if len(creds) != 2 {
+		t.Fatalf("applied=%v", creds)
+	}
+	// The inline entry of the server is replaced by the Secret-backed one;
+	// the other entry is carried forward untouched.
+	if creds[0].ServerAddress != "ghcr.io" || creds[0].Username != "" || creds[0].Password != "" ||
+		creds[0].SecretRef == nil || creds[0].SecretRef.Name != "registry-ghcr-io" || creds[0].SecretRef.Realm != "dev" {
+		t.Fatalf("ghcr.io entry = %+v (secretRef %+v)", creds[0], creds[0].SecretRef)
+	}
+	if want := (v1beta1.RegistryCredentials{Username: "fallback", Password: storedToken + "-2"}); fmt.Sprint(
+		creds[1],
+	) != fmt.Sprint(want) {
+		t.Fatalf("other entry = %+v, want %+v", creds[1], want)
 	}
 }
 
@@ -189,8 +223,12 @@ func TestRegistryCredentialAppendsAndUpsertsEmptyServerDefault(t *testing.T) {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body)
 	}
 	creds := appliedCredentials(t, c.applied)
-	if len(creds) != 2 || creds[1].Username != "default-user" || creds[0].Password != storedToken {
+	if len(creds) != 2 || creds[1].SecretRef == nil || creds[1].SecretRef.Name != "registry-default" ||
+		creds[0].Password != storedToken {
 		t.Fatalf("applied=%v", creds)
+	}
+	if len(c.secrets) != 1 || c.secrets[0].Spec.BasicAuth.Username != "default-user" {
+		t.Fatalf("stored secrets = %+v", c.secrets)
 	}
 }
 
@@ -225,6 +263,9 @@ func TestRegistryCredentialRejectsInvalidRequestsWithoutEchoingToken(t *testing.
 		}
 		if c.applied != nil {
 			t.Errorf("%s: applied an invalid request", name)
+		}
+		if len(c.secrets) != 0 {
+			t.Errorf("%s: stored a secret for an invalid request", name)
 		}
 	}
 }

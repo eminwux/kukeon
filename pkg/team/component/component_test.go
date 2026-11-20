@@ -24,21 +24,37 @@ import (
 
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/component"
+	"github.com/eminwux/kukeon/pkg/team/connector"
 	"github.com/eminwux/kukeon/team/components"
 )
 
-// TestBundledLibrary locks the components kuke ships: the GitHub connector
-// delivers the API token as GH_TOKEN only, and the GitHub Issues forge builds
-// on it without a binding of its own.
+// TestBundledLibrary locks the components kuke ships: the GitHub Issues forge
+// builds on the catalog's GitHub connector without a binding of its own, and
+// does not load without the catalog.
 func TestBundledLibrary(t *testing.T) {
-	lib, err := component.Load(components.FS)
+	if _, err := component.Load(components.FS); err == nil ||
+		!strings.Contains(err.Error(), `needs unknown component "github"`) {
+		t.Fatalf("the bundled library loaded without the connector catalog: %v", err)
+	}
+	catalog, err := connector.Default()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(lib) != 2 || lib[0].Metadata.Name != "github" || lib[1].Metadata.Name != "github-issues" {
-		t.Fatalf("library = %+v", lib)
+	lib, err := component.Load(components.FS, catalog.Components()...)
+	if err != nil {
+		t.Fatal(err)
 	}
-	github, issues := lib[0], lib[1]
+	find := func(name string) component.Component {
+		t.Helper()
+		for _, c := range lib {
+			if c.Metadata.Name == name {
+				return c
+			}
+		}
+		t.Fatalf("component %q is not in the library: %+v", name, lib)
+		return component.Component{}
+	}
+	github, issues := find("github"), find("github-issues")
 	if github.Spec.Kind != api.ComponentKindConnector || !slices.Equal(github.Spec.Requires, []string{"gh"}) ||
 		len(github.Spec.Needs) != 0 || len(github.Spec.Environment) != 0 || len(github.Spec.Parameters) != 0 {
 		t.Fatalf("github connector = %+v", github.Spec)

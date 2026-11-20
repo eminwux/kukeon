@@ -5,8 +5,9 @@ export type Parameter = {
 export type SecretSlot = { name: string; envName: string; required: boolean };
 export type RepoSlot = { name: string; target: string; required: boolean };
 export type ComponentMode = { name: string; description: string; parameters: Parameter[]; secrets: SecretSlot[] };
+export type ComponentConnector = { name: string; title: string; method: string; delivery: string; optional: boolean; secretTypes: string[]; scopes: string[] };
 export type Component = {
-  kind: string; name: string; description: string; optional: boolean; requires: string[];
+  kind: string; name: string; description: string; optional: boolean; group: string; connector: ComponentConnector | null; requires: string[];
   parameters: Parameter[]; secrets: SecretSlot[]; modes: ComponentMode[];
 };
 export type BlueprintForm = {
@@ -23,6 +24,8 @@ export type RepoAnswer = { url?: string; revision?: "branch" | "ref"; branch?: s
 export type Answers = {
   values: Record<string, string | boolean>;
   components: string[];
+  groups: Record<string, string>;
+  connectors: Record<string, Partial<SecretRef>>;
   requires: string;
   prefix: string;
   modes: { enabled: string[]; default: string };
@@ -30,7 +33,7 @@ export type Answers = {
   secrets: Record<string, Partial<SecretRef>>;
   git: DefaultGitAnswer | null;
 };
-export type FormSection = { key: string; title: string; kind: string; description?: string; parameters: Parameter[]; secrets: SecretSlot[] };
+export type FormSection = { key: string; title: string; kind: string; description?: string; parameters: Parameter[]; secrets: SecretSlot[]; connector?: ComponentConnector; component?: string };
 export type InventoryImage = { name: string; capabilities?: string[] };
 export type ImageChoice = { name: string; capabilities: string[]; status: "match" | "unknown" };
 export type RenderedValue = { kind: string; key: string; value: string; origin: string };
@@ -39,6 +42,9 @@ export type SecretChoice = { name: string; realm: string; space: string; stack: 
 
 export function blueprintForm(blueprint: unknown): BlueprintForm;
 export function emptyAnswers(form: BlueprintForm): Answers;
+export function groupChoice(form: BlueprintForm, answers: Answers, group: string): string;
+export function connectorSections(form: BlueprintForm, answers: Answers, mode?: string): Array<FormSection & { connector: ComponentConnector; component: string }>;
+export function connectorsWithoutIdentity(form: BlueprintForm, answers: Answers, defaults: Array<{ connector: string; component?: string; effective?: unknown }> | undefined, mode?: string): string[];
 export function previewMode(form: BlueprintForm, answers: Answers, requested?: string): string;
 export function formSections(form: BlueprintForm, answers: Answers, mode?: string): FormSection[];
 export function requiredCapabilities(form: BlueprintForm, answers: Answers): string[];

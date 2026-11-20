@@ -1,0 +1,26 @@
+# Test-only connector (issue #1548): the whole definition of a connector kuke
+# has never heard of. It is not part of the embedded catalog; the tests that
+# load it prove that one file like this is all a new connector takes — no Go
+# and no TypeScript names it.
+apiVersion: kuketeams.io/v1
+kind: Connector
+metadata:
+  name: example-token
+spec:
+  title: Example
+  description: An API token for the example service.
+  scopes: [realm, space, stack]
+  identity:
+    secretTypes: [opaque]
+    fields:
+      - name: account
+        required: true
+        help: Account the token belongs to.
+  methods:
+    - name: token
+      default: true
+      delivery: env
+      description: A token delivered as EXAMPLE_TOKEN.
+      secret:
+        name: example-token
+        envName: EXAMPLE_TOKEN

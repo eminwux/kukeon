@@ -574,7 +574,7 @@ func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr erro
 		return intmodel.Cell{}, fmt.Errorf("realm %q has no namespace", realmID)
 	}
 
-	creds := ctr.ConvertRealmCredentials(internalRealm.Spec.RegistryCredentials)
+	creds := r.registryCredentials(internalRealm)
 
 	// Generate containerd ID with cell identifier for uniqueness
 	containerID, err := naming.BuildRootContainerdID(spaceID, stackID, cellID)
@@ -1305,7 +1305,7 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (_ intmode
 		return intmodel.Cell{}, fmt.Errorf("realm %q has no namespace", realmName)
 	}
 
-	creds := ctr.ConvertRealmCredentials(internalRealm.Spec.RegistryCredentials)
+	creds := r.registryCredentials(internalRealm)
 
 	// Find container in cell spec by ID (base name)
 	var foundContainerSpec *intmodel.ContainerSpec

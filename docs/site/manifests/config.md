@@ -67,12 +67,12 @@ Structural repo slot fills, keyed by the blueprint's repo slot `name`. Each entr
 
 #### CellConfigRepoFill
 
-| Field    | Type   | Required | Description                                                                                                                                                                 |
-| -------- | ------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `url`    | string | yes      | The clone URL filling the slot.                                                                                                                                             |
-| `branch` | string | no       | The branch to check out (moving target). Empty clones the remote's default. Mutually exclusive with `ref`.                                                                  |
-| `ref`    | string | no       | Immutable pin — tag name or full commit SHA. Survives in-place restarts (see [ContainerRepo `ref`](container.md#containerrepo)). Mutually exclusive with `branch`.          |
-| `git`    | object | no       | This source's own git identity — `author`, `committer`, `credential`, `signing`, `sign`. Unset fields use the cell's default identity. See [RepoGit](container.md#repogit). |
+| Field    | Type   | Required | Description                                                                                                                                                                                                                                      |
+| -------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `url`    | string | yes      | The clone URL filling the slot.                                                                                                                                                                                                                  |
+| `branch` | string | no       | The branch to check out (moving target). Empty clones the remote's default. Mutually exclusive with `ref`.                                                                                                                                       |
+| `ref`    | string | no       | Immutable pin — tag name or full commit SHA. Survives in-place restarts (see [ContainerRepo `ref`](container.md#containerrepo)). Mutually exclusive with `branch`.                                                                               |
+| `git`    | object | no       | This source's own git identity — `author`, `committer`, `credential`, `signing`, `sign`, or an `identityRef` naming a stored git identity that supplies them. Unset fields use the cell's default identity. See [RepoGit](container.md#repogit). |
 
 ### `spec.secrets` (map[string][SecretFill](#cellconfigsecretfill), optional)
 
@@ -90,7 +90,9 @@ Image capabilities this Config's cells need on top of the blueprint's and its en
 
 ### `spec.components` (array of string, optional)
 
-The blueprint's **optional** components to enable, by name. A component that is not optional is always on and need not be listed; naming a component the blueprint does not declare is an apply-time error. Enabling a component adds its parameters, env, secret slots and required capabilities to the cell.
+The blueprint's **optional** components to enable, by name. A component that is not optional is always on and need not be listed; naming a component the blueprint does not declare is an apply-time error. Enabling a component adds its parameters, env, secret slots and required capabilities to the cell. Components that share a `group` are alternatives: enabling two of one group — `claude-subscription` and `claude-api-key`, say — is an apply-time error.
+
+A `connector` component makes its [connector](../concepts/connectors.md) a requirement of the Config's cells. Which identity fills it is resolved at render time: a per-cell `--connector`, else this Config's `spec.secrets` fill (or `spec.git.identityRef`), else the Stack, Space and Realm defaults.
 
 ### `spec.modes` (object, optional)
 
@@ -106,6 +108,15 @@ The mode itself is picked **per cell**, at create time — `kuke run <config> --
 ### `spec.git` (object, optional)
 
 Overrides the git identity, credentials and signing config the cell inherits from its Realm → Space → Stack defaults. Same shape as a container's [`git`](container.md#containergit): `author`, `committer` and `signing` replace the inherited value; `credentials[]` merge by `host`. See the [git credentials guide](../guides/git-credentials.md).
+
+`identityRef` names a stored [git identity](../concepts/connectors.md#git) — an `ssh-key` or `basic-auth` Secret tagged `git` — instead of spelling the block out. At render time the daemon expands it at the level it is written on into author, committer, a credential for each of the identity's hosts and, for an SSH key, signing with the same key; the result then merges like any other level. Fields written next to the reference win over the identity's. `identityRef` is valid here, on a repo fill's `git`, and on a Realm, Space or Stack `spec.defaults.git`; a rendered cell never carries it. A reference to a Secret that is missing, is tagged for another connector, or lacks a required field (`hosts`) fails the render.
+
+```yaml
+spec:
+  git:
+    identityRef: { name: bot-key, realm: default }
+    author: { name: Release Bot, email: release@example.com } # overrides the identity's author
+```
 
 ### `spec.autoDelete` (bool, optional)
 
@@ -176,7 +187,7 @@ Applying a Config is refused when `cron` does not parse, `timezone` is unknown, 
 
 ## status
 
-`status` is written by kukeond and is read-only: `kuke get config <name> -o yaml` shows it, and a `status` block in an applied document is ignored. Only a scheduled Config has one.
+`status` is written by kukeond and is read-only: `kuke get config <name> -o yaml` shows it, and a `status` block in an applied document is ignored. A Config has one when it is scheduled or requires a connector.
 
 ```yaml
 status:
@@ -200,6 +211,43 @@ status:
 
 All times are UTC. `kuke get configs` shows the same state in two columns: `SCHEDULE` (the cron expression, followed by the time zone when one is set) and `NEXT` (the next fire time, or `suspended`). Both are empty for an unscheduled Config.
 
+### `status.connectors`
+
+How each [connector](../concepts/connectors.md) the Config requires resolves right now, computed on every get and list — so it follows a change of a Realm, Space or Stack default with no re-apply.
+
+```yaml
+status:
+  connectors:
+    - connector: github
+      component: github
+      method: token
+      delivery: env
+      slot: github-token
+      state: resolved
+      required: true
+      identity: { name: work-github, realm: default }
+      origin: realm
+    - connector: claude
+      component: claude-login
+      method: login
+      delivery: stateVolume
+      state: resolved
+      volume: team-dev-claude
+```
+
+| Field       | Type   | Description                                                                                            |
+| ----------- | ------ | ------------------------------------------------------------------------------------------------------ |
+| `connector` | string | The connector's name; `title` is its display name.                                                     |
+| `component` | string | The blueprint component that requires it; `method` is the connector method that component is.          |
+| `delivery`  | string | How the identity reaches the cell: `env`, `file`, `stateVolume` or `git`.                              |
+| `slot`      | string | The secret slot the identity fills (`env` and `file`).                                                 |
+| `state`     | string | `resolved` or `unresolved`.                                                                            |
+| `required`  | bool   | A cell cannot be created while the connector is unresolved.                                            |
+| `identity`  | object | The Secret that fills the connector. Absent when unresolved, and for a login kept in a state volume.   |
+| `origin`    | string | The level the identity comes from: `config`, `stack`, `space` or `realm` (`cell` in a create preview). |
+| `volume`    | string | The state volume holding the login of a `stateVolume` connector.                                       |
+| `message`   | string | Why the connector is unresolved, or what is wrong with the identity it names.                          |
+
 ## Slot fills
 
 A `CellConfig` fills the structural slots a [`CellBlueprint`](blueprint.md) declares. Slot matching is by **name**, across all of the blueprint's containers — the same slot name on two containers shares a single Config-side entry. The validation gates are:
@@ -215,7 +263,7 @@ The two channels are independent: scalar `values` are blueprint-side parameters 
 kukeond is the only place a CellConfig becomes a Cell: `kuke create cell --from-config`, `kuke run --from-config`, `kuke create cell --clone`, the web UI, the `OutOfSync` reconciler and the `kuke restart` re-apply all ask the daemon to render. The render merges the `spec.defaults` of the cell's [Realm](realm.md#specdefaults-object-optional), [Space](space.md) and [Stack](stack.md) under the Config's own fill:
 
 ```
-Realm defaults → Space defaults → Stack defaults → CellConfig → (per-cell --env)
+Realm defaults → Space defaults → Stack defaults → CellConfig → (per-cell --env, --connector)
 ```
 
 Maps merge per key, and the deeper level wins. The `git` block merges the same way: identity and signing are replaced by the deepest level that sets them, and `credentials[]` merge by `host`. A blueprint parameter no level sets keeps its blueprint default. Repo and secret defaults apply only to slots the referenced blueprint declares — a realm-wide `github-token` secret default is simply ignored by a blueprint without that slot — while the Config's own fills stay strictly validated. A level default can satisfy a required slot the Config leaves open. Container `image` values that name a realm [`spec.images`](realm.md#specimages-array-optional) entry resolve to that image.
@@ -233,7 +281,7 @@ A `CellConfig` is a **1:N** binding: it stamps as many cells as you run it, each
 The lineage contract:
 
 - Every cell stamped from a Config carries the `kukeon.io/config=<name>` **lineage label** (a back-reference, not an identity constraint). List a Config's stamped cells with `kuke get cells -l kukeon.io/config=<name>`.
-- Every stamped cell also persists a `Spec.Provenance` block recording the binding it came from (kind, scoped ref, resolved params, and any `--env` per-cell overrides), so a later re-resolve rebuilds the cell from the same Config without re-supplying values.
+- Every stamped cell also persists a `Spec.Provenance` block recording the binding it came from (kind, scoped ref, resolved params, and any `--env` and `--connector` per-cell overrides), so a later re-resolve rebuilds the cell from the same Config without re-supplying values.
 - Editing the Config does **not** push to live cells. A stamped cell whose spec has drifted from the current Config surfaces as informational `OutOfSync` in the `SYNC` column of `kuke get cell -o wide`; an operator pulls it back in line explicitly with [`kuke restart <cell>`](../cli/kuke-restart.md) (or `kuke restart -l <selector>` to roll a fleet). `kuke run` / `kuke create cell` never mutate a live cell.
 
 This is the structural parallel with a [`CellBlueprint`](blueprint.md): both are always-fresh templates (`<prefix>-<6hex>` per invocation). A Blueprint binds only scalar `${KEY}` parameters; a Config additionally binds structural repo/secret slot sources, so a blueprint with required slots can only run through a Config.
@@ -256,7 +304,7 @@ The [`status.schedule`](#status) of a scheduled Config is stored beside the docu
 
 - **One Config → N cells (1:N binding).** Each `kuke run --from-config` / `kuke create cell --from-config` stamps a fresh `<prefix>-<6hex>` cell (or a `--name`-pinned one); the cell's identity is its [`CellDoc`](../concepts/cell.md), and the Config name lives on only as the `kukeon.io/config` lineage label.
 - **Lineage label.** Every stamped cell carries the `kukeon.io/config=<name>` label, so an operator can list all of a Config's cells with `kuke get cells -l kukeon.io/config=<name>`.
-- **Persisted provenance.** Every stamped cell records its binding in `Spec.Provenance` (kind, scoped ref, resolved params, `--env` overrides), so `kuke restart <cell>` can re-resolve it from the Config without re-supplying values.
+- **Persisted provenance.** Every stamped cell records its binding in `Spec.Provenance` (kind, scoped ref, resolved params, `--env` and `--connector` overrides), so `kuke restart <cell>` can re-resolve it from the Config without re-supplying values.
 - **Apply-time slot validation.** A Config that fills an undeclared slot, or that leaves a required slot unfilled, errors at apply time against the referenced blueprint's current shape — not at run time.
 - **Cross-scope references.** A Config may reference a Blueprint in a different scope; the same is true of the `secretRef` inside each secret slot fill.
 - **A schedule is not part of the cell.** `spec.schedule` decides when kukeond creates cells from the Config, never what they contain: editing it leaves existing cells in sync, and a scheduled cell differs from a hand-started one only by its name, its `kukeon.io/schedule` label and being self-deleting.

@@ -298,6 +298,14 @@ type CellFromConfigRequest struct {
 	// Draft, on a preview, is an unsaved CellConfig to render instead of the
 	// stored one Config names. A create refuses it.
 	Draft *v1beta1.CellConfigDoc
+	// ConnectorOverrides pick, for this cell only, the identity of a
+	// connector the Config requires — `--connector <connector>=<secret>` —
+	// keyed by connector name (issue #1548). A reference without a realm is
+	// looked up in the cell's own realm. The method stays the Config's; a
+	// connector the Config does not require, or a Secret tagged for another
+	// connector, is refused. The overrides are recorded in the cell's
+	// provenance, so a restart and a recreate keep them.
+	ConnectorOverrides map[string]v1beta1.ContainerSecretRef
 }
 
 // PreviewCellFromConfigArgs is the wire request for PreviewCellFromConfig.
@@ -311,6 +319,9 @@ type PreviewCellFromConfigResult struct {
 	Cell   v1beta1.CellDoc
 	Digest string
 	Values []v1beta1.RenderedValue
+	// Connectors is how each connector the Config requires resolved for
+	// this cell: the identity and the level it came from (#1548).
+	Connectors []v1beta1.ConnectorStatus
 }
 
 // PreviewCellFromConfigReply is the wire response for PreviewCellFromConfig.

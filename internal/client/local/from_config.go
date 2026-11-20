@@ -36,7 +36,9 @@ func (c *Client) PreviewCellFromConfig(
 	if err != nil {
 		return kukeonv1.PreviewCellFromConfigResult{}, err
 	}
-	return kukeonv1.PreviewCellFromConfigResult{Cell: res.Cell, Digest: res.Digest, Values: res.Values}, nil
+	return kukeonv1.PreviewCellFromConfigResult{
+		Cell: res.Cell, Digest: res.Digest, Values: res.Values, Connectors: res.Connectors,
+	}, nil
 }
 
 // CreateCellFromConfig delegates to the controller's daemon-side render +
@@ -76,6 +78,7 @@ func cellFromConfigRequest(req kukeonv1.CellFromConfigRequest) controller.CellFr
 		Mode:               req.Mode,
 		Params:             req.Params,
 		Draft:              req.Draft,
+		ConnectorOverrides: req.ConnectorOverrides,
 	}
 }
 

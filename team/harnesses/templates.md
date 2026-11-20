@@ -95,7 +95,7 @@ serves both an attached session and a dispatched run.
 ```yaml
 spec:
   secrets: # slots available in every mode; a role fills one by naming it
-    - { name: claude-code-oauth-token, envName: CLAUDE_CODE_OAUTH_TOKEN }
+    - { name: my-agent-token, envName: MY_AGENT_TOKEN }
   modes:
     interactive:
       description: Attachable session; the login persists in the state volume.
@@ -108,7 +108,7 @@ spec:
       parameters:
         - { name: PROMPT, required: true }
       secrets:
-        - { name: anthropic-api-key, envName: ANTHROPIC_API_KEY }
+        - { name: my-agent-run-key, envName: MY_AGENT_RUN_KEY }
       onInit:
         - script: |
             cd "$INITIAL_PATH" || exit 1
@@ -122,6 +122,24 @@ run first in every mode. Every mode parameter is exported to the scripts as an
 environment variable of the same name. Secret slots take an environment
 destination only (`name` + `envName`); the destination is fixed by the Harness,
 because the blueprint is shared across roles and teams.
+
+### Authentication is a connector
+
+How a harness authenticates is not declared in its `harness.yaml`. The packaged
+Claude and Codex harnesses each have a connector of the same name under
+[`team/connectors`](../connectors) whose `spec.harness` points back at the
+harness. Each of the connector's methods — the login kept in the state volume,
+a subscription token, an API key — is a component of the harness's blueprint,
+the methods share one exclusion group, and `kuke team` enables exactly one on
+every Config of that harness: the method the team picks under `connectors`, else
+the one a secret name the role lists selects, else the connector's default (the
+login). See [Connectors](../../docs/site/concepts/connectors.md).
+
+A harness that has no connector declares its own slots as above (OpenCode's
+`openrouter-api-key`). A `harness.yaml` written before harness authentication
+moved into the catalog — one that still declares a slot its connector also
+defines — keeps its own slots, and the connector's components are left out of
+its blueprint so no slot is declared twice.
 
 A Harness with no `spec.modes` keeps the single-`onInit` form shown above, with
 the built-in `PROMPT` parameter (empty selects the interactive branch).

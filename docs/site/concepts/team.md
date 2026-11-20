@@ -425,7 +425,8 @@ Do step 1 before step 3, so the secret exists when the cells first start.
 
 ### Connectors
 
-A role enables a connector by name:
+A [connector](connectors.md) is a kind of access a cell needs. A role enables
+one by name:
 
 ```yaml
 # role.yaml
@@ -439,6 +440,37 @@ git credential: clone, push and signing use the git identity below. The older
 spelling — `harnesses.<h>.secrets: [gh-token]` with `needs.image: [gh]` — still
 composes and enables the same connector, filled from the same `gh-token`
 secret.
+
+Two more connectors are enabled without the role asking: the one that
+authenticates the pair's harness (`claude` or `codex` — exactly one of its
+methods per Config, the login by default) and `git`, for a role with
+`needs.repos`.
+
+A team decides **how** each connector is delivered and **which identity** fills
+it under `connectors`, in its `kind: Team` file or TeamEntry; a role entry
+overrides the team for that role and can give the role a connector it does not
+ask for itself:
+
+```yaml
+# kuketeam.yaml (kind: Team) or ~/.kuke/kuketeam.d/<team>.yaml
+spec:
+  connectors:
+    claude: { method: subscription, identity: claude-team }
+    github: { identity: work-github }
+    git: { identity: bot-key }
+  roles:
+    - name: reviewer
+      # ...
+      connectors:
+        github: { identity: review-github }
+```
+
+`identity` names a stored Secret, `name[@realm[/space[/stack]]]`. A connector
+left out — or an entry with no identity — uses the default method and inherits
+its identity from the Stack, Space and Realm defaults, so replacing a default
+reaches every team that did not choose, with no re-render. Only identities a
+team chose are written as fills on its Configs. See
+[Connectors → Teams](connectors.md#teams) for the full rules.
 
 ## Git identity and credentials
 
@@ -497,23 +529,31 @@ The base majordomo clones over HTTPS and needs no git credential.
 ## Secret declarations
 
 Only selected role/harness requirements contribute bindings. The shipped
-majordomo has no `gh` or `gh-token` requirement. Claude and Codex can reuse an
-existing authenticated session and declare no mandatory token. OpenCode's
-selected provider requires `openrouter-api-key`.
+majordomo has no `gh` or `gh-token` requirement. Claude and Codex authenticate
+through their [connector](connectors.md), by default with the login kept in the
+state volume, and declare no mandatory token. OpenCode's selected provider
+requires `openrouter-api-key`.
 
 Each required secret is bound by name, in this order of precedence:
 
-1. the binding recorded in the team's TeamEntry (`~/.kuke/kuketeam.d/<team>.yaml`
+1. the identity the team chose for the secret's connector (`connectors`, above);
+2. the binding recorded in the team's TeamEntry (`~/.kuke/kuketeam.d/<team>.yaml`
    `secrets:`), including any operator edit to it;
-2. a global `TeamsConfig.spec.secrets` binding;
-3. a generated default: the runtime secret of the same name in the team realm
-   (`default`), exposed as the requirement upper-snake-cased (`gh-token` →
-   `GH_TOKEN`, `openrouter-api-key` → `OPENROUTER_API_KEY`).
+3. a global `TeamsConfig.spec.secrets` binding;
+4. the default: the slot is left to the Realm → Space → Stack defaults.
+
+A binding from 1–3 is written as a fill on the Config. The default is not: the
+Config carries no fill, and `kuke team` writes a Realm `spec.defaults.secrets`
+entry for the slot — pointing at the runtime secret of the same name in the team
+realm (`gh-token`, `openrouter-api-key`) — only when no Realm, Space or Stack
+default exists for it yet. It never overwrites one, so the default the operator
+sets later is the one every such Config uses.
 
 A shared blueprint fixes where a secret lands: a harness slot
-(`claude-code-oauth-token` → `CLAUDE_CODE_OAUTH_TOKEN`, `openrouter-api-key` →
-`OPENROUTER_API_KEY`) and a connector slot (`github-token` → `GH_TOKEN`) keep
-their declared destination, and a binding whose `envName` differs is rejected.
+(`openrouter-api-key` → `OPENROUTER_API_KEY`) and a connector slot
+(`github-token` → `GH_TOKEN`, `claude-code-oauth-token` →
+`CLAUDE_CODE_OAUTH_TOKEN`) keep their declared destination, and a binding whose
+`envName` differs is rejected.
 A role secret no harness or component declares becomes an optional slot on the
 shared blueprint, with the binding's `envName`.
 

@@ -1417,7 +1417,7 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		return nil, fmt.Errorf("realm %q has no namespace", realmName)
 	}
 
-	creds := ctr.ConvertRealmCredentials(internalRealm.Spec.RegistryCredentials)
+	creds := r.registryCredentials(internalRealm)
 
 	// Prepare root container: ensure it's in Containers array and RootContainerID is set
 	rootContainerdID, err := naming.BuildRootContainerdID(spaceName, stackName, cellID)
@@ -1731,7 +1731,7 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		return nil, fmt.Errorf("failed to get realm: %w", err)
 	}
 
-	creds := ctr.ConvertRealmCredentials(internalRealm.Spec.RegistryCredentials)
+	creds := r.registryCredentials(internalRealm)
 
 	// Generate containerd ID with cell identifier for uniqueness
 	containerID, err := naming.BuildRootContainerdID(spaceName, stackName, cellID)

@@ -34,6 +34,7 @@ import (
 	"github.com/eminwux/kukeon/internal/webui"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	"github.com/eminwux/kukeon/pkg/team/connector"
 )
 
 const (
@@ -121,6 +122,19 @@ func newHandler(browserURL, endpoint string, dial Dial) (http.Handler, error) {
 }
 
 func newHandlerWithPolicy(policy accessPolicy, endpoint string, dial Dial) (http.Handler, error) {
+	// The connector catalog embedded in kuke: what the Connectors page, the
+	// identity forms and the pickers are generated from (#1548).
+	catalog, err := connector.Default()
+	if err != nil {
+		return nil, fmt.Errorf("load connector catalog: %w", err)
+	}
+	return newHandlerWithCatalog(policy, endpoint, dial, catalog)
+}
+
+// newHandlerWithCatalog builds the handler over an explicit connector catalog.
+func newHandlerWithCatalog(
+	policy accessPolicy, endpoint string, dial Dial, catalog *connector.Catalog,
+) (http.Handler, error) {
 	assets, err := webui.Assets()
 	if err != nil {
 		return nil, err
@@ -132,6 +146,7 @@ func newHandlerWithPolicy(policy accessPolicy, endpoint string, dial Dial) (http
 	mux.HandleFunc("GET /api/realms/{name}", realmHandler(dial, true))
 	mux.HandleFunc("GET /api/realms/{name}/images", realmImagesHandler(dial))
 	registerResourceRoutes(mux, dial)
+	registerConnectorRoutes(mux, dial, catalog)
 	registerDaemonRoutes(mux, endpoint, dial)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -259,6 +274,9 @@ func writeAPIError(w http.ResponseWriter, err error) {
 
 func apiErrorStatus(err error) (int, string) {
 	status, code := http.StatusServiceUnavailable, "unavailable"
+	if connectorStatus, connectorCode, ok := connectorErrorStatus(err); ok {
+		return connectorStatus, connectorCode
+	}
 	switch {
 	case errors.Is(err, errdefs.ErrDaemonMethodUnsupported):
 		status, code = http.StatusNotImplemented, "daemon_outdated"

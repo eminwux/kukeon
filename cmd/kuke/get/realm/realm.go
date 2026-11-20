@@ -25,6 +25,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
 	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
+	"github.com/eminwux/kukeon/internal/connector"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -140,7 +141,18 @@ func filterRealmsBySelector(realms []v1beta1.RealmDoc, selector *shared.LabelSel
 	return out
 }
 
+// redactRealm returns the realm as it may be printed: a registry password is
+// write-only (issue #1548), so no output format ever carries one — whether the
+// entry is a legacy inline one or names a Secret. Re-applying the printed
+// document keeps the stored password of every inline entry it still lists.
+func redactRealm(realm v1beta1.RealmDoc) v1beta1.RealmDoc {
+	realm.Spec.RegistryCredentials = connector.RedactRegistryPasswords(realm.Spec.RegistryCredentials)
+	return realm
+}
+
 func printRealm(cmd *cobra.Command, realm *v1beta1.RealmDoc, format shared.OutputFormat) error {
+	redacted := redactRealm(*realm)
+	realm = &redacted
 	switch format {
 	case shared.OutputFormatJSON:
 		return shared.PrintJSON(cmd, realm)
@@ -158,6 +170,13 @@ func printRealms(
 	realms []v1beta1.RealmDoc,
 	format shared.OutputFormat,
 ) error {
+	if len(realms) > 0 {
+		redacted := make([]v1beta1.RealmDoc, len(realms))
+		for i := range realms {
+			redacted[i] = redactRealm(realms[i])
+		}
+		realms = redacted
+	}
 	switch format {
 	case shared.OutputFormatYAML:
 		return shared.PrintYAML(cmd, realms)

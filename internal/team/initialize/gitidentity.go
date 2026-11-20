@@ -24,6 +24,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/connector"
 	"github.com/eminwux/kukeon/internal/gitcred"
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/config"
@@ -146,7 +147,45 @@ func importGitIdentity(
 	}
 	// The host paths are now stored secrets.
 	git.SigningKey, git.AllowedSigners = "", ""
+	// The imported key is also a git identity (issue #1548): it carries the
+	// facts the block above spells out, so a Config, a cell or another scope
+	// can name it with one `git.identityRef` and the web UI can offer it.
+	// A key bound to no host (every host already has another credential) is
+	// stored untagged: an identity must say which hosts it authenticates.
+	if fields := gitIdentityFields(git, keyRef); fields[connector.GitFieldHosts] != "" {
+		docs[0].Spec.Connector = connector.GitIdentityTag
+		docs[0].Spec.Identity = fields
+	}
 	return docs, notes, nil
+}
+
+// gitIdentityFields are the readable identity fields of the imported key: the
+// hosts it is bound to, the author and committer when the operator has them
+// configured, and what it signs.
+func gitIdentityFields(git *config.Git, keyRef config.SecretRef) map[string]string {
+	fields := map[string]string{}
+	var hosts []string
+	for _, credential := range git.Credentials {
+		if credential.SecretRef == keyRef {
+			hosts = append(hosts, credential.Host)
+		}
+	}
+	fields[connector.GitFieldHosts] = strings.Join(hosts, ",")
+	if git.Author != nil && git.Author.Name != "" && git.Author.Email != "" {
+		fields[connector.GitFieldAuthor] = connector.FormatPerson(git.Author.Name, git.Author.Email)
+	}
+	if git.Committer != nil && git.Committer.Name != "" && git.Committer.Email != "" {
+		fields[connector.GitFieldCommitter] = connector.FormatPerson(git.Committer.Name, git.Committer.Email)
+	}
+	if git.Signing != nil && git.Signing.SecretRef == keyRef {
+		if len(git.Sign) > 0 {
+			fields[connector.GitFieldSign] = strings.Join(git.Sign, ",")
+		}
+		if ref := git.Signing.AllowedSignersRef; ref != nil {
+			fields[connector.GitFieldAllowedSignersRef] = ref.Name
+		}
+	}
+	return fields
 }
 
 // signsWith reports whether the operator's user.signingkey names the SSH key

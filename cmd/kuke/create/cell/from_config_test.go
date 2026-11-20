@@ -17,6 +17,7 @@
 package cell_test
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -90,5 +91,69 @@ func TestCreateCell_DryRunRequiresFromConfig(t *testing.T) {
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "--from-config") {
 		t.Fatalf("Execute error = %v, want the --from-config requirement", err)
+	}
+}
+
+// TestCreateCell_FromConfig_ConnectorOverrides: `--connector
+// <connector>=<secret>[@scope]` reaches the daemon as a per-cell override
+// keyed by connector name (issue #1548); a secret named without a scope is
+// looked up in the Config's realm, and the connector name is not interpreted
+// by the CLI — the daemon checks it against the Config's blueprint.
+func TestCreateCell_FromConfig_ConnectorOverrides(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	cmd, out := newTestExecCmd(t, dryRunClient(t))
+	setFlag(t, cmd, "realm", "cfg-realm")
+	setFlag(t, cmd, "from-config", "prod")
+	setFlag(t, cmd, "dry-run", "true")
+	setFlag(t, cmd, "connector", "forge=other-token")
+	setFlag(t, cmd, "connector", "example-token=shared@team/eng/web")
+	cmd.SetArgs([]string{"prod-1"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	want := map[string]v1beta1.ContainerSecretRef{
+		"forge":         {Name: "other-token", Realm: "cfg-realm"},
+		"example-token": {Name: "shared", Realm: "team", Space: "eng", Stack: "web"},
+	}
+	if got := lastConfigRequest.ConnectorOverrides; !reflect.DeepEqual(got, want) {
+		t.Errorf("request overrides = %+v, want %+v", got, want)
+	}
+	// The rendered cell records them, so a restart and a recreate keep them.
+	if !strings.Contains(out.String(), "connectorOverrides:") || !strings.Contains(out.String(), "other-token") {
+		t.Errorf("rendered cell does not record the overrides:\n%s", out.String())
+	}
+}
+
+// TestCreateCell_ConnectorFlagRejections: a malformed override, one connector
+// named twice, and --connector without --from-config are refused before the
+// daemon is asked for anything.
+func TestCreateCell_ConnectorFlagRejections(t *testing.T) {
+	for name, tc := range map[string]struct {
+		source  [2]string
+		values  []string
+		wantErr string
+	}{
+		"no secret":         {[2]string{"from-config", "prod"}, []string{"forge"}, "want <connector>=<secret>"},
+		"empty secret":      {[2]string{"from-config", "prod"}, []string{"forge="}, "want <connector>=<secret>"},
+		"too deep a scope":  {[2]string{"from-config", "prod"}, []string{"forge=t@a/b/c/d"}, "name[@realm[/space[/stack]]]"},
+		"named twice":       {[2]string{"from-config", "prod"}, []string{"forge=a", "forge=b"}, "more than once"},
+		"with a blueprint":  {[2]string{"from-blueprint", "web"}, []string{"forge=a"}, "only valid with --from-config"},
+		"with a clone":      {[2]string{"clone", "src"}, []string{"forge=a"}, "only valid with --from-config"},
+		"with a bare image": {[2]string{"image", "busybox"}, []string{"forge=a"}, "only valid with --from-config"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+			cmd, _ := newTestExecCmd(t, &fakeClient{})
+			setFlag(t, cmd, "realm", "cfg-realm")
+			setFlag(t, cmd, tc.source[0], tc.source[1])
+			for _, value := range tc.values {
+				setFlag(t, cmd, "connector", value)
+			}
+			cmd.SetArgs([]string{"prod-1"})
+			err := cmd.Execute()
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Execute error = %v, want it to contain %q", err, tc.wantErr)
+			}
+		})
 	}
 }

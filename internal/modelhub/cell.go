@@ -96,6 +96,8 @@ type CellProvenance struct {
 	// `--param` overrides of a Config-bound cell (#1472).
 	Mode           string
 	ParamOverrides map[string]string
+	// ConnectorOverrides records the per-cell connector identities (#1548).
+	ConnectorOverrides map[string]ContainerSecretRef
 }
 
 // CellBindingRef mirrors v1beta1.CellBindingRef. Issue #1021.
@@ -133,6 +135,13 @@ func CloneCellProvenance(in *CellProvenance) *CellProvenance {
 			overrides[k] = v
 		}
 		out.ParamOverrides = overrides
+	}
+	if in.ConnectorOverrides != nil {
+		overrides := make(map[string]ContainerSecretRef, len(in.ConnectorOverrides))
+		for k, v := range in.ConnectorOverrides {
+			overrides[k] = v
+		}
+		out.ConnectorOverrides = overrides
 	}
 	return out
 }

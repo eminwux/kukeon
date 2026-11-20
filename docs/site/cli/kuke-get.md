@@ -53,11 +53,18 @@ Per-kind column contracts. The default table is what `kuke get <kind>` (no `-o w
 | `container` | `NAME REALM SPACE STACK CELL STATE RESTARTS AGE` | `IMAGE EXIT`                                  |
 | `image`     | `NAME REALM CREATED` (cross-realm default)       | `DIGEST`                                      |
 | `blueprint` | `NAME REALM SPACE STACK AGE`                     | _(none)_                                      |
-| `config`    | `NAME REALM SPACE STACK SCHEDULE NEXT`           | _(none)_                                      |
+| `config`    | `NAME REALM SPACE STACK SCHEDULE NEXT`           | `CONNECTORS`                                  |
+| `secret`    | `NAME TYPE CONNECTOR REALM SPACE STACK CELL`     | `IDENTITY`                                    |
 
 `SYNC` (`InSync`/`OutOfSync`/`-`) is computed for cells that carry a `kukeon.io/config=<name>` lineage label; non-lineage cells render `-`. The `-o wide` `DIVERGENCE` column expands an `OutOfSync` cell with a one-line summary of what diverged (image, env, mounts, …). See `kuke restart` for the reconcile verb.
 
 `SCHEDULE` and `NEXT` are filled for a CellConfig with a [`spec.schedule`](../manifests/config.md#specschedule-object-optional) and empty otherwise. `SCHEDULE` is the cron expression, followed by the time zone in parentheses when one is set. `NEXT` is the next fire time in UTC, or `suspended`; it stays empty until kukeond's first scheduler pass after the schedule was applied, at most a minute. `kuke get config <name> -o yaml` shows the full `status.schedule`.
+
+`-o wide` on `config` adds `CONNECTORS`: one `<connector>=<what fills it>` entry per [connector](../concepts/connectors.md) the Config requires — the identity and the level it comes from (`github=work-github (realm)`), the method of a connector that keeps a login in the state volume (`claude=login`), `MISSING` for a required connector nothing resolves (a cell cannot be created from the Config until one does), and `none` for a connector the cell starts without. The same resolution is in `status.connectors` of `-o yaml` / `-o json`.
+
+`secret` lists each secret's `TYPE` and the `CONNECTOR` it is an identity of; `-o wide` adds its readable `IDENTITY` fields. No output format carries secret material.
+
+`kuke get realm -o yaml` and `-o json` never print a registry password: an inline `spec.registryCredentials[].password` is omitted from every output, and a Secret-backed entry shows only its `secretRef`.
 
 `-o wide` on `space` surfaces the egress allowlist (`EGRESS`) and the cell-default-deny posture (`NET-DEFAULTS yes/no`).
 

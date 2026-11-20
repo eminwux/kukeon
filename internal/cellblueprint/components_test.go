@@ -817,3 +817,130 @@ func TestFlatten_ModeOfDisabledHarnessRejected(t *testing.T) {
 		t.Fatalf("enabled harness: %v", err)
 	}
 }
+
+// authDoc is harnessDoc with the three ways its harness authenticates as one
+// exclusion group (issue #1548): a login that fills no slot and two tokens.
+func authDoc() v1beta1.CellBlueprintDoc {
+	doc := harnessDoc()
+	method := func(name, delivery string, slot *v1beta1.BlueprintSecretSlot) v1beta1.BlueprintComponent {
+		comp := v1beta1.BlueprintComponent{
+			Kind: v1beta1.ComponentKindConnector, Name: name, Optional: true, Group: "auth",
+			Connector: &v1beta1.BlueprintConnector{
+				Name: "auth", Method: name, Delivery: delivery,
+				SecretTypes: []string{v1beta1.SecretTypeOpaque},
+			},
+		}
+		if slot != nil {
+			comp.Secrets = []v1beta1.BlueprintSecretSlot{*slot}
+		}
+		return comp
+	}
+	doc.Spec.Components = append(doc.Spec.Components,
+		method("auth-login", v1beta1.ConnectorDeliveryStateVolume, nil),
+		method("auth-token", v1beta1.ConnectorDeliveryEnv,
+			&v1beta1.BlueprintSecretSlot{Name: "auth-token", EnvName: "AUTH_TOKEN", Required: true}),
+		method("auth-file", v1beta1.ConnectorDeliveryFile,
+			&v1beta1.BlueprintSecretSlot{
+				Name: "auth-file", Mode: v1beta1.BlueprintSecretModeFile, MountPath: "/run/auth", Required: true,
+			}),
+	)
+	return doc
+}
+
+// The members of a group are alternatives: a Config enables one. The
+// validation view folds every member in and is not a selection.
+func TestFlatten_GroupIsExclusive(t *testing.T) {
+	doc := authDoc()
+	if err := cellblueprint.ValidateDeclaration(doc); err != nil {
+		t.Fatalf("ValidateDeclaration: %v", err)
+	}
+	for _, enabled := range [][]string{nil, {"auth-login"}, {"auth-token"}, {"github", "auth-file"}} {
+		flat, err := cellblueprint.Flatten(doc, cellblueprint.FlattenOptions{Components: enabled})
+		if err != nil {
+			t.Fatalf("enable %v: %v", enabled, err)
+		}
+		slots := slotNames(container(t, flat.Doc, "work"))
+		for _, name := range []string{"auth-token", "auth-file"} {
+			if slices.Contains(slots, name) != slices.Contains(enabled, name) {
+				t.Fatalf("enable %v: slots = %v", enabled, slots)
+			}
+		}
+	}
+	_, err := cellblueprint.Flatten(doc, cellblueprint.FlattenOptions{Components: []string{"auth-token", "auth-login"}})
+	if !errors.Is(err, errdefs.ErrBlueprintComponentGroup) ||
+		!strings.Contains(err.Error(), `"auth-login" and "auth-token" both belong to group "auth"`) {
+		t.Fatalf("two members of one group: %v", err)
+	}
+	// A member that is always on excludes every optional one.
+	required := authDoc()
+	required.Spec.Components[2].Optional = false
+	if _, err = cellblueprint.Flatten(required, cellblueprint.FlattenOptions{Components: []string{"auth-token"}}); !errors.Is(
+		err,
+		errdefs.ErrBlueprintComponentGroup,
+	) {
+		t.Fatalf("always-on member next to an enabled one: %v", err)
+	}
+	if _, err = cellblueprint.Flatten(doc, cellblueprint.FlattenOptions{All: true}); err != nil {
+		t.Fatalf("validation view: %v", err)
+	}
+}
+
+func TestValidateDeclaration_ConnectorRejections(t *testing.T) {
+	const login, token = 2, 3 // indexes of authDoc's login and env-token components
+	for _, tc := range []struct {
+		name   string
+		mutate func(*v1beta1.CellBlueprintDoc)
+		want   string
+	}{
+		{
+			"group name",
+			func(d *v1beta1.CellBlueprintDoc) { d.Spec.Components[login].Group = "Not Valid" },
+			"group \"Not Valid\" must be a lowercase identifier",
+		},
+		{
+			"descriptor on a harness",
+			func(d *v1beta1.CellBlueprintDoc) { d.Spec.Components[0].Connector = d.Spec.Components[login].Connector },
+			"only a connector component carries a connector definition",
+		},
+		{
+			"malformed descriptor",
+			func(d *v1beta1.CellBlueprintDoc) { d.Spec.Components[login].Connector.Delivery = "pigeon" },
+			"delivery \"pigeon\"",
+		},
+		{
+			"env delivery without a slot",
+			func(d *v1beta1.CellBlueprintDoc) { d.Spec.Components[token].Secrets = nil },
+			"env delivery needs exactly one secret slot",
+		},
+		{
+			"env delivery through a file slot",
+			func(d *v1beta1.CellBlueprintDoc) {
+				d.Spec.Components[token].Connector.Delivery = v1beta1.ConnectorDeliveryFile
+			},
+			"file delivery needs a secret slot of mode \"file\"",
+		},
+		{
+			"login with a slot",
+			func(d *v1beta1.CellBlueprintDoc) {
+				d.Spec.Components[login].Secrets = []v1beta1.BlueprintSecretSlot{{Name: "extra", EnvName: "EXTRA"}}
+			},
+			"stateVolume delivery declares no secret slot",
+		},
+		{
+			"registry connector as a component",
+			func(d *v1beta1.CellBlueprintDoc) {
+				d.Spec.Components[login].Connector.Delivery = v1beta1.ConnectorDeliveryRegistry
+			},
+			"a registry connector is a Realm concern",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := authDoc()
+			tc.mutate(&doc)
+			err := cellblueprint.ValidateDeclaration(doc)
+			if !errors.Is(err, errdefs.ErrBlueprintComponent) || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}

@@ -42,6 +42,10 @@ type createConfigRequest struct {
 	Env                []string                   `json:"env"`
 	IgnoreDiskPressure bool                       `json:"ignoreDiskPressure"`
 	Preview            string                     `json:"preview"`
+	// Connectors are the identities picked for this cell only, keyed by
+	// connector name — only the ones that differ from what the Config
+	// resolves on its own (#1548).
+	Connectors map[string]v1beta1.ContainerSecretRef `json:"connectors,omitempty"`
 }
 
 func registerCreateRoutes(mux *http.ServeMux, dial Dial) {
@@ -77,6 +81,9 @@ func registerCreateRoutes(mux *http.ServeMux, dial Dial) {
 						"preview":  digest,
 						"digest":   rendered.Digest,
 						"values":   redactRenderedValues(rendered.Values, envSecrets(input.Env)),
+						// The identity each connector resolved to for this
+						// cell, and the level it came from.
+						"connectors": connectorStatuses(rendered.Connectors),
 					}, nil
 				}
 				if input.Preview != digest {
@@ -125,12 +132,17 @@ func configCell(ctx context.Context, c kukeonv1.Client, input createConfigReques
 	if err != nil {
 		return empty, err
 	}
+	overrides, err := connectorOverrides(input.Connectors)
+	if err != nil {
+		return empty, err
+	}
 	// kukeond renders the cell (#1418): defaults merge, slot fills, realm
 	// images and — for an omitted name — the generated <prefix>-<6hex>.
 	request := kukeonv1.CellFromConfigRequest{
-		Config:       configMetadata,
-		Name:         requestedName,
-		EnvOverrides: normalized,
+		Config:             configMetadata,
+		Name:               requestedName,
+		EnvOverrides:       normalized,
+		ConnectorOverrides: overrides,
 	}
 	preview, err := c.PreviewCellFromConfig(ctx, request)
 	if err != nil {
@@ -144,7 +156,9 @@ func configCell(ctx context.Context, c kukeonv1.Client, input createConfigReques
 	if err = checkCreationTarget(ctx, c, doc); err != nil {
 		return empty, err
 	}
-	return configRender{Doc: doc, Digest: preview.Digest, Values: preview.Values, Request: request}, nil
+	return configRender{
+		Doc: doc, Digest: preview.Digest, Values: preview.Values, Connectors: preview.Connectors, Request: request,
+	}, nil
 }
 
 // reviewedCellName returns the cell name the request asks for — the typed
@@ -291,10 +305,21 @@ func checkCreationTarget(ctx context.Context, c kukeonv1.Client, doc v1beta1.Cel
 
 // configRender is a daemon-side preview plus the request that reproduces it.
 type configRender struct {
-	Doc     v1beta1.CellDoc
-	Digest  string
-	Values  []v1beta1.RenderedValue
-	Request kukeonv1.CellFromConfigRequest
+	Doc    v1beta1.CellDoc
+	Digest string
+	Values []v1beta1.RenderedValue
+	// Connectors is how each connector the Config requires resolved.
+	Connectors []v1beta1.ConnectorStatus
+	Request    kukeonv1.CellFromConfigRequest
+}
+
+// connectorStatuses is the connector resolution of a render as a JSON array
+// (never null), so the browser can iterate it unconditionally.
+func connectorStatuses(statuses []v1beta1.ConnectorStatus) []v1beta1.ConnectorStatus {
+	if statuses == nil {
+		return []v1beta1.ConnectorStatus{}
+	}
+	return statuses
 }
 
 // renderError keeps the daemon's lookup / collision sentinels and classifies
@@ -303,6 +328,10 @@ func renderError(err error) error {
 	for _, sentinel := range []error{
 		errdefs.ErrConfigNotFound, errdefs.ErrBlueprintNotFound, errdefs.ErrCellAlreadyExists,
 		errdefs.ErrStackNotFound, errdefs.ErrSpaceNotFound, errdefs.ErrRealmNotFound, errdefs.ErrConfig,
+		// A connector failure keeps its own code: the UI offers "set a
+		// default" or "pick an identity" for it instead of a generic error.
+		errdefs.ErrConnectorUnresolved, errdefs.ErrConnectorIdentity,
+		errdefs.ErrConnectorUnknown, errdefs.ErrConnectorInvalid,
 	} {
 		if errors.Is(err, sentinel) {
 			return err

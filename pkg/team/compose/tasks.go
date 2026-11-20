@@ -162,6 +162,10 @@ func bindTasks(plan *pairPlan, base *api.CellConfigDoc) ([]*api.CellConfigDoc, s
 				AutoDelete: true,
 			},
 		}
+		if base.Spec.Git != nil {
+			git := *base.Spec.Git
+			cc.Spec.Git = &git
+		}
 		cc.Metadata.Name = resourceName(base.Metadata.Name, task.Name)
 		cc.Metadata.Labels = maps.Clone(base.Metadata.Labels)
 		cc.Metadata.Labels[api.LabelTask] = task.Name

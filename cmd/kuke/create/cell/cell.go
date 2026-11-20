@@ -216,6 +216,15 @@ func RegisterSourceFlags(cmd *cobra.Command) {
 			"resolved for the same key. Rejected with --from-blueprint: materialise from a "+
 			"Config (or edit the Blueprint) to layer env overrides.")
 
+	cmd.Flags().StringArray("connector", nil,
+		"Identity of a connector for this cell only, as <connector>=<secret>[@realm[/space[/stack]]]; "+
+			"repeatable. Valid with --from-config. The connector must be one the Config requires "+
+			"(`kuke get config <name>` lists them) and the secret one of its identities; a secret "+
+			"named without a scope is looked up in the Config's realm. It overrides the identity "+
+			"the Config or a Realm/Space/Stack default resolves — the method stays the Config's — "+
+			"and is recorded in Spec.Provenance.connectorOverrides, so a restart and a recreate "+
+			"keep it.")
+
 	cmd.Flags().Bool("ignore-disk-pressure", false,
 		"Bypass kukeond's data-volume disk-pressure guard for this cell's "+
 			"creation. The daemon normally refuses to provision a new cell once "+
@@ -258,6 +267,10 @@ type SourceFlags struct {
 	// Mode is the harness mode the cell is created in (`--mode`), valid on the
 	// --from-config path. Empty selects the Config's default. Issue #1472.
 	Mode string
+	// ConnectorArgs holds the `--connector <connector>=<secret>[@scope]`
+	// per-cell identity overrides, valid on the --from-config path. Issue
+	// #1548.
+	ConnectorArgs []string
 	// IgnoreDiskPressure threads `--ignore-disk-pressure` onto the
 	// transport-only Spec.IgnoreDiskPressure field so the daemon's
 	// CreateCell guard is bypassed for this invocation. Issue #1035.
@@ -353,6 +366,13 @@ func parseCreateCellFlags(cmd *cobra.Command, args []string) (SourceFlags, error
 		}
 		flags.Mode = strings.TrimSpace(mode)
 	}
+	if cmd.Flags().Lookup("connector") != nil {
+		connectorArgs, connectorErr := cmd.Flags().GetStringArray("connector")
+		if connectorErr != nil {
+			return SourceFlags{}, connectorErr
+		}
+		flags.ConnectorArgs = connectorArgs
+	}
 
 	return flags, nil
 }
@@ -376,6 +396,12 @@ func parseCreateCellFlags(cmd *cobra.Command, args []string) (SourceFlags, error
 // (which feeds Materialize a SourceFlags it built itself) inherits the same
 // rules without re-implementing them.
 func ValidateOverrideSymmetry(flags SourceFlags) error {
+	if len(flags.ConnectorArgs) > 0 && flags.ConfigName == "" {
+		return errors.New(
+			"--connector is only valid with --from-config; a connector identity is picked for a cell " +
+				"created from a CellConfig",
+		)
+	}
 	if flags.CloneSource != "" {
 		return nil
 	}
@@ -546,6 +572,18 @@ func rejectBindingKnobsWithImage(cmd *cobra.Command) error {
 		if strings.TrimSpace(mode) != "" {
 			return errors.New(
 				"--mode is only valid with --from-config; a harness mode is picked from the modes a CellConfig enables",
+			)
+		}
+	}
+	if cmd.Flags().Lookup("connector") != nil {
+		connectorArgs, connectorErr := cmd.Flags().GetStringArray("connector")
+		if connectorErr != nil {
+			return connectorErr
+		}
+		if len(connectorArgs) > 0 {
+			return errors.New(
+				"--connector is only valid with --from-config; a connector identity is picked for a cell " +
+					"created from a CellConfig",
 			)
 		}
 	}

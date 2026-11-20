@@ -34,10 +34,6 @@ spec:
         - name: PROMPT
           required: true
           description: Prompt the run starts from.
-      secrets:
-        # Optional: without it the run uses the login in the state volume.
-        - name: openai-api-key
-          envName: OPENAI_API_KEY
       onInit:
         - script: |
             set -euo pipefail

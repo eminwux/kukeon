@@ -38,6 +38,7 @@ import (
 	"github.com/eminwux/kukeon/pkg/team/component"
 	"github.com/eminwux/kukeon/pkg/team/compose/renderers"
 	"github.com/eminwux/kukeon/pkg/team/config"
+	"github.com/eminwux/kukeon/pkg/team/connector"
 	"github.com/eminwux/kukeon/pkg/team/harness"
 	"gopkg.in/yaml.v3"
 )
@@ -156,7 +157,9 @@ type extraRepo struct{ Name, Target string }
 // comes from the harness definition, the security profile and the component
 // library; the only role-derived content is the union of leftovers no shared
 // declaration covers (see group).
-func render(name string, g *group, lib []component.Component, opts Options) (*api.CellBlueprintDoc, error) {
+func render(
+	name string, g *group, lib []component.Component, catalog *connector.Catalog, opts Options,
+) (*api.CellBlueprintDoc, error) {
 	first := g.plans[0]
 	h := first.definition
 	if err := h.Validate(); err != nil {
@@ -176,7 +179,7 @@ func render(name string, g *group, lib []component.Component, opts Options) (*ap
 	if err != nil {
 		return nil, fmt.Errorf("bundled renderer: %w", err)
 	}
-	ctx, err := blueprintInputs(name, g, lib, opts)
+	ctx, err := blueprintInputs(name, g, lib, catalog, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -241,23 +244,61 @@ func checkDestinations(bp api.CellBlueprintDoc) error {
 			destinations[slot.EnvName] = true
 		}
 	}
-	var optional []string
-	for _, c := range bp.Spec.Components {
-		if c.Optional {
-			optional = append(optional, c.Name)
-		}
-	}
 	modes := cellblueprint.Modes(bp)
 	if len(modes) == 0 {
 		modes = []string{""}
 	}
-	for _, mode := range modes {
-		opts := cellblueprint.FlattenOptions{Components: optional, Mode: mode}
-		if _, err := cellblueprint.Flatten(bp, opts); err != nil {
-			return err
+	for _, selection := range componentSelections(bp) {
+		for _, mode := range modes {
+			opts := cellblueprint.FlattenOptions{Components: selection, Mode: mode}
+			if _, err := cellblueprint.Flatten(bp, opts); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
+}
+
+// componentSelections lists the sets of optional components checkDestinations
+// flattens: every ungrouped optional component, plus one member of each group.
+// The members of a group are alternatives and cannot be enabled together, so
+// each one is tried in turn next to the first member of every other group.
+func componentSelections(bp api.CellBlueprintDoc) [][]string {
+	var ungrouped []string
+	groups := map[string][]string{}
+	var order []string
+	for _, c := range bp.Spec.Components {
+		if !c.Optional {
+			continue
+		}
+		if c.Group == "" {
+			ungrouped = append(ungrouped, c.Name)
+			continue
+		}
+		if _, seen := groups[c.Group]; !seen {
+			order = append(order, c.Group)
+		}
+		groups[c.Group] = append(groups[c.Group], c.Name)
+	}
+	base := slices.Clone(ungrouped)
+	for _, group := range order {
+		base = append(base, groups[group][0])
+	}
+	out := [][]string{base}
+	for _, group := range order {
+		for _, member := range groups[group][1:] {
+			selection := slices.Clone(ungrouped)
+			for _, other := range order {
+				if other == group {
+					selection = append(selection, member)
+				} else {
+					selection = append(selection, groups[other][0])
+				}
+			}
+			out = append(out, selection)
+		}
+	}
+	return out
 }
 
 // contentDigest identifies what a shared blueprint renders, independent of the
@@ -299,7 +340,9 @@ func text(value string) *string { return &value }
 // the harness definition, the security profile and the component library.
 //
 //nolint:gocyclo,cyclop,funlen // one linear assembly; each step feeds the next.
-func blueprintInputs(name string, g *group, lib []component.Component, opts Options) (rendererInput, error) {
+func blueprintInputs(
+	name string, g *group, lib []component.Component, catalog *connector.Catalog, opts Options,
+) (rendererInput, error) {
 	first := g.plans[0]
 	h := first.definition
 	prof := first.profile
@@ -503,17 +546,28 @@ func blueprintInputs(name string, g *group, lib []component.Component, opts Opti
 
 	components := []api.BlueprintComponent{comp}
 	for _, c := range lib {
+		// A harness's auth methods belong to that harness's blueprints only.
+		if !rendersInto(c, h, catalog) {
+			continue
+		}
 		rendered := api.BlueprintComponent{
 			Kind: c.Spec.Kind, Name: c.Metadata.Name, Description: c.Spec.Description, Optional: true,
 			Requires: slices.Clone(c.Spec.Requires), Parameters: slices.Clone(c.Spec.Parameters),
+			Group: c.Spec.Group,
+		}
+		// Each connector component carries a copy of its connector's
+		// definition: the daemon keeps no catalog and validates against it.
+		if c.Spec.Connector != nil {
+			desc := *c.Spec.Connector
+			desc.SecretTypes, desc.Scopes = slices.Clone(desc.SecretTypes), slices.Clone(desc.Scopes)
+			desc.Fields = slices.Clone(desc.Fields)
+			rendered.Connector = &desc
 		}
 		for _, key := range slices.Sorted(maps.Keys(c.Spec.Environment)) {
 			rendered.Env = append(rendered.Env, key+"="+c.Spec.Environment[key])
 		}
 		for _, secret := range c.Spec.Secrets {
-			rendered.Secrets = append(rendered.Secrets, api.BlueprintSecretSlot{
-				Name: secret.Name, EnvName: secret.EnvName, Required: secret.Required,
-			})
+			rendered.Secrets = append(rendered.Secrets, componentSlot(secret))
 		}
 		components = append(components, rendered)
 	}

@@ -1,7 +1,7 @@
 export const kinds = ["realm", "space", "stack", "cell", "container"];
 export const titles = ["Realms", "Spaces", "Stacks", "Cells"];
 export const catalogTitles: Record<string, string> = { blueprints: "Blueprints", configs: "Configs", volumes: "Volumes", secrets: "Secrets" };
-export type Route = { view: string; scope: string[]; parent: string[]; document: boolean; config?: string[]; blueprint?: string[] };
+export type Route = { view: string; scope: string[]; parent: string[]; document: boolean; config?: string[]; blueprint?: string[]; target?: string[] };
 
 const HOME = (): Route => ({ view: "dashboard", scope: [], parent: [], document: false });
 export const homeLink = "#/resources";
@@ -24,6 +24,13 @@ export function readRoute(): Route {
       let blueprint: unknown;
       try { blueprint = JSON.parse(params.get("blueprint") ?? "null"); } catch { blueprint = null; }
       return { view: "new-config", scope: [], parent: [], document: false, blueprint: Array.isArray(blueprint) && blueprint.every(value => typeof value === "string") ? blueprint.slice(0, 4) : undefined };
+    }
+    // #/connectors lists the connector catalog; #/connectors/<name>?scope=[realm, space, stack] opens one
+    // connector with its scope pickers on that scope.
+    if (parts[0] === "connectors") {
+      let target: unknown;
+      try { target = JSON.parse(params.get("scope") ?? "null"); } catch { target = null; }
+      return { view: "connectors", scope: parts.slice(1, 2), parent: [], document: false, target: Array.isArray(target) && target.every(value => typeof value === "string") ? target.slice(0, 3) : undefined };
     }
     // #/daemon (health) and #/daemon/logs live under Administration.
     // #/health: majordomo's health reports and the sweep schedule.

@@ -80,6 +80,7 @@ nav:
       - concepts/client-and-daemon.md
       - concepts/blueprint-contract.md
       - concepts/team.md
+      - concepts/connectors.md
   - Architecture:
       - architecture/overview.md
       - architecture/process-model.md

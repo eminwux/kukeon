@@ -112,7 +112,17 @@ func apply(
 		raw = append(append(stackDoc, []byte("---\n")...), raw...)
 		expected++
 	}
-	secrets, missing, err := prepareSecrets(ctx, client, result, command)
+	// Slots the Configs leave to the scope defaults get a Realm default once;
+	// a default that is already set — at any level — is the operator's.
+	realmDoc, inherited, err := secretDefaultsDocument(ctx, client, result)
+	if err != nil {
+		return out, err
+	}
+	if realmDoc != nil {
+		raw = append(append(realmDoc, []byte("---\n")...), raw...)
+		expected++
+	}
+	secrets, missing, err := prepareSecrets(ctx, client, result, command, inherited)
 	if err != nil {
 		return out, err
 	}
@@ -304,6 +314,110 @@ func gitDefaultsDocument(ctx context.Context, client Client, result *compose.Res
 	return yaml.Marshal(doc)
 }
 
+// secretDefaultsDocument returns the team realm's document with a
+// spec.defaults.secrets entry added for every slot the team's Configs leave to
+// the scope defaults (issue #1548), or nil when there is nothing to add. A
+// default is written once: a slot the Realm, the Space or the Stack already
+// fills is left exactly as it is, so re-running `kuke team` never undoes a
+// default the operator changed — and changing it reaches every Config that
+// did not choose an identity, with no re-render. The second return names the
+// slots that were already filled.
+func secretDefaultsDocument(
+	ctx context.Context, client Client, result *compose.Result,
+) ([]byte, map[string]bool, error) {
+	if len(result.DefaultSecrets) == 0 {
+		return nil, nil, nil
+	}
+	scope := result.Scope
+	realms, err := client.ListRealms(ctx)
+	if err != nil {
+		return nil, nil, requestError("prerequisite lookup", "realm "+scope.Realm, err)
+	}
+	i := slices.IndexFunc(realms, func(doc api.RealmDoc) bool { return doc.Metadata.Name == scope.Realm })
+	if i < 0 {
+		return nil, nil, fmt.Errorf("preflight: required realm %s is missing", scope.Realm)
+	}
+	current := realms[i]
+
+	inherited, err := filledDefaultSlots(ctx, client, scope, current)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var defaults api.ScopeDefaults
+	if current.Spec.Defaults != nil {
+		defaults = *current.Spec.Defaults
+	}
+	secrets := make(map[string]api.CellConfigSecretFill, len(defaults.Secrets)+len(result.DefaultSecrets))
+	for slot, fill := range defaults.Secrets {
+		secrets[slot] = fill
+	}
+	added := false
+	for _, slot := range result.DefaultSecrets {
+		if inherited[slot.Slot] {
+			continue
+		}
+		ref := slot.Reference
+		secrets[slot.Slot] = api.CellConfigSecretFill{SecretRef: &api.ContainerSecretRef{
+			Name: ref.Name, Realm: ref.Realm, Space: ref.Space, Stack: ref.Stack, Cell: ref.Cell,
+		}}
+		added = true
+	}
+	if !added {
+		return nil, inherited, nil
+	}
+	defaults.Secrets = secrets
+	// A Realm apply replaces the spec's compatible fields whole, so the
+	// document carries everything the Realm already has.
+	doc := current
+	doc.APIVersion, doc.Kind = api.APIVersionV1Beta1, api.KindRealm
+	doc.Status = api.RealmStatus{}
+	doc.Spec.Defaults = &defaults
+	raw, err := yaml.Marshal(doc)
+	if err != nil {
+		return nil, nil, fmt.Errorf("marshal realm document: %w", err)
+	}
+	return raw, inherited, nil
+}
+
+// filledDefaultSlots names the secret slots the team's Realm, Space or Stack
+// already gives a default identity.
+func filledDefaultSlots(
+	ctx context.Context, client Client, scope compose.Scope, realm api.RealmDoc,
+) (map[string]bool, error) {
+	filled := map[string]bool{}
+	mark := func(defaults *api.ScopeDefaults) {
+		if defaults == nil {
+			return
+		}
+		for slot, fill := range defaults.Secrets {
+			if fill.SecretRef != nil {
+				filled[slot] = true
+			}
+		}
+	}
+	mark(realm.Spec.Defaults)
+	spaces, err := client.ListSpaces(ctx, scope.Realm)
+	if err != nil {
+		return nil, requestError("prerequisite lookup", "space "+scope.Space, err)
+	}
+	for _, space := range spaces {
+		if space.Metadata.Name == scope.Space {
+			mark(space.Spec.Defaults.Fill())
+		}
+	}
+	stacks, err := client.ListStacks(ctx, scope.Realm, scope.Space)
+	if err != nil {
+		return nil, requestError("prerequisite lookup", "stack "+scope.Stack, err)
+	}
+	for _, stack := range stacks {
+		if stack.Metadata.Name == scope.Stack {
+			mark(stack.Spec.Defaults)
+		}
+	}
+	return filled, nil
+}
+
 // mergeGit lays the team's git block over the stack's existing one.
 func mergeGit(existing, team *api.ContainerGit) *api.ContainerGit {
 	out := &api.ContainerGit{}
@@ -351,10 +465,15 @@ func missingGitSecrets(
 		collect(result.Git.Signing)
 	}
 	for _, pair := range result.Pairs {
+		// The team's git identity (`connectors.git.identity`) is one Secret.
+		if git := pair.Config.Spec.Git; git != nil {
+			refs = append(refs, git.IdentityRef)
+		}
 		for _, fill := range pair.Config.Spec.Repos {
 			if fill.Git == nil {
 				continue
 			}
+			refs = append(refs, fill.Git.IdentityRef)
 			if fill.Git.Credential != nil {
 				refs = append(refs, fill.Git.Credential.SecretRef)
 			}
@@ -425,17 +544,25 @@ func checkResults(result kukeonv1.ApplyDocumentsResult, expected int, command st
 	return nil
 }
 
+// inherited names the slots a scope default set before this application
+// already fills: their Secret is whatever the operator pointed the default at,
+// not the one this team would have generated, so the generated one is neither
+// created nor reported missing.
 func prepareSecrets(
 	ctx context.Context,
 	client Client,
 	result *compose.Result,
 	command string,
+	inherited map[string]bool,
 ) ([]api.SecretDoc, []string, error) {
 	// Deduplicate by complete runtime identity, not role/harness identifier.
 	requirements := map[config.SecretRef]*config.SecretSource{}
 	var order []config.SecretRef
 	for _, pair := range result.Pairs {
 		for _, required := range pair.Secrets {
+			if required.Default && inherited[required.Destination.Name] {
+				continue
+			}
 			previous, exists := requirements[required.Reference]
 			if !exists {
 				order = append(order, required.Reference)

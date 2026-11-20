@@ -105,7 +105,8 @@ func TestRootDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(rendered), "components:") || strings.Contains(string(rendered), "GH_TOKEN") {
+	if slices.Contains(result.Pairs[0].Config.Spec.Components, "github") ||
+		strings.Contains(string(rendered), "GH_TOKEN") {
 		t.Fatalf("majordomo config enables the GitHub connector: %s", rendered)
 	}
 	if _, set := envOf(work(t, result.Pairs[0], interactive))["GH_TOKEN"]; set {
@@ -494,7 +495,11 @@ func assertRootResources(t *testing.T, result *compose.Result) {
 		p.Config.Spec.Repos["role-source"].Branch != "main" {
 		t.Fatalf("missing explicit role source: %+v", p.Config.Spec.Repos)
 	}
-	if !slices.Equal(p.Config.Spec.Requires, []string{"go"}) || len(p.Config.Spec.Components) != 0 {
+	// The one component every harness Config enables is how the harness
+	// authenticates (issue #1548): with nothing chosen, the login kept in the
+	// state volume.
+	if !slices.Equal(p.Config.Spec.Requires, []string{"go"}) ||
+		!slices.Equal(p.Config.Spec.Components, []string{"codex-login"}) {
 		t.Fatalf("config requires %v components %v", p.Config.Spec.Requires, p.Config.Spec.Components)
 	}
 	if !slices.Equal(bp.Spec.Requires, []string{"git"}) {
@@ -663,10 +668,26 @@ func TestSecretBindingsGeneratedAndRecorded(t *testing.T) {
 			pair := result.Pairs[0]
 			rendered := work(t, pair, interactive)
 			if len(rendered.Secrets) != 1 || rendered.Secrets[0].Name != tc.want.EnvName ||
-				pair.Config.Spec.Secrets[tc.want.Name].SecretRef.Name != tc.want.SecretRef.Name ||
+				rendered.Secrets[0].SecretRef.Name != tc.want.SecretRef.Name ||
 				pair.Secrets[0].Reference != tc.want.SecretRef ||
 				pair.Secrets[0].Destination.EnvName != tc.want.EnvName {
 				t.Fatal("binding not applied to resources")
+			}
+			// A binding nobody chose is not written into the Config: the
+			// slot is left to the Realm default, which application writes
+			// once (issue #1548). A chosen one is a Config fill.
+			fill, filled := pair.Config.Spec.Secrets[tc.want.Name]
+			wantDefault := tc.name == "generated"
+			if filled == wantDefault || pair.Secrets[0].Default != wantDefault ||
+				(filled && fill.SecretRef.Name != tc.want.SecretRef.Name) {
+				t.Fatalf("config fill = %+v (filled=%v), default=%v", fill, filled, pair.Secrets[0].Default)
+			}
+			wantDefaults := []compose.DefaultSecret(nil)
+			if wantDefault {
+				wantDefaults = []compose.DefaultSecret{{Slot: tc.want.Name, Reference: tc.want.SecretRef}}
+			}
+			if !reflect.DeepEqual(result.DefaultSecrets, wantDefaults) {
+				t.Fatalf("default secrets = %+v, want %+v", result.DefaultSecrets, wantDefaults)
 			}
 			// Recomposing from the recorded entry alone yields the same bindings.
 			cfg.Spec.Secrets = nil
@@ -1299,13 +1320,23 @@ func TestMajordomoSweepOptIn(t *testing.T) {
 		if got := sweep.Spec.Values["PROMPT"]; got != "Use the health-sweep skill with arguments: --file-issues example/kukeon-ops" {
 			t.Fatalf("prompt = %q", got)
 		}
-		if !reflect.DeepEqual(sweep.Spec.Secrets, p.Config.Spec.Secrets) || len(sweep.Spec.Secrets) != 1 {
+		// The token is not chosen by the team, so neither Config fills it:
+		// both inherit the Realm default, and both enable the connector.
+		if len(sweep.Spec.Secrets) != 0 || len(p.Config.Spec.Secrets) != 0 ||
+			!slices.Contains(sweep.Spec.Components, "github") ||
+			!slices.Equal(sweep.Spec.Components, p.Config.Spec.Components) {
 			t.Fatalf(
-				"%s: sweep secrets %v, interactive secrets %v",
+				"%s: sweep secrets %v components %v, interactive secrets %v components %v",
 				p.Harness,
 				sweep.Spec.Secrets,
+				sweep.Spec.Components,
 				p.Config.Spec.Secrets,
+				p.Config.Spec.Components,
 			)
+		}
+		if c := work(t, p, interactive); len(c.Secrets) != 1 || c.Secrets[0].Name != "GH_TOKEN" ||
+			c.Secrets[0].SecretRef.Name != "gh-token" {
+			t.Fatalf("%s: interactive cell secrets = %+v", p.Harness, c.Secrets)
 		}
 		if !slices.Contains(p.Image.Capabilities, "gh") {
 			t.Fatalf("%s: image %s does not provide gh: %v", p.Harness, p.Image.Image, p.Image.Capabilities)

@@ -49,7 +49,11 @@ const (
 // SecretSpec carries the secret material supplied at apply time. Type selects
 // which block is set; an empty Type is opaque.
 type SecretSpec struct {
-	Type      string
+	Type string
+	// Connector and Identity are the readable identity tag and fields (issue
+	// #1548); they are reported by get/list, unlike the material.
+	Connector string
+	Identity  map[string]string
 	Data      string
 	BasicAuth *SecretBasicAuth
 	SSHKey    *SecretSSHKey

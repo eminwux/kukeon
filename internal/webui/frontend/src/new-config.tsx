@@ -4,12 +4,16 @@ import { ErrorNotice, useResource } from "./request";
 import { newCellLink } from "./routes";
 import { MergedValues } from "./merged-values";
 import { catalogAPI } from "./catalog-url.mjs";
-import { blueprintForm, buildSpec, emptyAnswers, formSections, imageChoices, imageStatus, missingAnswers, previewMode, requiredCapabilities, secretChoices } from "./config-form.mjs";
+import { blueprintForm, buildSpec, connectorsWithoutIdentity, emptyAnswers, formSections, groupChoice, imageChoices, imageStatus, missingAnswers, previewMode, requiredCapabilities, secretChoices } from "./config-form.mjs";
 import type { Answers, BlueprintForm, CredentialAnswer, DefaultGitAnswer, Identity, InventoryImage, Parameter, RenderedValue, RepoAnswer, RepoGitAnswer, RepoSlot, SecretChoice, SecretRef, SecretSlot, SigningAnswer } from "./config-form.mjs";
+
+import { ConnectorIdentities, IdentitySelect, connectorsLink } from "./connector-ui";
+import { defaultGroupChoices, defaultRow, deliveryStateVolume, groupComponents, identitiesFor, originLabel, refLabel, scopeParts, scopeQuery, secretRef as identityRef, takesIdentity, targetScope } from "./connectors.mjs";
+import type { Connector, ConnectorDefault, ConnectorStatus } from "./connectors.mjs";
 
 type ScopeMetadata = { name: string; realm?: string; space?: string; stack?: string };
 type CatalogDoc = { metadata: ScopeMetadata; spec?: Record<string, unknown>; kind?: string };
-type Preview = { config: CatalogDoc; document: unknown; preview: string; digest?: string; values?: RenderedValue[] };
+type Preview = { config: CatalogDoc; document: unknown; preview: string; digest?: string; values?: RenderedValue[]; connectors?: ConnectorStatus[] };
 type ImageList = { images: InventoryImage[] };
 
 const gitTypes = ["basic-auth", "ssh-key"];
@@ -158,12 +162,20 @@ function ConfigForm({ blueprint, blueprintScope, form, revision, inventory, onCr
   }, [inventory.data, realm, realms]);
   const secrets = useResource<unknown[]>("/api/catalog/secrets", revision);
   const images = useResource<ImageList>(realm ? `/api/realms/${encodeURIComponent(realm)}/image-inventory` : null, revision);
-  const mode = previewMode(form, answers, requestedMode);
-  const sections = formSections(form, answers, mode);
-  const required = requiredCapabilities(form, answers);
-  const missing = missingAnswers(form, answers, mode);
+  // Connector components (#1548): one method per group, and an identity picker per connector that
+  // shows the default the Config's scope would inherit. Nothing is fetched for a blueprint without them.
+  const hasConnectors = form.components.some(component => component.connector);
+  const { groups, ungrouped: optional } = useMemo(() => groupComponents(form.components), [form]);
+  const connectors = useResource<Connector[]>(hasConnectors ? "/api/connectors" : null, revision);
+  const target = targetScope({ realm, space, stack });
+  const defaults = useResource<ConnectorDefault[]>(hasConnectors && realm ? `/api/connectors/defaults?${scopeQuery(target)}` : null, revision);
+  // A group starts on the method the catalog marks default until the operator chooses one.
+  const effective = useMemo<Answers>(() => ({ ...answers, groups: { ...defaultGroupChoices(form.components, connectors.data), ...answers.groups } }), [answers, form, connectors.data]);
+  const mode = previewMode(form, effective, requestedMode);
+  const sections = formSections(form, effective, mode);
+  const required = requiredCapabilities(form, effective);
+  const missing = [...missingAnswers(form, effective, mode), ...connectorsWithoutIdentity(form, effective, defaults.data, mode).map(title => `${title} identity`)];
   const enabledModes = form.modes.filter(item => !answers.modes.enabled.length || answers.modes.enabled.includes(item));
-  const optional = form.components.filter(component => component.optional);
   const blueprintRef = { name: blueprint.metadata.name, realm: blueprint.metadata.realm, space: blueprint.metadata.space, stack: blueprint.metadata.stack };
   function reviewChanged() { setPreview(undefined); setCreated(undefined); setError(""); }
   function change(next: Partial<Answers>) { setAnswers(old => ({ ...old, ...next })); reviewChanged(); }
@@ -172,7 +184,7 @@ function ConfigForm({ blueprint, blueprintScope, form, revision, inventory, onCr
     setPending(true); setStage(create ? "create" : "preview"); setError("");
     const scope = [realm, space, stack, name.trim()].filter(Boolean);
     try {
-      const body = { config: { name: name.trim(), realm, ...(space ? { space } : {}), ...(stack ? { stack } : {}) }, spec: buildSpec(blueprintRef, form, answers), ...(mode ? { mode } : {}), ...(create && preview ? { preview: preview.preview } : {}) };
+      const body = { config: { name: name.trim(), realm, ...(space ? { space } : {}), ...(stack ? { stack } : {}) }, spec: buildSpec(blueprintRef, form, effective), ...(mode ? { mode } : {}), ...(create && preview ? { preview: preview.preview } : {}) };
       const response = await fetch(`/api/configs/from-blueprint/${create ? "create" : "preview"}`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(body) });
       const result = await response.json();
       if (!response.ok) {
@@ -203,7 +215,13 @@ function ConfigForm({ blueprint, blueprintScope, form, revision, inventory, onCr
       <label className="schema-field"><span>Stack</span><select aria-label="Config stack" value={stack} disabled={pending || !space} onChange={event => { setStack(event.target.value); reviewChanged(); }}><option value="">{space ? "Space-scoped" : "Realm-scoped"}</option>{stacks.map(row => <option key={row.scope[2]}>{row.scope[2]}</option>)}</select><small>Cells land in the Config's scope; an open coordinate means <code>default</code>.</small></label>
     </div></div>
 
-    {optional.length > 0 && <div className="schema-section"><h3>Components</h3><p className="description">Optional components bundle the parameters, secrets and image capabilities of one concern. Their fields appear once enabled.</p>
+    {(optional.length > 0 || groups.length > 0) && <div className="schema-section"><h3>Components</h3><p className="description">Optional components bundle the parameters, secrets and image capabilities of one concern. Their fields appear once enabled.</p>
+      {groups.length > 0 && <div className="schema-fields">{groups.map(({ group, members }) => {
+        const chosen = members.find(member => member.name === groupChoice(form, effective, group));
+        const titles = [...new Set(members.map(member => member.connector?.title || member.connector?.name || ""))];
+        const label = `${titles.length === 1 && titles[0] ? titles[0] : group} method`;
+        return <label className="schema-field" key={group}><span>{label}<b aria-label="required"> *</b></span><select aria-label={label} value={chosen?.name ?? ""} disabled={pending} onChange={event => change({ groups: { ...answers.groups, [group]: event.target.value } })}>{members.map(member => <option key={member.name} value={member.name}>{member.connector?.method || member.name}</option>)}</select><small>{chosen?.description}{chosen?.description && " "}The methods of the <code>{group}</code> group are alternatives: a Config enables exactly one.</small></label>;
+      })}</div>}
       {optional.map(component => <label className="schema-check" key={component.name}><input type="checkbox" checked={answers.components.includes(component.name)} disabled={pending} onChange={event => change({ components: event.target.checked ? [...answers.components, component.name] : answers.components.filter(item => item !== component.name) })} />{component.name} <span className="badge">{component.kind}</span><small>{component.description}{component.requires.length > 0 && <> Requires: {component.requires.join(", ")}.</>}</small></label>)}
     </div>}
 
@@ -218,7 +236,19 @@ function ConfigForm({ blueprint, blueprintScope, form, revision, inventory, onCr
     {sections.map(section => <div className="schema-section" key={section.key}><h3>{section.kind === "group" ? section.title[0].toUpperCase() + section.title.slice(1) : section.title} {section.kind !== "group" && <span className="badge">{section.kind}</span>}</h3>{section.description && <p className="description">{section.description}</p>}{section.kind === "mode" && <p className="description">Values entered here are saved in the Config as that mode's default; a cell can still set them with <code>--param</code>.</p>}
       <div className="schema-fields">
         {section.parameters.map(item => <ParameterField key={item.name} item={item} value={answers.values[item.name]} disabled={pending} images={images.data?.images} required={required} onChange={value => change({ values: { ...answers.values, [item.name]: value } })} />)}
-        {section.secrets.map((slot: SecretSlot) => <SecretPicker key={slot.name} label={`${slot.name} secret`} required={slot.required} value={answers.secrets[slot.name]} choices={secretChoices(secrets.data, ["opaque"])} disabled={pending} help={slot.envName ? `Delivered as ${slot.envName}.` : undefined} onChange={ref => { const next = { ...answers.secrets }; if (ref) next[slot.name] = ref; else delete next[slot.name]; change({ secrets: next }); }} />)}
+        {section.connector && section.component && takesIdentity(section.connector.delivery) && (() => {
+          const { connector, component } = section;
+          const title = connector.title || connector.name;
+          const row = defaultRow(defaults.data, { connector: connector.name, component });
+          const picked = identityRef(answers.connectors[component]);
+          const none = !!defaults.data && !row?.effective;
+          const emptyLabel = !defaults.data ? "Default (inherited from the Realm, Space or Stack)" : row?.effective ? `Default: ${refLabel(row.effective)} (${originLabel(row.origin)})` : connector.optional ? "No default" : "No default — required";
+          const envName = section.secrets[0]?.envName;
+          return <IdentitySelect key={`connector:${component}`} label={`${title} identity`} identities={identitiesFor(secrets.data, connector.name)} value={answers.connectors[component]} emptyLabel={emptyLabel} disabled={pending} required={!connector.optional} realm={realm} onChange={ref => { const next = { ...answers.connectors }; if (ref) next[component] = ref; else delete next[component]; change({ connectors: next }); }}
+            help={<>{envName && <>Delivered as {envName}. </>}Choosing the default saves no fill: the Config keeps inheriting it from {scopeParts(target).join(" / ")}.{none && !picked && !connector.optional && <span className="field-error"> Nothing resolves yet — pick an identity or <a href={connectorsLink(connector.name, target)}>set a default</a>.</span>}</>} />;
+        })()}
+        {section.connector?.delivery === deliveryStateVolume && <p className="description connector-login">Uses the login kept in the harness state volume: no stored identity. Log in once from an interactive cell of this Config.</p>}
+        {!(section.connector && takesIdentity(section.connector.delivery)) && section.secrets.map((slot: SecretSlot) => <SecretPicker key={slot.name} label={`${slot.name} secret`} required={slot.required} value={answers.secrets[slot.name]} choices={secretChoices(secrets.data, ["opaque"])} disabled={pending} help={slot.envName ? `Delivered as ${slot.envName}.` : undefined} onChange={ref => { const next = { ...answers.secrets }; if (ref) next[slot.name] = ref; else delete next[slot.name]; change({ secrets: next }); }} />)}
       </div>
     </div>)}
 
@@ -232,11 +262,13 @@ function ConfigForm({ blueprint, blueprintScope, form, revision, inventory, onCr
 
     <div className="schema-section"><DefaultGitEditor value={answers.git} secrets={secrets.data} disabled={pending} onChange={git => change({ git })} /></div>
     {secrets.error && <p className="stale">Secrets could not be listed: {secrets.error.message}. Name a secret by hand instead.</p>}
+    {defaults.error && <p className="stale">Connector defaults could not be loaded for {scopeParts(target).join(" / ")}: {defaults.error.message}. A picker's Default still inherits whatever the scope sets.</p>}
 
     {missing.length > 0 && <p className="description" role="note">Still required: {missing.join(", ")}.</p>}
     {error && <p className="error" role="alert">{error}</p>}{pending && <p role="status">{stage === "create" ? "Saving Config…" : "Preparing preview…"}</p>}
     {preview && <div className="creation-review"><h3>Review Config</h3>
       <p className="description">The daemon rendered a cell from these answers{mode && <> in <strong>{mode}</strong> mode</>} without saving anything. Creating saves the Config below; no cell is created.</p>
+      {preview.connectors && <ConnectorIdentities statuses={preview.connectors} />}
       {preview.values && <MergedValues values={preview.values} digest={preview.digest} />}
       <h4>CellConfig to save</h4><pre tabIndex={0} aria-label="CellConfig to save">{JSON.stringify(preview.config, null, 2)}</pre>
       <details><summary>Cell this Config renders</summary><pre tabIndex={0} aria-label="Cell preview">{JSON.stringify(preview.document, null, 2)}</pre></details>

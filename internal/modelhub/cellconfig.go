@@ -16,7 +16,11 @@
 
 package modelhub
 
-import "time"
+import (
+	"time"
+
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+)
 
 // CellConfig is the internal carrier for a daemon-stored cell identity (kind:
 // CellConfig, issue #624). Like CellBlueprint the daemon never interprets its
@@ -40,6 +44,9 @@ type CellConfig struct {
 	// ScheduleStatus is the stored schedule state; nil when the scheduler has
 	// recorded none. The controller's get and list fill it.
 	ScheduleStatus *CellConfigScheduleStatus
+	// Connectors is how each connector the Config requires resolves right
+	// now; the controller's get and list fill it (issue #1548).
+	Connectors []v1beta1.ConnectorStatus
 }
 
 // CellConfigSchedule is the summary of a Config's spec.schedule a list shows.

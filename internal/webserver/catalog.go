@@ -174,7 +174,7 @@ func listCatalog(ctx context.Context, c kukeonv1.Client, kind string, scope [4]s
 	case catalogSecrets:
 		docs, err := c.ListSecrets(ctx, scope[0], scope[1], scope[2], scope[3])
 		for i := range docs {
-			docs[i].Spec = v1beta1.SecretSpec{Type: docs[i].Spec.Type}
+			docs[i].Spec = readableSecret(docs[i].Spec)
 		}
 		return catalogList(docs, err)
 	default:
@@ -228,7 +228,7 @@ func getCatalog(ctx context.Context, c kukeonv1.Client, kind string, scope [4]st
 				},
 			},
 		)
-		result.Secret.Spec = v1beta1.SecretSpec{Type: result.Secret.Spec.Type}
+		result.Secret.Spec = readableSecret(result.Secret.Spec)
 		return catalogResult(result.Secret, result.MetadataExists, err, errdefs.ErrSecretNotFound)
 	default:
 		return nil, errdefs.ErrConfig

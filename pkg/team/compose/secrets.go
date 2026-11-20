@@ -50,9 +50,16 @@ func newSecretBindings(
 	}, nil
 }
 
-func (s *secretBindings) lookup(name string) (config.SecretBinding, error) {
+// lookup resolves the binding of a requirement a role names. The second
+// result reports whether the binding is the generated default — the secret of
+// the same name in the team realm — rather than one the operator chose: a
+// default is not written into a Config as a fill but left to the scope
+// defaults, so it stays a live inheritance (issue #1548). A recorded or global
+// binding that names exactly the default secret counts as the default too;
+// TeamEntries written before connectors recorded every generated default.
+func (s *secretBindings) lookup(name string) (config.SecretBinding, bool, error) {
 	if binding, ok := s.used[name]; ok {
-		return binding, nil
+		return binding, s.isDefault(binding, name), nil
 	}
 	binding, ok := findBinding(s.recorded, name)
 	if !ok {
@@ -61,7 +68,7 @@ func (s *secretBindings) lookup(name string) (config.SecretBinding, error) {
 	if !ok {
 		var err error
 		if binding, err = config.DefaultSecretBinding(name, s.realm); err != nil {
-			return config.SecretBinding{}, err
+			return config.SecretBinding{}, false, err
 		}
 	}
 	if binding.Source != nil {
@@ -72,38 +79,50 @@ func (s *secretBindings) lookup(name string) (config.SecretBinding, error) {
 	if !slices.ContainsFunc(s.recorded, func(b config.SecretBinding) bool { return b.Name == name }) {
 		s.added = append(s.added, name)
 	}
-	return binding, nil
+	return binding, s.isDefault(binding, name), nil
+}
+
+// isDefault reports whether a binding names the default runtime secret of a
+// requirement: `secretName` in the team realm, at realm scope.
+func (s *secretBindings) isDefault(binding config.SecretBinding, secretName string) bool {
+	return binding.SecretRef == config.SecretRef{Name: secretName, Realm: s.realm}
 }
 
 // component binds a component secret slot. The destination is the slot's, not
 // the team's: a shared blueprint fixes it. The runtime secret comes from the
 // team's binding for the slot, then from one for an alias, then from the
-// component's default secret in the team realm.
-func (s *secretBindings) component(slot component.Secret) (config.SecretBinding, error) {
+// component's default secret in the team realm. The second result reports
+// whether the binding is that default (see lookup).
+func (s *secretBindings) component(slot component.Secret) (config.SecretBinding, bool, error) {
+	secretName := slot.SecretName
+	if secretName == "" {
+		secretName = slot.Name
+	}
 	for _, name := range append([]string{slot.Name}, slot.Aliases...) {
-		if _, ok := findBinding(s.recorded, name); ok {
-			return s.lookup(name)
-		}
-		if _, ok := findBinding(s.global, name); ok {
-			return s.lookup(name)
+		_, recorded := findBinding(s.recorded, name)
+		_, global := findBinding(s.global, name)
+		if recorded || global {
+			binding, _, err := s.lookup(name)
+			return binding, s.isDefault(binding, secretName), err
 		}
 	}
 	if binding, ok := s.used[slot.Name]; ok {
-		return binding, nil
-	}
-	name := slot.SecretName
-	if name == "" {
-		name = slot.Name
+		return binding, s.isDefault(binding, secretName), nil
 	}
 	binding := config.SecretBinding{
-		Name: slot.Name, SecretRef: config.SecretRef{Name: name, Realm: s.realm}, EnvName: slot.EnvName,
+		Name: slot.Name, SecretRef: config.SecretRef{Name: secretName, Realm: s.realm}, EnvName: slot.EnvName,
+	}
+	if binding.EnvName == "" {
+		// A file-delivered slot has no env destination; the binding record
+		// still needs an identifier-shaped one to stay a valid declaration.
+		binding.EnvName = strings.ToUpper(strings.NewReplacer("-", "_", ".", "_").Replace(slot.Name))
 	}
 	if err := config.ValidateSecrets("secret "+slot.Name, []config.SecretBinding{binding}); err != nil {
-		return config.SecretBinding{}, err
+		return config.SecretBinding{}, false, err
 	}
 	s.used[slot.Name] = binding
 	s.added = append(s.added, slot.Name)
-	return binding, nil
+	return binding, true, nil
 }
 
 // entry keeps recorded bindings in their order, appends newly used ones, and

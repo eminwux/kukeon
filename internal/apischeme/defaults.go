@@ -202,3 +202,36 @@ func validateScopeDefaults(kind string, d *ext.ScopeDefaults) error {
 	}
 	return nil
 }
+
+// validateRegistryCredentials checks the Secret-backed entries of a Realm's
+// spec.registryCredentials (issue #1548): the Secret is named, lives at the
+// Realm's own scope, and the entry carries no inline username or password
+// next to it. Inline entries written before Secret-backed ones existed are
+// accepted as they are.
+func validateRegistryCredentials(realm string, creds []ext.RegistryCredentials) error {
+	for i, cred := range creds {
+		ref := cred.SecretRef
+		if ref == nil {
+			continue
+		}
+		field := fmt.Sprintf("realm spec.registryCredentials[%d]", i)
+		if strings.TrimSpace(ref.Name) == "" {
+			return fmt.Errorf("%s.secretRef.name is required", field)
+		}
+		if got := strings.TrimSpace(ref.Realm); got != "" && got != strings.TrimSpace(realm) {
+			return fmt.Errorf(
+				"%s.secretRef.realm is %q: a registry credential is a Secret of the Realm itself (%q)",
+				field, got, realm)
+		}
+		if strings.TrimSpace(ref.Space) != "" || strings.TrimSpace(ref.Stack) != "" ||
+			strings.TrimSpace(ref.Cell) != "" {
+			return fmt.Errorf(
+				"%s.secretRef names a space, stack or cell: a registry credential is realm-scoped", field)
+		}
+		if cred.Username != "" || cred.Password != "" {
+			return fmt.Errorf(
+				"%s sets both secretRef and an inline username or password; keep only secretRef", field)
+		}
+	}
+	return nil
+}

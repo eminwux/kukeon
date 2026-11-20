@@ -26,6 +26,7 @@ import (
 	applypkg "github.com/eminwux/kukeon/internal/controller/apply"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // GetConfigResult reports the full document view of a single `kind: CellConfig`
@@ -105,7 +106,26 @@ func (b *Exec) GetConfig(config intmodel.CellConfig) (GetConfigResult, error) {
 	res.MetadataExists = true
 	res.Config = got
 	res.Config.ScheduleStatus = b.configScheduleStatus(got)
+	res.Config.Connectors = b.configConnectors(got)
 	return res, nil
+}
+
+// configConnectors reports how each connector a Config requires resolves right
+// now (issue #1548): the identity a cell created from it would use and the
+// level it comes from, or that nothing fills it. It is computed from the
+// Config, its blueprint and the Realm, Space and Stack defaults on every read,
+// so a default set a moment ago shows at once. Best-effort, like the schedule
+// status: a Config whose blueprint is gone, or that no longer fits it, reports
+// no connectors rather than failing the get — creating a cell from it reports
+// the actual error.
+func (b *Exec) configConnectors(cfg intmodel.CellConfig) []v1beta1.ConnectorStatus {
+	resolved, err := resolveConfig(b.runner, cfg, cellBinding{})
+	if err != nil {
+		b.logger.DebugContext(b.ctx, "get config: resolve connectors",
+			"config", cfg.Metadata.Name, "error", err)
+		return nil
+	}
+	return resolved.connectors
 }
 
 // configScheduleStatus returns the stored schedule state of a Config that has
@@ -163,6 +183,18 @@ func (b *Exec) ListConfigs(realmName, spaceName, stackName string) ([]intmodel.C
 		if found {
 			configs[i].ScheduleStatus = &status
 		}
+	}
+	// Every Config also reports how its connectors resolve (#1548), so a list
+	// can flag the ones a cell cannot be created from yet. The list carries
+	// no documents, so each is read for this; best-effort like the rest.
+	for i := range configs {
+		full, getErr := b.runner.GetConfig(configs[i])
+		if getErr != nil {
+			b.logger.DebugContext(b.ctx, "list configs: read config",
+				"config", configs[i].Metadata.Name, "error", getErr)
+			continue
+		}
+		configs[i].Connectors = b.configConnectors(full)
 	}
 	return configs, nil
 }

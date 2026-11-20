@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { startServer } from "./server.mjs";
+import { startServer, connectorWorld, mockConnectorAPI } from "./server.mjs";
 
 let server;
 test.beforeEach(async () => { server = await startServer(); });
@@ -2523,4 +2523,503 @@ test("Connected section shows web and daemon versions and warns only on a mismat
   await page.getByRole("button", { name: "Refresh" }).click();
   await expect(versions).toHaveText(["v0.7.0", "unknown"]);
   await expect(connection.getByRole("img")).toHaveCount(0);
+});
+
+// Connectors (#1548, §7). The mock world serves test-only connectors — `example-token` (env delivery, one
+// readable field), a grouped harness connector, a git-delivered and a registry-delivered one — so everything
+// asserted here is rendered from GET /api/connectors, never from a connector the UI knows by name.
+async function mockConnectors(page) {
+  const world = connectorWorld();
+  await mock(page);
+  await mockConnectorAPI(page, world);
+  return world;
+}
+const connectorsPanel = page => page.getByRole("region", { name: "Connectors", exact: true });
+const newCellFor = name => `#/new-cell?config=${encodeURIComponent(JSON.stringify(["dev", "shared", "services", name]))}`;
+const exampleOther = { name: "example-other", realm: "dev", space: "shared", stack: "services" };
+
+test("Connectors page lists the catalog with the Configs missing an identity, and creates, rotates and deletes identities write-only", async ({ page }) => {
+  const world = await mockConnectors(page);
+  const value = "s3cr3t-example-value";
+  const rotated = "r0tated-example-value";
+  const logged = [];
+  page.on("console", message => logged.push(message.text()));
+  const identityPosts = () => world.posts("/api/connectors/example-token/identities");
+  await page.goto(`${server.url}#/resources`);
+  await nav(page).getByRole("link", { name: "Connectors" }).click();
+  await expect(page).toHaveURL(/#\/connectors$/);
+  await expect(page.locator(".page-heading h1")).toHaveText("Connectors");
+  await expect(nav(page).getByRole("link", { name: "Connectors" })).toHaveAttribute("aria-current", "page");
+
+  // One row per connector of the catalog, whatever its delivery handler.
+  const list = page.getByRole("region", { name: "Connectors list" });
+  const listRow = title => list.getByRole("row").filter({ has: page.getByRole("link", { name: title, exact: true }) });
+  await expect(list.getByRole("row")).toHaveCount(5);
+  await expect(listRow("Example")).toContainText("example-token");
+  await expect(listRow("Example")).toContainText("token — environment variable EXAMPLE_TOKEN");
+  await expect(listRow("Demo")).toContainText("login — login kept in the harness state volume (no identity)");
+  await expect(listRow("Repo")).toContainText("the cell's git identity");
+  await expect(listRow("Pulls")).toContainText("image pulls of a Realm");
+  // Example: three identities, three Configs require it, two of them have nothing to fill it.
+  await expect(listRow("Example").getByRole("cell").nth(2)).toHaveText("3");
+  await expect(listRow("Example").getByRole("cell").nth(3)).toHaveText("3");
+  await expect(listRow("Example").getByRole("cell").nth(4)).toContainText("2");
+  await expect(listRow("Example").getByText("Needs a default")).toBeVisible();
+  await expect(listRow("Example").getByRole("link", { name: "Set a default for Example" })).toHaveAttribute("href", `#/connectors/example-token?scope=${encodeURIComponent(JSON.stringify(["dev", "shared", "services"]))}`);
+  await expect(listRow("Demo").getByText("Needs a default")).toHaveCount(0);
+  await expect(listRow("Demo").getByRole("cell").nth(3)).toHaveText("1");
+
+  await listRow("Example").getByRole("link", { name: "Example", exact: true }).click();
+  await expect(page).toHaveURL(/#\/connectors\/example-token$/);
+  await expect(page.getByRole("region", { name: "Example connector" })).toContainText("opaque Secret with account");
+  const missing = page.getByRole("region", { name: "Configs without a Example identity" });
+  await expect(missing.getByRole("listitem")).toHaveCount(2);
+  await expect(missing.getByRole("link", { name: "mine", exact: true })).toHaveAttribute("href", "#/configs/dev/shared/services/mine");
+  await expect(missing.getByRole("link", { name: "other", exact: true })).toHaveAttribute("href", "#/configs/prod/shared/services/other");
+
+  // Identities: name, scope, type and readable fields.
+  const identities = page.getByRole("region", { name: "Example identities" });
+  const table = identities.getByRole("table", { name: "Example identities" });
+  await expect(table.getByRole("row")).toHaveCount(4);
+  await expect(table.getByRole("row", { name: /example-default/ })).toContainText("account: acme");
+  await expect(table.getByRole("row", { name: /example-default/ })).toContainText("opaque");
+  await expect(table.getByRole("row", { name: /example-other/ }).locator(".scope-cell")).toHaveText("dev / shared / services");
+
+  // The create form is generated from the connector: a single secret type needs no type picker, and its
+  // one readable field is required.
+  const create = identities.getByRole("form", { name: "New Example identity" });
+  await expect(identities.getByLabel("Identity realm")).toHaveValue("dev");
+  await expect(create.getByLabel("Secret type")).toHaveCount(0);
+  await expect(create.getByText("Account the token belongs to.")).toBeVisible();
+  await expect(create.getByLabel("Value")).toHaveAttribute("type", "password");
+  await create.getByLabel("Identity name").fill("example-new");
+  await create.getByLabel("Value").fill(value);
+  await create.getByRole("button", { name: "Create identity" }).click();
+  await expect(create.getByRole("alert")).toContainText("account is required.");
+  expect(identityPosts()).toHaveLength(0);
+  await create.getByLabel("account").fill("gamma");
+  await create.getByRole("button", { name: "Create identity" }).click();
+  await expect(toasts(page).filter({ hasText: "Example identity example-new created in dev." })).toBeVisible();
+  await expect(table.getByRole("row")).toHaveCount(5);
+  await expect(table.getByRole("row", { name: /example-new/ })).toContainText("account: gamma");
+  expect(identityPosts()).toHaveLength(1);
+  expect(identityPosts()[0].body).toEqual({ scope: { realm: "dev" }, name: "example-new", type: "opaque", identity: { account: "gamma" }, value });
+  // The value is write-only: gone from the form, absent from the page, the URL, storage and the console.
+  await expect(create.getByLabel("Value")).toHaveValue("");
+  await expect(create.getByLabel("Identity name")).toHaveValue("");
+  expect(await page.content()).not.toContain(value);
+  expect(await page.evaluate(() => document.body.innerText)).not.toContain(value);
+  expect(page.url()).not.toContain(value);
+  expect(world.requests.map(request => request.path).join(" ")).not.toContain(value);
+  expect(await page.evaluate(() => JSON.stringify({ ...localStorage }) + JSON.stringify({ ...sessionStorage }))).not.toContain(value);
+
+  // Rotate: the same form with the name fixed and the readable fields kept; it replaces the value.
+  await table.getByRole("button", { name: "Rotate Example identity example-default — dev", exact: true }).click();
+  const rotate = identities.getByRole("form", { name: "Rotate Example identity example-default" });
+  await expect(rotate.getByLabel("Identity name")).toBeDisabled();
+  await expect(rotate.getByLabel("Identity name")).toHaveValue("example-default");
+  await expect(rotate.getByLabel("account")).toHaveValue("acme");
+  await expect(rotate.getByLabel("Value")).toHaveValue("");
+  await rotate.getByLabel("Value").fill(rotated);
+  await rotate.getByRole("button", { name: "Rotate identity" }).click();
+  await expect(toasts(page).filter({ hasText: "Example identity example-default rotated in dev." })).toBeVisible();
+  await expect(rotate).toHaveCount(0);
+  expect(identityPosts()[1].body).toEqual({ scope: { realm: "dev" }, name: "example-default", type: "opaque", identity: { account: "acme" }, value: rotated });
+  await expect(table.getByRole("row")).toHaveCount(5);
+  expect(await page.content()).not.toContain(rotated);
+
+  // Delete goes through the existing secret delete route, after the same confirmation.
+  await table.getByRole("button", { name: "Delete Example identity example-other — dev / shared / services", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Delete secret" });
+  await expect(dialog.locator(".cell-action-target code")).toHaveText("dev / shared / services / example-other");
+  await expect(dialog.getByRole("button", { name: "Confirm Delete" })).toBeDisabled();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(table.getByRole("row")).toHaveCount(5);
+  await table.getByRole("button", { name: "Delete Example identity example-other — dev / shared / services", exact: true }).click();
+  await dialog.getByRole("checkbox").check();
+  await dialog.getByRole("button", { name: "Confirm Delete" }).click();
+  await expect(toasts(page).filter({ hasText: "Example identity example-other deleted." })).toBeVisible();
+  await expect(table.getByRole("row")).toHaveCount(4);
+  await expect(table.getByRole("row", { name: /example-other/ })).toHaveCount(0);
+  expect(world.requests.at(-1)).toEqual({ path: "/api/catalog/secrets/example-other/delete?realm=dev&space=shared&stack=services", body: {} });
+  expect(logged.join("\n")).not.toContain(value);
+  expect(logged.join("\n")).not.toContain(rotated);
+});
+
+test("an identity form follows the connector's secret types and field types", async ({ page }) => {
+  const world = await mockConnectors(page);
+  const key = "-----BEGIN OPENSSH " + "PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA-test-only\n-----END OPENSSH PRIVATE KEY-----";
+  await page.goto(`${server.url}#/connectors/repo`);
+  const create = page.getByRole("form", { name: "New Repo identity" });
+  // Two accepted types: a type picker; ssh-key shows every field, including the ones limited to it.
+  await expect(create.getByLabel("Secret type").getByRole("option")).toHaveText(["ssh-key", "basic-auth"]);
+  await expect(create.getByLabel("author")).toHaveAttribute("placeholder", "Name <email>");
+  await expect(create.getByRole("group", { name: "sign" }).getByRole("checkbox")).toHaveCount(2);
+  await expect(create.getByLabel("allowedSignersRef")).toHaveAttribute("placeholder", "name@realm[/space[/stack]]");
+  await expect(create.locator("textarea")).toHaveCount(2);
+  await create.getByLabel("Secret type").selectOption("basic-auth");
+  await expect(create.getByRole("group", { name: "sign" })).toHaveCount(0);
+  await expect(create.getByLabel("allowedSignersRef")).toHaveCount(0);
+  await expect(create.getByLabel("Password or token")).toHaveAttribute("type", "password");
+  await create.getByLabel("Secret type").selectOption("ssh-key");
+
+  await create.getByLabel("Identity name").fill("repo-new");
+  await create.getByLabel("author").fill("not-a-person");
+  await create.getByRole("textbox", { name: /^hosts/ }).fill("example.com, example.org/group");
+  await create.getByRole("group", { name: "sign" }).getByLabel("commits").check();
+  await create.getByLabel("Private key").fill(key);
+  await create.getByRole("button", { name: "Create identity" }).click();
+  await expect(create.getByRole("alert")).toContainText("author must be written Name <email>.");
+  await create.getByLabel("author").fill("Dev <dev@example.com>");
+  await create.getByRole("button", { name: "Create identity" }).click();
+  await expect(page.getByRole("table", { name: "Repo identities" }).getByRole("row", { name: /repo-new/ })).toContainText("hosts: example.com,example.org/group");
+  expect(world.posts("/api/connectors/repo/identities")[0].body).toEqual({
+    scope: { realm: "dev" }, name: "repo-new", type: "ssh-key",
+    identity: { author: "Dev <dev@example.com>", hosts: "example.com,example.org/group", sign: "commits" }, privateKey: key,
+  });
+  await expect(create.getByLabel("Private key")).toHaveValue("");
+  expect(await page.content()).not.toContain("b3BlbnNzaC1rZXktdjEAAAAA-test-only");
+
+  // A connector whose every method keeps a login in the state volume would have no identity; this one
+  // has one login method and says so.
+  await page.goto(`${server.url}#/connectors/demo`);
+  await expect(page.getByRole("region", { name: "Demo connector" })).toContainText("The login method has no identity");
+  await expect(page.getByRole("region", { name: "Demo defaults" }).getByRole("group")).toHaveCount(1);
+  await expect(page.getByRole("region", { name: "Demo defaults" }).getByRole("group", { name: "Demo key default" })).toBeVisible();
+});
+
+test("setting a Realm default clears the Needs connector badge of the Configs that inherit it, without re-rendering them", async ({ page }) => {
+  const world = await mockConnectors(page);
+  const defaultPosts = () => world.posts("/api/connectors/example-token/defaults");
+  const configRow = name => page.getByRole("region", { name: "Configs list" }).getByRole("row").filter({ has: page.getByRole("link", { name, exact: true }) });
+  await page.goto(`${server.url}#/configs`);
+  await expect(configRow("mine").locator(".needs-connector")).toHaveText("Needs connector: Example");
+  await expect(configRow("other").locator(".needs-connector")).toHaveText("Needs connector: Example");
+  await expect(configRow("teams")).toBeVisible();
+  await expect(configRow("teams").locator(".needs-connector")).toHaveCount(0);
+  const before = JSON.stringify(world.configs);
+
+  // The marker on the Connectors page links to the scope of a Config that is missing the identity.
+  await nav(page).getByRole("link", { name: "Connectors" }).click();
+  await page.getByRole("link", { name: "Set a default for Example" }).click();
+  const defaults = page.getByRole("region", { name: "Example defaults" });
+  await expect(defaults.getByLabel("Default realm")).toHaveValue("dev");
+  await expect(defaults.getByLabel("Default space")).toHaveValue("shared");
+  await expect(defaults.getByLabel("Default stack")).toHaveValue("services");
+  const levelTable = defaults.getByRole("table", { name: "Example token defaults by level" });
+  await expect(levelTable.getByRole("row")).toHaveCount(4);
+  await expect(levelTable.getByText("Not set")).toHaveCount(3);
+  await expect(defaults.locator(".connector-effective")).toContainText("No default in this scope");
+  await expect(defaults.getByLabel("Example token default level").getByRole("option")).toHaveText(["Realm — dev", "Space — dev / shared", "Stack — dev / shared / services"]);
+  await defaults.getByLabel("Example token default level").selectOption({ label: "Realm — dev" });
+  await defaults.getByRole("combobox", { name: /^Example token default identity/ }).selectOption({ label: "example-default — dev (opaque)" });
+  await defaults.getByRole("button", { name: "Set default", exact: true }).click();
+  await expect(toasts(page).filter({ hasText: "Example token default set to example-default at Realm — dev." })).toBeVisible();
+  expect(defaultPosts()[0].body).toEqual({ scope: { realm: "dev" }, method: "token", identity: { name: "example-default", realm: "dev" } });
+  // Each level's value and the effective one.
+  await expect(defaults.locator(".connector-effective")).toContainText("Effective: example-default dev — from the realm level.");
+  await expect(levelTable.getByRole("row", { name: /^realm/ })).toContainText("example-default");
+  await expect(levelTable.getByRole("row", { name: /^realm/ })).toContainText("Effective");
+  await expect(levelTable.getByText("Not set")).toHaveCount(2);
+
+  // The Config that inherits the Realm default resolves at once; the one in another Realm does not.
+  const missing = page.getByRole("region", { name: "Configs without a Example identity" });
+  await expect(missing.getByRole("listitem")).toHaveCount(1);
+  await expect(missing.getByRole("link", { name: "other", exact: true })).toBeVisible();
+  await nav(page).getByRole("link", { name: "Configs" }).click();
+  await expect(configRow("mine")).toBeVisible();
+  await expect(configRow("mine").locator(".needs-connector")).toHaveCount(0);
+  await expect(configRow("other").locator(".needs-connector")).toHaveText("Needs connector: Example");
+  // Nothing re-rendered a Config: the only write was the Realm default.
+  expect(JSON.stringify(world.configs)).toBe(before);
+  expect(world.requests.map(request => request.path)).toEqual(["/api/connectors/example-token/defaults"]);
+
+  // A deeper level wins, and clearing a level falls back to the next one.
+  await page.goto(`${server.url}#/connectors/example-token?scope=${encodeURIComponent(JSON.stringify(["dev", "shared", "services"]))}`);
+  await defaults.getByLabel("Example token default level").selectOption({ label: "Stack — dev / shared / services" });
+  await defaults.getByRole("combobox", { name: /^Example token default identity/ }).selectOption({ label: "example-team — dev (opaque)" });
+  await defaults.getByRole("button", { name: "Set default", exact: true }).click();
+  await expect(defaults.locator(".connector-effective")).toContainText("Effective: example-team dev — from the stack level.");
+  expect(defaultPosts()[1].body).toEqual({ scope: { realm: "dev", space: "shared", stack: "services" }, method: "token", identity: { name: "example-team", realm: "dev" } });
+  await defaults.getByRole("button", { name: "Clear Example token default at stack level" }).click();
+  await expect(defaults.locator(".connector-effective")).toContainText("Effective: example-default dev — from the realm level.");
+  expect(defaultPosts()[2].body).toEqual({ scope: { realm: "dev", space: "shared", stack: "services" }, method: "token", identity: null });
+  await defaults.getByRole("button", { name: "Clear Example token default at realm level" }).click();
+  await expect(defaults.locator(".connector-effective")).toContainText("No default in this scope");
+  await nav(page).getByRole("link", { name: "Configs" }).click();
+  await expect(configRow("mine").locator(".needs-connector")).toHaveText("Needs connector: Example");
+});
+
+test("Config detail shows each connector's identity and level and fixes an unresolved one with a default or a pick for the Config", async ({ page }) => {
+  const world = await mockConnectors(page);
+  const value = "inline-created-value";
+  await page.goto(`${server.url}#/configs/dev/shared/services/mine`);
+  const panel = connectorsPanel(page);
+  await expect(panel.locator(".panel-heading .needs-connector")).toHaveText("Needs connector: Example");
+  const item = panel.getByRole("listitem", { name: "Example connector" });
+  await expect(item.locator(".state-badge")).toHaveText("Unresolved");
+  await expect(item).toContainText("No identity — required");
+  await expect(item).toContainText('no identity fills secret slot "example-token"');
+
+  // Set default: create an identity inline, then save it as a scope default.
+  await item.getByRole("button", { name: "Set default for Example" }).click();
+  const fix = item.getByRole("group", { name: "Set default for Example" });
+  await expect(fix.getByLabel("Example default level").getByRole("option")).toHaveText(["Realm — dev", "Space — dev / shared", "Stack — dev / shared / services"]);
+  await expect(fix.getByRole("button", { name: "Save default" })).toBeDisabled();
+  await fix.getByRole("button", { name: "Create a new identity…" }).click();
+  const create = fix.getByRole("form", { name: "New Example identity" });
+  await create.getByLabel("Identity name").fill("example-inline");
+  await create.getByLabel("account").fill("inline");
+  await create.getByLabel("Value").fill(value);
+  await create.getByRole("button", { name: "Create identity" }).click();
+  await expect(create).toHaveCount(0);
+  await expect(fix.getByRole("combobox", { name: /^Example default identity/ }).locator("option:checked")).toHaveText(/^example-inline — dev/);
+  await fix.getByRole("button", { name: "Save default" }).click();
+  await expect(item.locator(".state-badge")).toHaveText("Resolved");
+  await expect(item).toContainText("example-inline");
+  await expect(item).toContainText("Realm default");
+  await expect(panel.locator(".panel-heading")).toContainText("All resolved");
+  expect(world.posts("/api/connectors/example-token/identities")[0].body).toEqual({ scope: { realm: "dev" }, name: "example-inline", type: "opaque", identity: { account: "inline" }, value });
+  expect(world.posts("/api/connectors/example-token/defaults")[0].body).toEqual({ scope: { realm: "dev" }, method: "token", identity: { name: "example-inline", realm: "dev" } });
+  expect(await page.content()).not.toContain(value);
+
+  // Pick for this Config: a Config fill, which wins over the default.
+  await item.getByRole("button", { name: "Pick Example identity for this Config" }).click();
+  const pick = item.getByRole("group", { name: "Pick Example identity for this Config" });
+  await pick.getByRole("combobox", { name: /^Example identity for this Config/ }).selectOption({ label: "example-other — dev / shared / services (opaque)" });
+  await pick.getByRole("button", { name: "Save for this Config" }).click();
+  await expect(item).toContainText("picked for this Config");
+  await expect(item).toContainText("example-other");
+  await expect(item.locator(".state-badge")).toHaveText("Resolved");
+  expect(world.posts("/api/configs/connector")[0].body).toEqual({ config: { name: "mine", realm: "dev", space: "shared", stack: "services" }, connector: "example-token", identity: exampleOther });
+  // Un-picking returns the Config to the default.
+  await item.getByRole("button", { name: "Pick Example identity for this Config" }).click();
+  await pick.getByRole("button", { name: "Use the default instead" }).click();
+  await expect(item).toContainText("Realm default");
+  expect(world.posts("/api/configs/connector")[1].body).toEqual({ config: { name: "mine", realm: "dev", space: "shared", stack: "services" }, connector: "example-token", identity: null });
+});
+
+test("a team-owned Config shows its identities read-only with only Set default, and a login names its state volume", async ({ page }) => {
+  await mockConnectors(page);
+  await page.goto(`${server.url}#/configs/dev/shared/services/teams`);
+  const panel = connectorsPanel(page);
+  await expect(panel.getByRole("note")).toContainText("Identities are set by team kukeon");
+  await expect(panel.locator(".panel-heading")).toContainText("All resolved");
+  const example = panel.getByRole("listitem", { name: "Example connector" });
+  await expect(example).toContainText("example-team");
+  await expect(example).toContainText("set by team kukeon");
+  await expect(example.getByRole("button", { name: "Set default for Example" })).toBeVisible();
+  await expect(panel.getByRole("button", { name: /^Pick .* identity for this Config$/ })).toHaveCount(0);
+  await expect(example.getByRole("button")).toHaveCount(1);
+  // A login has no identity: the status names the state volume and "Log in" opens the New Cell flow.
+  const demo = panel.getByRole("listitem", { name: "Demo connector" });
+  await expect(demo).toContainText("Login kept in state volume kukeon-dev-demo");
+  await expect(demo.getByRole("button")).toHaveCount(0);
+  await expect(demo.getByRole("link", { name: "Log in to Demo" })).toHaveAttribute("href", newCellFor("teams"));
+  await demo.getByRole("link", { name: "Log in to Demo" }).click();
+  await expect(page.getByRole("heading", { name: "Create a stopped Cell" })).toBeVisible();
+});
+
+test("New Cell pre-selects each connector's effective identity, sends only changed picks and keeps Create disabled while one is unresolved", async ({ page }) => {
+  const world = await mockConnectors(page);
+  const previews = () => world.posts("/api/cells/from-config/preview");
+  const previewButton = page.getByRole("button", { name: /^(Preview Cell|Refresh preview)$/ });
+  const createButton = page.getByRole("button", { name: "Create Cell", exact: true });
+  const panel = connectorsPanel(page);
+  const item = panel.getByRole("listitem", { name: "Example connector" });
+  const picker = panel.getByRole("combobox", { name: /^Example identity/ });
+  const review = page.getByRole("table", { name: "Connector identities" });
+
+  // A resolved Config: the effective identity is pre-selected and nothing is sent for it.
+  await page.goto(`${server.url}${newCellFor("teams")}`);
+  await expect(picker.locator("option:checked")).toHaveText("example-team — dev (opaque)");
+  await expect(picker.getByRole("option")).toHaveText(["Use the Config's identity", "example-default — dev (opaque)", "example-team — dev (opaque)", "example-other — dev / shared / services (opaque)", "Name a secret…"]);
+  await expect(item).toContainText("set by team kukeon");
+  await expect(panel.getByRole("listitem", { name: "Demo connector" })).toContainText("Login kept in state volume kukeon-dev-demo");
+  await expect(panel.getByRole("listitem", { name: "Demo connector" }).getByRole("combobox")).toHaveCount(0);
+  await previewButton.click();
+  await expect(review.getByRole("row", { name: /^Example/ })).toContainText("example-team");
+  await expect(review.getByRole("row", { name: /^Demo/ })).toContainText("Login kept in state volume");
+  expect(previews()).toHaveLength(1);
+  expect(previews()[0].body).toEqual({ config: { name: "teams", realm: "dev", space: "shared", stack: "services" }, name: "", env: [], ignoreDiskPressure: false });
+
+  // Choosing another identity of the connector sends it as an override, for this cell only.
+  await picker.selectOption({ label: "example-other — dev / shared / services (opaque)" });
+  await expect(createButton).toHaveCount(0);
+  await expect(item).toContainText("Picked for this cell");
+  await previewButton.click();
+  await expect(review.getByRole("row", { name: /^Example/ })).toContainText("picked for this cell");
+  expect(previews()[1].body.connectors).toEqual({ "example-token": exampleOther });
+  // Back on the effective identity, nothing is sent.
+  await picker.selectOption({ label: "example-team — dev (opaque)" });
+  await previewButton.click();
+  await expect(review.getByRole("row", { name: /^Example/ })).toContainText("set by team kukeon");
+  expect(previews()).toHaveLength(3);
+  expect(previews()[2].body).not.toHaveProperty("connectors");
+
+  // An untagged Secret can be named by hand; the daemon's refusal names the connector.
+  await picker.selectOption({ label: "Name a secret…" });
+  await expect(panel.getByLabel("Example identity secret realm")).toHaveValue("dev");
+  await panel.getByLabel("Example identity secret name").fill("untagged");
+  await previewButton.click();
+  await expect(page.locator("form.creation-form").getByRole("alert")).toContainText('not an identity of connector "example-token"');
+  expect(previews()[3].body.connectors).toEqual({ "example-token": { name: "untagged", realm: "dev" } });
+
+  // The override travels with the create, bound to the reviewed preview.
+  await picker.selectOption({ label: "example-default — dev (opaque)" });
+  await page.getByLabel("Cell name (optional)").fill("picked-cell");
+  await previewButton.click();
+  await expect(review.getByRole("row", { name: /^Example/ })).toContainText("example-default");
+  await createButton.click();
+  await expect(page).toHaveURL(/#\/workspace\/dev\/shared\/services\/picked-cell$/);
+  expect(world.posts("/api/cells/from-config/create")).toHaveLength(1);
+  expect(world.posts("/api/cells/from-config/create")[0].body).toMatchObject({ name: "picked-cell", resolvedName: "picked-cell", preview: "reviewed", connectors: { "example-token": { name: "example-default", realm: "dev" } } });
+
+  // An unresolved required connector is flagged before any preview or create.
+  const sent = previews().length;
+  await page.goto(`${server.url}${newCellFor("mine")}`);
+  await expect(item.getByRole("alert")).toContainText("Example has no usable identity");
+  await expect(panel.locator(".panel-heading .needs-connector")).toHaveText("Needs connector: Example");
+  await expect(picker.locator("option:checked")).toHaveText("No identity — required");
+  await expect(createButton).toBeDisabled();
+  await expect(previewButton).toBeDisabled();
+  await expect(item.getByRole("button", { name: "Set default for Example" })).toBeVisible();
+  await expect(item.getByRole("button", { name: "Pick Example identity for this Config" })).toBeVisible();
+
+  // Picking an identity for the cell is enough to preview; un-picking blocks again.
+  await picker.selectOption({ label: "example-default — dev (opaque)" });
+  await expect(item.getByRole("alert")).toHaveCount(0);
+  await expect(previewButton).toBeEnabled();
+  await picker.selectOption({ label: "No identity — required" });
+  await expect(previewButton).toBeDisabled();
+  await expect(createButton).toBeDisabled();
+  expect(previews()).toHaveLength(sent);
+
+  // The same Set default fix, inline: the Config resolves and Create opens up.
+  await item.getByRole("button", { name: "Set default for Example" }).click();
+  const fix = item.getByRole("group", { name: "Set default for Example" });
+  await fix.getByLabel("Example default level").selectOption({ label: "Stack — dev / shared / services" });
+  await fix.getByRole("combobox", { name: /^Example default identity/ }).selectOption({ label: "example-other — dev / shared / services (opaque)" });
+  await fix.getByRole("button", { name: "Save default" }).click();
+  await expect(item.getByRole("alert")).toHaveCount(0);
+  await expect(picker.locator("option:checked")).toHaveText("example-other — dev / shared / services (opaque)");
+  expect(world.posts("/api/connectors/example-token/defaults").at(-1).body).toEqual({ scope: { realm: "dev", space: "shared", stack: "services" }, method: "token", identity: exampleOther });
+  await expect(previewButton).toBeEnabled();
+  await previewButton.click();
+  await expect(review.getByRole("row", { name: /^Example/ })).toContainText("Stack default");
+  await expect(createButton).toBeEnabled();
+  expect(previews().at(-1).body).not.toHaveProperty("connectors");
+});
+
+test("New Config offers one method per group and an identity picker per connector showing its default", async ({ page }) => {
+  const world = await mockConnectors(page);
+  world.defaults.dev = { "example-token:token": { name: "example-default", realm: "dev" } };
+  const previews = () => world.posts("/api/configs/from-blueprint/preview");
+  const review = page.getByRole("table", { name: "Connector identities" });
+  await page.goto(`${server.url}#/new-config?blueprint=${encodeURIComponent(JSON.stringify(["dev", "demo"]))}`);
+  await expect(page.getByRole("heading", { name: "Answer the demo form" })).toBeVisible();
+  await page.getByLabel("Config name").fill("fresh");
+  await expect(page.getByLabel("Config realm")).toHaveValue("dev");
+  await page.getByLabel("Config space").selectOption("shared");
+  await page.getByLabel("Config stack").selectOption("services");
+
+  // The methods of one group are a single choice — never two checkboxes — starting on the catalog's
+  // default method. Enabled components are sent in the blueprint's order.
+  const method = page.getByLabel("Demo method", { exact: true });
+  await expect(method.getByRole("option")).toHaveText(["login", "key"]);
+  await expect(method).toHaveValue("demo-key");
+  await expect(page.getByRole("checkbox", { name: /^demo-/ })).toHaveCount(0);
+  const demoPicker = page.getByRole("combobox", { name: /^Demo identity/ });
+  await expect(demoPicker.getByRole("option")).toHaveText(["No default — required", "demo-key-1 — dev (opaque)", "Name a secret…"]);
+  await expect(page.getByRole("note")).toContainText("Demo identity");
+  await expect(page.getByRole("link", { name: "set a default" })).toHaveAttribute("href", `#/connectors/demo?scope=${encodeURIComponent(JSON.stringify(["dev", "shared", "services"]))}`);
+  // A login method takes no identity.
+  await method.selectOption("demo-login");
+  await expect(demoPicker).toHaveCount(0);
+  await expect(page.getByText("Uses the login kept in the harness state volume")).toBeVisible();
+  await expect(page.getByRole("note")).toHaveCount(0);
+
+  // An ungrouped connector is a toggle; its picker shows the default the Config's scope inherits.
+  await page.getByRole("checkbox", { name: /^example-token connector/ }).check();
+  const examplePicker = page.getByRole("combobox", { name: /^Example identity/ });
+  await expect(examplePicker.getByRole("option")).toHaveText(["Default: example-default — dev (Realm default)", "example-default — dev (opaque)", "example-team — dev (opaque)", "example-other — dev / shared / services (opaque)", "Name a secret…"]);
+  await expect(examplePicker).toHaveValue("");
+  // Choosing Default sends no fill: the Config keeps inheriting.
+  await page.getByRole("button", { name: "Preview Config", exact: true }).click();
+  await expect(review.getByRole("row", { name: /^Example/ })).toContainText("Realm default");
+  expect(previews()).toHaveLength(1);
+  expect(previews()[0].body).toEqual({ config: { name: "fresh", realm: "dev", space: "shared", stack: "services" }, mode: "interactive", spec: { blueprint: { name: "demo", realm: "dev" }, components: ["example-token", "demo-login"] } });
+
+  // A pick is saved as the Config's fill; the git-delivered connector's pick is the git identity reference.
+  await examplePicker.selectOption({ label: "example-other — dev / shared / services (opaque)" });
+  await method.selectOption("demo-key");
+  await demoPicker.selectOption({ label: "demo-key-1 — dev (opaque)" });
+  await page.getByRole("checkbox", { name: /^repo connector/ }).check();
+  const repoPicker = page.getByRole("combobox", { name: /^Repo identity/ });
+  await expect(repoPicker.getByRole("option")).toHaveText(["No default", "repo-key — dev (ssh-key)", "Name a secret…"]);
+  await repoPicker.selectOption({ label: "repo-key — dev (ssh-key)" });
+  await page.getByRole("button", { name: "Preview Config", exact: true }).click();
+  await expect(review.getByRole("row", { name: /^Example/ })).toContainText("picked for this Config");
+  await expect(review.getByRole("row", { name: /^Repo/ })).toContainText("repo-key");
+  expect(previews()[1].body.spec).toEqual({
+    blueprint: { name: "demo", realm: "dev" }, components: ["example-token", "demo-key", "repo"],
+    secrets: { "demo-key": { secretRef: { name: "demo-key-1", realm: "dev" } }, "example-token": { secretRef: exampleOther } },
+    git: { identityRef: { name: "repo-key", realm: "dev" } },
+  });
+  await page.getByRole("button", { name: "Create Config", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Config created" })).toBeVisible();
+  expect(world.configs.at(-1).spec.components).toEqual(["example-token", "demo-key", "repo"]);
+});
+
+test("the registry-delivered connector is Realm only and saves Secret-backed registry entries", async ({ page }) => {
+  const world = await mockConnectors(page);
+  const token = "s3cr3t-registry-token";
+  await page.goto(`${server.url}#/connectors/pulls`);
+  await expect(page.getByRole("region", { name: "Pulls connector" })).toContainText("image pulls of a Realm");
+  // Realm only: no Space or Stack to choose, no scope default, no free-standing identity form.
+  await expect(page.getByLabel("Registry realm")).toHaveValue("dev");
+  await expect(page.getByLabel("Registry space")).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Pulls defaults" })).toHaveCount(0);
+  await expect(page.getByRole("form", { name: "New Pulls identity" })).toHaveCount(0);
+  const identities = page.getByRole("table", { name: "Pulls identities" });
+  await expect(identities.getByRole("row")).toHaveCount(2);
+  await expect(identities.getByRole("row", { name: /registry-ghcr\.io/ })).toContainText("basic-auth");
+
+  // The Realm's entries: a Secret-backed one names its Secret, a legacy inline one its username.
+  const panel = page.getByRole("region", { name: "Registry credentials" });
+  await expect(panel.getByRole("row")).toHaveCount(3);
+  await expect(panel.getByRole("row", { name: /^ghcr\.io/ }).getByRole("link", { name: "registry-ghcr.io" })).toHaveAttribute("href", "#/secrets/dev/registry-ghcr.io");
+  const legacy = panel.getByRole("row", { name: /^legacy\.example\.com/ });
+  await expect(legacy).toContainText("old");
+  await expect(legacy).toContainText("Inline (legacy)");
+
+  // Saving the legacy entry again moves it into a Secret; the token stays write-only.
+  await panel.getByRole("button", { name: "Replace credential for legacy.example.com" }).click();
+  const form = panel.getByRole("form", { name: "Add or replace registry credential" });
+  await expect(form.getByLabel("Server")).toHaveValue("legacy.example.com");
+  await expect(form.getByLabel("Username")).toHaveValue("old");
+  await form.getByLabel("Token").fill(token);
+  await form.getByRole("button", { name: "Replace credential" }).click();
+  await expect(legacy.getByRole("link", { name: "registry-legacy.example.com" })).toHaveAttribute("href", "#/secrets/dev/registry-legacy.example.com");
+  await expect(panel.getByText("Inline (legacy)")).toHaveCount(0);
+  expect(world.posts("/api/realms/dev/registry-credentials")).toHaveLength(1);
+  expect(world.posts("/api/realms/dev/registry-credentials")[0].body).toEqual({ server: "legacy.example.com", username: "old", password: token });
+  await expect(form.getByLabel("Token")).toHaveValue("");
+  expect(await page.content()).not.toContain(token);
+  // The credential it stored is an identity of the connector.
+  await expect(identities.getByRole("row")).toHaveCount(3);
+  await expect(identities.getByRole("row", { name: /registry-legacy\.example\.com/ })).toContainText("basic-auth");
+
+  // A new server gets a Secret-backed entry too, and the Realm page lists the same entries.
+  await form.getByLabel("Server").fill("registry.example.org");
+  await form.getByLabel("Username").fill("bot");
+  await form.getByLabel("Token").fill(token);
+  await form.getByRole("button", { name: "Add credential" }).click();
+  await expect(panel.getByRole("row", { name: /^registry\.example\.org/ }).getByRole("link", { name: "registry-registry.example.org" })).toBeVisible();
+  await page.goto(`${server.url}#/resource/dev`);
+  const realmPanel = page.getByRole("region", { name: "Registry credentials" });
+  await expect(realmPanel.getByRole("row")).toHaveCount(4);
+  await expect(realmPanel.getByRole("row", { name: /^ghcr\.io/ }).getByRole("link", { name: "registry-ghcr.io" })).toBeVisible();
+  expect(await page.content()).not.toContain(token);
 });

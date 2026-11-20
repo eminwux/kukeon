@@ -469,7 +469,7 @@ func ValidateDocument(doc *Document) *ValidationError {
 				Err:   secretErr,
 			}
 		}
-		if doc.SecretDoc.Metadata.Name == secretstore.TypesDir {
+		if doc.SecretDoc.Metadata.Name == secretstore.TypesDir || doc.SecretDoc.Metadata.Name == secretstore.MetaDir {
 			return &ValidationError{
 				Index: doc.Index,
 				Kind:  doc.Kind,

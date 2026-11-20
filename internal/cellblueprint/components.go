@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/connector"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
@@ -81,6 +82,9 @@ func Flatten(doc v1beta1.CellBlueprintDoc, opts FlattenOptions) (Flattened, erro
 	requires := append([]string(nil), spec.Requires...)
 
 	if err := checkEnabledNames(doc, components, opts.Components); err != nil {
+		return Flattened{}, err
+	}
+	if err := checkGroups(doc, components, opts.Components); err != nil {
 		return Flattened{}, err
 	}
 
@@ -173,6 +177,27 @@ func checkEnabledNames(doc v1beta1.CellBlueprintDoc, components []v1beta1.Bluepr
 			return fmt.Errorf("%w: blueprint %q declares no component %q",
 				errdefs.ErrBlueprintComponent, doc.Metadata.Name, name)
 		}
+	}
+	return nil
+}
+
+// checkGroups rejects a selection that enables two components of one group:
+// the members of a group are alternatives (the ways one harness authenticates,
+// issue #1548). It looks at what a CellConfig asks for, not at the render
+// view, so the apply-time validation view refuses such a Config too.
+func checkGroups(doc v1beta1.CellBlueprintDoc, components []v1beta1.BlueprintComponent, enabled []string) error {
+	taken := map[string]string{}
+	for _, comp := range components {
+		group := strings.TrimSpace(comp.Group)
+		if group == "" || (comp.Optional && !slices.Contains(enabled, comp.Name)) {
+			continue
+		}
+		if other, dup := taken[group]; dup {
+			return fmt.Errorf(
+				"%w: blueprint %q: components %q and %q both belong to group %q; enable one",
+				errdefs.ErrBlueprintComponentGroup, doc.Metadata.Name, other, comp.Name, group)
+		}
+		taken[group] = comp.Name
 	}
 	return nil
 }
@@ -448,6 +473,13 @@ func ValidateDeclaration(doc v1beta1.CellBlueprintDoc) error {
 		if err := validateEnvEntries(field+".env", comp.Env); err != nil {
 			return err
 		}
+		if comp.Group != "" && !componentNameRE.MatchString(comp.Group) {
+			return fmt.Errorf("%w: %s.group %q must be a lowercase identifier",
+				errdefs.ErrBlueprintComponent, field, comp.Group)
+		}
+		if err := validateConnector(field, comp); err != nil {
+			return err
+		}
 		if len(comp.Modes) == 0 {
 			continue
 		}
@@ -494,6 +526,48 @@ func ValidateDeclaration(doc v1beta1.CellBlueprintDoc) error {
 	}
 	_, err := Flatten(strict, FlattenOptions{})
 	return err
+}
+
+// validateConnector checks the connector definition a component carries: only
+// a connector component has one, it is well formed, and its delivery matches
+// what the component declares — an env or file connector delivers through
+// exactly one secret slot of that mode, the others through none.
+func validateConnector(field string, comp v1beta1.BlueprintComponent) error {
+	desc := comp.Connector
+	if desc == nil {
+		return nil
+	}
+	if comp.Kind != v1beta1.ComponentKindConnector {
+		return fmt.Errorf("%w: %s.connector: only a connector component carries a connector definition",
+			errdefs.ErrBlueprintComponent, field)
+	}
+	if err := connector.ValidateDescriptor(*desc); err != nil {
+		return fmt.Errorf("%w: %s.connector: %w", errdefs.ErrBlueprintComponent, field, err)
+	}
+	switch desc.Delivery {
+	case v1beta1.ConnectorDeliveryEnv, v1beta1.ConnectorDeliveryFile:
+		if len(comp.Secrets) != 1 {
+			return fmt.Errorf("%w: %s.connector: %s delivery needs exactly one secret slot",
+				errdefs.ErrBlueprintComponent, field, desc.Delivery)
+		}
+		mode := strings.TrimSpace(comp.Secrets[0].Mode)
+		if mode == "" {
+			mode = v1beta1.BlueprintSecretModeEnv
+		}
+		if mode != desc.Delivery {
+			return fmt.Errorf("%w: %s.connector: %s delivery needs a secret slot of mode %q",
+				errdefs.ErrBlueprintComponent, field, desc.Delivery, desc.Delivery)
+		}
+	case v1beta1.ConnectorDeliveryRegistry:
+		return fmt.Errorf("%w: %s.connector: a registry connector is a Realm concern, not a component",
+			errdefs.ErrBlueprintComponent, field)
+	default:
+		if len(comp.Secrets) != 0 {
+			return fmt.Errorf("%w: %s.connector: %s delivery declares no secret slot",
+				errdefs.ErrBlueprintComponent, field, desc.Delivery)
+		}
+	}
+	return nil
 }
 
 func validateEnvEntries(field string, env []string) error {

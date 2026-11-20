@@ -536,3 +536,74 @@ func TestNewConfigCmd_ScheduleColumns(t *testing.T) {
 		}
 	})
 }
+
+// TestNewConfigCmd_ConnectorsColumn pins issue #1548: `-o wide` shows how each
+// connector a Config requires resolves — the identity and the level it comes
+// from, the method of a login, MISSING for a required connector nothing fills
+// and `none` for one the cell starts without — and the structured formats
+// carry the same as status.connectors.
+func TestNewConfigCmd_ConnectorsColumn(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	cfg := v1beta1.CellConfigDoc{
+		Metadata: v1beta1.CellConfigMetadata{Name: "kukeon-dev", Realm: "default"},
+		Status: &v1beta1.CellConfigStatus{Connectors: []v1beta1.ConnectorStatus{
+			{
+				Connector: "agent", Component: "agent-login", Method: "login",
+				Delivery: v1beta1.ConnectorDeliveryStateVolume, State: v1beta1.ConnectorResolved,
+			},
+			{
+				Connector: "forge", Component: "forge", Delivery: v1beta1.ConnectorDeliveryEnv,
+				State: v1beta1.ConnectorResolved, Origin: v1beta1.RenderOriginRealm, Required: true,
+				Identity: &v1beta1.ContainerSecretRef{Name: "forge-token", Realm: "default"},
+			},
+			{
+				Connector: "cloud", Component: "cloud", Delivery: v1beta1.ConnectorDeliveryEnv,
+				State: v1beta1.ConnectorUnresolved, Required: true,
+			},
+			{
+				Connector: "scm", Component: "scm", Delivery: v1beta1.ConnectorDeliveryGit,
+				State: v1beta1.ConnectorUnresolved,
+			},
+		}},
+	}
+	fake := &fakeClient{
+		listConfigsFn: func(_, _, _ string) ([]v1beta1.CellConfigDoc, error) {
+			return []v1beta1.CellConfigDoc{cfg}, nil
+		},
+		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+			return kukeonv1.GetConfigResult{Config: cfg, MetadataExists: true}, nil
+		},
+	}
+	run := func(t *testing.T, args ...string) string {
+		t.Helper()
+		t.Cleanup(viper.Reset)
+		cmd := configcmd.NewConfigCmd()
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+		cmd.SetContext(context.WithValue(context.Background(), configcmd.MockControllerKey{}, kukeonv1.Client(fake)))
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		return buf.String()
+	}
+
+	wide := run(t, "--realm", "default", "-o", "wide")
+	want := "agent=login, forge=forge-token (realm), cloud=MISSING, scm=none"
+	if !strings.Contains(wide, "CONNECTORS") || !strings.Contains(wide, want) {
+		t.Errorf("-o wide = \n%s\nwant a CONNECTORS column reading %q", wide, want)
+	}
+	if plain := run(t, "--realm", "default"); strings.Contains(plain, "CONNECTORS") {
+		t.Errorf("the default table shows the CONNECTORS column:\n%s", plain)
+	}
+	for _, format := range []string{"yaml", "json"} {
+		doc := run(t, "kukeon-dev", "--realm", "default", "-o", format)
+		for _, field := range []string{"connectors", "forge-token", "unresolved", "agent-login"} {
+			if !strings.Contains(doc, field) {
+				t.Errorf("-o %s lost %q:\n%s", format, field, doc)
+			}
+		}
+	}
+}

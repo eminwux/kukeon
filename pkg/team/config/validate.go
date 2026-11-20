@@ -19,7 +19,9 @@ package config
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"path"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -226,6 +228,9 @@ func validateSelections(d *Defaults) error {
 	if err := validateSources(d.Sources, sources); err != nil {
 		return err
 	}
+	if err := validateConnectors("spec.connectors", d.Connectors); err != nil {
+		return err
+	}
 	for i, h := range d.Harnesses {
 		field := fmt.Sprintf("spec.defaults.harnesses[%d]", i)
 		if err := unique(field+".name", h.Name, harnesses); err != nil {
@@ -248,6 +253,9 @@ func validateSelections(d *Defaults) error {
 		}
 		if role.Harness != "" && !harnesses[role.Harness] {
 			return fmt.Errorf("%s.harness: unknown harness %q", field, role.Harness)
+		}
+		if err := validateConnectors(field+".connectors", role.Connectors); err != nil {
+			return err
 		}
 		if role.Tasks != nil {
 			tasks := map[string]bool{}
@@ -275,6 +283,51 @@ func validateSelections(d *Defaults) error {
 		}
 	}
 	return nil
+}
+
+// validateConnectors checks the shape of a connector choice map. Whether a
+// connector or a method exists is the connector catalog's to say, so that is
+// checked at composition.
+func validateConnectors(field string, choices map[string]ConnectorChoice) error {
+	for _, name := range slices.Sorted(maps.Keys(choices)) {
+		choice := choices[name]
+		if !ValidName(name) {
+			return fmt.Errorf("%s: invalid connector name %q", field, name)
+		}
+		if choice.Method != "" && !ValidName(choice.Method) {
+			return fmt.Errorf("%s.%s.method: invalid method name %q", field, name, choice.Method)
+		}
+		if choice.Identity == "" {
+			continue
+		}
+		if _, err := ParseIdentity(choice.Identity, "default"); err != nil {
+			return fmt.Errorf("%s.%s.identity: %w", field, name, err)
+		}
+	}
+	return nil
+}
+
+// ParseIdentity reads a connector identity written
+// `name[@realm[/space[/stack]]]`; without a scope it is a Secret of realm.
+func ParseIdentity(value, realm string) (SecretRef, error) {
+	name, scope, scoped := strings.Cut(strings.TrimSpace(value), "@")
+	ref := SecretRef{Name: name, Realm: realm}
+	if scoped {
+		parts := strings.Split(scope, "/")
+		const maxScope = 3 // realm/space/stack
+		if len(parts) > maxScope {
+			return SecretRef{}, fmt.Errorf("want name[@realm[/space[/stack]]], got %q", value)
+		}
+		for len(parts) < maxScope {
+			parts = append(parts, "")
+		}
+		ref.Realm, ref.Space, ref.Stack = parts[0], parts[1], parts[2]
+	}
+	if !ValidName(ref.Name) || !ValidName(ref.Realm) || (ref.Space != "" && !ValidName(ref.Space)) ||
+		(ref.Stack != "" && (!ValidName(ref.Stack) || ref.Space == "")) {
+		return SecretRef{}, fmt.Errorf("want name[@realm[/space[/stack]]], got %q", value)
+	}
+	return ref, nil
 }
 
 func unique(field, name string, names map[string]bool) error {

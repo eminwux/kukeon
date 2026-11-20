@@ -303,6 +303,9 @@ type ContainerGit struct {
 	AllowedSigners string
 	Credentials    []GitCredential
 	Signing        *GitSigning
+	// IdentityRef names a git identity Secret (issue #1548). It is carried on
+	// scope defaults and expanded at render; a cell's container never has it.
+	IdentityRef *ContainerSecretRef
 }
 
 // Host-key policies; see the external v1beta1.GitHostKeyPolicy* constants.
@@ -333,6 +336,8 @@ type RepoGit struct {
 	Credential *GitCredential
 	Signing    *GitSigning
 	Sign       []string
+	// IdentityRef mirrors ContainerGit.IdentityRef for one source.
+	IdentityRef *ContainerSecretRef
 }
 
 // GitIdentity mirrors the v1beta1 GitIdentity payload.

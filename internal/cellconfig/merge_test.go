@@ -17,6 +17,7 @@
 package cellconfig
 
 import (
+	"reflect"
 	"testing"
 
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -162,5 +163,58 @@ func TestRealmImageRef(t *testing.T) {
 		if got := RealmImageRef("default", tc.img); got != tc.want {
 			t.Errorf("RealmImageRef(%+v) = %q, want %q", tc.img, got, tc.want)
 		}
+	}
+}
+
+// TestMergeDefaultsForCell pins the level a single cell adds (issue #1548):
+// what the cell chose at create time wins over the Config and every scope
+// default, is attributed to the cell, and never changes the Config.
+func TestMergeDefaultsForCell(t *testing.T) {
+	layers := []DefaultsLayer{
+		{Origin: v1beta1.RenderOriginRealm, Defaults: &v1beta1.ScopeDefaults{
+			Secrets: map[string]v1beta1.CellConfigSecretFill{"token": {SecretRef: secretRef("realm-token")}},
+			Git:     &v1beta1.ContainerGit{Author: identity("realm"), Committer: identity("realm")},
+		}},
+	}
+	cfg := mergeConfig()
+	cfg.Spec.Secrets = map[string]v1beta1.CellConfigSecretFill{"token": {SecretRef: secretRef("config-token")}}
+	cfg.Spec.Git = &v1beta1.ContainerGit{Author: identity("config")}
+
+	cell := &v1beta1.ScopeDefaults{
+		Secrets: map[string]v1beta1.CellConfigSecretFill{"token": {SecretRef: secretRef("cell-token")}},
+		Git:     &v1beta1.ContainerGit{Author: identity("cell")},
+		// A cell's values travel as mode parameters, never through this level.
+		Values: map[string]string{"OWNER": "cell"},
+	}
+	merged, values := MergeDefaultsForCell(cfg, minimalBlueprint(), layers, cell)
+
+	if got := merged.Spec.Secrets["token"].SecretRef.Name; got != "cell-token" {
+		t.Errorf("secret token = %q, want the cell's", got)
+	}
+	if got := originOf(t, values, v1beta1.RenderKindSecret, "token"); got.Origin != v1beta1.RenderOriginCell ||
+		got.Value != "secret:r/cell-token" {
+		t.Errorf("secret token explain = %+v, want the cell's", got)
+	}
+	if merged.Spec.Git == nil || merged.Spec.Git.Author.Name != "cell" || merged.Spec.Git.Committer.Name != "realm" {
+		t.Errorf("git = %+v, want the cell's author over the realm's committer", merged.Spec.Git)
+	}
+	if got := originOf(t, values, v1beta1.RenderKindGit, "default.author").Origin; got != v1beta1.RenderOriginCell {
+		t.Errorf("author origin = %q, want cell", got)
+	}
+	if got := merged.Spec.Values["OWNER"]; got != "config" {
+		t.Errorf("values[OWNER] = %q: a cell layer's values must be ignored", got)
+	}
+	if cfg.Spec.Secrets["token"].SecretRef.Name != "config-token" || cfg.Spec.Git.Author.Name != "config" {
+		t.Error("MergeDefaultsForCell modified the input Config")
+	}
+
+	// Without a cell level it is MergeDefaults.
+	plain, plainValues := MergeDefaults(cfg, minimalBlueprint(), layers)
+	same, sameValues := MergeDefaultsForCell(cfg, minimalBlueprint(), layers, nil)
+	if !reflect.DeepEqual(plain, same) || !reflect.DeepEqual(plainValues, sameValues) {
+		t.Error("a nil cell level changed the merge")
+	}
+	if got := plain.Spec.Secrets["token"].SecretRef.Name; got != "config-token" {
+		t.Errorf("secret token without a cell level = %q, want the Config's", got)
 	}
 }

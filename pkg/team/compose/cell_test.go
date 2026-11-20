@@ -35,8 +35,10 @@ const (
 // renderCell produces the cell a pair's CellConfig stamps in one harness mode,
 // the way the daemon does: flatten the shared blueprint for the Config's
 // enabled components and the picked mode, drop the Config's fills for slots
-// that mode does not use, then materialize. params are per-cell values (the
-// PROMPT of a headless run). mode is empty for a harness without modes.
+// that mode does not use, layer the Realm defaults `kuke team` writes for the
+// slots the Config leaves to them (issue #1548), then materialize. params are
+// per-cell values (the PROMPT of a headless run). mode is empty for a harness
+// without modes.
 func renderCell(t *testing.T, pair compose.Pair, mode string, params map[string]string) api.CellDoc {
 	t.Helper()
 	flat, err := cellblueprint.Flatten(*pair.Blueprint, cellblueprint.FlattenOptions{
@@ -73,6 +75,17 @@ func renderCell(t *testing.T, pair compose.Pair, mode string, params map[string]
 		if active[name] {
 			cfg.Spec.Secrets[name] = fill
 		}
+	}
+	// A slot the Config does not fill resolves to the Realm default.
+	for _, required := range pair.Secrets {
+		name := required.Destination.Name
+		if _, filled := cfg.Spec.Secrets[name]; filled || !required.Default || !active[name] {
+			continue
+		}
+		ref := required.Reference
+		cfg.Spec.Secrets[name] = api.CellConfigSecretFill{SecretRef: &api.ContainerSecretRef{
+			Name: ref.Name, Realm: ref.Realm, Space: ref.Space, Stack: ref.Stack, Cell: ref.Cell,
+		}}
 	}
 	doc, err := cellconfig.MaterializeWithName(cfg, flat.Doc, "cell-under-test")
 	if err != nil {
