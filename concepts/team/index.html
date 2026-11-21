@@ -4306,6 +4306,30 @@ composition derives from the role and source selections (<code>IMAGE</code>, <co
 <code>STATE_VOLUME</code>, …) cannot be set here. <code>AGENT_NAME</code> defaults
 to the full resource identity. Parameters must not hold credentials: use secret
 bindings instead.</p>
+<p>A role declares the further parameters it reads in <code>Role.spec.needs.params</code>.
+Each entry is a bare name, which the operator must supply in
+<code>TeamsConfig.spec.parameters</code>, or a <code>{ name, default }</code> mapping that carries
+the role's own value:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="nt">needs</span><span class="p">:</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="w">  </span><span class="nt">params</span><span class="p">:</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REGION</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">AGENTS_REPO</span><span class="p p-Indicator">,</span><span class="nt"> default</span><span class="p">:</span><span class="w"> </span><span class="s">"${ROLE_SOURCE_REPO}"</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<p>A default may reference any composed fact as <code>${FACT}</code>. Besides the values
+composition derives (<code>ROLE_PATH</code>, <code>ROLE_SOURCE_DIR</code>, …) there is
+<code>ROLE_SOURCE_REPO</code>: the <code>&lt;owner&gt;/&lt;repo&gt;</code> of the role source's URL, reduced from
+scp-like (<code>git@host:owner/repo</code>), <code>ssh://</code> and <code>https://</code> URLs with or without
+a trailing <code>.git</code>. A fork's roles therefore point at the fork without an edit.
+<code>ROLE_SOURCE_REPO</code> is a fact only: it is not a blueprint parameter and
+<code>spec.parameters</code> cannot set it.</p>
+<p>The resolved value is written to the <code>CellConfig</code> and exported into the cell
+environment under the parameter's name. Precedence, highest first:
+<code>TeamsConfig.spec.parameters.&lt;NAME&gt;</code>, then the role's default, then the
+blueprint's empty default. A role cannot set a default for a parameter the
+blueprint or composition already declares (<code>PROMPT</code>, <code>AGENT_NAME</code>, <code>IMAGE</code>, …).
+When a URL does not reduce to <code>&lt;owner&gt;/&lt;repo&gt;</code> (a nested group path, a local
+path), <code>ROLE_SOURCE_REPO</code> is empty, and <code>kuke team init</code> / <code>kuke team add</code> print
+a note naming the role and each parameter whose default resolved empty.</p>
 <p>Harness-owned <code>onInit</code> scripts (<code>spec.onInit</code>, or each mode's) call the image-installed
 <code>/opt/kuketeams/harness/Makefile.start setup</code>, which runs
 <code>make -C "$ROLE_SOURCE_DIR" &lt;harness&gt; ROLE="$ROLE_PATH"</code> against the role's
@@ -4350,19 +4374,19 @@ it there to fall back to the global binding or default). A requirement whose
 name cannot yield an environment identifier (e.g. it starts with a digit) must
 be bound explicitly. The project's <code>kind: Team</code> file never declares bindings.</p>
 <p>An explicit global binding looks like this:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># Optional, under TeamsConfig.spec (or the same shape under TeamEntry secrets).</span>
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="nt">secrets</span><span class="p">:</span>
-<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">openrouter-api-key</span><span class="w"> </span><span class="c1"># identifier in Role.spec.harnesses.opencode.secrets</span>
-<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="w">    </span><span class="nt">secretRef</span><span class="p">:</span>
-<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">provider-account</span>
-<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="w">      </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auth</span>
-<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="w">      </span><span class="nt">space</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">shared</span>
-<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="w">      </span><span class="nt">stack</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">operators</span>
-<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="w">    </span><span class="nt">envName</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OPENROUTER_API_KEY</span>
-<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="w">    </span><span class="c1"># Optional fallback if application finds no runtime secret:</span>
-<a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a><span class="w">    </span><span class="nt">source</span><span class="p">:</span>
-<a id="__codelineno-16-12" name="__codelineno-16-12" href="#__codelineno-16-12"></a><span class="w">      </span><span class="nt">env</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OPERATOR_OPENROUTER_KEY</span>
-<a id="__codelineno-16-13" name="__codelineno-16-13" href="#__codelineno-16-13"></a><span class="w">      </span><span class="c1"># Alternatively: file: /absolute/path/to/private/provider-key</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="c1"># Optional, under TeamsConfig.spec (or the same shape under TeamEntry secrets).</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="nt">secrets</span><span class="p">:</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">openrouter-api-key</span><span class="w"> </span><span class="c1"># identifier in Role.spec.harnesses.opencode.secrets</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="w">    </span><span class="nt">secretRef</span><span class="p">:</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">provider-account</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="w">      </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auth</span>
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="w">      </span><span class="nt">space</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">shared</span>
+<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a><span class="w">      </span><span class="nt">stack</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">operators</span>
+<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a><span class="w">    </span><span class="nt">envName</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OPENROUTER_API_KEY</span>
+<a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a><span class="w">    </span><span class="c1"># Optional fallback if application finds no runtime secret:</span>
+<a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a><span class="w">    </span><span class="nt">source</span><span class="p">:</span>
+<a id="__codelineno-17-12" name="__codelineno-17-12" href="#__codelineno-17-12"></a><span class="w">      </span><span class="nt">env</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OPERATOR_OPENROUTER_KEY</span>
+<a id="__codelineno-17-13" name="__codelineno-17-13" href="#__codelineno-17-13"></a><span class="w">      </span><span class="c1"># Alternatively: file: /absolute/path/to/private/provider-key</span>
 </code></pre></div>
 <p><code>name</code>, the scoped <code>secretRef</code>, and <code>envName</code> are required. <code>source</code> is
 optional; when present it names exactly one environment <strong>variable</strong> or
@@ -4431,7 +4455,7 @@ when the team is applied or a cell is launched.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 21, 2026 19:37:32 UTC">November 21, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 21, 2026 20:11:41 UTC">November 21, 2026</span>
   </span>
 
     
