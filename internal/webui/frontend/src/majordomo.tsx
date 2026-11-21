@@ -111,8 +111,29 @@ function save(key: string, value: string) {
   try { localStorage.setItem(key, value); } catch { /* Preferences are optional. */ }
 }
 
+// The phone breakpoint shared with style.css's max-width: 760px blocks.
+export const mobileMaxWidth = 760;
+// The narrowest main column the docked panel may leave: an 80-column cell terminal at 1440 with the
+// default sidebar, after the cell screen's and the terminal screen's padding.
+export const contentMinWidth = 800;
+
+// window.innerWidth, the width the CSS media queries see, updated at most once a frame.
+export function useViewportWidth(): number {
+  const [width, setWidth] = useState(() => window.innerWidth);
+  useEffect(() => {
+    let frame = 0;
+    const update = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(() => setWidth(window.innerWidth)); };
+    window.addEventListener("resize", update);
+    return () => { cancelAnimationFrame(frame); window.removeEventListener("resize", update); };
+  }, []);
+  return width;
+}
+
 // Panel visibility and width, kept per browser. question is the text waiting to be pasted.
-export function useMajordomoDock() {
+// width is the stored preference; effectiveWidth is what the viewport allows next to the sidebar
+// (sidebarWidth, the rendered width: 0 when the sidebar is a drawer). When the panel cannot dock
+// without squeezing main below contentMinWidth, it overlays the content instead.
+export function useMajordomoDock(viewport: number, sidebarWidth: number) {
   const [open, setOpen] = useState(() => stored(openKey) === "true");
   const [width, setWidth] = useState(() => {
     const value = Number(stored(widthKey));
@@ -121,8 +142,12 @@ export function useMajordomoDock() {
   const [question, setQuestion] = useState("");
   useEffect(() => { save(openKey, String(open)); }, [open]);
   useEffect(() => { save(widthKey, String(width)); }, [width]);
+  const available = viewport - sidebarWidth - contentMinWidth;
+  const overlay = viewport <= mobileMaxWidth || available < dockWidth.min;
+  const maxWidth = Math.max(dockWidth.min, Math.min(dockWidth.max, overlay ? viewport : available));
+  const effectiveWidth = Math.min(width, maxWidth);
   return {
-    open, setOpen, width, setWidth: (value: number) => setWidth(clampWidth(value)), question,
+    open, setOpen, width, effectiveWidth, maxWidth, overlay, setWidth: (value: number) => setWidth(clampWidth(value)), question,
     ask: (text: string) => { setQuestion(oneLine(text)); setOpen(true); },
     clearQuestion: () => setQuestion(""),
   };
@@ -166,7 +191,9 @@ async function postJSON(path: string, body?: unknown): Promise<{ ok: boolean; st
   return { ok: response.ok, status: response.status, body: parsed };
 }
 
-function Resizer({ width, onResize }: { width: number; onResize: (value: number) => void }) {
+// width is the rendered width and max what the viewport allows; onResize stores the preference, which
+// keeps its own 320-960 bounds.
+function Resizer({ width, max, onResize }: { width: number; max: number; onResize: (value: number) => void }) {
   const origin = useRef<{ x: number; width: number } | null>(null);
   function down(event: PointerEvent<HTMLDivElement>) {
     if (event.button !== 0) return;
@@ -192,7 +219,7 @@ function Resizer({ width, onResize }: { width: number; onResize: (value: number)
     onResize(next);
   }
   return <div className="majordomo-resizer" role="separator" aria-orientation="vertical" aria-label="Resize majordomo panel" aria-controls="majordomo-panel"
-    aria-valuenow={width} aria-valuemin={dockWidth.min} aria-valuemax={dockWidth.max} tabIndex={0}
+    aria-valuenow={width} aria-valuemin={dockWidth.min} aria-valuemax={max} tabIndex={0}
     onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} onKeyDown={key} />;
 }
 
@@ -290,8 +317,8 @@ export function MajordomoPanel({ major, dock, inventory, manager, theme, revisio
     <button type="button" className="majordomo-primary" disabled={!!pending} aria-busy={pending === "start" || undefined} onClick={startCell}>{pending === "start" ? "Starting…" : "Start"}</button>
   </div> : null;
 
-  return <aside className="majordomo-panel" id="majordomo-panel" aria-label="Majordomo panel" hidden={!dock.open} style={{ width: dock.width }}>
-    <Resizer width={dock.width} onResize={dock.setWidth} />
+  return <aside className="majordomo-panel" id="majordomo-panel" aria-label="Majordomo panel" hidden={!dock.open} style={{ width: dock.effectiveWidth }}>
+    <Resizer width={dock.effectiveWidth} max={dock.maxWidth} onResize={dock.setWidth} />
     <header className="majordomo-header">
       <h2><Icon name="majordomo" />Majordomo</h2>
       <span className={`terminal-connection-state ${connection.tone}`} role="status" title={connection.label}><span className="state-dot" aria-hidden="true" /><span className="majordomo-connection-label">{connection.label}</span></span>

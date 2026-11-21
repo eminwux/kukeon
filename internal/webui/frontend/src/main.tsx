@@ -7,7 +7,7 @@ import { TerminalWorkspace, useTerminalSessions, type TerminalManager } from "./
 import { CellSidebar } from "./cell-sidebar";
 import { useInventory, type Inventory, type InventoryResource, type Doc, type RuntimeStatus } from "./inventory";
 import { apiPath, catalogTitles, daemonLink, healthLink, homeLink, imagesLink, kinds, titles, readRoute, resourceLink, listLink, newCellLink, workspaceLink, type Route } from "./routes";
-import { BrandMark, SidebarRail, SidebarResizer, SidebarToggle, VersionRows, useSidebarLayout, versionInfo } from "./sidebar-shell";
+import { BrandMark, SidebarRail, SidebarResizer, SidebarToggle, VersionRows, railWidth, useSidebarLayout, versionInfo } from "./sidebar-shell";
 import { StateBadge } from "./status";
 import { DocumentRowLink, Icon } from "./icons";
 import { CgroupPanel } from "./cgroup";
@@ -20,7 +20,7 @@ import { CellLifecycleControls, CellRowActions, type LifecycleAction, type Lifec
 import { InventoryIndicator, NotificationProvider, useNotify } from "./notifications";
 import { cellRemovalConfirmed, cellsWithin, deleteOperationComplete, descendantCounts, parentActionsAllowed, purgeOperationComplete, requestedPurgeOptions } from "./lifecycle-policy.js";
 import { ParentRowActions, type ParentAction } from "./scope-actions";
-import { AskMajordomo, AskProvider, MajordomoPanel, MajordomoRailButton, MajordomoSidebarEntry, MajordomoToolbarButton, cellQuestion, useMajordomo, useMajordomoDock } from "./majordomo";
+import { AskMajordomo, AskProvider, MajordomoPanel, MajordomoRailButton, MajordomoSidebarEntry, MajordomoToolbarButton, cellQuestion, mobileMaxWidth, useMajordomo, useMajordomoDock, useViewportWidth } from "./majordomo";
 import { HealthPage } from "./health";
 import { connectorsLink } from "./connector-ui";
 
@@ -290,13 +290,28 @@ function App() {
   const nextTheme: Theme = theme === "system" ? "light" : theme === "light" ? "dark" : "system";
   const [menuOpen, setMenuOpen] = useState(false);
   const sidebar = useSidebarLayout();
+  const menuToggle = useRef<HTMLButtonElement>(null);
+  const sidebarClose = useRef<HTMLButtonElement>(null);
+  const restoreMenuFocus = useRef(false);
+  // Closing the drawer from its scrim, close button or Escape returns focus to the menu toggle once
+  // main is no longer inert; choosing a link closes it and leaves focus to the new page.
+  const closeMenu = () => { restoreMenuFocus.current = true; setMenuOpen(false); };
   useEffect(() => {
     const changed = () => { setRoute(readRoute()); setMenuOpen(false); };
-    const keydown = (event: KeyboardEvent) => { if (event.key === "Escape") setMenuOpen(false); };
     window.addEventListener("hashchange", changed);
-    window.addEventListener("keydown", keydown);
-    return () => { window.removeEventListener("hashchange", changed); window.removeEventListener("keydown", keydown); };
+    return () => window.removeEventListener("hashchange", changed);
   }, []);
+  useEffect(() => {
+    if (!menuOpen) {
+      if (restoreMenuFocus.current) menuToggle.current?.focus();
+      restoreMenuFocus.current = false;
+      return;
+    }
+    sidebarClose.current?.focus();
+    const keydown = (event: KeyboardEvent) => { if (event.key === "Escape") closeMenu(); };
+    window.addEventListener("keydown", keydown);
+    return () => window.removeEventListener("keydown", keydown);
+  }, [menuOpen]);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     try { localStorage.setItem("kukeon-theme", theme); } catch { /* Preferences are optional. */ }
@@ -305,7 +320,13 @@ function App() {
   const inventory = useInventory(revision);
   const terminals = useTerminalSessions(inventory);
   const major = useMajordomo(inventory, revision);
-  const dock = useMajordomoDock();
+  const viewport = useViewportWidth();
+  const mobile = viewport <= mobileMaxWidth;
+  // The sidebar's rendered width: the resizable column, the icon rail, or nothing when it is a drawer.
+  const sidebarWidth = mobile ? 0 : sidebar.collapsed ? railWidth : sidebar.width;
+  const dock = useMajordomoDock(viewport, sidebarWidth);
+  // The toast stack is a sibling of the shell, so the rendered dock width is published on the root.
+  useLayoutEffect(() => { document.documentElement.style.setProperty("--majordomo-width", `${dock.effectiveWidth}px`); }, [dock.effectiveWidth]);
   const dockedCell = major.cell ? JSON.stringify(major.cell.scope) : "";
   function recordOperation(scope: string[], operation: LifecycleFeedback) {
     const key = JSON.stringify(scope);
@@ -578,10 +599,10 @@ function App() {
   const daemonStatus = inventory.daemon.error?.code === "permission_denied" ? "Permission denied" : inventory.daemon.error ? "Unavailable" : inventory.daemon.loading ? "Checking…" : "Connected";
   const daemonTone = inventory.daemon.error ? "failed" : inventory.daemon.loading ? "checking" : "";
   const versions = versionInfo(connection.data?.version, connection.data?.daemonVersion);
-  const shellStyle = { "--sidebar-width": `${sidebar.width}px`, "--majordomo-width": `${dock.width}px` } as CSSProperties;
-  return <AskProvider value={dock.ask}><div className={`app-shell${cellTerminalActive ? " cell-screen-active" : ""}${sidebar.collapsed ? " sidebar-collapsed" : ""}${dock.open ? " majordomo-open" : ""}`} style={shellStyle}>
+  const shellStyle = { "--sidebar-width": `${sidebar.width}px` } as CSSProperties;
+  return <AskProvider value={dock.ask}><div className={`app-shell${cellScreenScope ? " cell-screen" : ""}${cellTerminalActive ? " cell-screen-active" : ""}${sidebar.collapsed ? " sidebar-collapsed" : ""}${dock.open ? " majordomo-open" : ""}${dock.open && dock.overlay ? " majordomo-overlay" : ""}`} style={shellStyle}>
     <aside className={`sidebar ${menuOpen ? "is-open" : ""}`} id="cell-sidebar" aria-label="Cell sidebar">
-      <button className="sidebar-close" aria-label="Close sidebar" onClick={() => setMenuOpen(false)}>×</button>
+      <button ref={sidebarClose} className="sidebar-close" aria-label="Close sidebar" onClick={closeMenu}>×</button>
       <div className="sidebar-panel">
         <div className="sidebar-header">
           <a className="brand" href={homeLink}><BrandMark /><span className="brand-title">kukeon</span></a>
@@ -602,9 +623,11 @@ function App() {
       {sidebar.collapsed && <SidebarRail inventory={inventory} selectedScope={cellScreenScope ?? []} connection={{ status: daemonStatus, tone: daemonTone, info: versions }} onExpand={() => sidebar.setCollapsed(false)} majordomo={<MajordomoRailButton major={major} dock={dock} />} />}
       {!sidebar.collapsed && <SidebarResizer width={sidebar.width} onResize={sidebar.setWidth} />}
     </aside>
-    <main className="workspace">
+    <div className="sidebar-scrim" aria-hidden="true" hidden={!menuOpen} onClick={closeMenu} />
+    {/* While the phone drawer is open, the page behind it leaves the Tab order and the accessibility tree. */}
+    <main className="workspace" inert={menuOpen && mobile}>
       <header className="toolbar">
-        <button className="menu-toggle" aria-label="Toggle sidebar" aria-expanded={menuOpen} aria-controls="cell-sidebar" onClick={() => setMenuOpen(!menuOpen)}>☰</button>
+        <button ref={menuToggle} className="menu-toggle" aria-label="Toggle sidebar" aria-expanded={menuOpen} aria-controls="cell-sidebar" onClick={() => setMenuOpen(!menuOpen)}>☰</button>
         <span className="toolbar-connectivity" role="status" aria-label={`Daemon: ${daemonStatus}`} title={`Daemon: ${daemonStatus}`}><span className={`dot ${daemonTone}`} aria-hidden="true" /></span>
         <InventoryIndicator inventory={inventory} />
         <nav className="breadcrumbs" aria-label="Resource scope">{isWorkspace || route.view === "resource" ? route.scope.map((name, i) => <a key={i} aria-label={`${kinds[i]}: ${name}`} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>) : <><a href={homeLink}>Resources</a>{connectorsView ? route.scope[0] ? <><a href={connectorsLink()}>Connectors</a><span>{route.scope[0]}</span></> : <span>Connectors</span> : route.view === "health" ? <span>Health</span> : daemonView ? route.view === "daemon" ? <span>Daemon</span> : <><a href={daemonLink()}>Daemon</a><span>Logs</span></> : images ? <><a href={imagesLink()}>Images</a>{route.scope[0] && (route.scope[1] ? <a href={imagesLink(route.scope[0])}>{route.scope[0]}</a> : <span>{route.scope[0]}</span>)}{route.scope[1] && <span>{route.scope[1]}</span>}</> : catalog ? <><a href={`#/${route.view}`}>{catalogTitles[route.view]}</a>{route.scope.slice(0, -1).map((name, i) => <a key={i} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}{route.scope.length > 0 && <span>{route.scope.at(-1)}</span>}</> : heading !== "Resources" && <span>{heading}</span>}</>}</nav>

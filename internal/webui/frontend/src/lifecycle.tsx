@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { availableLifecycleActions, canConfirmDestructiveAction } from "./lifecycle-policy.js";
 import { DocumentRowLink, Icon, RowAction, RowActions } from "./icons";
 import { resourceLink, workspaceLink } from "./routes";
@@ -97,7 +97,46 @@ function AdvancedCellActions({
 }) {
   const menu = useRef<HTMLDetailsElement>(null);
   const [confirming, setConfirming] = useState<DestructiveAction | null>(null);
+  const [open, setOpen] = useState(false);
   const pending = operation?.phase === "pending";
+
+  // The menu hangs from the summary's right edge and shifts sideways only as far as needed to stay
+  // inside a 16px viewport gutter: on phones the title row wraps and the summary may sit anywhere.
+  useLayoutEffect(() => {
+    const details = menu.current;
+    const panel = details?.querySelector<HTMLElement>(".cell-advanced-menu");
+    if (!open || !details || !panel) return;
+    const place = () => {
+      const anchor = details.getBoundingClientRect();
+      const width = panel.offsetWidth;
+      const left = Math.max(16, Math.min(anchor.right - width, window.innerWidth - 16 - width));
+      panel.style.right = `${Math.round(anchor.right - left - width)}px`;
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => { window.removeEventListener("resize", place); panel.style.removeProperty("right"); };
+  }, [open]);
+
+  // While open, Escape closes the menu and returns focus to its summary, and a pointer down outside
+  // closes it where it is. Escape is taken in the capture phase so the expanded terminal keeps its size.
+  useEffect(() => {
+    if (!open) return;
+    const escape = (event: KeyboardEvent) => {
+      const details = menu.current;
+      if (event.key !== "Escape" || !details) return;
+      event.preventDefault();
+      event.stopPropagation();
+      details.open = false;
+      details.querySelector("summary")?.focus();
+    };
+    const outside = (event: PointerEvent) => {
+      const details = menu.current;
+      if (details && !details.contains(event.target as Node | null)) details.open = false;
+    };
+    window.addEventListener("keydown", escape, true);
+    document.addEventListener("pointerdown", outside, true);
+    return () => { window.removeEventListener("keydown", escape, true); document.removeEventListener("pointerdown", outside, true); };
+  }, [open]);
 
   function request(action: DestructiveAction) {
     if (pending) return;
@@ -106,7 +145,7 @@ function AdvancedCellActions({
   }
 
   return <>
-    <details className="cell-advanced-actions" ref={menu}>
+    <details className="cell-advanced-actions" ref={menu} onToggle={event => setOpen(event.currentTarget.open)}>
       <summary aria-label={`Advanced actions for ${scope.join(" / ")}`}>Advanced actions</summary>
       <div className="cell-advanced-menu">
         <section aria-labelledby="cell-advanced-operations">
