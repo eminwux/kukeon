@@ -117,6 +117,10 @@
          <lastmod>2026-11-21</lastmod>
     </url>
     <url>
+         <loc>https://kukeon.io/cli/kuke-screenshot/</loc>
+         <lastmod>2026-11-21</lastmod>
+    </url>
+    <url>
          <loc>https://kukeon.io/cli/kuke-status/</loc>
          <lastmod>2026-11-21</lastmod>
     </url>
@@ -134,6 +138,10 @@
     </url>
     <url>
          <loc>https://kukeon.io/cli/kuke-version/</loc>
+         <lastmod>2026-11-21</lastmod>
+    </url>
+    <url>
+         <loc>https://kukeon.io/cli/kuke-write/</loc>
          <lastmod>2026-11-21</lastmod>
     </url>
     <url>
