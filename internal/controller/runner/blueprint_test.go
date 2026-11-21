@@ -326,7 +326,10 @@ func TestListBlueprints_PopulatesLabelsFromDocument(t *testing.T) {
 		t.Fatalf("got %d blueprints, want 1", len(got))
 	}
 	if got[0].Metadata.Labels["kukeon.io/team"] != "sbsh" {
-		t.Errorf("Labels[kukeon.io/team] = %q, want sbsh (labels must round-trip via list)", got[0].Metadata.Labels["kukeon.io/team"])
+		t.Errorf(
+			"Labels[kukeon.io/team] = %q, want sbsh (labels must round-trip via list)",
+			got[0].Metadata.Labels["kukeon.io/team"],
+		)
 	}
 	if got[0].Metadata.Labels["foo"] != "bar" {
 		t.Errorf("Labels[foo] = %q, want bar (all labels must round-trip)", got[0].Metadata.Labels["foo"])

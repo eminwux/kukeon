@@ -159,7 +159,8 @@ func TestDetachRootContainerFromNetwork_DeadTaskReleasesReservation(t *testing.T
 	if _, err := os.Stat(reservation); !os.IsNotExist(err) {
 		t.Fatalf(
 			"reservation %s not released on the dead-task path (stat err=%v); CNI DEL was not issued with an empty netns",
-			reservation, err,
+			reservation,
+			err,
 		)
 	}
 }

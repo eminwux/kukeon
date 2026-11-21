@@ -941,12 +941,12 @@ type LoadImageResult struct {
 // effort: -1 is emitted when containerd cannot resolve the size locally so
 // the CLI renders "-" rather than "0 B".
 type ImageInfo struct {
-	Name      string            `json:"name"      yaml:"name"`
-	Size      int64             `json:"size"      yaml:"size"`
-	CreatedAt time.Time         `json:"createdAt" yaml:"createdAt"`
-	Digest    string            `json:"digest"    yaml:"digest"`
-	MediaType string            `json:"mediaType" yaml:"mediaType"`
-	Labels    map[string]string `json:"labels"    yaml:"labels"`
+	Name      string            `json:"name"                   yaml:"name"`
+	Size      int64             `json:"size"                   yaml:"size"`
+	CreatedAt time.Time         `json:"createdAt"              yaml:"createdAt"`
+	Digest    string            `json:"digest"                 yaml:"digest"`
+	MediaType string            `json:"mediaType"              yaml:"mediaType"`
+	Labels    map[string]string `json:"labels"                 yaml:"labels"`
 	// Capabilities are the capabilities the image declares in its
 	// io.kukeon.capabilities config label; empty when it declares none.
 	Capabilities []string `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`

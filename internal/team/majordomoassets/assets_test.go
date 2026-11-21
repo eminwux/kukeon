@@ -126,7 +126,10 @@ func TestDefaultRoleAssets(t *testing.T) {
 		t.Fatal("majordomo should not require project repos or non-provider secrets")
 	}
 	// Daemon access comes from the three host mounts (issue #1509).
-	if want := []string{"kukeond-socket", "kuke-binary", "kukeon-install"}; !reflect.DeepEqual(role.Spec.Needs.Mounts, want) {
+	if want := []string{"kukeond-socket", "kuke-binary", "kukeon-install"}; !reflect.DeepEqual(
+		role.Spec.Needs.Mounts,
+		want,
+	) {
 		t.Fatalf("mounts = %v, want %v", role.Spec.Needs.Mounts, want)
 	}
 	if len(role.Spec.Skills) != 4 {

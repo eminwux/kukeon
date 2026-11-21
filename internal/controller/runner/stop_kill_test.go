@@ -72,6 +72,7 @@ func (c *stopKillFakeClient) NewCgroup(ctr.CgroupSpec) (*cgroup2.Manager, error)
 	//nolint:nilnil // cgroup2.Manager has unexported fields; the test path discards the value
 	return nil, nil
 }
+
 func (c *stopKillFakeClient) LoadCgroup(string, string) (*cgroup2.Manager, error) {
 	//nolint:nilnil // same as NewCgroup
 	return nil, nil
@@ -80,9 +81,11 @@ func (c *stopKillFakeClient) DeleteCgroup(string, string) error { return nil }
 func (c *stopKillFakeClient) EnsureSubtreeControllers(string, string, []string) ([]string, error) {
 	return nil, nil
 }
+
 func (c *stopKillFakeClient) EnableCellSubtreeControllers(string, string, []string) ([]string, error) {
 	return nil, nil
 }
+
 func (c *stopKillFakeClient) EnableCellAllSubtreeControllers(string, string) ([]string, error) {
 	return nil, nil
 }
@@ -152,9 +155,11 @@ func (c *stopKillFakeClient) ContainerProcessUID(string, containerd.Container) (
 func (c *stopKillFakeClient) LoadImage(string, io.Reader) ([]string, error) {
 	return nil, nil
 }
+
 func (c *stopKillFakeClient) ListImages(string) ([]ctr.ImageInfo, error) {
 	return nil, nil
 }
+
 func (c *stopKillFakeClient) GetImage(string, string) (ctr.ImageInfo, error) {
 	return ctr.ImageInfo{}, nil
 }

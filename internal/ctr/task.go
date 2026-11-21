@@ -39,7 +39,16 @@ func (c *client) TaskStatus(namespace, id string) (containerd.Status, error) {
 	nsCtx := c.namespaceCtx(namespace)
 	status, err := task.Status(nsCtx)
 	if err != nil {
-		c.logger.ErrorContext(c.ctx, "failed to get task status", "id", id, "namespace", namespace, "err", formatError(err))
+		c.logger.ErrorContext(
+			c.ctx,
+			"failed to get task status",
+			"id",
+			id,
+			"namespace",
+			namespace,
+			"err",
+			formatError(err),
+		)
 		return containerd.Status{}, fmt.Errorf("failed to get task status: %w", err)
 	}
 
@@ -60,7 +69,16 @@ func (c *client) TaskMetrics(namespace, id string) (*apitypes.Metric, error) {
 	nsCtx := c.namespaceCtx(namespace)
 	metrics, err := task.Metrics(nsCtx)
 	if err != nil {
-		c.logger.ErrorContext(c.ctx, "failed to get task metrics", "id", id, "namespace", namespace, "err", formatError(err))
+		c.logger.ErrorContext(
+			c.ctx,
+			"failed to get task metrics",
+			"id",
+			id,
+			"namespace",
+			namespace,
+			"err",
+			formatError(err),
+		)
 		return nil, fmt.Errorf("failed to get task metrics: %w", err)
 	}
 

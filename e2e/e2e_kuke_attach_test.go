@@ -922,7 +922,8 @@ func startKukeondDaemonWithSocketGID(t *testing.T, runPath string, socketGID int
 		t.Skipf("kukeond binary %s not found, skipping daemon-mode test", bin)
 	}
 
-	sockDir, err := os.MkdirTemp("/tmp", "kd-") //nolint:usetesting // intentional shorter prefix; see startKukeondDaemon
+	//nolint:usetesting // intentional shorter prefix; see startKukeondDaemon
+	sockDir, err := os.MkdirTemp("/tmp", "kd-")
 	if err != nil {
 		t.Fatalf("MkdirTemp(/tmp, kd-): %v", err)
 	}

@@ -55,13 +55,13 @@ type CellConfigMetadata struct {
 	// its own identity on the CellDoc. When Spec.Prefix is unset, Name is also
 	// the default cell-name prefix the unified generator uses (see
 	// internal/cellconfig.Prefix).
-	Name string `json:"name"             yaml:"name"`
+	Name string `json:"name"                  yaml:"name"`
 	// Realm is the always-required top-level scope coordinate.
-	Realm string `json:"realm"            yaml:"realm"`
+	Realm string `json:"realm"                 yaml:"realm"`
 	// Space, when set, scopes the config to a space within Realm.
-	Space string `json:"space,omitempty"  yaml:"space,omitempty"`
+	Space string `json:"space,omitempty"       yaml:"space,omitempty"`
 	// Stack, when set, scopes the config to a stack within Space.
-	Stack string `json:"stack,omitempty"  yaml:"stack,omitempty"`
+	Stack string `json:"stack,omitempty"       yaml:"stack,omitempty"`
 	// Labels are copied onto the cell materialized from this config, in
 	// addition to the kukeon.io/config back-reference label.
 	Labels map[string]string `json:"labels,omitempty"      yaml:"labels,omitempty"`
@@ -82,16 +82,16 @@ type CellConfigSpec struct {
 	// to metadata.name. Mirrors CellBlueprintSpec.Prefix — a Config is a 1:N
 	// binding, so each `create cell --from-config` (no name) stamps a fresh
 	// hex-suffixed cell.
-	Prefix string `json:"prefix,omitempty"  yaml:"prefix,omitempty"`
+	Prefix string `json:"prefix,omitempty"     yaml:"prefix,omitempty"`
 	// Blueprint references the CellBlueprint this config instantiates.
-	Blueprint CellConfigBlueprintRef `json:"blueprint"         yaml:"blueprint"`
+	Blueprint CellConfigBlueprintRef `json:"blueprint"            yaml:"blueprint"`
 	// Values fill the referenced blueprint's `${KEY}` scalar parameters. Stored
 	// verbatim here; resolution happens at run time (#625).
-	Values map[string]string `json:"values,omitempty"  yaml:"values,omitempty"`
+	Values map[string]string `json:"values,omitempty"     yaml:"values,omitempty"`
 	// Repos fills the blueprint's structural repo slots, keyed by slot name.
-	Repos map[string]CellConfigRepoFill `json:"repos,omitempty"   yaml:"repos,omitempty"`
+	Repos map[string]CellConfigRepoFill `json:"repos,omitempty"      yaml:"repos,omitempty"`
 	// Secrets fills the blueprint's structural secret slots, keyed by slot name.
-	Secrets map[string]CellConfigSecretFill `json:"secrets,omitempty" yaml:"secrets,omitempty"`
+	Secrets map[string]CellConfigSecretFill `json:"secrets,omitempty"    yaml:"secrets,omitempty"`
 	// Requires adds image capabilities this Config's cells need on top of the
 	// blueprint's and its enabled components' (e.g. [go]).
 	Requires []string `json:"requires,omitempty"   yaml:"requires,omitempty"`
@@ -151,7 +151,7 @@ type CellConfigSchedule struct {
 type CellConfigStatus struct {
 	// Schedule is the state of the Config's spec.schedule; nil for a Config
 	// kukeond has not scheduled.
-	Schedule *CellConfigScheduleStatus `json:"schedule,omitempty" yaml:"schedule,omitempty"`
+	Schedule *CellConfigScheduleStatus `json:"schedule,omitempty"   yaml:"schedule,omitempty"`
 	// Connectors reports, for every connector the Config requires, the
 	// identity a cell created from it now would use and the level it comes
 	// from, or that nothing resolves it (issue #1548). Computed on read from

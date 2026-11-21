@@ -250,7 +250,11 @@ func parseArgs(args []string) (*buildConfig, error) {
 		defaultContainerdSocket,
 		"host containerd socket the worker connects to",
 	)
-	root := fs.String("root", defaultBuildRoot, "directory for BuildKit's own state (cache, history, snapshots); the default is scoped per target namespace, an explicit value is used verbatim")
+	root := fs.String(
+		"root",
+		defaultBuildRoot,
+		"directory for BuildKit's own state (cache, history, snapshots); the default is scoped per target namespace, an explicit value is used verbatim",
+	)
 	kukeondConfig := fs.String(
 		"kukeond-config",
 		"",
@@ -422,7 +426,9 @@ func parseCSVPairs(flag, raw string) (map[string]string, error) {
 		k, v, ok := strings.Cut(seg, "=")
 		k = strings.TrimSpace(k)
 		if !ok || k == "" {
-			return nil, &usageError{msg: fmt.Sprintf("invalid --%s %q: expected comma-separated KEY=VALUE pairs", flag, raw)}
+			return nil, &usageError{
+				msg: fmt.Sprintf("invalid --%s %q: expected comma-separated KEY=VALUE pairs", flag, raw),
+			}
 		}
 		out[k] = v
 	}
@@ -447,7 +453,9 @@ func parseSecrets(raw []string) ([]secretSpec, error) {
 		}
 		for k := range kv {
 			if k != "id" && k != "src" {
-				return nil, &usageError{msg: fmt.Sprintf("invalid --secret %q: unknown key %q (expected id, src)", s, k)}
+				return nil, &usageError{
+					msg: fmt.Sprintf("invalid --secret %q: unknown key %q (expected id, src)", s, k),
+				}
 			}
 		}
 		id := strings.TrimSpace(kv["id"])
@@ -456,7 +464,12 @@ func parseSecrets(raw []string) ([]secretSpec, error) {
 			return nil, &usageError{msg: fmt.Sprintf("invalid --secret %q: id is required (id=NAME,src=PATH)", s)}
 		}
 		if src == "" {
-			return nil, &usageError{msg: fmt.Sprintf("invalid --secret %q: src is required — file-based secrets only (id=NAME,src=PATH)", s)}
+			return nil, &usageError{
+				msg: fmt.Sprintf(
+					"invalid --secret %q: src is required — file-based secrets only (id=NAME,src=PATH)",
+					s,
+				),
+			}
 		}
 		out = append(out, secretSpec{id: id, src: src})
 	}
@@ -487,7 +500,11 @@ func parseCacheOpts(raw []string, flag string) ([]cacheSpec, error) {
 		}
 		if typ != "local" {
 			return nil, &usageError{msg: fmt.Sprintf(
-				"invalid --%s %q: type=%s is not supported yet; only type=local (local-disk cache) is available", flag, s, typ)}
+				"invalid --%s %q: type=%s is not supported yet; only type=local (local-disk cache) is available",
+				flag,
+				s,
+				typ,
+			)}
 		}
 		if strings.TrimSpace(kv[requiredAttr]) == "" {
 			return nil, &usageError{msg: fmt.Sprintf(

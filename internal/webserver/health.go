@@ -98,7 +98,11 @@ func registerHealthRoutes(mux *http.ServeMux, dial Dial) {
 			labels := stored.Config.Metadata.Labels
 			if labels[v1beta1.LabelTeam] != majordomoTeam || labels[v1beta1.LabelRole] != majordomoRole ||
 				labels[v1beta1.LabelTask] != sweepTask {
-				return nil, fmt.Errorf("%w: %s is not a majordomo health-sweep config", errdefs.ErrConfig, input.Config.Name)
+				return nil, fmt.Errorf(
+					"%w: %s is not a majordomo health-sweep config",
+					errdefs.ErrConfig,
+					input.Config.Name,
+				)
 			}
 			created, err := c.CreateCellFromConfig(ctx, kukeonv1.CellFromConfigRequest{
 				Config: lookup, Start: true,

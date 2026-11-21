@@ -165,10 +165,19 @@ func (c *lifecycleClient) DeleteCell(_ context.Context, doc v1beta1.CellDoc) (ku
 	if c.deleteResult != nil {
 		return *c.deleteResult, nil
 	}
-	return kukeonv1.DeleteCellResult{Cell: doc, ContainersDeleted: true, CgroupDeleted: true, MetadataDeleted: true}, nil
+	return kukeonv1.DeleteCellResult{
+		Cell:              doc,
+		ContainersDeleted: true,
+		CgroupDeleted:     true,
+		MetadataDeleted:   true,
+	}, nil
 }
 
-func (c *lifecycleClient) PurgeCell(_ context.Context, doc v1beta1.CellDoc, force, cascade bool) (kukeonv1.PurgeCellResult, error) {
+func (c *lifecycleClient) PurgeCell(
+	_ context.Context,
+	doc v1beta1.CellDoc,
+	force, cascade bool,
+) (kukeonv1.PurgeCellResult, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.purgeCalls++
@@ -301,7 +310,9 @@ func TestCellLifecycleDestructiveRoutesUseScopedDaemonOperations(t *testing.T) {
 				t.Fatalf("daemon call documents=%d, want 1", len(client.received))
 			}
 			doc := client.received[0]
-			if doc.Metadata.Name != "c1" || doc.Spec.ID != "c1" || doc.Spec.RealmID != "r1" || doc.Spec.SpaceID != "s1" || doc.Spec.StackID != "t1" {
+			if doc.Metadata.Name != "c1" || doc.Spec.ID != "c1" || doc.Spec.RealmID != "r1" ||
+				doc.Spec.SpaceID != "s1" ||
+				doc.Spec.StackID != "t1" {
 				t.Fatalf("daemon received incompletely scoped cell: %+v", doc)
 			}
 			if tc.action == "purge" && (client.purgeForce != true || client.purgeCascade != false) {
@@ -319,7 +330,13 @@ func TestPurgeLifecycleDefaultsOptionsToFalse(t *testing.T) {
 	handler := lifecycleHandler(t, func(context.Context) (kukeonv1.Client, error) { return client, nil })
 	w := postLifecycle(handler, "purge")
 	if w.Code != http.StatusOK || client.purgeForce || client.purgeCascade {
-		t.Fatalf("status=%d options force:%v cascade:%v body=%s", w.Code, client.purgeForce, client.purgeCascade, w.Body)
+		t.Fatalf(
+			"status=%d options force:%v cascade:%v body=%s",
+			w.Code,
+			client.purgeForce,
+			client.purgeCascade,
+			w.Body,
+		)
 	}
 }
 
@@ -340,7 +357,11 @@ func TestPurgeLifecycleRejectsInvalidOptionsBeforeDial(t *testing.T) {
 				dialed = true
 				return &lifecycleClient{}, nil
 			})
-			req := httptest.NewRequest(http.MethodPost, "http://localhost:5129"+lifecyclePath+"purge", strings.NewReader(tc.body))
+			req := httptest.NewRequest(
+				http.MethodPost,
+				"http://localhost:5129"+lifecyclePath+"purge",
+				strings.NewReader(tc.body),
+			)
 			req.Header.Set("Content-Type", tc.contentType)
 			w := httptest.NewRecorder()
 			handler.ServeHTTP(w, req)
@@ -522,7 +543,13 @@ func TestCellLifecycleDestructiveOperationsConflictWithActiveLifecycleOperation(
 				t.Fatalf("first operation status=%d body=%s", first.Code, first.Body)
 			}
 			if client.stopCalls != 1 || client.killCalls != 0 || client.deleteCalls != 0 || client.purgeCalls != 0 {
-				t.Fatalf("calls stop/kill/delete/purge = %d/%d/%d/%d", client.stopCalls, client.killCalls, client.deleteCalls, client.purgeCalls)
+				t.Fatalf(
+					"calls stop/kill/delete/purge = %d/%d/%d/%d",
+					client.stopCalls,
+					client.killCalls,
+					client.deleteCalls,
+					client.purgeCalls,
+				)
 			}
 		})
 	}

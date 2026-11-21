@@ -67,7 +67,11 @@ func TestContainerGitRoundTripV1Beta1(t *testing.T) {
 		t.Errorf("internal sign = %v, want 2 entries", internal.Spec.Git.Sign)
 	}
 	if internal.Spec.Git.AllowedSigners != input.Spec.Git.AllowedSigners {
-		t.Errorf("internal allowedSigners = %q, want %q", internal.Spec.Git.AllowedSigners, input.Spec.Git.AllowedSigners)
+		t.Errorf(
+			"internal allowedSigners = %q, want %q",
+			internal.Spec.Git.AllowedSigners,
+			input.Spec.Git.AllowedSigners,
+		)
 	}
 
 	out, err := apischeme.BuildContainerExternalFromInternal(internal, version)

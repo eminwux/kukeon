@@ -56,7 +56,10 @@ func TestCellLockManager_SameKeySerializes(t *testing.T) {
 	wg.Wait()
 
 	if maxActive != 1 {
-		t.Fatalf("max concurrent holders of one key = %d, want 1 (issue #714 keyed mutex must be exclusive per key)", maxActive)
+		t.Fatalf(
+			"max concurrent holders of one key = %d, want 1 (issue #714 keyed mutex must be exclusive per key)",
+			maxActive,
+		)
 	}
 }
 
@@ -79,7 +82,9 @@ func TestCellLockManager_DifferentKeysDoNotSerialize(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("acquiring a second key blocked while a different key was held; the lock must not serialize unrelated cells (issue #714)")
+		t.Fatal(
+			"acquiring a second key blocked while a different key was held; the lock must not serialize unrelated cells (issue #714)",
+		)
 	}
 }
 
@@ -214,7 +219,9 @@ func TestCellLifecycleLock_StartCellWaitsForReconcile(t *testing.T) {
 
 	select {
 	case <-startDone:
-		t.Fatal("StartCell returned while ReconcileCell held the per-cell lifecycle lock; same-cell lifecycle ops were not serialized (issue #714)")
+		t.Fatal(
+			"StartCell returned while ReconcileCell held the per-cell lifecycle lock; same-cell lifecycle ops were not serialized (issue #714)",
+		)
 	case <-time.After(300 * time.Millisecond):
 		// Expected: StartCell is parked at lock acquisition.
 	}
@@ -256,7 +263,9 @@ func TestCellLifecycleLock_DifferentCellsRunConcurrently(t *testing.T) {
 		select {
 		case <-entered:
 		case <-time.After(2 * time.Second):
-			t.Fatal("expected both ReconcileCell ops on distinct cells to enter their side-effect span concurrently; the per-cell lock must not serialize unrelated cells (issue #714)")
+			t.Fatal(
+				"expected both ReconcileCell ops on distinct cells to enter their side-effect span concurrently; the per-cell lock must not serialize unrelated cells (issue #714)",
+			)
 		}
 	}
 

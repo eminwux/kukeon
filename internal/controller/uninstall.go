@@ -177,11 +177,13 @@ type UninstallReport struct {
 
 // Uninstall performs a comprehensive teardown of all kukeon runtime state.
 // Steps (in order):
+//
 //  0. Stop the kukeond daemon (SIGTERM, then SIGKILL after a short grace) when
 //     a PID file is present. Doing this before any per-realm purge prevents
 //     the live daemon from racing the in-process containerd cleanup and
 //     pinning containers in `kuke-system.kukeon.io` while we are trying to
 //     drain it.
+//
 //  1. Purge every realm with --cascade --force (drains spaces/stacks/cells/
 //     containers + tasks; the kukeond cell living inside `kuke-system` is
 //     killed and deleted as part of that cascade). Realms are enumerated by
@@ -199,6 +201,7 @@ type UninstallReport struct {
 //     surviving cache after a successful namespace drop strands the next
 //     `kuke build` with "parent snapshot does not exist" or "content digest
 //     ... not found" — issue #904.
+//
 //  2. Release live kukeon-owned bind mounts under SocketDir, then RemoveAll
 //     on SocketDir (typically /run/kukeon). The unmount step is what makes a
 //     post-attach uninstall succeed: kuketty leaves a /run/kukeon/tty bind
@@ -206,8 +209,11 @@ type UninstallReport struct {
 //     regression). A plain umount is tried first, falling back to lazy
 //     MNT_DETACH so the parent dir can still be removed when the mount has
 //     stragglers holding it open.
+//
 //  3. The same release + RemoveAll for the run path (typically /opt/kukeon).
+//
 //  4. Remove the kukeon system user and group (no-op if absent).
+//
 //  5. After the per-namespace cache sweep, try a plain rmdir on
 //     BuildCacheBaseDir — only succeeds when it is empty so a scoped
 //     uninstall (`--server-configuration` narrowing realm enumeration to one

@@ -791,4 +791,3 @@ func TestDeleteF_Cell_VerifyAllResourcesDeleted(t *testing.T) {
 		t.Fatalf("cell %q still appears in cell list after deletion", cellName)
 	}
 }
-

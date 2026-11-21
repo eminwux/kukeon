@@ -75,7 +75,10 @@ func TestSanitizeRedactsSecrets(t *testing.T) {
 		!strings.Contains(got, "after") {
 		t.Errorf("private key survived: %q", got)
 	}
-	if got := healthcmd.Sanitize("value opaque-literal-9 seen", "opaque-literal-9"); strings.Contains(got, "opaque-literal-9") {
+	if got := healthcmd.Sanitize("value opaque-literal-9 seen", "opaque-literal-9"); strings.Contains(
+		got,
+		"opaque-literal-9",
+	) {
 		t.Errorf("explicit literal survived: %q", got)
 	}
 }
@@ -271,7 +274,8 @@ func TestFilingCommentsOnTheOpenIssueOfARecurringFinding(t *testing.T) {
 	// A recurring finding whose issue was closed gets a new one.
 	gh.issues = nil
 	third := sweepReport()
-	if opened, commented, err = filer(server).File(t.Context(), &third, &second); err != nil || opened != 1 || commented != 0 {
+	if opened, commented, err = filer(server).File(t.Context(), &third, &second); err != nil || opened != 1 ||
+		commented != 0 {
 		t.Fatalf("closed issue: opened=%d commented=%d err=%v", opened, commented, err)
 	}
 	if body := gh.issues[0]["body"].(string); !strings.Contains(body, "recurring: the previous health report") {
@@ -347,7 +351,8 @@ func TestSubmitWithFileIssuesStoresTheIssueURL(t *testing.T) {
 
 	// Without the flag nothing reaches GitHub, token or not.
 	before := len(gh.requests)
-	if _, _, err = run(t, &fakeClient{}, string(raw), "report", "submit", "-f", "-"); err != nil || len(gh.requests) != before {
+	if _, _, err = run(t, &fakeClient{}, string(raw), "report", "submit", "-f", "-"); err != nil ||
+		len(gh.requests) != before {
 		t.Fatalf("default submit filed something: err=%v requests=%v", err, gh.requests[before:])
 	}
 

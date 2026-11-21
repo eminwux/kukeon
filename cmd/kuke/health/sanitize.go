@@ -50,7 +50,8 @@ var urlUserinfo = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)[^\s/@:]+(:[^\
 // credential, keeping the key and redacting the value.
 var keyedSecret = regexp.MustCompile(
 	`(?i)\b([A-Za-z0-9_.-]*(password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|authorization|credential)[A-Za-z0-9_.-]*)` +
-		`(\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s,;]+)`)
+		`(\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s,;]+)`,
+)
 
 // Sanitize removes secret values and credential-bearing URLs from text that
 // is about to leave the host in a filed issue. extra lists literal values to

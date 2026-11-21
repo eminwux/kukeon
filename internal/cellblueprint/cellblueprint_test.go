@@ -182,7 +182,12 @@ func TestMaterialize_GeneratedNameAndScope(t *testing.T) {
 		t.Fatalf("spec.id = %q, want = metadata.name %q", cell.Spec.ID, cell.Metadata.Name)
 	}
 	if cell.Spec.RealmID != "default" || cell.Spec.SpaceID != "agents" || cell.Spec.StackID != "claude" {
-		t.Fatalf("scope = %q/%q/%q, want default/agents/claude", cell.Spec.RealmID, cell.Spec.SpaceID, cell.Spec.StackID)
+		t.Fatalf(
+			"scope = %q/%q/%q, want default/agents/claude",
+			cell.Spec.RealmID,
+			cell.Spec.SpaceID,
+			cell.Spec.StackID,
+		)
 	}
 	if cell.Metadata.Labels[cellblueprint.LabelBlueprint] != "web" {
 		t.Fatalf("missing blueprint back-reference label: %v", cell.Metadata.Labels)

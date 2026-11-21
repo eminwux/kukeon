@@ -82,6 +82,8 @@ func AllocCellName(explicit, prefix string, exists func(string) (bool, error)) (
 	}
 	return "", fmt.Errorf(
 		"could not allocate a free cell name for prefix %q after %d attempts (last tried %q): persistent suffix collision",
-		strings.TrimSpace(prefix), MaxCellNameAllocAttempts, last,
+		strings.TrimSpace(prefix),
+		MaxCellNameAllocAttempts,
+		last,
 	)
 }

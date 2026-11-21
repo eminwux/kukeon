@@ -89,7 +89,11 @@ func TestGetContainerObservation_PopulatesExitTime(t *testing.T) {
 		t.Errorf("GetContainerObservation State = %v, want Error", obs.State)
 	}
 	if !obs.ExitTime.Equal(exitTime) {
-		t.Errorf("GetContainerObservation ExitTime = %v, want %v (sources ContainerStatus.FinishTime)", obs.ExitTime, exitTime)
+		t.Errorf(
+			"GetContainerObservation ExitTime = %v, want %v (sources ContainerStatus.FinishTime)",
+			obs.ExitTime,
+			exitTime,
+		)
 	}
 }
 
@@ -183,7 +187,11 @@ func TestPopulateCellContainerStatuses_PreservesExitInfoAcrossReap(t *testing.T)
 		t.Errorf("pull 2: FinishTime = %v, want preserved %v across the reap", got.FinishTime, exitTime)
 	}
 	if got.ExitCode != 137 {
-		t.Errorf("pull 2: ExitCode = %d, want preserved 137 across the reap (a reset 0 would contradict FinishTime=%v)", got.ExitCode, exitTime)
+		t.Errorf(
+			"pull 2: ExitCode = %d, want preserved 137 across the reap (a reset 0 would contradict FinishTime=%v)",
+			got.ExitCode,
+			exitTime,
+		)
 	}
 	if got.ExitSignal != "SIGKILL" {
 		t.Errorf("pull 2: ExitSignal = %q, want preserved SIGKILL across the reap", got.ExitSignal)

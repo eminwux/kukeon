@@ -130,7 +130,11 @@ func (r *Exec) stampCellEtcFilePathsOnContainers(cell *intmodel.Cell) {
 // container spec value (e.g. a root spec built fresh by
 // ensureCellRootContainerSpec) and need it to carry the same bind-mount
 // paths the cell-wide stamp would apply.
-func stampEtcFilePathsOnContainerSpec(spec *intmodel.ContainerSpec, hostnamePath, hostsPath string, suppressHosts bool) {
+func stampEtcFilePathsOnContainerSpec(
+	spec *intmodel.ContainerSpec,
+	hostnamePath, hostsPath string,
+	suppressHosts bool,
+) {
 	if spec == nil || hostnamePath == "" {
 		return
 	}

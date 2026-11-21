@@ -1024,12 +1024,21 @@ func TestValidateContainerVolumes(t *testing.T) {
 			mount: ext.VolumeMount{Kind: ext.VolumeKindVolume, Source: "data", Target: "/data"},
 		},
 		{
-			name:  "cross-scope ref ok",
-			mount: ext.VolumeMount{Kind: ext.VolumeKindVolume, Target: "/c", VolumeRef: &ext.VolumeRef{Name: "n", Realm: "r"}},
+			name: "cross-scope ref ok",
+			mount: ext.VolumeMount{
+				Kind:      ext.VolumeKindVolume,
+				Target:    "/c",
+				VolumeRef: &ext.VolumeRef{Name: "n", Realm: "r"},
+			},
 		},
 		{
-			name:    "source and ref exclusive",
-			mount:   ext.VolumeMount{Kind: ext.VolumeKindVolume, Source: "data", Target: "/d", VolumeRef: &ext.VolumeRef{Name: "n", Realm: "r"}},
+			name: "source and ref exclusive",
+			mount: ext.VolumeMount{
+				Kind:      ext.VolumeKindVolume,
+				Source:    "data",
+				Target:    "/d",
+				VolumeRef: &ext.VolumeRef{Name: "n", Realm: "r"},
+			},
 			wantErr: errdefs.ErrVolumeRefSourceExclusive,
 		},
 		{
@@ -1063,13 +1072,22 @@ func TestValidateContainerVolumes(t *testing.T) {
 			wantErr: errdefs.ErrVolumeRefRealmRequired,
 		},
 		{
-			name:    "ref incomplete scope",
-			mount:   ext.VolumeMount{Kind: ext.VolumeKindVolume, Target: "/d", VolumeRef: &ext.VolumeRef{Name: "n", Realm: "r", Stack: "st"}},
+			name: "ref incomplete scope",
+			mount: ext.VolumeMount{
+				Kind:      ext.VolumeKindVolume,
+				Target:    "/d",
+				VolumeRef: &ext.VolumeRef{Name: "n", Realm: "r", Stack: "st"},
+			},
 			wantErr: errdefs.ErrVolumeRefScopeIncomplete,
 		},
 		{
-			name:    "volumeRef on bind kind rejected",
-			mount:   ext.VolumeMount{Kind: ext.VolumeKindBind, Source: "/a", Target: "/b", VolumeRef: &ext.VolumeRef{Name: "n", Realm: "r"}},
+			name: "volumeRef on bind kind rejected",
+			mount: ext.VolumeMount{
+				Kind:      ext.VolumeKindBind,
+				Source:    "/a",
+				Target:    "/b",
+				VolumeRef: &ext.VolumeRef{Name: "n", Realm: "r"},
+			},
 			wantErr: nil, // distinct inline error, asserted as non-nil below
 		},
 		{
@@ -2385,7 +2403,10 @@ func TestRuntimeEnv_InboundPreserved_OutboundDropped(t *testing.T) {
 			t.Fatalf("BuildCellExternalFromInternal: %v", err)
 		}
 		if got := out.Spec.RuntimeEnv; len(got) != 0 {
-			t.Errorf("external.Spec.RuntimeEnv = %v, want empty (RuntimeEnv must not persist to disk or echo to clients)", got)
+			t.Errorf(
+				"external.Spec.RuntimeEnv = %v, want empty (RuntimeEnv must not persist to disk or echo to clients)",
+				got,
+			)
 		}
 	})
 }

@@ -77,7 +77,12 @@ func NewVersionCmd() *cobra.Command {
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Daemon: %s\n", daemonVersion)
 
 			if clientVersion != daemonVersion {
-				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Warning: version mismatch (client: %s, daemon: %s)\n", clientVersion, daemonVersion)
+				_, _ = fmt.Fprintf(
+					cmd.ErrOrStderr(),
+					"Warning: version mismatch (client: %s, daemon: %s)\n",
+					clientVersion,
+					daemonVersion,
+				)
 				strict, _ := cmd.Flags().GetBool("strict")
 				if strict {
 					return fmt.Errorf("version mismatch: client=%s daemon=%s", clientVersion, daemonVersion)
@@ -108,5 +113,7 @@ func (r *realDaemonClient) Close() error {
 }
 
 // compile-time interface check
-var _ daemonClient = (*realDaemonClient)(nil)
-var _ io.Closer = (*realDaemonClient)(nil)
+var (
+	_ daemonClient = (*realDaemonClient)(nil)
+	_ io.Closer    = (*realDaemonClient)(nil)
+)

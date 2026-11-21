@@ -731,20 +731,41 @@ func TestContainerExitedNonZero(t *testing.T) {
 		status intmodel.ContainerStatus
 		want   bool
 	}{
-		{"clean_stop_is_not_a_failure",
-			intmodel.ContainerStatus{State: intmodel.ContainerStateStopped, ExitCode: 0}, false},
-		{"exited_state_is_not_a_failure",
-			intmodel.ContainerStatus{State: intmodel.ContainerStateExited, ExitCode: 0}, false},
-		{"reaped_clean_exit_is_not_a_failure",
-			intmodel.ContainerStatus{State: intmodel.ContainerStateNotCreated, ExitCode: 0}, false},
-		{"nonzero_exit_is_a_failure",
-			intmodel.ContainerStatus{State: intmodel.ContainerStateStopped, ExitCode: 1}, true},
-		{"reaped_nonzero_exit_is_a_failure",
-			intmodel.ContainerStatus{State: intmodel.ContainerStateNotCreated, ExitCode: 137}, true},
-		{"error_state_is_a_failure_even_with_zero_code",
-			intmodel.ContainerStatus{State: intmodel.ContainerStateError, ExitCode: 0}, true},
-		{"failed_state_is_a_failure_even_with_zero_code",
-			intmodel.ContainerStatus{State: intmodel.ContainerStateFailed, ExitCode: 0}, true},
+		{
+			"clean_stop_is_not_a_failure",
+			intmodel.ContainerStatus{State: intmodel.ContainerStateStopped, ExitCode: 0},
+			false,
+		},
+		{
+			"exited_state_is_not_a_failure",
+			intmodel.ContainerStatus{State: intmodel.ContainerStateExited, ExitCode: 0},
+			false,
+		},
+		{
+			"reaped_clean_exit_is_not_a_failure",
+			intmodel.ContainerStatus{State: intmodel.ContainerStateNotCreated, ExitCode: 0},
+			false,
+		},
+		{
+			"nonzero_exit_is_a_failure",
+			intmodel.ContainerStatus{State: intmodel.ContainerStateStopped, ExitCode: 1},
+			true,
+		},
+		{
+			"reaped_nonzero_exit_is_a_failure",
+			intmodel.ContainerStatus{State: intmodel.ContainerStateNotCreated, ExitCode: 137},
+			true,
+		},
+		{
+			"error_state_is_a_failure_even_with_zero_code",
+			intmodel.ContainerStatus{State: intmodel.ContainerStateError, ExitCode: 0},
+			true,
+		},
+		{
+			"failed_state_is_a_failure_even_with_zero_code",
+			intmodel.ContainerStatus{State: intmodel.ContainerStateFailed, ExitCode: 0},
+			true,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1035,8 +1056,12 @@ func TestShouldWindDownCell(t *testing.T) {
 			want:     false,
 		},
 		{
-			name:     "blocked_for_kukeond_style_cell_root_only",
-			cell:     cell(specsRootOnly, []intmodel.ContainerStatus{{ID: "root", State: intmodel.ContainerStateReady}}, true),
+			name: "blocked_for_kukeond_style_cell_root_only",
+			cell: cell(
+				specsRootOnly,
+				[]intmodel.ContainerStatus{{ID: "root", State: intmodel.ContainerStateReady}},
+				true,
+			),
 			newState: intmodel.CellStateExited,
 			want:     false,
 		},

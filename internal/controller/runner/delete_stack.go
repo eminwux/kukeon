@@ -134,7 +134,9 @@ func (r *Exec) DeleteStack(stack intmodel.Stack) error {
 	if len(residue) > 0 {
 		return fmt.Errorf(
 			"%w: cell subdirectory residue under %s — cascade did not remove %s; inspect and remove by hand before re-running",
-			errdefs.ErrDeleteStack, metadataRunPath, strings.Join(residue, ", "),
+			errdefs.ErrDeleteStack,
+			metadataRunPath,
+			strings.Join(residue, ", "),
 		)
 	}
 

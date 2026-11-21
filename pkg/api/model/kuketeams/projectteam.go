@@ -34,7 +34,7 @@ type ProjectTeamSpec struct {
 	// plus exactly one of tag/branch/commit). See TeamSource. The legacy
 	// `<owner>/<repo>@vX.Y.Z` string form is rejected at parse time with a
 	// migration error.
-	Source TeamSource `json:"source"             yaml:"source"`
+	Source TeamSource `json:"source"               yaml:"source"`
 	// ProjectDir overrides the in-cell project clone dir basename, decoupling
 	// it from metadata.name (the team *label*). The renderer exposes it as
 	// `.project.NAME` — the fact a blueprint's `project` repo target reads for
@@ -51,15 +51,15 @@ type ProjectTeamSpec struct {
 	// renderer stamps the defaulted value onto every rendered Blueprint/Config
 	// so the persisted Config scope matches the live cell — see Scope in
 	// pkg/team/compose and #1133).
-	Realm string `json:"realm,omitempty"    yaml:"realm,omitempty"`
-	Space string `json:"space,omitempty"    yaml:"space,omitempty"`
-	Stack string `json:"stack,omitempty"    yaml:"stack,omitempty"`
+	Realm string `json:"realm,omitempty"      yaml:"realm,omitempty"`
+	Space string `json:"space,omitempty"      yaml:"space,omitempty"`
+	Stack string `json:"stack,omitempty"      yaml:"stack,omitempty"`
 	// Defaults supplies project-wide harness defaults applied to every role
 	// that does not pin its own.
-	Defaults ProjectTeamDefaults `json:"defaults,omitempty" yaml:"defaults,omitempty"`
+	Defaults ProjectTeamDefaults `json:"defaults,omitempty"   yaml:"defaults,omitempty"`
 	// Roles is the roster: each entry references a role declared in the agents
 	// source and may add project-specific capability needs.
-	Roles []ProjectTeamRole `json:"roles"              yaml:"roles"`
+	Roles []ProjectTeamRole `json:"roles"                yaml:"roles"`
 }
 
 // ProjectTeamDefaults holds project-wide defaults.

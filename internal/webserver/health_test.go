@@ -42,7 +42,10 @@ func (c *healthClient) Close() error { return nil }
 func (c *healthClient) ListHealthReports(context.Context) ([]kukeonv1.HealthReportSummary, error) {
 	var out []kukeonv1.HealthReportSummary
 	for _, report := range c.reports {
-		out = append(out, kukeonv1.HealthReportSummary{ID: report.ID, Summary: report.Summary, Findings: len(report.Findings)})
+		out = append(
+			out,
+			kukeonv1.HealthReportSummary{ID: report.ID, Summary: report.Summary, Findings: len(report.Findings)},
+		)
 	}
 	return out, nil
 }

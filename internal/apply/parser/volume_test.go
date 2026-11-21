@@ -76,7 +76,10 @@ func TestValidateDocument_Volume_RealmRequired(t *testing.T) {
 }
 
 func TestValidateDocument_Volume_StackWithoutSpaceRejected(t *testing.T) {
-	doc := parseVolume(t, "apiVersion: v1beta1\nkind: Volume\nmetadata:\n  name: data\n  realm: default\n  stack: web\n")
+	doc := parseVolume(
+		t,
+		"apiVersion: v1beta1\nkind: Volume\nmetadata:\n  name: data\n  realm: default\n  stack: web\n",
+	)
 	requireValidationErr(t, parser.ValidateDocument(doc), errdefs.ErrVolumeScopeIncomplete)
 }
 

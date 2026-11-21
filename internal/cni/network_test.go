@@ -336,7 +336,11 @@ func TestManager_ReadBridgeName(t *testing.T) {
 		{name: "bridge plugin second", contents: bridgeSecond, wantBridge: "cni0"},
 		{name: "no bridge plugin", contents: noBridge, wantErr: errdefs.ErrBridgePluginMissing},
 		{name: "plugins field absent", contents: missingPlugins, wantErr: errdefs.ErrBridgePluginMissing},
-		{name: "pre-fix stale bridge name preserved for comparison", contents: preFixStale, wantBridge: "kuke-system-kukeon"},
+		{
+			name:       "pre-fix stale bridge name preserved for comparison",
+			contents:   preFixStale,
+			wantBridge: "kuke-system-kukeon",
+		},
 		{name: "file missing", setupNoOp: true, wantErr: errdefs.ErrNetworkNotFound},
 	}
 

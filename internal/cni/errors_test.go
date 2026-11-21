@@ -27,7 +27,9 @@ import (
 
 func TestTranslateCNIError(t *testing.T) {
 	// The real-world error from the gaps doc — plugin output concatenated by libcni.
-	rangeErr := errors.New(`plugin type="bridge" failed (add): failed to create bridge "kuke-system-kukeon": could not add "kuke-system-kukeon": numerical result out of range`)
+	rangeErr := errors.New(
+		`plugin type="bridge" failed (add): failed to create bridge "kuke-system-kukeon": could not add "kuke-system-kukeon": numerical result out of range`,
+	)
 
 	tests := []struct {
 		name         string

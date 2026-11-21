@@ -151,7 +151,10 @@ func TestApplySpaceDefaultsToContainer_OverrideReplacesShallow(t *testing.T) {
 		t.Errorf("Capabilities.Drop = %v, container-spec value should replace defaults", container.Capabilities.Drop)
 	}
 	if len(container.Capabilities.Add) != 0 {
-		t.Errorf("Capabilities.Add = %v, expected empty — shallow override must not leak default Add", container.Capabilities.Add)
+		t.Errorf(
+			"Capabilities.Add = %v, expected empty — shallow override must not leak default Add",
+			container.Capabilities.Add,
+		)
 	}
 
 	// Tmpfs replaced — the single container-spec entry, not the Space pair.

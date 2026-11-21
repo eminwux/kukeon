@@ -191,7 +191,10 @@ func TestCleanupNamespaceResourcesForcedGCSweepReclaimsStraggler(t *testing.T) {
 		}
 	}
 	if forcedSweep == -1 {
-		t.Errorf("call log missing the trailing forced-GC-sweep lease.Create after the snapshot drain; got %v", srv.callLog)
+		t.Errorf(
+			"call log missing the trailing forced-GC-sweep lease.Create after the snapshot drain; got %v",
+			srv.callLog,
+		)
 	}
 }
 

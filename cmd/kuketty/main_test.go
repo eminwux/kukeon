@@ -358,8 +358,11 @@ func TestWorkloadExitCode(t *testing.T) {
 			// A raw PTY-read EIO that still surfaces means a genuine error with
 			// the child alive (sbsh v0.13.1 only returns it after waiting in
 			// vain for EvCmdExited), so it is a kuketty-internal failure.
-			name:     "raw pty-read EIO is an internal failure",
-			err:      fmt.Errorf("terminalManagerReader pty read error: could not read pipe->pipe: %w", errors.New("read /dev/ptmx: input/output error")),
+			name: "raw pty-read EIO is an internal failure",
+			err: fmt.Errorf(
+				"terminalManagerReader pty read error: could not read pipe->pipe: %w",
+				errors.New("read /dev/ptmx: input/output error"),
+			),
 			wantCode: 0,
 			wantOK:   false,
 		},

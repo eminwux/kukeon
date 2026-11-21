@@ -69,7 +69,8 @@ func TestHostLinuxDeviceOpt_ResolvesViaHostRoot(t *testing.T) {
 		t.Fatalf("expected one device-cgroup allow rule, got %+v", spec.Linux.Resources)
 	}
 	r := spec.Linux.Resources.Devices[0]
-	if !r.Allow || r.Type != "c" || r.Major == nil || *r.Major != 10 || r.Minor == nil || *r.Minor != 232 || r.Access != "rwm" {
+	if !r.Allow || r.Type != "c" || r.Major == nil || *r.Major != 10 || r.Minor == nil || *r.Minor != 232 ||
+		r.Access != "rwm" {
 		t.Errorf("device-cgroup rule = %+v, want allow c 10:232 rwm", r)
 	}
 }
@@ -83,7 +84,15 @@ func TestHostLinuxDeviceOpt_MissingNodeNamesPath(t *testing.T) {
 		return nil, os.ErrNotExist
 	})
 
-	err := hostLinuxDeviceOpt("/dev/kvm", deviceAccessRWM)(context.Background(), nil, nil, &runtimespec.Spec{Linux: &runtimespec.Linux{}})
+	err := hostLinuxDeviceOpt(
+		"/dev/kvm",
+		deviceAccessRWM,
+	)(
+		context.Background(),
+		nil,
+		nil,
+		&runtimespec.Spec{Linux: &runtimespec.Linux{}},
+	)
 	if err == nil {
 		t.Fatal("expected a create-time error for a missing host node, got nil")
 	}

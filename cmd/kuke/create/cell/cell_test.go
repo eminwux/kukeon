@@ -1088,7 +1088,10 @@ func TestCreateCell_FromConfig_EnvBakedAndRecorded(t *testing.T) {
 		t.Errorf("Provenance.EnvOverrides=%v want [BAR=baz]", prov.EnvOverrides)
 	}
 	if len(materializeDoc.Spec.RuntimeEnv) != 0 {
-		t.Errorf("Spec.RuntimeEnv=%v want empty (override persists, not the runtime form)", materializeDoc.Spec.RuntimeEnv)
+		t.Errorf(
+			"Spec.RuntimeEnv=%v want empty (override persists, not the runtime form)",
+			materializeDoc.Spec.RuntimeEnv,
+		)
 	}
 }
 

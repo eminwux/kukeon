@@ -105,7 +105,8 @@ func NewLogCmd() *cobra.Command {
 	cmd.Flags().String("container", "",
 		"Container within the cell to read (omit to auto-pick the only non-root container)")
 	_ = viper.BindPFlag(config.KUKE_LOG_CONTAINER.ViperKey, cmd.Flags().Lookup("container"))
-	cmd.Flags().BoolP("follow", "f", false, "Tail the file until SIGINT instead of printing current contents and exiting")
+	cmd.Flags().
+		BoolP("follow", "f", false, "Tail the file until SIGINT instead of printing current contents and exiting")
 	_ = viper.BindPFlag(config.KUKE_LOG_FOLLOW.ViperKey, cmd.Flags().Lookup("follow"))
 
 	cmd.ValidArgsFunction = config.CompleteCellNames

@@ -329,7 +329,11 @@ func TestCheckHostCNIPlugins(t *testing.T) {
 		rc := &runCtx{cniBinDir: dir, daemonClient: newFakeClient()}
 		r := checkHostCNIPlugins(rc)
 		if r.Status != StatusWARN {
-			t.Errorf("expected WARN when a plugin is missing but the daemon is reachable; got %s (%s)", r.Status, r.Detail)
+			t.Errorf(
+				"expected WARN when a plugin is missing but the daemon is reachable; got %s (%s)",
+				r.Status,
+				r.Detail,
+			)
 		}
 		if !strings.Contains(r.Detail, plugins[1]) {
 			t.Errorf("Detail should name the missing plugin; got %q", r.Detail)
@@ -779,6 +783,7 @@ func (f *fakeCtrClient) ListNamespaces() ([]string, error) {
 	}
 	return f.namespaces, nil
 }
+
 func (f *fakeCtrClient) NamespaceStorage(ns string) (ctr.StorageStats, error) {
 	if f.storageErr != nil {
 		return ctr.StorageStats{}, f.storageErr

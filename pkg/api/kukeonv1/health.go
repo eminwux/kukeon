@@ -65,21 +65,21 @@ type HealthDigestRequest struct {
 // is involved in producing it. Checks describe the host kukeond runs on, so
 // the answer is the same whether the caller is on the host or inside a cell.
 type HealthDigest struct {
-	SchemaVersion string    `json:"schemaVersion" yaml:"schemaVersion"`
-	Since         time.Time `json:"since"         yaml:"since"`
-	Until         time.Time `json:"until"         yaml:"until"`
+	SchemaVersion string    `json:"schemaVersion"       yaml:"schemaVersion"`
+	Since         time.Time `json:"since"               yaml:"since"`
+	Until         time.Time `json:"until"               yaml:"until"`
 	// Clean is true when no check is warn or fail, no error-level log entry
 	// fell in the window, and no cell is Failed or Error.
-	Clean  bool          `json:"clean"  yaml:"clean"`
-	Checks []HealthCheck `json:"checks" yaml:"checks"`
+	Clean  bool          `json:"clean"               yaml:"clean"`
+	Checks []HealthCheck `json:"checks"              yaml:"checks"`
 	// LogErrors groups kukeond's error-level log entries in the window by
 	// normalized signature. LogSource is the file they were read from; it is
 	// empty, with LogNote explaining why, when kukeond has no log file.
-	LogErrors []HealthLogGroup `json:"logErrors"         yaml:"logErrors"`
+	LogErrors []HealthLogGroup `json:"logErrors"           yaml:"logErrors"`
 	LogSource string           `json:"logSource,omitempty" yaml:"logSource,omitempty"`
 	LogNote   string           `json:"logNote,omitempty"   yaml:"logNote,omitempty"`
 	// Cells lists every cell currently Failed or Error, whatever the window.
-	Cells []HealthCell `json:"cells" yaml:"cells"`
+	Cells []HealthCell `json:"cells"               yaml:"cells"`
 }
 
 // HealthCheck is one host or state check evaluated inside kukeond.
@@ -100,19 +100,19 @@ type HealthLogGroup struct {
 	FirstSeen time.Time `json:"firstSeen" yaml:"firstSeen"`
 	LastSeen  time.Time `json:"lastSeen"  yaml:"lastSeen"`
 	// Sample is the newest entry of the group, verbatim.
-	Sample string `json:"sample" yaml:"sample"`
+	Sample string `json:"sample"    yaml:"sample"`
 }
 
 // HealthCell is a cell in a terminal failure state. Failed is kukeon's own
 // bring-up failure and is classified kukeon; Error is a workload that exited
 // non-zero and is classified workload.
 type HealthCell struct {
-	Realm          string `json:"realm"          yaml:"realm"`
-	Space          string `json:"space"          yaml:"space"`
-	Stack          string `json:"stack"          yaml:"stack"`
-	Name           string `json:"name"           yaml:"name"`
-	State          string `json:"state"          yaml:"state"`
-	Classification string `json:"classification" yaml:"classification"`
+	Realm          string `json:"realm"             yaml:"realm"`
+	Space          string `json:"space"             yaml:"space"`
+	Stack          string `json:"stack"             yaml:"stack"`
+	Name           string `json:"name"              yaml:"name"`
+	State          string `json:"state"             yaml:"state"`
+	Classification string `json:"classification"    yaml:"classification"`
 	// Since is when the cell entered the state, as closely as kukeond
 	// records it: the newest container finish time for an Error cell, else
 	// the cell's last status write.
@@ -135,40 +135,40 @@ type HealthReport struct {
 	SchemaVersion string `json:"schemaVersion,omitempty" yaml:"schemaVersion,omitempty"`
 	// ID identifies the report. kukeond assigns one when a submission leaves
 	// it empty.
-	ID string `json:"id" yaml:"id"`
+	ID string `json:"id"                      yaml:"id"`
 	// CreatedAt is set by kukeond when a submission leaves it zero.
-	CreatedAt time.Time `json:"createdAt" yaml:"createdAt"`
+	CreatedAt time.Time `json:"createdAt"               yaml:"createdAt"`
 	// Since and Until are the digest window the report covers.
-	Since time.Time `json:"since" yaml:"since"`
-	Until time.Time `json:"until" yaml:"until"`
+	Since time.Time `json:"since"                   yaml:"since"`
+	Until time.Time `json:"until"                   yaml:"until"`
 	// Cell is the cell that ran the sweep.
-	Cell     HealthCellRef   `json:"cell"     yaml:"cell"`
-	Summary  string          `json:"summary"  yaml:"summary"`
-	Findings []HealthFinding `json:"findings" yaml:"findings"`
+	Cell     HealthCellRef   `json:"cell"                    yaml:"cell"`
+	Summary  string          `json:"summary"                 yaml:"summary"`
+	Findings []HealthFinding `json:"findings"                yaml:"findings"`
 	// Body is the report as markdown, for people.
-	Body string `json:"body,omitempty" yaml:"body,omitempty"`
+	Body string `json:"body,omitempty"          yaml:"body,omitempty"`
 }
 
 // HealthFinding is one triaged finding of a report.
 type HealthFinding struct {
 	// Signature identifies the finding across reports: the digest's log
 	// signature, check name or cell identity it came from.
-	Signature      string `json:"signature"      yaml:"signature"`
-	Classification string `json:"classification" yaml:"classification"`
-	Severity       string `json:"severity"       yaml:"severity"`
+	Signature      string `json:"signature"                   yaml:"signature"`
+	Classification string `json:"classification"              yaml:"classification"`
+	Severity       string `json:"severity"                    yaml:"severity"`
 	// Recurring is set by kukeond on submission: true when the previous
 	// stored report already carried a finding with the same signature.
-	Recurring bool   `json:"recurring" yaml:"recurring"`
-	Title     string `json:"title,omitempty" yaml:"title,omitempty"`
+	Recurring bool   `json:"recurring"                   yaml:"recurring"`
+	Title     string `json:"title,omitempty"             yaml:"title,omitempty"`
 	// Count is how many times the finding occurred in the window, when the
 	// digest counted it (a log group's count). Zero means not counted.
-	Count int `json:"count,omitempty" yaml:"count,omitempty"`
+	Count int `json:"count,omitempty"             yaml:"count,omitempty"`
 	// Evidence is what supports the finding: command output, log samples.
-	Evidence []string `json:"evidence" yaml:"evidence"`
+	Evidence []string `json:"evidence"                    yaml:"evidence"`
 	// SuggestedCommands are commands the reader may run; nothing runs them.
 	SuggestedCommands []string `json:"suggestedCommands,omitempty" yaml:"suggestedCommands,omitempty"`
 	// IssueURL is the issue filed for the finding, when filing is enabled.
-	IssueURL string `json:"issueUrl,omitempty" yaml:"issueUrl,omitempty"`
+	IssueURL string `json:"issueUrl,omitempty"          yaml:"issueUrl,omitempty"`
 }
 
 // HealthReportSummary is one row of ListHealthReports.

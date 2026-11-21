@@ -758,7 +758,11 @@ func validateContainerRestart(spec ext.ContainerSpec) error {
 	restarts := policy == intmodel.RestartPolicyAlways || policy == intmodel.RestartPolicyOnFailure
 	if spec.RestartBackoffSeconds != nil {
 		if *spec.RestartBackoffSeconds < 0 {
-			return fmt.Errorf("container %q: restartBackoffSeconds must be >= 0, got %d", spec.ID, *spec.RestartBackoffSeconds)
+			return fmt.Errorf(
+				"container %q: restartBackoffSeconds must be >= 0, got %d",
+				spec.ID,
+				*spec.RestartBackoffSeconds,
+			)
 		}
 		if !restarts {
 			return fmt.Errorf(

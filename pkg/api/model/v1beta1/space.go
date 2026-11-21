@@ -27,8 +27,8 @@ type SpaceDoc struct {
 }
 
 type SpaceMetadata struct {
-	Name   string            `json:"name"   yaml:"name"`
-	Labels map[string]string `json:"labels" yaml:"labels"`
+	Name   string            `json:"name"                 yaml:"name"`
+	Labels map[string]string `json:"labels"               yaml:"labels"`
 	// Generation is a monotonic counter bumped by a writer on each
 	// spec-changing update. Defaults to zero; phase 3 wires the writers to
 	// populate it. See ObservedGeneration on the status.

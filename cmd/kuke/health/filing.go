@@ -66,12 +66,11 @@ type Filer struct {
 }
 
 type ghIssue struct {
-	Number      int    `json:"number"`
-	HTMLURL     string `json:"html_url"`
-	Body        string `json:"body"`
-	State       string `json:"state"`
-	PullRequest *struct {
-	} `json:"pull_request,omitempty"`
+	Number      int       `json:"number"`
+	HTMLURL     string    `json:"html_url"`
+	Body        string    `json:"body"`
+	State       string    `json:"state"`
+	PullRequest *struct{} `json:"pull_request,omitempty"`
 }
 
 // marker is the hidden line that ties an issue to a finding's signature.

@@ -107,8 +107,10 @@ func dirtyDigest() kukeonv1.HealthDigest {
 		SchemaVersion: kukeonv1.HealthSchemaVersion, Since: window, Until: window.Add(time.Hour),
 		Checks: []kukeonv1.HealthCheck{
 			{Section: "host", Name: "containerd", Status: kukeonv1.HealthStatusOK, Detail: "reachable"},
-			{Section: "host", Name: "cni-plugins", Status: kukeonv1.HealthStatusFail, Detail: "missing: bridge",
-				Remediation: "redeploy kukeond"},
+			{
+				Section: "host", Name: "cni-plugins", Status: kukeonv1.HealthStatusFail, Detail: "missing: bridge",
+				Remediation: "redeploy kukeond",
+			},
 		},
 		LogErrors: []kukeonv1.HealthLogGroup{{
 			Signature: "start cell failed: task <id>", Count: 3, FirstSeen: window, LastSeen: window,
@@ -302,10 +304,14 @@ func TestReportsAndReport(t *testing.T) {
 			t.Errorf("markdown lacks %q:\n%s", want, out)
 		}
 	}
-	if out, _, err = run(t, client, "", "report", "r1", "-o", "json"); err != nil || !strings.Contains(out, "\"issueUrl\"") {
+	if out, _, err = run(t, client, "", "report", "r1", "-o", "json"); err != nil ||
+		!strings.Contains(out, "\"issueUrl\"") {
 		t.Fatalf("report json: %q %v", out, err)
 	}
-	if _, errOut, readErr := run(t, client, "", "report", "nope"); !errors.Is(readErr, errdefs.ErrHealthReportNotFound) ||
+	if _, errOut, readErr := run(t, client, "", "report", "nope"); !errors.Is(
+		readErr,
+		errdefs.ErrHealthReportNotFound,
+	) ||
 		!strings.Contains(errOut, "not found") {
 		t.Fatalf("missing report: %q %v", errOut, readErr)
 	}

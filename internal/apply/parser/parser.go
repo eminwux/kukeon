@@ -554,7 +554,12 @@ func validateBlueprint(doc *Document) *ValidationError {
 		return &ValidationError{Index: doc.Index, Kind: doc.Kind, Name: bp.Metadata.Name, Err: scopeErr}
 	}
 	if len(bp.Spec.Cell.Containers) == 0 {
-		return &ValidationError{Index: doc.Index, Kind: doc.Kind, Name: bp.Metadata.Name, Err: errdefs.ErrBlueprintCellRequired}
+		return &ValidationError{
+			Index: doc.Index,
+			Kind:  doc.Kind,
+			Name:  bp.Metadata.Name,
+			Err:   errdefs.ErrBlueprintCellRequired,
+		}
 	}
 	for _, c := range bp.Spec.Cell.Containers {
 		if repoErr := validateBlueprintRepos(c.Repos); repoErr != nil {

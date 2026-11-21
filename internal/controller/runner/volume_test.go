@@ -273,7 +273,11 @@ func TestVolume_ReclaimedByScopeCascade(t *testing.T) {
 			volPath := fs.VolumePath(runPath, tc.md.Realm, tc.md.Space, tc.md.Stack, tc.md.Name)
 			scopeDir := tc.scopeDir(runPath)
 			if !strings.HasPrefix(volPath, scopeDir+string(os.PathSeparator)) {
-				t.Fatalf("volume %q is not under its scope dir %q — cascade purge would not reclaim it", volPath, scopeDir)
+				t.Fatalf(
+					"volume %q is not under its scope dir %q — cascade purge would not reclaim it",
+					volPath,
+					scopeDir,
+				)
 			}
 
 			// The exact reclaim the three purge paths perform.
@@ -285,7 +289,13 @@ func TestVolume_ReclaimedByScopeCascade(t *testing.T) {
 				t.Errorf("volume survived scope cascade reclaim: stat err = %v", err)
 			}
 			// A volume outside the purged scope must be untouched.
-			otherPath := fs.VolumePath(runPath, tc.otherKept.Realm, tc.otherKept.Space, tc.otherKept.Stack, tc.otherKept.Name)
+			otherPath := fs.VolumePath(
+				runPath,
+				tc.otherKept.Realm,
+				tc.otherKept.Space,
+				tc.otherKept.Stack,
+				tc.otherKept.Name,
+			)
 			if _, err := os.Stat(otherPath); err != nil {
 				t.Errorf("volume outside purged scope was reclaimed: %v", err)
 			}
@@ -347,7 +357,11 @@ func TestVolume_NotMistakenForChildScope(t *testing.T) {
 	got := listedKeys(t, r, "", "", "")
 	want := []string{"default///realm-bp"}
 	if !equalStrings(got, want) {
-		t.Errorf("ListBlueprints(all) = %v, want %v (volumes/ subdir must be ignored, not traversed as a phantom space)", got, want)
+		t.Errorf(
+			"ListBlueprints(all) = %v, want %v (volumes/ subdir must be ignored, not traversed as a phantom space)",
+			got,
+			want,
+		)
 	}
 }
 

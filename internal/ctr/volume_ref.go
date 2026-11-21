@@ -136,7 +136,11 @@ func volumeDirExists(path string) bool {
 // entry is present the original slice is returned and runPath is never consulted
 // — a spec that declares no volume reference pays no resolution cost and is
 // unaffected by an unset RunPath. Step 4 (#1016).
-func resolveVolumeMounts(runPath string, scope VolumeScope, mounts []intmodel.VolumeMount) ([]intmodel.VolumeMount, error) {
+func resolveVolumeMounts(
+	runPath string,
+	scope VolumeScope,
+	mounts []intmodel.VolumeMount,
+) ([]intmodel.VolumeMount, error) {
 	hasVolumeKind := false
 	for i := range mounts {
 		if mounts[i].Kind == intmodel.VolumeKindVolume {
