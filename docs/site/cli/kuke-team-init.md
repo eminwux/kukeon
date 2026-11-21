@@ -131,10 +131,16 @@ scopes with kuke (`kuke init` creates `default/default/default`). Init never
 creates, starts, restarts, or deletes cells. `ApplyDocumentsForTeam` receives
 the stable team name `kuke`, so reruns update that team's resources and prune
 obsolete team-owned configs. A shared blueprint the team stops using is removed
-only when no other CellConfig references it; if the realm already holds a
-different blueprint under a shared name that another team uses, this team's is
-applied as `<name>-<content digest>` instead of overwriting it. It does not
-prune credentials or running cells.
+only when no other CellConfig references it. A shared blueprint that already
+exists with different content is replaced in place, whichever team's configs
+use it, so every team sees the same content; a note names the old and new
+content digest and the other configs using it, whose cells turn `OutOfSync`
+until `kuke restart`. Only a blueprint kuke team did not render (no
+`kukeon.io/shared: "true"` label) is never overwritten: this team's is applied
+as `<name>-<content digest>` instead. A `<name>-<content digest>` copy an
+earlier version forked for a shared blueprint is migrated: the team's configs
+move back to `<name>`, and the copy is removed, or reported while another
+config still uses it. It does not prune credentials or running cells.
 
 ## Git identity and credentials
 

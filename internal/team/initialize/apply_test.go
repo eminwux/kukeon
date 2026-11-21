@@ -26,6 +26,7 @@ import (
 	"net/rpc"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -233,6 +234,7 @@ func (f *fakeClient) ApplyDocumentsForTeam(
 	f.raw = raw
 	f.team = team
 	if f.resources == nil {
+		previous := f.teamBlueprintRefs(team)
 		var resources []kukeonv1.ApplyResourceResult
 		decoder := yaml.NewDecoder(bytes.NewReader(raw))
 		for {
@@ -271,10 +273,45 @@ func (f *fakeClient) ApplyDocumentsForTeam(
 				}
 			}
 			f.configs = kept
+			resources = append(resources, f.pruneShared(previous, applied)...)
 		}
 		return kukeonv1.ApplyDocumentsResult{Resources: resources}, f.applyErr
 	}
 	return kukeonv1.ApplyDocumentsResult{Resources: f.resources}, f.applyErr
+}
+
+// teamBlueprintRefs lists the realm/name of each blueprint team's stored
+// configs reference.
+func (f *fakeClient) teamBlueprintRefs(team string) []string {
+	var out []string
+	for _, cfg := range f.configs {
+		if team == "" || cfg.Metadata.Labels[api.LabelTeam] == team {
+			ref := cfg.Spec.Blueprint
+			out = append(out, ref.Realm+"/"+ref.Name)
+		}
+	}
+	return out
+}
+
+// pruneShared removes the shared blueprints the team referenced before the
+// apply, did not apply, and no stored config references any more, as
+// kukeond's per-team prune does.
+func (f *fakeClient) pruneShared(previous []string, applied map[string]bool) []kukeonv1.ApplyResourceResult {
+	inUse := f.teamBlueprintRefs("")
+	var out []kukeonv1.ApplyResourceResult
+	for _, key := range previous {
+		stored, ok := f.blueprints[key]
+		if !ok || stored.Metadata.Labels[api.LabelShared] != "true" ||
+			applied["CellBlueprint/"+stored.Metadata.Name] || slices.Contains(inUse, key) {
+			continue
+		}
+		delete(f.blueprints, key)
+		out = append(out, kukeonv1.ApplyResourceResult{
+			Kind: "CellBlueprint", Name: stored.Metadata.Name, Action: "pruned",
+			Details: map[string]string{"realm": stored.Metadata.Realm},
+		})
+	}
+	return out
 }
 
 func composition(t *testing.T, harness string, bindings []config.SecretBinding) *compose.Result {

@@ -95,7 +95,7 @@ func apply(
 		return out, err
 	}
 	// Settle shared blueprint names before anything references them.
-	renamed, err := resolveSharedNames(ctx, client, result, legacyTeam)
+	renamed, superseded, err := resolveSharedNames(ctx, client, result, legacyTeam)
 	if err != nil {
 		return out, err
 	}
@@ -179,6 +179,7 @@ func apply(
 	if err = checkResults(response, expected, command); err != nil {
 		return out, err
 	}
+	out.notes = append(out.notes, supersededNotes(superseded, response)...)
 	out.resources = expected
 	return out, nil
 }
@@ -194,81 +195,285 @@ func createSecret(ctx context.Context, client Client, secret api.SecretDoc, comm
 	return nil
 }
 
-// resolveSharedNames decides the name each shared blueprint is stored under.
-// A blueprint keeps its plain `<harness>[-<profile>]` name unless the realm
-// already holds a *different* blueprint there that this team may not replace —
-// one another team's (or a hand-written) CellConfig references, or one kuke
-// team did not render. Then it takes a content-digest suffix instead of
-// overwriting, and the team's configs follow. Configs of legacyTeam, which
-// is being replaced, are not counted as another team's.
+// resolveSharedNames decides the name each shared blueprint is stored under
+// (issue #1560). Kukeon has one operator, so a blueprint kuke team rendered
+// (`kukeon.io/shared: "true"`) keeps its plain `<harness>[-<profile>]` name
+// and is replaced in place whichever teams' configs use it: they all see the
+// new content, and their cells go OutOfSync until restarted. A note names the
+// replaced blueprint, its old and new digest, and the other configs using it.
+// Only a blueprint kuke team did not render is never overwritten: this team's
+// copy then takes a content-digest suffix and its configs follow. Configs of
+// legacyTeam, which is being replaced, are not reported as another team's.
+//
+// The second return lists the digest-named copies this team's configs used
+// until now and stop using (forks from before #1560, or an earlier revision of
+// a hand-written-plain-name fork): the daemon prunes each one nothing else
+// references, and the caller reports the outcome.
 func resolveSharedNames(
 	ctx context.Context, client Client, result *compose.Result, legacyTeam string,
-) ([]string, error) {
+) ([]string, []supersededCopy, error) {
 	var notes []string
-	var foreign map[string]bool
 	team := result.Entry.Metadata.Name
+	refs := &configRefs{client: client}
 	for _, bp := range result.Blueprints {
 		md := bp.Metadata
-		got, err := client.GetBlueprint(ctx, api.CellBlueprintDoc{
-			APIVersion: api.APIVersionV1Beta1, Kind: api.KindCellBlueprint,
-			Metadata: api.CellBlueprintMetadata{Name: md.Name, Realm: md.Realm},
-		})
+		got, err := lookupBlueprint(ctx, client, md.Name, md.Realm)
 		if err != nil {
-			return nil, requestError("lookup", "blueprint "+md.Name, err)
+			return nil, nil, err
 		}
 		if !got.MetadataExists {
 			continue
 		}
 		existing := got.Blueprint.Metadata.Labels
-		shared := existing[api.LabelShared] == "true"
-		if shared && existing[api.LabelContentDigest] == md.Labels[api.LabelContentDigest] {
-			continue
-		}
-		if shared {
-			if foreign == nil {
-				if foreign, err = foreignBlueprintRefs(ctx, client, md.Realm, team, legacyTeam); err != nil {
-					return nil, err
-				}
+		digest := md.Labels[api.LabelContentDigest]
+		switch {
+		case existing[api.LabelShared] != "true":
+			// Hand-written: overwriting it would destroy the operator's content.
+			name := compose.DigestName(bp)
+			notes = append(notes, fmt.Sprintf(
+				"blueprint %s already exists in realm %s with different content; applied this team's as %s",
+				md.Name, md.Realm, name,
+			))
+			result.RenameBlueprint(bp, name)
+		case existing[api.LabelContentDigest] == digest:
+		default:
+			users, usersErr := refs.users(ctx, md.Realm, md.Name, team, legacyTeam)
+			if usersErr != nil {
+				return nil, nil, usersErr
 			}
-			if !foreign[md.Name] {
-				// Only this team uses it: a new harness revision replaces it.
+			if len(users) == 0 {
+				// Only this team uses it: an ordinary new harness revision.
 				continue
 			}
+			old := existing[api.LabelContentDigest]
+			if old == "" {
+				old = "unknown"
+			}
+			notes = append(notes, fmt.Sprintf(
+				"blueprint %s in realm %s replaced in place (content %s → %s); also used by %s, "+
+					"whose cells pick up the new content on restart",
+				md.Name, md.Realm, old, digest, describeUsers(users),
+			))
 		}
-		name := compose.DigestName(bp)
-		notes = append(notes, fmt.Sprintf(
-			"blueprint %s already exists in realm %s with different content; applied this team's as %s",
-			md.Name, md.Realm, name,
-		))
-		result.RenameBlueprint(bp, name)
 	}
-	return notes, nil
+	superseded, err := supersededCopies(ctx, client, result, refs, team)
+	if err != nil {
+		return nil, nil, err
+	}
+	return notes, superseded, nil
 }
 
-// foreignBlueprintRefs names the realm-scoped blueprints of realm that a
-// CellConfig outside teams references. Empty team names are ignored.
-func foreignBlueprintRefs(ctx context.Context, client Client, realm string, teams ...string) (map[string]bool, error) {
-	configs, err := client.ListConfigs(ctx, "", "", "")
+// supersededCopy is a digest-named shared blueprint this team's configs
+// referenced before this application and no longer do.
+type supersededCopy struct {
+	name, realm, now string
+	// users are the configs outside this team that still reference it.
+	users []configUser
+}
+
+// supersededCopies finds the realm-scoped `<prefix>-<digest>` shared
+// blueprints this team's stored configs reference while this application names
+// that blueprint differently.
+func supersededCopies(
+	ctx context.Context, client Client, result *compose.Result, refs *configRefs, team string,
+) ([]supersededCopy, error) {
+	used, err := refs.teamRefs(ctx, team)
 	if err != nil {
-		return nil, requestError("lookup", "configs", err)
+		return nil, err
 	}
-	out := map[string]bool{}
-	for _, listed := range configs {
-		if label := listed.Metadata.Labels[api.LabelTeam]; label != "" && slices.Contains(teams, label) {
+	var out []supersededCopy
+	seen := map[api.CellConfigBlueprintRef]bool{}
+	for _, ref := range used {
+		if seen[ref] || ref.Space != "" || ref.Stack != "" {
 			continue
 		}
-		got, getErr := client.GetConfig(ctx, api.CellConfigDoc{
-			APIVersion: api.APIVersionV1Beta1, Kind: api.KindCellConfig, Metadata: listed.Metadata,
+		seen[ref] = true
+		i := slices.IndexFunc(result.Blueprints, func(bp *api.CellBlueprintDoc) bool {
+			return bp.Metadata.Realm == ref.Realm && bp.Metadata.Name != ref.Name &&
+				isDigestName(ref.Name, bp.Spec.Prefix)
 		})
-		if getErr != nil {
-			return nil, requestError("lookup", "config "+listed.Metadata.Name, getErr)
-		}
-		if !got.MetadataExists {
+		if i < 0 {
 			continue
 		}
-		ref := got.Config.Spec.Blueprint
-		if ref.Realm == realm && ref.Space == "" && ref.Stack == "" {
-			out[ref.Name] = true
+		got, lookupErr := lookupBlueprint(ctx, client, ref.Name, ref.Realm)
+		if lookupErr != nil {
+			return nil, lookupErr
+		}
+		if !got.MetadataExists || got.Blueprint.Metadata.Labels[api.LabelShared] != "true" {
+			continue
+		}
+		users, usersErr := refs.users(ctx, ref.Realm, ref.Name, team)
+		if usersErr != nil {
+			return nil, usersErr
+		}
+		out = append(out, supersededCopy{
+			name: ref.Name, realm: ref.Realm, now: result.Blueprints[i].Metadata.Name, users: users,
+		})
+	}
+	return out, nil
+}
+
+// isDigestName reports whether name is prefix followed by the content-digest
+// suffix compose.DigestName appends.
+func isDigestName(name, prefix string) bool {
+	const digestLength = 16
+	suffix, ok := strings.CutPrefix(name, prefix+"-")
+	return ok && prefix != "" && len(suffix) == digestLength &&
+		strings.Trim(suffix, "0123456789abcdef") == ""
+}
+
+// supersededNotes reports, after a successful application, what became of
+// each superseded copy: the daemon's per-team prune removes it once nothing
+// references it.
+func supersededNotes(superseded []supersededCopy, response kukeonv1.ApplyDocumentsResult) []string {
+	var notes []string
+	for _, copied := range superseded {
+		pruned := slices.ContainsFunc(response.Resources, func(r kukeonv1.ApplyResourceResult) bool {
+			return r.Kind == string(api.KindCellBlueprint) && r.Name == copied.name && r.Action == "pruned" &&
+				(r.Details["realm"] == "" || r.Details["realm"] == copied.realm)
+		})
+		switch {
+		case pruned:
+			notes = append(notes, fmt.Sprintf(
+				"blueprint %s in realm %s removed: this team's configs now use %s",
+				copied.name, copied.realm, copied.now,
+			))
+		case len(copied.users) > 0:
+			notes = append(notes, fmt.Sprintf(
+				"blueprint %s in realm %s is no longer used by this team (its configs now use %s) "+
+					"but is kept: still referenced by %s",
+				copied.name, copied.realm, copied.now, describeUsers(copied.users),
+			))
+		default:
+			notes = append(notes, fmt.Sprintf(
+				"blueprint %s in realm %s is no longer used by this team (its configs now use %s); "+
+					"once nothing references it, remove it with kuke delete blueprint %s --realm %s",
+				copied.name, copied.realm, copied.now, copied.name, copied.realm,
+			))
+		}
+	}
+	return notes
+}
+
+func lookupBlueprint(ctx context.Context, client Client, name, realm string) (kukeonv1.GetBlueprintResult, error) {
+	got, err := client.GetBlueprint(ctx, api.CellBlueprintDoc{
+		APIVersion: api.APIVersionV1Beta1, Kind: api.KindCellBlueprint,
+		Metadata: api.CellBlueprintMetadata{Name: name, Realm: realm},
+	})
+	if err != nil {
+		return got, requestError("lookup", "blueprint "+name, err)
+	}
+	return got, nil
+}
+
+// configUser is one stored CellConfig, by team label and name.
+type configUser struct{ team, name string }
+
+// describeUsers groups configs by team: `team kukeon (a, b); configs without
+// a team (c)`.
+func describeUsers(users []configUser) string {
+	byTeam := map[string][]string{}
+	var teams []string
+	for _, user := range users {
+		if _, ok := byTeam[user.team]; !ok {
+			teams = append(teams, user.team)
+		}
+		byTeam[user.team] = append(byTeam[user.team], user.name)
+	}
+	slices.Sort(teams)
+	parts := make([]string, 0, len(teams))
+	for _, team := range teams {
+		names := byTeam[team]
+		slices.Sort(names)
+		label := "team " + team
+		if team == "" {
+			label = "configs without a team"
+		}
+		parts = append(parts, label+" ("+strings.Join(names, ", ")+")")
+	}
+	return strings.Join(parts, "; ")
+}
+
+// configRefs reads the stored CellConfigs' blueprint references on demand:
+// the list once, each config's document at most once.
+type configRefs struct {
+	client Client
+	listed []api.CellConfigDoc
+	loaded bool
+	read   map[int]*api.CellConfigBlueprintRef
+}
+
+func (c *configRefs) list(ctx context.Context) error {
+	if c.loaded {
+		return nil
+	}
+	configs, err := c.client.ListConfigs(ctx, "", "", "")
+	if err != nil {
+		return requestError("lookup", "configs", err)
+	}
+	c.listed, c.loaded, c.read = configs, true, map[int]*api.CellConfigBlueprintRef{}
+	return nil
+}
+
+// ref returns the blueprint config i references, or nil once it is gone.
+func (c *configRefs) ref(ctx context.Context, i int) (*api.CellConfigBlueprintRef, error) {
+	if ref, ok := c.read[i]; ok {
+		return ref, nil
+	}
+	listed := c.listed[i]
+	got, err := c.client.GetConfig(ctx, api.CellConfigDoc{
+		APIVersion: api.APIVersionV1Beta1, Kind: api.KindCellConfig, Metadata: listed.Metadata,
+	})
+	if err != nil {
+		return nil, requestError("lookup", "config "+listed.Metadata.Name, err)
+	}
+	var ref *api.CellConfigBlueprintRef
+	if got.MetadataExists {
+		ref = &got.Config.Spec.Blueprint
+	}
+	c.read[i] = ref
+	return ref, nil
+}
+
+// teamRefs lists the blueprints team's stored configs reference.
+func (c *configRefs) teamRefs(ctx context.Context, team string) ([]api.CellConfigBlueprintRef, error) {
+	if err := c.list(ctx); err != nil {
+		return nil, err
+	}
+	var out []api.CellConfigBlueprintRef
+	for i, listed := range c.listed {
+		if listed.Metadata.Labels[api.LabelTeam] != team {
+			continue
+		}
+		ref, err := c.ref(ctx, i)
+		if err != nil {
+			return nil, err
+		}
+		if ref != nil {
+			out = append(out, *ref)
+		}
+	}
+	return out, nil
+}
+
+// users lists the configs outside teams that reference the realm-scoped
+// blueprint name of realm. Empty team names are ignored.
+func (c *configRefs) users(ctx context.Context, realm, name string, teams ...string) ([]configUser, error) {
+	if err := c.list(ctx); err != nil {
+		return nil, err
+	}
+	var out []configUser
+	for i, listed := range c.listed {
+		label := listed.Metadata.Labels[api.LabelTeam]
+		if label != "" && slices.Contains(teams, label) {
+			continue
+		}
+		ref, err := c.ref(ctx, i)
+		if err != nil {
+			return nil, err
+		}
+		if ref != nil && ref.Name == name && ref.Realm == realm && ref.Space == "" && ref.Stack == "" {
+			out = append(out, configUser{team: label, name: listed.Metadata.Name})
 		}
 	}
 	return out, nil

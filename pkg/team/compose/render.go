@@ -314,7 +314,7 @@ func contentDigest(bp *api.CellBlueprintDoc) (string, error) {
 }
 
 // DigestName is the name a shared blueprint takes when the realm already holds
-// a different blueprint under its plain name.
+// a blueprint kuke team did not render under its plain name.
 func DigestName(bp *api.CellBlueprintDoc) string {
 	return bp.Spec.Prefix + "-" + bp.Metadata.Labels[api.LabelContentDigest]
 }

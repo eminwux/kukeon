@@ -46,8 +46,9 @@ func TestKukeondIntegration(t *testing.T) {
 	team.Metadata.Name = fmt.Sprintf("init-check-%d", time.Now().UnixNano())
 	result := compositionFor(t, "codex", nil, team)
 	// Shared blueprints belong to the realm, not to this check: one that
-	// existed before is left alone, and one this run created is removed only
-	// when no other config references it.
+	// existed before is not removed (applying replaces it in place when its
+	// content differs, #1560), and one this run created is removed only when
+	// no other config references it.
 	created := map[string]bool{}
 	for _, bp := range result.Blueprints {
 		got, getErr := client.GetBlueprint(t.Context(), *bp)
@@ -66,8 +67,9 @@ func TestKukeondIntegration(t *testing.T) {
 			if !created[bp.Metadata.Name] {
 				continue
 			}
-			foreign, lookupErr := foreignBlueprintRefs(t.Context(), client, bp.Metadata.Realm, team.Metadata.Name)
-			if lookupErr != nil || foreign[bp.Metadata.Name] {
+			refs := &configRefs{client: client}
+			users, lookupErr := refs.users(t.Context(), bp.Metadata.Realm, bp.Metadata.Name, team.Metadata.Name)
+			if lookupErr != nil || len(users) > 0 {
 				continue
 			}
 			if _, deleteErr := client.DeleteBlueprint(t.Context(), *bp); deleteErr != nil {

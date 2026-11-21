@@ -174,11 +174,16 @@ two roles lives in the pair's CellConfig:
 | Connectors and forges                                                                 | `components`                                                             |
 | Harness state volume                                                                  | `values.STATE_VOLUME`                                                    |
 
-Blueprints carry `kukeon.io/shared: "true"` and no team label. If the realm
-already holds a different blueprint under a shared name that another team's
-Config references, this team's is applied as `<name>-<content digest>` instead
-of overwriting it. A team's apply removes a shared blueprint it stopped using
-only when no other CellConfig references it.
+Blueprints carry `kukeon.io/shared: "true"` and no team label. One realm has
+one copy of each shared blueprint: when a team renders different content under
+a shared name, its apply replaces the blueprint in place, whichever teams'
+Configs reference it, and says so in a note (old → new content digest, and the
+other Configs using it). Their cells turn `OutOfSync` and pick up the new
+content on `kuke restart`. The last apply wins, so keep teams on the same
+harness revision by pinning it in each team's sources. Only a blueprint kuke
+team did not render — without the shared label — is never overwritten; this
+team's is then applied as `<name>-<content digest>`. A team's apply removes a
+shared blueprint it stopped using only when no other CellConfig references it.
 
 ### Modes
 

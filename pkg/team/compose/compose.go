@@ -611,7 +611,7 @@ func union(a, b []string) []string {
 
 // RenameBlueprint gives a shared blueprint a new name and repoints every
 // Config that references it. Application uses it to append a content digest
-// when the realm already holds a different blueprint under the same name.
+// when the realm already holds a hand-written blueprint under the same name.
 func (r *Result) RenameBlueprint(bp *api.CellBlueprintDoc, name string) {
 	bp.Metadata.Name = name
 	for i := range r.Pairs {
