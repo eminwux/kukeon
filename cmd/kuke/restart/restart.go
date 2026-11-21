@@ -37,27 +37,30 @@ type MockControllerKey struct{}
 
 // NewRestartCmd builds the `kuke restart <name>` leaf. Cell is the only
 // resource this verb targets. A Ready cell is stop+start; a terminal/degraded
-// cell (Stopped/Exited/Error/Failed) is equivalent to `kuke start <name>` (the
-// daemon recovers a Failed cell via a recreate-style path, #1268); a
-// genuinely-unrecoverable Pending/Unknown cell is refused with a
-// `kuke delete cell` pointer.
+// cell (Stopped/Exited/Error/Failed/Degraded) is equivalent to `kuke start
+// <name>` (the daemon recovers a Failed/Error/Degraded cell via a
+// recreate-style path, #1268); a genuinely-unrecoverable Pending/Unknown cell
+// is refused with a `kuke delete cell` pointer.
 //
-// For a Config-lineage cell whose live spec has diverged from the daemon-stored
-// Config (Status.OutOfSync = true), the start step automatically re-materialises
-// from the Config so the restart is also a reconcile. That logic lives in the
-// daemon's controller.StartCell (internal/controller/start_cell.go) — restart
-// is just stop+start on top, and `kuke stop` + `kuke start` produces the same
-// end state as `kuke restart`. Issue #983.
+// For a Config-lineage cell, the start step renders the daemon-stored Config
+// and, when the render differs from the cell, re-materialises from it so the
+// restart is also a reconcile — decided from that render, not from
+// Status.OutOfSync (issue #1569). That logic lives in the daemon's
+// controller.StartCell (internal/controller/start_cell.go) — restart is just
+// stop+start on top, and `kuke stop` + `kuke start` produces the same end
+// state as `kuke restart`. Issue #983.
 func NewRestartCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "restart [name]",
 		Aliases: []string{"res"},
-		Short:   "Restart a cell (or a fleet via -l <selector>; on OutOfSync also reconciles from Config)",
+		Short:   "Restart a cell (or a fleet via -l <selector>; a Config-lineage cell is also reconciled from its Config)",
 		Long: "Restart a cell. Bounces the cell's containers (stop + start). " +
-			"When the cell carries a `kukeon.io/config=<name>` lineage label " +
-			"and the daemon has marked it OutOfSync, the start step uses the " +
-			"freshly materialised spec from the Config so the restart is also " +
-			"a reconcile — equivalent to `kuke stop` + `kuke start`. " +
+			"When the cell carries a `kukeon.io/config=<name>` lineage label, " +
+			"the start step renders the Config and, when the render differs " +
+			"from the cell, uses the freshly materialised spec so the restart " +
+			"is also a reconcile — equivalent to `kuke stop` + `kuke start`. " +
+			"The cell does not need to be marked OutOfSync first: a restart " +
+			"straight after a Config edit runs the new spec. " +
 			"Severs any active attach session as a side effect of the stop step. " +
 			"With `-l <selector>` (mutually exclusive with a positional name) the " +
 			"restart fans out across every cell whose labels match, reconciling " +

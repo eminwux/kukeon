@@ -264,3 +264,73 @@ func TestCellLifecycleLock_DifferentCellsRunConcurrently(t *testing.T) {
 	<-doneA
 	<-doneB
 }
+
+// TestCellLifecycleLock_ReconcileWaitsForUpdateCell is case 10 of issue
+// #1569 (AC6): UpdateCell holds the per-cell lock for its whole span, so a
+// ReconcileCell started while UpdateCell is parked inside it (here in the
+// containerd read GetCell makes first) blocks until UpdateCell releases.
+func TestCellLifecycleLock_ReconcileWaitsForUpdateCell(t *testing.T) {
+	assertReconcileWaitsFor(t, func(r *Exec, cell intmodel.Cell) {
+		_, _ = r.UpdateCell(cell)
+	})
+}
+
+// TestCellLifecycleLock_ReconcileWaitsForUpdateContainer is the
+// UpdateContainer half of case 10.
+func TestCellLifecycleLock_ReconcileWaitsForUpdateContainer(t *testing.T) {
+	assertReconcileWaitsFor(t, func(r *Exec, cell intmodel.Cell) {
+		_, _ = r.UpdateContainer(cell, cell.Spec.Containers[0])
+	})
+}
+
+// assertReconcileWaitsFor parks op inside the per-cell lock (at its first
+// gated containerd call) and asserts a concurrent ReconcileCell on the same
+// cell does not return until op releases the lock.
+func assertReconcileWaitsFor(t *testing.T, op func(r *Exec, cell intmodel.Cell)) {
+	t.Helper()
+	realm, space, stack, cellName := "default", "kukeon", "kukeon", "web"
+
+	entered := make(chan struct{}, 2)
+	release := make(chan struct{})
+	fake := &deleteCellFakeClient{existsContainerFn: gateExistsContainer(entered, release)}
+	r := newDeleteCellTestExec(t, fake)
+	seedDeleteCellRealm(t, r, realm)
+	seedDeleteCellCell(t, r, realm, space, stack, cellName)
+	cell := oneContainerCell(realm, space, stack, cellName)
+
+	opDone := make(chan struct{})
+	go func() {
+		op(r, cell)
+		close(opDone)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("update op never reached the ExistsContainer gate; cannot exercise the lock")
+	}
+
+	recDone := make(chan struct{})
+	go func() {
+		_, _, _ = r.ReconcileCell(cell)
+		close(recDone)
+	}()
+	// ReconcileCell also makes the gated ExistsContainer call once it holds
+	// the lock, so reaching the gate (a second entry signal) or returning
+	// while the update op is parked means it ran inside the op's span.
+	select {
+	case <-entered:
+		t.Fatal("ReconcileCell reached containerd while the update op held the per-cell lock (issue #1569)")
+	case <-recDone:
+		t.Fatal("ReconcileCell returned while the update op held the per-cell lock (issue #1569)")
+	case <-time.After(300 * time.Millisecond):
+		// Expected: ReconcileCell is parked at lock acquisition.
+	}
+
+	close(release)
+	select {
+	case <-recDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("ReconcileCell did not proceed after the update op released the per-cell lock")
+	}
+	<-opDone
+}

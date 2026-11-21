@@ -37,16 +37,15 @@ func (b *Exec) StopCell(cell intmodel.Cell) (StopCellResult, error) {
 		return result, err
 	}
 
-	// Stop all containers in the cell
+	// Stop all containers in the cell. The runner persists the label it
+	// chose (Stopped, Stopped + OperatorStopped, or an Exited / Error label
+	// kept as it was; see classifyOperatorStop) under the per-cell lock, and
+	// is the only writer of the verb's outcome: a second write here, from a
+	// snapshot taken outside the lock, could overwrite a concurrent locked
+	// writer's update (issue #1569).
 	internalCell, err = b.runner.StopCell(internalCell)
 	if err != nil {
 		return result, fmt.Errorf("failed to stop cell containers: %w", err)
-	}
-
-	// Persist the label the runner chose (Stopped, Stopped + OperatorStopped,
-	// or an Exited / Error label kept as it was; see classifyOperatorStop).
-	if err = b.runner.UpdateCellMetadata(internalCell); err != nil {
-		return result, fmt.Errorf("failed to update cell metadata: %w", err)
 	}
 
 	result.Cell = internalCell

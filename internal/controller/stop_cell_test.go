@@ -416,7 +416,7 @@ func TestStopCell_RunnerErrors(t *testing.T) {
 			errContains: "failed to stop cell containers",
 		},
 		{
-			name:      "UpdateCellMetadata runner error is wrapped",
+			name:      "controller does not write the cell after runner StopCell (#1569)",
 			cellName:  "test-cell",
 			realmName: "test-realm",
 			spaceName: "test-space",
@@ -437,12 +437,14 @@ func TestStopCell_RunnerErrors(t *testing.T) {
 					cell.Status.State = intmodel.CellStateStopped
 					return cell, nil
 				}
+				// The runner persists the verb's outcome under the per-cell
+				// lock; a second controller write would be a stale-snapshot
+				// write outside it (issue #1569).
 				f.UpdateCellMetadataFn = func(_ intmodel.Cell) error {
-					return errors.New("metadata update failed")
+					return errors.New("unexpected controller UpdateCellMetadata after StopCell")
 				}
 			},
-			wantErr:     true,
-			errContains: "failed to update cell metadata",
+			wantErr: false,
 		},
 	}
 

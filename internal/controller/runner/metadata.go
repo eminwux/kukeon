@@ -406,6 +406,22 @@ func (r *Exec) writeStackMetadata(
 }
 
 func (r *Exec) UpdateCellMetadata(cell intmodel.Cell) error {
+	return r.writeCellMetadata(cell, nil, nil)
+}
+
+// writeCellMetadata is the Cell counterpart of writeRealmMetadata. A non-nil
+// missingErr makes the write must-exist (a cell whose metadata is gone
+// returns missingErr instead of being recreated) and a non-nil checkPrior
+// runs against the on-disk document before the write. UpdateCellMetadata
+// passes nil, nil so the create flows can still write the first document;
+// status-only writers (PatchCellMetadata, persistCellStatusGuarded) pass
+// errdefs.ErrCellNotFound so a write landing after DeleteCell cannot
+// resurrect the cell (issue #1569).
+func (r *Exec) writeCellMetadata(
+	cell intmodel.Cell,
+	missingErr error,
+	checkPrior func(v1beta1.CellDoc) error,
+) error {
 	stampCellLifecycle(&cell, r.nowUTC())
 
 	// Convert to external model for filesystem boundary
@@ -425,9 +441,12 @@ func (r *Exec) UpdateCellMetadata(cell intmodel.Cell) error {
 		func(d v1beta1.CellDoc) int64 { return d.Metadata.Generation },
 		func(d *v1beta1.CellDoc, g int64) { d.Metadata.Generation = g },
 		func(d v1beta1.CellDoc) any { return d.Spec },
-		nil,
-		nil,
+		missingErr,
+		checkPrior,
 	)
+	if missingErr != nil && errors.Is(err, missingErr) {
+		return err
+	}
 	if err != nil {
 		r.logger.Error("failed to write metadata", "err", fmt.Sprintf("%v", err))
 		return fmt.Errorf("%w: %w", errdefs.ErrWriteMetadata, err)

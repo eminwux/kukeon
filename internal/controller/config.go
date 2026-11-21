@@ -22,7 +22,6 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/apischeme"
-	"github.com/eminwux/kukeon/internal/cellconfig"
 	applypkg "github.com/eminwux/kukeon/internal/controller/apply"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
@@ -234,39 +233,23 @@ func (b *Exec) DeleteConfig(config intmodel.CellConfig) (DeleteConfigResult, err
 	return res, nil
 }
 
-// configBackRefCells returns the scope paths of every persisted cell that
-// carries the kukeon.io/config back-reference label (cellconfig.LabelConfig)
-// pointing at this config, within the config's own scope. Historically a Config
-// materialized at most one live cell within scope (the legacy 1:1 StableName
-// identity pin, retired in epic:cell-identity P2 #1022; the 1:N binding is wired
-// in a later phase), so this is normally zero or one entry today; it stays a
-// slice to surface every match without guessing. The match is by label value == config name plus a scope
-// prefix (the cell's realm always matches; space/stack match only when the
-// config sets them) so a same-named config in a sibling scope never produces a
-// false positive. The label is set by `kuke run -c` (#625); until that lands no
-// cell carries it and this is a no-op.
+// configBackRefCells returns the scope paths of every persisted cell bound to
+// this config. The match is cellBoundToConfig, the same one the OutOfSync
+// lookup uses (issue #1569): a cell with render provenance matches only when
+// its BindingRef names this exact Config scope, so a same-named config in a
+// sibling or nested scope never produces a false positive; a cell without
+// provenance falls back to label value == config name plus a scope prefix
+// (the cell's realm always matches; space/stack match only when the config
+// sets them).
 func (b *Exec) configBackRefCells(md intmodel.CellConfigMetadata) ([]string, error) {
 	cells, err := b.runner.ListCells("", "", "")
 	if err != nil {
 		return nil, err
 	}
 
-	realm := strings.TrimSpace(md.Realm)
-	space := strings.TrimSpace(md.Space)
-	stack := strings.TrimSpace(md.Stack)
-
 	var refs []string
 	for _, cell := range cells {
-		if cell.Metadata.Labels[cellconfig.LabelConfig] != md.Name {
-			continue
-		}
-		if cell.Spec.RealmName != realm {
-			continue
-		}
-		if space != "" && cell.Spec.SpaceName != space {
-			continue
-		}
-		if stack != "" && cell.Spec.StackName != stack {
+		if !cellBoundToConfig(cell, md) {
 			continue
 		}
 		refs = append(refs, fmt.Sprintf("%s/%s/%s/%s",

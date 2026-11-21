@@ -541,91 +541,11 @@ func TestStartCell_OutOfSyncReapply_NoLineageLabelSkipsReapply(t *testing.T) {
 	}
 }
 
-func TestStartCell_OutOfSyncReapply_OutOfSyncErrorSkipsReapply(t *testing.T) {
-	live := reapplyLineageCell("test-realm", "test-space", "test-stack")
-	live.Status.OutOfSyncError = "referenced blueprint missing"
-	live.Status.OutOfSync = false // detector blocked on the error
-
-	var recreateCalled, getConfigCalled bool
-	f := &fakeRunner{
-		GetCellFn:                 func(_ intmodel.Cell) (intmodel.Cell, error) { return live, nil },
-		ExistsCgroupFn:            func(_ any) (bool, error) { return true, nil },
-		ExistsCellRootContainerFn: func(_ intmodel.Cell) (bool, error) { return true, nil },
-		// #1136: materializeCellFromConfig now reproduces the runner-injected
-		// space-derived container fields. The reapply fixtures' containers carry
-		// neither an explicit cniConfigPath nor space defaults, so these stubs
-		// return empties — keeping the materialised desired diff to the intended
-		// image/hostNetwork drift only.
-		GetSpaceFn:                  func(s intmodel.Space) (intmodel.Space, error) { return s, nil },
-		GetRealmFn:                  func(r intmodel.Realm) (intmodel.Realm, error) { return r, nil },
-		GetStackFn:                  func(st intmodel.Stack) (intmodel.Stack, error) { return st, nil },
-		ResolveSpaceCNIConfigPathFn: func(string, string) (string, error) { return "", nil },
-		GetConfigFn: func(intmodel.CellConfig) (intmodel.CellConfig, error) {
-			getConfigCalled = true
-			return intmodel.CellConfig{}, nil
-		},
-		RecreateCellFn: func(intmodel.Cell) (intmodel.Cell, error) {
-			recreateCalled = true
-			return intmodel.Cell{}, nil
-		},
-		StartCellFn:          func(c intmodel.Cell) (intmodel.Cell, error) { c.Status.State = intmodel.CellStateReady; return c, nil },
-		UpdateCellMetadataFn: func(intmodel.Cell) error { return nil },
-	}
-
-	ctrl := setupTestController(t, f)
-	if _, err := ctrl.StartCell(buildTestCell("prod", "test-realm", "test-space", "test-stack")); err != nil {
-		t.Fatalf("StartCell returned error: %v", err)
-	}
-	if getConfigCalled {
-		t.Error("GetConfig was called despite OutOfSyncError being set; reapply must skip")
-	}
-	if recreateCalled {
-		t.Error("RecreateCell was called despite OutOfSyncError being set")
-	}
-}
-
-func TestStartCell_OutOfSyncReapply_OutOfSyncFalseSkipsReapply(t *testing.T) {
-	live := reapplyLineageCell("test-realm", "test-space", "test-stack")
-	live.Status.OutOfSync = false
-	live.Status.OutOfSyncReason = ""
-
-	var getConfigCalled, recreateCalled bool
-	f := &fakeRunner{
-		GetCellFn:                 func(_ intmodel.Cell) (intmodel.Cell, error) { return live, nil },
-		ExistsCgroupFn:            func(_ any) (bool, error) { return true, nil },
-		ExistsCellRootContainerFn: func(_ intmodel.Cell) (bool, error) { return true, nil },
-		// #1136: materializeCellFromConfig now reproduces the runner-injected
-		// space-derived container fields. The reapply fixtures' containers carry
-		// neither an explicit cniConfigPath nor space defaults, so these stubs
-		// return empties — keeping the materialised desired diff to the intended
-		// image/hostNetwork drift only.
-		GetSpaceFn:                  func(s intmodel.Space) (intmodel.Space, error) { return s, nil },
-		GetRealmFn:                  func(r intmodel.Realm) (intmodel.Realm, error) { return r, nil },
-		GetStackFn:                  func(st intmodel.Stack) (intmodel.Stack, error) { return st, nil },
-		ResolveSpaceCNIConfigPathFn: func(string, string) (string, error) { return "", nil },
-		GetConfigFn: func(intmodel.CellConfig) (intmodel.CellConfig, error) {
-			getConfigCalled = true
-			return intmodel.CellConfig{}, nil
-		},
-		RecreateCellFn: func(intmodel.Cell) (intmodel.Cell, error) {
-			recreateCalled = true
-			return intmodel.Cell{}, nil
-		},
-		StartCellFn:          func(c intmodel.Cell) (intmodel.Cell, error) { c.Status.State = intmodel.CellStateReady; return c, nil },
-		UpdateCellMetadataFn: func(intmodel.Cell) error { return nil },
-	}
-
-	ctrl := setupTestController(t, f)
-	if _, err := ctrl.StartCell(buildTestCell("prod", "test-realm", "test-space", "test-stack")); err != nil {
-		t.Fatalf("StartCell returned error: %v", err)
-	}
-	if getConfigCalled {
-		t.Error("GetConfig was called for a Synced cell; reapply must skip")
-	}
-	if recreateCalled {
-		t.Error("RecreateCell was called for a Synced cell")
-	}
-}
+// The former TestStartCell_OutOfSyncReapply_OutOfSyncErrorSkipsReapply and
+// TestStartCell_OutOfSyncReapply_OutOfSyncFalseSkipsReapply pinned the
+// Status.OutOfSync / Status.OutOfSyncError gates issue #1569 removed; their
+// replacement is TestStartCell_LineageReapplyIgnoresStatusGates in
+// start_cell_lineage_test.go.
 
 // TestStartCell_OutOfSyncReapply_LineageConfigDeletedFallsThrough covers the
 // "lineage Config deleted" case — the reconciler keeps the OutOfSync flag set

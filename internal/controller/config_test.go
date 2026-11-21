@@ -25,6 +25,7 @@ import (
 	"github.com/eminwux/kukeon/internal/cellconfig"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	ext "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // TestGetConfig_ReportsNotFoundWithoutError pins the GetBlueprint-shaped
@@ -248,5 +249,51 @@ func TestDeleteConfig_ValidatesScope(t *testing.T) {
 		Metadata: intmodel.CellConfigMetadata{Realm: "default"},
 	}); !errors.Is(err, errdefs.ErrConfigNameRequired) {
 		t.Errorf("DeleteConfig() error = %v, want ErrConfigNameRequired", err)
+	}
+}
+
+// TestDeleteConfig_BackRefMatchesProvenanceScope pins the AC3 back-reference
+// half of issue #1569: with same-named Configs at space and stack scope, a
+// cell whose provenance binds it to the space-scoped one is reported only
+// when that one is deleted, never for the stack-scoped namesake.
+func TestDeleteConfig_BackRefMatchesProvenanceScope(t *testing.T) {
+	bound := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
+			Name:   "web-1",
+			Labels: map[string]string{cellconfig.LabelConfig: "web"},
+		},
+		Spec: intmodel.CellSpec{
+			RealmName: "default", SpaceName: "team-a", StackName: "api",
+			Provenance: &intmodel.CellProvenance{
+				BindingKind: ext.BindingKindConfig,
+				BindingRef:  intmodel.CellBindingRef{Name: "web", Realm: "default", Space: "team-a"},
+			},
+		},
+	}
+	mockRunner := &fakeRunner{
+		ListCellsFn:    func(string, string, string) ([]intmodel.Cell, error) { return []intmodel.Cell{bound}, nil },
+		DeleteConfigFn: func(intmodel.CellConfig) error { return nil },
+	}
+	ctrl := setupTestController(t, mockRunner)
+
+	stackScoped, err := ctrl.DeleteConfig(intmodel.CellConfig{
+		Metadata: intmodel.CellConfigMetadata{Name: "web", Realm: "default", Space: "team-a", Stack: "api"},
+	})
+	if err != nil {
+		t.Fatalf("DeleteConfig(stack-scoped) error = %v", err)
+	}
+	if len(stackScoped.BackRefCells) != 0 {
+		t.Errorf("stack-scoped namesake reported %v; the cell is bound to the space-scoped Config",
+			stackScoped.BackRefCells)
+	}
+
+	spaceScoped, err := ctrl.DeleteConfig(intmodel.CellConfig{
+		Metadata: intmodel.CellConfigMetadata{Name: "web", Realm: "default", Space: "team-a"},
+	})
+	if err != nil {
+		t.Fatalf("DeleteConfig(space-scoped) error = %v", err)
+	}
+	if len(spaceScoped.BackRefCells) != 1 || spaceScoped.BackRefCells[0] != "default/team-a/api/web-1" {
+		t.Errorf("BackRefCells = %v, want [default/team-a/api/web-1]", spaceScoped.BackRefCells)
 	}
 }

@@ -272,7 +272,8 @@ func recordContainerExit(cell *intmodel.Cell, containerID string, es *containerd
 // killCellLocked. It re-reads the cell (GetCell returns the persisted label
 // plus fresh container statuses), decides the label from that view before
 // anything is torn down, runs the teardown core, applies the label and
-// persists once. The caller must hold the per-cell lifecycle lock.
+// persists once; a failed persist is returned. The caller must hold the
+// per-cell lifecycle lock.
 func (r *Exec) operatorTeardownLocked(cell intmodel.Cell, mode cellTeardownMode) (intmodel.Cell, error) {
 	cellName := strings.TrimSpace(cell.Metadata.Name)
 	if cellName == "" {
@@ -314,11 +315,11 @@ func (r *Exec) operatorTeardownLocked(cell intmodel.Cell, mode cellTeardownMode)
 	}
 	applyOperatorStopLabel(&torn, label)
 
+	// This is the only persist of the verb's outcome: the controller no
+	// longer writes the cell a second time after the runner returns (issue
+	// #1569), so a failed write must surface instead of being logged away.
 	if err = r.UpdateCellMetadata(torn); err != nil {
-		r.logger.WarnContext(r.ctx, "failed to persist cell status after teardown",
-			"cell", cellName,
-			"error", err)
-		// Continue anyway - status persistence is best-effort, as before.
+		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateCellMetadata, err)
 	}
 	return torn, nil
 }

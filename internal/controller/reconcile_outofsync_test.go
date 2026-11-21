@@ -28,6 +28,7 @@
 package controller_test
 
 import (
+	"encoding/json"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -128,6 +129,9 @@ func runOutOfSyncHarness(t *testing.T, cell intmodel.Cell, mock *fakeRunner) (co
 	mock.ListCellsFn = func(string, string, string) ([]intmodel.Cell, error) {
 		return []intmodel.Cell{cell}, nil
 	}
+	if mock.PatchCellMetadataFn == nil {
+		mock.PatchCellMetadataFn = patchAgainstSnapshot(t, cell, mock.UpdateCellMetadataFn)
+	}
 	ctrl := setupTestController(t, mock)
 	res, err := ctrl.ReconcileCells()
 	if err != nil {
@@ -140,6 +144,68 @@ func runOutOfSyncHarness(t *testing.T, cell intmodel.Cell, mock *fakeRunner) (co
 		CellsDeleted: res.CellsDeleted,
 		Errors:       res.Errors,
 	}, captured
+}
+
+// patchAgainstSnapshot emulates runner.PatchCellMetadata for a fakeRunner with
+// no backing store: the "fresh" document is a deep copy of snapshot (the cell
+// as persisted), and a mutate that returns true hands the patched copy to
+// write. It lets the OutOfSync tests keep capturing the persisted cell
+// through UpdateCellMetadataFn now that the tick writes through the locked
+// patch (issue #1569).
+func patchAgainstSnapshot(
+	t *testing.T, snapshot intmodel.Cell, write func(intmodel.Cell) error,
+) func(intmodel.Cell, func(*intmodel.Cell) bool) error {
+	t.Helper()
+	return func(_ intmodel.Cell, mutate func(*intmodel.Cell) bool) error {
+		fresh := cloneCellForTest(t, snapshot)
+		if !mutate(&fresh) {
+			return nil
+		}
+		if write == nil {
+			return nil
+		}
+		return write(fresh)
+	}
+}
+
+// patchAgainstCellSet is patchAgainstSnapshot for a multi-cell walk: the
+// snapshot a patch starts from is the listed cell with the same name.
+func patchAgainstCellSet(
+	t *testing.T, cells []intmodel.Cell, write func(intmodel.Cell) error,
+) func(intmodel.Cell, func(*intmodel.Cell) bool) error {
+	t.Helper()
+	return func(target intmodel.Cell, mutate func(*intmodel.Cell) bool) error {
+		for _, c := range cells {
+			if c.Metadata.Name == target.Metadata.Name {
+				return patchAgainstSnapshot(t, c, write)(target, mutate)
+			}
+		}
+		return errdefs.ErrCellNotFound
+	}
+}
+
+// cloneCellForTest deep-copies a cell through its serialized external
+// document, the same round trip the runner's on-disk write and read take, so
+// the copy shares no maps or slices with the original.
+func cloneCellForTest(t *testing.T, cell intmodel.Cell) intmodel.Cell {
+	t.Helper()
+	doc, err := apischeme.BuildCellExternalFromInternal(cell, apischeme.VersionV1Beta1)
+	if err != nil {
+		t.Fatalf("BuildCellExternalFromInternal: %v", err)
+	}
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal cell doc: %v", err)
+	}
+	var decoded ext.CellDoc
+	if err = json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal cell doc: %v", err)
+	}
+	out, err := apischeme.ConvertCellDocToInternal(decoded)
+	if err != nil {
+		t.Fatalf("ConvertCellDocToInternal: %v", err)
+	}
+	return out
 }
 
 // controllerResult mirrors controller.ReconcileResult so tests can read
@@ -642,3 +708,62 @@ func TestReconcileCells_OutOfSync_RealmScopedCellSkipsRedundantProbes(t *testing
 // production constant would soften the test (would still flag a true
 // regression as long as the production constant remains stable).
 const outOfSyncReasonConfigDeletedTest = "lineage Config deleted"
+
+// runLineageTick runs one reconcile tick over live against getConfig and getBlueprint, and
+// returns the persisted cell (nil when nothing was written) and every Config
+// lookup the tick made. The walk lists test-realm/test-space/default.
+func runLineageTick(
+	t *testing.T,
+	live intmodel.Cell,
+	getConfig func(intmodel.CellConfig) (intmodel.CellConfig, error),
+	getBlueprint func(intmodel.CellBlueprint) (intmodel.CellBlueprint, error),
+) (*intmodel.Cell, []intmodel.CellConfigMetadata) {
+	t.Helper()
+	var lookups []intmodel.CellConfigMetadata
+	mock := stubLineageRunner(func(c intmodel.CellConfig) (intmodel.CellConfig, error) {
+		lookups = append(lookups, c.Metadata)
+		return getConfig(c)
+	}, getBlueprint, nil)
+	mock.ListRealmsFn = func() ([]intmodel.Realm, error) {
+		return []intmodel.Realm{buildTestRealm("test-realm", "")}, nil
+	}
+	mock.ListSpacesFn = func(string) ([]intmodel.Space, error) {
+		return []intmodel.Space{buildTestSpace("test-space", "test-realm")}, nil
+	}
+	mock.ListStacksFn = func(string, string) ([]intmodel.Stack, error) {
+		return []intmodel.Stack{buildTestStack("default", "test-realm", "test-space")}, nil
+	}
+	res, captured := runOutOfSyncHarness(t, live, mock)
+	if res.CellsErrored != 0 {
+		t.Fatalf("CellsErrored = %d (%v)", res.CellsErrored, res.Errors)
+	}
+	return captured, lookups
+}
+
+// TestReconcileCells_OutOfSync_LookupUsesProvenance is the tick half of cases
+// 5 and 6 (AC3): with same-named Configs at space and stack scope, a cell
+// stamped from the space-scoped one is compared against that one only (a
+// stack-scoped impostor does not mark it OutOfSync), and when that one is
+// deleted the cell reports "lineage Config deleted" instead of resolving the
+// impostor.
+func TestReconcileCells_OutOfSync_LookupUsesProvenance(t *testing.T) {
+	live := provenanceBoundCell()
+	live.Spec.Containers[0].Image = "nginx:2.0" // matches the space-scoped Config's render
+	live.Status = intmodel.CellStatus{State: intmodel.CellStateReady}
+
+	captured, lookups := runLineageTick(t, live, shadowedConfigLookup(false), impostorAwareBlueprintLookup(t))
+	if captured != nil && captured.Status.OutOfSync {
+		t.Errorf("cell compared against the impostor: OutOfSync reason %q", captured.Status.OutOfSyncReason)
+	}
+	if len(lookups) != 1 || lookups[0].Space != "test-space" || lookups[0].Stack != "" {
+		t.Errorf("GetConfig lookups = %+v, want one at the provenance scope", lookups)
+	}
+
+	captured, lookups = runLineageTick(t, live, shadowedConfigLookup(true), impostorAwareBlueprintLookup(t))
+	if captured == nil || !captured.Status.OutOfSync || captured.Status.OutOfSyncReason != "lineage Config deleted" {
+		t.Errorf("deleted bound Config verdict = %+v, want OutOfSync lineage Config deleted", captured)
+	}
+	if len(lookups) != 1 {
+		t.Errorf("GetConfig lookups = %+v, want one exact lookup and no widening", lookups)
+	}
+}

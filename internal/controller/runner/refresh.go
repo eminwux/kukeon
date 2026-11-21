@@ -48,9 +48,19 @@ func observedGenerationBehind(status intmodel.CellStatus, generation int64) bool
 // window). A stale observation is reported as a benign skip (persisted ==
 // false, nil error): the next reconcile tick re-derives status from the
 // fresher spec rather than clobbering it with a stale view.
+//
+// The write is must-exist (issue #1569): a cell whose metadata was removed by
+// a DeleteCell that landed after the reconciler listed it is reported as the
+// same benign skip instead of being recreated from the stale snapshot.
 func (r *Exec) persistCellStatusGuarded(cell intmodel.Cell) (bool, error) {
 	cell.Status.ObservedGeneration = cell.Metadata.Generation
-	if err := r.UpdateCellMetadata(cell); err != nil {
+	if err := r.writeCellMetadata(cell, errdefs.ErrCellNotFound, nil); err != nil {
+		if errors.Is(err, errdefs.ErrCellNotFound) {
+			r.logger.DebugContext(r.ctx,
+				"reconcile: skipping cell persist; cell metadata is gone",
+				"cell", cell.Metadata.Name)
+			return false, nil
+		}
 		if errors.Is(err, errdefs.ErrStaleResource) {
 			r.logger.DebugContext(r.ctx,
 				"reconcile: skipping stale cell persist; on-disk generation advanced",

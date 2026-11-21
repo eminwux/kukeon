@@ -30,9 +30,25 @@ import (
 // - Container additions (containers in desired but not in actual)
 // - Container updates (containers in both, with spec changes)
 // - Container removals (orphans: containers in actual but not in desired)
+// - Cell-level fields DiffCell routes here as Compatible (spec.autoDelete,
+// spec.tty) and, when desired carries one, the render provenance
 //
 // Breaking changes (root container spec changes, parent associations) should be rejected before calling this method.
+//
+// It holds the per-cell lifecycle lock for its whole span (issue #1569): it
+// stops, deletes, recreates and starts children and then writes metadata,
+// and a reconcile tick landing mid-update would otherwise observe a child in
+// a transient state (stopped or deleted) and act on it.
 func (r *Exec) UpdateCell(desired intmodel.Cell) (intmodel.Cell, error) {
+	defer r.lockCell(desired)()
+	return r.updateCellLocked(desired)
+}
+
+// updateCellLocked is UpdateCell's body. The caller must hold the per-cell
+// lock.
+//
+//nolint:funlen,gocognit,gocyclo,cyclop // UpdateCell's existing body, moved under the lock wrapper (#1569).
+func (r *Exec) updateCellLocked(desired intmodel.Cell) (intmodel.Cell, error) {
 	// Get existing cell
 	existing, err := r.GetCell(desired)
 	if err != nil {
@@ -46,6 +62,8 @@ func (r *Exec) UpdateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 	// genuine spec change that legitimately routes through UpdateCell
 	// strips the canonical labels (issue #455).
 	existing.Metadata.Labels = mergeManagedLabels(existing.Metadata.Labels, desired.Metadata.Labels)
+
+	applyCompatibleCellFields(&existing, desired)
 
 	// Build maps of desired and actual containers by ID
 	desiredContainers := make(map[string]*intmodel.ContainerSpec)
@@ -278,6 +296,25 @@ func (r *Exec) UpdateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 	}
 
 	return existing, nil
+}
+
+// applyCompatibleCellFields copies the cell-level fields DiffCell classifies
+// as Compatible — spec.autoDelete and spec.tty — from desired onto existing.
+// They route to UpdateCell, so UpdateCell must persist them or the cell stays
+// OutOfSync forever (issue #1569). Spec.Provenance is copied only when desired
+// carries one: a hand-written Cell document applied with `kuke apply -f` has
+// none, and wiping the live render record would orphan the cell's Config
+// lineage.
+func applyCompatibleCellFields(existing *intmodel.Cell, desired intmodel.Cell) {
+	existing.Spec.AutoDelete = desired.Spec.AutoDelete
+	existing.Spec.Tty = nil
+	if desired.Spec.Tty != nil {
+		tty := *desired.Spec.Tty
+		existing.Spec.Tty = &tty
+	}
+	if desired.Spec.Provenance != nil {
+		existing.Spec.Provenance = intmodel.CloneCellProvenance(desired.Spec.Provenance)
+	}
 }
 
 // containerSpecChanged reports whether a non-root container must be
