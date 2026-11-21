@@ -7,6 +7,7 @@ import { ErrorNotice, useResource } from "./request";
 import { apiPath } from "./routes";
 import type { InventoryResource } from "./inventory";
 import { Icon } from "./icons";
+import { darkAnsi, darkTerminalBackground, lightAnsi, lightTerminalBackground } from "./terminal-palette.js";
 
 type Container = { id: string; attachable?: boolean; root?: boolean };
 export type TerminalState = "connecting" | "attached" | "disconnected" | "interrupted";
@@ -18,15 +19,11 @@ const maxSessions = 20;
 export const cellId = (scope: string[]) => JSON.stringify(scope);
 export const sessionId = (scope: string[], container: string) => JSON.stringify([...scope, container]);
 export const unavailableStates = new Set(["Stopped", "Stopping", "Exited", "Deleted", "Failed", "Error", "Pending", "Unknown"]);
-const terminalTheme = {
-  background: "#000000", foreground: "#ffffff", cursor: "#ffffff", cursorAccent: "#000000", selectionBackground: "#4d4d4d",
-  black: "#000000", red: "#cd0000", green: "#00cd00", yellow: "#cdcd00", blue: "#0000ee", magenta: "#cd00cd", cyan: "#00cdcd", white: "#e5e5e5",
-  brightBlack: "#7f7f7f", brightRed: "#ff0000", brightGreen: "#00ff00", brightYellow: "#ffff00", brightBlue: "#5c5cff", brightMagenta: "#ff00ff", brightCyan: "#00ffff", brightWhite: "#ffffff",
-};
+const terminalTheme = { cursorAccent: "#000000", selectionBackground: "#4d4d4d" };
 export type Theme = "system" | "light" | "dark";
 function terminalThemeFor(theme: Theme) {
   const dark = theme === "dark" || theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches;
-  return { ...terminalTheme, background: dark ? "#0d1421" : "#f8fafc", foreground: dark ? "#e5e6ec" : "#20232b", cursor: dark ? "#e5e6ec" : "#20232b" };
+  return { ...terminalTheme, ...(dark ? darkAnsi : lightAnsi), background: dark ? darkTerminalBackground : lightTerminalBackground, foreground: dark ? "#e5e6ec" : "#20232b", cursor: dark ? "#e5e6ec" : "#20232b" };
 }
 
 // This hook lives in App, above both the cell terminal and Resources routes.
@@ -329,9 +326,11 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
   useEffect(() => { setSkipAutoAttachFor(""); }, [key]);
   useEffect(() => {
     // Wait for the inventory: it is what tells whether this cell's terminal is docked.
-    if (!scope || docked || !inventory.data || containers.loading || containers.error || !selected || !selectedEligible || unavailable || atLimit || current || skipAutoAttachFor === currentId) return;
+    // Only cellTerminal attaches: cellRead keeps this workspace mounted so existing sessions
+    // survive, but inspecting a cell must not open a new terminal session (#1566).
+    if (!visible || !scope || docked || !inventory.data || containers.loading || containers.error || !selected || !selectedEligible || unavailable || atLimit || current || skipAutoAttachFor === currentId) return;
     manager.attach(scope, selected);
-  }, [key, docked, !inventory.data, selected, selectedEligible, containers.loading, containers.error, unavailable, atLimit, current, currentId, skipAutoAttachFor, manager.attach]);
+  }, [visible, key, docked, !inventory.data, selected, selectedEligible, containers.loading, containers.error, unavailable, atLimit, current, currentId, skipAutoAttachFor, manager.attach]);
   const headerState = current?.state === "attached" ? "Attached"
     : current?.message || (skipAutoAttachFor === currentId && currentId ? "Detached" : atLimit ? "Connection limit reached" : unavailable ? `Unavailable: ${cellState}` : containers.loading ? "Loading containers…" : containers.error ? "Container list unavailable" : !eligible.length ? "No attachable containers" : !selectedEligible ? "Container unavailable" : "Connecting…");
   // With nothing to attach to, the terminal area carries the only (neutral) message.
