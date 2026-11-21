@@ -154,7 +154,8 @@ func TestPreviewCellFromConfig_ConnectorMethodUnresolved(t *testing.T) {
 }
 
 // TestPreviewCellFromConfig_ConnectorMethodRejected: a method pick must name
-// a connector the blueprint declares methods for and one of its methods.
+// a connector the blueprint declares methods for, one of its methods, and a
+// connector the Config requires — it never adds one the Config leaves out.
 func TestPreviewCellFromConfig_ConnectorMethodRejected(t *testing.T) {
 	for name, tc := range map[string]struct {
 		methods map[string]string
@@ -164,6 +165,9 @@ func TestPreviewCellFromConfig_ConnectorMethodRejected(t *testing.T) {
 		"unknown method":    {map[string]string{"agent": "oauth"}, "login, token, key"},
 		"no methods":        {map[string]string{"git": "ssh"}, `no connector "git"`},
 		"empty method":      {map[string]string{"agent": " "}, "names no method"},
+		"not required by the Config": {
+			map[string]string{"forge": "token"}, `connector "forge" is not required by config`,
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			req := previewRequest()

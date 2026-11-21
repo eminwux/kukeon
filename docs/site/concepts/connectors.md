@@ -243,8 +243,9 @@ the Stack, Space and Realm defaults — a Config's fill for its own method's slo
 does not carry over. The choice is recorded in
 `spec.provenance.connectorMethods` and kept by `kuke restart`, a
 reconcile-driven recreate and `--clone`. A connector the blueprint declares no
-methods for, or a method it does not declare, is rejected. Valid with
-`--from-config` only.
+methods for, a method it does not declare, or a connector the Config does not
+require (a method pick swaps a method, it never adds a connector) is rejected.
+Valid with `--from-config` only.
 
 In the web UI's New Cell flow every required connector is pre-selected with its
 effective method and identity. A connector with several methods offers a method
