@@ -200,7 +200,14 @@ func (b *Exec) runSchedule(
 	}
 	status.ActiveCells = cells.active
 
-	if fireTime, due := b.advanceSchedule(&status, schedule, key, prev, now); due {
+	// A due fire whose cell already exists was fired by an earlier attempt —
+	// the daemon restarted between creating the cell and recording it — so it
+	// is recorded as fired whatever the eligibility gate would say of it.
+	alreadyFired := func(fireTime time.Time) bool {
+		_, owned := cells.owned[cellconfig.ScheduledCellName(cfgDoc.Metadata.Name, fireTime)]
+		return owned
+	}
+	if fireTime, due := b.advanceSchedule(&status, schedule, key, prev, now, alreadyFired); due {
 		b.fireSchedule(result, &status, cfgDoc, cells, fireTime)
 	}
 	result.Skipped += status.SkippedFires - stored.SkippedFires
@@ -208,18 +215,67 @@ func (b *Exec) runSchedule(
 	if found && scheduleStatusEqual(stored, status) {
 		return nil
 	}
-	return b.runner.WriteConfigScheduleStatus(cfg, status)
+	if err = b.runner.WriteConfigScheduleStatus(cfg, status); err != nil {
+		return err
+	}
+	return b.dropStatusOfDeletedConfig(cfg, md, key)
+}
+
+// dropStatusOfDeletedConfig undoes a schedule status write that re-created
+// the state of a Config deleted while the pass worked on it. DeleteConfig
+// removes the document and then its status; a delete landing between the
+// pass's read of the Config and its write would otherwise leave
+// config-status/<name> behind, and nothing prunes it once the Config is no
+// longer listed — so a Config re-created under the same name after the pass
+// would inherit its history. Re-reading the Config after the write closes
+// that window for a delete: either this read sees the document gone and
+// removes the state, or the delete comes after it and removes the state
+// itself.
+//
+// It does not cover a Config deleted and re-applied under the same name
+// while the pass is still working on it (a slow cell create widens that
+// window). The re-read then finds the new document and the old Config's
+// state is kept. Nothing tells the two documents apart: a Config carries no
+// UID or creation time, and comparing documents would fail both ways —
+// re-applying the same YAML yields identical bytes, while an in-place edit
+// mid-pass would be mistaken for a re-create and wipe its real history. The
+// residual is pinned by TestRunSchedules_ConfigReappliedDuringThePass.
+func (b *Exec) dropStatusOfDeletedConfig(cfg intmodel.CellConfig, md intmodel.CellConfigMetadata, key string) error {
+	_, err := b.runner.GetConfig(intmodel.CellConfig{Metadata: md})
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, errdefs.ErrConfigNotFound):
+		b.logger.InfoContext(b.ctx, "schedule: config deleted during the pass; removing its schedule state",
+			"config", key)
+		return b.runner.DeleteConfigScheduleStatus(cfg)
+	default:
+		// The write stands; a Config that is really gone is caught the same
+		// way the next time a pass writes its state.
+		b.logger.DebugContext(b.ctx, "schedule: re-read of config after status write failed",
+			"config", key, "error", err)
+		return nil
+	}
 }
 
 // advanceSchedule moves a schedule's nextScheduleTime past now and reports the
 // fire that should run in this pass, if any. Everything it decides not to run
 // — a suspended or unparseable schedule, missed fires past their deadline, all
 // but the latest of several due fires — is recorded on status instead.
+//
+// alreadyFired reports whether a fire time's cell already exists: an earlier
+// attempt created it, then the daemon died before recording it. When the
+// latest due fire is not eligible, the latest due fire time with an existing
+// cell is reported instead — the latest itself, or an earlier one the
+// downtime has since passed — so fireSchedule records that cell as the fire
+// rather than counting it as skipped. A latest fire that is eligible runs as
+// usual; an earlier recovered cell is then one of the skipped fires.
 func (b *Exec) advanceSchedule(
 	status *intmodel.CellConfigScheduleStatus,
 	schedule *v1beta1.CellConfigSchedule,
 	key string,
 	prev, now time.Time,
+	alreadyFired func(time.Time) bool,
 ) (time.Time, bool) {
 	spec, loc, parseErr := cellconfig.ParseSchedule(*schedule)
 	if parseErr != nil {
@@ -250,22 +306,30 @@ func (b *Exec) advanceSchedule(
 
 	// One or more fire times are due. Walk them to find the latest and the
 	// first one still ahead.
-	var latest time.Time
+	var latest, recovered time.Time
 	var due int64
 	next := *status.NextScheduleTime
 	for !next.IsZero() && !next.After(now) {
 		latest = next
+		if alreadyFired(next) {
+			recovered = next
+		}
 		due++
 		next = spec.Next(next, loc)
 	}
 	status.NextScheduleTime = timeOrNil(next)
 
-	if !fireIsEligible(schedule, latest, prev, now) {
+	switch {
+	case fireIsEligible(schedule, latest, prev, now):
+		status.SkippedFires += due - 1
+		return latest, true
+	case !recovered.IsZero():
+		status.SkippedFires += due - 1
+		return recovered, true
+	default:
 		status.SkippedFires += due
 		return time.Time{}, false
 	}
-	status.SkippedFires += due - 1
-	return latest, true
 }
 
 // scheduleResolution is the precision of a schedule, and the period kukeond

@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -617,7 +616,7 @@ func stageKukepause(runPath string) (string, error) {
 		return "", fmt.Errorf("create kukepause stage dir %q: %w", binDir, err)
 	}
 	dst := filepath.Join(binDir, kukepauseBinaryName)
-	if err = copyKukepauseAtomic(src, dst); err != nil {
+	if err = fs.CopyFileAtomic(src, dst, kukepauseStagedMode, kukepauseBinaryName); err != nil {
 		return "", err
 	}
 	return dst, nil
@@ -643,44 +642,6 @@ func resolveKukepauseSource() (string, error) {
 		"%s not found on $PATH or alongside kuke; build it with `make kukepause` and install it (`make install-dev`)",
 		kukepauseBinaryName,
 	)
-}
-
-// copyKukepauseAtomic copies src over dst via a sibling tmp file + rename so a
-// concurrent reader never observes a partial binary. Mode carries the execute
-// bit through the root container's bind mount.
-func copyKukepauseAtomic(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return fmt.Errorf("open kukepause source %q: %w", src, err)
-	}
-	defer func() { _ = in.Close() }()
-
-	tmp := dst + ".tmp"
-	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, kukepauseStagedMode)
-	if err != nil {
-		return fmt.Errorf("create kukepause staged tmp %q: %w", tmp, err)
-	}
-	if _, err = io.Copy(out, in); err != nil {
-		_ = out.Close()
-		_ = os.Remove(tmp)
-		return fmt.Errorf("copy kukepause %q -> %q: %w", src, tmp, err)
-	}
-	if err = out.Close(); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("close kukepause staged tmp %q: %w", tmp, err)
-	}
-	// O_CREATE applies the mode only on creation and is subject to umask; chmod
-	// guarantees the execute bit regardless of the caller's umask or a
-	// pre-existing tmp file.
-	if err = os.Chmod(tmp, kukepauseStagedMode); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("chmod kukepause staged tmp %q: %w", tmp, err)
-	}
-	if err = os.Rename(tmp, dst); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("rename kukepause staged %q -> %q: %w", tmp, dst, err)
-	}
-	return nil
 }
 
 func runInit(cmd *cobra.Command, _ []string) error {

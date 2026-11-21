@@ -373,7 +373,7 @@ func stageKukettyBinary(runPath string) (string, error) {
 }
 
 // ensureStagedBinary makes dst a byte-identical, executable copy of src,
-// copying via copyBinaryAtomic only when dst is missing, defective (zero-byte
+// copying via fs.CopyFileAtomic only when dst is missing, defective (zero-byte
 // or non-exec, per stagedBinaryUsable), or holds content that differs from
 // src. It returns true when a copy was performed.
 //
@@ -404,7 +404,7 @@ func ensureStagedBinary(src, dst, label string) (bool, error) {
 	if err := os.MkdirAll(dstDir, 0o755); err != nil {
 		return false, fmt.Errorf("mkdir %q: %w", dstDir, err)
 	}
-	if err := copyBinaryAtomic(src, dst, label); err != nil {
+	if err = fs.CopyFileAtomic(src, dst, stagedBinaryMode, label); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -515,39 +515,10 @@ func resolveKukettyBinary() (string, error) {
 	return "", fmt.Errorf("kuketty binary not found in: %v", tried)
 }
 
-// copyBinaryAtomic copies src to dst via a sibling tmp file, then renames
-// the tmp file over dst. Mode is 0o755 — the binary must be exec'able by
-// the workload's uid through the bind mount, which carries through unix
-// owner-x bits but not setgid-style elevations. The label string is woven
-// into every error so callers (kuketty, kukepause) get attributable
-// diagnostics when a stage trip fails.
-func copyBinaryAtomic(src, dst, label string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return fmt.Errorf("open %s source %q: %w", label, src, err)
-	}
-	defer func() { _ = in.Close() }()
-
-	tmp := dst + ".tmp"
-	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
-	if err != nil {
-		return fmt.Errorf("create %s staged tmp %q: %w", label, tmp, err)
-	}
-	if _, err = io.Copy(out, in); err != nil {
-		_ = out.Close()
-		_ = os.Remove(tmp)
-		return fmt.Errorf("copy %s %q -> %q: %w", label, src, tmp, err)
-	}
-	if err = out.Close(); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("close %s staged tmp %q: %w", label, tmp, err)
-	}
-	if err = os.Rename(tmp, dst); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("rename %s staged %q -> %q: %w", label, tmp, dst, err)
-	}
-	return nil
-}
+// stagedBinaryMode is the mode of the binaries staged under <RunPath>/bin:
+// they must be exec'able by the workload's uid through the bind mount, which
+// carries through unix owner-x bits but not setgid-style elevations.
+const stagedBinaryMode os.FileMode = 0o755
 
 // attachablePostCreateChown resets the owner of the per-container tty
 // directory to the container's resolved process uid, so a non-root image

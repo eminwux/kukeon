@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 
 	"github.com/eminwux/kukeon/internal/ctr"
+	"github.com/eminwux/kukeon/internal/util/fs"
 )
 
 // kukepauseSourcePathInsideDaemon is the path inside the kukeond container
@@ -69,7 +70,7 @@ func stageKukepauseBinary(runPath string) (string, error) {
 		return "", fmt.Errorf("mkdir %q: %w", dstDir, err)
 	}
 
-	if err = copyBinaryAtomic(src, dst, ctr.RootContainerPauseBinaryName); err != nil {
+	if err = fs.CopyFileAtomic(src, dst, stagedBinaryMode, ctr.RootContainerPauseBinaryName); err != nil {
 		return "", err
 	}
 	return dst, nil
