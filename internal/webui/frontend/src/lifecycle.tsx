@@ -118,24 +118,28 @@ function AdvancedCellActions({
 
   // While open, Escape closes the menu and returns focus to its summary, and a pointer down outside
   // closes it where it is. Escape is taken in the capture phase so the expanded terminal keeps its size.
+  // The listeners stay attached and read the element's own open state: the `open` React state trails
+  // the asynchronous toggle event, so gating on it lost an Escape pressed right after opening and
+  // swallowed the confirmation dialog's Escape right after an action closed the menu.
   useEffect(() => {
-    if (!open) return;
     const escape = (event: KeyboardEvent) => {
       const details = menu.current;
-      if (event.key !== "Escape" || !details) return;
+      if (event.key !== "Escape" || !details?.open) return;
       event.preventDefault();
-      event.stopPropagation();
+      // The expanded terminal also listens on window in the capture phase; whichever registered first,
+      // the menu's Escape ends here so the terminal keeps its size.
+      event.stopImmediatePropagation();
       details.open = false;
       details.querySelector("summary")?.focus();
     };
     const outside = (event: PointerEvent) => {
       const details = menu.current;
-      if (details && !details.contains(event.target as Node | null)) details.open = false;
+      if (details?.open && !details.contains(event.target as Node | null)) details.open = false;
     };
     window.addEventListener("keydown", escape, true);
     document.addEventListener("pointerdown", outside, true);
     return () => { window.removeEventListener("keydown", escape, true); document.removeEventListener("pointerdown", outside, true); };
-  }, [open]);
+  }, []);
 
   function request(action: DestructiveAction) {
     if (pending) return;

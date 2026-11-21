@@ -3395,6 +3395,37 @@ test("closing a confirmation dialog returns focus to its trigger, or to the Adva
   await expect(purgeRealm).toBeFocused();
 });
 
+// The menu's React open state trails the asynchronous toggle event. Escape must act on the element's
+// own state, so it is neither lost right after the menu opens nor swallowed right after an action
+// closes the menu and opens its dialog (CI hit both windows).
+test("Advanced actions Escape follows the menu's own open state, not the trailing toggle event", async ({ page }) => {
+  await mock(page);
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  const menu = page.locator("details.cell-advanced-actions");
+  await expect(menu.locator("summary")).toBeVisible();
+  const escapeInSameTask = action => page.evaluate(action => {
+    const details = document.querySelector("details.cell-advanced-actions");
+    if (action) [...details.querySelectorAll("button")].find(button => button.textContent === action).click();
+    else details.querySelector("summary").click();
+    const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    document.body.dispatchEvent(escape);
+    return { open: details.open, swallowed: escape.defaultPrevented };
+  }, action);
+  const settle = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 50))));
+
+  expect(await escapeInSameTask(null)).toEqual({ open: false, swallowed: true });
+  await settle();
+  await expect(menu).not.toHaveAttribute("open");
+
+  await menu.locator("summary").click();
+  await expect(menu).toHaveAttribute("open", "");
+  await settle();
+  expect(await escapeInSameTask("Kill cell…")).toEqual({ open: false, swallowed: false });
+  await expect(page.getByRole("dialog", { name: "Kill cell" })).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});
+
 test("route changes focus the new page heading and title the document; the first Tab stop skips to main", async ({ page }) => {
   await mock(page);
   await page.goto(`${server.url}#/resources`);
