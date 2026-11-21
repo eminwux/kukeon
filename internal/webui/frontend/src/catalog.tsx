@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { ErrorNotice, useResource } from "./request";
 import { catalogTitles, newCellLink, newConfigLink, workspaceLink } from "./routes";
 import { StateBadge } from "./status";
@@ -7,6 +7,7 @@ import { cellsForBlueprint, cellsForConfig, configsForBlueprint, type ConfigDoc 
 import { DocumentRowLink, RowAction, RowActions } from "./icons";
 import { catalogAPI, catalogDeleteAPI } from "./catalog-url.mjs";
 import { useNotify } from "./notifications";
+import { useModalDialog } from "./focus";
 import { AskMajordomo, catalogQuestion } from "./majordomo";
 import { ConfigConnectors, NeedsConnectorBadge } from "./connector-ui";
 
@@ -139,12 +140,7 @@ export function CatalogDeleteConfirmation({ kind, doc, revision, inventory, onCa
   const dialog = useRef<HTMLDialogElement>(null);
   const [acknowledged, setAcknowledged] = useState(false);
   const scope = [...scopeOf(doc.metadata), doc.metadata.name];
-  useEffect(() => {
-    const element = dialog.current;
-    if (!element) return;
-    element.showModal();
-    return () => { if (element.open) element.close(); };
-  }, []);
+  useModalDialog(dialog);
   return <dialog className="cell-action-dialog catalog-delete-dialog" ref={dialog} aria-labelledby="catalog-delete-title" aria-describedby="catalog-delete-description" onCancel={event => { event.preventDefault(); onCancel(); }} onClick={event => { if (event.target === event.currentTarget) onCancel(); }}>
     <form onSubmit={event => { event.preventDefault(); if (acknowledged) onConfirm(); }}>
       <h2 id="catalog-delete-title">Delete {singular[kind].toLowerCase()}</h2>

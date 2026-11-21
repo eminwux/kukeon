@@ -354,7 +354,8 @@ test("Resources is home and retains resource summaries and navigation", async ({
   await mock(page);
   await page.goto(server.url);
   await expect(page.locator(".page-heading h1")).toHaveText("Resources");
-  await expect(page).toHaveTitle("kukeon");
+  // The document title names the page (#1567).
+  await expect(page).toHaveTitle("Resources · kukeon");
   await expect(page.locator('link[rel="icon"][type="image/svg+xml"]')).toHaveAttribute("href", /^\/assets\/.+\.svg$/);
   const brand = page.getByRole("complementary", { name: "Cell sidebar" }).getByRole("link", { name: "kukeon", exact: true });
   await expect(brand).toHaveAttribute("href", "#/resources");
@@ -3360,4 +3361,68 @@ test("resource-name and breadcrumb links have a 24px hit target and resizers sho
   await handle.focus();
   expect(await handle.evaluate(el => el.matches(":focus-visible"))).toBe(true);
   expect(await handle.evaluate(el => getComputedStyle(el).boxShadow)).toMatch(/rgb/);
+});
+
+// Issue #1567, item B: keyboard and screen-reader users keep their place across dialogs and route changes.
+test("closing a confirmation dialog returns focus to its trigger, or to the Advanced actions summary", async ({ page }) => {
+  await mock(page);
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  const summary = page.locator("summary", { hasText: "Advanced actions" });
+  for (const [action, close] of [["Kill", "Escape"], ["Delete", "Cancel"], ["Purge", "Escape"]]) {
+    await summary.click();
+    await page.getByRole("button", { name: `${action} cell…` }).click();
+    await expect(page.getByRole("dialog", { name: `${action} cell` })).toBeVisible();
+    if (close === "Escape") await page.keyboard.press("Escape");
+    else await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(summary).toBeFocused();
+  }
+
+  await page.goto(`${server.url}#/cells`);
+  const deleteIcon = page.locator("tbody tr").first().getByRole("button", { name: /^Delete cell / });
+  await deleteIcon.click();
+  await expect(page.getByRole("dialog", { name: "Delete cell" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(deleteIcon).toBeFocused();
+
+  await page.goto(`${server.url}#/realms`);
+  const purgeRealm = page.getByRole("button", { name: "Purge realm dev" });
+  await purgeRealm.click();
+  await expect(page.getByRole("dialog", { name: "Purge realm" })).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+  await expect(purgeRealm).toBeFocused();
+});
+
+test("route changes focus the new page heading and title the document; the first Tab stop skips to main", async ({ page }) => {
+  await mock(page);
+  await page.goto(`${server.url}#/resources`);
+  const heading = page.locator("main .page-heading h1");
+  await expect(heading).toHaveText("Resources");
+  await expect(page).toHaveTitle("Resources · kukeon");
+  // The initial load leaves focus where the browser put it.
+  await expect(heading).not.toBeFocused();
+
+  await nav(page).getByRole("link", { name: "Configs" }).click();
+  await expect(heading).toHaveText("Configs");
+  await expect(heading).toBeFocused();
+  await expect(page).toHaveTitle("Configs · kukeon");
+
+  await page.goto(`${server.url}#/resource/dev/shared/services/api`);
+  await expect(page).toHaveTitle("api · kukeon");
+  await page.getByRole("navigation", { name: "Resource scope" }).getByRole("link", { name: "Stack: services" }).click();
+  await expect(heading).toHaveText("services");
+  await expect(heading).toBeFocused();
+  await expect(page).toHaveTitle("services · kukeon");
+
+  await page.reload();
+  await expect(heading).toHaveText("services");
+  const hash = new URL(page.url()).hash;
+  await page.keyboard.press("Tab");
+  const skip = page.getByRole("link", { name: "Skip to content" });
+  await expect(skip).toBeFocused();
+  expect((await skip.boundingBox()).y).toBeGreaterThanOrEqual(0);
+  await page.keyboard.press("Enter");
+  await expect(page.locator("main")).toBeFocused();
+  expect(new URL(page.url()).hash).toBe(hash);
 });

@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { availableLifecycleActions, canConfirmDestructiveAction } from "./lifecycle-policy.js";
 import { DocumentRowLink, Icon, RowAction, RowActions } from "./icons";
 import { resourceLink, workspaceLink } from "./routes";
+import { useModalDialog } from "./focus";
 
 export type LifecycleAction = "start" | "stop" | "restart" | "kill" | "delete" | "purge";
 export type DestructiveAction = Extract<LifecycleAction, "kill" | "delete" | "purge">;
@@ -11,11 +12,14 @@ export type LifecycleFeedback = { action: LifecycleAction; phase: "pending" | "s
 function CellActionConfirmation({
   action,
   scope,
+  returnFocus,
   onCancel,
   onConfirm,
 }: {
   action: DestructiveAction;
   scope: string[];
+  // Where focus goes when the dialog closes and the control that opened it is no longer rendered.
+  returnFocus?: () => HTMLElement | null | undefined;
   onCancel: () => void;
   onConfirm: (options?: PurgeOptions) => void;
 }) {
@@ -26,12 +30,7 @@ function CellActionConfirmation({
   const [cascade, setCascade] = useState(false);
   const fullScope = scope.join(" / ");
 
-  useEffect(() => {
-    const element = dialog.current;
-    if (!element) return;
-    element.showModal();
-    return () => { if (element.open) element.close(); };
-  }, []);
+  useModalDialog(dialog, returnFocus);
 
   const title = action === "kill" ? "Kill cell" : action === "delete" ? "Delete cell" : "Purge cell";
   const consequence = action === "kill"
@@ -162,6 +161,7 @@ function AdvancedCellActions({
     {confirming && <CellActionConfirmation
       action={confirming}
       scope={scope}
+      returnFocus={() => menu.current?.querySelector("summary")}
       onCancel={() => setConfirming(null)}
       onConfirm={options => { setConfirming(null); onAction(scope, confirming, undefined, options); }}
     />}

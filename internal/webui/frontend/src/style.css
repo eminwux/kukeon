@@ -18,6 +18,11 @@ button { background: var(--panel); border: 1px solid var(--line); border-radius:
 code, .mono-id { font-family: var(--mono); font-size: .92em; }
 button:hover, a.resource-link:hover { background: var(--hover); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+/* First Tab stop: hidden above the viewport until keyboard focus, then moves focus to main (#1567). */
+.skip-link { position: fixed; top: 8px; left: 8px; z-index: 100; padding: 8px 14px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--accent); font-weight: 600; transform: translateY(calc(-100% - 16px)); }
+.skip-link:focus { transform: none; }
+/* Route changes and the skip link focus these programmatically; they are not controls, so no ring. */
+.workspace:focus, .page-heading h1:focus { outline: none; }
 .app-shell { display: grid; grid-template-columns: var(--sidebar-width, 264px) minmax(0, 1fr); min-height: 100dvh; }
 .app-shell.sidebar-collapsed { grid-template-columns: var(--rail-width) minmax(0, 1fr); }
 .sidebar { position: sticky; top: 0; height: 100dvh; display: flex; flex-direction: column; background: var(--sidebar); border-right: 1px solid var(--line); }

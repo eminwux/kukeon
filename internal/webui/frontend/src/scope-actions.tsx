@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { canConfirmDestructiveAction, disruptsDaemon } from "./lifecycle-policy.js";
 import { DocumentRowLink, RowAction, RowActions } from "./icons";
 import { kinds, resourceLink, titles } from "./routes";
 import type { LifecycleFeedback, PurgeOptions } from "./lifecycle";
+import { useModalDialog } from "./focus";
 
 export type ParentAction = "delete" | "purge";
 
@@ -37,12 +38,7 @@ function ParentActionConfirmation({
   const children = counts.map((count, index) => `${count} ${childNoun(scope.length + index, count)}`).join(", ");
   const hasChildren = counts.some(count => count > 0);
 
-  useEffect(() => {
-    const element = dialog.current;
-    if (!element) return;
-    element.showModal();
-    return () => { if (element.open) element.close(); };
-  }, []);
+  useModalDialog(dialog);
 
   const consequence = action === "delete"
     ? `Delete removes this ${kind}'s metadata and cgroup when kukeond validation permits. It does not perform Purge's broader cleanup.`
