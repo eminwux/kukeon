@@ -86,7 +86,7 @@ The old per-role blueprints are pruned by the same apply. **CellConfig names do 
 
 Profiles are part of the security posture and are fixed in the blueprint: `root` for a role that needs the `root` image capability, `host` for one that mounts the kukeon socket, binary and install tree. A Config cannot switch them on.
 
-If two teams render different content under the same blueprint name — they pin different harness revisions — the second is stored as `<name>-<content digest>` instead of overwriting, and `kuke team` says so. A team's apply removes a shared blueprint it no longer uses only when no other CellConfig references it.
+If two teams render different content under the same blueprint name — they pin different harness revisions — the later apply replaces the shared blueprint in place, so every team's cells use the same content, and `kuke team` says so. Only a blueprint kuke team did not render (no `kukeon.io/shared: "true"` label) is never overwritten; the team's is then stored as `<name>-<content digest>`. A team's apply removes a shared blueprint it no longer uses only when no other CellConfig references it.
 
 Existing cells are marked `OutOfSync`; `kuke restart <cell>` re-renders one from its Config.
 

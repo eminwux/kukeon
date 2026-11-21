@@ -107,7 +107,8 @@ func TestInitHelpExplainsStoredGitCredentials(t *testing.T) {
 
 const (
 	hostPathNote = "spec.git.signingKey / allowedSigners are host paths and no longer reach a cell"
-	renameNote   = "blueprint claude already exists in realm default with different content; applied this team's as claude-0123456789abcdef"
+	renameNote   = "blueprint claude in realm default replaced in place (content 0000000000000000 → 0123456789abcdef); " +
+		"also used by team kukeon (kukeon-pm-claude), whose cells pick up the new content on restart"
 )
 
 // Notes follow the missing-secret guidance on a successful init, and are not

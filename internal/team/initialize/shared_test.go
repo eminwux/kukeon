@@ -151,53 +151,59 @@ func TestResourceAccountingCountsSharedBlueprintsOnce(t *testing.T) {
 }
 
 // TestSharedBlueprintNames covers how application names a shared blueprint when
-// the realm already holds one under its plain name.
+// the realm already holds one under its plain name (#1560): a blueprint kuke
+// team rendered is replaced in place, whoever uses it; only a hand-written one
+// makes this team's copy take a content-digest suffix.
 func TestSharedBlueprintNames(t *testing.T) {
 	plain := api.CellConfigBlueprintRef{Name: "codex", Realm: "default"}
 	for _, tc := range []struct {
 		name    string
 		prepare func(*fakeClient, *compose.Result)
 		renamed bool
+		// users is the other configs the replacement note names; empty means
+		// no replacement note.
+		users string
 		// legacy names the team a forced init is migrating from (#1527).
 		legacy string
 	}{
-		{"absent", func(*fakeClient, *compose.Result) {}, false, ""},
+		{"absent", func(*fakeClient, *compose.Result) {}, false, "", ""},
 		{"same-content", func(f *fakeClient, r *compose.Result) {
 			f.blueprints["default/codex"] = storedShared("codex", r.Blueprints[0].Metadata.Labels[api.LabelContentDigest])
 			// Even when another team uses it: identical content is the same blueprint.
 			f.configs = []api.CellConfigDoc{configReferencing("other-majordomo-codex", "other", plain)}
-		}, false, ""},
+		}, false, "", ""},
 		{"different-content-used-by-another-team", func(f *fakeClient, _ *compose.Result) {
 			f.blueprints["default/codex"] = storedShared("codex", "0000000000000000")
 			f.configs = []api.CellConfigDoc{
 				configReferencing("root-majordomo-codex", "root", plain),
 				configReferencing("other-majordomo-codex", "other", plain),
+				configReferencing("other-pm-codex", "other", plain),
 			}
-		}, true, ""},
+		}, false, "team other (other-majordomo-codex, other-pm-codex)", ""},
 		{"different-content-used-by-a-hand-written-config", func(f *fakeClient, _ *compose.Result) {
 			f.blueprints["default/codex"] = storedShared("codex", "0000000000000000")
 			f.configs = []api.CellConfigDoc{configReferencing("mine", "", plain)}
-		}, true, ""},
+		}, false, "configs without a team (mine)", ""},
 		{"different-content-used-only-by-this-team", func(f *fakeClient, _ *compose.Result) {
 			f.blueprints["default/codex"] = storedShared("codex", "0000000000000000")
 			f.configs = []api.CellConfigDoc{configReferencing("root-majordomo-codex", "root", plain)}
-		}, false, ""},
+		}, false, "", ""},
 		// The init team being migrated from kukeon (#1527) loses its configs
-		// once the replacement is applied: they must not force a rename.
+		// once the replacement is applied: the note does not name them.
 		{"different-content-used-only-by-the-legacy-team", func(f *fakeClient, _ *compose.Result) {
 			f.blueprints["default/codex"] = storedShared("codex", "0000000000000000")
 			f.configs = []api.CellConfigDoc{configReferencing("kukeon-majordomo-codex", legacyName, plain)}
-		}, false, legacyName},
+		}, false, "", legacyName},
 		{"different-content-used-by-the-legacy-team-and-another", func(f *fakeClient, _ *compose.Result) {
 			f.blueprints["default/codex"] = storedShared("codex", "0000000000000000")
 			f.configs = []api.CellConfigDoc{
 				configReferencing("kukeon-majordomo-codex", legacyName, plain),
 				configReferencing("other-majordomo-codex", "other", plain),
 			}
-		}, true, legacyName},
+		}, false, "team other (other-majordomo-codex)", legacyName},
 		{"different-content-unreferenced", func(f *fakeClient, _ *compose.Result) {
 			f.blueprints["default/codex"] = storedShared("codex", "0000000000000000")
-		}, false, ""},
+		}, false, "", ""},
 		{"another-team-references-a-same-named-blueprint-elsewhere", func(f *fakeClient, _ *compose.Result) {
 			f.blueprints["default/codex"] = storedShared("codex", "0000000000000000")
 			f.configs = []api.CellConfigDoc{
@@ -205,13 +211,19 @@ func TestSharedBlueprintNames(t *testing.T) {
 				configReferencing("other-scope", "other", api.CellConfigBlueprintRef{Name: "codex", Realm: "default", Space: "default"}),
 				configReferencing("other-name", "other", api.CellConfigBlueprintRef{Name: "claude", Realm: "default"}),
 			}
-		}, false, ""},
+		}, false, "", ""},
 		// A blueprint kuke team did not render is never overwritten, used or not.
 		{"not-shared", func(f *fakeClient, _ *compose.Result) {
 			doc := storedShared("codex", "")
 			doc.Metadata.Labels = map[string]string{api.LabelTeam: "legacy"}
 			f.blueprints["default/codex"] = doc
-		}, true, ""},
+		}, true, "", ""},
+		{"not-shared-used-by-another-team", func(f *fakeClient, _ *compose.Result) {
+			doc := storedShared("codex", "")
+			doc.Metadata.Labels = nil
+			f.blueprints["default/codex"] = doc
+			f.configs = []api.CellConfigDoc{configReferencing("other-majordomo-codex", "other", plain)}
+		}, true, "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFake()
@@ -251,20 +263,27 @@ func TestSharedBlueprintNames(t *testing.T) {
 						)
 					}
 				}
-				noted := slices.ContainsFunc(done.notes, func(n string) bool {
-					return strings.Contains(n, "blueprint codex already exists in realm default") &&
-						strings.Contains(n, want)
-				})
-				if noted != tc.renamed || len(done.notes) != map[bool]int{true: 1, false: 0}[tc.renamed] {
-					t.Fatalf("attempt %d: notes = %v", attempt, done.notes)
+				var wantNote string
+				switch {
+				case tc.renamed:
+					wantNote = "blueprint codex already exists in realm default with different content; " +
+						"applied this team's as " + want
+				case tc.users != "" && attempt == 0:
+					// The rerun finds its own content in place: nothing to report.
+					wantNote = "blueprint codex in realm default replaced in place (content 0000000000000000 → " +
+						digest + "); also used by " + tc.users + ", whose cells pick up the new content on restart"
+				}
+				if wantNote == "" && len(done.notes) != 0 ||
+					wantNote != "" && !slices.Equal(done.notes, []string{wantNote}) {
+					t.Fatalf("attempt %d: notes = %q, want %q", attempt, done.notes, wantNote)
 				}
 				if done.resources != 4 {
 					t.Fatalf("resources = %d", done.resources)
 				}
 				if tc.renamed {
-					// The other owner's blueprint is left exactly as it was.
+					// The hand-written blueprint is left exactly as it was.
 					if kept := f.blueprints["default/codex"]; kept.Metadata.Labels[api.LabelContentDigest] == digest {
-						t.Fatal("foreign blueprint overwritten")
+						t.Fatal("hand-written blueprint overwritten")
 					}
 					if f.blueprints["default/"+want].Metadata.Labels[api.LabelContentDigest] != digest {
 						t.Fatal("digest-named blueprint not stored")
@@ -272,8 +291,136 @@ func TestSharedBlueprintNames(t *testing.T) {
 				} else if f.blueprints["default/codex"].Metadata.Labels[api.LabelContentDigest] != digest {
 					t.Fatal("plain-named blueprint does not hold this team's content")
 				}
+				if _, forked := f.blueprints["default/codex-"+digest]; forked && !tc.renamed {
+					t.Fatal("a digest-named copy was created for a shared blueprint")
+				}
 			}
 		})
+	}
+}
+
+// forkedRealm is the realm state #1560 reports: another team on the plain
+// shared blueprint, and this team (root) on the digest-named copy an earlier
+// application forked under the pre-#1560 rule.
+func forkedRealm(t *testing.T, f *fakeClient, result *compose.Result, otherOnFork bool) string {
+	t.Helper()
+	digest := result.Blueprints[0].Metadata.Labels[api.LabelContentDigest]
+	fork := "codex-" + digest
+	f.blueprints["default/codex"] = storedShared("codex", "0000000000000000")
+	f.blueprints["default/"+fork] = storedShared(fork, digest)
+	f.configs = []api.CellConfigDoc{
+		configReferencing("root-majordomo-codex", "root", api.CellConfigBlueprintRef{Name: fork, Realm: "default"}),
+		configReferencing("other-pm-codex", "other", api.CellConfigBlueprintRef{Name: "codex", Realm: "default"}),
+	}
+	if otherOnFork {
+		f.configs = append(f.configs, configReferencing(
+			"third-dev-codex", "third", api.CellConfigBlueprintRef{Name: fork, Realm: "default"}))
+	}
+	return fork
+}
+
+// A team still on a digest-named fork is moved back onto the plain name, which
+// it replaces in place; the fork, once nothing references it, is removed by
+// the daemon's per-team prune, and the note says so.
+func TestSharedBlueprintForkIsMigrated(t *testing.T) {
+	f := newFake()
+	f.prune = true
+	result := composeTeam(t, nil)
+	digest := result.Blueprints[0].Metadata.Labels[api.LabelContentDigest]
+	fork := forkedRealm(t, f, result, false)
+	done, err := apply(t.Context(), f, result, "kuke team init", nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, names := appliedDocs(t, f.raw)
+	if !slices.Equal(names["CellBlueprint"], []string{"codex", "claude"}) {
+		t.Fatalf("blueprints applied as %v", names["CellBlueprint"])
+	}
+	for _, cfg := range f.configs {
+		if cfg.Metadata.Name == "root-majordomo-codex" && cfg.Spec.Blueprint.Name != "codex" {
+			t.Fatalf("this team's config still references %q", cfg.Spec.Blueprint.Name)
+		}
+	}
+	if f.blueprints["default/codex"].Metadata.Labels[api.LabelContentDigest] != digest {
+		t.Fatal("plain-named blueprint not replaced in place")
+	}
+	if _, kept := f.blueprints["default/"+fork]; kept {
+		t.Fatal("unreferenced fork not pruned")
+	}
+	want := []string{
+		"blueprint codex in realm default replaced in place (content 0000000000000000 → " + digest +
+			"); also used by team other (other-pm-codex), whose cells pick up the new content on restart",
+		"blueprint " + fork + " in realm default removed: this team's configs now use codex",
+	}
+	if !slices.Equal(done.notes, want) {
+		t.Fatalf("notes = %q, want %q", done.notes, want)
+	}
+	// Once migrated, a rerun has nothing left to report.
+	if done, err = apply(t.Context(), f, composeTeam(t, nil), "kuke team init", nil, ""); err != nil ||
+		len(done.notes) != 0 {
+		t.Fatalf("rerun notes = %q err=%v", done.notes, err)
+	}
+}
+
+// A fork another team still uses is kept, and the note names who uses it.
+func TestSharedBlueprintForkStillReferencedIsReported(t *testing.T) {
+	f := newFake()
+	f.prune = true
+	result := composeTeam(t, nil)
+	fork := forkedRealm(t, f, result, true)
+	done, err := apply(t.Context(), f, result, "kuke team init", nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, kept := f.blueprints["default/"+fork]; !kept {
+		t.Fatal("a fork another team references was pruned")
+	}
+	want := "blueprint " + fork + " in realm default is no longer used by this team (its configs now use codex) " +
+		"but is kept: still referenced by team third (third-dev-codex)"
+	if len(done.notes) != 2 || done.notes[1] != want {
+		t.Fatalf("notes = %q, want %q last", done.notes, want)
+	}
+}
+
+// When the daemon does not report the fork pruned and nothing else references
+// it, the note says how to remove it.
+func TestSharedBlueprintForkNotPrunedIsReported(t *testing.T) {
+	f := newFake()
+	result := composeTeam(t, nil)
+	fork := forkedRealm(t, f, result, false)
+	done, err := apply(t.Context(), f, result, "kuke team init", nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "blueprint " + fork + " in realm default is no longer used by this team (its configs now use codex); " +
+		"once nothing references it, remove it with kuke delete blueprint " + fork + " --realm default"
+	if len(done.notes) != 2 || done.notes[1] != want {
+		t.Fatalf("notes = %q, want %q last", done.notes, want)
+	}
+}
+
+// Only a shared `<prefix>-<16 hex>` name is treated as a fork: a hand-written
+// blueprint this team's configs happen to reference is not reported.
+func TestIsDigestName(t *testing.T) {
+	for name, want := range map[string]bool{
+		"codex-0123456789abcdef":      true,
+		"codex-host-0123456789abcdef": false,
+		"codex":                       false,
+		"codex-0123456789abcde":       false,
+		"codex-0123456789ABCDEF":      false,
+		"codex-host":                  false,
+		"claude-0123456789abcdef":     false,
+		"codex-0123456789abcdef0":     false,
+		"codex-host-0123456789abcdeg": false,
+		"codexx-0123456789abcdef":     false,
+		"codex--0123456789abcdef":     false,
+	} {
+		if got := isDigestName(name, "codex"); got != want {
+			t.Errorf("isDigestName(%q, codex) = %v, want %v", name, got, want)
+		}
+	}
+	if !isDigestName("codex-host-0123456789abcdef", "codex-host") || isDigestName("x-0123456789abcdef", "") {
+		t.Error("prefix handling")
 	}
 }
 
@@ -287,8 +434,8 @@ func TestSharedBlueprintLookupFailureAppliesNothing(t *testing.T) {
 	}
 }
 
-// The rename note reaches the operator through the run result.
-func TestRunReportsRenamedSharedBlueprint(t *testing.T) {
+// The replacement note reaches the operator through the run result.
+func TestRunReportsReplacedSharedBlueprint(t *testing.T) {
 	opts := setupRun(t)
 	f := opts.Client.(*fakeClient)
 	f.blueprints["default/claude"] = storedShared("claude", "0000000000000000")
@@ -299,12 +446,14 @@ func TestRunReportsRenamedSharedBlueprint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Notes) != 1 || !strings.Contains(result.Notes[0], "blueprint claude already exists") ||
+	const replaced = "blueprint claude in realm default replaced in place (content 0000000000000000 → "
+	if len(result.Notes) != 1 || !strings.HasPrefix(result.Notes[0], replaced) ||
+		!strings.Contains(result.Notes[0], "also used by team other (other-dev-claude)") ||
 		result.Resources != 4 {
 		t.Fatalf("notes=%v resources=%d", result.Notes, result.Resources)
 	}
-	if !bytes.Contains(f.raw, []byte("name: claude-")) {
-		t.Fatal("digest-named blueprint not applied")
+	if _, names := appliedDocs(t, f.raw); !slices.Contains(names["CellBlueprint"], "claude") {
+		t.Fatalf("blueprints applied as %v, want claude under its plain name", names["CellBlueprint"])
 	}
 }
 
