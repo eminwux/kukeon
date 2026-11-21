@@ -4378,17 +4378,30 @@ to single hyphens: team <code>esp32</code>, role <code>pr-reviewer</code>, and h
 produce <code>esp32-pr-reviewer-codex</code>. A task config appends the task name:
 <code>esp32-pr-reviewer-codex-pick-review-pr</code>. Different selections can collide on these
 readable names (<code>root-a</code>/<code>majordomo</code> and <code>root</code>/<code>a-majordomo</code>); choose distinct
-names in the same scope. <code>kukeon.io/team</code> labels keep the authored team name,
+names in the same scope. Within one team, composition fails when two role ×
+harness pairs produce the same config name (role <code>a-b</code> and role <code>a.b</code>), and
+the error names both pairs. <code>kukeon.io/team</code> labels keep the authored team name,
 and <code>kukeon.io/role</code> labels the role name from the team's <code>roles</code> list, on pair
 and task configs alike.
 Resources default to realm/space/stack <code>default</code>.</p>
-<p>Default harness state volumes use the readable resource name plus a
-16-character SHA-256 suffix when any original component contains a dot or
-hyphen, so state stays isolated even when readable names coincide. Explicit
-<code>volumeRef</code> bindings remain explicit references. Own-scope volume slots carry
-<code>ensure: true</code>. The name is passed to the shared blueprint as the Config's
-<code>STATE_VOLUME</code> value and is the same name earlier per-role blueprints used, so
-a harness login survives re-rendering.</p>
+<p>A harness keeps its state (logins, sessions) on a Volume named after the
+pair's config plus <code>-state</code>: <code>&lt;team&gt;-&lt;role&gt;-&lt;harness&gt;-state</code>, for example
+<code>kuke-majordomo-claude-state</code> or <code>esp32-pr-reviewer-codex-state</code>. The Volume
+is mounted only at the harness's <code>statePath</code> (<code>$HOME/.claude</code> for claude,
+<code>$HOME/.codex</code> for codex). It is not the cell's home or root filesystem, and a
+harness without a <code>statePath</code> gets no state volume. The pair config, its task
+configs and the sweep cell all mount the same one, so one harness login covers
+every cell of that role × harness.</p>
+<p>The Config passes the name to the shared blueprint as <code>STATE_VOLUME</code>, and the
+Volume's scope as <code>STATE_VOLUME_REALM</code>, <code>STATE_VOLUME_SPACE</code> and
+<code>STATE_VOLUME_STACK</code> (the Config's own realm, space and stack). The blueprint
+mounts it through a fully-qualified <code>volumeRef</code> with <code>ensure: true</code>, so the
+first cell creates the Volume at those coordinates and the web UI links it.</p>
+<p>Installs composed before this name existed used
+<code>&lt;team&gt;-&lt;role&gt;-&lt;harness&gt;[-&lt;project&gt;-&lt;role&gt;-&lt;harness&gt;]-&lt;digest&gt;</code>. Composition
+does not migrate those Volumes: after re-rendering, each role × harness starts
+with a new, empty state volume, so log in to each harness again. Delete the
+old Volumes with <code>kuke delete volume</code> once they are no longer needed.</p>
 <h2 id="what-preflight-covers">What preflight covers<a class="headerlink" href="#what-preflight-covers" title="Permanent link">&para;</a></h2>
 <p>Preflight covers strict document shape, selection/reference resolution, role
 assets, template and partial execution, image capabilities, parameter
@@ -4418,7 +4431,7 @@ when the team is applied or a cell is launched.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 21, 2026 13:46:52 UTC">November 21, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 21, 2026 19:37:32 UTC">November 21, 2026</span>
   </span>
 
     
