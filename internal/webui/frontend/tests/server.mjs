@@ -120,7 +120,7 @@ export function connectorWorld() {
       // Requires Example and nothing fills it: no cell can be created from it.
       config("mine", "dev", ["example-token"]),
       // Team-owned: the team picked the Example identity; Demo uses its login.
-      config("teams", "dev", ["demo-login", "example-token"], { labels: { "kukeon.io/team": "kukeon" }, secrets: { "example-token": { secretRef: { name: "example-team", realm: "dev" } } }, values: { STATE_VOLUME: "kukeon-dev-demo" } }),
+      config("teams", "dev", ["demo-login", "example-token"], { labels: { "kukeon.io/team": "kukeon" }, secrets: { "example-token": { secretRef: { name: "example-team", realm: "dev" } } }, values: { STATE_VOLUME: "kukeon-dev-demo-state", STATE_VOLUME_REALM: "dev", STATE_VOLUME_SPACE: "shared", STATE_VOLUME_STACK: "services" } }),
       config("other", "prod", ["example-token"]),
     ],
     registry: { dev: [{ serverAddress: "ghcr.io", secretRef: { name: "registry-ghcr.io", realm: "dev" } }, { serverAddress: "legacy.example.com", username: "old", password: "" }] },
@@ -159,7 +159,11 @@ export function connectorStatuses(world, config, overrides = {}) {
     const { connector, method } = found;
     const delivery = method?.delivery ?? connector.delivery;
     const base = { connector: connector.name, title: connector.title, component, ...(method ? { method: method.name } : {}), delivery, ...(method?.slot ? { slot: method.slot } : {}) };
-    if (delivery === "stateVolume") return [{ ...base, state: "resolved", volume: config.spec.values?.STATE_VOLUME ?? "" }];
+    if (delivery === "stateVolume") {
+      const values = config.spec.values ?? {};
+      const volumeRef = values.STATE_VOLUME && values.STATE_VOLUME_REALM ? { name: values.STATE_VOLUME, realm: values.STATE_VOLUME_REALM, ...(values.STATE_VOLUME_SPACE ? { space: values.STATE_VOLUME_SPACE } : {}), ...(values.STATE_VOLUME_STACK ? { stack: values.STATE_VOLUME_STACK } : {}) } : undefined;
+      return [{ ...base, state: "resolved", volume: values.STATE_VOLUME ?? "", ...(volumeRef ? { volumeRef } : {}) }];
+    }
     const required = !connector.optional;
     const fill = refOf(delivery === "git" ? config.spec.git?.identityRef : config.spec.secrets?.[method.slot]?.secretRef);
     const inherited = defaultAt(world, scope, targetKey(connector, method));

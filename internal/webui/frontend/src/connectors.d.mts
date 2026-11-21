@@ -27,8 +27,9 @@ export type Connector = {
 };
 export type ConnectorStatus = {
   connector: string; title?: string; component: string; method?: string; delivery: string; slot?: string; state: string;
-  required?: boolean; identity?: SecretRef; origin?: string; volume?: string; message?: string;
+  required?: boolean; identity?: SecretRef; origin?: string; volume?: string; volumeRef?: VolumeRef; message?: string;
 };
+export type VolumeRef = { name: string; realm: string; space?: string; stack?: string };
 export type ConfigMetadata = { name: string; realm?: string; space?: string; stack?: string; labels?: Record<string, string> };
 export type ConnectorMissing = { config: ConfigMetadata; component: string; method?: string; slot?: string; delivery: string; message?: string };
 export type ConnectorUsage = { connector: string; configs: number; missing: ConnectorMissing[] };

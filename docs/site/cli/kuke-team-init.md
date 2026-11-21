@@ -297,7 +297,7 @@ enabled health sweep, for one) in `kuke.yaml` and run `kuke team init --reapply`
 Cells already created from the old configs are not touched.
 
 Log in to each harness once more afterwards. The state volume that holds the
-harness login is named after the config, so a `kuke-majordomo-*` cell starts
+harness login is named after the config (`<config>-state`), so a `kuke-majordomo-*` cell starts
 with a new, empty volume. The old `kukeon-majordomo-*` volumes are left in
 place; delete them with `kuke delete volume` when you no longer need them.
 

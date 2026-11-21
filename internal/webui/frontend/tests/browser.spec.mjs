@@ -2814,7 +2814,9 @@ test("a team-owned Config shows its identities read-only with only Set default, 
   await expect(example.getByRole("button")).toHaveCount(1);
   // A login has no identity: the status names the state volume and "Log in" opens the New Cell flow.
   const demo = panel.getByRole("listitem", { name: "Demo connector" });
-  await expect(demo).toContainText("Login kept in state volume kukeon-dev-demo");
+  await expect(demo).toContainText("Login kept in state volume kukeon-dev-demo-state");
+  // The Config names the volume's scope, so the volume is a linked Volume reference.
+  await expect(demo.getByRole("link", { name: "kukeon-dev-demo-state" })).toHaveAttribute("href", "#/volumes/dev/shared/services/kukeon-dev-demo-state");
   await expect(demo.getByRole("button")).toHaveCount(0);
   await expect(demo.getByRole("link", { name: "Log in to Demo" })).toHaveAttribute("href", newCellFor("teams"));
   await demo.getByRole("link", { name: "Log in to Demo" }).click();
@@ -2836,7 +2838,7 @@ test("New Cell pre-selects each connector's effective identity, sends only chang
   await expect(picker.locator("option:checked")).toHaveText("example-team — dev (opaque)");
   await expect(picker.getByRole("option")).toHaveText(["Use the Config's identity", "example-default — dev (opaque)", "example-team — dev (opaque)", "example-other — dev / shared / services (opaque)", "Name a secret…"]);
   await expect(item).toContainText("set by team kukeon");
-  await expect(panel.getByRole("listitem", { name: "Demo connector" })).toContainText("Login kept in state volume kukeon-dev-demo");
+  await expect(panel.getByRole("listitem", { name: "Demo connector" })).toContainText("Login kept in state volume kukeon-dev-demo-state");
   // A login has no identity to pick; its only control is the method picker (#1551).
   await expect(panel.getByRole("listitem", { name: "Demo connector" }).getByRole("combobox", { name: /^Demo identity/ })).toHaveCount(0);
   await previewButton.click();

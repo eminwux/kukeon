@@ -19,9 +19,7 @@ package compose_test
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -476,7 +474,11 @@ func assertRootResources(t *testing.T, result *compose.Result) {
 		"SANDBOX":         "workspace-write",
 		"APPROVAL":        "on-request",
 		"AGENT_NAME":      "root-majordomo-codex",
-		"STATE_VOLUME":    "root-majordomo-codex",
+		"STATE_VOLUME":    "root-majordomo-codex-state",
+		// The state volume lives in the Config's own scope.
+		"STATE_VOLUME_REALM": "default",
+		"STATE_VOLUME_SPACE": "default",
+		"STATE_VOLUME_STACK": "default",
 	}
 	if !reflect.DeepEqual(p.Config.Spec.Values, want) {
 		t.Fatalf("config values = %v, want %v", p.Config.Spec.Values, want)
@@ -507,7 +509,9 @@ func assertRootResources(t *testing.T, result *compose.Result) {
 	}
 	rendered := work(t, p, interactive)
 	state, ok := stateVolume(rendered)
-	if !ok || state.Source != "root-majordomo-codex" || !state.Ensure || state.Target != "/home/user/.codex" {
+	if !ok || *state.VolumeRef != (api.VolumeRef{
+		Name: "root-majordomo-codex-state", Realm: "default", Space: "default", Stack: "default",
+	}) || state.Source != "" || !state.Ensure || state.Target != "/home/user/.codex" {
 		t.Fatalf("state volume missing team ownership/ensure: %+v", state)
 	}
 	if rendered.Image != publishedCodexImage(t) || len(rendered.Repos) != 1 ||
@@ -917,8 +921,9 @@ func TestLaunchPreservesSourceRevision(t *testing.T) {
 	}
 }
 
-func TestReviewerConfigNamePreservesExistingState(t *testing.T) {
+func TestStateVolumeIsConfigNamePlusState(t *testing.T) {
 	cfg, opts := fixture(t)
+	opts.Scope = compose.Scope{Realm: "teams", Space: "esp", Stack: "agents"}
 	team := selectedTeam(cfg)
 	team.Metadata.Name = "esp32"
 	cfg.Spec.Defaults.Roles[0].Name = "pr-reviewer"
@@ -933,55 +938,100 @@ func TestReviewerConfigNamePreservesExistingState(t *testing.T) {
 	if pair.Config.Metadata.Name != "esp32-pr-reviewer-codex" {
 		t.Fatalf("unexpected cell config name: %q", pair.Config.Metadata.Name)
 	}
-	// The volume name is the one the per-role blueprints used, so a login made
-	// before blueprints were shared is still there.
-	const historic = "esp32-pr-reviewer-codex-84a6981913a0eaf3"
-	if pair.Config.Spec.Values["STATE_VOLUME"] != historic {
+	// No project-dir part and no digest: the Config name plus -state, in the
+	// Config's own realm, space and stack.
+	want := api.VolumeRef{Name: "esp32-pr-reviewer-codex-state", Realm: "teams", Space: "esp", Stack: "agents"}
+	if pair.Config.Spec.Values["STATE_VOLUME"] != want.Name {
 		t.Fatalf("STATE_VOLUME = %q", pair.Config.Spec.Values["STATE_VOLUME"])
 	}
 	for _, mode := range []string{interactive, headless} {
-		if state, ok := stateVolume(work(t, pair, mode)); !ok || state.Source != historic {
-			t.Fatalf("PR #37 state-volume identity was not preserved in %s mode: %+v", mode, state)
+		state, ok := stateVolume(work(t, pair, mode))
+		if !ok || *state.VolumeRef != want || state.Source != "" || !state.Ensure {
+			t.Fatalf("state volume in %s mode = %+v, want ensured volumeRef %+v", mode, state, want)
 		}
 	}
 }
 
-// historicStateVolume reimplements, independently of the composer, the name
-// the per-(team, role, harness) blueprints gave a role's state volume before
-// blueprints were shared. A project-bound role's template named the volume
-// <project>-<role>-<harness>, which the binder then qualified with the team.
-func historicStateVolume(team, role, harness string, project bool) string {
-	parts := []string{team, role, harness}
-	if project {
-		parts = append(parts, "work-majordomo-"+harness)
+// TestStateVolumeNames pins literal state volume names, with and without a
+// project-bound role: neither the project checkout nor punctuation in the
+// selections changes the shape.
+func TestStateVolumeNames(t *testing.T) {
+	for _, tc := range []struct {
+		team, role string
+		project    bool
+		want       map[string]string
+	}{
+		{"root", "majordomo", false, map[string]string{
+			"codex": "root-majordomo-codex-state", "claude": "root-majordomo-claude-state",
+		}},
+		{"root", "majordomo", true, map[string]string{
+			"codex": "root-majordomo-codex-state", "claude": "root-majordomo-claude-state",
+		}},
+		{"kukeon", "pm", true, map[string]string{
+			"codex": "kukeon-pm-codex-state", "claude": "kukeon-pm-claude-state",
+		}},
+		{"esp32", "pr-reviewer", false, map[string]string{"codex": "esp32-pr-reviewer-codex-state"}},
+		{"root.a", "majordomo", false, map[string]string{"claude": "root-a-majordomo-claude-state"}},
+	} {
+		cfg, opts := fixture(t)
+		allHarnesses(cfg)
+		cfg.Spec.Secrets = []config.SecretBinding{routerBinding()}
+		if tc.project {
+			withProject(t, cfg, opts)
+		}
+		team := selectedTeam(cfg)
+		team.Metadata.Name = tc.team
+		cfg.Spec.Defaults.Roles[0].Name = tc.role
+		result, err := compose.Compose(cfg, team, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, pair := range result.Pairs {
+			want, pinned := tc.want[pair.Harness]
+			if !pinned {
+				continue
+			}
+			if got := pair.Config.Spec.Values["STATE_VOLUME"]; got != want {
+				t.Errorf("%s/%s/%s project=%v: STATE_VOLUME = %q, want %q",
+					tc.team, tc.role, pair.Harness, tc.project, got, want)
+			}
+		}
 	}
-	name := strings.Join(strings.FieldsFunc(strings.Join(parts, "-"), func(r rune) bool {
-		return r == '-' || r == '.'
-	}), "-")
-	if !strings.ContainsAny(strings.Join(parts, ""), ".-") {
-		return name
-	}
-	digest := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
-	return fmt.Sprintf("%s-%x", name, digest[:8])
 }
 
-// TestHistoricStateVolumeNames pins literal names of the per-role render, so
-// the composer and historicStateVolume cannot drift together.
-func TestHistoricStateVolumeNames(t *testing.T) {
-	for _, tc := range []struct {
-		team, role, harness string
-		project             bool
-		want                string
-	}{
-		{"root", "majordomo", "codex", false, "root-majordomo-codex"},
-		{"esp32", "pr-reviewer", "codex", false, "esp32-pr-reviewer-codex-84a6981913a0eaf3"},
-		{"root", "majordomo", "codex", true, "root-majordomo-codex-work-majordomo-codex-b2e12e8fb2d11c86"},
-		{"root", "majordomo", "claude", true, "root-majordomo-claude-work-majordomo-claude-4697e42f75c741b5"},
-		{"root.a", "majordomo", "claude", false, "root-a-majordomo-claude-a6ef3afb31a98bb9"},
+// withProject makes the majordomo role need the project repo and gives the
+// team a project source.
+func withProject(t *testing.T, cfg *config.TeamsConfig, opts compose.Options) {
+	t.Helper()
+	source := copiedSource(t)
+	source["team/roles/majordomo/role.yaml"].Data = bytes.ReplaceAll(
+		source["team/roles/majordomo/role.yaml"].Data,
+		[]byte("  needs:"), []byte("  needs:\n    repos: [project]"))
+	opts.Sources["kukeon"] = source
+	cfg.Spec.Defaults.Sources = append(cfg.Spec.Defaults.Sources, config.Source{
+		Name: "project", URL: "https://example.test/work", Branch: "topic", ClonePath: "/home/user/work",
+	})
+}
+
+// TestComposeRejectsCollidingPairNames composes two role selections whose
+// names join to the same CellConfig (and state volume) name.
+func TestComposeRejectsCollidingPairNames(t *testing.T) {
+	cfg, opts := fixture(t)
+	first := cfg.Spec.Defaults.Roles[0]
+	first.Name = "a-majordomo"
+	second := first
+	second.Name = "a.majordomo"
+	cfg.Spec.Defaults.Roles = []config.Role{first, second}
+	result, err := compose.Compose(cfg, selectedTeam(cfg), opts)
+	if err == nil || result != nil {
+		t.Fatalf("Compose = %v, %v; want a name collision error and no result", result, err)
+	}
+	for _, part := range []string{
+		`role "a-majordomo" harness "codex"`, `role "a.majordomo" harness "codex"`,
+		`"root-a-majordomo-codex"`, `"root-a-majordomo-codex-state"`,
 	} {
-		if got := historicStateVolume(tc.team, tc.role, tc.harness, tc.project); got != tc.want {
-			t.Errorf("historic name for %s/%s/%s project=%v = %q, want %q",
-				tc.team, tc.role, tc.harness, tc.project, got, tc.want)
+		if !strings.Contains(err.Error(), part) {
+			t.Errorf("error %q does not name %s", err, part)
 		}
 	}
 }
@@ -998,16 +1048,8 @@ func TestReadableResourceNamesAndIsolatedState(t *testing.T) {
 			allHarnesses(cfg)
 			cfg.Spec.Secrets = []config.SecretBinding{routerBinding()}
 			if project {
-				source := copiedSource(t)
-				source["team/roles/majordomo/role.yaml"].Data = bytes.ReplaceAll(
-					source["team/roles/majordomo/role.yaml"].Data,
-					[]byte("  needs:"), []byte("  needs:\n    repos: [project]"))
-				opts.Sources["kukeon"] = source
-				cfg.Spec.Defaults.Sources = append(cfg.Spec.Defaults.Sources, config.Source{
-					Name: "project", URL: "https://example.test/work", Branch: "topic", ClonePath: "/home/user/work",
-				})
+				withProject(t, cfg, opts)
 			}
-			volumes := map[string]string{}
 			digests := map[string]string{}
 			for _, selection := range []struct{ team, role string }{
 				{"root-a", "majordomo"},
@@ -1072,17 +1114,16 @@ func TestReadableResourceNamesAndIsolatedState(t *testing.T) {
 					if hasState != (pair.Harness != "opencode") {
 						t.Fatalf("state volume presence changed for %s", owner)
 					}
+					// The state volume follows the Config name: two selections
+					// that join to one name already share their Config, and
+					// Compose rejects them when they meet in one team.
 					if hasState {
-						if state.Source != pair.Config.Spec.Values["STATE_VOLUME"] ||
-							state.Source != historicStateVolume(selection.team, selection.role, pair.Harness, project) {
-							t.Fatalf("state volume %q for %s is not the historic name", state.Source, owner)
+						if state.VolumeRef.Name != pair.Config.Spec.Values["STATE_VOLUME"] ||
+							state.VolumeRef.Name != name+"-state" {
+							t.Fatalf("state volume %q for %s is not %s-state", state.VolumeRef.Name, owner, name)
 						}
-						if previous, exists := volumes[state.Source]; exists && previous != owner {
-							t.Fatalf("%s and %s share state volume %q", previous, owner, state.Source)
-						}
-						volumes[state.Source] = owner
-						if !runtimeID.MatchString(state.Source) {
-							t.Fatalf("invalid runtime volume name %q for %s", state.Source, owner)
+						if !runtimeID.MatchString(state.VolumeRef.Name) {
+							t.Fatalf("invalid runtime volume name %q for %s", state.VolumeRef.Name, owner)
 						}
 					}
 				}

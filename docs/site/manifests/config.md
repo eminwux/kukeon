@@ -232,7 +232,12 @@ status:
       method: login
       delivery: stateVolume
       state: resolved
-      volume: team-dev-claude
+      volume: team-dev-claude-state
+      volumeRef:
+        name: team-dev-claude-state
+        realm: default
+        space: default
+        stack: default
 ```
 
 | Field       | Type   | Description                                                                                            |
@@ -246,6 +251,7 @@ status:
 | `identity`  | object | The Secret that fills the connector. Absent when unresolved, and for a login kept in a state volume.   |
 | `origin`    | string | The level the identity comes from: `config`, `stack`, `space` or `realm` (`cell` in a create preview). |
 | `volume`    | string | The state volume holding the login of a `stateVolume` connector.                                       |
+| `volumeRef` | object | That volume with its scope, when the Config sets `STATE_VOLUME_REALM` (and `_SPACE` / `_STACK`).       |
 | `message`   | string | Why the connector is unresolved, or what is wrong with the identity it names.                          |
 
 ## Slot fills

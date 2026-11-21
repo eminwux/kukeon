@@ -19,7 +19,6 @@ package compose
 import (
 	"errors"
 	"fmt"
-	"path"
 	"slices"
 	"strings"
 
@@ -253,7 +252,7 @@ func planParameters(plan *pairPlan, cfg *config.TeamsConfig) error {
 func bind(
 	plan *pairPlan, bp *api.CellBlueprintDoc, cfg *config.TeamsConfig, team *config.Team, opts Options,
 ) (Pair, error) {
-	name := resourceName(plan.team, plan.selection.Name, plan.hsel.Name)
+	name := plan.configName()
 	cc := &api.CellConfigDoc{
 		APIVersion: api.APIVersionV1Beta1, Kind: api.KindCellConfig,
 		Metadata: api.CellConfigMetadata{
@@ -333,17 +332,20 @@ func bindValues(plan *pairPlan, bp *api.CellBlueprintDoc, cfg *config.TeamsConfi
 		return errors.New("ROLE_SOURCE_DIR: require absolute safe checkout path")
 	}
 	facts := map[string]string{
-		"IMAGE":            plan.image.Image,
-		"ROLE_SOURCE_DIR":  plan.roleSource.ClonePath,
-		"ROLE_PATH":        plan.selection.Path,
-		"INITIAL_PATH":     initial,
-		"HARNESS_SETTINGS": settings.Settings,
-		"ROLE_NAME":        plan.role.Metadata.Name,
-		"SANDBOX":          sandbox,
-		"APPROVAL":         approval,
-		"PERMISSIONS":      settings.Permissions,
-		"AGENT_NAME":       cc.Metadata.Name,
-		"STATE_VOLUME":     plan.stateVolume(),
+		"IMAGE":              plan.image.Image,
+		"ROLE_SOURCE_DIR":    plan.roleSource.ClonePath,
+		"ROLE_PATH":          plan.selection.Path,
+		"INITIAL_PATH":       initial,
+		"HARNESS_SETTINGS":   settings.Settings,
+		"ROLE_NAME":          plan.role.Metadata.Name,
+		"SANDBOX":            sandbox,
+		"APPROVAL":           approval,
+		"PERMISSIONS":        settings.Permissions,
+		"AGENT_NAME":         cc.Metadata.Name,
+		"STATE_VOLUME":       plan.stateVolume(),
+		"STATE_VOLUME_REALM": cc.Metadata.Realm,
+		"STATE_VOLUME_SPACE": cc.Metadata.Space,
+		"STATE_VOLUME_STACK": cc.Metadata.Stack,
 	}
 	if project, ok := runtimeSource(plan.sources, projectSlot); ok {
 		facts["PROJECT_DIR"] = project.ClonePath
@@ -375,15 +377,13 @@ func bindValues(plan *pairPlan, bp *api.CellBlueprintDoc, cfg *config.TeamsConfi
 	return nil
 }
 
-// stateVolume preserves the volume name each role's cells have always used,
-// so a harness login survives the move to shared blueprints.
+// stateVolume names the Volume holding the pair's harness state: the pair's
+// CellConfig name plus `-state`. The pair config, its task configs and the
+// sweep cell share it, so one harness login covers every cell of the role ×
+// harness. Compose rejects two pairs whose names join to the same string, so
+// two pairs never share a state volume by accident.
 func (p *pairPlan) stateVolume() string {
-	if !slices.Contains(p.role.Spec.Needs.Repos, projectSlot) {
-		return stateVolumeName(p.team, p.selection.Name, p.hsel.Name)
-	}
-	project, _ := runtimeSource(p.sources, projectSlot)
-	legacy := path.Base(project.ClonePath) + "-" + p.role.Metadata.Name + "-" + p.hsel.Name
-	return stateVolumeName(p.team, p.selection.Name, p.hsel.Name, legacy)
+	return p.configName() + stateVolumeSuffix
 }
 
 // bindRepos fills the blueprint's repo slots from the team's runtime sources:

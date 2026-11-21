@@ -27,7 +27,6 @@ package compose
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -164,6 +163,9 @@ func Compose(cfg *config.TeamsConfig, team *config.Team, opts Options) (*Result,
 	// blueprint they use so the blueprint is rendered once with everything
 	// its pairs need.
 	var plans []*pairPlan
+	// owners maps each CellConfig name to the pair that takes it: the name
+	// joins the parts with `-`, so two pairs can produce the same one.
+	owners := map[string]*pairPlan{}
 	groups := map[string]*group{}
 	var order []string
 	for _, role := range effective.Roles {
@@ -178,6 +180,9 @@ func Compose(cfg *config.TeamsConfig, team *config.Team, opts Options) (*Result,
 				cfg, team.Metadata.Name, role, h, effective, opts, lib, catalog, secrets)
 			if planErr != nil {
 				return nil, fmt.Errorf("compose %s/%s: %w", role.Name, h.Name, planErr)
+			}
+			if err = claimName(owners, plan); err != nil {
+				return nil, err
 			}
 			plans = append(plans, plan)
 			key := plan.blueprintName()
@@ -259,6 +264,23 @@ func Compose(cfg *config.TeamsConfig, team *config.Team, opts Options) (*Result,
 	slices.Sort(result.Notes)
 	result.Notes = slices.Compact(result.Notes)
 	return result, nil
+}
+
+// claimName records the CellConfig name of a pair, and fails when another pair
+// of the compose already produced it: the two would share a Config and a
+// harness state volume.
+func claimName(owners map[string]*pairPlan, plan *pairPlan) error {
+	name := plan.configName()
+	if other, taken := owners[name]; taken {
+		return fmt.Errorf(
+			"role %q harness %q and role %q harness %q of team %q both produce the name %q "+
+				"(their CellConfig and %q state volume); rename one of the selections",
+			other.selection.Name, other.hsel.Name, plan.selection.Name, plan.hsel.Name, plan.team,
+			name, name+stateVolumeSuffix,
+		)
+	}
+	owners[name] = plan
+	return nil
 }
 
 func normalizeScope(s Scope) (Scope, error) {
@@ -353,6 +375,14 @@ type secretFill struct {
 	// isDefault marks a slot left to the scope defaults instead of being
 	// written into the Config.
 	isDefault bool
+}
+
+// stateVolumeSuffix ends the name of a pair's harness state volume.
+const stateVolumeSuffix = "-state"
+
+// configName is the name of the pair's CellConfig: `<team>-<role>-<harness>`.
+func (p *pairPlan) configName() string {
+	return resourceName(p.team, p.selection.Name, p.hsel.Name)
 }
 
 func (p *pairPlan) blueprintName() string {
@@ -517,17 +547,6 @@ func resourceName(parts ...string) string {
 	return strings.Join(strings.FieldsFunc(strings.Join(parts, "-"), func(r rune) bool {
 		return r == '-' || r == '.'
 	}), "-")
-}
-
-// stateVolumeName retains the original component boundaries in a digest so
-// readable resource aliases cannot share persistent state accidentally.
-func stateVolumeName(parts ...string) string {
-	name := resourceName(parts...)
-	if !strings.ContainsAny(strings.Join(parts, ""), ".-") {
-		return name
-	}
-	digest := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
-	return fmt.Sprintf("%s-%x", name, digest[:8])
 }
 
 func load(source fs.FS, filename string, out any) error {

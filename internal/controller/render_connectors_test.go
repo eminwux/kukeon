@@ -48,7 +48,13 @@ func connectorBlueprint() ext.CellBlueprintDoc {
 		Kind:       ext.KindCellBlueprint,
 		Metadata:   ext.CellBlueprintMetadata{Name: "dev", Realm: "kuke-system"},
 		Spec: ext.CellBlueprintSpec{
-			Parameters: []ext.CellBlueprintParameter{{Name: "IMAGE"}, {Name: "STATE_VOLUME"}},
+			Parameters: []ext.CellBlueprintParameter{
+				{Name: "IMAGE"},
+				{Name: "STATE_VOLUME"},
+				{Name: "STATE_VOLUME_REALM"},
+				{Name: "STATE_VOLUME_SPACE"},
+				{Name: "STATE_VOLUME_STACK"},
+			},
 			Components: []ext.BlueprintComponent{
 				{Kind: ext.ComponentKindHarness, Name: "harness"},
 				{
@@ -431,6 +437,10 @@ func TestGetConfig_ReportsConnectors(t *testing.T) {
 		login.Method != "login" || login.Component != "agent-login" {
 		t.Errorf("login status = %+v, want resolved with the state volume", login)
 	}
+	// A Config that names no state volume scope gets no reference to link.
+	if login.VolumeRef != nil {
+		t.Errorf("login volumeRef = %+v, want none without STATE_VOLUME_REALM", login.VolumeRef)
+	}
 	forge := connectorStatus(t, statuses, "forge")
 	if forge.State != ext.ConnectorUnresolved || !forge.Required || forge.Message == "" || forge.Slot != "forge-token" {
 		t.Errorf("forge status = %+v, want unresolved and required", forge)
@@ -754,4 +764,31 @@ func TestPreviewCellFromConfig_ShadowedGitIdentity(t *testing.T) {
 			t.Fatalf("error = %v, want ErrConnectorIdentity naming repo project", err)
 		}
 	})
+}
+
+// TestConfigConnectorStatusStateVolumeRef: a Config naming its state volume's
+// scope reports the volume as a reference the web UI links.
+func TestConfigConnectorStatusStateVolumeRef(t *testing.T) {
+	fx := &connectorFixture{}
+	cfg := connectorConfig("agent-login")
+	cfg.Spec.Values["STATE_VOLUME_REALM"] = "default"
+	cfg.Spec.Values["STATE_VOLUME_SPACE"] = "teams"
+	cfg.Spec.Values["STATE_VOLUME_STACK"] = "kukeon"
+	ctrl := setupTestController(t, newConnectorRunner(t, fx, cfg))
+	res, err := ctrl.GetConfig(configCarrier(t, cfg))
+	if err != nil {
+		t.Fatalf("GetConfig: %v", err)
+	}
+	doc, err := apischeme.ConvertCellConfigToExternal(res.Config)
+	if err != nil {
+		t.Fatalf("convert config: %v", err)
+	}
+	if doc.Status == nil {
+		t.Fatal("config carries no status")
+	}
+	login := connectorStatus(t, doc.Status.Connectors, "agent")
+	want := ext.VolumeRef{Name: "kukeon-dev-state", Realm: "default", Space: "teams", Stack: "kukeon"}
+	if login.VolumeRef == nil || *login.VolumeRef != want {
+		t.Fatalf("login volumeRef = %+v, want %+v", login.VolumeRef, want)
+	}
 }

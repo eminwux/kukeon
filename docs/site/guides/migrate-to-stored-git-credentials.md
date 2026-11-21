@@ -82,7 +82,7 @@ What you will see in the daemon afterwards:
 | `~/.ssh` bind mount, hardcoded `GIT_SSH_COMMAND`           | Stored credentials from the inherited `git` block                                                                              |
 | Secret slots listed by each role                           | Harness secret slots, plus the `github` connector                                                                              |
 
-The old per-role blueprints are pruned by the same apply. **CellConfig names do not change** (`<team>-<role>-<harness>`), so `kuke run <config>` keeps working, and **state volume names are preserved**, so an interactive harness login survives the migration.
+The old per-role blueprints are pruned by the same apply. **CellConfig names do not change** (`<team>-<role>-<harness>`), so `kuke run <config>` keeps working. The harness state volume is named `<config>-state` (see [Resource names and state volumes](../concepts/team.md#resource-names-and-state-volumes)); a Volume from an earlier install under the old digest-suffixed name is not reused, so log in to each harness again after re-rendering.
 
 Profiles are part of the security posture and are fixed in the blueprint: `root` for a role that needs the `root` image capability, `host` for one that mounts the kukeon socket, binary and install tree. A Config cannot switch them on.
 

@@ -604,18 +604,33 @@ to single hyphens: team `esp32`, role `pr-reviewer`, and harness `codex`
 produce `esp32-pr-reviewer-codex`. A task config appends the task name:
 `esp32-pr-reviewer-codex-pick-review-pr`. Different selections can collide on these
 readable names (`root-a`/`majordomo` and `root`/`a-majordomo`); choose distinct
-names in the same scope. `kukeon.io/team` labels keep the authored team name,
+names in the same scope. Within one team, composition fails when two role ×
+harness pairs produce the same config name (role `a-b` and role `a.b`), and
+the error names both pairs. `kukeon.io/team` labels keep the authored team name,
 and `kukeon.io/role` labels the role name from the team's `roles` list, on pair
 and task configs alike.
 Resources default to realm/space/stack `default`.
 
-Default harness state volumes use the readable resource name plus a
-16-character SHA-256 suffix when any original component contains a dot or
-hyphen, so state stays isolated even when readable names coincide. Explicit
-`volumeRef` bindings remain explicit references. Own-scope volume slots carry
-`ensure: true`. The name is passed to the shared blueprint as the Config's
-`STATE_VOLUME` value and is the same name earlier per-role blueprints used, so
-a harness login survives re-rendering.
+A harness keeps its state (logins, sessions) on a Volume named after the
+pair's config plus `-state`: `<team>-<role>-<harness>-state`, for example
+`kuke-majordomo-claude-state` or `esp32-pr-reviewer-codex-state`. The Volume
+is mounted only at the harness's `statePath` (`$HOME/.claude` for claude,
+`$HOME/.codex` for codex). It is not the cell's home or root filesystem, and a
+harness without a `statePath` gets no state volume. The pair config, its task
+configs and the sweep cell all mount the same one, so one harness login covers
+every cell of that role × harness.
+
+The Config passes the name to the shared blueprint as `STATE_VOLUME`, and the
+Volume's scope as `STATE_VOLUME_REALM`, `STATE_VOLUME_SPACE` and
+`STATE_VOLUME_STACK` (the Config's own realm, space and stack). The blueprint
+mounts it through a fully-qualified `volumeRef` with `ensure: true`, so the
+first cell creates the Volume at those coordinates and the web UI links it.
+
+Installs composed before this name existed used
+`<team>-<role>-<harness>[-<project>-<role>-<harness>]-<digest>`. Composition
+does not migrate those Volumes: after re-rendering, each role × harness starts
+with a new, empty state volume, so log in to each harness again. Delete the
+old Volumes with `kuke delete volume` once they are no longer needed.
 
 ## What preflight covers
 
