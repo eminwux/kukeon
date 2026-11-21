@@ -22,7 +22,8 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (key: string
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const remaining = useRef(autoDismissMs);
-  // Each state change restarts the countdown; hover and focus pause it without resetting.
+  // Each state change restarts the countdown; hover and focus pause it without resetting. Hover counts
+  // only once the pointer moves over the toast: one that appears under a resting pointer still dismisses.
   useEffect(() => { remaining.current = autoDismissMs; }, [toast.revision]);
   useEffect(() => {
     if (toast.tone !== "success" || hovered || focused) return;
@@ -33,8 +34,8 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (key: string
   return <div
     className={`toast ${toast.tone}`}
     data-toast={toast.key}
-    onMouseEnter={() => setHovered(true)}
-    onMouseLeave={() => setHovered(false)}
+    onPointerMove={() => setHovered(true)}
+    onPointerLeave={() => setHovered(false)}
     onFocus={() => setFocused(true)}
     onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false); }}
     onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); onDismiss(toast.key); } }}

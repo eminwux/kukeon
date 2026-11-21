@@ -7,6 +7,8 @@ import { Icon } from "./icons";
 const collapsedKey = "kukeon-sidebar-collapsed";
 const widthKey = "kukeon-sidebar-width";
 export const sidebarWidth = { min: 208, max: 480, initial: 264, step: 16 };
+// The collapsed icon rail, the --rail-width token in style.css.
+export const railWidth = 56;
 
 function clampWidth(value: number): number {
   return Math.round(Math.min(sidebarWidth.max, Math.max(sidebarWidth.min, value)));

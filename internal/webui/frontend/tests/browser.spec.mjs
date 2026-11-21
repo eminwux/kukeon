@@ -3068,3 +3068,213 @@ test("the registry-delivered connector is Realm only and saves Secret-backed reg
   await expect(realmPanel.getByRole("row", { name: /^ghcr\.io/ }).getByRole("link", { name: "registry-ghcr.io" })).toBeVisible();
   expect(await page.content()).not.toContain(token);
 });
+
+// Cell screen layout and overlays (#1565): the expanded terminal follows the sidebar edge, the
+// Advanced actions menu and the phone drawer dismiss like other overlays, and toasts stay clear of
+// the title row's lifecycle buttons.
+const shellOnly = path => path.endsWith("/containers") ? { json: [{ id: "shell", attachable: true }] } : undefined;
+const readyAttach = socket => { socket.send(JSON.stringify({ type: "ready" })); };
+
+test("the expanded terminal's left edge follows the sidebar when expanded, collapsed and resized, and uses the gutter on phones", async ({ page }) => {
+  await mock(page, shellOnly);
+  await page.routeWebSocket("**/attach", readyAttach);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const sidebar = page.getByRole("complementary", { name: "Cell sidebar" });
+  const expanded = page.locator(".terminal-workspace.is-expanded");
+  const sidebarRight = async () => { const box = await sidebar.boundingBox(); return Math.round(box.x + box.width); };
+  async function expandBeside(edge) {
+    await terminalTools(page).getByRole("button", { name: "Expand terminal" }).click();
+    await expect.poll(async () => Math.round((await expanded.boundingBox()).x)).toBe(edge + 12);
+    await terminalTools(page).getByRole("button", { name: "Collapse terminal" }).click();
+    await expect(expanded).toHaveCount(0);
+  }
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
+  expect(await sidebarRight()).toBe(264);
+  await expandBeside(264);
+  await sidebar.getByRole("button", { name: "Collapse sidebar" }).click();
+  expect(await sidebarRight()).toBe(56);
+  await expandBeside(56);
+  await sidebar.getByRole("button", { name: "Expand sidebar" }).click();
+  for (const width of [208, 480]) {
+    await page.evaluate(value => localStorage.setItem("kukeon-sidebar-width", String(value)), width);
+    await page.reload();
+    await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
+    expect(await sidebarRight()).toBe(width);
+    await expandBeside(width);
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await terminalTools(page).getByRole("button", { name: "Expand terminal" }).click();
+  await expect.poll(async () => Math.round((await expanded.boundingBox()).x)).toBe(12);
+});
+
+test("the cell Advanced actions menu closes on Escape, outside pointer down and a chosen action, and stays inside the viewport", async ({ page }) => {
+  await mock(page, shellOnly);
+  await page.routeWebSocket("**/attach", readyAttach);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
+  const menu = page.locator("details.cell-advanced-actions");
+  const summary = menu.locator("summary");
+  await summary.click();
+  await expect(menu).toHaveAttribute("open", "");
+  await page.keyboard.press("Escape");
+  await expect(menu).not.toHaveAttribute("open");
+  await expect(summary).toBeFocused();
+
+  await summary.click();
+  await expect(menu).toHaveAttribute("open", "");
+  await content(page).click({ position: { x: 4, y: 4 } });
+  await expect(menu).not.toHaveAttribute("open");
+
+  // Over the expanded terminal, Escape closes only the menu.
+  await terminalTools(page).getByRole("button", { name: "Expand terminal" }).click();
+  await expect(page.locator(".terminal-workspace")).toHaveClass(/is-expanded/);
+  await summary.click();
+  await expect(menu).toHaveAttribute("open", "");
+  await page.keyboard.press("Escape");
+  await expect(menu).not.toHaveAttribute("open");
+  await expect(page.locator(".terminal-workspace")).toHaveClass(/is-expanded/);
+  await terminalTools(page).getByRole("button", { name: "Collapse terminal" }).click();
+
+  await summary.click();
+  await page.getByRole("button", { name: "Kill cell…" }).click();
+  await expect(menu).not.toHaveAttribute("open");
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+
+  for (const [width, height] of [[390, 844], [768, 1024]]) {
+    await page.setViewportSize({ width, height });
+    await summary.click();
+    await expect(menu).toHaveAttribute("open", "");
+    const box = await page.locator(".cell-advanced-menu").boundingBox();
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(width);
+    expect(box.y + box.height).toBeLessThanOrEqual(height);
+    await page.keyboard.press("Escape");
+    await expect(menu).not.toHaveAttribute("open");
+  }
+});
+
+test("the phone sidebar drawer has a scrim, closes on a scrim tap or Escape with focus back on the toggle, and makes main inert", async ({ page }) => {
+  await mock(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(server.url);
+  const drawer = page.getByRole("complementary", { name: "Cell sidebar" });
+  const toggle = page.getByRole("button", { name: "Toggle sidebar" });
+  const scrim = page.locator(".sidebar-scrim");
+  const main = page.locator("main");
+  await expect(scrim).toBeHidden();
+  await toggle.click();
+  await expect(drawer).toBeVisible();
+  await expect(scrim).toBeVisible();
+  await page.mouse.click(370, 400);
+  await expect(drawer).toBeHidden();
+  await expect(scrim).toBeHidden();
+  await expect(toggle).toBeFocused();
+
+  await toggle.click();
+  await expect(drawer).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(drawer).toBeHidden();
+  await expect(toggle).toBeFocused();
+
+  await toggle.click();
+  await expect(main).toHaveAttribute("inert", "");
+  for (let i = 0; i < 10; i++) {
+    await page.keyboard.press("Tab");
+    expect(await page.evaluate(() => !!document.activeElement?.closest("main"))).toBe(false);
+  }
+  await drawer.getByRole("button", { name: "Close sidebar" }).click();
+  await expect(drawer).toBeHidden();
+  await expect(toggle).toBeFocused();
+  await expect(main).not.toHaveAttribute("inert");
+
+  // Desktop never sets inert or shows the scrim, even if the drawer was left open at phone width.
+  await toggle.click();
+  await expect(main).toHaveAttribute("inert", "");
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(main).not.toHaveAttribute("inert");
+  await expect(scrim).toBeHidden();
+  await expect(drawer).toBeVisible();
+});
+
+function lifecycleMock(state) {
+  const posts = [];
+  const cell = "/api/realms/dev/spaces/shared/stacks/services/cells/api";
+  const handler = async (path, request) => {
+    if (request.method() === "POST") {
+      posts.push(path.split("/").at(-1));
+      state.value = path.endsWith("/stop") ? "Stopped" : "Ready";
+      return { json: {} };
+    }
+    if (path.endsWith("/containers")) return { json: [{ id: "shell", attachable: true }] };
+    if (path === cell) return { json: { ...doc(["dev", "shared", "services", "api"]), status: { state: state.value } } };
+    if (path.endsWith("/cells") && path.includes("/dev/")) return { json: fixture(path).map(item => ({ ...item, status: { state: state.value } })) };
+  };
+  return { posts, handler };
+}
+
+test("cell screen toasts stay clear of the title-row buttons, so Start follows Stop without dismissing the toast", async ({ page }) => {
+  const state = { value: "Ready" };
+  const { posts, handler } = lifecycleMock(state);
+  await mock(page, handler);
+  await page.routeWebSocket("**/attach", readyAttach);
+  const row = page.locator(".cell-page-title-row:visible");
+  const overlaps = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+  for (const [width, height] of [[1440, 900], [1024, 768], [768, 1024], [390, 844]]) {
+    await page.setViewportSize({ width, height });
+    for (const view of ["workspace", "resource"]) {
+      await page.goto(`${server.url}#/${view}/dev/shared/services/api`);
+      await row.getByRole("button", { name: "Stop", exact: true }).click();
+      await expect.poll(() => posts.at(-1)).toBe("stop");
+      await expect(toasts(page).first()).toHaveClass(/success/);
+      const buttons = await row.getByRole("button").all();
+      for (const toast of await toasts(page).all()) {
+        const box = await toast.boundingBox();
+        for (const button of buttons) {
+          const target = await button.boundingBox();
+          if (target) expect(overlaps(box, target), `${width} ${view}: toast covers ${await button.getAttribute("aria-label")}`).toBe(false);
+        }
+      }
+      // No dismiss: the click has to reach Start.
+      const count = posts.length;
+      await row.getByRole("button", { name: "Start", exact: true }).click({ timeout: 5000 });
+      await expect.poll(() => posts.length).toBe(count + 1);
+      expect(posts.at(-1)).toBe("start");
+      await expect(toasts(page).first()).toHaveClass(/success/);
+    }
+  }
+});
+
+test("a success toast under a resting pointer still auto-dismisses, while moving onto one pauses it", async ({ page }) => {
+  await page.clock.install();
+  const state = { value: "Ready" };
+  const { posts, handler } = lifecycleMock(state);
+  await mock(page, handler);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${server.url}#/resource/dev/shared/services/api`);
+  const row = page.locator(".cell-page-title-row");
+  // Rest the pointer where the stack will appear (bottom right on the cell screen), then act from the keyboard.
+  const resting = { x: 1440 - 16 - 120, y: 900 - 16 - 20 };
+  await page.mouse.move(resting.x, resting.y);
+  await row.getByRole("button", { name: "Stop", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  await expect.poll(() => posts.length).toBe(1);
+  await expect(toasts(page)).toHaveClass(/success/);
+  const box = await toasts(page).boundingBox();
+  expect(resting.x > box.x && resting.x < box.x + box.width && resting.y > box.y && resting.y < box.y + box.height).toBe(true);
+  await page.clock.fastForward(6000);
+  await expect(toasts(page)).toHaveCount(0);
+
+  await row.getByRole("button", { name: "Start", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  await expect.poll(() => posts.length).toBe(2);
+  await expect(toasts(page)).toHaveClass(/success/);
+  await page.mouse.move(700, 300);
+  await toasts(page).hover();
+  await page.clock.fastForward(6000);
+  await expect(toasts(page)).toHaveCount(1);
+  await page.mouse.move(700, 300);
+  await page.clock.fastForward(5100);
+  await expect(toasts(page)).toHaveCount(0);
+});

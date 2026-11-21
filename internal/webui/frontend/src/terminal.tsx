@@ -299,7 +299,8 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
   useEffect(() => {
     if (!expanded) return;
     const escape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || screens.current?.contains(event.target as Node)) return;
+      // An open disclosure (the Advanced actions menu above the terminal) takes its own Escape first.
+      if (event.key !== "Escape" || screens.current?.contains(event.target as Node) || (event.target as Element | null)?.closest?.("details[open]")) return;
       event.preventDefault();
       event.stopPropagation();
       setExpanded(false);

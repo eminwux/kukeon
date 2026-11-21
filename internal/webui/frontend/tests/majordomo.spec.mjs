@@ -169,6 +169,8 @@ test("a stopped majordomo cell offers Start and a running one opens", async ({ p
 });
 
 test("the docked panel opens from the sidebar and the header, collapses without detaching, resizes and keeps its session across navigation", async ({ page }) => {
+  // Wide enough that the stepped widths below all fit next to the 800px main column floor.
+  await page.setViewportSize({ width: 1920, height: 1080 });
   const state = await world(page, { configs: teamConfigs(), cells: [runningMajordomo(), cell("api", "Ready")] });
   await page.goto(`${server.url}#/resources`);
   await expect(panel(page)).toBeHidden();
@@ -227,6 +229,66 @@ test("the docked panel opens from the sidebar and the header, collapses without 
   expect(state.requests).toEqual([]);
 });
 
+test("Majordomo dock never squeezes main below its floor and overlays the content when it cannot dock", async ({ page }) => {
+  // No majordomo cell: the panel shows its setup, so the only terminal is the api cell's.
+  const state = await world(page, { configs: teamConfigs(), cells: [cell("api", "Ready")] });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => { if (!sessionStorage.getItem("seeded")) { sessionStorage.setItem("seeded", "1"); localStorage.setItem("kukeon-majordomo-open", "true"); } });
+  await page.goto(`${server.url}#/workspace/default/default/default/api`);
+  const shell = page.locator(".app-shell");
+  const resizer = panel(page).getByRole("separator", { name: "Resize majordomo panel" });
+  const width = async selector => Math.round((await page.locator(selector).first().boundingBox()).width);
+  const cols = () => state.messages.filter(message => typeof message === "string" && JSON.parse(message).type === "resize").map(message => JSON.parse(message).cols).at(-1);
+  await expect(panel(page)).toBeVisible();
+  await expect(page.locator(".terminal-connection-state").first()).toContainText("Attached");
+
+  // 1440 with the default 480 preference: the panel docks at what leaves main its 800px floor, and
+  // the cell terminal gets 80 columns. The stored preference is untouched.
+  await expect(shell).not.toHaveClass(/majordomo-overlay/);
+  await expect.poll(() => width(".majordomo-panel")).toBe(1440 - 264 - 800);
+  expect(await width("main")).toBeGreaterThanOrEqual(800);
+  await expect.poll(cols).toBeGreaterThanOrEqual(80);
+  await expect(resizer).toHaveAttribute("aria-valuemax", String(1440 - 264 - 800));
+  expect(await page.evaluate(() => localStorage.getItem("kukeon-majordomo-width"))).toBe("480");
+  // Docked, the expanded terminal and the toasts keep clear of the panel.
+  await page.locator(".cell-terminal-tools").getByRole("button", { name: "Expand terminal" }).click();
+  await expect.poll(async () => { const box = await page.locator(".terminal-workspace.is-expanded").boundingBox(); return Math.round(box.x + box.width); }).toBe(1440 - 376 - 12);
+  expect(await page.locator(".toast-stack").evaluate(el => getComputedStyle(el).right)).toBe(`${376 + 16}px`);
+  await page.locator(".cell-terminal-tools").getByRole("button", { name: "Collapse terminal" }).click();
+  await expect(page.locator(".terminal-workspace.is-expanded")).toHaveCount(0);
+
+  // A stored width wider than the viewport allows is clamped on load and on window resize, and stays stored.
+  await page.evaluate(() => localStorage.setItem("kukeon-majordomo-width", "960"));
+  await page.reload();
+  await expect(panel(page)).toBeVisible();
+  await expect.poll(() => width(".majordomo-panel")).toBe(1440 - 264 - 800);
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await expect.poll(() => width(".majordomo-panel")).toBe(1920 - 264 - 800);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect.poll(() => width(".majordomo-panel")).toBe(1440 - 264 - 800);
+  expect(await page.evaluate(() => localStorage.getItem("kukeon-majordomo-width"))).toBe("960");
+
+  // 1024 and 768 cannot dock next to the floor: the panel overlays, main keeps the full width beside
+  // the sidebar, and nothing is offset for the panel.
+  for (const [viewport, height] of [[1024, 768], [768, 1024]]) {
+    await page.setViewportSize({ width: viewport, height });
+    await expect(shell).toHaveClass(/majordomo-overlay/);
+    await expect.poll(() => width(".workspace")).toBe(viewport - 264);
+    expect(await shell.evaluate(el => getComputedStyle(el).paddingRight)).toBe("0px");
+    expect(await page.locator(".toast-stack").evaluate(el => getComputedStyle(el).right)).toBe("16px");
+    expect(await page.locator(".cell-page-title-row h1").evaluate(el => el.getBoundingClientRect().height)).toBeLessThan(40);
+    // The overlaid panel covers the title row's right end, so its controls are used from the keyboard here.
+    await page.locator(".cell-terminal-tools").getByRole("button", { name: "Expand terminal" }).press("Enter");
+    await expect.poll(async () => { const box = await page.locator(".terminal-workspace.is-expanded").boundingBox(); return Math.round(box.x + box.width); }).toBe(viewport - 12);
+    await page.locator(".cell-terminal-tools").getByRole("button", { name: "Collapse terminal" }).press("Enter");
+    await page.goto(`${server.url}#/cells`);
+    await expect(page.locator(".workspace table")).toBeVisible();
+    expect(await width(".workspace table")).toBeGreaterThan(400);
+    await page.goto(`${server.url}#/workspace/default/default/default/api`);
+  }
+  expect(await page.evaluate(() => localStorage.getItem("kukeon-majordomo-width"))).toBe("960");
+});
+
 test("majordomo's own cell screen points at the panel instead of opening a second terminal", async ({ page }) => {
   const state = await world(page, { configs: teamConfigs(), cells: [runningMajordomo()] });
   await page.goto(`${server.url}#/workspace/default/default/default/majordomo`);
@@ -265,6 +327,8 @@ test("Ask majordomo pastes one unsubmitted bracketed paste carrying the cell's s
 });
 
 test("Ask majordomo is on the cell list's failed rows and on config, blueprint, volume and daemon views", async ({ page }) => {
+  // Docked, not overlaid: below 1384px the open panel would cover the next view's Ask button.
+  await page.setViewportSize({ width: 1920, height: 1080 });
   const daemon = { status: "unavailable", endpoint: "unix:///run/kukeon/kukeond.sock", serverVersion: "v0.11.0", checkedAt: "2026-11-17T10:00:00Z", latencyMs: 3, error: { code: "unavailable", message: "dial unix /run/kukeon/kukeond.sock: connect: connection refused" } };
   const state = await world(page, { configs: teamConfigs(), daemon, cells: [runningMajordomo(), cell("api", "Error"), cell("web", "Degraded"), cell("ok", "Ready")] });
   const question = async () => { await expect.poll(() => pasted(state).filter(message => message.includes("\x1b[200~")).length).toBeGreaterThan(0); const last = pasted(state).filter(message => message.includes("\x1b[200~")).at(-1); state.messages.length = 0; return last.slice(6, -6); };
