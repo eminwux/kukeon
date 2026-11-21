@@ -3582,7 +3582,7 @@
 <tr>
 <td><code>kuke stop</code></td>
 <td><code>SIGTERM</code></td>
-<td>Request graceful shutdown; container exits on its own terms</td>
+<td>Graceful shutdown; <code>SIGKILL</code> after a short grace period</td>
 </tr>
 <tr>
 <td><code>kuke kill</code></td>
@@ -3602,12 +3602,12 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>kuke stop &lt;name&gt; --realm &lt;r&gt; --space &lt;s&gt; --stack &lt;t&gt;
 </code></pre></div>
 <p>Aliases: <code>kuke stop</code> → <code>kuke sto</code>.</p>
-<p>Sends SIGTERM to the task. If the container has a shutdown handler, it gets a chance to run. There is no explicit grace period flag today — whatever the task does before exiting, it does.</p>
+<p>Sends SIGTERM to every task in the cell: the workload containers first, then the root container. If a container has a shutdown handler, it gets a chance to run. A task still running after a short grace period (5s; there is no flag to change it today) is sent SIGKILL. <code>stop</code> waits for each task to exit and deletes it, including tasks that had already exited, then releases the cell's network.</p>
 <h2 id="kuke-kill">kuke kill<a class="headerlink" href="#kuke-kill" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>kuke kill &lt;name&gt; --realm &lt;r&gt; --space &lt;s&gt; --stack &lt;t&gt;
 </code></pre></div>
 <p>Aliases: <code>kuke kill</code> → <code>kuke k</code>.</p>
-<p>Sends SIGKILL. Useful when a cell is unresponsive. For the daemon itself, prefer the dedicated <a href="../kuke-daemon/"><code>kuke daemon kill</code></a> shortcut — it knows the daemon's static coordinates.</p>
+<p>Sends SIGKILL to every task in the cell, workloads first, then the root. Like <code>stop</code>, it waits for each task to exit and deletes it, so the two verbs leave the same end state; they differ only in the first signal. Useful when a cell is unresponsive. For the daemon itself, prefer the dedicated <a href="../kuke-daemon/"><code>kuke daemon kill</code></a> shortcut — it knows the daemon's static coordinates.</p>
 <h2 id="common-flags">Common flags<a class="headerlink" href="#common-flags" title="Permanent link">&para;</a></h2>
 <p>All three verbs share the same scope flags:</p>
 <table>
@@ -3653,7 +3653,13 @@
 <li>Exit 0: signal delivered (or cell already in desired state for <code>start</code>).</li>
 <li>Exit non-zero: the daemon couldn't find the resource, the resource is in a state that doesn't allow the transition, or the underlying containerd/runtime call failed.</li>
 </ul>
-<p>After <code>stop</code>/<code>kill</code>, the cell is in <code>Stopped</code> state. <code>start</code> moves it to <code>Ready</code>. See <a href="../../concepts/cell/#lifecycle">Cell</a> and <a href="../../concepts/container/#lifecycle">Container</a> for the full state tables.</p>
+<p>After <code>stop</code>/<code>kill</code>, no task of the cell is left behind. The state the cell is left in depends on what the verb interrupted:</p>
+<ul>
+<li>The cell had already settled in <code>Exited</code> or <code>Error</code> and no workload was running: the state, <code>REASON</code> and <code>MESSAGE</code> are kept.</li>
+<li>A workload was still running, the cell was <code>Degraded</code>, or a restart was owed: <code>Stopped</code> with reason <code>OperatorStopped</code>. This suppresses <code>--rm</code> auto-delete until the cell is restarted or deleted.</li>
+<li>Otherwise: <code>Stopped</code>.</li>
+</ul>
+<p>Stopping or killing an already torn-down cell is a no-op that exits 0. <code>start</code> moves the cell to <code>Ready</code>. See <a href="../../concepts/cell/#lifecycle">Cell</a> and <a href="../../concepts/container/#lifecycle">Container</a> for the full state tables.</p>
 <h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../kuke-run/">kuke run</a> — create + start a cell from a file or profile</li>
@@ -3681,7 +3687,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 11, 2026 05:39:09 UTC">June 11, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 21, 2026 13:14:20 UTC">November 21, 2026</span>
   </span>
 
     

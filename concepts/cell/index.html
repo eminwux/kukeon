@@ -1063,6 +1063,56 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Lifecycle">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#states" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        States
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exits-wind-down-and-root-death" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exits, wind-down and root death
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#states-and-verbs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        States and verbs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#state-diagram" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        State diagram
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -3541,6 +3591,56 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Lifecycle">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#states" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        States
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exits-wind-down-and-root-death" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exits, wind-down and root death
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#states-and-verbs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        States and verbs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#state-diagram" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        State diagram
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -3628,7 +3728,9 @@
 <li>One container in a cell must be the root. If none is set explicitly, the first container declared is chosen.</li>
 <li>The root container is created first. Its network namespace is the cell's network namespace.</li>
 <li>Non-root containers join the same network namespace at creation time.</li>
-<li>When the root container exits, the cell's network namespace is torn down. Non-root containers are expected to exit as well.</li>
+<li>The root anchors the cell: workloads join its network, IPC and UTS namespaces, kukeon reaches the cell's network through the root's PID, and the cell's CNI/IPAM lease is keyed to the root container. It must stay alive for as long as any workload runs.</li>
+<li>When every workload has finished, the reconciler stops the root (see <a href="#lifecycle">Lifecycle</a>), whatever the workloads' <code>restartPolicy</code>.</li>
+<li>When the root container exits while a workload is still running, the reconciler kills the remaining workloads, releases the cell's network, and settles the cell in <code>Error</code> with reason <code>RootContainerExited</code>. Cells with only a root container (kukeond-style) are different: there the root is the workload, and the cell's state follows the root.</li>
 </ul>
 <h2 id="cell-networking">Cell networking<a class="headerlink" href="#cell-networking" title="Permanent link">&para;</a></h2>
 <ul>
@@ -3638,6 +3740,7 @@
 <li>Two cells in the same space can reach each other at the IP layer; two cells in different spaces cannot (unless you join them into a shared network).</li>
 </ul>
 <h2 id="lifecycle">Lifecycle<a class="headerlink" href="#lifecycle" title="Permanent link">&para;</a></h2>
+<h3 id="states">States<a class="headerlink" href="#states" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
 <tr>
@@ -3648,34 +3751,159 @@
 <tbody>
 <tr>
 <td><code>Pending</code></td>
-<td>Cell metadata exists; containers not yet created</td>
+<td>The cell's status was never written by a lifecycle path. <code>kuke create cell</code> stamps <code>Stopped</code>, so a cell is not normally seen in <code>Pending</code> today. <code>start</code>, <code>run &lt;cell&gt;</code> and <code>restart</code> refuse it; delete it and create it again.</td>
 </tr>
 <tr>
 <td><code>Ready</code></td>
-<td>Root container is running; non-root containers are running</td>
+<td>The workloads are running. For a root-only cell, the root is running.</td>
+</tr>
+<tr>
+<td><code>Degraded</code></td>
+<td>Some workloads are running, but at least one is down in a non-clean way: it crashed, or it exited under a <code>restartPolicy</code> that wants it running and the reconciler is restarting it (or waiting out its backoff). Not sticky: the reconciler re-derives it every pass, so it returns to <code>Ready</code> when the workload recovers and settles to <code>Error</code> once an <code>on-failure</code> workload exhausts its retry cap.</td>
 </tr>
 <tr>
 <td><code>Stopped</code></td>
-<td>The workload is not running because the operator stopped it or it was never started: either <code>kuke stop</code> (SIGTERM) / <code>kuke kill</code> (SIGKILL) interrupted a running workload, or <code>kuke create cell</code> materialized the cell without starting it. Set only by those paths — the reconciler never <em>derives</em> it. For these two origins the label is durable: the reconciler keeps <code>Stopped</code> across ticks instead of re-deriving the torn-down or never-started containers to <code>Exited</code>/<code>Error</code>, unless a workload is observed running again (e.g. a task started outside kukeon). The reconciler's own wind-down of a cell whose workloads already exited also passes through <code>Stopped</code> transiently and settles to <code>Exited</code> on the next tick (#1267, #1486). A <code>Stopped</code> cell restarts via <code>kuke start</code> / <code>kuke run &lt;cell&gt;</code>.</td>
+<td>The operator stopped the cell (<code>kuke stop</code> / <code>kuke kill</code>), or <code>kuke create cell</code> materialized it without starting it. Only those paths set it; the reconciler never derives it. When an operator stop interrupts a cell that had not finished (a workload was running, the cell was <code>Degraded</code>, or a restart was owed), the cell also carries reason <code>OperatorStopped</code>, and the label is durable: the reconciler keeps it <code>Stopped</code> across passes.</td>
 </tr>
 <tr>
 <td><code>Exited</code></td>
-<td>Every workload exited cleanly on its own (every exit code zero) — a clean self-exit. Auto-delete-eligible, so <code>kuke run --rm</code> reaps a finished job (#1267).</td>
+<td>Every workload exited 0 on its own, and no restart is owed. Auto-delete-eligible: a <code>kuke run --rm</code> cell in this state is deleted.</td>
 </tr>
 <tr>
 <td><code>Error</code></td>
-<td>A workload exited non-zero / crashed; <code>reason</code> + <code>message</code> carry the failing container and its exit code/signal. Preserved (not auto-deleted) so the failure can be inspected — clear with <code>kuke delete cell</code> (#1267).</td>
+<td>A workload exited non-zero and no restart is owed (reason <code>WorkloadFailed</code>), or the root died under running workloads (reason <code>RootContainerExited</code>). <code>message</code> names the container and its exit code or signal. Sticky: the reconciler does not re-derive it, and it is never auto-deleted, so the failure stays inspectable. It is still restartable: <code>kuke start</code> / <code>run &lt;cell&gt;</code> / <code>restart</code> recreate the cell.</td>
 </tr>
 <tr>
 <td><code>Failed</code></td>
-<td>A kukeon bring-up fault (create/start/recreate failed). Reserved for kukeon's own faults — a crashed workload is <code>Error</code>, not <code>Failed</code>. Preserved like <code>Error</code>.</td>
+<td>A kukeon bring-up fault: create, start or recreate failed. A crashed workload is <code>Error</code>, not <code>Failed</code>. Sticky like <code>Error</code>, and restartable the same way.</td>
 </tr>
 <tr>
 <td><code>Unknown</code></td>
-<td>The daemon can't determine the state (e.g., containerd offline)</td>
+<td>kukeon cannot tell (for example containerd is unreachable, or a workload's task status could not be read). The reconciler waits for the next pass rather than act on it.</td>
 </tr>
 </tbody>
 </table>
+<h3 id="exits-wind-down-and-root-death">Exits, wind-down and root death<a class="headerlink" href="#exits-wind-down-and-root-death" title="Permanent link">&para;</a></h3>
+<p>Each reconcile pass reads every container's task from containerd and applies these rules, in order:</p>
+<ol>
+<li><strong>Sticky states are kept.</strong> <code>Error</code> and <code>Failed</code> are not re-derived. An <code>Error</code> cell whose root is still running is wound down (see rule 5) and keeps its label.</li>
+<li><strong>A durable <code>Stopped</code> is kept.</strong> A never-started cell, or one carrying <code>OperatorStopped</code>, stays <code>Stopped</code> unless a workload is seen running again (a task started outside kukeon).</li>
+<li><strong>Root death.</strong> If the root is terminal while a workload is still running, the reconciler kills every workload, runs the CNI/IPAM cleanup, and sets <code>Error</code> with reason <code>RootContainerExited</code> in the same pass. An <code>Unknown</code> root read does not count. Root-only cells are exempt.</li>
+<li><strong>Derivation and restarts.</strong> For a cell with workloads, the state follows the workloads, not the root: <code>Ready</code> if they are all up, <code>Degraded</code> if some are up and one is down, <code>Exited</code> if all exited 0, <code>Error</code> if any exited non-zero. A root-only cell follows its root. A workload whose <code>restartPolicy</code> asks for a restart (<code>always</code> on any exit, <code>on-failure</code> on a non-zero exit) is restarted, subject to its backoff and retry cap; while a restart is owed the cell is held at <code>Degraded</code>. <code>restartPolicy</code> decides only whether a workload is restarted.</li>
+<li><strong>Wind-down.</strong> Once every workload is terminal and no restart is owed (derived <code>Exited</code> or <code>Error</code>), the reconciler stops the root within that pass, whatever the <code>restartPolicy</code>. The stop is graceful: SIGTERM, then SIGKILL after 5 seconds. A root that handles SIGTERM, such as the injected kukepause root, ends with exit 0; one that ignores it (for example <code>sleep infinity</code> as PID 1) ends with exit 137. Every container's task is deleted, so every container then reads <code>Stopped</code> with its last exit code preserved. The cell keeps its derived <code>Exited</code> / <code>Error</code> label and its <code>reason</code> / <code>message</code>; it never passes through <code>Stopped</code>. Container records and snapshots stay, so the cell can be started again.</li>
+<li><strong><code>--rm</code>.</strong> A cell with <code>spec.autoDelete</code> (<code>kuke run --rm</code>) that settles <code>Exited</code> is killed and deleted instead of wound down. <code>Error</code>, <code>Failed</code> and <code>OperatorStopped</code> cells are never auto-deleted.</li>
+</ol>
+<p><code>kuke refresh</code> applies rules 1, 2 and 4 the same way but acts on nothing: it never restarts, winds down, tears down or deletes a cell.</p>
+<h3 id="states-and-verbs">States and verbs<a class="headerlink" href="#states-and-verbs" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>State</th>
+<th><code>start</code></th>
+<th><code>stop</code> / <code>kill</code></th>
+<th><code>restart</code></th>
+<th><code>run &lt;cell&gt;</code></th>
+<th><code>delete</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Pending</code></td>
+<td>refused</td>
+<td>stops tasks; <code>Stopped</code></td>
+<td>refused</td>
+<td>refused</td>
+<td>removes the cell</td>
+</tr>
+<tr>
+<td><code>Ready</code></td>
+<td>refused while a workload runs</td>
+<td><code>Stopped</code> + <code>OperatorStopped</code></td>
+<td>stop, then start</td>
+<td>attaches</td>
+<td>removes the cell</td>
+</tr>
+<tr>
+<td><code>Degraded</code></td>
+<td>recreates the cell</td>
+<td><code>Stopped</code> + <code>OperatorStopped</code></td>
+<td>recreates the cell</td>
+<td>recreates, then attaches</td>
+<td>removes the cell</td>
+</tr>
+<tr>
+<td><code>Stopped</code></td>
+<td>starts the existing containers</td>
+<td>stays <code>Stopped</code></td>
+<td>starts</td>
+<td>starts, then attaches</td>
+<td>removes the cell</td>
+</tr>
+<tr>
+<td><code>Exited</code></td>
+<td>starts the existing containers</td>
+<td>stays <code>Exited</code>; any leftover task is ended</td>
+<td>starts</td>
+<td>starts, then attaches</td>
+<td>removes the cell</td>
+</tr>
+<tr>
+<td><code>Error</code></td>
+<td>recreates the cell</td>
+<td>stays <code>Error</code> with its reason; any leftover task is ended</td>
+<td>recreates the cell</td>
+<td>recreates, then attaches</td>
+<td>removes the cell</td>
+</tr>
+<tr>
+<td><code>Failed</code></td>
+<td>recreates the cell</td>
+<td><code>Stopped</code></td>
+<td>recreates the cell</td>
+<td>recreates, then attaches</td>
+<td>removes the cell</td>
+</tr>
+<tr>
+<td><code>Unknown</code></td>
+<td>refused</td>
+<td>stops tasks; <code>Stopped</code></td>
+<td>refused</td>
+<td>refused</td>
+<td>removes the cell</td>
+</tr>
+</tbody>
+</table>
+<p>Notes on the table:</p>
+<ul>
+<li><code>start</code>, <code>restart</code> and <code>run &lt;cell&gt;</code> share one decision in the daemon: <code>Pending</code> and <code>Unknown</code> are refused with a <code>kuke delete cell</code> pointer; <code>Failed</code>, <code>Error</code> and <code>Degraded</code> are recreated (stop, recreate the containers, start); <code>Stopped</code> and <code>Exited</code>, and a <code>Ready</code> cell whose tasks are gone, start from their existing container records. <code>restart</code> stops first only when the cell is <code>Ready</code>.</li>
+<li><code>stop</code> and <code>kill</code> differ only in the first signal (SIGTERM, escalating to SIGKILL after the timeout, versus SIGKILL straight away). Either verb ends and deletes every task in the cell, including tasks that had already exited, and waits (bounded) for each one to exit. Afterwards every container reads <code>Stopped</code> with its last exit code (137 for a SIGKILLed task).</li>
+<li>The label after <code>stop</code> / <code>kill</code> is decided before anything is torn down. A <code>Ready</code> cell whose workload has already exited (for example <code>kuke run --rm</code> killing the cell after the workload finished) becomes plain <code>Stopped</code> without <code>OperatorStopped</code>, so the reconciler can still settle it to <code>Exited</code> and auto-delete it.</li>
+<li><code>delete</code> stops any task still running and removes the cell's containers, snapshots, cgroup and metadata.</li>
+</ul>
+<h3 id="state-diagram">State diagram<a class="headerlink" href="#state-diagram" title="Permanent link">&para;</a></h3>
+<pre class="mermaid"><code>stateDiagram-v2
+    [*] --&gt; Stopped: kuke create cell
+    Stopped --&gt; Ready: start / run / restart
+    Exited --&gt; Ready: start / run / restart
+    Ready --&gt; Degraded: a workload crashed or is restarting
+    Degraded --&gt; Ready: workload back up
+    Degraded --&gt; Error: restart budget exhausted (wind-down)
+    Ready --&gt; Exited: all workloads exited 0 (wind-down)
+    Ready --&gt; Error: a workload exited non-zero (wind-down)
+    Ready --&gt; Error: root died (workloads killed)
+    Degraded --&gt; Error: root died (workloads killed)
+    Ready --&gt; Stopped: stop / kill (OperatorStopped)
+    Degraded --&gt; Stopped: stop / kill (OperatorStopped)
+    Exited --&gt; Exited: stop / kill (label kept)
+    Error --&gt; Error: stop / kill (label kept)
+    Error --&gt; Ready: start / run / restart (recreate)
+    Degraded --&gt; Ready: start / run / restart (recreate)
+    Failed --&gt; Ready: start / run / restart (recreate)
+    Exited --&gt; [*]: --rm auto-delete
+    Stopped --&gt; [*]: delete
+    Exited --&gt; [*]: delete
+    Error --&gt; [*]: delete
+    Failed --&gt; [*]: delete</code></pre>
 <h2 id="operations">Operations<a class="headerlink" href="#operations" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Materialise a cell from a daemon-stored CellBlueprint (containers declared in the Blueprint)</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>cell<span class="w"> </span>mycell<span class="w"> </span>--from-blueprint<span class="w"> </span>web<span class="w"> </span>--realm<span class="w"> </span>main<span class="w"> </span>--space<span class="w"> </span>default<span class="w"> </span>--stack<span class="w"> </span>default
@@ -3722,7 +3950,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 20, 2026 13:37:15 UTC">November 20, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 21, 2026 13:14:20 UTC">November 21, 2026</span>
   </span>
 
     

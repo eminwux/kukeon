@@ -4057,7 +4057,7 @@
 <td><code>restartPolicy</code></td>
 <td>string</td>
 <td>no</td>
-<td>Per-container reap policy at the cell wind-down / auto-delete gate. One of <code>always</code>, <code>on-failure</code>, <code>never</code>. Empty defaults to <code>never</code> (matches the Kubernetes default restartPolicy; see <a href="#restart-policy">Restart policy</a>).</td>
+<td>Whether the reconciler relaunches this container after it exits. One of <code>always</code>, <code>on-failure</code>, <code>never</code>. Empty defaults to <code>never</code> (matches the Kubernetes default restartPolicy; see <a href="#restart-policy">Restart policy</a>).</td>
 </tr>
 <tr>
 <td><code>restartBackoffSeconds</code></td>
@@ -4084,37 +4084,16 @@
 </div>
 <p><code>ports</code> is accepted by the schema today but its semantics are still being designed. Values round-trip (you can read back what you applied), but the controller does not act on them. See <a href="https://github.com/eminwux/kukeon/issues">GitHub Issues</a> for the backlog.</p>
 <h3 id="restart-policy">Restart policy<a class="headerlink" href="#restart-policy" title="Permanent link">&para;</a></h3>
-<p><code>spec.restartPolicy</code> selects whether the cell wind-down / auto-delete reconciler reaps a cell after one of its non-root containers exits. The runner evaluates the policy per container at the wind-down gate; the cell-level decision is the intersection across every terminally-exited non-root container, so a single <code>never</code> blocks the wind-down.</p>
-<table>
-<thead>
-<tr>
-<th>Value</th>
-<th>Behavior at wind-down</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>empty/unset</td>
-<td>Treated as <code>never</code> (the default). An exited non-root container preserves the cell in <code>Stopped</code> rather than triggering a wind-down — matches the Kubernetes default restartPolicy.</td>
-</tr>
-<tr>
-<td><code>always</code></td>
-<td>Wind-down / auto-delete proceeds whenever the container terminally exits, regardless of exit code.</td>
-</tr>
-<tr>
-<td><code>on-failure</code></td>
-<td>Wind-down / auto-delete proceeds only when the container's last exit code is non-zero. A zero-exit (clean shutdown) keeps the cell in place.</td>
-</tr>
-<tr>
-<td><code>never</code></td>
-<td>Wind-down / auto-delete is skipped — the cell stays in <code>Stopped</code> until an operator tears it down explicitly (<code>kuke delete</code> / <code>kuke purge</code>).</td>
-</tr>
-</tbody>
-</table>
-<p>Only the root container is exempt: the root's exit drives cell-level lifecycle decisions independently and is not subject to this gate.</p>
-<p><strong>Auto-delete (<code>--rm</code>) interaction.</strong> A cell that opted into auto-delete (<code>kuke run --rm</code>, or <code>spec.autoDelete: true</code>) is reaped on a <strong>no-restart-required exit</strong> — an exit a <code>never</code> policy (or a clean-exit <code>on-failure</code>) would otherwise preserve in <code>Stopped</code> is deleted instead. <code>--rm</code> does <strong>not</strong> defeat a restart-requiring policy: with <code>restartPolicy: always</code> (any exit) or <code>on-failure</code> (non-zero exit) the restart fires first and the workload is relaunched, not deleted, for that tick — so a <code>--rm</code> + <code>always</code> workload restarts on exit rather than being cleaned up. In short, <code>--rm</code> cleans up a workload once it reaches a terminal, no-restart exit; it does not override an active restart loop.</p>
+<p><code>spec.restartPolicy</code> decides one thing: whether the reconciler <strong>relaunches</strong> a non-root container after it exits. It does <strong>not</strong> decide whether the cell is wound down. Once every non-root workload has stopped and no restart is owed, the cell settles the same way under every policy:</p>
+<ul>
+<li>every workload exited <code>0</code> → the cell settles in <code>Exited</code>;</li>
+<li>at least one workload exited non-zero → the cell settles in the sticky <code>Error</code> state.</li>
+</ul>
+<p>In both cases the reconciler winds the cell down: it gracefully stops the root container and releases the cell's network, so no task is left running behind a terminal state. The cell's record, its containers' exit codes and its <code>REASON</code>/<code>MESSAGE</code> are kept, and <code>kuke start</code> / <code>kuke restart</code> brings it back. See <a href="../../concepts/cell/#exits-wind-down-and-root-death">Exits, wind-down and root death</a> for the full rules.</p>
+<p>The root container is not subject to <code>restartPolicy</code>. If the root dies while a workload is still running, the reconciler kills the remaining workloads and settles the cell in <code>Error</code> with reason <code>RootContainerExited</code>.</p>
+<p><strong>Auto-delete (<code>--rm</code>) interaction.</strong> A cell that opted into auto-delete (<code>kuke run --rm</code>, or <code>spec.autoDelete: true</code>) is deleted instead of wound down when it settles in <code>Exited</code>. A cell that settles in <code>Error</code> is kept for inspection, <code>--rm</code> or not. <code>--rm</code> does <strong>not</strong> defeat a restart-requiring policy: with <code>restartPolicy: always</code> (any exit) or <code>on-failure</code> (non-zero exit) the restart fires first and the workload is relaunched, not deleted — so a <code>--rm</code> + <code>always</code> workload restarts on exit rather than being cleaned up. In short, <code>--rm</code> cleans up a workload once it reaches a clean, no-restart exit; it does not override an active restart loop.</p>
 <h3 id="restart-on-exit">Restart on exit<a class="headerlink" href="#restart-on-exit" title="Permanent link">&para;</a></h3>
-<p>The same <code>restartPolicy</code> value also drives whether the reconciler <strong>relaunches</strong> a non-root container after it exits, before the wind-down gate above is consulted. The two readings agree on which exits matter — an exit that owes a restart is never reaped — so a container is either relaunched or preserved, never silently dropped.</p>
+<p>The reconciler checks each exited non-root container against its <code>restartPolicy</code> before the cell is allowed to settle. A container that owes a restart is relaunched (after its backoff), and the cell holds in <code>Degraded</code> meanwhile. Only when no restart is owed does the cell settle as described above.</p>
 <table>
 <thead>
 <tr>
@@ -4125,7 +4104,7 @@
 <tbody>
 <tr>
 <td>empty/unset</td>
-<td>Never (treated as <code>never</code>). The exited container is left terminal; the cell is preserved.</td>
+<td>Never (treated as <code>never</code>). The exited container is left terminal and the cell settles.</td>
 </tr>
 <tr>
 <td><code>always</code></td>
@@ -4957,7 +4936,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 16, 2026 11:01:05 UTC">November 16, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 21, 2026 13:14:20 UTC">November 21, 2026</span>
   </span>
 
     
