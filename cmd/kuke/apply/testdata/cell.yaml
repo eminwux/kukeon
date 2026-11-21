@@ -11,18 +11,21 @@ spec:
     - id: root
       root: true
       image: ghcr.io/containerd/busybox:latest
-      command: sleep
+      command: sh
       args:
-        - "3600"
+        - "-c"
+        - "trap 'exit 0' TERM; sleep 3600 & wait"
     - id: worker
       image: ghcr.io/containerd/busybox:latest
-      command: sleep
+      command: sh
       args:
-        - "3600"
+        - "-c"
+        - "trap 'exit 0' TERM; sleep 3600 & wait"
       env:
         - WORKER_MODE=active
     - id: cache
       image: ghcr.io/containerd/busybox:latest
-      command: sleep
+      command: sh
       args:
-        - "3600"
+        - "-c"
+        - "trap 'exit 0' TERM; sleep 3600 & wait"

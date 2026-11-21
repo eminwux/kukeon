@@ -525,9 +525,11 @@ func getCellIDNoDaemon(t *testing.T, runPath, realmName, spaceName, stackName, c
 // (#912) calls for ≥20 to catch the bind-then-chmod EACCES window even
 // after the upstream sbsh fix closed it — a future regression that
 // re-opens the window would surface on at least one of these dial
-// attempts in normal CI load. Per iteration cost is ~1 stop + ~1 start
-// + a short attach grace, so 20 iterations stay inside the e2e test's
-// 60s budget on a healthy runner.
+// attempts in normal CI load. One iteration is a `kuke stop`, a
+// `kuke run` and the 2s attachConnectGrace before the detach: about 3s on
+// CI, so the 20 iterations cost about 60s in total. That holds only while
+// attachable-cell.yaml's containers exit on SIGTERM; a workload that
+// ignores it makes every stop wait out the 5s teardown timeout (#1572).
 const runFromStoppedRaceIterations = 20
 
 // runFromStoppedExitTimeout caps the wait for a single `kuke run`
@@ -572,9 +574,15 @@ const runFromStoppedExitTimeout = 20 * time.Second
 // gains the plumbing as part of this fix rather than depending on a
 // separately landed change.
 func TestKuke_RunFromStopped_NonRootKukeonGroup_NoEACCES(t *testing.T) {
-	// Serial: the test drops privilege and chmods the runPath; it does
-	// not parallelise meaningfully and any t.Parallel sibling running
-	// as root inside the same runPath would muddy the EACCES signal.
+	// Serial, but not because of the runPath: getRandomRunPath and
+	// startKukeondDaemonWithSocketGID give this test its own runPath and
+	// daemon. It stays serial because it needs the host's `kukeon` group,
+	// and Go releases t.Parallel tests only after every serial test has
+	// finished — including TestKuke_Uninstall_VerifyState and
+	// TestKuke_DaemonResetPurgeSystem_ThenUninstall, whose `kuke uninstall`
+	// removes that group. Run with t.Parallel it skipped on "group: unknown
+	// group kukeon" (#1572). As a serial test it runs before them in file
+	// order (e2e_kuke_attach_test.go sorts before e2e_kuke_test.go).
 	if os.Geteuid() != 0 {
 		t.Skip("requires root to drop privilege to a non-root caller")
 	}

@@ -4,10 +4,10 @@ on:
     branches:
       - main
     # Skip on changes that can't affect Go build/test/e2e outcomes (docs-only
-    # PRs, mkdocs site edits, release tooling, etc.). `make e2e` shells out to
-    # `docker build` against the repo root Dockerfile and runs Go binaries
-    # produced from the Makefile, so both stay in the trigger set alongside
-    # `**/*.go` and the module files. The workflow self-reference ensures CI
+    # PRs, mkdocs site edits, release tooling, etc.). `make e2e` builds the
+    # repo root Dockerfile with kukebuild and runs Go binaries produced from
+    # the Makefile, so both stay in the trigger set alongside `**/*.go` and
+    # the module files. The workflow self-reference ensures CI
     # edits to this file still run their own job.
     #
     # `internal/webui/**` is deliberately absent: frontend source and the
@@ -48,6 +48,16 @@ on:
 permissions:
   contents: read
 
+# GOWORK=off matches the Makefile's `export GOWORK := off`. It also has to be
+# visible to actions/setup-go: the action runs `go env` in the repo root before
+# restoring its cache, and with go.work in effect (go 1.25.5) the installed
+# go1.24.5 downloads the go1.25.5 toolchain into GOMODCACHE first. The cached
+# tarball holds the same read-only toolchain files, so the restore then fails
+# with thousands of `Cannot open: File exists` errors, is treated as a miss,
+# and every run re-saves a fresh cache (#1572).
+env:
+  GOWORK: "off"
+
 jobs:
   test:
     name: make test
@@ -73,12 +83,12 @@ jobs:
       - name: Run kukebuild module tests
         run: make test-kukebuild
 
-  # `make e2e` needs three host prerequisites — root (sudo -E), a docker
-  # daemon for `docker build` of the local kukeond image, and a standalone
-  # containerd at /run/containerd/containerd.sock (the bootstrap target for
-  # `kuke image load` + `kuke init`, distinct from the docker-private
-  # containerd socket at /var/run/docker/containerd/containerd.toml). Mirrors
-  # the local-dev contract documented in AGENTS.md and
+  # `make e2e` needs two host prerequisites — root, and a standalone
+  # containerd at /run/containerd/containerd.sock (the target kukebuild
+  # writes the local kukeond image into and the bootstrap target for
+  # `kuke init`, distinct from the docker-private containerd socket at
+  # /var/run/docker/containerd/containerd.toml). No docker daemon is needed.
+  # Mirrors the local-dev contract documented in AGENTS.md and
   # docs/site/install/build-from-source.md. Runs in parallel with the unit
   # job above (no shared resources).
   e2e:
@@ -101,11 +111,10 @@ jobs:
       # pulls hit registry-1.docker.io and ghcr.io from many
       # workers simultaneously, surfacing as 20s `read udp 127.0.0.1:NNN->
       # 127.0.0.53:53: i/o timeout` errors from containerd's image fetcher
-      # (observed on this PR's first green-everything-else run). Applied
-      # before `Ensure docker daemon is running` so dockerd inherits the
-      # static resolv.conf at startup; `options timeout:2 attempts:3` caps
-      # a failed query at 6s so we fail fast rather than re-burning 20s on
-      # every parallel pull if both upstreams ever go away together.
+      # (observed on this PR's first green-everything-else run).
+      # `options timeout:2 attempts:3` caps a failed query at 6s so we fail
+      # fast rather than re-burning 20s on every parallel pull if both
+      # upstreams ever go away together.
       - name: Use static public DNS (bypass systemd-resolved)
         run: |
           sudo systemctl stop systemd-resolved 2>/dev/null || true
@@ -118,11 +127,6 @@ jobs:
           EOF
           getent hosts registry-1.docker.io > /dev/null
           getent hosts ghcr.io > /dev/null
-
-      - name: Ensure docker daemon is running
-        run: |
-          sudo systemctl start docker
-          sudo docker info > /dev/null
 
       - name: Ensure standalone containerd is running
         run: |
@@ -159,9 +163,17 @@ jobs:
           getent group kukeon > /dev/null || sudo groupadd --system kukeon
           getent group kukeon
 
-      # `sudo -E env "PATH=$PATH"` re-injects the runner's PATH past sudoers'
+      # `sudo env "PATH=$PATH" ...` re-injects the runner's PATH past sudoers'
       # secure_path so the actions/setup-go toolchain stays resolvable when
-      # the Makefile invokes `go test` as root.
+      # the Makefile invokes `go test` as root. (`sudo -E` is not used: the
+      # runner's sudoers rejects it with "preserving the entire environment
+      # is not supported, '-E' is ignored".)
+      #
+      # GOCACHE and GOMODCACHE are passed the same way so root reuses the
+      # module and build cache actions/setup-go restored for the `runner`
+      # user. Without them root falls back to its own empty caches,
+      # re-downloads every module plus the go1.25.5 toolchain and compiles
+      # every package from scratch (#1572).
       #
       # step-level timeout-minutes (vs. the implicit 360 min job default) is
       # the diagnostic safety net: when a child of `go test` (e.g. an orphan
@@ -187,4 +199,16 @@ jobs:
       # that not even `timeout-minutes` escapes.
       - name: Run e2e suite as root
         timeout-minutes: 20
-        run: stdbuf -oL -eL sudo -E env "PATH=$PATH" make e2e </dev/null > >(cat) 2> >(cat >&2)
+        run: |
+          GOCACHE="$(go env GOCACHE)"
+          GOMODCACHE="$(go env GOMODCACHE)"
+          stdbuf -oL -eL sudo env "PATH=$PATH" "GOCACHE=$GOCACHE" "GOMODCACHE=$GOMODCACHE" make e2e </dev/null > >(cat) 2> >(cat >&2)
+
+      # Root wrote new entries into the runner's GOCACHE/GOMODCACHE above.
+      # Hand them back to `runner` so the `Post Set up Go` cache save, which
+      # runs as `runner`, is not tripped up by root-owned files or
+      # directories when this job wins the save (a `go.sum` change or the
+      # first run after the cache key changes).
+      - name: Return Go caches to the runner user
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" "$(go env GOCACHE)" "$(go env GOMODCACHE)"

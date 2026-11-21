@@ -11,14 +11,16 @@ spec:
     - id: root
       root: true
       image: ghcr.io/containerd/busybox:latest
-      command: sleep
+      command: sh
       args:
-        - "3600"
+        - "-c"
+        - "trap 'exit 0' TERM; sleep 3600 & wait"
     - id: work
       image: ghcr.io/containerd/busybox:latest
-      command: sleep
+      command: sh
       args:
-        - "3600"
+        - "-c"
+        - "trap 'exit 0' TERM; sleep 3600 & wait"
       attachable: true
       # Required repo with an unresolvable hostname (RFC 6761 reserves
       # .invalid for tests). kuketty's processRepos will fail and the

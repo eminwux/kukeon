@@ -42,6 +42,8 @@ import (
 // only the OCI record: every run gets its own env while the writable snapshot
 // and authored metadata remain intact. Regression for #1369.
 func TestKuke_RunRuntimeEnvReuse(t *testing.T) {
+	t.Parallel()
+
 	runPath := getRandomRunPath(t)
 	host := startKukeondDaemon(t, runPath)
 	realm, space, stack, cell := generateUniqueRealmName(
@@ -93,8 +95,8 @@ spec:
     - id: root
       root: true
       image: docker.io/library/busybox:latest
-      command: sleep
-      args: ["3600"]
+      command: sh
+      args: ["-c", "trap 'exit 0' TERM; sleep 3600 & wait"]
     - id: work
       image: %s
       command: /bin/sh
