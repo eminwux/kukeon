@@ -79,7 +79,8 @@ func TestHealthDigestWindowAndReports(t *testing.T) {
 	if err != nil || len(list) != 1 || list[0].ID != stored.ID {
 		t.Fatalf("list = %+v err=%v", list, err)
 	}
-	if read, readErr := client.ReadHealthReport(ctx, kukeonv1.HealthReportLatest); readErr != nil || read.ID != stored.ID {
+	if read, readErr := client.ReadHealthReport(ctx, kukeonv1.HealthReportLatest); readErr != nil ||
+		read.ID != stored.ID {
 		t.Fatalf("read latest = %+v err=%v", read, readErr)
 	}
 }

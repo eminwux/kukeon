@@ -81,7 +81,9 @@ func TestVolumeMountedByLiveCell_ReadyCellMountingRefuses(t *testing.T) {
 	runPath := t.TempDir()
 	r := newMetadataTestExec(t, runPath, time.Now())
 
-	vol := intmodel.Volume{Metadata: intmodel.VolumeMetadata{Name: "data", Realm: "default", Space: "app", Stack: "web"}}
+	vol := intmodel.Volume{
+		Metadata: intmodel.VolumeMetadata{Name: "data", Realm: "default", Space: "app", Stack: "web"},
+	}
 	if _, err := r.WriteVolume(vol); err != nil {
 		t.Fatalf("WriteVolume: %v", err)
 	}
@@ -103,7 +105,9 @@ func TestVolumeMountedByLiveCell_StoppedCellAllows(t *testing.T) {
 	runPath := t.TempDir()
 	r := newMetadataTestExec(t, runPath, time.Now())
 
-	vol := intmodel.Volume{Metadata: intmodel.VolumeMetadata{Name: "data", Realm: "default", Space: "app", Stack: "web"}}
+	vol := intmodel.Volume{
+		Metadata: intmodel.VolumeMetadata{Name: "data", Realm: "default", Space: "app", Stack: "web"},
+	}
 	if _, err := r.WriteVolume(vol); err != nil {
 		t.Fatalf("WriteVolume: %v", err)
 	}
@@ -123,8 +127,12 @@ func TestVolumeMountedByLiveCell_DifferentVolumeAllows(t *testing.T) {
 	runPath := t.TempDir()
 	r := newMetadataTestExec(t, runPath, time.Now())
 
-	target := intmodel.Volume{Metadata: intmodel.VolumeMetadata{Name: "data", Realm: "default", Space: "app", Stack: "web"}}
-	other := intmodel.Volume{Metadata: intmodel.VolumeMetadata{Name: "logs", Realm: "default", Space: "app", Stack: "web"}}
+	target := intmodel.Volume{
+		Metadata: intmodel.VolumeMetadata{Name: "data", Realm: "default", Space: "app", Stack: "web"},
+	}
+	other := intmodel.Volume{
+		Metadata: intmodel.VolumeMetadata{Name: "logs", Realm: "default", Space: "app", Stack: "web"},
+	}
 	for _, v := range []intmodel.Volume{target, other} {
 		if _, err := r.WriteVolume(v); err != nil {
 			t.Fatalf("WriteVolume %q: %v", v.Metadata.Name, err)
@@ -152,7 +160,9 @@ func TestVolume_SurvivesCellDelete(t *testing.T) {
 	runPath := t.TempDir()
 	r := newMetadataTestExec(t, runPath, time.Now())
 
-	vol := intmodel.Volume{Metadata: intmodel.VolumeMetadata{Name: "data", Realm: "default", Space: "app", Stack: "web"}}
+	vol := intmodel.Volume{
+		Metadata: intmodel.VolumeMetadata{Name: "data", Realm: "default", Space: "app", Stack: "web"},
+	}
 	if _, err := r.WriteVolume(vol); err != nil {
 		t.Fatalf("WriteVolume: %v", err)
 	}

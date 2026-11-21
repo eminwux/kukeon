@@ -201,7 +201,10 @@ func cell(name string, state v1beta1.CellState) v1beta1.CellDoc {
 func TestFailedCellsAreTaggedByOwner(t *testing.T) {
 	crashed := cell("job", v1beta1.CellStateError)
 	finished := time.Date(2026, 11, 17, 8, 30, 0, 0, time.UTC)
-	crashed.Status.Containers = []v1beta1.ContainerStatus{{FinishTime: finished.Add(-time.Minute)}, {FinishTime: finished}}
+	crashed.Status.Containers = []v1beta1.ContainerStatus{
+		{FinishTime: finished.Add(-time.Minute)},
+		{FinishTime: finished},
+	}
 	broken := cell("api", v1beta1.CellStateFailed)
 	broken.Status.Reason, broken.Status.Message = "CreateFailed", "cni attach failed"
 

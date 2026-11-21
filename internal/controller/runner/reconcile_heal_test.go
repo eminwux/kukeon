@@ -121,7 +121,10 @@ func TestReconcileCell_HealsWipedCgroupWhenReadyObserved(t *testing.T) {
 		)
 	}
 	if updatedCell.Status.CgroupPath == "" {
-		t.Errorf("Status.CgroupPath = %q, want non-empty after heal (ensureCgroupInternal must backfill it)", updatedCell.Status.CgroupPath)
+		t.Errorf(
+			"Status.CgroupPath = %q, want non-empty after heal (ensureCgroupInternal must backfill it)",
+			updatedCell.Status.CgroupPath,
+		)
 	}
 	if !updatedCell.Status.ReadyObserved {
 		t.Errorf("Status.ReadyObserved = false, want true (the latch must survive the heal)")
@@ -132,7 +135,9 @@ func TestReconcileCell_HealsWipedCgroupWhenReadyObserved(t *testing.T) {
 	// snapshot carried cgroupReady:false for a cell whose cgroup is in
 	// fact present — exactly the stale-state surface #861 just closed.
 	if !updatedCell.Status.CgroupReady {
-		t.Errorf("Status.CgroupReady = false, want true after heal (heal must pair with the #861 probe so cgroupReady:true ships in the same tick, not next-pass)")
+		t.Errorf(
+			"Status.CgroupReady = false, want true after heal (heal must pair with the #861 probe so cgroupReady:true ships in the same tick, not next-pass)",
+		)
 	}
 }
 
@@ -156,7 +161,9 @@ func TestReconcileCell_DoesNotHealHalfCreateCell(t *testing.T) {
 		// the gate change reads as a behavior change in the test
 		// surface, not a silent log-only divergence.
 		newCgroupFn: func(ctr.CgroupSpec) (*cgroup2.Manager, error) {
-			t.Errorf("NewCgroup called on a never-Ready cell — heal must be gated on the ReadyObserved latch (#855 AC#4)")
+			t.Errorf(
+				"NewCgroup called on a never-Ready cell — heal must be gated on the ReadyObserved latch (#855 AC#4)",
+			)
 			return nil, errors.New("must not be called")
 		},
 		enableCellSubtreeFn: func(string, string, []string) ([]string, error) {
@@ -281,7 +288,9 @@ func TestReconcileCell_DoesNotResurrectDeletedCell(t *testing.T) {
 		// regression — fail loudly so the recheck reads as a behavior
 		// change in the test surface, not a silent log-only divergence.
 		newCgroupFn: func(ctr.CgroupSpec) (*cgroup2.Manager, error) {
-			t.Errorf("NewCgroup called on a deleted cell — the post-lock recheck must short-circuit before the #855 heal (#1251)")
+			t.Errorf(
+				"NewCgroup called on a deleted cell — the post-lock recheck must short-circuit before the #855 heal (#1251)",
+			)
 			return nil, errors.New("must not be called")
 		},
 		enableCellSubtreeFn: func(string, string, []string) ([]string, error) {
@@ -325,10 +334,14 @@ func TestReconcileCell_DoesNotResurrectDeletedCell(t *testing.T) {
 		t.Fatalf("ReconcileCell: unexpected error: %v", err)
 	}
 	if !outcome.Vanished {
-		t.Errorf("ReconcileOutcome.Vanished = false, want true (the cell's metadata is gone — the reconciler must report it vanished, not heal it)")
+		t.Errorf(
+			"ReconcileOutcome.Vanished = false, want true (the cell's metadata is gone — the reconciler must report it vanished, not heal it)",
+		)
 	}
 	if outcome.Deleted {
-		t.Errorf("ReconcileOutcome.Deleted = true, want false (the reconciler observed an external delete, it did not perform one — Deleted is reserved for the AutoDelete path)")
+		t.Errorf(
+			"ReconcileOutcome.Deleted = true, want false (the reconciler observed an external delete, it did not perform one — Deleted is reserved for the AutoDelete path)",
+		)
 	}
 	if outcome.Updated {
 		t.Errorf("ReconcileOutcome.Updated = true, want false (a vanished cell is a pure no-op — no status write)")
@@ -336,7 +349,10 @@ func TestReconcileCell_DoesNotResurrectDeletedCell(t *testing.T) {
 	// The resurrection signature: metadata.json must stay gone. Pre-fix
 	// ensureCellCgroup's UpdateCellMetadata rewrote it.
 	if _, statErr := os.Stat(metadataPath); !os.IsNotExist(statErr) {
-		t.Errorf("cell metadata.json exists after reconcile (stat err = %v), want still-absent — the reconciler resurrected the deleted cell (#1251)", statErr)
+		t.Errorf(
+			"cell metadata.json exists after reconcile (stat err = %v), want still-absent — the reconciler resurrected the deleted cell (#1251)",
+			statErr,
+		)
 	}
 }
 
@@ -361,7 +377,11 @@ func TestReconcileCell_HealVsDeletedMetadata(t *testing.T) {
 				StackName: stack,
 				Containers: []intmodel.ContainerSpec{
 					{ID: rootID, ContainerdID: space + "_" + stack + "_" + cellName + "_" + rootID, Root: true},
-					{ID: workloadID, ContainerdID: space + "_" + stack + "_" + cellName + "_" + workloadID, Root: false},
+					{
+						ID:           workloadID,
+						ContainerdID: space + "_" + stack + "_" + cellName + "_" + workloadID,
+						Root:         false,
+					},
 				},
 			},
 			Status: intmodel.CellStatus{State: intmodel.CellStateReady, ReadyObserved: true},

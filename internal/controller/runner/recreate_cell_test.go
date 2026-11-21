@@ -196,7 +196,9 @@ func TestRecreateCell_StartsTasksBeforeReady(t *testing.T) {
 	}
 
 	if startContainerCalls == 0 {
-		t.Error("RecreateCell did not start any task — Ready was stamped over created-but-not-started containers (issue #682)")
+		t.Error(
+			"RecreateCell did not start any task — Ready was stamped over created-but-not-started containers (issue #682)",
+		)
 	}
 	if got.Status.State != intmodel.CellStateReady {
 		t.Errorf("returned cell State = %v, want Ready", got.Status.State)

@@ -545,14 +545,14 @@ type GitSigning struct {
 // CellConfig repo fill's `git`). Every field is optional and falls back to the
 // container's default identity.
 type RepoGit struct {
-	Author    *GitIdentity `json:"author,omitempty"     yaml:"author,omitempty"`
-	Committer *GitIdentity `json:"committer,omitempty"  yaml:"committer,omitempty"`
+	Author    *GitIdentity `json:"author,omitempty"      yaml:"author,omitempty"`
+	Committer *GitIdentity `json:"committer,omitempty"   yaml:"committer,omitempty"`
 	// Credential authenticates this source's remote. Host must be empty.
-	Credential *GitCredential `json:"credential,omitempty" yaml:"credential,omitempty"`
-	Signing    *GitSigning    `json:"signing,omitempty"    yaml:"signing,omitempty"`
+	Credential *GitCredential `json:"credential,omitempty"  yaml:"credential,omitempty"`
+	Signing    *GitSigning    `json:"signing,omitempty"     yaml:"signing,omitempty"`
 	// Sign lists what to sign in this checkout ("commits", "tags"). Empty
 	// inherits the default, or signs both when this source sets Signing.
-	Sign []string `json:"sign,omitempty"       yaml:"sign,omitempty"`
+	Sign []string `json:"sign,omitempty"        yaml:"sign,omitempty"`
 	// IdentityRef names the git identity this source uses, as on
 	// ContainerGit: the daemon expands it into this source's author,
 	// committer, credential and signing key when it renders the cell.

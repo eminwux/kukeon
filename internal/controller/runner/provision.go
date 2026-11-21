@@ -2074,7 +2074,12 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 			// already-done runOn: create stages from the rendered ContainerDoc
 			// on this boot.
 			priorStages := priorStagesForContainer(*cell, containerSpec.ID)
-			attachOpts, attachErr := r.attachableBuildOpts(internalRealm.Spec.Namespace, containerSpec, creds, priorStages)
+			attachOpts, attachErr := r.attachableBuildOpts(
+				internalRealm.Spec.Namespace,
+				containerSpec,
+				creds,
+				priorStages,
+			)
 			if attachErr != nil {
 				return nil, fmt.Errorf("failed to prepare attachable container %s: %w", containerdID, attachErr)
 			}

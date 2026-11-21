@@ -27,8 +27,8 @@ type RealmDoc struct {
 }
 
 type RealmMetadata struct {
-	Name   string            `json:"name"   yaml:"name"`
-	Labels map[string]string `json:"labels" yaml:"labels"`
+	Name   string            `json:"name"                 yaml:"name"`
+	Labels map[string]string `json:"labels"               yaml:"labels"`
 	// Generation is a monotonic counter bumped by a writer on each
 	// spec-changing update. Defaults to zero; phase 3 (issue #596 follow-up)
 	// wires the writers to populate it. See ObservedGeneration on the status.
@@ -70,33 +70,33 @@ type RegistryCredentials struct {
 
 type RealmStatus struct {
 	State      RealmState `json:"state"                              yaml:"state"`
-	CgroupPath string     `json:"cgroupPath,omitempty"         yaml:"cgroupPath,omitempty"`
+	CgroupPath string     `json:"cgroupPath,omitempty"               yaml:"cgroupPath,omitempty"`
 	// SubtreeControllers is the cgroup-v2 controller set actually
 	// delegated on this realm's own cgroup.subtree_control after the
 	// host-root filter (issue #328).
-	SubtreeControllers []string `json:"subtreeControllers,omitempty" yaml:"subtreeControllers,omitempty"`
+	SubtreeControllers []string `json:"subtreeControllers,omitempty"       yaml:"subtreeControllers,omitempty"`
 	// CreatedAt is the wall-clock time of the first persist for this
 	// realm. Bumped only when zero so the value never moves once set.
-	CreatedAt time.Time `json:"createdAt,omitempty"          yaml:"createdAt,omitempty"`
+	CreatedAt time.Time `json:"createdAt,omitempty"                yaml:"createdAt,omitempty"`
 	// UpdatedAt is the wall-clock time of the most recent persist.
-	UpdatedAt time.Time `json:"updatedAt,omitempty"          yaml:"updatedAt,omitempty"`
+	UpdatedAt time.Time `json:"updatedAt,omitempty"                yaml:"updatedAt,omitempty"`
 	// ReadyAt is the wall-clock time of the first State==Ready persist.
 	// Set-once: never overwritten by subsequent Ready transitions or
 	// state flaps, so it serves as an immutable "first reached Ready"
 	// marker.
-	ReadyAt time.Time `json:"readyAt,omitempty"            yaml:"readyAt,omitempty"`
+	ReadyAt time.Time `json:"readyAt,omitempty"                  yaml:"readyAt,omitempty"`
 	// Reason is a short reason code summarizing why State is in its
 	// current value. Empty when no reason has been recorded.
-	Reason string `json:"reason,omitempty"             yaml:"reason,omitempty"`
+	Reason string `json:"reason,omitempty"                   yaml:"reason,omitempty"`
 	// Message is the human-readable detail backing Reason; especially
 	// valuable on State==Failed where it captures the immediate cause.
-	Message string `json:"message,omitempty"            yaml:"message,omitempty"`
+	Message string `json:"message,omitempty"                  yaml:"message,omitempty"`
 	// CgroupReady reports whether CgroupPath actually exists on the
 	// host filesystem as of the last status write. The CgroupPath
 	// field records the intent (the path where the cgroup should
 	// live); this re-verifies presence so callers can distinguish
 	// "configured" from "still mounted".
-	CgroupReady bool `json:"cgroupReady,omitempty"        yaml:"cgroupReady,omitempty"`
+	CgroupReady bool `json:"cgroupReady,omitempty"              yaml:"cgroupReady,omitempty"`
 	// ContainerdNamespaceReady reports whether the containerd
 	// namespace recorded in Spec.Namespace was actually present as of
 	// the last status write. Like CgroupReady, this separates intent
@@ -105,7 +105,7 @@ type RealmStatus struct {
 	// ObservedGeneration is the Metadata.Generation the reconciler last
 	// acted on. Defaults to zero; phase 3 wires the reconciler to compare
 	// it against Generation to skip stale work.
-	ObservedGeneration int64 `json:"observedGeneration,omitempty" yaml:"observedGeneration,omitempty"`
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"       yaml:"observedGeneration,omitempty"`
 }
 
 type RealmState int

@@ -151,8 +151,10 @@ func TestEnforcer_ApplyIsIdempotentWhenMasterExists(t *testing.T) {
 		t.Errorf("must not re-insert FORWARD jump when -C succeeds")
 	}
 	// Dispatch append should have occurred.
-	if !wasCalled(runner, []string{"-A", "KUKEON-EGRESS", "-i", "br0", "-m", "comment",
-		"--comment", "kukeon:main:blog:dispatch", "-j", p.ChainName()}) {
+	if !wasCalled(runner, []string{
+		"-A", "KUKEON-EGRESS", "-i", "br0", "-m", "comment",
+		"--comment", "kukeon:main:blog:dispatch", "-j", p.ChainName(),
+	}) {
 		t.Errorf("expected dispatch -A; calls = %v", runner.calls)
 	}
 }

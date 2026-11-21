@@ -69,7 +69,12 @@ func TestEnsureClientConnected_ConcurrentFirstUseSingleClient(t *testing.T) {
 	}
 	for idx, c := range observed {
 		if c != r.ctrClient {
-			t.Fatalf("goroutine %d observed a different client pointer (%p) than the final one (%p): two clients were constructed", idx, c, r.ctrClient)
+			t.Fatalf(
+				"goroutine %d observed a different client pointer (%p) than the final one (%p): two clients were constructed",
+				idx,
+				c,
+				r.ctrClient,
+			)
 		}
 	}
 }

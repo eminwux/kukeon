@@ -3707,7 +3707,10 @@ func TestRun_Attach_StaleSocket_EACCES_BudgetExhausted_WrapsSentinel(t *testing.
 		)
 	}
 	if errors.Is(err, errdefs.ErrAttachPingTimeout) {
-		t.Errorf("err=%v, must NOT be wrapped with ErrAttachPingTimeout — EACCES is the stale-socket class, not ping-timeout", err)
+		t.Errorf(
+			"err=%v, must NOT be wrapped with ErrAttachPingTimeout — EACCES is the stale-socket class, not ping-timeout",
+			err,
+		)
 	}
 	mu.Lock()
 	defer mu.Unlock()
@@ -3814,7 +3817,10 @@ func TestRun_Attach_PermissionDenied_PresentSocket_FailsFast(t *testing.T) {
 		)
 	}
 	if errors.Is(err, errdefs.ErrAttachStaleSocket) {
-		t.Errorf("err=%v, must NOT be wrapped with ErrAttachStaleSocket — a present-socket EACCES is permanent, not the stale-socket race", err)
+		t.Errorf(
+			"err=%v, must NOT be wrapped with ErrAttachStaleSocket — a present-socket EACCES is permanent, not the stale-socket race",
+			err,
+		)
 	}
 	mu.Lock()
 	defer mu.Unlock()

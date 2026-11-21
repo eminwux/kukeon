@@ -1449,7 +1449,12 @@ const (
 // policy says must restart should fire now, wait for backoff, or give up
 // against the on-failure cap. Reads (does not mutate) the per-container restart
 // state under the lock.
-func (r *Exec) restartDecisionFor(cell intmodel.Cell, containerID, policy string, backoff time.Duration, maxRetries int) restartPassResult {
+func (r *Exec) restartDecisionFor(
+	cell intmodel.Cell,
+	containerID, policy string,
+	backoff time.Duration,
+	maxRetries int,
+) restartPassResult {
 	r.restartStatesMu.Lock()
 	defer r.restartStatesMu.Unlock()
 

@@ -28,8 +28,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eminwux/kukeon/cmd/kuke/internal/lifecycle"
 	logscmd "github.com/eminwux/kukeon/cmd/kuke/daemon/logs"
+	"github.com/eminwux/kukeon/cmd/kuke/internal/lifecycle"
 	logcmd "github.com/eminwux/kukeon/cmd/kuke/log"
 	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/cmd/types"

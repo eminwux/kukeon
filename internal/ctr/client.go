@@ -105,7 +105,12 @@ type Client interface {
 	// one level deeper. Idempotent: re-running on an already-drained group
 	// is a no-op.
 	RelocateProcessesToLeaf(group, mountpoint, leaf string) error
-	CreateContainerFromSpec(namespace string, spec intmodel.ContainerSpec, creds []RegistryCredentials, opts ...BuildOption) (containerd.Container, error)
+	CreateContainerFromSpec(
+		namespace string,
+		spec intmodel.ContainerSpec,
+		creds []RegistryCredentials,
+		opts ...BuildOption,
+	) (containerd.Container, error)
 
 	CreateContainer(namespace string, spec ContainerSpec, creds []RegistryCredentials) (containerd.Container, error)
 	GetContainer(namespace, id string) (containerd.Container, error)

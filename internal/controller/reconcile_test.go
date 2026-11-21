@@ -159,7 +159,10 @@ func TestReconcileCells_ListRealmsErrorIsRecorded(t *testing.T) {
 	ctrl := setupTestController(t, mock)
 	res, err := ctrl.ReconcileCells()
 	if err != nil {
-		t.Fatalf("ReconcileCells() must not return a hard error on a list-realms failure (loop must keep ticking next pass): %v", err)
+		t.Fatalf(
+			"ReconcileCells() must not return a hard error on a list-realms failure (loop must keep ticking next pass): %v",
+			err,
+		)
 	}
 	if len(res.Errors) != 1 {
 		t.Errorf("Errors: got %v, want 1 entry", res.Errors)

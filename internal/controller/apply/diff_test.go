@@ -675,8 +675,10 @@ func TestDiffCell_RootContainerSecrets_Breaking(t *testing.T) {
 			SpaceName: "default",
 			StackName: "default",
 			Containers: []intmodel.ContainerSpec{
-				{ID: "root", Root: true, Image: "busybox:latest",
-					Secrets: []intmodel.ContainerSecret{{Name: "tok", FromEnv: "CLAUDE_CODE_OAUTH_TOKEN"}}},
+				{
+					ID: "root", Root: true, Image: "busybox:latest",
+					Secrets: []intmodel.ContainerSecret{{Name: "tok", FromEnv: "CLAUDE_CODE_OAUTH_TOKEN"}},
+				},
 			},
 		},
 	}
@@ -1314,7 +1316,9 @@ func TestDiffContainer_ReposSecretsNoChange(t *testing.T) {
 			ID:        "web",
 			RealmName: "default", SpaceName: "default", StackName: "default", CellName: "hello-world",
 			Image: "nginx:1.27",
-			Repos: []intmodel.ContainerRepo{{Name: "app", URL: "https://example.com/app.git", Target: "/src", Required: true}},
+			Repos: []intmodel.ContainerRepo{
+				{Name: "app", URL: "https://example.com/app.git", Target: "/src", Required: true},
+			},
 			Secrets: []intmodel.ContainerSecret{{
 				Name:      "db",
 				SecretRef: &intmodel.ContainerSecretRef{Name: "db-creds", Realm: "default"},

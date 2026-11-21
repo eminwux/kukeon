@@ -113,7 +113,11 @@ func TestExclusiveLockBlocksExclusiveAndShared(t *testing.T) {
 			// not respected at all.
 			minWait := time.Duration(float64(releaseAt) * 0.6)
 			if elapsed < minWait {
-				t.Fatalf("contended acquire took %v, expected ≥ %v — exclusive lock was not respected", elapsed, minWait)
+				t.Fatalf(
+					"contended acquire took %v, expected ≥ %v — exclusive lock was not respected",
+					elapsed,
+					minWait,
+				)
 			}
 
 			<-holdDone
@@ -163,7 +167,9 @@ func TestSharedLockAllowsSharedConcurrency(t *testing.T) {
 		<-firstInside
 		_ = metadata.WithSharedLock(ctx, logger, file, func() error {
 			if firstReleased.Load() {
-				t.Errorf("second shared holder entered after first released — that exercises sequential acquisition, not concurrent")
+				t.Errorf(
+					"second shared holder entered after first released — that exercises sequential acquisition, not concurrent",
+				)
 			}
 			close(secondInside)
 			return nil
@@ -174,7 +180,10 @@ func TestSharedLockAllowsSharedConcurrency(t *testing.T) {
 	case <-secondInside:
 		// Concurrent admission confirmed.
 	case <-time.After(holdDuration / 2):
-		t.Fatalf("second shared holder did not enter within %v — shared lock did not admit concurrent reader", holdDuration/2)
+		t.Fatalf(
+			"second shared holder did not enter within %v — shared lock did not admit concurrent reader",
+			holdDuration/2,
+		)
 	}
 
 	wg.Wait()
@@ -256,7 +265,12 @@ func TestConcurrentWritersDoNotTearBytes(t *testing.T) {
 				return
 			}
 			if len(got.Filler) != fillerLen {
-				t.Errorf("reader probe %d: filler length %d, want %d — torn payload surfaced", i, len(got.Filler), fillerLen)
+				t.Errorf(
+					"reader probe %d: filler length %d, want %d — torn payload surfaced",
+					i,
+					len(got.Filler),
+					fillerLen,
+				)
 				return
 			}
 		}

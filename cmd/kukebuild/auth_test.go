@@ -200,7 +200,10 @@ func TestResolveRegistryAuthDockerConfigBeatsEnv(t *testing.T) {
 	// The docker-config credential (alice, decoded into Username) must win — the
 	// env fallback is applied only when the config carries no entry for the host.
 	if got := cf.AuthConfigs["registry:5000"].Username; got != "alice" {
-		t.Errorf("AuthConfigs[registry:5000].Username = %q, want the docker-config value \"alice\" (env must not override)", got)
+		t.Errorf(
+			"AuthConfigs[registry:5000].Username = %q, want the docker-config value \"alice\" (env must not override)",
+			got,
+		)
 	}
 }
 

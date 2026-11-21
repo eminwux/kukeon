@@ -53,9 +53,15 @@ func TestEmbeddedAssets(t *testing.T) {
 	handler := http.FileServerFS(assets)
 	iconResponse := httptest.NewRecorder()
 	handler.ServeHTTP(iconResponse, httptest.NewRequest(http.MethodGet, string(icon[1]), nil))
-	if iconResponse.Code != http.StatusOK || !strings.HasPrefix(iconResponse.Header().Get("Content-Type"), "image/svg+xml") ||
+	if iconResponse.Code != http.StatusOK ||
+		!strings.HasPrefix(iconResponse.Header().Get("Content-Type"), "image/svg+xml") ||
 		!strings.Contains(iconResponse.Body.String(), "<svg") {
-		t.Fatalf("favicon %s: status %d, type %q", icon[1], iconResponse.Code, iconResponse.Header().Get("Content-Type"))
+		t.Fatalf(
+			"favicon %s: status %d, type %q",
+			icon[1],
+			iconResponse.Code,
+			iconResponse.Header().Get("Content-Type"),
+		)
 	}
 	for _, ref := range refs {
 		path := string(ref[1])

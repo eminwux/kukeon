@@ -31,7 +31,13 @@ func TestSynthesizeFromImage_DefaultsAttachableShell(t *testing.T) {
 		t.Fatalf("SynthesizeFromImage: %v", err)
 	}
 	if doc.APIVersion != v1beta1.APIVersionV1Beta1 || doc.Kind != v1beta1.KindCell {
-		t.Errorf("apiVersion/kind=%q/%q want %q/%q", doc.APIVersion, doc.Kind, v1beta1.APIVersionV1Beta1, v1beta1.KindCell)
+		t.Errorf(
+			"apiVersion/kind=%q/%q want %q/%q",
+			doc.APIVersion,
+			doc.Kind,
+			v1beta1.APIVersionV1Beta1,
+			v1beta1.KindCell,
+		)
 	}
 	if len(doc.Spec.Containers) != 1 {
 		t.Fatalf("containers=%d want 1 (single user container; root synthesized by runner)", len(doc.Spec.Containers))

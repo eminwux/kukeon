@@ -591,8 +591,18 @@ func TestUninstall_RendersBuildCacheRows(t *testing.T) {
 					{Name: "kuke-system", Namespace: "kuke-system.kukeon.io", Purged: true, NamespaceRemoved: true},
 				},
 				BuildCaches: []controller.BuildCachePurgeOutcome{
-					{Namespace: "default.kukeon.io", Path: "/var/lib/kukebuild/default.kukeon.io", Existed: true, Removed: true},
-					{Namespace: "kuke-system.kukeon.io", Path: "/var/lib/kukebuild/kuke-system.kukeon.io", Existed: true, Removed: true},
+					{
+						Namespace: "default.kukeon.io",
+						Path:      "/var/lib/kukebuild/default.kukeon.io",
+						Existed:   true,
+						Removed:   true,
+					},
+					{
+						Namespace: "kuke-system.kukeon.io",
+						Path:      "/var/lib/kukebuild/kuke-system.kukeon.io",
+						Existed:   true,
+						Removed:   true,
+					},
 				},
 				BuildCacheBaseDir:     "/var/lib/kukebuild",
 				BuildCacheBaseExisted: true,
@@ -635,7 +645,12 @@ func TestUninstall_RendersBuildCacheKeptOnScopedUninstall(t *testing.T) {
 					{Name: "default", Namespace: "default.dev.kukeon.io", Purged: true, NamespaceRemoved: true},
 				},
 				BuildCaches: []controller.BuildCachePurgeOutcome{
-					{Namespace: "default.dev.kukeon.io", Path: "/var/lib/kukebuild/default.dev.kukeon.io", Existed: true, Removed: true},
+					{
+						Namespace: "default.dev.kukeon.io",
+						Path:      "/var/lib/kukebuild/default.dev.kukeon.io",
+						Existed:   true,
+						Removed:   true,
+					},
 				},
 				BuildCacheBaseDir:     "/var/lib/kukebuild",
 				BuildCacheBaseExisted: true,

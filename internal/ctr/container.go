@@ -305,7 +305,16 @@ func (c *client) StopContainer(
 		}
 	}
 
-	c.logger.InfoContext(c.ctx, "stopped container", "id", id, "namespace", namespace, "exit_code", exitStatus.ExitCode())
+	c.logger.InfoContext(
+		c.ctx,
+		"stopped container",
+		"id",
+		id,
+		"namespace",
+		namespace,
+		"exit_code",
+		exitStatus.ExitCode(),
+	)
 
 	// Verify task is actually stopped
 	finalStatus, err := task.Status(nsCtx)
@@ -356,7 +365,11 @@ func (c *client) deleteTaskBestEffort(
 }
 
 // CreateContainer creates a new container with the provided spec.
-func (c *client) CreateContainer(namespace string, spec ContainerSpec, creds []RegistryCredentials) (containerd.Container, error) {
+func (c *client) CreateContainer(
+	namespace string,
+	spec ContainerSpec,
+	creds []RegistryCredentials,
+) (containerd.Container, error) {
 	if err := validateContainerSpec(spec); err != nil {
 		return nil, err
 	}
@@ -493,7 +506,16 @@ func (c *client) DeleteContainer(namespace, id string, opts ContainerDeleteOptio
 		return internalerrdefs.ErrEmptyContainerID
 	}
 
-	c.logger.DebugContext(c.ctx, "starting to delete container", "id", id, "namespace", namespace, "snapshot_cleanup", opts.SnapshotCleanup)
+	c.logger.DebugContext(
+		c.ctx,
+		"starting to delete container",
+		"id",
+		id,
+		"namespace",
+		namespace,
+		"snapshot_cleanup",
+		opts.SnapshotCleanup,
+	)
 	container, err := c.loadContainer(namespace, id)
 	if err != nil {
 		// Container doesn't exist - treat as idempotent (already deleted)
@@ -501,7 +523,16 @@ func (c *client) DeleteContainer(namespace, id string, opts ContainerDeleteOptio
 			c.logger.DebugContext(c.ctx, "container not found", "id", id, "namespace", namespace)
 			return nil
 		}
-		c.logger.DebugContext(c.ctx, "failed to load container for deletion", "id", id, "namespace", namespace, "error", err)
+		c.logger.DebugContext(
+			c.ctx,
+			"failed to load container for deletion",
+			"id",
+			id,
+			"namespace",
+			namespace,
+			"error",
+			err,
+		)
 		return err
 	}
 
@@ -540,7 +571,16 @@ func (c *client) DeleteContainer(namespace, id string, opts ContainerDeleteOptio
 			c.dropContainer(namespace, id)
 			return nil
 		}
-		c.logger.ErrorContext(c.ctx, "failed to delete container", "id", id, "namespace", namespace, "err", formatError(err))
+		c.logger.ErrorContext(
+			c.ctx,
+			"failed to delete container",
+			"id",
+			id,
+			"namespace",
+			namespace,
+			"err",
+			formatError(err),
+		)
 		return fmt.Errorf("failed to delete container: %w", err)
 	}
 

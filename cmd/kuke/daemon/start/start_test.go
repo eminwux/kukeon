@@ -27,8 +27,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eminwux/kukeon/cmd/kuke/internal/lifecycle"
 	start "github.com/eminwux/kukeon/cmd/kuke/daemon/start"
+	"github.com/eminwux/kukeon/cmd/kuke/internal/lifecycle"
 	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/consts"

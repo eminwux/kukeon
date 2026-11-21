@@ -57,7 +57,9 @@ func TestContainerSpecChanged_OCIBakedFields(t *testing.T) {
 			s.Secrets = []intmodel.ContainerSecret{{Name: "tok", FromEnv: "CLAUDE_CODE_OAUTH_TOKEN"}}
 		}, true},
 		{"secretsRef", func(s *intmodel.ContainerSpec) {
-			s.Secrets = []intmodel.ContainerSecret{{Name: "db", SecretRef: &intmodel.ContainerSecretRef{Name: "creds", Realm: "default"}}}
+			s.Secrets = []intmodel.ContainerSecret{
+				{Name: "db", SecretRef: &intmodel.ContainerSecretRef{Name: "creds", Realm: "default"}},
+			}
 		}, true},
 		// Compatible env changes recreate only workload containers because the
 		// OCI Process.Env is fixed at create and isn't refreshed by task restart.
@@ -83,11 +85,15 @@ func TestContainerSpecChanged_OCIBakedFields(t *testing.T) {
 // scope coordinate. Mirrors the diff layer's secretRefEqual semantics.
 func TestContainerSpecChanged_SecretRefScopeChange(t *testing.T) {
 	actual := intmodel.ContainerSpec{
-		Image:   "busybox:latest",
-		Secrets: []intmodel.ContainerSecret{{Name: "db", SecretRef: &intmodel.ContainerSecretRef{Name: "creds", Realm: "default"}}},
+		Image: "busybox:latest",
+		Secrets: []intmodel.ContainerSecret{
+			{Name: "db", SecretRef: &intmodel.ContainerSecretRef{Name: "creds", Realm: "default"}},
+		},
 	}
 	desired := actual
-	desired.Secrets = []intmodel.ContainerSecret{{Name: "db", SecretRef: &intmodel.ContainerSecretRef{Name: "creds", Realm: "prod"}}}
+	desired.Secrets = []intmodel.ContainerSecret{
+		{Name: "db", SecretRef: &intmodel.ContainerSecretRef{Name: "creds", Realm: "prod"}},
+	}
 
 	if !containerSpecChanged(&desired, &actual) {
 		t.Error("expected containerSpecChanged=true for a SecretRef scope change")

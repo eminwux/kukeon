@@ -57,7 +57,9 @@ func translateCNIError(err error, networkName, bridge string) error {
 		strings.Contains(msg, "executable file not found") {
 		return fmt.Errorf(
 			"%w: required CNI plugin missing on host — install the standard CNI plugins (e.g. apt install containernetworking-plugins) so %q resolves: %w",
-			errdefs.ErrCNIPluginNotFound, networkName, err,
+			errdefs.ErrCNIPluginNotFound,
+			networkName,
+			err,
 		)
 	}
 

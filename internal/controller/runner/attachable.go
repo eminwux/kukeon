@@ -112,7 +112,12 @@ func attachableTTYDirInitialPerms(kukeonGroupGID int) (os.FileMode, int) {
 // render-time gate can omit already-done runOn: create stages from the next
 // boot's ContainerDoc. Pass nil on a fresh-create boot — every create stage
 // renders normally and runs on the next boot.
-func (r *Exec) attachableBuildOpts(_ string, spec intmodel.ContainerSpec, _ []ctr.RegistryCredentials, priorStages []intmodel.StageStatus) ([]ctr.BuildOption, error) {
+func (r *Exec) attachableBuildOpts(
+	_ string,
+	spec intmodel.ContainerSpec,
+	_ []ctr.RegistryCredentials,
+	priorStages []intmodel.StageStatus,
+) ([]ctr.BuildOption, error) {
 	if !spec.Attachable {
 		return nil, nil
 	}

@@ -282,7 +282,10 @@ func TestReconcileCells_OutOfSync_EnvOverrideSurvivesNoSpuriousDrift(t *testing.
 	res, _ := runOutOfSyncHarness(t, live, mock)
 
 	if got := updateCalls.Load(); got != 0 {
-		t.Errorf("UpdateCellMetadata calls: got %d, want 0 (recorded --env override must not produce spurious OutOfSync)", got)
+		t.Errorf(
+			"UpdateCellMetadata calls: got %d, want 0 (recorded --env override must not produce spurious OutOfSync)",
+			got,
+		)
 	}
 	if res.CellsUpdated != 0 {
 		t.Errorf("CellsUpdated: got %d, want 0", res.CellsUpdated)
@@ -383,7 +386,10 @@ func TestReconcileCells_OutOfSync_RunnerInjectedContainerFieldsStaySynced(t *tes
 	res, _ := runOutOfSyncHarness(t, live, mock)
 
 	if got := updateCalls.Load(); got != 0 {
-		t.Errorf("UpdateCellMetadata calls: got %d, want 0 (runner-injected container fields must not produce spurious OutOfSync)", got)
+		t.Errorf(
+			"UpdateCellMetadata calls: got %d, want 0 (runner-injected container fields must not produce spurious OutOfSync)",
+			got,
+		)
 	}
 	if res.CellsUpdated != 0 {
 		t.Errorf("CellsUpdated: got %d, want 0", res.CellsUpdated)

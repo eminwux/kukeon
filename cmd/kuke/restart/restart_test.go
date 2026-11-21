@@ -182,7 +182,9 @@ func TestRestartCmd(t *testing.T) {
 					t.Fatalf(
 						"OutOfSync reapply lives daemon-side; restart CLI must not call ApplyDocuments/GetConfig/GetBlueprint, "+
 							"got apply=%d getConfig=%d getBlueprint=%d",
-						f.applyCalls, f.getConfigCnt, f.getBpCalls,
+						f.applyCalls,
+						f.getConfigCnt,
+						f.getBpCalls,
 					)
 				}
 			},

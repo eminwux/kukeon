@@ -382,7 +382,9 @@ func TestNewContainerCmd_NamedSingleRow(t *testing.T) {
 		cmd.SetErr(buf)
 		ctx := context.WithValue(context.Background(), container.MockControllerKey{}, kukeonv1.Client(fake))
 		cmd.SetContext(ctx)
-		cmd.SetArgs(append([]string{"co1", "--realm", "r1", "--space", "s1", "--stack", "st1", "--cell", "ce1"}, args...))
+		cmd.SetArgs(
+			append([]string{"co1", "--realm", "r1", "--space", "s1", "--stack", "st1", "--cell", "ce1"}, args...),
+		)
 		if err := cmd.Execute(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

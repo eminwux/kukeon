@@ -334,7 +334,10 @@ func TestListSecrets_IgnoresReservedSubdirs(t *testing.T) {
 	}
 	got := make([]string, 0, len(out))
 	for _, s := range out {
-		got = append(got, s.Metadata.Realm+"/"+s.Metadata.Space+"/"+s.Metadata.Stack+"/"+s.Metadata.Cell+"/"+s.Metadata.Name)
+		got = append(
+			got,
+			s.Metadata.Realm+"/"+s.Metadata.Space+"/"+s.Metadata.Stack+"/"+s.Metadata.Cell+"/"+s.Metadata.Name,
+		)
 	}
 	sort.Strings(got)
 	want := []string{"default////realm-tok"}

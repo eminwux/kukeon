@@ -116,7 +116,9 @@ func TestComputeContainerSpecHash_BreakingFieldsChangeHash(t *testing.T) {
 			s.Secrets = []intmodel.ContainerSecret{{Name: "db", FromEnv: "DB_PASS"}}
 		}},
 		{"secretsRef", func(s *intmodel.ContainerSpec) {
-			s.Secrets = []intmodel.ContainerSecret{{Name: "db", SecretRef: &intmodel.ContainerSecretRef{Name: "creds", Realm: "prod"}}}
+			s.Secrets = []intmodel.ContainerSecret{
+				{Name: "db", SecretRef: &intmodel.ContainerSecretRef{Name: "creds", Realm: "prod"}},
+			}
 		}},
 	}
 	for _, tc := range cases {
@@ -160,8 +162,12 @@ func TestComputeContainerSpecHash_CompatibleFieldsDoNotChangeHash(t *testing.T) 
 			mut := base
 			tc.mut(&mut)
 			if ComputeContainerSpecHash(mut) != baseHash {
-				t.Errorf("changing compatible field %s must NOT change the spec hash (apply.DiffCell handles it in-place); base=%q mutated=%q",
-					tc.name, baseHash, ComputeContainerSpecHash(mut))
+				t.Errorf(
+					"changing compatible field %s must NOT change the spec hash (apply.DiffCell handles it in-place); base=%q mutated=%q",
+					tc.name,
+					baseHash,
+					ComputeContainerSpecHash(mut),
+				)
 			}
 		})
 	}
@@ -275,8 +281,12 @@ func TestSpecHashDomainPinsToDiffCellBreakingFields(t *testing.T) {
 
 			if tc.expectRootBreaks {
 				if hashBefore == hashAfter {
-					t.Errorf("field %q is Breaking-on-root in DiffCell but ComputeContainerSpecHash is unchanged — apply.DiffCell would force a recreate while StartCell silently resumes a stale snapshot; before=%q after=%q",
-						tc.name, hashBefore, hashAfter)
+					t.Errorf(
+						"field %q is Breaking-on-root in DiffCell but ComputeContainerSpecHash is unchanged — apply.DiffCell would force a recreate while StartCell silently resumes a stale snapshot; before=%q after=%q",
+						tc.name,
+						hashBefore,
+						hashAfter,
+					)
 				}
 			} else {
 				if hashBefore != hashAfter {

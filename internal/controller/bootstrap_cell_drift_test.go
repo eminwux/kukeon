@@ -150,7 +150,9 @@ func TestBootstrapCell_IdempotentRerunReportsAlreadyRunning(t *testing.T) {
 		t.Errorf("CellSection.CellStartedPre = false; want true (containers already running on a healthy re-run)")
 	}
 	if section.CellStarted {
-		t.Errorf("CellSection.CellStarted = true; want false (no-op re-run must render \"already running\", not \"started\")")
+		t.Errorf(
+			"CellSection.CellStarted = true; want false (no-op re-run must render \"already running\", not \"started\")",
+		)
 	}
 }
 

@@ -233,13 +233,15 @@ func richBlueprintForDivergence() v1beta1.CellBlueprintDoc {
 				Containers: []v1beta1.BlueprintContainer{
 					{ID: "root", Root: true, Image: "registry.example.com/root:latest"},
 					{
-						ID:              "main",
-						Image:           "registry.example.com/web:${TAG}",
-						Attachable:      true,
-						Args:            []string{"--port", "8080"},
-						Env:             []string{"FOO=bar", "BAZ=qux"},
-						Ports:           []string{"8080/tcp"},
-						Volumes:         []v1beta1.VolumeMount{{Source: "/host/data", Target: "/data", ReadOnly: true, Mode: 0o644}},
+						ID:         "main",
+						Image:      "registry.example.com/web:${TAG}",
+						Attachable: true,
+						Args:       []string{"--port", "8080"},
+						Env:        []string{"FOO=bar", "BAZ=qux"},
+						Ports:      []string{"8080/tcp"},
+						Volumes: []v1beta1.VolumeMount{
+							{Source: "/host/data", Target: "/data", ReadOnly: true, Mode: 0o644},
+						},
 						Networks:        []string{"default"},
 						NetworksAliases: []string{"web"},
 						RestartPolicy:   "on-failure",

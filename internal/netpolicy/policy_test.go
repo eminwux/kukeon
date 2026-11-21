@@ -74,11 +74,19 @@ func TestFromInternal_RuleValidation(t *testing.T) {
 		wantErr error
 	}{
 		{"empty", intmodel.EgressAllowRule{}, errdefs.ErrEgressRuleTargetRequired},
-		{"both set", intmodel.EgressAllowRule{Host: "example.com", CIDR: "10.0.0.0/8"}, errdefs.ErrEgressRuleTargetConflict},
+		{
+			"both set",
+			intmodel.EgressAllowRule{Host: "example.com", CIDR: "10.0.0.0/8"},
+			errdefs.ErrEgressRuleTargetConflict,
+		},
 		{"bad cidr", intmodel.EgressAllowRule{CIDR: "not-a-cidr"}, errdefs.ErrEgressInvalidCIDR},
 		{"bad host", intmodel.EgressAllowRule{Host: "has spaces.com"}, errdefs.ErrEgressInvalidHost},
 		{"bad port low", intmodel.EgressAllowRule{CIDR: "10.0.0.0/8", Ports: []int{0}}, errdefs.ErrEgressInvalidPort},
-		{"bad port high", intmodel.EgressAllowRule{CIDR: "10.0.0.0/8", Ports: []int{70000}}, errdefs.ErrEgressInvalidPort},
+		{
+			"bad port high",
+			intmodel.EgressAllowRule{CIDR: "10.0.0.0/8", Ports: []int{70000}},
+			errdefs.ErrEgressInvalidPort,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -107,11 +107,19 @@ func resolve(
 
 	raw, err := yaml.Marshal(doc)
 	if err != nil {
-		return v1beta1.CellBlueprintDoc{}, fmt.Errorf("blueprint %q: marshal for substitution: %w", doc.Metadata.Name, err)
+		return v1beta1.CellBlueprintDoc{}, fmt.Errorf(
+			"blueprint %q: marshal for substitution: %w",
+			doc.Metadata.Name,
+			err,
+		)
 	}
 	var node yaml.Node
 	if unmarshalErr := yaml.Unmarshal(raw, &node); unmarshalErr != nil {
-		return v1beta1.CellBlueprintDoc{}, fmt.Errorf("blueprint %q: parse for substitution: %w", doc.Metadata.Name, unmarshalErr)
+		return v1beta1.CellBlueprintDoc{}, fmt.Errorf(
+			"blueprint %q: parse for substitution: %w",
+			doc.Metadata.Name,
+			unmarshalErr,
+		)
 	}
 
 	substituteScalars(&node, values)

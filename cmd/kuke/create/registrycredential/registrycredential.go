@@ -76,7 +76,8 @@ func NewRegistryCredentialCmd() *cobra.Command {
 		RunE:          runCreateRegistryCredential,
 	}
 
-	cmd.Flags().String("server", "", "Registry server address the credential applies to (e.g. ghcr.io); empty matches the registry from the image reference")
+	cmd.Flags().
+		String("server", "", "Registry server address the credential applies to (e.g. ghcr.io); empty matches the registry from the image reference")
 	cmd.Flags().String("username", "", "Registry username")
 	cmd.Flags().Bool("password-stdin", false, "Read the registry token from stdin (docker login style)")
 	cmd.Flags().String("from-file", "", "Read the registry token from a file")

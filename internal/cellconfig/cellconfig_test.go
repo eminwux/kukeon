@@ -89,8 +89,10 @@ func TestValidateSlotFill_AllFilled(t *testing.T) {
 	)
 	cfg := v1beta1.CellConfigDoc{
 		Spec: v1beta1.CellConfigSpec{
-			Repos:   map[string]v1beta1.CellConfigRepoFill{"project": {URL: "git@x:y.git"}},
-			Secrets: map[string]v1beta1.CellConfigSecretFill{"token": {SecretRef: &v1beta1.ContainerSecretRef{Name: "t", Realm: "r"}}},
+			Repos: map[string]v1beta1.CellConfigRepoFill{"project": {URL: "git@x:y.git"}},
+			Secrets: map[string]v1beta1.CellConfigSecretFill{
+				"token": {SecretRef: &v1beta1.ContainerSecretRef{Name: "t", Realm: "r"}},
+			},
 		},
 	}
 	if err := cellconfig.ValidateSlotFill(cfg, bp); err != nil {
@@ -143,7 +145,9 @@ func TestValidateSlotFill_UnknownSecretSlot(t *testing.T) {
 	bp := blueprintWithSlots(nil, map[string]bool{"token": false})
 	cfg := v1beta1.CellConfigDoc{
 		Spec: v1beta1.CellConfigSpec{
-			Secrets: map[string]v1beta1.CellConfigSecretFill{"typo": {SecretRef: &v1beta1.ContainerSecretRef{Name: "t", Realm: "r"}}},
+			Secrets: map[string]v1beta1.CellConfigSecretFill{
+				"typo": {SecretRef: &v1beta1.ContainerSecretRef{Name: "t", Realm: "r"}},
+			},
 		},
 	}
 	err := cellconfig.ValidateSlotFill(cfg, bp)

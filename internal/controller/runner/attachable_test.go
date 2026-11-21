@@ -695,28 +695,46 @@ func TestWriteKukettyDoc_RenderGate_OmitsDoneCreateStagesOnRestart(t *testing.T)
 		t.Fatalf("Spec.Tty is nil")
 	}
 	if len(doc.Spec.Tty.OnInit) != 3 {
-		t.Fatalf("len(Spec.Tty.OnInit) = %d, want 3 (slice length must be preserved so kuketty's Stage.Index aligns with spec position)", len(doc.Spec.Tty.OnInit))
+		t.Fatalf(
+			"len(Spec.Tty.OnInit) = %d, want 3 (slice length must be preserved so kuketty's Stage.Index aligns with spec position)",
+			len(doc.Spec.Tty.OnInit),
+		)
 	}
 	// Gated create stage: Script cleared, RunOn preserved so kuketty's
 	// createStages still picks it up at the correct Index. The on-disk
 	// evidence the gate fired is the empty Script alongside an unchanged
 	// RunOn.
 	if doc.Spec.Tty.OnInit[0].Script != "" {
-		t.Errorf("OnInit[0].Script = %q, want empty (gate must clear done create stage's Script)", doc.Spec.Tty.OnInit[0].Script)
+		t.Errorf(
+			"OnInit[0].Script = %q, want empty (gate must clear done create stage's Script)",
+			doc.Spec.Tty.OnInit[0].Script,
+		)
 	}
 	if doc.Spec.Tty.OnInit[0].RunOn != extmodel.RunOnCreate {
-		t.Errorf("OnInit[0].RunOn = %q, want %q (gate must not touch RunOn — preserving createStages selection)", doc.Spec.Tty.OnInit[0].RunOn, extmodel.RunOnCreate)
+		t.Errorf(
+			"OnInit[0].RunOn = %q, want %q (gate must not touch RunOn — preserving createStages selection)",
+			doc.Spec.Tty.OnInit[0].RunOn,
+			extmodel.RunOnCreate,
+		)
 	}
 	// Non-create stages are never gated.
 	if doc.Spec.Tty.OnInit[1].Script != startStage.Script {
-		t.Errorf("OnInit[1].Script = %q, want %q (runOn: start must not be touched)", doc.Spec.Tty.OnInit[1].Script, startStage.Script)
+		t.Errorf(
+			"OnInit[1].Script = %q, want %q (runOn: start must not be touched)",
+			doc.Spec.Tty.OnInit[1].Script,
+			startStage.Script,
+		)
 	}
 	if doc.Spec.Tty.OnInit[1].RunOn != extmodel.RunOnStart {
 		t.Errorf("OnInit[1].RunOn = %q, want %q", doc.Spec.Tty.OnInit[1].RunOn, extmodel.RunOnStart)
 	}
 	// Create stage with no prior done record: unchanged.
 	if doc.Spec.Tty.OnInit[2].Script != freshStage.Script {
-		t.Errorf("OnInit[2].Script = %q, want %q (fresh create stage with no prior done must render unchanged)", doc.Spec.Tty.OnInit[2].Script, freshStage.Script)
+		t.Errorf(
+			"OnInit[2].Script = %q, want %q (fresh create stage with no prior done must render unchanged)",
+			doc.Spec.Tty.OnInit[2].Script,
+			freshStage.Script,
+		)
 	}
 }
 
@@ -814,8 +832,11 @@ func TestWriteKukettyDoc_RenderGate_ReconcileRollback(t *testing.T) {
 		t.Fatalf("Spec.Tty.OnInit = %+v, want single-entry (rolled-back spec)", doc.Spec.Tty)
 	}
 	if doc.Spec.Tty.OnInit[0].Script != "" {
-		t.Errorf("OnInit[0].Script = %q, want empty (stageA's hash %s is in done-set; gate must fire at its new position)",
-			doc.Spec.Tty.OnInit[0].Script, hashA)
+		t.Errorf(
+			"OnInit[0].Script = %q, want empty (stageA's hash %s is in done-set; gate must fire at its new position)",
+			doc.Spec.Tty.OnInit[0].Script,
+			hashA,
+		)
 	}
 
 	// Second sub-scenario: a rolled-back spec whose stages no longer have

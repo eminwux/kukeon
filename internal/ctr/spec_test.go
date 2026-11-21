@@ -1027,9 +1027,24 @@ func TestBuildRootContainerSpec_Hostname(t *testing.T) {
 		containerdID string
 		wantHostname string
 	}{
-		{name: "cell name sets hostname", cellName: "kuke-app", containerdID: "s_st_kuke-app_root", wantHostname: "kuke-app"},
-		{name: "empty cell name falls back to containerd id", cellName: "", containerdID: "s_st_kuke-app_root", wantHostname: "s_st_kuke-app_root"},
-		{name: "whitespace cell name treated as empty", cellName: "   ", containerdID: "s_st_kuke-app_root", wantHostname: "s_st_kuke-app_root"},
+		{
+			name:         "cell name sets hostname",
+			cellName:     "kuke-app",
+			containerdID: "s_st_kuke-app_root",
+			wantHostname: "kuke-app",
+		},
+		{
+			name:         "empty cell name falls back to containerd id",
+			cellName:     "",
+			containerdID: "s_st_kuke-app_root",
+			wantHostname: "s_st_kuke-app_root",
+		},
+		{
+			name:         "whitespace cell name treated as empty",
+			cellName:     "   ",
+			containerdID: "s_st_kuke-app_root",
+			wantHostname: "s_st_kuke-app_root",
+		},
 	}
 
 	for _, tt := range tests {

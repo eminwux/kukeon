@@ -129,8 +129,22 @@ func TestMaybeRestartExitedContainers_FiresPerPolicyRow(t *testing.T) {
 		{"always_clean_fires", intmodel.RestartPolicyAlways, intmodel.ContainerStateExited, 0, true, restartFired},
 		{"always_failed_fires", intmodel.RestartPolicyAlways, intmodel.ContainerStateStopped, 1, true, restartFired},
 		{"empty_default_failed_no_fire", "", intmodel.ContainerStateStopped, 1, false, restartNone},
-		{"on_failure_failed_fires", intmodel.RestartPolicyOnFailure, intmodel.ContainerStateStopped, 137, true, restartFired},
-		{"on_failure_clean_no_fire", intmodel.RestartPolicyOnFailure, intmodel.ContainerStateStopped, 0, false, restartNone},
+		{
+			"on_failure_failed_fires",
+			intmodel.RestartPolicyOnFailure,
+			intmodel.ContainerStateStopped,
+			137,
+			true,
+			restartFired,
+		},
+		{
+			"on_failure_clean_no_fire",
+			intmodel.RestartPolicyOnFailure,
+			intmodel.ContainerStateStopped,
+			0,
+			false,
+			restartNone,
+		},
 		{"never_failed_no_fire", intmodel.RestartPolicyNever, intmodel.ContainerStateStopped, 1, false, restartNone},
 	}
 	for _, tc := range cases {
@@ -336,14 +350,18 @@ func TestRestartDecisionFor(t *testing.T) {
 	})
 	t.Run("past_backoff_fires", func(t *testing.T) {
 		r := &Exec{nowFn: fixedClock(now)}
-		r.restartStates = map[string]*containerRestartState{key(r): {attempts: 1, lastAttempt: now.Add(-restartBackoff)}}
+		r.restartStates = map[string]*containerRestartState{
+			key(r): {attempts: 1, lastAttempt: now.Add(-restartBackoff)},
+		}
 		if got := r.restartDecisionFor(cell, "work", intmodel.RestartPolicyOnFailure, restartBackoff, onFailureMaxRestarts); got != restartFired {
 			t.Errorf("got %v, want restartFired past backoff", got)
 		}
 	})
 	t.Run("cap_exhausted_gives_up", func(t *testing.T) {
 		r := &Exec{nowFn: fixedClock(now)}
-		r.restartStates = map[string]*containerRestartState{key(r): {attempts: onFailureMaxRestarts, lastAttempt: now.Add(-time.Hour)}}
+		r.restartStates = map[string]*containerRestartState{
+			key(r): {attempts: onFailureMaxRestarts, lastAttempt: now.Add(-time.Hour)},
+		}
 		if got := r.restartDecisionFor(cell, "work", intmodel.RestartPolicyOnFailure, restartBackoff, onFailureMaxRestarts); got != restartNone {
 			t.Errorf("got %v, want restartNone (cap exhausted)", got)
 		}
@@ -396,14 +414,19 @@ func TestReconcileCell_RestartFiresAndSuppressesWindDown(t *testing.T) {
 	cell := intmodel.Cell{
 		Metadata: intmodel.CellMetadata{Name: cellName},
 		Spec: intmodel.CellSpec{
-			ID:        cellName,
-			RealmName: realm,
-			SpaceName: space,
-			StackName: stack,
+			ID:         cellName,
+			RealmName:  realm,
+			SpaceName:  space,
+			StackName:  stack,
 			AutoDelete: true, // even with --rm the fired restart wins this tick
 			Containers: []intmodel.ContainerSpec{
 				{ID: rootID, ContainerdID: rootContainerdID, Root: true},
-				{ID: workloadID, ContainerdID: workloadContainerdID, Root: false, RestartPolicy: intmodel.RestartPolicyAlways},
+				{
+					ID:            workloadID,
+					ContainerdID:  workloadContainerdID,
+					Root:          false,
+					RestartPolicy: intmodel.RestartPolicyAlways,
+				},
 			},
 		},
 		Status: intmodel.CellStatus{State: intmodel.CellStateReady, ReadyObserved: true},
@@ -489,7 +512,12 @@ func TestReconcileCell_AutoDeleteWithOnFailureRestartWins(t *testing.T) {
 			AutoDelete: true, // --rm must NOT win against an owed on-failure restart
 			Containers: []intmodel.ContainerSpec{
 				{ID: rootID, ContainerdID: rootContainerdID, Root: true},
-				{ID: workloadID, ContainerdID: workloadContainerdID, Root: false, RestartPolicy: intmodel.RestartPolicyOnFailure},
+				{
+					ID:            workloadID,
+					ContainerdID:  workloadContainerdID,
+					Root:          false,
+					RestartPolicy: intmodel.RestartPolicyOnFailure,
+				},
 			},
 		},
 		Status: intmodel.CellStatus{State: intmodel.CellStateReady, ReadyObserved: true},
