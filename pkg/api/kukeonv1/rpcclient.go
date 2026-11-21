@@ -606,6 +606,31 @@ func (c *UnixClient) StartCell(ctx context.Context, doc v1beta1.CellDoc) (StartC
 	return reply.Result, nil
 }
 
+// ConnectContainerTerminal implements Client. Each call opens its own
+// connection to kukeond so the reply's SCM_RIGHTS descriptor can only belong
+// to this call; the shared, multiplexed connection the other methods use is
+// left alone. The returned connection is the daemon's connected sbsh control
+// socket, owned by the caller.
+func (c *UnixClient) ConnectContainerTerminal(
+	ctx context.Context,
+	doc v1beta1.ContainerDoc,
+) (*net.UnixConn, error) {
+	d := net.Dialer{Timeout: c.dialTimeout}
+	raw, err := d.DialContext(ctx, "unix", c.sockPath)
+	if err != nil {
+		return nil, wrapDialError(c.sockPath, err)
+	}
+	conn, ok := raw.(*net.UnixConn)
+	if !ok {
+		_ = raw.Close()
+		return nil, fmt.Errorf("dial kukeond at %s: got %T, want a unix socket", c.sockPath, raw)
+	}
+	reply := &ConnectContainerTerminalReply{}
+	return callReceivingConn(ctx, conn, MethodConnectContainerTerminal,
+		&ConnectContainerTerminalArgs{Doc: doc}, reply,
+		func() *APIError { return reply.Err })
+}
+
 // AttachContainer implements Client.
 func (c *UnixClient) AttachContainer(
 	ctx context.Context,

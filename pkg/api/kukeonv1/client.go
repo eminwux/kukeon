@@ -23,6 +23,7 @@ package kukeonv1
 import (
 	"context"
 	"io"
+	"net"
 
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
@@ -157,6 +158,20 @@ type Client interface {
 	// the file directly. Same Attachable gate as AttachContainer: only
 	// containers wrapped by sbsh have a capture file to surface.
 	LogContainer(ctx context.Context, doc v1beta1.ContainerDoc) (LogContainerResult, error)
+	// ConnectContainerTerminal returns a connection to the target
+	// container's sbsh control socket, so a caller without filesystem
+	// access to the socket (a cell holding only the kukeond socket mount)
+	// can still speak sbsh's protocol to it. The daemon applies the same
+	// gates as AttachContainer (ErrAttachNotSupported,
+	// ErrAttachTaskNotRunning), dials the socket itself, and passes the
+	// connected descriptor back over the kukeond socket (SCM_RIGHTS);
+	// terminal bytes never traverse kukeond. A failed dial surfaces as
+	// ErrAttachStaleSocket (socket absent) or ErrAttachPermissionDenied
+	// (socket present but not dialable) so callers can errors.Is the
+	// class without stat'ing a path they cannot see. Each returned
+	// connection carries a single sbsh call; the caller owns and closes
+	// it. Local transport only.
+	ConnectContainerTerminal(ctx context.Context, doc v1beta1.ContainerDoc) (*net.UnixConn, error)
 	// ReadDaemonLogs returns a bounded chunk of kukeond's own stdout/stderr
 	// stream — the same runtime-shim log file `kuke daemon logs` reads —
 	// so callers without filesystem access to the daemon's storage (the
@@ -435,7 +450,9 @@ const (
 	MethodStartCell       = ServiceName + ".StartCell"
 	MethodAttachContainer = ServiceName + ".AttachContainer"
 	MethodLogContainer    = ServiceName + ".LogContainer"
-	MethodReadDaemonLogs  = ServiceName + ".ReadDaemonLogs"
+
+	MethodConnectContainerTerminal = ServiceName + ".ConnectContainerTerminal"
+	MethodReadDaemonLogs           = ServiceName + ".ReadDaemonLogs"
 
 	MethodReadHealthDigest   = ServiceName + ".ReadHealthDigest"
 	MethodSubmitHealthReport = ServiceName + ".SubmitHealthReport"

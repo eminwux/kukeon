@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -136,6 +137,7 @@ type fakeClient struct {
 	createCellFn      func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error)
 	startCellFn       func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error)
 	attachContainerFn func(doc v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error)
+	connectFn         func(doc v1beta1.ContainerDoc) error
 	killCellFn        func(doc v1beta1.CellDoc) (kukeonv1.KillCellResult, error)
 	deleteCellFn      func(doc v1beta1.CellDoc) (kukeonv1.DeleteCellResult, error)
 	getBlueprintFn    func(doc v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error)
@@ -147,6 +149,7 @@ type fakeClient struct {
 	createCalls       int
 	startCalls        int
 	attachCalls       int
+	connectCalls      int
 	killCalls         int
 	deleteCalls       int
 	createConfigCalls int
@@ -154,6 +157,8 @@ type fakeClient struct {
 	createDoc         v1beta1.CellDoc
 	startDoc          v1beta1.CellDoc
 	attachDoc         v1beta1.ContainerDoc
+	connectDoc        v1beta1.ContainerDoc
+	conns             []*net.UnixConn
 	killDoc           v1beta1.CellDoc
 	deleteDoc         v1beta1.CellDoc
 }
@@ -194,6 +199,26 @@ func (f *fakeClient) AttachContainer(
 		return kukeonv1.AttachContainerResult{}, errors.New("unexpected AttachContainer call")
 	}
 	return f.attachContainerFn(doc)
+}
+
+// ConnectContainerTerminal backs the daemon-passed attach route (#1535).
+// connectFn decides refusal; on success the fake hands back one end of a
+// real socketpair, the shape the daemon passes over SCM_RIGHTS.
+func (f *fakeClient) ConnectContainerTerminal(
+	_ context.Context,
+	doc v1beta1.ContainerDoc,
+) (*net.UnixConn, error) {
+	f.connectCalls++
+	f.connectDoc = doc
+	if f.connectFn == nil {
+		return nil, errors.New("unexpected ConnectContainerTerminal call")
+	}
+	if err := f.connectFn(doc); err != nil {
+		return nil, err
+	}
+	conn, peer := socketPair()
+	f.conns = append(f.conns, peer, conn)
+	return conn, nil
 }
 
 func (f *fakeClient) KillCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
@@ -622,8 +647,8 @@ func TestRun_ExistingCell_RecordedReady_ContainerdLostContainers_Refuses(t *test
 	if fc.startCalls != 0 {
 		t.Errorf("StartCell calls=%d want 0 (refuse, do not re-enter start — #630)", fc.startCalls)
 	}
-	if fc.attachCalls != 0 {
-		t.Errorf("AttachContainer calls=%d want 0 (must not attach to a dead socket)", fc.attachCalls)
+	if fc.connectCalls != 0 {
+		t.Errorf("ConnectContainerTerminal calls=%d want 0 (must not attach to a dead socket)", fc.connectCalls)
 	}
 }
 
@@ -688,8 +713,8 @@ func TestRun_ExistingCell_RecordedReady_TaskGone_Refuses(t *testing.T) {
 	if strings.Contains(out.String(), "already existed") {
 		t.Errorf("must not print phantom `already existed` for a diverged cell:\n%s", out.String())
 	}
-	if fc.attachCalls != 0 {
-		t.Errorf("AttachContainer calls=%d want 0 (must not attach to a dead socket)", fc.attachCalls)
+	if fc.connectCalls != 0 {
+		t.Errorf("ConnectContainerTerminal calls=%d want 0 (must not attach to a dead socket)", fc.connectCalls)
 	}
 }
 
@@ -1555,9 +1580,9 @@ spec:
 
 const testHostSocket = "/opt/kukeon/r/s/st/c/work/tty/socket"
 
-func attachSuccessFn() func(v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
-	return func(_ v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
-		return kukeonv1.AttachContainerResult{HostSocketPath: testHostSocket}, nil
+func connectSuccessFn() func(v1beta1.ContainerDoc) error {
+	return func(_ v1beta1.ContainerDoc) error {
+		return nil
 	}
 }
 
@@ -1668,7 +1693,7 @@ func TestRun_Attach_AfterCreate_UsesTtyDefault(t *testing.T) {
 		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
 			return successCreateResult(doc), nil
 		},
-		attachContainerFn: attachSuccessFn(),
+		connectFn: connectSuccessFn(),
 	}
 	run := &runCapture{}
 	cmd, _ := newCmdWithRun(t, fc, run)
@@ -1680,17 +1705,18 @@ func TestRun_Attach_AfterCreate_UsesTtyDefault(t *testing.T) {
 	if fc.createCalls != 1 {
 		t.Fatalf("CreateCell calls=%d want 1", fc.createCalls)
 	}
-	if fc.attachCalls != 1 {
-		t.Fatalf("AttachContainer calls=%d want 1", fc.attachCalls)
+	if fc.connectCalls != 1 {
+		t.Fatalf("ConnectContainerTerminal calls=%d want 1", fc.connectCalls)
 	}
-	if got := fc.attachDoc.Metadata.Name; got != "claude" {
-		t.Errorf("AttachContainer target=%q want claude (tty.default)", got)
+	if got := fc.connectDoc.Metadata.Name; got != "claude" {
+		t.Errorf("ConnectContainerTerminal target=%q want claude (tty.default)", got)
 	}
 	if run.calls != 1 {
 		t.Fatalf("attach loop calls=%d want 1", run.calls)
 	}
-	if run.opts.SocketPath != testHostSocket {
-		t.Errorf("SocketPath=%q want %q", run.opts.SocketPath, testHostSocket)
+	if run.opts.Dial == nil || run.opts.SocketPath != "" {
+		t.Errorf("Options{Dial set=%t, SocketPath=%q}, want the daemon-passed dialer and no path",
+			run.opts.Dial != nil, run.opts.SocketPath)
 	}
 }
 
@@ -1701,7 +1727,7 @@ func TestRun_Attach_AfterCreate_FirstAttachableWhenNoDefault(t *testing.T) {
 		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
 			return successCreateResult(doc), nil
 		},
-		attachContainerFn: attachSuccessFn(),
+		connectFn: connectSuccessFn(),
 	}
 	run := &runCapture{}
 	cmd, _ := newCmdWithRun(t, fc, run)
@@ -1710,8 +1736,8 @@ func TestRun_Attach_AfterCreate_FirstAttachableWhenNoDefault(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if got := fc.attachDoc.Metadata.Name; got != "shell" {
-		t.Errorf("AttachContainer target=%q want shell (first attachable)", got)
+	if got := fc.connectDoc.Metadata.Name; got != "shell" {
+		t.Errorf("ConnectContainerTerminal target=%q want shell (first attachable)", got)
 	}
 }
 
@@ -1722,7 +1748,7 @@ func TestRun_Attach_AfterCreate_ExplicitContainerWinsOverDefault(t *testing.T) {
 		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
 			return successCreateResult(doc), nil
 		},
-		attachContainerFn: attachSuccessFn(),
+		connectFn: connectSuccessFn(),
 	}
 	run := &runCapture{}
 	cmd, _ := newCmdWithRun(t, fc, run)
@@ -1734,8 +1760,8 @@ func TestRun_Attach_AfterCreate_ExplicitContainerWinsOverDefault(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if got := fc.attachDoc.Metadata.Name; got != "shell" {
-		t.Errorf("AttachContainer target=%q want shell (--container must beat tty.default)", got)
+	if got := fc.connectDoc.Metadata.Name; got != "shell" {
+		t.Errorf("ConnectContainerTerminal target=%q want shell (--container must beat tty.default)", got)
 	}
 }
 
@@ -1761,8 +1787,8 @@ func TestRun_Attach_NoCandidate_Errors_NoMutationOnAttach(t *testing.T) {
 	if !errors.Is(err, errdefs.ErrAttachNoCandidate) {
 		t.Fatalf("err=%v want ErrAttachNoCandidate", err)
 	}
-	if fc.attachCalls != 0 {
-		t.Errorf("AttachContainer calls=%d want 0", fc.attachCalls)
+	if fc.connectCalls != 0 {
+		t.Errorf("ConnectContainerTerminal calls=%d want 0", fc.connectCalls)
 	}
 	if run.calls != 0 {
 		t.Errorf("attach loop calls=%d want 0", run.calls)
@@ -1791,8 +1817,8 @@ func TestRun_Attach_BadContainerFlag_Errors(t *testing.T) {
 	if !strings.Contains(err.Error(), "shell") || !strings.Contains(err.Error(), "claude") {
 		t.Errorf("err %q must list attachables (shell, claude); output:\n%s", err, out.String())
 	}
-	if fc.attachCalls != 0 {
-		t.Errorf("AttachContainer calls=%d want 0", fc.attachCalls)
+	if fc.connectCalls != 0 {
+		t.Errorf("ConnectContainerTerminal calls=%d want 0", fc.connectCalls)
 	}
 	if run.calls != 0 {
 		t.Errorf("attach loop calls=%d want 0", run.calls)
@@ -1810,8 +1836,8 @@ func TestRun_Attach_AttachContainer_NotFound_SurfacesSentinel(t *testing.T) {
 		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
 			return successCreateResult(doc), nil
 		},
-		attachContainerFn: func(_ v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
-			return kukeonv1.AttachContainerResult{}, errdefs.ErrContainerNotFound
+		connectFn: func(_ v1beta1.ContainerDoc) error {
+			return errdefs.ErrContainerNotFound
 		},
 	}
 	run := &runCapture{}
@@ -1822,8 +1848,8 @@ func TestRun_Attach_AttachContainer_NotFound_SurfacesSentinel(t *testing.T) {
 	if !errors.Is(err, errdefs.ErrContainerNotFound) {
 		t.Fatalf("err=%v want ErrContainerNotFound", err)
 	}
-	if fc.attachCalls != 1 {
-		t.Errorf("AttachContainer calls=%d want 1", fc.attachCalls)
+	if fc.connectCalls != 1 {
+		t.Errorf("ConnectContainerTerminal calls=%d want 1", fc.connectCalls)
 	}
 	if run.calls != 0 {
 		t.Errorf("attach loop calls=%d want 0", run.calls)
@@ -1917,7 +1943,7 @@ func TestRun_Attach_AlreadyReady_ShortCircuitThenAttaches(t *testing.T) {
 				RootContainerTaskRunning: true,
 			}, nil
 		},
-		attachContainerFn: attachSuccessFn(),
+		connectFn: connectSuccessFn(),
 	}
 	run := &runCapture{}
 	cmd, _ := newCmdWithRun(t, fc, run)
@@ -1929,11 +1955,11 @@ func TestRun_Attach_AlreadyReady_ShortCircuitThenAttaches(t *testing.T) {
 	if fc.createCalls != 0 {
 		t.Errorf("CreateCell calls=%d want 0 (short-circuit on Ready)", fc.createCalls)
 	}
-	if fc.attachCalls != 1 {
-		t.Fatalf("AttachContainer calls=%d want 1", fc.attachCalls)
+	if fc.connectCalls != 1 {
+		t.Fatalf("ConnectContainerTerminal calls=%d want 1", fc.connectCalls)
 	}
-	if got := fc.attachDoc.Metadata.Name; got != "claude" {
-		t.Errorf("AttachContainer target=%q want claude", got)
+	if got := fc.connectDoc.Metadata.Name; got != "claude" {
+		t.Errorf("ConnectContainerTerminal target=%q want claude", got)
 	}
 	if run.calls != 1 {
 		t.Errorf("attach loop calls=%d want 1", run.calls)
@@ -2076,7 +2102,7 @@ func TestRun_RmAttach_KeepsCellAliveOnCleanDetach(t *testing.T) {
 		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
 			return successCreateResult(doc), nil
 		},
-		attachContainerFn: attachSuccessFn(),
+		connectFn: connectSuccessFn(),
 		killCellFn: func(_ v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
 			return kukeonv1.KillCellResult{Killed: true}, nil
 		},
@@ -2115,7 +2141,7 @@ func TestRun_RmAttach_KillsCellOnPeerClosed(t *testing.T) {
 		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
 			return successCreateResult(doc), nil
 		},
-		attachContainerFn: attachSuccessFn(),
+		connectFn: connectSuccessFn(),
 		killCellFn: func(_ v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
 			return kukeonv1.KillCellResult{Killed: true}, nil
 		},
@@ -2164,7 +2190,7 @@ func TestRun_RmAttach_DeleteCellNotFound_Silent(t *testing.T) {
 		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
 			return successCreateResult(doc), nil
 		},
-		attachContainerFn: attachSuccessFn(),
+		connectFn: connectSuccessFn(),
 		killCellFn: func(_ v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
 			return kukeonv1.KillCellResult{Killed: true}, nil
 		},
@@ -2196,7 +2222,7 @@ func TestRun_RmAttach_DeleteCellFailureWarns(t *testing.T) {
 		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
 			return successCreateResult(doc), nil
 		},
-		attachContainerFn: attachSuccessFn(),
+		connectFn: connectSuccessFn(),
 		killCellFn: func(_ v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
 			return kukeonv1.KillCellResult{Killed: true}, nil
 		},
@@ -2228,7 +2254,7 @@ func TestRun_RmAttach_KillsCellEvenWhenAttachLoopErrors(t *testing.T) {
 		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
 			return successCreateResult(doc), nil
 		},
-		attachContainerFn: attachSuccessFn(),
+		connectFn: connectSuccessFn(),
 		killCellFn: func(_ v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
 			return kukeonv1.KillCellResult{Killed: true}, nil
 		},
@@ -2257,7 +2283,7 @@ func TestRun_RmAttach_KillCellFailureDoesNotMaskAttachExit(t *testing.T) {
 		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
 			return successCreateResult(doc), nil
 		},
-		attachContainerFn: attachSuccessFn(),
+		connectFn: connectSuccessFn(),
 		killCellFn: func(_ v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
 			return kukeonv1.KillCellResult{}, errors.New("daemon RPC: connection refused")
 		},
@@ -2293,7 +2319,7 @@ func TestRun_RmAttach_KillCellNotFound_Silent(t *testing.T) {
 		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
 			return successCreateResult(doc), nil
 		},
-		attachContainerFn: attachSuccessFn(),
+		connectFn: connectSuccessFn(),
 		killCellFn: func(_ v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
 			return kukeonv1.KillCellResult{}, errdefs.ErrCellNotFound
 		},
@@ -2387,7 +2413,7 @@ func TestRun_RmAttach_AlreadyReady_StillKillsCellOnPeerClosed(t *testing.T) {
 				RootContainerTaskRunning: true,
 			}, nil
 		},
-		attachContainerFn: attachSuccessFn(),
+		connectFn: connectSuccessFn(),
 		killCellFn: func(_ v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
 			return kukeonv1.KillCellResult{Killed: true}, nil
 		},
@@ -2422,7 +2448,7 @@ func TestRun_AttachNoRm_DoesNotCallKillCell(t *testing.T) {
 		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
 			return successCreateResult(doc), nil
 		},
-		attachContainerFn: attachSuccessFn(),
+		connectFn: connectSuccessFn(),
 	}
 	run := &runCapture{}
 	cmd, _ := newCmdWithRun(t, fc, run)
@@ -3491,7 +3517,7 @@ func TestRun_Attach_PingDeadline_RetriesWithinBudget(t *testing.T) {
 		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
 			return successCreateResult(doc), nil
 		},
-		attachContainerFn: attachSuccessFn(),
+		connectFn: connectSuccessFn(),
 	}
 	cmd, _ := newCmdWithRunFn(t, fc, runFn)
 	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML)})
@@ -3499,10 +3525,10 @@ func TestRun_Attach_PingDeadline_RetriesWithinBudget(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v (want nil — retry must absorb the ping-timeout)", err)
 	}
-	if fc.attachCalls != 1 {
+	if fc.connectCalls != 2 {
 		t.Errorf(
-			"AttachContainer calls=%d, want 1 (HostSocketPath resolved once; retries are on the dial side)",
-			fc.attachCalls,
+			"ConnectContainerTerminal calls=%d, want 2 (one preflight per attempt)",
+			fc.connectCalls,
 		)
 	}
 	mu.Lock()
@@ -3536,7 +3562,7 @@ func TestRun_Attach_PingDeadline_BudgetExhausted_WrapsSentinel(t *testing.T) {
 		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
 			return successCreateResult(doc), nil
 		},
-		attachContainerFn: attachSuccessFn(),
+		connectFn: connectSuccessFn(),
 	}
 	cmd, _ := newCmdWithRunFn(t, fc, runFn)
 	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML)})
@@ -3583,7 +3609,7 @@ func TestRun_Attach_NonPingError_DoesNotRetry(t *testing.T) {
 		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
 			return successCreateResult(doc), nil
 		},
-		attachContainerFn: attachSuccessFn(),
+		connectFn: connectSuccessFn(),
 	}
 	cmd, _ := newCmdWithRunFn(t, fc, runFn)
 	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML)})
@@ -3602,33 +3628,50 @@ func TestRun_Attach_NonPingError_DoesNotRetry(t *testing.T) {
 	}
 }
 
-// staleSocketErr returns an error chain that mirrors the surface
-// `kuke run` sees when sbsh's pkg/attach dial(2) hits a stale pre-fix
-// kuketty tty socket — `ping failed: dial unix /opt/kukeon/s/<hash>:
-// connect: permission denied`. The chain carries syscall.EACCES so
-// the runWithPingRetry classifier sees the same surface real sbsh
-// returns through net.OpError → os.SyscallError → syscall.Errno
-// (#933).
-func staleSocketErr() error {
-	return fmt.Errorf("ping failed: dial unix /opt/kukeon/s/abc: connect: %w", syscall.EACCES)
+// daemonDialErr returns the error a kukeond-side control-socket dial
+// failure reaches `kuke run` with (#1535): the daemon classifies the errno
+// against the socket it can see, and the sentinel crosses the wire as an
+// APIError Kind, so the client gets a chain that unwraps to the sentinel and
+// names the errno only in its message.
+func daemonDialErr(kind, errno string) error {
+	return kukeonv1.FromAPIError(&kukeonv1.APIError{
+		Kind:    kind,
+		Message: "attach: dial /opt/kukeon/s/abc: connect: " + errno,
+	})
 }
 
-// staleSocketENOENTErr returns an error chain that mirrors the
-// sub-millisecond Remove→Listen gap inside new kuketty's init path —
-// the stale inode has been unlinked but the replacement bind(2) has
-// not landed, so dial(2) returns ENOENT. Defense-in-depth path
-// alongside the dominant EACCES window (#933).
-func staleSocketENOENTErr() error {
-	return fmt.Errorf("ping failed: dial unix /opt/kukeon/s/abc: connect: %w", syscall.ENOENT)
+// failingConnect returns a connectFn that refuses the first n preflights
+// with err and accepts the rest.
+func failingConnect(n int, err error) func(v1beta1.ContainerDoc) error {
+	var calls int
+	var mu sync.Mutex
+	return func(v1beta1.ContainerDoc) error {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		if n < 0 || calls <= n {
+			return err
+		}
+		return nil
+	}
+}
+
+// countingRun is an attach loop that succeeds and counts its calls.
+func countingRun(calls *int, mu *sync.Mutex) runcmd.RunFn {
+	return runcmd.RunFn(func(_ context.Context, _ sbshattach.Options) error {
+		mu.Lock()
+		defer mu.Unlock()
+		*calls++
+		return nil
+	})
 }
 
 // TestRun_Attach_StaleSocket_EACCES_RetriesWithinBudget pins the
-// stale-socket guarantee from #933: when the first call into the
-// in-process attach loop fails with EACCES against a stale pre-fix
-// kuketty tty socket (mode 0o640, group-read only), runWithPingRetry
-// must retry instead of surfacing `connect: permission denied` to the
-// operator. Pre-fix this test fails: the original classifier matched
-// only context.DeadlineExceeded, so EACCES propagated straight through.
+// stale-socket guarantee from #933 on the daemon-passed route: when
+// kukeond's dial hits EACCES on a socket that is not on disk (the pre-fix
+// stale inode is gone, the replacement not yet bound), it reports
+// ErrAttachStaleSocket and runWithPingRetry must retry instead of
+// surfacing it to the operator.
 func TestRun_Attach_StaleSocket_EACCES_RetriesWithinBudget(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
@@ -3637,41 +3680,33 @@ func TestRun_Attach_StaleSocket_EACCES_RetriesWithinBudget(t *testing.T) {
 
 	var calls int
 	var mu sync.Mutex
-	runFn := runcmd.RunFn(func(_ context.Context, _ sbshattach.Options) error {
-		mu.Lock()
-		defer mu.Unlock()
-		calls++
-		if calls == 1 {
-			return staleSocketErr()
-		}
-		return nil
-	})
-
 	fc := &fakeClient{
 		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
 			return successCreateResult(doc), nil
 		},
-		attachContainerFn: attachSuccessFn(),
+		connectFn: failingConnect(1, daemonDialErr("AttachStaleSocket", "permission denied")),
 	}
-	cmd, _ := newCmdWithRunFn(t, fc, runFn)
+	cmd, _ := newCmdWithRunFn(t, fc, countingRun(&calls, &mu))
 	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML)})
 
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute: %v (want nil — retry must absorb the stale-socket EACCES)", err)
+		t.Fatalf("Execute: %v (want nil — retry must absorb the stale-socket class)", err)
+	}
+	if fc.connectCalls != 2 {
+		t.Errorf("ConnectContainerTerminal calls=%d, want 2 (one stale, one success)", fc.connectCalls)
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if calls != 2 {
-		t.Errorf("attach loop calls=%d, want 2 (one EACCES, one success)", calls)
+	if calls != 1 {
+		t.Errorf("attach loop calls=%d, want 1 (only the attempt whose preflight connected)", calls)
 	}
 }
 
 // TestRun_Attach_StaleSocket_EACCES_BudgetExhausted_WrapsSentinel pins
-// the budget-exhausted surface for the stale-socket class: when dial(2)
-// keeps firing EACCES past the budget, runWithPingRetry must surface
-// the readiness-race class via errdefs.ErrAttachStaleSocket so callers
-// can errors.Is the stale-socket failure without sniffing for raw
-// syscall.EACCES (#933).
+// the budget-exhausted surface for the stale-socket class: when kukeond
+// keeps reporting the socket stale past the budget, runWithPingRetry must
+// surface errdefs.ErrAttachStaleSocket (once — no stutter) with the
+// daemon's message naming the underlying errno (#933).
 func TestRun_Attach_StaleSocket_EACCES_BudgetExhausted_WrapsSentinel(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
@@ -3680,31 +3715,21 @@ func TestRun_Attach_StaleSocket_EACCES_BudgetExhausted_WrapsSentinel(t *testing.
 
 	var calls int
 	var mu sync.Mutex
-	runFn := runcmd.RunFn(func(_ context.Context, _ sbshattach.Options) error {
-		mu.Lock()
-		defer mu.Unlock()
-		calls++
-		return staleSocketErr()
-	})
-
 	fc := &fakeClient{
 		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
 			return successCreateResult(doc), nil
 		},
-		attachContainerFn: attachSuccessFn(),
+		connectFn: failingConnect(-1, daemonDialErr("AttachStaleSocket", "permission denied")),
 	}
-	cmd, _ := newCmdWithRunFn(t, fc, runFn)
+	cmd, _ := newCmdWithRunFn(t, fc, countingRun(&calls, &mu))
 	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML)})
 
 	err := cmd.Execute()
 	if !errors.Is(err, errdefs.ErrAttachStaleSocket) {
 		t.Fatalf("err=%v, want chain to include errdefs.ErrAttachStaleSocket", err)
 	}
-	if !errors.Is(err, syscall.EACCES) {
-		t.Errorf(
-			"err=%v, want chain to preserve syscall.EACCES so operators can still see the underlying cause",
-			err,
-		)
+	if !strings.Contains(err.Error(), "permission denied") {
+		t.Errorf("err=%q, want the daemon's message naming the underlying errno", err)
 	}
 	if errors.Is(err, errdefs.ErrAttachPingTimeout) {
 		t.Errorf(
@@ -3712,19 +3737,23 @@ func TestRun_Attach_StaleSocket_EACCES_BudgetExhausted_WrapsSentinel(t *testing.
 			err,
 		)
 	}
+	if fc.connectCalls < 2 {
+		t.Errorf("ConnectContainerTerminal calls=%d, want >= 2 (at least one retry before budget exhaustion)",
+			fc.connectCalls)
+	}
 	mu.Lock()
 	defer mu.Unlock()
-	if calls < 2 {
-		t.Errorf("attach loop calls=%d, want >= 2 (at least one retry before budget exhaustion)", calls)
+	if calls != 0 {
+		t.Errorf("attach loop calls=%d, want 0 (no preflight connected)", calls)
 	}
 }
 
 // TestRun_Attach_StaleSocket_ENOENT_RetriesWithinBudget pins the
 // defense-in-depth ENOENT retry: the sub-millisecond gap between
 // kuketty's os.Remove of the stale inode and its listenUnixWithMode
-// bind(2) on the replacement surfaces as ENOENT from dial(2), and
-// runWithPingRetry must absorb that window the same way it absorbs
-// the dominant EACCES one (#933).
+// bind(2) on the replacement surfaces from kukeond's dial as ENOENT,
+// reported as ErrAttachStaleSocket, and runWithPingRetry must absorb that
+// window the same way it absorbs the EACCES one (#933).
 func TestRun_Attach_StaleSocket_ENOENT_RetriesWithinBudget(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
@@ -3733,49 +3762,108 @@ func TestRun_Attach_StaleSocket_ENOENT_RetriesWithinBudget(t *testing.T) {
 
 	var calls int
 	var mu sync.Mutex
-	runFn := runcmd.RunFn(func(_ context.Context, _ sbshattach.Options) error {
-		mu.Lock()
-		defer mu.Unlock()
-		calls++
-		if calls == 1 {
-			return staleSocketENOENTErr()
-		}
-		return nil
-	})
-
 	fc := &fakeClient{
 		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
 			return successCreateResult(doc), nil
 		},
-		attachContainerFn: attachSuccessFn(),
+		connectFn: failingConnect(1, daemonDialErr("AttachStaleSocket", "no such file or directory")),
 	}
-	cmd, _ := newCmdWithRunFn(t, fc, runFn)
+	cmd, _ := newCmdWithRunFn(t, fc, countingRun(&calls, &mu))
 	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML)})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v (want nil — retry must absorb the stale-socket ENOENT)", err)
 	}
-	mu.Lock()
-	defer mu.Unlock()
+	if fc.connectCalls != 2 {
+		t.Errorf("ConnectContainerTerminal calls=%d, want 2 (one ENOENT, one success)", fc.connectCalls)
+	}
+}
+
+// TestRun_Attach_StaleSocket_InLoopDial_Retries pins that the class is
+// recognised from the attach loop's own dials too, not only the preflight:
+// sbsh wraps a Dial error as "ping failed: %w", and the typed sentinel must
+// survive that wrap.
+func TestRun_Attach_StaleSocket_InLoopDial_Retries(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	restore := runcmd.SetAttachPingRetryForTest(500*time.Millisecond, 10*time.Millisecond)
+	t.Cleanup(restore)
+
+	var calls int
+	runFn := runcmd.RunFn(func(_ context.Context, _ sbshattach.Options) error {
+		calls++
+		if calls == 1 {
+			return fmt.Errorf("ping failed: %w", daemonDialErr("AttachStaleSocket", "no such file or directory"))
+		}
+		return nil
+	})
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+		connectFn: connectSuccessFn(),
+	}
+	cmd, _ := newCmdWithRunFn(t, fc, runFn)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML)})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v (want nil — retry must absorb the in-loop stale-socket dial)", err)
+	}
 	if calls != 2 {
-		t.Errorf("attach loop calls=%d, want 2 (one ENOENT, one success)", calls)
+		t.Errorf("attach loop calls=%d, want 2", calls)
 	}
 }
 
 // TestRun_Attach_PermissionDenied_PresentSocket_FailsFast pins the
-// #1170 split: when dial(2) returns EACCES against a control socket
-// that is *present on disk* (a live listener with the wrong mode, e.g.
-// 0o640 without group-write), runWithPingRetry must fail fast with
-// errdefs.ErrAttachPermissionDenied on the first attempt instead of
-// retrying for the full budget. Pre-fix the classifier lumped every
-// EACCES into the transient stale-socket class, so this hung for the
-// 10 s budget and then surfaced a misleading "stale socket" message.
+// #1170 split on the daemon-passed route: when kukeond's dial gets EACCES
+// against a control socket that is present on disk (a live listener with
+// the wrong mode), it reports ErrAttachPermissionDenied and
+// runWithPingRetry must fail fast on the first attempt instead of retrying
+// for the full budget.
 func TestRun_Attach_PermissionDenied_PresentSocket_FailsFast(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	// A generous budget proves the fail-fast path does not depend on the
 	// budget elapsing: if the classifier wrongly retried, the test would
 	// either spin to >1 call or hang well past its own runtime.
+	restore := runcmd.SetAttachPingRetryForTest(10*time.Second, 10*time.Millisecond)
+	t.Cleanup(restore)
+
+	var calls int
+	var mu sync.Mutex
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+		connectFn: failingConnect(-1, daemonDialErr("AttachPermissionDenied", "permission denied")),
+	}
+	cmd, _ := newCmdWithRunFn(t, fc, countingRun(&calls, &mu))
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML)})
+
+	err := cmd.Execute()
+	if !errors.Is(err, errdefs.ErrAttachPermissionDenied) {
+		t.Fatalf("err=%v, want chain to include errdefs.ErrAttachPermissionDenied", err)
+	}
+	if errors.Is(err, errdefs.ErrAttachStaleSocket) {
+		t.Errorf(
+			"err=%v, must NOT be wrapped with ErrAttachStaleSocket — a present-socket EACCES is permanent, not the stale-socket race",
+			err,
+		)
+	}
+	if fc.connectCalls != 1 {
+		t.Errorf("ConnectContainerTerminal calls=%d, want 1 (permanent EACCES must fail fast, no retry)",
+			fc.connectCalls)
+	}
+}
+
+// TestRun_Attach_OlderDaemon_PresentSocketEACCES_FailsFast pins the
+// pre-#1535 classification on the version-skew fallback: against a kukeond
+// without ConnectContainerTerminal, kuke dials AttachContainer's
+// HostSocketPath itself, so a raw EACCES against a socket present on disk
+// must still fail fast as ErrAttachPermissionDenied.
+func TestRun_Attach_OlderDaemon_PresentSocketEACCES_FailsFast(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
 	restore := runcmd.SetAttachPingRetryForTest(10*time.Second, 10*time.Millisecond)
 	t.Cleanup(restore)
 
@@ -3787,11 +3875,10 @@ func TestRun_Attach_PermissionDenied_PresentSocket_FailsFast(t *testing.T) {
 	}
 
 	var calls int
-	var mu sync.Mutex
-	runFn := runcmd.RunFn(func(_ context.Context, _ sbshattach.Options) error {
-		mu.Lock()
-		defer mu.Unlock()
+	var gotPath string
+	runFn := runcmd.RunFn(func(_ context.Context, opts sbshattach.Options) error {
 		calls++
+		gotPath = opts.SocketPath
 		return fmt.Errorf("ping failed: dial unix %s: connect: %w", presentSocket, syscall.EACCES)
 	})
 
@@ -3799,6 +3886,8 @@ func TestRun_Attach_PermissionDenied_PresentSocket_FailsFast(t *testing.T) {
 		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
 			return successCreateResult(doc), nil
 		},
+		connectFn: failingConnect(-1,
+			fmt.Errorf("%w: KukeonV1.ConnectContainerTerminal", errdefs.ErrDaemonMethodUnsupported)),
 		attachContainerFn: func(_ v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
 			return kukeonv1.AttachContainerResult{HostSocketPath: presentSocket}, nil
 		},
@@ -3811,19 +3900,11 @@ func TestRun_Attach_PermissionDenied_PresentSocket_FailsFast(t *testing.T) {
 		t.Fatalf("err=%v, want chain to include errdefs.ErrAttachPermissionDenied", err)
 	}
 	if !errors.Is(err, syscall.EACCES) {
-		t.Errorf(
-			"err=%v, want chain to preserve syscall.EACCES so operators can still see the underlying cause",
-			err,
-		)
+		t.Errorf("err=%v, want chain to preserve syscall.EACCES on the path-dial fallback", err)
 	}
-	if errors.Is(err, errdefs.ErrAttachStaleSocket) {
-		t.Errorf(
-			"err=%v, must NOT be wrapped with ErrAttachStaleSocket — a present-socket EACCES is permanent, not the stale-socket race",
-			err,
-		)
+	if gotPath != presentSocket {
+		t.Errorf("fallback SocketPath=%q, want %q", gotPath, presentSocket)
 	}
-	mu.Lock()
-	defer mu.Unlock()
 	if calls != 1 {
 		t.Errorf("attach loop calls=%d, want 1 (permanent EACCES must fail fast, no retry)", calls)
 	}
@@ -3893,7 +3974,7 @@ func TestRun_Positional_Ready_Attaches(t *testing.T) {
 				RootContainerExists: true, RootContainerTaskRunning: true,
 			}, nil
 		},
-		attachContainerFn: attachSuccessFn(),
+		connectFn: connectSuccessFn(),
 	}
 	run := &runCapture{}
 	cmd, _ := newCmdWithRun(t, fc, run)

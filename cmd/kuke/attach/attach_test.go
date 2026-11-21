@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"testing"
 
@@ -41,7 +42,11 @@ type fakeClient struct {
 
 	listContainersFn  func(realm, space, stack, cell string) ([]v1beta1.ContainerSpec, error)
 	getCellFn         func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error)
+	connectFn         func(doc v1beta1.ContainerDoc) error
 	attachContainerFn func(doc v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error)
+
+	connectCalls int
+	conns        []*net.UnixConn
 }
 
 // GetCell backs the divergence guard. With no getCellFn set it reports a
@@ -70,6 +75,25 @@ func (f *fakeClient) ListContainers(
 		return nil, errors.New("unexpected ListContainers call")
 	}
 	return f.listContainersFn(realm, space, stack, cell)
+}
+
+// ConnectContainerTerminal backs the daemon-passed attach route. connectFn
+// sees the requested doc and decides refusal; on success the fake hands back
+// one end of a real socketpair, as the daemon would.
+func (f *fakeClient) ConnectContainerTerminal(
+	_ context.Context,
+	doc v1beta1.ContainerDoc,
+) (*net.UnixConn, error) {
+	f.connectCalls++
+	if f.connectFn == nil {
+		return nil, errors.New("unexpected ConnectContainerTerminal call")
+	}
+	if err := f.connectFn(doc); err != nil {
+		return nil, err
+	}
+	conn, peer := socketPair()
+	f.conns = append(f.conns, peer)
+	return conn, nil
 }
 
 func (f *fakeClient) AttachContainer(
@@ -134,11 +158,11 @@ func TestAttach_SingleNonRootAttachable_Succeeds(t *testing.T) {
 				{ID: "work", Attachable: true},
 			}, nil
 		},
-		attachContainerFn: func(doc v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
+		connectFn: func(doc v1beta1.ContainerDoc) error {
 			if got := doc.Metadata.Name; got != "work" {
-				t.Errorf("AttachContainer called with name %q, want %q", got, "work")
+				t.Errorf("ConnectContainerTerminal called with name %q, want %q", got, "work")
 			}
-			return kukeonv1.AttachContainerResult{HostSocketPath: testHostSocket}, nil
+			return nil
 		},
 	}
 	run := &runCapture{}
@@ -153,9 +177,7 @@ func TestAttach_SingleNonRootAttachable_Succeeds(t *testing.T) {
 	if run.calls != 1 {
 		t.Fatalf("attach.Run called %d times, want 1", run.calls)
 	}
-	if run.opts.SocketPath != testHostSocket {
-		t.Errorf("Options.SocketPath = %q, want %q", run.opts.SocketPath, testHostSocket)
-	}
+	assertDaemonPassedRoute(t, run.opts)
 }
 
 // TestAttach_PositionalCell_DefaultsRealmSpaceStack covers the issue-#373
@@ -174,7 +196,7 @@ func TestAttach_PositionalCell_DefaultsRealmSpaceStack(t *testing.T) {
 				{ID: "work", Attachable: true},
 			}, nil
 		},
-		attachContainerFn: func(doc v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
+		connectFn: func(doc v1beta1.ContainerDoc) error {
 			if got := doc.Spec.RealmID; got != "default" {
 				t.Errorf("doc.Spec.RealmID = %q, want %q", got, "default")
 			}
@@ -187,7 +209,7 @@ func TestAttach_PositionalCell_DefaultsRealmSpaceStack(t *testing.T) {
 			if got := doc.Spec.CellID; got != "hello" {
 				t.Errorf("doc.Spec.CellID = %q, want %q", got, "hello")
 			}
-			return kukeonv1.AttachContainerResult{HostSocketPath: testHostSocket}, nil
+			return nil
 		},
 	}
 	run := &runCapture{}
@@ -317,11 +339,11 @@ func TestAttach_ExplicitContainer_NotAttachable_SurfacesSentinel(t *testing.T) {
 
 	fc := &fakeClient{
 		// ListContainers must not be called when --container is explicit.
-		attachContainerFn: func(doc v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
+		connectFn: func(doc v1beta1.ContainerDoc) error {
 			if got := doc.Metadata.Name; got != "side" {
-				t.Errorf("AttachContainer called with name %q, want %q", got, "side")
+				t.Errorf("ConnectContainerTerminal called with name %q, want %q", got, "side")
 			}
-			return kukeonv1.AttachContainerResult{}, errdefs.ErrAttachNotSupported
+			return errdefs.ErrAttachNotSupported
 		},
 	}
 	run := &runCapture{}
@@ -348,8 +370,8 @@ func TestAttach_ExplicitContainer_NotFound_SurfacesSentinel(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	fc := &fakeClient{
-		attachContainerFn: func(_ v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
-			return kukeonv1.AttachContainerResult{}, errdefs.ErrContainerNotFound
+		connectFn: func(_ v1beta1.ContainerDoc) error {
+			return errdefs.ErrContainerNotFound
 		},
 	}
 	run := &runCapture{}
@@ -372,8 +394,8 @@ func TestAttach_ExplicitContainer_Attachable_Succeeds(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	fc := &fakeClient{
-		attachContainerFn: func(_ v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
-			return kukeonv1.AttachContainerResult{HostSocketPath: testHostSocket}, nil
+		connectFn: func(_ v1beta1.ContainerDoc) error {
+			return nil
 		},
 	}
 	run := &runCapture{}
@@ -389,9 +411,7 @@ func TestAttach_ExplicitContainer_Attachable_Succeeds(t *testing.T) {
 	if run.calls != 1 {
 		t.Fatalf("attach.Run called %d times, want 1", run.calls)
 	}
-	if run.opts.SocketPath != testHostSocket {
-		t.Errorf("Options.SocketPath = %q, want %q", run.opts.SocketPath, testHostSocket)
-	}
+	assertDaemonPassedRoute(t, run.opts)
 }
 
 // TestAttach_RecordedReady_TaskGone_Refuses covers #683: the cell metadata
@@ -402,7 +422,7 @@ func TestAttach_ExplicitContainer_Attachable_Succeeds(t *testing.T) {
 func TestAttach_RecordedReady_TaskGone_Refuses(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
-	attachCalls := 0
+	connectCalls := 0
 	fc := &fakeClient{
 		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
 			return kukeonv1.GetCellResult{
@@ -413,9 +433,9 @@ func TestAttach_RecordedReady_TaskGone_Refuses(t *testing.T) {
 				RootContainerTaskRunning: false,
 			}, nil
 		},
-		attachContainerFn: func(_ v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
-			attachCalls++
-			return kukeonv1.AttachContainerResult{HostSocketPath: testHostSocket}, nil
+		connectFn: func(_ v1beta1.ContainerDoc) error {
+			connectCalls++
+			return nil
 		},
 	}
 	run := &runCapture{}
@@ -435,8 +455,8 @@ func TestAttach_RecordedReady_TaskGone_Refuses(t *testing.T) {
 	if !strings.Contains(err.Error(), "kuke delete cell c1") {
 		t.Errorf("error %q missing `kuke delete cell` recovery pointer", err.Error())
 	}
-	if attachCalls != 0 {
-		t.Errorf("AttachContainer calls=%d, want 0 (must not attach to a dead socket)", attachCalls)
+	if connectCalls != 0 {
+		t.Errorf("ConnectContainerTerminal calls=%d, want 0 (must not attach to a dead socket)", connectCalls)
 	}
 	if run.calls != 0 {
 		t.Errorf("attach.Run called %d times, want 0", run.calls)
@@ -453,8 +473,8 @@ func TestAttach_RunReturnsCleanDetachError(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	fc := &fakeClient{
-		attachContainerFn: func(_ v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
-			return kukeonv1.AttachContainerResult{HostSocketPath: testHostSocket}, nil
+		connectFn: func(_ v1beta1.ContainerDoc) error {
+			return nil
 		},
 	}
 	cleanDetachErr := fmt.Errorf("wrapped by harness: %w", sbshattach.ErrDetached)
@@ -483,8 +503,8 @@ func TestAttach_RunReturnsPeerClosedError(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	fc := &fakeClient{
-		attachContainerFn: func(_ v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
-			return kukeonv1.AttachContainerResult{HostSocketPath: testHostSocket}, nil
+		connectFn: func(_ v1beta1.ContainerDoc) error {
+			return nil
 		},
 	}
 	peerClosedErr := fmt.Errorf("wrapped by harness: %w", sbshattach.ErrPeerClosed)
@@ -511,8 +531,8 @@ func TestAttach_RunReturnsRealError(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	fc := &fakeClient{
-		attachContainerFn: func(_ v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
-			return kukeonv1.AttachContainerResult{HostSocketPath: testHostSocket}, nil
+		connectFn: func(_ v1beta1.ContainerDoc) error {
+			return nil
 		},
 	}
 	bootErr := errors.New("wait on ready: dial unix: connection refused")
@@ -608,7 +628,7 @@ func TestAttach_NotCreated_PointsAtRun(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	listCalls := 0
-	attachCalls := 0
+	connectCalls := 0
 	fc := &fakeClient{
 		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
 			return kukeonv1.GetCellResult{MetadataExists: false}, nil
@@ -617,9 +637,9 @@ func TestAttach_NotCreated_PointsAtRun(t *testing.T) {
 			listCalls++
 			return nil, nil
 		},
-		attachContainerFn: func(_ v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
-			attachCalls++
-			return kukeonv1.AttachContainerResult{}, nil
+		connectFn: func(_ v1beta1.ContainerDoc) error {
+			connectCalls++
+			return nil
 		},
 	}
 	run := &runCapture{}
@@ -647,8 +667,8 @@ func TestAttach_NotCreated_PointsAtRun(t *testing.T) {
 	if listCalls != 0 {
 		t.Errorf("ListContainers called %d times, want 0 (guard must fire first)", listCalls)
 	}
-	if attachCalls != 0 {
-		t.Errorf("AttachContainer called %d times, want 0", attachCalls)
+	if connectCalls != 0 {
+		t.Errorf("ConnectContainerTerminal called %d times, want 0", connectCalls)
 	}
 	if run.calls != 0 {
 		t.Errorf("attach.Run called %d times, want 0", run.calls)
@@ -663,7 +683,7 @@ func TestAttach_NotCreated_PointsAtRun(t *testing.T) {
 func TestAttach_Stopped_PointsAtStart(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
-	attachCalls := 0
+	connectCalls := 0
 	fc := &fakeClient{
 		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
 			return kukeonv1.GetCellResult{
@@ -676,9 +696,9 @@ func TestAttach_Stopped_PointsAtStart(t *testing.T) {
 				RootContainerTaskRunning: true,
 			}, nil
 		},
-		attachContainerFn: func(_ v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
-			attachCalls++
-			return kukeonv1.AttachContainerResult{HostSocketPath: testHostSocket}, nil
+		connectFn: func(_ v1beta1.ContainerDoc) error {
+			connectCalls++
+			return nil
 		},
 	}
 	run := &runCapture{}
@@ -698,8 +718,8 @@ func TestAttach_Stopped_PointsAtStart(t *testing.T) {
 	if got := err.Error(); !strings.Contains(got, "kuke start kukeon-pm-0") {
 		t.Errorf("error %q missing `kuke start kukeon-pm-0` recovery pointer", got)
 	}
-	if attachCalls != 0 {
-		t.Errorf("AttachContainer called %d times, want 0 (must not dial dead socket)", attachCalls)
+	if connectCalls != 0 {
+		t.Errorf("ConnectContainerTerminal called %d times, want 0 (must not dial dead socket)", connectCalls)
 	}
 	if run.calls != 0 {
 		t.Errorf("attach.Run called %d times, want 0", run.calls)
@@ -713,7 +733,7 @@ func TestAttach_Stopped_PointsAtStart(t *testing.T) {
 func TestAttach_Failed_PointsAtDelete(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
-	attachCalls := 0
+	connectCalls := 0
 	fc := &fakeClient{
 		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
 			return kukeonv1.GetCellResult{
@@ -722,9 +742,9 @@ func TestAttach_Failed_PointsAtDelete(t *testing.T) {
 				RootContainerExists: true,
 			}, nil
 		},
-		attachContainerFn: func(_ v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
-			attachCalls++
-			return kukeonv1.AttachContainerResult{HostSocketPath: testHostSocket}, nil
+		connectFn: func(_ v1beta1.ContainerDoc) error {
+			connectCalls++
+			return nil
 		},
 	}
 	run := &runCapture{}
@@ -744,8 +764,8 @@ func TestAttach_Failed_PointsAtDelete(t *testing.T) {
 	if got := err.Error(); !strings.Contains(got, "kuke delete cell c1") {
 		t.Errorf("error %q missing `kuke delete cell c1` recovery pointer", got)
 	}
-	if attachCalls != 0 {
-		t.Errorf("AttachContainer called %d times, want 0", attachCalls)
+	if connectCalls != 0 {
+		t.Errorf("ConnectContainerTerminal called %d times, want 0", connectCalls)
 	}
 	if run.calls != 0 {
 		t.Errorf("attach.Run called %d times, want 0", run.calls)

@@ -1201,12 +1201,24 @@ func controllerImageToWire(img controller.ImageInfo) kukeonv1.ImageInfo {
 // instead, mirroring the client-side guard's predicate at the server
 // boundary so every caller — CLI or not — gets the same typed refusal.
 func (c *Client) AttachContainer(_ context.Context, doc v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
-	container, err := c.resolveAttachable(doc)
+	socketPath, err := c.gateAttachableSocket(doc)
 	if err != nil {
 		return kukeonv1.AttachContainerResult{}, err
 	}
-	if err := guardAttachableTaskLiveness(container); err != nil {
-		return kukeonv1.AttachContainerResult{}, err
+	return kukeonv1.AttachContainerResult{HostSocketPath: socketPath}, nil
+}
+
+// gateAttachableSocket applies the gates AttachContainer and
+// ConnectContainerTerminal share — Attachable, server-side task liveness
+// (#852), and the wrong-mode socket heal (#1169) — and returns the
+// SUN_PATH-safe host path of the container's sbsh control socket.
+func (c *Client) gateAttachableSocket(doc v1beta1.ContainerDoc) (string, error) {
+	container, err := c.resolveAttachable(doc)
+	if err != nil {
+		return "", err
+	}
+	if err = guardAttachableTaskLiveness(container); err != nil {
+		return "", err
 	}
 	spec := container.Spec
 	// Heal a wrong-mode live tty socket in place before handing back its
@@ -1219,12 +1231,10 @@ func (c *Client) AttachContainer(_ context.Context, doc v1beta1.ContainerDoc) (k
 	// re-entering the #630-prone start-on-running path. Best-effort and
 	// idempotent: a socket already at 0o660 is left untouched.
 	c.ctrl.ReapplyAttachableSocketPerms(spec)
-	return kukeonv1.AttachContainerResult{
-		HostSocketPath: fs.ContainerSocketSymlinkPath(
-			c.ctrl.RunPath(),
-			spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName, spec.ID,
-		),
-	}, nil
+	return fs.ContainerSocketSymlinkPath(
+		c.ctrl.RunPath(),
+		spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName, spec.ID,
+	), nil
 }
 
 // guardAttachableTaskLiveness is the server-side task-liveness gate for

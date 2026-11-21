@@ -15,11 +15,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package attach implements the `kuke attach` thin sbsh client subcommand.
-// The daemon validates the target's Attachable gate and returns the host
-// path of the per-container sbsh control socket; this subcommand drives
-// the interactive attach loop in-process via sbsh's pkg/attach library,
-// so kuke needs no on-host `sb` binary. Bytes never traverse kukeond's
-// RPC.
+// The daemon validates the target's Attachable gate, dials the
+// per-container sbsh control socket, and passes each connected socket back
+// over the kukeond socket (ConnectContainerTerminal); this subcommand drives
+// the interactive attach loop in-process via sbsh's pkg/attach library over
+// those connections, so kuke needs neither an on-host `sb` binary nor access
+// to the socket path. Bytes never traverse kukeond's RPC.
 package attach
 
 import (
@@ -135,8 +136,19 @@ func runAttach(cmd *cobra.Command, args []string) error {
 	}
 
 	doc := buildContainerDoc(container, realm, space, stack, cell)
-	result, err := client.AttachContainer(cmd.Context(), doc)
-	if err != nil {
+	// The daemon dials the container's sbsh control socket and passes the
+	// connection back (ConnectContainerTerminal), so this works from a cell
+	// that can reach the kukeond socket but not the socket path. The
+	// preflight connect enforces the Attachable / task-liveness gates
+	// before the attach loop takes over the terminal.
+	dialer := kukeshared.NewTerminalDialer(client, doc)
+	defer dialer.Close()
+	opts := attach.Options{
+		Stdin:  os.Stdin,
+		Stdout: os.Stdout,
+		Stderr: os.Stderr,
+	}
+	if err = dialer.Prepare(cmd.Context(), &opts); err != nil {
 		if errors.Is(err, errdefs.ErrAttachNotSupported) {
 			return fmt.Errorf("container %q in cell %q is not attachable: %w", container, cell, err)
 		}
@@ -145,17 +157,9 @@ func runAttach(cmd *cobra.Command, args []string) error {
 		}
 		return err
 	}
-	if result.HostSocketPath == "" {
-		return fmt.Errorf("daemon returned empty HostSocketPath for container %q", container)
-	}
 
 	run := resolveRun(cmd)
-	runErr := run(cmd.Context(), attach.Options{
-		SocketPath: result.HostSocketPath,
-		Stdin:      os.Stdin,
-		Stdout:     os.Stdout,
-		Stderr:     os.Stderr,
-	})
+	runErr := run(cmd.Context(), opts)
 	if runErr != nil && !kukeshared.IsCleanAttachExit(runErr) {
 		return runErr
 	}

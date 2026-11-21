@@ -19,6 +19,7 @@ package kukeonv1
 import (
 	"context"
 	"errors"
+	"net"
 
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
@@ -171,6 +172,10 @@ func (FakeClient) StartCell(context.Context, v1beta1.CellDoc) (StartCellResult, 
 
 func (FakeClient) AttachContainer(context.Context, v1beta1.ContainerDoc) (AttachContainerResult, error) {
 	return AttachContainerResult{}, ErrUnexpectedCall
+}
+
+func (FakeClient) ConnectContainerTerminal(context.Context, v1beta1.ContainerDoc) (*net.UnixConn, error) {
+	return nil, ErrUnexpectedCall
 }
 
 func (FakeClient) ReadDaemonLogs(context.Context, DaemonLogRequest) (DaemonLogResult, error) {

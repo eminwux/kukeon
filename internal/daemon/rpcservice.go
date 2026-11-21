@@ -348,6 +348,25 @@ func (s *KukeonV1Service) AttachContainer(
 	return nil
 }
 
+// ConnectContainerTerminal applies AttachContainer's gates, dials the
+// container's sbsh control socket, and hands the connected socket to the
+// caller: reply.Conn is sent as SCM_RIGHTS by the server codec
+// (kukeonv1.NewServerCodec), which closes the daemon's copy once the reply
+// is written. Terminal bytes never traverse kukeond.
+func (s *KukeonV1Service) ConnectContainerTerminal(
+	args *kukeonv1.ConnectContainerTerminalArgs,
+	reply *kukeonv1.ConnectContainerTerminalReply,
+) error {
+	conn, err := s.core.ConnectContainerTerminal(s.ctx, args.Doc)
+	if err != nil {
+		reply.Err = kukeonv1.ToAPIError(err)
+		s.logger.DebugContext(s.ctx, "ConnectContainerTerminal returned error", "error", err)
+		return nil
+	}
+	reply.Conn = conn
+	return nil
+}
+
 // LogContainer enforces the Attachable gate at the API boundary and returns
 // the host path of the per-container sbsh capture file. Bytes never
 // traverse this RPC — the client tails HostCapturePath directly.
