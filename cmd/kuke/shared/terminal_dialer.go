@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"sync"
 
@@ -27,11 +28,13 @@ import (
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/sbsh/pkg/attach"
+	rpcterminal "github.com/eminwux/sbsh/pkg/rpcclient/terminal"
 )
 
 // TerminalDialer supplies sbsh's pkg/attach with control-socket connections
 // obtained through kukeonv1.Client.ConnectContainerTerminal, so `kuke
-// attach` / `kuke run` reach a container's terminal through kukeond instead
+// attach` / `kuke run` (and, via TerminalClient, `kuke screenshot` / `kuke
+// write`) reach a container's terminal through kukeond instead
 // of dialing the socket path themselves (a cell with only the kukeond socket
 // mounted cannot see that path).
 //
@@ -77,25 +80,54 @@ func (d *TerminalDialer) Preflight(ctx context.Context) error {
 // newer kuke on the host keeps attaching until the daemon is redeployed;
 // that fallback still needs filesystem access to the socket, as before.
 func (d *TerminalDialer) Prepare(ctx context.Context, opts *attach.Options) error {
-	err := d.Preflight(ctx)
-	if err == nil {
+	socketPath, err := d.route(ctx)
+	if err != nil {
+		return err
+	}
+	if socketPath == "" {
 		opts.Dial = d.Dial
 		opts.SocketPath = ""
 		return nil
 	}
+	opts.Dial = nil
+	opts.SocketPath = socketPath
+	return nil
+}
+
+// TerminalClient preflights and returns an sbsh terminal RPC client for
+// one-shot control calls (`kuke screenshot`, `kuke write`): built on this
+// dialer (terminal.NewWithDialer), or, against a kukeond that predates
+// ConnectContainerTerminal, on AttachContainer's HostSocketPath — the same
+// fallback as Prepare.
+func (d *TerminalDialer) TerminalClient(ctx context.Context, logger *slog.Logger) (rpcterminal.Client, error) {
+	socketPath, err := d.route(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if socketPath == "" {
+		return rpcterminal.NewWithDialer(d.Dial, logger), nil
+	}
+	return rpcterminal.NewUnix(socketPath, logger), nil
+}
+
+// route preflights. An empty socketPath means "dial through this dialer";
+// a non-empty one is the version-skew fallback path.
+func (d *TerminalDialer) route(ctx context.Context) (string, error) {
+	err := d.Preflight(ctx)
+	if err == nil {
+		return "", nil
+	}
 	if !errors.Is(err, errdefs.ErrDaemonMethodUnsupported) {
-		return err
+		return "", err
 	}
 	res, err := d.client.AttachContainer(ctx, d.doc)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if res.HostSocketPath == "" {
-		return fmt.Errorf("daemon returned empty HostSocketPath for container %q", d.doc.Metadata.Name)
+		return "", fmt.Errorf("daemon returned empty HostSocketPath for container %q", d.doc.Metadata.Name)
 	}
-	opts.Dial = nil
-	opts.SocketPath = res.HostSocketPath
-	return nil
+	return res.HostSocketPath, nil
 }
 
 // Dial satisfies sbsh's terminal.Dialer: the parked preflight connection

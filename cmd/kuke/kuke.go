@@ -42,6 +42,7 @@ import (
 	refreshcmd "github.com/eminwux/kukeon/cmd/kuke/refresh"
 	restartcmd "github.com/eminwux/kukeon/cmd/kuke/restart"
 	runcmd "github.com/eminwux/kukeon/cmd/kuke/run"
+	screenshotcmd "github.com/eminwux/kukeon/cmd/kuke/screenshot"
 	servecmd "github.com/eminwux/kukeon/cmd/kuke/serve"
 	startcmd "github.com/eminwux/kukeon/cmd/kuke/start"
 	statuscmd "github.com/eminwux/kukeon/cmd/kuke/status"
@@ -49,6 +50,7 @@ import (
 	teamcmd "github.com/eminwux/kukeon/cmd/kuke/team"
 	uninstallcmd "github.com/eminwux/kukeon/cmd/kuke/uninstall"
 	"github.com/eminwux/kukeon/cmd/kuke/version"
+	writecmd "github.com/eminwux/kukeon/cmd/kuke/write"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/clientconfig"
 	"github.com/eminwux/kukeon/internal/cni"
@@ -169,6 +171,8 @@ func SetupKukeCmd(rootCmd *cobra.Command) error {
 	rootCmd.AddCommand(runcmd.NewRunCmd())
 	rootCmd.AddCommand(attachcmd.NewAttachCmd())
 	rootCmd.AddCommand(logcmd.NewLogCmd())
+	rootCmd.AddCommand(screenshotcmd.NewScreenshotCmd())
+	rootCmd.AddCommand(writecmd.NewWriteCmd())
 	rootCmd.AddCommand(autocompletecmd.NewAutocompleteCmd())
 	rootCmd.AddCommand(imagecmd.NewImageCmd())
 	rootCmd.AddCommand(uninstallcmd.NewUninstallCmd())

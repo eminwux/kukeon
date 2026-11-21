@@ -513,6 +513,32 @@ var (
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_LOG_FOLLOW = DefineKV("KUKE_LOG_FOLLOW", "kuke/log/follow", "false")
 
+	// Screenshot command variables.
+
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_SCREENSHOT_REALM = DefineKV("KUKE_SCREENSHOT_REALM", "kuke/screenshot/realm", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_SCREENSHOT_SPACE = DefineKV("KUKE_SCREENSHOT_SPACE", "kuke/screenshot/space", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_SCREENSHOT_STACK = DefineKV("KUKE_SCREENSHOT_STACK", "kuke/screenshot/stack", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_SCREENSHOT_CONTAINER = DefineKV("KUKE_SCREENSHOT_CONTAINER", "kuke/screenshot/container")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_SCREENSHOT_OUTPUT = DefineKV("KUKE_SCREENSHOT_OUTPUT", "kuke/screenshot/output", "text")
+
+	// Write command variables.
+
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_WRITE_REALM = DefineKV("KUKE_WRITE_REALM", "kuke/write/realm", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_WRITE_SPACE = DefineKV("KUKE_WRITE_SPACE", "kuke/write/space", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_WRITE_STACK = DefineKV("KUKE_WRITE_STACK", "kuke/write/stack", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_WRITE_CONTAINER = DefineKV("KUKE_WRITE_CONTAINER", "kuke/write/container")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_WRITE_RAW = DefineKV("KUKE_WRITE_RAW", "kuke/write/raw", "false")
+
 	// Restart command variables
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_RESTART_CELL_REALM = DefineKV("KUKE_RESTART_CELL_REALM", "kuke/restart/cell/realm", "default")
