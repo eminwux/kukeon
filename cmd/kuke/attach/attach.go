@@ -25,17 +25,12 @@ package attach
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"os"
-	"strings"
 
 	"github.com/eminwux/kukeon/cmd/config"
 	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/internal/consts"
-	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/sbsh/pkg/attach"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -86,23 +81,15 @@ func NewAttachCmd() *cobra.Command {
 }
 
 func runAttach(cmd *cobra.Command, args []string) error {
-	cell := strings.TrimSpace(args[0])
-	realm := strings.TrimSpace(viper.GetString(config.KUKE_ATTACH_REALM.ViperKey))
-	space := strings.TrimSpace(viper.GetString(config.KUKE_ATTACH_SPACE.ViperKey))
-	stack := strings.TrimSpace(viper.GetString(config.KUKE_ATTACH_STACK.ViperKey))
-	container := strings.TrimSpace(viper.GetString(config.KUKE_ATTACH_CONTAINER.ViperKey))
-
-	if cell == "" {
-		return fmt.Errorf("%w (positional cell)", errdefs.ErrCellNameRequired)
-	}
-	if realm == "" {
-		return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
-	}
-	if space == "" {
-		return fmt.Errorf("%w (--space)", errdefs.ErrSpaceNameRequired)
-	}
-	if stack == "" {
-		return fmt.Errorf("%w (--stack)", errdefs.ErrStackNameRequired)
+	target := kukeshared.TerminalTarget{
+		Cell:      args[0],
+		Realm:     viper.GetString(config.KUKE_ATTACH_REALM.ViperKey),
+		Space:     viper.GetString(config.KUKE_ATTACH_SPACE.ViperKey),
+		Stack:     viper.GetString(config.KUKE_ATTACH_STACK.ViperKey),
+		Container: viper.GetString(config.KUKE_ATTACH_CONTAINER.ViperKey),
+	}.Trimmed()
+	if err := target.Validate(); err != nil {
+		return err
 	}
 
 	client, err := resolveClient(cmd)
@@ -111,31 +98,14 @@ func runAttach(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = client.Close() }()
 
-	// Cell-level liveness guard (#683, #852): refuse to attach to a cell
-	// whose state is anything other than Ready+task-live. Runs before the
-	// container picker so a missing cell surfaces a "create it first"
-	// pointer instead of falling out of ListContainers with
-	// ErrAttachNoCandidate, and so a Stopped / Failed cell short-circuits
-	// before the attach loop dials a now-orphan socket inode.
-	cellGet, err := client.GetCell(cmd.Context(), buildCellDoc(cell, realm, space, stack))
+	// Cell-level liveness guard (#683, #852) then the container picker:
+	// refuse a missing / Stopped / diverged cell before the attach loop
+	// dials a now-orphan socket inode.
+	doc, err := kukeshared.ResolveTerminalTarget(cmd.Context(), client, target)
 	if err != nil {
 		return err
 	}
-	if err = kukeshared.GuardCellTaskLiveness(cellGet, cell, realm, space, stack); err != nil {
-		return err
-	}
 
-	if container == "" {
-		container, err = kukeshared.PickContainer(cmd.Context(), client, realm, space, stack, cell,
-			func(spec v1beta1.ContainerSpec) bool {
-				return !spec.Root && spec.Attachable
-			})
-		if err != nil {
-			return err
-		}
-	}
-
-	doc := buildContainerDoc(container, realm, space, stack, cell)
 	// The daemon dials the container's sbsh control socket and passes the
 	// connection back (ConnectContainerTerminal), so this works from a cell
 	// that can reach the kukeond socket but not the socket path. The
@@ -149,13 +119,7 @@ func runAttach(cmd *cobra.Command, args []string) error {
 		Stderr: os.Stderr,
 	}
 	if err = dialer.Prepare(cmd.Context(), &opts); err != nil {
-		if errors.Is(err, errdefs.ErrAttachNotSupported) {
-			return fmt.Errorf("container %q in cell %q is not attachable: %w", container, cell, err)
-		}
-		if errors.Is(err, errdefs.ErrContainerNotFound) {
-			return fmt.Errorf("container %q not found in cell %q: %w", container, cell, err)
-		}
-		return err
+		return kukeshared.WrapTerminalConnectError(err, doc)
 	}
 
 	run := resolveRun(cmd)
@@ -178,41 +142,4 @@ func resolveRun(cmd *cobra.Command) runFn {
 		return mock
 	}
 	return attach.Run
-}
-
-// buildCellDoc assembles the lookup CellDoc the divergence guard queries via
-// GetCell. Only the identity coordinates are needed — GetCell resolves the
-// persisted spec and the live root-task status from them.
-func buildCellDoc(cell, realm, space, stack string) v1beta1.CellDoc {
-	return v1beta1.CellDoc{
-		APIVersion: v1beta1.APIVersionV1Beta1,
-		Kind:       v1beta1.KindCell,
-		Metadata: v1beta1.CellMetadata{
-			Name:   cell,
-			Labels: make(map[string]string),
-		},
-		Spec: v1beta1.CellSpec{
-			RealmID: realm,
-			SpaceID: space,
-			StackID: stack,
-		},
-	}
-}
-
-func buildContainerDoc(name, realm, space, stack, cell string) v1beta1.ContainerDoc {
-	return v1beta1.ContainerDoc{
-		APIVersion: v1beta1.APIVersionV1Beta1,
-		Kind:       v1beta1.KindContainer,
-		Metadata: v1beta1.ContainerMetadata{
-			Name:   name,
-			Labels: make(map[string]string),
-		},
-		Spec: v1beta1.ContainerSpec{
-			ID:      name,
-			RealmID: realm,
-			SpaceID: space,
-			StackID: stack,
-			CellID:  cell,
-		},
-	}
 }

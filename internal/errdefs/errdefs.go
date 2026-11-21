@@ -345,6 +345,15 @@ var (
 	// /run/kukeon/tty/socket to connect to.
 	ErrAttachNotSupported = errors.New("container is not attachable; recreate with attachable=true")
 
+	// ErrInvalidWritePayload is returned by `kuke write` when its text
+	// argument holds a caret or backslash escape it cannot expand (a
+	// dangling `^`, `^!`, `\n`, a short `\x`). --raw skips expansion.
+	ErrInvalidWritePayload = errors.New("invalid write payload")
+
+	// ErrInvalidScreenshotFormat is returned by `kuke screenshot` for an
+	// -o value other than text, ansi or json.
+	ErrInvalidScreenshotFormat = errors.New("unsupported screenshot output format; use text, ansi or json")
+
 	// ErrAttachAmbiguous is returned by the `kuke attach` candidate picker
 	// when --container is omitted and the target cell has more than one
 	// non-root attachable container. The error message lists the candidates

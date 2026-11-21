@@ -28,6 +28,8 @@ Both are hard-linked to the same binary on install. Running `kuke` enters the cl
 | `kuke restart`                 | Restart a cell (bounces the process; on OutOfSync also reconciles)       |
 | `kuke log`                     | Print a container's stdout/stderr (use `-f` to follow)                   |
 | `kuke attach`                  | Attach to an Attachable container's `sbsh` terminal                      |
+| `kuke screenshot`              | Print an Attachable container's current rendered screen                  |
+| `kuke write`                   | Write bytes to an Attachable container's terminal input                  |
 | `kuke build`                   | Build an OCI image from a Dockerfile into a realm's containerd namespace |
 | `kuke image`                   | Manage container images in a realm's containerd namespace                |
 | `kuke daemon`                  | Manage the `kukeond` daemon cell lifecycle                               |
@@ -49,7 +51,7 @@ Every `kuke` subcommand inherits these persistent flags from the root command:
 | `--verbose`, `-v`     | `false`                           | Enable verbose logging on stderr                    |
 | `--log-level`         | `info`                            | Log level (`debug`, `info`, `warn`, `error`)        |
 
-`--no-daemon` is **not** a root-persistent flag — it is only accepted on `kuke init`, `kuke uninstall`, `kuke purge`, and every `kuke get <kind>` (see #222; the `get` kinds were retained per a user override on the original AC). The other promotable callers that don't carry the flag — `log`, `refresh`, `restart`, `start`, `stop`, `doctor cgroups` — reach the in-process path via `KUKEON_NO_DAEMON=true` or an explicit `--run-path` (which auto-promotes to in-process mode). The true workload verbs (`apply`, `create *`, `run`, `attach`, `delete *`, `kill *`) route through the daemon-only client after #566/#588 and ignore both knobs — they have no in-process fallback and always require the daemon.
+`--no-daemon` is **not** a root-persistent flag — it is only accepted on `kuke init`, `kuke uninstall`, `kuke purge`, and every `kuke get <kind>` (see #222; the `get` kinds were retained per a user override on the original AC). The other promotable callers that don't carry the flag — `log`, `screenshot`, `write`, `refresh`, `restart`, `start`, `stop`, `doctor cgroups` — reach the in-process path via `KUKEON_NO_DAEMON=true` or an explicit `--run-path` (which auto-promotes to in-process mode). The true workload verbs (`apply`, `create *`, `run`, `attach`, `delete *`, `kill *`) route through the daemon-only client after #566/#588 and ignore both knobs — they have no in-process fallback and always require the daemon.
 
 ### In-process mode host prerequisites
 
@@ -87,6 +89,8 @@ The positional argument is the resource's own name; the flags specify where in t
 - [kuke restart](kuke-restart.md)
 - [kuke log](kuke-log.md)
 - [kuke attach](kuke-attach.md)
+- [kuke screenshot](kuke-screenshot.md)
+- [kuke write](kuke-write.md)
 - [kuke build](kuke-build.md)
 - [kuke image](kuke-image.md)
 - [kuke daemon](kuke-daemon.md)
