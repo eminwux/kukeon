@@ -3578,11 +3578,11 @@
 <h1 id="kuke-restart">kuke restart<a class="headerlink" href="#kuke-restart" title="Permanent link">&para;</a></h1>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke restart (&lt;name&gt; | -l &lt;selector&gt;) [--realm &lt;name&gt;] [--space &lt;name&gt;] [--stack &lt;name&gt;]
 </code></pre></div>
-<p>Restart a cell (cells are the only lifecycle subject). Bounces the running process. When the cell is a Config-lineage cell that the daemon has marked OutOfSync, the start step automatically re-materialises the spec from the Config (daemon-side, in <code>controller.StartCell</code> — issue #983), so the restart is also a reconcile.</p>
+<p>Restart a cell (cells are the only lifecycle subject). Bounces the running process. When the cell is a Config-lineage cell, the start step renders its Config at start time and, when the render differs from the cell, re-materialises the spec from it (daemon-side, in <code>controller.StartCell</code> — issues #983, #1569), so the restart is also a reconcile.</p>
 <h2 id="synopsis">Synopsis<a class="headerlink" href="#synopsis" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>kuke restart (&lt;name&gt; | -l &lt;selector&gt;) [--realm &lt;name&gt;] [--space &lt;name&gt;] [--stack &lt;name&gt;]
 </code></pre></div>
-<p>Bounces the cell's containers (stop + start). When the cell carries a <code>kukeon.io/config=&lt;name&gt;</code> lineage label and the daemon has marked it OutOfSync, the daemon's <code>StartCell</code> reapplies the freshly materialised spec from the lineage Config before bringing the cell back up — equivalent to <code>kuke stop &lt;name&gt;</code> + <code>kuke start &lt;name&gt;</code>. Severs any active attach session as a side effect of the stop step.</p>
+<p>Bounces the cell's containers (stop + start). When the cell carries a <code>kukeon.io/config=&lt;name&gt;</code> lineage label, the daemon's <code>StartCell</code> renders the lineage Config on every start and, when the render differs from the cell, reapplies it before bringing the cell back up — equivalent to <code>kuke stop &lt;name&gt;</code> + <code>kuke start &lt;name&gt;</code>. The decision comes from that render, not from the cell's <code>OutOfSync</code> status, so a <code>kuke restart</code> straight after <code>kuke apply</code> of the Config runs the new spec without waiting for the reconcile tick. Severs any active attach session as a side effect of the stop step.</p>
 <p>With <code>-l &lt;selector&gt;</code> (mutually exclusive with the positional <code>&lt;name&gt;</code>) the restart fans out across <strong>every</strong> cell in scope whose labels match, reconciling each matched cell individually — the fleet-rollout path for a Config whose stamped cells share the <code>kukeon.io/config=&lt;name&gt;</code> lineage label. Unmatched cells are untouched.</p>
 <h3 id="flags">Flags<a class="headerlink" href="#flags" title="Permanent link">&para;</a></h3>
 <table>
@@ -3634,26 +3634,30 @@
 <tbody>
 <tr>
 <td><code>Ready</code></td>
-<td>Pure bounce: <code>StopCell</code> then <code>StartCell</code>. The daemon's <code>StartCell</code> re-materialises and rebuilds the cell from the lineage Config when <code>Status.OutOfSync</code> is set on a Config-lineage cell — otherwise it just starts the on-disk spec.</td>
+<td>Pure bounce: <code>StopCell</code> then <code>StartCell</code>. For a Config-lineage cell the daemon's <code>StartCell</code> renders the lineage Config and rebuilds the cell from it when the render differs from the cell; otherwise it just starts the on-disk spec.</td>
 </tr>
 <tr>
 <td><code>Stopped</code> / <code>Exited</code></td>
-<td>Equivalent to <code>kuke start &lt;name&gt;</code>. <code>Stopped</code> is an operator stop/kill; <code>Exited</code> is a clean self-exit (#1267) — both restart in place. The daemon-side OutOfSync reapply also fires here, so <code>kuke stop</code> + <code>kuke start</code> produces the same end state as <code>kuke restart</code> on the same cell (#983).</td>
+<td>Equivalent to <code>kuke start &lt;name&gt;</code>. <code>Stopped</code> is an operator stop/kill; <code>Exited</code> is a clean self-exit (#1267) — both restart in place. The daemon-side lineage reapply also fires here, so <code>kuke stop</code> + <code>kuke start</code> produces the same end state as <code>kuke restart</code> on the same cell (#983).</td>
 </tr>
 <tr>
-<td><code>Pending</code> / <code>Failed</code> / <code>Error</code> / <code>Unknown</code></td>
-<td>Refused with <code>cell "&lt;name&gt;" exists in &lt;state&gt; state; delete it with \</code>kuke delete cell <name>` before restarting<code>. Exit code non-zero. Restart does not reconcile a degraded cell in place.</code>Error` is the #1267 workload-crash terminal.</td>
+<td><code>Failed</code> / <code>Error</code> / <code>Degraded</code></td>
+<td>Equivalent to <code>kuke start &lt;name&gt;</code>: the daemon recovers the cell with a recreate (stop → delete → recreate containers → start, the sticky root included; #1268, #1274). For a Config-lineage cell whose Config renders to a different spec, the recreate uses that fresh spec, so a crashed cell whose Config was fixed comes back on the fix in one restart (#1569). With no lineage, a deleted Config or a render failure, it recreates from the on-disk spec. <code>Error</code> is the #1267 workload-crash terminal.</td>
+</tr>
+<tr>
+<td><code>Pending</code> / <code>Unknown</code></td>
+<td>Refused with <code>cell "&lt;name&gt;" exists in &lt;state&gt; state; delete it with \</code>kuke delete cell <name>` before restarting`. Exit code non-zero.</td>
 </tr>
 </tbody>
 </table>
 <h3 id="outofsync-detection">OutOfSync detection<a class="headerlink" href="#outofsync-detection" title="Permanent link">&para;</a></h3>
-<p>The OutOfSync flag on a cell is set by the daemon's reconciler loop when a cell carrying a <code>kukeon.io/config=&lt;name&gt;</code> lineage label has a live spec that no longer matches the materialisation of its source Config (someone edited the Config, or the underlying Blueprint, after the cell was last materialised). Surface it ahead of <code>kuke restart</code> with <a href="../kuke-get/"><code>kuke get cell &lt;name&gt;</code></a> — the <code>SYNC</code> column reports <code>InSync</code> / <code>OutOfSync</code> / <code>Unknown</code>. A cell without the lineage label is never marked OutOfSync, so <code>kuke restart</code> on such cells is always a pure bounce.</p>
+<p>The OutOfSync flag on a cell is set by the daemon's reconciler loop when a cell carrying a <code>kukeon.io/config=&lt;name&gt;</code> lineage label has a live spec that no longer matches the materialisation of its source Config (someone edited the Config, or the underlying Blueprint, after the cell was last materialised). Surface it ahead of <code>kuke restart</code> with <a href="../kuke-get/"><code>kuke get cell &lt;name&gt;</code></a> — the <code>SYNC</code> column reports <code>InSync</code> / <code>OutOfSync</code> / <code>Unknown</code>. The flag is informational: <code>kuke restart</code> does not wait for it, since the start step renders the Config itself. A successful reapply clears <code>outOfSync</code>, <code>outOfSyncReason</code> and <code>outOfSyncError</code> at once and records the fresh render provenance, so <code>kuke get cell</code> reads <code>InSync</code> straight after the restart. A cell without the lineage label is never marked OutOfSync, so <code>kuke restart</code> on such cells is always a pure bounce.</p>
 <h3 id="side-effects">Side effects<a class="headerlink" href="#side-effects" title="Permanent link">&para;</a></h3>
 <ul>
 <li>Active attach sessions are severed by the stop step.</li>
 <li>The reapply lives in the daemon's <code>controller.StartCell</code> (<code>internal/controller/start_cell.go</code>), so every code path that issues <code>StartCell</code> — <code>kuke restart</code>'s start step, <code>kuke start</code> directly, and <code>kuke run &lt;cell&gt;</code> on an existing Stopped cell — inherits the reconcile-on-start behaviour. The CLI restart command itself no longer composes <code>GetConfig</code> + <code>GetBlueprint</code> + <code>ApplyDocuments</code>; those calls happen daemon-side.</li>
-<li>On the reapply branch the daemon resolves the lineage Config (probing the cell's full scope → space-only → realm-only, mirroring the reconciler), materialises the cell from Config + Blueprint, and rebuilds via <code>RecreateCell</code> — tearing down the stale containerd records (post-#867 stop leaves them in place with the old spec-hash) and starting fresh containers with the new spec.</li>
-<li>A reapply that fails to materialise (lineage Config deleted, referenced Blueprint missing, OutOfSync detection itself errored, <code>RecreateCell</code> failure) falls back to starting the cell with the on-disk spec — the runtime still bounces as the operator asked. Diagnostics are logged daemon-side (<code>kukeond</code> slog stream) rather than printed to the CLI.</li>
+<li>The daemon resolves the lineage Config from the cell's render provenance (<code>spec.provenance.bindingRef</code>), at exactly the scope the cell was rendered from, so a same-named Config at another scope never shadows it. Only a cell without provenance falls back to probing its full scope → space-only → realm-only by the <code>kukeon.io/config</code> label name. It then materialises the cell from Config + Blueprint and routes the diff by change class: a Breaking change (or a realm image rebuilt under the same tag) rebuilds via <code>RecreateCell</code>, tearing down the stale containerd records and starting fresh containers with the new spec; a Compatible change (env, ports, volumes, <code>spec.autoDelete</code>, <code>spec.tty</code>, a workload container's image or args) is applied in place with <code>UpdateCell</code>, keeping the root container and its overlay; a change of render inputs that leaves the spec unchanged only records the new provenance.</li>
+<li>A reapply that cannot run (lineage Config deleted, referenced Blueprint missing or any other render error, <code>RecreateCell</code> failure) falls back to starting the cell with the on-disk spec — the runtime still bounces as the operator asked. Diagnostics are logged daemon-side (<code>kukeond</code> slog stream) rather than printed to the CLI.</li>
 <li>Running clones of the source Config are unaffected by a <code>kuke restart</code> on one cell; each clone needs its own <code>kuke restart &lt;clone-name&gt;</code> (or stop+start) to pick up the new spec.</li>
 </ul>
 <h3 id="example-session">Example session<a class="headerlink" href="#example-session" title="Permanent link">&para;</a></h3>
@@ -3677,10 +3681,10 @@
 </code></pre></div>
 <h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="../kuke-lifecycle/">kuke start / stop / kill</a> — primitive lifecycle verbs <code>kuke restart</code> composes; the OutOfSync reapply also fires from <code>kuke start</code> directly.</li>
+<li><a href="../kuke-lifecycle/">kuke start / stop / kill</a> — primitive lifecycle verbs <code>kuke restart</code> composes; the lineage reapply also fires from <code>kuke start</code> directly.</li>
 <li><a href="../kuke-get/">kuke get</a> — read the <code>SYNC</code> column on <code>kuke get cell -o wide</code> to spot OutOfSync ahead of <code>restart</code>.</li>
 <li><a href="../kuke-run/">kuke run</a> — divergent-spec warn-and-attach on the <code>-f</code> path (<code>--require-synced</code> for the opt-in refusal) cites <code>kuke restart &lt;name&gt;</code> as the reconcile pointer; <code>kuke run &lt;cell&gt;</code> on an existing Stopped cell also triggers the daemon-side reapply.</li>
-<li><a href="../../manifests/config/"><code>kind: CellConfig</code></a> — the lineage source the OutOfSync reapply re-materialises from.</li>
+<li><a href="../../manifests/config/"><code>kind: CellConfig</code></a> — the lineage source the start-time reapply re-materialises from.</li>
 <li><a href="../../manifests/blueprint/"><code>kind: CellBlueprint</code></a> — referenced by the Config, looked up via <code>GetBlueprint</code> on the reapply path.</li>
 </ul>
 
@@ -3705,7 +3709,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 12, 2026 22:09:33 UTC">June 12, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 21, 2026 15:13:35 UTC">November 21, 2026</span>
   </span>
 
     
