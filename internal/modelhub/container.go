@@ -88,17 +88,16 @@ type ContainerSpec struct {
 	// RestartPolicy is the user-authored restart policy applied to the
 	// container when its task exits. See the RestartPolicy* constants below
 	// for the canonical values; consumed by the runner's restart-on-exit pass
-	// (refresh.go:restartPolicyRequiresRestart) and its wind-down reap gate
-	// (refresh.go:restartPolicyPermitsCellReap). Empty/unset is treated as
-	// RestartPolicyNever — an exited non-root container is not restarted and
-	// preserves the cell in Stopped rather than triggering a cell-level
-	// wind-down, matching the Kubernetes default restartPolicy. Interaction with
-	// auto-delete: a cell that opted into `--rm` / Spec.AutoDelete is reaped on a
-	// no-restart-required exit (a `never`, or a clean-exit `on-failure`, that
-	// would otherwise be preserved) instead of being kept in Stopped. `--rm` does
-	// not defeat a restart-requiring policy (`always`, or `on-failure` on a
-	// non-zero exit) — that relaunch fires first and the cell is restarted, not
-	// deleted, for that tick (cf. `docker run --rm`).
+	// (refresh.go:restartPolicyRequiresRestart). Empty/unset is treated as
+	// RestartPolicyNever — an exited non-root container is not restarted,
+	// matching the Kubernetes default restartPolicy. The policy decides only
+	// whether the workload is restarted, never whether the cell is wound down
+	// (#1557): once every workload is terminal and no restart is owed, the
+	// reconciler stops the root whatever the policy. Interaction with
+	// auto-delete: a cell that opted into `--rm` / Spec.AutoDelete is deleted
+	// once it settles Exited. `--rm` does not defeat a restart-requiring policy
+	// (`always`, or `on-failure` on a non-zero exit) — that relaunch fires first
+	// and the cell is restarted, not deleted, for that tick (cf. `docker run --rm`).
 	RestartPolicy string
 	// RestartBackoffSeconds is the user-authored minimum interval (seconds)
 	// between reconciler-driven restarts of this container, parameterizing the

@@ -850,11 +850,11 @@ func TestRootContainerExitedNonZero(t *testing.T) {
 }
 
 // TestRootContainerStillRunning pins the snapshot read used by the
-// wind-down gate. The wind-down kill is a no-op on every subsequent
+// wind-down gate. The wind-down teardown is a no-op on every subsequent
 // tick once the root task is dead, so this read is the cheap guard
 // that keeps shouldWindDownCell from firing again. Missing-status
 // reads false (the snapshot didn't see the root — be conservative
-// and skip the kill).
+// and skip the teardown).
 func TestRootContainerStillRunning(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -984,11 +984,17 @@ func TestShouldWindDownCell(t *testing.T) {
 			want:     true,
 		},
 		{
-			// Error (the workload-crash terminal, #1267, inheriting #407's
-			// Failed contract) is sticky and left for the operator — the
-			// wind-down predicate must NOT fire on it (only Exited triggers).
-			name:     "blocked_on_error_state",
+			// Error (a workload crash, #1267) is wound down too (#1557): the
+			// cell keeps its sticky Error label, but its root must not keep
+			// running with nothing left to run.
+			name:     "fires_on_error_state",
 			cell:     cell(specsWithWork, rootRunningStatus, true),
+			newState: intmodel.CellStateError,
+			want:     true,
+		},
+		{
+			name:     "blocked_on_error_when_root_already_dead",
+			cell:     cell(specsWithWork, rootDeadStatus, true),
 			newState: intmodel.CellStateError,
 			want:     false,
 		},
@@ -1003,8 +1009,8 @@ func TestShouldWindDownCell(t *testing.T) {
 			want:     false,
 		},
 		{
-			// Stopped (operator stop/kill, #1267) is no longer a wind-down
-			// trigger — only the self-exit terminal Exited is.
+			// Stopped (operator stop/kill, #1267) is not a wind-down trigger
+			// — only the derived terminals Exited and Error are.
 			name:     "blocked_on_operator_stopped",
 			cell:     cell(specsWithWork, rootRunningStatus, true),
 			newState: intmodel.CellStateStopped,
@@ -1054,9 +1060,9 @@ func TestShouldWindDownCell(t *testing.T) {
 // terminals are preserved across reconcile ticks: CellStateFailed (a kukeon
 // bring-up fault, #407) and CellStateError (a workload crash, #1267). Every
 // other state — including Stopped (operator stop/kill) and Exited (clean
-// self-exit) — is re-derivable, so the `--rm` / wind-down reap paths that reach
-// Stopped via KillCell still settle to Exited on the next tick. Pairs with the
-// auto-delete/wind-down predicate tests above.
+// self-exit) — is re-derivable, so the `kuke run --rm` kill, which leaves a
+// breadcrumb-free Stopped, still settles to Exited on the next tick. Pairs with
+// the auto-delete/wind-down predicate tests above.
 func TestCellStateIsSticky(t *testing.T) {
 	cases := []struct {
 		state intmodel.CellState
@@ -1287,10 +1293,11 @@ func TestReconcileCell_OperatorStoppedCellStaysStopped(t *testing.T) {
 	}
 }
 
-// TestReconcileCell_WindDownStoppedSettlesTerminal pins the internal
-// wind-down contract #1486 must not disturb: KillCell stamps Stopped on a
-// ReadyObserved cell with no breadcrumb, and the next tick still re-derives it
-// from the workload exit — Exited for a clean exit, sticky Error otherwise.
+// TestReconcileCell_WindDownStoppedSettlesTerminal pins the contract #1486
+// must not disturb: a ReadyObserved Stopped with no breadcrumb (an operator
+// stop/kill of a cell whose workload had already exited, e.g. the
+// `kuke run --rm` kill, D4 row 3 of #1557) is re-derived on the next tick from
+// the workload exit — Exited for a clean exit, sticky Error otherwise.
 func TestReconcileCell_WindDownStoppedSettlesTerminal(t *testing.T) {
 	cases := map[uint32]intmodel.CellState{
 		0: intmodel.CellStateExited,

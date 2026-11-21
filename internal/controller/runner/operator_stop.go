@@ -21,18 +21,20 @@ import (
 )
 
 // reasonOperatorStopped is the stable PascalCase Status.Reason label stamped
-// when a stop/kill interrupts a cell whose workload was still running (#1371).
-// It is the persisted breadcrumb that tells "the operator interrupted it" apart
-// from "it ran to completion": ReconcileCell keeps a Stopped cell carrying it
-// at Stopped instead of re-deriving the all-terminal workload to Exited / Error
+// when an operator stop/kill interrupts a cell that had not run its course
+// (#1371, widened by #1557): a workload was still running, the cell was
+// Degraded, or a workload restart was owed or deferred. It is the persisted
+// breadcrumb that tells "the operator interrupted it" apart from "it ran to
+// completion": ReconcileCell keeps a Stopped cell carrying it at Stopped
+// instead of re-deriving the all-terminal workload to Exited / Error
 // (cellStoppedIsDurable, #1486), and the auto-delete gate skips it (#1371). It
 // is cleared by markCellReady, so the cell stays inspectable until the
-// operator deletes or restarts it.
+// operator deletes or restarts it. See classifyOperatorStop for when it is set.
 const reasonOperatorStopped = "OperatorStopped"
 
 // operatorStoppedMessage is the human-readable Status.Message paired with
 // reasonOperatorStopped.
-const operatorStoppedMessage = "cell was stopped while its workload was still running; " +
+const operatorStoppedMessage = "cell was stopped before its workload finished; " +
 	"auto-delete is suppressed until the cell is restarted or deleted"
 
 // cellWorkloadActive reports whether the cell's workload is still running in
@@ -40,11 +42,9 @@ const operatorStoppedMessage = "cell was stopped while its workload was still ru
 // spec, the workload is the non-root set (any one active counts); for a
 // root-only cell (kukeond-style), the root *is* the workload.
 //
-// The reconciler's own kills (wind-down, auto-delete) only fire once every
-// non-root workload is terminal, so they never observe an active workload
-// here; an operator stop/kill of a live cell does. That asymmetry is what
-// lets stopCellLocked / killCellLocked stamp reasonOperatorStopped without
-// knowing which caller drove them.
+// classifyOperatorStop consults it to decide whether a stop/kill interrupts a
+// live workload, and cellStoppedIsDurable to tell whether a persisted Stopped
+// is masking a task started outside kukeon.
 func cellWorkloadActive(cell intmodel.Cell) bool {
 	statusByID := make(map[string]intmodel.ContainerState, len(cell.Status.Containers))
 	for i := range cell.Status.Containers {
@@ -90,31 +90,97 @@ func containerStateIsActive(s intmodel.ContainerState) bool {
 }
 
 // markCellOperatorStopped stamps the operator-interrupt breadcrumb. Callers
-// set it only when cellWorkloadActive was true immediately before the stop.
+// set it only when classifyOperatorStop returns operatorStopLabelInterrupted.
 func markCellOperatorStopped(cell *intmodel.Cell) {
 	cell.Status.Reason = reasonOperatorStopped
 	cell.Status.Message = operatorStoppedMessage
 }
 
 // cellOperatorStopped reports whether the cell carries the operator-interrupt
-// breadcrumb, i.e. it was stopped or killed while its workload was running and
-// has not been restarted since.
+// breadcrumb, i.e. an operator stop or kill interrupted it before its workload
+// finished and it has not been restarted since.
 func cellOperatorStopped(cell intmodel.Cell) bool {
 	return cell.Status.Reason == reasonOperatorStopped
 }
 
-// workloadActiveBeforeStop refreshes the cell's container statuses from
-// containerd and reports whether its workload is still running, so the
-// stop/kill paths can decide whether this teardown interrupts a live workload.
-// A populate failure falls back to the persisted snapshot — best-effort, the
-// same discipline the rest of the stop path follows.
-func (r *Exec) workloadActiveBeforeStop(cell intmodel.Cell) bool {
-	probe := cell
-	probe.Status.Containers = append([]intmodel.ContainerStatus(nil), cell.Status.Containers...)
-	if err := r.populateCellContainerStatuses(&probe); err != nil {
-		r.logger.DebugContext(r.ctx, "pre-stop populate container statuses failed",
-			"cell", cell.Metadata.Name, "error", err)
-		return cellWorkloadActive(cell)
+// operatorStopLabel is the cell label an operator stop/kill leaves behind.
+type operatorStopLabel int
+
+const (
+	// operatorStopLabelStopped sets State=Stopped and leaves Reason/Message
+	// untouched. This is the default for a cell that is neither running nor
+	// already settled at a terminal label, and it must not stamp the
+	// breadcrumb: `kuke run --rm` kills a cell whose workload has already
+	// exited while the persisted state is still Ready, and a breadcrumb there
+	// would stop the reconciler from ever auto-deleting it.
+	operatorStopLabelStopped operatorStopLabel = iota
+	// operatorStopLabelInterrupted sets State=Stopped plus the
+	// reasonOperatorStopped breadcrumb, so the Stopped is durable (#1486).
+	operatorStopLabelInterrupted
+	// operatorStopLabelKeep leaves State, Reason and Message untouched: the
+	// cell had already settled at Exited or Error, and the verb only tears
+	// down what was still running (typically the root).
+	operatorStopLabelKeep
+)
+
+// classifyOperatorStop decides, before teardown, the label a `kuke stop` /
+// `kuke kill` leaves on the cell (#1557). cell is the GetCell result: its
+// State, Reason, Message and ReadyObserved are the persisted values and its
+// container statuses are fresh from containerd. First match wins:
+//
+//  1. Persisted Exited or Error, no workload active: keep the label.
+//  2. Persisted Degraded; or a workload is active; or the cell has been Ready
+//     and a terminal workload's restartPolicy owes it a restart: Stopped plus
+//     the OperatorStopped breadcrumb.
+//  3. Anything else: Stopped, Reason/Message untouched.
+func classifyOperatorStop(cell intmodel.Cell) operatorStopLabel {
+	active := cellWorkloadActive(cell)
+	switch {
+	case (cell.Status.State == intmodel.CellStateExited || cell.Status.State == intmodel.CellStateError) && !active:
+		return operatorStopLabelKeep
+	case cell.Status.State == intmodel.CellStateDegraded,
+		active,
+		cell.Status.ReadyObserved && cellHasRestartRequiringExit(cell):
+		return operatorStopLabelInterrupted
+	default:
+		return operatorStopLabelStopped
 	}
-	return cellWorkloadActive(probe)
+}
+
+// applyOperatorStopLabel writes the label classifyOperatorStop chose.
+func applyOperatorStopLabel(cell *intmodel.Cell, label operatorStopLabel) {
+	switch label {
+	case operatorStopLabelKeep:
+		// Exited / Error and its reason stay as they were.
+	case operatorStopLabelInterrupted:
+		cell.Status.State = intmodel.CellStateStopped
+		markCellOperatorStopped(cell)
+	case operatorStopLabelStopped:
+		cell.Status.State = intmodel.CellStateStopped
+	}
+}
+
+// cellHasRestartRequiringExit reports whether some terminal non-root container
+// exited in a way its restartPolicy says must be restarted. Pure: it reads the
+// container-status snapshot only and ignores the backoff and retry-cap
+// bookkeeping (see restartOwed for the reconciler's full check).
+func cellHasRestartRequiringExit(cell intmodel.Cell) bool {
+	statusByID := make(map[string]intmodel.ContainerStatus, len(cell.Status.Containers))
+	for i := range cell.Status.Containers {
+		statusByID[cell.Status.Containers[i].ID] = cell.Status.Containers[i]
+	}
+	for i := range cell.Spec.Containers {
+		spec := cell.Spec.Containers[i]
+		if spec.Root {
+			continue
+		}
+		status, ok := statusByID[spec.ID]
+		if !ok || !containerStateIsTerminal(status.State) {
+			continue
+		}
+		if restartPolicyRequiresRestart(spec.RestartPolicy, status.ExitCode) {
+			return true
+		}
+	}
+	return false
 }

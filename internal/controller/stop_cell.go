@@ -43,7 +43,8 @@ func (b *Exec) StopCell(cell intmodel.Cell) (StopCellResult, error) {
 		return result, fmt.Errorf("failed to stop cell containers: %w", err)
 	}
 
-	// Update cell metadata state to Stopped
+	// Persist the label the runner chose (Stopped, Stopped + OperatorStopped,
+	// or an Exited / Error label kept as it was; see classifyOperatorStop).
 	if err = b.runner.UpdateCellMetadata(internalCell); err != nil {
 		return result, fmt.Errorf("failed to update cell metadata: %w", err)
 	}

@@ -715,10 +715,12 @@ func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr erro
 			// Stamped (hash, version) match the running domain — reuse untouched.
 		}
 		reuseExistingRoot = true
-		// Drop any stale task on the existing record. Reaching this branch
-		// implies the idempotent-skip path above already determined the
-		// task is not Running; a leftover Created/Stopped task would
-		// otherwise refuse the StartContainer below.
+		// Drop any task left on the existing record, so the StartContainer
+		// below does not refuse it. The task may still be Running here: the
+		// idempotent-skip path above skips only when *every* task in the cell
+		// is running, so a cell whose root is up while a workload is down
+		// reaches this branch with a live root, and WithProcessKill then
+		// kills it. A leftover Created/Stopped task is deleted the same way.
 		if task, taskErr := container.Task(nsCtx, nil); taskErr == nil {
 			if _, deleteTaskErr := task.Delete(nsCtx, containerd.WithProcessKill); deleteTaskErr != nil {
 				fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
@@ -726,7 +728,7 @@ func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr erro
 				r.logger.WarnContext(r.ctx, "failed to delete stale task on existing root container, continuing", fields...)
 			}
 		}
-		// Defense-in-depth CNI scrub. stop.go/kill.go already release the
+		// Defense-in-depth CNI scrub. The stop/kill teardown already releases the
 		// IPAM reservation pre-snapshot-preservation; a daemon crash
 		// mid-stop could leave a stale host-local file keyed to this
 		// deterministic root containerd ID. Scrub it so the CNI ADD below

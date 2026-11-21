@@ -484,12 +484,12 @@ kuke attach <cell> --container <con>                   # alias: att
 
 **Intent.** Tear down a cell. Three verbs by escalating force:
 
-| Verb     | Semantics                                                                        |
-| -------- | -------------------------------------------------------------------------------- |
-| `stop`   | Graceful SIGTERM to the cell's containers; leaves metadata in `Stopped` state.   |
-| `kill`   | Immediate SIGKILL of containerd tasks; leaves metadata in `Stopped` state.       |
-| `delete` | Removes metadata; refuses if the cell still has running containers.              |
-| `purge`  | `delete` + comprehensive cleanup (orphaned containers, CNI, half-created state). |
+| Verb     | Semantics                                                                                                                |
+| -------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `stop`   | SIGTERM to every task (SIGKILL after a bounded grace), workloads first, then the root; waits for and deletes every task. |
+| `kill`   | SIGKILL to every task, workloads first, then the root; waits for and deletes every task. Same end state as `stop`.       |
+| `delete` | Removes metadata; refuses if the cell still has running containers.                                                      |
+| `purge`  | `delete` + comprehensive cleanup (orphaned containers, CNI, half-created state).                                         |
 
 **Sequence.**
 
@@ -502,7 +502,12 @@ sudo kuke purge cell <name> --realm <r> --space <s> --stack <st>
 
 **Invariants.**
 
-- After `kuke kill <name>`, `kuke get cell` reports the cell in `Stopped`; metadata remains so `kuke apply -f` can re-materialize it.
+- After `kuke stop <name>` or `kuke kill <name>`, no containerd task of the cell is left behind — including tasks that had already exited — and the cell's network is released. Metadata remains so `kuke start` or `kuke apply -f` can bring it back.
+- The label `stop`/`kill` leaves depends on what the verb interrupted:
+  - cell already settled in `Exited` or `Error` with no workload running → the label, `REASON` and `MESSAGE` are kept (a clean `Exited` cell with `--rm` is still auto-deleted on the next tick);
+  - a workload was running, the cell was `Degraded`, or a restart was owed → `Stopped` with reason `OperatorStopped`, and `--rm` auto-delete is suppressed;
+  - anything else (e.g. a root-only cell) → plain `Stopped`.
+- Running `stop`/`kill` again on an already-torn-down cell is a no-op: exit code 0, label unchanged.
 - After `delete cell`, the cell is absent from `kuke get cells`; exit code 0.
 - `kuke kill <half-created>` (a cell whose root container was never started, e.g. after an image-pull failure) exits non-zero with a `no RootContainerID set` error. The right verb in that state is `kuke purge cell`, which **succeeds** and tears down whatever metadata was written.
 - `delete cell <missing>` exits non-zero with a `not found` message scoped to the realm/space/stack.
