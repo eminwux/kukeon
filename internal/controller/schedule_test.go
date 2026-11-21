@@ -699,6 +699,38 @@ func TestRunSchedules_RestartRecoveredFireWithoutDeadline(t *testing.T) {
 	h.wantNext("2026-11-17T08:40:00Z")
 }
 
+// TestRunSchedules_RestartRecoveredEarlierFire: the daemon died after creating
+// one fire's cell, and the downtime ran past the next fire time too. The
+// latest due fire is missed with no deadline and does not run, but the
+// earlier fire's existing cell is recorded as the fire rather than skipped.
+func TestRunSchedules_RestartRecoveredEarlierFire(t *testing.T) {
+	h := newScheduleHarness(t)
+	h.configs[scheduleConfigName] = scheduledConfig("*/10 * * * *")
+	h.pass("2026-11-17T08:22:19Z")
+
+	// The 08:30 fire created its cell, then the daemon was down until after
+	// 08:40.
+	h.cells = []intmodel.Cell{
+		scheduleCell("disk-watch-1794904200", scheduleConfigName, intmodel.CellStateExited),
+	}
+	h.restartDaemon()
+	res := h.pass("2026-11-17T08:45:00Z")
+
+	h.wantFires(0)
+	h.wantSkipped(1) // 08:40 only
+	if res.Skipped != 1 || res.Fired != 1 {
+		t.Errorf("Skipped=%d Fired=%d, want 1 and 1", res.Skipped, res.Fired)
+	}
+	status := h.status()
+	if status.LastCell != "disk-watch-1794904200" {
+		t.Errorf("lastCell = %q, want the 08:30 fire's existing cell", status.LastCell)
+	}
+	if status.LastScheduleTime == nil || !status.LastScheduleTime.Equal(at(t, "2026-11-17T08:30:00Z")) {
+		t.Errorf("lastScheduleTime = %v, want 2026-11-17T08:30:00Z", status.LastScheduleTime)
+	}
+	h.wantNext("2026-11-17T08:50:00Z")
+}
+
 // TestRunSchedules_ConfigDeletedDuringThePass: a Config deleted while a pass
 // fires it — after the pass read it, before the pass wrote its schedule
 // state — leaves no config-status/<name> behind, and one re-created under the
@@ -735,6 +767,37 @@ func TestRunSchedules_ConfigDeletedDuringThePass(t *testing.T) {
 		t.Errorf("re-created Config inherited schedule history: %+v", status)
 	}
 	h.wantNext("2026-11-17T08:40:00Z")
+}
+
+// TestRunSchedules_ConfigReappliedDuringThePass pins the residual
+// dropStatusOfDeletedConfig documents: a Config deleted and re-applied under
+// the same name while a pass is still firing it keeps the deleted Config's
+// schedule state, because the re-read after the write finds a document and
+// nothing tells the new one from the old.
+func TestRunSchedules_ConfigReappliedDuringThePass(t *testing.T) {
+	h := newScheduleHarness(t)
+	h.configs[scheduleConfigName] = scheduledConfig("*/10 * * * *")
+	h.pass("2026-11-17T08:22:19Z")
+
+	h.ctrl.SetScheduleFireForTest(func(req controller.CellFromConfigRequest) error {
+		h.fires = append(h.fires, req)
+		h.cells = append(h.cells, scheduleCellFor(req.Name, req.Schedule, req.Config, intmodel.CellStateReady))
+		// `kuke delete config` then `kuke apply` of the same document, both
+		// landing mid-pass.
+		delete(h.configs, scheduleConfigName)
+		delete(h.statuses, scheduleConfigName)
+		h.configs[scheduleConfigName] = scheduledConfig("*/10 * * * *")
+		return nil
+	})
+	h.pass("2026-11-17T08:30:00Z")
+
+	status, ok := h.statuses[scheduleConfigName]
+	if !ok {
+		t.Fatal("schedule status removed for a Config that exists again; the residual changed — update the docstring")
+	}
+	if status.LastCell != "disk-watch-1794904200" {
+		t.Errorf("lastCell = %q, want the deleted Config's fire kept (documented residual)", status.LastCell)
+	}
 }
 
 // TestRunSchedules_RemovingTheScheduleStopsFires: a Config that loses its

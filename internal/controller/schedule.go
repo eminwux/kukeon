@@ -226,10 +226,20 @@ func (b *Exec) runSchedule(
 // removes the document and then its status; a delete landing between the
 // pass's read of the Config and its write would otherwise leave
 // config-status/<name> behind, and nothing prunes it once the Config is no
-// longer listed — so a Config later re-created under the same name would
-// inherit its history. Re-reading the Config after the write closes that
-// window: either this read sees the document gone and removes the state, or
-// the delete comes after it and removes the state itself.
+// longer listed — so a Config re-created under the same name after the pass
+// would inherit its history. Re-reading the Config after the write closes
+// that window for a delete: either this read sees the document gone and
+// removes the state, or the delete comes after it and removes the state
+// itself.
+//
+// It does not cover a Config deleted and re-applied under the same name
+// while the pass is still working on it (a slow cell create widens that
+// window). The re-read then finds the new document and the old Config's
+// state is kept. Nothing tells the two documents apart: a Config carries no
+// UID or creation time, and comparing documents would fail both ways —
+// re-applying the same YAML yields identical bytes, while an in-place edit
+// mid-pass would be mistaken for a re-create and wipe its real history. The
+// residual is pinned by TestRunSchedules_ConfigReappliedDuringThePass.
 func (b *Exec) dropStatusOfDeletedConfig(cfg intmodel.CellConfig, md intmodel.CellConfigMetadata, key string) error {
 	_, err := b.runner.GetConfig(intmodel.CellConfig{Metadata: md})
 	switch {
@@ -253,10 +263,13 @@ func (b *Exec) dropStatusOfDeletedConfig(cfg intmodel.CellConfig, md intmodel.Ce
 // — a suspended or unparseable schedule, missed fires past their deadline, all
 // but the latest of several due fires — is recorded on status instead.
 //
-// alreadyFired reports whether a fire time's cell already exists. Such a fire
-// is reported as due even when fireIsEligible would drop it, so fireSchedule
-// records the existing cell as the fire instead of the fire being counted as
-// skipped.
+// alreadyFired reports whether a fire time's cell already exists: an earlier
+// attempt created it, then the daemon died before recording it. When the
+// latest due fire is not eligible, the latest due fire time with an existing
+// cell is reported instead — the latest itself, or an earlier one the
+// downtime has since passed — so fireSchedule records that cell as the fire
+// rather than counting it as skipped. A latest fire that is eligible runs as
+// usual; an earlier recovered cell is then one of the skipped fires.
 func (b *Exec) advanceSchedule(
 	status *intmodel.CellConfigScheduleStatus,
 	schedule *v1beta1.CellConfigSchedule,
@@ -293,22 +306,30 @@ func (b *Exec) advanceSchedule(
 
 	// One or more fire times are due. Walk them to find the latest and the
 	// first one still ahead.
-	var latest time.Time
+	var latest, recovered time.Time
 	var due int64
 	next := *status.NextScheduleTime
 	for !next.IsZero() && !next.After(now) {
 		latest = next
+		if alreadyFired(next) {
+			recovered = next
+		}
 		due++
 		next = spec.Next(next, loc)
 	}
 	status.NextScheduleTime = timeOrNil(next)
 
-	if !alreadyFired(latest) && !fireIsEligible(schedule, latest, prev, now) {
+	switch {
+	case fireIsEligible(schedule, latest, prev, now):
+		status.SkippedFires += due - 1
+		return latest, true
+	case !recovered.IsZero():
+		status.SkippedFires += due - 1
+		return recovered, true
+	default:
 		status.SkippedFires += due
 		return time.Time{}, false
 	}
-	status.SkippedFires += due - 1
-	return latest, true
 }
 
 // scheduleResolution is the precision of a schedule, and the period kukeond
