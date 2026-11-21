@@ -46,14 +46,14 @@ function ImageListView({ realm, revision }: { realm: string; revision: number })
       </div>
       {list.data && <p className="description image-namespace">Containerd namespace <code>{list.data.namespace}</code></p>}
       {list.loading && <p className="scope-filter" role="status">{list.data ? "Refreshing images…" : "Loading images…"}</p>}
-      {rows.length > 0 && <div className="table-scroll"><table className="image-table"><thead><tr><th scope="col">Reference</th><th scope="col">Size</th><th scope="col">Created</th><th scope="col">Digest</th><th scope="col">Media type</th><th scope="col">Labels</th></tr></thead><tbody>
+      {rows.length > 0 && <div className="table-scroll"><table className="image-table stackable"><thead><tr><th scope="col">Reference</th><th scope="col">Size</th><th scope="col">Created</th><th scope="col">Digest</th><th scope="col">Media type</th><th scope="col">Labels</th></tr></thead><tbody>
         {rows.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(image => <tr key={image.name}>
-          <td><a className="resource-name" href={imagesLink(realm, image.name)}>{image.name}</a></td>
-          <td>{formatImageSize(image.size)}</td>
-          <td>{formatImageCreated(image.createdAt)}</td>
-          <td>{image.digest ? <code title={image.digest}>{shortDigest(image.digest)}</code> : UNAVAILABLE}</td>
-          <td>{formatImageText(image.mediaType)}</td>
-          <td>{sortedLabels(image.labels).length || "None"}</td>
+          <td className="image-ref" data-label="Reference" title={image.name}><a className="resource-name" href={imagesLink(realm, image.name)}>{image.name}</a></td>
+          <td data-label="Size">{formatImageSize(image.size)}</td>
+          <td data-label="Created">{formatImageCreated(image.createdAt)}</td>
+          <td data-label="Digest">{image.digest ? <code title={image.digest}>{shortDigest(image.digest)}</code> : UNAVAILABLE}</td>
+          <td className="image-media-type" data-label="Media type" title={image.mediaType || undefined}>{formatImageText(image.mediaType)}</td>
+          <td data-label="Labels">{sortedLabels(image.labels).length || "None"}</td>
         </tr>)}
       </tbody></table></div>}
       {!list.loading && !rows.length && <div className="empty-state"><h3>{list.error ? "Images could not be loaded" : images.length ? "No matching images" : "No images found"}</h3><p>{list.error ? "Refresh to retry." : images.length ? "Try another search." : `No images are installed in realm ${realm}'s containerd namespace.`}</p></div>}
