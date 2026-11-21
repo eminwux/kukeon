@@ -17,11 +17,11 @@
 package init
 
 import (
-	"bytes"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/eminwux/kukeon/internal/util/fs"
 )
 
 const (
@@ -76,42 +76,12 @@ func stageKukeClient(runPath string) (kukeClientPaths, error) {
 	if err != nil {
 		return kukeClientPaths{}, fmt.Errorf("read kuke executable %q: %w", self, err)
 	}
-	if err = writeIfChanged(paths.Binary, content); err != nil {
+	if _, err = fs.WriteFileIfChanged(paths.Binary, content, kukeClientStagedMode, "kuke client"); err != nil {
 		return kukeClientPaths{}, err
 	}
-	if err = writeIfChanged(paths.Shim, []byte(kukeClientShim)); err != nil {
+	shim := []byte(kukeClientShim)
+	if _, err = fs.WriteFileIfChanged(paths.Shim, shim, kukeClientStagedMode, "kuke client shim"); err != nil {
 		return kukeClientPaths{}, err
 	}
 	return paths, nil
-}
-
-// writeIfChanged replaces dst with content via a sibling tmp file + rename,
-// unless dst already holds exactly that content.
-func writeIfChanged(dst string, content []byte) error {
-	if current, err := os.ReadFile(dst); err == nil && bytes.Equal(current, content) {
-		return nil
-	}
-	tmp := dst + ".tmp"
-	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, kukeClientStagedMode)
-	if err != nil {
-		return fmt.Errorf("create staged tmp %q: %w", tmp, err)
-	}
-	if _, err = io.Copy(out, bytes.NewReader(content)); err != nil {
-		_ = out.Close()
-		_ = os.Remove(tmp)
-		return fmt.Errorf("write staged tmp %q: %w", tmp, err)
-	}
-	if err = out.Close(); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("close staged tmp %q: %w", tmp, err)
-	}
-	if err = os.Chmod(tmp, kukeClientStagedMode); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("chmod staged tmp %q: %w", tmp, err)
-	}
-	if err = os.Rename(tmp, dst); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("rename staged %q -> %q: %w", tmp, dst, err)
-	}
-	return nil
 }
