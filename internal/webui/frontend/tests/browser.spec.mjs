@@ -60,7 +60,8 @@ test("terminal selects eligible containers, forwards input and resize, and detac
   await expect(terminalTools(page).locator(".terminal-connection-state")).toHaveAttribute("title", /waiting for container output/);
   sendOutput();
   await expect(terminalTools(page).locator(".terminal-connection-state")).toHaveText("Attached");
-  await expect.poll(() => panel.locator(".xterm-fg-13").evaluate(el => getComputedStyle(el).color)).toBe("rgb(255, 0, 255)");
+  // The page follows the (light) system appearance, so bright magenta uses the light ANSI palette.
+  await expect.poll(() => panel.locator(".xterm-fg-13").evaluate(el => getComputedStyle(el).color)).toBe("rgb(166, 38, 164)");
   await expect.poll(() => panel.locator(".xterm-rows").first().evaluate(el => getComputedStyle(el).fontFamily)).toContain("monospace");
   await expect(panel.locator(".xterm-cursor.xterm-cursor-blink")).toHaveClass(/xterm-cursor-underline/);
   await expect.poll(() => panel.locator(".xterm-cursor.xterm-cursor-blink").evaluate(el => getComputedStyle(el).animationName)).not.toBe("none");
@@ -111,14 +112,22 @@ test("expanded terminal keeps its session, resizes, and follows the appearance s
   await mock(page, path => path.endsWith("/containers") ? { json: [{ id: "shell", attachable: true }] } : undefined);
   let connections = 0;
   const messages = [];
+  let sendOutput = () => {};
   await page.routeWebSocket("**/attach", socket => {
     connections++;
     socket.onMessage(message => { messages.push(message); });
     socket.send(JSON.stringify({ type: "ready" }));
+    sendOutput = text => socket.send(Buffer.from(text));
   });
   await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
   const panel = page.getByRole("region", { name: "Terminal workspace" });
   await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
+  // ANSI white and bright yellow follow the theme: readable greys/amber on the light background,
+  // the unchanged dark palette after switching to dark (asserted below).
+  sendOutput("\x1b[37mwhite\x1b[93mbright-yellow\x1b[0m $ ");
+  const ansiColor = index => panel.locator(`.terminal-session:not([hidden]) .xterm-fg-${index}`).first().evaluate(el => getComputedStyle(el).color);
+  await expect.poll(() => ansiColor(7)).toBe("rgb(110, 119, 129)");
+  await expect.poll(() => ansiColor(11)).toBe("rgb(154, 103, 0)");
   const screen = panel.locator(".terminal-screen");
   const screenHandle = await screen.elementHandle();
   await page.getByRole("link", { name: "View details for dev / shared / services / api" }).click();
@@ -146,6 +155,8 @@ test("expanded terminal keeps its session, resizes, and follows the appearance s
   await appearance.click();
   await appearance.click();
   await expect.poll(() => screen.evaluate(el => getComputedStyle(el).backgroundColor)).toBe("rgb(13, 20, 33)");
+  await expect.poll(() => ansiColor(7)).toBe("rgb(229, 229, 229)");
+  await expect.poll(() => ansiColor(11)).toBe("rgb(255, 255, 0)");
   await terminalTools(page).getByRole("button", { name: "Collapse terminal" }).focus();
   await page.keyboard.press("Escape");
   await expect(panel).not.toHaveClass(/is-expanded/);
@@ -377,9 +388,12 @@ test("Resources is home and retains resource summaries and navigation", async ({
 
 test("Resources cells open cellRead and the sidebar opens cellTerminal, each linking to the other", async ({ page }) => {
   await mock(page, path => path.endsWith("/containers") ? { json: [{ id: "shell", attachable: true }] } : undefined);
-  await page.routeWebSocket("**/attach", socket => { socket.send(JSON.stringify({ type: "ready" })); });
+  let opened = 0;
+  let closed = 0;
+  await page.routeWebSocket("**/attach", socket => { opened++; socket.onClose(() => { closed++; }); socket.send(JSON.stringify({ type: "ready" })); });
   const cells = page.getByRole("navigation", { name: "Cell navigation" });
   const sidebarCell = cells.getByRole("link", { name: "Open dev / shared / services / api" });
+  const connectionState = terminalTools(page).locator(".terminal-connection-state");
   await page.goto(`${server.url}#/cells`);
   await page.getByRole("row").filter({ hasText: "dev / shared / services" }).getByRole("link", { name: "api", exact: true }).click();
   await expect(page).toHaveURL(/#\/resource\/dev\/shared\/services\/api$/);
@@ -388,6 +402,11 @@ test("Resources cells open cellRead and the sidebar opens cellTerminal, each lin
   await expect(page.getByRole("region", { name: "Cell terminal" })).toBeHidden();
   await expect(page.getByRole("tablist")).toHaveCount(0);
   await expect(sidebarCell).toHaveAttribute("aria-current", "page");
+  // Opening cellRead from Resources inspects the cell without attaching to it.
+  await expect(page.locator(".container-panel li").filter({ hasText: "shell" })).toBeVisible();
+  await page.waitForTimeout(500);
+  expect(opened).toBe(0);
+  await expect(sidebarCell.locator(".cell-terminal-state")).toHaveCount(0);
   const toTerminal = page.getByRole("link", { name: "Open terminal for dev / shared / services / api" });
   await expect(toTerminal).toHaveAttribute("title", "Open cell terminal");
   await toTerminal.focus();
@@ -397,6 +416,8 @@ test("Resources cells open cellRead and the sidebar opens cellTerminal, each lin
   await expect(page.getByRole("region", { name: "Cell details" })).toBeHidden();
   await expect(page.getByRole("tablist")).toHaveCount(0);
   await expect(sidebarCell).toHaveAttribute("aria-current", "page");
+  await expect(connectionState).toContainText("Attached");
+  expect(opened).toBe(1);
 
   await page.goto(`${server.url}#/workspace`);
   await sidebarCell.click();
@@ -412,6 +433,43 @@ test("Resources cells open cellRead and the sidebar opens cellTerminal, each lin
   const containerRow = page.locator(".container-panel li").filter({ hasText: "shell" });
   await expect(containerRow.getByRole("link", { name: "shell", exact: true })).toHaveAttribute("href", "#/resource/dev/shared/services/api/shell");
   await expect(containerRow.getByRole("link", { name: "View document" })).toHaveAttribute("href", "#/resource/dev/shared/services/api/shell?document=1");
+
+  // The session attached on cellTerminal survives cellTerminal → cellRead → cellTerminal on the same socket.
+  await page.getByRole("link", { name: "Open terminal for dev / shared / services / api" }).click();
+  await expect(page).toHaveURL(/#\/workspace\/dev\/shared\/services\/api$/);
+  await expect(connectionState).toContainText("Attached");
+  expect(opened).toBe(1);
+  expect(closed).toBe(0);
+
+  // A terminal detached on cellTerminal stays detached through cellRead → cellTerminal.
+  await terminalTools(page).getByRole("button", { name: "Detach" }).click();
+  await expect.poll(() => closed).toBe(1);
+  await expect(connectionState).toContainText("Detached");
+  await page.getByRole("link", { name: "View details for dev / shared / services / api" }).click();
+  await expect(page.getByRole("heading", { name: "Runtime status" })).toBeVisible();
+  await page.getByRole("link", { name: "Open terminal for dev / shared / services / api" }).click();
+  await expect(page).toHaveURL(/#\/workspace\/dev\/shared\/services\/api$/);
+  await expect(connectionState).toContainText("Detached");
+  await page.waitForTimeout(500);
+  expect(opened).toBe(1);
+});
+
+test("a cold load of cellRead never opens a terminal session", async ({ page }) => {
+  await mock(page, path => path.endsWith("/containers") ? { json: [{ id: "shell", attachable: true }] } : undefined);
+  let opened = 0;
+  await page.routeWebSocket("**/attach", socket => { opened++; socket.send(JSON.stringify({ type: "ready" })); });
+  await page.goto(`${server.url}#/resource/dev/shared/services/api`);
+  await expect(page.getByRole("heading", { name: "Runtime status" })).toBeVisible();
+  await expect(page.locator(".container-panel li").filter({ hasText: "shell" })).toBeVisible();
+  // Give a would-be auto-attach every chance to fire: the inventory and container list have loaded.
+  await expect(page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link", { name: "Open dev / shared / services / api" })).toBeVisible();
+  await page.waitForTimeout(1000);
+  expect(opened).toBe(0);
+  await expect(page.locator(".cell-terminal-state")).toHaveCount(0);
+  await page.getByRole("link", { name: "Open terminal for dev / shared / services / api" }).click();
+  await expect(page).toHaveURL(/#\/workspace\/dev\/shared\/services\/api$/);
+  await expect.poll(() => opened).toBe(1);
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
 });
 
 for (const [width, height] of [[1440, 900], [390, 844]]) {
