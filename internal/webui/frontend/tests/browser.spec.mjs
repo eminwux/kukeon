@@ -3336,3 +3336,28 @@ test("a success toast under a resting pointer still auto-dismisses, while moving
   await page.clock.fastForward(5100);
   await expect(toasts(page)).toHaveCount(0);
 });
+
+// Issue #1567, item A: interactive text gets a 24px hit area and the resizers keep a visible keyboard focus ring.
+test("resource-name and breadcrumb links have a 24px hit target and resizers show a focus ring", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mock(page);
+  await page.goto(`${server.url}#/cells`);
+  const name = content(page).locator("a.resource-name").first();
+  await expect(name).toBeVisible();
+  expect((await name.boundingBox()).height).toBeGreaterThanOrEqual(24);
+  // A table row with a name link stays the compact height (about 36px with a state badge).
+  expect((await content(page).locator("tbody tr").first().boundingBox()).height).toBeLessThanOrEqual(38);
+  const home = page.getByRole("navigation", { name: "Resource scope" }).getByRole("link", { name: "Resources" });
+  expect((await home.boundingBox()).height).toBeGreaterThanOrEqual(24);
+
+  await page.goto(`${server.url}#/resource/dev/shared/services`);
+  const crumbs = page.getByRole("navigation", { name: "Resource scope" }).getByRole("link");
+  await expect(crumbs).toHaveCount(3);
+  for (const crumb of await crumbs.all()) expect((await crumb.boundingBox()).height).toBeGreaterThanOrEqual(24);
+
+  const handle = page.getByRole("separator", { name: "Resize sidebar" });
+  await page.keyboard.press("Shift");
+  await handle.focus();
+  expect(await handle.evaluate(el => el.matches(":focus-visible"))).toBe(true);
+  expect(await handle.evaluate(el => getComputedStyle(el).boxShadow)).toMatch(/rgb/);
+});
