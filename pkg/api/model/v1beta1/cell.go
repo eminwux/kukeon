@@ -137,33 +137,39 @@ const (
 // from. See CellSpec.Provenance for the lifecycle contract. Issue #1021.
 type CellProvenance struct {
 	// BindingKind is "config" or "blueprint" (see BindingKind* constants).
-	BindingKind string `json:"bindingKind"              yaml:"bindingKind"`
+	BindingKind string `json:"bindingKind"                  yaml:"bindingKind"`
 	// BindingRef is the scoped name of the Config or Blueprint this cell was
 	// materialized from — the lineage back-reference P4 re-resolves against.
-	BindingRef CellBindingRef `json:"bindingRef"               yaml:"bindingRef"`
+	BindingRef CellBindingRef `json:"bindingRef"                   yaml:"bindingRef"`
 	// Params are the scalar values resolved into the binding at
 	// materialization time (a Config's spec.values, or a Blueprint's
 	// resolved --param map). Persisted verbatim so re-resolution does not
 	// depend on re-reading transient CLI state.
-	Params map[string]string `json:"params,omitempty"         yaml:"params,omitempty"`
+	Params map[string]string `json:"params,omitempty"             yaml:"params,omitempty"`
 	// EnvOverrides are the `--env KEY=VALUE` entries supplied at run time.
 	// Mirrors the values RuntimeEnv carries transiently, but persisted here
 	// so a later re-resolution sees the same overrides the operator chose.
-	EnvOverrides []string `json:"envOverrides,omitempty"   yaml:"envOverrides,omitempty"`
+	EnvOverrides []string `json:"envOverrides,omitempty"       yaml:"envOverrides,omitempty"`
 	// Mode is the harness mode the cell was created in (a Config binding whose
 	// blueprint declares modes). Persisted so a re-render picks the same mode.
 	// Issue #1472, step 11.
-	Mode string `json:"mode,omitempty"           yaml:"mode,omitempty"`
+	Mode string `json:"mode,omitempty"               yaml:"mode,omitempty"`
 	// ParamOverrides are the `--param KEY=VALUE` entries supplied when the
 	// cell was created from a Config, overriding the Config's values for this
 	// cell only (e.g. the PROMPT of a headless run).
-	ParamOverrides map[string]string `json:"paramOverrides,omitempty" yaml:"paramOverrides,omitempty"`
+	ParamOverrides map[string]string `json:"paramOverrides,omitempty"     yaml:"paramOverrides,omitempty"`
 	// ConnectorOverrides are the `--connector <connector>=<secret>` entries
 	// supplied when the cell was created from a Config: the identity this
 	// one cell uses for a connector instead of the one its Config or a scope
 	// default resolves, keyed by connector name. Persisted so a restart and a
 	// reconcile-driven recreate keep the identity. Issue #1548.
 	ConnectorOverrides map[string]ContainerSecretRef `json:"connectorOverrides,omitempty" yaml:"connectorOverrides,omitempty"`
+	// ConnectorMethods are the `--connector-method <connector>=<method>`
+	// entries supplied when the cell was created from a Config: the method
+	// this one cell uses for a connector instead of the one its Config
+	// enables, keyed by connector name. Persisted so a restart and a
+	// reconcile-driven recreate keep the method. Issue #1551.
+	ConnectorMethods map[string]string `json:"connectorMethods,omitempty"   yaml:"connectorMethods,omitempty"`
 }
 
 // CellBindingRef is a scoped reference to the Config or Blueprint a cell was
@@ -210,6 +216,13 @@ func CloneCellProvenance(in *CellProvenance) *CellProvenance {
 			overrides[k] = v
 		}
 		out.ConnectorOverrides = overrides
+	}
+	if in.ConnectorMethods != nil {
+		methods := make(map[string]string, len(in.ConnectorMethods))
+		for k, v := range in.ConnectorMethods {
+			methods[k] = v
+		}
+		out.ConnectorMethods = methods
 	}
 	return out
 }

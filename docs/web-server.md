@@ -542,10 +542,13 @@ Elsewhere in the UI:
   identity picker per connector that takes one. Leaving the picker on
   **Default** keeps the Config inheriting the scope's default; the form will
   not submit when a required connector has neither.
-- **New Cell** starts each connector on the identity the Config resolves to.
-  Picking another identity of the same connector uses it for this cell only;
-  the Config and the defaults are not changed. The preview names the identity
-  each connector resolved to and where it came from, and never any material.
+- **New Cell** starts each connector on the method and identity the Config
+  resolves to. A connector with several methods offers a **Method** picker, and
+  picking another method shows that method's identity picker (or, for a login,
+  its state-volume note). Picking another method or identity uses it for this
+  cell only; the Config and the defaults are not changed. The preview names the
+  method and identity each connector resolved to and where it came from, and
+  never any material.
 
 ## Options and permissions
 
@@ -761,8 +764,10 @@ an identity returns `connector_unresolved` (409) from the preview and create
 endpoints, which is what the **Set default** and **Pick for this Config**
 actions answer. The Cell endpoints `/api/cells/from-config/preview` and
 `/api/cells/from-config/create` additionally accept `connectors`: the
-identities picked for that cell only, keyed by connector name; their preview
-returns the resolution of every connector under `connectors`.
+identities picked for that cell only, keyed by connector name, and `methods`:
+the connector methods picked for that cell only, keyed by connector name (an
+unknown method returns `connector_invalid`); their preview returns the
+resolution of every connector under `connectors`.
 
 ### Create a Cell
 

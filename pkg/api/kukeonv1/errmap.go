@@ -75,6 +75,7 @@ var kindToSentinel = map[string]error{
 	"ConnectorUnresolved":     errdefs.ErrConnectorUnresolved,
 	"ConnectorUnknown":        errdefs.ErrConnectorUnknown,
 	"ConnectorIdentity":       errdefs.ErrConnectorIdentity,
+	"ConnectorMethod":         errdefs.ErrConnectorMethod,
 	"VolumeInUse":             errdefs.ErrVolumeInUse,
 }
 

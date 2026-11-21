@@ -78,8 +78,8 @@ func connectorRequirements(bp v1beta1.CellBlueprintDoc, enabled []string) []conn
 // reference without a realm is looked up in the cell's own.
 //
 // An override must name a connector the Config requires, and that connector
-// must take an identity: only the identity is chosen per cell, never the
-// method (#1548).
+// must take an identity. reqs already reflects a per-cell method choice
+// (#1551), so the identity fills the slot of the method the cell uses.
 func cellConnectorLayer(
 	cfgName, realm string, reqs []connectorRequirement, overrides map[string]v1beta1.ContainerSecretRef,
 ) (*v1beta1.ScopeDefaults, map[string]v1beta1.ContainerSecretRef, error) {
@@ -126,6 +126,124 @@ func cellConnectorLayer(
 		recorded[name] = ref
 	}
 	return layer, recorded, nil
+}
+
+// cellMethodComponents applies the per-cell `--connector-method` choices
+// (#1551) to the components a Config enables. A connector's methods are the
+// blueprint's components that carry its descriptor with a method name, and
+// they are alternatives (one group), so a choice disables every method
+// component of the connector and enables the one of the requested method. It
+// returns the components to flatten with and the choices as they are recorded
+// in the cell's provenance.
+//
+// A choice must name a connector the blueprint declares methods for, a method
+// one of those components delivers, a connector whose method components are
+// all optional — a blueprint that always enables one leaves no choice — and a
+// connector the Config requires, i.e. one of whose method components it
+// enables: a choice swaps a method, it never adds a connector.
+func cellMethodComponents(
+	cfgName string, bp v1beta1.CellBlueprintDoc, enabled []string, methods map[string]string,
+) ([]string, map[string]string, error) {
+	if len(methods) == 0 {
+		return enabled, nil, nil
+	}
+	names := make([]string, 0, len(methods))
+	for name := range methods {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	out := append([]string(nil), enabled...)
+	recorded := make(map[string]string, len(methods))
+	for _, key := range names {
+		name, method := strings.TrimSpace(key), strings.TrimSpace(methods[key])
+		if method == "" {
+			return nil, nil, fmt.Errorf(
+				"%w: connector %q: the choice names no method", errdefs.ErrConnectorMethod, name)
+		}
+		var (
+			members []v1beta1.BlueprintComponent
+			picked  string
+			known   []string
+		)
+		for _, comp := range bp.Spec.Components {
+			if comp.Connector == nil || comp.Connector.Name != name || comp.Connector.Method == "" {
+				continue
+			}
+			members = append(members, comp)
+			known = append(known, comp.Connector.Method)
+			if comp.Connector.Method == method {
+				picked = comp.Name
+			}
+		}
+		if len(members) == 0 {
+			return nil, nil, fmt.Errorf(
+				"%w: config %q has no connector %q with methods to choose from (connectors with methods: %s)",
+				errdefs.ErrConnectorMethod, cfgName, name, methodConnectorNames(bp))
+		}
+		if picked == "" {
+			return nil, nil, fmt.Errorf("%w: connector %q has no method %q (methods: %s)",
+				errdefs.ErrConnectorMethod, name, method, strings.Join(known, ", "))
+		}
+		required := false
+		for _, comp := range members {
+			if !comp.Optional {
+				return nil, nil, fmt.Errorf(
+					"%w: config %q: blueprint %q always enables component %q, so connector %q has no method to choose",
+					errdefs.ErrConnectorMethod, cfgName, bp.Metadata.Name, comp.Name, name)
+			}
+			if componentEnabled(enabled, comp.Name) {
+				required = true
+			}
+		}
+		// A choice swaps the method of a connector the Config requires; it
+		// never adds a connector (and its credential) the Config does not.
+		if !required {
+			return nil, nil, fmt.Errorf(
+				"%w: connector %q is not required by config %q (connectors whose method it enables: %s)",
+				errdefs.ErrConnectorMethod, name, cfgName, enabledMethodConnectorNames(bp, enabled))
+		}
+		for _, comp := range members {
+			out = slices.DeleteFunc(out, func(c string) bool { return strings.TrimSpace(c) == comp.Name })
+		}
+		out = append(out, picked)
+		recorded[name] = method
+	}
+	return out, recorded, nil
+}
+
+// componentEnabled reports whether the Config's component list enables name.
+func componentEnabled(enabled []string, name string) bool {
+	return slices.ContainsFunc(enabled, func(c string) bool { return strings.TrimSpace(c) == name })
+}
+
+// enabledMethodConnectorNames lists the connectors whose method components
+// the Config enables, i.e. those a `--connector-method` choice may swap.
+func enabledMethodConnectorNames(bp v1beta1.CellBlueprintDoc, enabled []string) string {
+	return methodConnectorList(bp, func(comp v1beta1.BlueprintComponent) bool {
+		return componentEnabled(enabled, comp.Name)
+	})
+}
+
+// methodConnectorNames lists the connectors a blueprint declares methods for.
+func methodConnectorNames(bp v1beta1.CellBlueprintDoc) string {
+	return methodConnectorList(bp, func(v1beta1.BlueprintComponent) bool { return true })
+}
+
+// methodConnectorList lists, sorted and deduplicated, the connectors of the
+// blueprint's method components that keep accepts, or "none".
+func methodConnectorList(bp v1beta1.CellBlueprintDoc, keep func(v1beta1.BlueprintComponent) bool) string {
+	var names []string
+	for _, comp := range bp.Spec.Components {
+		if comp.Connector != nil && comp.Connector.Method != "" && keep(comp) {
+			names = append(names, comp.Connector.Name)
+		}
+	}
+	if len(names) == 0 {
+		return "none"
+	}
+	sort.Strings(names)
+	return strings.Join(slices.Compact(names), ", ")
 }
 
 func findRequirement(reqs []connectorRequirement, name string) (connectorRequirement, bool) {

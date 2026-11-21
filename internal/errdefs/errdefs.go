@@ -582,6 +582,10 @@ var (
 	// ErrConnectorUnknown is returned when a per-cell override names a
 	// connector the CellConfig does not require.
 	ErrConnectorUnknown = errors.New("config does not require the connector")
+	// ErrConnectorMethod is returned when a per-cell method choice names a
+	// method the connector's blueprint components do not declare, or a
+	// connector whose method is not a choice (issue #1551).
+	ErrConnectorMethod = errors.New("connector has no such method")
 	// ErrBlueprintComponentGroup is returned when a CellConfig enables two
 	// components of one group.
 	ErrBlueprintComponentGroup = errors.New("components of one group are mutually exclusive")

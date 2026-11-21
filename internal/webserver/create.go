@@ -46,6 +46,9 @@ type createConfigRequest struct {
 	// connector name — only the ones that differ from what the Config
 	// resolves on its own (#1548).
 	Connectors map[string]v1beta1.ContainerSecretRef `json:"connectors,omitempty"`
+	// Methods are the connector methods picked for this cell only, keyed by
+	// connector name — only the ones that differ from the Config's (#1551).
+	Methods map[string]string `json:"methods,omitempty"`
 }
 
 func registerCreateRoutes(mux *http.ServeMux, dial Dial) {
@@ -136,6 +139,10 @@ func configCell(ctx context.Context, c kukeonv1.Client, input createConfigReques
 	if err != nil {
 		return empty, err
 	}
+	methods, err := connectorMethods(input.Methods)
+	if err != nil {
+		return empty, err
+	}
 	// kukeond renders the cell (#1418): defaults merge, slot fills, realm
 	// images and — for an omitted name — the generated <prefix>-<6hex>.
 	request := kukeonv1.CellFromConfigRequest{
@@ -143,6 +150,7 @@ func configCell(ctx context.Context, c kukeonv1.Client, input createConfigReques
 		Name:               requestedName,
 		EnvOverrides:       normalized,
 		ConnectorOverrides: overrides,
+		ConnectorMethods:   methods,
 	}
 	preview, err := c.PreviewCellFromConfig(ctx, request)
 	if err != nil {
@@ -331,7 +339,7 @@ func renderError(err error) error {
 		// A connector failure keeps its own code: the UI offers "set a
 		// default" or "pick an identity" for it instead of a generic error.
 		errdefs.ErrConnectorUnresolved, errdefs.ErrConnectorIdentity,
-		errdefs.ErrConnectorUnknown, errdefs.ErrConnectorInvalid,
+		errdefs.ErrConnectorUnknown, errdefs.ErrConnectorMethod, errdefs.ErrConnectorInvalid,
 	} {
 		if errors.Is(err, sentinel) {
 			return err

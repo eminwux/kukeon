@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  allowedLevels, blockingConnectors, blocksCells, changedPicks, clearMaterial, connectorLevels, defaultGroupChoices, defaultRow, defaultTargets, emptyIdentityForm, formatSecretReference,
-  groupComponents, identitiesFor, identityErrors, identityFields, identityPayload, isRegistry, loginMethods, originLabel, refKey, refLabel, registryEntries, sameRef, scopeAt, scopeFromParts,
+  allowedLevels, blockingConnectors, blocksCells, changedMethods, changedPicks, clearMaterial, connectorLevels, defaultGroupChoices, defaultRow, defaultTargets, emptyIdentityForm, formatSecretReference,
+  groupComponents, identitiesFor, identityErrors, identityFields, identityPayload, isRegistry, loginMethods, methodChoices, methodStatuses, originLabel, refKey, refLabel, registryEntries, sameRef, scopeAt, scopeFromParts,
   scopeLevel, scopeQuery, secretRef, takesIdentity, targetScope, teamOf, unresolvedConnectors, usageFor,
 } from "./connectors.mjs";
 import { blueprintForm, buildSpec, connectorsWithoutIdentity, emptyAnswers, formSections, groupChoice, missingAnswers } from "./config-form.mjs";
@@ -294,4 +294,27 @@ test("registry entries name the Secret of a Secret-backed entry and the username
     { server: "", username: "", secret: { name: "registry-default", realm: "dev" } },
   ]);
   assert.deepEqual(registryEntries({}), []);
+});
+
+test("a cell's method pick swaps the connector's delivery and is sent only when it differs (#1551)", () => {
+  assert.deepEqual(methodChoices(demo).map(method => method.name), ["login", "key", "cert"]);
+  assert.deepEqual(methodChoices(example), [], "a single method is no choice");
+  assert.deepEqual(methodChoices(repo), [], "a connector without methods is no choice");
+
+  const statuses = [
+    { connector: "demo", title: "Demo", component: "demo-login", method: "login", delivery: "stateVolume", state: "resolved", volume: "dev-demo" },
+    { connector: "repo", component: "repo", delivery: "git", state: "resolved" },
+  ];
+  assert.deepEqual(changedMethods(statuses, {}), {});
+  assert.deepEqual(changedMethods(statuses, { demo: "login" }), {}, "re-picking the Config's method is no override");
+  assert.deepEqual(changedMethods(statuses, { demo: "key", repo: "ssh" }), { demo: "key" }, "a connector without a method takes no method pick");
+
+  assert.equal(methodStatuses(statuses, [demo, repo], {})[0], statuses[0], "no pick keeps the Config's status");
+  const [picked, untouched] = methodStatuses(statuses, [demo, repo], { demo: "key" });
+  assert.deepEqual(picked, { connector: "demo", title: "Demo", component: "demo-key", method: "key", delivery: "env", slot: "demo-key", state: "pending" });
+  assert.equal(untouched, statuses[1]);
+  assert.equal(takesIdentity(picked.delivery), true, "the picked method's identity can be chosen");
+  assert.equal(blocksCells(picked), false, "a picked method resolves in the preview, which fails by itself when nothing fills it");
+  assert.deepEqual(changedPicks([picked], { demo: { name: "demo-key-1", realm: "dev" } }), { demo: { name: "demo-key-1", realm: "dev" } });
+  assert.equal(methodStatuses(statuses, [demo], { demo: "oauth" })[0], statuses[0], "an unknown method is left to the daemon to refuse");
 });

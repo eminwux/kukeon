@@ -232,6 +232,8 @@ func cloneFromConfig(
 		Params:       params,
 		// The clone keeps the identities the source cell picked (#1548).
 		ConnectorOverrides: srcProv.ConnectorOverrides,
+		// ...and the methods it picked (#1551).
+		ConnectorMethods: srcProv.ConnectorMethods,
 	})
 	if err != nil {
 		if errors.Is(err, errdefs.ErrConfigNotFound) {
@@ -257,6 +259,7 @@ func cloneFromConfig(
 		cellDoc.Spec.Provenance.Mode = rendered.Mode
 		cellDoc.Spec.Provenance.ParamOverrides = rendered.ParamOverrides
 		cellDoc.Spec.Provenance.ConnectorOverrides = rendered.ConnectorOverrides
+		cellDoc.Spec.Provenance.ConnectorMethods = rendered.ConnectorMethods
 	}
 	return cellDoc, nil
 }

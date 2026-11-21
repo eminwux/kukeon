@@ -98,6 +98,8 @@ type CellProvenance struct {
 	ParamOverrides map[string]string
 	// ConnectorOverrides records the per-cell connector identities (#1548).
 	ConnectorOverrides map[string]ContainerSecretRef
+	// ConnectorMethods records the per-cell connector methods (#1551).
+	ConnectorMethods map[string]string
 }
 
 // CellBindingRef mirrors v1beta1.CellBindingRef. Issue #1021.
@@ -142,6 +144,13 @@ func CloneCellProvenance(in *CellProvenance) *CellProvenance {
 			overrides[k] = v
 		}
 		out.ConnectorOverrides = overrides
+	}
+	if in.ConnectorMethods != nil {
+		methods := make(map[string]string, len(in.ConnectorMethods))
+		for k, v := range in.ConnectorMethods {
+			methods[k] = v
+		}
+		out.ConnectorMethods = methods
 	}
 	return out
 }

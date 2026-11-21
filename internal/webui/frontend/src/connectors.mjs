@@ -26,6 +26,8 @@ export const secretSSHKey = "ssh-key";
 // Levels a default may be set at, shallowest first: a deeper level wins.
 export const scopeLevels = ["realm", "space", "stack"];
 export const stateResolved = "resolved";
+// A connector whose method a cell picked: it resolves in the preview (#1551).
+export const statePending = "pending";
 // The label `kuke team` stamps on the Configs it renders.
 export const teamLabel = "kukeon.io/team";
 // An open Config coordinate lands in the scope of this name.
@@ -212,6 +214,40 @@ export function changedPicks(statuses, picks) {
     if (ref && !sameRef(ref, status.identity)) out[status.connector] = ref;
   }
   return out;
+}
+// methodChoices are the methods a cell may pick for a connector (#1551): its
+// catalog methods, offered only when there is more than one to choose from.
+export function methodChoices(connector) {
+  const methods = list(connector?.methods).filter(method => text(method?.name));
+  return methods.length > 1 ? methods : [];
+}
+// changedMethods keeps only the method picks that differ from the method the
+// Config uses: those are the per-cell methods a create sends.
+export function changedMethods(statuses, picks) {
+  const out = {};
+  for (const status of list(statuses)) {
+    const method = trimmed(picks?.[status.connector]);
+    if (method && text(status.method) && method !== status.method) out[status.connector] = method;
+  }
+  return out;
+}
+// methodStatuses applies the per-cell method picks to a Config's connector
+// statuses: a connector on a picked method shows that method's delivery and
+// slot. Which identity fills it is the daemon's to resolve (cell pick, Config,
+// scope defaults), so it stays "pending" until the preview reports it; it
+// does not block a preview, which fails by itself when nothing resolves.
+export function methodStatuses(statuses, connectors, picks) {
+  const changed = changedMethods(statuses, picks);
+  return list(statuses).map(status => {
+    const name = changed[status.connector];
+    const catalog = list(connectors).find(connector => connector?.name === status.connector);
+    const method = name ? list(catalog?.methods).find(item => item?.name === name) : undefined;
+    if (!method) return status;
+    const out = { connector: status.connector, component: text(method.component) || `${status.connector}-${name}`, method: name, delivery: text(method.delivery), state: statePending };
+    if (status.title) out.title = status.title;
+    if (text(method.slot)) out.slot = method.slot;
+    return out;
+  });
 }
 // unresolvedConnectors are the connectors that still keep a cell from being
 // created once the picks are applied: a blocking one nothing was picked for.

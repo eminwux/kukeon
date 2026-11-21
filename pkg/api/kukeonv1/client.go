@@ -301,11 +301,20 @@ type CellFromConfigRequest struct {
 	// ConnectorOverrides pick, for this cell only, the identity of a
 	// connector the Config requires — `--connector <connector>=<secret>` —
 	// keyed by connector name (issue #1548). A reference without a realm is
-	// looked up in the cell's own realm. The method stays the Config's; a
-	// connector the Config does not require, or a Secret tagged for another
-	// connector, is refused. The overrides are recorded in the cell's
-	// provenance, so a restart and a recreate keep them.
+	// looked up in the cell's own realm. A connector the Config does not
+	// require, or a Secret tagged for another connector, is refused. The
+	// overrides are recorded in the cell's provenance, so a restart and a
+	// recreate keep them.
 	ConnectorOverrides map[string]v1beta1.ContainerSecretRef
+	// ConnectorMethods pick, for this cell only, the method of a connector
+	// the Config requires — `--connector-method <connector>=<method>` —
+	// keyed by connector name (issue #1551). The blueprint component of that
+	// method is enabled in place of the one the Config enables, so the
+	// connector's identity then fills that method's slot. An unknown
+	// connector or method, or a connector the Config does not require, is
+	// refused. Recorded in the cell's provenance, so a restart and a
+	// recreate keep it.
+	ConnectorMethods map[string]string
 }
 
 // PreviewCellFromConfigArgs is the wire request for PreviewCellFromConfig.

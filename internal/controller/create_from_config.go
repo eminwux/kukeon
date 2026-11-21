@@ -70,9 +70,14 @@ type CellFromConfigRequest struct {
 	Schedule string
 	// ConnectorOverrides pick, for this cell only, the identity of a
 	// connector the Config requires, keyed by connector name (issue #1548).
-	// A reference without a realm is looked up in the cell's own realm. The
-	// method stays the Config's. Recorded in the cell's provenance.
+	// A reference without a realm is looked up in the cell's own realm.
+	// Recorded in the cell's provenance.
 	ConnectorOverrides map[string]v1beta1.ContainerSecretRef
+	// ConnectorMethods pick, for this cell only, the method of a connector
+	// the Config requires, keyed by connector name (issue #1551): the
+	// blueprint component of that method is enabled in place of the one the
+	// Config enables. Recorded in the cell's provenance.
+	ConnectorMethods map[string]string
 }
 
 // CellFromConfigPreview is the outcome of a render: the rendered cell, its
@@ -123,6 +128,7 @@ func (b *Exec) PreviewCellFromConfig(req CellFromConfigRequest) (CellFromConfigP
 	rendered, err := renderCellFromConfig(b.runner, cfg, cellBinding{
 		Name: name, EnvOverrides: req.EnvOverrides, Mode: strings.TrimSpace(req.Mode), Params: req.Params,
 		Schedule: strings.TrimSpace(req.Schedule), Connectors: req.ConnectorOverrides,
+		Methods: req.ConnectorMethods,
 	})
 	if err != nil {
 		return CellFromConfigPreview{}, err

@@ -170,6 +170,16 @@ export function connectorStatuses(world, config, overrides = {}) {
     return [{ ...base, state: problem ? "unresolved" : "resolved", ...(required ? { required } : {}), identity, origin, ...(problem ? { message: problem } : {}) }];
   });
 }
+// withMethods applies a cell's per-cell method picks (#1551) the way the
+// daemon does: the picked method's component replaces the Config's.
+function withMethods(world, config, methods = {}) {
+  const components = (config.spec.components ?? []).map(component => {
+    const found = methodOf(world, component);
+    const picked = found?.method ? methods[found.connector.name] : undefined;
+    return picked ? found.connector.methods.find(method => method.name === picked)?.component ?? component : component;
+  });
+  return { ...config, spec: { ...config.spec, components } };
+}
 const blocks = status => status.state !== "resolved" && (status.required || status.identity);
 const withStatus = (world, config) => ({ ...config, status: { connectors: connectorStatuses(world, config) } });
 const secretDoc = secret => ({
@@ -280,7 +290,7 @@ export async function mockConnectorAPI(page, world) {
     const body = record(route.request());
     const config = world.configs.find(item => refPath(item.metadata) === refPath(body.config));
     if (!config) return route.fulfill(fail(404, "not_found", "config not found"));
-    const statuses = connectorStatuses(world, config, body.connectors ?? {});
+    const statuses = connectorStatuses(world, withMethods(world, config, body.methods ?? {}), body.connectors ?? {});
     const failure = renderFailure(statuses, config.metadata.name);
     if (failure) return route.fulfill(failure);
     const document = { apiVersion: "v1beta1", kind: "Cell", metadata: { name: body.name || body.resolvedName || `${config.metadata.name}-abc123` }, spec: { realmId: config.metadata.realm, spaceId: config.metadata.space || "default", stackId: config.metadata.stack || "default", containers: [] } };
