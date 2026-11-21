@@ -4019,19 +4019,34 @@ such names of one connector are alternatives — the first method wins and
 <h2 id="per-cell-overrides">Per-cell overrides<a class="headerlink" href="#per-cell-overrides" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>cell<span class="w"> </span>--from-config<span class="w"> </span>team-dev-claude<span class="w"> </span>--connector<span class="w"> </span><span class="nv">github</span><span class="o">=</span>other-github
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>-c<span class="w"> </span>team-dev-claude<span class="w"> </span>--connector<span class="w"> </span><span class="nv">git</span><span class="o">=</span>release-key@ops
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>cell<span class="w"> </span>--from-config<span class="w"> </span>team-dev-codex<span class="w"> </span>--connector-method<span class="w"> </span><span class="nv">codex</span><span class="o">=</span>api-key<span class="w"> </span>--connector<span class="w"> </span><span class="nv">codex</span><span class="o">=</span>my-openai-key
 </code></pre></div>
 <p><code>--connector &lt;connector&gt;=&lt;secret&gt;[@realm[/space[/stack]]]</code> uses another identity
 for this one cell. The override is recorded in the cell's provenance
 (<code>spec.provenance.connectorOverrides</code>), so <code>kuke restart</code> and a
 reconcile-driven recreate render the cell with the same identity, and
 <code>kuke create cell --clone</code> carries it over. The flag is valid with
-<code>--from-config</code> only. Only the identity is overridable:
-the method is the Config's. An unknown connector, a missing Secret, or a Secret
+<code>--from-config</code> only. An unknown connector, a missing Secret, or a Secret
 tagged for another connector is rejected before anything is created.</p>
+<p><code>--connector-method &lt;connector&gt;=&lt;method&gt;</code> uses another method of a connector
+for this one cell — for example a codex Config on <code>login</code> started once with
+<code>api-key</code>. The blueprint already carries every method of the connector as one
+exclusive group, so the cell enables the picked method's component in place of
+the one the Config enables; the Config itself is not changed. The new method's
+identity resolves as usual: a <code>--connector</code> override, the Config's fill, then
+the Stack, Space and Realm defaults — a Config's fill for its own method's slot
+does not carry over. The choice is recorded in
+<code>spec.provenance.connectorMethods</code> and kept by <code>kuke restart</code>, a
+reconcile-driven recreate and <code>--clone</code>. A connector the blueprint declares no
+methods for, a method it does not declare, or a connector the Config does not
+require (a method pick swaps a method, it never adds a connector) is rejected.
+Valid with <code>--from-config</code> only.</p>
 <p>In the web UI's New Cell flow every required connector is pre-selected with its
-effective identity; choosing another sends the same override, and the preview
-shows the identities the cell will use. Configs owned by a team show theirs
-read-only.</p>
+effective method and identity. A connector with several methods offers a method
+picker; choosing another identity or method sends the same overrides, and the
+preview shows the methods and identities the cell will use. A per-cell pick is
+allowed on a team-owned Config too: only the Config's own page shows its
+identities read-only, because <code>kuke team add</code> re-renders it.</p>
 <h2 id="why-login-volumes-are-not-shared-across-roles">Why login volumes are not shared across roles<a class="headerlink" href="#why-login-volumes-are-not-shared-across-roles" title="Permanent link">&para;</a></h2>
 <p>The <code>login</code> methods keep the session in the harness state volume, and that
 volume is per role — <code>kuke-majordomo-claude</code> and <code>team-dev-claude</code> each log in
@@ -4210,7 +4225,7 @@ daemon was built.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 20, 2026 13:37:15 UTC">November 20, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 21, 2026 12:03:10 UTC">November 21, 2026</span>
   </span>
 
     

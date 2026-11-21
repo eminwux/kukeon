@@ -3633,6 +3633,11 @@
 <td>Per-cell identity override <code>CONNECTOR=SECRET[@realm[/space[/stack]]]</code>: use another stored identity for one <a href="../../concepts/connectors/#per-cell-overrides">connector</a> of this cell. Valid with <code>--from-config</code> only; recorded in <code>Spec.Provenance.connectorOverrides</code>, so it survives <code>kuke restart</code> and a recreate</td>
 </tr>
 <tr>
+<td><code>--connector-method</code></td>
+<td>(empty, repeatable)</td>
+<td>Per-cell method <code>CONNECTOR=METHOD</code>: use another <a href="../../concepts/connectors/#per-cell-overrides">method</a> of a connector for this cell, e.g. <code>codex=api-key</code>. Valid with <code>--from-config</code> only; recorded in <code>Spec.Provenance.connectorMethods</code>, so it survives <code>kuke restart</code> and a recreate</td>
+</tr>
+<tr>
 <td><code>--detach</code>, <code>-d</code></td>
 <td><code>false</code></td>
 <td>Return immediately after start without attaching</td>
@@ -3770,7 +3775,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 20, 2026 13:37:15 UTC">November 20, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 21, 2026 12:03:10 UTC">November 21, 2026</span>
   </span>
 
     

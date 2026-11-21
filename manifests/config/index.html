@@ -4533,7 +4533,7 @@
 <p>The lineage contract:</p>
 <ul>
 <li>Every cell stamped from a Config carries the <code>kukeon.io/config=&lt;name&gt;</code> <strong>lineage label</strong> (a back-reference, not an identity constraint). List a Config's stamped cells with <code>kuke get cells -l kukeon.io/config=&lt;name&gt;</code>.</li>
-<li>Every stamped cell also persists a <code>Spec.Provenance</code> block recording the binding it came from (kind, scoped ref, resolved params, and any <code>--env</code> and <code>--connector</code> per-cell overrides), so a later re-resolve rebuilds the cell from the same Config without re-supplying values.</li>
+<li>Every stamped cell also persists a <code>Spec.Provenance</code> block recording the binding it came from (kind, scoped ref, resolved params, and any <code>--env</code>, <code>--connector</code> and <code>--connector-method</code> per-cell overrides), so a later re-resolve rebuilds the cell from the same Config without re-supplying values.</li>
 <li>Editing the Config does <strong>not</strong> push to live cells. A stamped cell whose spec has drifted from the current Config surfaces as informational <code>OutOfSync</code> in the <code>SYNC</code> column of <code>kuke get cell -o wide</code>; an operator pulls it back in line explicitly with <a href="../../cli/kuke-restart/"><code>kuke restart &lt;cell&gt;</code></a> (or <code>kuke restart -l &lt;selector&gt;</code> to roll a fleet). <code>kuke run</code> / <code>kuke create cell</code> never mutate a live cell.</li>
 </ul>
 <p>This is the structural parallel with a <a href="../blueprint/"><code>CellBlueprint</code></a>: both are always-fresh templates (<code>&lt;prefix&gt;-&lt;6hex&gt;</code> per invocation). A Blueprint binds only scalar <code>${KEY}</code> parameters; a Config additionally binds structural repo/secret slot sources, so a blueprint with required slots can only run through a Config.</p>
@@ -4598,7 +4598,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 20, 2026 13:37:15 UTC">November 20, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 21, 2026 12:03:10 UTC">November 21, 2026</span>
   </span>
 
     
