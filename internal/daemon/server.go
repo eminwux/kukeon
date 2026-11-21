@@ -26,7 +26,6 @@ import (
 	"log/slog"
 	"net"
 	"net/rpc"
-	"net/rpc/jsonrpc"
 	"os"
 	"path/filepath"
 	"sync"
@@ -459,7 +458,9 @@ func (s *Server) acceptLoop(listener net.Listener) {
 			s.logger.WarnContext(s.ctx, "accept error", "error", err)
 			continue
 		}
-		go s.rpc.ServeCodec(jsonrpc.NewServerCodec(conn))
+		// The fd-aware codec is wire-identical to jsonrpc; it only adds
+		// SCM_RIGHTS to ConnectContainerTerminal replies.
+		go s.rpc.ServeCodec(kukeonv1.NewServerCodec(conn))
 	}
 }
 

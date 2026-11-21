@@ -131,8 +131,8 @@ func formatAttachableList(spec v1beta1.CellSpec) string {
 	return strings.Join(names, ", ")
 }
 
-// runAttachLoop resolves the per-container sbsh control socket via the
-// daemon's AttachContainer RPC and drives the in-process attach loop.
+// runAttachLoop drives the in-process attach loop over control-socket
+// connections kukeond dials and passes back (ConnectContainerTerminal).
 // Returns the tri-state used by the --rm cleanup decision in
 // attachAndMaybeAutoDelete:
 //
@@ -166,28 +166,24 @@ func runAttachLoop(
 		},
 	}
 
-	result, err := client.AttachContainer(cmd.Context(), containerDoc)
-	if err != nil {
-		if errors.Is(err, errdefs.ErrAttachNotSupported) {
-			return false, fmt.Errorf("container %q in cell %q is not attachable: %w",
-				container, doc.Metadata.Name, err)
-		}
-		if errors.Is(err, errdefs.ErrContainerNotFound) {
-			return false, fmt.Errorf("container %q not found in cell %q: %w",
-				container, doc.Metadata.Name, err)
-		}
-		return false, err
-	}
-	if result.HostSocketPath == "" {
-		return false, fmt.Errorf("daemon returned empty HostSocketPath for container %q", container)
-	}
-
+	// Each attempt preflights a daemon-passed connection (#1535): kukeond
+	// enforces the Attachable / task-liveness gates and dials the socket, so
+	// a boot-race dial failure comes back as a typed sentinel the retry
+	// classifier can errors.Is, and the attach loop then dials through the
+	// same RPC.
+	dialer := kukeshared.NewTerminalDialer(client, containerDoc)
+	defer dialer.Close()
 	run := resolveRun(cmd)
-	runErr := runWithPingRetry(cmd.Context(), run, attach.Options{
-		SocketPath: result.HostSocketPath,
-		Stdin:      os.Stdin,
-		Stdout:     os.Stdout,
-		Stderr:     os.Stderr,
+	runErr := runWithPingRetry(cmd.Context(), func(ctx context.Context) (string, error) {
+		opts := attach.Options{
+			Stdin:  os.Stdin,
+			Stdout: os.Stdout,
+			Stderr: os.Stderr,
+		}
+		if err := dialer.Prepare(ctx, &opts); err != nil {
+			return "", wrapAttachGateError(err, container, doc.Metadata.Name)
+		}
+		return opts.SocketPath, run(ctx, opts)
 	})
 	switch kukeshared.ClassifyAttachExit(runErr) {
 	case kukeshared.AttachExitDetached:
@@ -201,6 +197,19 @@ func runAttachLoop(
 	}
 }
 
+// wrapAttachGateError names the container and cell on the gate refusals the
+// preflight surfaces, matching `kuke attach`'s wording.
+func wrapAttachGateError(err error, container, cell string) error {
+	switch {
+	case errors.Is(err, errdefs.ErrAttachNotSupported):
+		return fmt.Errorf("container %q in cell %q is not attachable: %w", container, cell, err)
+	case errors.Is(err, errdefs.ErrContainerNotFound):
+		return fmt.Errorf("container %q not found in cell %q: %w", container, cell, err)
+	default:
+		return err
+	}
+}
+
 func resolveRun(cmd *cobra.Command) runFn {
 	if mock, ok := cmd.Context().Value(MockRunKey{}).(runFn); ok {
 		return mock
@@ -208,51 +217,55 @@ func resolveRun(cmd *cobra.Command) runFn {
 	return attach.Run
 }
 
-// runWithPingRetry retries run() while the failure looks like a
+// attachAttempt performs one attach attempt: prepare the connection route
+// and run the attach loop. It returns the socket path the attempt dialed
+// directly — empty on the daemon-passed route, set only on the fallback to
+// AttachContainer against an older kukeond — so the classifier can stat it.
+type attachAttempt func(ctx context.Context) (socketPath string, err error)
+
+// runWithPingRetry retries attempt() while the failure looks like a
 // kuketty boot-race class — either sbsh's per-attempt 3 s ping
 // deadline firing before kuketty has entered Serve()'s Accept loop
-// (#926), or dial(2) returning EACCES/ENOENT against a stale pre-fix
-// tty socket that the new kuketty has not yet unlinked and re-bound
-// (#933). Both classes share the same retry budget and backoff: the
-// post-StartCell attach can race either window, and a kuketty whose
-// stale socket has been replaced does not re-enter the EACCES window
-// on subsequent runs (the race window collapses to the sub-millisecond
-// Remove→Listen gap inside kuketty's init path).
+// (#926), or the control socket being absent / not yet re-bound when
+// it is dialed (#933). Both classes share the same retry budget and
+// backoff: the post-StartCell attach can race either window, and a
+// kuketty whose stale socket has been replaced does not re-enter the
+// window on subsequent runs (the race window collapses to the
+// sub-millisecond Remove→Listen gap inside kuketty's init path).
+//
+// The socket is dialed by kukeond (ConnectContainerTerminal, #1535), so
+// dial failures arrive as typed sentinels — errdefs.ErrAttachStaleSocket
+// or errdefs.ErrAttachPermissionDenied — rather than a raw errno the
+// client could pair with a stat of a path it may not be able to see.
 //
 // Behaviour:
 //   - non-boot-race errors propagate immediately; the existing
 //     ClassifyAttachExit branch handles them.
 //   - boot-race errors are retried with attachPingRetryBackoff
-//     between attempts until either run() succeeds, the outer ctx
+//     between attempts until either an attempt succeeds, the outer ctx
 //     is cancelled (returns ctx.Err), or attachPingRetryBudget is
-//     exhausted (returns the last runErr wrapped with the matching
+//     exhausted (returns the last error carrying the matching
 //     sentinel — errdefs.ErrAttachPingTimeout for the ping-deadline
 //     class, errdefs.ErrAttachStaleSocket for the absent-socket
-//     EACCES/ENOENT class — so callers can errors.Is either class
-//     without string-matching sbsh's wrap or sniffing for raw errno
-//     values).
-//   - EACCES against a socket that is *present on disk* is a permanent
-//     wrong-mode condition, not a race: attachBootRaceSentinel returns
-//     errdefs.ErrAttachPermissionDenied with retry=false and the loop
-//     surfaces it immediately rather than burning the full budget
-//     (#1170).
-func runWithPingRetry(ctx context.Context, run runFn, opts attach.Options) error {
+//     class — so callers can errors.Is either class without
+//     string-matching sbsh's wrap).
+//   - a socket that is present but not dialable is a permanent
+//     wrong-mode condition, not a race: errdefs.ErrAttachPermissionDenied
+//     surfaces immediately rather than burning the full budget (#1170).
+func runWithPingRetry(ctx context.Context, attempt attachAttempt) error {
 	deadline := time.Now().Add(attachPingRetryBudget)
 	var lastErr error
 	for {
-		lastErr = run(ctx, opts)
-		sentinel, retry := attachBootRaceSentinel(ctx, lastErr, opts.SocketPath)
+		var socketPath string
+		socketPath, lastErr = attempt(ctx)
+		sentinel, retry := attachBootRaceSentinel(ctx, lastErr, socketPath)
 		if sentinel == nil {
 			return lastErr
 		}
-		if !retry {
-			// Permanent failure (e.g. a present socket with the wrong
-			// mode): retrying cannot resolve it, so surface the matching
-			// sentinel immediately instead of waiting out the budget.
-			return fmt.Errorf("%w: %w", sentinel, lastErr)
-		}
-		if !time.Now().Before(deadline) {
-			return fmt.Errorf("%w: %w", sentinel, lastErr)
+		if !retry || !time.Now().Before(deadline) {
+			// Permanent failure (a present socket with the wrong mode), or
+			// the budget is spent: surface the matching sentinel.
+			return withSentinel(sentinel, lastErr)
 		}
 		select {
 		case <-ctx.Done():
@@ -260,6 +273,15 @@ func runWithPingRetry(ctx context.Context, run runFn, opts attach.Options) error
 		case <-time.After(attachPingRetryBackoff):
 		}
 	}
+}
+
+// withSentinel wraps err with sentinel unless the chain already carries it
+// (a typed dial failure from kukeond does), so the message does not stutter.
+func withSentinel(sentinel, err error) error {
+	if errors.Is(err, sentinel) {
+		return err
+	}
+	return fmt.Errorf("%w: %w", sentinel, err)
 }
 
 // attachBootRaceSentinel classifies err for runWithPingRetry, returning
@@ -273,19 +295,17 @@ func runWithPingRetry(ctx context.Context, run runFn, opts attach.Options) error
 //   - ctx must not be done (a cancelled outer ctx surfaces as
 //     DeadlineExceeded on the inner WithTimeout child, but is the
 //     operator's ^C not kuketty's boot race — don't retry);
+//   - errdefs.ErrAttachPermissionDenied (kukeond found the socket present
+//     but could not dial it) is permanent: retry=false (#1170);
+//   - errdefs.ErrAttachStaleSocket (kukeond found the socket absent, or
+//     absent-on-stat after EACCES) retries (#933);
 //   - context.DeadlineExceeded in the chain maps to ErrAttachPingTimeout
 //     and retries (the only bounded-timeout in sbsh's attach.Run setup
 //     is the 3 s ping window in clientrunner/io.go dialTerminalCtrlSocket);
-//   - syscall.ENOENT in the chain maps to ErrAttachStaleSocket and
-//     retries (the Remove→Listen gap inside kuketty's init path; #933);
-//   - syscall.EACCES in the chain is split by stat(2) on socketPath
-//     (#1170): a stale/absent inode (stat ENOENT) is the transient
-//     pre-fix window — maps to ErrAttachStaleSocket and retries; a
-//     socket that is *present on disk* is a permanent wrong-mode
-//     condition retrying cannot fix — maps to ErrAttachPermissionDenied
-//     with retry=false so the loop fails fast with a message naming the
-//     actual cause instead of burning the 10 s budget blaming a stale
-//     socket.
+//   - raw syscall.ENOENT / syscall.EACCES only reach here on the fallback
+//     to AttachContainer against an older kukeond, where the client dials
+//     socketPath itself; they keep the pre-#1535 classification, splitting
+//     EACCES by stat(2) on socketPath.
 func attachBootRaceSentinel(ctx context.Context, err error, socketPath string) (error, bool) {
 	if err == nil {
 		return nil, false
@@ -293,13 +313,16 @@ func attachBootRaceSentinel(ctx context.Context, err error, socketPath string) (
 	if ctx.Err() != nil {
 		return nil, false
 	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return errdefs.ErrAttachPingTimeout, true
-	}
-	if errors.Is(err, syscall.ENOENT) {
+	switch {
+	case errors.Is(err, errdefs.ErrAttachPermissionDenied):
+		return errdefs.ErrAttachPermissionDenied, false
+	case errors.Is(err, errdefs.ErrAttachStaleSocket):
 		return errdefs.ErrAttachStaleSocket, true
-	}
-	if errors.Is(err, syscall.EACCES) {
+	case errors.Is(err, context.DeadlineExceeded):
+		return errdefs.ErrAttachPingTimeout, true
+	case errors.Is(err, syscall.ENOENT):
+		return errdefs.ErrAttachStaleSocket, true
+	case errors.Is(err, syscall.EACCES):
 		if socketPresent(socketPath) {
 			return errdefs.ErrAttachPermissionDenied, false
 		}

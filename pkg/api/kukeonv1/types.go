@@ -17,6 +17,7 @@
 package kukeonv1
 
 import (
+	"net"
 	"time"
 
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -711,6 +712,34 @@ type AttachContainerResult struct {
 	// the daemon errors with ErrAttachNotSupported when the target is not
 	// Attachable, or ErrAttachTaskNotRunning when the task is not Running.
 	HostSocketPath string
+}
+
+// ConnectContainerTerminalArgs identifies the target container whose sbsh
+// control socket the daemon should connect to on the caller's behalf.
+type ConnectContainerTerminalArgs struct {
+	Doc v1beta1.ContainerDoc
+}
+
+// ConnectContainerTerminalReply is the wire reply for
+// ConnectContainerTerminal. On success the connected control socket does
+// not travel in the JSON body: the daemon's fd-aware server codec (see
+// NewServerCodec) sends Conn's descriptor as SCM_RIGHTS ancillary data with
+// the reply bytes and closes its own copy once the reply is written. Err is
+// set, and no descriptor is sent, when a gate or the dial fails.
+type ConnectContainerTerminalReply struct {
+	Err *APIError
+
+	// Conn is the daemon-side connected sbsh control socket. Never
+	// serialized; consumed by the server codec when writing the reply.
+	Conn *net.UnixConn `json:"-"`
+}
+
+// takePassedConn hands Conn to the server codec and clears it so the reply
+// owns the descriptor exactly once.
+func (r *ConnectContainerTerminalReply) takePassedConn() *net.UnixConn {
+	c := r.Conn
+	r.Conn = nil
+	return c
 }
 
 // ---- Log ----
