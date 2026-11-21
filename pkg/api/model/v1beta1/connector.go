@@ -121,31 +121,34 @@ const (
 // never its material.
 type ConnectorStatus struct {
 	// Connector is the connector's name.
-	Connector string `json:"connector"          yaml:"connector"`
+	Connector string `json:"connector"           yaml:"connector"`
 	// Title is the connector's display name.
-	Title string `json:"title,omitempty"    yaml:"title,omitempty"`
+	Title string `json:"title,omitempty"     yaml:"title,omitempty"`
 	// Component is the blueprint component that requires it.
-	Component string `json:"component"          yaml:"component"`
+	Component string `json:"component"           yaml:"component"`
 	// Method is the connector method the Config uses.
-	Method string `json:"method,omitempty"   yaml:"method,omitempty"`
+	Method string `json:"method,omitempty"    yaml:"method,omitempty"`
 	// Delivery is the handler delivering the identity.
-	Delivery string `json:"delivery"           yaml:"delivery"`
+	Delivery string `json:"delivery"            yaml:"delivery"`
 	// Slot is the secret slot the identity fills (env and file delivery).
-	Slot string `json:"slot,omitempty"     yaml:"slot,omitempty"`
+	Slot string `json:"slot,omitempty"      yaml:"slot,omitempty"`
 	// State is resolved or unresolved.
-	State string `json:"state"              yaml:"state"`
+	State string `json:"state"               yaml:"state"`
 	// Required reports whether a cell cannot be created while the connector
 	// is unresolved.
-	Required bool `json:"required,omitempty" yaml:"required,omitempty"`
+	Required bool `json:"required,omitempty"  yaml:"required,omitempty"`
 	// Identity is the Secret that fills the connector; nil when unresolved
 	// or when the delivery needs none (a login kept in the state volume).
-	Identity *ContainerSecretRef `json:"identity,omitempty" yaml:"identity,omitempty"`
+	Identity *ContainerSecretRef `json:"identity,omitempty"  yaml:"identity,omitempty"`
 	// Origin is the level the identity came from: cell, config, stack, space
 	// or realm.
-	Origin string `json:"origin,omitempty"   yaml:"origin,omitempty"`
+	Origin string `json:"origin,omitempty"    yaml:"origin,omitempty"`
 	// Volume is the state volume holding the login of a stateVolume
 	// connector.
-	Volume string `json:"volume,omitempty"   yaml:"volume,omitempty"`
+	Volume string `json:"volume,omitempty"    yaml:"volume,omitempty"`
+	// VolumeRef is that state volume with its scope, when the Config names
+	// one (STATE_VOLUME_REALM, and optionally _SPACE and _STACK).
+	VolumeRef *VolumeRef `json:"volumeRef,omitempty" yaml:"volumeRef,omitempty"`
 	// Message says why the connector is unresolved.
-	Message string `json:"message,omitempty"  yaml:"message,omitempty"`
+	Message string `json:"message,omitempty"   yaml:"message,omitempty"`
 }

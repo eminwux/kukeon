@@ -127,6 +127,10 @@ func cloneConnectorStatuses(in []ext.ConnectorStatus) []ext.ConnectorStatus {
 			identity := *status.Identity
 			out[i].Identity = &identity
 		}
+		if status.VolumeRef != nil {
+			ref := *status.VolumeRef
+			out[i].VolumeRef = &ref
+		}
 	}
 	return out
 }

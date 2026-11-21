@@ -139,10 +139,11 @@ func envOf(c api.ContainerSpec) map[string]string {
 	return out
 }
 
-// stateVolume returns the named state volume a rendered container mounts.
+// stateVolume returns the harness state volume a rendered container mounts by
+// a fully-qualified reference.
 func stateVolume(c api.ContainerSpec) (api.VolumeMount, bool) {
 	for _, volume := range c.Volumes {
-		if volume.Kind == api.VolumeKindVolume && volume.VolumeRef == nil {
+		if volume.Kind == api.VolumeKindVolume && volume.VolumeRef != nil {
 			return volume, true
 		}
 	}

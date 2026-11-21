@@ -8,7 +8,7 @@ import {
   formatSecretReference, identitiesFor, identityErrors, identityFields, identityPayload, originLabel, refKey, refLabel, refScope, scopeAt, scopeLevels, scopeParts,
   secretBasicAuth, secretRef, secretSSHKey, secretTypesOf, stateResolved, takesIdentity, targetScope, teamOf,
 } from "./connectors.mjs";
-import type { ConfigMetadata, Connector, ConnectorStatus, FormField, Identity, IdentityForm as IdentityFormState, Scope, SecretRef } from "./connectors.mjs";
+import type { ConfigMetadata, Connector, ConnectorStatus, FormField, Identity, IdentityForm as IdentityFormState, Scope, SecretRef, VolumeRef } from "./connectors.mjs";
 
 // Shared pieces of the connectors UI (#1548, §7). Nothing here names a
 // connector: every label, field and choice comes from GET /api/connectors, the
@@ -42,10 +42,18 @@ export function ConnectorStateBadge({ status }: { status: ConnectorStatus }) {
   return <span className={`state-badge tone-${tone}`}><span className="state-dot" aria-hidden="true" />{status.state === stateResolved ? "Resolved" : blocksCells(status) ? "Unresolved" : "Not set"}</span>;
 }
 
+function volumeLink(ref: VolumeRef): string { return "#/volumes/" + [ref.realm, ref.space, ref.stack, ref.name].filter(Boolean).map(value => encodeURIComponent(value as string)).join("/"); }
+// StateVolume names the volume keeping a login: a link to the Volume when the
+// Config names its scope, the bare name otherwise.
+function StateVolume({ status }: { status: ConnectorStatus }) {
+  if (status.volumeRef) return <a className="resource-name" href={volumeLink(status.volumeRef)}><code>{status.volumeRef.name}</code></a>;
+  return status.volume ? <code>{status.volume}</code> : <>of the harness</>;
+}
+
 // StatusIdentity names the identity a connector resolved to and the level it
 // came from. Only Secret coordinates are shown — never material.
 export function StatusIdentity({ status, team = "" }: { status: ConnectorStatus; team?: string }) {
-  if (status.delivery === deliveryStateVolume) return <span>Login kept in state volume {status.volume ? <code>{status.volume}</code> : "of the harness"} — no stored identity.</span>;
+  if (status.delivery === deliveryStateVolume) return <span>Login kept in state volume <StateVolume status={status} /> — no stored identity.</span>;
   if (!status.identity) return <span>No identity{status.required ? " — required" : ""}</span>;
   return <span><code>{status.identity.name}</code> <span className="description">{refScope(status.identity).join(" / ")}</span>{status.origin && <> <span className="badge">{originLabel(status.origin, team)}</span></>}</span>;
 }

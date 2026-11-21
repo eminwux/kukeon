@@ -122,7 +122,7 @@ func TestBlueprintsAreSharedPerHarnessAndProfile(t *testing.T) {
 	}
 	// Each role keeps its own state volume and identity in its config.
 	for name, pair := range byConfig {
-		if pair.Config.Spec.Values["STATE_VOLUME"] != name || pair.Config.Spec.Values["AGENT_NAME"] != name {
+		if pair.Config.Spec.Values["STATE_VOLUME"] != name+"-state" || pair.Config.Spec.Values["AGENT_NAME"] != name {
 			t.Fatalf("%s values = %v", name, pair.Config.Spec.Values)
 		}
 	}
@@ -333,7 +333,8 @@ func TestHarnessModesPerCell(t *testing.T) {
 	// Both modes share the state volume, so a login made attached serves runs.
 	a, _ := stateVolume(attached)
 	d, _ := stateVolume(dispatched)
-	if a.Source != "root-majordomo-claude" || a != d {
+	if a.VolumeRef == nil || d.VolumeRef == nil || a.VolumeRef.Name != "root-majordomo-claude-state" ||
+		*a.VolumeRef != *d.VolumeRef || a.Target != d.Target || a.Ensure != d.Ensure {
 		t.Fatalf("state volumes differ across modes: %+v %+v", a, d)
 	}
 
@@ -385,13 +386,16 @@ func TestBlueprintIsASelfDescribingForm(t *testing.T) {
 		kind, group string
 		required    bool
 	}{
-		"IMAGE":           {api.ParameterTypeImage, "image", false},
-		"ROLE_SOURCE_DIR": {api.ParameterTypePath, "role", true},
-		"ROLE_PATH":       {api.ParameterTypePath, "role", true},
-		"INITIAL_PATH":    {api.ParameterTypePath, "role", false},
-		"PROJECT_DIR":     {api.ParameterTypePath, "role", false},
-		"ROLE_NAME":       {"", "role", true},
-		"STATE_VOLUME":    {"", "state", true},
+		"IMAGE":              {api.ParameterTypeImage, "image", false},
+		"ROLE_SOURCE_DIR":    {api.ParameterTypePath, "role", true},
+		"ROLE_PATH":          {api.ParameterTypePath, "role", true},
+		"INITIAL_PATH":       {api.ParameterTypePath, "role", false},
+		"PROJECT_DIR":        {api.ParameterTypePath, "role", false},
+		"ROLE_NAME":          {"", "role", true},
+		"STATE_VOLUME":       {"", "state", true},
+		"STATE_VOLUME_REALM": {"", "state", true},
+		"STATE_VOLUME_SPACE": {"", "state", true},
+		"STATE_VOLUME_STACK": {"", "state", true},
 	} {
 		got, ok := params[name]
 		if !ok || got.Type != want.kind || got.Group != want.group || got.Required != want.required ||

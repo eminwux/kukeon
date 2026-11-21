@@ -439,7 +439,7 @@ func TestSubscriptionDefaultServesEveryRole(t *testing.T) {
 		if !ok {
 			t.Fatalf("%s %s cell has no state volume", pair.Role, mode)
 		}
-		volumes[volume.Source] = true
+		volumes[volume.VolumeRef.Name] = true
 	}
 	// The login stays per role: the token, not a shared volume, is what both use.
 	if len(volumes) != 2 {

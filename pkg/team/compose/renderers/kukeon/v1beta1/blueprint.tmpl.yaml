@@ -42,10 +42,14 @@ spec:
           {{- template "host_mounts" . }}
           {{- end }}
           {{- if .StatePath }}
-          # Harness state (logins, sessions). The Config names the volume, so a
-          # role keeps its state across blueprint revisions.
+          # Harness state (logins, sessions). The Config names the volume and
+          # its scope, so a role keeps its state across blueprint revisions.
           - kind: volume
-            source: "${STATE_VOLUME}"
+            volumeRef:
+              name: "${STATE_VOLUME}"
+              realm: "${STATE_VOLUME_REALM}"
+              space: "${STATE_VOLUME_SPACE}"
+              stack: "${STATE_VOLUME_STACK}"
             target: {{ .StatePath }}
             ensure: true
           {{- end }}

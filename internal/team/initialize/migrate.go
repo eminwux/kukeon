@@ -86,8 +86,9 @@ func removeTeamConfigs(ctx context.Context, client Client, team string) error {
 func migrationNote(legacyPath string) string {
 	return fmt.Sprintf(
 		"migrated the init team from %s to %s: removed %s and the %s-majordomo-* configs. "+
-			"Log in to each harness again: the state volume is named after the config, so %s-majordomo-* cells "+
-			"start with a new one; delete the old %s-majordomo-* volumes with kuke delete volume when no longer needed.",
+			"Log in to each harness again: the state volume is named after the config (<config>-state), so "+
+			"%s-majordomo-* cells start with a new one; delete the old %s-majordomo-* volumes "+
+			"with kuke delete volume when no longer needed.",
 		legacyName, majordomoName, legacyPath, legacyName, majordomoName, legacyName,
 	)
 }

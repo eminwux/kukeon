@@ -63,8 +63,8 @@ const (
 //nolint:gochecknoglobals // package-level membership set, read-only.
 var composed = map[string]bool{
 	"IMAGE": true, "ROLE_SOURCE_DIR": true, "ROLE_PATH": true, "INITIAL_PATH": true, "PROJECT_DIR": true,
-	"HARNESS_SETTINGS": true, "STATE_VOLUME": true, "ROLE_NAME": true, "SANDBOX": true, "APPROVAL": true,
-	"PERMISSIONS": true,
+	"HARNESS_SETTINGS": true, "STATE_VOLUME": true, "STATE_VOLUME_REALM": true, "STATE_VOLUME_SPACE": true,
+	"STATE_VOLUME_STACK": true, "ROLE_NAME": true, "SANDBOX": true, "APPROVAL": true, "PERMISSIONS": true,
 }
 
 func checkAssets(source fs.FS, rolePath string, role *model.Role, settings model.RoleHarness, harness string) error {
@@ -501,10 +501,26 @@ func blueprintInputs(
 		if !config.SafePath(statePath) {
 			return rendererInput{}, errors.New("spec.statePath: require safe absolute or $HOME path")
 		}
-		parameters = append(parameters, api.CellBlueprintParameter{
-			Name: "STATE_VOLUME", Required: true, Group: groupState,
-			Description: "Volume holding the harness state (logins, sessions) across cells.",
-		})
+		// The Config names the Volume and its scope: a shared blueprint serves
+		// Configs of every space and stack of the realm.
+		parameters = append(parameters,
+			api.CellBlueprintParameter{
+				Name: "STATE_VOLUME", Required: true, Group: groupState,
+				Description: "Volume holding the harness state (logins, sessions) across cells.",
+			},
+			api.CellBlueprintParameter{
+				Name: "STATE_VOLUME_REALM", Required: true, Group: groupState,
+				Description: "Realm of the harness state volume.",
+			},
+			api.CellBlueprintParameter{
+				Name: "STATE_VOLUME_SPACE", Required: true, Group: groupState,
+				Description: "Space of the harness state volume.",
+			},
+			api.CellBlueprintParameter{
+				Name: "STATE_VOLUME_STACK", Required: true, Group: groupState,
+				Description: "Stack of the harness state volume.",
+			},
+		)
 	}
 	mounts := slices.Clone(h.Spec.Mounts)
 	for i := range mounts {

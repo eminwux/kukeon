@@ -38,6 +38,12 @@ import (
 // the component carries, plus the two delivery handlers written here (the
 // secret-slot one shared by env and file, and git).
 
+// stateVolumeScopeValues are the Config values naming the realm, space and
+// stack of the state volume.
+//
+//nolint:gochecknoglobals // read-only list of value names.
+var stateVolumeScopeValues = [3]string{"STATE_VOLUME_REALM", "STATE_VOLUME_SPACE", "STATE_VOLUME_STACK"}
+
 // stateVolumeValue is the Config value naming the volume a harness keeps its
 // state — and therefore its login — in.
 const stateVolumeValue = "STATE_VOLUME"
@@ -632,10 +638,25 @@ func connectorStatuses(
 			// A login kept in the harness state volume has no stored identity.
 			status.State = v1beta1.ConnectorResolved
 			status.Volume = strings.TrimSpace(merged.Spec.Values[stateVolumeValue])
+			status.VolumeRef = stateVolumeRef(status.Volume, merged.Spec.Values)
 		}
 		out = append(out, status)
 	}
 	return out
+}
+
+// stateVolumeRef is the state volume with the scope the Config names for it,
+// or nil when the Config names no realm or an incomplete scope (a stack
+// without a space).
+func stateVolumeRef(name string, values map[string]string) *v1beta1.VolumeRef {
+	var scope [3]string
+	for i, key := range stateVolumeScopeValues {
+		scope[i] = strings.TrimSpace(values[key])
+	}
+	if name == "" || scope[0] == "" || (scope[2] != "" && scope[1] == "") {
+		return nil
+	}
+	return &v1beta1.VolumeRef{Name: name, Realm: scope[0], Space: scope[1], Stack: scope[2]}
 }
 
 // gitStatus fills the status of the git connector from the merged git block.
