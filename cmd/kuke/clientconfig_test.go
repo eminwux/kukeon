@@ -379,6 +379,35 @@ func TestMaybeWriteClientConfigurationDefaultSkipsCustomPath(t *testing.T) {
 	}
 }
 
+// TestMaybeWriteClientConfigurationDefaultSkipsUnknownHome proves that with
+// $HOME unset the first-run dump does not fire: the default path then falls
+// back to a relative "tmp/.kuke/kuke.yaml", and writing it would drop a file
+// into the working directory (#1550). The test chdirs into a TempDir so a
+// regression writes there, not into the package source tree.
+func TestMaybeWriteClientConfigurationDefaultSkipsUnknownHome(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	t.Setenv("HOME", "")
+
+	viper.Reset()
+	cmd, err := NewKukeCmd()
+	if err != nil {
+		t.Fatalf("NewKukeCmd() error = %v", err)
+	}
+
+	maybeWriteClientConfigurationDefault(cmd, config.DefaultClientConfigurationFile())
+
+	entries, err := os.ReadDir(cwd)
+	if err != nil {
+		t.Fatalf("ReadDir(%s): %v", cwd, err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("working directory not empty after dump with HOME unset: %v", entries)
+	}
+}
+
 // TestMaybeWriteClientConfigurationDefaultWritesAtDefaultPath proves the
 // happy path: when the resolved path equals the project default, the dump
 // fires and produces a parseable document. We swap $HOME to a TempDir so

@@ -359,8 +359,15 @@ func loadClientConfiguration(cmd *cobra.Command) error {
 // (the path won't equal the project default), while pointing it at the
 // default path is a no-op overwrite-guarded by O_EXCL inside WriteDefault.
 // Errors are intentionally swallowed: kuke must still run when $HOME is
-// read-only or the parent directory cannot be created.
+// read-only or the parent directory cannot be created. With $HOME unset the
+// dump is skipped outright: the default path then falls back to a relative
+// "tmp/.kuke/kuke.yaml", and writing it would drop a file into whatever
+// directory kuke ran in (#1550). Reading still falls back to the hardcoded
+// defaults.
 func maybeWriteClientConfigurationDefault(_ *cobra.Command, path string) {
+	if !config.HomeDirKnown() {
+		return
+	}
 	if path != config.DefaultClientConfigurationFile() {
 		return
 	}

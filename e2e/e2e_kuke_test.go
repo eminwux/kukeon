@@ -869,8 +869,10 @@ func TestKuke_Autocomplete_GetCell_ViaDaemon(t *testing.T) {
 	// for the completion request (and skips the root PreRun), so the `--host`
 	// flag would not reach viper here — the env var does. This mirrors how an
 	// operator on a non-default socket drives completion (see the
-	// completionClient doc in cmd/config/autocomplete.go).
-	exitCode, stdout, stderr := runBinary(t, []string{"KUKEON_HOST=" + host}, kuke,
+	// completionClient doc in cmd/config/autocomplete.go). HOME points at a
+	// per-test dir so kuke never resolves its client config relative to the
+	// working directory (#1550).
+	exitCode, stdout, stderr := runBinary(t, []string{"KUKEON_HOST=" + host, "HOME=" + t.TempDir()}, kuke,
 		"__complete",
 		"get", "cell",
 		"--realm", realm, "--space", space, "--stack", stack,

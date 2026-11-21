@@ -71,11 +71,21 @@ func DefaultServerConfigurationFile() string {
 	return filepath.Join("/", "etc", "kukeon", "kukeond.yaml")
 }
 
+// HomeDirKnown reports whether the operator's home directory can be
+// determined. DefaultKukeDir and DefaultProfilesFile fall back to a relative
+// "tmp" base when it cannot, so a caller about to *write* to one of those
+// default paths must check this first — otherwise the write lands under the
+// current working directory (#1550).
+func HomeDirKnown() bool {
+	_, err := os.UserHomeDir()
+	return err == nil
+}
+
 // DefaultKukeDir is the per-operator kuke state directory (~/.kuke) holding
 // the client configuration, the team-distribution global-facts file
 // (kuketeams.yaml), and the per-project drop-in directory (kuketeam.d/). Falls
 // back to "tmp" when the home directory cannot be determined, matching the
-// other default-path helpers.
+// other default-path helpers; writers gate on HomeDirKnown.
 func DefaultKukeDir() string {
 	base, err := os.UserHomeDir()
 	if err != nil {
