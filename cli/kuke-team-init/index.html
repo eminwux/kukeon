@@ -3822,10 +3822,16 @@ scopes with kuke (<code>kuke init</code> creates <code>default/default/default</
 creates, starts, restarts, or deletes cells. <code>ApplyDocumentsForTeam</code> receives
 the stable team name <code>kuke</code>, so reruns update that team's resources and prune
 obsolete team-owned configs. A shared blueprint the team stops using is removed
-only when no other CellConfig references it; if the realm already holds a
-different blueprint under a shared name that another team uses, this team's is
-applied as <code>&lt;name&gt;-&lt;content digest&gt;</code> instead of overwriting it. It does not
-prune credentials or running cells.</p>
+only when no other CellConfig references it. A shared blueprint that already
+exists with different content is replaced in place, whichever team's configs
+use it, so every team sees the same content; a note names the old and new
+content digest and the other configs using it, whose cells turn <code>OutOfSync</code>
+until <code>kuke restart</code>. Only a blueprint kuke team did not render (no
+<code>kukeon.io/shared: "true"</code> label) is never overwritten: this team's is applied
+as <code>&lt;name&gt;-&lt;content digest&gt;</code> instead. A <code>&lt;name&gt;-&lt;content digest&gt;</code> copy an
+earlier version forked for a shared blueprint is migrated: the team's configs
+move back to <code>&lt;name&gt;</code>, and the copy is removed, or reported while another
+config still uses it. It does not prune credentials or running cells.</p>
 <h2 id="git-identity-and-credentials">Git identity and credentials<a class="headerlink" href="#git-identity-and-credentials" title="Permanent link">&para;</a></h2>
 <p>Team cells clone, push and sign with <a href="../../guides/git-credentials/">stored git credentials</a>.
 The host <code>~/.ssh</code> is never mounted, and init reads nothing from it unless you
@@ -4027,7 +4033,7 @@ blueprints and configs on cleanup.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 20, 2026 13:37:15 UTC">November 20, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 21, 2026 13:46:52 UTC">November 21, 2026</span>
   </span>
 
     
