@@ -153,7 +153,7 @@ input { border: 1px solid var(--line); background: var(--code); color: var(--tex
 .list-controls select { padding: 7px 10px; }
 .result-count { font-size: var(--font-sm); color: var(--muted); padding-bottom: 8px; font-variant-numeric: tabular-nums; }
 /* Contain absolutely positioned descendants (.sr-only headers) so they cannot widen the page. */
-.table-scroll { position: relative; overflow-x: auto; }
+.table-scroll { position: relative; overflow-x: auto; container: table-scroll / inline-size; }
 table { width: 100%; border-collapse: collapse; text-align: left; font-size: var(--font-sm); font-variant-numeric: tabular-nums; }
 th { color: var(--muted); font-size: var(--font-xs); text-transform: uppercase; letter-spacing: .08em; font-weight: 550; background: var(--code); }
 /* Compact rows: about 36px with a state badge, so 15+ rows fit at 1440x900. */
@@ -190,7 +190,11 @@ button:disabled { cursor: default; opacity: .4; }
 .details-grid dd { margin: 0; overflow-wrap: anywhere; }
 .label-badge { margin-right: 8px; display: inline-block; }
 .container-panel { margin-top: 16px; }
-.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+/* The -1px margin keeps a body-level live region (notifications.tsx) from adding 1px of scroll below the shell. */
+/* Inline-block path segments (status.tsx PathText): no percentage max-width, which would collapse a table
+   column to its narrowest segment; shrink-to-fit plus overflow-wrap already keeps a segment within the line. */
+.path-segment { display: inline-block; overflow-wrap: anywhere; }
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 @media (max-width: 1050px) { .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .scope-cell { min-width: 7rem; } th, td { padding-inline: 10px; } .summary-card { padding: 12px; } .attention-list li { grid-template-columns: minmax(0, 1fr) auto; } .attention-list .mono-id { grid-column: 1; grid-row: 2; } .details-grid { grid-template-columns: 90px minmax(0, 1fr); } }
 .state-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 6px; vertical-align: 1px; }
@@ -378,8 +382,25 @@ button:disabled { cursor: default; opacity: .4; }
   .cell-terminal-tools { order: 3; flex: 1 1 100%; }
   .cell-screen-content .cell-terminal-view > #cell-terminal { height: auto; min-height: 0; }
 }
-@media (min-width: 761px) and (max-width: 1050px) {
-  .cell-page-title-row { flex-wrap: wrap; }
+/* The cell title row stays one line from 761px up: the name truncates (its full text is the h1's title)
+   and the controls keep their size. Below 761px the row may wrap, but the name stays on one line. */
+.cell-page-title-row h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cell-page-title-row > :not(h1) { flex-shrink: 0; }
+
+/* List tables (#1567): when their panel is narrower than 640px (768px viewports with the sidebar
+   open, and phones), each row becomes a card. The name and row actions share the first line and the
+   other cells follow, labelled from their column header through data-label. Markup stays a table. */
+@container table-scroll (max-width: 640px) {
+  table.stackable thead { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  table.stackable, table.stackable tbody { display: block; }
+  table.stackable tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 12px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+  table.stackable td { grid-column: 1; display: block; min-width: 0; padding: 0; border: 0; }
+  table.stackable td.row-actions { grid-column: 2; grid-row: 1; width: auto; }
+  table.stackable td:not(:first-child):not(.row-actions) { grid-column: 1 / -1; }
+  table.stackable td:first-child .resource-name { white-space: normal; overflow-wrap: anywhere; }
+  table.stackable td[data-label]:not(:first-child)::before { content: attr(data-label) " "; margin-right: 6px; color: var(--muted); font-family: inherit; font-size: var(--font-xs); letter-spacing: .08em; text-transform: uppercase; }
+  table.stackable .scope-cell { min-width: 0; }
+  table.stackable .image-ref, table.stackable .image-media-type { max-width: none; white-space: normal; overflow-wrap: anywhere; }
 }
 
 .new-cell-toolbar-action { color: var(--accent); border-color: var(--accent); font-weight: 600; }
@@ -453,6 +474,10 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--er
 .registry-credential-form input, .registry-credential-form button { height: 36px; }
 .registry-credential-form button { padding: 0 12px; font-size: var(--font-sm); white-space: nowrap; }
 .image-table td:nth-child(2), .image-table td:nth-child(3) { white-space: nowrap; }
+.image-table .image-ref, .image-table .image-media-type { max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.image-table .image-ref { width: 45%; }
+.image-table .image-media-type { width: 22%; }
+.image-table td:not(.image-ref):not(.image-media-type) { white-space: nowrap; }
 .image-table .resource-name { font-family: var(--mono); font-size: var(--font-sm); font-weight: 500; }
 .image-namespace { margin: 0; padding: 14px 20px; border-bottom: 1px solid var(--line); }
 .terminal-empty { display: grid; flex: 1; place-items: center; margin: 0; padding: 24px; }
