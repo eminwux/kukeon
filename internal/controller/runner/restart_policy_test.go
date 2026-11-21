@@ -30,50 +30,11 @@ import (
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
-// TestRestartPolicyPermitsContainerReap pins the per-container half of
-// the #1003 reap gate. The decision table:
-//
-//   - "always"        → permit reap regardless of exit code.
-//   - "on-failure"    → permit reap iff exit code is non-zero; clean exits
-//     (0) preserve the cell.
-//   - "" or "never"   → never permit reap. Empty is the default: an exited
-//     non-root container preserves the cell, matching the Kubernetes
-//     default restartPolicy.
-//   - unknown values  → permissive fallback so a typo or a future spec
-//     value does not silently strand cells.
-func TestRestartPolicyPermitsContainerReap(t *testing.T) {
-	cases := []struct {
-		name     string
-		policy   string
-		exitCode int
-		want     bool
-	}{
-		{"empty_default_clean_exit_blocks", "", 0, false},
-		{"empty_default_failed_exit_blocks", "", 1, false},
-		{"always_clean_exit_permits", intmodel.RestartPolicyAlways, 0, true},
-		{"always_failed_exit_permits", intmodel.RestartPolicyAlways, 137, true},
-		{"on_failure_clean_exit_blocks", intmodel.RestartPolicyOnFailure, 0, false},
-		{"on_failure_failed_exit_permits", intmodel.RestartPolicyOnFailure, 1, true},
-		{"on_failure_signal_exit_permits", intmodel.RestartPolicyOnFailure, 137, true},
-		{"never_clean_exit_blocks", intmodel.RestartPolicyNever, 0, false},
-		{"never_failed_exit_blocks", intmodel.RestartPolicyNever, 1, false},
-		{"unknown_policy_permits_default", "no-such-policy", 0, true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := restartPolicyPermitsContainerReap(tc.policy, tc.exitCode); got != tc.want {
-				t.Errorf("restartPolicyPermitsContainerReap(%q, %d) = %v, want %v",
-					tc.policy, tc.exitCode, got, tc.want)
-			}
-		})
-	}
-}
-
 // TestReconcileCell_AutoDeleteOverridesRestartPolicyNever is the end-to-end
-// pin for the rule that `--rm` / Spec.AutoDelete overrides the restartPolicy
-// *preserve* gate: a cell that opted into auto-delete is reaped on exit even
-// when its non-root container carries an explicit `restartPolicy: never` (which
-// would otherwise block the wind-down path). `--rm` does NOT override a
+// pin for the rule that `--rm` / Spec.AutoDelete deletes a cleanly Exited cell
+// even when its non-root container carries an explicit `restartPolicy: never`:
+// the policy only decides whether the workload restarts (#1557), so `never`
+// never holds a cell back from the reap gate. `--rm` does NOT override a
 // restart-requiring policy — that case is pinned by
 // TestReconcileCell_RestartFiresAndSuppressesWindDown (`--rm` + `always`) and
 // TestReconcileCell_AutoDeleteWithOnFailureRestartWins (`--rm` + `on-failure`
@@ -113,7 +74,7 @@ func TestReconcileCell_AutoDeleteOverridesRestartPolicyNever(t *testing.T) {
 			AutoDelete: true, // --rm
 			Containers: []intmodel.ContainerSpec{
 				{ID: rootID, ContainerdID: rootContainerdID, Root: true},
-				// Explicit never would block the wind-down path — but --rm must win.
+				// Explicit never: no restart is owed, so --rm deletes the cell.
 				{
 					ID:            workloadID,
 					ContainerdID:  workloadContainerdID,
@@ -138,8 +99,9 @@ func TestReconcileCell_AutoDeleteOverridesRestartPolicyNever(t *testing.T) {
 		)
 	}
 
-	// Sanity: the same cell WITHOUT AutoDelete must be preserved by the
-	// explicit never (the wind-down path still honors restartPolicy).
+	// Sanity: the same cell WITHOUT AutoDelete is not deleted. Its root task
+	// is already gone (the reboot wiped it), so there is nothing to wind down
+	// either and the cell metadata stays for the operator.
 	cell.Spec.AutoDelete = false
 	seedPostRebootCell(t, r, realm, space, stack, cellName, rootID, workloadID, rootContainerdID, workloadContainerdID)
 	_, outcome, err = r.ReconcileCell(cell)
@@ -148,13 +110,13 @@ func TestReconcileCell_AutoDeleteOverridesRestartPolicyNever(t *testing.T) {
 	}
 	if outcome.Deleted {
 		t.Errorf(
-			"ReconcileOutcome.Deleted = true, want false (without --rm, an explicit restartPolicy: never must preserve the cell)",
+			"ReconcileOutcome.Deleted = true, want false (without --rm, the reconciler must never delete the cell)",
 		)
 	}
 }
 
-// TestContainerStateIsTerminal locks the terminal-state set the
-// RestartPolicy gate scopes its check to. Stopped / Failed / NotCreated
+// TestContainerStateIsTerminal locks the terminal-state set the restart pass
+// and the root-death check scope their checks to. Stopped / Failed / NotCreated
 // are terminal — they map to "the task is no longer running and will not
 // run again on its own". The running and transient states are not.
 func TestContainerStateIsTerminal(t *testing.T) {
@@ -178,165 +140,11 @@ func TestContainerStateIsTerminal(t *testing.T) {
 	}
 }
 
-// TestRestartPolicyPermitsCellReap pins the cell-level aggregation: a
-// single non-root container that says "do not reap" must block the
-// whole cell, but only terminal containers participate in the decision.
-// Root containers are ignored — the wind-down kills the root anyway.
-func TestRestartPolicyPermitsCellReap(t *testing.T) {
-	cell := func(specs []intmodel.ContainerSpec, statuses []intmodel.ContainerStatus) intmodel.Cell {
-		return intmodel.Cell{
-			Spec:   intmodel.CellSpec{Containers: specs},
-			Status: intmodel.CellStatus{Containers: statuses},
-		}
-	}
-
-	cases := []struct {
-		name string
-		cell intmodel.Cell
-		want bool
-	}{
-		{
-			name: "empty_policy_terminal_stopped_blocks_default",
-			cell: cell(
-				[]intmodel.ContainerSpec{
-					{ID: "root", Root: true},
-					{ID: "work", Root: false, RestartPolicy: ""},
-				},
-				[]intmodel.ContainerStatus{
-					{ID: "root", State: intmodel.ContainerStateReady},
-					{ID: "work", State: intmodel.ContainerStateStopped, ExitCode: 0},
-				},
-			),
-			want: false,
-		},
-		{
-			name: "never_policy_terminal_blocks",
-			cell: cell(
-				[]intmodel.ContainerSpec{
-					{ID: "root", Root: true},
-					{ID: "work", Root: false, RestartPolicy: intmodel.RestartPolicyNever},
-				},
-				[]intmodel.ContainerStatus{
-					{ID: "root", State: intmodel.ContainerStateReady},
-					{ID: "work", State: intmodel.ContainerStateStopped, ExitCode: 0},
-				},
-			),
-			want: false,
-		},
-		{
-			name: "on_failure_clean_exit_blocks",
-			cell: cell(
-				[]intmodel.ContainerSpec{
-					{ID: "root", Root: true},
-					{ID: "work", Root: false, RestartPolicy: intmodel.RestartPolicyOnFailure},
-				},
-				[]intmodel.ContainerStatus{
-					{ID: "root", State: intmodel.ContainerStateReady},
-					{ID: "work", State: intmodel.ContainerStateStopped, ExitCode: 0},
-				},
-			),
-			want: false,
-		},
-		{
-			name: "on_failure_failed_exit_permits",
-			cell: cell(
-				[]intmodel.ContainerSpec{
-					{ID: "root", Root: true},
-					{ID: "work", Root: false, RestartPolicy: intmodel.RestartPolicyOnFailure},
-				},
-				[]intmodel.ContainerStatus{
-					{ID: "root", State: intmodel.ContainerStateReady},
-					{ID: "work", State: intmodel.ContainerStateStopped, ExitCode: 137},
-				},
-			),
-			want: true,
-		},
-		{
-			name: "any_never_in_multi_container_blocks_cell",
-			cell: cell(
-				[]intmodel.ContainerSpec{
-					{ID: "root", Root: true},
-					{ID: "worker", Root: false, RestartPolicy: intmodel.RestartPolicyAlways},
-					{ID: "sidecar", Root: false, RestartPolicy: intmodel.RestartPolicyNever},
-				},
-				[]intmodel.ContainerStatus{
-					{ID: "root", State: intmodel.ContainerStateReady},
-					{ID: "worker", State: intmodel.ContainerStateStopped, ExitCode: 0},
-					{ID: "sidecar", State: intmodel.ContainerStateStopped, ExitCode: 0},
-				},
-			),
-			want: false,
-		},
-		{
-			name: "non_terminal_container_ignored_for_policy_decision",
-			cell: cell(
-				[]intmodel.ContainerSpec{
-					{ID: "root", Root: true},
-					{ID: "still-running", Root: false, RestartPolicy: intmodel.RestartPolicyNever},
-				},
-				[]intmodel.ContainerStatus{
-					{ID: "root", State: intmodel.ContainerStateReady},
-					{ID: "still-running", State: intmodel.ContainerStateReady},
-				},
-			),
-			want: true,
-		},
-		{
-			name: "root_policy_ignored",
-			cell: cell(
-				[]intmodel.ContainerSpec{
-					{ID: "root", Root: true, RestartPolicy: intmodel.RestartPolicyNever},
-					{ID: "work", Root: false, RestartPolicy: intmodel.RestartPolicyAlways},
-				},
-				[]intmodel.ContainerStatus{
-					{ID: "root", State: intmodel.ContainerStateStopped, ExitCode: 0},
-					{ID: "work", State: intmodel.ContainerStateStopped, ExitCode: 0},
-				},
-			),
-			want: true,
-		},
-		{
-			name: "container_with_no_status_ignored",
-			cell: cell(
-				[]intmodel.ContainerSpec{
-					{ID: "root", Root: true},
-					{ID: "work", Root: false, RestartPolicy: intmodel.RestartPolicyNever},
-				},
-				[]intmodel.ContainerStatus{
-					{ID: "root", State: intmodel.ContainerStateReady},
-				},
-			),
-			want: true,
-		},
-		{
-			name: "on_failure_notcreated_treated_as_clean_blocks",
-			cell: cell(
-				[]intmodel.ContainerSpec{
-					{ID: "root", Root: true},
-					{ID: "work", Root: false, RestartPolicy: intmodel.RestartPolicyOnFailure},
-				},
-				[]intmodel.ContainerStatus{
-					{ID: "root", State: intmodel.ContainerStateReady},
-					{ID: "work", State: intmodel.ContainerStateNotCreated, ExitCode: 0},
-				},
-			),
-			want: false,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := restartPolicyPermitsCellReap(tc.cell); got != tc.want {
-				t.Errorf("restartPolicyPermitsCellReap(...) = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
 // TestGetContainerObservation_PopulatesExitCode confirms the
 // GetContainerObservation plumbing wires containerd.Status.ExitStatus
 // into the ContainerObservation.ExitCode column. Without this, the
-// OnFailure gate in restartPolicyPermitsCellReap reads ExitCode=0
-// from every stopped container and the gate collapses to Never.
+// on-failure restart trigger (restartPolicyRequiresRestart) reads ExitCode=0
+// from every stopped container and the policy collapses to Never.
 func TestGetContainerObservation_PopulatesExitCode(t *testing.T) {
 	realm, space, stack, cellName := "default", "kukeon", "kukeon", "web"
 	containerID, containerdID := "root", "kukeon_kukeon_web_root"
@@ -372,7 +180,7 @@ func TestGetContainerObservation_PopulatesExitCode(t *testing.T) {
 // non-TaskStatus-success branches (NotCreated + ErrTaskNotFound) at
 // ExitCode=0. The contract: ExitCode is only meaningful when TaskStatus
 // returned successfully; every other return path leaves it zero so the
-// OnFailure gate falls back to its "clean exit blocks reap" branch.
+// on-failure restart trigger treats it as a clean exit (no restart).
 func TestGetContainerObservation_ZeroExitOnNonTerminalBranches(t *testing.T) {
 	realm, space, stack, cellName := "default", "kukeon", "kukeon", "web"
 	containerID, containerdID := "root", "kukeon_kukeon_web_root"

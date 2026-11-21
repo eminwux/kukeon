@@ -350,59 +350,103 @@ func TestReconcileCell_CreateOnlyAutoDeleteCellSurvives(t *testing.T) {
 }
 
 // TestStopCell_StampsOperatorStoppedOnlyWhenWorkloadRunning drives the real
-// stop/kill paths: interrupting a running workload stamps the breadcrumb,
-// while stopping a cell whose workload already exited (the reconciler's
-// wind-down shape, or `kuke run -a --rm` after the shell exits) does not.
+// stop/kill paths through the #1557 label rule (classifyOperatorStop), keyed
+// on the persisted state the verb finds:
+//
+//   - Ready: interrupting a running workload stamps the breadcrumb, while
+//     stopping a cell whose workload already exited (`kuke run -a --rm` after
+//     the shell exits) leaves a plain Stopped (D4 row 3).
+//   - Exited / Error: with the workload finished the label is kept (row 1);
+//     a workload running again is an interrupt (row 2).
+//   - Degraded: always an interrupt (row 2).
 func TestStopCell_StampsOperatorStoppedOnlyWhenWorkloadRunning(t *testing.T) {
 	type verb func(r *Exec, cell intmodel.Cell) (intmodel.Cell, error)
 	verbs := map[string]verb{
 		"stop": func(r *Exec, c intmodel.Cell) (intmodel.Cell, error) { return r.StopCell(c) },
 		"kill": func(r *Exec, c intmodel.Cell) (intmodel.Cell, error) { return r.KillCell(c) },
 	}
+	persistedStates := []intmodel.CellState{
+		intmodel.CellStateReady,
+		intmodel.CellStateExited,
+		intmodel.CellStateError,
+		intmodel.CellStateDegraded,
+	}
 	for verbName, run := range verbs {
-		for _, workloadRunning := range []bool{true, false} {
-			t.Run(fmt.Sprintf("%s/workloadRunning=%v", verbName, workloadRunning), func(t *testing.T) {
-				realm, space, stack, cellName := "default", "lab", "suite", "rm-stop"
-				rootID, workloadID := "root", "workload"
-				rootCID := space + "_" + stack + "_" + cellName + "_" + rootID
-				workCID := space + "_" + stack + "_" + cellName + "_" + workloadID
-
-				var stopped atomic.Bool
-				fake := &deleteCellFakeClient{
-					existsContainerFn: func(_, _ string) (bool, error) { return true, nil },
-					taskStatusFn: func(_, id string) (containerd.Status, error) {
-						if stopped.Load() {
-							return containerd.Status{Status: containerd.Stopped}, nil
-						}
-						if id == workCID && !workloadRunning {
-							return containerd.Status{Status: containerd.Stopped}, nil
-						}
-						return containerd.Status{Status: containerd.Running}, nil
-					},
-					stopContainerFn: func(_, _ string, _ ctr.StopContainerOptions) (*containerd.ExitStatus, error) {
-						stopped.Store(true)
-						//nolint:nilnil // the stop path discards the exit status; nil mirrors stopKillFakeClient
-						return nil, nil
-					},
-				}
-				r := newDeleteCellTestExec(t, fake)
-				seedDeleteCellRealm(t, r, realm)
-				seedStopKillSpace(t, r, realm, space)
-				seedPostRebootCell(t, r, realm, space, stack, cellName, rootID, workloadID, rootCID, workCID)
-
-				req := buildStopKillCellRequest(realm, space, stack, cellName)
-				got, err := run(r, req)
-				if err != nil {
-					t.Fatalf("%s: %v", verbName, err)
-				}
-				if got.Status.State != intmodel.CellStateStopped {
-					t.Errorf("State = %v, want Stopped", got.Status.State)
-				}
-				if cellOperatorStopped(got) != workloadRunning {
-					t.Errorf("cellOperatorStopped = %v, want %v (Reason=%q)",
-						cellOperatorStopped(got), workloadRunning, got.Status.Reason)
-				}
-			})
+		for _, persistedState := range persistedStates {
+			for _, workloadRunning := range []bool{true, false} {
+				name := fmt.Sprintf("%s/persisted=%v/workloadRunning=%v", verbName, persistedState, workloadRunning)
+				t.Run(name, func(t *testing.T) {
+					wantState := intmodel.CellStateStopped
+					wantCrumb := workloadRunning || persistedState == intmodel.CellStateDegraded
+					if !workloadRunning && (persistedState == intmodel.CellStateExited ||
+						persistedState == intmodel.CellStateError) {
+						wantState = persistedState
+					}
+					runOperatorStopCase(t, run, persistedState, workloadRunning, wantState, wantCrumb)
+				})
+			}
 		}
+	}
+}
+
+func runOperatorStopCase(
+	t *testing.T,
+	run func(r *Exec, cell intmodel.Cell) (intmodel.Cell, error),
+	persistedState intmodel.CellState,
+	workloadRunning bool,
+	wantState intmodel.CellState,
+	wantCrumb bool,
+) {
+	t.Helper()
+	realm, space, stack, cellName := "default", "lab", "suite", "rm-stop"
+	rootID, workloadID := "root", "workload"
+	rootCID := space + "_" + stack + "_" + cellName + "_" + rootID
+	workCID := space + "_" + stack + "_" + cellName + "_" + workloadID
+
+	var stopped atomic.Bool
+	fake := &deleteCellFakeClient{
+		existsContainerFn: func(_, _ string) (bool, error) { return true, nil },
+		taskStatusFn: func(_, id string) (containerd.Status, error) {
+			if stopped.Load() {
+				return containerd.Status{Status: containerd.Stopped}, nil
+			}
+			if id == workCID && !workloadRunning {
+				return containerd.Status{Status: containerd.Stopped}, nil
+			}
+			return containerd.Status{Status: containerd.Running}, nil
+		},
+		stopContainerFn: func(_, _ string, _ ctr.StopContainerOptions) (*containerd.ExitStatus, error) {
+			stopped.Store(true)
+			//nolint:nilnil // the stop path tolerates a nil exit status; nil mirrors stopKillFakeClient
+			return nil, nil
+		},
+	}
+	r := newDeleteCellTestExec(t, fake)
+	seedDeleteCellRealm(t, r, realm)
+	seedStopKillSpace(t, r, realm, space)
+	seedPostRebootCell(t, r, realm, space, stack, cellName, rootID, workloadID, rootCID, workCID)
+
+	req := buildStopKillCellRequest(realm, space, stack, cellName)
+	if persistedState != intmodel.CellStateReady {
+		seeded, err := r.GetCell(req)
+		if err != nil {
+			t.Fatalf("GetCell: %v", err)
+		}
+		seeded.Status.State = persistedState
+		if err = r.UpdateCellMetadata(seeded); err != nil {
+			t.Fatalf("UpdateCellMetadata: %v", err)
+		}
+	}
+
+	got, err := run(r, req)
+	if err != nil {
+		t.Fatalf("verb: %v", err)
+	}
+	if got.Status.State != wantState {
+		t.Errorf("State = %v, want %v", got.Status.State, wantState)
+	}
+	if cellOperatorStopped(got) != wantCrumb {
+		t.Errorf("cellOperatorStopped = %v, want %v (Reason=%q)",
+			cellOperatorStopped(got), wantCrumb, got.Status.Reason)
 	}
 }

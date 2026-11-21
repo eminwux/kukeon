@@ -358,15 +358,52 @@ func carryStackLifecycle(orig intmodel.StackStatus, next *intmodel.StackStatus) 
 // RefreshCell refreshes the status of a cell and its containers.
 // Returns the updated cell, number of containers updated, and any error.
 //
-// Mirrors the container-aware derivation ReconcileCell does (#543): the
-// post-reboot scenario (cgroup wiped, container records survive, tasks
-// gone) must transition cells out of Unknown so `kuke refresh` surfaces
-// the same Cells / Containers updates the reconcile loop does. Pure
-// "cgroup-only" cell-state derivation would re-park them at Unknown.
+// It derives state from cgroup existence plus container task state, like
+// ReconcileCell (#543): the post-reboot scenario (cgroup wiped, container
+// records survive, tasks gone) must transition cells out of Unknown so
+// `kuke refresh` surfaces the same Cells / Containers updates the reconcile
+// loop does.
+//
+// It follows the reconciler's rules (#1557): it takes the per-cell lock,
+// re-reads the persisted label after taking it, and applies the same guards
+// in the same order — a sticky Error / Failed is kept with its reason, a
+// durable Stopped (create-only, or OperatorStopped) is kept, and a cell whose
+// workload restart is owed or deferred is held at Degraded. It triggers none
+// of the reconciler's side effects: no restart, no wind-down, no root-death
+// teardown, no auto-delete. The only write is the derived status.
 func (r *Exec) RefreshCell(cell intmodel.Cell) (intmodel.Cell, int, error) {
-	originalStatus := cell.Status
+	defer r.lockCell(cell)()
+
+	// The "before" side of the containersUpdated count is the list-time
+	// snapshot the caller handed us: GetCell below returns live container
+	// statuses, so comparing against those would always report no change.
 	originalContainerStatuses := append(
-		[]intmodel.ContainerStatus(nil), originalStatus.Containers...)
+		[]intmodel.ContainerStatus(nil), cell.Status.Containers...)
+
+	// Re-read after taking the lock: the argument is a list-time snapshot
+	// that a concurrent stop or reconcile may have overtaken, so the guards
+	// below must see the label as it is persisted now. A cell deleted while
+	// we waited for the lock is skipped without writing (#1251).
+	originalStatus := cell.Status
+	current, getErr := r.GetCell(cell)
+	switch {
+	case getErr == nil:
+		originalStatus.State = current.Status.State
+		originalStatus.Reason = current.Status.Reason
+		originalStatus.Message = current.Status.Message
+		originalStatus.ReadyObserved = current.Status.ReadyObserved
+		cell.Status.State = current.Status.State
+		cell.Status.Reason = current.Status.Reason
+		cell.Status.Message = current.Status.Message
+		cell.Status.ReadyObserved = current.Status.ReadyObserved
+	case errors.Is(getErr, errdefs.ErrCellNotFound):
+		r.logger.DebugContext(r.ctx, "refresh: cell metadata gone, skipping",
+			"cell", cell.Metadata.Name)
+		return cell, 0, nil
+	default:
+		r.logger.DebugContext(r.ctx, "refresh: failed to re-read cell after lock",
+			"cell", cell.Metadata.Name, "error", getErr)
+	}
 
 	newStatus := intmodel.CellStatus{
 		State:      intmodel.CellStateUnknown, // Default to Unknown - will be updated if checks succeed
@@ -395,23 +432,47 @@ func (r *Exec) RefreshCell(cell intmodel.Cell) (intmodel.Cell, int, error) {
 	}
 	newStatus.Containers = cell.Status.Containers
 
-	// Derive cell state from the container snapshot when the cgroup
-	// check didn't error. CreateCell-race protection comes from
-	// latchReadyObserved below — a cell that has never been observed
-	// Ready cannot be reaped regardless of what derivation reads back.
-	if err == nil {
-		newStatus.State = r.deriveCellState(cell)
-	}
+	// Apply ReconcileCell's guards in its order. carryCellLifecycle above
+	// already copied Reason/Message forward, so the kept-label branches need
+	// only fix the state.
+	switch {
+	case cellStateIsSticky(originalStatus.State):
+		// Sticky Error / Failed: keep state, reason and message.
+		newStatus.State = originalStatus.State
+	case cellStoppedIsDurable(originalStatus, cell):
+		// Create-only or operator-stopped Stopped: keep it.
+		newStatus.State = intmodel.CellStateStopped
+	default:
+		// Derive cell state from the container snapshot when the cgroup
+		// check didn't error. CreateCell-race protection comes from
+		// latchReadyObserved below — a cell that has never been observed
+		// Ready cannot be reaped regardless of what derivation reads back.
+		if err == nil {
+			newStatus.State = r.deriveCellState(cell)
+		}
 
-	// Stamp the runtime workload-failure breadcrumb on a fresh transition to
-	// CellStateError (#1206, renamed from Failed in #1267), same contract as
-	// ReconcileCell. carryCellLifecycle above already copied any prior
-	// Reason/Message forward, so an already-Error cell keeps its original
-	// reason; only a fresh Ready/Exited → Error transition restamps here.
-	// cell's container snapshot was populated above, so the breadcrumb resolves
-	// the failing container even though the final write target is newStatus.
-	if newStatus.State == intmodel.CellStateError && originalStatus.State != intmodel.CellStateError {
-		newStatus.Reason, newStatus.Message = cellFailureBreadcrumb(cell)
+		// Stamp the runtime workload-failure breadcrumb on a fresh transition
+		// to CellStateError (#1206, renamed from Failed in #1267), same
+		// contract as ReconcileCell. The cell's container snapshot was
+		// populated above, so the breadcrumb resolves the failing container
+		// even though the final write target is newStatus.
+		if newStatus.State == intmodel.CellStateError && originalStatus.State != intmodel.CellStateError {
+			newStatus.Reason, newStatus.Message = cellFailureBreadcrumb(cell)
+		}
+
+		// Degraded hold: while a workload restart is owed or deferred the
+		// reconciler holds the cell at non-sticky Degraded with its original
+		// reason, so that its restart loop is not ended by a sticky Error.
+		// Mirror that read-only; persisting Error here would strand the
+		// restart for good.
+		probe := cell
+		probe.Status.ReadyObserved = latchReadyObserved(
+			originalStatus.ReadyObserved, originalStatus.State, newStatus.State)
+		if r.restartOwed(probe) {
+			newStatus.State = intmodel.CellStateDegraded
+			newStatus.Reason = originalStatus.Reason
+			newStatus.Message = originalStatus.Message
+		}
 	}
 
 	// Run ReadyObserved through the same one-way latch ReconcileCell uses.
@@ -605,12 +666,12 @@ func (r *Exec) refreshContainerStatus(cell intmodel.Cell, containerSpec *intmode
 	return updated, nil
 }
 
-// ReconcileCell is the daemon-side counterpart to RefreshCell. Where
-// RefreshCell derives cell.Status.State from cgroup existence alone (so
-// `kuke refresh` keeps its current shape), ReconcileCell additionally
-// considers container task state — which is what flips a Ready cell to
-// Stopped when an operator runs `ctr task kill` outside of kukeon, or
-// when the cell's non-root workloads have all exited.
+// ReconcileCell is the daemon-side counterpart to RefreshCell. Both derive
+// cell.Status.State from cgroup existence plus container task state under the
+// same sticky / durable-Stopped / Degraded-hold rules, but only ReconcileCell
+// acts on what it sees: it restarts workloads, winds down finished cells,
+// tears down cells whose root died, and auto-deletes `--rm` cells. RefreshCell
+// (`kuke refresh`) is read-only apart from persisting the derived status.
 //
 // State derivation (see deriveCellState):
 //   - cgroup check error or cgroup absent → Unknown
@@ -632,22 +693,26 @@ func (r *Exec) refreshContainerStatus(cell intmodel.Cell, containerSpec *intmode
 // (and so `kuke get cell` sees the same per-container view the
 // reconciler decided on).
 //
-// Wind-down side-effects: when the derivation flips to Exited and the
-// cell has at least one non-root container in spec and the root
-// container task is still running, the reconciler kills the cell so the
-// root container shell stops too (a crash → Error is sticky and left for
-// the operator, so it does not wind down). Two flavors:
+// Wind-down side-effects: when the derivation settles on Exited or Error,
+// no restart is owed, the cell has at least one non-root container in spec
+// and the root container task is still running, the reconciler tears the
+// cell down so the root stops too (#1557). restartPolicy decides only whether
+// a workload is restarted, never whether the root stays up. Two flavors:
 //
-//   - AutoDelete=true: autoDeleteCell runs (KillCell + DeleteCell) and
-//     the cell metadata is removed. Subsumes the per-cell
-//     `kuke run --rm` watcher.
-//   - AutoDelete=false: windDownCell runs (KillCell only). The cell
-//     metadata is preserved in Exited state for the operator to
-//     `kuke delete` explicitly — a long-lived `sleep infinity` root
-//     does not get to hold the cell open after every workload has
-//     exited.
+//   - AutoDelete=true and Exited: autoDeleteCell runs (kill + DeleteCell)
+//     and the cell metadata is removed. Subsumes the per-cell
+//     `kuke run --rm` watcher. An Error cell is not auto-deleted.
+//   - Otherwise: windDownCell runs a graceful teardown. The cell keeps its
+//     derived Exited / Error label and reason, and its metadata is
+//     preserved for the operator to `kuke delete` explicitly — a
+//     long-lived `sleep infinity` root does not get to hold the cell open
+//     (and its IP lease) after every workload has finished.
 //
-// Both flavors are gated by the ReadyObserved latch so an in-flight
+// Root death: when the root is observed terminal while a workload is still
+// running, the reconciler kills the workloads, releases the network and
+// settles the cell in Error with reasonRootContainerExited (#1557).
+//
+// All of these are gated by the ReadyObserved latch so an in-flight
 // CreateCell (cgroup created, non-root containers not yet registered
 // → derivation reads Exited from "container does not exist") is not
 // reaped before it ever reached Ready.
@@ -699,12 +764,22 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 	// them via a re-derivation tick — and so cellStateAutoDeleteTriggers (which
 	// excludes both) cannot be bypassed. Container statuses are still refreshed
 	// below so `kuke get cell -o yaml` shows the latest per-container view, but
-	// the cell-level state is left alone until the operator runs
-	// `kuke delete cell`.
+	// the cell-level state is left alone until the operator restarts or
+	// deletes the cell.
 	if cellStateIsSticky(originalStatus.State) {
 		if err := r.populateCellContainerStatuses(&cell); err != nil {
 			r.logger.DebugContext(r.ctx, "populate container statuses failed",
 				"cell", cell.Metadata.Name, "error", err)
+		}
+		// An Error cell whose root is still running is wound down here
+		// (#1557): the pass that first derived Error normally does it, but a
+		// cell persisted as Error before wind-down covered Error, or whose
+		// wind-down failed, would otherwise keep a live root forever. Only
+		// while every workload is still terminal; Failed is left alone.
+		if originalStatus.State == intmodel.CellStateError &&
+			cellWorkloadsTerminal(cell) &&
+			shouldWindDownCell(cell, intmodel.CellStateError) {
+			return r.windDownCell(cell)
 		}
 		updated := !containerStatusesEqual(originalStatus.Containers, cell.Status.Containers) ||
 			observedGenerationBehind(originalStatus, cell.Metadata.Generation)
@@ -779,9 +854,10 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 	// relabel Exited (a false "workload completed") or sticky Error. Container
 	// statuses and CgroupReady are still refreshed, mirroring the sticky path.
 	// A workload observed active (a task started outside kukeon) falls
-	// through to normal derivation. The reconciler's own wind-down Stopped
-	// (ReadyObserved, no breadcrumb) is not preserved, so it still settles to
-	// Exited on this tick and `--rm` reaping keeps working.
+	// through to normal derivation. A Stopped with ReadyObserved and no
+	// breadcrumb (an operator stop of an already-finished cell, such as the
+	// `kuke run --rm` kill) is not preserved, so it still settles to Exited on
+	// this tick and `--rm` reaping keeps working.
 	if cellStoppedIsDurable(originalStatus, cell) {
 		cell.Status.State = intmodel.CellStateStopped
 		cell.Status.ReadyObserved = originalStatus.ReadyObserved
@@ -796,6 +872,18 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 			updated = persisted
 		}
 		return cell, ReconcileOutcome{Updated: updated}, nil
+	}
+
+	// Root death (#1557). The root anchors the cell's network, IPC and UTS
+	// namespaces and its CNI/IPAM lease, so workloads still running after it
+	// died sit on a network kukeon can no longer address, restart or tear
+	// down cleanly. Kill them and release the network in this pass, and
+	// settle the cell in Error naming the root's exit. Root-only cells never
+	// match (the root is the workload there and keeps the root-derived
+	// path), and an Unknown root read is not terminal, so a transient misread
+	// cannot kill a cell.
+	if rootDied, rootStatus := rootDiedUnderWorkloads(originalStatus, cell); rootDied {
+		return r.tearDownAfterRootDeath(cell, rootStatus)
 	}
 
 	// Run derivation whenever the filesystem check succeeded, even when the
@@ -882,30 +970,23 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 		cell.Status.Message = originalStatus.Message
 	case restartNone:
 		// No restart is owed for this exit — the restartFired/restartDeferred
-		// cases above already returned. Auto-delete (`--rm` / Spec.AutoDelete) is
-		// an explicit "delete the cell once the workload exits" directive that
-		// overrides the restartPolicy *preserve* gate: a `never` (or clean-exit
-		// `on-failure`) container that restartPolicyPermitsCellReap would
-		// otherwise keep in Stopped is reaped here instead. It does NOT override a
-		// restart-requiring policy — `always` (any exit) and `on-failure`
-		// (non-zero exit) fire the restart pass above and win this tick, so the
-		// cell is relaunched, not deleted. The auto-delete branch is therefore NOT
-		// gated on the RestartPolicy reap check, but it is reached only once no
-		// restart is owed (cf. `docker run --rm` cleaning up a finished workload).
+		// cases above already returned. `always` (any exit) and `on-failure`
+		// (non-zero exit, under its retry cap) never reach here while the root
+		// is alive, so a cell at this point has nothing left to run.
+		//
+		// Auto-delete (`--rm` / Spec.AutoDelete) comes first: a cleanly
+		// Exited cell is killed and deleted (cf. `docker run --rm` cleaning up
+		// a finished workload).
 		if shouldAutoDeleteCell(cell.Spec.AutoDelete, newState, cell.Status.ReadyObserved,
 			cellOperatorStopped(cell)) {
 			return r.autoDeleteCell(cell)
 		}
 
-		// RestartPolicy gate (#1003): per-container restartPolicy vetoes the
-		// wind-down kill so a workload authored with `restartPolicy: never`
-		// (or `on-failure` that exited cleanly) is left in Stopped state instead
-		// of disappearing under the next tick. Empty/unset defaults to `never` —
-		// an exited non-root container preserves the cell, matching the
-		// Kubernetes default restartPolicy. This governs only the non-auto-delete
-		// path; a `--rm` cell is already handled above. See
-		// restartPolicyPermitsCellReap.
-		if restartPolicyPermitsCellReap(cell) && shouldWindDownCell(cell, newState) {
+		// Otherwise wind the cell down: every workload is terminal (Exited or
+		// Error), so the root is stopped gracefully and its network released.
+		// restartPolicy plays no part here (#1557) — it decides whether a
+		// workload is restarted, not whether the root stays up.
+		if shouldWindDownCell(cell, newState) {
 			return r.windDownCell(cell)
 		}
 	}
@@ -937,26 +1018,25 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 	return cell, ReconcileOutcome{Updated: updated}, nil
 }
 
-// windDownCell is the non-AutoDelete counterpart to autoDeleteCell:
-// when a cell's non-root workloads have all exited, kill the cell
-// (KillCell handles the root task plus CNI detach plus cleanup) so
-// the root container shell does not zombie. Cell metadata is left
-// in place — the operator runs `kuke delete cell` explicitly when
-// they are done with it. KillCell already populates and persists
-// container statuses, so the caller need not double-write metadata.
+// windDownCell is the non-AutoDelete counterpart to autoDeleteCell: when a
+// cell's non-root workloads have all finished (derived Exited or Error), tear
+// the cell down so the root container does not outlive its workloads holding
+// an IP lease (#1557). The teardown is graceful (SIGTERM, then SIGKILL after
+// the timeout), so a root that handles SIGTERM, such as kukepause, ends
+// Stopped with exit 0; the workloads' dead tasks are deleted too, so every
+// container reads Stopped with its last exit code.
 //
-// KillCell is best-effort and idempotent (workload containers that
-// are already gone are no-ops); errors surface so the next reconcile
-// pass retries.
+// The cell keeps the label ReconcileCell derived for it — Exited, or Error
+// with the WorkloadFailed breadcrumb already stamped — and is persisted once
+// with that label. It is never written as Stopped on this path: Stopped is
+// reserved for the operator verbs and create-only materialization. Container
+// records and snapshots stay in place (#867); the operator runs
+// `kuke delete cell` when done with it.
 //
-// KillCell stamps CellStateStopped, but the cell got here because its
-// workloads self-exited cleanly (the reconciler derived CellStateExited, the
-// only state that fires shouldWindDownCell). This Stopped carries
-// ReadyObserved and no OperatorStopped breadcrumb (the workload was already
-// terminal when KillCell probed it), so cellStoppedIsDurable does not keep it
-// and the next reconcile tick re-derives the now-root-dead cell back to
-// Exited — the operator-stop-vs-self-exit label settles correctly without a
-// second write here (#1486).
+// After a wind-down the next pass is a no-op: an Exited cell re-derives
+// Exited from the preserved exit codes, an Error cell is sticky, and
+// shouldWindDownCell no longer fires because the root is not running. A
+// teardown error is returned so the next reconcile pass retries.
 func (r *Exec) windDownCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcome, error) {
 	r.logger.InfoContext(r.ctx, "reconcile: winding down cell after non-root workloads exited",
 		"cell", cell.Metadata.Name,
@@ -965,11 +1045,96 @@ func (r *Exec) windDownCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcome
 		"stack", cell.Spec.StackName,
 		"state", cell.Status.State)
 
-	updatedCell, err := r.killCellLocked(cell)
+	torn, err := r.teardownCellLocked(cell, teardownGraceful)
 	if err != nil {
-		return cell, ReconcileOutcome{}, fmt.Errorf("wind-down: kill cell: %w", err)
+		return cell, ReconcileOutcome{}, fmt.Errorf("wind-down: stop cell: %w", err)
 	}
-	return updatedCell, ReconcileOutcome{Updated: true}, nil
+	persisted, persistErr := r.persistCellStatusGuarded(torn)
+	if persistErr != nil {
+		return torn, ReconcileOutcome{}, fmt.Errorf("failed to update cell metadata: %w", persistErr)
+	}
+	return torn, ReconcileOutcome{Updated: persisted}, nil
+}
+
+// rootDiedUnderWorkloads reports whether the cell's root container is
+// observed terminal while one of its workloads is still active, and returns a
+// copy of the root's status for the breadcrumb. original is the status read
+// before this pass; cell carries the freshly populated container statuses.
+// Requires a cell that has been Ready and has non-root containers in spec.
+func rootDiedUnderWorkloads(original intmodel.CellStatus, cell intmodel.Cell) (bool, intmodel.ContainerStatus) {
+	if !original.ReadyObserved || !hasNonRootContainerSpec(cell.Spec.Containers) {
+		return false, intmodel.ContainerStatus{}
+	}
+	rootSpec := findRootContainerSpec(cell)
+	if rootSpec == nil {
+		return false, intmodel.ContainerStatus{}
+	}
+	for i := range cell.Status.Containers {
+		st := cell.Status.Containers[i]
+		if st.ID != rootSpec.ID {
+			continue
+		}
+		if !containerStateIsTerminal(st.State) || !cellWorkloadActive(cell) {
+			return false, intmodel.ContainerStatus{}
+		}
+		return true, st
+	}
+	return false, intmodel.ContainerStatus{}
+}
+
+// tearDownAfterRootDeath kills every remaining task in a cell whose root died
+// under running workloads, releases its CNI/IPAM lease (purgeCNIForContainer
+// runs by container ID, so it works with the root's netns gone), and settles
+// the cell in Error with reasonRootContainerExited. Error is sticky, so the
+// next pass leaves the cell alone; `kuke start` recovers it through
+// RecreateCell. rootStatus is the root's status as observed before teardown.
+func (r *Exec) tearDownAfterRootDeath(
+	cell intmodel.Cell,
+	rootStatus intmodel.ContainerStatus,
+) (intmodel.Cell, ReconcileOutcome, error) {
+	r.logger.WarnContext(r.ctx, "reconcile: root container exited under running workloads; tearing the cell down",
+		"cell", cell.Metadata.Name,
+		"realm", cell.Spec.RealmName,
+		"space", cell.Spec.SpaceName,
+		"stack", cell.Spec.StackName,
+		"root", rootStatus.ID,
+		"rootState", rootStatus.State,
+		"rootExitCode", rootStatus.ExitCode)
+
+	torn, err := r.teardownCellLocked(cell, teardownKill)
+	if err != nil {
+		return cell, ReconcileOutcome{}, fmt.Errorf("root death: kill cell: %w", err)
+	}
+	torn.Status.State = intmodel.CellStateError
+	torn.Status.Reason = reasonRootContainerExited
+	torn.Status.Message = rootDeathMessage(rootStatus)
+	persisted, persistErr := r.persistCellStatusGuarded(torn)
+	if persistErr != nil {
+		return torn, ReconcileOutcome{}, fmt.Errorf("failed to update cell metadata: %w", persistErr)
+	}
+	return torn, ReconcileOutcome{Updated: persisted}, nil
+}
+
+// rootDeathMessage renders the Status.Message for reasonRootContainerExited.
+// A root whose task vanished without an exit record (zero FinishTime) is
+// reported as such rather than as a misleading "exit code 0".
+func rootDeathMessage(root intmodel.ContainerStatus) string {
+	const suffix = "; its workloads were killed and the cell was torn down"
+	if root.FinishTime.IsZero() {
+		return fmt.Sprintf("root container %q is gone without an exit record%s", root.ID, suffix)
+	}
+	return "root " + formatContainerFailure(root) + suffix
+}
+
+// cellWorkloadsTerminal reports whether every non-root workload in spec reads
+// back terminal in the cell's container-status snapshot (none active, none
+// Unknown, none missing). False for a root-only cell.
+func cellWorkloadsTerminal(cell intmodel.Cell) bool {
+	if !hasNonRootContainerSpec(cell.Spec.Containers) {
+		return false
+	}
+	derived := deriveCellStateFromNonRootContainerStatuses(cell.Spec.Containers, cell.Status.Containers)
+	return derived == intmodel.CellStateExited || derived == intmodel.CellStateError
 }
 
 // autoDeleteCell runs the kill+delete sequence the per-cell watcher used
@@ -1015,15 +1180,20 @@ func (r *Exec) autoDeleteCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutco
 // terminal-for-derivation but still operator-restartable (#1268). markCellReady
 // then clears the failure breadcrumb on that transition.
 //
-// CellStateStopped is deliberately NOT sticky: the `kuke run --rm` reap and the
-// non-AutoDelete wind-down both reach Stopped via KillCell, then rely on the
-// next reconcile tick re-deriving the now-terminal cell to Exited (so `--rm`
-// auto-deletes and a wound-down cell settles at the clean-exit label). Making
-// Stopped unconditionally sticky would freeze those paths. Instead, the
+// Error stickiness does not block wind-down: a sticky Error cell whose root is
+// still running is wound down from the sticky branch, keeping its label
+// (#1557).
+//
+// CellStateStopped is deliberately NOT sticky: `kuke run --rm` kills a cell
+// whose workload has already exited while it is still persisted Ready, which
+// leaves a Stopped with no breadcrumb, and relies on the next reconcile tick
+// re-deriving the now-terminal cell to Exited so auto-delete fires. Making
+// Stopped unconditionally sticky would freeze that path. Instead, the
 // narrower cellStoppedIsDurable predicate keeps the two Stopped origins that
 // must survive a tick — a never-started create-only cell and an
-// operator-interrupted stop/kill (#1486) — while the wind-down Stopped is
-// still re-derived. The derivation itself never *produces* Stopped (#1267).
+// operator-interrupted stop/kill (#1486) — while any other Stopped is still
+// re-derived. The derivation itself never *produces* Stopped (#1267), and
+// wind-down never writes it.
 //
 // Extracted as a pure function so the stickiness predicate is unit-testable
 // without spinning up a runner + containerd fake.
@@ -1047,9 +1217,10 @@ func cellStateIsSticky(s intmodel.CellState) bool {
 //     clean stop to Exited and a kill (exit 137) to sticky Error.
 //
 // Either way the Stopped is kept only while no workload is active: a task
-// started outside kukeon makes the cell derive normally (Ready). The
-// reconciler's own wind-down Stopped (ReadyObserved, no breadcrumb) is not
-// durable, so it still settles to Exited and `--rm` reaping still fires.
+// started outside kukeon makes the cell derive normally (Ready). A Stopped
+// with ReadyObserved and no breadcrumb (an operator stop of a cell whose
+// workload had already exited, e.g. the `kuke run --rm` kill) is not durable,
+// so it still settles to Exited and `--rm` reaping still fires.
 func cellStoppedIsDurable(original intmodel.CellStatus, cell intmodel.Cell) bool {
 	if original.State != intmodel.CellStateStopped {
 		return false
@@ -1126,23 +1297,30 @@ func shouldAutoDeleteCell(autoDelete bool, newState intmodel.CellState, readyObs
 	return autoDelete && cellStateAutoDeleteTriggers(newState) && readyObserved && !operatorStopped
 }
 
-// shouldWindDownCell decides whether the reconciler should kill the
-// cell (root container + leftover plumbing) because its non-root
-// workloads have all exited. Same trigger states + ReadyObserved gate
-// as shouldAutoDeleteCell, plus two extra preconditions:
+// shouldWindDownCell decides whether the reconciler should tear the cell
+// down (root container + leftover plumbing) because its non-root workloads
+// have all finished. It fires for both terminal derived states, Exited and
+// Error, whatever the workloads' restartPolicy (#1557): the restart pass runs
+// first and wins the tick whenever a restart is owed, so a cell reaching this
+// gate has nothing left to run. It is deliberately not routed through
+// cellStateAutoDeleteTriggers, which stays Exited-only because it gates
+// `--rm`. Gated on the ReadyObserved latch, plus two extra preconditions:
 //
 //   - At least one non-root container in spec. Without this, the cell
-//     is kukeond-style — the root *is* the workload, and killing it
+//     is kukeond-style — the root *is* the workload, and stopping it
 //     because "the workload is gone" would be circular. Those cells
 //     stay in their derived state and the operator stops them
 //     explicitly via `kuke daemon stop` / `kuke daemon reset`.
 //   - The root container task is still running. Once the root is dead
 //     there is nothing to wind down; firing again would be a wasted
-//     KillCell on every subsequent tick. Read from the freshly
+//     teardown on every subsequent tick. Read from the freshly
 //     populated container statuses so this check costs no extra
 //     containerd round-trip.
 func shouldWindDownCell(cell intmodel.Cell, newState intmodel.CellState) bool {
-	if !cellStateAutoDeleteTriggers(newState) || !cell.Status.ReadyObserved {
+	if newState != intmodel.CellStateExited && newState != intmodel.CellStateError {
+		return false
+	}
+	if !cell.Status.ReadyObserved {
 		return false
 	}
 	if !hasNonRootContainerSpec(cell.Spec.Containers) {
@@ -1155,82 +1333,13 @@ func shouldWindDownCell(cell intmodel.Cell, newState intmodel.CellState) bool {
 	return rootContainerStillRunning(rootSpec.ID, cell.Status.Containers)
 }
 
-// restartPolicyPermitsCellReap reports whether every terminally-exited
-// non-root container in the cell carries a RestartPolicy that permits
-// the cell-level wind-down kill to fire (#1003). The reconciler asks this
-// gate before shouldWindDownCell — a single container's `never` (or
-// `on-failure` with a clean exit) blocks the cell-level reap, preserving
-// the workload in Stopped state so the operator can decide explicitly. The
-// auto-delete (`--rm`) branch is NOT gated on this — an explicit AutoDelete
-// reaps such a preserved exit anyway. It does not override a restart-requiring
-// policy, which fires earlier in ReconcileCell and wins the tick (see
-// ReconcileCell).
-//
-// Decision per terminally-exited non-root container, keyed on its
-// ContainerStatus.ExitCode (populated by GetContainerObservation):
-//
-//   - "always"        → permit reap regardless of exit code.
-//   - "on-failure"    → permit reap only when ExitCode != 0; a clean exit
-//     (0) means the workload completed successfully and the cell stays.
-//   - "" or "never"   → never permit reap. Empty is the default: an exited
-//     non-root container preserves the cell in Stopped (kept for restart),
-//     matching the Kubernetes default restartPolicy.
-//
-// Unknown values fall through to the permissive default to mirror the
-// pre-#1003 behavior — typos and future-spec values do not silently
-// strand cells in Stopped.
-//
-// Containers in non-terminal states (Ready/Pending/Paused/Unknown) are
-// ignored: the cell-state derivation already gates on "every non-root
-// terminal" before this function runs, so a non-terminal container being
-// "permitted to reap" is meaningless.
-func restartPolicyPermitsCellReap(cell intmodel.Cell) bool {
-	statusByID := make(map[string]intmodel.ContainerStatus, len(cell.Status.Containers))
-	for i := range cell.Status.Containers {
-		statusByID[cell.Status.Containers[i].ID] = cell.Status.Containers[i]
-	}
-	for i := range cell.Spec.Containers {
-		spec := cell.Spec.Containers[i]
-		if spec.Root {
-			continue
-		}
-		status, ok := statusByID[spec.ID]
-		if !ok {
-			continue
-		}
-		if !containerStateIsTerminal(status.State) {
-			continue
-		}
-		if !restartPolicyPermitsContainerReap(spec.RestartPolicy, status.ExitCode) {
-			return false
-		}
-	}
-	return true
-}
-
-// restartPolicyPermitsContainerReap is the per-container half of
-// restartPolicyPermitsCellReap. Pulled out so it can be exercised
-// directly without building a full cell snapshot. See
-// restartPolicyPermitsCellReap for the policy table.
-func restartPolicyPermitsContainerReap(policy string, exitCode int) bool {
-	switch policy {
-	case intmodel.RestartPolicyAlways:
-		return true
-	case intmodel.RestartPolicyOnFailure:
-		return exitCode != 0
-	case "", intmodel.RestartPolicyNever:
-		return false
-	default:
-		return true
-	}
-}
-
 // containerStateIsTerminal reports whether the state means "the task
-// is no longer running and will not run again on its own". Used by
-// restartPolicyPermitsCellReap to scope its policy check to containers
-// the reconciler is about to reap. Stopped, Failed, and NotCreated all
-// count — the cell-state derivation already treats them equivalently
-// (see deriveCellStateFromNonRootContainerStatuses).
+// is no longer running and will not run again on its own". Used by the
+// restart pass, the root-death check and the operator-stop classifier to
+// scope their checks to finished containers. Stopped, Failed, and NotCreated
+// all count — the cell-state derivation already treats them equivalently
+// (see deriveCellStateFromNonRootContainerStatuses). Unknown does not: a
+// transient misread must never be acted on.
 func containerStateIsTerminal(s intmodel.ContainerState) bool {
 	switch s {
 	case intmodel.ContainerStateStopped,
@@ -1279,25 +1388,21 @@ type containerRestartState struct {
 	lastAttempt time.Time
 }
 
-// restartPolicyRequiresRestart is the per-container restart-trigger half of the
-// reconciler's restart-on-exit pass (#1233), sibling to
-// restartPolicyPermitsContainerReap. It encodes the policy rows:
+// restartPolicyRequiresRestart is the per-container restart trigger of the
+// reconciler's restart-on-exit pass (#1233). It encodes the policy rows:
 //
 //   - "always"        → restart on any exit.
 //   - "on-failure"    → restart only on a non-zero exit; a clean exit (0) means
 //     the workload completed successfully and is not restarted.
 //   - "" or "never"   → never restart. Empty/unset defaults to `never`,
 //     matching the Kubernetes default restartPolicy (modelhub/container.go):
-//     a non-root cell that never set the field is NOT restarted on exit, it is
-//     left for the reap gate (preserved in Stopped, or deleted under `--rm`).
+//     a non-root cell that never set the field is NOT restarted on exit; once
+//     every workload is done the cell is wound down (or deleted under `--rm`).
 //
-// Unknown values fall through to the permissive default for the same reason
-// restartPolicyPermitsContainerReap does — a typo or future-spec value should
-// not silently strand a workload. The truth table currently coincides with
-// restartPolicyPermitsContainerReap (both encode "this policy + exit triggers an
-// action"), but the two are kept as named siblings: the restart pass and the
-// reap gate are distinct decisions, and #1235's user-authored knobs will diverge
-// them.
+// restartPolicy decides only whether a workload is restarted, never whether
+// the cell's root stays up (#1557). Unknown values fall through to the
+// permissive default (restart) so a typo or future-spec value does not
+// silently strand a workload.
 func restartPolicyRequiresRestart(policy string, exitCode int) bool {
 	switch policy {
 	case intmodel.RestartPolicyAlways:
@@ -1477,6 +1582,45 @@ func (r *Exec) maybeRestartExitedContainers(cell intmodel.Cell) (intmodel.Cell, 
 	return cell, result, nil
 }
 
+// restartOwed is the read-only twin of maybeRestartExitedContainers: it
+// reports whether that pass would fire or defer a restart for this cell
+// (#1557, used by RefreshCell to hold Degraded without restarting anything).
+// Same gates — ReadyObserved, a running root, a terminal non-root container
+// whose restartPolicy requires a restart and whose decision is not
+// restartNone — but it never relaunches a container or touches the restart
+// bookkeeping.
+func (r *Exec) restartOwed(cell intmodel.Cell) bool {
+	if !cell.Status.ReadyObserved {
+		return false
+	}
+	if rootSpec := findRootContainerSpec(cell); rootSpec != nil &&
+		!rootContainerStillRunning(rootSpec.ID, cell.Status.Containers) {
+		return false
+	}
+	statusByID := make(map[string]intmodel.ContainerStatus, len(cell.Status.Containers))
+	for i := range cell.Status.Containers {
+		statusByID[cell.Status.Containers[i].ID] = cell.Status.Containers[i]
+	}
+	for i := range cell.Spec.Containers {
+		spec := cell.Spec.Containers[i]
+		if spec.Root {
+			continue
+		}
+		status, ok := statusByID[spec.ID]
+		if !ok || !containerStateIsTerminal(status.State) {
+			continue
+		}
+		if !restartPolicyRequiresRestart(spec.RestartPolicy, status.ExitCode) {
+			continue
+		}
+		if r.restartDecisionFor(cell, spec.ID, spec.RestartPolicy,
+			effectiveRestartBackoff(spec), effectiveOnFailureMaxRestarts(spec)) != restartNone {
+			return true
+		}
+	}
+	return false
+}
+
 // restartContainer invokes the relaunch action for a container the restart pass
 // decided to restart. Falls through to (*Exec).StartContainer unless a test
 // injected restartContainerFn.
@@ -1638,7 +1782,7 @@ func (r *Exec) deriveCellState(cell intmodel.Cell) intmodel.CellState {
 // defensive read-side check that pairs with #301 — a transient
 // containerd hiccup or namespace-race-induced misread on a workload
 // container must not flip the cell to Stopped and trigger the
-// wind-down KillCell. Wait for the next reconcile pass to settle.
+// wind-down. Wait for the next reconcile pass to settle.
 //
 // "Container does not exist in containerd" is mapped to
 // ContainerStateNotCreated by GetContainerState; this derivation treats
@@ -1656,9 +1800,9 @@ func (r *Exec) deriveCellState(cell intmodel.Cell) intmodel.CellState {
 // an operator stop (Stopped). ExitCode is preserved across task reaping by
 // populateCellContainerStatuses, so a failed-then-reaped (NotCreated) workload
 // still carries its non-zero code here. CellStateError is sticky and excluded
-// from auto-delete / wind-down (cellStateIsSticky, cellStateAutoDeleteTriggers),
-// so the crashed cell is preserved with its exit code intact for the operator
-// instead of being reaped.
+// from auto-delete (cellStateIsSticky, cellStateAutoDeleteTriggers), so the
+// crashed cell is wound down but preserved with its exit code intact for the
+// operator instead of being deleted.
 func deriveCellStateFromNonRootContainerStatuses(
 	specs []intmodel.ContainerSpec,
 	statuses []intmodel.ContainerStatus,
@@ -1846,6 +1990,13 @@ func rootContainerExitedNonZero(rootID string, statuses []intmodel.ContainerStat
 // StartCellFailed / CreateCellFailed / StartContainerFailed startup reasons so
 // machine consumers can tell a post-Ready crash apart from a failed bring-up.
 const reasonWorkloadFailed = "WorkloadFailed"
+
+// reasonRootContainerExited is the stable PascalCase Status.Reason label
+// stamped when the reconciler observes a cell's root container terminal while
+// a workload is still running, and tears the cell down (#1557). Distinct from
+// reasonWorkloadFailed: the workloads did not fail, the root that anchors
+// their namespaces and network did.
+const reasonRootContainerExited = "RootContainerExited"
 
 // cellFailureBreadcrumb returns the (Reason, Message) pair to stamp on a cell
 // transitioning to CellStateFailed from a runtime workload exit (#1206).

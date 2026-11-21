@@ -86,7 +86,7 @@ See [Concepts → Container](../concepts/container.md) for what a container is.
 | `repos`                 | array of `ContainerRepo`   | no       | Git repos the kuketty wrapper clones before the workload starts — requires `attachable: true` (see [ContainerRepo](#containerrepo))                                                                                                 |
 | `git`                   | `ContainerGit`             | no       | Default git identity, stored credentials and signing, rendered as a container-global gitconfig (see [ContainerGit](#containergit))                                                                                                  |
 | `cniConfigPath`         | string                     | no       | Override the CNI config directory for this container                                                                                                                                                                                |
-| `restartPolicy`         | string                     | no       | Per-container reap policy at the cell wind-down / auto-delete gate. One of `always`, `on-failure`, `never`. Empty defaults to `never` (matches the Kubernetes default restartPolicy; see [Restart policy](#restart-policy)).        |
+| `restartPolicy`         | string                     | no       | Whether the reconciler relaunches this container after it exits. One of `always`, `on-failure`, `never`. Empty defaults to `never` (matches the Kubernetes default restartPolicy; see [Restart policy](#restart-policy)).           |
 | `restartBackoffSeconds` | int                        | no       | Minimum seconds between reconciler-driven restarts of this container. Unset uses the built-in `30s` default; `0` disables the floor. Requires a restarting policy (`always`/`on-failure`). See [Restart on exit](#restart-on-exit). |
 | `restartMaxRetries`     | int                        | no       | `on-failure` retry cap before the container is left terminal. Unset uses the built-in `5` default; must be ≥ 1. Requires `restartPolicy: on-failure`. See [Restart on exit](#restart-on-exit).                                      |
 | `tty`                   | `ContainerTty`             | no       | Shell-UX config for the kuketty wrapper (prompt, init scripts, logging) — requires `attachable: true` (see [ContainerTty](#containertty))                                                                                           |
@@ -96,29 +96,27 @@ See [Concepts → Container](../concepts/container.md) for what a container is.
 
 ### Restart policy
 
-`spec.restartPolicy` selects whether the cell wind-down / auto-delete reconciler reaps a cell after one of its non-root containers exits. The runner evaluates the policy per container at the wind-down gate; the cell-level decision is the intersection across every terminally-exited non-root container, so a single `never` blocks the wind-down.
+`spec.restartPolicy` decides one thing: whether the reconciler **relaunches** a non-root container after it exits. It does **not** decide whether the cell is wound down. Once every non-root workload has stopped and no restart is owed, the cell settles the same way under every policy:
 
-| Value        | Behavior at wind-down                                                                                                                                                             |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| empty/unset  | Treated as `never` (the default). An exited non-root container preserves the cell in `Stopped` rather than triggering a wind-down — matches the Kubernetes default restartPolicy. |
-| `always`     | Wind-down / auto-delete proceeds whenever the container terminally exits, regardless of exit code.                                                                                |
-| `on-failure` | Wind-down / auto-delete proceeds only when the container's last exit code is non-zero. A zero-exit (clean shutdown) keeps the cell in place.                                      |
-| `never`      | Wind-down / auto-delete is skipped — the cell stays in `Stopped` until an operator tears it down explicitly (`kuke delete` / `kuke purge`).                                       |
+- every workload exited `0` → the cell settles in `Exited`;
+- at least one workload exited non-zero → the cell settles in the sticky `Error` state.
 
-Only the root container is exempt: the root's exit drives cell-level lifecycle decisions independently and is not subject to this gate.
+In both cases the reconciler winds the cell down: it gracefully stops the root container and releases the cell's network, so no task is left running behind a terminal state. The cell's record, its containers' exit codes and its `REASON`/`MESSAGE` are kept, and `kuke start` / `kuke restart` brings it back. See [Exits, wind-down and root death](../concepts/cell.md#exits-wind-down-and-root-death) for the full rules.
 
-**Auto-delete (`--rm`) interaction.** A cell that opted into auto-delete (`kuke run --rm`, or `spec.autoDelete: true`) is reaped on a **no-restart-required exit** — an exit a `never` policy (or a clean-exit `on-failure`) would otherwise preserve in `Stopped` is deleted instead. `--rm` does **not** defeat a restart-requiring policy: with `restartPolicy: always` (any exit) or `on-failure` (non-zero exit) the restart fires first and the workload is relaunched, not deleted, for that tick — so a `--rm` + `always` workload restarts on exit rather than being cleaned up. In short, `--rm` cleans up a workload once it reaches a terminal, no-restart exit; it does not override an active restart loop.
+The root container is not subject to `restartPolicy`. If the root dies while a workload is still running, the reconciler kills the remaining workloads and settles the cell in `Error` with reason `RootContainerExited`.
+
+**Auto-delete (`--rm`) interaction.** A cell that opted into auto-delete (`kuke run --rm`, or `spec.autoDelete: true`) is deleted instead of wound down when it settles in `Exited`. A cell that settles in `Error` is kept for inspection, `--rm` or not. `--rm` does **not** defeat a restart-requiring policy: with `restartPolicy: always` (any exit) or `on-failure` (non-zero exit) the restart fires first and the workload is relaunched, not deleted — so a `--rm` + `always` workload restarts on exit rather than being cleaned up. In short, `--rm` cleans up a workload once it reaches a clean, no-restart exit; it does not override an active restart loop.
 
 ### Restart on exit
 
-The same `restartPolicy` value also drives whether the reconciler **relaunches** a non-root container after it exits, before the wind-down gate above is consulted. The two readings agree on which exits matter — an exit that owes a restart is never reaped — so a container is either relaunched or preserved, never silently dropped.
+The reconciler checks each exited non-root container against its `restartPolicy` before the cell is allowed to settle. A container that owes a restart is relaunched (after its backoff), and the cell holds in `Degraded` meanwhile. Only when no restart is owed does the cell settle as described above.
 
-| Value        | Restart on exit                                                                           |
-| ------------ | ----------------------------------------------------------------------------------------- |
-| empty/unset  | Never (treated as `never`). The exited container is left terminal; the cell is preserved. |
-| `always`     | On **any** exit (zero or non-zero). Uncapped — relaunches indefinitely.                   |
-| `on-failure` | On a **non-zero** exit only. A clean (exit 0) completion is not relaunched.               |
-| `never`      | Never.                                                                                    |
+| Value        | Restart on exit                                                                         |
+| ------------ | --------------------------------------------------------------------------------------- |
+| empty/unset  | Never (treated as `never`). The exited container is left terminal and the cell settles. |
+| `always`     | On **any** exit (zero or non-zero). Uncapped — relaunches indefinitely.                 |
+| `on-failure` | On a **non-zero** exit only. A clean (exit 0) completion is not relaunched.             |
+| `never`      | Never.                                                                                  |
 
 **Restart timing.** Restarts are evaluated on the reconcile loop, so a relaunch lands on the next reconcile tick after the exit is observed, not synchronously. Successive attempts on the same container are spaced by a minimum **30s backoff** — an exit inside the backoff window defers to a later tick. An `on-failure` container is capped at **5 restart attempts**; once the cap is exhausted the cell settles into the sticky `Error` state and self-healing stops until an operator intervenes. `always` is uncapped (it keeps the backoff but never exhausts).
 

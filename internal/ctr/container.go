@@ -196,7 +196,27 @@ func (c *client) StopContainer(
 		return nil, fmt.Errorf("failed to get task status: %w", err)
 	}
 
-	if status.Status != containerd.Running {
+	// A task that is not running still has to be cleaned up: a stop or kill
+	// must leave no task behind (#1557), including one that exited before the
+	// call. Only a paused or unknown task is refused, since deleting it would
+	// discard a process the caller did not ask to end.
+	switch status.Status {
+	case containerd.Running:
+		// Fall through to the signal / wait / delete path below.
+	case containerd.Stopped:
+		exited := containerd.NewExitStatus(status.ExitStatus, status.ExitTime, nil)
+		c.deleteTaskBestEffort(nsCtx, task, namespace, id)
+		c.logger.InfoContext(c.ctx, "deleted already-exited task", "id", id, "namespace", namespace,
+			"exit_code", status.ExitStatus)
+		return exited, nil
+	case containerd.Created:
+		c.deleteTaskBestEffort(nsCtx, task, namespace, id, containerd.WithProcessKill)
+		c.logger.InfoContext(c.ctx, "deleted never-started task", "id", id, "namespace", namespace)
+		return &containerd.ExitStatus{}, nil
+	case containerd.Paused, containerd.Pausing, containerd.Unknown:
+		c.logger.WarnContext(c.ctx, "task is not running", "id", id, "status", status.Status)
+		return nil, internalerrdefs.ErrTaskNotRunning
+	default:
 		c.logger.WarnContext(c.ctx, "task is not running", "id", id, "status", status.Status)
 		return nil, internalerrdefs.ErrTaskNotRunning
 	}
@@ -317,6 +337,22 @@ func (c *client) StopContainer(
 	c.dropTask(namespace, id)
 
 	return &exitStatus, nil
+}
+
+// deleteTaskBestEffort deletes a task that is no longer running and drops it
+// from the task cache. A failed delete is logged and not returned, matching the
+// delete at the end of StopContainer: the task has already stopped, so the
+// caller's stop succeeded even if containerd kept the task record.
+func (c *client) deleteTaskBestEffort(
+	nsCtx context.Context,
+	task containerd.Task,
+	namespace, id string,
+	opts ...containerd.ProcessDeleteOpts,
+) {
+	if _, err := task.Delete(nsCtx, opts...); err != nil {
+		c.logger.WarnContext(c.ctx, "failed to delete stopped task", "id", id, "err", formatError(err))
+	}
+	c.dropTask(namespace, id)
 }
 
 // CreateContainer creates a new container with the provided spec.

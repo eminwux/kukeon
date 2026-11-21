@@ -83,7 +83,8 @@ func (b *Exec) KillCell(cell intmodel.Cell) (KillCellResult, error) {
 		return res, fmt.Errorf("failed to kill cell containers: %w", err)
 	}
 
-	// Update cell metadata state to Stopped
+	// Persist the label the runner chose (Stopped, Stopped + OperatorStopped,
+	// or an Exited / Error label kept as it was; see classifyOperatorStop).
 	if err = b.runner.UpdateCellMetadata(internalCell); err != nil {
 		return res, fmt.Errorf("failed to update cell metadata: %w", err)
 	}

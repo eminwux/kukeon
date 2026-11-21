@@ -50,7 +50,9 @@ A cell's **identity is its own document** — the `CellDoc`. The CellDoc owns th
 - One container in a cell must be the root. If none is set explicitly, the first container declared is chosen.
 - The root container is created first. Its network namespace is the cell's network namespace.
 - Non-root containers join the same network namespace at creation time.
-- When the root container exits, the cell's network namespace is torn down. Non-root containers are expected to exit as well.
+- The root anchors the cell: workloads join its network, IPC and UTS namespaces, kukeon reaches the cell's network through the root's PID, and the cell's CNI/IPAM lease is keyed to the root container. It must stay alive for as long as any workload runs.
+- When every workload has finished, the reconciler stops the root (see [Lifecycle](#lifecycle)), whatever the workloads' `restartPolicy`.
+- When the root container exits while a workload is still running, the reconciler kills the remaining workloads, releases the cell's network, and settles the cell in `Error` with reason `RootContainerExited`. Cells with only a root container (kukeond-style) are different: there the root is the workload, and the cell's state follows the root.
 
 ## Cell networking
 
@@ -61,15 +63,79 @@ A cell's **identity is its own document** — the `CellDoc`. The CellDoc owns th
 
 ## Lifecycle
 
-| State     | What it means                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `Pending` | Cell metadata exists; containers not yet created                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `Ready`   | Root container is running; non-root containers are running                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `Stopped` | The workload is not running because the operator stopped it or it was never started: either `kuke stop` (SIGTERM) / `kuke kill` (SIGKILL) interrupted a running workload, or `kuke create cell` materialized the cell without starting it. Set only by those paths — the reconciler never _derives_ it. For these two origins the label is durable: the reconciler keeps `Stopped` across ticks instead of re-deriving the torn-down or never-started containers to `Exited`/`Error`, unless a workload is observed running again (e.g. a task started outside kukeon). The reconciler's own wind-down of a cell whose workloads already exited also passes through `Stopped` transiently and settles to `Exited` on the next tick (#1267, #1486). A `Stopped` cell restarts via `kuke start` / `kuke run <cell>`. |
-| `Exited`  | Every workload exited cleanly on its own (every exit code zero) — a clean self-exit. Auto-delete-eligible, so `kuke run --rm` reaps a finished job (#1267).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `Error`   | A workload exited non-zero / crashed; `reason` + `message` carry the failing container and its exit code/signal. Preserved (not auto-deleted) so the failure can be inspected — clear with `kuke delete cell` (#1267).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `Failed`  | A kukeon bring-up fault (create/start/recreate failed). Reserved for kukeon's own faults — a crashed workload is `Error`, not `Failed`. Preserved like `Error`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `Unknown` | The daemon can't determine the state (e.g., containerd offline)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+### States
+
+| State      | What it means                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Pending`  | The cell's status was never written by a lifecycle path. `kuke create cell` stamps `Stopped`, so a cell is not normally seen in `Pending` today. `start`, `run <cell>` and `restart` refuse it; delete it and create it again.                                                                                                                                                                                                                     |
+| `Ready`    | The workloads are running. For a root-only cell, the root is running.                                                                                                                                                                                                                                                                                                                                                                              |
+| `Degraded` | Some workloads are running, but at least one is down in a non-clean way: it crashed, or it exited under a `restartPolicy` that wants it running and the reconciler is restarting it (or waiting out its backoff). Not sticky: the reconciler re-derives it every pass, so it returns to `Ready` when the workload recovers and settles to `Error` once an `on-failure` workload exhausts its retry cap.                                            |
+| `Stopped`  | The operator stopped the cell (`kuke stop` / `kuke kill`), or `kuke create cell` materialized it without starting it. Only those paths set it; the reconciler never derives it. When an operator stop interrupts a cell that had not finished (a workload was running, the cell was `Degraded`, or a restart was owed), the cell also carries reason `OperatorStopped`, and the label is durable: the reconciler keeps it `Stopped` across passes. |
+| `Exited`   | Every workload exited 0 on its own, and no restart is owed. Auto-delete-eligible: a `kuke run --rm` cell in this state is deleted.                                                                                                                                                                                                                                                                                                                 |
+| `Error`    | A workload exited non-zero and no restart is owed (reason `WorkloadFailed`), or the root died under running workloads (reason `RootContainerExited`). `message` names the container and its exit code or signal. Sticky: the reconciler does not re-derive it, and it is never auto-deleted, so the failure stays inspectable. It is still restartable: `kuke start` / `run <cell>` / `restart` recreate the cell.                                 |
+| `Failed`   | A kukeon bring-up fault: create, start or recreate failed. A crashed workload is `Error`, not `Failed`. Sticky like `Error`, and restartable the same way.                                                                                                                                                                                                                                                                                         |
+| `Unknown`  | kukeon cannot tell (for example containerd is unreachable, or a workload's task status could not be read). The reconciler waits for the next pass rather than act on it.                                                                                                                                                                                                                                                                           |
+
+### Exits, wind-down and root death
+
+Each reconcile pass reads every container's task from containerd and applies these rules, in order:
+
+1. **Sticky states are kept.** `Error` and `Failed` are not re-derived. An `Error` cell whose root is still running is wound down (see rule 5) and keeps its label.
+2. **A durable `Stopped` is kept.** A never-started cell, or one carrying `OperatorStopped`, stays `Stopped` unless a workload is seen running again (a task started outside kukeon).
+3. **Root death.** If the root is terminal while a workload is still running, the reconciler kills every workload, runs the CNI/IPAM cleanup, and sets `Error` with reason `RootContainerExited` in the same pass. An `Unknown` root read does not count. Root-only cells are exempt.
+4. **Derivation and restarts.** For a cell with workloads, the state follows the workloads, not the root: `Ready` if they are all up, `Degraded` if some are up and one is down, `Exited` if all exited 0, `Error` if any exited non-zero. A root-only cell follows its root. A workload whose `restartPolicy` asks for a restart (`always` on any exit, `on-failure` on a non-zero exit) is restarted, subject to its backoff and retry cap; while a restart is owed the cell is held at `Degraded`. `restartPolicy` decides only whether a workload is restarted.
+5. **Wind-down.** Once every workload is terminal and no restart is owed (derived `Exited` or `Error`), the reconciler stops the root within that pass, whatever the `restartPolicy`. The stop is graceful: SIGTERM, then SIGKILL after 5 seconds. A root that handles SIGTERM, such as the injected kukepause root, ends with exit 0; one that ignores it (for example `sleep infinity` as PID 1) ends with exit 137. Every container's task is deleted, so every container then reads `Stopped` with its last exit code preserved. The cell keeps its derived `Exited` / `Error` label and its `reason` / `message`; it never passes through `Stopped`. Container records and snapshots stay, so the cell can be started again.
+6. **`--rm`.** A cell with `spec.autoDelete` (`kuke run --rm`) that settles `Exited` is killed and deleted instead of wound down. `Error`, `Failed` and `OperatorStopped` cells are never auto-deleted.
+
+`kuke refresh` applies rules 1, 2 and 4 the same way but acts on nothing: it never restarts, winds down, tears down or deletes a cell.
+
+### States and verbs
+
+| State      | `start`                        | `stop` / `kill`                                           | `restart`          | `run <cell>`             | `delete`         |
+| ---------- | ------------------------------ | --------------------------------------------------------- | ------------------ | ------------------------ | ---------------- |
+| `Pending`  | refused                        | stops tasks; `Stopped`                                    | refused            | refused                  | removes the cell |
+| `Ready`    | refused while a workload runs  | `Stopped` + `OperatorStopped`                             | stop, then start   | attaches                 | removes the cell |
+| `Degraded` | recreates the cell             | `Stopped` + `OperatorStopped`                             | recreates the cell | recreates, then attaches | removes the cell |
+| `Stopped`  | starts the existing containers | stays `Stopped`                                           | starts             | starts, then attaches    | removes the cell |
+| `Exited`   | starts the existing containers | stays `Exited`; any leftover task is ended                | starts             | starts, then attaches    | removes the cell |
+| `Error`    | recreates the cell             | stays `Error` with its reason; any leftover task is ended | recreates the cell | recreates, then attaches | removes the cell |
+| `Failed`   | recreates the cell             | `Stopped`                                                 | recreates the cell | recreates, then attaches | removes the cell |
+| `Unknown`  | refused                        | stops tasks; `Stopped`                                    | refused            | refused                  | removes the cell |
+
+Notes on the table:
+
+- `start`, `restart` and `run <cell>` share one decision in the daemon: `Pending` and `Unknown` are refused with a `kuke delete cell` pointer; `Failed`, `Error` and `Degraded` are recreated (stop, recreate the containers, start); `Stopped` and `Exited`, and a `Ready` cell whose tasks are gone, start from their existing container records. `restart` stops first only when the cell is `Ready`.
+- `stop` and `kill` differ only in the first signal (SIGTERM, escalating to SIGKILL after the timeout, versus SIGKILL straight away). Either verb ends and deletes every task in the cell, including tasks that had already exited, and waits (bounded) for each one to exit. Afterwards every container reads `Stopped` with its last exit code (137 for a SIGKILLed task).
+- The label after `stop` / `kill` is decided before anything is torn down. A `Ready` cell whose workload has already exited (for example `kuke run --rm` killing the cell after the workload finished) becomes plain `Stopped` without `OperatorStopped`, so the reconciler can still settle it to `Exited` and auto-delete it.
+- `delete` stops any task still running and removes the cell's containers, snapshots, cgroup and metadata.
+
+### State diagram
+
+```mermaid
+stateDiagram-v2
+    [*] --> Stopped: kuke create cell
+    Stopped --> Ready: start / run / restart
+    Exited --> Ready: start / run / restart
+    Ready --> Degraded: a workload crashed or is restarting
+    Degraded --> Ready: workload back up
+    Degraded --> Error: restart budget exhausted (wind-down)
+    Ready --> Exited: all workloads exited 0 (wind-down)
+    Ready --> Error: a workload exited non-zero (wind-down)
+    Ready --> Error: root died (workloads killed)
+    Degraded --> Error: root died (workloads killed)
+    Ready --> Stopped: stop / kill (OperatorStopped)
+    Degraded --> Stopped: stop / kill (OperatorStopped)
+    Exited --> Exited: stop / kill (label kept)
+    Error --> Error: stop / kill (label kept)
+    Error --> Ready: start / run / restart (recreate)
+    Degraded --> Ready: start / run / restart (recreate)
+    Failed --> Ready: start / run / restart (recreate)
+    Exited --> [*]: --rm auto-delete
+    Stopped --> [*]: delete
+    Exited --> [*]: delete
+    Error --> [*]: delete
+    Failed --> [*]: delete
+```
 
 ## Operations
 

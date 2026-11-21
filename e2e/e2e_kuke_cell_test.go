@@ -823,7 +823,7 @@ func TestKuke_KillCell_VerifyState(t *testing.T) {
 	)
 	runReturningBinary(t, nil, kuke, args...)
 
-	// Step 9: Verify root container task is STOPPED (kill only sends signal, doesn't delete task)
+	// Step 9: Verify root container task is gone (kill waits for the SIGKILLed task and deletes it, #1557)
 	if !verifyRootContainerTaskIsStopped(t, realmNamespace, rootContainerID) {
 		t.Fatalf(
 			"root container task %q is still running in containerd namespace %q after killing cell",

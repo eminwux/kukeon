@@ -137,9 +137,9 @@ func (b *Exec) StartCell(cell intmodel.Cell) (StartCellResult, error) {
 	// already claimed Pending / Unknown (refused) and Failed / Error / Degraded
 	// (recreate). The guard blocks on live *workloads*, not the cell shell: on a
 	// cell with a non-root workload spec the root container is excluded, because
-	// a #1003 restart-policy veto (a non-root workload that exits cleanly under
-	// on-failure, or exits under never) deliberately leaves the root alive on an
-	// otherwise-Exited cell, and that pinned root must not wedge the cell against
+	// an Exited cell can still carry a live root (one finished before the
+	// reconciler's wind-down covered every restartPolicy, #1557, or whose
+	// wind-down has not run yet), and that root must not wedge the cell against
 	// `kuke run` / `start` / `restart` (#1316). Root-only cells (kukeond-style /
 	// cgroup-only, no non-root spec) keep the root in the check — there the root
 	// IS the workload, so a running root must still block a duplicate start. The

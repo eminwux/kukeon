@@ -2,11 +2,11 @@
 
 Runtime lifecycle for cells. These commands don't touch metadata — they operate on the containerd task under the resource.
 
-| Command      | Signal              | What it does                                                |
-| ------------ | ------------------- | ----------------------------------------------------------- |
-| `kuke start` | (create/start task) | Launch the container(s); no-op if already running           |
-| `kuke stop`  | `SIGTERM`           | Request graceful shutdown; container exits on its own terms |
-| `kuke kill`  | `SIGKILL`           | Immediate termination; no graceful shutdown window          |
+| Command      | Signal              | What it does                                            |
+| ------------ | ------------------- | ------------------------------------------------------- |
+| `kuke start` | (create/start task) | Launch the container(s); no-op if already running       |
+| `kuke stop`  | `SIGTERM`           | Graceful shutdown; `SIGKILL` after a short grace period |
+| `kuke kill`  | `SIGKILL`           | Immediate termination; no graceful shutdown window      |
 
 All three take the same shape: `<verb> <name> <scope flags>`. The `<name>` positional resolves to a cell within the named realm/space/stack — cells are the only lifecycle subject.
 
@@ -30,7 +30,7 @@ kuke stop <name> --realm <r> --space <s> --stack <t>
 
 Aliases: `kuke stop` → `kuke sto`.
 
-Sends SIGTERM to the task. If the container has a shutdown handler, it gets a chance to run. There is no explicit grace period flag today — whatever the task does before exiting, it does.
+Sends SIGTERM to every task in the cell: the workload containers first, then the root container. If a container has a shutdown handler, it gets a chance to run. A task still running after a short grace period (5s; there is no flag to change it today) is sent SIGKILL. `stop` waits for each task to exit and deletes it, including tasks that had already exited, then releases the cell's network.
 
 ## kuke kill
 
@@ -40,7 +40,7 @@ kuke kill <name> --realm <r> --space <s> --stack <t>
 
 Aliases: `kuke kill` → `kuke k`.
 
-Sends SIGKILL. Useful when a cell is unresponsive. For the daemon itself, prefer the dedicated [`kuke daemon kill`](kuke-daemon.md) shortcut — it knows the daemon's static coordinates.
+Sends SIGKILL to every task in the cell, workloads first, then the root. Like `stop`, it waits for each task to exit and deletes it, so the two verbs leave the same end state; they differ only in the first signal. Useful when a cell is unresponsive. For the daemon itself, prefer the dedicated [`kuke daemon kill`](kuke-daemon.md) shortcut — it knows the daemon's static coordinates.
 
 ## Common flags
 
@@ -74,7 +74,13 @@ sudo kuke kill web --realm default --space blog --stack wordpress
 - Exit 0: signal delivered (or cell already in desired state for `start`).
 - Exit non-zero: the daemon couldn't find the resource, the resource is in a state that doesn't allow the transition, or the underlying containerd/runtime call failed.
 
-After `stop`/`kill`, the cell is in `Stopped` state. `start` moves it to `Ready`. See [Cell](../concepts/cell.md#lifecycle) and [Container](../concepts/container.md#lifecycle) for the full state tables.
+After `stop`/`kill`, no task of the cell is left behind. The state the cell is left in depends on what the verb interrupted:
+
+- The cell had already settled in `Exited` or `Error` and no workload was running: the state, `REASON` and `MESSAGE` are kept.
+- A workload was still running, the cell was `Degraded`, or a restart was owed: `Stopped` with reason `OperatorStopped`. This suppresses `--rm` auto-delete until the cell is restarted or deleted.
+- Otherwise: `Stopped`.
+
+Stopping or killing an already torn-down cell is a no-op that exits 0. `start` moves the cell to `Ready`. See [Cell](../concepts/cell.md#lifecycle) and [Container](../concepts/container.md#lifecycle) for the full state tables.
 
 ## Related
 
