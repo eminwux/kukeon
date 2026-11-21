@@ -247,7 +247,6 @@ func environment(field string, values map[string]string) error {
 					"HARNESS_SETTINGS",
 					"PROMPT",
 					"AGENT_NAME",
-					"AGENTS_REPO",
 					"HOME",
 					"GIT_SSH_COMMAND",
 					"GIT_CONFIG_SYSTEM",

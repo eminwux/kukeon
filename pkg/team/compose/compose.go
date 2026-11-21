@@ -356,6 +356,9 @@ type pairPlan struct {
 	extraSecrets []api.BlueprintSecretSlot
 	// extraParams are role-declared parameters the blueprint does not declare.
 	extraParams []string
+	// paramDefaults are the defaults the role declares for its extraParams,
+	// by name, before fact interpolation.
+	paramDefaults map[string]string
 	// tasks are the role tasks the team selects, rendered as task configs.
 	tasks []model.RoleTask
 	// realm is the team's realm: where an identity named without a scope is

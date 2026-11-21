@@ -520,6 +520,35 @@ composition derives from the role and source selections (`IMAGE`, `ROLE_PATH`,
 to the full resource identity. Parameters must not hold credentials: use secret
 bindings instead.
 
+A role declares the further parameters it reads in `Role.spec.needs.params`.
+Each entry is a bare name, which the operator must supply in
+`TeamsConfig.spec.parameters`, or a `{ name, default }` mapping that carries
+the role's own value:
+
+```yaml
+needs:
+  params:
+    - REGION
+    - { name: AGENTS_REPO, default: "${ROLE_SOURCE_REPO}" }
+```
+
+A default may reference any composed fact as `${FACT}`. Besides the values
+composition derives (`ROLE_PATH`, `ROLE_SOURCE_DIR`, …) there is
+`ROLE_SOURCE_REPO`: the `<owner>/<repo>` of the role source's URL, reduced from
+scp-like (`git@host:owner/repo`), `ssh://` and `https://` URLs with or without
+a trailing `.git`. A fork's roles therefore point at the fork without an edit.
+`ROLE_SOURCE_REPO` is a fact only: it is not a blueprint parameter and
+`spec.parameters` cannot set it.
+
+The resolved value is written to the `CellConfig` and exported into the cell
+environment under the parameter's name. Precedence, highest first:
+`TeamsConfig.spec.parameters.<NAME>`, then the role's default, then the
+blueprint's empty default. A role cannot set a default for a parameter the
+blueprint or composition already declares (`PROMPT`, `AGENT_NAME`, `IMAGE`, …).
+When a URL does not reduce to `<owner>/<repo>` (a nested group path, a local
+path), `ROLE_SOURCE_REPO` is empty, and `kuke team init` / `kuke team add` print
+a note naming the role and each parameter whose default resolved empty.
+
 Harness-owned `onInit` scripts (`spec.onInit`, or each mode's) call the image-installed
 `/opt/kuketeams/harness/Makefile.start setup`, which runs
 `make -C "$ROLE_SOURCE_DIR" <harness> ROLE="$ROLE_PATH"` against the role's

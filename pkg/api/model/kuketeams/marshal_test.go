@@ -97,17 +97,24 @@ func TestRoundTripAllKinds(t *testing.T) {
 			got.Spec.Source != nil && got.Spec.Source.Branch == "main" && got.Spec.Source.Floating()
 	})
 
+	roleDefault := "${ROLE_SOURCE_REPO}"
 	role := model.Role{
 		APIVersion: model.APIVersionV1, Kind: model.KindRole,
 		Metadata: model.Metadata{Name: "dev"},
 		Spec: model.RoleSpec{
 			Harnesses: map[string]model.RoleHarness{"claude": {Settings: "s.json"}},
-			Needs:     model.RoleNeeds{Repos: []string{"project", "agents"}, Mounts: []string{"ssh"}},
+			Needs: model.RoleNeeds{
+				Repos: []string{"project", "agents"}, Mounts: []string{"ssh"},
+				Params: []model.RoleParam{{Name: "PROMPT"}, {Name: "AGENTS_REPO", Default: &roleDefault}},
+			},
 		},
 	}
 	assertJSONYAML(t, "Role", role, func(got model.Role) bool {
+		params := got.Spec.Needs.Params
 		return len(got.Spec.Needs.Repos) == 2 && len(got.Spec.Needs.Mounts) == 1 &&
-			got.Spec.Harnesses["claude"].Settings == "s.json"
+			got.Spec.Harnesses["claude"].Settings == "s.json" &&
+			len(params) == 2 && params[0].Name == "PROMPT" && params[0].Default == nil &&
+			params[1].Name == "AGENTS_REPO" && params[1].Default != nil && *params[1].Default == roleDefault
 	})
 
 	h := model.Harness{
@@ -187,5 +194,44 @@ func assertJSONYAML[T any](t *testing.T, name string, in T, ok func(T) bool) {
 	}
 	if !ok(fromYAML) {
 		t.Errorf("%s YAML round-trip lost data: %s", name, yb)
+	}
+}
+
+// TestRoleParamForms asserts a needs.params entry decodes from a bare name or
+// a {name, default} mapping in YAML and JSON, and that a name-only entry
+// marshals back to the bare name.
+func TestRoleParamForms(t *testing.T) {
+	t.Parallel()
+	var needs model.RoleNeeds
+	raw := "params:\n  - PROMPT\n  - { name: AGENTS_REPO, default: \"${ROLE_SOURCE_REPO}\" }\n  - { name: EMPTY, default: \"\" }\n"
+	if err := yaml.Unmarshal([]byte(raw), &needs); err != nil {
+		t.Fatal(err)
+	}
+	if len(needs.Params) != 3 || needs.Params[0] != (model.RoleParam{Name: "PROMPT"}) ||
+		needs.Params[1].Default == nil || *needs.Params[1].Default != "${ROLE_SOURCE_REPO}" ||
+		needs.Params[2].Default == nil || *needs.Params[2].Default != "" {
+		t.Fatalf("params = %+v", needs.Params)
+	}
+	out, err := yaml.Marshal(needs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "- PROMPT\n") || !strings.Contains(string(out), "default: \"\"") {
+		t.Fatalf("marshaled = %s", out)
+	}
+	var fromJSON model.RoleNeeds
+	if err = json.Unmarshal([]byte(`{"params":["PROMPT",{"name":"REGION","default":"eu"}]}`), &fromJSON); err != nil {
+		t.Fatal(err)
+	}
+	if len(fromJSON.Params) != 2 || fromJSON.Params[1].Name != "REGION" || *fromJSON.Params[1].Default != "eu" {
+		t.Fatalf("json params = %+v", fromJSON.Params)
+	}
+	for _, bad := range []string{"params:\n  - { name: X, value: y }\n", "params:\n  - [X]\n"} {
+		if err = yaml.Unmarshal([]byte(bad), &needs); err == nil {
+			t.Fatalf("accepted %q", bad)
+		}
+	}
+	if err = json.Unmarshal([]byte(`{"params":[{"name":"X","value":"y"}]}`), &fromJSON); err == nil {
+		t.Fatal("json accepted an unknown field")
 	}
 }
