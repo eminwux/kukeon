@@ -592,11 +592,8 @@ func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr erro
 		return r.ctrClient.TaskStatus(namespace, id)
 	}) {
 		markCellReady(&internalCell)
-		if err = r.PopulateAndPersistCellContainerStatuses(&internalCell); err != nil {
-			r.logger.WarnContext(r.ctx, "failed to populate container statuses after idempotent StartCell skip",
-				"cell", cellName,
-				"error", err)
-			// best-effort, fall through with the Ready state we already set
+		if err = r.persistStartedCell(&internalCell); err != nil {
+			return intmodel.Cell{}, err
 		}
 		// #935: this idempotent-skip path bypasses the destructive recreate
 		// below and with it attachableBuildOpts + attachablePostCreateChown,
@@ -1238,15 +1235,31 @@ func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr erro
 
 	markCellReady(&internalCell)
 
-	// Populate container statuses after starting cell and persist them
-	if err = r.PopulateAndPersistCellContainerStatuses(&internalCell); err != nil {
-		r.logger.WarnContext(r.ctx, "failed to populate container statuses",
-			"cell", cellName,
-			"error", err)
-		// Continue anyway - status population is best-effort
+	if err = r.persistStartedCell(&internalCell); err != nil {
+		// The cell is up; a failed record write must not run the
+		// Failed-transition teardown in the deferred cleanup.
+		provisionStarted = false
+		return intmodel.Cell{}, err
 	}
 
 	return internalCell, nil
+}
+
+// persistStartedCell records a started cell's Ready state. Populating the
+// container statuses is best-effort, but the write itself is not: the
+// controller no longer persists the cell a second time after the runner
+// returns (issue #1569), so Ready must reach disk even when the populate
+// fails, and a failed write is returned.
+func (r *Exec) persistStartedCell(cell *intmodel.Cell) error {
+	if err := r.populateCellContainerStatuses(cell); err != nil {
+		r.logger.WarnContext(r.ctx, "failed to populate container statuses after StartCell",
+			"cell", cell.Metadata.Name,
+			"error", err)
+	}
+	if err := r.UpdateCellMetadata(*cell); err != nil {
+		return fmt.Errorf("%w: %w", internalerrdefs.ErrUpdateCellMetadata, err)
+	}
+	return nil
 }
 
 // StartContainer starts a specific container in a cell. Mirrors StartCell's

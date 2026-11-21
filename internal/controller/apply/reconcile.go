@@ -520,9 +520,9 @@ func createAndStartCell(r runner.Runner, desired intmodel.Cell) (intmodel.Cell, 
 	if startErr != nil {
 		return intmodel.Cell{}, fmt.Errorf("failed to start cell after creation: %w", startErr)
 	}
-	if updateErr := r.UpdateCellMetadata(started); updateErr != nil {
-		return intmodel.Cell{}, fmt.Errorf("failed to update cell metadata after start: %w", updateErr)
-	}
+	// runner.StartCell persists the started cell under the per-cell lock;
+	// a second write from this snapshot is redundant and could overwrite a
+	// concurrent locked writer (issue #1569).
 	return started, nil
 }
 

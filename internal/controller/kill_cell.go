@@ -77,16 +77,12 @@ func (b *Exec) KillCell(cell intmodel.Cell) (KillCellResult, error) {
 		return res, err
 	}
 
-	// Kill all containers in the cell
+	// Kill all containers in the cell. The runner persists the label it
+	// chose (see classifyOperatorStop) under the per-cell lock and is the
+	// only writer of the verb's outcome (issue #1569).
 	internalCell, err = b.runner.KillCell(internalCell)
 	if err != nil {
 		return res, fmt.Errorf("failed to kill cell containers: %w", err)
-	}
-
-	// Persist the label the runner chose (Stopped, Stopped + OperatorStopped,
-	// or an Exited / Error label kept as it was; see classifyOperatorStop).
-	if err = b.runner.UpdateCellMetadata(internalCell); err != nil {
-		return res, fmt.Errorf("failed to update cell metadata: %w", err)
 	}
 
 	res.Cell = internalCell

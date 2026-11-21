@@ -25,16 +25,22 @@ import (
 
 // Render provenance annotations the daemon stamps on every cell it renders
 // from a CellConfig (issue #1418). Annotations are never compared by
-// apply.DiffCell; the OutOfSync reconciler reads the defaults and image ones
-// explicitly to name the level that drifted.
+// apply.DiffCell; the OutOfSync reconciler reads the blueprint, config,
+// values, defaults and image ones explicitly to name the input that drifted.
 const (
 	// AnnotationRenderDigest is the digest of the rendered cell (identity,
 	// labels and spec). Preview and create of the same inputs produce the
 	// same value.
 	AnnotationRenderDigest = "kukeon.io/render-digest"
 	// AnnotationRenderConfigRevision is a content hash of the CellConfig
-	// document the cell was rendered from.
+	// document the cell was rendered from, with spec.schedule left out (a
+	// schedule is not part of the cells a Config makes).
 	AnnotationRenderConfigRevision = "kukeon.io/render-config-revision"
+	// AnnotationRenderBlueprintRevision records the CellBlueprint the cell
+	// was rendered from as "<blueprint name>@<content hash of the stored
+	// blueprint document>" (issue #1569), so the OutOfSync reconciler can
+	// name a blueprint edit or a Config repointed at another blueprint.
+	AnnotationRenderBlueprintRevision = "kukeon.io/render-blueprint-revision"
 	// AnnotationRenderRealmDefaults, AnnotationRenderSpaceDefaults and
 	// AnnotationRenderStackDefaults record each level's defaults as
 	// "generation=<n> hash=<h>"; hash is a content hash of the level's

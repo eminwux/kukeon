@@ -36,6 +36,8 @@ Bypass `kukeond` and run the operation in-process. Requires root: the client now
 
 Don't run two in-process commands at the same time — they'll race on the same on-disk state.
 
+In-process `start`, `stop`, `refresh` and `purge` are **not** serialised against a running `kukeond`: the per-cell lock that orders the daemon's lifecycle verbs against its reconcile tick is an in-process mutex, not a file lock, so it does not reach a second process (#1569). Use the in-process path for these verbs only while the daemon is stopped — it is the escape hatch for when the daemon is down, not a second way to drive a live one.
+
 ### `--verbose`, `-v` (`false`)
 
 Turn on structured slog output to stderr. Pair with `--log-level debug` for the chattiest view.

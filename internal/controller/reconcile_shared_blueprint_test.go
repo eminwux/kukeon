@@ -87,6 +87,7 @@ func TestSharedBlueprintReplacedInPlaceReachesEveryTeamsCells(t *testing.T) {
 		},
 	)
 	mock.ListCellsFn = func(string, string, string) ([]intmodel.Cell, error) { return live, nil }
+	mock.PatchCellMetadataFn = patchAgainstCellSet(t, live, mock.UpdateCellMetadataFn)
 	ctrl := setupTestController(t, mock)
 	res, err := ctrl.ReconcileCells()
 	if err != nil {

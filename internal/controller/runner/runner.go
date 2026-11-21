@@ -114,6 +114,13 @@ type Runner interface {
 	RecreateCell(cell intmodel.Cell) (intmodel.Cell, error)
 	UpdateContainer(cell intmodel.Cell, container intmodel.ContainerSpec) (intmodel.Cell, error)
 	UpdateCellMetadata(cell intmodel.Cell) error
+	// PatchCellMetadata is the locked read-modify-write for a cell's
+	// persisted document (issue #1569): under the per-cell lock it reads
+	// the document off disk, hands it to mutate, and writes it back (must
+	// exist; errdefs.ErrCellNotFound when the cell is gone) only when
+	// mutate returns true. Controller code changes a cell's status or
+	// annotations only through it.
+	PatchCellMetadata(cell intmodel.Cell, mutate func(fresh *intmodel.Cell) bool) error
 	ExistsCellRootContainer(cell intmodel.Cell) (bool, error)
 	DeleteCell(cell intmodel.Cell) error
 

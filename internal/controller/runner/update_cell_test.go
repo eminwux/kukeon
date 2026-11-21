@@ -139,3 +139,77 @@ func TestContainerSpecChanged_GitMountAppears(t *testing.T) {
 		})
 	}
 }
+
+// TestApplyCompatibleCellFields is case 8 of issue #1569: UpdateCell persists
+// the cell-level fields DiffCell routes to it as Compatible (spec.autoDelete,
+// spec.tty), and the render provenance only when desired carries one, so a
+// hand-written Cell document does not wipe the Config lineage record.
+func TestApplyCompatibleCellFields(t *testing.T) {
+	liveProv := &intmodel.CellProvenance{
+		BindingKind: "config",
+		BindingRef:  intmodel.CellBindingRef{Name: "cfg", Realm: "default"},
+		Params:      map[string]string{"CMD": "old"},
+	}
+	freshProv := &intmodel.CellProvenance{
+		BindingKind: "config",
+		BindingRef:  intmodel.CellBindingRef{Name: "cfg", Realm: "default"},
+		Params:      map[string]string{"CMD": "new"},
+	}
+
+	cases := []struct {
+		name       string
+		desired    intmodel.CellSpec
+		wantAuto   bool
+		wantTty    string
+		wantParams string
+	}{
+		{
+			name: "autoDelete and tty land; provenance replaced",
+			desired: intmodel.CellSpec{
+				AutoDelete: true,
+				Tty:        &intmodel.CellTty{Default: "work"},
+				Provenance: freshProv,
+			},
+			wantAuto:   true,
+			wantTty:    "work",
+			wantParams: "new",
+		},
+		{
+			name:       "desired without provenance keeps the live record",
+			desired:    intmodel.CellSpec{AutoDelete: true},
+			wantAuto:   true,
+			wantParams: "old",
+		},
+		{
+			name:       "autoDelete and tty cleared",
+			desired:    intmodel.CellSpec{Provenance: freshProv},
+			wantParams: "new",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			existing := intmodel.Cell{Spec: intmodel.CellSpec{
+				AutoDelete: !tc.wantAuto,
+				Tty:        &intmodel.CellTty{Default: "stale"},
+				Provenance: intmodel.CloneCellProvenance(liveProv),
+			}}
+			applyCompatibleCellFields(&existing, intmodel.Cell{Spec: tc.desired})
+			if existing.Spec.AutoDelete != tc.wantAuto {
+				t.Errorf("AutoDelete = %v, want %v", existing.Spec.AutoDelete, tc.wantAuto)
+			}
+			gotTty := ""
+			if existing.Spec.Tty != nil {
+				gotTty = existing.Spec.Tty.Default
+			}
+			if gotTty != tc.wantTty {
+				t.Errorf("Tty.Default = %q, want %q", gotTty, tc.wantTty)
+			}
+			if existing.Spec.Provenance == nil || existing.Spec.Provenance.Params["CMD"] != tc.wantParams {
+				t.Errorf("Provenance = %+v, want params CMD=%s", existing.Spec.Provenance, tc.wantParams)
+			}
+			if tc.desired.Provenance != nil && existing.Spec.Provenance == tc.desired.Provenance {
+				t.Error("provenance aliased to desired; want a copy")
+			}
+		})
+	}
+}

@@ -225,7 +225,8 @@ func renderCellFromConfig(r runner.Runner, cfg intmodel.CellConfig, binding cell
 		annotations[k] = v
 	}
 	annotations[cellconfig.AnnotationRenderDigest] = digest
-	annotations[cellconfig.AnnotationRenderConfigRevision] = shortHash(cfg.Document)
+	annotations[cellconfig.AnnotationRenderConfigRevision] = resolved.cfgRevision
+	annotations[cellconfig.AnnotationRenderBlueprintRevision] = resolved.bpRevision
 	annotations[cellconfig.AnnotationRenderRealmDefaults] = levelStamp(
 		levels.realm.Metadata.Generation, levels.realm.Spec.Defaults)
 	annotations[cellconfig.AnnotationRenderSpaceDefaults] = levelStamp(
@@ -252,13 +253,20 @@ func renderCellFromConfig(r runner.Runner, cfg intmodel.CellConfig, binding cell
 // its origins, and how each connector the Config requires resolves. A render
 // materializes it; a Config get reports its connectors.
 type configResolution struct {
-	cfgDoc  v1beta1.CellConfigDoc
-	bpDoc   v1beta1.CellBlueprintDoc
-	flat    cellblueprint.Flattened
-	levels  scopeLevels
-	merged  v1beta1.CellConfigDoc
-	values  []v1beta1.RenderedValue
-	binding cellBinding
+	cfgDoc v1beta1.CellConfigDoc
+	bpDoc  v1beta1.CellBlueprintDoc
+	// bpRevision is the referenced blueprint's "<name>@<content hash>"
+	// (AnnotationRenderBlueprintRevision), taken from the stored document
+	// bytes before components and mode are folded in.
+	bpRevision string
+	// cfgRevision is the Config's render revision (configRevision), taken
+	// from the decoded document before any fill is folded in.
+	cfgRevision string
+	flat        cellblueprint.Flattened
+	levels      scopeLevels
+	merged      v1beta1.CellConfigDoc
+	values      []v1beta1.RenderedValue
+	binding     cellBinding
 
 	connectors []v1beta1.ConnectorStatus
 	git        *gitIdentityExpander
@@ -274,8 +282,9 @@ func resolveConfig(r runner.Runner, cfg intmodel.CellConfig, binding cellBinding
 	if err != nil {
 		return configResolution{}, fmt.Errorf("decode lineage config: %w", err)
 	}
+	cfgRevision := configRevision(cfgDoc)
 
-	bpDoc, err := lookupConfigBlueprint(r, cfgDoc)
+	bpDoc, bpRevision, err := lookupConfigBlueprint(r, cfgDoc)
 	if err != nil {
 		return configResolution{}, err
 	}
@@ -361,15 +370,17 @@ func resolveConfig(r runner.Runner, cfg intmodel.CellConfig, binding cellBinding
 	git.settle(values)
 
 	return configResolution{
-		cfgDoc:     cfgDoc,
-		bpDoc:      bpDoc,
-		flat:       flat,
-		levels:     levels,
-		merged:     merged,
-		values:     values,
-		binding:    binding,
-		connectors: connectorStatuses(r, requirements, merged, values, git),
-		git:        git,
+		cfgDoc:      cfgDoc,
+		bpDoc:       bpDoc,
+		bpRevision:  bpRevision,
+		cfgRevision: cfgRevision,
+		flat:        flat,
+		levels:      levels,
+		merged:      merged,
+		values:      values,
+		binding:     binding,
+		connectors:  connectorStatuses(r, requirements, merged, values, git),
+		git:         git,
 	}, nil
 }
 
@@ -626,8 +637,14 @@ func sourceIdentityValues(
 	return out, nil
 }
 
-// lookupConfigBlueprint fetches and decodes the Blueprint a Config references.
-func lookupConfigBlueprint(r runner.Runner, cfgDoc v1beta1.CellConfigDoc) (v1beta1.CellBlueprintDoc, error) {
+// lookupConfigBlueprint fetches and decodes the Blueprint a Config references,
+// and returns its render revision: "<name>@<shortHash(stored document)>"
+// (cellconfig.AnnotationRenderBlueprintRevision, issue #1569). The hash covers
+// the stored bytes of every blueprint, so an in-place overwrite of a shared
+// blueprint (#1560) changes it just as a repoint to another blueprint does.
+func lookupConfigBlueprint(
+	r runner.Runner, cfgDoc v1beta1.CellConfigDoc,
+) (v1beta1.CellBlueprintDoc, string, error) {
 	ref := cfgDoc.Spec.Blueprint
 	bpCarrier, getErr := r.GetBlueprint(intmodel.CellBlueprint{
 		Metadata: intmodel.CellBlueprintMetadata{
@@ -639,16 +656,45 @@ func lookupConfigBlueprint(r runner.Runner, cfgDoc v1beta1.CellConfigDoc) (v1bet
 	})
 	if getErr != nil {
 		if errors.Is(getErr, errdefs.ErrBlueprintNotFound) {
-			return v1beta1.CellBlueprintDoc{}, fmt.Errorf(
+			return v1beta1.CellBlueprintDoc{}, "", fmt.Errorf(
 				"%w: referenced blueprint %q not found", errdefs.ErrBlueprintNotFound, ref.Name)
 		}
-		return v1beta1.CellBlueprintDoc{}, fmt.Errorf("read referenced blueprint %q: %w", ref.Name, getErr)
+		return v1beta1.CellBlueprintDoc{}, "", fmt.Errorf("read referenced blueprint %q: %w", ref.Name, getErr)
 	}
 	bpDoc, bpErr := apischeme.ConvertCellBlueprintToExternal(bpCarrier)
 	if bpErr != nil {
-		return v1beta1.CellBlueprintDoc{}, fmt.Errorf("decode referenced blueprint: %w", bpErr)
+		return v1beta1.CellBlueprintDoc{}, "", fmt.Errorf("decode referenced blueprint: %w", bpErr)
 	}
-	return bpDoc, nil
+	return bpDoc, blueprintRevision(strings.TrimSpace(ref.Name), bpCarrier.Document), nil
+}
+
+// configRevision is a CellConfig's render revision
+// (cellconfig.AnnotationRenderConfigRevision): a content hash of the decoded
+// Config document with spec.schedule cleared. A schedule is a property of the
+// Config, not of the cells made from it (#1503), so adding, changing or
+// removing one must not make those cells report "config changed".
+func configRevision(cfgDoc v1beta1.CellConfigDoc) string {
+	cfgDoc.Spec.Schedule = nil
+	return hashJSON(cfgDoc)
+}
+
+// legacyConfigRevision is the config revision cells rendered before issue
+// #1569 carry: a content hash of the stored document bytes, schedule
+// included. The OutOfSync comparison accepts it as "unchanged" while it still
+// matches the current document, so upgrading never flaps a cell.
+func legacyConfigRevision(cfg intmodel.CellConfig) string {
+	return shortHash(cfg.Document)
+}
+
+// blueprintRevision formats a blueprint render revision.
+func blueprintRevision(name string, document []byte) string {
+	return name + "@" + shortHash(document)
+}
+
+// blueprintRevisionName returns the name part of a blueprint render revision.
+func blueprintRevisionName(revision string) string {
+	name, _, _ := strings.Cut(revision, "@")
+	return name
 }
 
 // loadScopeLevels reads the cell's Realm, Space and Stack. A not-found level

@@ -21,6 +21,8 @@
 package controller_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
@@ -457,6 +459,7 @@ func TestReconcileCells_OutOfSync_BackfillsUnpulledImageDigest(t *testing.T) {
 	backfilled := *captured
 	scope.digest = "sha256:bbb"
 	mock.UpdateCellMetadataFn = nil
+	mock.PatchCellMetadataFn = nil
 	_, captured = runOutOfSyncHarness(t, backfilled, mock)
 	if captured == nil || !captured.Status.OutOfSync ||
 		!strings.Contains(captured.Status.OutOfSyncReason, "image agent digest changed") {
@@ -539,12 +542,14 @@ func TestStartCell_OutOfSyncReapply_DefaultsOnlyRecordsProvenance(t *testing.T) 
 		c.Status.State = intmodel.CellStateReady
 		return c, nil
 	}
-	mock.UpdateCellMetadataFn = func(c intmodel.Cell) error {
+	// The reapply records the fresh render through the locked patch
+	// (issue #1569).
+	mock.PatchCellMetadataFn = patchAgainstSnapshot(t, live, func(c intmodel.Cell) error {
 		if stamped == nil {
 			stamped = c.Metadata.Annotations
 		}
 		return nil
-	}
+	})
 
 	ctrl := setupTestController(t, mock)
 	res, err := ctrl.StartCell(buildTestCell(live.Metadata.Name, live.Spec.RealmName, live.Spec.SpaceName,
@@ -589,10 +594,10 @@ func TestStartCell_OutOfSyncReapply_ImageRebuildRecreates(t *testing.T) {
 	mock.StartCellFn = func(intmodel.Cell) (intmodel.Cell, error) {
 		return intmodel.Cell{}, errors.New("runner.StartCell must not run: RecreateCell owns the start")
 	}
-	mock.UpdateCellMetadataFn = func(c intmodel.Cell) error {
+	mock.PatchCellMetadataFn = patchAgainstSnapshot(t, live, func(c intmodel.Cell) error {
 		stamped = c.Metadata.Annotations
 		return nil
-	}
+	})
 
 	ctrl := setupTestController(t, mock)
 	res, err := ctrl.StartCell(buildTestCell(live.Metadata.Name, live.Spec.RealmName, live.Spec.SpaceName,
@@ -605,5 +610,276 @@ func TestStartCell_OutOfSyncReapply_ImageRebuildRecreates(t *testing.T) {
 	}
 	if got := stamped[cellconfig.AnnotationRenderImageDigests]; got != "agent=sha256:bbb" {
 		t.Errorf("recorded image digests = %q, want agent=sha256:bbb", got)
+	}
+}
+
+// runRenderTick runs one reconcile tick over live against the render fixture
+// and returns the counters and the cell the OutOfSync patch persisted (nil
+// when nothing was written).
+func runRenderTick(t *testing.T, mock *fakeRunner, live intmodel.Cell) (controllerResult, *intmodel.Cell) {
+	t.Helper()
+	mock.ListRealmsFn = func() ([]intmodel.Realm, error) {
+		return []intmodel.Realm{buildTestRealm("kuke-system", "")}, nil
+	}
+	mock.ListSpacesFn = func(string) ([]intmodel.Space, error) {
+		return []intmodel.Space{buildTestSpace("default", "kuke-system")}, nil
+	}
+	mock.ListStacksFn = func(string, string) ([]intmodel.Stack, error) {
+		return []intmodel.Stack{buildTestStack("default", "kuke-system", "default")}, nil
+	}
+	mock.ReconcileCellFn = passthroughReconcile
+	mock.UpdateCellMetadataFn = nil
+	mock.PatchCellMetadataFn = nil
+	return runOutOfSyncHarness(t, live, mock)
+}
+
+func serveConfig(t *testing.T, mock *fakeRunner, cfg ext.CellConfigDoc) {
+	t.Helper()
+	mock.GetConfigFn = func(intmodel.CellConfig) (intmodel.CellConfig, error) {
+		return configCarrier(t, cfg), nil
+	}
+}
+
+func serveBlueprint(t *testing.T, mock *fakeRunner, bp ext.CellBlueprintDoc) {
+	t.Helper()
+	mock.GetBlueprintFn = func(intmodel.CellBlueprint) (intmodel.CellBlueprint, error) {
+		return blueprintCarrier(t, bp), nil
+	}
+}
+
+// TestRenderCellFromConfig_StampsBlueprintRevision pins AC10: a newly
+// rendered cell carries kukeon.io/render-blueprint-revision as
+// "<blueprint name>@<hash>".
+func TestRenderCellFromConfig_StampsBlueprintRevision(t *testing.T) {
+	mock := newRenderRunner(t, &renderScope{}, renderConfig())
+	live := renderLiveCell(t, setupTestController(t, mock))
+	rev := live.Metadata.Annotations[cellconfig.AnnotationRenderBlueprintRevision]
+	name, hash, ok := strings.Cut(rev, "@")
+	if !ok || name != "dev" || len(hash) != 16 {
+		t.Errorf("blueprint revision = %q, want dev@<16 hex>", rev)
+	}
+}
+
+// TestReconcileCells_OutOfSync_NamesTheInputThatMoved covers cases 13 and 14
+// (AC11): a blueprint content change under the same name or a Config
+// repointed at another blueprint names the blueprint; a Config document
+// change alone says "config changed"; a fill-value change through a level
+// default says "values changed". Reasons come in the fixed order.
+func TestReconcileCells_OutOfSync_NamesTheInputThatMoved(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		change     func(t *testing.T, mock *fakeRunner, scope *renderScope)
+		wantPrefix string
+		wantExact  string
+	}{
+		{
+			name: "blueprint content changed, same name",
+			change: func(t *testing.T, mock *fakeRunner, _ *renderScope) {
+				bp := renderBlueprint()
+				bp.Spec.Prefix = "renamed" // content only; the rendered spec is unchanged
+				serveBlueprint(t, mock, bp)
+			},
+			wantExact: "blueprint dev changed",
+		},
+		{
+			name: "config repointed at another blueprint",
+			change: func(t *testing.T, mock *fakeRunner, _ *renderScope) {
+				cfg := renderConfig()
+				cfg.Spec.Blueprint.Name = "dev-next"
+				serveConfig(t, mock, cfg)
+				bp := renderBlueprint()
+				bp.Metadata.Name = "dev-next"
+				serveBlueprint(t, mock, bp)
+			},
+			wantPrefix: "blueprint dev-next changed; config changed",
+		},
+		{
+			name: "config document changed only",
+			change: func(t *testing.T, mock *fakeRunner, _ *renderScope) {
+				cfg := renderConfig()
+				cfg.Metadata.Annotations = map[string]string{"owner": "ops"} // not copied onto the cell
+				serveConfig(t, mock, cfg)
+			},
+			wantExact: "config changed",
+		},
+		{
+			name: "fill values changed through a level default",
+			change: func(_ *testing.T, _ *fakeRunner, scope *renderScope) {
+				scope.spaceDefaults = &intmodel.SpaceDefaults{Values: map[string]string{"REGION": "eu"}}
+			},
+			wantPrefix: "values changed; space defaults changed; spec differs at ",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			scope := &renderScope{}
+			mock := newRenderRunner(t, scope, renderConfig())
+			live := renderLiveCell(t, setupTestController(t, mock))
+
+			tc.change(t, mock, scope)
+			_, captured := runRenderTick(t, mock, live)
+			if captured == nil || !captured.Status.OutOfSync {
+				t.Fatalf("no OutOfSync verdict persisted: %+v", captured)
+			}
+			reason := captured.Status.OutOfSyncReason
+			if tc.wantExact != "" && reason != tc.wantExact {
+				t.Errorf("reason = %q, want %q", reason, tc.wantExact)
+			}
+			if tc.wantPrefix != "" && !strings.HasPrefix(reason, tc.wantPrefix) {
+				t.Errorf("reason = %q, want prefix %q", reason, tc.wantPrefix)
+			}
+		})
+	}
+}
+
+// TestReconcileCells_OutOfSync_CellWithoutBlueprintStampDoesNotFlap is case
+// 15 (AC12): a cell rendered before the blueprint revision existed gets no
+// blueprint reason and no spurious OutOfSync, and a Synced one has the stamp
+// back-filled, so a later blueprint change is named for it.
+func TestReconcileCells_OutOfSync_CellWithoutBlueprintStampDoesNotFlap(t *testing.T) {
+	scope := &renderScope{}
+	mock := newRenderRunner(t, scope, renderConfig())
+	live := renderLiveCell(t, setupTestController(t, mock))
+	fresh := live.Metadata.Annotations[cellconfig.AnnotationRenderBlueprintRevision]
+	delete(live.Metadata.Annotations, cellconfig.AnnotationRenderBlueprintRevision)
+
+	// The blueprint changed since, without changing the rendered spec.
+	bp := renderBlueprint()
+	bp.Spec.Prefix = "renamed"
+	serveBlueprint(t, mock, bp)
+
+	res, captured := runRenderTick(t, mock, live)
+	if captured == nil {
+		t.Fatal("Synced cell without the blueprint stamp was not back-filled")
+	}
+	if captured.Status.OutOfSync || captured.Status.OutOfSyncReason != "" {
+		t.Errorf("unstamped cell flapped: %+v", captured.Status)
+	}
+	got := captured.Metadata.Annotations[cellconfig.AnnotationRenderBlueprintRevision]
+	if got == "" || got == fresh {
+		t.Errorf("back-filled blueprint revision = %q, want the current blueprint's (not %q)", got, fresh)
+	}
+	if res.CellsUpdated != 1 {
+		t.Errorf("CellsUpdated = %d, want 1 for the back-fill", res.CellsUpdated)
+	}
+
+	// Once stamped, a blueprint change is named.
+	backfilled := *captured
+	bp.Spec.Prefix = "renamed-again"
+	serveBlueprint(t, mock, bp)
+	_, captured = runRenderTick(t, mock, backfilled)
+	if captured == nil || captured.Status.OutOfSyncReason != "blueprint dev changed" {
+		t.Errorf("after back-fill, blueprint change verdict = %+v, want blueprint dev changed", captured)
+	}
+}
+
+// TestReconcileCells_OutOfSync_LegacyConfigRevisionDoesNotFlap: a cell
+// rendered before issue #1569 carries the config revision as the hash of the
+// stored document bytes. While that document is unchanged the cell stays
+// Synced, and the stamp is rewritten in the current form.
+func TestReconcileCells_OutOfSync_LegacyConfigRevisionDoesNotFlap(t *testing.T) {
+	cfg := renderConfig()
+	mock := newRenderRunner(t, &renderScope{}, cfg)
+	live := renderLiveCell(t, setupTestController(t, mock))
+	current := live.Metadata.Annotations[cellconfig.AnnotationRenderConfigRevision]
+	sum := sha256.Sum256(configCarrier(t, cfg).Document)
+	legacy := hex.EncodeToString(sum[:])[:16]
+	if legacy == current {
+		t.Fatal("fixture: legacy and current config revisions coincide")
+	}
+	live.Metadata.Annotations[cellconfig.AnnotationRenderConfigRevision] = legacy
+
+	_, captured := runRenderTick(t, mock, live)
+	if captured == nil {
+		t.Fatal("legacy config revision was not back-filled")
+	}
+	if captured.Status.OutOfSync {
+		t.Errorf("legacy config revision flapped the cell: %q", captured.Status.OutOfSyncReason)
+	}
+	if got := captured.Metadata.Annotations[cellconfig.AnnotationRenderConfigRevision]; got != current {
+		t.Errorf("back-filled config revision = %q, want %q", got, current)
+	}
+}
+
+// TestReconcileCells_OutOfSync_StableAcrossTicks is case 16 (AC13): with
+// several reasons present and no input change between two ticks, the reason
+// string is identical and the second tick writes nothing.
+func TestReconcileCells_OutOfSync_StableAcrossTicks(t *testing.T) {
+	scope := &renderScope{}
+	mock := newRenderRunner(t, scope, renderConfig())
+	live := renderLiveCell(t, setupTestController(t, mock))
+
+	cfg := renderConfig()
+	cfg.Metadata.Annotations = map[string]string{"owner": "ops"}
+	serveConfig(t, mock, cfg)
+	bp := renderBlueprint()
+	bp.Spec.Prefix = "renamed"
+	serveBlueprint(t, mock, bp)
+	scope.realmDefaults = &intmodel.ScopeDefaults{Values: map[string]string{"REGION": "eu"}}
+	scope.stackDefaults = &intmodel.ScopeDefaults{Values: map[string]string{"UNUSED": "x"}}
+
+	_, first := runRenderTick(t, mock, live)
+	if first == nil || !first.Status.OutOfSync {
+		t.Fatalf("first tick: no OutOfSync verdict: %+v", first)
+	}
+	want := "blueprint dev changed; config changed; values changed; realm defaults changed; " +
+		"stack defaults changed; spec differs at "
+	if !strings.HasPrefix(first.Status.OutOfSyncReason, want) {
+		t.Errorf("reason = %q, want prefix %q", first.Status.OutOfSyncReason, want)
+	}
+
+	for i := range 2 {
+		res, again := runRenderTick(t, mock, *first)
+		if again != nil {
+			t.Errorf("tick %d with no input change wrote %+v", i+2, again.Status)
+		}
+		if res.CellsUpdated != 0 {
+			t.Errorf("tick %d CellsUpdated = %d, want 0", i+2, res.CellsUpdated)
+		}
+	}
+}
+
+// TestReconcileCells_OutOfSync_SkipsWhenAnotherWriterGotIn covers D10 / AC7:
+// the tick's verdict is patched onto the fresh document only when that
+// document still has the generation and annotations the verdict was computed
+// from; otherwise the write is skipped with no error and no CellsUpdated.
+func TestReconcileCells_OutOfSync_SkipsWhenAnotherWriterGotIn(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		moved func(*intmodel.Cell)
+	}{
+		{name: "generation moved", moved: func(c *intmodel.Cell) { c.Metadata.Generation++ }},
+		{name: "annotations moved", moved: func(c *intmodel.Cell) {
+			c.Metadata.Annotations[cellconfig.AnnotationRenderConfigRevision] = "recorded-by-a-start"
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			scope := &renderScope{}
+			mock := newRenderRunner(t, scope, renderConfig())
+			live := renderLiveCell(t, setupTestController(t, mock))
+			live.Metadata.Generation = 4
+			scope.realmDefaults = &intmodel.ScopeDefaults{Values: map[string]string{"UNUSED": "x"}}
+
+			runRenderTick(t, mock, live) // wire list fns
+			var wrote bool
+			mock.UpdateCellMetadataFn = func(intmodel.Cell) error { wrote = true; return nil }
+			mock.PatchCellMetadataFn = func(_ intmodel.Cell, mutate func(*intmodel.Cell) bool) error {
+				fresh := cloneCellForTest(t, live)
+				tc.moved(&fresh)
+				if mutate(&fresh) {
+					wrote = true
+				}
+				return nil
+			}
+			res, err := setupTestController(t, mock).ReconcileCells()
+			if err != nil {
+				t.Fatalf("ReconcileCells: %v", err)
+			}
+			if wrote {
+				t.Error("the tick wrote its verdict over another writer's update")
+			}
+			if res.CellsUpdated != 0 || res.CellsErrored != 0 {
+				t.Errorf("CellsUpdated=%d CellsErrored=%d, want 0/0", res.CellsUpdated, res.CellsErrored)
+			}
+		})
 	}
 }

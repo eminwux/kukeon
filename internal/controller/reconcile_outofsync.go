@@ -19,6 +19,7 @@ package controller
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 
@@ -56,11 +57,12 @@ const (
 //   - OutOfSync = false with OutOfSyncError set when divergence is
 //     undecidable — referenced Blueprint missing, slot-fill validation
 //     failure, or any other materialization error. Distinct from OutOfSync
-//     so downstream verbs (`kuke get cell` SYNC column, `kuke restart
-//     <name>`) can route the error case separately from a routine drift.
+//     so `kuke get cell`'s SYNC column can report the error case separately
+//     from a routine drift. The start-time reapply does not read it: it
+//     renders the Config itself (issue #1569).
 //
-// Persists via runner.UpdateCellMetadata only when any of the three fields
-// would change, so an already-Synced cell costs at most one Config + one
+// Persists via a locked runner.PatchCellMetadata only when any of the three
+// fields would change, so an already-Synced cell costs at most one Config + one
 // Blueprint read per tick. The caller (ReconcileCells) treats a persisted
 // write as a CellsUpdated bump.
 func reconcileCellOutOfSync(r runner.Runner, cell intmodel.Cell) (bool, error) {
@@ -90,6 +92,23 @@ type cellOutOfSync struct {
 	// at render time (a registry ref not pulled yet) now record the digest
 	// the namespace holds, so a later re-pull can be detected (#1418).
 	ImageDigests string
+
+	// BlueprintRevision, when non-empty, back-fills the cell's render
+	// blueprint-revision annotation on a Synced cell rendered before the
+	// annotation existed, so a later blueprint change is named for it too
+	// (issue #1569).
+	BlueprintRevision string
+
+	// ConfigRevision, when non-empty, back-fills the cell's render
+	// config-revision annotation on a Synced cell that carries none or the
+	// pre-#1569 form (legacyConfigRevision), so a later schedule edit is not
+	// mistaken for a Config change.
+	ConfigRevision string
+}
+
+// hasBackfill reports whether the verdict carries an annotation back-fill.
+func (o cellOutOfSync) hasBackfill() bool {
+	return o.ImageDigests != "" || o.BlueprintRevision != "" || o.ConfigRevision != ""
 }
 
 // desiredCellOutOfSync computes the OutOfSync verdict the live cell
@@ -111,10 +130,14 @@ func desiredCellOutOfSync(r runner.Runner, cell intmodel.Cell, configName string
 	}
 
 	backfill := backfillImageDigests(desiredCell, cell)
-	drift := renderProvenanceDrift(desiredCell, cell)
+	drift := renderProvenanceDrift(desiredCell, cell, legacyConfigRevision(cfg))
 	diff := apply.DiffCell(desiredCell, cell)
 	if !diff.HasChanges && len(drift) == 0 {
-		return cellOutOfSync{ImageDigests: backfill}
+		return cellOutOfSync{
+			ImageDigests:      backfill,
+			BlueprintRevision: backfillStamp(desiredCell, cell, cellconfig.AnnotationRenderBlueprintRevision),
+			ConfigRevision:    backfillStamp(desiredCell, cell, cellconfig.AnnotationRenderConfigRevision),
+		}
 	}
 	reasons := drift
 	if diff.HasChanges {
@@ -161,10 +184,37 @@ func backfillImageDigests(desired, live intmodel.Cell) string {
 	return strings.Join(parts, ",")
 }
 
+// backfillStamp returns the fresh render's value of a provenance annotation
+// when the live cell's differs from it — absent (rendered before the stamp
+// existed) or in an older form — or "" when they already agree (issue #1569).
+// The caller only back-fills a Synced cell, for which renderProvenanceDrift
+// reported no drift, so the recorded value is the one the cell's spec
+// actually reflects. A live cell with no render provenance at all (rendered
+// before #1418) is left alone, as backfillImageDigests leaves it: nothing
+// compares its stamps.
+func backfillStamp(desired, live intmodel.Cell, key string) string {
+	if live.Metadata.Annotations[cellconfig.AnnotationRenderDigest] == "" {
+		return ""
+	}
+	want := desired.Metadata.Annotations[key]
+	if want == "" || live.Metadata.Annotations[key] == want {
+		return ""
+	}
+	return want
+}
+
 // renderProvenanceDrift compares the render provenance annotations of a fresh
-// render against the live cell's and returns one reason per drifted input
-// (issue #1418):
+// render against the live cell's and returns one reason per drifted input,
+// in a fixed order (issues #1418, #1569):
 //
+//   - "blueprint <name> changed" when the blueprint revision differs: the
+//     blueprint's stored content changed under the same name, or the Config
+//     now points at a different blueprint. <name> is the blueprint the fresh
+//     render resolved;
+//   - "config changed" when the content hash of the CellConfig document
+//     (spec.schedule left out) differs;
+//   - "values changed" when the hash of the merged fill (values, repo, secret
+//     and git fills, after every level is folded in) differs;
 //   - "<level> defaults changed" when the content hash of a Realm, Space or
 //     Stack spec.defaults fill differs from the one the cell was rendered
 //     with — even when the change does not alter the rendered spec, so the
@@ -174,11 +224,37 @@ func backfillImageDigests(desired, live intmodel.Cell) string {
 //     apply.DiffCell cannot see because the container's image reference is
 //     unchanged.
 //
-// A live cell without the annotations (rendered before #1418, or not rendered
-// from a Config) reports nothing, and an image digest only counts when both
-// sides know it, so a not-yet-pulled image never flaps the verdict.
-func renderProvenanceDrift(desired, live intmodel.Cell) []string {
+// The order is blueprint, config, values, then the realm, space and stack
+// defaults, then images, so the same drift always yields the same reason and
+// the persisted status stays stable across ticks. A live cell without the
+// annotation for an input (rendered before that stamp existed, or not
+// rendered from a Config) reports nothing for that input, and an image digest
+// only counts when both sides know it, so a not-yet-pulled image never flaps
+// the verdict.
+//
+// legacyConfigRev is the current Config document's pre-#1569 revision
+// (legacyConfigRevision); a live config stamp equal to it is unchanged.
+func renderProvenanceDrift(desired, live intmodel.Cell, legacyConfigRev string) []string {
 	var reasons []string
+	if liveRev := live.Metadata.Annotations[cellconfig.AnnotationRenderBlueprintRevision]; liveRev != "" {
+		desiredRev := desired.Metadata.Annotations[cellconfig.AnnotationRenderBlueprintRevision]
+		if desiredRev != liveRev {
+			name := blueprintRevisionName(desiredRev)
+			if name == "" {
+				name = blueprintRevisionName(liveRev)
+			}
+			reasons = append(reasons, "blueprint "+name+" changed")
+		}
+	}
+	if liveRev := live.Metadata.Annotations[cellconfig.AnnotationRenderConfigRevision]; liveRev != "" &&
+		liveRev != desired.Metadata.Annotations[cellconfig.AnnotationRenderConfigRevision] &&
+		liveRev != legacyConfigRev {
+		reasons = append(reasons, "config changed")
+	}
+	if liveHash := live.Metadata.Annotations[cellconfig.AnnotationRenderValuesHash]; liveHash != "" &&
+		liveHash != desired.Metadata.Annotations[cellconfig.AnnotationRenderValuesHash] {
+		reasons = append(reasons, "values changed")
+	}
 	levels := []struct{ level, key string }{
 		{v1beta1.RenderOriginRealm, cellconfig.AnnotationRenderRealmDefaults},
 		{v1beta1.RenderOriginSpace, cellconfig.AnnotationRenderSpaceDefaults},
@@ -229,29 +305,100 @@ func configLineage(cell intmodel.Cell) (string, bool) {
 	return name, true
 }
 
-// lookupLineageConfig fetches the daemon-stored Config the cell's lineage
-// label points to, returning (cfg, true, nil) on hit, (zero, false, nil)
-// when the operator deleted the Config (the canonical OutOfSync trigger
-// the umbrella documents), or (zero, false, err) on any other error.
+// provenanceConfigRef returns the exact identity of the Config a cell was
+// rendered from, as recorded in Spec.Provenance.BindingRef (issue #1569). The
+// second return is false for a cell without usable provenance — no
+// provenance, a non-Config binding, or an empty BindingRef.Name — which
+// falls back to the label-name probe. An empty BindingRef.Realm defaults to
+// the cell's own realm.
+func provenanceConfigRef(cell intmodel.Cell) (intmodel.CellConfigMetadata, bool) {
+	prov := cell.Spec.Provenance
+	if prov == nil || prov.BindingKind != v1beta1.BindingKindConfig {
+		return intmodel.CellConfigMetadata{}, false
+	}
+	ref := prov.BindingRef
+	name := strings.TrimSpace(ref.Name)
+	if name == "" {
+		return intmodel.CellConfigMetadata{}, false
+	}
+	realm := strings.TrimSpace(ref.Realm)
+	if realm == "" {
+		realm = strings.TrimSpace(cell.Spec.RealmName)
+	}
+	return intmodel.CellConfigMetadata{
+		Name:  name,
+		Realm: realm,
+		Space: strings.TrimSpace(ref.Space),
+		Stack: strings.TrimSpace(ref.Stack),
+	}, true
+}
+
+// cellBoundToConfig reports whether a Config-lineage cell was rendered from
+// the Config identified by md. It is the single "is this cell bound to this
+// Config" comparison the OutOfSync lookup and the `kuke delete config`
+// back-reference notice share (issue #1569):
 //
-// The `kukeon.io/config` lineage label records only the Config name, not
-// the scope it was bound at, so the lookup must probe progressively
-// shallower scopes: full (realm/space/stack) → space-only (realm/space) →
-// realm-only (realm). A realm-scoped Config (bound at realm-only via an
-// explicit empty `--space "" --stack ""`, or by the team renderer) can be
-// referenced by a cell materialized at the full default scope — `kuke run`
-// fills the cell at realm=default / space=default / stack=default via
-// resolveCellLocation regardless of the Config's binding scope. Without the
-// widening here, that cell's reconciler tick resolves to
-// `/opt/kukeon/data/default/default/default/configs/<name>` (which does not
-// exist) and persists a permanent "lineage Config deleted" OutOfSync verdict.
+//   - A cell with usable provenance matches only the exact scope its
+//     BindingRef records (the same comparison cellIsScheduledBy makes), so a
+//     same-named Config at another scope never shadows the real one.
+//   - A cell without provenance (rendered before #1021) falls back to the
+//     legacy match: lineage label == Config name, same realm, and the
+//     Config's space/stack, when set, equal the cell's.
+func cellBoundToConfig(cell intmodel.Cell, md intmodel.CellConfigMetadata) bool {
+	name := strings.TrimSpace(md.Name)
+	if label, ok := configLineage(cell); !ok || label != name {
+		return false
+	}
+	realm := strings.TrimSpace(md.Realm)
+	space := strings.TrimSpace(md.Space)
+	stack := strings.TrimSpace(md.Stack)
+	if ref, ok := provenanceConfigRef(cell); ok {
+		return ref.Name == name && ref.Realm == realm && ref.Space == space && ref.Stack == stack
+	}
+	if strings.TrimSpace(cell.Spec.RealmName) != realm {
+		return false
+	}
+	if space != "" && strings.TrimSpace(cell.Spec.SpaceName) != space {
+		return false
+	}
+	if stack != "" && strings.TrimSpace(cell.Spec.StackName) != stack {
+		return false
+	}
+	return true
+}
+
+// lookupLineageConfig fetches the daemon-stored Config the cell was rendered
+// from, returning (cfg, true, nil) on hit, (zero, false, nil) when the
+// operator deleted the Config (the canonical OutOfSync trigger the umbrella
+// documents), or (zero, false, err) on any other error.
 //
-// Probes are deduplicated when the cell's space or stack is already empty
-// (a realm-scoped cell or a space-scoped cell only takes the one probe
-// its own scope names).
+// A cell with usable provenance is looked up exactly once, at the scope its
+// Spec.Provenance.BindingRef records (issue #1569). Not found there means the
+// lineage Config was deleted; the lookup does not widen, so a same-named
+// Config at a deeper or shallower scope can neither shadow the real one nor
+// hide its deletion.
+//
+// Only a cell without provenance takes the legacy widening probe. Its
+// `kukeon.io/config` lineage label records only the Config name, not the
+// scope it was bound at, so the lookup probes progressively shallower scopes:
+// full (realm/space/stack) → space-only (realm/space) → realm-only (realm).
+// A realm-scoped Config can be referenced by a cell materialized at the full
+// default scope (#921). Probes are deduplicated when the cell's space or
+// stack is already empty.
 func lookupLineageConfig(
 	r runner.Runner, cell intmodel.Cell, configName string,
 ) (intmodel.CellConfig, bool, error) {
+	if ref, ok := provenanceConfigRef(cell); ok {
+		cfg, err := r.GetConfig(intmodel.CellConfig{Metadata: ref})
+		if err == nil {
+			return cfg, true, nil
+		}
+		if errors.Is(err, errdefs.ErrConfigNotFound) {
+			return intmodel.CellConfig{}, false, nil
+		}
+		return intmodel.CellConfig{}, false, err
+	}
+
 	realm, space, stack := cell.Spec.RealmName, cell.Spec.SpaceName, cell.Spec.StackName
 
 	type probe struct{ space, stack string }
@@ -441,34 +588,61 @@ func collectDiffFieldPaths(diff apply.CellDiffResult) []string {
 }
 
 // persistCellOutOfSync writes the new OutOfSync verdict to the cell's
-// metadata when any of the three status fields would change or an image
-// digest is back-filled, and reports whether a write actually occurred. The no-write fast-path keeps a
-// Synced fleet from spinning the metadata file once per tick.
+// metadata when any of the three status fields would change or an annotation
+// is back-filled, and reports whether a write actually occurred. The no-write
+// fast-path keeps a Synced fleet from spinning the metadata file once per tick.
+//
+// The write is a locked patch on a fresh read (runner.PatchCellMetadata,
+// issue #1569), not a write of the snapshot the verdict was computed from: it
+// changes only the three OutOfSync status fields and the back-filled
+// annotations, so a stop, start or update that persisted after the tick
+// listed the cell keeps its state. When another writer moved the cell's
+// generation or annotations since that snapshot — so the verdict may be about
+// an older spec or provenance — or the cell is gone, the write is skipped with
+// no error; the next tick recomputes.
 func persistCellOutOfSync(
 	r runner.Runner, cell intmodel.Cell, desired cellOutOfSync,
 ) (bool, error) {
 	if cell.Status.OutOfSync == desired.OutOfSync &&
 		cell.Status.OutOfSyncReason == desired.Reason &&
 		cell.Status.OutOfSyncError == desired.Err &&
-		desired.ImageDigests == "" {
+		!desired.hasBackfill() {
 		return false, nil
 	}
 
-	if desired.ImageDigests != "" {
-		annotations := make(map[string]string, len(cell.Metadata.Annotations))
-		for k, v := range cell.Metadata.Annotations {
-			annotations[k] = v
+	written := false
+	err := r.PatchCellMetadata(cell, func(fresh *intmodel.Cell) bool {
+		if fresh.Metadata.Generation != cell.Metadata.Generation ||
+			!maps.Equal(fresh.Metadata.Annotations, cell.Metadata.Annotations) {
+			return false
 		}
-		annotations[cellconfig.AnnotationRenderImageDigests] = desired.ImageDigests
-		cell.Metadata.Annotations = annotations
+		if desired.hasBackfill() {
+			annotations := make(map[string]string, len(fresh.Metadata.Annotations))
+			for k, v := range fresh.Metadata.Annotations {
+				annotations[k] = v
+			}
+			if desired.ImageDigests != "" {
+				annotations[cellconfig.AnnotationRenderImageDigests] = desired.ImageDigests
+			}
+			if desired.BlueprintRevision != "" {
+				annotations[cellconfig.AnnotationRenderBlueprintRevision] = desired.BlueprintRevision
+			}
+			if desired.ConfigRevision != "" {
+				annotations[cellconfig.AnnotationRenderConfigRevision] = desired.ConfigRevision
+			}
+			fresh.Metadata.Annotations = annotations
+		}
+		fresh.Status.OutOfSync = desired.OutOfSync
+		fresh.Status.OutOfSyncReason = desired.Reason
+		fresh.Status.OutOfSyncError = desired.Err
+		written = true
+		return true
+	})
+	if errors.Is(err, errdefs.ErrCellNotFound) || errors.Is(err, errdefs.ErrStaleResource) {
+		return false, nil
 	}
-
-	cell.Status.OutOfSync = desired.OutOfSync
-	cell.Status.OutOfSyncReason = desired.Reason
-	cell.Status.OutOfSyncError = desired.Err
-
-	if err := r.UpdateCellMetadata(cell); err != nil {
+	if err != nil {
 		return false, fmt.Errorf("persist OutOfSync status: %w", err)
 	}
-	return true, nil
+	return written, nil
 }

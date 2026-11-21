@@ -27,7 +27,22 @@ import (
 // If an OCI-baked container field changes, it will stop, delete, and recreate
 // the container, then restart it when it was running. Otherwise, it updates
 // the container spec in metadata.
+//
+// Like UpdateCell it holds the per-cell lifecycle lock for its whole span
+// (issue #1569), so a reconcile tick cannot observe the container mid-swap.
 func (r *Exec) UpdateContainer(cell intmodel.Cell, desiredContainer intmodel.ContainerSpec) (intmodel.Cell, error) {
+	defer r.lockCell(cell)()
+	return r.updateContainerLocked(cell, desiredContainer)
+}
+
+// updateContainerLocked is UpdateContainer's body. The caller must hold the
+// per-cell lock.
+//
+//nolint:funlen // UpdateContainer's existing body, moved unchanged under the lock wrapper (#1569).
+func (r *Exec) updateContainerLocked(
+	cell intmodel.Cell,
+	desiredContainer intmodel.ContainerSpec,
+) (intmodel.Cell, error) {
 	// Get existing cell
 	existing, err := r.GetCell(cell)
 	if err != nil {
