@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -850,14 +851,16 @@ spec:
     - id: root
       root: true
       image: ghcr.io/containerd/busybox:latest
-      command: sleep
+      command: sh
       args:
-        - "%[5]s"
+        - "-c"
+        - "trap 'exit 0' TERM; sleep %[5]s & wait"
     - id: work
       image: ghcr.io/containerd/busybox:latest
-      command: sleep
+      command: sh
       args:
-        - "3600"
+        - "-c"
+        - "trap 'exit 0' TERM; sleep 3600 & wait"
 `, cellName, realmName, spaceName, stackName, sleepArg)
 	}
 	runManifest := func(content string, verb ...string) {
@@ -895,14 +898,15 @@ spec:
 	runManifest(manifest("3601"), "apply")
 	after := getCell()
 
-	rootArgs := ""
+	var rootArgs []string
 	for _, c := range after.Spec.Containers {
 		if c.Root {
-			rootArgs = strings.Join(c.Args, " ")
+			rootArgs = c.Args
 		}
 	}
-	if rootArgs != "3601" {
-		t.Fatalf("root args after recreate = %q, want %q", rootArgs, "3601")
+	wantRootArgs := []string{"-c", "trap 'exit 0' TERM; sleep 3601 & wait"}
+	if !slices.Equal(rootArgs, wantRootArgs) {
+		t.Fatalf("root args after recreate = %q, want %q", rootArgs, wantRootArgs)
 	}
 	if after.Metadata.Generation <= before.Metadata.Generation {
 		t.Errorf("generation = %d, want > %d", after.Metadata.Generation, before.Metadata.Generation)
@@ -986,9 +990,10 @@ spec:
     - id: root
       root: true
       image: ghcr.io/containerd/busybox:latest
-      command: sleep
+      command: sh
       args:
-        - "3600"
+        - "-c"
+        - "trap 'exit 0' TERM; sleep 3600 & wait"
 `, cellName, realmName, spaceName, stackName)
 	path := filepath.Join(t.TempDir(), "apply-create.yaml")
 	if err := os.WriteFile(path, []byte(manifest), 0o644); err != nil {

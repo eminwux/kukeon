@@ -34,6 +34,8 @@ import (
 // Only the changed workload container should be replaced: the root snapshot
 // and an unrelated sidecar must remain intact. Regression for #1368.
 func TestKuke_EnvChangesReachTheRunningProcess(t *testing.T) {
+	t.Parallel()
+
 	runPath := getRandomRunPath(t)
 	host := startKukeondDaemonWithReconcileInterval(t, runPath, "100ms")
 	realm := generateUniqueRealmName(t)
@@ -98,8 +100,8 @@ spec:
         env: ["MSG=${MSG}", "EXTRA=from-config"]
       - id: sidecar
         image: docker.io/library/busybox:latest
-        command: sleep
-        args: ["3600"]
+        command: sh
+        args: ["-c", "trap 'exit 0' TERM; sleep 3600 & wait"]
 `, realm, space, stack, defaultMSG)
 	}
 	config := func(msg string) string {
@@ -152,8 +154,8 @@ spec:
     - id: root
       root: true
       image: docker.io/library/busybox:latest
-      command: sleep
-      args: ["3600"]
+      command: sh
+      args: ["-c", "trap 'exit 0' TERM; sleep 3600 & wait"]
     - id: main
       image: docker.io/library/busybox:latest
       command: /bin/sh
@@ -161,8 +163,8 @@ spec:
       env: ["MSG=%s", "EXTRA=kept"]
     - id: sidecar
       image: docker.io/library/busybox:latest
-      command: sleep
-      args: ["3600"]
+      command: sh
+      args: ["-c", "trap 'exit 0' TERM; sleep 3600 & wait"]
 `, name, name, realm, space, stack, msg)
 	}
 	apply("direct-cell.yaml", makeDirectCell(directCell, "v1"))
