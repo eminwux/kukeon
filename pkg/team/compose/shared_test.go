@@ -912,19 +912,27 @@ func TestComposedParametersCannotBeOverridden(t *testing.T) {
 			t.Fatalf("%s: result=%v err=%v", name, result, err)
 		}
 	}
-	// A parameter the form leaves to the operator is still theirs.
-	cfg, opts := fixture(t)
-	cfg.Spec.Parameters = map[string]string{"AGENTS_REPO": "eminwux/agents", "AGENT_NAME": "custom"}
+	// A parameter the form leaves to the operator is still theirs, and the
+	// operator's value overrides a role-declared default.
+	cfg, opts := withRoleParams(t, agentsRepoDefault, "git@github.com:eminwux/agents")
+	cfg.Spec.Parameters = map[string]string{"AGENTS_REPO": "fork/agents", "AGENT_NAME": "custom"}
 	result, err := compose.Compose(cfg, selectedTeam(cfg), opts)
 	if err != nil {
 		t.Fatal(err)
 	}
 	values := result.Pairs[0].Config.Spec.Values
-	if values["AGENTS_REPO"] != "eminwux/agents" || values["AGENT_NAME"] != "custom" {
+	if values["AGENTS_REPO"] != "fork/agents" || values["AGENT_NAME"] != "custom" {
 		t.Fatalf("values = %v", values)
 	}
-	if envOf(work(t, result.Pairs[0], interactive))["AGENTS_REPO"] != "eminwux/agents" {
+	if envOf(work(t, result.Pairs[0], interactive))["AGENTS_REPO"] != "fork/agents" {
 		t.Fatal("AGENTS_REPO did not reach the cell")
+	}
+	// ROLE_SOURCE_REPO is a fact for role defaults, never an operator input.
+	cfg, opts = fixture(t)
+	cfg.Spec.Parameters = map[string]string{"ROLE_SOURCE_REPO": "x/y"}
+	if _, err = compose.Compose(cfg, selectedTeam(cfg), opts); err == nil ||
+		!strings.Contains(err.Error(), "unsupported parameter") {
+		t.Fatalf("ROLE_SOURCE_REPO override: err = %v", err)
 	}
 }
 

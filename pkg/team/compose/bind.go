@@ -19,6 +19,7 @@ package compose
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -217,10 +218,20 @@ func aliasSlot(lib []component.Component, name string) (component.Component, com
 	return component.Component{}, component.Secret{}, false
 }
 
+// cellEnvironment are the cell environment names the shared blueprint or the
+// runtime sets; a role parameter, exported under its own name, must not
+// replace them.
+//
+//nolint:gochecknoglobals // package-level membership list, read-only.
+var cellEnvironment = []string{
+	"PATH", "HOME", "IS_SANDBOX", "KUKEON_HOST", "GIT_SSH_COMMAND", "GIT_CONFIG_SYSTEM",
+}
+
 // planParameters records the role-declared parameters the shared blueprint
-// does not already declare, and checks the operator supplied each.
+// does not already declare, and checks each has a value: the operator's, or
+// the default the role declares for it.
 func planParameters(plan *pairPlan, cfg *config.TeamsConfig) error {
-	known := map[string]bool{"PROMPT": true, "AGENT_NAME": true, "AGENTS_REPO": true}
+	known := map[string]bool{"PROMPT": true, "AGENT_NAME": true}
 	for name := range composed {
 		known[name] = true
 	}
@@ -232,17 +243,34 @@ func planParameters(plan *pairPlan, cfg *config.TeamsConfig) error {
 			known[p.Name] = true
 		}
 	}
-	for _, name := range plan.role.Spec.Needs.Params {
+	for _, param := range plan.role.Spec.Needs.Params {
+		name := param.Name
 		if !parameterName.MatchString(name) {
 			return fmt.Errorf("role needs.params: invalid parameter name %q", name)
 		}
+		if slices.Contains(cellEnvironment, name) {
+			return fmt.Errorf("role needs.params: %q is reserved in the cell environment", name)
+		}
 		if known[name] {
+			if param.Default != nil {
+				return fmt.Errorf("role needs.params: %q is declared by the blueprint; a role cannot default it", name)
+			}
 			continue
 		}
-		if _, supplied := cfg.Spec.Parameters[name]; !supplied && name != "ROLE" {
+		if param.Default != nil {
+			if _, dup := plan.paramDefaults[name]; dup {
+				return fmt.Errorf("role needs.params: duplicate parameter %q", name)
+			}
+			if plan.paramDefaults == nil {
+				plan.paramDefaults = map[string]string{}
+			}
+			plan.paramDefaults[name] = *param.Default
+		} else if _, supplied := cfg.Spec.Parameters[name]; !supplied && name != "ROLE" {
 			return fmt.Errorf("spec.parameters: missing required parameter %q", name)
 		}
-		plan.extraParams = append(plan.extraParams, name)
+		if !slices.Contains(plan.extraParams, name) {
+			plan.extraParams = append(plan.extraParams, name)
+		}
 	}
 	return nil
 }
@@ -350,9 +378,20 @@ func bindValues(plan *pairPlan, bp *api.CellBlueprintDoc, cfg *config.TeamsConfi
 	if project, ok := runtimeSource(plan.sources, projectSlot); ok {
 		facts["PROJECT_DIR"] = project.ClonePath
 	}
+	// ROLE_SOURCE_REPO is a fact for role defaults to reference, not a
+	// blueprint parameter.
+	defaultFacts := maps.Clone(facts)
+	defaultFacts[roleSourceRepoFact] = sourceRepo(plan.roleSource.URL)
+	defaults, err := roleDefaults(plan, defaultFacts, cfg.Spec.Parameters)
+	if err != nil {
+		return err
+	}
 	declared := allParameters(bp)
 	for name, param := range declared {
 		value, ok := facts[name]
+		if def, set := defaults[name]; set {
+			value, ok = def, true
+		}
 		if override, set := cfg.Spec.Parameters[name]; set && !composed[name] {
 			value, ok = override, true
 		}
@@ -369,7 +408,7 @@ func bindValues(plan *pairPlan, bp *api.CellBlueprintDoc, cfg *config.TeamsConfi
 		}
 		cc.Spec.Values[name] = value
 	}
-	for _, name := range plan.role.Spec.Needs.Params {
+	for _, name := range plan.role.Spec.Needs.ParamNames() {
 		if _, ok := declared[name]; !ok {
 			return fmt.Errorf("template did not declare required parameter %q", name)
 		}

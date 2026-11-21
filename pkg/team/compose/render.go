@@ -395,14 +395,10 @@ func blueprintInputs(
 			Description: "Harness settings file, relative to the role directory.",
 		},
 		{Name: "AGENT_NAME", Default: text(""), Group: groupRole, Description: "Name the agent reports as."},
-		{
-			Name: "AGENTS_REPO", Default: text(""), Group: groupRole,
-			Description: "Repository the role files feedback against.",
-		},
 	}
 	environment := []string{
 		"ROLE_SOURCE_DIR=${ROLE_SOURCE_DIR}", "ROLE_PATH=${ROLE_PATH}", "INITIAL_PATH=${INITIAL_PATH}",
-		"HARNESS_SETTINGS=${HARNESS_SETTINGS}", "AGENT_NAME=${AGENT_NAME}", "AGENTS_REPO=${AGENTS_REPO}",
+		"HARNESS_SETTINGS=${HARNESS_SETTINGS}", "AGENT_NAME=${AGENT_NAME}",
 	}
 	if slices.Contains(prof.Mounts, "kukeond-socket") {
 		// The socket is reached through its directory mount (issue #1483).
@@ -456,6 +452,8 @@ func blueprintInputs(
 			Name: extra, Default: text(""), Group: groupRole,
 			Description: "Declared by a role's needs.params.",
 		})
+		// The role reads its parameter from the cell environment.
+		environment = append(environment, extra+"=${"+extra+"}")
 	}
 	if comp.Env, err = resolveEnvironment(h.Spec.Environment, resolve); err != nil {
 		return rendererInput{}, err

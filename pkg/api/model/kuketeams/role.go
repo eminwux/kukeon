@@ -16,6 +16,15 @@
 
 package kuketeams
 
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+
+	"gopkg.in/yaml.v3"
+)
+
 // Role is a per-role document (role.yaml) authored in the agents source. It
 // declares the role's skills, per-harness configuration, and the capabilities,
 // repos, mounts, params, and secrets the role needs. metadata is name-only: the
@@ -106,12 +115,101 @@ type RoleHarness struct {
 //     `kukeon-install`). They are part of the security posture, so they pick
 //     the blueprint variant rather than a config toggle. `ssh` is still
 //     accepted but mounts nothing: cells use stored git credentials.
-//   - Params: parameter names supplied at materialization time.
+//   - Params: parameters supplied at materialization time. An entry is a bare
+//     name or a {name, default} mapping (see RoleParam).
 //   - Secrets: secret names resolved against TeamsConfig.secrets.
 type RoleNeeds struct {
-	Image   []string `json:"image,omitempty"   yaml:"image,omitempty"`
-	Repos   []string `json:"repos,omitempty"   yaml:"repos,omitempty"`
-	Mounts  []string `json:"mounts,omitempty"  yaml:"mounts,omitempty"`
-	Params  []string `json:"params,omitempty"  yaml:"params,omitempty"`
-	Secrets []string `json:"secrets,omitempty" yaml:"secrets,omitempty"`
+	Image   []string    `json:"image,omitempty"   yaml:"image,omitempty"`
+	Repos   []string    `json:"repos,omitempty"   yaml:"repos,omitempty"`
+	Mounts  []string    `json:"mounts,omitempty"  yaml:"mounts,omitempty"`
+	Params  []RoleParam `json:"params,omitempty"  yaml:"params,omitempty"`
+	Secrets []string    `json:"secrets,omitempty" yaml:"secrets,omitempty"`
+}
+
+// RoleParam is one `needs.params` entry: a bare parameter name, which the
+// operator must supply in TeamsConfig.spec.parameters unless kukeon already
+// knows it, or a mapping that also carries the role's default:
+//
+//	params:
+//	  - PROMPT
+//	  - { name: FEEDBACK_REPO, default: "${ROLE_SOURCE_REPO}" }
+//
+// The default may reference composed facts as ${FACT}; a value in
+// TeamsConfig.spec.parameters overrides it.
+type RoleParam struct {
+	// Name is the parameter name.
+	Name string `json:"name"              yaml:"name"`
+	// Default is the role's value for the parameter, used when the operator
+	// supplies none. Nil means the role declares no default.
+	Default *string `json:"default,omitempty" yaml:"default,omitempty"`
+}
+
+// roleParamFields is RoleParam without its marshaling methods.
+type roleParamFields RoleParam
+
+// UnmarshalYAML accepts a bare name or a {name, default} mapping.
+func (p *RoleParam) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		*p = RoleParam{Name: node.Value}
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return errors.New("needs.params entry: require a name or a {name, default} mapping")
+	}
+	// node.Decode does not inherit the document decoder's KnownFields, so
+	// the mapping's keys are checked here.
+	for i := 0; i < len(node.Content); i += 2 {
+		if key := node.Content[i].Value; key != "name" && key != "default" {
+			return fmt.Errorf("needs.params entry: unknown field %q", key)
+		}
+	}
+	var fields roleParamFields
+	if err := node.Decode(&fields); err != nil {
+		return fmt.Errorf("needs.params entry: %w", err)
+	}
+	*p = RoleParam(fields)
+	return nil
+}
+
+// MarshalYAML writes an entry with no default as the bare name, so a role
+// authored with names round-trips unchanged.
+func (p RoleParam) MarshalYAML() (any, error) {
+	if p.Default == nil {
+		return p.Name, nil
+	}
+	return roleParamFields(p), nil
+}
+
+// UnmarshalJSON accepts a bare name or a {name, default} object.
+func (p *RoleParam) UnmarshalJSON(raw []byte) error {
+	var name string
+	if err := json.Unmarshal(raw, &name); err == nil {
+		*p = RoleParam{Name: name}
+		return nil
+	}
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.DisallowUnknownFields()
+	var fields roleParamFields
+	if err := d.Decode(&fields); err != nil {
+		return fmt.Errorf("needs.params entry: %w", err)
+	}
+	*p = RoleParam(fields)
+	return nil
+}
+
+// MarshalJSON writes an entry with no default as the bare name.
+func (p RoleParam) MarshalJSON() ([]byte, error) {
+	if p.Default == nil {
+		return json.Marshal(p.Name)
+	}
+	return json.Marshal(roleParamFields(p))
+}
+
+// ParamNames lists the names of the role's needs.params entries.
+func (n RoleNeeds) ParamNames() []string {
+	out := make([]string, 0, len(n.Params))
+	for _, p := range n.Params {
+		out = append(out, p.Name)
+	}
+	return out
 }
