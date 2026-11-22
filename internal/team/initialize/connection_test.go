@@ -160,6 +160,9 @@ func TestInitOverUnixSocketAndClientConfiguration(t *testing.T) {
 	opts.Client = nil
 	t.Setenv("KUKE_CONFIGURATION", "")
 	t.Setenv("KUKEON_HOST", "")
+	if err := os.MkdirAll(opts.Root, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(opts.Root, "kuke.yaml"), []byte("kind: ClientConfiguration\nspec:\n  host: "+host+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}

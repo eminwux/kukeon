@@ -355,12 +355,12 @@ func TestConnectorIdentityTypes(t *testing.T) {
 		if reflect.DeepEqual(view.SecretTypes, []string{v1beta1.SecretTypeBasicAuth}) {
 			basicAuth = view.Name
 		}
-		if len(view.SecretTypes) == 2 && view.Delivery == v1beta1.ConnectorDeliveryGit {
+		if len(view.SecretTypes) > 1 && view.Delivery == v1beta1.ConnectorDeliveryGit {
 			sshOrBasic = view.Name
 		}
 	}
 	if basicAuth == "" || sshOrBasic == "" {
-		t.Fatalf("catalog carries no basic-auth-only (%q) or two-type git (%q) connector", basicAuth, sshOrBasic)
+		t.Fatalf("catalog carries no basic-auth-only (%q) or several-type git (%q) connector", basicAuth, sshOrBasic)
 	}
 
 	w := connectorRequest(t, handler, http.MethodPost, "/api/connectors/"+basicAuth+"/identities",
@@ -396,6 +396,30 @@ func TestConnectorIdentityTypes(t *testing.T) {
 		got.SSHKey.PublicKey != "ssh-ed25519 AAAA me" ||
 		got.Identity["hosts"] != "github.com" {
 		t.Errorf("ssh-key secret = %+v (key %+v)", got, got.SSHKey)
+	}
+
+	// An author-only git identity (issue #1591) takes no value and no hosts:
+	// it stores the placeholder and must carry an author.
+	authorOnly := `{"scope":{"realm":"dev"},"name":"me","type":"opaque","identity":{"author":"Me <me@example.com>"}}`
+	w = connectorRequest(t, handler, http.MethodPost, "/api/connectors/"+sshOrBasic+"/identities", authorOnly)
+	if w.Code != http.StatusOK {
+		t.Fatalf("author-only: status=%d body=%s", w.Code, w.Body)
+	}
+	got = c.created[len(c.created)-1].Spec
+	if got.Data != "kukeon:git-author-only" || got.Connector != sshOrBasic ||
+		got.Identity["author"] != "Me <me@example.com>" {
+		t.Errorf("author-only secret = %+v", got)
+	}
+	for body, mention := range map[string]string{
+		strings.Replace(authorOnly, `"type"`, `"value":"tok-material","type"`, 1):           "stores no value",
+		`{"scope":{"realm":"dev"},"name":"me","type":"opaque"}`:                             `requires identity field \"author\"`,
+		strings.Replace(authorOnly, `"identity":{`, `"identity":{"hosts":"github.com",`, 1): `\"hosts\" applies to`,
+	} {
+		w = connectorRequest(t, handler, http.MethodPost, "/api/connectors/"+sshOrBasic+"/identities", body)
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), mention) ||
+			strings.Contains(w.Body.String(), "tok-material") {
+			t.Errorf("author-only %s: status=%d body=%s, want 400 naming %s", body, w.Code, w.Body, mention)
+		}
 	}
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { ErrorNotice, useResource, type Failure } from "./request";
 import { useNotify } from "./notifications";
 import type { Doc, InventoryResource } from "./inventory";
@@ -7,10 +7,10 @@ import { catalogDeleteAPI } from "./catalog-url.mjs";
 import { RegistryCredentialsPanel } from "./registry-credentials";
 import { IdentityForm, IdentitySelect, ScopePicker, connectorAPI, connectorsLink, levelLabel, sendJSON, toFailure } from "./connector-ui";
 import {
-  allowedLevels, connectorLevels, defaultRow, defaultScopeName, defaultTargets, deliveryEnv, deliveryFile, deliveryGit, deliveryRegistry, deliveryStateVolume, identitiesFor, isRegistry,
-  loginMethods, refKey, refLabel, refScope, registryEntries, scopeAt, scopeFromParts, scopeLevel, scopeLevels, scopeParts, scopeQuery, secretRef, targetScope, usageFor,
+  allowedLevels, connectorLevels, defaultRow, defaultScopeName, defaultTargets, deliveryEnv, deliveryFile, deliveryGit, deliveryRegistry, deliveryStateVolume, identitiesFor, importPayload, importsFromHost,
+  isRegistry, loginMethods, refKey, refLabel, refScope, registryEntries, scopeAt, scopeFromParts, scopeLevel, scopeLevels, scopeParts, scopeQuery, secretRef, targetScope, usageFor,
 } from "./connectors.mjs";
-import type { Connector, ConnectorDefault, ConnectorUsage, DefaultTarget, Identity, Scope, SecretRef } from "./connectors.mjs";
+import type { Connector, ConnectorDefault, ConnectorUsage, DefaultTarget, Identity, ImportForm, ImportResult, Scope, SecretRef } from "./connectors.mjs";
 
 // The Connectors page (#1548, §7). It iterates GET /api/connectors: a
 // connector added as one connector.yaml is listed, given identities and
@@ -59,6 +59,61 @@ function ConnectorList({ connectors, usage, secrets }: { connectors: Connector[]
     </tbody></table></div>
     {!connectors.length && <div className="empty-state"><h3>No connectors are defined</h3></div>}
   </section>;
+}
+
+// ImportFromHost runs the server's import of a git-delivered connector's
+// identity (#1591): the SSH key and git configuration of the account running
+// `kuke serve`, stored as one identity — the same import as
+// `kuke connector import git`. Only paths and readable fields come back.
+function ImportFromHost({ connector, inventory, onChanged }: { connector: Connector; inventory: InventoryResource; onChanged: () => void }) {
+  const title = connector.title || connector.name;
+  const [open, setOpen] = useState(false);
+  const [scope, setScope] = useScope(inventory, undefined);
+  const [form, setForm] = useState<Omit<ImportForm, "realm">>({ hosts: "", name: "", key: "", passphraseFile: "", makeDefault: true });
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<Failure>();
+  const [result, setResult] = useState<ImportResult>();
+  const { notify } = useNotify();
+  const set = (next: Partial<typeof form>) => { setForm(old => ({ ...old, ...next })); setError(undefined); };
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (pending) return;
+    setPending(true); setError(undefined); setResult(undefined);
+    try {
+      const imported = await sendJSON<ImportResult>(connectorAPI(connector.name, "import"), importPayload({ ...form, realm: scope.realm }));
+      setResult(imported);
+      const stored = imported.secrets.find(secret => secret.name === imported.name)?.action === "updated" ? "updated" : "imported";
+      notify({ key: `identity-import:${connector.name}`, tone: "success", message: `${title} identity ${imported.name} ${stored} in ${imported.realm}${imported.default ? `; it is now the ${imported.realm} default` : ""}.` });
+      onChanged();
+    } catch (caught) { setError(toFailure(caught)); }
+    finally { setPending(false); }
+  }
+  return <div className="connector-import">
+    <div className="connector-actions"><button type="button" className="subtle-button" aria-expanded={open} onClick={() => setOpen(value => !value)}>{open ? "Hide import" : "Import from host"}</button></div>
+    {open && <form className="creation-form identity-form" aria-label={`Import ${title} identity from host`} method="post" autoComplete="off" onSubmit={submit}>
+      <h3>Import from host</h3>
+      <p className="description">Reads the SSH key and global git configuration of the account running <code>kuke serve</code> and stores them as one {title} identity: an SSH key identity when a key is found, else an author-only one. Rerunning updates it in place. Key material goes to the daemon only — it is never shown here.</p>
+      <ScopePicker label="Import" inventory={inventory} levels={[scopeLevels[0]]} value={scope} disabled={pending} onChange={setScope} />
+      <div className="schema-fields">
+        <label className="schema-field"><span>Hosts</span><input value={form.hosts} placeholder="github.com" disabled={pending} autoComplete="off" spellCheck={false} onChange={event => set({ hosts: event.target.value })} /><small>Comma-separated hosts or URL prefixes the key authenticates.</small></label>
+        <label className="schema-field"><span>Identity name</span><input value={form.name} placeholder="git-ssh, or git-author without a key" disabled={pending} autoComplete="off" spellCheck={false} onChange={event => set({ name: event.target.value })} /></label>
+        <label className="schema-field"><span>Key</span><input value={form.key} placeholder=".ssh/id_ed25519" disabled={pending} autoComplete="off" spellCheck={false} onChange={event => set({ key: event.target.value })} /><small>A file in the server account's home directory. Empty: the key git signs with, else id_ed25519, id_ecdsa, id_rsa.</small></label>
+        <label className="schema-field"><span>Passphrase file</span><input value={form.passphraseFile} placeholder=".ssh/passphrase" disabled={pending} autoComplete="off" spellCheck={false} onChange={event => set({ passphraseFile: event.target.value })} /><small>For a passphrase-protected key: a file in the server account's home directory.</small></label>
+        <label className="schema-check"><input type="checkbox" checked={form.makeDefault} disabled={pending} onChange={event => set({ makeDefault: event.target.checked })} />Make it the Realm default</label>
+      </div>
+      <div className="connector-actions"><button type="submit" disabled={pending || !scope.realm}>{pending ? "Importing…" : "Import identity"}</button></div>
+      {error && <ErrorNotice error={error} kind="Identity" />}
+      {result && <div className="connector-import-result" role="status" aria-label="Imported identity">
+        <dl className="details-grid">
+          <dt>Identity</dt><dd><code>{result.name}</code> <span className="description">{result.realm}</span> <span className="badge">{result.type}</span></dd>
+          <dt>Read from</dt><dd>{result.home}{result.keyPath ? <> — key <code>{result.keyPath}</code></> : <> — no SSH key: author-only</>}</dd>
+          {Object.keys(result.identity).length > 0 && <><dt>Fields</dt><dd>{Object.entries(result.identity).map(([name, value]) => <span className="badge label-badge" key={name}>{name}: {value}</span>)}</dd></>}
+          {result.default && <><dt>Realm default</dt><dd>{result.default.identity?.name}{result.default.previous && result.default.previous.name !== result.default.identity?.name && <> (replaces <code>{result.default.previous.name}</code>)</>}</dd></>}
+        </dl>
+        {!!result.notes?.length && <ul className="description">{result.notes.map(note => <li key={note}>{note}</li>)}</ul>}
+      </div>}
+    </form>}
+  </div>;
 }
 
 // IdentitiesPanel lists a connector's identities — the Secrets tagged with it —
@@ -116,6 +171,7 @@ function IdentitiesPanel({ connector, identities, secrets, secretsError, revisio
         </tr>)}
       </tbody></table></div> : <p>No {title} identities are stored.</p>}
       {rotating && <IdentityForm key={`rotate:${refKey(rotating)}`} connector={connector} scope={secretRef(rotating)!} existing={rotating} secrets={secrets} onSaved={() => { setRotating(undefined); onChanged(); }} onCancel={() => setRotating(undefined)} />}
+      {importsFromHost(connector) && <ImportFromHost connector={connector} inventory={inventory} onChanged={onChanged} />}
       {registry ? <p className="description">A registry identity is created together with the registry entry that uses it, below.</p> : <>
         <div className="connector-store"><h3>Where to store a new identity</h3><ScopePicker label="Identity" inventory={inventory} levels={levels} value={store} onChange={setStore} />
           {store.realm && !storable && <p className="field-error" role="alert">{title} identities are stored at {levels.join(" or ")} level.</p>}</div>

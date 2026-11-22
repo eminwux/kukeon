@@ -19,7 +19,6 @@ package majordomoassets_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -30,16 +29,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/eminwux/kukeon/internal/team/bootstrap"
 	"github.com/eminwux/kukeon/pkg/team/config"
 	"gopkg.in/yaml.v3"
 )
-
-type noGit struct{}
-
-func (noGit) Lookup(context.Context, string, bool) (string, error) {
-	return "", bootstrap.ErrMissing
-}
 
 func read(t *testing.T, path string) []byte {
 	t.Helper()
@@ -94,14 +86,7 @@ type definition struct {
 func TestDefaultRoleAssets(t *testing.T) {
 	// Resolve the actual initial majordomo selection, rather than duplicating its path
 	// in a fixture that could pass while init points at a different role.
-	result, err := bootstrap.Run(t.Context(), bootstrap.Options{Root: t.TempDir(), Git: noGit{}})
-	if err != nil {
-		t.Fatal(err)
-	}
 	roles := config.Majordomo().Spec.Roles
-	if len(result.Config.Spec.Defaults.Roles) != 0 {
-		t.Fatal("bootstrap seeded majordomo globally")
-	}
 	if len(roles) != 1 {
 		t.Fatalf("default roles: %+v", roles)
 	}
@@ -121,7 +106,7 @@ func TestDefaultRoleAssets(t *testing.T) {
 		t.Fatalf("invalid role identity: %+v", role)
 	}
 	if !reflect.DeepEqual(role.Spec.Needs.Image, selection.Needs.Image) {
-		t.Fatalf("role capabilities %v differ from bootstrap %v", role.Spec.Needs.Image, selection.Needs.Image)
+		t.Fatalf("role capabilities %v differ from the init selection %v", role.Spec.Needs.Image, selection.Needs.Image)
 	}
 	if len(role.Spec.Needs.Repos)+len(role.Spec.Needs.Secrets) != 0 {
 		t.Fatal("majordomo should not require project repos or non-provider secrets")

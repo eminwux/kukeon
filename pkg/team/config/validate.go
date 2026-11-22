@@ -56,47 +56,10 @@ func Validate(cfg *TeamsConfig) error {
 	if cfg.Kind != Kind {
 		return fmt.Errorf("kind: expected %q", Kind)
 	}
-	if err := validateGit(cfg.Spec.Git); err != nil {
-		return err
-	}
 	if err := validateBindings(&cfg.Spec); err != nil {
 		return err
 	}
 	return validateDefaults(&cfg.Spec.Defaults)
-}
-
-func validateGit(g *Git) error {
-	if g == nil {
-		return nil
-	}
-	for _, optional := range []struct{ field, value string }{
-		{"spec.git.signingKey", g.SigningKey},
-		{"spec.git.allowedSigners", g.AllowedSigners},
-	} {
-		if err := validUTF8(optional.field, optional.value); err != nil {
-			return err
-		}
-	}
-	if err := validateIdentities("spec.git", g.Author, g.Committer); err != nil {
-		return err
-	}
-	hosts := map[string]bool{}
-	for i, credential := range g.Credentials {
-		field := fmt.Sprintf("spec.git.credentials[%d]", i)
-		if err := unique(field+".host", credential.Host, hosts); err != nil {
-			return err
-		}
-		if strings.ContainsAny(credential.Host, " \t\r\n@") || strings.Contains(credential.Host, "://") {
-			return fmt.Errorf("%s.host: use a bare host or host/path prefix (no scheme or user)", field)
-		}
-		if err := validateCredential(field, credential.SecretRef, credential.Port, credential.HostKeyPolicy); err != nil {
-			return err
-		}
-	}
-	if len(g.Sign) > 0 && g.Signing == nil && blank(g.SigningKey) {
-		return errors.New("spec.git.signing: sign requires a stored signing secret (spec.git.signing.secretRef)")
-	}
-	return validateSigning("spec.git", g.Signing, g.Sign)
 }
 
 func validateIdentities(field string, author, committer *Identity) error {

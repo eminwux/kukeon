@@ -16,14 +16,11 @@
 
 package kuketeams
 
-import (
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
-)
-
 // TeamsConfig is the host-side, operator-owned global-facts document, stored at
-// ~/.kuke/kuketeams.yaml and maintained by `kuke team init`. It carries the
-// operator facts only — git identity/signing, registry, source clone URLs, and
-// secret sources. Per-team composition lives in its own TeamEntry document
+// ~/.kuke/kuketeams.yaml. It is optional and hand-written: kuke reads it and
+// never writes it (issue #1591). It carries the operator facts only — registry,
+// source clone URLs, and secret sources. A git identity is not one of them: it
+// is a git connector identity (`kuke connector import git`). Per-team composition lives in its own TeamEntry document
 // under the ~/.kuke/kuketeam.d/ drop-in directory (one <team>.yaml file per
 // team), so a corrupt or partial write touches a single team rather than the
 // shared roster.
@@ -35,11 +32,6 @@ type TeamsConfig struct {
 
 // TeamsConfigSpec carries the operator-owned composition.
 type TeamsConfigSpec struct {
-	// Git is the operator's default git identity, credentials and signing
-	// config. It names stored secrets, never host paths, and is written as
-	// scope defaults so every team cell inherits it. It is a strict superset
-	// of v1beta1.ContainerGit.
-	Git *TeamsConfigGit `json:"git,omitempty"       yaml:"git,omitempty"`
 	// Registry is the default container registry for resolving images.
 	Registry string `json:"registry,omitempty"  yaml:"registry,omitempty"`
 	// HomeDir is an explicit override for the `.operator.HOME_DIR` blueprint
@@ -59,21 +51,6 @@ type TeamsConfigSpec struct {
 	// Secrets maps a secret name to its source declaration. A secret never
 	// carries an inline value — only where to read it from.
 	Secrets map[string]TeamsConfigSecret `json:"secrets,omitempty"   yaml:"secrets,omitempty"`
-}
-
-// TeamsConfigGit is a strict superset of v1beta1.ContainerGit — the embedded
-// runtime type contributes author, committer, credentials, signing and sign.
-// Embedding (rather than redeclaring) keeps it drift-proof: any field added to
-// ContainerGit is automatically carried here.
-type TeamsConfigGit struct {
-	v1beta1.ContainerGit `yaml:",inline"`
-
-	// SSHKey was the host path to the SSH private key used as the
-	// GIT_SSH_COMMAND identity for clone/push.
-	//
-	// Deprecated: no host key reaches a cell. Store the key as an ssh-key
-	// Secret and bind it in credentials (issue #1472).
-	SSHKey string `json:"sshKey,omitempty" yaml:"sshKey,omitempty"`
 }
 
 // TeamsConfigSecret declares where a secret's value is read from. `From` is one

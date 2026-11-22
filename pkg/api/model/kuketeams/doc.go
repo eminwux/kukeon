@@ -20,9 +20,10 @@
 //
 //   - ProjectTeam (committed in each project repo, `kuketeam.yaml`) declares the
 //     roster: which pinned agents source, which roles, which harness defaults.
-//   - TeamsConfig (host, operator-owned, `~/.kuke/kuketeams.yaml`) carries
-//     operator facts only — git identity/signing, registry, source clone URLs,
-//     secret sources.
+//   - TeamsConfig (host, operator-owned, `~/.kuke/kuketeams.yaml`, optional and
+//     hand-written) carries operator facts only — registry, source clone URLs,
+//     secret sources. A git identity is a git connector identity instead
+//     (`kuke connector import git`, issue #1591).
 //   - TeamEntry (host, `~/.kuke/kuketeam.d/<team>.yaml`, one per team) carries
 //     the per-team composition record: `kuke team init` writes the operator's
 //     system team's `kuketeam.d/kuke.yaml` (the reserved name `kuke`, #1527),
@@ -42,8 +43,7 @@
 // would be redundant with the ref and drift-prone).
 //
 // The team-layer types are declarative sugar that render onto the existing
-// v1beta1 runtime: TeamsConfig.git is a strict superset of v1beta1.ContainerGit
-// and is written as scope defaults, Role.needs.repos fill the shared
+// v1beta1 runtime: Role.needs.repos fill the shared
 // blueprint's repo slots, Role.needs.mounts select the blueprint's security
 // profile. This package defines the parsed surface only; composition lives in
 // pkg/team/compose and application in internal/team/initialize.
@@ -60,7 +60,7 @@ const (
 	// kuketeam.yaml in each project repo.
 	KindProjectTeam = "ProjectTeam"
 	// KindTeamsConfig identifies the host-side, operator-owned global-facts
-	// document (~/.kuke/kuketeams.yaml) maintained by `kuke team init`.
+	// document (~/.kuke/kuketeams.yaml), optional and written by hand.
 	KindTeamsConfig = "TeamsConfig"
 	// KindTeamEntry identifies a host-side, per-team composition record
 	// (~/.kuke/kuketeam.d/<team>.yaml) — one document per team file.
@@ -75,14 +75,6 @@ const (
 	// KindImageCatalog identifies the prebuilt-image → capability map
 	// (harnesses/images.yaml) in the agents source — the v1 selector input.
 	KindImageCatalog = "ImageCatalog"
-)
-
-// GitSignCommits and GitSignTags are the accepted entries in TeamsConfig.git.sign,
-// mirroring v1beta1's GitSignCommits/GitSignTags so the rendered git config keys
-// (commit.gpgsign / tag.gpgsign) stay aligned with the runtime contract.
-const (
-	GitSignCommits = "commits"
-	GitSignTags    = "tags"
 )
 
 // Secret source modes for TeamsConfig.secrets — a secret declares where its

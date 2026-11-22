@@ -76,6 +76,8 @@ func NewSecretCmdWithCatalog(catalog *connector.Catalog) *cobra.Command {
 			"    kuke create secret <name> --connector <connector> --from-file ./token\n" +
 			"    kuke create secret <name> --connector <connector> --type ssh-key \\\n" +
 			"        --from-file ~/.ssh/id_ed25519 --identity FIELD=VALUE\n" +
+			"An opaque git identity is author-only: it stores no value and takes no --hosts:\n" +
+			"    kuke create secret <name> --connector git --type opaque --author 'Name <email>'\n" +
 			"Connectors: " + strings.Join(catalog.Names(), ", ") + ".\n" +
 			"The tag and the identity fields are readable (`kuke get secret`); the material never is.",
 		Args:          cobra.MaximumNArgs(1),
@@ -207,7 +209,11 @@ func parseCreateSecretFlags(
 	}
 	switch strings.TrimSpace(secretType) {
 	case "", v1beta1.SecretTypeOpaque:
-		flags.spec, err = opaqueSpec(cmd)
+		if choice.authorOnly(secretType) {
+			flags.spec, err = authorOnlySpec(cmd)
+		} else {
+			flags.spec, err = opaqueSpec(cmd)
+		}
 	case v1beta1.SecretTypeBasicAuth:
 		flags.spec, err = basicAuthSpec(cmd)
 	case v1beta1.SecretTypeSSHKey:

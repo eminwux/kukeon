@@ -64,6 +64,9 @@ func setupAddRun(t *testing.T) Options {
 	if err := config.Encode(&raw, cfg); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(opts.Root, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(opts.Root, "kuketeams.yaml"), raw.Bytes(), 0o600); err != nil {
 		t.Fatal(err)
 	}

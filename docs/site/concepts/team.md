@@ -18,13 +18,13 @@ Two commands drive it:
 
 ## Where the files live
 
-| File                             | Where        | Holds                                                                                                      |
-| -------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------- |
-| `~/.kuke/kuketeams.yaml`         | host         | `TeamsConfig`: global defaults (sources, roles, harnesses), Git identity, parameters, secret bindings.     |
-| `~/.kuke/kuketeam.d/<team>.yaml` | host         | `TeamEntry`: the accepted declaration of one registered team. Written only after a fully successful apply. |
-| `kuketeam.yaml`                  | project repo | `Team`: the project's selections, read by `kuke team add DIRECTORY`.                                       |
-| `roles/<role>/`                  | a source     | Role definition (`role.yaml`) and the instruction/skill assets materialized into the harness home.         |
-| `harnesses/<harness>/`           | a source     | Harness definition (`harness.yaml`), image catalog (`images.yaml`), and image build context.               |
+| File                             | Where        | Holds                                                                                                               |
+| -------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `~/.kuke/kuketeams.yaml`         | host         | `TeamsConfig`, optional and hand-written: global defaults (sources, roles, harnesses), parameters, secret bindings. |
+| `~/.kuke/kuketeam.d/<team>.yaml` | host         | `TeamEntry`: the accepted declaration of one registered team. Written only after a fully successful apply.          |
+| `kuketeam.yaml`                  | project repo | `Team`: the project's selections, read by `kuke team add DIRECTORY`.                                                |
+| `roles/<role>/`                  | a source     | Role definition (`role.yaml`) and the instruction/skill assets materialized into the harness home.                  |
+| `harnesses/<harness>/`           | a source     | Harness definition (`harness.yaml`), image catalog (`images.yaml`), and image build context.                        |
 
 All documents use `apiVersion: kuketeams.io/v1` and are decoded strictly
 (single document, no unknown fields). This repository ships the `majordomo`
@@ -70,8 +70,10 @@ the image from the current definitions and catalog.
 
 ## Reusable defaults after init
 
-After `init`, edit `~/.kuke/kuketeams.yaml` to declare reusable sources, roles,
-and harnesses. Both harnesses are listed here; dev narrows to Claude and pm to
+`~/.kuke/kuketeams.yaml` is optional and hand-written: kuke reads it and never
+writes it, and a missing file means empty global defaults. `kuke team init` and
+`kuke team add` both work without it. Create it to declare reusable sources,
+roles, and harnesses. Both harnesses are listed here; dev narrows to Claude and pm to
 Codex:
 
 ```yaml
@@ -480,17 +482,23 @@ team chose are written as fills on its Configs. See
 ## Git identity and credentials
 
 Team cells use [stored git credentials](../guides/git-credentials.md); the host
-`~/.ssh` is never mounted. `TeamsConfig.spec.git` names the operator's default
-identity, credentials and signing key by secret, and `kuke team` writes it as
-the `spec.defaults.git` of the team's stack, where every team cell inherits it.
-A source may state its own identity with `sources[].git`; it is rendered into
-that repo's fill of each CellConfig. The remote transport follows the
-credential, so a project added by its HTTPS URL is still cloned and pushed over
-SSH when its host is bound to an SSH key.
+`~/.ssh` is never mounted. A team cell's git identity is the git connector
+identity a Realm, Space or Stack default names (`spec.defaults.git.identityRef`),
+or the one the team names under [`connectors.git`](#connectors). `kuke team`
+reads no git identity from the host and writes no git defaults. Store yours with
+[`kuke connector import git --default`](../cli/kuke-connector.md#kuke-connector-import-git).
 
-[`kuke team init --import-git-identity`](../cli/kuke-team-init.md#git-identity-and-credentials)
-stores your existing key as a secret, with your explicit consent. A role's
-`needs.mounts: [ssh]` is still accepted but mounts nothing.
+`TeamsConfig` has no `spec.git`: a `kuketeams.yaml` that still has one fails to
+decode and names `kuke connector import git --default`. A source may state its
+own identity with `sources[].git` (author, committer, credential, signing); it
+is rendered into that repo's fill of each CellConfig. The remote transport
+follows the credential, so a project added by its HTTPS URL is still cloned and
+pushed over SSH when its host is bound to an SSH key.
+
+When a team clones a source over SSH that states no credential of its own and
+nothing gives its cells a git identity, `kuke team init` and `kuke team add`
+print `no git identity is set; run kuke connector import git --default`. A
+role's `needs.mounts: [ssh]` is still accepted but mounts nothing.
 
 ## Runtime repository and parameter bindings
 

@@ -55,6 +55,7 @@ type fakeClient struct {
 	blueprints    map[string]api.CellBlueprintDoc
 	configs       []api.CellConfigDoc
 	stackDefaults *api.ScopeDefaults
+	spaceDefaults *api.SpaceDefaults
 	stackLabels   map[string]string
 	// The team realm's spec, as far as an applied Realm document can change it.
 	realmDefaults *api.ScopeDefaults
@@ -180,7 +181,7 @@ func (f *fakeClient) ListSpaces(context.Context, string) ([]api.SpaceDoc, error)
 		return nil, nil
 	}
 	return []api.SpaceDoc{
-		{Metadata: api.SpaceMetadata{Name: "default"}},
+		{Metadata: api.SpaceMetadata{Name: "default"}, Spec: api.SpaceSpec{Defaults: f.spaceDefaults}},
 		{Metadata: api.SpaceMetadata{Name: "shared"}},
 	}, nil
 }
@@ -709,18 +710,17 @@ func TestDefaultIdentityIsWrittenOnce(t *testing.T) {
 func TestMissingGitIdentityHint(t *testing.T) {
 	identity := &api.ContainerSecretRef{Name: "bot-key", Realm: "default", Stack: "team"}
 	repoIdentity := &api.ContainerSecretRef{Name: "repo-key", Realm: "default"}
+	plainKey := &api.ContainerSecretRef{Name: "plain-key", Realm: "default"}
 	result := &compose.Result{
-		Git: &api.ContainerGit{Credentials: []api.GitCredential{
-			{Host: "github.com", SecretRef: &api.ContainerSecretRef{Name: "plain-key", Realm: "default"}},
-		}},
 		Pairs: []compose.Pair{{Config: &api.CellConfigDoc{Spec: api.CellConfigSpec{
 			Git: &api.ContainerGit{IdentityRef: identity},
 			Repos: map[string]api.CellConfigRepoFill{
 				"project": {Git: &api.RepoGit{IdentityRef: repoIdentity}},
+				"other":   {Git: &api.RepoGit{Credential: &api.GitCredential{SecretRef: plainKey}}},
 			},
 		}}}},
 	}
-	missing, err := missingGitSecrets(t.Context(), newFake(), result, nil)
+	missing, err := missingGitSecrets(t.Context(), newFake(), result)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -744,5 +744,57 @@ func TestMissingGitIdentityHint(t *testing.T) {
 	}
 	if len(missing) != 3 {
 		t.Errorf("missing = %q, want three lines", missing)
+	}
+}
+
+// TestNoGitIdentityHint is AC13: a team that clones over SSH, with no git
+// identity named by its Configs or by the Realm, Space or Stack defaults, is
+// told once how to store one; a team that has one, or clones nothing over SSH,
+// is told nothing.
+func TestNoGitIdentityHint(t *testing.T) {
+	identity := &api.ContainerSecretRef{Name: "git-ssh", Realm: "default"}
+	gitDefault := &api.ScopeDefaults{Git: &api.ContainerGit{IdentityRef: identity}}
+	for _, tc := range []struct {
+		name   string
+		ssh    bool
+		setup  func(*fakeClient, *compose.Result)
+		hinted bool
+	}{
+		{"ssh, no identity", true, func(*fakeClient, *compose.Result) {}, true},
+		{"no ssh source", false, func(*fakeClient, *compose.Result) {}, false},
+		{"realm default", true, func(f *fakeClient, _ *compose.Result) { f.realmDefaults = gitDefault }, false},
+		{"space default", true, func(f *fakeClient, _ *compose.Result) {
+			f.spaceDefaults = &api.SpaceDefaults{Git: gitDefault.Git}
+		}, false},
+		{"stack default", true, func(f *fakeClient, _ *compose.Result) { f.stackDefaults = gitDefault }, false},
+		{"team identity", true, func(_ *fakeClient, r *compose.Result) {
+			r.Pairs[0].Config.Spec.Git = &api.ContainerGit{IdentityRef: identity}
+		}, false},
+		// A default that sets other git fields but names no identity is none.
+		{"realm git without identity", true, func(f *fakeClient, _ *compose.Result) {
+			f.realmDefaults = &api.ScopeDefaults{Git: &api.ContainerGit{Author: &api.GitIdentity{Name: "A", Email: "a@x"}}}
+		}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := composition(t, "codex", nil)
+			if tc.ssh {
+				result.SSHSources = []string{"agents"}
+			}
+			f := newFake()
+			tc.setup(f, result)
+			out, err := apply(t.Context(), f, result, "kuke team init", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			count := 0
+			for _, note := range out.notes {
+				if note == "no git identity is set; run kuke connector import git --default" {
+					count++
+				}
+			}
+			if want := map[bool]int{true: 1, false: 0}[tc.hinted]; count != want {
+				t.Fatalf("hint printed %d times, want %d: %v", count, want, out.notes)
+			}
+		})
 	}
 }

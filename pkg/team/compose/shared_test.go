@@ -681,110 +681,6 @@ spec:
 	}
 }
 
-// TestDefaultGitIdentity is step 13: TeamsConfig.spec.git names stored secrets
-// and is handed to application as scope defaults; nothing git-related is baked
-// into a blueprint or config, and host paths never reach a cell.
-func TestDefaultGitIdentity(t *testing.T) {
-	cfg, opts := fixture(t)
-	key := config.SecretRef{Name: "git-ssh", Realm: "default"}
-	signers := config.SecretRef{Name: "signers", Realm: "default", Space: "ops"}
-	cfg.Spec.Git = &config.Git{
-		Author:    &config.Identity{Name: "Dev Bot", Email: "dev-bot@example.com"},
-		Committer: &config.Identity{Name: "Committer", Email: "committer@example.com"},
-		Credentials: []config.GitCredential{
-			{Host: "github.com", SecretRef: key},
-			{
-				Host:          "git.example.com",
-				SecretRef:     config.SecretRef{Name: "https-pat", Realm: "default"},
-				User:          "git",
-				Port:          2222,
-				HostKeyPolicy: "accept-new",
-			},
-		},
-		Signing: &config.GitSigning{SecretRef: key, AllowedSignersRef: &signers},
-		Sign:    []string{"commits", "tags"},
-	}
-	result, err := compose.Compose(cfg, selectedTeam(cfg), opts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := &api.ContainerGit{
-		Author:    &api.GitIdentity{Name: "Dev Bot", Email: "dev-bot@example.com"},
-		Committer: &api.GitIdentity{Name: "Committer", Email: "committer@example.com"},
-		Credentials: []api.GitCredential{
-			{Host: "github.com", SecretRef: &api.ContainerSecretRef{Name: "git-ssh", Realm: "default"}},
-			{
-				Host: "git.example.com", SecretRef: &api.ContainerSecretRef{Name: "https-pat", Realm: "default"},
-				User: "git", Port: 2222, HostKeyPolicy: "accept-new",
-			},
-		},
-		Signing: &api.GitSigning{
-			SecretRef:         &api.ContainerSecretRef{Name: "git-ssh", Realm: "default"},
-			AllowedSignersRef: &api.ContainerSecretRef{Name: "signers", Realm: "default", Space: "ops"},
-		},
-		Sign: []string{"commits", "tags"},
-	}
-	if !reflect.DeepEqual(result.Git, want) {
-		t.Fatalf("default git = %+v, want %+v", result.Git, want)
-	}
-	if len(result.Notes) != 0 {
-		t.Fatalf("notes = %v", result.Notes)
-	}
-	// The identity is inherited, not rendered into the team's documents.
-	raw, err := result.MarshalYAML()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, absent := range []string{"dev-bot@example.com", "git-ssh", "signing", "credentials"} {
-		if bytes.Contains(raw, []byte(absent)) {
-			t.Fatalf("default identity %q rendered into blueprint/config documents", absent)
-		}
-	}
-	for _, pair := range result.Pairs {
-		if pair.Config.Spec.Git != nil || pair.Blueprint.Spec.Cell.Containers[0].Git != nil {
-			t.Fatal("git identity baked into a team document")
-		}
-	}
-}
-
-func TestLegacyGitHostPathsAreIgnoredWithANote(t *testing.T) {
-	cfg, opts := fixture(t)
-	cfg.Spec.Git = &config.Git{
-		Author:         &config.Identity{Name: "Dev", Email: "dev@example.com"},
-		SigningKey:     "/home/dev/.ssh/id_ed25519.pub",
-		Sign:           []string{"commits"},
-		AllowedSigners: "/home/dev/.ssh/allowed_signers",
-	}
-	result, err := compose.Compose(cfg, selectedTeam(cfg), opts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := &api.ContainerGit{Author: &api.GitIdentity{Name: "Dev", Email: "dev@example.com"}}
-	if !reflect.DeepEqual(result.Git, want) {
-		t.Fatalf("git = %+v: host paths and unsatisfiable signing must be dropped", result.Git)
-	}
-	if len(result.Notes) != 1 || !strings.Contains(result.Notes[0], "host paths") ||
-		!strings.Contains(result.Notes[0], "--import-git-identity") {
-		t.Fatalf("notes = %v", result.Notes)
-	}
-	if strings.Contains(strings.Join(result.Notes, " "), "/home/dev") {
-		t.Fatal("note echoes the operator's key path")
-	}
-	// Host paths alone leave nothing to inherit.
-	cfg.Spec.Git = &config.Git{SigningKey: "/home/dev/.ssh/id_ed25519.pub"}
-	if result, err = compose.Compose(cfg, selectedTeam(cfg), opts); err != nil || result.Git != nil ||
-		len(result.Notes) != 1 {
-		t.Fatalf("git=%v notes=%v err=%v", result.Git, result.Notes, err)
-	}
-	raw, err := result.MarshalYAML()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Contains(raw, []byte("id_ed25519")) || bytes.Contains(raw, []byte(".ssh")) {
-		t.Fatal("host key path rendered")
-	}
-}
-
 // TestPerSourceGitIdentity: a source may state its own identity, rendered into
 // its repo fill; sources that do not keep using the default.
 func TestPerSourceGitIdentity(t *testing.T) {
@@ -835,9 +731,10 @@ func TestPerSourceGitIdentity(t *testing.T) {
 	}
 }
 
-// With the host ~/.ssh gone, an SSH source no stored credential covers cannot
-// be cloned; the operator is told which one, without failing composition.
-func TestSSHSourcesWithoutCredentialAreNoted(t *testing.T) {
+// TestSSHSourcesAreReported: composition names every in-cell SSH clone that
+// states no credential of its own, so application can say when nothing gives
+// the team a git identity (issue #1591). It fails nothing and notes nothing.
+func TestSSHSourcesAreReported(t *testing.T) {
 	sshSource := func(cfg *config.TeamsConfig) {
 		cfg.Spec.Defaults.Sources = append(
 			cfg.Spec.Defaults.Sources,
@@ -850,30 +747,16 @@ func TestSSHSourcesWithoutCredentialAreNoted(t *testing.T) {
 			config.Source{Name: "definitions", URL: "git@gitlab.com:team/defs", Tag: "v1"}, // not cloned in the cell
 		)
 	}
-	hasNote := func(notes []string) bool {
-		return slices.ContainsFunc(notes, func(n string) bool {
-			return strings.Contains(n, "source agents") && strings.Contains(n, "github.com")
-		})
-	}
 	ref := config.SecretRef{Name: "git-ssh", Realm: "default"}
 	for _, tc := range []struct {
 		name   string
 		change func(*config.TeamsConfig)
-		noted  bool
+		want   []string
 	}{
-		{"no-git", func(*config.TeamsConfig) {}, true},
-		{"other-host", func(c *config.TeamsConfig) {
-			c.Spec.Git = &config.Git{Credentials: []config.GitCredential{{Host: "gitlab.com", SecretRef: ref}}}
-		}, true},
-		{"host", func(c *config.TeamsConfig) {
-			c.Spec.Git = &config.Git{Credentials: []config.GitCredential{{Host: "github.com", SecretRef: ref}}}
-		}, false},
-		{"url-prefix", func(c *config.TeamsConfig) {
-			c.Spec.Git = &config.Git{Credentials: []config.GitCredential{{Host: "GitHub.com/eminwux", SecretRef: ref}}}
-		}, false},
+		{"ssh-source", func(*config.TeamsConfig) {}, []string{"agents"}},
 		{"source-credential", func(c *config.TeamsConfig) {
 			c.Spec.Defaults.Sources[1].Git = &config.SourceGit{Credential: &config.SourceCredential{SecretRef: ref}}
-		}, false},
+		}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, opts := fixture(t)
@@ -883,12 +766,12 @@ func TestSSHSourcesWithoutCredentialAreNoted(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if hasNote(result.Notes) != tc.noted {
-				t.Fatalf("notes = %v, want noted=%v", result.Notes, tc.noted)
+			if !slices.Equal(result.SSHSources, tc.want) {
+				t.Fatalf("ssh sources = %v, want %v", result.SSHSources, tc.want)
 			}
 			for _, note := range result.Notes {
-				if strings.Contains(note, "definitions") || strings.Contains(note, "source kukeon") {
-					t.Fatalf("note for a source that is not an in-cell SSH clone: %s", note)
+				if strings.Contains(note, "source ") {
+					t.Fatalf("composition notes a source: %s", note)
 				}
 			}
 			// The SSH URL is kept: the transport follows the credential.

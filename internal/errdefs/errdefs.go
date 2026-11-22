@@ -595,6 +595,11 @@ var (
 	// method the connector's blueprint components do not declare, or a
 	// connector whose method is not a choice (issue #1551).
 	ErrConnectorMethod = errors.New("connector has no such method")
+	// ErrGitImport is returned when `kuke connector import git` (or the web
+	// UI's import) cannot build a git identity from the host: no usable key
+	// and no author, an unreadable or passphrase-protected key, a malformed
+	// option (issue #1591).
+	ErrGitImport = errors.New("import git identity")
 	// ErrBlueprintComponentGroup is returned when a CellConfig enables two
 	// components of one group.
 	ErrBlueprintComponentGroup = errors.New("components of one group are mutually exclusive")

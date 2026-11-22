@@ -5,6 +5,11 @@
 # defaults, on a Config's `git` block, or on one repo's `git` — and the daemon
 # expands it into author, committer, a credential for each host and, for an SSH
 # key, signing with the same key. Explicit fields next to the reference win.
+#
+# An opaque identity is author-only: it carries an author (and committer) and
+# no key, so a user without an SSH key still gets a commit identity. Its value
+# is a fixed placeholder nothing reads; `kuke connector import git` and
+# `kuke create secret --connector git --type opaque` supply it.
 apiVersion: kuketeams.io/v1
 kind: Connector
 metadata:
@@ -17,7 +22,8 @@ spec:
   optional: true
   scopes: [realm, space, stack]
   identity:
-    secretTypes: [ssh-key, basic-auth]
+    # opaque last: the first type is the web form's default.
+    secretTypes: [ssh-key, basic-auth, opaque]
     fields:
       - name: author
         type: person
@@ -28,6 +34,7 @@ spec:
       - name: hosts
         type: list
         required: true
+        secretTypes: [ssh-key, basic-auth]
         help: Hosts or URL prefixes the secret authenticates (github.com, gitlab.com/group).
       - name: sign
         type: list

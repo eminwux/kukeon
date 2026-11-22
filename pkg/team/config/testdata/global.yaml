@@ -1,17 +1,6 @@
 apiVersion: kuketeams.io/v1
 kind: TeamsConfig
 spec:
-  git:
-    author:
-      name: Example User
-      email: user@example.com
-    committer:
-      name: Example User
-      email: user@example.com
-    signingKey: /home/inwx/.ssh/id_rsa.pub
-    sign:
-      - commits
-    allowedSigners: /home/inwx/.ssh/allowed_signers
   defaults:
     sources:
       - name: kukeon

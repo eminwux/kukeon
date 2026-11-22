@@ -266,6 +266,27 @@ export function secretTypesOf(connector) {
   const types = list(connector?.secretTypes).filter(type => [secretOpaque, secretBasicAuth, secretSSHKey].includes(type));
   return types.length ? types : [secretOpaque];
 }
+// storesNoValue reports an identity type that carries no material: an opaque
+// identity of a git-delivered connector is author-only (#1591) — it gives a
+// cell its author and committer and authenticates nothing, so the form asks
+// for no value and the server stores a placeholder.
+export function storesNoValue(connector, type) {
+  return !list(connector?.methods).length && connector?.delivery === deliveryGit && type === secretOpaque;
+}
+// importsFromHost reports a connector whose identity the server can discover
+// on its own host (#1591): a git-delivered one — its SSH key and git
+// configuration.
+export function importsFromHost(connector) { return !list(connector?.methods).length && connector?.delivery === deliveryGit; }
+// importPayload builds the body of POST /api/connectors/{name}/import. The key
+// and passphrase file are paths in the server account's home directory; no
+// material is ever part of it.
+export function importPayload(form) {
+  const body = { realm: trimmed(form?.realm) || defaultScopeName, makeDefault: form?.makeDefault === true };
+  const hosts = parseList(form?.hosts);
+  if (hosts.length) body.hosts = hosts;
+  for (const key of ["name", "key", "passphraseFile"]) if (trimmed(form?.[key])) body[key] = trimmed(form[key]);
+  return body;
+}
 // emptyIdentityForm is a blank create form; given an existing identity it is
 // the rotate form: same name, type and readable fields, material blank.
 export function emptyIdentityForm(connector, existing) {
@@ -293,7 +314,7 @@ export function identityErrors(connector, form) {
   }
   if (form?.type === secretBasicAuth) { if (!trimmed(form.username)) errors.push("Username is required."); if (!text(form.password)) errors.push("Password or token is required."); }
   else if (form?.type === secretSSHKey) { if (!trimmed(form.privateKey)) errors.push("Private key is required."); }
-  else if (!text(form?.value)) errors.push("Value is required.");
+  else if (!storesNoValue(connector, form?.type) && !text(form?.value)) errors.push("Value is required.");
   return errors;
 }
 // identityPayload builds the body of POST /api/connectors/{name}/identities.
@@ -311,7 +332,7 @@ export function identityPayload(connector, scope, form) {
   else if (type === secretSSHKey) {
     body.privateKey = text(form.privateKey);
     for (const key of ["passphrase", "publicKey", "certificate", "knownHosts"]) if (text(form[key])) body[key] = text(form[key]);
-  } else body.value = text(form?.value);
+  } else if (!storesNoValue(connector, type)) body.value = text(form?.value);
   return body;
 }
 // clearMaterial blanks every write-only input of a form once it was sent.

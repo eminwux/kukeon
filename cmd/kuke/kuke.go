@@ -28,6 +28,7 @@ import (
 	attachcmd "github.com/eminwux/kukeon/cmd/kuke/attach"
 	autocompletecmd "github.com/eminwux/kukeon/cmd/kuke/autocomplete"
 	buildcmd "github.com/eminwux/kukeon/cmd/kuke/build"
+	connectorcmd "github.com/eminwux/kukeon/cmd/kuke/connector"
 	createcmd "github.com/eminwux/kukeon/cmd/kuke/create"
 	daemoncmd "github.com/eminwux/kukeon/cmd/kuke/daemon"
 	deletecmd "github.com/eminwux/kukeon/cmd/kuke/delete"
@@ -175,6 +176,7 @@ func SetupKukeCmd(rootCmd *cobra.Command) error {
 	rootCmd.AddCommand(writecmd.NewWriteCmd())
 	rootCmd.AddCommand(autocompletecmd.NewAutocompleteCmd())
 	rootCmd.AddCommand(imagecmd.NewImageCmd())
+	rootCmd.AddCommand(connectorcmd.NewConnectorCmd())
 	rootCmd.AddCommand(uninstallcmd.NewUninstallCmd())
 	rootCmd.AddCommand(version.NewVersionCmd())
 

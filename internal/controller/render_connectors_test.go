@@ -83,11 +83,14 @@ func connectorBlueprint() ext.CellBlueprintDoc {
 					Kind: ext.ComponentKindConnector, Name: "git", Optional: true,
 					Connector: &ext.BlueprintConnector{
 						Name: "git", Delivery: ext.ConnectorDeliveryGit, Optional: true,
-						SecretTypes: []string{ext.SecretTypeSSHKey, ext.SecretTypeBasicAuth},
+						SecretTypes: []string{ext.SecretTypeSSHKey, ext.SecretTypeBasicAuth, ext.SecretTypeOpaque},
 						Fields: []ext.ConnectorField{
 							{Name: "author", Type: ext.ConnectorFieldPerson},
 							{Name: "committer", Type: ext.ConnectorFieldPerson},
-							{Name: "hosts", Type: ext.ConnectorFieldList, Required: true},
+							{
+								Name: "hosts", Type: ext.ConnectorFieldList, Required: true,
+								SecretTypes: []string{ext.SecretTypeSSHKey, ext.SecretTypeBasicAuth},
+							},
 							{
 								Name: "sign", Type: ext.ConnectorFieldList, Enum: []string{"commits", "tags"},
 								SecretTypes: []string{ext.SecretTypeSSHKey},
@@ -638,12 +641,81 @@ func TestPreviewCellFromConfig_GitIdentityLevels(t *testing.T) {
 	}
 }
 
+// TestPreviewCellFromConfig_AuthorOnlyGitIdentity: an opaque git identity
+// (issue #1591) gives a cell its author and committer and nothing else — no
+// credential, no signing — whether a Realm default names it, with or without a
+// git connector on the blueprint, or one repo fill does.
+func TestPreviewCellFromConfig_AuthorOnlyGitIdentity(t *testing.T) {
+	authorOnly := intmodel.SecretSpec{
+		Type: ext.SecretTypeOpaque, Connector: "git",
+		Identity: map[string]string{"author": "Me <me@example.com>", "committer": "Me Bot <bot@example.com>"},
+	}
+	newFixture := func() *connectorFixture {
+		return &connectorFixture{
+			scope: renderScope{realmDefaults: &intmodel.ScopeDefaults{
+				Git: &intmodel.ContainerGit{
+					IdentityRef: &intmodel.ContainerSecretRef{Name: "git-author", Realm: "kuke-system"},
+				},
+			}},
+			secrets: map[string]intmodel.SecretSpec{"kuke-system/git-author": authorOnly},
+		}
+	}
+	// "git" carries the connector descriptor; "forge" does not, so the
+	// identity is checked against the fallback.
+	for _, components := range [][]string{{"git"}, {"forge"}} {
+		t.Run("realm default/"+components[0], func(t *testing.T) {
+			fx := newFixture()
+			fx.secrets["kuke-system/forge-a"] = intmodel.SecretSpec{Connector: "forge"}
+			fx.scope.realmDefaults.Secrets = secretFillOf("forge-a")
+			cfg := connectorConfig(components...)
+			preview, err := setupTestController(t, newConnectorRunner(t, fx, cfg)).
+				PreviewCellFromConfig(previewRequest())
+			if err != nil {
+				t.Fatalf("PreviewCellFromConfig: %v", err)
+			}
+			git := preview.Cell.Spec.Containers[0].Git
+			if git == nil || git.Author == nil || git.Author.Email != "me@example.com" ||
+				git.Committer == nil || git.Committer.Email != "bot@example.com" {
+				t.Fatalf("git = %+v, want the author-only identity's author and committer", git)
+			}
+			if len(git.Credentials) != 0 || git.Signing != nil || len(git.Sign) != 0 || git.IdentityRef != nil {
+				t.Errorf("git = %+v (credentials %+v), want no credential, no signing and no reference",
+					git, git.Credentials)
+			}
+		})
+	}
+
+	t.Run("repo", func(t *testing.T) {
+		fx := newFixture()
+		fx.scope.realmDefaults = nil
+		cfg := connectorConfig("git")
+		cfg.Spec.Repos["project"] = ext.CellConfigRepoFill{
+			URL: "https://github.com/eminwux/kukeon.git",
+			Git: &ext.RepoGit{IdentityRef: contractSecretRef("git-author")},
+		}
+		preview, err := setupTestController(t, newConnectorRunner(t, fx, cfg)).PreviewCellFromConfig(previewRequest())
+		if err != nil {
+			t.Fatalf("PreviewCellFromConfig: %v", err)
+		}
+		repoGit := preview.Cell.Spec.Containers[0].Repos[0].Git
+		if repoGit == nil || repoGit.IdentityRef != nil || repoGit.Author == nil ||
+			repoGit.Author.Email != "me@example.com" || repoGit.Committer.Email != "bot@example.com" {
+			t.Fatalf("repo git = %+v, want the author-only identity's author and committer", repoGit)
+		}
+		if repoGit.Credential != nil || repoGit.Signing != nil || len(repoGit.Sign) != 0 {
+			t.Errorf("repo git = %+v, want no credential and no signing", repoGit)
+		}
+	})
+}
+
 // TestPreviewCellFromConfig_GitIdentityRefRejected: a reference that cannot be
 // expanded fails the render — the cell would otherwise start with no identity.
 func TestPreviewCellFromConfig_GitIdentityRefRejected(t *testing.T) {
 	fx := &connectorFixture{secrets: map[string]intmodel.SecretSpec{
 		"kuke-system/untagged": {Type: ext.SecretTypeSSHKey},
 		"kuke-system/forge-a":  {Connector: "forge"},
+		// An author-only (opaque) identity authenticates nothing: hosts on it
+		// are refused (issue #1591).
 		"kuke-system/opaque":   {Connector: "git", Identity: map[string]string{"hosts": "github.com"}},
 		"kuke-system/no-hosts": gitIdentitySecret(map[string]string{"author": "A <a@example.com>"}),
 	}}

@@ -116,6 +116,19 @@ func TestCreateSecret_ConnectorTagsEveryType(t *testing.T) {
 			wantType: v1beta1.SecretTypeBasicAuth, wantTag: "git", material: "https-token",
 			wantIdentity: map[string]string{"hosts": "github.com"},
 		},
+		{
+			// Issue #1591: no value, no --hosts.
+			name:     "author-only git identity",
+			args:     []string{"me", "--connector", "git", "--type", "opaque", "--author", "Me <me@example.com>"},
+			wantType: "", wantTag: "git", material: "kukeon:git-author-only",
+			wantIdentity: map[string]string{"author": "Me <me@example.com>"},
+		},
+		{
+			name:     "author-only git identity without --type",
+			args:     []string{"me", "--connector", "git", "--author", "Me <me@example.com>"},
+			wantType: "", wantTag: "git", material: "kukeon:git-author-only",
+			wantIdentity: map[string]string{"author": "Me <me@example.com>"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -132,6 +145,10 @@ func TestCreateSecret_ConnectorTagsEveryType(t *testing.T) {
 			}
 			if !reflect.DeepEqual(doc.Spec.Identity, tt.wantIdentity) {
 				t.Errorf("identity = %v, want %v", doc.Spec.Identity, tt.wantIdentity)
+			}
+			if tt.wantTag == "git" && tt.wantType == "" &&
+				doc.Spec.Data != "kukeon:git-author-only" {
+				t.Errorf("author-only data = %q, want the placeholder", doc.Spec.Data)
 			}
 			if !strings.Contains(out, "connector: "+tt.wantTag) {
 				t.Errorf("output does not show the tag:\n%s", out)
@@ -165,6 +182,36 @@ func TestCreateSecret_ConnectorRejections(t *testing.T) {
 			"several accepted types need --type",
 			[]string{"x", "--connector", "git", "--from-file", keyFile, "--hosts", "github.com"},
 			"requires --type",
+		},
+		{
+			"author-only git identity takes no value",
+			[]string{
+				"x",
+				"--connector",
+				"git",
+				"--type",
+				"opaque",
+				"--author",
+				"A <a@example.com>",
+				"--from-file",
+				tokenFile,
+			},
+			"an author-only git identity stores no value; use --type ssh-key for a key",
+		},
+		{
+			"author-only git identity takes no literal",
+			[]string{"x", "--connector", "git", "--author", "A <a@example.com>", "--from-literal", "tok-material"},
+			"an author-only git identity stores no value",
+		},
+		{
+			"author-only git identity needs an author",
+			[]string{"x", "--connector", "git", "--type", "opaque"},
+			`requires identity field "author"`,
+		},
+		{
+			"author-only git identity takes no hosts",
+			[]string{"x", "--connector", "git", "--author", "A <a@example.com>", "--hosts", "github.com"},
+			`identity field "hosts" applies to a ssh-key or basic-auth secret, not opaque`,
 		},
 		{
 			"missing required field",

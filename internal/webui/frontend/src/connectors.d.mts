@@ -82,9 +82,18 @@ export function methodStatuses(statuses: ConnectorStatus[] | undefined, connecto
 export function unresolvedConnectors(statuses: ConnectorStatus[] | undefined, picks: Record<string, Partial<SecretRef> | undefined> | undefined): ConnectorStatus[];
 export function identityFields(connector: { fields?: ConnectorField[] } | undefined, type: string): FormField[];
 export function secretTypesOf(connector: { secretTypes?: string[] } | undefined): string[];
+export function storesNoValue(connector: { methods?: unknown[]; delivery?: string } | undefined, type: string | undefined): boolean;
+export function importsFromHost(connector: { methods?: unknown[]; delivery?: string } | undefined): boolean;
+export type ImportForm = { realm: string; hosts: string; name: string; key: string; passphraseFile: string; makeDefault: boolean };
+export type ImportResult = {
+  home: string; name: string; realm: string; type: string; identity: Record<string, string>; keyPath?: string; allowedSignersPath?: string; notes?: string[];
+  secrets: Array<{ name: string; realm: string; action: string }>;
+  default?: { realm: string; identity: SecretRef | null; previous?: SecretRef; action: string };
+};
+export function importPayload(form: Partial<ImportForm> | undefined): Record<string, unknown>;
 export function emptyIdentityForm(connector: { secretTypes?: string[] } | undefined, existing?: { name?: string; type?: string; identity?: Record<string, string> }): IdentityForm;
 export function parseList(value: string | undefined): string[];
-export function identityErrors(connector: { fields?: ConnectorField[]; secretTypes?: string[] } | undefined, form: IdentityForm): string[];
-export function identityPayload(connector: { fields?: ConnectorField[]; secretTypes?: string[] } | undefined, scope: Partial<Scope>, form: IdentityForm): Record<string, unknown>;
+export function identityErrors(connector: { fields?: ConnectorField[]; secretTypes?: string[]; methods?: unknown[]; delivery?: string } | undefined, form: IdentityForm): string[];
+export function identityPayload(connector: { fields?: ConnectorField[]; secretTypes?: string[]; methods?: unknown[]; delivery?: string } | undefined, scope: Partial<Scope>, form: IdentityForm): Record<string, unknown>;
 export function clearMaterial(form: IdentityForm): IdentityForm;
 export function registryEntries(realm: unknown): RegistryEntry[];

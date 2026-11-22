@@ -55,10 +55,10 @@ export const testConnectors = [
     ],
   },
   {
-    name: "repo", title: "Repo", description: "The identity a cell clones and signs with.", delivery: "git", optional: true, scopes: ["realm", "space", "stack"], secretTypes: ["ssh-key", "basic-auth"], methods: [],
+    name: "repo", title: "Repo", description: "The identity a cell clones and signs with.", delivery: "git", optional: true, scopes: ["realm", "space", "stack"], secretTypes: ["ssh-key", "basic-auth", "opaque"], methods: [],
     fields: [
       { name: "author", type: "person", help: "Commit author, as Name <email>." },
-      { name: "hosts", type: "list", required: true, help: "Hosts the secret authenticates." },
+      { name: "hosts", type: "list", required: true, secretTypes: ["ssh-key", "basic-auth"], help: "Hosts the secret authenticates." },
       { name: "sign", type: "list", enum: ["commits", "tags"], secretTypes: ["ssh-key"], help: "What to sign with the key." },
       { name: "allowedSignersRef", type: "secret", secretTypes: ["ssh-key"], help: "Secret holding the allowed-signers file." },
     ],
@@ -238,6 +238,30 @@ export async function mockConnectorAPI(page, world) {
     const connector = world.connectors.find(item => item.name === decodeURIComponent(parts[2]));
     if (request.method() !== "POST" || !connector) return route.fulfill(fail(400, "invalid_request", `unknown connector "${parts[2]}"`));
     const body = record(request);
+    // The import of a git-delivered connector's identity from the server's
+    // host (#1591): `.ssh/absent` stands for a key the server cannot read.
+    if (parts[3] === "import") {
+      if (connector.delivery !== "git" || connector.methods.length) return route.fulfill(fail(400, "invalid_request", `connector "${connector.name}" takes no import`));
+      if (body.key === ".ssh/absent") return route.fulfill(fail(400, "invalid_request", "config error: import git identity: cannot read private key /home/operator/.ssh/absent; check its path and permissions"));
+      const realm = body.realm || "default";
+      const name = body.name || "git-ssh";
+      const identity = { author: "Operator <operator@example.com>", committer: "Operator <operator@example.com>", hosts: (body.hosts ?? ["github.com"]).join(",") };
+      const secret = { name, realm, type: "ssh-key", connector: connector.name, identity };
+      const index = world.secrets.findIndex(item => refPath(item) === refPath(secret));
+      if (index >= 0) world.secrets[index] = secret; else world.secrets.push(secret);
+      let made;
+      if (body.makeDefault) {
+        const fills = world.defaults[realm] ??= {};
+        const key = targetKey(connector, undefined);
+        made = { realm, identity: { name, realm }, ...(fills[key] ? { previous: fills[key] } : {}), action: "updated" };
+        fills[key] = refOf({ name, realm });
+      }
+      return route.fulfill({ json: {
+        home: "/home/operator", name, realm, type: "ssh-key", identity, keyPath: "/home/operator/.ssh/id_ed25519",
+        notes: ["git signing was not imported: the configured signing key is not the imported SSH key /home/operator/.ssh/id_ed25519 (a GPG key, or a different SSH key)."],
+        secrets: [{ name, realm, action: index >= 0 ? "updated" : "created" }], ...(made ? { default: made } : {}),
+      } });
+    }
     const level = body.scope?.stack ? "stack" : body.scope?.space ? "space" : "realm";
     if (!connector.scopes.includes(level)) return route.fulfill(fail(400, "invalid_request", `connector "${connector.name}" is set at ${connector.scopes.join(" or ")} level, not ${level}`));
     if (parts[3] === "defaults") {

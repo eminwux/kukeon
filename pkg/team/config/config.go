@@ -36,42 +36,13 @@ type TeamsConfig struct {
 	Spec       Spec   `yaml:"spec"`
 }
 
+// Spec has no git block: a git identity is a git connector identity, stored
+// with `kuke connector import git` (issue #1591). A leftover `spec.git` fails
+// to decode with an error that says so.
 type Spec struct {
-	Git        *Git              `yaml:"git,omitempty"`
 	Defaults   Defaults          `yaml:"defaults"`
 	Secrets    []SecretBinding   `yaml:"secrets,omitempty"`
 	Parameters map[string]string `yaml:"parameters,omitempty"`
-}
-
-// Git is the operator's default git identity for every team cell. Credentials
-// and signing name stored secrets — never host paths: kuke team writes this
-// block as scope defaults, and cells clone, push and sign from the secrets
-// alone, without the operator's ~/.ssh.
-type Git struct {
-	Author    *Identity `yaml:"author,omitempty"`
-	Committer *Identity `yaml:"committer,omitempty"`
-	// Credentials bind stored git credential secrets (type ssh-key or
-	// basic-auth) to remote hosts. The remote transport follows the credential.
-	Credentials []GitCredential `yaml:"credentials,omitempty"`
-	// Signing names the stored ssh-key secret commits and tags are signed with.
-	Signing *GitSigning `yaml:"signing,omitempty"`
-	Sign    []string    `yaml:"sign,omitempty"`
-	// SigningKey and AllowedSigners are the pre-stored-credential host paths.
-	// They are still decoded so existing configurations load, but no host path
-	// reaches a cell any more: composition ignores them and reports how to
-	// import the key into a secret.
-	SigningKey     string `yaml:"signingKey,omitempty"`
-	AllowedSigners string `yaml:"allowedSigners,omitempty"`
-}
-
-// GitCredential binds a stored git credential secret to a host (or a
-// host/path URL prefix).
-type GitCredential struct {
-	Host          string    `yaml:"host"`
-	SecretRef     SecretRef `yaml:"secretRef"`
-	User          string    `yaml:"user,omitempty"`
-	Port          int       `yaml:"port,omitempty"`
-	HostKeyPolicy string    `yaml:"hostKeyPolicy,omitempty"`
 }
 
 // GitSigning names the stored ssh-key secret to sign with and, optionally, the
@@ -82,7 +53,7 @@ type GitSigning struct {
 }
 
 // SourceGit is the git identity one source states for itself. Unset fields
-// fall back to the default identity.
+// fall back to the identity the git connector's scope default names.
 type SourceGit struct {
 	Author     *Identity         `yaml:"author,omitempty"`
 	Committer  *Identity         `yaml:"committer,omitempty"`
