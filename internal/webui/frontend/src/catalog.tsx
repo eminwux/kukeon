@@ -1,12 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { ErrorNotice, useResource } from "./request";
 import { catalogTitles, newCellLink, newConfigLink, workspaceLink } from "./routes";
-import { StateBadge } from "./status";
+import { ScopePath, StateBadge } from "./status";
 import type { InventoryResource, Row } from "./inventory";
 import { cellsForBlueprint, cellsForConfig, configsForBlueprint, type ConfigDoc } from "./relationships.mjs";
 import { DocumentRowLink, RowAction, RowActions } from "./icons";
 import { catalogAPI, catalogDeleteAPI } from "./catalog-url.mjs";
 import { useNotify } from "./notifications";
+import { useModalDialog } from "./focus";
 import { AskMajordomo, catalogQuestion } from "./majordomo";
 import { ConfigConnectors, NeedsConnectorBadge } from "./connector-ui";
 
@@ -139,12 +140,7 @@ export function CatalogDeleteConfirmation({ kind, doc, revision, inventory, onCa
   const dialog = useRef<HTMLDialogElement>(null);
   const [acknowledged, setAcknowledged] = useState(false);
   const scope = [...scopeOf(doc.metadata), doc.metadata.name];
-  useEffect(() => {
-    const element = dialog.current;
-    if (!element) return;
-    element.showModal();
-    return () => { if (element.open) element.close(); };
-  }, []);
+  useModalDialog(dialog);
   return <dialog className="cell-action-dialog catalog-delete-dialog" ref={dialog} aria-labelledby="catalog-delete-title" aria-describedby="catalog-delete-description" onCancel={event => { event.preventDefault(); onCancel(); }} onClick={event => { if (event.target === event.currentTarget) onCancel(); }}>
     <form onSubmit={event => { event.preventDefault(); if (acknowledged) onConfirm(); }}>
       <h2 id="catalog-delete-title">Delete {singular[kind].toLowerCase()}</h2>
@@ -219,7 +215,7 @@ function CatalogList({ kind, revision, inventory, onChanged }: { kind: string; r
     <section className="panel" aria-label={`${catalogTitles[kind]} list`} aria-busy={list.loading}>
       <div className="list-controls"><label className="search-field">Search<input type="search" value={query} placeholder={`Search ${kind}…`} onChange={e => { setQuery(e.target.value); setPage(0); }} /></label><label>Realm<select aria-label="Filter by realm" value={realm} onChange={e => { setRealm(e.target.value); setPage(0); }}><option value="">All realms</option>{[...new Set(list.data?.map(doc => doc.metadata.realm))].sort().map(name => <option key={name}>{name}</option>)}</select></label><span className="result-count">{rows.length} results</span>{(kind === "blueprints" || kind === "configs") && <a className="document-action" href={newConfigLink()}>New Config</a>}</div>
       {list.loading && <p className="scope-filter" role="status">Loading {kind}…</p>}
-      <div className="table-scroll"><table><thead><tr><th>Name</th><th>Scope</th><th>Type</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{rows.slice(currentPage * 25, (currentPage + 1) * 25).map(doc => { const scope = [...scopeOf(doc.metadata), doc.metadata.name]; return <tr key={JSON.stringify(scope)}><td><a className="resource-name" href={catalogLink(kind, scope)}>{doc.metadata.name}</a>{kind === "configs" && <> <NeedsConnectorBadge config={doc} /></>}</td><td className="scope-cell">{scope.slice(0, -1).join(" / ")}</td><td>{doc.kind as string || catalogTitles[kind]}</td><td className="row-actions"><RowActions>{kind === "configs" && <RowAction icon="create" href={newCellLink(scope)} label={`New cell from config ${scope.join(" / ")}`} title="New cell from this config" />}{kind === "blueprints" && <RowAction icon="create" href={newConfigLink(scope)} label={`New config from blueprint ${scope.join(" / ")}`} title="New config from this blueprint" />}<DocumentRowLink href={catalogLink(kind, scope, true)} label={scope.join(" / ")} /><RowAction icon="delete" danger label={`Delete ${singular[kind].toLowerCase()} ${scope.join(" / ")}`} title="Delete…" disabled={pending.has(JSON.stringify(scope))} busy={pending.has(JSON.stringify(scope))} onClick={() => setConfirming(doc)} /></RowActions></td></tr>; })}</tbody></table></div>
+      <div className="table-scroll"><table className="stackable"><thead><tr><th>Name</th><th>Scope</th><th>Type</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{rows.slice(currentPage * 25, (currentPage + 1) * 25).map(doc => { const scope = [...scopeOf(doc.metadata), doc.metadata.name]; return <tr key={JSON.stringify(scope)}><td data-label="Name"><a className="resource-name" href={catalogLink(kind, scope)}>{doc.metadata.name}</a>{kind === "configs" && <> <NeedsConnectorBadge config={doc} /></>}</td><td className="scope-cell" data-label="Scope"><ScopePath parts={scope.slice(0, -1)} /></td><td data-label="Type">{doc.kind as string || catalogTitles[kind]}</td><td className="row-actions"><RowActions>{kind === "configs" && <RowAction icon="create" href={newCellLink(scope)} label={`New cell from config ${scope.join(" / ")}`} title="New cell from this config" />}{kind === "blueprints" && <RowAction icon="create" href={newConfigLink(scope)} label={`New config from blueprint ${scope.join(" / ")}`} title="New config from this blueprint" />}<DocumentRowLink href={catalogLink(kind, scope, true)} label={scope.join(" / ")} /><RowAction icon="delete" danger label={`Delete ${singular[kind].toLowerCase()} ${scope.join(" / ")}`} title="Delete…" disabled={pending.has(JSON.stringify(scope))} busy={pending.has(JSON.stringify(scope))} onClick={() => setConfirming(doc)} /></RowActions></td></tr>; })}</tbody></table></div>
       {!list.loading && !rows.length && <div className="empty-state"><h3>{list.error ? "Resources could not be loaded" : list.data?.length ? "No matching resources" : `No ${kind} found`}</h3></div>}
       <div className="pagination"><span>{rows.length ? `${currentPage * 25 + 1}–${Math.min((currentPage + 1) * 25, rows.length)} of ${rows.length}` : "0 results"}</span><button disabled={!currentPage} onClick={() => setPage(currentPage - 1)}>Previous</button><button disabled={(currentPage + 1) * 25 >= rows.length} onClick={() => setPage(currentPage + 1)}>Next</button></div>
     </section>

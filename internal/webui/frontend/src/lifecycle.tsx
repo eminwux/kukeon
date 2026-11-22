@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { availableLifecycleActions, canConfirmDestructiveAction } from "./lifecycle-policy.js";
 import { DocumentRowLink, Icon, RowAction, RowActions } from "./icons";
 import { resourceLink, workspaceLink } from "./routes";
+import { useModalDialog } from "./focus";
 
 export type LifecycleAction = "start" | "stop" | "restart" | "kill" | "delete" | "purge";
 export type DestructiveAction = Extract<LifecycleAction, "kill" | "delete" | "purge">;
@@ -11,11 +12,14 @@ export type LifecycleFeedback = { action: LifecycleAction; phase: "pending" | "s
 function CellActionConfirmation({
   action,
   scope,
+  returnFocus,
   onCancel,
   onConfirm,
 }: {
   action: DestructiveAction;
   scope: string[];
+  // Where focus goes when the dialog closes and the control that opened it is no longer rendered.
+  returnFocus?: () => HTMLElement | null | undefined;
   onCancel: () => void;
   onConfirm: (options?: PurgeOptions) => void;
 }) {
@@ -26,12 +30,7 @@ function CellActionConfirmation({
   const [cascade, setCascade] = useState(false);
   const fullScope = scope.join(" / ");
 
-  useEffect(() => {
-    const element = dialog.current;
-    if (!element) return;
-    element.showModal();
-    return () => { if (element.open) element.close(); };
-  }, []);
+  useModalDialog(dialog, returnFocus);
 
   const title = action === "kill" ? "Kill cell" : action === "delete" ? "Delete cell" : "Purge cell";
   const consequence = action === "kill"
@@ -119,24 +118,28 @@ function AdvancedCellActions({
 
   // While open, Escape closes the menu and returns focus to its summary, and a pointer down outside
   // closes it where it is. Escape is taken in the capture phase so the expanded terminal keeps its size.
+  // The listeners stay attached and read the element's own open state: the `open` React state trails
+  // the asynchronous toggle event, so gating on it lost an Escape pressed right after opening and
+  // swallowed the confirmation dialog's Escape right after an action closed the menu.
   useEffect(() => {
-    if (!open) return;
     const escape = (event: KeyboardEvent) => {
       const details = menu.current;
-      if (event.key !== "Escape" || !details) return;
+      if (event.key !== "Escape" || !details?.open) return;
       event.preventDefault();
-      event.stopPropagation();
+      // The expanded terminal also listens on window in the capture phase; whichever registered first,
+      // the menu's Escape ends here so the terminal keeps its size.
+      event.stopImmediatePropagation();
       details.open = false;
       details.querySelector("summary")?.focus();
     };
     const outside = (event: PointerEvent) => {
       const details = menu.current;
-      if (details && !details.contains(event.target as Node | null)) details.open = false;
+      if (details?.open && !details.contains(event.target as Node | null)) details.open = false;
     };
     window.addEventListener("keydown", escape, true);
     document.addEventListener("pointerdown", outside, true);
     return () => { window.removeEventListener("keydown", escape, true); document.removeEventListener("pointerdown", outside, true); };
-  }, [open]);
+  }, []);
 
   function request(action: DestructiveAction) {
     if (pending) return;
@@ -162,6 +165,7 @@ function AdvancedCellActions({
     {confirming && <CellActionConfirmation
       action={confirming}
       scope={scope}
+      returnFocus={() => menu.current?.querySelector("summary")}
       onCancel={() => setConfirming(null)}
       onConfirm={options => { setConfirming(null); onAction(scope, confirming, undefined, options); }}
     />}

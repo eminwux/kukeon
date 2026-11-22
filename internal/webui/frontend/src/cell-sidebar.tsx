@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { InventoryResource, Row } from "./inventory";
 import { workspaceLink } from "./routes";
-import { StateBadge } from "./status";
+import { ScopePath, StateBadge } from "./status";
 import type { TerminalState } from "./terminal";
 
 const groupingKey = "kukeon-cell-grouping";
@@ -73,7 +73,7 @@ export function CellSidebar({ inventory, selectedScope, terminalStates }: {
       {!!filtered.length && <p className="cell-result-count">{filtered.length} {filtered.length === 1 ? "cell" : "cells"}{incomplete ? " in retained inventory" : ""}</p>}
     </div>
     <nav className="cell-navigation-list" aria-label="Cell navigation">
-      {sharedScope && <p className="cell-group-scope" title="Scope shared by every listed cell">{sharedScope}</p>}
+      {sharedScope && <p className="cell-group-scope" title="Scope shared by every listed cell"><ScopePath parts={filtered[0].scope.slice(0, 3)} /></p>}
       {groups.slice(0, groupLimit).map(({ id, label, rows }) => {
         const isCollapsed = !!groupBy && collapsed.includes(id);
         const limit = limits[id] ?? pageSize;
@@ -84,7 +84,7 @@ export function CellSidebar({ inventory, selectedScope, terminalStates }: {
             const fullName = row.scope.join(" / ");
             const terminalState = terminalStates[JSON.stringify(row.scope)];
             const state = row.doc.status?.state;
-            return <li key={JSON.stringify(row.scope)}><a className="cell-link" href={workspaceLink(row.scope)} aria-current={current ? "page" : undefined} aria-label={`Open ${fullName}`} title={fullName}><span className="cell-link-name">{row.doc.metadata.name}</span>{!sharedScope && <span className="cell-link-scope">{row.scope.slice(0, 3).join(" / ")}</span>}<StateBadge state={state} />{terminalState && <span className={`cell-terminal-state ${terminalState}`}>Terminal {terminalState}</span>}</a></li>;
+            return <li key={JSON.stringify(row.scope)}><a className="cell-link" href={workspaceLink(row.scope)} aria-current={current ? "page" : undefined} aria-label={`Open ${fullName}`} title={fullName}><span className="cell-link-name">{row.doc.metadata.name}</span>{!sharedScope && <span className="cell-link-scope"><ScopePath parts={row.scope.slice(0, 3)} /></span>}<StateBadge state={state} />{terminalState && <span className={`cell-terminal-state ${terminalState}`}>Terminal {terminalState}</span>}</a></li>;
           })}</ul>{rows.length > limit && <button className="cell-more" onClick={() => setLimits(old => ({ ...old, [id]: limit + pageSize }))}>Show {Math.min(pageSize, rows.length - limit)} more cells</button>}</>}
         </section>;
       })}

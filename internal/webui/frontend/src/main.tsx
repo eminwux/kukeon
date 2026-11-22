@@ -8,7 +8,7 @@ import { CellSidebar } from "./cell-sidebar";
 import { useInventory, type Inventory, type InventoryResource, type Doc, type RuntimeStatus } from "./inventory";
 import { apiPath, catalogTitles, daemonLink, healthLink, homeLink, imagesLink, kinds, titles, readRoute, resourceLink, listLink, newCellLink, workspaceLink, type Route } from "./routes";
 import { BrandMark, SidebarRail, SidebarResizer, SidebarToggle, VersionRows, railWidth, useSidebarLayout, versionInfo } from "./sidebar-shell";
-import { StateBadge } from "./status";
+import { ScopePath, SocketPath, StateBadge } from "./status";
 import { DocumentRowLink, Icon } from "./icons";
 import { CgroupPanel } from "./cgroup";
 import { RealmImagesPanel } from "./images";
@@ -93,7 +93,7 @@ function ResourceList({ depth, inventory, parent, operations, onLifecycleAction,
   return <section className="panel" aria-label={`${titles[depth]} list`}>
     <div className="list-controls"><label className="search-field">Search<input type="search" placeholder={`Search ${titles[depth].toLowerCase()}…`} value={search} onChange={e => { setSearch(e.target.value); setPage(0); }} /></label>{depth > 0 && <label>Realm<select aria-label="Filter by realm" value={realm} onChange={e => { setRealm(e.target.value); setPage(0); }}><option value="">All realms</option>{inventory.data?.rows[0].map(row => <option key={row.scope[0]}>{row.scope[0]}</option>)}</select></label>}<span className="result-count">{filtered.length} results</span></div>
     {parent.length > 0 && <p className="scope-filter">Scope: {parent.join(" / ")} <a href={listLink(depth)}>Clear scope</a></p>}
-    <div className="table-scroll"><table><thead><tr><th>Name</th><th>State</th><th>Scope</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{filtered.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(row => <tr key={JSON.stringify(row.scope)}><td><a className="resource-name" href={resourceLink(row.scope)}>{row.doc.metadata.name}</a></td><td><StateBadge state={row.doc.status?.state} />{depth === 3 && failureStates.includes(row.doc.status?.state ?? "") && <AskMajordomo question={cellQuestion(row.scope, row.doc.status)} subject={`cell ${row.scope.join(" / ")}`} />}</td><td className="scope-cell">{row.scope.slice(0, -1).join(" / ") || "—"}</td><td className="row-actions">{depth === 3 ? <CellRowActions scope={row.scope} state={row.doc.status?.state} operation={operations[JSON.stringify(row.scope)]} onAction={onLifecycleAction} /> : <ParentRowActions scope={row.scope} counts={descendantCounts(inventory.data?.rows ?? [], row.scope)} allowed={parentActionsAllowed(row.scope)} operation={operations[JSON.stringify(row.scope)]} onAction={onParentAction} />}</td></tr>)}</tbody></table></div>
+    <div className="table-scroll"><table className="stackable"><thead><tr><th>Name</th><th>State</th>{depth > 0 && <th>Scope</th>}<th><span className="sr-only">Actions</span></th></tr></thead><tbody>{filtered.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(row => <tr key={JSON.stringify(row.scope)}><td data-label="Name"><a className="resource-name" href={resourceLink(row.scope)}>{row.doc.metadata.name}</a></td><td data-label="State"><StateBadge state={row.doc.status?.state} />{depth === 3 && failureStates.includes(row.doc.status?.state ?? "") && <AskMajordomo question={cellQuestion(row.scope, row.doc.status)} subject={`cell ${row.scope.join(" / ")}`} />}</td>{depth > 0 && <td className="scope-cell" data-label="Scope"><ScopePath parts={row.scope.slice(0, -1)} /></td>}<td className="row-actions">{depth === 3 ? <CellRowActions scope={row.scope} state={row.doc.status?.state} operation={operations[JSON.stringify(row.scope)]} onAction={onLifecycleAction} /> : <ParentRowActions scope={row.scope} counts={descendantCounts(inventory.data?.rows ?? [], row.scope)} allowed={parentActionsAllowed(row.scope)} operation={operations[JSON.stringify(row.scope)]} onAction={onParentAction} />}</td></tr>)}</tbody></table></div>
     {!filtered.length && <div className="empty-state"><h3>{inventory.loading ? "Loading resources…" : inventory.error || inventory.data?.failures.length ? "Resources could not be fully loaded" : scoped.length ? "No matching resources" : `No ${titles[depth].toLowerCase()} found`}</h3><p>{search || realm ? "Try another search or clear the filters." : "Refresh to retrieve the latest resource state."}</p></div>}
     <div className="pagination"><span>{filtered.length ? `${currentPage * pageSize + 1}–${Math.min((currentPage + 1) * pageSize, filtered.length)} of ${filtered.length}` : "0 results"}</span><button disabled={!currentPage} onClick={() => setPage(currentPage - 1)}>Previous</button><button disabled={(currentPage + 1) * pageSize >= filtered.length} onClick={() => setPage(currentPage + 1)}>Next</button></div>
   </section>;
@@ -242,7 +242,7 @@ function CellDetailsScreen({ title, view, scope, revision, inventory, manager, t
     {scope && <div className="page-heading cell-page-heading">
       {/* cellTerminal keeps one action row: title, view switch, terminal tools, then lifecycle actions. */}
       <div ref={terminalBar} className={`cell-page-title-row${terminalView ? " cell-terminal-bar" : ""}${terminalExpanded ? " is-terminal-expanded" : ""}`}>
-        <h1>{title}</h1>
+        <h1 tabIndex={-1} title={title}>{title}</h1>
         <span className={`cell-detail-state ${detailState?.tone ?? "is-idle"}`} aria-hidden={!detailState} tabIndex={detailState ? 0 : -1} aria-label={detailState ? `Cell details: ${detailState.label}` : undefined} data-tooltip={detailState?.label}><span className="dot" aria-hidden="true" /></span>
         <a className="icon-button cell-view-switch" href={terminalView ? resourceLink(scope) : workspaceLink(scope)} aria-label={switchLabel} title={terminalView ? "View cell details" : "Open cell terminal"}>
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -600,7 +600,21 @@ function App() {
   const daemonTone = inventory.daemon.error ? "failed" : inventory.daemon.loading ? "checking" : "";
   const versions = versionInfo(connection.data?.version, connection.data?.daemonVersion);
   const shellStyle = { "--sidebar-width": `${sidebar.width}px` } as CSSProperties;
+  const pageTitle = heading ? `${heading} · kukeon` : "kukeon";
+  useEffect(() => { document.title = pageTitle; }, [pageTitle]);
+  // A route change moves focus to the new page's h1 so keyboard and screen-reader users start at the
+  // new content. Not on first load, not when only ?document=1 toggles, and not while a form control
+  // drives the route (the Images realm select). The terminal view focuses its terminal itself.
+  const routeKey = JSON.stringify({ ...route, document: undefined });
+  const shownRoute = useRef(routeKey);
+  useEffect(() => {
+    if (shownRoute.current === routeKey) return;
+    shownRoute.current = routeKey;
+    if (isWorkspace || document.activeElement?.matches("input, select, textarea")) return;
+    document.querySelector<HTMLElement>("main .page-heading h1")?.focus();
+  }, [routeKey, isWorkspace]);
   return <AskProvider value={dock.ask}><div className={`app-shell${cellScreenScope ? " cell-screen" : ""}${cellTerminalActive ? " cell-screen-active" : ""}${sidebar.collapsed ? " sidebar-collapsed" : ""}${dock.open ? " majordomo-open" : ""}${dock.open && dock.overlay ? " majordomo-overlay" : ""}`} style={shellStyle}>
+    <a className="skip-link" href="#main-content" onClick={event => { event.preventDefault(); document.getElementById("main-content")?.focus(); }}>Skip to content</a>
     <aside className={`sidebar ${menuOpen ? "is-open" : ""}`} id="cell-sidebar" aria-label="Cell sidebar">
       <button ref={sidebarClose} className="sidebar-close" aria-label="Close sidebar" onClick={closeMenu}>×</button>
       <div className="sidebar-panel">
@@ -615,7 +629,7 @@ function App() {
             <p className="status" role="status"><span className={`dot ${daemonTone}`} aria-hidden="true" />{daemonStatus}</p>
             <a className="connection-action" href={daemonLink()} aria-label="Daemon details" title="Daemon details"><Icon name="info" /></a>
           </div>
-          <code>{connection.data?.endpoint ?? (connection.loading ? "Loading socket…" : "Socket unknown")}</code>
+          <code>{connection.data?.endpoint ? <SocketPath path={connection.data.endpoint} /> : connection.loading ? "Loading socket…" : "Socket unknown"}</code>
           {connection.data && <VersionRows info={versions} />}
           {connection.error && <ErrorNotice error={connection.error} />}
         </section>
@@ -625,7 +639,7 @@ function App() {
     </aside>
     <div className="sidebar-scrim" aria-hidden="true" hidden={!menuOpen} onClick={closeMenu} />
     {/* While the phone drawer is open, the page behind it leaves the Tab order and the accessibility tree. */}
-    <main className="workspace" inert={menuOpen && mobile}>
+    <main className="workspace" id="main-content" tabIndex={-1} inert={menuOpen && mobile}>
       <header className="toolbar">
         <button ref={menuToggle} className="menu-toggle" aria-label="Toggle sidebar" aria-expanded={menuOpen} aria-controls="cell-sidebar" onClick={() => setMenuOpen(!menuOpen)}>☰</button>
         <span className="toolbar-connectivity" role="status" aria-label={`Daemon: ${daemonStatus}`} title={`Daemon: ${daemonStatus}`}><span className={`dot ${daemonTone}`} aria-hidden="true" /></span>
@@ -647,7 +661,7 @@ function App() {
       </header>
       <div className={`workspace-content ${isWorkspace ? "cell-workspace-content" : ""}${cellTerminalActive ? " cell-screen-content" : ""}`}>
         {!isWorkspace && !cellScreenScope && <ResourcesNavigation route={route} />}
-        {!cellScreenScope && <div className="page-heading"><h1>{heading}</h1>{headingContext && <p className="page-context mono-id">{headingContext}</p>}</div>}
+        {!cellScreenScope && <div className="page-heading"><h1 tabIndex={-1}>{heading}</h1>{headingContext && <p className="page-context mono-id">{headingContext}</p>}</div>}
         <CellDetailsScreen title={heading ?? "Cell"} view={cellView} scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} operations={operations} onLifecycleAction={runCellLifecycle} dockedCell={dockedCell} onOpenDock={() => dock.setOpen(true)} />
         {isWorkspace ? null : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "new-config" ? <Suspense fallback={<p role="status">Loading Config creation form…</p>}><NewConfigPage key={JSON.stringify(route.blueprint ?? [])} revision={revision} inventory={inventory} blueprintScope={route.blueprint} onCreated={() => setRevision(value => value + 1)} /></Suspense> : connectorsView ? <Suspense fallback={<p role="status">Loading connectors…</p>}><ConnectorsPage name={route.scope[0]} target={route.target} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /></Suspense> : route.view === "health" ? <HealthPage revision={revision} major={major} onChanged={() => setRevision(value => value + 1)} /> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} operations={operations} onLifecycleAction={runCellLifecycle} onParentAction={runParentAction} /> : <Dashboard inventory={inventory} />}
         <footer>Daemon inventory · {inventory.data ? <>Last refreshed <time dateTime={inventory.data.updatedAt}>{new Date(inventory.data.updatedAt).toLocaleTimeString()}</time></> : "Not refreshed yet"} · Refresh to retrieve the latest state.</footer>

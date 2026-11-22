@@ -354,7 +354,8 @@ test("Resources is home and retains resource summaries and navigation", async ({
   await mock(page);
   await page.goto(server.url);
   await expect(page.locator(".page-heading h1")).toHaveText("Resources");
-  await expect(page).toHaveTitle("kukeon");
+  // The document title names the page (#1567).
+  await expect(page).toHaveTitle("Resources · kukeon");
   await expect(page.locator('link[rel="icon"][type="image/svg+xml"]')).toHaveAttribute("href", /^\/assets\/.+\.svg$/);
   const brand = page.getByRole("complementary", { name: "Cell sidebar" }).getByRole("link", { name: "kukeon", exact: true });
   await expect(brand).toHaveAttribute("href", "#/resources");
@@ -2209,7 +2210,8 @@ test("realm scope, breadcrumbs and narrow lists stay within the page", async ({ 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${server.url}#/realms`);
   await expect(page.getByRole("row")).toHaveCount(3);
-  await expect(page.locator(".scope-cell").first()).toHaveText("—");
+  // Realms have no parent scope, so the list omits the Scope column (#1567).
+  await expect(page.locator(".scope-cell")).toHaveCount(0);
   await page.goto(`${server.url}#/cells`);
   await expect(page.getByRole("row")).toHaveCount(3);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -3360,4 +3362,160 @@ test("resource-name and breadcrumb links have a 24px hit target and resizers sho
   await handle.focus();
   expect(await handle.evaluate(el => el.matches(":focus-visible"))).toBe(true);
   expect(await handle.evaluate(el => getComputedStyle(el).boxShadow)).toMatch(/rgb/);
+});
+
+// Issue #1567, item B: keyboard and screen-reader users keep their place across dialogs and route changes.
+test("closing a confirmation dialog returns focus to its trigger, or to the Advanced actions summary", async ({ page }) => {
+  await mock(page);
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  const summary = page.locator("summary", { hasText: "Advanced actions" });
+  for (const [action, close] of [["Kill", "Escape"], ["Delete", "Cancel"], ["Purge", "Escape"]]) {
+    await summary.click();
+    await page.getByRole("button", { name: `${action} cell…` }).click();
+    await expect(page.getByRole("dialog", { name: `${action} cell` })).toBeVisible();
+    if (close === "Escape") await page.keyboard.press("Escape");
+    else await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(summary).toBeFocused();
+  }
+
+  await page.goto(`${server.url}#/cells`);
+  const deleteIcon = page.locator("tbody tr").first().getByRole("button", { name: /^Delete cell / });
+  await deleteIcon.click();
+  await expect(page.getByRole("dialog", { name: "Delete cell" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(deleteIcon).toBeFocused();
+
+  await page.goto(`${server.url}#/realms`);
+  const purgeRealm = page.getByRole("button", { name: "Purge realm dev" });
+  await purgeRealm.click();
+  await expect(page.getByRole("dialog", { name: "Purge realm" })).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+  await expect(purgeRealm).toBeFocused();
+});
+
+// The menu's React open state trails the asynchronous toggle event. Escape must act on the element's
+// own state, so it is neither lost right after the menu opens nor swallowed right after an action
+// closes the menu and opens its dialog (CI hit both windows).
+test("Advanced actions Escape follows the menu's own open state, not the trailing toggle event", async ({ page }) => {
+  await mock(page);
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  const menu = page.locator("details.cell-advanced-actions");
+  await expect(menu.locator("summary")).toBeVisible();
+  const escapeInSameTask = action => page.evaluate(action => {
+    const details = document.querySelector("details.cell-advanced-actions");
+    if (action) [...details.querySelectorAll("button")].find(button => button.textContent === action).click();
+    else details.querySelector("summary").click();
+    const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    document.body.dispatchEvent(escape);
+    return { open: details.open, swallowed: escape.defaultPrevented };
+  }, action);
+  const settle = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 50))));
+
+  expect(await escapeInSameTask(null)).toEqual({ open: false, swallowed: true });
+  await settle();
+  await expect(menu).not.toHaveAttribute("open");
+
+  await menu.locator("summary").click();
+  await expect(menu).toHaveAttribute("open", "");
+  await settle();
+  expect(await escapeInSameTask("Kill cell…")).toEqual({ open: false, swallowed: false });
+  await expect(page.getByRole("dialog", { name: "Kill cell" })).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});
+
+test("route changes focus the new page heading and title the document; the first Tab stop skips to main", async ({ page }) => {
+  await mock(page);
+  await page.goto(`${server.url}#/resources`);
+  const heading = page.locator("main .page-heading h1");
+  await expect(heading).toHaveText("Resources");
+  await expect(page).toHaveTitle("Resources · kukeon");
+  // The initial load leaves focus where the browser put it.
+  await expect(heading).not.toBeFocused();
+
+  await nav(page).getByRole("link", { name: "Configs" }).click();
+  await expect(heading).toHaveText("Configs");
+  await expect(heading).toBeFocused();
+  await expect(page).toHaveTitle("Configs · kukeon");
+
+  await page.goto(`${server.url}#/resource/dev/shared/services/api`);
+  await expect(page).toHaveTitle("api · kukeon");
+  await page.getByRole("navigation", { name: "Resource scope" }).getByRole("link", { name: "Stack: services" }).click();
+  await expect(heading).toHaveText("services");
+  await expect(heading).toBeFocused();
+  await expect(page).toHaveTitle("services · kukeon");
+
+  await page.reload();
+  await expect(heading).toHaveText("services");
+  const hash = new URL(page.url()).hash;
+  await page.keyboard.press("Tab");
+  const skip = page.getByRole("link", { name: "Skip to content" });
+  await expect(skip).toBeFocused();
+  expect((await skip.boundingBox()).y).toBeGreaterThanOrEqual(0);
+  await page.keyboard.press("Enter");
+  await expect(page.locator("main")).toBeFocused();
+  expect(new URL(page.url()).hash).toBe(hash);
+});
+
+// Issue #1567, item C: lists, the Images table and the cell title row fit tablet and phone widths.
+test("lists fit tablet and phone widths, Realms omit Scope, short pages have no phantom scroll and paths wrap at separators", async ({ page }) => {
+  const longImages = [...inventoryImages, { name: "ghcr.io/eminwux/kukeon-very-long-repository-name/kukeond:v0.10.0-56-ge85ed8c0", size: 123400000, createdAt: "2026-01-02T03:04:05Z", digest: "sha256:fedcba9876543210fedcba9876543210", mediaType: "application/vnd.docker.distribution.manifest.v2+json", labels: {} }];
+  await mockCatalog(page);
+  await mock(page, path => path === "/api/realms/dev/image-inventory" ? { json: { realm: "dev", namespace: "dev.kukeon.io", images: longImages } } : undefined);
+  const fits = async (hash, viewport) => {
+    await page.goto(`${server.url}${hash}`);
+    await expect(page.locator(".table-scroll tbody tr").first(), `${hash} at ${viewport}`).toBeVisible();
+    const { scrollWidth, clientWidth } = await page.locator(".table-scroll").first().evaluate(el => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
+    expect(scrollWidth, `${hash} at ${viewport}`).toBeLessThanOrEqual(clientWidth + 1);
+  };
+  for (const [width, height] of [[768, 1024], [390, 844]]) {
+    await page.setViewportSize({ width, height });
+    for (const hash of ["#/cells", "#/configs", "#/blueprints", "#/images/dev"]) await fits(hash, `${width}x${height}`);
+    // Stacked rows keep the name, state and row actions readable; secondary cells are labelled.
+    await page.goto(`${server.url}#/cells`);
+    const row = page.locator("tbody tr").first();
+    await expect(row.locator("a.resource-name")).toBeVisible();
+    await expect(row.locator(".state-badge")).toBeVisible();
+    await expect(row.getByRole("button", { name: /^Delete cell / })).toBeAttached();
+    await expect(row.locator('td[data-label="Scope"]')).toBeVisible();
+  }
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await fits("#/images/dev", "1024x768");
+  await expect(page.locator(`td.image-ref[title="${longImages[2].name}"]`)).toHaveCount(1);
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${server.url}#/realms`);
+  await expect(page.getByRole("row")).toHaveCount(3);
+  await expect(page.getByRole("columnheader", { name: "Scope" })).toHaveCount(0);
+  await page.goto(`${server.url}#/spaces`);
+  await expect(page.getByRole("columnheader", { name: "Scope" })).toHaveCount(1);
+
+  await page.route("**/api/catalog/volumes", route => route.fulfill({ json: [] }));
+  await page.goto(`${server.url}#/volumes`);
+  await expect(page.getByRole("heading", { name: "No volumes found" })).toBeVisible();
+  expect(await page.evaluate(() => document.scrollingElement.scrollHeight - document.scrollingElement.clientHeight)).toBe(0);
+
+  // Socket and scope paths are segments that each end at a separator, so lines break only there.
+  const socket = page.locator(".connection code .path-segment");
+  expect((await socket.allTextContents()).slice(0, -1).every(segment => segment.endsWith("/"))).toBe(true);
+  await page.goto(`${server.url}#/cells`);
+  const scope = page.locator("tbody tr").first().locator(".scope-cell .path-segment");
+  await expect(scope).toHaveText(["dev /", "shared /", "services"]);
+});
+
+test("the cell title row stays on one line at 1024 and 768, truncating the name", async ({ page }) => {
+  const name = "worker-with-a-rather-long-cell-name";
+  await mock(page, path => path === "/api/realms/dev/spaces/shared/stacks/services/cells" ? { json: [doc(["dev", "shared", "services", name])] } : path.endsWith(`/cells/${name}`) ? { json: doc(["dev", "shared", "services", name]) } : undefined);
+  for (const [width, height] of [[1024, 768], [768, 1024]]) {
+    await page.setViewportSize({ width, height });
+    for (const hash of [`#/resource/dev/shared/services/${name}`, `#/workspace/dev/shared/services/${name}`]) {
+      await page.goto(`${server.url}${hash}`);
+      const row = page.locator(".cell-page-title-row");
+      await expect(row.getByRole("heading", { level: 1 })).toHaveAttribute("title", name);
+      await expect(row.getByText("Advanced actions", { exact: true })).toBeVisible();
+      expect((await row.boundingBox()).height, `${hash} at ${width}`).toBeLessThanOrEqual(48);
+    }
+  }
 });
