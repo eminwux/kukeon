@@ -578,6 +578,28 @@ func TestRenderedLaunchScriptsAndExplicitProjectRepo(t *testing.T) {
 					t.Fatalf("%s/%s shell syntax: %v: %s", pair.Harness, mode, checkErr, output)
 				}
 			}
+			// sbsh writes the prompt verbatim as `export PS1=<prompt>` (#1622).
+			prompt := exec.CommandContext(
+				t.Context(),
+				"bash",
+				"-c",
+				"export PS1="+rendered.Tty.Prompt+"\nprintf %s \"$PS1\"",
+			)
+			if output, promptErr := prompt.CombinedOutput(); promptErr != nil || string(output) != pair.Harness+"> " {
+				t.Fatalf(
+					"%s/%s prompt %q exports as %q: %v",
+					pair.Harness,
+					mode,
+					rendered.Tty.Prompt,
+					output,
+					promptErr,
+				)
+			}
+			// A headless codex exec cannot answer the trust prompt for a non-git initialPath (#1622).
+			if pair.Harness == "codex" && mode == headless &&
+				!strings.Contains(script(rendered), "--skip-git-repo-check") {
+				t.Fatal("codex headless exec lacks --skip-git-repo-check")
+			}
 			if !strings.Contains(script(rendered), `cd "$INITIAL_PATH"`) {
 				t.Fatalf("%s/%s inferred project directory", pair.Harness, mode)
 			}

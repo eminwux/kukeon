@@ -172,6 +172,13 @@ type rendererInput struct {
 
 type extraRepo struct{ Name, Target string }
 
+// shellPrompt single-quotes a tty prompt for the shell. sbsh stamps the prompt
+// verbatim into `export PS1=<prompt>`, so a bare "codex> " parses as a
+// redirection and the wrapped bash reports a syntax error on every start.
+func shellPrompt(prompt string) string {
+	return "'" + strings.ReplaceAll(prompt, "'", `'\''`) + "'"
+}
+
 // render builds the shared blueprint one group of pairs uses. Everything in it
 // comes from the harness definition, the security profile and the component
 // library; the only role-derived content is the union of leftovers no shared
@@ -610,7 +617,7 @@ func blueprintInputs(
 		requires = append(requires, "root")
 	}
 	in := rendererInput{
-		Name: name, Realm: opts.Scope.Realm, Shell: h.Spec.Shell, Prompt: h.Metadata.Name + "> ",
+		Name: name, Realm: opts.Scope.Realm, Shell: h.Spec.Shell, Prompt: shellPrompt(h.Metadata.Name + "> "),
 		Root: prof.Root, Requires: requires, MountSelectors: prof.Mounts, Environment: environment,
 		Parameters: parameters, Components: components, Secrets: g.extraSecrets, Mounts: mounts,
 		StatePath: statePath, OnInit: onInit,

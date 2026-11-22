@@ -57,7 +57,7 @@ spec:
         approval=$CODEX_APPROVAL
         set -- -c 'project_doc_fallback_filenames=["CLAUDE.md"]' -c 'project_doc_max_bytes=131072'
         if [ -n "${PROMPT:-}" ]; then
-          exec codex "$@" --ask-for-approval never exec --json \
+          exec codex "$@" --ask-for-approval never exec --json --skip-git-repo-check \
             --cd "$PWD" --sandbox "$sandbox" -- "$PROMPT"
         else
           exec codex "$@" \

@@ -41,7 +41,7 @@ spec:
             cd "$INITIAL_PATH" || exit 1
             sandbox=$CODEX_SANDBOX
             set -- -c 'project_doc_fallback_filenames=["CLAUDE.md"]' -c 'project_doc_max_bytes=131072'
-            exec codex "$@" --ask-for-approval never exec --json \
+            exec codex "$@" --ask-for-approval never exec --json --skip-git-repo-check \
               --cd "$PWD" --sandbox "$sandbox" -- "$PROMPT"
   skillPath: $HOME/.agents/skills
   images:
