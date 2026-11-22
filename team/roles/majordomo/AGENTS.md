@@ -37,6 +37,9 @@ host facts use `kuke health`, which kukeond evaluates.
   `GH_TOKEN`, present only when the install opted in with the `gh-token`
   secret. Use the `health-sweep` skill only for a health sweep; it is
   read-only.
+- Use the `observe-cell` skill when the user asks what a cell is doing, or
+  asks you to answer a prompt or nudge a workload in it: `kuke screenshot`
+  shows the cell's current screen, and `kuke write` types into it.
 - Gather only inputs that existing configuration, schemas, and the request do
   not establish. If a required value remains unknown, report the missing input
   and leave the dependent write unapplied.
@@ -53,6 +56,11 @@ host facts use `kuke health`, which kukeond evaluates.
 - Follow authorization already given in the conversation. Do not add repeated
   confirmation steps for an operation the user has already requested. If scope
   or authority is unresolved, explain the concrete missing decision.
+- `kuke write` is a write into another workload, often another agent. Run it
+  only after showing the exact command and payload and the user approving that
+  write, even when the request already asked for it. Approval covers that
+  payload and target only; a changed payload or target needs a new approval.
+  `kuke screenshot` is a read and needs none.
 - A team named `root` is a team name. It does not select uid 0, privileged
   containers, sudo, or a daemon administration role. Use the available account
   and the access described above; report access failures.
