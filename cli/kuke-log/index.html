@@ -3649,7 +3649,9 @@
 </table>
 <p>Plus all <a href="../kuke/">global flags</a>.</p>
 <h2 id="behavior">Behavior<a class="headerlink" href="#behavior" title="Permanent link">&para;</a></h2>
-<p><code>kuke log</code> reads the on-disk capture file maintained by the daemon for each container's stdout/stderr. Without <code>-f</code>, it prints what's there and exits — useful for scripting and for checking on a container that has already terminated. With <code>-f</code>, it tails the file until you SIGINT (Ctrl-C) the command.</p>
+<p><code>kuke log</code> asks the daemon for the container's output stream — the sbsh capture of an attachable container, or the runtime log of any other — and prints the bytes exactly as stored, including terminal escape sequences and a trailing prompt with no newline. The bytes travel over the kukeond socket in bounded chunks, so <code>kuke log</code> needs only access to the socket (<code>KUKEON_HOST</code>), not to the host's <code>/opt/kukeon</code>: it works the same from a cell that mounts just the kukeond socket and the <code>kuke</code> binary. Without <code>-f</code>, it prints what's there and exits — useful for scripting and for checking on a container that has already terminated. With <code>-f</code>, it keeps polling for new bytes until you SIGINT (Ctrl-C) the command; if the stream is truncated or replaced, it starts again from the beginning of the new stream.</p>
+<p><code>kuke log</code> shows the live capture only: when sbsh has rotated older output into closed segments, those are not reassembled.</p>
+<p>With <code>KUKEON_NO_DAEMON=true</code> (or an explicit <code>--run-path</code>), <code>kuke log</code> reads the same stream in-process from the host's <code>/opt/kukeon</code>. Against a kukeond too old to serve the chunked read, <code>kuke log</code> falls back to resolving the file's host path through the daemon and opening it directly, which again requires the host's <code>/opt/kukeon</code>.</p>
 <p>Container selection: if the cell has exactly one non-root container, <code>--container</code> can be omitted. Otherwise, pass <code>--container</code> explicitly.</p>
 <h2 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Print and exit (cell in default/default/default)</span>
@@ -3665,7 +3667,7 @@
 <a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>log<span class="w"> </span>wp<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
 </code></pre></div>
 <h2 id="kuke-log-vs-kuke-daemon-logs">kuke log vs. kuke daemon logs<a class="headerlink" href="#kuke-log-vs-kuke-daemon-logs" title="Permanent link">&para;</a></h2>
-<p><code>kuke log</code> is for any user-workload container. To read the <code>kukeond</code> daemon's own logs without typing out the static <code>kuke-system / kukeon / kukeon / kukeond</code> coordinates, use <a href="../kuke-daemon/"><code>kuke daemon logs</code></a> — it's a thin wrapper around <code>kuke log</code> with the realm/space/stack/cell pre-filled.</p>
+<p><code>kuke log</code> is for any user-workload container. To read the <code>kukeond</code> daemon's own logs without typing out the static <code>kuke-system / kukeon / kukeon / kukeond</code> coordinates, use <a href="../kuke-daemon/"><code>kuke daemon logs</code></a> — the same stream for the <code>kukeond</code> container, with the realm/space/stack/cell pre-filled.</p>
 <h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../kuke-daemon/">kuke daemon logs</a> — shortcut for the daemon's own log stream</li>
@@ -3693,7 +3695,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 13, 2026 21:42:28 UTC">May 13, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 22, 2026 13:28:57 UTC">November 22, 2026</span>
   </span>
 
     
