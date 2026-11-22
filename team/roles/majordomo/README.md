@@ -2,7 +2,7 @@
 
 Majordomo is the kuke team member that knows kukeon. It inspects kukeon's
 runtime and configuration, diagnoses problems, and carries out explicitly
-requested operations with verified outcomes. It has four skills:
+requested operations with verified outcomes. It has five skills:
 
 - [`create-cell-config`](skills/create-cell-config/SKILL.md) inspects an
   existing blueprint, produces a CellConfig draft, and applies it when
@@ -17,6 +17,11 @@ requested operations with verified outcomes. It has four skills:
 - [`health-sweep`](skills/health-sweep/SKILL.md) is the read-only unattended
   run: it reads kukeond's health digest and, if there are findings, stores one
   triaged report in kukeond.
+- [`observe-cell`](skills/observe-cell/SKILL.md) shows what a running cell's
+  terminal displays right now with `kuke screenshot` (busy, idle, waiting at a
+  prompt, errored), and on request types into it with `kuke write`. Every
+  write needs the user's approval of its exact payload and target, and is
+  confirmed with a second screenshot.
 
 It runs two ways:
 
@@ -77,6 +82,16 @@ kukeon TeamEntry selection; it does not dynamically install runtime prerequisite
   are the three read-only ones above. The daemon connection can mutate runtime
   resources: target and operation authorization come from the user's request,
   and the `health-sweep` task is restricted to reads by its skill.
+- **Reading a cell's screen is always allowed; typing into it is not.**
+  `kuke screenshot` and `kuke write` reach any Attachable cell through the
+  kukeond socket (no per-cell capability check yet). `kuke screenshot` is a
+  read, pre-approved in Claude's settings and allowed in the `health-sweep`
+  task. `kuke write` types into another workload, often another agent:
+  majordomo shows the exact command, runs it only after the user approves that
+  payload and target, and never runs it from the sweep. It is left out of
+  Claude's `allow` list, so Claude also prompts for each write and the
+  unattended sweep is denied; OpenCode asks for every command, and Codex
+  (`on-request`) relies on the role instructions.
 
 ## Materialize into a dedicated cell home
 

@@ -16,6 +16,8 @@ Only these, and only as reads plus the one submission:
 - `kuke health ...` (the digest, `reports`, `report <id|latest>`)
 - `kuke get ...`
 - `kuke log ...`
+- `kuke screenshot ...` (a running Attachable cell's current screen, as
+  evidence)
 - `kuke daemon logs` (it reads kukeond's log file directly, which fails in a cell
   whose kukeon install is mounted read-only; the digest's `logErrors` already
   carry the error-level entries)
@@ -24,9 +26,11 @@ Only these, and only as reads plus the one submission:
 
 **Never run a command that mutates kukeon or a workload**: no `kuke apply`,
 `create`, `delete`, `purge`, `start`, `stop`, `kill`, `restart`, `run`,
-`refresh`, `init`, `uninstall`, `build`, `image`, `team`, or any `kuke daemon`
-subcommand other than `logs`. Do not write files anywhere but
-`/tmp/health-sweep/`, which holds the report draft. If a fix seems obvious,
+`refresh`, `write`, `init`, `uninstall`, `build`, `image`, `team`, or any
+`kuke daemon` subcommand other than `logs`. `kuke write` types into another
+workload's terminal and needs a person's approval; a sweep never runs it. Do
+not write files anywhere but `/tmp/health-sweep/`, which holds the report
+draft. If a fix seems obvious,
 write it into the report as a suggested command; do not run it.
 
 On Claude, the role's settings pre-approve exactly these reads, the submission

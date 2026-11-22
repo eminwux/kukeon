@@ -8,6 +8,7 @@ spec:
     - team/roles/majordomo/skills/diagnose
     - team/roles/majordomo/skills/file-kukeon-bug
     - team/roles/majordomo/skills/health-sweep
+    - team/roles/majordomo/skills/observe-cell
   harnesses:
     claude:
       settings: config/claude.settings.json

@@ -5,6 +5,7 @@
       "Bash(kuke health:*)",
       "Bash(kuke get:*)",
       "Bash(kuke log:*)",
+      "Bash(kuke screenshot:*)",
       "Bash(kuke daemon logs:*)",
       "Read(//tmp/health-sweep/**)",
       "Edit(//tmp/health-sweep/**)"

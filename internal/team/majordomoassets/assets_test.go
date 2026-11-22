@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -132,7 +133,7 @@ func TestDefaultRoleAssets(t *testing.T) {
 	) {
 		t.Fatalf("mounts = %v, want %v", role.Spec.Needs.Mounts, want)
 	}
-	if len(role.Spec.Skills) != 4 {
+	if len(role.Spec.Skills) != 5 {
 		t.Fatalf("skills: %v", role.Spec.Skills)
 	}
 	// The health sweep ships scheduled but switched off, so no install spends
@@ -202,7 +203,8 @@ func checkHarnessSettings(t *testing.T, role definition, roleDir string) {
 	}
 	var settings struct {
 		Permissions struct {
-			DefaultMode string `json:"defaultMode"`
+			DefaultMode string   `json:"defaultMode"`
+			Allow       []string `json:"allow"`
 		} `json:"permissions"`
 	}
 	settingsPath := role.Spec.Harnesses["claude"].Settings
@@ -214,6 +216,18 @@ func checkHarnessSettings(t *testing.T, role definition, roleDir string) {
 	}
 	if settings.Permissions.DefaultMode != "default" {
 		t.Fatal("Claude settings bypass permissions")
+	}
+	// Reading a cell's screen is pre-approved; typing into one is not, so
+	// Claude asks for every kuke write and the unattended sweep is denied
+	// (issue #1538).
+	if !slices.Contains(settings.Permissions.Allow, "Bash(kuke screenshot:*)") {
+		t.Fatalf("Claude settings do not allow kuke screenshot: %v", settings.Permissions.Allow)
+	}
+	for _, rule := range settings.Permissions.Allow {
+		if strings.Contains(rule, "kuke write") || rule == "Bash" || rule == "Bash(*)" ||
+			rule == "Bash(kuke:*)" || rule == "Bash(kuke *)" {
+			t.Fatalf("Claude settings allow kuke write: %q", rule)
+		}
 	}
 	codex := role.Spec.Harnesses["codex"]
 	if codex.Sandbox != "workspace-write" || codex.Approval != "on-request" {
