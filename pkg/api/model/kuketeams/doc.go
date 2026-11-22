@@ -104,6 +104,7 @@ var KnownHarnesses = map[string]bool{
 	"claude":   true,
 	"codex":    true,
 	"opencode": true,
+	"script":   true,
 }
 
 // IsKnownHarness reports whether name is a recognized harness.

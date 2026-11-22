@@ -151,3 +151,49 @@ func assertGenerated(t *testing.T, h *harness.Harness, c *harness.ImageCatalog, 
 		}
 	}
 }
+
+// sharedHarness is a minimal harness whose only image is build-less.
+func sharedHarness(imageName string) string {
+	return `apiVersion: kuketeams.io/v1
+kind: Harness
+metadata:
+  name: script
+spec:
+  renderer: kukeon/v1beta1
+  shell: /bin/bash
+  skillPath: $HOME/.agents/skills
+  modes:
+    headless:
+      onInit:
+        - script: exec true
+  images:
+    - name: ` + imageName + `
+      capabilities: [script]
+`
+}
+
+func TestSharedBaseImageEntry(t *testing.T) {
+	load := func(imageName string) (*harness.Harness, error) {
+		return harness.Load(fstest.MapFS{"script/harness.yaml": {Data: []byte(sharedHarness(imageName))}}, "script")
+	}
+	h, err := load("base-user")
+	if err != nil {
+		t.Fatalf("build-less base-user entry: %v", err)
+	}
+	if !h.Spec.Images[0].Shared() {
+		t.Fatal("build-less entry does not report Shared")
+	}
+	c, err := harness.Generate(h, "ghcr.io/eminwux/kukeon", "v1.2.3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Spec.Images) != 1 || c.Spec.Images[0].Image != "ghcr.io/eminwux/kukeon/base-user:v1.2.3" {
+		t.Fatalf("catalog = %+v", c.Spec.Images)
+	}
+	if _, err = load("base-root"); err != nil {
+		t.Fatalf("build-less base-root entry: %v", err)
+	}
+	if _, err = load("custom"); err == nil || !strings.Contains(err.Error(), "shared base") {
+		t.Fatalf("build-less non-base entry: %v", err)
+	}
+}

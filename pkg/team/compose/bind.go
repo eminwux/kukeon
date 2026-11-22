@@ -369,6 +369,7 @@ func bindValues(plan *pairPlan, bp *api.CellBlueprintDoc, cfg *config.TeamsConfi
 		"SANDBOX":            sandbox,
 		"APPROVAL":           approval,
 		"PERMISSIONS":        settings.Permissions,
+		"COMMAND":            settings.Command,
 		"AGENT_NAME":         cc.Metadata.Name,
 		"STATE_VOLUME":       plan.stateVolume(),
 		"STATE_VOLUME_REALM": cc.Metadata.Realm,

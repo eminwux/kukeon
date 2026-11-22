@@ -100,6 +100,10 @@ func Build(source fs.FS, directory, registry, tag, platforms string, subset []st
 	owners := map[string]string{}
 	for _, dir := range directories {
 		for _, image := range definitions[dir].Spec.Images {
+			// A shared entry runs on a published base; it adds no target.
+			if image.Shared() {
+				continue
+			}
 			images = append(images, image)
 			owners[image.Name] = dir
 		}
@@ -152,6 +156,10 @@ func baseImages() []harness.Image {
 
 func uniqueNames(h *harness.Harness, names map[string]bool, filename string) error {
 	for _, image := range h.Spec.Images {
+		// A shared entry names a published base and claims no image name.
+		if image.Shared() {
+			continue
+		}
 		if names[image.Name] {
 			return fmt.Errorf("%s: duplicate image name %q", filename, image.Name)
 		}

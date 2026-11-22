@@ -1,0 +1,37 @@
+apiVersion: kuketeams.io/v1
+kind: Harness
+metadata:
+  name: script
+spec:
+  renderer: kukeon/v1beta1
+  shell: /bin/bash
+  # A program role loads no skills. The Harness contract requires the field;
+  # nothing reads it for this harness.
+  skillPath: $HOME/.agents/skills
+  # The program's own state, kept across runs on the pair's state volume.
+  statePath: $HOME/.script-state
+  environment:
+    SCRIPT_STATE_DIR: "${HOME}/.script-state"
+  # No model, no login and no interactive mode: a script role is a plain
+  # program the cell runs once.
+  modes:
+    headless:
+      description: Runs the role's command once and exits with its status.
+      parameters:
+        - name: COMMAND
+          required: true
+          description: Command line the role declares (harnesses.script.command).
+        - name: ARGS
+          default: ""
+          description: Arguments a task appends to the command.
+      onInit:
+        - script: |
+            set -eu
+            cd "$INITIAL_PATH" || exit 1
+            # exec, and nothing after it: sbsh types this script into the PTY.
+            exec /bin/bash -c "$COMMAND $ARGS"
+  # No build: the harness runs on the published shared base (bash, git, gh,
+  # jq, yq, python3). Nothing new is built or published for it.
+  images:
+    - name: base-user
+      capabilities: [script, git, gh, go, node, make]

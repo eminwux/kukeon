@@ -105,3 +105,55 @@ func TestBuildRejectsCrossHarnessDuplicateNames(t *testing.T) {
 		t.Fatalf("duplicate build target accepted: %v", err)
 	}
 }
+
+// TestBuildSkipsSharedBaseEntries checks a harness whose image is a published
+// shared base adds no Bake target and claims no image name.
+func TestBuildSkipsSharedBaseEntries(t *testing.T) {
+	source := buildSource(t)
+	delete(source, "harnesses/script/harness.yaml")
+	without, err := harnessbuild.Build(source, "", "registry.test/team", "v1", "linux/amd64", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source["harnesses/shared/harness.yaml"] = &fstest.MapFile{Data: []byte(`apiVersion: kuketeams.io/v1
+kind: Harness
+metadata:
+  name: shared
+spec:
+  renderer: kukeon/v1beta1
+  shell: /bin/bash
+  skillPath: $HOME/.agents/skills
+  modes:
+    headless:
+      onInit:
+        - script: exec true
+  images:
+    - name: base-user
+      capabilities: [shared]
+`)}
+	if _, _, err = harnessbuild.Definitions(source); err != nil {
+		t.Fatalf("shared base entry rejected: %v", err)
+	}
+	with, err := harnessbuild.Build(source, "", "registry.test/team", "v1", "linux/amd64", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(with.Group["default"].Targets, without.Group["default"].Targets) ||
+		len(with.Target) != len(without.Target) {
+		t.Fatalf("shared entry changed the plan: %v vs %v", with.Group, without.Group)
+	}
+	if len(with.Target["base-user"].Labels) != 0 {
+		t.Fatalf("shared entry stamped base-user: %v", with.Target["base-user"].Labels)
+	}
+	// A built image still cannot take a shared base's name.
+	source["harnesses/shared/harness.yaml"].Data = []byte(strings.Replace(
+		string(source["harnesses/shared/harness.yaml"].Data),
+		"      capabilities: [shared]",
+		"      build: {context: harnesses/base, dockerfile: Dockerfile.user}\n      capabilities: [shared]",
+		1,
+	))
+	if _, err = harnessbuild.Build(source, "", "registry.test/team", "v1", "linux/amd64", nil); err == nil ||
+		!strings.Contains(err.Error(), "duplicate image name") {
+		t.Fatalf("built image named base-user accepted: %v", err)
+	}
+}
