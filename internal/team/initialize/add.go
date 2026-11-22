@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -89,15 +88,11 @@ func Add(ctx context.Context, opts AddOptions) (Result, error) {
 		return Result{}, err
 	}
 	missingRevision := source.Branch == "" && source.Tag == "" && source.Commit == ""
-	path := filepath.Join(opts.Root, "kuketeams.yaml")
-	f, err := os.Open(path)
+	// kuketeams.yaml is optional (issue #1591): a missing file is the empty
+	// configuration.
+	cfg, configPath, err := loadTeamsConfig(opts.Root)
 	if err != nil {
-		return Result{}, errors.New("add: cannot read ~/.kuke/kuketeams.yaml; run kuke team init and check permissions")
-	}
-	cfg, err := config.Decode(f)
-	_ = f.Close()
-	if err != nil {
-		return Result{}, fmt.Errorf("add global configuration: %w", err)
+		return Result{}, fmt.Errorf("add: %w", err)
 	}
 	// Resolve validates collisions and references before any network operation.
 	if missingRevision {
@@ -145,7 +140,7 @@ func Add(ctx context.Context, opts AddOptions) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	return runTeam(ctx, opts.Options, cfg, team, recorded, Result{}, command, nil)
+	return runTeam(ctx, opts.Options, cfg, team, recorded, Result{ConfigPath: configPath}, command)
 }
 
 func validateRevision(opts AddOptions) error {

@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   allowedLevels, blockingConnectors, blocksCells, changedMethods, changedPicks, clearMaterial, connectorLevels, defaultGroupChoices, defaultRow, defaultTargets, emptyIdentityForm, formatSecretReference,
-  groupComponents, identitiesFor, identityErrors, identityFields, identityPayload, isRegistry, loginMethods, methodChoices, methodStatuses, originLabel, refKey, refLabel, registryEntries, sameRef, scopeAt, scopeFromParts,
-  scopeLevel, scopeQuery, secretRef, takesIdentity, targetScope, teamOf, unresolvedConnectors, usageFor,
+  groupComponents, identitiesFor, identityErrors, identityFields, identityPayload, importPayload, importsFromHost, isRegistry, loginMethods, methodChoices, methodStatuses, originLabel, refKey, refLabel,
+  registryEntries, sameRef, scopeAt, scopeFromParts, scopeLevel, scopeQuery, secretRef, storesNoValue, takesIdentity, targetScope, teamOf, unresolvedConnectors, usageFor,
 } from "./connectors.mjs";
 import { blueprintForm, buildSpec, connectorsWithoutIdentity, emptyAnswers, formSections, groupChoice, missingAnswers } from "./config-form.mjs";
 
@@ -317,4 +317,24 @@ test("a cell's method pick swaps the connector's delivery and is sent only when 
   assert.equal(blocksCells(picked), false, "a picked method resolves in the preview, which fails by itself when nothing fills it");
   assert.deepEqual(changedPicks([picked], { demo: { name: "demo-key-1", realm: "dev" } }), { demo: { name: "demo-key-1", realm: "dev" } });
   assert.equal(methodStatuses(statuses, [demo], { demo: "oauth" })[0], statuses[0], "an unknown method is left to the daemon to refuse");
+});
+
+// #1591: an opaque identity of a git-delivered connector is author-only — it
+// stores no value — and such a connector can import its identity from the host.
+test("a git-delivered connector's opaque identity is author-only and importable", () => {
+  const authorOnly = { ...repo, secretTypes: ["ssh-key", "basic-auth", "opaque"], fields: repo.fields.map(field => field.name === "hosts" ? { ...field, secretTypes: ["ssh-key", "basic-auth"] } : field) };
+  assert.equal(storesNoValue(authorOnly, "opaque"), true);
+  assert.equal(storesNoValue(authorOnly, "ssh-key"), false);
+  assert.equal(storesNoValue(example, "opaque"), false, "an env-delivered opaque identity is a token");
+  assert.equal(emptyIdentityForm(authorOnly).type, "ssh-key", "the first type stays the default");
+  const form = { ...emptyIdentityForm(authorOnly), name: "me", type: "opaque", fields: { author: "Me <me@example.com>", hosts: "github.com" }, value: "ignored" };
+  assert.deepEqual(identityFields(authorOnly, "opaque").map(field => field.name), ["author"], "hosts and signing are for a key");
+  assert.deepEqual(identityErrors(authorOnly, form), []);
+  assert.deepEqual(identityPayload(authorOnly, { realm: "dev" }, form), { scope: { realm: "dev" }, name: "me", type: "opaque", identity: { author: "Me <me@example.com>" } });
+
+  assert.equal(importsFromHost(repo), true);
+  for (const other of [example, demo, pulls]) assert.equal(importsFromHost(other), false, other.name);
+  assert.deepEqual(importPayload({ realm: " dev ", hosts: "github.com, gitlab.com/group", name: "", key: " .ssh/id_work ", passphraseFile: "", makeDefault: true }),
+    { realm: "dev", makeDefault: true, hosts: ["github.com", "gitlab.com/group"], key: ".ssh/id_work" });
+  assert.deepEqual(importPayload({}), { realm: "default", makeDefault: false });
 });

@@ -3184,7 +3184,7 @@ test("an identity form follows the connector's secret types and field types", as
   await page.goto(`${server.url}#/connectors/repo`);
   const create = page.getByRole("form", { name: "New Repo identity" });
   // Two accepted types: a type picker; ssh-key shows every field, including the ones limited to it.
-  await expect(create.getByLabel("Secret type").getByRole("option")).toHaveText(["ssh-key", "basic-auth"]);
+  await expect(create.getByLabel("Secret type").getByRole("option")).toHaveText(["ssh-key", "basic-auth", "opaque"]);
   await expect(create.getByLabel("author")).toHaveAttribute("placeholder", "Name <email>");
   await expect(create.getByRole("group", { name: "sign" }).getByRole("checkbox")).toHaveCount(2);
   await expect(create.getByLabel("allowedSignersRef")).toHaveAttribute("placeholder", "name@realm[/space[/stack]]");
@@ -3211,6 +3211,20 @@ test("an identity form follows the connector's secret types and field types", as
   });
   await expect(create.getByLabel("Private key")).toHaveValue("");
   expect(await page.content()).not.toContain("b3BlbnNzaC1rZXktdjEAAAAA-test-only");
+
+  // An opaque identity of a git-delivered connector is author-only (#1591): no value, no hosts, no signing.
+  await create.getByLabel("Secret type").selectOption("opaque");
+  await expect(create.getByText("An author-only identity: it stores no value")).toBeVisible();
+  await expect(create.getByLabel("Value")).toHaveCount(0);
+  await expect(create.getByRole("textbox", { name: /^hosts/ })).toHaveCount(0);
+  await expect(create.getByRole("group", { name: "sign" })).toHaveCount(0);
+  await create.getByLabel("Identity name").fill("repo-author");
+  await create.getByLabel("author").fill("Dev <dev@example.com>");
+  await create.getByRole("button", { name: "Create identity" }).click();
+  await expect(page.getByRole("table", { name: "Repo identities" }).getByRole("row", { name: /repo-author/ })).toContainText("opaque");
+  expect(world.posts("/api/connectors/repo/identities")[1].body).toEqual({
+    scope: { realm: "dev" }, name: "repo-author", type: "opaque", identity: { author: "Dev <dev@example.com>" },
+  });
 
   // A connector whose every method keeps a login in the state volume would have no identity; this one
   // has one login method and says so.
@@ -3254,6 +3268,44 @@ test("a connector page shows its title with the slug as context, and its scope p
   await expect(heading.locator(".page-context")).toHaveCount(0);
   await page.goto(`${server.url}#/connectors`);
   await expect(heading.locator("h1")).toHaveText("Connectors");
+});
+
+test("a git-delivered connector imports its identity from the server's host", async ({ page }) => {
+  const world = await mockConnectors(page);
+  await page.goto(`${server.url}#/connectors/repo`);
+  const panel = page.getByRole("region", { name: "Repo identities" });
+  // Only a git-delivered connector offers the import.
+  await expect(panel.getByRole("button", { name: "Import from host" })).toBeVisible();
+  await panel.getByRole("button", { name: "Import from host" }).click();
+  const form = page.getByRole("form", { name: "Import Repo identity from host" });
+  await form.getByLabel("Import realm").selectOption("dev");
+  await form.getByLabel("Hosts").fill("github.com, gitlab.com");
+  await expect(form.getByLabel("Make it the Realm default")).toBeChecked();
+
+  // A failed import shows the server's error and stores nothing.
+  await form.getByRole("textbox", { name: /^Key / }).fill(".ssh/absent");
+  await form.getByRole("button", { name: "Import identity" }).click();
+  await expect(form.getByRole("alert")).toContainText("cannot read private key");
+  await expect(panel.getByRole("table", { name: "Repo identities" }).getByRole("row", { name: /git-ssh/ })).toHaveCount(0);
+
+  await form.getByRole("textbox", { name: /^Key / }).fill("");
+  await form.getByRole("button", { name: "Import identity" }).click();
+  await expect(toasts(page).filter({ hasText: "Repo identity git-ssh imported in dev; it is now the dev default." })).toBeVisible();
+  const result = form.getByRole("status", { name: "Imported identity" });
+  await expect(result).toContainText("/home/operator/.ssh/id_ed25519");
+  await expect(result).toContainText("hosts: github.com,gitlab.com");
+  await expect(result).toContainText("git signing was not imported");
+  expect(world.posts("/api/connectors/repo/import").map(request => request.body)).toEqual([
+    { realm: "dev", makeDefault: true, hosts: ["github.com", "gitlab.com"], key: ".ssh/absent" },
+    { realm: "dev", makeDefault: true, hosts: ["github.com", "gitlab.com"] },
+  ]);
+  await expect(panel.getByRole("table", { name: "Repo identities" }).getByRole("row", { name: /git-ssh/ })).toContainText("ssh-key");
+  await expect(page.getByRole("region", { name: "Repo defaults" })).toContainText("git-ssh");
+
+  // Other connectors have no import.
+  await page.goto(`${server.url}#/connectors/example-token`);
+  await expect(page.getByRole("region", { name: "Example identities" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Import from host" })).toHaveCount(0);
 });
 
 test("setting a Realm default clears the Needs connector badge of the Configs that inherit it, without re-rendering them", async ({ page }) => {

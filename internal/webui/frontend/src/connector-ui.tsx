@@ -6,7 +6,7 @@ import { newCellLink } from "./routes";
 import {
   allowedLevels, blockingConnectors, blocksCells, clearMaterial, connectorStatuses, connectorTitle, deliveryStateVolume, emptyIdentityForm, fieldList, fieldPerson, fieldSecret,
   formatSecretReference, identitiesFor, identityErrors, identityFields, identityPayload, originLabel, refKey, refLabel, refScope, scopeAt, scopeLevels, scopeParts,
-  secretBasicAuth, secretRef, secretSSHKey, secretTypesOf, stateResolved, takesIdentity, targetScope, teamOf,
+  secretBasicAuth, secretRef, secretSSHKey, secretTypesOf, stateResolved, storesNoValue, takesIdentity, targetScope, teamOf,
 } from "./connectors.mjs";
 import type { ConfigMetadata, Connector, ConnectorStatus, FormField, Identity, IdentityForm as IdentityFormState, Scope, SecretRef, VolumeRef } from "./connectors.mjs";
 
@@ -26,7 +26,7 @@ export async function sendJSON<T>(path: string, body: unknown): Promise<T> {
   if (!response.ok) throw result.error ?? { code: "http_error", message: `HTTP ${response.status}` };
   return result as T;
 }
-export function connectorAPI(connector: string, action: "defaults" | "identities"): string {
+export function connectorAPI(connector: string, action: "defaults" | "identities" | "import"): string {
   return `/api/connectors/${encodeURIComponent(connector)}/${action}`;
 }
 export function connectorsLink(connector?: string, scope?: Partial<Scope>): string {
@@ -202,7 +202,8 @@ export function IdentityForm({ connector, scope, existing, secrets, onSaved, onC
         <label className="schema-field"><span>Public key</span><input value={form.publicKey} placeholder="ssh-ed25519 AAAA…" autoComplete="off" spellCheck={false} disabled={pending} onChange={event => set({ publicKey: event.target.value })} /></label>
         <label className="schema-field"><span>Certificate</span><input value={form.certificate} autoComplete="off" spellCheck={false} disabled={pending} onChange={event => set({ certificate: event.target.value })} /></label>
         <label className="schema-field identity-key"><span>Known hosts</span><textarea value={form.knownHosts} placeholder="example.com ssh-ed25519 AAAA…" autoComplete="off" spellCheck={false} disabled={pending} onChange={event => set({ knownHosts: event.target.value })} /></label>
-      </> : <label className="schema-field"><span>Value<b aria-label="required"> *</b></span><input type="password" value={form.value} {...secretInput} onChange={event => set({ value: event.target.value })} /></label>}
+      </> : storesNoValue(connector, form.type) ? <p className="description identity-no-value">An author-only identity: it stores no value, and gives cells the author and committer only — no credential and no signing.</p>
+        : <label className="schema-field"><span>Value<b aria-label="required"> *</b></span><input type="password" value={form.value} {...secretInput} onChange={event => set({ value: event.target.value })} /></label>}
     </div>
     <div className="connector-actions">
       <button type="submit" disabled={pending}>{pending ? "Saving…" : existing ? "Rotate identity" : "Create identity"}</button>

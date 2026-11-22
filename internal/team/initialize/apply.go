@@ -24,7 +24,6 @@ import (
 	"net"
 	"net/rpc"
 	"os"
-	"reflect"
 	"slices"
 	"strings"
 
@@ -38,7 +37,7 @@ import (
 
 // Client deliberately has no cell lifecycle methods. Init can only read scope,
 // create explicitly sourced secrets, and apply blueprint/config documents (plus
-// the team stack's git defaults).
+// the team realm's secret defaults).
 type Client interface {
 	Close() error
 	Ping(context.Context) error
@@ -72,7 +71,7 @@ type applied struct {
 // Required secrets that are absent and have no creation source do not block
 // application; Apply returns one remediation line per missing runtime secret.
 func Apply(ctx context.Context, client Client, result *compose.Result) ([]string, error) {
-	out, err := apply(ctx, client, result, "kuke team init", nil, "")
+	out, err := apply(ctx, client, result, "kuke team init", "")
 	return out.missing, err
 }
 
@@ -80,8 +79,7 @@ func Apply(ctx context.Context, client Client, result *compose.Result) ([]string
 // apply succeeds (the pre-#1527 init team): they do not make a shared
 // blueprint foreign, so its replacement keeps the plain names.
 func apply(
-	ctx context.Context, client Client, result *compose.Result, command string, imported []api.SecretDoc,
-	legacyTeam string,
+	ctx context.Context, client Client, result *compose.Result, command string, legacyTeam string,
 ) (applied, error) {
 	var out applied
 	if result.Entry == nil || len(result.Pairs) == 0 {
@@ -104,20 +102,16 @@ func apply(
 	if err != nil {
 		return out, err
 	}
-	stackDoc, err := gitDefaultsDocument(ctx, client, result)
-	if err != nil {
-		return out, err
-	}
 	expected := len(result.Blueprints) + result.Configs()
-	if stackDoc != nil {
-		raw = append(append(stackDoc, []byte("---\n")...), raw...)
-		expected++
-	}
 	// Slots the Configs leave to the scope defaults get a Realm default once;
 	// a default that is already set — at any level — is the operator's.
-	realmDoc, inherited, err := secretDefaultsDocument(ctx, client, result)
+	needsGit := needsGitIdentity(result)
+	realmDoc, inherited, gitDefault, err := secretDefaultsDocument(ctx, client, result, needsGit)
 	if err != nil {
 		return out, err
+	}
+	if needsGit && !gitDefault {
+		out.notes = append(out.notes, noGitIdentityNote)
 	}
 	if realmDoc != nil {
 		raw = append(append(realmDoc, []byte("---\n")...), raw...)
@@ -127,7 +121,7 @@ func apply(
 	if err != nil {
 		return out, err
 	}
-	gitMissing, err := missingGitSecrets(ctx, client, result, imported)
+	gitMissing, err := missingGitSecrets(ctx, client, result)
 	if err != nil {
 		return out, err
 	}
@@ -147,27 +141,6 @@ func apply(
 		}
 		if err = createSecret(ctx, client, secret, command); err != nil {
 			return out, err
-		}
-	}
-	for _, secret := range imported {
-		// An import is the operator's explicit request to store this key, so
-		// it replaces whatever the secret held: skipping an existing one would
-		// report success while cells kept the old key. The stored bytes cannot
-		// be read back to compare, so the replacement is always written and
-		// reported.
-		ref := secret.Metadata
-		lookup := api.SecretDoc{APIVersion: secret.APIVersion, Kind: secret.Kind, Metadata: secret.Metadata}
-		got, lookupErr := client.GetSecret(ctx, lookup)
-		if lookupErr != nil {
-			return out, requestError("recheck", "secret "+ref.Name, lookupErr)
-		}
-		if err = createSecret(ctx, client, secret, command); err != nil {
-			return out, err
-		}
-		if got.MetadataExists {
-			out.notes = append(out.notes, fmt.Sprintf(
-				"secret %q already existed and was replaced with the imported material.", ref.Name,
-			))
 		}
 	}
 	// CellConfigs only reference secrets structurally; kukeond resolves them at
@@ -479,45 +452,24 @@ func (c *configRefs) users(ctx context.Context, realm, name string, teams ...str
 	return out, nil
 }
 
-// gitDefaultsDocument returns the team stack's document with the operator's
-// default git identity written into spec.defaults.git, or nil when there is
-// nothing to write or it is already there. Only the git block is touched:
-// identity and signing are replaced, credentials are merged by host, and every
-// other default the stack carries is kept.
-func gitDefaultsDocument(ctx context.Context, client Client, result *compose.Result) ([]byte, error) {
-	if result.Git == nil {
-		return nil, nil
+// noGitIdentityNote is the hint `kuke team init` and `kuke team add` print
+// when a team clones over SSH and nothing gives its cells a git identity
+// (issue #1591).
+const noGitIdentityNote = "no git identity is set; run kuke connector import git --default"
+
+// needsGitIdentity reports whether the team clones over SSH and none of its
+// Configs names its own git identity (`connectors.git.identity`): only then
+// does a missing scope default matter.
+func needsGitIdentity(result *compose.Result) bool {
+	if len(result.SSHSources) == 0 {
+		return false
 	}
-	scope := result.Scope
-	stacks, err := client.ListStacks(ctx, scope.Realm, scope.Space)
-	if err != nil {
-		return nil, requestError("prerequisite lookup", "stack "+scope.Stack, err)
+	for _, pair := range result.Pairs {
+		if git := pair.Config.Spec.Git; git != nil && git.IdentityRef != nil {
+			return false
+		}
 	}
-	i := slices.IndexFunc(stacks, func(doc api.StackDoc) bool { return doc.Metadata.Name == scope.Stack })
-	if i < 0 {
-		return nil, fmt.Errorf("preflight: required stack %s is missing", scope.Stack)
-	}
-	current := stacks[i]
-	var defaults api.ScopeDefaults
-	if current.Spec.Defaults != nil {
-		defaults = *current.Spec.Defaults
-	}
-	merged := mergeGit(defaults.Git, result.Git)
-	if reflect.DeepEqual(defaults.Git, merged) {
-		return nil, nil
-	}
-	defaults.Git = merged
-	doc := api.StackDoc{
-		APIVersion: api.APIVersionV1Beta1, Kind: api.KindStack,
-		Metadata: api.StackMetadata{Name: current.Metadata.Name, Labels: current.Metadata.Labels},
-		Spec: api.StackSpec{
-			ID: current.Spec.ID, RealmID: scope.Realm, SpaceID: scope.Space, Defaults: &defaults,
-		},
-	}
-	if doc.Spec.ID == "" {
-		doc.Spec.ID = current.Metadata.Name
-	}
-	return yaml.Marshal(doc)
+	return true
 }
 
 // secretDefaultsDocument returns the team realm's document with a
@@ -527,28 +479,31 @@ func gitDefaultsDocument(ctx context.Context, client Client, result *compose.Res
 // fills is left exactly as it is, so re-running `kuke team` never undoes a
 // default the operator changed — and changing it reaches every Config that
 // did not choose an identity, with no re-render. The second return maps each
-// slot that was already filled to the identity it inherits.
+// slot that was already filled to the identity it inherits; the third reports
+// whether the Realm, the Space or the Stack names a default git identity,
+// looked up only when needsGit is set.
 func secretDefaultsDocument(
-	ctx context.Context, client Client, result *compose.Result,
-) ([]byte, map[string]config.SecretRef, error) {
-	if len(result.DefaultSecrets) == 0 {
-		return nil, nil, nil
+	ctx context.Context, client Client, result *compose.Result, needsGit bool,
+) ([]byte, map[string]config.SecretRef, bool, error) {
+	if len(result.DefaultSecrets) == 0 && !needsGit {
+		return nil, nil, false, nil
 	}
 	scope := result.Scope
 	realms, err := client.ListRealms(ctx)
 	if err != nil {
-		return nil, nil, requestError("prerequisite lookup", "realm "+scope.Realm, err)
+		return nil, nil, false, requestError("prerequisite lookup", "realm "+scope.Realm, err)
 	}
 	i := slices.IndexFunc(realms, func(doc api.RealmDoc) bool { return doc.Metadata.Name == scope.Realm })
 	if i < 0 {
-		return nil, nil, fmt.Errorf("preflight: required realm %s is missing", scope.Realm)
+		return nil, nil, false, fmt.Errorf("preflight: required realm %s is missing", scope.Realm)
 	}
 	current := realms[i]
 
-	inherited, err := filledDefaultSlots(ctx, client, scope, current)
+	filled, err := filledDefaultSlots(ctx, client, scope, current)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
+	inherited, gitDefault := filled.slots, filled.gitIdentity
 
 	var defaults api.ScopeDefaults
 	if current.Spec.Defaults != nil {
@@ -560,7 +515,7 @@ func secretDefaultsDocument(
 	}
 	added := false
 	for _, slot := range result.DefaultSecrets {
-		if _, filled := inherited[slot.Slot]; filled {
+		if _, ok := inherited[slot.Slot]; ok {
 			continue
 		}
 		ref := slot.Reference
@@ -570,7 +525,7 @@ func secretDefaultsDocument(
 		added = true
 	}
 	if !added {
-		return nil, inherited, nil
+		return nil, inherited, gitDefault, nil
 	}
 	defaults.Secrets = secrets
 	// A Realm apply replaces the spec's compatible fields whole, so the
@@ -581,21 +536,34 @@ func secretDefaultsDocument(
 	doc.Spec.Defaults = &defaults
 	raw, err := yaml.Marshal(doc)
 	if err != nil {
-		return nil, nil, fmt.Errorf("marshal realm document: %w", err)
+		return nil, nil, false, fmt.Errorf("marshal realm document: %w", err)
 	}
-	return raw, inherited, nil
+	return raw, inherited, gitDefault, nil
 }
 
-// filledDefaultSlots maps each secret slot the team's Realm, Space or Stack
-// already gives a default identity to the identity a Config that fills none
-// inherits: the deepest level's, with an unset realm read as the team's.
+// scopeFilled is what the team's Realm, Space and Stack defaults already set.
+type scopeFilled struct {
+	// slots maps each secret slot with a default to the identity a Config
+	// that fills none inherits: the deepest level's.
+	slots map[string]config.SecretRef
+	// gitIdentity reports a level whose git block names an identity.
+	gitIdentity bool
+}
+
+// filledDefaultSlots reads what the team's Realm, Space and Stack defaults
+// already set: each secret slot's default identity — the deepest level's,
+// with an unset realm read as the team's — and whether any level names a
+// default git identity.
 func filledDefaultSlots(
 	ctx context.Context, client Client, scope compose.Scope, realm api.RealmDoc,
-) (map[string]config.SecretRef, error) {
-	filled := map[string]config.SecretRef{}
+) (scopeFilled, error) {
+	filled := scopeFilled{slots: map[string]config.SecretRef{}}
 	mark := func(defaults *api.ScopeDefaults) {
 		if defaults == nil {
 			return
+		}
+		if defaults.Git != nil && defaults.Git.IdentityRef != nil {
+			filled.gitIdentity = true
 		}
 		for slot, fill := range defaults.Secrets {
 			if fill.SecretRef == nil {
@@ -611,13 +579,13 @@ func filledDefaultSlots(
 			if ref.Realm == "" {
 				ref.Realm = scope.Realm
 			}
-			filled[slot] = ref
+			filled.slots[slot] = ref
 		}
 	}
 	mark(realm.Spec.Defaults)
 	spaces, err := client.ListSpaces(ctx, scope.Realm)
 	if err != nil {
-		return nil, requestError("prerequisite lookup", "space "+scope.Space, err)
+		return filled, requestError("prerequisite lookup", "space "+scope.Space, err)
 	}
 	for _, space := range spaces {
 		if space.Metadata.Name == scope.Space {
@@ -626,7 +594,7 @@ func filledDefaultSlots(
 	}
 	stacks, err := client.ListStacks(ctx, scope.Realm, scope.Space)
 	if err != nil {
-		return nil, requestError("prerequisite lookup", "stack "+scope.Stack, err)
+		return filled, requestError("prerequisite lookup", "stack "+scope.Stack, err)
 	}
 	for _, stack := range stacks {
 		if stack.Metadata.Name == scope.Stack {
@@ -636,40 +604,9 @@ func filledDefaultSlots(
 	return filled, nil
 }
 
-// mergeGit lays the team's git block over the stack's existing one.
-func mergeGit(existing, team *api.ContainerGit) *api.ContainerGit {
-	out := &api.ContainerGit{}
-	if existing != nil {
-		*out = *existing
-		out.Credentials = slices.Clone(existing.Credentials)
-		// The pre-stored-credential host paths never reach a cell.
-		out.SigningKey, out.AllowedSigners = "", ""
-	}
-	if team.Author != nil {
-		out.Author = team.Author
-	}
-	if team.Committer != nil {
-		out.Committer = team.Committer
-	}
-	if team.Signing != nil {
-		out.Signing, out.Sign = team.Signing, slices.Clone(team.Sign)
-	}
-	for _, credential := range team.Credentials {
-		j := slices.IndexFunc(out.Credentials, func(c api.GitCredential) bool { return c.Host == credential.Host })
-		if j < 0 {
-			out.Credentials = append(out.Credentials, credential)
-		} else {
-			out.Credentials[j] = credential
-		}
-	}
-	return out
-}
-
-// missingGitSecrets returns one remediation line per git credential or signing
-// secret that does not exist yet and is not about to be imported.
-func missingGitSecrets(
-	ctx context.Context, client Client, result *compose.Result, imported []api.SecretDoc,
-) ([]string, error) {
+// missingGitSecrets returns one remediation line per git identity, credential
+// or signing secret the team's Configs name that does not exist yet.
+func missingGitSecrets(ctx context.Context, client Client, result *compose.Result) ([]string, error) {
 	var refs []*api.ContainerSecretRef
 	// identities are the refs named as git.identityRef: a tagged git identity,
 	// not a bare credential, so their remediation creates one.
@@ -684,12 +621,6 @@ func missingGitSecrets(
 		if signing != nil {
 			refs = append(refs, signing.SecretRef, signing.AllowedSignersRef)
 		}
-	}
-	if result.Git != nil {
-		for _, credential := range result.Git.Credentials {
-			refs = append(refs, credential.SecretRef)
-		}
-		collect(result.Git.Signing)
 	}
 	for _, pair := range result.Pairs {
 		// The team's git identity (`connectors.git.identity`) is one Secret.
@@ -715,9 +646,6 @@ func missingGitSecrets(
 		}
 		seen[*ref] = true
 		md := api.SecretMetadata{Name: ref.Name, Realm: ref.Realm, Space: ref.Space, Stack: ref.Stack, Cell: ref.Cell}
-		if slices.ContainsFunc(imported, func(doc api.SecretDoc) bool { return doc.Metadata == md }) {
-			continue
-		}
 		got, err := client.GetSecret(ctx, api.SecretDoc{
 			APIVersion: api.APIVersionV1Beta1, Kind: api.KindSecret, Metadata: md,
 		})

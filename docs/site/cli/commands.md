@@ -34,6 +34,7 @@ Both are hard-linked to the same binary on install. Running `kuke` enters the cl
 | `kuke image`                   | Manage container images in a realm's containerd namespace                |
 | `kuke daemon`                  | Manage the `kukeond` daemon cell lifecycle                               |
 | `kuke team init` / `add`       | Compose agent teams and register them with `kukeond`                     |
+| `kuke connector`               | List connector identities, import a git identity, set Realm defaults     |
 | `kuke uninstall`               | Remove all kukeon runtime state from this host                           |
 | `kuke autocomplete`            | Emit a shell completion script                                           |
 | `kuke version`                 | Print the version                                                        |
@@ -96,6 +97,7 @@ The positional argument is the resource's own name; the flags specify where in t
 - [kuke daemon](kuke-daemon.md)
 - [kuke team init](kuke-team-init.md)
 - [kuke team add](kuke-team-add.md)
+- [kuke connector](kuke-connector.md)
 - [kuke uninstall](kuke-uninstall.md)
 - [kuke autocomplete](kuke-autocomplete.md)
 - [kuke version](kuke-version.md)

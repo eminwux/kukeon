@@ -196,6 +196,8 @@ The two git types are used through a `git` block — see the [git credentials gu
 
 **`--connector <name>`** tags the secret as an identity of a [connector](../concepts/connectors.md), so it can be picked by name for a team, a Config or one cell. The secret is validated against the connector: its type must be one the connector accepts (when `--type` is omitted and the connector accepts exactly one type, that type is used), required identity fields must be set, and each value must read as its declared type. The connector's readable identity fields are set with `--identity FIELD=VALUE` (repeatable) or with the flag of the same name — every field of every connector in the catalog is a flag, in kebab case (`--author`, `--hosts`, `--allowed-signers-ref`, …). `kuke create secret --help` lists the connectors and the field flags. An unknown connector, an unknown field, or a field given without `--connector` is rejected.
 
+The `git` connector accepts `ssh-key`, `basic-auth` and `opaque`. An `opaque` git identity is [author-only](../concepts/connectors.md#author-only-identities): it requires `--author`, stores no value and takes no `--hosts`, `--sign` or `--allowed-signers-ref`. `--connector git` without `--type` and without `--from-file` creates one; with `--from-file`, `--type` is required. `--from-literal` or `--from-file` on an author-only identity fails with `an author-only git identity stores no value; use --type ssh-key for a key`. To store your own key and author in one step, use [`kuke connector import git`](kuke-connector.md#kuke-connector-import-git).
+
 | Flag                  | Type         | Default             | Description                                                                 |
 | --------------------- | ------------ | ------------------- | --------------------------------------------------------------------------- |
 | `<NAME>` (positional) | all          | _(required)_        | The secret name                                                             |
@@ -243,6 +245,9 @@ sudo kuke create secret work-github --connector github --from-file ./token
 # A git identity: the key plus its readable facts
 sudo kuke create secret bot-key --connector git --type ssh-key --from-file ~/.ssh/id_ed25519 \
     --author 'Dev Bot <bot@example.com>' --hosts github.com --sign commits,tags
+
+# An author-only git identity: no key, no value
+sudo kuke create secret me --connector git --author 'Me <me@example.com>'
 ```
 
 `kuke get secrets` lists each secret's `TYPE` and `CONNECTOR` (`-o wide` adds its readable `IDENTITY` fields); no verb prints a value.

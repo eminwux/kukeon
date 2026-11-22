@@ -153,12 +153,20 @@ func resolveConnector(
 // secretType picks the secret type: --type when given, else the one type the
 // connector accepts. A connector that accepts several types and not the
 // default one needs --type.
+//
+// The git connector also accepts opaque — an author-only identity (issue
+// #1591) — so without --type it would silently store a key passed with
+// --from-file as an opaque value: a git identity given --from-file still needs
+// --type, and one without becomes author-only.
 func (c *connectorChoice) secretType(cmd *cobra.Command, fromFlag string) (string, error) {
 	if c == nil || cmd.Flags().Changed("type") {
 		return fromFlag, nil
 	}
 	accepted := c.desc.SecretTypes
 	switch {
+	case c.gitIdentity() && cmd.Flags().Changed("from-file"):
+		return "", fmt.Errorf("--connector %s with --from-file requires --type (one of: %s)",
+			c.desc.Name, strings.Join(accepted, ", "))
 	case len(accepted) == 0 || slices.Contains(accepted, v1beta1.SecretTypeOpaque):
 		return fromFlag, nil
 	case len(accepted) == 1:
@@ -167,6 +175,36 @@ func (c *connectorChoice) secretType(cmd *cobra.Command, fromFlag string) (strin
 		return "", fmt.Errorf("--connector %s requires --type (one of: %s)",
 			c.desc.Name, strings.Join(accepted, ", "))
 	}
+}
+
+// gitIdentity reports a choice of the git connector.
+func (c *connectorChoice) gitIdentity() bool {
+	return c != nil && c.desc.Name == intconnector.GitIdentityTag
+}
+
+// authorOnly reports an author-only git identity: the git connector with an
+// opaque secret type.
+func (c *connectorChoice) authorOnly(secretType string) bool {
+	secretType = strings.TrimSpace(secretType)
+	return c.gitIdentity() && (secretType == "" || secretType == v1beta1.SecretTypeOpaque)
+}
+
+// authorOnlySpec is the material of an author-only git identity: none. The
+// stored value is the fixed placeholder, so a value flag is refused rather
+// than dropped.
+func authorOnlySpec(cmd *cobra.Command) (v1beta1.SecretSpec, error) {
+	for _, name := range []string{"from-literal", "from-file"} {
+		if cmd.Flags().Changed(name) {
+			return v1beta1.SecretSpec{}, errors.New(
+				"an author-only git identity stores no value; use --type ssh-key for a key")
+		}
+	}
+	if err := rejectFlags(cmd, v1beta1.SecretTypeOpaque,
+		"username", "password-stdin", "token-stdin", "token-file", "passphrase-stdin",
+		"passphrase-file", "public-key-file", "certificate-file", "known-hosts-file"); err != nil {
+		return v1beta1.SecretSpec{}, err
+	}
+	return v1beta1.SecretSpec{Data: intconnector.GitAuthorOnlyValue}, nil
 }
 
 // tag stamps the connector and its identity fields onto the secret, after
@@ -216,6 +254,9 @@ func (c *connectorChoice) tag(cmd *cobra.Command, fieldFlags []identityFlag, spe
 		spec.Identity = identity
 	}
 	if checkErr := intconnector.CheckSecret(c.desc, *spec); checkErr != nil {
+		return fmt.Errorf("--connector %s: %w", c.desc.Name, checkErr)
+	}
+	if checkErr := intconnector.CheckGitAuthorOnly(*spec); checkErr != nil {
 		return fmt.Errorf("--connector %s: %w", c.desc.Name, checkErr)
 	}
 	return nil

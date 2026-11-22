@@ -18,7 +18,6 @@ package compose_test
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"io/fs"
 	"os"
@@ -32,7 +31,6 @@ import (
 	"testing/fstest"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
-	"github.com/eminwux/kukeon/internal/team/bootstrap"
 	"github.com/eminwux/kukeon/internal/team/teamtest"
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/compose"
@@ -57,19 +55,18 @@ func publishedCodexImage(t *testing.T) string {
 	return image
 }
 
-type noGit struct{}
-
-func (noGit) Lookup(context.Context, string, bool) (string, error) { return "", bootstrap.ErrMissing }
+// emptyConfig is the TeamsConfig of a host with no kuketeams.yaml (issue
+// #1591: the file is optional).
+func emptyConfig() *config.TeamsConfig {
+	return &config.TeamsConfig{APIVersion: config.APIVersion, Kind: config.Kind}
+}
 
 func fixture(t *testing.T) (*config.TeamsConfig, compose.Options) {
 	t.Helper()
-	boot, err := bootstrap.Run(t.Context(), bootstrap.Options{Root: t.TempDir(), Git: noGit{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	boot.Config.Spec.Defaults = config.Majordomo().Spec
-	boot.Config.Spec.Defaults.Harnesses = boot.Config.Spec.Defaults.Harnesses[:1]
-	return boot.Config, compose.Options{
+	base := emptyConfig()
+	base.Spec.Defaults = config.Majordomo().Spec
+	base.Spec.Defaults.Harnesses = base.Spec.Defaults.Harnesses[:1]
+	return base, compose.Options{
 		Sources: map[string]fs.FS{"kukeon": copiedSource(t)},
 	}
 }
@@ -1267,11 +1264,8 @@ func TestInitialPathLaunchAcrossHarnesses(t *testing.T) {
 // harness configs on the shared host blueprint with daemon access, and the
 // health sweep rendered hourly but suspended, with no secret required.
 func TestFreshMajordomoComposition(t *testing.T) {
-	boot, err := bootstrap.Run(t.Context(), bootstrap.Options{Root: t.TempDir(), Git: noGit{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := compose.Compose(boot.Config, config.Majordomo(), compose.Options{Sources: shippedSource()})
+	base := emptyConfig()
+	result, err := compose.Compose(base, config.Majordomo(), compose.Options{Sources: shippedSource()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1328,8 +1322,8 @@ func TestFreshMajordomoComposition(t *testing.T) {
 			t.Fatalf("sweep must ship hourly and suspended: %+v", sweep.Spec.Schedule)
 		}
 	}
-	if len(result.Blueprints) != 2 || result.Git != nil || len(result.Notes) != 0 {
-		t.Fatalf("blueprints=%d git=%v notes=%v", len(result.Blueprints), result.Git, result.Notes)
+	if len(result.Blueprints) != 2 || len(result.SSHSources) != 0 || len(result.Notes) != 0 {
+		t.Fatalf("blueprints=%d ssh sources=%v notes=%v", len(result.Blueprints), result.SSHSources, result.Notes)
 	}
 }
 
@@ -1338,10 +1332,7 @@ func TestFreshMajordomoComposition(t *testing.T) {
 // one gh-token binding enables the github connector for the whole role, so the
 // interactive cell and the sweep cell both get GH_TOKEN and a gh image.
 func TestMajordomoSweepOptIn(t *testing.T) {
-	boot, err := bootstrap.Run(t.Context(), bootstrap.Options{Root: t.TempDir(), Git: noGit{}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	base := emptyConfig()
 	team := config.Majordomo()
 	on := false
 	role := &team.Spec.Roles[0]
@@ -1349,7 +1340,7 @@ func TestMajordomoSweepOptIn(t *testing.T) {
 	role.Tasks = &[]config.TaskSelection{{
 		Name: "health-sweep", Suspend: &on, Args: "--file-issues example/kukeon-ops",
 	}}
-	result, err := compose.Compose(boot.Config, team, compose.Options{Sources: shippedSource()})
+	result, err := compose.Compose(base, team, compose.Options{Sources: shippedSource()})
 	if err != nil {
 		t.Fatal(err)
 	}

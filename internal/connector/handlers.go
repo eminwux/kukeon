@@ -17,8 +17,10 @@
 package connector
 
 import (
+	"fmt"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/errdefs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
@@ -47,6 +49,34 @@ const (
 	// file used to verify signatures.
 	GitFieldAllowedSignersRef = "allowedSignersRef"
 )
+
+// GitAuthorOnlyValue is the stored value of an author-only git identity: an
+// opaque Secret tagged `git` that carries an author and committer but no key
+// or hosts (issue #1591). The daemon's secret store rejects an empty opaque
+// value, so this fixed placeholder stands in; nothing reads it.
+const GitAuthorOnlyValue = "kukeon:git-author-only"
+
+// IsGitAuthorOnly reports whether a Secret is an author-only git identity: an
+// opaque Secret tagged for the git connector.
+func IsGitAuthorOnly(spec v1beta1.SecretSpec) bool {
+	return strings.TrimSpace(spec.Connector) == GitIdentityTag &&
+		effectiveType(spec.Type) == v1beta1.SecretTypeOpaque
+}
+
+// CheckGitAuthorOnly checks the one rule the connector schema cannot state:
+// an author-only git identity must carry an author, since it has nothing else
+// to give a cell. Every other Secret passes.
+func CheckGitAuthorOnly(spec v1beta1.SecretSpec) error {
+	if !IsGitAuthorOnly(spec) {
+		return nil
+	}
+	if strings.TrimSpace(spec.Identity[GitFieldAuthor]) == "" {
+		return fmt.Errorf(
+			"%w: an author-only git identity (an opaque secret) requires identity field %q",
+			errdefs.ErrConnectorIdentity, GitFieldAuthor)
+	}
+	return nil
+}
 
 // RegistryIdentityTag is the Secret tag of a registry credential.
 const RegistryIdentityTag = "registry"

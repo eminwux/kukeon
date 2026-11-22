@@ -20,9 +20,6 @@ import (
 	"bytes"
 	"errors"
 	"io"
-	"os"
-	"path/filepath"
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -125,7 +122,7 @@ func TestResourceAccountingCountsSharedBlueprintsOnce(t *testing.T) {
 	if len(result.Pairs) != 4 || len(result.Blueprints) != 2 {
 		t.Fatalf("pairs=%d blueprints=%d", len(result.Pairs), len(result.Blueprints))
 	}
-	done, err := apply(t.Context(), f, result, "kuke team init", nil, "")
+	done, err := apply(t.Context(), f, result, "kuke team init", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +141,7 @@ func TestResourceAccountingCountsSharedBlueprintsOnce(t *testing.T) {
 		{Action: "created"},
 		{Action: "created"},
 	}
-	if _, err = apply(t.Context(), f, result, "kuke team init", nil, ""); err == nil ||
+	if _, err = apply(t.Context(), f, result, "kuke team init", ""); err == nil ||
 		!strings.Contains(err.Error(), "4 of 6 resources accepted") {
 		t.Fatalf("err=%v", err)
 	}
@@ -237,7 +234,7 @@ func TestSharedBlueprintNames(t *testing.T) {
 					result = composeTeam(t, nil)
 					codex = result.Blueprints[0]
 				}
-				done, err := apply(t.Context(), f, result, "kuke team init", nil, tc.legacy)
+				done, err := apply(t.Context(), f, result, "kuke team init", tc.legacy)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -328,7 +325,7 @@ func TestSharedBlueprintForkIsMigrated(t *testing.T) {
 	result := composeTeam(t, nil)
 	digest := result.Blueprints[0].Metadata.Labels[api.LabelContentDigest]
 	fork := forkedRealm(t, f, result, false)
-	done, err := apply(t.Context(), f, result, "kuke team init", nil, "")
+	done, err := apply(t.Context(), f, result, "kuke team init", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +353,7 @@ func TestSharedBlueprintForkIsMigrated(t *testing.T) {
 		t.Fatalf("notes = %q, want %q", done.notes, want)
 	}
 	// Once migrated, a rerun has nothing left to report.
-	if done, err = apply(t.Context(), f, composeTeam(t, nil), "kuke team init", nil, ""); err != nil ||
+	if done, err = apply(t.Context(), f, composeTeam(t, nil), "kuke team init", ""); err != nil ||
 		len(done.notes) != 0 {
 		t.Fatalf("rerun notes = %q err=%v", done.notes, err)
 	}
@@ -368,7 +365,7 @@ func TestSharedBlueprintForkStillReferencedIsReported(t *testing.T) {
 	f.prune = true
 	result := composeTeam(t, nil)
 	fork := forkedRealm(t, f, result, true)
-	done, err := apply(t.Context(), f, result, "kuke team init", nil, "")
+	done, err := apply(t.Context(), f, result, "kuke team init", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -388,7 +385,7 @@ func TestSharedBlueprintForkNotPrunedIsReported(t *testing.T) {
 	f := newFake()
 	result := composeTeam(t, nil)
 	fork := forkedRealm(t, f, result, false)
-	done, err := apply(t.Context(), f, result, "kuke team init", nil, "")
+	done, err := apply(t.Context(), f, result, "kuke team init", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -427,7 +424,7 @@ func TestIsDigestName(t *testing.T) {
 func TestSharedBlueprintLookupFailureAppliesNothing(t *testing.T) {
 	f := newFake()
 	f.blueprintErr = errors.New("permission denied: sensitive-detail")
-	_, err := apply(t.Context(), f, composeTeam(t, nil), "kuke team init", nil, "")
+	_, err := apply(t.Context(), f, composeTeam(t, nil), "kuke team init", "")
 	if err == nil || !strings.Contains(err.Error(), "blueprint codex lookup") ||
 		strings.Contains(err.Error(), "sensitive-detail") || f.applies != 0 || f.creates != 0 {
 		t.Fatalf("err=%v applies=%d", err, f.applies)
@@ -457,97 +454,14 @@ func TestRunReportsReplacedSharedBlueprint(t *testing.T) {
 	}
 }
 
-func gitConfig(cfg *config.TeamsConfig) {
-	key := config.SecretRef{Name: "git-ssh", Realm: "default"}
-	cfg.Spec.Git = &config.Git{
-		Author:      &config.Identity{Name: "Dev Bot", Email: "dev-bot@example.com"},
-		Credentials: []config.GitCredential{{Host: "github.com", SecretRef: key}},
-		Signing:     &config.GitSigning{SecretRef: key},
-		Sign:        []string{"commits"},
-	}
-}
-
-// TestGitDefaultsAreWrittenToTheTeamStack is step 13's application half: the
-// operator's default identity becomes the stack's defaults.git, so every team
-// cell inherits it.
-func TestGitDefaultsAreWrittenToTheTeamStack(t *testing.T) {
-	f := newFake()
-	f.secrets[api.SecretMetadata{Name: "git-ssh", Realm: "default"}] = "present"
-	f.stackLabels = map[string]string{"owner": "ops"}
-	f.stackDefaults = &api.ScopeDefaults{
-		Values: map[string]string{"ANTHROPIC_MODEL": "sonnet"},
-		Repos:  map[string]api.CellConfigRepoFill{"project": {URL: "https://example.test/p"}},
-		Secrets: map[string]api.CellConfigSecretFill{
-			"github-token": {SecretRef: &api.ContainerSecretRef{Name: "gh", Realm: "default"}},
-		},
-		Git: &api.ContainerGit{
-			Author:    &api.GitIdentity{Name: "Old", Email: "old@example.com"},
-			Committer: &api.GitIdentity{Name: "Kept Committer", Email: "kept@example.com"},
-			Credentials: []api.GitCredential{
-				{Host: "github.com", SecretRef: &api.ContainerSecretRef{Name: "old-key", Realm: "default"}, Port: 22},
-				{Host: "gitlab.com", SecretRef: &api.ContainerSecretRef{Name: "gitlab-key", Realm: "default"}},
-			},
-			SigningKey:     "/home/dev/.ssh/id_ed25519.pub",
-			AllowedSigners: "/home/dev/.ssh/allowed_signers",
-		},
-	}
-	kept := *f.stackDefaults
-	result := composeTeam(t, gitConfig)
-	done, err := apply(t.Context(), f, result, "kuke team init", nil, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	kinds, _ := appliedDocs(t, f.raw)
-	if done.resources != 5 || len(kinds) != 5 || kinds[0] != "Stack" {
-		t.Fatalf("resources=%d kinds=%v: the stack document must lead the stream", done.resources, kinds)
-	}
-	var stack api.StackDoc
-	if err = yaml.NewDecoder(bytes.NewReader(f.raw)).Decode(&stack); err != nil {
-		t.Fatal(err)
-	}
-	if stack.APIVersion != api.APIVersionV1Beta1 || stack.Metadata.Name != "default" ||
-		stack.Metadata.Labels["owner"] != "ops" || stack.Spec.ID != "default" ||
-		stack.Spec.RealmID != "default" || stack.Spec.SpaceID != "default" {
-		t.Fatalf("stack identity changed: %+v %+v", stack.Metadata, stack.Spec)
-	}
-	got := stack.Spec.Defaults
-	if !reflect.DeepEqual(got.Values, kept.Values) || !reflect.DeepEqual(got.Repos, kept.Repos) ||
-		!reflect.DeepEqual(got.Secrets, kept.Secrets) {
-		t.Fatalf("non-git defaults changed: %+v", got)
-	}
-	want := &api.ContainerGit{
-		Author:    &api.GitIdentity{Name: "Dev Bot", Email: "dev-bot@example.com"},
-		Committer: &api.GitIdentity{Name: "Kept Committer", Email: "kept@example.com"},
-		Credentials: []api.GitCredential{
-			{Host: "github.com", SecretRef: &api.ContainerSecretRef{Name: "git-ssh", Realm: "default"}},
-			{Host: "gitlab.com", SecretRef: &api.ContainerSecretRef{Name: "gitlab-key", Realm: "default"}},
-		},
-		Signing: &api.GitSigning{SecretRef: &api.ContainerSecretRef{Name: "git-ssh", Realm: "default"}},
-		Sign:    []string{"commits"},
-	}
-	if !reflect.DeepEqual(got.Git, want) {
-		t.Fatalf("stack git defaults = %+v, want %+v", got.Git, want)
-	}
-	// The caller's stack document was not mutated through shared slices.
-	if kept.Git.Credentials[0].SecretRef.Name != "old-key" || kept.Git.Author.Name != "Old" {
-		t.Fatal("merge aliased the daemon's stored defaults")
-	}
-	// Once written, a rerun sends no stack document.
-	done, err = apply(t.Context(), f, composeTeam(t, gitConfig), "kuke team init", nil, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if kinds, _ = appliedDocs(t, f.raw); done.resources != 4 || slices.Contains(kinds, "Stack") {
-		t.Fatalf("rerun resources=%d kinds=%v", done.resources, kinds)
-	}
-}
-
-func TestNoGitIdentityLeavesTheStackAlone(t *testing.T) {
+// TestApplyLeavesTheStackGitAlone: kuke team writes no git defaults (issue
+// #1591): a stack's git block is the operator's, and no Stack document is sent.
+func TestApplyLeavesTheStackGitAlone(t *testing.T) {
 	f := newFake()
 	f.stackDefaults = &api.ScopeDefaults{
 		Git: &api.ContainerGit{Author: &api.GitIdentity{Name: "Kept", Email: "k@example.com"}},
 	}
-	done, err := apply(t.Context(), f, composeTeam(t, nil), "kuke team init", nil, "")
+	done, err := apply(t.Context(), f, composeTeam(t, nil), "kuke team init", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -557,153 +471,78 @@ func TestNoGitIdentityLeavesTheStackAlone(t *testing.T) {
 	}
 }
 
-func TestMergeGit(t *testing.T) {
-	ref := func(name string) *api.ContainerSecretRef {
-		return &api.ContainerSecretRef{Name: name, Realm: "default"}
-	}
-	team := &api.ContainerGit{
-		Committer: &api.GitIdentity{Name: "Team", Email: "team@example.com"},
-		Credentials: []api.GitCredential{
-			{Host: "b.example", SecretRef: ref("new-b")},
-			{Host: "c.example", SecretRef: ref("c")},
-		},
-	}
-	// Nothing stored yet: the team's block is the result.
-	if got := mergeGit(nil, team); !reflect.DeepEqual(got, team) {
-		t.Fatalf("merge onto nothing = %+v", got)
-	}
-	existing := &api.ContainerGit{
-		Author: &api.GitIdentity{Name: "Stored", Email: "stored@example.com"},
-		Credentials: []api.GitCredential{
-			{Host: "a.example", SecretRef: ref("a")},
-			{Host: "b.example", SecretRef: ref("old-b")},
-		},
-		Signing: &api.GitSigning{SecretRef: ref("stored-signing")},
-		Sign:    []string{"tags"},
-	}
-	got := mergeGit(existing, team)
-	want := &api.ContainerGit{
-		Author:    &api.GitIdentity{Name: "Stored", Email: "stored@example.com"},
-		Committer: &api.GitIdentity{Name: "Team", Email: "team@example.com"},
-		Credentials: []api.GitCredential{
-			{
-				Host:      "a.example",
-				SecretRef: ref("a"),
-			}, {Host: "b.example", SecretRef: ref("new-b")}, {Host: "c.example", SecretRef: ref("c")},
-		},
-		// The team states no signing, so the stored one stands.
-		Signing: &api.GitSigning{SecretRef: ref("stored-signing")},
-		Sign:    []string{"tags"},
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("merged = %+v, want %+v", got, want)
-	}
-	if existing.Credentials[1].SecretRef.Name != "old-b" || len(existing.Credentials) != 2 {
-		t.Fatal("merge mutated the stored block")
-	}
-	// Merging is idempotent, which is what makes a rerun send no stack document.
-	if again := mergeGit(got, team); !reflect.DeepEqual(again, got) {
-		t.Fatalf("second merge changed the block: %+v", again)
-	}
-}
-
-// Git credential and signing secrets that do not exist are reported with the
-// typed-secret command, once each, without blocking application.
+// Git credential and signing secrets a source names that do not exist are
+// reported with the typed-secret command, once each, without blocking
+// application.
 func TestMissingGitSecretsAreReported(t *testing.T) {
 	deploy := config.SecretRef{Name: "deploy-key", Realm: "default"}
+	signers := config.SecretRef{Name: "signers", Realm: "default"}
 	withSecrets := func(cfg *config.TeamsConfig) {
-		gitConfig(cfg)
-		signers := config.SecretRef{Name: "signers", Realm: "default"}
-		cfg.Spec.Git.Signing.AllowedSignersRef = &signers
 		cfg.Spec.Defaults.Sources[0].Git = &config.SourceGit{
 			Credential: &config.SourceCredential{SecretRef: deploy},
-			Signing:    &config.GitSigning{SecretRef: deploy},
+			Signing:    &config.GitSigning{SecretRef: deploy, AllowedSignersRef: &signers},
 		}
 	}
 	f := newFake()
 	f.secrets[api.SecretMetadata{Name: "signers", Realm: "default"}] = "present"
-	done, err := apply(t.Context(), f, composeTeam(t, withSecrets), "kuke team init", nil, "")
+	done, err := apply(t.Context(), f, composeTeam(t, withSecrets), "kuke team init", "")
 	if err != nil || f.applies != 1 || f.creates != 0 {
 		t.Fatalf("err=%v applies=%d creates=%d", err, f.applies, f.creates)
 	}
-	if len(done.missing) != 2 ||
-		!strings.HasPrefix(done.missing[0], "git-ssh  →  kuke create secret git-ssh --realm default --type ssh-key") ||
+	if len(done.missing) != 1 ||
 		!strings.HasPrefix(
-			done.missing[1],
+			done.missing[0],
 			"deploy-key  →  kuke create secret deploy-key --realm default --type ssh-key",
 		) {
 		t.Fatalf("missing = %q", done.missing)
 	}
-	// A secret about to be imported in this run is not reported missing.
-	imported := []api.SecretDoc{{
-		APIVersion: api.APIVersionV1Beta1, Kind: api.KindSecret,
-		Metadata: api.SecretMetadata{Name: "git-ssh", Realm: "default"},
-		Spec:     api.SecretSpec{Type: api.SecretTypeSSHKey, SSHKey: &api.SecretSSHKey{PrivateKey: "material"}},
-	}}
-	f = newFake()
-	done, err = apply(t.Context(), f, composeTeam(t, withSecrets), "kuke team init", imported, "")
-	if err != nil || len(done.missing) != 2 || strings.Contains(strings.Join(done.missing, "\n"), "git-ssh") {
-		t.Fatalf("missing=%q err=%v", done.missing, err)
-	}
-	if len(f.created) != 1 || f.created[0].Spec.SSHKey.PrivateKey != "material" ||
-		bytes.Contains(f.raw, []byte("material")) {
-		t.Fatal("imported secret not created out of band")
-	}
 	// Existing secrets are neither recreated nor reported.
 	f = newFake()
-	for _, name := range []string{"git-ssh", "signers", "deploy-key"} {
+	for _, name := range []string{"signers", "deploy-key"} {
 		f.secrets[api.SecretMetadata{Name: name, Realm: "default"}] = "present"
 	}
-	done, err = apply(t.Context(), f, composeTeam(t, withSecrets), "kuke team init", nil, "")
+	done, err = apply(t.Context(), f, composeTeam(t, withSecrets), "kuke team init", "")
 	if err != nil || len(done.missing) != 0 || f.creates != 0 || len(done.notes) != 0 {
 		t.Fatalf("missing=%q creates=%d notes=%q err=%v", done.missing, f.creates, done.notes, err)
-	}
-	// An import over an existing secret replaces it and says so: skipping it
-	// would report success while cells kept the old key.
-	done, err = apply(t.Context(), f, composeTeam(t, withSecrets), "kuke team init", imported, "")
-	if err != nil || len(done.missing) != 0 || f.creates != 1 ||
-		f.created[0].Spec.SSHKey.PrivateKey != "material" {
-		t.Fatalf("missing=%q creates=%d err=%v", done.missing, f.creates, err)
-	}
-	if !slices.ContainsFunc(done.notes, func(n string) bool {
-		return strings.Contains(n, `secret "git-ssh" already existed and was replaced`)
-	}) {
-		t.Fatalf("notes = %q, want the replacement reported", done.notes)
 	}
 	// A failed lookup gates the apply and reports no daemon text.
 	f = newFake()
 	f.lookupErr = errors.New("denied: sensitive-detail")
-	if _, err = apply(t.Context(), f, composeTeam(t, withSecrets), "kuke team init", nil, ""); err == nil ||
+	if _, err = apply(t.Context(), f, composeTeam(t, withSecrets), "kuke team init", ""); err == nil ||
 		f.applies != 0 || strings.Contains(err.Error(), "sensitive-detail") {
 		t.Fatalf("err=%v applies=%d", err, f.applies)
 	}
 }
 
-// The operator sees composition notes (settings without effect, uncovered SSH
-// sources) on the result of a successful add.
-func TestAddReportsCompositionNotes(t *testing.T) {
-	opts, _ := setupAdd(t)
-	changeAddConfig(t, opts, func(cfg *config.TeamsConfig) {
-		cfg.Spec.Git = &config.Git{
-			Author:     &config.Identity{Name: "Dev", Email: "dev@example.com"},
-			SigningKey: "/home/dev/.ssh/id_ed25519.pub",
+// TestAddHintsAtAMissingGitIdentity is AC13 through `kuke team add`: the
+// project clones over SSH and nothing names a git identity, so the result says
+// once how to store one; with a Realm default it says nothing.
+func TestAddHintsAtAMissingGitIdentity(t *testing.T) {
+	const hint = "no git identity is set; run kuke connector import git --default"
+	for _, withDefault := range []bool{false, true} {
+		opts, _ := setupAdd(t)
+		fake := newFake()
+		if withDefault {
+			fake.realmDefaults = &api.ScopeDefaults{Git: &api.ContainerGit{
+				IdentityRef: &api.ContainerSecretRef{Name: "git-ssh", Realm: "default"},
+			}}
 		}
-	})
-	fake := newFake()
-	opts.Client = fake
-	result, err := Add(t.Context(), opts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.ContainsFunc(result.Notes, func(n string) bool { return strings.Contains(n, "host paths") }) {
-		t.Fatalf("notes = %v", result.Notes)
-	}
-	if bytes.Contains(fake.raw, []byte("id_ed25519")) || !bytes.Contains(fake.raw, []byte("kind: Stack")) ||
-		!bytes.Contains(fake.raw, []byte("dev@example.com")) {
-		t.Fatal("identity must reach the stack defaults without the host key path")
-	}
-	if entry, readErr := os.ReadFile(filepath.Join(opts.Root, "kuketeam.d", opts.Name+".yaml")); readErr != nil ||
-		bytes.Contains(entry, []byte("dev@example.com")) {
-		t.Fatalf("team registration must not carry the operator identity: %v", readErr)
+		opts.Client = fake
+		result, err := Add(t.Context(), opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		count := 0
+		for _, note := range result.Notes {
+			if note == hint {
+				count++
+			}
+		}
+		if want := map[bool]int{false: 1, true: 0}[withDefault]; count != want {
+			t.Fatalf("default=%v: notes = %v, want the hint %d time(s)", withDefault, result.Notes, want)
+		}
+		if bytes.Contains(fake.raw, []byte("kind: Stack")) {
+			t.Fatal("add wrote stack git defaults")
+		}
 	}
 }

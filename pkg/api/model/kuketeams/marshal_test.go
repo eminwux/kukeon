@@ -22,46 +22,8 @@ import (
 	"testing"
 
 	model "github.com/eminwux/kukeon/pkg/api/model/kuketeams"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"gopkg.in/yaml.v3"
 )
-
-// TestTeamsConfigGitMarshalsContainerGitSuperset asserts the embedded
-// v1beta1.ContainerGit fields promote in both JSON and YAML, and the added
-// sshKey field round-trips — i.e. TeamsConfig.git is a strict superset of
-// ContainerGit on the wire, not just in Go.
-func TestTeamsConfigGitMarshalsContainerGitSuperset(t *testing.T) {
-	t.Parallel()
-	git := model.TeamsConfigGit{
-		ContainerGit: v1beta1.ContainerGit{
-			Author:         &v1beta1.GitIdentity{Name: "A", Email: "a@example.com"},
-			SigningKey:     "/k.pub",
-			Sign:           []string{model.GitSignCommits, model.GitSignTags},
-			AllowedSigners: "/allowed",
-		},
-		SSHKey: "/id_ed25519",
-	}
-
-	jsonBytes, err := json.Marshal(git)
-	if err != nil {
-		t.Fatalf("json.Marshal: %v", err)
-	}
-	for _, key := range []string{`"author"`, `"signingKey"`, `"sign"`, `"allowedSigners"`, `"sshKey"`} {
-		if !strings.Contains(string(jsonBytes), key) {
-			t.Errorf("JSON missing promoted key %s: %s", key, jsonBytes)
-		}
-	}
-
-	yamlBytes, err := yaml.Marshal(git)
-	if err != nil {
-		t.Fatalf("yaml.Marshal: %v", err)
-	}
-	for _, key := range []string{"author:", "signingKey:", "sign:", "allowedSigners:", "sshKey:"} {
-		if !strings.Contains(string(yamlBytes), key) {
-			t.Errorf("YAML missing promoted key %q: %s", key, yamlBytes)
-		}
-	}
-}
 
 // TestRoundTripAllKinds round-trips each kind through JSON and YAML and checks
 // a representative field survives, exercising the JSON+YAML marshalling AC.
