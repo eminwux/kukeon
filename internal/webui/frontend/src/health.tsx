@@ -38,12 +38,15 @@ function reportQuestion(report: Report): string {
   return oneLine(`About health report ${report.id} (created ${report.createdAt}, window ${report.since} to ${report.until}, ${report.findings.length} findings, ${kukeon} classified kukeon): read it with "kuke health report ${report.id}" and walk me through what needs attention first.`);
 }
 
-// The reapply edit a suspended sweep needs. Schedules are never edited from the browser.
-function EnableSweep({ config }: { config: ConfigDoc }) {
+// The reapply edit suspended sweeps need, shown once for every suspended sweep config (#1568). Schedules are
+// never edited from the browser.
+function EnableSweep({ configs }: { configs: ConfigDoc[] }) {
   const edit = `# ~/.kuke/kuketeam.d/kuke.yaml, under spec.roles[] for the majordomo role\ntasks:\n  - { name: ${sweepTask}, suspend: false }`;
+  const names = configs.map(config => config.metadata.name);
   return <div className="health-enable" role="note">
     <strong>Sweeps are suspended.</strong>
-    <p>{config.metadata.name} ships switched off so no install spends model credits unasked. To turn sweeps on, edit the kuke team entry on the host and reapply it:</p>
+    <p>{names.length === 1 ? `${names[0]} ships` : `These ${names.length} sweep configs ship`} switched off so no install spends model credits unasked. To turn sweeps on, edit the kuke team entry on the host and reapply it:</p>
+    {names.length > 1 && <ul className="health-suspended" aria-label="Suspended sweeps">{names.map((name, index) => <li key={index} className="mono-id">{name}</li>)}</ul>}
     <pre tabIndex={0}>{edit}</pre>
     <pre tabIndex={0}>kuke team init --reapply</pre>
     <p className="description">The schedule cannot be changed from this page.</p>
@@ -67,7 +70,6 @@ function SweepSchedule({ config, onRun, running }: { config: ConfigDoc; onRun: (
       <dt>Last fire</dt><dd>{when(status?.lastScheduleTime)}{status?.lastCell ? <> · <span className="mono-id">{status.lastCell}</span></> : null}</dd>
       <dt>Last error</dt><dd>{status?.lastError ? <span className="health-last-error">{status.lastError}</span> : "None"}</dd>
     </dl>
-    {schedule?.suspend && <EnableSweep config={config} />}
   </li>;
 }
 
@@ -102,6 +104,7 @@ export function HealthPage({ revision, major, onChanged }: { revision: number; m
   }
 
   const current = hasReports ? report.data : undefined;
+  const suspended = major.sweeps.filter(config => config.spec?.schedule?.suspend);
   return <>
     <section className="panel health-schedule" aria-label="Sweep schedule">
       <div className="panel-heading"><h2>Sweep schedule</h2><span className="badge">From the task config</span></div>
@@ -109,6 +112,7 @@ export function HealthPage({ revision, major, onChanged }: { revision: number; m
         {major.configs.loading && !major.configs.data && <p role="status">Loading sweep configs…</p>}
         {major.configs.error && <ErrorNotice error={major.configs.error} kind="Configs" />}
         {major.configs.data && !major.sweeps.length && <p className="description" role="status">No health-sweep config found. Run <code>kuke team init</code> on the host to apply majordomo and its sweep task.</p>}
+        {suspended.length > 0 && <EnableSweep configs={suspended} />}
         <ul className="health-sweeps">{major.sweeps.map(config => <SweepSchedule key={JSON.stringify([...configScope(config), config.metadata.name])} config={config} onRun={runSweep} running={running === config.metadata.name} />)}</ul>
         {sweepResult && <div className={sweepResult.tone === "error" ? "error" : "health-sweep-started"} role={sweepResult.tone === "error" ? "alert" : "status"}>{sweepResult.tone === "error" && <strong>Sweep did not start</strong>}<p>{sweepResult.message}</p></div>}
       </div>

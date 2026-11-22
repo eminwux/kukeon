@@ -320,6 +320,8 @@ function App() {
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const nextTheme: Theme = theme === "system" ? "light" : theme === "light" ? "dark" : "system";
   const [menuOpen, setMenuOpen] = useState(false);
+  // The open connector's display title, reported by the Connectors page once its catalog has loaded.
+  const [connectorTitle, setConnectorTitle] = useState<{ name: string; title: string }>();
   const sidebar = useSidebarLayout();
   const menuToggle = useRef<HTMLButtonElement>(null);
   const sidebarClose = useRef<HTMLButtonElement>(null);
@@ -477,14 +479,13 @@ function App() {
           : presence === true ? "The cell still exists and remains listed in the sidebar."
             : "The final state could not be confirmed; the cell and terminal tabs were retained.";
         const effects = `Containers deleted: ${body.containersDeleted === true ? "yes" : "not reported"}; cgroup deleted: ${body.cgroupDeleted === true ? "yes" : "not reported"}; metadata deleted: ${body.metadataDeleted === true ? "yes" : "not confirmed"}; comprehensive purge: ${body.purgeSucceeded === true ? "complete" : "incomplete"}.`;
-        const requestedOptions = `Options passed: --force ${body.force ? "enabled" : "disabled"}, --cascade ${body.cascade ? "enabled" : "disabled"}.`;
         const details = body.purgeSucceeded
           ? ` Deleted: ${body.deleted?.join(", ") || "none reported"}. Purged: ${body.purged?.join(", ") || "none reported"}.`
           : ` Daemon-reported cleanup targets (individual completion unconfirmed): ${body.deleted?.join(", ") || "none reported"}. Purge detail: ${body.purged?.join(", ") || "none reported"}.`;
         if (!complete && presence !== false) {
           terminals.interruptCell(scope, "Purge was incomplete. The cell may still exist, but its runtime resources may have changed.");
         }
-        recordOperation(scope, { action, phase: complete ? "success" : "error", message: complete ? `Cell purged. ${effects} ${requestedOptions}${details}` : `Purge incomplete. ${effects} ${requestedOptions}${details} ${outcome}` });
+        recordOperation(scope, { action, phase: complete ? "success" : "error", message: complete ? `Cell purged. ${effects}${details}` : `Purge incomplete. ${effects}${details} ${outcome}` });
         return;
       }
       const message = action === "start" ? "Cell started."
@@ -624,9 +625,12 @@ function App() {
   const images = route.view === "images";
   const daemonView = route.view === "daemon" || route.view === "daemon-logs";
   const connectorsView = route.view === "connectors";
-  const heading = connectorsView ? route.scope[0] ?? "Connectors" : route.view === "health" ? "Health" : route.view === "daemon" ? "Daemon" : route.view === "daemon-logs" ? "Daemon logs" : isWorkspace ? route.scope.at(-1) ?? "Cell" : route.view === "new-cell" ? "New Cell" : route.view === "new-config" ? "New Config" : images ? route.scope[1] ?? "Images" : catalog ? route.scope.at(-1) ?? catalogTitles[route.view] : route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : "Resources";
+  // A connector page is headed by its title, with the slug as secondary text; until the catalog loads, or
+  // for an unknown connector, the slug stands in.
+  const connectorHeading = connectorsView && route.scope[0] ? connectorTitle?.name === route.scope[0] ? connectorTitle.title : route.scope[0] : undefined;
+  const heading = connectorsView ? connectorHeading ?? "Connectors" : route.view === "health" ? "Health" : route.view === "daemon" ? "Daemon" : route.view === "daemon-logs" ? "Daemon logs" : isWorkspace ? route.scope.at(-1) ?? "Cell" : route.view === "new-cell" ? "New Cell" : route.view === "new-config" ? "New Config" : images ? route.scope[1] ?? "Images" : catalog ? route.scope.at(-1) ?? catalogTitles[route.view] : route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : "Resources";
   // Only a scope path or realm qualifies the title; generic subtitles were dropped.
-  const headingContext = isWorkspace ? route.scope.join(" / ") : images ? route.scope[1] ? route.scope[0] : "" : route.view === "resource" || (catalog && route.scope.length > 0) ? route.scope.join(" / ") : "";
+  const headingContext = connectorsView ? connectorHeading && connectorHeading !== route.scope[0] ? route.scope[0] : "" : isWorkspace ? route.scope.join(" / ") : images ? route.scope[1] ? route.scope[0] : "" : route.view === "resource" || (catalog && route.scope.length > 0) ? route.scope.join(" / ") : "";
   const daemonStatus = inventory.daemon.error?.code === "permission_denied" ? "Permission denied" : inventory.daemon.error ? "Unavailable" : inventory.daemon.loading ? "Checking…" : "Connected";
   const daemonTone = inventory.daemon.error ? "failed" : inventory.daemon.loading ? "checking" : "";
   const versions = versionInfo(connection.data?.version, connection.data?.daemonVersion);
@@ -693,7 +697,7 @@ function App() {
         {!isWorkspace && !cellScreenScope && <ResourcesNavigation route={route} mobile={mobile} />}
         {!cellScreenScope && <div className="page-heading"><h1 tabIndex={-1}>{heading}</h1>{headingContext && <p className="page-context mono-id">{headingContext}</p>}</div>}
         <CellDetailsScreen title={heading ?? "Cell"} view={cellView} scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} operations={operations} onLifecycleAction={runCellLifecycle} dockedCell={dockedCell} onOpenDock={() => dock.setOpen(true)} />
-        {isWorkspace ? null : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "new-config" ? <Suspense fallback={<p role="status">Loading Config creation form…</p>}><NewConfigPage key={JSON.stringify(route.blueprint ?? [])} revision={revision} inventory={inventory} blueprintScope={route.blueprint} onCreated={() => setRevision(value => value + 1)} /></Suspense> : connectorsView ? <Suspense fallback={<p role="status">Loading connectors…</p>}><ConnectorsPage name={route.scope[0]} target={route.target} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /></Suspense> : route.view === "health" ? <HealthPage revision={revision} major={major} onChanged={() => setRevision(value => value + 1)} /> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} operations={operations} onLifecycleAction={runCellLifecycle} onParentAction={runParentAction} /> : <Dashboard inventory={inventory} />}
+        {isWorkspace ? null : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "new-config" ? <Suspense fallback={<p role="status">Loading Config creation form…</p>}><NewConfigPage key={JSON.stringify(route.blueprint ?? [])} revision={revision} inventory={inventory} blueprintScope={route.blueprint} onCreated={() => setRevision(value => value + 1)} /></Suspense> : connectorsView ? <Suspense fallback={<p role="status">Loading connectors…</p>}><ConnectorsPage name={route.scope[0]} target={route.target} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} onTitle={setConnectorTitle} /></Suspense> : route.view === "health" ? <HealthPage revision={revision} major={major} onChanged={() => setRevision(value => value + 1)} /> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} operations={operations} onLifecycleAction={runCellLifecycle} onParentAction={runParentAction} /> : <Dashboard inventory={inventory} />}
         <footer>Daemon inventory · {inventory.data ? <>Last refreshed <time dateTime={inventory.data.updatedAt}>{new Date(inventory.data.updatedAt).toLocaleTimeString()}</time></> : "Not refreshed yet"} · Refresh to retrieve the latest state.</footer>
       </div>
     </main>

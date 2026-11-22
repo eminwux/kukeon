@@ -1609,7 +1609,7 @@ test("create from config resolves configs and blueprint refs scoped at realm, sp
   for (const lookup of lookups) expect(lookup.params).not.toContain(lookup.scope.at(-1));
 });
 
-test("kill and purge require explicit confirmation and pass only selected purge options", async ({ page }) => {
+test("kill and purge require explicit confirmation, and the cell Purge dialog offers no no-op options", async ({ page }) => {
   const submitted = [];
   await mock(page, (path, request) => {
     if (request.method() !== "POST") return undefined;
@@ -1639,19 +1639,19 @@ test("kill and purge require explicit confirmation and pass only selected purge 
   await page.getByText("Advanced actions", { exact: true }).click();
   await page.getByRole("button", { name: "Purge cell…" }).click();
   dialog = page.getByRole("dialog");
-  const force = dialog.locator("label").filter({ hasText: "--force" }).locator("input");
-  const cascade = dialog.locator("label").filter({ hasText: "--cascade" }).locator("input");
-  await expect(force).not.toBeChecked();
-  await expect(cascade).not.toBeChecked();
+  // --force and --cascade change nothing for a cell (kukeond only records them), so the dialog no longer
+  // offers them (#1568). The request body is the one the dialog always sent by default.
+  await expect(dialog.getByRole("checkbox")).toHaveCount(0);
+  await expect(dialog).not.toContainText("--force");
+  await expect(dialog).not.toContainText("--cascade");
   await expect(dialog.getByRole("button", { name: "Confirm Purge" })).toBeDisabled();
   await dialog.getByLabel("Type the full target above to enable Purge").fill("dev / shared / services / api");
-  await force.check();
-  await cascade.check();
   await dialog.getByRole("button", { name: "Confirm Purge" }).click();
   await expect(toasts(page)).toHaveCount(1);
   await expect(toasts(page)).toContainText("Cell purged");
+  await expect(toasts(page)).not.toContainText("--force");
   await expect(toasts(page).locator(".toast-title")).toHaveText("dev / shared / services / api");
-  expect(submitted).toEqual([{ force: true, cascade: true }]);
+  expect(submitted).toEqual([{ force: false, cascade: false }]);
 });
 
 test("partial purge reports incomplete cleanup instead of success", async ({ page }) => {
@@ -3205,8 +3205,44 @@ test("an identity form follows the connector's secret types and field types", as
   // has one login method and says so.
   await page.goto(`${server.url}#/connectors/demo`);
   await expect(page.getByRole("region", { name: "Demo connector" })).toContainText("The login method has no identity");
-  await expect(page.getByRole("region", { name: "Demo defaults" }).getByRole("group")).toHaveCount(1);
+  await expect(page.getByRole("region", { name: "Demo defaults" }).getByRole("group", { name: /^Demo .* default$/ })).toHaveCount(1);
   await expect(page.getByRole("region", { name: "Demo defaults" }).getByRole("group", { name: "Demo key default" })).toBeVisible();
+});
+
+// Issue #1568, item F: the connector page is headed by the connector's title and labels what each scope picker is for.
+test("a connector page shows its title with the slug as context, and its scope pickers sit under labelled groups", async ({ page }) => {
+  const world = await mockConnectors(page);
+  await page.goto(`${server.url}#/connectors/example-token`);
+  const heading = page.locator("main .page-heading");
+  await expect(heading.locator("h1")).toHaveText("Example");
+  await expect(heading.locator(".page-context")).toHaveText("example-token");
+  await expect(page).toHaveTitle("Example · kukeon");
+  // Each scope picker is in a group named for what its scope applies to.
+  const stored = page.getByRole("region", { name: "Example identities" }).getByRole("group", { name: "Stored identity scope" });
+  await expect(stored).toContainText("Where a new Example identity is stored");
+  await expect(stored.getByRole("combobox")).toHaveCount(3);
+  await expect(stored.getByLabel("Identity realm")).toHaveValue("dev");
+  const defaults = page.getByRole("region", { name: "Example defaults" });
+  const scope = defaults.getByRole("group", { name: "Default scope" });
+  await expect(scope).toContainText("Whose defaults are shown and set below");
+  await expect(scope.getByLabel("Default realm")).toHaveValue("dev");
+  await expect(scope.getByRole("combobox")).toHaveCount(3);
+  const method = defaults.getByRole("group", { name: "Example token default" });
+  await expect(method.getByRole("heading", { name: "Per-method scope" })).toBeVisible();
+  await expect(method).toContainText("The level of the default scope above at which the token method's default is saved.");
+  await expect(method.getByLabel("Example token default level")).toBeVisible();
+  // Saving is unchanged: a default set through the grouped pickers posts the same body.
+  await scope.getByLabel("Default space").selectOption("shared");
+  await defaults.getByLabel("Example token default identity").selectOption({ label: "example-default — dev (opaque)" });
+  await defaults.getByRole("button", { name: "Set default" }).click();
+  await expect.poll(() => world.posts("/api/connectors/example-token/defaults").length).toBe(1);
+  expect(world.posts("/api/connectors/example-token/defaults")[0].body).toEqual({ scope: { realm: "dev", space: "shared" }, method: "token", identity: { name: "example-default", realm: "dev" } });
+  // A connector the catalog does not define keeps its slug as the heading, with no context line.
+  await page.goto(`${server.url}#/connectors/nope`);
+  await expect(heading.locator("h1")).toHaveText("nope");
+  await expect(heading.locator(".page-context")).toHaveCount(0);
+  await page.goto(`${server.url}#/connectors`);
+  await expect(heading.locator("h1")).toHaveText("Connectors");
 });
 
 test("setting a Realm default clears the Needs connector badge of the Configs that inherit it, without re-rendering them", async ({ page }) => {

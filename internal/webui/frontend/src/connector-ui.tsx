@@ -105,6 +105,13 @@ export function IdentitySelect({ label, identities, value, onChange, emptyLabel,
   </div>;
 }
 
+// ScopeGroup puts a scope picker under a heading that says what its scope applies to (#1568): the connector
+// page has one for where an identity is stored and one for whose defaults are shown.
+export function ScopeGroup({ title, description, children }: { title: string; description: ReactNode; children: ReactNode }) {
+  const id = useId();
+  return <div className="connector-store" role="group" aria-labelledby={id}><h3 id={id}>{title}</h3><p className="description">{description}</p>{children}</div>;
+}
+
 // ScopePicker chooses a Realm, Space and Stack from the inventory, down to the
 // deepest of the given levels.
 export function ScopePicker({ label, inventory, levels, value, onChange, disabled = false }: { label: string; inventory: InventoryResource; levels: string[]; value: Scope; onChange: (scope: Scope) => void; disabled?: boolean }) {
