@@ -334,14 +334,23 @@ type profile struct {
 //nolint:gochecknoglobals // package-level membership list, read-only.
 var hostMounts = []string{"kuke-binary", "kukeon-install", "kukeond-socket"}
 
+// daemonMounts are the host mounts the `host` profile names: the daemon socket
+// and the host's own `kuke` client, which every shipped role selects. Any
+// other set — one of the two alone, or with `kukeon-install` — keeps a suffix
+// naming its mounts.
+//
+//nolint:gochecknoglobals // package-level membership list, read-only.
+var daemonMounts = []string{"kuke-binary", "kukeond-socket"}
+
 // name is the blueprint-name suffix of the profile: empty for the default
-// posture, `root`, `host` (all kukeon host mounts) or both.
+// posture, `root`, `host` (the daemon socket and `kuke` client mounts) or
+// both.
 func (p profile) name() string {
 	var parts []string
 	if p.Root {
 		parts = append(parts, "root")
 	}
-	if slices.Equal(p.Mounts, hostMounts) {
+	if slices.Equal(p.Mounts, daemonMounts) {
 		parts = append(parts, "host")
 	} else {
 		parts = append(parts, p.Mounts...)

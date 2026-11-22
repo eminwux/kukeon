@@ -1276,7 +1276,7 @@ func TestFreshMajordomoComposition(t *testing.T) {
 	wantMounts := mergeMounts(socketMounts, binaryMounts)
 	for i, harnessName := range []string{"codex", "claude"} {
 		p := result.Pairs[i]
-		blueprint := harnessName + "-kuke-binary-kukeond-socket"
+		blueprint := harnessName + "-host"
 		if p.Config.Metadata.Name != "kuke-majordomo-"+harnessName || p.Blueprint.Metadata.Name != blueprint ||
 			p.Config.Spec.Blueprint.Name != blueprint || result.Blueprints[i] != p.Blueprint {
 			t.Fatalf("incorrect pair identity: %s on %s", p.Config.Metadata.Name, p.Blueprint.Metadata.Name)

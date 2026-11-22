@@ -193,14 +193,17 @@ func mergeMounts(sets ...map[string]hostMount) map[string]hostMount {
 // Host mounts are part of the security posture, so they select a blueprint
 // variant instead of being a config toggle.
 func TestHostMountProfiles(t *testing.T) {
+	daemon := mergeMounts(socketMounts, binaryMounts)
 	all := mergeMounts(socketMounts, binaryMounts, installMounts)
 	for _, tc := range []struct {
 		name, mounts, want string
 		root               bool
 		targets            map[string]hostMount
 	}{
-		{"all", "[kukeond-socket, kuke-binary, kukeon-install]", "codex-host", false, all},
-		{"all-root", "[kukeon-install, ssh, kuke-binary, kukeond-socket]", "codex-root-host", true, all},
+		{"host", "[kukeond-socket, kuke-binary]", "codex-host", false, daemon},
+		{"host-root", "[ssh, kuke-binary, kukeond-socket]", "codex-root-host", true, daemon},
+		{"all", "[kukeond-socket, kuke-binary, kukeon-install]", "codex-kuke-binary-kukeon-install-kukeond-socket", false, all},
+		{"all-root", "[kukeon-install, ssh, kuke-binary, kukeond-socket]", "codex-root-kuke-binary-kukeon-install-kukeond-socket", true, all},
 		{"partial", "[kuke-binary]", "codex-kuke-binary", false, binaryMounts},
 		{"socket", "[kukeond-socket]", "codex-kukeond-socket", false, socketMounts},
 		{"ssh-only", "[ssh]", "codex", false, map[string]hostMount{}},

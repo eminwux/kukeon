@@ -148,11 +148,12 @@ See [Blueprint contract](blueprint-contract.md).
 | --------------------- | ------------------------------------------------------------------------------ |
 | `<harness>`           | the default posture (`claude`, `codex`, `opencode`)                            |
 | `<harness>-root`      | the `root` image capability: a privileged cell with a nested container runtime |
-| `<harness>-host`      | the `kukeond-socket`, `kuke-binary` and `kukeon-install` host mounts           |
+| `<harness>-host`      | the `kukeond-socket` and `kuke-binary` host mounts                             |
 | `<harness>-root-host` | both                                                                           |
 
-A role that selects only some of the host mounts gets a profile named after
-them. The security posture is fixed in the blueprint and is never a Config
+A role that selects any other set of host mounts — only one of the two, or
+`kukeon-install` as well — gets a profile named after them, such as
+`<harness>-kuke-binary-kukeon-install-kukeond-socket`. The security posture is fixed in the blueprint and is never a Config
 toggle.
 
 The daemon socket and the `kuke` binary are mounted through directories, so a
