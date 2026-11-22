@@ -26,8 +26,13 @@ when both are known and differ. An unreachable daemon shows `daemon unknown`.
 `GET /api/connection` returns `endpoint`, `version`, and, when kukeond answers
 its version ping, `daemonVersion`.
 
-**Group by** defaults to **None**. Choose any label key found in cell metadata
-to organize the sidebar; cells without a value appear under **Ungrouped**. Group
+**Group by** defaults to **None**. Choose a label key found in cell metadata
+to organize the sidebar; cells without a value appear under **Ungrouped**. The
+controller-managed identity keys (`realm.kukeon.io`, `space.kukeon.io`,
+`stack.kukeon.io`, `cell.kukeon.io`, …) are left out, because they repeat the
+scope or are unique per cell; a key of that kind stays listed only while it is
+the stored selection. A cell that is out of sync with its Config, or whose
+comparison failed, shows a **Drift** or **Drift unknown** badge after its state. Group
 headers expand and collapse. The sidebar initially shows 25 groups and 100 cells
 per group, with controls to reveal more. The selected key and collapsed groups are stored only in
 this browser. If inventory becomes unavailable, retained cells are marked stale.
@@ -35,9 +40,12 @@ this browser. If inventory becomes unavailable, retained cells are marked stale.
 The toolbar's **New Cell** button opens a guided workflow with **From Config** and **Manual** methods.
 Config creation uses the selected CellConfig and its referenced Blueprint;
 manual creation exposes Cell and Container authorable fields in Basic and
-Advanced sections. Both methods preview and validate before creation. Cells are
+Advanced sections. Both methods preview and validate before creation. The
+preview leads with a summary (name, scope, containers, images, connectors) and
+keeps the complete Cell document in a collapsed **Full preview (JSON)**
+disclosure; **Create Cell** is then the one primary action. Cells are
 created stopped and appear in the sidebar immediately. Starting after creation
-is an explicit opt-in; when an attachable workload is present, the cell terminal
+is an explicit opt-in beside Create Cell; when an attachable workload is present, the cell terminal
 attaches after it becomes ready. Switching cells preserves each cell's
 terminal tab and attachment up to the connection limit; it does not stop a
 workload. A lost browser connection does not guarantee that process or terminal
@@ -61,11 +69,12 @@ cell and kukeond remains authoritative for validation and state.
   confirmed; partial or ambiguous results trigger a scoped daemon read and an
   inventory refresh.
 - **Purge** asks kukeond for comprehensive cleanup and requires typing the full
-  scoped cell identity before submission. `--force` and `--cascade` are separate,
-  unchecked options. The current cell purge implementation records `--force`
-  without bypassing controller validation, and accepts `--cascade` without
-  applying recursive cleanup because cells are leaf resources. The result
-  reports the requested options and daemon-reported cleanup items. When purge
+  scoped cell identity before submission. The dialog does not offer `--force`
+  or `--cascade` for a cell: the current cell purge implementation only records
+  `--force` without bypassing controller validation, and accepts `--cascade`
+  without applying recursive cleanup because cells are leaf resources. The
+  request still sends both, off. The result reports the daemon-reported
+  cleanup items. When purge
   is partial, the `Deleted` list is a cleanup plan and does not prove that each
   listed item was removed; use the success flag and refreshed inventory to
   distinguish completion from attempted cleanup.
@@ -117,9 +126,14 @@ running returns `operation_in_progress` (409). An overlap is the same target,
 an ancestor, or a descendant. These routes use the same Host/Origin checks as
 every other route.
 
-Open **Administration** for the resource dashboard and navigation to Realms,
-Spaces, Stacks, Cells, Blueprints, Configs, Volumes, and Secrets. The dashboard
-shows counts and daemon-reported cell states. Containers are reached through
+Open **Administration** for the resource dashboard and its navigation, which
+has two labelled groups: **Operate** (Overview, Cells, Health) and **Configure**
+(Realms, Spaces, Stacks, Blueprints, Configs, Volumes, Secrets, Connectors,
+Images, Daemon). On phones the Configure group is a disclosure. The dashboard
+leads with **Needs attention**: every cell that is not Ready, and every Ready
+cell that is out of sync with its Config or whose comparison failed, with the
+reason. The cell count and daemon-reported cell states follow, then the realm,
+space and stack counts. Containers are reached through
 their cell details. Select a resource kind to open its list across scopes.
 Lists show name, reported state, and parent scope. Search by name or scope, filter
 by realm, and use the paging controls for collections larger than 25 entries.
@@ -263,8 +277,8 @@ kukeon file itself.
 - **Run sweep now** starts one sweep cell from that config, the same as
   `kuke run -d <config>`. A sweep submits a report only if it finds something.
 - While sweeps are suspended, the page shows the entry edit and the
-  `kuke team init --reapply` command that turn them on. No control on the page
-  edits a schedule.
+  `kuke team init --reapply` command that turn them on, once, above the sweep
+  list, naming the suspended configs. No control on the page edits a schedule.
 - **Latest report**: its window, summary and findings. Each finding shows its
   classification (`kukeon`, `workload` or `unclear`), whether it is recurring
   or new, its evidence and suggested commands, and a link to the issue if one
@@ -352,7 +366,10 @@ cell, are shown verbatim and the row stays.
 ## Cgroup details
 
 Realm, space, stack, cell, and container detail views include a **Cgroup**
-section; for cells it appears on the **Overview** tab. kukeond reads the cgroup
+section; for cells it appears on the **Overview** tab. On cell and container
+pages the section is collapsed until opened, shows a one-line summary
+(readiness, memory in use against its limit, PIDs), and remembers whether it
+was left open in this browser. kukeond reads the cgroup
 v2 interface files and returns them over its Unix-socket API. `kuke serve` never
 reads `/sys/fs/cgroup` itself. Values are point-in-time: refresh re-reads them.
 
@@ -395,7 +412,9 @@ use the same notices as other resource views.
 ## Network details
 
 Space, cell, and container detail views include a **Network** section; for
-cells it appears on the **Overview** tab. Realms and stacks have no networking
+cells it appears on the **Overview** tab. On cell and container pages it is
+collapsed until opened, with a one-line summary, like the Cgroup section.
+Realms and stacks have no networking
 fields, so they have none. kukeond reads the space's CNI conflist, its subnet
 allocator state, and the CNI result cache, and returns them over its
 Unix-socket API. `kuke serve` never reads `/opt/kukeon` or `/var/lib/cni`
@@ -695,7 +714,8 @@ curl http://127.0.0.1:5129/api/realms
 
 The sidebar holds the kukeon brand (a link to Resources), the cell inventory,
 and daemon connection and version information; the toolbar holds **New Cell**,
-**Resources**, refresh, and appearance controls. Resources shows its resource
+refresh, and appearance controls, and its breadcrumb starts at **Resources**.
+Resources shows its resource
 navigation above the current view. Existing `#/dashboard`, resource, catalog, and
 hierarchy bookmarks still open their Administration views; browser history keeps
 working across both areas.
@@ -838,6 +858,11 @@ blueprint. A Blueprint is the form and the CellConfig is the answers (see
   source's own git identity: author, a credential (`basic-auth` or `ssh-key`
   secret) and a signing key (`ssh-key` secret). **Secret slots** pick a stored
   Secret.
+- The **Config** section (name, prefix, scope) is always open. Every other
+  section is a disclosure whose row counts the answers set in it. Sections that
+  hold a required answer come first and open by themselves while one is
+  missing. **Preview Config** with a required answer still missing sends
+  nothing: it opens each section that holds one and focuses the first field.
 
 **Preview** renders a cell from the unsaved Config through the daemon — the same
 render `kuke create cell <name> --from-config <cfg> --dry-run --explain` performs — and shows
