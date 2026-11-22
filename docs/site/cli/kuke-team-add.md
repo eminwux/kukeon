@@ -89,9 +89,17 @@ spec:
     - { name: dev, source: agents, path: dev, needs: { image: [go, root] } }
     - { name: pm, source: agents, path: pm }
     - { name: pr-reviewer, source: agents, path: pr-reviewer }
+    - {
+        name: pipeline,
+        source: agents,
+        path: pipeline,
+        harness: script,
+        tasks: [{ name: tick, suspend: false }],
+      }
   harnesses:
     - { name: claude, source: project, path: team/harnesses/claude }
     - { name: codex, source: project, path: team/harnesses/codex }
+    - { name: script, source: project, path: team/harnesses/script }
 ```
 
 `--source` overrides only `projectSource.url`. One of `--branch`, `--tag`, or

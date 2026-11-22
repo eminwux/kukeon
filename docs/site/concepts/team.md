@@ -377,6 +377,17 @@ spec:
 - **Modes.** There is only a `headless` mode; a script cell is not an
   attachable session.
 
+kukeon's own `kuketeam.yaml` runs the agents repository's `pipeline` role this
+way: pinned to `script`, with `tasks: [{ name: tick, suspend: false }]`
+switching on the five-minute tick the role ships suspended. To stop the
+reactor:
+
+- **Durably:** set `tasks: [{ name: tick, suspend: true }]` on the role entry
+  in `kuketeam.yaml` (or remove the role entry) and run `kuke team add`.
+- **Immediately:** `kuke delete config kukeon-pipeline-script-tick`. No new
+  tick fires, and worker cells that are already running are left alone. The
+  next `kuke team add` renders the config again.
+
 ### The majordomo health sweep
 
 The `kuke` team's `majordomo` role declares one task, `health-sweep`, with

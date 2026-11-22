@@ -11,8 +11,16 @@ spec:
     - { name: dev, source: agents, path: dev, needs: { image: [go, root] } }
     - { name: pm, source: agents, path: pm }
     - { name: pr-reviewer, source: agents, path: pr-reviewer }
+    - {
+        name: pipeline,
+        source: agents,
+        path: pipeline,
+        harness: script,
+        tasks: [{ name: tick, suspend: false }],
+      }
   # Harness definitions, contexts and image catalogs live in this repository
   # (team/harnesses/); `project` is the source `kuke team add` adds for it.
   harnesses:
     - { name: claude, source: project, path: team/harnesses/claude }
     - { name: codex, source: project, path: team/harnesses/codex }
+    - { name: script, source: project, path: team/harnesses/script }

@@ -17,6 +17,8 @@
 package compose_test
 
 import (
+	"fmt"
+	"io/fs"
 	"os"
 	"slices"
 	"strings"
@@ -355,5 +357,100 @@ func TestScriptRoleNeedsNoAgentsFile(t *testing.T) {
 			!strings.Contains(err.Error(), "missing role asset "+missing) {
 			t.Fatalf("model harness without %s: err = %v", missing, err)
 		}
+	}
+}
+
+// agentRoleYAML is a model role on the team's two model harnesses, standing in
+// for the agents repository's dev, pm and pr-reviewer roles.
+const agentRoleYAML = `apiVersion: kuketeams.io/v1
+kind: Role
+metadata: { name: %s }
+spec:
+  harnesses:
+    claude:
+      settings: config/claude.settings.json
+    codex: {}
+`
+
+// pipelineYAML stands in for the agents repository's pipeline role: a program
+// role on the script harness whose tick ships switched off.
+const pipelineYAML = `apiVersion: kuketeams.io/v1
+kind: Role
+metadata: { name: pipeline }
+spec:
+  harnesses:
+    script:
+      command: python3 "$ROLE_SOURCE_DIR/$ROLE_PATH/reactor.py"
+  connectors: [github]
+  needs:
+    mounts: [kuke-binary, kukeond-socket]
+  tasks:
+    - { name: tick, schedule: "*/5 * * * *", suspend: true }
+`
+
+// TestKukeonTeamRunsThePipeline composes this repository's own kuketeam.yaml
+// (issue #1542): the agent roles pair with claude and codex only, and the
+// pipeline role, pinned to script, renders its tick switched on.
+func TestKukeonTeamRunsThePipeline(t *testing.T) {
+	f, err := os.Open("../../../kuketeam.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	team, err := config.DecodeTeam(f)
+	_ = f.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	team.ProjectSource = &config.Source{
+		Name: "project", URL: "git@github.com:eminwux/kukeon", Branch: "main", ClonePath: "/home/user/kukeon",
+	}
+	agents := fstest.MapFS{"pipeline/role.yaml": &fstest.MapFile{Data: []byte(pipelineYAML)}}
+	for _, role := range []string{"dev", "pm", "pr-reviewer"} {
+		agents[role+"/role.yaml"] = &fstest.MapFile{Data: []byte(fmt.Sprintf(agentRoleYAML, role))}
+		agents[role+"/AGENTS.md"] = &fstest.MapFile{Data: []byte("# " + role + "\n")}
+		agents[role+"/config/claude.settings.json"] = &fstest.MapFile{Data: []byte("{}\n")}
+	}
+	opts := compose.Options{Sources: map[string]fs.FS{"agents": agents, "project": copiedSource(t)}}
+
+	result, err := compose.Compose(emptyConfig(), team, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"dev/claude", "dev/codex", "pm/claude", "pm/codex",
+		"pr-reviewer/claude", "pr-reviewer/codex", "pipeline/script",
+	}
+	if got := pairList(result); !slices.Equal(got, want) {
+		t.Fatalf("pairs = %v, want %v", got, want)
+	}
+	var configs []string
+	for _, pair := range result.Pairs {
+		configs = append(configs, pair.Config.Metadata.Name)
+		for _, task := range pair.Tasks {
+			configs = append(configs, task.Metadata.Name)
+		}
+	}
+	for _, absent := range []string{
+		"kukeon-pipeline-claude", "kukeon-pipeline-codex",
+		"kukeon-dev-script", "kukeon-pm-script", "kukeon-pr-reviewer-script",
+	} {
+		if slices.Contains(configs, absent) {
+			t.Fatalf("configs %v include %s", configs, absent)
+		}
+	}
+
+	pipeline := pairFor(t, result, "pipeline", scriptHarness)
+	if got, want := pipeline.Config.Metadata.Name, "kukeon-pipeline-script"; got != want {
+		t.Fatalf("pipeline config = %q, want %q", got, want)
+	}
+	if len(pipeline.Tasks) != 1 {
+		t.Fatalf("pipeline tasks = %v", taskNames(pipeline))
+	}
+	tick := pipeline.Tasks[0]
+	if got, want := tick.Metadata.Name, "kukeon-pipeline-script-tick"; got != want {
+		t.Fatalf("tick config = %q, want %q", got, want)
+	}
+	if tick.Spec.Schedule == nil || tick.Spec.Schedule.Cron != "*/5 * * * *" || tick.Spec.Schedule.Suspend {
+		t.Fatalf("tick schedule = %+v, want the role's cadence, unsuspended", tick.Spec.Schedule)
 	}
 }
