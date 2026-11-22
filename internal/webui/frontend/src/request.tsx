@@ -35,6 +35,13 @@ export function useResource<T>(path: string | null, revision: number): Resource<
   return state;
 }
 
+// Normalize a thrown API error body or a network exception into a Failure.
+export function toFailure(error: unknown): Failure {
+  const failure = error as Partial<Failure>;
+  if (failure && typeof failure.code === "string") return { code: failure.code, message: failure.message ?? "Request failed." };
+  return { code: "unavailable", message: error instanceof Error ? error.message : "The request could not reach the web server." };
+}
+
 export function failureTitle(error: Failure, kind = "Realm"): string {
   return error.code === "permission_denied" ? "Permission denied"
     : error.code === "unavailable" ? "Daemon unavailable"

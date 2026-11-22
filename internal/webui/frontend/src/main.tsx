@@ -266,7 +266,7 @@ function CellDetailsScreen({ title, view, scope, revision, inventory, manager, t
       </div>
     </div>}
     <section className="cell-terminal-view" aria-label="Cell terminal" hidden={!terminalView}>
-      <TerminalWorkspace scope={scope} revision={revision} inventory={inventory} manager={manager} theme={theme} visible={terminalView && !!scope} controlsHost={terminalToolsHost} onExpandedChange={setTerminalExpanded} dockedCell={dockedCell} onOpenDock={onOpenDock} />
+      <TerminalWorkspace scope={scope} revision={revision} inventory={inventory} manager={manager} theme={theme} visible={terminalView && !!scope} controlsHost={terminalToolsHost} onExpandedChange={setTerminalExpanded} dockedCell={dockedCell} onOpenDock={onOpenDock} operation={operation} onLifecycleAction={onLifecycleAction} />
     </section>
     <section className="cell-overview-content" aria-label="Cell details" hidden={terminalView}>{detail.error && <ErrorNotice error={detail.error} kind="Cell" />}{detail.error && detail.data && <p className="stale">Stale resource details — refresh failed.</p>}{status}{containerPanel}{overview}{scope && !terminalView && <NetworkPanel scope={scope} revision={revision} />}{scope && !terminalView && <CgroupPanel scope={scope} revision={revision} />}</section>
   </div>;
@@ -488,6 +488,8 @@ function App() {
         recordOperation(scope, { action, phase: complete ? "success" : "error", message: complete ? `Cell purged. ${effects}${details}` : `Purge incomplete. ${effects}${details} ${outcome}` });
         return;
       }
+      // The interrupted sessions belong to the stopped process; dropping them lets the terminal reattach on Ready.
+      if (action === "start") terminals.dropInterrupted(scope);
       const message = action === "start" ? "Cell started."
         : action === "stop" ? "Cell stopped. The previous terminal session ended."
         : "Cell restarted. The previous terminal session ended; reconnect to attach to the new process.";

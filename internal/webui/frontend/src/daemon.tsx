@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ErrorNotice, useResource, type Failure } from "./request";
+import { ErrorNotice, toFailure, useResource, type Failure } from "./request";
 import { daemonLink } from "./routes";
 import type { InventoryResource } from "./inventory";
 import { MAX_CHARS, MAX_LINES, applyChunk, emptyLogBuffer, healthLabel, healthTone, type LogBuffer, type LogChunk } from "./log-buffer.js";
@@ -83,12 +83,6 @@ async function readChunk(offset: number, signal: AbortSignal): Promise<LogChunk>
   try { body = await response.json(); } catch { /* Use the HTTP status below. */ }
   if (!response.ok) throw body.error ?? { code: "http_error", message: `HTTP ${response.status}` };
   return body;
-}
-
-function toFailure(error: unknown): Failure {
-  const failure = error as Partial<Failure>;
-  if (failure && typeof failure.code === "string") return { code: failure.code, message: failure.message ?? "Request failed." };
-  return { code: "unavailable", message: error instanceof Error ? error.message : "The request could not reach the web server." };
 }
 
 export function DaemonLogsPage({ revision }: { revision: number }) {
