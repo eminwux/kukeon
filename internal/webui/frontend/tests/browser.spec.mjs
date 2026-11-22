@@ -18,13 +18,17 @@ function fixture(path, cellCount = 1) {
   const names = depth === 3 ? Array.from({ length: cellCount }, (_, i) => cellCount === 1 ? "api" : `api-${String(i).padStart(2, "0")}`) : [depth === 1 ? "shared" : "services"];
   return names.map(name => doc([...scope, name]));
 }
+// A container with no stream file yet: the log view's neutral empty state.
+const noLog = { status: 404, json: { error: { code: "log_unavailable", message: "container log stream unavailable" } } };
 async function mock(page, handler = () => undefined) {
   await page.route("**/api/realms**", async route => {
     const path = new URL(route.request().url()).pathname;
     const result = await handler(path, route.request());
-    await route.fulfill(result ?? { json: fixture(path) });
+    await route.fulfill(result ?? (path.endsWith("/log") ? noLog : { json: fixture(path) }));
   });
 }
+// One GET …/containers/{name}/log reply: text starting at byte `start`, ending at the stream's end.
+const logChunk = (text, start = 0) => ({ json: { source: "/mock/log", data: Buffer.from(text).toString("base64"), start, next: start + Buffer.byteLength(text), size: start + Buffer.byteLength(text), truncated: false, more: false } });
 const failure = { status: 503, json: { error: { code: "unavailable", message: "Scoped read failed" } } };
 const nav = page => page.getByRole("navigation", { name: "Resources navigation" });
 const listSearch = page => page.locator(".list-controls").getByRole("searchbox");
@@ -54,7 +58,8 @@ test("terminal selects eligible containers, forwards input and resize, and detac
   });
   await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
   const panel = page.getByRole("region", { name: "Terminal workspace" });
-  await expect(terminalTools(page).locator("option")).toHaveCount(2);
+  // Every non-root container is listed; one without a terminal is marked as a log view.
+  await expect(terminalTools(page).locator("option")).toHaveText(["worker", "shell", "no-tty (logs)"]);
   await terminalTools(page).getByLabel("Container").selectOption("shell");
   await expect.poll(() => selected).toContain("/containers/shell/attach");
   await expect(terminalTools(page).locator(".terminal-connection-state")).toHaveText("Connecting…");
@@ -346,7 +351,8 @@ test("terminal error offers a new attachment and stopped cells release sessions"
   failInventory = false;
   stopped = true;
   await page.getByRole("button", { name: "Refresh" }).click();
-  await expect(panel.getByText("Terminal unavailable: cell is Stopped.")).toBeVisible();
+  await expect(panel.locator(".terminal-log-status")).toContainText("Cell is Stopped. Showing the last output of shell.");
+  await expect(panel.getByText("Terminal unavailable", { exact: false })).toHaveCount(0);
   await expect(terminalTools(page).getByText("Terminal unavailable", { exact: false })).toHaveCount(0);
   await expect(terminalTools(page).getByRole("button", { name: "Reconnect" })).toHaveCount(0);
   await expect.poll(() => closed).toBeGreaterThan(closedBefore);
@@ -470,7 +476,11 @@ test("Resources cells open cellRead and the sidebar opens cellTerminal, each lin
 });
 
 test("a cold load of cellRead never opens a terminal session", async ({ page }) => {
-  await mock(page, path => path.endsWith("/containers") ? { json: [{ id: "shell", attachable: true }] } : undefined);
+  let logReads = 0;
+  await mock(page, path => {
+    if (path.endsWith("/log")) logReads++;
+    return path.endsWith("/containers") ? { json: [{ id: "shell", attachable: true }, { id: "web" }] } : undefined;
+  });
   let opened = 0;
   await page.routeWebSocket("**/attach", socket => { opened++; socket.send(JSON.stringify({ type: "ready" })); });
   await page.goto(`${server.url}#/resource/dev/shared/services/api`);
@@ -480,12 +490,148 @@ test("a cold load of cellRead never opens a terminal session", async ({ page }) 
   await expect(page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link", { name: "Open dev / shared / services / api" })).toBeVisible();
   await page.waitForTimeout(1000);
   expect(opened).toBe(0);
+  expect(logReads).toBe(0);
   await expect(page.locator(".cell-terminal-state")).toHaveCount(0);
   await page.getByRole("link", { name: "Open terminal for dev / shared / services / api" }).click();
   await expect(page).toHaveURL(/#\/workspace\/dev\/shared\/services\/api$/);
   await expect.poll(() => opened).toBe(1);
   await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
+  // The log view reads only once it is on screen.
+  expect(logReads).toBe(0);
+  await terminalTools(page).getByLabel("Container").selectOption("web");
+  await expect.poll(() => logReads).toBeGreaterThan(0);
 });
+
+// Serves `text` as a container's whole stream: the tail read returns it, a forward read from the end returns nothing new.
+const logStream = (request, text) => {
+  const offset = Number(new URL(request.url()).searchParams.get("offset"));
+  return offset === -1 ? logChunk(text) : logChunk("", offset);
+};
+const logScreen = page => page.locator("#cell-terminal .terminal-log .xterm-rows");
+
+test("a live cell with no attachable container follows its log", async ({ page }) => {
+  const offsets = [];
+  await mock(page, (path, request) => {
+    if (!path.endsWith("/containers/web/log")) return;
+    const offset = Number(new URL(request.url()).searchParams.get("offset"));
+    offsets.push(offset);
+    if (offset === -1) return logChunk("listening on :8080\n");
+    if (offset === 19) return logChunk("GET /healthz 200\n", 19);
+    return logChunk("", offset);
+  });
+  let opened = 0;
+  await page.routeWebSocket("**/attach", () => { opened++; });
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  await expect(terminalTools(page).locator("option")).toHaveText(["web (logs)"]);
+  await expect(logScreen(page)).toContainText("listening on :8080");
+  // The follow timer reads forward from the cursor the tail read returned.
+  await expect(logScreen(page)).toContainText("GET /healthz 200", { timeout: 10000 });
+  expect(offsets[0]).toBe(-1);
+  expect(offsets).toContain(19);
+  expect(opened).toBe(0);
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toHaveText("Logs");
+  for (const name of ["Attach", "Detach", "Reconnect"]) await expect(terminalTools(page).getByRole("button", { name })).toHaveCount(0);
+  await expect(page.locator("#cell-terminal .terminal-log-status")).toHaveCount(0);
+  await expect(page.locator("#cell-terminal .terminal-overlay")).toHaveCount(0);
+  // Read-only: typing into the log xterm sends nothing anywhere.
+  const requests = [];
+  page.on("request", request => { if (!request.url().endsWith("/log") && !request.url().includes("/log?")) requests.push(request.url()); });
+  await page.locator("#cell-terminal .terminal-log .xterm-helper-textarea").focus();
+  await page.keyboard.type("ls\n");
+  expect(requests.filter(url => url.includes("/containers/web/"))).toEqual([]);
+  expect(opened).toBe(0);
+  // Expand resizes the log view with the panel.
+  const before = await page.locator("#cell-terminal .terminal-log .terminal-screen").boundingBox();
+  await terminalTools(page).getByRole("button", { name: "Expand terminal" }).click();
+  await expect(page.locator("#cell-terminal")).toHaveClass(/is-expanded/);
+  await expect.poll(async () => (await page.locator("#cell-terminal .terminal-log .terminal-screen").boundingBox())?.height).toBeGreaterThan(before.height);
+  await expect(logScreen(page)).toContainText("listening on :8080");
+});
+
+test("the selector switches between a terminal and a log without reattaching", async ({ page }) => {
+  await mock(page, (path, request) => {
+    if (path.endsWith("/containers")) return { json: [{ id: "shell", attachable: true }, { id: "web" }] };
+    if (path.endsWith("/containers/web/log")) return logStream(request, "served /index.html\n");
+  });
+  let opened = 0;
+  let closed = 0;
+  await page.routeWebSocket("**/attach", socket => { opened++; socket.onClose(() => closed++); socket.send(JSON.stringify({ type: "ready" })); });
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  const select = terminalTools(page).getByLabel("Container");
+  await expect(terminalTools(page).locator("option")).toHaveText(["shell", "web (logs)"]);
+  await expect(select).toHaveValue("shell");
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
+  expect(opened).toBe(1);
+  await select.selectOption("web");
+  await expect(logScreen(page)).toContainText("served /index.html");
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toHaveText("Logs");
+  await expect(page.locator("#cell-terminal .terminal-session:not([hidden]):not(.terminal-log)")).toHaveCount(0);
+  await select.selectOption("shell");
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
+  await expect(page.locator("#cell-terminal .terminal-log")).toHaveCount(0);
+  await page.waitForTimeout(300);
+  expect(opened).toBe(1);
+  expect(closed).toBe(0);
+});
+
+test("a dead cell shows its last output and Start brings the terminal back", async ({ page }) => {
+  let started = false;
+  let hold = null;
+  const cell = "/api/realms/dev/spaces/shared/stacks/services/cells/api";
+  await mock(page, async (path, request) => {
+    if (request.method() === "POST" && path === `${cell}/start`) {
+      if (hold) await hold.promise;
+      started = true;
+      return { json: {} };
+    }
+    const state = started ? "Ready" : "Exited";
+    if (path.endsWith("/containers")) return { json: [{ id: "shell", attachable: true }] };
+    if (path.endsWith("/containers/shell/log")) return logStream(request, "\x1b[32mdone\x1b[0m\r\n$ exit\r\n");
+    if (path === cell) return { json: { ...doc(["dev", "shared", "services", "api"]), status: { state } } };
+    if (path.endsWith("/cells") && path.includes("/dev/")) return { json: fixture(path).map(item => ({ ...item, status: { state } })) };
+  });
+  let opened = 0;
+  await page.routeWebSocket("**/attach", socket => { opened++; socket.send(JSON.stringify({ type: "ready" })); });
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  const panel = page.locator("#cell-terminal");
+  await expect(logScreen(page)).toContainText("done");
+  await expect(logScreen(page)).toContainText("$ exit");
+  // The capture is replayed as terminal bytes, so ANSI colors survive.
+  await expect(panel.locator(".terminal-log .xterm-fg-2")).toHaveText("done");
+  await expect(panel.getByText("Terminal unavailable", { exact: false })).toHaveCount(0);
+  await expect(panel.locator(".terminal-log-status")).toContainText("Cell is Exited. Showing the last output of shell.");
+  expect(opened).toBe(0);
+  let release;
+  hold = { promise: new Promise(resolve => { release = resolve; }) };
+  await panel.getByRole("button", { name: "Start" }).click();
+  // The strip's Start shares the title row's pending lock.
+  await expect(panel.getByRole("button", { name: "Start" })).toBeDisabled();
+  await expect(page.locator(".cell-page-title-row").getByRole("button", { name: "Start…", exact: true })).toBeDisabled();
+  hold = null;
+  release();
+  await expect.poll(() => opened).toBe(1);
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
+  await expect(panel.locator(".terminal-log")).toHaveCount(0);
+  await expect(panel.locator(".terminal-log-status")).toHaveCount(0);
+});
+
+test("a container with no output yet shows a neutral message", async ({ page }) => {
+  await mock(page);
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  await expect(page.locator("#cell-terminal").getByText("No output yet.")).toBeVisible();
+  await expect(page.locator("#cell-terminal [role=\"alert\"]")).toHaveCount(0);
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toHaveText("Logs");
+});
+
+for (const theme of ["light", "dark"]) {
+  test(`the log view follows the ${theme} theme`, async ({ page }) => {
+    await page.addInitScript(value => localStorage.setItem("kukeon-theme", value), theme);
+    await mock(page, (path, request) => path.endsWith("/containers/web/log") ? logStream(request, "ready\n") : undefined);
+    await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+    await expect(logScreen(page)).toContainText("ready");
+    await expect.poll(() => logScreen(page).evaluate(el => getComputedStyle(el).color)).toBe(theme === "dark" ? "rgb(229, 230, 236)" : "rgb(32, 35, 43)");
+  });
+}
 
 for (const [width, height] of [[1440, 900], [390, 844]]) {
   for (const theme of ["light", "dark"]) {
@@ -619,9 +765,9 @@ test("cell sidebar uses full scope for duplicate names and switching reuses inve
   await cells.getByRole("link", { name: "Open dev / shared / services / api" }).focus();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/#\/workspace\/dev\/shared\/services\/api$/);
-  await expect(page.getByText("No attachable containers are available.")).toBeVisible();
-  await expect(page.locator("#cell-terminal .terminal-empty")).toHaveText("No attachable containers are available.");
-  await expect(terminalTools(page).getByRole("button", { name: "Expand terminal" })).toHaveCount(0);
+  // The default container has no terminal and no output yet: its log view shows a neutral message.
+  await expect(page.locator("#cell-terminal .terminal-empty")).toHaveText("No output yet.");
+  await expect(page.locator("#cell-terminal [role=\"alert\"]")).toHaveCount(0);
   await page.getByRole("link", { name: "View details for dev / shared / services / api" }).click();
   await expect(page).toHaveURL(/#\/resource\/dev\/shared\/services\/api$/);
   await expect(cells.getByRole("link", { name: "Open dev / shared / services / api" })).toHaveAttribute("aria-current", "page");
@@ -2305,9 +2451,12 @@ test("Start, Stop, Restart and Refresh on cellTerminal never resize the attached
     if (path === cell) return { json: { ...doc(["dev", "shared", "services", "api"]), status: { state } } };
     if (path.endsWith("/cells") && path.includes("/dev/")) return { json: fixture(path).map(item => ({ ...item, status: { state } })) };
   });
+  // Messages from the first attachment only: the session Start reattaches is a new process and sizes itself once.
   const messages = [];
+  let sockets = 0;
   await page.routeWebSocket("**/attach", socket => {
-    socket.onMessage(message => { messages.push(message); });
+    const first = ++sockets === 1;
+    socket.onMessage(message => { if (first) messages.push(message); });
     socket.send(JSON.stringify({ type: "ready" }));
   });
   const resizes = () => messages.filter(message => typeof message === "string" && JSON.parse(message).type === "resize").length;
@@ -2340,9 +2489,13 @@ test("Start, Stop, Restart and Refresh on cellTerminal never resize the attached
   }
   await act("Restart");
   await act("Stop");
-  await expect(page.locator("#cell-terminal").getByText("Terminal unavailable: cell is Stopped.")).toBeVisible();
+  await expect(page.locator("#cell-terminal .terminal-log-status")).toContainText("Cell is Stopped.");
   expect(await terminal.boundingBox()).toEqual(before);
+  const socketsBeforeStart = sockets;
   await act("Start");
+  // Start drops the interrupted session, so the Ready cell reattaches with no further click.
+  await expect.poll(() => sockets).toBe(socketsBeforeStart + 1);
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
   await page.getByRole("button", { name: "Refresh" }).click();
   await expect(page.getByRole("button", { name: "Refresh" })).toHaveAttribute("aria-busy", "false");
   await page.waitForTimeout(200);
@@ -2492,7 +2645,7 @@ test("terminal unavailable and limit messages leave the cellTerminal title row h
   const ready = await heights();
   state = "Stopped";
   await page.getByRole("button", { name: "Refresh" }).click();
-  await expect(page.locator("#cell-terminal").getByText("Terminal unavailable: cell is Stopped.")).toBeVisible();
+  await expect(page.locator("#cell-terminal .terminal-log-status")).toContainText("Cell is Stopped.");
   expect(await heights()).toEqual(ready);
   await page.setViewportSize({ width: 1440, height: 900 });
   const centers = await page.locator(".cell-page-title-row > *:not([hidden])").evaluateAll(els => new Set(els.map(el => Math.round(el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2))).size);
