@@ -65,6 +65,7 @@ func registerResourceRoutes(mux *http.ServeMux, dial Dial) {
 	registerCellLifecycleRoutes(mux, dial)
 	registerParentLifecycleRoutes(mux, dial)
 	registerContainerRoutes(mux, dial)
+	registerContainerLogRoute(mux, dial)
 	registerCgroupRoutes(mux, dial)
 	registerNetworkRoutes(mux, dial)
 	registerImageInventoryRoutes(mux, dial)
