@@ -124,7 +124,7 @@ func TestScriptHarnessRendersConfigs(t *testing.T) {
 	if got, want := pair.Config.Metadata.Name, "root-ticker-script"; got != want {
 		t.Fatalf("config name = %q, want %q", got, want)
 	}
-	if got, want := pair.Blueprint.Metadata.Name, "script-kuke-binary-kukeond-socket"; got != want {
+	if got, want := pair.Blueprint.Metadata.Name, "script-host"; got != want {
 		t.Fatalf("blueprint = %q, want %q", got, want)
 	}
 	if got := pair.Config.Spec.Values["COMMAND"]; got != tickerCommand {
