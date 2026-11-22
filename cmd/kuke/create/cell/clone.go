@@ -105,7 +105,7 @@ func materializeClone(cmd *cobra.Command, client kukeonv1.Client, flags SourceFl
 		if err != nil {
 			return v1beta1.CellDoc{}, err
 		}
-		cellDoc, err = cloneFromConfig(cmd, client, flags, srcProv, name)
+		cellDoc, err = cloneFromConfig(cmd, client, flags, src, name)
 	case v1beta1.BindingKindBlueprint:
 		cellDoc, err = cloneFromBlueprint(cmd, client, flags, srcProv)
 	default:
@@ -185,9 +185,12 @@ func resolveSourceCell(
 // of the source's recorded env overrides (last-write-wins). The returned doc's
 // Spec.Provenance is the source's copied verbatim, with the merged env
 // overrides recorded — byte-equal to the source when no extra --env is given.
+// The clone is rendered in the source cell's space and stack (#1603), which
+// may lie below the Config's scope.
 func cloneFromConfig(
-	cmd *cobra.Command, client kukeonv1.Client, flags SourceFlags, srcProv *v1beta1.CellProvenance, name string,
+	cmd *cobra.Command, client kukeonv1.Client, flags SourceFlags, src v1beta1.CellDoc, name string,
 ) (v1beta1.CellDoc, error) {
+	srcProv := src.Spec.Provenance
 	// --param stacks on the source's recorded per-cell params; like on the
 	// --from-config path the daemon accepts only the picked mode's parameters.
 	params := map[string]string{}
@@ -234,6 +237,9 @@ func cloneFromConfig(
 		ConnectorOverrides: srcProv.ConnectorOverrides,
 		// ...and the methods it picked (#1551).
 		ConnectorMethods: srcProv.ConnectorMethods,
+		// ...and renders where the source cell lives (#1603).
+		TargetSpace: src.Spec.SpaceID,
+		TargetStack: src.Spec.StackID,
 	})
 	if err != nil {
 		if errors.Is(err, errdefs.ErrConfigNotFound) {

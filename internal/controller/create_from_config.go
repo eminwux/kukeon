@@ -78,6 +78,10 @@ type CellFromConfigRequest struct {
 	// blueprint component of that method is enabled in place of the one the
 	// Config enables. Recorded in the cell's provenance.
 	ConnectorMethods map[string]string
+	// TargetSpace and TargetStack place the cell below the Config's scope
+	// (issue #1603); see cellTargetScope. Empty keeps the Config's scope.
+	TargetSpace string
+	TargetStack string
 }
 
 // CellFromConfigPreview is the outcome of a render: the rendered cell, its
@@ -119,7 +123,10 @@ func (b *Exec) PreviewCellFromConfig(req CellFromConfigRequest) (CellFromConfigP
 		return CellFromConfigPreview{}, fmt.Errorf("%w: decode config: %w", errdefs.ErrConversionFailed, err)
 	}
 
-	realm, space, stack := cellconfig.CellScope(cfgDoc)
+	realm, space, stack, err := cellTargetScope(cfgDoc, req.TargetSpace, req.TargetStack)
+	if err != nil {
+		return CellFromConfigPreview{}, err
+	}
 	name, err := b.allocateConfigCellName(req.Name, cellconfig.Prefix(cfgDoc), realm, space, stack)
 	if err != nil {
 		return CellFromConfigPreview{}, err
@@ -128,7 +135,7 @@ func (b *Exec) PreviewCellFromConfig(req CellFromConfigRequest) (CellFromConfigP
 	rendered, err := renderCellFromConfig(b.runner, cfg, cellBinding{
 		Name: name, EnvOverrides: req.EnvOverrides, Mode: strings.TrimSpace(req.Mode), Params: req.Params,
 		Schedule: strings.TrimSpace(req.Schedule), Connectors: req.ConnectorOverrides,
-		Methods: req.ConnectorMethods,
+		Methods: req.ConnectorMethods, TargetSpace: req.TargetSpace, TargetStack: req.TargetStack,
 	})
 	if err != nil {
 		return CellFromConfigPreview{}, err

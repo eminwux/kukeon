@@ -341,6 +341,13 @@ type CellFromConfigRequest struct {
 	// refused. Recorded in the cell's provenance, so a restart and a
 	// recreate keep it.
 	ConnectorMethods map[string]string
+	// TargetSpace and TargetStack place the cell in a space and stack below
+	// the Config's own scope (issue #1603). A coordinate the Config sets is
+	// pinned: a different target is refused. Empty keeps the Config's scope
+	// with empty coordinates defaulted to "default". The realm is always the
+	// Config's.
+	TargetSpace string
+	TargetStack string
 }
 
 // PreviewCellFromConfigArgs is the wire request for PreviewCellFromConfig.

@@ -883,3 +883,154 @@ func TestReconcileCells_OutOfSync_SkipsWhenAnotherWriterGotIn(t *testing.T) {
 		})
 	}
 }
+
+// targetScopeRunner is a render runner whose Space and Stack defaults depend
+// on the level's name, so a test can tell which levels a render merged.
+func targetScopeRunner(t *testing.T, cfg ext.CellConfigDoc) *fakeRunner {
+	t.Helper()
+	mock := newRenderRunner(t, &renderScope{}, cfg)
+	mock.GetSpaceFn = func(s intmodel.Space) (intmodel.Space, error) {
+		s.Spec.Defaults = &intmodel.SpaceDefaults{Values: map[string]string{"REGION": "space-" + s.Metadata.Name}}
+		return s, nil
+	}
+	mock.GetStackFn = func(st intmodel.Stack) (intmodel.Stack, error) {
+		st.Spec.Defaults = &intmodel.ScopeDefaults{Secrets: map[string]intmodel.SecretFill{
+			"token": {SecretRef: &intmodel.ContainerSecretRef{Name: "token-" + st.Spec.SpaceName + "-" + st.Metadata.Name}},
+		}}
+		return st, nil
+	}
+	return mock
+}
+
+// TestPreviewCellFromConfig_TargetScope (#1603): a realm-scoped Config
+// renders into the requested space and stack, merges that space's and stack's
+// defaults, and keeps the binding ref on the Config's own scope.
+func TestPreviewCellFromConfig_TargetScope(t *testing.T) {
+	ctrl := setupTestController(t, targetScopeRunner(t, renderConfig()))
+
+	req := previewRequest()
+	req.TargetSpace, req.TargetStack = "a", "b"
+	preview, err := ctrl.PreviewCellFromConfig(req)
+	if err != nil {
+		t.Fatalf("PreviewCellFromConfig: %v", err)
+	}
+	if got := preview.Cell.Spec; got.RealmID != "kuke-system" || got.SpaceID != "a" || got.StackID != "b" {
+		t.Fatalf("scope = %s/%s/%s, want kuke-system/a/b", got.RealmID, got.SpaceID, got.StackID)
+	}
+	if v, ok := valueOrigin(preview.Values, ext.RenderKindValue, "REGION"); !ok ||
+		v.Origin != "space" || v.Value != "space-a" {
+		t.Errorf("REGION = %+v, want space-a from the space level", v)
+	}
+	if v, ok := valueOrigin(preview.Values, ext.RenderKindSecret, "token"); !ok || v.Origin != "stack" {
+		t.Errorf("token = %+v, want the stack level", v)
+	}
+	if secrets := preview.Cell.Spec.Containers[0].Secrets; len(secrets) != 1 ||
+		secrets[0].SecretRef.Name != "token-a-b" {
+		t.Errorf("secrets = %+v, want the a/b stack default token-a-b", secrets)
+	}
+	prov := preview.Cell.Spec.Provenance
+	if prov == nil || prov.BindingRef.Realm != "kuke-system" || prov.BindingRef.Space != "" ||
+		prov.BindingRef.Stack != "" {
+		t.Errorf("binding ref = %+v, want the realm-scoped Config", prov)
+	}
+}
+
+// TestPreviewCellFromConfig_NoTargetKeepsDigest (#1603): no target and an
+// explicit default/default target render the same cell as before.
+func TestPreviewCellFromConfig_NoTargetKeepsDigest(t *testing.T) {
+	ctrl := setupTestController(t, targetScopeRunner(t, renderConfig()))
+
+	plain, err := ctrl.PreviewCellFromConfig(previewRequest())
+	if err != nil {
+		t.Fatalf("preview without target: %v", err)
+	}
+	if got := plain.Cell.Spec; got.SpaceID != "default" || got.StackID != "default" {
+		t.Fatalf("scope = %s/%s, want default/default", got.SpaceID, got.StackID)
+	}
+	req := previewRequest()
+	req.TargetSpace, req.TargetStack = "default", "default"
+	explicit, err := ctrl.PreviewCellFromConfig(req)
+	if err != nil {
+		t.Fatalf("preview with default target: %v", err)
+	}
+	if explicit.Digest != plain.Digest {
+		t.Errorf("digest with default target = %s, want %s", explicit.Digest, plain.Digest)
+	}
+	req.TargetSpace, req.TargetStack = "a", "b"
+	moved, err := ctrl.PreviewCellFromConfig(req)
+	if err != nil {
+		t.Fatalf("preview with a/b target: %v", err)
+	}
+	if moved.Digest == plain.Digest {
+		t.Error("digest did not change with the target scope")
+	}
+}
+
+// TestPreviewCellFromConfig_PinnedScopeRefusesOtherTarget (#1603): a
+// coordinate the Config sets cannot be moved; naming the same one is fine.
+func TestPreviewCellFromConfig_PinnedScopeRefusesOtherTarget(t *testing.T) {
+	cfg := renderConfig()
+	cfg.Metadata.Space = "team"
+	ctrl := setupTestController(t, targetScopeRunner(t, cfg))
+
+	req := previewRequest()
+	req.Config.Space = "team"
+	req.TargetSpace = "other"
+	if _, err := ctrl.PreviewCellFromConfig(req); !errors.Is(err, errdefs.ErrConfig) {
+		t.Fatalf("other space: error = %v, want ErrConfig", err)
+	}
+	req.TargetSpace, req.TargetStack = "team", "b"
+	preview, err := ctrl.PreviewCellFromConfig(req)
+	if err != nil {
+		t.Fatalf("pinned space with a free stack: %v", err)
+	}
+	if got := preview.Cell.Spec; got.SpaceID != "team" || got.StackID != "b" {
+		t.Errorf("scope = %s/%s, want team/b", got.SpaceID, got.StackID)
+	}
+
+	cfg.Metadata.Stack = "pinned"
+	ctrl = setupTestController(t, targetScopeRunner(t, cfg))
+	req.TargetStack = "b"
+	if _, err = ctrl.PreviewCellFromConfig(req); !errors.Is(err, errdefs.ErrConfig) {
+		t.Fatalf("other stack: error = %v, want ErrConfig", err)
+	}
+	req.TargetSpace = "bad/space"
+	req.TargetStack = ""
+	cfg.Metadata.Space, cfg.Metadata.Stack = "", ""
+	ctrl = setupTestController(t, targetScopeRunner(t, cfg))
+	if _, err = ctrl.PreviewCellFromConfig(req); !errors.Is(err, errdefs.ErrConfig) {
+		t.Fatalf("invalid space name: error = %v, want ErrConfig", err)
+	}
+}
+
+// TestPreviewCellFromConfig_AllocatesNameInTargetScope (#1603): an omitted
+// name is allocated against the cells of the target scope.
+func TestPreviewCellFromConfig_AllocatesNameInTargetScope(t *testing.T) {
+	mock := targetScopeRunner(t, renderConfig())
+	var probed []string
+	mock.GetCellFn = func(c intmodel.Cell) (intmodel.Cell, error) {
+		probed = append(probed, c.Spec.SpaceName+"/"+c.Spec.StackName)
+		if c.Spec.SpaceName == "default" {
+			// Every name is taken in the default scope.
+			return c, nil
+		}
+		return intmodel.Cell{}, errdefs.ErrCellNotFound
+	}
+	ctrl := setupTestController(t, mock)
+
+	req := previewRequest()
+	req.Name = ""
+	req.TargetSpace, req.TargetStack = "a", "b"
+	preview, err := ctrl.PreviewCellFromConfig(req)
+	if err != nil {
+		t.Fatalf("PreviewCellFromConfig: %v", err)
+	}
+	if preview.Cell.Metadata.Name == "" {
+		t.Fatal("no name allocated")
+	}
+	for _, scope := range probed {
+		if scope != "a/b" {
+			t.Errorf("name probed in %s, want only a/b (probes %v)", scope, probed)
+		}
+	}
+}

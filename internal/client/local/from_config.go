@@ -80,6 +80,8 @@ func cellFromConfigRequest(req kukeonv1.CellFromConfigRequest) controller.CellFr
 		Draft:              req.Draft,
 		ConnectorOverrides: req.ConnectorOverrides,
 		ConnectorMethods:   req.ConnectorMethods,
+		TargetSpace:        req.TargetSpace,
+		TargetStack:        req.TargetStack,
 	}
 }
 
