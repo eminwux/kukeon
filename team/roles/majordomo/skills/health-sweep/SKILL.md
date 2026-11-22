@@ -18,9 +18,8 @@ Only these, and only as reads plus the one submission:
 - `kuke log ...`
 - `kuke screenshot ...` (a running Attachable cell's current screen, as
   evidence)
-- `kuke daemon logs` (it reads kukeond's log file directly, which fails in a cell
-  whose kukeon install is mounted read-only; the digest's `logErrors` already
-  carry the error-level entries)
+- `kuke daemon logs` (the full kukeond log, read through the daemon socket;
+  the digest's `logErrors` already carry the error-level entries)
 - `kuke health report submit -f <file>` (with `--file-issues <owner/repo>`
   only as described under _Filing_)
 

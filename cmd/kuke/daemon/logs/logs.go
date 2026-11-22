@@ -17,11 +17,16 @@
 // Package logs implements `kuke daemon logs`, a shortcut that prints the
 // kukeond container's stdout/stderr stream. The kukeond cell coordinates
 // (realm=kuke-system, space=kukeon, stack=kukeon, cell=kukeond, container=
-// kukeond) are static — set by `kuke init` and centralised in internal/consts
-// — so this verb fills them in and dispatches through the same tail loop
-// `kuke log` uses. The command runs in-process for the same reason the rest
-// of `kuke daemon` does: it operates on the daemon cell and must keep working
-// when the daemon socket is not reachable.
+// kukeond) are static — set by `kuke init` and centralised in internal/consts.
+//
+// The command reads through the daemon first: the ReadDaemonLogs RPC over
+// the kukeond socket (KUKEON_HOST) returns bounded, cursor-addressed chunks,
+// so it works from a cell that has the socket mounted but only a read-only
+// view of /opt/kukeon (#1525). When the daemon cannot be reached — socket
+// missing, connection refused, permission denied, or a daemon too old to
+// serve the RPC — it falls back to the in-process path, which resolves the
+// log file through a local controller and tails it with `kuke log`'s loop.
+// That fallback is why the verb keeps working when kukeond is down.
 package logs
 
 import (
@@ -30,7 +35,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
+	"net/rpc"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/internal/lifecycle"
@@ -46,6 +56,17 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
+
+// MockDaemonClientKey injects the kukeonv1.Client used for the socket path
+// via context, so tests can drive the daemon read without dialing a real
+// kukeond. Without it, production dials KUKEON_HOST.
+type MockDaemonClientKey struct{}
+
+// daemonPollInterval is how often follow mode asks the daemon for new
+// bytes once it has caught up — the same cadence as `kuke log -f`.
+//
+//nolint:gochecknoglobals // test seam: tests shorten the follow poll
+var daemonPollInterval = 200 * time.Millisecond
 
 // MockTailKey injects a logcmd.TailFn via context for tests so the real
 // follow loop (which would block on a real file) can be bypassed.
@@ -89,15 +110,145 @@ func runLogs(cmd *cobra.Command, _ []string) error {
 		return errdefs.ErrLoggerNotFound
 	}
 
-	if err := kukshared.RequireRoot("kuke daemon logs"); err != nil {
-		return err
-	}
-
 	if _, _, err := kukshared.LoadServerConfigurationFromFlag(cmd); err != nil {
 		return err
 	}
 
 	follow := viper.GetBool(config.KUKE_DAEMON_LOGS_FOLLOW.ViperKey)
+
+	if !readThroughDaemon(cmd) {
+		return runInProcess(cmd, logger, follow)
+	}
+
+	handled, sockErr := runViaDaemon(cmd, follow)
+	if handled {
+		return sockErr
+	}
+	logger.DebugContext(cmd.Context(),
+		"kukeond socket unavailable; reading the daemon log in-process", "error", sockErr)
+	if err := runInProcess(cmd, logger, follow); err != nil {
+		return fmt.Errorf("%w (kukeond socket unavailable: %w)", err, sockErr)
+	}
+	return nil
+}
+
+// readThroughDaemon reports whether the socket path is tried at all. It is
+// skipped when the operator asked for in-process execution (KUKEON_NO_DAEMON,
+// or an explicit --run-path, which kuke.go promotes to no-daemon) and when
+// --server-configuration (flag or KUKEOND_CONFIGURATION) targets a specific
+// kukeond instance: KUKEON_HOST would not follow that choice, so the
+// in-process read the flag was built for (#284) stays authoritative.
+func readThroughDaemon(cmd *cobra.Command) bool {
+	if viper.GetBool(config.KUKEON_ROOT_NO_DAEMON.ViperKey) {
+		return false
+	}
+	if f := cmd.Flags().Lookup(kukshared.ServerConfigurationFlag); f != nil && f.Changed {
+		return false
+	}
+	if _, set := os.LookupEnv(config.KUKEOND_CONFIGURATION.EnvVar()); set {
+		return false
+	}
+	return true
+}
+
+// runViaDaemon prints kukeond's log through the ReadDaemonLogs RPC. handled
+// is false only when the daemon could not be reached before the first chunk
+// arrived (see daemonUnreachable); the caller then falls back to the
+// in-process read. Any other outcome — success, a cancelled follow, or an
+// error the daemon itself reported — is final.
+func runViaDaemon(cmd *cobra.Command, follow bool) (bool, error) {
+	client, err := resolveDaemonClient(cmd)
+	if err != nil {
+		return !daemonUnreachable(err), err
+	}
+	defer func() { _ = client.Close() }()
+
+	ctx := cmd.Context()
+	if follow {
+		// Same SIGINT/SIGTERM scope as `kuke log -f`: Ctrl+C ends the follow
+		// cleanly with exit 0 instead of killing the process mid-write.
+		var stop context.CancelFunc
+		ctx, stop = signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+	}
+	return streamDaemonLogs(ctx, client, cmd.OutOrStdout(), follow)
+}
+
+// streamDaemonLogs reads the log forward from byte 0 in DaemonLogMaxBytes
+// chunks until it has caught up, so the default mode prints the whole
+// current log like the in-process dump does. With follow it then polls from
+// the returned cursor until ctx is done. The daemon only returns complete
+// lines, so a trailing line still being written appears once its newline
+// lands. A Reset reply (the source shrank or was replaced) carries a tail
+// read of the new source; printing it and continuing from its cursor is the
+// tail -F behaviour.
+func streamDaemonLogs(
+	ctx context.Context, client kukeonv1.Client, out io.Writer, follow bool,
+) (bool, error) {
+	var (
+		offset   int64
+		answered bool
+	)
+	for {
+		res, err := client.ReadDaemonLogs(ctx, kukeonv1.DaemonLogRequest{
+			Offset:   offset,
+			MaxBytes: kukeonv1.DaemonLogMaxBytes,
+		})
+		if err != nil {
+			if ctx.Err() != nil {
+				// SIGINT/SIGTERM (or the caller) ended the read: a clean stop,
+				// matching `kuke log -f`, not a failure to report.
+				return true, nil //nolint:nilerr // cancellation is the normal end of a follow
+			}
+			if !answered && daemonUnreachable(err) {
+				return false, err
+			}
+			return true, fmt.Errorf("read kukeond log over the daemon socket: %w", err)
+		}
+		answered = true
+		if _, writeErr := io.WriteString(out, res.Data); writeErr != nil {
+			return true, writeErr
+		}
+		offset = res.Next
+		if res.More {
+			continue
+		}
+		if !follow {
+			return true, nil
+		}
+		select {
+		case <-ctx.Done():
+			return true, nil
+		case <-time.After(daemonPollInterval):
+		}
+	}
+}
+
+// daemonUnreachable reports whether err means the RPC never reached a
+// kukeond that serves ReadDaemonLogs: the dial failed (socket missing,
+// refused, permission denied — all *net.OpError), the connection dropped,
+// the address scheme is unsupported, or the daemon predates the RPC.
+// Errors the daemon answered with (wire errors such as
+// ErrDaemonLogUnavailable) are not in this set: the daemon is up and its
+// answer is the authoritative one.
+func daemonUnreachable(err error) bool {
+	var opErr *net.OpError
+	return errors.As(err, &opErr) ||
+		errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, rpc.ErrShutdown) ||
+		errors.Is(err, kukeonv1.ErrUnsupportedScheme) ||
+		errors.Is(err, errdefs.ErrDaemonMethodUnsupported)
+}
+
+// runInProcess is the daemon-down path: resolve the log file through an
+// in-process controller and tail it directly. It needs root (the controller
+// takes locks under the run path) and a writable kukeon install, which is
+// why it is the fallback rather than the default.
+func runInProcess(cmd *cobra.Command, logger *slog.Logger, follow bool) error {
+	if err := kukshared.RequireRoot("kuke daemon logs"); err != nil {
+		return err
+	}
 
 	client := resolveClient(cmd, logger)
 	defer func() { _ = client.Close() }()
@@ -191,10 +342,21 @@ func kukeondContainerDoc() v1beta1.ContainerDoc {
 	}
 }
 
-// resolveClient returns the kukeonv1.Client used by runLogs. Tests inject a
-// fake via lifecycle.MockClientKey; production always builds an in-process
-// client — `kuke daemon logs` is part of the daemon-lifecycle umbrella, so
-// it must work even when the daemon socket is not reachable.
+// resolveDaemonClient returns the client for the socket path. Tests inject
+// a fake via MockDaemonClientKey; production dials KUKEON_HOST, the address
+// every daemon-routed verb uses (a cell's kukeond-socket mount points it at
+// the hard-linked socket).
+func resolveDaemonClient(cmd *cobra.Command) (kukeonv1.Client, error) {
+	if mock, ok := cmd.Context().Value(MockDaemonClientKey{}).(kukeonv1.Client); ok {
+		return mock, nil
+	}
+	return kukshared.DaemonClientFromCmd(cmd)
+}
+
+// resolveClient returns the in-process kukeonv1.Client used by the fallback
+// path. Tests inject a fake via lifecycle.MockClientKey; production builds an
+// in-process client so the verb works even when the daemon socket is not
+// reachable.
 func resolveClient(cmd *cobra.Command, logger *slog.Logger) kukeonv1.Client {
 	if mockClient, ok := cmd.Context().Value(lifecycle.MockClientKey{}).(kukeonv1.Client); ok {
 		return mockClient

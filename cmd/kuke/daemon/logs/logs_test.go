@@ -114,6 +114,10 @@ func newCmd(t *testing.T, fc *fakeClient, tail *tailCapture) (*cobra.Command, *b
 	if fc != nil {
 		ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(fc))
 	}
+	// The socket path is tried first; an unreachable daemon sends these
+	// in-process cases down the fallback, exactly as on a host whose
+	// kukeond socket is gone.
+	ctx = context.WithValue(ctx, logscmd.MockDaemonClientKey{}, kukeonv1.Client(unreachableDaemon()))
 	if tail != nil {
 		ctx = context.WithValue(ctx, logscmd.MockTailKey{}, logcmd.TailFn(tail.fn))
 	}
@@ -412,9 +416,10 @@ func TestDaemonLogs_CapturePathFallback(t *testing.T) {
 }
 
 // TestDaemonLogs_NonRootIsRejected confirms the fail-fast UID gate rejects
-// non-root invocations before any side effect (cell lookup, in-process
-// controller construction). Symmetric with the same guard on `kuke daemon
-// reset` and the rest of the daemon-lifecycle verbs (#463).
+// non-root invocations of the in-process fallback before any side effect
+// (cell lookup, in-process controller construction). Symmetric with the same
+// guard on `kuke daemon reset` and the rest of the daemon-lifecycle verbs
+// (#463). The socket path runs first and needs no root (#1525).
 func TestDaemonLogs_NonRootIsRejected(t *testing.T) {
 	restore := kukshared.SetGeteuidForTesting(func() int { return 1000 })
 	t.Cleanup(restore)
@@ -425,7 +430,9 @@ func TestDaemonLogs_NonRootIsRejected(t *testing.T) {
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	cmd.SetContext(context.WithValue(context.Background(), types.CtxLogger, logger))
+	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+	ctx = context.WithValue(ctx, logscmd.MockDaemonClientKey{}, kukeonv1.Client(unreachableDaemon()))
+	cmd.SetContext(ctx)
 	cmd.SetArgs(nil)
 
 	err := cmd.Execute()
@@ -440,6 +447,9 @@ func TestDaemonLogs_NonRootIsRejected(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "sudo") {
 		t.Errorf("error does not suggest sudo: %v", err)
+	}
+	if !strings.Contains(err.Error(), "kukeond socket unavailable") {
+		t.Errorf("error does not say the socket path failed first: %v", err)
 	}
 }
 
