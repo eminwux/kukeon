@@ -357,18 +357,35 @@ func containerSpecChanged(desired, actual *intmodel.ContainerSpec) bool {
 }
 
 // volumeMountsEqual reports whether two VolumeMount slices are equal in
-// declaration order. VolumeMount is a flat struct of comparable fields, so
-// `==` matches the diff layer's `volumeMountsEqual` semantics.
+// declaration order, matching the diff layer's `volumeMountsEqual`
+// semantics. VolumeRef is a pointer, so it is compared by value: a freshly
+// materialized desired spec never shares the pointer with the stored actual
+// spec (#1606). The remaining fields are comparable and compared with `==`.
 func volumeMountsEqual(a, b []intmodel.VolumeMount) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	for i := range a {
-		if a[i] != b[i] {
+		x, y := a[i], b[i]
+		if !volumeRefEqual(x.VolumeRef, y.VolumeRef) {
+			return false
+		}
+		x.VolumeRef, y.VolumeRef = nil, nil
+		if x != y {
 			return false
 		}
 	}
 	return true
+}
+
+func volumeRefEqual(a, b *intmodel.VolumeRef) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
 }
 
 // containerSecretsEqual reports whether two ContainerSecret slices carry

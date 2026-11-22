@@ -241,6 +241,16 @@ func richBlueprintForDivergence() v1beta1.CellBlueprintDoc {
 						Ports:      []string{"8080/tcp"},
 						Volumes: []v1beta1.VolumeMount{
 							{Source: "/host/data", Target: "/data", ReadOnly: true, Mode: 0o644},
+							// Cross-scope volumeRef mount: a pointer field that
+							// must compare by value across the round-trip (#1606).
+							{
+								Kind:   v1beta1.VolumeKindVolume,
+								Target: "/state",
+								VolumeRef: &v1beta1.VolumeRef{
+									Name: "web-state", Realm: "default", Space: "default", Stack: "default",
+								},
+								Ensure: true,
+							},
 						},
 						Networks:        []string{"default"},
 						NetworksAliases: []string{"web"},

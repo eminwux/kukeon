@@ -1481,19 +1481,35 @@ func stringSlicesEqual(a, b []string) bool {
 	return true
 }
 
-// volumeMountsEqual compares two VolumeMount slices field-by-field. The
-// VolumeMount struct has no slice/map fields, so a direct == on each
-// element is enough.
+// volumeMountsEqual compares two VolumeMount slices field-by-field.
+// VolumeRef is a pointer, so it is compared by value: the on-disk spec and a
+// freshly materialized one never share the pointer (#1606). The remaining
+// fields are comparable and compared with `==`.
 func volumeMountsEqual(a, b []v1beta1.VolumeMount) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	for i := range a {
-		if a[i] != b[i] {
+		x, y := a[i], b[i]
+		if !volumeRefEqual(x.VolumeRef, y.VolumeRef) {
+			return false
+		}
+		x.VolumeRef, y.VolumeRef = nil, nil
+		if x != y {
 			return false
 		}
 	}
 	return true
+}
+
+func volumeRefEqual(a, b *v1beta1.VolumeRef) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
 }
 
 // nonRootContainers returns the user-supplied subset of cs — entries where

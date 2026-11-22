@@ -100,6 +100,34 @@ func TestContainerSpecChanged_SecretRefScopeChange(t *testing.T) {
 	}
 }
 
+// TestContainerSpecChanged_VolumeRefComparedByValue guards issue #1606 on
+// the recreate gate: two distinct but equal VolumeRef pointers must not
+// recreate the container, while a scope change on the ref still must.
+func TestContainerSpecChanged_VolumeRefComparedByValue(t *testing.T) {
+	spec := func(realm string) intmodel.ContainerSpec {
+		return intmodel.ContainerSpec{
+			Image: "busybox:latest",
+			Volumes: []intmodel.VolumeMount{{
+				Kind:      intmodel.VolumeKindVolume,
+				Target:    "/home/user/.claude",
+				VolumeRef: &intmodel.VolumeRef{Name: "state", Realm: realm, Space: "default", Stack: "default"},
+				Ensure:    true,
+			}},
+		}
+	}
+
+	actual := spec("default")
+	desired := spec("default")
+	if containerSpecChanged(&desired, &actual) {
+		t.Error("expected containerSpecChanged=false for distinct but equal VolumeRef pointers")
+	}
+
+	desired = spec("prod")
+	if !containerSpecChanged(&desired, &actual) {
+		t.Error("expected containerSpecChanged=true for a VolumeRef scope change")
+	}
+}
+
 // TestContainerSpecChanged_GitMountAppears guards the #1472 recreate gate: the
 // staged git directory is an OCI mount added at container create, so a git
 // declaration appearing or disappearing — on the container or on any of its
