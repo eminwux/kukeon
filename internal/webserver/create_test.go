@@ -44,6 +44,8 @@ type creationClient struct {
 	getBlueprintCalls  int
 	getConfigCalls     int
 	previewCalls       int
+	createCalls        int
+	lastRequest        kukeonv1.CellFromConfigRequest
 	doc                v1beta1.CellDoc
 	materializedCell   v1beta1.CellDoc
 }
@@ -118,6 +120,12 @@ func (c *creationClient) renderFromConfig(
 		return kukeonv1.PreviewCellFromConfigResult{}, err
 	}
 	cellconfig.ApplyEnvOverrides(&doc, req.EnvOverrides)
+	if req.TargetSpace != "" {
+		doc.Spec.SpaceID = req.TargetSpace
+	}
+	if req.TargetStack != "" {
+		doc.Spec.StackID = req.TargetStack
+	}
 	data, _ := json.Marshal(doc)
 	return kukeonv1.PreviewCellFromConfigResult{
 		Cell:   doc,
@@ -130,12 +138,15 @@ func (c *creationClient) PreviewCellFromConfig(
 	ctx context.Context, req kukeonv1.CellFromConfigRequest,
 ) (kukeonv1.PreviewCellFromConfigResult, error) {
 	c.previewCalls++
+	c.lastRequest = req
 	return c.renderFromConfig(ctx, req)
 }
 
 func (c *creationClient) CreateCellFromConfig(
 	ctx context.Context, req kukeonv1.CellFromConfigRequest,
 ) (kukeonv1.CreateCellFromConfigResult, error) {
+	c.createCalls++
+	c.lastRequest = req
 	preview, err := c.renderFromConfig(ctx, req)
 	if err != nil {
 		return kukeonv1.CreateCellFromConfigResult{}, err
@@ -195,9 +206,6 @@ func TestConfigCreation(t *testing.T) {
 	}
 	if c.created != 0 || preview.Document.Spec.Provenance == nil || preview.Document.Spec.RealmID != "r" {
 		t.Fatal("preview must materialize lineage without mutation")
-	}
-	if w = request("create", "http://localhost:5129"); w.Code < 400 {
-		t.Fatal("unreviewed create accepted")
 	}
 	input.Preview = preview.Preview
 	if w = request("create", "http://evil.example"); w.Code != 403 {
@@ -349,4 +357,75 @@ func TestSafePathSegment(t *testing.T) {
 			t.Fatalf("unsafe blueprint reference accepted: err=%v render calls=%d", err, c.previewCalls)
 		}
 	})
+}
+
+// TestConfigCreationWithoutPreview (#1603): a create with no preview token
+// renders and creates in one request; a wrong token is still refused.
+func TestConfigCreationWithoutPreview(t *testing.T) {
+	c := &creationClient{materializeCreated: true}
+	handler := testCreateHandler(t, c)
+	input := createConfigRequest{Config: v1beta1.CellConfigMetadata{Name: "cfg", Realm: "r"}}
+
+	w := postCreate(t, handler, "/api/cells/from-config/create", input)
+	if w.Code != http.StatusOK || c.created != 1 || c.createCalls != 1 {
+		t.Fatalf("create without preview: %d %s (created %d)", w.Code, w.Body.String(), c.created)
+	}
+	if c.lastRequest.ExpectedDigest == "" {
+		t.Error("create without preview did not pin the server's own render digest")
+	}
+	if !strings.HasPrefix(c.doc.Metadata.Name, "cfg-") {
+		t.Errorf("created name = %q, want an allocated cfg-<suffix>", c.doc.Metadata.Name)
+	}
+
+	input.Preview = "stale"
+	w = postCreate(t, handler, "/api/cells/from-config/create", input)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "preview again") || c.created != 1 {
+		t.Fatalf("create with a wrong token: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// TestConfigCreationTarget (#1603): the target space and stack reach the
+// daemon render on preview and create; an unsafe one never reaches it.
+func TestConfigCreationTarget(t *testing.T) {
+	c := &creationClient{materializeCreated: true}
+	handler := testCreateHandler(t, c)
+	input := createConfigRequest{
+		Config:      v1beta1.CellConfigMetadata{Name: "cfg", Realm: "r"},
+		TargetSpace: "a",
+		TargetStack: "b",
+	}
+	w := postCreate(t, handler, "/api/cells/from-config/preview", input)
+	if w.Code != http.StatusOK {
+		t.Fatalf("preview: %d %s", w.Code, w.Body.String())
+	}
+	if c.lastRequest.TargetSpace != "a" || c.lastRequest.TargetStack != "b" {
+		t.Fatalf("preview request target = %q/%q, want a/b", c.lastRequest.TargetSpace, c.lastRequest.TargetStack)
+	}
+	var preview struct {
+		Document v1beta1.CellDoc `json:"document"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &preview); err != nil {
+		t.Fatal(err)
+	}
+	if preview.Document.Spec.SpaceID != "a" || preview.Document.Spec.StackID != "b" {
+		t.Errorf("preview scope = %s/%s, want a/b", preview.Document.Spec.SpaceID, preview.Document.Spec.StackID)
+	}
+	w = postCreate(t, handler, "/api/cells/from-config/create", input)
+	if w.Code != http.StatusOK || c.lastRequest.TargetSpace != "a" || c.lastRequest.TargetStack != "b" {
+		t.Fatalf("create: %d %s, request %+v", w.Code, w.Body.String(), c.lastRequest)
+	}
+
+	for _, unsafe := range []createConfigRequest{
+		{Config: input.Config, TargetSpace: "../a"},
+		{Config: input.Config, TargetStack: "a/b"},
+	} {
+		previews := c.previewCalls
+		w = postCreate(t, handler, "/api/cells/from-config/preview", unsafe)
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "unsafe target") {
+			t.Errorf("unsafe target %+v: %d %s", unsafe, w.Code, w.Body.String())
+		}
+		if c.previewCalls != previews {
+			t.Errorf("unsafe target %+v reached the daemon render", unsafe)
+		}
+	}
 }
