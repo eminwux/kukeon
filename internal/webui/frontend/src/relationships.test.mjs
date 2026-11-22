@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { cellsForBlueprint, cellsForConfig, configsForBlueprint, sameScopedReference } from "./relationships.mjs";
+import { cellsForBlueprint, cellsForConfig, configForCell, configsForBlueprint, sameScopedReference } from "./relationships.mjs";
 
 const blueprint = { name: "base", realm: "r1", space: "shared", stack: "images" };
 const configA = { metadata: { name: "app", realm: "r1", space: "team-a", stack: "dev" }, spec: { blueprint } };
@@ -26,4 +26,17 @@ test("Blueprint lineage follows its scoped Configs and deduplicates full Cell id
   assert.equal(result.length, 2);
   assert.equal(result[0].config, configA);
   assert.equal(result[1].config, configB);
+});
+
+test("A Cell resolves its source Config from the same scoped provenance, and only a Config binding counts", () => {
+  const fromConfig = cell("r1", "app-123", configA.metadata);
+  assert.deepEqual(configForCell(fromConfig.doc), configA.metadata);
+  // The inverse of cellsForConfig: the reference it returns selects the same Cell.
+  assert.deepEqual(cellsForConfig([fromConfig], configForCell(fromConfig.doc)), [fromConfig]);
+  // A realm-scoped Config has no space or stack; absent coordinates are left out, not blanked.
+  assert.deepEqual(configForCell({ spec: { provenance: { bindingKind: "config", bindingRef: { name: "base", realm: "r1" } } } }), { name: "base", realm: "r1" });
+  assert.equal(configForCell({ spec: { provenance: { bindingKind: "blueprint", bindingRef: blueprint } } }), null);
+  assert.equal(configForCell({ spec: { provenance: { bindingKind: "config", bindingRef: { realm: "r1" } } } }), null);
+  assert.equal(configForCell({ spec: {} }), null);
+  assert.equal(configForCell(undefined), null);
 });

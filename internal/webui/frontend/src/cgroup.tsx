@@ -1,8 +1,9 @@
-import { useResource, ErrorNotice } from "./request";
+import { useResource, ErrorNotice, failureTitle } from "./request";
+import { StoredDisclosure, disclosedKinds } from "./disclosure";
 import { apiPath, kinds } from "./routes";
 import { StateBadge } from "./status";
 import {
-  formatCPUMax, formatCgroupList, formatCgroupValue, formatDeclared, formatIOMax,
+  formatCPUMax, formatCgroupList, formatCgroupValue, formatDeclared, formatIOMax, summarizeCgroup,
   type CgroupCPUMax, type CgroupDeclared, type CgroupIOMax, type CgroupList, type CgroupValue, type Formatted,
 } from "./cgroup-format.js";
 
@@ -79,9 +80,8 @@ export function CgroupPanel({ scope, revision }: { scope: string[]; revision: nu
   const detail = useResource<CgroupDetail>(`${apiPath(scope)}/cgroup`, revision);
   const data = detail.data && !Array.isArray(detail.data) ? detail.data : undefined;
   const live = data?.exists ? data.live : undefined;
-  return <section className="panel cgroup-panel" aria-label={`${kind} cgroup`}>
-    <div className="panel-heading"><h2>Cgroup</h2><span className="badge">{detail.error ? "Stale values" : detail.loading ? "Refreshing values" : "Read by kukeond"}</span></div>
-    <div className="panel-body">
+  const badge = <span className="badge">{detail.error ? "Stale values" : detail.loading ? "Refreshing values" : "Read by kukeond"}</span>;
+  const body = <div className="panel-body">
       {detail.loading && !data && <p role="status">Loading cgroup details…</p>}
       {detail.error && <ErrorNotice error={detail.error} kind={kind} />}
       {detail.error && data && <p className="stale">Stale cgroup values — refresh failed.</p>}
@@ -106,6 +106,9 @@ export function CgroupPanel({ scope, revision }: { scope: string[]; revision: nu
         <h3>Limits and usage (live)</h3>
         {live ? <LiveValues live={live} /> : <div className="status-message"><strong>Cgroup not present</strong><p>{data.cgroupPath ? `kukeond found no cgroup at this path${data.reason ? ` (${data.reason})` : ""}. Stopped containers and cells without a cgroup have no live values.` : "No cgroup path is recorded for this resource yet."}</p></div>}
       </>}
-    </div>
-  </section>;
+    </div>;
+  if (!disclosedKinds.includes(kind)) return <section className="panel cgroup-panel" aria-label={`${kind} cgroup`}><div className="panel-heading"><h2>Cgroup</h2>{badge}</div>{body}</section>;
+  // Collapsed, the heading row still says what the section holds; a failed read stays visible there.
+  const summary = data ? summarizeCgroup(data) : detail.error ? failureTitle(detail.error, kind) : detail.loading ? "Loading…" : "Not reported";
+  return <StoredDisclosure id={`${kind}-cgroup`} title="Cgroup" summary={summary} badge={badge} className="cgroup-panel" label={`${kind} cgroup`}>{body}</StoredDisclosure>;
 }

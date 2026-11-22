@@ -5,7 +5,7 @@ import type { Doc, InventoryResource } from "./inventory";
 import { CatalogDeleteConfirmation } from "./catalog";
 import { catalogDeleteAPI } from "./catalog-url.mjs";
 import { RegistryCredentialsPanel } from "./registry-credentials";
-import { IdentityForm, IdentitySelect, ScopePicker, connectorAPI, connectorsLink, levelLabel, sendJSON, toFailure } from "./connector-ui";
+import { IdentityForm, IdentitySelect, ScopeGroup, ScopePicker, connectorAPI, connectorsLink, levelLabel, sendJSON, toFailure } from "./connector-ui";
 import {
   allowedLevels, connectorLevels, defaultRow, defaultScopeName, defaultTargets, deliveryEnv, deliveryFile, deliveryGit, deliveryRegistry, deliveryStateVolume, identitiesFor, importPayload, importsFromHost,
   isRegistry, loginMethods, refKey, refLabel, refScope, registryEntries, scopeAt, scopeFromParts, scopeLevel, scopeLevels, scopeParts, scopeQuery, secretRef, targetScope, usageFor,
@@ -173,8 +173,8 @@ function IdentitiesPanel({ connector, identities, secrets, secretsError, revisio
       {rotating && <IdentityForm key={`rotate:${refKey(rotating)}`} connector={connector} scope={secretRef(rotating)!} existing={rotating} secrets={secrets} onSaved={() => { setRotating(undefined); onChanged(); }} onCancel={() => setRotating(undefined)} />}
       {importsFromHost(connector) && <ImportFromHost connector={connector} inventory={inventory} onChanged={onChanged} />}
       {registry ? <p className="description">A registry identity is created together with the registry entry that uses it, below.</p> : <>
-        <div className="connector-store"><h3>Where to store a new identity</h3><ScopePicker label="Identity" inventory={inventory} levels={levels} value={store} onChange={setStore} />
-          {store.realm && !storable && <p className="field-error" role="alert">{title} identities are stored at {levels.join(" or ")} level.</p>}</div>
+        <ScopeGroup title="Stored identity scope" description={<>Where a new {title} identity is stored: the Realm, Space or Stack its Secret is saved in.</>}><ScopePicker label="Identity" inventory={inventory} levels={levels} value={store} onChange={setStore} />
+          {store.realm && !storable && <p className="field-error" role="alert">{title} identities are stored at {levels.join(" or ")} level.</p>}</ScopeGroup>
         <IdentityForm key={`new:${scopeParts(store).join("/")}`} connector={connector} scope={store} secrets={secrets} onSaved={() => onChanged()} />
       </>}
     </div>
@@ -223,6 +223,8 @@ function DefaultTargetEditor({ connector, target, scope, row, identities, onChan
       })}
     </tbody></table></div>
     <p className="connector-effective" role="status">{row?.effective ? <>Effective: <code>{row.effective.name}</code> <span className="description">{refScope(row.effective).join(" / ")}</span> — from the {row.origin} level.</> : <>No default in this scope. A Config here that picks no identity cannot create cells.</>}</p>
+    <h4>{target.method ? "Per-method scope" : "Level to set"}</h4>
+    <p className="description">The level of the default scope above at which {target.method ? <>the <code>{target.method}</code> method's default</> : "this default"} is saved.{target.method && " Each method keeps its own default."}</p>
     <div className="schema-fields">
       <label className="schema-field"><span>Level</span><select aria-label={`${name} default level`} value={picked} disabled={pending || !allowed.length} onChange={event => setLevel(event.target.value)}>{allowed.map(item => <option key={item} value={item}>{levelLabel(item, scope)}</option>)}</select></label>
       <IdentitySelect label={`${name} default identity`} identities={identities} value={choice} emptyLabel="Select an identity…" disabled={pending} realm={scope.realm} onChange={setChoice} />
@@ -243,7 +245,7 @@ function DefaultsPanel({ connector, identities, revision, inventory, initialScop
     <div className="panel-heading"><h2>Defaults</h2><span className="badge">{levels.join(" · ")}</span></div>
     <div className="panel-body">
       <p className="description">A default fills {title} for every Config in the scope that picked no identity. The deepest level wins: Stack over Space over Realm. Changing one takes effect at once — no Config is re-rendered.</p>
-      <ScopePicker label="Default" inventory={inventory} levels={levels} value={scope} onChange={setScope} />
+      <ScopeGroup title="Default scope" description={<>Whose defaults are shown and set below: every level of this scope, from its Realm down.</>}><ScopePicker label="Default" inventory={inventory} levels={levels} value={scope} onChange={setScope} /></ScopeGroup>
       {!scope.realm ? <p className="description">Choose a Realm to see and set its defaults.</p> : <>
         {defaults.loading && !defaults.data && <p role="status">Loading defaults…</p>}
         {defaults.error && <ErrorNotice error={defaults.error} kind="Scope" />}
@@ -322,12 +324,15 @@ function ConnectorDetail({ connector, usage, secrets, secretsError, target, revi
   </>;
 }
 
-export function ConnectorsPage({ name, target, revision, inventory, onChanged }: { name?: string; target?: string[]; revision: number; inventory: InventoryResource; onChanged: () => void }) {
+export function ConnectorsPage({ name, target, revision, inventory, onChanged, onTitle }: { name?: string; target?: string[]; revision: number; inventory: InventoryResource; onChanged: () => void; onTitle?: (connector: { name: string; title: string }) => void }) {
   const catalog = useResource<Connector[]>("/api/connectors", revision);
   const usage = useResource<ConnectorUsage[]>("/api/connectors/status", revision);
   const secrets = useResource<unknown[]>("/api/catalog/secrets", revision);
   const connector = name ? catalog.data?.find(item => item.name === name) : undefined;
   const scope: Scope | undefined = target?.length ? scopeFromParts(target) : undefined;
+  // The page heading shows the connector's title, which only the catalog knows (#1568).
+  const connectorName = connector?.name, connectorTitle = connector?.title;
+  useEffect(() => { if (connectorName) onTitle?.({ name: connectorName, title: connectorTitle || connectorName }); }, [connectorName, connectorTitle, onTitle]);
   return <>
     {catalog.loading && !catalog.data && <p role="status">Loading connectors…</p>}
     {catalog.error && <ErrorNotice error={catalog.error} kind="Connector" />}

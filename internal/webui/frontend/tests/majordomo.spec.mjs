@@ -443,7 +443,9 @@ test("the Health page shows the sweep schedule from the task config, runs a swee
 
   // Suspended: the edit and the command are shown, and nothing on the page edits the schedule.
   const enable = schedule.getByRole("note");
+  await expect(enable).toHaveCount(1);
   await expect(enable).toContainText("Sweeps are suspended.");
+  await expect(enable).toContainText("kuke-majordomo-claude-health-sweep ships switched off");
   await expect(enable).toContainText("{ name: health-sweep, suspend: false }");
   await expect(enable).toContainText("kuke team init --reapply");
   await expect(schedule.locator("input, select, textarea")).toHaveCount(0);
@@ -454,6 +456,26 @@ test("the Health page shows the sweep schedule from the task config, runs a swee
   expect(state.sweeps).toEqual([{ config: { name: "kuke-majordomo-claude-health-sweep", realm: "default", space: "default", stack: "default" } }]);
 
   await expect(page.getByRole("region", { name: "Health report" })).toContainText("No health report is stored.");
+});
+
+// Issue #1568, item F: the suspended notice is shown once, however many sweep configs are suspended.
+test("two suspended sweep configs share one suspended notice that names both, and an enabled one is left out", async ({ page }) => {
+  const sweep = (name, suspend) => config(name, sweepLabels, { spec: { schedule: { cron: "@hourly", suspend } } });
+  await world(page, { configs: [...teamConfigs({ suspend: true }), sweep("kuke-majordomo-codex-health-sweep", true), sweep("kuke-majordomo-enabled-health-sweep", false)] });
+  await page.goto(`${server.url}#/health`);
+  const schedule = page.getByRole("region", { name: "Sweep schedule" });
+  await expect(schedule.locator(".health-sweep")).toHaveCount(3);
+  await expect(schedule.locator(".health-sweep .state-badge")).toHaveText(["Suspended", "Suspended", "Scheduled"]);
+  const notice = schedule.getByRole("note");
+  await expect(notice).toHaveCount(1);
+  await expect(notice).toContainText("Sweeps are suspended.");
+  await expect(notice.getByRole("list", { name: "Suspended sweeps" }).getByRole("listitem")).toHaveText(["kuke-majordomo-claude-health-sweep", "kuke-majordomo-codex-health-sweep"]);
+  await expect(notice).not.toContainText("kuke-majordomo-enabled-health-sweep");
+  await expect(notice.locator("pre")).toHaveText([/\{ name: health-sweep, suspend: false \}/, "kuke team init --reapply"]);
+  // The notice sits above the sweep list instead of inside every suspended entry.
+  await expect(schedule.locator(".health-sweep").getByRole("note")).toHaveCount(0);
+  expect(await notice.evaluate(el => el.compareDocumentPosition(document.querySelector(".health-sweeps")) & Node.DOCUMENT_POSITION_FOLLOWING)).toBeTruthy();
+  await expect(schedule.getByRole("button", { name: /^Run sweep now with / })).toHaveCount(3);
 });
 
 test("an enabled sweep shows no reapply instructions, and a host without majordomo says so", async ({ page }) => {

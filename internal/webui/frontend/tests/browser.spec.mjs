@@ -31,6 +31,8 @@ const listSearch = page => page.locator(".list-controls").getByRole("searchbox")
 const terminalTools = page => page.locator(".cell-terminal-tools");
 const toasts = page => page.getByRole("region", { name: "Notifications" }).locator(".toast");
 const content = page => page.locator(".workspace-content");
+// Cell and container pages keep Network and Cgroup collapsed (#1568); a test opens one by its region name.
+const expand = (page, name) => page.getByRole("region", { name }).locator("summary").click();
 const inventoryIndicator = (page, state) => page.locator(".toolbar").getByRole("button", { name: `Inventory ${state}: show details` });
 
 test("terminal selects eligible containers, forwards input and resize, and detaches", async ({ page }) => {
@@ -270,7 +272,7 @@ test("Workspace retains independent scoped terminals, focus and resize while swi
   const resizedBefore = messages.get(devPath).filter(message => typeof message === "string" && JSON.parse(message).type === "resize").length;
   await page.setViewportSize({ width: 900, height: 700 });
   await expect.poll(() => messages.get(devPath).filter(message => typeof message === "string" && JSON.parse(message).type === "resize").length).toBeGreaterThan(resizedBefore);
-  await page.getByRole("link", { name: "Resources", exact: true }).click();
+  await page.locator(".breadcrumbs").getByRole("link", { name: "Resources", exact: true }).click();
   await expect(page.locator(".page-heading h1")).toHaveText("Resources");
   expect(closed).toEqual([]);
   await cells.getByRole("link", { name: "Open dev / shared / services / api" }).click();
@@ -378,6 +380,18 @@ test("Resources is home and retains resource summaries and navigation", async ({
     await expect(page.locator(".summary-card").filter({ hasText: type }).locator("strong")).toHaveText("2");
     await expect(nav(page).getByRole("link", { name: type, exact: true })).toBeVisible();
   }
+  // Navigation is two labelled groups: operations first, then resources and administration (#1568).
+  const groups = { Operate: ["Overview", "Cells", "Health"], Configure: ["Realms", "Spaces", "Stacks", "Blueprints", "Configs", "Volumes", "Secrets", "Connectors", "Images", "Daemon"] };
+  for (const [label, links] of Object.entries(groups)) {
+    const group = nav(page).getByRole("group", { name: label, exact: true });
+    await expect(group.getByRole("link")).toHaveText(links);
+  }
+  await expect(nav(page).getByRole("link")).toHaveCount(13);
+  await expect(nav(page).locator('[aria-current="page"]')).toHaveText(["Overview"]);
+  // The toolbar no longer repeats the breadcrumb root, which still leads home.
+  await expect(page.locator(".toolbar-actions").getByRole("link", { name: "Resources" })).toHaveCount(0);
+  await expect(page.locator(".toolbar-actions").getByRole("link", { name: "New Cell", exact: true })).toBeVisible();
+  await expect(page.locator(".breadcrumbs").getByRole("link", { name: "Resources", exact: true })).toHaveAttribute("href", "#/resources");
   await expect(page.locator(".summary-card").filter({ hasText: "Cells" }).getByRole("list", { name: "Cell states" })).toContainText("Running");
   const attention = page.getByRole("region", { name: "Cells needing attention" });
   await expect(attention.getByRole("link", { name: "api", exact: true })).toHaveAttribute("href", "#/resource/prod/shared/services/api");
@@ -482,9 +496,13 @@ for (const [width, height] of [[1440, 900], [390, 844]]) {
         : path.endsWith("/containers") ? { json: [{ id: "root", root: true }, { id: "web" }, { id: "shell", attachable: true }] } : undefined);
       await page.goto(`${server.url}#/resource/dev/shared/services/api`);
       const panels = page.locator(".cell-overview-content > .panel");
+      await expect(panels).toHaveCount(5);
+      // Network and Cgroup start collapsed (#1568); this test measures the page with both open.
+      await expect(page.getByRole("region", { name: "cell cgroup" }).getByText("cpu io memory pids", { exact: true })).toBeHidden();
+      await expand(page, "cell network");
+      await expand(page, "cell cgroup");
       await expect(page.getByRole("region", { name: "cell cgroup" }).getByText("cpu io memory pids", { exact: true })).toBeVisible();
       await expect(page.getByRole("region", { name: "cell network" })).toBeVisible();
-      await expect(panels).toHaveCount(5);
       const sizes = await panels.evaluateAll(items => items.map(item => ({ client: item.clientHeight, scroll: item.scrollHeight })));
       for (const size of sizes) expect(size.client).toBeGreaterThanOrEqual(size.scroll);
       expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe(theme);
@@ -496,6 +514,97 @@ for (const [width, height] of [[1440, 900], [390, 844]]) {
     });
   }
 }
+
+// Issue #1568, item C: cellRead leads with status, containers and the source Config; runtime internals are disclosures.
+test("cellRead keeps Network and Cgroup collapsed with a summary line, opens them by keyboard and remembers the choice", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const network = { cell: { bridgeName: "k-0123abcd", hostNetwork: false, ipv4: "10.88.1.5", ipv4State: "assigned", rootContainer: "root", containers: [{ id: "root", root: true }, { id: "web" }] } };
+  const cgroup = { cgroupPath: "/kukeon/dev/shared/services/api", absolutePath: "/sys/fs/cgroup/kukeon/dev/shared/services/api", exists: true, ready: true, subtreeControllers: ["cpu", "memory"], live: { memory: { current: { state: "set", raw: "327155712", value: 327155712 }, max: { state: "set", raw: "1073741824", value: 1073741824 } }, pids: { current: { state: "set", raw: "12", value: 12 } } } };
+  const reads = { network: 0, cgroup: 0 };
+  await mock(page, path => {
+    if (path.endsWith("/cells/api/network")) { reads.network++; return { json: network }; }
+    if (path.endsWith("/cells/api/cgroup")) { reads.cgroup++; return { json: cgroup }; }
+    if (path.endsWith("/containers")) return { json: [{ id: "root", root: true }, { id: "web", attachable: true }] };
+    if (path.endsWith("/cells/api")) return { json: { ...doc(["dev", "shared", "services", "api"]), spec: { realmId: "dev", spaceId: "shared", stackId: "services", provenance: { bindingKind: "config", bindingRef: { name: "app", realm: "dev", space: "shared" } } } } };
+  });
+  await page.goto(`${server.url}#/resource/dev/shared/services/api`);
+  const details = page.getByRole("region", { name: "Cell details" });
+  const networkPanel = page.getByRole("region", { name: "cell network" });
+  const cgroupPanel = page.getByRole("region", { name: "cell cgroup" });
+  await expect(details.locator("details")).toHaveCount(2);
+  await expect(networkPanel.locator("summary")).toContainText("Bridged (space network) · 10.88.1.5 · 2 containers");
+  await expect(cgroupPanel.locator("summary")).toContainText("Ready · memory 312 MiB / 1 GiB · 12 PIDs");
+  for (const panel of [networkPanel, cgroupPanel]) {
+    await expect(panel.locator("details")).not.toHaveAttribute("open");
+    await expect(panel.locator(".panel-body")).toBeHidden();
+  }
+  // Status, containers, then the overview with the source Config: all above the collapsed internals and
+  // inside the first 1440x900 viewport, where the open sections used to push them 2,600px apart.
+  await expect(details.locator(":scope > .panel h2")).toHaveText(["Runtime status", "Containers", "Resource overview", "Network", "Cgroup"]);
+  const config = details.locator(".resource-overview dt:text-is('Config') + dd").getByRole("link");
+  await expect(config).toHaveText("dev / shared / app");
+  await expect(config).toHaveAttribute("href", "#/configs/dev/shared/app");
+  for (const visible of [page.getByRole("heading", { name: "Runtime status" }), details.locator(".container-panel li").filter({ hasText: "web" }), config, networkPanel.locator("summary")]) await expect(visible).toBeInViewport({ ratio: 1 });
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+  expect(await page.evaluate(() => document.scrollingElement.scrollHeight)).toBeLessThan(1100);
+  // Every overview field shown before is still there.
+  await expect(details.locator(".resource-overview dt")).toHaveText(["Config", "Labels", "Name", "Kind", "Scope", "API version"]);
+
+  // Each summary is keyboard-operable: Enter opens Network, Space opens Cgroup.
+  await networkPanel.locator("summary").focus();
+  await page.keyboard.press("Enter");
+  await expect(networkPanel.locator("details")).toHaveAttribute("open");
+  await expect(networkPanel.getByText("k-0123abcd")).toBeVisible();
+  await expect(networkPanel.locator("table.network-containers tr").filter({ hasText: "web" })).toBeVisible();
+  await cgroupPanel.locator("summary").focus();
+  await page.keyboard.press("Space");
+  await expect(cgroupPanel.getByText("/sys/fs/cgroup/kukeon/dev/shared/services/api")).toBeVisible();
+  await expect(cgroupPanel.locator(".cgroup-live")).toBeVisible();
+  // One read per section: the summary line and the body share it.
+  expect(reads).toEqual({ network: 1, cgroup: 1 });
+  await page.keyboard.press("Space");
+  await expect(cgroupPanel.locator(".panel-body")).toBeHidden();
+
+  // The choice is remembered per section across a reload.
+  await page.reload();
+  await expect(networkPanel.locator("details")).toHaveAttribute("open");
+  await expect(networkPanel.getByText("k-0123abcd")).toBeVisible();
+  await expect(cgroupPanel.locator("details")).not.toHaveAttribute("open");
+});
+
+test("a cell not created from a Config says so, and a failed internal read stays visible on the collapsed row", async ({ page }) => {
+  await mock(page, path => path.endsWith("/cells/api/network") ? { status: 403, json: { error: { code: "permission_denied", message: "network read denied" } } } : undefined);
+  await page.goto(`${server.url}#/resource/dev/shared/services/api`);
+  const details = page.getByRole("region", { name: "Cell details" });
+  await expect(details.locator(".resource-overview dt:text-is('Config') + dd")).toHaveText("Not created from a Config");
+  await expect(details.locator(".resource-overview").getByRole("link", { name: /Config/ })).toHaveCount(0);
+  const networkPanel = page.getByRole("region", { name: "cell network" });
+  await expect(networkPanel.locator("summary")).toContainText("Permission denied");
+  await expect(networkPanel.locator("summary")).toContainText("Stale values");
+  await expand(page, "cell network");
+  await expect(networkPanel.getByRole("alert")).toContainText("network read denied");
+});
+
+test("the container page collapses Network and Cgroup the same way, while realm, space and stack pages keep them open", async ({ page }) => {
+  await mock(page, path => path.endsWith("/containers/web/network") ? { json: { cell: { hostNetwork: false, ipv4State: "assigned", ipv4: "10.88.1.5", rootContainer: "root" }, container: { id: "web", ports: ["8080:80"] } } }
+    : path.endsWith("/containers/web/cgroup") ? { json: { cgroupPath: "/kukeon/web", exists: false, ready: false } } : undefined);
+  await page.goto(`${server.url}#/resource/prod/shared/services/api/web`);
+  const networkPanel = page.getByRole("region", { name: "container network" });
+  const cgroupPanel = page.getByRole("region", { name: "container cgroup" });
+  await expect(networkPanel.locator("summary")).toContainText("Cell network namespace · 1 declared port");
+  await expect(cgroupPanel.locator("summary")).toContainText("Cgroup not present");
+  await expect(networkPanel.locator(".panel-body")).toBeHidden();
+  await expect(cgroupPanel.locator(".panel-body")).toBeHidden();
+  await expand(page, "container network");
+  await expect(networkPanel.locator("dt:text-is('Ports') + dd")).toContainText("8080:80");
+  await expand(page, "container cgroup");
+  await expect(cgroupPanel.getByText("kukeond found no cgroup at this path")).toBeVisible();
+  // A realm, space or stack page has no disclosure: its sections render open as before.
+  await page.goto(`${server.url}#/resource/dev/shared`);
+  await expect(page.getByRole("region", { name: "space network" }).locator(".panel-body")).toBeVisible();
+  await expect(page.getByRole("region", { name: "space cgroup" }).locator(".panel-body")).toBeVisible();
+  await expect(content(page).locator("details.disclosure, .disclosure details")).toHaveCount(0);
+});
 
 test("cell sidebar uses full scope for duplicate names and switching reuses inventory", async ({ page }) => {
   let inventoryReads = 0;
@@ -817,9 +926,45 @@ test("mobile cell navigation closes after selection and Resources fits the scree
   await expect(page.locator(".page-heading h1")).toHaveText("api");
   await expect(page.getByRole("link", { name: "+ New Cell" })).toHaveCount(0);
   await expect(page.getByRole("status", { name: "Daemon: Connected" })).toBeVisible();
-  await page.getByRole("link", { name: "Resources", exact: true }).click();
-  await expect(nav(page).getByRole("link", { name: "Secrets" })).toBeVisible();
+  // Phones hide the breadcrumbs, so the way home from a cell is the drawer's brand link.
+  await page.getByRole("button", { name: "Toggle sidebar" }).click();
+  await page.getByRole("complementary", { name: "Cell sidebar" }).getByRole("link", { name: "kukeon", exact: true }).click();
+  await expect(page.locator(".page-heading h1")).toHaveText("Resources");
+  await expect(nav(page).getByRole("link", { name: "Overview" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+});
+
+// Issue #1568, item A: on phones the Configure group is a disclosure and the navigation never scrolls sideways.
+test("phone navigation fits the screen and reaches every Configure page through its disclosure", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mock(page);
+  await mockDaemon(page);
+  await page.goto(`${server.url}#/resources`);
+  const bar = page.locator(".resources-nav");
+  const fits = async () => expect(await bar.evaluate(el => el.scrollWidth <= el.clientWidth + 1 && getComputedStyle(el).overflowX !== "auto")).toBe(true);
+  await expect(nav(page).getByRole("group", { name: "Operate" }).getByRole("link")).toHaveText(["Overview", "Cells", "Health"]);
+  await expect(nav(page).getByRole("link", { name: "Daemon" })).toBeHidden();
+  await fits();
+  const configure = nav(page).locator("summary", { hasText: "Configure" });
+  await configure.focus();
+  await page.keyboard.press("Enter");
+  await expect(nav(page).getByRole("group", { name: "Configure" }).getByRole("link")).toHaveCount(10);
+  await fits();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await nav(page).getByRole("link", { name: "Daemon" }).click();
+  await expect(page.locator(".page-heading h1")).toHaveText("Daemon");
+  // A page inside the group keeps the disclosure open and marks the active link.
+  await expect(nav(page).getByRole("link", { name: "Daemon" })).toHaveAttribute("aria-current", "page");
+  await fits();
+  // An Operate page collapses it again.
+  await nav(page).getByRole("link", { name: "Cells" }).click();
+  await expect(page.locator(".page-heading h1")).toHaveText("Cells");
+  await expect(nav(page).getByRole("link", { name: "Cells" })).toHaveAttribute("aria-current", "page");
+  await expect(nav(page).getByRole("link", { name: "Daemon" })).toBeHidden();
+  // A deep link into the group opens it.
+  await page.goto(`${server.url}#/secrets`);
+  await expect(nav(page).getByRole("link", { name: "Secrets" })).toHaveAttribute("aria-current", "page");
+  await fits();
 });
 
 test("cell status cards and container observations expose reported runtime state", async ({ page }) => {
@@ -1025,6 +1170,135 @@ test("create from config previews, prevents duplicate submits and opens the scop
   await expect(page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link", { name: "Open prod / shared / services / new-cell" })).toBeVisible();
 });
 
+// Issue #1568, item D: the preview is a short summary, the JSON is one click away and Create Cell is the
+// one primary action, with the start option beside it.
+test("New Cell from a Config summarizes the preview, keeps the JSON collapsed and wrapped, and makes Create the only primary action", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockCatalog(page);
+  const requests = [];
+  const cellDocument = name => ({ apiVersion: "kukeon.io/v1beta1", kind: "Cell", metadata: { name, labels: { note: "x".repeat(400) } }, spec: { realmId: "prod", spaceId: "shared", stackId: "services", containers: [
+    { id: "work", image: "ghcr.io/example/app:v1", attachable: true, env: Array.from({ length: 80 }, (_, i) => `VAR_${i}=<redacted>`) }, { id: "sidecar", image: "ghcr.io/example/sidecar:v2" }] } });
+  await page.route("**/api/cells/from-config/*", async route => {
+    const input = route.request().postDataJSON();
+    const create = route.request().url().endsWith("create");
+    requests.push({ step: create ? "create" : "preview", input });
+    await route.fulfill({ json: create ? cellDocument(input.resolvedName) : { document: cellDocument(input.name || "worker-7f3a"), preview: "reviewed" } });
+  });
+  let started = 0;
+  await page.route("**/api/realms/prod/spaces/shared/stacks/services/cells/worker-7f3a/**", route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/start")) { started++; return route.fulfill({ json: {} }); }
+    if (path.endsWith("/containers")) return route.fulfill({ json: [{ id: "work", attachable: true }] });
+    return route.fallback();
+  });
+  await page.routeWebSocket("**/attach", socket => { socket.send(JSON.stringify({ type: "ready" })); });
+  await page.goto(`${server.url}#/new-cell?config=${encodeURIComponent(JSON.stringify(["prod", "shared", "services", "shared-name"]))}`);
+  // The mode switch is a segmented control that exposes its selected state.
+  const modes = page.getByRole("group", { name: "Cell creation method" });
+  await expect(modes.getByRole("button", { name: "From Config" })).toHaveAttribute("aria-pressed", "true");
+  await expect(modes.getByRole("button", { name: "Manual" })).toHaveAttribute("aria-pressed", "false");
+  const primary = content(page).locator("button.primary-action:visible");
+  await expect(page.getByRole("button", { name: "Preview Cell", exact: true })).toBeEnabled();
+  await expect(primary).toHaveText(["Preview Cell"]);
+  await page.getByRole("button", { name: "Preview Cell", exact: true }).click();
+
+  const review = page.locator(".creation-review");
+  await expect(review.locator(".creation-summary dt")).toHaveText(["Name", "Scope", "Containers", "Images", "Connectors"]);
+  await expect(review.locator(".creation-summary dd")).toHaveText(["worker-7f3a", "prod / shared / services", "2 (work, sidecar)", "ghcr.io/example/app:v1ghcr.io/example/sidecar:v2", "None"]);
+  // The summary is on screen without scrolling by hand, and the page is no longer thousands of pixels of JSON.
+  await expect(review.locator(".creation-summary")).toBeInViewport({ ratio: 1 });
+  const collapsedHeight = await page.evaluate(() => document.scrollingElement.scrollHeight);
+  // Create Cell is the only primary-styled button; Refresh preview is a plain, content-width button.
+  await expect(primary).toHaveText(["Create Cell"]);
+  const refresh = page.getByRole("button", { name: "Refresh preview", exact: true });
+  await expect(refresh).not.toHaveClass(/primary-action/);
+  expect((await refresh.boundingBox()).width).toBeLessThan(200);
+  // The start option sits on the same row, right after Create.
+  const create = review.getByRole("button", { name: "Create Cell", exact: true });
+  const start = review.getByLabel("Start and attach after creation");
+  const [createBox, startBox] = [await create.boundingBox(), await start.boundingBox()];
+  expect(Math.abs((createBox.y + createBox.height / 2) - (startBox.y + startBox.height / 2))).toBeLessThan(12);
+  expect(startBox.x - (createBox.x + createBox.width)).toBeGreaterThan(0);
+  expect(startBox.x - (createBox.x + createBox.width)).toBeLessThan(60);
+
+  // The full JSON is a collapsed disclosure that wraps instead of widening the page.
+  const json = review.locator("details.creation-json");
+  const pre = page.getByLabel("Complete Cell preview");
+  await expect(json).not.toHaveAttribute("open");
+  await expect(pre).toBeHidden();
+  await json.locator("summary").focus();
+  await page.keyboard.press("Enter");
+  await expect(pre).toContainText('"id": "sidecar"');
+  expect(await pre.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  expect(await page.evaluate(() => document.scrollingElement.scrollHeight)).toBeGreaterThan(collapsedHeight);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await pre.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // Create with start and attach: the reviewed name and preview token go back unchanged, then the cell starts.
+  await start.check();
+  await create.click();
+  await expect(page).toHaveURL(/#\/workspace\/prod\/shared\/services\/worker-7f3a$/);
+  await expect.poll(() => started).toBe(1);
+  expect(requests.map(request => request.step)).toEqual(["preview", "create"]);
+  expect(requests[1].input).toEqual({ config: { name: "shared-name", realm: "prod", space: "shared", stack: "services" }, name: "", resolvedName: "worker-7f3a", preview: "reviewed", env: [], ignoreDiskPressure: false });
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
+});
+
+test("manual New Cell keeps validation inline, summarizes the preview and sends the previewed specification unchanged", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mock(page);
+  const requests = [];
+  await page.route("**/api/cells/manual/*", async route => {
+    const input = route.request().postDataJSON();
+    const create = route.request().url().endsWith("create");
+    requests.push({ step: create ? "create" : "preview", input });
+    const document = { apiVersion: "kukeon.io/v1beta1", kind: "Cell", metadata: { name: input.name, annotations: { note: "y".repeat(600) } }, spec: { realmId: input.realm, spaceId: input.space, stackId: input.stack, containers: input.spec.containers } };
+    await route.fulfill({ json: create ? document : { document, preview: "manual-reviewed" } });
+  });
+  await page.goto(`${server.url}#/new-cell`);
+  const modes = page.getByRole("group", { name: "Cell creation method" });
+  await modes.getByRole("button", { name: "Manual" }).click();
+  await expect(modes.getByRole("button", { name: "Manual" })).toHaveAttribute("aria-pressed", "true");
+  await expect(modes.getByRole("button", { name: "From Config" })).toHaveAttribute("aria-pressed", "false");
+  const primary = content(page).locator("button.primary-action:visible");
+  await expect(primary).toHaveText(["Validate and preview Cell"]);
+  // Validation errors stay inline, beside the field, and nothing is sent.
+  await primary.click();
+  await expect(page.locator("#manual-name-error")).toHaveText("This field is required.");
+  await expect(page.getByText("Fix the highlighted fields before previewing.")).toBeVisible();
+  expect(requests).toEqual([]);
+  await page.locator("#manual-name").fill("manual-cell");
+  await page.getByRole("button", { name: "Add container" }).click();
+  await page.getByLabel(/^Container ID/).fill("app");
+  await page.getByLabel(/^OCI image/).fill("ghcr.io/example/app:latest");
+  await page.getByLabel("Attachable terminal").check();
+  await primary.click();
+
+  const review = page.locator(".creation-review");
+  await expect(review.locator(".creation-summary dd")).toHaveText(["manual-cell", "dev / shared / services", "1 (app)", "ghcr.io/example/app:latest", "None"]);
+  await expect(review.locator(".creation-summary")).toBeInViewport({ ratio: 1 });
+  await expect(primary).toHaveText(["Create Cell"]);
+  await expect(page.getByRole("button", { name: "Refresh preview", exact: true })).not.toHaveClass(/primary-action/);
+  const pre = page.getByLabel("Complete manual Cell preview");
+  await expect(pre).toBeHidden();
+  await review.locator("details.creation-json summary").click();
+  await expect(pre).toContainText('"image": "ghcr.io/example/app:latest"');
+  // The raw preview used to be thousands of pixels wide; it now wraps, also on a phone.
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await pre.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  await review.getByLabel("Start and attach after creation").check();
+  await review.getByRole("button", { name: "Create Cell", exact: true }).click();
+  await expect(page).toHaveURL(/#\/workspace\/dev\/shared\/services\/manual-cell$/);
+  expect(requests.map(request => request.step)).toEqual(["preview", "create"]);
+  expect(requests[1].input).toEqual({ ...requests[0].input, preview: "manual-reviewed" });
+  expect(requests[0].input).toMatchObject({ name: "manual-cell", realm: "dev", space: "shared", stack: "services", labels: {}, annotations: {}, spec: { containers: [{ id: "app", image: "ghcr.io/example/app:latest", attachable: true }], autoDelete: false, nestedCgroupRuntime: false, ignoreDiskPressure: false } });
+});
+
 // A shared blueprint as `kuke team` renders it: the form below is derived from
 // this document alone.
 const formBlueprint = {
@@ -1042,6 +1316,13 @@ const formBlueprint = {
     cell: { containers: [{ id: "work", image: "${IMAGE}", repos: [{ name: "role-source", target: "/home/user/agents", required: true }, { name: "project", target: "/home/user/project" }] }] },
   },
 };
+// New Config sections after Config are disclosures (#1568); a test opens one by its heading unless it is open.
+const configSection = (page, title) => page.locator(".schema-disclosure").filter({ has: page.locator("summary h3", { hasText: new RegExp(`^${title}$`) }) });
+async function openSection(page, title) {
+  const section = configSection(page, title);
+  if (await section.locator("details").getAttribute("open") === null) await section.locator("summary").click();
+  await expect(section.locator("details")).toHaveAttribute("open");
+}
 test("a config is created from the form a blueprint describes, and the preview shows each repo's git identity", async ({ page }) => {
   await mock(page, path => path === "/api/realms/prod/image-inventory" ? { json: { realm: "prod", namespace: "prod.kukeon.io", images: [
     { name: "ghcr.io/example/claude-gh:v1", capabilities: ["claude", "git", "gh"], labels: {} },
@@ -1083,6 +1364,7 @@ test("a config is created from the form a blueprint describes, and the preview s
 
   // Typed inputs come from the blueprint: an enum select, a required path.
   await expect(page.getByLabel("ANTHROPIC_MODEL")).toHaveValue("");
+  await openSection(page, "claude");
   await page.getByLabel("ANTHROPIC_MODEL").selectOption("sonnet");
   await page.getByLabel("Config name").fill("dev");
   // The config's scope comes from the inventory; open coordinates stay realm-scoped.
@@ -1096,6 +1378,7 @@ test("a config is created from the form a blueprint describes, and the preview s
   const picker = page.getByLabel("IMAGE from realm images");
   await expect(picker.getByRole("option")).toHaveText(["Choose from the realm's images…", "ghcr.io/example/claude-gh:v1", "ghcr.io/example/claude:v1", "docker.io/library/alpine:3 — capabilities unknown"]);
   await expect(page.getByLabel("github-token secret")).toHaveCount(0);
+  await openSection(page, "Components");
   await page.getByLabel(/^github connector/).check();
   await expect(picker.getByRole("option")).toHaveText(["Choose from the realm's images…", "ghcr.io/example/claude-gh:v1", "docker.io/library/alpine:3 — capabilities unknown"]);
   await expect(page.getByText("This image does not provide: gh.")).toBeVisible();
@@ -1105,6 +1388,7 @@ test("a config is created from the form a blueprint describes, and the preview s
 
   // A mode's own parameters show only when previewing that mode.
   await expect(page.getByLabel("PROMPT")).toHaveCount(0);
+  await openSection(page, "Modes");
   await page.getByLabel("Preview as mode").selectOption("headless");
   await expect(page.getByLabel("PROMPT")).toBeVisible();
   await page.getByLabel("Preview as mode").selectOption("interactive");
@@ -1173,6 +1457,127 @@ test("the config preview of an existing config shows each repo's git identity", 
 // kuke team writes realm-only blueprint refs from stack-scoped configs; the
 // mock 404s any lookup whose scope slots do not match exactly, so a name that
 // leaks into the space or stack slot fails the test.
+// Issue #1568, item E: the New Config form leads with the essentials and discloses the rest on demand.
+async function mockConfigForm(page) {
+  await mock(page, path => path === "/api/realms" ? { json: [doc(["prod"])] } : path === "/api/realms/prod/image-inventory" ? { json: { realm: "prod", namespace: "prod.kukeon.io", images: [
+    { name: "ghcr.io/example/claude-gh:v1", capabilities: ["claude", "git", "gh"], labels: {} }, { name: "ghcr.io/example/claude:v1", capabilities: ["claude", "git"], labels: {} }] } } : undefined);
+  await page.route("**/api/catalog/**", async route => {
+    const [, , kind, name] = new URL(route.request().url()).pathname.split("/").filter(Boolean);
+    if (kind === "blueprints") return route.fulfill({ json: name ? formBlueprint : [{ kind: "CellBlueprint", metadata: formBlueprint.metadata }] });
+    return route.fulfill({ json: kind === "secrets" ? [{ kind: "Secret", metadata: { name: "gh-token", realm: "prod" }, spec: {} }] : [] });
+  });
+  const requests = [];
+  await page.route("**/api/configs/from-blueprint/*", async route => {
+    const input = route.request().postDataJSON();
+    requests.push({ action: route.request().url().split("/").at(-1), input });
+    const config = { apiVersion: "v1beta1", kind: "CellConfig", metadata: input.config, spec: input.spec };
+    await route.fulfill({ json: route.request().url().endsWith("create") ? config : { config, preview: "reviewed", document: { metadata: { name: "dev-abc123" }, spec: { realmId: "prod" } }, values: [] } });
+  });
+  await page.goto(`${server.url}#/new-config?blueprint=${encodeURIComponent(JSON.stringify(["prod", "claude"]))}`);
+  await expect(page.getByRole("heading", { name: "Answer the claude form" })).toBeVisible();
+  return requests;
+}
+
+test("New Config leads with the essential fields and keeps optional sections collapsed with a count of set answers", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockConfigForm(page);
+  const headings = page.locator(".schema-disclosure > details > summary h3");
+  // Sections holding a required answer come first and open by themselves; the rest are collapsed rows.
+  await expect(headings).toHaveText(["Role", "Repositories", "Components", "Modes", "Image", "claude", "Image capabilities", "Default git identity"]);
+  await expect(page.locator(".schema-disclosure > details[open] > summary h3")).toHaveText(["Role", "Repositories"]);
+  await expect(configSection(page, "Role").locator(".disclosure-summary")).toHaveText("Defaults · 1 required");
+  await expect(configSection(page, "Repositories").locator(".disclosure-summary")).toHaveText("Defaults · 1 required");
+  for (const title of ["Components", "Modes", "Image", "claude", "Image capabilities", "Default git identity"]) await expect(configSection(page, title).locator(".disclosure-summary")).toHaveText("Defaults");
+  // Above the fold at 1440x900 are the Config essentials only; the required answers follow, open, and no
+  // optional field shows anywhere until its section is opened.
+  for (const essential of [page.getByLabel("Config name"), page.getByLabel("Config realm"), page.getByLabel("Config space"), page.getByLabel("Config stack")]) await expect(essential).toBeInViewport({ ratio: 1 });
+  for (const required of [page.getByLabel("ROLE_PATH"), page.getByLabel("role-source URL")]) await expect(required).toBeVisible();
+  for (const optional of [page.getByLabel("IMAGE", { exact: true }), page.getByLabel("ANTHROPIC_MODEL"), page.getByLabel("Additional required capabilities"), page.getByLabel("Preview as mode"), page.getByLabel(/^github connector/), page.getByLabel("Override the inherited default identity")]) await expect(optional).toBeHidden();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+
+  // A section opens from the keyboard, and its row counts the answers set inside it.
+  await configSection(page, "claude").locator("summary").focus();
+  await page.keyboard.press("Enter");
+  await page.getByLabel("ANTHROPIC_MODEL").selectOption("sonnet");
+  await expect(configSection(page, "claude").locator(".disclosure-summary")).toHaveText("1 set");
+  await page.getByLabel("ROLE_PATH").fill("dev");
+  await expect(configSection(page, "Role").locator(".disclosure-summary")).toHaveText("1 set");
+  await openSection(page, "Modes");
+  await page.getByLabel("Default mode").selectOption("headless");
+  await expect(configSection(page, "Modes").locator(".disclosure-summary")).toHaveText("1 set");
+  // Enabling a component brings its own section, already open because its secret is required, and opens
+  // the Image section whose default image no longer provides every required capability.
+  await openSection(page, "Components");
+  await page.getByLabel(/^github connector/).check();
+  await expect(configSection(page, "Components").locator(".disclosure-summary")).toHaveText("1 set");
+  await expect(configSection(page, "github").locator("details")).toHaveAttribute("open");
+  await expect(configSection(page, "github").locator(".disclosure-summary")).toHaveText("Defaults · 1 required");
+  await expect(configSection(page, "Image").locator("details")).toHaveAttribute("open");
+  await expect(page.getByText("This image does not provide: gh.")).toBeVisible();
+  // The one primary action is the preview; the review then makes Create Config primary.
+  await expect(content(page).locator("button.primary-action:visible")).toHaveText(["Preview Config"]);
+});
+
+test("submitting New Config with an unmet required answer opens its collapsed section and focuses the first invalid field", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const requests = await mockConfigForm(page);
+  await page.getByLabel("Config name").fill("dev");
+  await openSection(page, "Components");
+  await page.getByLabel(/^github connector/).check();
+  // Collapse every section that holds a required answer, as an operator skimming the form might.
+  for (const title of ["Role", "github", "Repositories"]) {
+    await configSection(page, title).locator("summary").click();
+    await expect(configSection(page, title).locator("details")).not.toHaveAttribute("open");
+  }
+  await expect(page.getByLabel("ROLE_PATH")).toBeHidden();
+  const requiredErrors = page.locator(".field-error").filter({ hasText: "This answer is required." });
+  await expect(requiredErrors).toHaveCount(0);
+  const preview = page.getByRole("button", { name: "Preview Config", exact: true });
+  await preview.click();
+  // Nothing is sent; each section with a missing answer opens and the first invalid field takes focus.
+  for (const title of ["Role", "github", "Repositories"]) await expect(configSection(page, title).locator("details")).toHaveAttribute("open");
+  await expect(page.getByLabel("ROLE_PATH")).toBeFocused();
+  await expect(page.getByLabel("ROLE_PATH")).toHaveAttribute("aria-invalid", "true");
+  await expect(page.getByLabel("github-token secret")).toHaveAttribute("aria-invalid", "true");
+  await expect(page.getByLabel("role-source URL")).toHaveAttribute("aria-invalid", "true");
+  await expect(page.getByLabel("project URL")).not.toHaveAttribute("aria-invalid");
+  await expect(requiredErrors).toHaveCount(3);
+  expect(requests).toEqual([]);
+
+  // An answered field drops its mark at once; the next submit moves focus to the next missing one.
+  await page.getByLabel("ROLE_PATH").fill("dev");
+  await expect(page.getByLabel("ROLE_PATH")).not.toHaveAttribute("aria-invalid");
+  await preview.click();
+  await expect(page.getByLabel("github-token secret")).toBeFocused();
+  await page.getByLabel("github-token secret").selectOption({ label: "gh-token — prod (opaque)" });
+  await configSection(page, "Repositories").locator("summary").click();
+  await preview.click();
+  await expect(configSection(page, "Repositories").locator("details")).toHaveAttribute("open");
+  await expect(page.getByLabel("role-source URL")).toBeFocused();
+  expect(requests).toEqual([]);
+  await page.getByLabel("role-source URL").fill("git@github.com:o/agents.git");
+  await expect(requiredErrors).toHaveCount(0);
+  // A typed input the browser itself rejects (an email) gets the same treatment from a collapsed section.
+  await openSection(page, "Default git identity");
+  await page.getByLabel("Override the inherited default identity").check();
+  await page.getByLabel("Default author email").fill("not-an-email");
+  await configSection(page, "Default git identity").locator("summary").click();
+  await expect(page.getByLabel("Default author email")).toBeHidden();
+  await preview.click();
+  await expect(configSection(page, "Default git identity").locator("details")).toHaveAttribute("open");
+  await expect(page.getByLabel("Default author email")).toBeFocused();
+  expect(requests).toEqual([]);
+  await page.getByLabel("Override the inherited default identity").uncheck();
+  await preview.click();
+  await expect(page.getByRole("heading", { name: "Review Config" })).toBeVisible();
+  expect(requests).toHaveLength(1);
+  expect(requests[0].input).toEqual({ config: { name: "dev", realm: "prod" }, mode: "interactive", spec: { blueprint: { name: "claude", realm: "prod" }, values: { ROLE_PATH: "dev" }, repos: { "role-source": { url: "git@github.com:o/agents.git" } }, secrets: { "github-token": { secretRef: { name: "gh-token", realm: "prod" } } }, components: ["github"] } });
+  // The review keeps the button hierarchy of New Cell: Create Config is the only primary action.
+  await expect(content(page).locator("button.primary-action:visible")).toHaveText(["Create Config"]);
+  await expect(page.getByRole("button", { name: "Refresh preview", exact: true })).not.toHaveClass(/primary-action/);
+  await expect(page.locator(".creation-review details").filter({ hasText: "Cell this Config renders" })).not.toHaveAttribute("open");
+});
+
 test("create from config resolves configs and blueprint refs scoped at realm, space and stack", async ({ page }) => {
   const scopedMetadata = scope => ({ name: scope.at(-1), realm: scope[0], ...(scope.length > 2 ? { space: scope[1] } : {}), ...(scope.length > 3 ? { stack: scope[2] } : {}) });
   const cases = [
@@ -1215,7 +1620,7 @@ test("create from config resolves configs and blueprint refs scoped at realm, sp
   for (const lookup of lookups) expect(lookup.params).not.toContain(lookup.scope.at(-1));
 });
 
-test("kill and purge require explicit confirmation and pass only selected purge options", async ({ page }) => {
+test("kill and purge require explicit confirmation, and the cell Purge dialog offers no no-op options", async ({ page }) => {
   const submitted = [];
   await mock(page, (path, request) => {
     if (request.method() !== "POST") return undefined;
@@ -1245,19 +1650,19 @@ test("kill and purge require explicit confirmation and pass only selected purge 
   await page.getByText("Advanced actions", { exact: true }).click();
   await page.getByRole("button", { name: "Purge cell…" }).click();
   dialog = page.getByRole("dialog");
-  const force = dialog.locator("label").filter({ hasText: "--force" }).locator("input");
-  const cascade = dialog.locator("label").filter({ hasText: "--cascade" }).locator("input");
-  await expect(force).not.toBeChecked();
-  await expect(cascade).not.toBeChecked();
+  // --force and --cascade change nothing for a cell (kukeond only records them), so the dialog no longer
+  // offers them (#1568). The request body is the one the dialog always sent by default.
+  await expect(dialog.getByRole("checkbox")).toHaveCount(0);
+  await expect(dialog).not.toContainText("--force");
+  await expect(dialog).not.toContainText("--cascade");
   await expect(dialog.getByRole("button", { name: "Confirm Purge" })).toBeDisabled();
   await dialog.getByLabel("Type the full target above to enable Purge").fill("dev / shared / services / api");
-  await force.check();
-  await cascade.check();
   await dialog.getByRole("button", { name: "Confirm Purge" }).click();
   await expect(toasts(page)).toHaveCount(1);
   await expect(toasts(page)).toContainText("Cell purged");
+  await expect(toasts(page)).not.toContainText("--force");
   await expect(toasts(page).locator(".toast-title")).toHaveText("dev / shared / services / api");
-  expect(submitted).toEqual([{ force: true, cascade: true }]);
+  expect(submitted).toEqual([{ force: false, cascade: false }]);
 });
 
 test("partial purge reports incomplete cleanup instead of success", async ({ page }) => {
@@ -1921,6 +2326,7 @@ test("container cgroup section distinguishes Unlimited, Not available and Not se
   await mock(page, path => path.endsWith("/containers/web/cgroup") ? cgroup(reads++ === 0 ? 1048576 : 2097152) : undefined);
   await page.goto(`${server.url}#/resource/prod/shared/services/api/web`);
   const panel = page.getByRole("region", { name: "container cgroup" });
+  await expand(page, "container cgroup");
   await expect(panel.getByText("/sys/fs/cgroup/kukeon/prod/shared/services/api/prod_shared_services_api_web")).toBeVisible();
   const declared = panel.locator("table.cgroup-declared");
   await expect(declared.locator("tr").filter({ hasText: "Memory limit" })).toContainText("512 MiB");
@@ -1963,9 +2369,10 @@ test("cellRead shows the cell cgroup with nested runtime and delegated controlle
   await mock(page, path => path.endsWith("/cells/api/cgroup") ? { json: { cgroupPath: "/kukeon/dev/shared/services/api", absolutePath: "/sys/fs/cgroup/kukeon/dev/shared/services/api", exists: true, ready: true, nestedCgroupRuntime: true, subtreeControllers: ["cpu", "io", "memory", "pids"], live: { memory: { max: { state: "set", raw: "1073741824", value: 1073741824 } }, io: { state: "set", entries: [] } } } } : undefined);
   await page.goto(`${server.url}#/resource/dev/shared/services/api`);
   const panel = page.getByRole("region", { name: "cell cgroup" });
+  await expand(page, "cell cgroup");
   await expect(panel.getByText("cpu io memory pids", { exact: true })).toBeVisible();
   await expect(panel.getByText("Enabled", { exact: true })).toBeVisible();
-  await expect(panel.getByText("1 GiB", { exact: false })).toBeVisible();
+  await expect(panel.locator(".panel-body").getByText("1 GiB", { exact: false })).toBeVisible();
   await expect(panel.getByText("No device limits")).toBeVisible();
 });
 
@@ -2011,7 +2418,9 @@ test("cellRead network section shows Not running for a stopped cell and the per-
   } } : undefined);
   await page.goto(`${server.url}#/resource/dev/shared/services/api`);
   const panel = page.getByRole("region", { name: "cell network" });
-  await expect(panel.getByText("Bridged (space network)")).toBeVisible();
+  await expand(page, "cell network");
+  await expect(panel.locator("summary")).toContainText("Bridged (space network) · Not running · 2 containers");
+  await expect(panel.locator(".panel-body").getByText("Bridged (space network)")).toBeVisible();
   await expect(panel.getByText("Not running", { exact: true })).toBeVisible();
   const containers = panel.locator("table.network-containers");
   await expect(containers.locator("tr").filter({ hasText: "web" })).toContainText("No (default)");
@@ -2027,6 +2436,7 @@ test("container network section labels defaults, inherited CNI path and unset de
   } } : undefined);
   await page.goto(`${server.url}#/resource/prod/shared/services/api/web`);
   const panel = page.getByRole("region", { name: "container network" });
+  await expand(page, "container network");
   await expect(panel.locator("dt:text-is('Host network') + dd")).toHaveText("Yes");
   await expect(panel.locator("dt:text-is('Host PID') + dd")).toHaveText("No (default)");
   await expect(panel.getByText("Inherited from space (/s.conflist)")).toBeVisible();
@@ -2284,6 +2694,67 @@ test("Overview shows an explicit all-Ready state when no cell needs attention", 
   const attention = page.getByRole("region", { name: "Cells needing attention" });
   await expect(attention).toContainText("All cells Ready");
   await expect(attention.getByRole("link")).toHaveCount(0);
+  await expect(attention.locator(".badge")).toHaveText("0 of 2 cells");
+  await expect(page.locator(".drift-badge")).toHaveCount(0);
+});
+
+// Issue #1568, item B: a Ready cell that is out of sync with its Config no longer looks healthy.
+test("config drift shows in Needs attention, the Cells table and the sidebar, and the Overview leads with cells", async ({ page }) => {
+  const statuses = { "dev/api-00": { state: "Ready", outOfSync: true, outOfSyncReason: "image changed" }, "prod/api-00": { state: "Ready", outOfSyncError: "config demo not found" } };
+  await mock(page, path => /\/cells$/.test(path) ? { json: fixture(path, 2).map(cell => ({ ...cell, status: statuses[`${path.split("/")[3]}/${cell.metadata.name}`] ?? { state: "Ready" } })) } : undefined);
+  await page.goto(`${server.url}#/resources`);
+  const attention = page.getByRole("region", { name: "Cells needing attention" });
+  await expect(attention.locator(".panel-heading .badge")).toHaveText("2 of 4 cells");
+  const items = attention.getByRole("listitem");
+  await expect(items).toHaveCount(2);
+  const drifted = items.filter({ hasText: "dev / shared / services" });
+  await expect(drifted.getByRole("link", { name: "api-00", exact: true })).toHaveAttribute("href", "#/resource/dev/shared/services/api-00");
+  await expect(drifted.locator(".state-badge")).toHaveText(["Ready", /^Drift\b/]);
+  await expect(drifted.locator(".attention-reason")).toHaveText("Configuration out of sync: image changed");
+  // The badge is a text label whose accessible text and tooltip carry the reason.
+  await expect(drifted.locator(".drift-badge")).toHaveAttribute("title", "Configuration out of sync: image changed");
+  await expect(drifted.locator(".drift-badge")).toContainText("Configuration out of sync: image changed");
+  const failed = items.filter({ hasText: "prod / shared / services" });
+  await expect(failed.locator(".state-badge")).toHaveText(["Ready", /^Drift unknown/]);
+  await expect(failed.locator(".attention-reason")).toHaveText("Configuration comparison failed: config demo not found");
+  // The attention panel and the cell summary come before the realm, space and stack cards.
+  await expect(page.locator(".summary-card > span")).toHaveText(["Cells", "Realms", "Spaces", "Stacks"]);
+  const tops = await page.evaluate(() => [".attention-panel", ".summary-card-cells", ".summary-card:not(.summary-card-cells)"].map(selector => document.querySelector(selector).getBoundingClientRect().top));
+  expect(tops[0]).toBeLessThan(tops[1]);
+  expect(tops[1]).toBeLessThan(tops[2]);
+  await expect(page.locator(".summary-card-cells").getByRole("list", { name: "Cell states" })).toContainText("Ready");
+
+  const sidebar = page.getByRole("navigation", { name: "Cell navigation" });
+  await expect(sidebar.getByRole("link", { name: "Open dev / shared / services / api-00" }).locator(".drift-badge")).toContainText("Drift");
+  await expect(sidebar.getByRole("link", { name: "Open prod / shared / services / api-00" }).locator(".drift-badge")).toContainText("Drift unknown");
+  await expect(sidebar.getByRole("link", { name: "Open dev / shared / services / api-01" }).locator(".drift-badge")).toHaveCount(0);
+  await expect(sidebar.locator(".drift-badge")).toHaveCount(2);
+
+  await page.goto(`${server.url}#/cells`);
+  const rows = content(page).locator("tbody tr");
+  await expect(rows).toHaveCount(4);
+  await expect(rows.filter({ hasText: "dev / shared / services" }).filter({ hasText: "api-00" }).locator(".drift-badge")).toContainText("Drift");
+  await expect(rows.filter({ hasText: "prod / shared / services" }).filter({ hasText: "api-00" }).locator(".drift-badge")).toContainText("Drift unknown");
+  await expect(content(page).locator(".drift-badge")).toHaveCount(2);
+  // The sidebar row keeps the state badge, the drift badge and the name apart at the narrowest sidebar.
+  const overlap = await sidebar.getByRole("link", { name: "Open dev / shared / services / api-00" }).evaluate(link => {
+    const [state, drift] = [...link.querySelectorAll(".state-badge")].map(el => el.getBoundingClientRect());
+    return !(state.right <= drift.left || drift.right <= state.left || state.bottom <= drift.top || drift.bottom <= state.top);
+  });
+  expect(overlap).toBe(false);
+});
+
+test("Group by leaves out controller-managed label keys unless one is the stored selection", async ({ page }) => {
+  await mock(page, path => /\/cells$/.test(path) ? { json: fixture(path).map(cell => ({ ...cell, metadata: { ...cell.metadata, labels: { team: "platform", "kukeon.io/config": "app", "cell.kukeon.io": cell.metadata.name, "realm.kukeon.io/name": "x" } } })) } : undefined);
+  await page.goto(server.url);
+  const groupBy = page.getByRole("region", { name: "All cells" }).getByLabel("Group by");
+  await expect(page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link")).toHaveCount(2);
+  await expect(groupBy.locator("option")).toHaveText(["None", "kukeon.io/config", "team"]);
+  await page.evaluate(() => localStorage.setItem("kukeon-cell-grouping", "cell.kukeon.io"));
+  await page.reload();
+  await expect(groupBy).toHaveValue("cell.kukeon.io");
+  await expect(groupBy.locator("option")).toHaveText(["None", "cell.kukeon.io", "kukeon.io/config", "team"]);
+  await expect(page.getByRole("navigation", { name: "Cell navigation" }).getByRole("region", { name: "api group" })).toBeVisible();
 });
 
 // Administration → Daemon (issue #1386, steps 6 and 8).
@@ -2759,8 +3230,44 @@ test("an identity form follows the connector's secret types and field types", as
   // has one login method and says so.
   await page.goto(`${server.url}#/connectors/demo`);
   await expect(page.getByRole("region", { name: "Demo connector" })).toContainText("The login method has no identity");
-  await expect(page.getByRole("region", { name: "Demo defaults" }).getByRole("group")).toHaveCount(1);
+  await expect(page.getByRole("region", { name: "Demo defaults" }).getByRole("group", { name: /^Demo .* default$/ })).toHaveCount(1);
   await expect(page.getByRole("region", { name: "Demo defaults" }).getByRole("group", { name: "Demo key default" })).toBeVisible();
+});
+
+// Issue #1568, item F: the connector page is headed by the connector's title and labels what each scope picker is for.
+test("a connector page shows its title with the slug as context, and its scope pickers sit under labelled groups", async ({ page }) => {
+  const world = await mockConnectors(page);
+  await page.goto(`${server.url}#/connectors/example-token`);
+  const heading = page.locator("main .page-heading");
+  await expect(heading.locator("h1")).toHaveText("Example");
+  await expect(heading.locator(".page-context")).toHaveText("example-token");
+  await expect(page).toHaveTitle("Example · kukeon");
+  // Each scope picker is in a group named for what its scope applies to.
+  const stored = page.getByRole("region", { name: "Example identities" }).getByRole("group", { name: "Stored identity scope" });
+  await expect(stored).toContainText("Where a new Example identity is stored");
+  await expect(stored.getByRole("combobox")).toHaveCount(3);
+  await expect(stored.getByLabel("Identity realm")).toHaveValue("dev");
+  const defaults = page.getByRole("region", { name: "Example defaults" });
+  const scope = defaults.getByRole("group", { name: "Default scope" });
+  await expect(scope).toContainText("Whose defaults are shown and set below");
+  await expect(scope.getByLabel("Default realm")).toHaveValue("dev");
+  await expect(scope.getByRole("combobox")).toHaveCount(3);
+  const method = defaults.getByRole("group", { name: "Example token default" });
+  await expect(method.getByRole("heading", { name: "Per-method scope" })).toBeVisible();
+  await expect(method).toContainText("The level of the default scope above at which the token method's default is saved.");
+  await expect(method.getByLabel("Example token default level")).toBeVisible();
+  // Saving is unchanged: a default set through the grouped pickers posts the same body.
+  await scope.getByLabel("Default space").selectOption("shared");
+  await defaults.getByLabel("Example token default identity").selectOption({ label: "example-default — dev (opaque)" });
+  await defaults.getByRole("button", { name: "Set default" }).click();
+  await expect.poll(() => world.posts("/api/connectors/example-token/defaults").length).toBe(1);
+  expect(world.posts("/api/connectors/example-token/defaults")[0].body).toEqual({ scope: { realm: "dev", space: "shared" }, method: "token", identity: { name: "example-default", realm: "dev" } });
+  // A connector the catalog does not define keeps its slug as the heading, with no context line.
+  await page.goto(`${server.url}#/connectors/nope`);
+  await expect(heading.locator("h1")).toHaveText("nope");
+  await expect(heading.locator(".page-context")).toHaveCount(0);
+  await page.goto(`${server.url}#/connectors`);
+  await expect(heading.locator("h1")).toHaveText("Connectors");
 });
 
 test("a git-delivered connector imports its identity from the server's host", async ({ page }) => {
@@ -3083,6 +3590,7 @@ test("New Config offers one method per group and an identity picker per connecto
 
   // The methods of one group are a single choice — never two checkboxes — starting on the catalog's
   // default method. Enabled components are sent in the blueprint's order.
+  await openSection(page, "Components");
   const method = page.getByLabel("Demo method", { exact: true });
   await expect(method.getByRole("option")).toHaveText(["login", "key"]);
   await expect(method).toHaveValue("demo-key");
@@ -3094,12 +3602,16 @@ test("New Config offers one method per group and an identity picker per connecto
   // A login method takes no identity.
   await method.selectOption("demo-login");
   await expect(demoPicker).toHaveCount(0);
+  await openSection(page, "demo-login");
   await expect(page.getByText("Uses the login kept in the harness state volume")).toBeVisible();
   await expect(page.getByRole("note")).toHaveCount(0);
 
   // An ungrouped connector is a toggle; its picker shows the default the Config's scope inherits.
   await page.getByRole("checkbox", { name: /^example-token connector/ }).check();
   const examplePicker = page.getByRole("combobox", { name: /^Example identity/ });
+  // Its identity resolves from the Realm default, so nothing is required and the section stays collapsed.
+  await expect(configSection(page, "example-token").locator("details")).not.toHaveAttribute("open");
+  await openSection(page, "example-token");
   await expect(examplePicker.getByRole("option")).toHaveText(["Default: example-default — dev (Realm default)", "example-default — dev (opaque)", "example-team — dev (opaque)", "example-other — dev / shared / services (opaque)", "Name a secret…"]);
   await expect(examplePicker).toHaveValue("");
   // Choosing Default sends no fill: the Config keeps inheriting.
@@ -3114,6 +3626,7 @@ test("New Config offers one method per group and an identity picker per connecto
   await demoPicker.selectOption({ label: "demo-key-1 — dev (opaque)" });
   await page.getByRole("checkbox", { name: /^repo connector/ }).check();
   const repoPicker = page.getByRole("combobox", { name: /^Repo identity/ });
+  await openSection(page, "repo");
   await expect(repoPicker.getByRole("option")).toHaveText(["No default", "repo-key — dev (ssh-key)", "Name a secret…"]);
   await repoPicker.selectOption({ label: "repo-key — dev (ssh-key)" });
   await page.getByRole("button", { name: "Preview Config", exact: true }).click();
@@ -3426,8 +3939,9 @@ test("resource-name and breadcrumb links have a 24px hit target and resizers sho
   expect((await home.boundingBox()).height).toBeGreaterThanOrEqual(24);
 
   await page.goto(`${server.url}#/resource/dev/shared/services`);
+  // The root crumb leads the scope crumbs on resource and cell screens (#1568).
   const crumbs = page.getByRole("navigation", { name: "Resource scope" }).getByRole("link");
-  await expect(crumbs).toHaveCount(3);
+  await expect(crumbs).toHaveText(["Resources", "dev", "shared", "services"]);
   for (const crumb of await crumbs.all()) expect((await crumb.boundingBox()).height).toBeGreaterThanOrEqual(24);
 
   const handle = page.getByRole("separator", { name: "Resize sidebar" });

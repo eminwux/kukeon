@@ -9,6 +9,12 @@ export type DestructiveAction = Extract<LifecycleAction, "kill" | "delete" | "pu
 export type PurgeOptions = { force: boolean; cascade: boolean };
 export type LifecycleFeedback = { action: LifecycleAction; phase: "pending" | "success" | "error"; message: string };
 
+// A cell purge offers no --force or --cascade choice (#1568): the controller's PurgeCell only records both
+// on its result (internal/controller/purge_cell.go) and the runner purge takes neither, so for a leaf cell
+// they change nothing. The request still carries both, off, as it always did by default; realm, space and
+// stack purges keep the options in scope-actions.tsx, where they do apply.
+const cellPurgeOptions: PurgeOptions = { force: false, cascade: false };
+
 function CellActionConfirmation({
   action,
   scope,
@@ -26,8 +32,6 @@ function CellActionConfirmation({
   const dialog = useRef<HTMLDialogElement>(null);
   const [acknowledged, setAcknowledged] = useState(false);
   const [typedScope, setTypedScope] = useState("");
-  const [force, setForce] = useState(false);
-  const [cascade, setCascade] = useState(false);
   const fullScope = scope.join(" / ");
 
   useModalDialog(dialog, returnFocus);
@@ -48,7 +52,7 @@ function CellActionConfirmation({
     onCancel={event => { event.preventDefault(); onCancel(); }}
     onClick={event => { if (event.target === event.currentTarget) onCancel(); }}
   >
-    <form onSubmit={event => { event.preventDefault(); if (enabled) onConfirm(action === "purge" ? { force, cascade } : undefined); }}>
+    <form onSubmit={event => { event.preventDefault(); if (enabled) onConfirm(action === "purge" ? cellPurgeOptions : undefined); }}>
       <h2 id="cell-action-dialog-title">{title}</h2>
       <p id="cell-action-dialog-description">{consequence}</p>
       <dl className="cell-action-target"><dt>Exact target</dt><dd><code>{fullScope}</code></dd></dl>
@@ -61,16 +65,6 @@ function CellActionConfirmation({
         I understand this immediately terminates the cell's running containers.
       </label>}
       {action === "purge" && <>
-        <label className="cell-action-option">
-          <input type="checkbox" checked={force} onChange={event => setForce(event.target.checked)} />
-          Pass <code>--force</code> (skip validation where supported)
-        </label>
-        <small className="cell-action-option-help">For cells, kukeond currently records this option but does not bypass controller validation.</small>
-        <label className="cell-action-option">
-          <input type="checkbox" checked={cascade} onChange={event => setCascade(event.target.checked)} />
-          Pass <code>--cascade</code> (request recursive cleanup)
-        </label>
-        <small className="cell-action-option-help">Cells are leaf resources; the current cell purge operation accepts but does not apply cascade.</small>
         <label className="cell-action-scope-confirmation">Type the full target above to enable Purge
           <input autoComplete="off" spellCheck={false} value={typedScope} onChange={event => setTypedScope(event.target.value)} />
         </label>

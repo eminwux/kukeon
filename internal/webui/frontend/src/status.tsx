@@ -12,6 +12,23 @@ export function StateBadge({ state }: { state?: string }) {
   return <span className={`state-badge tone-${stateTone(state)}`}><span className="state-dot" aria-hidden="true" />{state || "Not reported"}</span>;
 }
 
+// Config drift (#1568). A Ready cell can still be out of sync with its Config, or the daemon may have failed
+// to compare them. The badge carries a text label, never colour alone; the reason is in its tooltip and,
+// through the visually hidden text, in its accessible name.
+export type DriftStatus = { outOfSync?: boolean; outOfSyncReason?: string; outOfSyncError?: string };
+export function hasDrift(status?: DriftStatus): boolean {
+  return !!status?.outOfSync || !!status?.outOfSyncError;
+}
+export function driftReason(status?: DriftStatus): string {
+  return status?.outOfSyncError ? `Configuration comparison failed: ${status.outOfSyncError}`
+    : `Configuration out of sync: ${status?.outOfSyncReason || "reason not reported"}`;
+}
+export function DriftBadge({ status }: { status?: DriftStatus }) {
+  if (!hasDrift(status)) return null;
+  const reason = driftReason(status);
+  return <span className="state-badge tone-warning drift-badge" title={reason}><span className="state-dot" aria-hidden="true" />{status?.outOfSyncError ? "Drift unknown" : "Drift"}<span className="sr-only">. {reason}</span></span>;
+}
+
 // Scope and socket paths wrap only at their separators (#1567). Each segment, with the separator that
 // ends it, is an inline-block, so lines break between segments; a segment breaks inside only when it
 // alone is wider than the line.

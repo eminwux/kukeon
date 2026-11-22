@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { NOT_AVAILABLE, NOT_SET, UNLIMITED, formatBytes, formatCPUMax, formatCgroupList, formatCgroupValue, formatDeclared, formatIOMax } from "../src/cgroup-format.js";
+import { NOT_AVAILABLE, NOT_SET, UNLIMITED, formatBytes, formatCPUMax, formatCgroupList, formatCgroupValue, formatDeclared, formatIOMax, summarizeCgroup } from "../src/cgroup-format.js";
 
 test("kernel max renders as Unlimited, keeping the raw value", () => {
   assert.deepEqual(formatCgroupValue({ state: "max", raw: "max" }, "bytes"), { text: UNLIMITED, raw: "max" });
@@ -40,4 +40,15 @@ test("declared resources label their source or Not set", () => {
   assert.deepEqual(formatDeclared({ field: "memoryLimitBytes", source: "unset" }), { text: NOT_SET, source: NOT_SET });
   assert.deepEqual(formatDeclared({ field: "memoryLimitBytes", value: 1073741824, source: "space-default" }), { text: "1 GiB", source: "Inherited space default" });
   assert.deepEqual(formatDeclared({ field: "pidsLimit", value: 64, source: "container" }), { text: "64", source: "Container spec" });
+});
+
+test("the collapsed Cgroup row summarizes readiness and memory without inventing absent values", () => {
+  const set = value => ({ state: "set", raw: String(value), value });
+  assert.equal(summarizeCgroup({ exists: true, ready: true, live: { memory: { current: set(327155712), max: set(1073741824) }, pids: { current: set(12) } } }), "Ready · memory 312 MiB / 1 GiB · 12 PIDs");
+  assert.equal(summarizeCgroup({ exists: true, ready: true, live: { memory: { current: set(1048576), max: { state: "max", raw: "max" } }, pids: { current: set(1) } } }), `Ready · memory 1 MiB / ${UNLIMITED} · 1 PID`);
+  // An absent memory.current is left out rather than shown as 0 or as "Not available".
+  assert.equal(summarizeCgroup({ exists: true, ready: false, live: { memory: { current: { state: "absent" }, max: set(1073741824) } } }), "Not ready · memory limit 1 GiB");
+  assert.equal(summarizeCgroup({ exists: true, ready: true, live: {} }), "Ready");
+  assert.equal(summarizeCgroup({ exists: false, ready: false }), "Cgroup not present");
+  assert.equal(summarizeCgroup(undefined), "Cgroup not present");
 });

@@ -28,4 +28,6 @@ export function formatNetworkExists(exists: boolean | undefined): string;
 export function formatNetworkMode(cell: CellNetwork | undefined): string;
 export function formatIPv4(cell: CellNetwork | undefined): string;
 export function formatContainerCNIPath(container: ContainerNetwork | undefined): string;
+export function summarizeCellNetwork(cell: CellNetwork | undefined): string;
+export function summarizeContainerNetwork(container: ContainerNetwork | undefined): string;
 export function formatDeclaredList(values: string[] | undefined): { text: string; notApplied: boolean };

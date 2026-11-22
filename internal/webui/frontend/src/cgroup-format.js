@@ -67,3 +67,18 @@ export function formatDeclared(entry) {
   const text = entry.field === "memoryLimitBytes" ? formatBytes(entry.value) : String(entry.value);
   return { text, source: sources[entry.source] ?? entry.source };
 }
+
+// One-line digest for the collapsed Cgroup disclosure on cell and container pages (#1568): readiness, then
+// memory in use against its limit when the cgroup is present.
+export function summarizeCgroup(detail) {
+  if (!detail?.exists) return "Cgroup not present";
+  const memory = detail.live?.memory;
+  const parts = [detail.ready ? "Ready" : "Not ready"];
+  const current = memory?.current?.state === "set" ? formatCgroupValue(memory.current, "bytes").text : "";
+  const max = ["set", "max"].includes(memory?.max?.state) ? formatCgroupValue(memory.max, "bytes").text : "";
+  if (current) parts.push(`memory ${current}${max ? ` / ${max}` : ""}`);
+  else if (max) parts.push(`memory limit ${max}`);
+  const pids = detail.live?.pids?.current;
+  if (pids?.state === "set" && typeof pids.value === "number") parts.push(`${pids.value} ${pids.value === 1 ? "PID" : "PIDs"}`);
+  return parts.join(" · ");
+}

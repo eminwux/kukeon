@@ -73,3 +73,14 @@ export function formatDeclaredList(values) {
   if (!values?.length) return { text: NOT_SET, notApplied: false };
   return { text: values.join(", "), notApplied: true };
 }
+
+// One-line digests for the collapsed Network disclosure on cell and container pages (#1568).
+export function summarizeCellNetwork(cell) {
+  const count = cell?.containers?.length ?? 0;
+  return [formatNetworkMode(cell), formatIPv4(cell), count ? `${count} ${count === 1 ? "container" : "containers"}` : ""].filter(Boolean).join(" · ");
+}
+
+export function summarizeContainerNetwork(container) {
+  const ports = container?.ports?.length ?? 0;
+  return [container?.hostNetwork ? "Host network" : "Cell network namespace", container?.root ? "root container" : "", ports ? `${ports} declared ${ports === 1 ? "port" : "ports"}` : "No declared ports"].filter(Boolean).join(" · ");
+}
