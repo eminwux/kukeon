@@ -663,6 +663,8 @@ kuke health report latest                        # one report as markdown
 - kukeond keeps the newest 50 reports; they survive a daemon restart. Storing a report files nothing.
 - `--file-issues <owner>/<repo>` on `report submit` is the only path that leaves the host, needs `GH_TOKEN` (set by the `github` connector when the install binds the `gh-token` secret to majordomo), files `kukeon` findings only, and still stores the report when filing fails (exit 1); the missing-token error names `GH_TOKEN` and the opt-in.
 - `kuke health issue -f <draft>` renders a diagnosed kukeon defect as JSON (`title`, `body`, `comment`, `marker`) with the same sanitizer, title format and signature marker as `--file-issues`, files nothing, and refuses a draft not classified `kukeon` (exit 1).
+- `kuke health issue -f <draft>` accepts the optional `expected`, `actual`, `rootCause`, `suggestedFix` and `acceptance` fields and renders each as its own sanitized body section, omitting empty ones, so a draft without them renders unchanged; `reproduction` renders as one fenced block and the body still ends with the marker.
+- `kuke health issue --comment -f <file>` prints the markdown file (`-` reads stdin) redacted by the same sanitizer as plain markdown, not JSON, decodes no draft and contacts nothing; empty or whitespace-only input exits 1 with `comment text is empty`.
 
 ### `--no-daemon` future
 

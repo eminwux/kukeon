@@ -19,6 +19,8 @@ package health_test
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -130,5 +132,139 @@ func TestIssueCommandRendersJSON(t *testing.T) {
 	if _, errOut, err = run(t, &fakeClient{}, strings.Replace(doc, "kukeon", "workload", 1), "issue", "-f", "-"); err == nil ||
 		!strings.Contains(errOut, "only kukeon defects") {
 		t.Fatalf("workload draft rendered: err=%v stderr=%q", err, errOut)
+	}
+}
+
+// fullDraft is a draft carrying every optional section (#1604).
+func fullDraft() healthcmd.IssueDraft {
+	draft := issueDraft("status.reason: CreateFailed")
+	draft.Expected = "`kuke start api` brings the cell to Ready."
+	draft.Actual = "The cell stays Failed with a CNI attach error."
+	draft.RootCause = "`internal/cni/attach.go:42` (commit `abc1234`) drops the bridge error."
+	draft.SuggestedFix = "Return the bridge error from `attach`."
+	draft.Acceptance = []string{"`kuke start api` reaches Ready", "the CNI error is reported"}
+	return draft
+}
+
+func TestInvestigationRendersTheOptionalSectionsInOrder(t *testing.T) {
+	f := &healthcmd.Filer{Version: "v0.11.0"}
+	rendered := f.Investigation(fullDraft())
+	order := []string{
+		"## Symptom", "## Expected", "## Actual", "## Evidence", "## Reproduction",
+		"## Root cause", "## Suggested fix", "## Acceptance criteria", "## kukeon version", "Signature: ",
+		"Filed by kukeon majordomo",
+	}
+	last := -1
+	for _, heading := range order {
+		at := strings.Index(rendered.Body, heading)
+		if at < 0 || at < last {
+			t.Fatalf("%q missing or out of order:\n%s", heading, rendered.Body)
+		}
+		last = at
+	}
+	for _, want := range []string{
+		"- [ ] `kuke start api` reaches Ready\n", "- [ ] the CNI error is reported\n",
+		"\n`internal/cni/attach.go:42` (commit `abc1234`) drops the bridge error.\n",
+	} {
+		if !strings.Contains(rendered.Body, want) {
+			t.Errorf("body lacks %q:\n%s", want, rendered.Body)
+		}
+	}
+	if !strings.HasSuffix(strings.TrimSpace(rendered.Body), rendered.Marker) {
+		t.Fatalf("body does not end with the marker:\n%s", rendered.Body)
+	}
+}
+
+func TestInvestigationWithoutOptionalFieldsOmitsTheirSections(t *testing.T) {
+	rendered := (&healthcmd.Filer{Version: "v0.11.0"}).Investigation(issueDraft("x"))
+	for _, heading := range []string{
+		"## Expected", "## Actual", "## Root cause", "## Suggested fix", "## Acceptance criteria",
+	} {
+		if strings.Contains(rendered.Body, heading) {
+			t.Errorf("body has %q without the field:\n%s", heading, rendered.Body)
+		}
+	}
+}
+
+func TestInvestigationRendersReproductionAsOneBlock(t *testing.T) {
+	draft := issueDraft("x")
+	draft.Reproduction = []string{"kuke create cell api", "kuke start api", "kuke get cell api"}
+	body := (&healthcmd.Filer{Version: "v0.11.0"}).Investigation(draft).Body
+	start := strings.Index(body, "## Reproduction")
+	end := strings.Index(body, "## kukeon version")
+	if start < 0 || end < start {
+		t.Fatalf("no Reproduction section:\n%s", body)
+	}
+	section := body[start:end]
+	want := "```\nkuke create cell api\nkuke start api\nkuke get cell api\n```\n"
+	if strings.Count(section, "```") != 2 || !strings.Contains(section, want) {
+		t.Fatalf("Reproduction is not one fenced block of all three lines:\n%s", section)
+	}
+}
+
+func TestInvestigationRedactsTheProseFields(t *testing.T) {
+	draft := fullDraft()
+	draft.RootCause = "the clone used " + tokenShaped[0]
+	draft.SuggestedFix = "rotate " + tokenShaped[1] + " and retry"
+	body := (&healthcmd.Filer{Version: "v0.11.0"}).Investigation(draft).Body
+	for _, secret := range tokenShaped[:2] {
+		if strings.Contains(body, secret) {
+			t.Fatalf("%q survived redaction:\n%s", secret, body)
+		}
+	}
+}
+
+func TestDecodeIssueDraftAcceptsTheOptionalFields(t *testing.T) {
+	doc := "signature: s\nclassification: kukeon\nseverity: error\nevidence: [x]\n" +
+		"expected: e\nactual: a\nrootCause: r\nsuggestedFix: f\nacceptance: [one, two]\n"
+	draft, err := healthcmd.DecodeIssueDraft([]byte(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if draft.Expected != "e" || draft.Actual != "a" || draft.RootCause != "r" || draft.SuggestedFix != "f" ||
+		len(draft.Acceptance) != 2 {
+		t.Fatalf("draft = %+v", draft)
+	}
+	if _, err = healthcmd.DecodeIssueDraft([]byte(doc + "repo: o/r\n")); err == nil {
+		t.Fatal("unknown field accepted")
+	}
+}
+
+func TestIssueCommentPrintsRedactedMarkdown(t *testing.T) {
+	t.Setenv(healthcmd.TokenEnv, "filing-token-0123456789")
+	notes := filepath.Join(t.TempDir(), "notes.md")
+	text := "## Analysis\n\nCloned from https://bot:s3cr3t@github.com/o/r.git with token=abc123def.\n" +
+		"The filing token filing-token-0123456789 leaked too.\n"
+	if err := os.WriteFile(notes, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut, err := run(t, &fakeClient{}, "", "issue", "--comment", "-f", notes)
+	if err != nil {
+		t.Fatalf("err=%v stderr=%q", err, errOut)
+	}
+	for _, secret := range []string{"s3cr3t", "abc123def", "filing-token-0123456789"} {
+		if strings.Contains(out, secret) {
+			t.Fatalf("%q survived redaction:\n%s", secret, out)
+		}
+	}
+	if !strings.HasPrefix(out, "## Analysis\n") || json.Valid([]byte(out)) {
+		t.Fatalf("output is not the plain markdown:\n%s", out)
+	}
+}
+
+func TestIssueCommentReadsStdin(t *testing.T) {
+	out, errOut, err := run(t, &fakeClient{}, "see token=abc123def\n", "issue", "--comment", "-f", "-")
+	if err != nil {
+		t.Fatalf("err=%v stderr=%q", err, errOut)
+	}
+	if !strings.HasPrefix(out, "see token=") || strings.Contains(out, "abc123def") {
+		t.Fatalf("out = %q", out)
+	}
+}
+
+func TestIssueCommentRefusesEmptyInput(t *testing.T) {
+	_, errOut, err := run(t, &fakeClient{}, " \n\t\n", "issue", "--comment", "-f", "-")
+	if err == nil || !strings.Contains(errOut, "comment text is empty") {
+		t.Fatalf("err=%v stderr=%q", err, errOut)
 	}
 }
