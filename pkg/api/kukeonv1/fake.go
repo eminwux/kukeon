@@ -202,6 +202,12 @@ func (FakeClient) LogContainer(context.Context, v1beta1.ContainerDoc) (LogContai
 	return LogContainerResult{}, ErrUnexpectedCall
 }
 
+func (FakeClient) ReadContainerLog(
+	context.Context, v1beta1.ContainerDoc, ContainerLogRequest,
+) (ContainerLogResult, error) {
+	return ContainerLogResult{}, ErrUnexpectedCall
+}
+
 func (FakeClient) StopCell(context.Context, v1beta1.CellDoc) (StopCellResult, error) {
 	return StopCellResult{}, ErrUnexpectedCall
 }

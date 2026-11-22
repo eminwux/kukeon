@@ -1261,8 +1261,9 @@ func TestInitialPathLaunchAcrossHarnesses(t *testing.T) {
 
 // TestFreshMajordomoComposition composes the kuke team exactly as `kuke team
 // init` does on a new host, from the role as shipped (issue #1509): both
-// harness configs on the shared host blueprint with daemon access, and the
-// health sweep rendered hourly but suspended, with no secret required.
+// harness configs on the shared socket-and-client blueprint with daemon
+// access but no /opt/kukeon mount (issue #1537), and the health sweep
+// rendered hourly but suspended, with no secret required.
 func TestFreshMajordomoComposition(t *testing.T) {
 	base := emptyConfig()
 	result, err := compose.Compose(base, config.Majordomo(), compose.Options{Sources: shippedSource()})
@@ -1272,10 +1273,10 @@ func TestFreshMajordomoComposition(t *testing.T) {
 	if len(result.Pairs) != 2 {
 		t.Fatalf("pairs=%d", len(result.Pairs))
 	}
-	wantMounts := mergeMounts(socketMounts, binaryMounts, installMounts)
+	wantMounts := mergeMounts(socketMounts, binaryMounts)
 	for i, harnessName := range []string{"codex", "claude"} {
 		p := result.Pairs[i]
-		blueprint := harnessName + "-host"
+		blueprint := harnessName + "-kuke-binary-kukeond-socket"
 		if p.Config.Metadata.Name != "kuke-majordomo-"+harnessName || p.Blueprint.Metadata.Name != blueprint ||
 			p.Config.Spec.Blueprint.Name != blueprint || result.Blueprints[i] != p.Blueprint {
 			t.Fatalf("incorrect pair identity: %s on %s", p.Config.Metadata.Name, p.Blueprint.Metadata.Name)
@@ -1302,6 +1303,11 @@ func TestFreshMajordomoComposition(t *testing.T) {
 		}
 		if !reflect.DeepEqual(got, wantMounts) {
 			t.Fatalf("%s host mounts = %v, want %v", harnessName, got, wantMounts)
+		}
+		for _, volume := range container.Volumes {
+			if volume.Target == "/opt/kukeon" || volume.Source == "/opt/kukeon" {
+				t.Fatalf("%s mounts the host's /opt/kukeon: %+v", harnessName, volume)
+			}
 		}
 		if !slices.Contains(container.Env, "KUKEON_HOST=unix:///run/kukeon/kukeond/kukeond.sock") {
 			t.Fatalf("%s is not pointed at the host daemon: %v", harnessName, container.Env)

@@ -13,11 +13,9 @@ completed authenticated Codex turn with command-generated installation evidence.
   running the same kukeon revision as the driver checkout.
 - `go`, `git`, `make`, and a compatible `kuke` CLI on the test driver's PATH
   (the driver itself runs `./kuke team init` from the checkout).
-  The image provides Python 3, Git, Make, and Codex. The driver must be on the
-  daemon host or have its log directory mounted at the same absolute path:
-  `kuke log` resolves a host path through RPC and reads the file locally. With
-  the default installation this requires readable `/opt/kukeon` files as well
-  as access to `/run/kukeon/kukeond.sock`.
+  The image provides Python 3, Git, Make, and Codex. The driver reads the work
+  container's output with `kuke log`, which streams it over the kukeond socket,
+  so it needs access to `/run/kukeon/kukeond.sock` but not to `/opt/kukeon`.
 - The catalog-selected Codex release must be available from GHCR. The current
   reference is the one in `team/harnesses/codex/images.yaml`. The driver verifies an
   **anonymous public pull** using GHCR's pull-token/manifest protocol; it never

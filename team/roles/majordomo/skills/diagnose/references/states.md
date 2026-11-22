@@ -31,10 +31,11 @@ Written against the kukeon revision that ships this skill. Confirm against
 
 ## What this cell can see
 
-This cell reaches the host's kukeond through three read-only mounts: the
-kukeond socket, the `kuke` client binary, and the kukeon install under
-`/opt/kukeon`. Every `kuke get`, `kuke log` and `kuke health` call is answered
-by the host daemon.
+This cell reaches the host's kukeond through two read-only mounts: the
+kukeond socket and the `kuke` client binary. The host's `/opt/kukeon` is not
+mounted, so its state tree and log files are not readable here. Every
+`kuke get`, `kuke log`, `kuke daemon logs` and `kuke health` call is answered by
+the host daemon over the socket.
 
 `kuke status` is different: its `host` and `state` rows are evaluated by the
 `kuke` client in the caller's own namespaces. Run here, they describe this

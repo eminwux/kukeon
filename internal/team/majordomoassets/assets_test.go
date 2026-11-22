@@ -111,8 +111,9 @@ func TestDefaultRoleAssets(t *testing.T) {
 	if len(role.Spec.Needs.Repos)+len(role.Spec.Needs.Secrets) != 0 {
 		t.Fatal("majordomo should not require project repos or non-provider secrets")
 	}
-	// Daemon access comes from the three host mounts (issue #1509).
-	if want := []string{"kukeond-socket", "kuke-binary", "kukeon-install"}; !reflect.DeepEqual(
+	// Daemon access comes from the socket and client mounts alone (issue
+	// #1509); the host's /opt/kukeon is not mounted (issue #1537).
+	if want := []string{"kukeond-socket", "kuke-binary"}; !reflect.DeepEqual(
 		role.Spec.Needs.Mounts,
 		want,
 	) {

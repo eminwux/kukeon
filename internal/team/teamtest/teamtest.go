@@ -36,7 +36,6 @@ const MajordomoRole = "team/roles/majordomo/role.yaml"
 const shippedRoleExtras = `    mounts:
       - kukeond-socket
       - kuke-binary
-      - kukeon-install
   tasks:
     - name: health-sweep
       skill: health-sweep

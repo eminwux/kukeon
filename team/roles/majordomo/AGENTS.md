@@ -9,11 +9,11 @@ or grooming), implement development issues, or review pull requests.
 
 ## What this cell is connected to
 
-This cell reaches the host's kukeond through three read-only host mounts: the
-daemon socket (`/run/kukeon/kukeond`, with `KUKEON_HOST` already set), the
-host's `kuke` client (`/usr/local/bin/kuke`), and the kukeon install
-(`/opt/kukeon`). `kuke` commands here act on the host daemon; no further
-provisioning is needed.
+This cell reaches the host's kukeond through two read-only host mounts: the
+daemon socket (`/run/kukeon/kukeond`, with `KUKEON_HOST` already set) and the
+host's `kuke` client (`/usr/local/bin/kuke`). The host's `/opt/kukeon` is not
+mounted: `kuke` commands here, including `kuke log` and `kuke daemon logs`,
+act on the host daemon over the socket; no further provisioning is needed.
 
 `kuke status` is the exception to trust: its host and state checks run in the
 `kuke` client, so in this cell they describe this container, not the host. For

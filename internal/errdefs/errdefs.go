@@ -146,6 +146,10 @@ var (
 	// kukeond container is not provisioned (issue #1386, step 7). A kukeond
 	// launched outside its kuke-system cell has no shim log to read.
 	ErrDaemonLogUnavailable = errors.New("kukeond log source unavailable")
+	// ErrContainerLogUnavailable marks a ReadContainerLog request whose
+	// container exists but whose output stream file does not (yet): the
+	// runtime shim or sbsh has not opened it (issue #1537).
+	ErrContainerLogUnavailable = errors.New("container log stream unavailable")
 	// ErrHealthReportNotFound marks a ReadHealthReport for an id kukeond
 	// does not hold, or for the newest report when none is stored (#1509).
 	ErrHealthReportNotFound = errors.New("health report not found")

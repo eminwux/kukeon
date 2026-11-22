@@ -73,6 +73,7 @@ var kindToSentinel = map[string]error{
 	"CellAlreadyExists":       errdefs.ErrCellAlreadyExists,
 	"RenderDigestMismatch":    errdefs.ErrRenderDigestMismatch,
 	"DaemonLogUnavailable":    errdefs.ErrDaemonLogUnavailable,
+	"ContainerLogUnavailable": errdefs.ErrContainerLogUnavailable,
 	"SecretInUse":             errdefs.ErrSecretInUse,
 	"ConnectorUnresolved":     errdefs.ErrConnectorUnresolved,
 	"ConnectorUnknown":        errdefs.ErrConnectorUnknown,
