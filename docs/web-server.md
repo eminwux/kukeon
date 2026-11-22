@@ -695,6 +695,29 @@ containerd namespace (`images` is `[]` when empty). Append
 - If kukeond has no log file to read, the error code is `log_unavailable`
   (404).
 
+`/api/realms/{realm}/spaces/{space}/stacks/{stack}/cells/{cell}/containers/{name}/log?offset={n}&maxBytes={m}`
+returns one chunk of a container's output stream as `{ "source", "data",
+"start", "next", "size", "truncated", "more" }`. It reads the same stream as
+`kuke log`: the terminal capture of an attachable container, or the runtime
+log of any other container. The stream is found from the cell's
+specification, so a stopped cell's last output can still be read.
+
+- `offset` defaults to `-1`, which reads the newest `maxBytes`. A byte offset
+  reads forward from that point; pass the previous `next` to follow.
+- `maxBytes` defaults to 65536 and must be between 1 and 1048576. Any other
+  `offset` or `maxBytes` is `invalid_request` (400).
+- `data` is the base64 encoding of the raw stream bytes (`null` for an empty
+  chunk). Nothing is held back waiting for a newline and nothing is
+  re-encoded, so a capture keeps its escape sequences and any bytes that are
+  not valid UTF-8.
+- `truncated` means earlier output exists before `start`. `more` means
+  output past `next` was already available. A `size` smaller than the
+  caller's cursor means the stream was truncated or replaced; read the tail
+  again.
+- A container with no stream file yet returns `log_unavailable` (404). A
+  missing cell or container returns `not_found` (404), and a kukeond that
+  predates the route returns `daemon_outdated` (501).
+
 Each name is a URL-encoded path segment. Collections return daemon documents,
 except containers, whose collection returns daemon container specs. Realm
 registry passwords are blanked (see [Registry credentials](#registry-credentials))
@@ -915,6 +938,32 @@ tab; the sidebar shows each cell's terminal connection state. Inactive terminals
 do not receive keyboard input. Each cell remembers its selected container until
 the page is reloaded.
 
+The container selector lists every container in the cell except its root
+container. Attachable containers come first, so the default selection is still
+the first attachable one; containers without a terminal are marked
+**(logs)**. When no live terminal is available, the terminal area shows the
+selected container's output instead (the log view):
+
+| Selected container | Cell state                                  | View                                        |
+| ------------------ | ------------------------------------------- | ------------------------------------------- |
+| attachable         | running                                     | live terminal                               |
+| not attachable     | running                                     | log view, following new output              |
+| any                | Stopped, Stopping, Exited, Error, Failed, … | log view of the last output, with **Start** |
+
+The log view is a read-only terminal: it accepts no keyboard input, sends
+nothing to the container, follows the light/dark theme, resizes with the panel
+and works with **Expand terminal**. It replays the newest 256 KiB of the
+stream, so a stopped attachable container looks like its last screen and ANSI
+colors are kept; **Earlier output is not shown.** marks a longer stream. A tail
+can start in the middle of an escape sequence, and a full-screen program
+replayed at a different width can wrap differently. While the cell runs and the
+page is visible, new output is appended every two seconds. A container that has
+written nothing yet shows **No output yet.** For a stopped cell, a line above
+the output names the cell state, and its **Start** button runs the same start
+action as the title row's Start. Once the cell is Ready, an attachable container
+returns to the live terminal and attaches with no further click. The cellRead
+view never reads logs.
+
 Choose **Expand terminal** to use the available screen space while retaining the
 cell sidebar and the same attachment. **Collapse terminal**, or Escape while
 focus is on the panel controls, returns to the regular panel. Escape inside the
@@ -931,9 +980,9 @@ The browser allows four concurrent terminal connections and eight retained
 terminal surfaces. At the limit, choose **Detach** on an existing terminal to
 free a slot. Detach closes that attachment and clears its browser scrollback;
 it does not stop the cell. A complete inventory refresh also releases terminal
-resources for cells confirmed stopped or removed. The cell and selected container
-must be running, and the server's user must have permission to connect to the
-attach socket returned by kukeond. Connection and permission errors appear in
+resources for cells confirmed stopped or removed. A live terminal needs a
+running cell and an attachable container, and the server's user must have
+permission to connect to the attach socket returned by kukeond. Connection and permission errors appear in
 the terminal panel. **Reconnect** starts a new attachment after a disconnect;
 bytes emitted while disconnected are not replayed. The existing attach protocol
 does not guarantee that a terminal process survives a network disconnect,

@@ -280,7 +280,8 @@ func apiErrorStatus(err error) (int, string) {
 	switch {
 	case errors.Is(err, errdefs.ErrDaemonMethodUnsupported):
 		status, code = http.StatusNotImplemented, "daemon_outdated"
-	case errors.Is(err, errdefs.ErrDaemonLogUnavailable):
+	case errors.Is(err, errdefs.ErrDaemonLogUnavailable),
+		errors.Is(err, errdefs.ErrContainerLogUnavailable):
 		status, code = http.StatusNotFound, "log_unavailable"
 	case errors.Is(err, errdefs.ErrCellAlreadyExists):
 		status, code = http.StatusConflict, "already_exists"

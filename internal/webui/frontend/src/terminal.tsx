@@ -7,6 +7,9 @@ import { ErrorNotice, useResource } from "./request";
 import { apiPath } from "./routes";
 import type { InventoryResource } from "./inventory";
 import { Icon } from "./icons";
+import { ContainerLog } from "./container-log";
+import { availableLifecycleActions } from "./lifecycle-policy.js";
+import type { LifecycleAction, LifecycleFeedback } from "./lifecycle";
 import { darkAnsi, darkTerminalBackground, lightAnsi, lightTerminalBackground } from "./terminal-palette.js";
 
 type Container = { id: string; attachable?: boolean; root?: boolean };
@@ -21,7 +24,7 @@ export const sessionId = (scope: string[], container: string) => JSON.stringify(
 export const unavailableStates = new Set(["Stopped", "Stopping", "Exited", "Deleted", "Failed", "Error", "Pending", "Unknown"]);
 const terminalTheme = { cursorAccent: "#000000", selectionBackground: "#4d4d4d" };
 export type Theme = "system" | "light" | "dark";
-function terminalThemeFor(theme: Theme) {
+export function terminalThemeFor(theme: Theme) {
   const dark = theme === "dark" || theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches;
   return { ...terminalTheme, ...(dark ? darkAnsi : lightAnsi), background: dark ? darkTerminalBackground : lightTerminalBackground, foreground: dark ? "#e5e6ec" : "#20232b", cursor: dark ? "#e5e6ec" : "#20232b" };
 }
@@ -81,6 +84,12 @@ export function useTerminalSessions(inventory: InventoryResource) {
       ? { ...item, generation: item.generation + 1, state: "interrupted", message }
       : item));
   }, []);
+  // After a successful start the previous sessions are gone for good; dropping them lets the auto-attach
+  // effect open a fresh terminal once the cell is Ready. Detached containers stay detached.
+  const dropInterrupted = useCallback((scope: string[]) => {
+    const key = cellId(scope);
+    setSessions(old => old.filter(item => cellId(item.scope) !== key || item.state !== "interrupted"));
+  }, []);
   const holdCell = useCallback((scope: string[]) => { retainedCells.current.add(cellId(scope)); }, []);
   const releaseCell = useCallback((scope: string[]) => { retainedCells.current.delete(cellId(scope)); }, []);
   const update = useCallback((id: string, generation: number, state: TerminalState, message: string) => {
@@ -119,7 +128,7 @@ export function useTerminalSessions(inventory: InventoryResource) {
     }
     return result;
   }, [sessions]);
-  return { sessions, selection, select, attach, detach, removeCell, interruptCell, holdCell, releaseCell, update, cellStates, pastes, paste, pasteDelivered };
+  return { sessions, selection, select, attach, detach, removeCell, interruptCell, dropInterrupted, holdCell, releaseCell, update, cellStates, pastes, paste, pasteDelivered };
 }
 
 export type TerminalManager = ReturnType<typeof useTerminalSessions>;
@@ -276,7 +285,7 @@ export function TerminalSession({ session, active, expanded, theme, update, pend
 
 // dockedCell is the cell whose terminal lives in the majordomo panel. Its sessions are mounted
 // there and nowhere else, so this workspace neither renders nor attaches them.
-export function TerminalWorkspace({ scope, revision, inventory, manager, theme, visible = true, controlsHost, onExpandedChange, dockedCell = "", onOpenDock }: { scope: string[] | null; revision: number; inventory: InventoryResource; manager: Manager; theme: Theme; visible?: boolean; controlsHost: HTMLDivElement | null; onExpandedChange: (expanded: boolean) => void; dockedCell?: string; onOpenDock?: () => void }) {
+export function TerminalWorkspace({ scope, revision, inventory, manager, theme, visible = true, controlsHost, onExpandedChange, dockedCell = "", onOpenDock, operation, onLifecycleAction }: { scope: string[] | null; revision: number; inventory: InventoryResource; manager: Manager; theme: Theme; visible?: boolean; controlsHost: HTMLDivElement | null; onExpandedChange: (expanded: boolean) => void; dockedCell?: string; onOpenDock?: () => void; operation?: LifecycleFeedback; onLifecycleAction?: (scope: string[], action: LifecycleAction, state?: string) => void }) {
   const [expanded, setExpanded] = useState(false);
   const [skipAutoAttachFor, setSkipAutoAttachFor] = useState("");
   const expandButton = useRef<HTMLButtonElement>(null);
@@ -309,11 +318,19 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
   }, [expanded]);
   const path = scope?.length === 4 ? `${apiPath(scope)}/containers` : null;
   const containers = useResource<Container[]>(path, revision);
-  const eligible = containers.data?.filter(container => container.attachable && !container.root) ?? [];
+  const workloads = containers.data?.filter(container => !container.root) ?? [];
+  const eligible = workloads.filter(container => container.attachable);
+  // Containers without a terminal are still listed: their output shows in the log view.
+  const logOnly = workloads.filter(container => !container.attachable);
   const key = scope ? cellId(scope) : "";
   const docked = !!key && key === dockedCell;
   const openInCell = manager.sessions.filter(item => cellId(item.scope) === key);
-  const options = [...eligible.map(container => container.id), ...openInCell.map(item => item.container).filter(id => !eligible.some(container => container.id === id))];
+  // Attachable first, then log-only, then retained sessions whose container is gone: the default stays the first attachable one.
+  const options = [
+    ...eligible.map(container => container.id),
+    ...logOnly.map(container => container.id),
+    ...openInCell.map(item => item.container).filter(id => !workloads.some(container => container.id === id)),
+  ];
   const selected = options.includes(manager.selection[key]) ? manager.selection[key] : options[0] ?? "";
   const currentId = scope && selected ? sessionId(scope, selected) : "";
   const current = manager.sessions.find(item => item.id === currentId);
@@ -321,6 +338,10 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
   const connections = manager.sessions.filter(item => item.state === "attached" || item.state === "connecting").length;
   const cellState = inventory.data?.rows[3].find(row => cellId(row.scope) === key)?.doc.status?.state;
   const unavailable = cellState && unavailableStates.has(cellState);
+  const selectedListed = workloads.some(container => container.id === selected);
+  // A live terminal needs an attachable container in a live cell; everything else that is listed shows its log.
+  const mode: "terminal" | "logs" = scope && !docked && selectedListed && (!selectedEligible || unavailable) ? "logs" : "terminal";
+  const logs = mode === "logs";
   const atLimit = !current && (connections >= maxConnections || manager.sessions.length >= maxSessions);
   const reconnectLimited = (current?.state === "disconnected" || current?.state === "interrupted") && connections >= maxConnections;
   useEffect(() => { setSkipAutoAttachFor(""); }, [key]);
@@ -328,30 +349,31 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
     // Wait for the inventory: it is what tells whether this cell's terminal is docked.
     // Only cellTerminal attaches: cellRead keeps this workspace mounted so existing sessions
     // survive, but inspecting a cell must not open a new terminal session (#1566).
-    if (!visible || !scope || docked || !inventory.data || containers.loading || containers.error || !selected || !selectedEligible || unavailable || atLimit || current || skipAutoAttachFor === currentId) return;
+    if (!visible || !scope || docked || logs || !inventory.data || containers.loading || containers.error || !selected || !selectedEligible || unavailable || atLimit || current || skipAutoAttachFor === currentId) return;
     manager.attach(scope, selected);
-  }, [visible, key, docked, !inventory.data, selected, selectedEligible, containers.loading, containers.error, unavailable, atLimit, current, currentId, skipAutoAttachFor, manager.attach]);
-  const headerState = current?.state === "attached" ? "Attached"
+  }, [visible, key, docked, !inventory.data, selected, selectedEligible, containers.loading, containers.error, unavailable, atLimit, current, currentId, skipAutoAttachFor, logs, manager.attach]);
+  const headerState = logs ? "Logs" : current?.state === "attached" ? "Attached"
     : current?.message || (skipAutoAttachFor === currentId && currentId ? "Detached" : atLimit ? "Connection limit reached" : unavailable ? `Unavailable: ${cellState}` : containers.loading ? "Loading containers…" : containers.error ? "Container list unavailable" : !eligible.length ? "No attachable containers" : !selectedEligible ? "Container unavailable" : "Connecting…");
   // With nothing to attach to, the terminal area carries the only (neutral) message.
-  const empty = !!scope && !containers.loading && !containers.error && !eligible.length && !options.length;
+  const empty = !!scope && !containers.loading && !containers.error && !workloads.length && !options.length;
   const live = current?.state === "attached" || current?.state === "connecting";
   const limitMessage = "Terminal limit reached. Detach another terminal to free a connection or retained slot.";
   const staleContainers = containers.error && containers.data ? "Container list is stale. Refresh before attaching." : "";
   // The title row never carries these messages: the state dot's tooltip does, and the terminal area
   // shows an overlay (which cannot change the terminal's size) only while nothing is attached.
-  const tooltip = atLimit || reconnectLimited ? limitMessage
+  const tooltip = logs ? unavailable ? `Cell is ${cellState}. Showing the last output of ${selected}.` : `Showing the output of ${selected}.`
+    : atLimit || reconnectLimited ? limitMessage
     : unavailable && !live ? `Terminal unavailable: cell is ${cellState}.`
       : containers.error && !live ? `${headerState}: ${containers.error.message}`
         : staleContainers && !live ? staleContainers
           : current?.message || headerState;
-  const overlay = !scope || empty || live ? null
+  const overlay = !scope || empty || live || logs ? null
     : atLimit || reconnectLimited ? <p className="terminal-limit" role="status">{limitMessage}</p>
       : unavailable ? <p className="terminal-unavailable" role="status">Terminal unavailable: cell is {cellState}.</p>
         : containers.error ? <><ErrorNotice error={containers.error} kind="Containers" />{staleContainers && <p className="stale">{staleContainers}</p>}</>
           : containers.loading && !containers.data ? <p role="status">Loading containers…</p>
             : null;
-  const headerTone = current?.state ?? (skipAutoAttachFor === currentId && currentId || atLimit || unavailable || containers.error || !eligible.length || !selectedEligible ? "disconnected" : "connecting");
+  const headerTone = logs ? "logs" : current?.state ?? (skipAutoAttachFor === currentId && currentId || atLimit || unavailable || containers.error || !eligible.length || !selectedEligible ? "disconnected" : "connecting");
   const toggleExpanded = () => { const next = !expanded; setExpanded(next); onExpandedChange(next); };
   const resume = () => { setSkipAutoAttachFor(""); manager.attach(scope!, selected); };
   // Attach, Detach and Reconnect swap within one slot. A dropped session also keeps Detach so its retained slot can be released.
@@ -360,11 +382,12 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
   const connectSlot = current?.state === "attached" || current?.state === "connecting" ? connectButton("Detach", false, () => { setSkipAutoAttachFor(current.id); manager.detach(current.id); })
     : current ? <>{connectButton("Reconnect", reconnectLimited || !selectedEligible || !!unavailable || !!containers.error, resume)}{connectButton("Detach", false, () => { setSkipAutoAttachFor(current.id); manager.detach(current.id); })}</>
     : skipAutoAttachFor === currentId && currentId ? connectButton("Attach", !!atLimit || !selectedEligible || !!unavailable || !!containers.error, resume) : null;
+  const optionLabel = (id: string) => eligible.some(container => container.id === id) ? id : logOnly.some(container => container.id === id) ? `${id} (logs)` : `${id} (unavailable)`;
   const controls = scope && !docked && <div className="terminal-workspace-tools">
     {!empty && <span className={`terminal-connection-state ${headerTone}`} role="status" tabIndex={0} title={tooltip} data-tooltip={tooltip}><span className="state-dot" aria-hidden="true" /><span className="sr-only">{headerState}</span></span>}
     <div className="terminal-controls">
-      {!!options.length && <><label htmlFor="terminal-container" className="sr-only">Container</label><select id="terminal-container" className="mono-id" value={selected} onChange={event => manager.select(scope, event.target.value)}>{options.map(id => <option key={id} value={id}>{id}{eligible.some(container => container.id === id) ? "" : " (unavailable)"}</option>)}</select>
-        {connectSlot}</>}
+      {!!options.length && <><label htmlFor="terminal-container" className="sr-only">Container</label><select id="terminal-container" className="mono-id" value={selected} onChange={event => manager.select(scope, event.target.value)}>{options.map(id => <option key={id} value={id}>{optionLabel(id)}</option>)}</select>
+        {!logs && connectSlot}</>}
       {!empty && <button ref={expandButton} type="button" className="icon-button" aria-label={expanded ? "Collapse terminal" : "Expand terminal"} data-tooltip={expanded ? "Collapse terminal" : "Expand terminal"} aria-expanded={expanded} aria-controls="terminal-screens" onClick={toggleExpanded}><Icon name={expanded ? "collapse" : "expand"} /></button>}
     </div>
   </div>;
@@ -372,10 +395,18 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
     {controls && controlsHost && createPortal(controls, controlsHost)}
     <section className={`panel terminal-workspace${expanded ? " is-expanded" : ""}${empty ? " is-empty" : ""}`} id="cell-terminal" hidden={!scope} aria-label="Terminal workspace">
       {docked ? <div className="empty-state terminal-docked" role="status"><p>This cell's terminal is docked in the Majordomo panel.</p><button type="button" onClick={onOpenDock}>Open the Majordomo panel</button></div> : <>
-        {empty && <p className="empty-state terminal-empty" role="status">No attachable containers are available.</p>}
+        {empty && <p className="empty-state terminal-empty" role="status">No containers are available.</p>}
         {overlay && <div className="terminal-overlay">{overlay}</div>}
+        {logs && unavailable && <div className="terminal-log-status" role="status">
+          <span>Cell is {cellState}. Showing the last output of <code>{selected}</code>.</span>
+          {availableLifecycleActions(cellState).includes("start") && <button type="button" disabled={operation?.phase === "pending"} onClick={() => onLifecycleAction?.(scope!, "start", cellState)}>Start</button>}
+        </div>}
       </>}
-      <div className="terminal-screens" id="terminal-screens" ref={screens}>{manager.sessions.filter(session => cellId(session.scope) !== dockedCell).map(session => <TerminalSession key={session.id} session={session} active={!!scope && visible && session.id === currentId} expanded={expanded} theme={theme} update={manager.update} pending={manager.pastes[session.id]} onPasted={manager.pasteDelivered} />)}</div>
+      <div className="terminal-screens" id="terminal-screens" ref={screens}>
+        {manager.sessions.filter(session => cellId(session.scope) !== dockedCell).map(session => <TerminalSession key={session.id} session={session} active={!!scope && visible && !logs && session.id === currentId} expanded={expanded} theme={theme} update={manager.update} pending={manager.pastes[session.id]} onPasted={manager.pasteDelivered} />)}
+        {/* Not mounting the log while hidden is what keeps cellRead free of log requests (#1566). */}
+        {visible && logs && <ContainerLog key={sessionId(scope!, selected)} scope={scope!} container={selected} attachable={selectedEligible} live={!unavailable} cellState={cellState} revision={revision} theme={theme} expanded={expanded} />}
+      </div>
     </section>
   </>;
 }

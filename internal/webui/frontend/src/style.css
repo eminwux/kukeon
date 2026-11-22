@@ -267,6 +267,14 @@ button:disabled { cursor: default; opacity: .4; }
 .terminal-connection-state.connecting { color: var(--status-pending); }
 .terminal-connection-state.disconnected { color: var(--status-error); }
 .terminal-connection-state.interrupted { color: var(--status-warning); }
+.terminal-connection-state.logs { color: var(--muted); }
+/* The log view (#1620) reuses the session box; its notices stack above the read-only screen. */
+.terminal-session.terminal-log { flex-direction: column; }
+.terminal-log .terminal-screen[hidden] { display: none; }
+.terminal-log > .error { margin: 12px 16px; }
+.terminal-log-omitted { flex: 0 0 auto; margin: 0; padding: 6px 16px; font-size: var(--font-sm); color: var(--muted); background: var(--terminal-bg); }
+.terminal-log-status { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 12px; padding: 8px 16px; font-size: var(--font-sm); border-bottom: 1px solid var(--line); }
+.terminal-log-status code { font-family: var(--mono); }
 .terminal-screens { min-width: 0; }
 .cell-link .state-badge.drift-badge { grid-column: 1 / -1; grid-row: auto; justify-self: start; }
 .cell-terminal-state { grid-column: 1 / -1; font-size: var(--font-sm); color: var(--muted); }
