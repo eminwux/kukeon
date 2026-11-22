@@ -25,3 +25,11 @@ func SetPollIntervalForTesting(d time.Duration) func() {
 	pollInterval = d
 	return func() { pollInterval = prev }
 }
+
+// SetFollowOutageLimitForTesting shortens how long a follow rides out an
+// unreachable kukeond, returning a restore function.
+func SetFollowOutageLimitForTesting(d time.Duration) func() {
+	prev := followOutageLimit
+	followOutageLimit = d
+	return func() { followOutageLimit = prev }
+}

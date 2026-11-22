@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -50,6 +51,15 @@ type fakeClient struct {
 	readContainerLogFn func(
 		doc v1beta1.ContainerDoc, req kukeonv1.ContainerLogRequest,
 	) (kukeonv1.ContainerLogResult, error)
+
+	// closes counts Close calls: the follow loop closes the client to
+	// make the next poll dial a restarted kukeond again.
+	closes atomic.Int32
+}
+
+func (f *fakeClient) Close() error {
+	f.closes.Add(1)
+	return nil
 }
 
 func (f *fakeClient) ReadContainerLog(

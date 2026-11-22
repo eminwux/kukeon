@@ -46,6 +46,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/rpc"
 	"os"
 	"os/signal"
 	"strings"
@@ -81,6 +83,22 @@ type tailFn func(ctx context.Context, path string, out io.Writer, follow bool) e
 //
 //nolint:gochecknoglobals // test seam: tests shorten the follow poll
 var pollInterval = 200 * time.Millisecond
+
+// followOutageLimit is how long `kuke log -f` keeps retrying while kukeond
+// is unreachable (a restart, an upgrade) before it gives up.
+//
+//nolint:gochecknoglobals // test seam: tests shorten the outage limit
+var followOutageLimit = 2 * time.Minute
+
+// transientDaemonError reports whether err means the request never reached
+// kukeond (dial failed, connection dropped), as opposed to an answer from it.
+func transientDaemonError(err error) bool {
+	var opErr *net.OpError
+	return errors.As(err, &opErr) ||
+		errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, rpc.ErrShutdown)
+}
 
 // TailFn is the exported alias for tailFile-shaped functions: open path,
 // dump current contents to out, and optionally follow until ctx is
@@ -192,13 +210,17 @@ func runLog(cmd *cobra.Command, args []string) error {
 // reported Size drops below the cursor the stream was truncated or replaced,
 // and the read starts over from 0 instead of stalling. answered reports
 // whether at least one chunk arrived, so the caller only falls back to the
-// host-path read when the daemon refused the very first request.
+// host-path read when the daemon refused the very first request. Once a
+// chunk has arrived, a follow survives kukeond going away: it drops the dead
+// connection, keeps the cursor and polls until the daemon answers again or
+// followOutageLimit passes, printing nothing in between.
 func streamContainerLog(
 	ctx context.Context, client kukeonv1.Client, doc v1beta1.ContainerDoc, out io.Writer, follow bool,
 ) (bool, error) {
 	var (
-		offset   int64
-		answered bool
+		offset      int64
+		answered    bool
+		outageStart time.Time
 	)
 	for {
 		res, err := client.ReadContainerLog(ctx, doc, kukeonv1.ContainerLogRequest{
@@ -213,6 +235,15 @@ func streamContainerLog(
 			// The stream file vanished mid-follow (container recreated):
 			// keep polling and read the new file from its start.
 			offset = 0
+		case err != nil && answered && follow && transientDaemonError(err):
+			// kukeond went away mid-follow (restart, upgrade). Drop the dead
+			// connection so the next poll dials again, and keep the cursor.
+			if outageStart.IsZero() {
+				outageStart = time.Now()
+			} else if time.Since(outageStart) > followOutageLimit {
+				return answered, fmt.Errorf("kukeond unreachable for %s: %w", followOutageLimit, err)
+			}
+			_ = client.Close()
 		case err != nil:
 			if errors.Is(err, errdefs.ErrContainerLogUnavailable) && res.Source != "" {
 				return answered, &missingLogFileError{path: res.Source, cause: err}
@@ -220,6 +251,7 @@ func streamContainerLog(
 			return answered, err
 		default:
 			answered = true
+			outageStart = time.Time{}
 			if res.Size < offset {
 				offset = 0
 				continue
