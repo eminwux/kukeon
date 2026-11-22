@@ -158,10 +158,15 @@ function ConfigForm({ blueprint, blueprintScope, form, revision, inventory, onCr
   const [error, setError] = useState("");
   const [opened, setOpened] = useState<Record<string, boolean>>({});
   const [showInvalid, setShowInvalid] = useState(false);
-  const [focusRequest, setFocusRequest] = useState<{ id: string }>();
+  const [focusRequest, setFocusRequest] = useState<{ id?: string; element?: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement }>();
   const autoOpened = useRef(new Set<string>());
   const review = useRef<HTMLDivElement>(null);
-  useEffect(() => { if (focusRequest) document.getElementById(focusRequest.id)?.focus(); }, [focusRequest]);
+  // Runs after the sections holding the field have opened. A natively invalid field also shows the
+  // browser's own message (a malformed email, a port out of range).
+  useEffect(() => {
+    if (focusRequest?.id) document.getElementById(focusRequest.id)?.focus();
+    if (focusRequest?.element) { focusRequest.element.focus(); focusRequest.element.reportValidity(); }
+  }, [focusRequest]);
   useEffect(() => { if (preview) review.current?.scrollIntoView({ block: "nearest" }); }, [preview]);
   const spaces = (inventory.data?.rows[1] ?? []).filter(row => row.scope[0] === realm);
   const stacks = (inventory.data?.rows[2] ?? []).filter(row => row.scope[0] === realm && row.scope[1] === space);
@@ -297,12 +302,24 @@ function ConfigForm({ blueprint, blueprintScope, form, revision, inventory, onCr
   }, [attention]);
   // Submitting with an unmet required answer sends nothing: it opens every section that holds one and puts
   // the cursor on the first.
-  function previewOrFocus() {
+  function previewOrFocus(target: HTMLFormElement) {
     const invalid = ordered.flatMap(block => block.invalid.map(id => ({ key: block.key, id })));
-    if (!invalid.length) { void submit(false); return; }
-    setShowInvalid(true);
-    setOpened(old => ({ ...old, ...Object.fromEntries(invalid.map(item => [item.key, true])) }));
-    setFocusRequest({ id: invalid[0].id });
+    if (invalid.length) {
+      setShowInvalid(true);
+      setOpened(old => ({ ...old, ...Object.fromEntries(invalid.map(item => [item.key, true])) }));
+      setFocusRequest({ id: invalid[0].id });
+      return;
+    }
+    // The form is noValidate because the browser cannot focus an invalid field inside a collapsed section;
+    // its typed inputs (an email, a port) are checked here instead, with the section opened first.
+    const native = target.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>("input:invalid, select:invalid, textarea:invalid");
+    if (native) {
+      const key = native.closest<HTMLElement>("[data-section]")?.dataset.section;
+      if (key) setOpened(old => ({ ...old, [key]: true }));
+      setFocusRequest({ element: native });
+      return;
+    }
+    void submit(false);
   }
   if (created) return <section className="panel" aria-label="Config created"><div className="panel-heading"><h2>Config created</h2><span className="badge">{created.slice(0, -1).join(" / ")}</span></div><div className="panel-body creation-form">
     <p className="creation-success" role="status"><span>CellConfig <strong>{created.at(-1)}</strong> was saved. It answers the <strong>{blueprint.metadata.name}</strong> blueprint's form; no cell was created.</span></p>
@@ -310,7 +327,7 @@ function ConfigForm({ blueprint, blueprintScope, form, revision, inventory, onCr
     <a className="new-cell-action config-create-action" href={newCellLink(created)}>Create a Cell from it <span aria-hidden="true">→</span></a>
     <button type="button" className="subtle-button" onClick={() => { setCreated(undefined); setName(""); }}>Create another Config from this Blueprint</button>
   </div></section>;
-  return <section className="panel"><div className="panel-heading"><h2>Answer the {blueprint.metadata.name} form</h2><span className="badge">{blueprintScope.slice(0, -1).join(" / ")}</span></div><form className="panel-body creation-form" noValidate onSubmit={event => { event.preventDefault(); previewOrFocus(); }}>
+  return <section className="panel"><div className="panel-heading"><h2>Answer the {blueprint.metadata.name} form</h2><span className="badge">{blueprintScope.slice(0, -1).join(" / ")}</span></div><form className="panel-body creation-form" noValidate onSubmit={event => { event.preventDefault(); previewOrFocus(event.currentTarget); }}>
     <p className="description">A blueprint is a form; a config is the answers. Every field below comes from the blueprint document — its parameters, components, modes and repository and secret slots. Security posture (root, host mounts) is fixed by the blueprint and cannot be changed here.</p>
     <div className="schema-section"><h3>Config</h3><div className="schema-fields">
       <label className="schema-field" htmlFor="config-name"><span>Config name <b aria-label="required"> *</b></span><input id="config-name" value={name} disabled={pending} onChange={event => { setName(event.target.value); reviewChanged(); }} /></label>
@@ -323,7 +340,7 @@ function ConfigForm({ blueprint, blueprintScope, form, revision, inventory, onCr
     {ordered.map(block => <Disclosure key={block.key} level={3} className="schema-disclosure" title={block.title} open={opened[block.key] ?? false} onToggle={open => setOpened(old => ({ ...old, [block.key]: open }))}
       badge={block.badge && <span className="badge">{block.badge}</span>}
       summary={<>{block.set ? `${block.set} set` : "Defaults"}{block.invalid.length > 0 && <span className="disclosure-required"> · {block.invalid.length} required</span>}</>}>
-      <div className="schema-section">{block.body}</div>
+      <div className="schema-section" data-section={block.key}>{block.body}</div>
     </Disclosure>)}
 
     {secrets.error && <p className="stale">Secrets could not be listed: {secrets.error.message}. Name a secret by hand instead.</p>}

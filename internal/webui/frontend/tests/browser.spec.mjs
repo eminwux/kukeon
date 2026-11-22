@@ -1557,6 +1557,17 @@ test("submitting New Config with an unmet required answer opens its collapsed se
   expect(requests).toEqual([]);
   await page.getByLabel("role-source URL").fill("git@github.com:o/agents.git");
   await expect(requiredErrors).toHaveCount(0);
+  // A typed input the browser itself rejects (an email) gets the same treatment from a collapsed section.
+  await openSection(page, "Default git identity");
+  await page.getByLabel("Override the inherited default identity").check();
+  await page.getByLabel("Default author email").fill("not-an-email");
+  await configSection(page, "Default git identity").locator("summary").click();
+  await expect(page.getByLabel("Default author email")).toBeHidden();
+  await preview.click();
+  await expect(configSection(page, "Default git identity").locator("details")).toHaveAttribute("open");
+  await expect(page.getByLabel("Default author email")).toBeFocused();
+  expect(requests).toEqual([]);
+  await page.getByLabel("Override the inherited default identity").uncheck();
   await preview.click();
   await expect(page.getByRole("heading", { name: "Review Config" })).toBeVisible();
   expect(requests).toHaveLength(1);
