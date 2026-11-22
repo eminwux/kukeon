@@ -73,11 +73,11 @@ Requires `--kukeond-image` and errors with `ErrHostNotInitialized` when the host
 
 Image-load is out of scope: the desired image must already be present in the `kuke-system` realm (via `kuke build` or `kuke image load`) before invoking this command.
 
-| Flag                     | Default                              | Description                                                                                                                                              |
-| ------------------------ | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--kukeond-image`        | _(required)_                         | Container image for kukeond. May be omitted if `kukeondImage` is set in `/etc/kukeon/kukeond.yaml`; otherwise required.                                  |
-| `--timeout`              | `10s` (`lifecycle.DefaultTimeout`)   | Grace period for the stop phase before escalating from SIGTERM to SIGKILL                                                                                |
-| `--server-configuration` | `/etc/kukeon/kukeond.yaml`           | Path to the kukeond server-configuration YAML (precedence chain: flag > `KUKEOND_CONFIGURATION` env > default file > hardcoded defaults)                 |
+| Flag                     | Default                            | Description                                                                                                                              |
+| ------------------------ | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `--kukeond-image`        | _(required)_                       | Container image for kukeond. May be omitted if `kukeondImage` is set in `/etc/kukeon/kukeond.yaml`; otherwise required.                  |
+| `--timeout`              | `10s` (`lifecycle.DefaultTimeout`) | Grace period for the stop phase before escalating from SIGTERM to SIGKILL                                                                |
+| `--server-configuration` | `/etc/kukeon/kukeond.yaml`         | Path to the kukeond server-configuration YAML (precedence chain: flag > `KUKEOND_CONFIGURATION` env > default file > hardcoded defaults) |
 
 ## kuke daemon reset
 
@@ -103,7 +103,7 @@ kuke daemon log  [-f]      # alias
 
 By default the current contents are printed and the command exits; pass `-f`/`--follow` to tail until SIGINT.
 
-The same stream is available without root or host file access through kukeond's read-only `ReadDaemonLogs` socket method. The `kuke serve` web UI uses it on its **Daemon → Logs** page.
+The command reads through kukeond's read-only `ReadDaemonLogs` socket method (at `KUKEON_HOST`) first, so it needs neither root nor host file access while the daemon answers — it works from a cell that has the daemon socket mounted. The `kuke serve` web UI uses the same method on its **Daemon → Logs** page. When the daemon cannot be reached (socket missing, connection refused, permission denied, or a kukeond too old to serve the method), it falls back to reading the log file in-process, which needs root — the same read as before, so a crashed or wedged kukeond whose cell still reads as running keeps its log readable. `KUKEON_NO_DAEMON=true`, an explicit `--run-path`, or an explicit `--server-configuration` skips the socket and reads in-process directly.
 
 | Flag             | Default | Description                                                        |
 | ---------------- | ------- | ------------------------------------------------------------------ |

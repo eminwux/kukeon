@@ -81,20 +81,23 @@ func NewUnixClient(sockPath string, opts ...UnixOption) *UnixClient {
 	return c
 }
 
-func (c *UnixClient) ensureConn(ctx context.Context) error {
+// ensureConn returns the live rpc.Client, dialing on first use. The caller
+// uses the returned pointer rather than re-reading c.rpcc, which a concurrent
+// Close (the ctx-cancel path in call) may nil out.
+func (c *UnixClient) ensureConn(ctx context.Context) (*rpc.Client, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.rpcc != nil {
-		return nil
+		return c.rpcc, nil
 	}
 	d := net.Dialer{Timeout: c.dialTimeout}
 	conn, err := d.DialContext(ctx, "unix", c.sockPath)
 	if err != nil {
-		return wrapDialError(c.sockPath, err)
+		return nil, wrapDialError(c.sockPath, err)
 	}
 	c.conn = conn
 	c.rpcc = rpc.NewClientWithCodec(jsonrpc.NewClientCodec(conn))
-	return nil
+	return c.rpcc, nil
 }
 
 // Close terminates the underlying rpc.Client connection if open. Safe to call
@@ -115,11 +118,12 @@ func (c *UnixClient) Close() error {
 // cancelled we nudge the conn with a short deadline so the blocked call
 // returns promptly, then drop the rpc.Client so the next call reconnects.
 func (c *UnixClient) call(ctx context.Context, method string, args, reply any) error {
-	if err := c.ensureConn(ctx); err != nil {
+	rpcc, err := c.ensureConn(ctx)
+	if err != nil {
 		return err
 	}
 	errCh := make(chan error, 1)
-	go func() { errCh <- c.rpcc.Call(method, args, reply) }()
+	go func() { errCh <- rpcc.Call(method, args, reply) }()
 	select {
 	case <-ctx.Done():
 		c.mu.Lock()

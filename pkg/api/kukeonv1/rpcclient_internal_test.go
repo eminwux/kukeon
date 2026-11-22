@@ -153,3 +153,51 @@ func TestUnixClientOutdatedDaemon(t *testing.T) {
 type oldDaemon struct{}
 
 func (*oldDaemon) Ping(_ *struct{}, reply *bool) error { *reply = true; return nil }
+
+// TestUnixClientCancelDuringCallIsRaceFree cancels the ctx while the call is
+// in flight, as Ctrl+C does during `kuke daemon logs -f`. call's ctx branch
+// closes the client (niling c.rpcc) while the call goroutine is still
+// starting; the goroutine must use the client it was handed, not re-read the
+// field, or it races Close and can panic on a nil *rpc.Client. Run with
+// -race.
+func TestUnixClientCancelDuringCallIsRaceFree(t *testing.T) {
+	sock := filepath.Join(t.TempDir(), "d.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	srv := rpc.NewServer()
+	if regErr := srv.RegisterName(ServiceName, &pingDaemon{}); regErr != nil {
+		t.Fatal(regErr)
+	}
+	go func() {
+		for {
+			conn, acceptErr := ln.Accept()
+			if acceptErr != nil {
+				return
+			}
+			go srv.ServeCodec(jsonrpc.NewServerCodec(conn))
+		}
+	}()
+
+	c := NewUnixClient(sock)
+	defer c.Close()
+	for range 200 {
+		// Dial first so call reaches the goroutine with a live client, then
+		// hand it an already-cancelled ctx: the select's ctx branch wins and
+		// closes the client while the goroutine is starting.
+		if pingErr := c.Ping(context.Background()); pingErr != nil {
+			t.Fatal(pingErr)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if callErr := c.Ping(ctx); !errors.Is(callErr, context.Canceled) && callErr != nil {
+			t.Fatalf("Ping on cancelled ctx = %v, want context.Canceled or nil", callErr)
+		}
+	}
+}
+
+type pingDaemon struct{}
+
+func (*pingDaemon) Ping(_ *PingArgs, reply *PingReply) error { reply.Version = "test"; return nil }
