@@ -40,13 +40,17 @@ this browser. If inventory becomes unavailable, retained cells are marked stale.
 The toolbar's **New Cell** button opens a guided workflow with **From Config** and **Manual** methods.
 Config creation uses the selected CellConfig and its referenced Blueprint;
 manual creation exposes Cell and Container authorable fields in Basic and
-Advanced sections. Both methods preview and validate before creation. The
-preview leads with a summary (name, scope, containers, images, connectors) and
-keeps the complete Cell document in a collapsed **Full preview (JSON)**
-disclosure; **Create Cell** is then the one primary action. Cells are
-created stopped and appear in the sidebar immediately. Starting after creation
-is an explicit opt-in beside Create Cell; when an attachable workload is present, the cell terminal
-attaches after it becomes ready. Switching cells preserves each cell's
+Advanced sections. Both methods end in one action row at the bottom right:
+**Start the cell** and **Attach a terminal** (both ticked by default), **Preview
+Cell** and **Create Cell**, the one primary action. Create needs no preview.
+A preview is optional and opens in its own **Preview** panel, marked _Not
+created yet_, with a summary (name, scope, containers, images, connectors) and
+the complete Cell document in a collapsed **Full preview (JSON)** disclosure;
+any input change removes it. Cells appear in the sidebar immediately. With both
+options ticked and an attachable workload present, the UI opens the cell
+terminal, which attaches when the cell is ready; otherwise it opens the cell's
+read page and no terminal session is opened. Unticking **Start the cell**
+creates the cell stopped. Switching cells preserves each cell's
 terminal tab and attachment up to the connection limit; it does not stop a
 workload. A lost browser connection does not guarantee that process or terminal
 state can be restored.
@@ -792,11 +796,22 @@ resolution of every connector under `connectors`.
 ### Create a Cell
 
 Choose **New Cell** in the toolbar to open the global creation
-workflow. **From Config** offers a searchable, fully scoped CellConfig selector,
-shows its Blueprint and target Realm/Space/Stack, and preserves environment
-overrides and the disk-pressure option. The Cell name is optional. When omitted,
-the server asks Kukeon's existing naming allocator for the preview name and
-reuses that exact reviewed name on create. It uses Kukeon's shared Config and
+workflow. **From Config** offers a searchable, fully scoped CellConfig selector;
+opened from a Config page it shows a one-line summary of the Config and its
+Blueprint instead, with **Change** to pick another. Only the Cell name and the
+target are open by default: the Realm is the Config's, and **Target space** and
+**Target stack** start on the Config's own coordinates (pinned and disabled when
+the Config sets them) or on `default`. A realm-scoped Config may place its cell
+in any space and stack of its realm, and a space-scoped one in any stack of its
+space; the daemon renders the cell there, merging that Space's and Stack's
+defaults. **Connectors**, **Environment overrides** and **Advanced** (the
+disk-pressure option) are collapsed sections; Connectors opens by itself when a
+required connector is unresolved. The preview lists what each source
+contributes: the Blueprint, the Config, the connectors (method, identity and the
+level that decided it), the Realm, Space and Stack defaults and the values set
+for this cell. The Cell name is optional. When omitted, a create without a
+preview lets the daemon allocate it; after a preview the server reuses that
+exact reviewed name on create. It uses Kukeon's shared Config and
 Blueprint materialization code, then asks the daemon to persist the result.
 Existing name conflicts are returned as conflicts; after an
 unavailable or timed-out create, refresh the inventory before retrying because
@@ -814,17 +829,23 @@ default root during creation; the web server does not insert or mark a workload
 container as root. The Cell document returned by Kukeon is available in the
 creation success notice and includes the daemon's final specification.
 
-Both methods call the existing daemon `MaterializeCell` operation, leave the
-Cell stopped by default, refresh and upsert the shared inventory, and open the
-new cell's terminal. The optional **Start after creation** choice is explicit;
-the terminal attaches to an eligible attachable workload after startup when one
-is present.
+Both methods call the existing daemon `MaterializeCell` operation, then — with
+**Start the cell** ticked, the default — start the Cell with a separate
+`/start` request, so "created, but start failed" stays a distinct outcome. They
+refresh and upsert the shared inventory and open the cell terminal or read page
+as described above.
 
 The JSON POST endpoints `/api/cells/from-config/preview` and
 `/api/cells/from-config/create` accept a scoped config reference, optional name,
-environment overrides, and disk-pressure choice. The endpoints require the exact
-same Origin and `Content-Type: application/json`. Preview is read only; create
-checks the preview digest before materializing. The manual endpoints
+environment overrides, disk-pressure choice, and an optional `targetSpace` and
+`targetStack`: the space and stack the cell lands in when the Config leaves them
+open (empty keeps the Config's scope; a different coordinate than one the Config
+pins is refused). The endpoints require the exact same Origin and
+`Content-Type: application/json`. Preview is read only. The `preview` token is
+optional on create: without it the server renders and creates in one request;
+with it, create refuses ("preview again") unless the inputs and the Config still
+render what was previewed. The manual create endpoint takes the same optional
+token. The manual endpoints
 `/api/cells/manual/preview` and `/api/cells/manual/create` accept the Cell name,
 target scope, labels, annotations, authorable Cell settings, and Container
 specifications. They use the same origin protections and strict request
