@@ -23,9 +23,10 @@
 // from kukeon's "self-contained runtime" pitch — see issue #522.
 //
 // kukebuild lives in its own Go module (cmd/kukebuild/go.mod, issue #655) so
-// BuildKit's `go 1.25` floor and its ~160-package moby / runc / grpc closure
-// advance independently of the root module, which stays on go 1.24.5 and links
-// zero BuildKit packages. The module is wired for local dev via the repo-root
+// BuildKit's ~160-package moby / runc / grpc closure advances independently of
+// the root module, which links zero BuildKit packages. Both modules pin the
+// same `go` directive and containerd version. The module is wired for local dev
+// via the repo-root
 // go.work. kukebuild imports no kukeon package: the only cross-module surface
 // (the realm->namespace suffix) is resolved from the public kukeond.yaml
 // config key, not a private internal/consts symbol.

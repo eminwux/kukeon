@@ -23,7 +23,7 @@ import (
 	"reflect"
 	"testing"
 
-	cgroup2 "github.com/containerd/cgroups/v2/cgroup2"
+	cgroup2 "github.com/containerd/cgroups/v3/cgroup2"
 )
 
 // RefreshRealm/Space/Stack rebuild status from what they observe and persist

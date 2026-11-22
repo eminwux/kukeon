@@ -196,7 +196,8 @@ func TestBuildContainerSpec_Resources(t *testing.T) {
 		*spec.Linux.Resources.CPU.Shares != 512 {
 		t.Errorf("CPU.Shares = %+v, want 512", spec.Linux.Resources.CPU)
 	}
-	if spec.Linux.Resources.Pids == nil || spec.Linux.Resources.Pids.Limit != 256 {
+	if spec.Linux.Resources.Pids == nil || spec.Linux.Resources.Pids.Limit == nil ||
+		*spec.Linux.Resources.Pids.Limit != 256 {
 		t.Errorf("Pids.Limit = %+v, want 256", spec.Linux.Resources.Pids)
 	}
 }

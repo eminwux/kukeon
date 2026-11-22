@@ -255,8 +255,8 @@ const (
 	//
 	// Must mirror the `defaultBuildRoot` constant in cmd/kukebuild/main.go;
 	// the two cannot be a single source of truth because cmd/kukebuild is a
-	// separate Go module (its go-1.25 BuildKit closure is deliberately
-	// disjoint from the root module's graph). On change, update both.
+	// separate Go module (its BuildKit closure is deliberately disjoint from
+	// the root module's graph). On change, update both.
 	KukebuildBaseDir = "/var/lib/kukebuild"
 
 	// InternalImageRegistry is the reserved, non-routable "host" every

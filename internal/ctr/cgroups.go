@@ -25,8 +25,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	cgroup2 "github.com/containerd/cgroups/v2/cgroup2"
-	cgroupstats "github.com/containerd/cgroups/v2/cgroup2/stats"
+	cgroup2 "github.com/containerd/cgroups/v3/cgroup2"
+	cgroupstats "github.com/containerd/cgroups/v3/cgroup2/stats"
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 )
@@ -85,7 +85,7 @@ func (c *client) LoadCgroup(group string, mountpoint string) (*cgroup2.Manager, 
 		return nil, err
 	}
 
-	manager, err := cgroup2.LoadManager(mp, group)
+	manager, err := cgroup2.Load(group, cgroup2.WithMountpoint(mp))
 	if err != nil {
 		return nil, err
 	}
@@ -575,7 +575,7 @@ func (c *client) managerFor(group, mountpoint string) (*cgroup2.Manager, error) 
 		return manager, nil
 	}
 	mp := c.effectiveMountpoint(mountpoint)
-	manager, err := cgroup2.LoadManager(mp, group)
+	manager, err := cgroup2.Load(group, cgroup2.WithMountpoint(mp))
 	if err != nil {
 		return nil, err
 	}

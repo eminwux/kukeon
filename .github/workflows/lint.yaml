@@ -45,11 +45,14 @@ jobs:
 
       # Keep in lockstep with the golangci-lint `rev` in .pre-commit-config.yaml:
       # a different release can format the same source differently, and the
-      # hook and this gate would then disagree.
+      # hook and this gate would then disagree. `goinstall` builds it with the
+      # Go set up above (go.mod's go 1.26.6): the prebuilt v2.6.2 binary is
+      # built with an older Go and refuses to load a go 1.26 module.
       - name: Install golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
           version: v2.6.2
+          install-mode: goinstall
           install-only: true
 
       # Formatters only (golines, gci, gofumpt from .golangci.yml); the full

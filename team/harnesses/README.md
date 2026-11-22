@@ -70,7 +70,7 @@ this build/release workflow.
 
 ## Local builds and checks
 
-Install Docker with Buildx/Bake and Python 3; Go 1.24+ runs the source checks.
+Install Docker with Buildx/Bake and Python 3; Go 1.26+ runs the source checks.
 Use a BuildKit builder with multi-platform support for both architectures (for
 example `docker buildx create --use --driver docker-container`). Cross-platform
 RUN instructions require binfmt/QEMU when not building on native workers.

@@ -1,9 +1,9 @@
 RELEASE_DIR := release
 
 # kukebuild lives in its own Go module (cmd/kukebuild/go.mod, issue #655) whose
-# go-1.25 BuildKit closure is deliberately incompatible with the root module's
-# go-1.24.5 dependency graph (e.g. the monolithic vs. split google.golang.org/
-# genproto). The repo-root go.work wires both modules for editor / gopls
+# BuildKit closure is deliberately kept apart from the root module's dependency
+# graph (the two have clashed before, e.g. the monolithic vs. split
+# google.golang.org/genproto). The repo-root go.work wires both modules for editor / gopls
 # navigation, but a workspace-union build re-couples those graphs and fails with
 # an ambiguous import — the exact coupling this split removes. So every build /
 # test here runs per-module (GOWORK=off), matching the single-module resolution
@@ -87,9 +87,11 @@ kukepause:
 
 # kukebuild is the native image builder that embeds BuildKit as a library
 # (issue #522). It lives in its own Go module (cmd/kukebuild/go.mod, issue #655)
-# so BuildKit's `go 1.25` floor and its moby / runc / grpc closure advance
-# independently of the root module (which stays on go 1.24.5 and links zero
-# BuildKit packages). The repo-root go.work wires both modules for local dev.
+# so BuildKit's moby / runc / grpc closure advances independently of the root
+# module (which links zero BuildKit packages). Both modules still pin the same
+# `go` directive and containerd version, so kukebuild and kukeond build with one
+# toolchain against one containerd. The repo-root go.work wires both modules for
+# local dev.
 # Built from inside its module dir so the workspace resolves the kukebuild
 # module's own go.mod/go.sum; the root-binary version ldflags don't apply
 # (kukebuild imports no cmd/config), so it links with -s -w only.
@@ -131,8 +133,8 @@ release-build:
 # (issue #655), is not shipped inside the kukeond container image (the Dockerfile
 # copies only kuke + kuketty), and is not a published release asset. Cross-build
 # it from its module via `make release-build-kukebuild` when a kukebuild release
-# artifact is wanted; the root Dockerfile builder (golang:1.24, no go.work)
-# never needs the go-1.25 BuildKit closure.
+# artifact is wanted; the root Dockerfile builder (no go.work) never needs the
+# BuildKit closure.
 .PHONY: release-build-kukebuild
 release-build-kukebuild:
 	set -e; \

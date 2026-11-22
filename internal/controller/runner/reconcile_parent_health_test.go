@@ -26,7 +26,7 @@ import (
 	"reflect"
 	"testing"
 
-	cgroup2 "github.com/containerd/cgroups/v2/cgroup2"
+	cgroup2 "github.com/containerd/cgroups/v3/cgroup2"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
