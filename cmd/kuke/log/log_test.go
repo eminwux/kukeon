@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -38,11 +39,29 @@ import (
 
 const testHostCapture = "/opt/kukeon/r1/s1/st1/c1/work/tty/capture"
 
+// fakeClient stubs the methods `kuke log` calls. With readContainerLogFn
+// unset, ReadContainerLog answers like a kukeond that predates the RPC, so
+// the LogContainer + tail tests below exercise the host-path fallback.
 type fakeClient struct {
 	kukeonv1.FakeClient
 
-	listContainersFn func(realm, space, stack, cell string) ([]v1beta1.ContainerSpec, error)
-	logContainerFn   func(doc v1beta1.ContainerDoc) (kukeonv1.LogContainerResult, error)
+	listContainersFn   func(realm, space, stack, cell string) ([]v1beta1.ContainerSpec, error)
+	logContainerFn     func(doc v1beta1.ContainerDoc) (kukeonv1.LogContainerResult, error)
+	readContainerLogFn func(
+		doc v1beta1.ContainerDoc, req kukeonv1.ContainerLogRequest,
+	) (kukeonv1.ContainerLogResult, error)
+}
+
+func (f *fakeClient) ReadContainerLog(
+	_ context.Context,
+	doc v1beta1.ContainerDoc,
+	req kukeonv1.ContainerLogRequest,
+) (kukeonv1.ContainerLogResult, error) {
+	if f.readContainerLogFn == nil {
+		return kukeonv1.ContainerLogResult{}, fmt.Errorf(
+			"%w: %s", errdefs.ErrDaemonMethodUnsupported, kukeonv1.MethodReadContainerLog)
+	}
+	return f.readContainerLogFn(doc, req)
 }
 
 func (f *fakeClient) ListContainers(

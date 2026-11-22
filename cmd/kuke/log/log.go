@@ -19,17 +19,26 @@
 // session it prints the per-container output stream. By default it
 // dumps the current capture/log file contents and exits; pass
 // `-f`/`--follow` to tail until SIGINT, matching `kubectl logs` /
-// `docker logs` conventions. Bytes never traverse the daemon RPC:
-// the daemon resolves the host path of the relevant stream and this
-// subcommand opens that path directly.
+// `docker logs` conventions.
 //
-// Two paths exist depending on the target container's IO model:
+// Bytes are read through the daemon: the ReadContainerLog RPC returns
+// bounded, cursor-addressed chunks of the stream, so `kuke log` works
+// from a cell that mounts only the kukeond socket and no /opt/kukeon
+// (issue #1537). A full read pages from offset 0 to the end; follow mode
+// keeps polling from the returned cursor and starts over from 0 when the
+// stream shrinks below it (truncated or replaced). With KUKEON_NO_DAEMON
+// the in-process client serves the same method by reading the file
+// itself, so there is one code path. Against a kukeond that predates the
+// RPC, `kuke log` falls back to resolving the host path with LogContainer
+// and opening it directly, which needs the host's /opt/kukeon.
+//
+// The stream depends on the target container's IO model:
 //
 //   - Attachable containers route output through sbsh, which writes a
-//     tty byte stream to HostCapturePath. `kuke log` reads that file.
+//     tty byte stream to the container's capture file.
 //   - Non-Attachable containers (including kukeond) have the containerd
-//     runtime shim write stdout/stderr to HostLogPath via cio.LogFile.
-//     `kuke log` reads that file. Implemented per issue #203.
+//     runtime shim write stdout/stderr to a log file via cio.LogFile.
+//     Implemented per issue #203.
 package log
 
 import (
@@ -66,10 +75,12 @@ type MockTailKey struct{}
 // implementation: tailFile.
 type tailFn func(ctx context.Context, path string, out io.Writer, follow bool) error
 
-// pollInterval is how long the follow loop waits between EOF reads.
-// Polling is intentional: avoiding fsnotify keeps the dependency surface
-// small and behaves correctly for sbsh's append-only capture file.
-const pollInterval = 200 * time.Millisecond
+// pollInterval is how long the follow loop waits between reads once it has
+// caught up. Polling is intentional: avoiding fsnotify keeps the dependency
+// surface small and behaves correctly for sbsh's append-only capture file.
+//
+//nolint:gochecknoglobals // test seam: tests shorten the follow poll
+var pollInterval = 200 * time.Millisecond
 
 // TailFn is the exported alias for tailFile-shaped functions: open path,
 // dump current contents to out, and optionally follow until ctx is
@@ -150,12 +161,132 @@ func runLog(cmd *cobra.Command, args []string) error {
 	}
 
 	doc := buildContainerDoc(container, realm, space, stack, cell)
+	out := cmd.OutOrStdout()
+
+	ctx := cmd.Context()
+	if follow {
+		// Install a local cancel scope tied to SIGINT/SIGTERM so Ctrl+C
+		// during follow ends the loop cleanly with exit 0. It chains off
+		// the caller's ctx so an upstream cancellation still wins.
+		var stop context.CancelFunc
+		ctx, stop = signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+	}
+
+	answered, err := streamContainerLog(ctx, client, doc, out, follow)
+	if err == nil {
+		return nil
+	}
+	if !answered && errors.Is(err, errdefs.ErrDaemonMethodUnsupported) {
+		// kukeond predates ReadContainerLog: resolve the host path and read
+		// it directly, as `kuke log` did before #1537.
+		return runViaHostPath(cmd, client, doc, cell, container, out, follow)
+	}
+	return describeLogError(err, cell, container)
+}
+
+// streamContainerLog prints the container's stream through ReadContainerLog.
+// It reads forward from byte 0 in ContainerLogMaxBytes chunks until it has
+// caught up, so the default mode prints the whole current stream; with
+// follow it then polls from the returned cursor until ctx is done. When the
+// reported Size drops below the cursor the stream was truncated or replaced,
+// and the read starts over from 0 instead of stalling. answered reports
+// whether at least one chunk arrived, so the caller only falls back to the
+// host-path read when the daemon refused the very first request.
+func streamContainerLog(
+	ctx context.Context, client kukeonv1.Client, doc v1beta1.ContainerDoc, out io.Writer, follow bool,
+) (bool, error) {
+	var (
+		offset   int64
+		answered bool
+	)
+	for {
+		res, err := client.ReadContainerLog(ctx, doc, kukeonv1.ContainerLogRequest{
+			Offset:   offset,
+			MaxBytes: kukeonv1.ContainerLogMaxBytes,
+		})
+		switch {
+		case err != nil && ctx.Err() != nil:
+			// SIGINT/SIGTERM (or the caller) ended the read: a clean stop.
+			return answered, nil
+		case err != nil && answered && follow && errors.Is(err, errdefs.ErrContainerLogUnavailable):
+			// The stream file vanished mid-follow (container recreated):
+			// keep polling and read the new file from its start.
+			offset = 0
+		case err != nil:
+			if errors.Is(err, errdefs.ErrContainerLogUnavailable) && res.Source != "" {
+				return answered, &missingLogFileError{path: res.Source, cause: err}
+			}
+			return answered, err
+		default:
+			answered = true
+			if res.Size < offset {
+				offset = 0
+				continue
+			}
+			if _, writeErr := out.Write(res.Data); writeErr != nil {
+				return answered, writeErr
+			}
+			offset = res.Next
+			if res.More {
+				continue
+			}
+			if !follow {
+				return answered, nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return answered, nil
+		case <-time.After(pollInterval):
+		}
+	}
+}
+
+// describeLogError adds the cell/container context `kuke log` has always
+// reported to the errors a stream read can end with.
+func describeLogError(err error, cell, container string) error {
+	var missing *missingLogFileError
+	switch {
+	case errors.Is(err, errdefs.ErrContainerNotFound):
+		return fmt.Errorf("container %q not found in cell %q: %w", container, cell, err)
+	case errors.As(err, &missing):
+		return noLogFileError(cell, container, missing.path)
+	}
+	return err
+}
+
+// missingLogFileError carries the daemon-side path of a stream file that
+// does not exist yet, so the message can name it.
+type missingLogFileError struct {
+	path  string
+	cause error
+}
+
+func (e *missingLogFileError) Error() string { return e.cause.Error() }
+func (e *missingLogFileError) Unwrap() error { return e.cause }
+
+// noLogFileError is the message `kuke log` prints when the container exists
+// but its stream file has not been opened yet.
+func noLogFileError(cell, container, path string) error {
+	return fmt.Errorf(
+		"cell %q container %q has no log file at %s (the runtime shim has not opened it yet — try again after the container produces output)",
+		cell,
+		container,
+		path,
+	)
+}
+
+// runViaHostPath is the pre-#1537 read path, kept for a kukeond that does not
+// serve ReadContainerLog: resolve the host path of the stream with
+// LogContainer and open it directly. It needs the host's /opt/kukeon.
+func runViaHostPath(
+	cmd *cobra.Command, client kukeonv1.Client, doc v1beta1.ContainerDoc,
+	cell, container string, out io.Writer, follow bool,
+) error {
 	result, err := client.LogContainer(cmd.Context(), doc)
 	if err != nil {
-		if errors.Is(err, errdefs.ErrContainerNotFound) {
-			return fmt.Errorf("container %q not found in cell %q: %w", container, cell, err)
-		}
-		return err
+		return describeLogError(err, cell, container)
 	}
 	streamPath := result.HostCapturePath
 	if streamPath == "" {
@@ -166,14 +297,9 @@ func runLog(cmd *cobra.Command, args []string) error {
 	}
 
 	tail := resolveTail(cmd)
-	if tailErr := tail(cmd.Context(), streamPath, cmd.OutOrStdout(), follow); tailErr != nil {
+	if tailErr := tail(cmd.Context(), streamPath, out, follow); tailErr != nil {
 		if errors.Is(tailErr, os.ErrNotExist) {
-			return fmt.Errorf(
-				"cell %q container %q has no log file at %s (the runtime shim has not opened it yet — try again after the container produces output)",
-				cell,
-				container,
-				streamPath,
-			)
+			return noLogFileError(cell, container, streamPath)
 		}
 		return tailErr
 	}

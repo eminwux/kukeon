@@ -367,9 +367,9 @@ func (s *KukeonV1Service) ConnectContainerTerminal(
 	return nil
 }
 
-// LogContainer enforces the Attachable gate at the API boundary and returns
-// the host path of the per-container sbsh capture file. Bytes never
-// traverse this RPC — the client tails HostCapturePath directly.
+// LogContainer returns the host path of the per-container output stream
+// (sbsh capture or runtime-shim log). Bytes never traverse this RPC; a
+// caller that cannot open the host path reads through ReadContainerLog.
 func (s *KukeonV1Service) LogContainer(
 	args *kukeonv1.LogContainerArgs,
 	reply *kukeonv1.LogContainerReply,
@@ -379,6 +379,22 @@ func (s *KukeonV1Service) LogContainer(
 	reply.Err = kukeonv1.ToAPIError(err)
 	if err != nil {
 		s.logger.DebugContext(s.ctx, "LogContainer returned error", "error", err)
+	}
+	return nil
+}
+
+// ReadContainerLog returns a bounded chunk of a container's output stream
+// (issue #1537), so `kuke log` works from a cell that mounts only the
+// kukeond socket. Socket access is the only gate, as for LogContainer.
+func (s *KukeonV1Service) ReadContainerLog(
+	args *kukeonv1.ReadContainerLogArgs,
+	reply *kukeonv1.ReadContainerLogReply,
+) error {
+	result, err := s.core.ReadContainerLog(s.ctx, args.Doc, args.Request)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	if err != nil {
+		s.logger.DebugContext(s.ctx, "ReadContainerLog returned error", "error", err)
 	}
 	return nil
 }

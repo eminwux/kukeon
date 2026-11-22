@@ -667,6 +667,23 @@ func (c *UnixClient) LogContainer(
 	return reply.Result, nil
 }
 
+// ReadContainerLog implements Client (issue #1537).
+func (c *UnixClient) ReadContainerLog(
+	ctx context.Context,
+	doc v1beta1.ContainerDoc,
+	req ContainerLogRequest,
+) (ContainerLogResult, error) {
+	args := &ReadContainerLogArgs{Doc: doc, Request: req}
+	reply := &ReadContainerLogReply{}
+	if err := c.call(ctx, MethodReadContainerLog, args, reply); err != nil {
+		return ContainerLogResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
 // StopCell implements Client.
 func (c *UnixClient) StopCell(ctx context.Context, doc v1beta1.CellDoc) (StopCellResult, error) {
 	args := &StopCellArgs{Doc: doc}

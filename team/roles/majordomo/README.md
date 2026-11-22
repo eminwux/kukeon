@@ -46,7 +46,7 @@ kukeon TeamEntry selection; it does not dynamically install runtime prerequisite
 
 ## Prerequisites and authority
 
-- **Daemon access is provided.** `role.yaml` requests three host mounts
+- **Daemon access is provided.** `role.yaml` requests two host mounts
   (`needs.mounts`), so a majordomo cell reaches the host's kukeond with no
   manual provisioning:
 
@@ -54,10 +54,20 @@ kukeon TeamEntry selection; it does not dynamically install runtime prerequisite
   | ---------------- | --------------------------------- | ------------------------------------------------------------------ |
   | `kukeond-socket` | `/run/kukeon/kukeond` (read-only) | The daemon socket; `KUKEON_HOST` points `kuke` at it.              |
   | `kuke-binary`    | `/usr/local/bin/kuke` (read-only) | The host's own `kuke` client, so client and daemon versions match. |
-  | `kukeon-install` | `/opt/kukeon` (read-only)         | The kukeon install the client and its shim resolve against.        |
 
-  The mounts select the shared `<harness>-host` blueprint. `kuke get cells`
-  therefore answers for the host as soon as the cell is up.
+  The host's `/opt/kukeon` is not mounted: every command the skills run —
+  including `kuke log` and `kuke daemon logs` — reads through the daemon
+  socket. The two mounts select the shared
+  `<harness>-kuke-binary-kukeond-socket` blueprint. `kuke get cells` therefore
+  answers for the host as soon as the cell is up.
+
+  **Migrating an existing install.** Earlier releases also mounted
+  `/opt/kukeon` read-only (`kukeon-install`) and selected the
+  `<harness>-host` blueprint. `kuke team init --reapply` re-renders the
+  majordomo configs against the new blueprint, but a majordomo cell that is
+  already running keeps the old mount until it is recreated from the
+  re-rendered config. Upgrade kukeond first: without `/opt/kukeon`, `kuke log`
+  in the cell needs a kukeond that serves the chunked `ReadContainerLog` read.
 
 - **In-cell `kuke status` host and state checks are not host facts.** Those
   rows are evaluated by the `kuke` client in its own namespaces, so inside a

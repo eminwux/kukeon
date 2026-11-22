@@ -153,3 +153,67 @@ func TestReadDaemonLogs_RPCSurfacesUnavailableSentinel(t *testing.T) {
 		t.Fatalf("wire error %+v does not unwrap to ErrDaemonLogUnavailable", reply.Err)
 	}
 }
+
+type containerLogClientFake struct {
+	kukeonv1.FakeClient
+
+	doc    v1beta1.ContainerDoc
+	req    kukeonv1.ContainerLogRequest
+	result kukeonv1.ContainerLogResult
+	err    error
+}
+
+func (c *containerLogClientFake) ReadContainerLog(
+	_ context.Context, doc v1beta1.ContainerDoc, req kukeonv1.ContainerLogRequest,
+) (kukeonv1.ContainerLogResult, error) {
+	c.doc = doc
+	c.req = req
+	return c.result, c.err
+}
+
+func TestReadContainerLog_RPCForwardsDocRequestAndResult(t *testing.T) {
+	core := &containerLogClientFake{result: kukeonv1.ContainerLogResult{
+		Source: "/opt/kukeon/r/s/st/c/work/tty/capture",
+		Data:   []byte("$ \xff"), Start: 4, Next: 7, Size: 7,
+	}}
+	svc := daemon.NewKukeonV1Service(context.Background(), discardLogger(), core)
+
+	doc := v1beta1.ContainerDoc{Metadata: v1beta1.ContainerMetadata{Name: "work"}}
+	args := &kukeonv1.ReadContainerLogArgs{Doc: doc, Request: kukeonv1.ContainerLogRequest{Offset: 4, MaxBytes: 128}}
+	reply := &kukeonv1.ReadContainerLogReply{}
+	if err := svc.ReadContainerLog(args, reply); err != nil {
+		t.Fatalf("transport error: %v", err)
+	}
+	if reply.Err != nil {
+		t.Fatalf("wire error: %v", kukeonv1.FromAPIError(reply.Err))
+	}
+	if core.doc.Metadata.Name != "work" || core.req != args.Request {
+		t.Fatalf("core got doc=%+v req=%+v", core.doc, core.req)
+	}
+	if string(reply.Result.Data) != "$ \xff" || reply.Result.Next != 7 || reply.Result.Source != core.result.Source {
+		t.Fatalf("reply %+v", reply.Result)
+	}
+}
+
+func TestReadContainerLog_RPCSurfacesSentinels(t *testing.T) {
+	for _, sentinel := range []error{
+		errdefs.ErrContainerNotFound, errdefs.ErrCellNotFound, errdefs.ErrContainerLogUnavailable,
+	} {
+		core := &containerLogClientFake{
+			result: kukeonv1.ContainerLogResult{Source: "/missing/capture"},
+			err:    sentinel,
+		}
+		svc := daemon.NewKukeonV1Service(context.Background(), discardLogger(), core)
+
+		reply := &kukeonv1.ReadContainerLogReply{}
+		if err := svc.ReadContainerLog(&kukeonv1.ReadContainerLogArgs{}, reply); err != nil {
+			t.Fatalf("transport error: %v", err)
+		}
+		if !errors.Is(kukeonv1.FromAPIError(reply.Err), sentinel) {
+			t.Fatalf("wire error %+v does not unwrap to %v", reply.Err, sentinel)
+		}
+		if reply.Result.Source != "/missing/capture" {
+			t.Fatalf("Source %q not carried alongside the error", reply.Result.Source)
+		}
+	}
+}

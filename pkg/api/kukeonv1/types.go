@@ -754,9 +754,11 @@ type LogContainerReply struct {
 	Err    *APIError
 }
 
-// LogContainerResult carries the host-side coordinates the `kuke log` client
-// needs to read the per-container output stream. Bytes never traverse this
-// RPC — the client opens the returned host path directly.
+// LogContainerResult carries the host-side coordinates of the per-container
+// output stream. Bytes never traverse this RPC — a caller with filesystem
+// access to the daemon's storage opens the returned host path directly.
+// `kuke log` reads through ReadContainerLog instead, so it also works from a
+// cell that does not mount /opt/kukeon (issue #1537).
 //
 // Exactly one of HostCapturePath or HostLogPath is non-empty:
 //
@@ -775,6 +777,68 @@ type LogContainerResult struct {
 	// by the containerd runtime shim (cio.LogFile mode). Set only for
 	// non-Attachable containers; the file is shim-owned, kuke only reads.
 	HostLogPath string
+}
+
+// Bounds for ReadContainerLog (issue #1537). A request with MaxBytes <= 0
+// reads ContainerLogDefaultMaxBytes; larger values are clamped to
+// ContainerLogMaxBytes so one reply never carries an unbounded payload.
+const (
+	ContainerLogDefaultMaxBytes = 64 << 10
+	ContainerLogMaxBytes        = 1 << 20
+)
+
+// ContainerLogRequest selects a byte range of a container's output stream —
+// the same file LogContainer resolves (the sbsh capture of an Attachable
+// container, the runtime-shim log of a non-Attachable one).
+//
+// A non-negative Offset reads forward from that byte; callers pass the
+// previous result's Next to continue. A negative Offset reads the newest
+// MaxBytes ending at the current end of the stream (tail). An Offset beyond
+// the current end returns no data and leaves Next at Offset: the stream was
+// truncated or replaced, which the caller detects as Size < its cursor and
+// answers by reading again from 0.
+type ContainerLogRequest struct {
+	Offset   int64
+	MaxBytes int
+}
+
+// ContainerLogResult is one bounded chunk of a container's output stream.
+//
+// Unlike DaemonLogResult, Data is raw bytes, verbatim: an sbsh capture is a
+// terminal byte stream (escape sequences, prompts without a trailing
+// newline, non-UTF-8 input), so nothing is held back waiting for a newline
+// and nothing is re-encoded.
+type ContainerLogResult struct {
+	// Source is the daemon-side path of the stream read (informational).
+	// It is also set when the stream file does not exist, so callers can
+	// name the missing path.
+	Source string
+	// Data is the chunk's bytes, exactly as stored.
+	Data []byte
+	// Start is the byte offset of Data's first byte in the stream.
+	Start int64
+	// Next is the offset to pass as ContainerLogRequest.Offset to continue.
+	Next int64
+	// Size is the stream's size in bytes when it was read.
+	Size int64
+	// Truncated reports that earlier bytes exist before Start that this
+	// chunk omits (a tail read of a stream larger than the bound).
+	Truncated bool
+	// More reports that data beyond Next was already available when the
+	// chunk was read (a forward read that hit the bound).
+	More bool
+}
+
+// ReadContainerLogArgs is the wire request for ReadContainerLog.
+type ReadContainerLogArgs struct {
+	Doc     v1beta1.ContainerDoc
+	Request ContainerLogRequest
+}
+
+// ReadContainerLogReply is the wire reply for ReadContainerLog.
+type ReadContainerLogReply struct {
+	Result ContainerLogResult
+	Err    *APIError
 }
 
 // ---- Refresh ----

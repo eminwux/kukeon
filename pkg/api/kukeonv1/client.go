@@ -154,10 +154,21 @@ type Client interface {
 	AttachContainer(ctx context.Context, doc v1beta1.ContainerDoc) (AttachContainerResult, error)
 	// LogContainer validates that the target container has Attachable=true
 	// and resolves the host-side path of the per-container sbsh capture
-	// file. Bytes never traverse this RPC — the caller (`kuke log`) reads
-	// the file directly. Same Attachable gate as AttachContainer: only
-	// containers wrapped by sbsh have a capture file to surface.
+	// file (or, for a non-Attachable container, the runtime-shim log).
+	// Bytes never traverse this RPC — a caller with filesystem access to
+	// the daemon's storage reads the file directly. `kuke log` uses
+	// ReadContainerLog instead and falls back to this only against a
+	// kukeond that predates it.
 	LogContainer(ctx context.Context, doc v1beta1.ContainerDoc) (LogContainerResult, error)
+	// ReadContainerLog returns one bounded chunk of the target container's
+	// output stream — the file LogContainer resolves — as raw bytes, so a
+	// caller without filesystem access to the daemon's storage (`kuke log`
+	// in a cell that mounts only the kukeond socket) can read and follow it
+	// over the socket (issue #1537). It surfaces the same not-found errors
+	// as LogContainer, and ErrContainerLogUnavailable when the container
+	// exists but its stream file does not. Read-only; see
+	// ContainerLogRequest for the cursor contract.
+	ReadContainerLog(ctx context.Context, doc v1beta1.ContainerDoc, req ContainerLogRequest) (ContainerLogResult, error)
 	// ConnectContainerTerminal returns a connection to the target
 	// container's sbsh control socket, so a caller without filesystem
 	// access to the socket (a cell holding only the kukeond socket mount)
@@ -450,6 +461,8 @@ const (
 	MethodStartCell       = ServiceName + ".StartCell"
 	MethodAttachContainer = ServiceName + ".AttachContainer"
 	MethodLogContainer    = ServiceName + ".LogContainer"
+
+	MethodReadContainerLog = ServiceName + ".ReadContainerLog"
 
 	MethodConnectContainerTerminal = ServiceName + ".ConnectContainerTerminal"
 	MethodReadDaemonLogs           = ServiceName + ".ReadDaemonLogs"
