@@ -2613,6 +2613,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../kuke-connector/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke connector
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../kuke-uninstall/" class="md-nav__link">
         
   
@@ -3720,12 +3748,10 @@
 
 
 <h1 id="kuke-team-init">kuke team init<a class="headerlink" href="#kuke-team-init" title="Permanent link">&para;</a></h1>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke team init [--force | --reapply] [--import-git-identity [--git-key PATH]
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>               [--git-key-passphrase-file FILE] [--git-known-hosts FILE]]
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>               [--host ENDPOINT] [--configuration PATH]
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke team init [--force | --reapply] [--host ENDPOINT] [--configuration PATH]
 </code></pre></div>
-<p>Initialize the operator's team configuration and apply the <code>kuke</code> team,
-whose one role is <code>majordomo</code>, to kukeond. <code>init</code> creates no cells and starts nothing; launch a composed
+<p>Apply the <code>kuke</code> team, whose one role is <code>majordomo</code>, to kukeond and register
+it at <code>~/.kuke/kuketeam.d/kuke.yaml</code>. <code>init</code> creates no cells and starts nothing; launch a composed
 cell explicitly with kuke afterwards (for example
 <code>kuke run --from-config kuke-majordomo-codex</code>).</p>
 <p><code>kuke</code> is the operator's system team, named after the <code>kuke-</code> system prefix
@@ -3747,7 +3773,7 @@ For the shared composition model, see <a href="../../concepts/team/">Teams</a>.<
 <tr>
 <td><code>--force</code></td>
 <td><code>false</code></td>
-<td>Replace an existing <code>~/.kuke/kuketeams.yaml</code> and reapply the initial majordomo declaration.</td>
+<td>Replace the registered <code>kuke</code> team with the initial majordomo declaration and apply it.</td>
 </tr>
 <tr>
 <td><code>--reapply</code></td>
@@ -3766,50 +3792,27 @@ For the shared composition model, see <a href="../../concepts/team/">Teams</a>.<
 </tr>
 </tbody>
 </table>
-<p>Git identity import (see <a href="#git-identity-and-credentials">Git identity and credentials</a>):</p>
-<table>
-<thead>
-<tr>
-<th>Flag</th>
-<th>Default</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>--import-git-identity</code></td>
-<td><code>false</code></td>
-<td>Your consent to copy an SSH private key into the <code>ssh-key</code> secret <code>git-ssh</code> and use it for the team's git credentials (and signing, if you already sign).</td>
-</tr>
-<tr>
-<td><code>--git-key</code></td>
-<td>—</td>
-<td>Private key to import. Default: the key git signs with, else <code>~/.ssh/id_ed25519</code>, <code>id_ecdsa</code>, <code>id_rsa</code>.</td>
-</tr>
-<tr>
-<td><code>--git-key-passphrase-file</code></td>
-<td>—</td>
-<td>File holding the key's passphrase. Required for a passphrase-protected key.</td>
-</tr>
-<tr>
-<td><code>--git-known-hosts</code></td>
-<td>—</td>
-<td><code>known_hosts</code> file to pin for the imported key. Default: the built-in <code>github.com</code>, <code>gitlab.com</code> and <code>bitbucket.org</code> keys.</td>
-</tr>
-</tbody>
-</table>
-<p>The last three require <code>--import-git-identity</code>.</p>
+<p>The git identity flags <code>--import-git-identity</code>, <code>--git-key</code>,
+<code>--git-key-passphrase-file</code> and <code>--git-known-hosts</code> were removed. Init does not
+read or store a git identity; use
+<a href="../kuke-connector/#kuke-connector-import-git"><code>kuke connector import git --default</code></a>
+(see <a href="#git-identity-and-credentials">Git identity and credentials</a>).</p>
 <p>kuke's global flags (<code>--verbose</code>, <code>--log-level</code>, <code>--run-path</code>, <code>--no-daemon</code>)
 are accepted but have no effect on <code>kuke team</code> subcommands: they resolve the
 operator home, the kukeond endpoint and the <code>ClientConfiguration</code> themselves.</p>
 <h2 id="what-it-does">What it does<a class="headerlink" href="#what-it-does" title="Permanent link">&para;</a></h2>
-<p><code>kuke team init</code> creates <code>~/.kuke/kuketeams.yaml</code> only when it does not exist.
-If the file already exists, it exits with guidance to use <code>--force</code> and does not
-contact the daemon. <code>kuke team init --force</code> atomically replaces the global
-configuration with the initial document and applies the initial <code>kuke</code> team.
-It replaces the accepted <code>kuke</code> registration after successful application, and
+<p>"Already initialized" means the <code>kuke</code> team entry
+<code>~/.kuke/kuketeam.d/kuke.yaml</code> exists. Without <code>--force</code> (or <code>--reapply</code>) init
+then exits without contacting the daemon:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>init: already initialized (/home/me/.kuke/kuketeam.d/kuke.yaml); use --force to reset or --reapply to recompose
+</code></pre></div>
+<p><code>kuke team init --force</code> applies the initial <code>kuke</code> team and replaces the entry
+with the initial majordomo declaration after successful application. It
 <a href="#migrating-from-the-kukeon-team-name">migrates</a> a host initialized while the
 team was still named <code>kukeon</code>.</p>
+<p><code>~/.kuke/kuketeams.yaml</code> is optional and hand-written. Init reads it when it
+exists and never writes it, <code>--force</code> included; without it init uses empty
+global defaults. See <a href="../../concepts/team/#reusable-defaults-after-init">reusable defaults</a>.</p>
 <p>The command fetches only the sources used by the selected role/harness
 definitions into temporary Git checkouts, and composes the kuke team's
 blueprints and configs. Git must be installed and able to read those sources
@@ -3817,13 +3820,6 @@ without a terminal prompt. <code>branch</code>, <code>tag</code>, and <code>comm
 explicitly; no checkout in the current directory is used. Fetched definitions
 are removed after the invocation. Runtime repository URLs and clone
 destinations still come from the authored configuration.</p>
-<p>Fresh global configuration is minimal (discovered Git settings are added under
-<code>spec.git</code> when available):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuketeams.io/v1</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">TeamsConfig</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">defaults</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{}</span>
-</code></pre></div>
 <p>The initial accepted declaration contains the majordomo selections directly. The
 majordomo role and both harnesses come from the kukeon repository (<code>team/roles/</code> and
 <code>team/harnesses/</code>):</p>
@@ -3890,42 +3886,34 @@ move back to <code>&lt;name&gt;</code>, and the copy is removed, or reported whi
 config still uses it. It does not prune credentials or running cells.</p>
 <h2 id="git-identity-and-credentials">Git identity and credentials<a class="headerlink" href="#git-identity-and-credentials" title="Permanent link">&para;</a></h2>
 <p>Team cells clone, push and sign with <a href="../../guides/git-credentials/">stored git credentials</a>.
-The host <code>~/.ssh</code> is never mounted, and init reads nothing from it unless you
-pass <code>--import-git-identity</code>.</p>
-<p><code>spec.git</code> in <code>~/.kuke/kuketeams.yaml</code> is the operator's default identity. It
-names secrets, not host paths:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">git</span><span class="p">:</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="nt">author</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Ada Lovelace</span><span class="p p-Indicator">,</span><span class="nt"> email</span><span class="p">:</span><span class="w"> </span><span class="nv">ada@example.com</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">    </span><span class="nt">committer</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Ada Lovelace</span><span class="p p-Indicator">,</span><span class="nt"> email</span><span class="p">:</span><span class="w"> </span><span class="nv">ada@example.com</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">    </span><span class="nt">credentials</span><span class="p">:</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">host</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">github.com</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">        </span><span class="nt">secretRef</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">git-ssh</span><span class="p p-Indicator">,</span><span class="nt"> realm</span><span class="p">:</span><span class="w"> </span><span class="nv">default</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">    </span><span class="nt">signing</span><span class="p">:</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">      </span><span class="nt">secretRef</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">git-ssh</span><span class="p p-Indicator">,</span><span class="nt"> realm</span><span class="p">:</span><span class="w"> </span><span class="nv">default</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">    </span><span class="nt">sign</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">commits</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">tags</span><span class="p p-Indicator">]</span>
+The host <code>~/.ssh</code> is never mounted, and init reads nothing from it or from your
+git configuration. It writes no <code>spec.defaults.git</code> on the team's stack.</p>
+<p>A team cell uses the git connector identity a Realm, Space or Stack default
+names (<code>spec.defaults.git.identityRef</code>), unless the team names one for its
+Configs (<code>connectors.git.identity</code>). Store yours once and make it the Realm
+default:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>kuke<span class="w"> </span>connector<span class="w"> </span>import<span class="w"> </span>git<span class="w"> </span>--default
 </code></pre></div>
-<p>Init writes it as <code>spec.defaults.git</code> of the team's stack, so every team cell
-inherits it. Only that <code>git</code> block is touched: the stack's other defaults are
-kept, and credentials for other hosts are merged by host. A source may state its
-own identity (<code>sources[].git</code>), which is rendered into that repo's fill of each
+<p>See <a href="../kuke-connector/#kuke-connector-import-git"><code>kuke connector import git</code></a>.
+A source may still state its own identity (<code>sources[].git</code>: author, committer,
+credential, signing), which is rendered into that repo's fill of each
 CellConfig.</p>
-<p>Init discovers <code>user.name</code> / <code>user.email</code> from your global git configuration.
-With <code>--import-git-identity</code> it also stores your SSH key as the secret
-<code>git-ssh</code>, binds it to every host the team's sources use, and — when your git
-configuration already signs commits or tags <strong>with that key</strong> — makes it the
-signing key and stores your allowed-signers file as <code>git-allowed-signers</code>. If
-<code>user.signingkey</code> names something else (a GPG key, or a different SSH key), the
-key is imported as a credential only, signing is left off and a note says so:
-cells signing with a key your forge does not know as your signing key would
-produce unverified commits. An import always writes the secret: an existing
-<code>git-ssh</code> is replaced with the key you named, and a note reports the
-replacement. Without the flag, init reports each SSH
-source no stored credential covers and each setting that no longer has an
-effect (the pre-stored-credential <code>signingKey</code> / <code>allowedSigners</code> host paths, a
-role's <code>needs.mounts: [ssh]</code>) as a note.</p>
-<p>Migrating an existing installation: see
-<a href="../../guides/migrate-to-stored-git-credentials/">Migrating to stored git credentials</a>.</p>
+<p>When the team clones a source over SSH that states no credential of its own,
+no Realm, Space or Stack default names a git identity, and no Config names its
+own, init prints one note:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>no git identity is set; run kuke connector import git --default
+</code></pre></div>
+<p>A role's <code>needs.mounts: [ssh]</code> mounts nothing; init prints a note for it.</p>
+<p><code>~/.kuke/kuketeams.yaml</code> has no <code>spec.git</code>. A file that still has one fails to
+decode:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>spec.git: spec.git was removed; store your git identity with kuke connector import git --default (line 4)
+</code></pre></div>
+<p>Delete the block and run <code>kuke connector import git --default</code>. Nothing is
+converted: a <code>spec.git</code> block, the stack <code>spec.defaults.git</code> an older init
+wrote and an older <code>git-ssh</code> secret are left as they are.</p>
+<p>Blueprints carry the connector definitions of the <code>kuke</code> build that applied the
+team. After upgrading <code>kuke</code>, run <code>kuke team init --reapply</code> (or <code>--force</code>)
+before the team's cells accept an author-only git identity.</p>
 <h2 id="authentication-and-secrets">Authentication and secrets<a class="headerlink" href="#authentication-and-secrets" title="Permanent link">&para;</a></h2>
 <p>Only selected role/harness requirements contribute secret lookups. The base
 majordomo with Codex or Claude does not require <code>gh</code> or <code>gh-token</code>. Selecting
@@ -3947,8 +3935,8 @@ or saved in the TeamEntry or the blueprint/config request.</p>
 blueprints/configs are still applied and the team registered (kukeond resolves
 secret references only when a cell launches), and the command exits 0 after
 listing each missing runtime secret once:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Missing secrets (cells will not start until they exist):
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>  provider-account  →  kuke create secret provider-account --realm auth --space shared --stack operators --from-file /path/to/token
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Missing secrets (cells will not start until they exist):
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>  provider-account  →  kuke create secret provider-account --realm auth --space shared --stack operators --from-file /path/to/token
 </code></pre></div>
 <p>Create them before launching cells; no rerun is needed. <code>kuke run</code> still fails
 on a cell whose secret is absent. The actual command uses the binding's
@@ -3973,21 +3961,21 @@ legacy <code>kukeon.yaml</code> <a href="#migrating-from-the-kukeon-team-name">b
 has kukeond prune the team's configs the new composition no longer renders. Use
 it after editing the entry, for example to
 <a href="../../concepts/team/#the-majordomo-health-sweep">turn on the health sweep</a>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nv">$EDITOR</span><span class="w"> </span>~/.kuke/kuketeam.d/kuke.yaml
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>kuke<span class="w"> </span>team<span class="w"> </span>init<span class="w"> </span>--reapply
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nv">$EDITOR</span><span class="w"> </span>~/.kuke/kuketeam.d/kuke.yaml
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>kuke<span class="w"> </span>team<span class="w"> </span>init<span class="w"> </span>--reapply
 </code></pre></div>
 <ul>
 <li>The entry is rewritten only after a fully successful apply, like every
   registration. A failed apply leaves your edit in place.</li>
-<li><code>~/.kuke/kuketeams.yaml</code> is read and never written.</li>
+<li><code>~/.kuke/kuketeams.yaml</code> is read when present and never written.</li>
 <li>The entry is decoded strictly: an unknown or misspelled field, or a task the
   role does not declare, fails before anything is fetched or applied.</li>
 <li>Without a stored entry the command fails and tells you to run
   <code>kuke team init</code> first; it never creates one.</li>
 <li><code>--reapply --force</code> is rejected. <code>--force</code> discards the entry and starts
   again from the initial declaration; <code>--reapply</code> keeps it.</li>
-<li><code>--reapply</code> does not import a git identity. Use
-  <code>--force --import-git-identity</code> for that.</li>
+<li><code>--reapply</code> does not import a git identity; nothing in <code>kuke team</code> does. Use
+  <a href="../kuke-connector/#kuke-connector-import-git"><code>kuke connector import git --default</code></a>.</li>
 </ul>
 <h3 id="migrating-from-the-kukeon-team-name">Migrating from the <code>kukeon</code> team name<a class="headerlink" href="#migrating-from-the-kukeon-team-name" title="Permanent link">&para;</a></h3>
 <p>The init team was named <code>kukeon</code> before it became <code>kuke</code>. That collided with
@@ -4038,31 +4026,31 @@ converge the same <code>kuke</code> identity. A registration write failure after
 application is reported as such and is also recovered by rerunning
 <code>init --force</code>.</p>
 <h2 id="output">Output<a class="headerlink" href="#output" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Created configuration: /home/me/.kuke/kuketeams.yaml
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>Applied 4 resources; registered kuke team: /home/me/.kuke/kuketeam.d/kuke.yaml
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>No cells created or started.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Read configuration: /home/me/.kuke/kuketeams.yaml
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>Applied 4 resources; registered kuke team: /home/me/.kuke/kuketeam.d/kuke.yaml
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>No cells created or started.
 </code></pre></div>
+<p>The <code>Read configuration</code> line is printed only when <code>~/.kuke/kuketeams.yaml</code>
+exists.</p>
 <p>Missing runtime secrets and notes follow when there are any:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>Missing secrets (cells will not start until they exist):
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>  git-ssh  →  kuke create secret git-ssh --realm default --type ssh-key --from-file /path/to/private-key  (git credential; or --type basic-auth)
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>  bot-key  →  kuke create secret bot-key --realm default --connector git --type ssh-key --from-file /path/to/private-key --hosts github.com --author 'Name &lt;email&gt;'  (git identity; or --type basic-auth)
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>Notes:
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>  source agents is cloned over SSH but no stored git credential covers github.com; add one to spec.git.credentials (kuke team init --force --import-git-identity imports your key)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>Missing secrets (cells will not start until they exist):
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>  git-ssh  →  kuke create secret git-ssh --realm default --type ssh-key --from-file /path/to/private-key  (git credential; or --type basic-auth)
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>  bot-key  →  kuke create secret bot-key --realm default --connector git --type ssh-key --from-file /path/to/private-key --hosts github.com --author 'Name &lt;email&gt;'  (git identity; or --type basic-auth)
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>Notes:
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>  role dev: needs.mounts ssh no longer mounts the host ~/.ssh; cells clone, push and sign with stored git credentials
 </code></pre></div>
 <p>A Secret named as a git identity (<code>spec.connectors.git.identity</code>) is listed
 with the <code>--connector git</code> form, since a cell renders only with a Secret tagged
 for the git connector; replace the example host and author with your own. A
 credential named directly keeps the plain <code>--type ssh-key</code> form.</p>
 <p>The resource count is the shared blueprints plus the CellConfigs, plus one when
-the stack's git defaults were written. With <code>--force</code>, the first line reads
-<code>Reset configuration: …</code>. Diagnostics (for
-example, Git settings that could not be discovered) are written to stderr.</p>
+the Realm's secret defaults were written.</p>
 <h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
 <p><code>make test</code> runs the injectable-client success/failure/rerun tests and the real
 Unix JSON-RPC transport tests. A separate check verifies actual daemon storage,
 reads back blueprints and configs, repeats application, and confirms that cells
 are unchanged:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nv">KUKETEAMS_INTEGRATION_HOST</span><span class="o">=</span>unix:///path/to/disposable/kukeond.sock<span class="w"> </span>make<span class="w"> </span>test-team-integration
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nv">KUKETEAMS_INTEGRATION_HOST</span><span class="o">=</span>unix:///path/to/disposable/kukeond.sock<span class="w"> </span>make<span class="w"> </span>test-team-integration
 </code></pre></div>
 <p>Use a disposable kukeond with existing <code>default/default/default</code> scope metadata.
 The check uses a unique <code>init-check-*</code> team and deletes only its generated
@@ -4089,7 +4077,7 @@ blueprints and configs on cleanup.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 21, 2026 19:37:32 UTC">November 21, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 22, 2026 11:30:41 UTC">November 22, 2026</span>
   </span>
 
     

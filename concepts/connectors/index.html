@@ -1305,6 +1305,45 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="git">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#author-only-identities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Author-only identities
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kuke-connector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        kuke connector
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#import-from-host-in-the-web-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Import from host in the web UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -2652,6 +2691,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../cli/kuke-connector/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke connector
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../cli/kuke-uninstall/" class="md-nav__link">
         
   
@@ -3665,6 +3732,45 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="git">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#author-only-identities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Author-only identities
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kuke-connector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        kuke connector
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#import-from-host-in-the-web-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Import from host in the web UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -3918,7 +4024,7 @@ token is never a git credential — clone, push and signing use the <code>git</c
 connector.</p>
 <h3 id="git"><code>git</code><a class="headerlink" href="#git" title="Permanent link">&para;</a></h3>
 <p>The identity a cell clones, pushes and signs with. A git identity is one
-<code>ssh-key</code> or <code>basic-auth</code> Secret that also carries readable facts:</p>
+<code>ssh-key</code>, <code>basic-auth</code> or <code>opaque</code> Secret that also carries readable facts:</p>
 <table>
 <thead>
 <tr>
@@ -3929,9 +4035,9 @@ connector.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>hosts</code> (required)</td>
+<td><code>hosts</code></td>
 <td>list</td>
-<td>Hosts or URL prefixes the Secret authenticates (<code>github.com</code>)</td>
+<td>Hosts or URL prefixes the Secret authenticates (<code>github.com</code>); required for <code>ssh-key</code> and <code>basic-auth</code></td>
 </tr>
 <tr>
 <td><code>author</code></td>
@@ -3963,6 +4069,54 @@ identity's, so a Config can keep the identity's key and credentials and state
 its own author. The rendered cell never carries the reference, only the result.</p>
 <p>A role with <code>needs.repos</code> requires the connector. It is optional for the cell
 to start: a public repository clones without an identity.</p>
+<h4 id="author-only-identities">Author-only identities<a class="headerlink" href="#author-only-identities" title="Permanent link">&para;</a></h4>
+<p>An <code>opaque</code> git identity is <strong>author-only</strong>: it carries <code>author</code> (required) and
+<code>committer</code>, and no key. <code>hosts</code>, <code>sign</code> and <code>allowedSignersRef</code> are rejected
+on it. Its stored value is the fixed placeholder <code>kukeon:git-author-only</code>, which
+nothing reads. It is for a user without an SSH key who still wants commits made
+under their name.</p>
+<ul>
+<li>A cell whose default names it gets the author and committer, no credential
+  and no signing.</li>
+<li>Named on one repo's <code>git.identityRef</code>, it sets that repo's author and no
+  credential.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>me<span class="w"> </span>--connector<span class="w"> </span>git<span class="w"> </span>--type<span class="w"> </span>opaque<span class="w"> </span>--author<span class="w"> </span><span class="s1">'Me &lt;me@example.com&gt;'</span>
+</code></pre></div>
+<p><code>--type opaque</code> may be left out: <code>--connector git</code> without <code>--type</code> and without
+<code>--from-file</code> creates an author-only identity. With <code>--from-file</code>, <code>--type</code> is
+required. An author-only identity takes no value: <code>--from-literal</code> and
+<code>--from-file</code> fail with
+<code>an author-only git identity stores no value; use --type ssh-key for a key</code>.</p>
+<h4 id="kuke-connector"><code>kuke connector</code><a class="headerlink" href="#kuke-connector" title="Permanent link">&para;</a></h4>
+<p><a href="../../cli/kuke-connector/"><code>kuke connector</code></a> manages git identities and Realm
+defaults from the command line:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>kuke<span class="w"> </span>connector<span class="w"> </span>list<span class="w">                      </span><span class="c1"># identities and Realm defaults</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>kuke<span class="w"> </span>connector<span class="w"> </span>import<span class="w"> </span>git<span class="w"> </span>--default<span class="w">      </span><span class="c1"># store your SSH key and gitconfig author, make it the default</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>kuke<span class="w"> </span>connector<span class="w"> </span>default<span class="w"> </span>git<span class="w"> </span>git-ssh<span class="w">       </span><span class="c1"># make an existing identity the Realm default</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>kuke<span class="w"> </span>connector<span class="w"> </span>default<span class="w"> </span>git<span class="w"> </span>--clear<span class="w">       </span><span class="c1"># remove it</span>
+</code></pre></div>
+<p><code>import git</code> reads the SSH key and the global git configuration of the user
+running it. With a key it stores an <code>ssh-key</code> identity (<code>git-ssh</code>); without one,
+an author-only identity (<code>git-author</code>). It turns signing on only when
+<code>user.signingkey</code> names the imported key. See the
+<a href="../../guides/git-credentials/">git credentials guide</a>.</p>
+<h4 id="import-from-host-in-the-web-ui">Import from host in the web UI<a class="headerlink" href="#import-from-host-in-the-web-ui" title="Permanent link">&para;</a></h4>
+<p>On the Connectors page, the <code>git</code> connector's Identities panel has an
+<strong>Import from host</strong> action. It takes a realm, the hosts, an optional identity
+name, an optional key and passphrase file, and a <em>Make it the Realm default</em>
+checkbox (on by default). It calls <code>POST /api/connectors/git/import</code> with
+<code>{realm, hosts, name, key, passphraseFile, makeDefault}</code> and runs the same
+import as <code>kuke connector import git</code>.</p>
+<p>The import runs <strong>as the user running <code>kuke serve</code></strong>: it reads that account's
+<code>~/.ssh</code> and global git configuration. Under a service manager that may not be
+your shell account; the result shows the home directory and the key path that
+were read. The key and passphrase file are paths inside that home directory
+(<code>.ssh/id_ed25519</code> or <code>~/.ssh/id_ed25519</code>); absolute paths and <code>..</code> are refused.
+Key material never appears in a response or an error. <code>kuke serve</code> has no
+authentication: see the <em>Trusted network only</em> warning at the top of this page.</p>
+<p>The identity create form also offers <code>opaque</code> for <code>git</code>, with no value field: an
+author-only identity.</p>
 <h3 id="registry"><code>registry</code><a class="headerlink" href="#registry" title="Permanent link">&para;</a></h3>
 <p>The credential a Realm pulls private images with: a <code>basic-auth</code> Secret in the
 Realm, bound to a registry server by a <code>spec.registryCredentials[]</code> entry's
@@ -3970,22 +4124,22 @@ Realm, bound to a registry server by a <code>spec.registryCredentials[]</code> e
 <a href="../../guides/private-registry/">Private registry</a>.</p>
 <h2 id="identities">Identities<a class="headerlink" href="#identities" title="Permanent link">&para;</a></h2>
 <p>An identity is a Secret tagged with its connector:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># A token identity</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>work-github<span class="w"> </span>--connector<span class="w"> </span>github<span class="w"> </span>--from-file<span class="w"> </span>./token
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># A git identity: the key plus the readable facts</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>bot-key<span class="w"> </span>--connector<span class="w"> </span>git<span class="w"> </span>--type<span class="w"> </span>ssh-key<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span>--from-file<span class="w"> </span>~/.ssh/id_ed25519<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">    </span>--author<span class="w"> </span><span class="s1">'Dev Bot &lt;bot@example.com&gt;'</span><span class="w"> </span>--hosts<span class="w"> </span>github.com<span class="w"> </span>--sign<span class="w"> </span>commits,tags
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># A token identity</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>work-github<span class="w"> </span>--connector<span class="w"> </span>github<span class="w"> </span>--from-file<span class="w"> </span>./token
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># A git identity: the key plus the readable facts</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>bot-key<span class="w"> </span>--connector<span class="w"> </span>git<span class="w"> </span>--type<span class="w"> </span>ssh-key<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">    </span>--from-file<span class="w"> </span>~/.ssh/id_ed25519<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">    </span>--author<span class="w"> </span><span class="s1">'Dev Bot &lt;bot@example.com&gt;'</span><span class="w"> </span>--hosts<span class="w"> </span>github.com<span class="w"> </span>--sign<span class="w"> </span>commits,tags
 </code></pre></div>
 <p><code>--connector</code> validates the Secret against the connector: its type must be one
 the connector accepts, required fields must be set, and each value must read as
 its declared type. Every field of the connector is a flag of its own
 (<code>--author</code>, <code>--hosts</code>, …) and can also be written <code>--identity FIELD=VALUE</code>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="gp">$ </span>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>secrets<span class="w"> </span>-o<span class="w"> </span>wide
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="go">NAME         TYPE     CONNECTOR  REALM    SPACE  STACK  CELL  IDENTITY</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="go">bot-key      ssh-key  git        default  -      -      -     author=Dev Bot &lt;bot@example.com&gt;; hosts=github.com; sign=commits,tags</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="go">work-github  opaque   github     default  -      -      -     -</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="gp">$ </span>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>secrets<span class="w"> </span>-o<span class="w"> </span>wide
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="go">NAME         TYPE     CONNECTOR  REALM    SPACE  STACK  CELL  IDENTITY</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="go">bot-key      ssh-key  git        default  -      -      -     author=Dev Bot &lt;bot@example.com&gt;; hosts=github.com; sign=commits,tags</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="go">work-github  opaque   github     default  -      -      -     -</span>
 </code></pre></div>
 <p>The tag and the fields are readable; the material never is. A Secret without a
 tag still works wherever it is named by hand — one created before connectors
@@ -4003,27 +4157,27 @@ first:</p>
 </ol>
 <p>A default is a <code>spec.defaults.secrets</code> entry keyed by the connector's slot (for
 <code>git</code>, <code>spec.defaults.git.identityRef</code>):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Realm</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nt">metadata</span><span class="p">:</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default.kukeon.io</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span><span class="nt">defaults</span><span class="p">:</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">    </span><span class="nt">secrets</span><span class="p">:</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">      </span><span class="nt">github-token</span><span class="p">:</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">        </span><span class="nt">secretRef</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">work-github</span><span class="p p-Indicator">,</span><span class="nt"> realm</span><span class="p">:</span><span class="w"> </span><span class="nv">default</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">    </span><span class="nt">git</span><span class="p">:</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">      </span><span class="nt">identityRef</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">bot-key</span><span class="p p-Indicator">,</span><span class="nt"> realm</span><span class="p">:</span><span class="w"> </span><span class="nv">default</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Realm</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default.kukeon.io</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">  </span><span class="nt">defaults</span><span class="p">:</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">    </span><span class="nt">secrets</span><span class="p">:</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">      </span><span class="nt">github-token</span><span class="p">:</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="w">        </span><span class="nt">secretRef</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">work-github</span><span class="p p-Indicator">,</span><span class="nt"> realm</span><span class="p">:</span><span class="w"> </span><span class="nv">default</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="w">    </span><span class="nt">git</span><span class="p">:</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="w">      </span><span class="nt">identityRef</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">bot-key</span><span class="p p-Indicator">,</span><span class="nt"> realm</span><span class="p">:</span><span class="w"> </span><span class="nv">default</span><span class="w"> </span><span class="p p-Indicator">}</span>
 </code></pre></div>
 <p>Defaults are <strong>live</strong>: a Config that chose no identity has no fill, so changing
 the default changes the identity of every such Config's next cell, with nothing
 to re-render. <code>kuke team</code> relies on this — it writes a Realm default for a slot
 only when no Realm, Space or Stack default exists yet, and never overwrites one.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="gp">$ </span>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>configs<span class="w"> </span>-o<span class="w"> </span>wide
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="go">NAME                  ...  CONNECTORS</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="go">kuke-majordomo-claude ...  claude=login, github=work-github (realm)</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="go">team-dev-codex        ...  codex=login, git=bot-key (config), github=MISSING</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="gp">$ </span>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>configs<span class="w"> </span>-o<span class="w"> </span>wide
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="go">NAME                  ...  CONNECTORS</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="go">kuke-majordomo-claude ...  claude=login, github=work-github (realm)</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="go">team-dev-codex        ...  codex=login, git=bot-key (config), github=MISSING</span>
 </code></pre></div>
 <p>A required connector with no identity at any level is <strong>unresolved</strong>. Previewing
 or creating a cell from that Config fails with an error naming the connector;
@@ -4034,21 +4188,21 @@ connector or of the wrong type is an error even for an optional connector.</p>
 <h2 id="teams">Teams<a class="headerlink" href="#teams" title="Permanent link">&para;</a></h2>
 <p>A team picks a method and an identity per connector in its <code>kind: Team</code> file or
 its TeamEntry; a role entry overrides the team for that role.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuketeams.io/v1</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Team</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="nt">metadata</span><span class="p">:</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">backend</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">  </span><span class="nt">connectors</span><span class="p">:</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">    </span><span class="nt">claude</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> method</span><span class="p">:</span><span class="w"> </span><span class="nv">subscription</span><span class="p p-Indicator">,</span><span class="nt"> identity</span><span class="p">:</span><span class="w"> </span><span class="nv">claude-team</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">    </span><span class="nt">github</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> identity</span><span class="p">:</span><span class="w"> </span><span class="nv">work-github</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">    </span><span class="nt">git</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> identity</span><span class="p">:</span><span class="w"> </span><span class="nv">bot-key</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="w">  </span><span class="nt">roles</span><span class="p">:</span>
-<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">reviewer</span>
-<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="w">      </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">agents</span>
-<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">roles/reviewer</span>
-<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="w">      </span><span class="nt">connectors</span><span class="p">:</span>
-<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="w">        </span><span class="nt">github</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> identity</span><span class="p">:</span><span class="w"> </span><span class="nv">review-github</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w"> </span><span class="c1"># this role only</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuketeams.io/v1</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Team</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">backend</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">  </span><span class="nt">connectors</span><span class="p">:</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="w">    </span><span class="nt">claude</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> method</span><span class="p">:</span><span class="w"> </span><span class="nv">subscription</span><span class="p p-Indicator">,</span><span class="nt"> identity</span><span class="p">:</span><span class="w"> </span><span class="nv">claude-team</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="w">    </span><span class="nt">github</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> identity</span><span class="p">:</span><span class="w"> </span><span class="nv">work-github</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="w">    </span><span class="nt">git</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> identity</span><span class="p">:</span><span class="w"> </span><span class="nv">bot-key</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="w">  </span><span class="nt">roles</span><span class="p">:</span>
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">reviewer</span>
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="w">      </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">agents</span>
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">roles/reviewer</span>
+<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a><span class="w">      </span><span class="nt">connectors</span><span class="p">:</span>
+<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a><span class="w">        </span><span class="nt">github</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> identity</span><span class="p">:</span><span class="w"> </span><span class="nv">review-github</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w"> </span><span class="c1"># this role only</span>
 </code></pre></div>
 <ul>
 <li><code>method</code> picks one of the connector's methods; empty selects its default.</li>
@@ -4073,9 +4227,9 @@ old secret names (<code>claude-code-oauth-token</code>, <code>anthropic-api-key<
 such names of one connector are alternatives — the first method wins and
 <code>kuke team</code> says so; set <code>connectors.&lt;name&gt;.method</code> to choose.</p>
 <h2 id="per-cell-overrides">Per-cell overrides<a class="headerlink" href="#per-cell-overrides" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>cell<span class="w"> </span>--from-config<span class="w"> </span>team-dev-claude<span class="w"> </span>--connector<span class="w"> </span><span class="nv">github</span><span class="o">=</span>other-github
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>-c<span class="w"> </span>team-dev-claude<span class="w"> </span>--connector<span class="w"> </span><span class="nv">git</span><span class="o">=</span>release-key@ops
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>cell<span class="w"> </span>--from-config<span class="w"> </span>team-dev-codex<span class="w"> </span>--connector-method<span class="w"> </span><span class="nv">codex</span><span class="o">=</span>api-key<span class="w"> </span>--connector<span class="w"> </span><span class="nv">codex</span><span class="o">=</span>my-openai-key
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>cell<span class="w"> </span>--from-config<span class="w"> </span>team-dev-claude<span class="w"> </span>--connector<span class="w"> </span><span class="nv">github</span><span class="o">=</span>other-github
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>-c<span class="w"> </span>team-dev-claude<span class="w"> </span>--connector<span class="w"> </span><span class="nv">git</span><span class="o">=</span>release-key@ops
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>cell<span class="w"> </span>--from-config<span class="w"> </span>team-dev-codex<span class="w"> </span>--connector-method<span class="w"> </span><span class="nv">codex</span><span class="o">=</span>api-key<span class="w"> </span>--connector<span class="w"> </span><span class="nv">codex</span><span class="o">=</span>my-openai-key
 </code></pre></div>
 <p><code>--connector &lt;connector&gt;=&lt;secret&gt;[@realm[/space[/stack]]]</code> uses another identity
 for this one cell. The override is recorded in the cell's provenance
@@ -4122,29 +4276,29 @@ volume.</p>
 <p>A connector is data. Adding one is one file, <code>team/connectors/&lt;name&gt;/connector.yaml</code>;
 no Go and no TypeScript names a connector, and a test
 (<code>pkg/team/connector/guard_test.go</code>) enforces it.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuketeams.io/v1</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Connector</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="nt">metadata</span><span class="p">:</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">example-token</span><span class="w"> </span><span class="c1"># must match the directory</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">  </span><span class="nt">title</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Example</span>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="w">  </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">An API token for the example service.</span>
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="w">  </span><span class="nt">scopes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">realm</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">space</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">stack</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="w">  </span><span class="nt">identity</span><span class="p">:</span>
-<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="w">    </span><span class="nt">secretTypes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">opaque</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="w">    </span><span class="nt">fields</span><span class="p">:</span>
-<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">account</span>
-<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a><span class="w">        </span><span class="nt">required</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a><span class="w">        </span><span class="nt">help</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Account the token belongs to.</span>
-<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a><span class="w">  </span><span class="nt">methods</span><span class="p">:</span>
-<a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">token</span>
-<a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a><span class="w">      </span><span class="nt">default</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a><span class="w">      </span><span class="nt">delivery</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">env</span>
-<a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a><span class="w">      </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">A token delivered as EXAMPLE_TOKEN.</span>
-<a id="__codelineno-6-20" name="__codelineno-6-20" href="#__codelineno-6-20"></a><span class="w">      </span><span class="nt">requires</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">example-cli</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-6-21" name="__codelineno-6-21" href="#__codelineno-6-21"></a><span class="w">      </span><span class="nt">secret</span><span class="p">:</span>
-<a id="__codelineno-6-22" name="__codelineno-6-22" href="#__codelineno-6-22"></a><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">example-token</span>
-<a id="__codelineno-6-23" name="__codelineno-6-23" href="#__codelineno-6-23"></a><span class="w">        </span><span class="nt">envName</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">EXAMPLE_TOKEN</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuketeams.io/v1</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Connector</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">example-token</span><span class="w"> </span><span class="c1"># must match the directory</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">  </span><span class="nt">title</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Example</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">  </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">An API token for the example service.</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">  </span><span class="nt">scopes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">realm</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">space</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">stack</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="w">  </span><span class="nt">identity</span><span class="p">:</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="w">    </span><span class="nt">secretTypes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">opaque</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="w">    </span><span class="nt">fields</span><span class="p">:</span>
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">account</span>
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="w">        </span><span class="nt">required</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="w">        </span><span class="nt">help</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Account the token belongs to.</span>
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="w">  </span><span class="nt">methods</span><span class="p">:</span>
+<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">token</span>
+<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a><span class="w">      </span><span class="nt">default</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a><span class="w">      </span><span class="nt">delivery</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">env</span>
+<a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a><span class="w">      </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">A token delivered as EXAMPLE_TOKEN.</span>
+<a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a><span class="w">      </span><span class="nt">requires</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">example-cli</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a><span class="w">      </span><span class="nt">secret</span><span class="p">:</span>
+<a id="__codelineno-8-22" name="__codelineno-8-22" href="#__codelineno-8-22"></a><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">example-token</span>
+<a id="__codelineno-8-23" name="__codelineno-8-23" href="#__codelineno-8-23"></a><span class="w">        </span><span class="nt">envName</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">EXAMPLE_TOKEN</span>
 </code></pre></div>
 <p>With that file the connector appears in <code>kuke create secret --connector</code>, team
 <code>connectors</code>, <code>kuke create cell --connector</code>, and the web UI's Connectors page
@@ -4281,7 +4435,7 @@ daemon was built.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 21, 2026 12:03:10 UTC">November 21, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 22, 2026 11:30:41 UTC">November 22, 2026</span>
   </span>
 
     

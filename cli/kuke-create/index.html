@@ -2596,6 +2596,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../kuke-connector/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke connector
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../kuke-uninstall/" class="md-nav__link">
         
   
@@ -3996,6 +4024,7 @@
 <p><strong><code>--type ssh-key</code></strong> — a git credential and signing key for SSH: <code>--from-file &lt;private key&gt;</code>, plus the optional passphrase, public key, certificate and pinned host keys.</p>
 <p>The two git types are used through a <code>git</code> block — see the <a href="../../guides/git-credentials/">git credentials guide</a> — and cannot be consumed as a container <code>secrets[]</code> entry. A flag that belongs to another type is rejected.</p>
 <p><strong><code>--connector &lt;name&gt;</code></strong> tags the secret as an identity of a <a href="../../concepts/connectors/">connector</a>, so it can be picked by name for a team, a Config or one cell. The secret is validated against the connector: its type must be one the connector accepts (when <code>--type</code> is omitted and the connector accepts exactly one type, that type is used), required identity fields must be set, and each value must read as its declared type. The connector's readable identity fields are set with <code>--identity FIELD=VALUE</code> (repeatable) or with the flag of the same name — every field of every connector in the catalog is a flag, in kebab case (<code>--author</code>, <code>--hosts</code>, <code>--allowed-signers-ref</code>, …). <code>kuke create secret --help</code> lists the connectors and the field flags. An unknown connector, an unknown field, or a field given without <code>--connector</code> is rejected.</p>
+<p>The <code>git</code> connector accepts <code>ssh-key</code>, <code>basic-auth</code> and <code>opaque</code>. An <code>opaque</code> git identity is <a href="../../concepts/connectors/#author-only-identities">author-only</a>: it requires <code>--author</code>, stores no value and takes no <code>--hosts</code>, <code>--sign</code> or <code>--allowed-signers-ref</code>. <code>--connector git</code> without <code>--type</code> and without <code>--from-file</code> creates one; with <code>--from-file</code>, <code>--type</code> is required. <code>--from-literal</code> or <code>--from-file</code> on an author-only identity fails with <code>an author-only git identity stores no value; use --type ssh-key for a key</code>. To store your own key and author in one step, use <a href="../kuke-connector/#kuke-connector-import-git"><code>kuke connector import git</code></a>.</p>
 <table>
 <thead>
 <tr>
@@ -4146,6 +4175,9 @@
 <a id="__codelineno-14-22" name="__codelineno-14-22" href="#__codelineno-14-22"></a><span class="c1"># A git identity: the key plus its readable facts</span>
 <a id="__codelineno-14-23" name="__codelineno-14-23" href="#__codelineno-14-23"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>bot-key<span class="w"> </span>--connector<span class="w"> </span>git<span class="w"> </span>--type<span class="w"> </span>ssh-key<span class="w"> </span>--from-file<span class="w"> </span>~/.ssh/id_ed25519<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-14-24" name="__codelineno-14-24" href="#__codelineno-14-24"></a><span class="w">    </span>--author<span class="w"> </span><span class="s1">'Dev Bot &lt;bot@example.com&gt;'</span><span class="w"> </span>--hosts<span class="w"> </span>github.com<span class="w"> </span>--sign<span class="w"> </span>commits,tags
+<a id="__codelineno-14-25" name="__codelineno-14-25" href="#__codelineno-14-25"></a>
+<a id="__codelineno-14-26" name="__codelineno-14-26" href="#__codelineno-14-26"></a><span class="c1"># An author-only git identity: no key, no value</span>
+<a id="__codelineno-14-27" name="__codelineno-14-27" href="#__codelineno-14-27"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>me<span class="w"> </span>--connector<span class="w"> </span>git<span class="w"> </span>--author<span class="w"> </span><span class="s1">'Me &lt;me@example.com&gt;'</span>
 </code></pre></div>
 <p><code>kuke get secrets</code> lists each secret's <code>TYPE</code> and <code>CONNECTOR</code> (<code>-o wide</code> adds its readable <code>IDENTITY</code> fields); no verb prints a value.</p>
 <h2 id="kuke-create-registry-credential">kuke create registry-credential<a class="headerlink" href="#kuke-create-registry-credential" title="Permanent link">&para;</a></h2>
@@ -4247,7 +4279,7 @@ is required.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 21, 2026 12:03:10 UTC">November 21, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 22, 2026 11:30:41 UTC">November 22, 2026</span>
   </span>
 
     

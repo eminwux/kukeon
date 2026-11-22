@@ -2674,6 +2674,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../cli/kuke-connector/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke connector
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../cli/kuke-uninstall/" class="md-nav__link">
         
   
@@ -3870,7 +3898,7 @@ starts cells: launch them explicitly, for example with
 <tr>
 <td><code>~/.kuke/kuketeams.yaml</code></td>
 <td>host</td>
-<td><code>TeamsConfig</code>: global defaults (sources, roles, harnesses), Git identity, parameters, secret bindings.</td>
+<td><code>TeamsConfig</code>, optional and hand-written: global defaults (sources, roles, harnesses), parameters, secret bindings.</td>
 </tr>
 <tr>
 <td><code>~/.kuke/kuketeam.d/&lt;team&gt;.yaml</code></td>
@@ -3930,8 +3958,10 @@ privilege. Published image references are read from the <code>images.yaml</code>
 the selected <code>harness.yaml</code>; no registry lookup is made. An update re-resolves
 the image from the current definitions and catalog.</p>
 <h2 id="reusable-defaults-after-init">Reusable defaults after init<a class="headerlink" href="#reusable-defaults-after-init" title="Permanent link">&para;</a></h2>
-<p>After <code>init</code>, edit <code>~/.kuke/kuketeams.yaml</code> to declare reusable sources, roles,
-and harnesses. Both harnesses are listed here; dev narrows to Claude and pm to
+<p><code>~/.kuke/kuketeams.yaml</code> is optional and hand-written: kuke reads it and never
+writes it, and a missing file means empty global defaults. <code>kuke team init</code> and
+<code>kuke team add</code> both work without it. Create it to declare reusable sources,
+roles, and harnesses. Both harnesses are listed here; dev narrows to Claude and pm to
 Codex:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuketeams.io/v1</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">TeamsConfig</span>
@@ -4329,16 +4359,21 @@ team chose are written as fills on its Configs. See
 <a href="../connectors/#teams">Connectors → Teams</a> for the full rules.</p>
 <h2 id="git-identity-and-credentials">Git identity and credentials<a class="headerlink" href="#git-identity-and-credentials" title="Permanent link">&para;</a></h2>
 <p>Team cells use <a href="../../guides/git-credentials/">stored git credentials</a>; the host
-<code>~/.ssh</code> is never mounted. <code>TeamsConfig.spec.git</code> names the operator's default
-identity, credentials and signing key by secret, and <code>kuke team</code> writes it as
-the <code>spec.defaults.git</code> of the team's stack, where every team cell inherits it.
-A source may state its own identity with <code>sources[].git</code>; it is rendered into
-that repo's fill of each CellConfig. The remote transport follows the
-credential, so a project added by its HTTPS URL is still cloned and pushed over
-SSH when its host is bound to an SSH key.</p>
-<p><a href="../../cli/kuke-team-init/#git-identity-and-credentials"><code>kuke team init --import-git-identity</code></a>
-stores your existing key as a secret, with your explicit consent. A role's
-<code>needs.mounts: [ssh]</code> is still accepted but mounts nothing.</p>
+<code>~/.ssh</code> is never mounted. A team cell's git identity is the git connector
+identity a Realm, Space or Stack default names (<code>spec.defaults.git.identityRef</code>),
+or the one the team names under <a href="#connectors"><code>connectors.git</code></a>. <code>kuke team</code>
+reads no git identity from the host and writes no git defaults. Store yours with
+<a href="../../cli/kuke-connector/#kuke-connector-import-git"><code>kuke connector import git --default</code></a>.</p>
+<p><code>TeamsConfig</code> has no <code>spec.git</code>: a <code>kuketeams.yaml</code> that still has one fails to
+decode and names <code>kuke connector import git --default</code>. A source may state its
+own identity with <code>sources[].git</code> (author, committer, credential, signing); it
+is rendered into that repo's fill of each CellConfig. The remote transport
+follows the credential, so a project added by its HTTPS URL is still cloned and
+pushed over SSH when its host is bound to an SSH key.</p>
+<p>When a team clones a source over SSH that states no credential of its own and
+nothing gives its cells a git identity, <code>kuke team init</code> and <code>kuke team add</code>
+print <code>no git identity is set; run kuke connector import git --default</code>. A
+role's <code>needs.mounts: [ssh]</code> is still accepted but mounts nothing.</p>
 <h2 id="runtime-repository-and-parameter-bindings">Runtime repository and parameter bindings<a class="headerlink" href="#runtime-repository-and-parameter-bindings" title="Permanent link">&para;</a></h2>
 <p>A source is the single declaration of its URL and branch/tag/commit. Optional
 <code>sources[].clonePath</code> requests a runtime clone at an absolute in-cell
@@ -4511,7 +4546,7 @@ when the team is applied or a cell is launched.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 21, 2026 20:11:41 UTC">November 21, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 22, 2026 11:30:41 UTC">November 22, 2026</span>
   </span>
 
     

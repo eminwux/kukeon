@@ -18,7 +18,7 @@
         <link rel="prev" href="../kuke-team-init/">
       
       
-        <link rel="next" href="../kuke-uninstall/">
+        <link rel="next" href="../kuke-connector/">
       
       
         
@@ -2585,6 +2585,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../kuke-connector/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke connector
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../kuke-uninstall/" class="md-nav__link">
         
   
@@ -3806,8 +3834,11 @@ project on that entry would stop init from migrating it.</p>
 <p>Any other name, <code>kukeon</code> included, is a project team: adding kukeon's own
 checkout leaves <code>kuke.yaml</code> and the <code>kuke-majordomo-*</code> configs untouched.</p>
 <h2 id="the-project-source-and-inherited-defaults">The project source and inherited defaults<a class="headerlink" href="#the-project-source-and-inherited-defaults" title="Permanent link">&para;</a></h2>
-<p>Prerequisites are Git, an existing valid <code>~/.kuke/kuketeams.yaml</code>, kukeond, and
-the parent <code>default/default/default</code> realm/space/stack metadata. <code>add</code> uses the
+<p>Prerequisites are Git, kukeond, and the parent <code>default/default/default</code>
+realm/space/stack metadata. <code>~/.kuke/kuketeams.yaml</code> is optional and
+hand-written: <code>add</code> reads it when it exists, never writes it, and uses empty
+global defaults without it. It has no <code>spec.git</code>; a file that still has one
+fails to decode (see <a href="../kuke-team-init/#git-identity-and-credentials"><code>kuke team init</code></a>). <code>add</code> uses the
 same endpoint and client configuration precedence as
 <a href="../kuke-team-init/#daemon-endpoint-and-client-configuration"><code>kuke team init</code></a>.</p>
 <p><code>init</code> leaves global defaults empty. Configure reusable sources, roles, and
@@ -3844,8 +3875,8 @@ omitted/explicit <code>spec</code> selections:</p>
 the current global defaults. Repeated add replaces the project source and
 revision, retaining explicit selections in an existing valid registration. It
 never resets global configuration.</p>
-<p><code>add</code> reads the global role/harness selections, Git identity, parameters, and
-scoped secret bindings. It selects published images from each harness's image
+<p><code>add</code> reads the global role/harness selections, parameters, and scoped secret
+bindings. It selects published images from each harness's image
 catalog. It does not build images or create or start cells. Existing runtime
 secrets are reused; missing ones use an explicit env/file creation source or
 report a kuke provisioning command.</p>
@@ -3872,14 +3903,17 @@ provision clone credentials for future cells. A cell still needs access to every
 requested repository, the published image, and its harness/provider
 authentication. <code>add</code> does not forward the host SSH agent or copy keys.</p>
 <p>Inside a cell, repositories are cloned and pushed with <strong>stored</strong> git
-credentials: the <code>spec.git</code> block of <code>~/.kuke/kuketeams.yaml</code>, which <code>add</code>
-writes as the git defaults of the team's stack (see
-<a href="../kuke-team-init/#git-identity-and-credentials"><code>kuke team init</code></a> and the
-<a href="../../guides/git-credentials/">git credentials guide</a>). The transport follows
-the credential, not the URL: a project added by its HTTPS URL is still cloned
-and pushed over SSH when its host is bound to an SSH key, so an API token in the
-cell can never take over a push. <code>add</code> prints a note for every runtime-cloned
-SSH source no stored credential covers.</p>
+credentials: the git connector identity a Realm, Space or Stack default names,
+or the one the team names under <code>connectors.git</code>. <code>add</code> writes no git defaults.
+Store yours with
+<a href="../kuke-connector/#kuke-connector-import-git"><code>kuke connector import git --default</code></a>
+(see the <a href="../../guides/git-credentials/">git credentials guide</a>). The transport
+follows the credential, not the URL: a project added by its HTTPS URL is still
+cloned and pushed over SSH when its host is bound to an SSH key, so an API token
+in the cell can never take over a push.</p>
+<p>When the team clones a source over SSH that states no credential of its own,
+and neither a scope default nor a Config names a git identity, <code>add</code> prints the
+note <code>no git identity is set; run kuke connector import git --default</code>.</p>
 <h2 id="secrets">Secrets<a class="headerlink" href="#secrets" title="Permanent link">&para;</a></h2>
 <p>Roles declare only requirement names. <code>add</code> binds each required secret for the
 selected role/harness pairs and records the bindings in the TeamEntry: a binding
@@ -3911,7 +3945,7 @@ ambiguous writes.</p>
 </code></pre></div>
 <p>The count is the team's shared blueprints (one per harness × security profile
 it uses) plus one CellConfig per role/harness pair, plus one headless task CellConfig
-per role/harness pair × selected role task, plus one when the stack's git
+per role/harness pair × selected role task, plus one when the Realm's secret
 defaults were written. A pair's config is named <code>&lt;team&gt;-&lt;role&gt;-&lt;harness&gt;</code>, and
 each of its task configs is named <code>&lt;team&gt;-&lt;role&gt;-&lt;harness&gt;-&lt;task&gt;</code>. See
 <a href="../../concepts/team/#tasks">Tasks</a>. Missing runtime secrets and notes are listed after
@@ -3938,7 +3972,7 @@ it, as for <a href="../kuke-team-init/#output"><code>kuke team init</code></a>.<
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 18, 2026 11:34:14 UTC">November 18, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 22, 2026 11:30:41 UTC">November 22, 2026</span>
   </span>
 
     

@@ -2541,6 +2541,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../cli/kuke-connector/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke connector
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../cli/kuke-uninstall/" class="md-nav__link">
         
   
@@ -3583,69 +3611,13 @@
 </ul>
 <p>Re-running <code>kuke team init</code> (and <code>kuke team add</code> for each added team) performs the migration. This page is what changes and what you have to do.</p>
 <h2 id="1-give-the-team-a-stored-git-identity">1. Give the team a stored git identity<a class="headerlink" href="#1-give-the-team-a-stored-git-identity" title="Permanent link">&para;</a></h2>
-<p>Without a stored credential, a cell that clones an SSH remote can no longer authenticate. The quickest path imports the key you already use:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke<span class="w"> </span>team<span class="w"> </span>init<span class="w"> </span>--force<span class="w"> </span>--import-git-identity
+<p>Without a stored credential, a cell that clones an SSH remote can no longer authenticate. Store the key and author you already use, and make them the Realm default:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke<span class="w"> </span>connector<span class="w"> </span>import<span class="w"> </span>git<span class="w"> </span>--default
 </code></pre></div>
-<p><code>--import-git-identity</code> is your explicit consent to copy an SSH private key into kukeon. Nothing is read from <code>~/.ssh</code> without it. It:</p>
-<ol>
-<li>picks the key — <code>--git-key &lt;path&gt;</code>, else the key your global git config signs with, else <code>~/.ssh/id_ed25519</code>, <code>id_ecdsa</code> or <code>id_rsa</code>;</li>
-<li>stores it as the <code>ssh-key</code> secret <code>git-ssh</code> in the <code>default</code> realm (with its <code>.pub</code> and <code>-cert.pub</code> neighbours when present; an existing <code>git-ssh</code> is replaced with the key you named, and a note reports it);</li>
-<li>binds it, in <code>~/.kuke/kuketeams.yaml</code>, to every host the team clones from;</li>
-<li>if you already sign commits <strong>with that key</strong> (<code>user.signingkey</code> is its path or its public key), makes it the signing key and stores your allowed-signers file as the secret <code>git-allowed-signers</code>. A GPG signer, or one who signs with a different SSH key, gets the credential only and a note; store the signing key as its own <code>ssh-key</code> secret and name it in <code>spec.git.signing</code>.</li>
-</ol>
-<table>
-<thead>
-<tr>
-<th>Flag</th>
-<th>Use</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>--git-key &lt;path&gt;</code></td>
-<td>Import this key instead of the discovered one.</td>
-</tr>
-<tr>
-<td><code>--git-key-passphrase-file &lt;file&gt;</code></td>
-<td>Required for a passphrase-protected key.</td>
-</tr>
-<tr>
-<td><code>--git-known-hosts &lt;file&gt;</code></td>
-<td>Pin host keys. Default: the built-in <code>github.com</code>, <code>gitlab.com</code> and <code>bitbucket.org</code> keys.</td>
-</tr>
-</tbody>
-</table>
-<p>Prefer to do it by hand — a dedicated deploy key, an HTTPS token? Create the secret yourself and name it in <code>~/.kuke/kuketeams.yaml</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>git-ssh<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--type<span class="w"> </span>ssh-key<span class="w"> </span>--from-file<span class="w"> </span>~/.ssh/team_deploy_key
-</code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># ~/.kuke/kuketeams.yaml</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="nt">git</span><span class="p">:</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">    </span><span class="nt">author</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Ada Lovelace</span><span class="p p-Indicator">,</span><span class="nt"> email</span><span class="p">:</span><span class="w"> </span><span class="nv">ada@example.com</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">    </span><span class="nt">committer</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Ada Lovelace</span><span class="p p-Indicator">,</span><span class="nt"> email</span><span class="p">:</span><span class="w"> </span><span class="nv">ada@example.com</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">    </span><span class="nt">credentials</span><span class="p">:</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">host</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">github.com</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">        </span><span class="nt">secretRef</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">git-ssh</span><span class="p p-Indicator">,</span><span class="nt"> realm</span><span class="p">:</span><span class="w"> </span><span class="nv">default</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">    </span><span class="nt">signing</span><span class="p">:</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">      </span><span class="nt">secretRef</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">git-ssh</span><span class="p p-Indicator">,</span><span class="nt"> realm</span><span class="p">:</span><span class="w"> </span><span class="nv">default</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">    </span><span class="nt">sign</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">commits</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">tags</span><span class="p p-Indicator">]</span>
-</code></pre></div>
-<p><code>spec.git.signingKey</code> and <code>spec.git.allowedSigners</code> — the old host paths — are still read so an existing file loads, but they no longer reach a cell. <code>kuke team init</code> and <code>kuke team add</code> print a note for every setting that lost its effect and for every SSH source no credential covers.</p>
-<p><code>kuke team</code> writes this block as the <code>spec.defaults.git</code> of the stack the team lives in, so every team cell inherits it. It only touches the <code>git</code> block there: other defaults are kept and credentials for other hosts are merged, not replaced.</p>
-<p>A source can state its own identity, which lands in that repo's fill of every role's Config:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">defaults</span><span class="p">:</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="nt">sources</span><span class="p">:</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">agents</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">        </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">git@github.com:acme/agents</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">        </span><span class="nt">branch</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">main</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">        </span><span class="nt">clonePath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/home/user/agents</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">        </span><span class="nt">git</span><span class="p">:</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">          </span><span class="nt">credential</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> secretRef</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">agents-deploy</span><span class="p p-Indicator">,</span><span class="nt"> realm</span><span class="p">:</span><span class="w"> </span><span class="nv">default</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w"> </span><span class="p p-Indicator">}</span>
-</code></pre></div>
+<p>That is the whole step; there is no compatibility path to describe. The <a href="../git-credentials/">git credentials guide</a> covers what the import stores, the author-only fallback, signing, and setting a default by hand. <code>kuke team init --import-git-identity</code> and the <code>spec.git</code> block of <code>~/.kuke/kuketeams.yaml</code> were removed: delete <code>spec.git</code> from the file if it is still there, or it fails to decode.</p>
 <h2 id="2-re-render-the-team">2. Re-render the team<a class="headerlink" href="#2-re-render-the-team" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>kuke<span class="w"> </span>team<span class="w"> </span>init<span class="w"> </span>--force<span class="w">          </span><span class="c1"># the kuke team</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>kuke<span class="w"> </span>team<span class="w"> </span>add<span class="w"> </span>&lt;team&gt;<span class="w"> </span>--source<span class="w"> </span>…<span class="w"> </span><span class="c1"># each added team, same arguments as before</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>kuke<span class="w"> </span>team<span class="w"> </span>init<span class="w"> </span>--force<span class="w">          </span><span class="c1"># the kuke team</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>kuke<span class="w"> </span>team<span class="w"> </span>add<span class="w"> </span>&lt;team&gt;<span class="w"> </span>--source<span class="w"> </span>…<span class="w"> </span><span class="c1"># each added team, same arguments as before</span>
 </code></pre></div>
 <p>What you will see in the daemon afterwards:</p>
 <table>
@@ -3666,7 +3638,7 @@
 </tr>
 <tr>
 <td><code>~/.ssh</code> bind mount, hardcoded <code>GIT_SSH_COMMAND</code></td>
-<td>Stored credentials from the inherited <code>git</code> block</td>
+<td>Stored credentials from the git identity a scope default names</td>
 </tr>
 <tr>
 <td>Secret slots listed by each role</td>
@@ -3680,8 +3652,8 @@
 <p>Existing cells are marked <code>OutOfSync</code>; <code>kuke restart &lt;cell&gt;</code> re-renders one from its Config.</p>
 <h2 id="3-dispatch-headless-runs-with-a-mode">3. Dispatch headless runs with a mode<a class="headerlink" href="#3-dispatch-headless-runs-with-a-mode" title="Permanent link">&para;</a></h2>
 <p>A harness now declares its start modes instead of one script branching on <code>$PROMPT</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>kuke<span class="w"> </span>run<span class="w"> </span>acme-dev-claude<span class="w">                                              </span><span class="c1"># interactive</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>kuke<span class="w"> </span>run<span class="w"> </span>acme-dev-claude<span class="w"> </span>--mode<span class="w"> </span>headless<span class="w"> </span>--param<span class="w"> </span><span class="nv">PROMPT</span><span class="o">=</span><span class="s2">"triage #42"</span><span class="w"> </span>-d
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>kuke<span class="w"> </span>run<span class="w"> </span>acme-dev-claude<span class="w">                                              </span><span class="c1"># interactive</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>kuke<span class="w"> </span>run<span class="w"> </span>acme-dev-claude<span class="w"> </span>--mode<span class="w"> </span>headless<span class="w"> </span>--param<span class="w"> </span><span class="nv">PROMPT</span><span class="o">=</span><span class="s2">"triage #42"</span><span class="w"> </span>-d
 </code></pre></div>
 <p><code>--env PROMPT=…</code> without <code>--mode</code> still selects the headless mode, so existing dispatch scripts keep working; prefer <code>--mode headless --param PROMPT=…</code> in new ones.</p>
 <h2 id="4-update-role-definitions-optional-at-your-pace">4. Update role definitions (optional, at your pace)<a class="headerlink" href="#4-update-role-definitions-optional-at-your-pace" title="Permanent link">&para;</a></h2>
@@ -3720,11 +3692,11 @@
 <tbody>
 <tr>
 <td>Clone fails with <code>Permission denied (publickey)</code></td>
-<td>No stored credential covers the host. Check the notes <code>kuke team init</code> printed; add a <code>credentials[]</code> entry or re-run with <code>--import-git-identity</code>.</td>
+<td>No stored credential covers the host. Run <code>kuke connector import git --default</code>, or check <code>kuke connector list</code> for the identity the Realm default names and its <code>hosts</code>.</td>
 </tr>
 <tr>
 <td>Clone fails with <code>Host key verification failed</code></td>
-<td>A forge other than GitHub/GitLab/Bitbucket with no pinned key. Store its key (<code>--known-hosts-file</code>, <code>--git-known-hosts</code>) or set <code>hostKeyPolicy: accept-new</code>.</td>
+<td>A forge other than GitHub/GitLab/Bitbucket with no pinned key. Store its key (<code>--known-hosts</code> on <code>kuke connector import git</code>, <code>--known-hosts-file</code> on <code>kuke create secret</code>) or set <code>hostKeyPolicy: accept-new</code>.</td>
 </tr>
 <tr>
 <td>Cell create fails: key is passphrase-protected</td>
@@ -3762,7 +3734,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 21, 2026 19:37:32 UTC">November 21, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 22, 2026 11:30:41 UTC">November 22, 2026</span>
   </span>
 
     
