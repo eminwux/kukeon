@@ -26,7 +26,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	cgroup2 "github.com/containerd/cgroups/v2/cgroup2"
+	cgroup2 "github.com/containerd/cgroups/v3/cgroup2"
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/metadata"

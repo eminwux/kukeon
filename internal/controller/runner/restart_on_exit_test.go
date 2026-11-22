@@ -24,7 +24,7 @@ import (
 	"testing"
 	"time"
 
-	cgroup2 "github.com/containerd/cgroups/v2/cgroup2"
+	cgroup2 "github.com/containerd/cgroups/v3/cgroup2"
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/eminwux/kukeon/internal/ctr"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"

@@ -24,7 +24,7 @@ import (
 	"log/slog"
 	"sync"
 
-	cgroup2 "github.com/containerd/cgroups/v2/cgroup2"
+	cgroup2 "github.com/containerd/cgroups/v3/cgroup2"
 	apitypes "github.com/containerd/containerd/api/types"
 	containerd "github.com/containerd/containerd/v2/client"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
