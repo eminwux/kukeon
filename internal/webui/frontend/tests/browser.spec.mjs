@@ -270,7 +270,7 @@ test("Workspace retains independent scoped terminals, focus and resize while swi
   const resizedBefore = messages.get(devPath).filter(message => typeof message === "string" && JSON.parse(message).type === "resize").length;
   await page.setViewportSize({ width: 900, height: 700 });
   await expect.poll(() => messages.get(devPath).filter(message => typeof message === "string" && JSON.parse(message).type === "resize").length).toBeGreaterThan(resizedBefore);
-  await page.getByRole("link", { name: "Resources", exact: true }).click();
+  await page.locator(".breadcrumbs").getByRole("link", { name: "Resources", exact: true }).click();
   await expect(page.locator(".page-heading h1")).toHaveText("Resources");
   expect(closed).toEqual([]);
   await cells.getByRole("link", { name: "Open dev / shared / services / api" }).click();
@@ -378,6 +378,18 @@ test("Resources is home and retains resource summaries and navigation", async ({
     await expect(page.locator(".summary-card").filter({ hasText: type }).locator("strong")).toHaveText("2");
     await expect(nav(page).getByRole("link", { name: type, exact: true })).toBeVisible();
   }
+  // Navigation is two labelled groups: operations first, then resources and administration (#1568).
+  const groups = { Operate: ["Overview", "Cells", "Health"], Configure: ["Realms", "Spaces", "Stacks", "Blueprints", "Configs", "Volumes", "Secrets", "Connectors", "Images", "Daemon"] };
+  for (const [label, links] of Object.entries(groups)) {
+    const group = nav(page).getByRole("group", { name: label, exact: true });
+    await expect(group.getByRole("link")).toHaveText(links);
+  }
+  await expect(nav(page).getByRole("link")).toHaveCount(13);
+  await expect(nav(page).locator('[aria-current="page"]')).toHaveText(["Overview"]);
+  // The toolbar no longer repeats the breadcrumb root, which still leads home.
+  await expect(page.locator(".toolbar-actions").getByRole("link", { name: "Resources" })).toHaveCount(0);
+  await expect(page.locator(".toolbar-actions").getByRole("link", { name: "New Cell", exact: true })).toBeVisible();
+  await expect(page.locator(".breadcrumbs").getByRole("link", { name: "Resources", exact: true })).toHaveAttribute("href", "#/resources");
   await expect(page.locator(".summary-card").filter({ hasText: "Cells" }).getByRole("list", { name: "Cell states" })).toContainText("Running");
   const attention = page.getByRole("region", { name: "Cells needing attention" });
   await expect(attention.getByRole("link", { name: "api", exact: true })).toHaveAttribute("href", "#/resource/prod/shared/services/api");
@@ -817,9 +829,45 @@ test("mobile cell navigation closes after selection and Resources fits the scree
   await expect(page.locator(".page-heading h1")).toHaveText("api");
   await expect(page.getByRole("link", { name: "+ New Cell" })).toHaveCount(0);
   await expect(page.getByRole("status", { name: "Daemon: Connected" })).toBeVisible();
-  await page.getByRole("link", { name: "Resources", exact: true }).click();
-  await expect(nav(page).getByRole("link", { name: "Secrets" })).toBeVisible();
+  // Phones hide the breadcrumbs, so the way home from a cell is the drawer's brand link.
+  await page.getByRole("button", { name: "Toggle sidebar" }).click();
+  await page.getByRole("complementary", { name: "Cell sidebar" }).getByRole("link", { name: "kukeon", exact: true }).click();
+  await expect(page.locator(".page-heading h1")).toHaveText("Resources");
+  await expect(nav(page).getByRole("link", { name: "Overview" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+});
+
+// Issue #1568, item A: on phones the Configure group is a disclosure and the navigation never scrolls sideways.
+test("phone navigation fits the screen and reaches every Configure page through its disclosure", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mock(page);
+  await mockDaemon(page);
+  await page.goto(`${server.url}#/resources`);
+  const bar = page.locator(".resources-nav");
+  const fits = async () => expect(await bar.evaluate(el => el.scrollWidth <= el.clientWidth + 1 && getComputedStyle(el).overflowX !== "auto")).toBe(true);
+  await expect(nav(page).getByRole("group", { name: "Operate" }).getByRole("link")).toHaveText(["Overview", "Cells", "Health"]);
+  await expect(nav(page).getByRole("link", { name: "Daemon" })).toBeHidden();
+  await fits();
+  const configure = nav(page).locator("summary", { hasText: "Configure" });
+  await configure.focus();
+  await page.keyboard.press("Enter");
+  await expect(nav(page).getByRole("group", { name: "Configure" }).getByRole("link")).toHaveCount(10);
+  await fits();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await nav(page).getByRole("link", { name: "Daemon" }).click();
+  await expect(page.locator(".page-heading h1")).toHaveText("Daemon");
+  // A page inside the group keeps the disclosure open and marks the active link.
+  await expect(nav(page).getByRole("link", { name: "Daemon" })).toHaveAttribute("aria-current", "page");
+  await fits();
+  // An Operate page collapses it again.
+  await nav(page).getByRole("link", { name: "Cells" }).click();
+  await expect(page.locator(".page-heading h1")).toHaveText("Cells");
+  await expect(nav(page).getByRole("link", { name: "Cells" })).toHaveAttribute("aria-current", "page");
+  await expect(nav(page).getByRole("link", { name: "Daemon" })).toBeHidden();
+  // A deep link into the group opens it.
+  await page.goto(`${server.url}#/secrets`);
+  await expect(nav(page).getByRole("link", { name: "Secrets" })).toHaveAttribute("aria-current", "page");
+  await fits();
 });
 
 test("cell status cards and container observations expose reported runtime state", async ({ page }) => {
@@ -3374,8 +3422,9 @@ test("resource-name and breadcrumb links have a 24px hit target and resizers sho
   expect((await home.boundingBox()).height).toBeGreaterThanOrEqual(24);
 
   await page.goto(`${server.url}#/resource/dev/shared/services`);
+  // The root crumb leads the scope crumbs on resource and cell screens (#1568).
   const crumbs = page.getByRole("navigation", { name: "Resource scope" }).getByRole("link");
-  await expect(crumbs).toHaveCount(3);
+  await expect(crumbs).toHaveText(["Resources", "dev", "shared", "services"]);
   for (const crumb of await crumbs.all()) expect((await crumb.boundingBox()).height).toBeGreaterThanOrEqual(24);
 
   const handle = page.getByRole("separator", { name: "Resize sidebar" });

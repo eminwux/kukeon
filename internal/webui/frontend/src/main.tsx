@@ -266,16 +266,36 @@ function initialTheme(): Theme {
   try { const value = localStorage.getItem("kukeon-theme"); return value === "light" || value === "dark" ? value : "system"; }
   catch { return "system"; }
 }
-function ResourcesNavigation({ route }: { route: Route }) {
+// Primary navigation in two labelled groups (#1568): day-to-day operations first, then the resources and
+// administration pages. On phones the second group sits behind a disclosure so the row never scrolls sideways.
+function ResourcesNavigation({ route, mobile }: { route: Route; mobile: boolean }) {
   const activeDepth = route.view === "resource" ? Math.min(route.scope.length - 1, 3) : titles.findIndex(title => title.toLowerCase() === route.view);
+  const scoped = (depth: number) => ({ title: titles[depth], href: listLink(depth), active: activeDepth === depth });
+  const operate = [
+    { title: "Overview", href: "#/resources", active: route.view === "dashboard" },
+    scoped(3),
+    { title: "Health", href: healthLink(), active: route.view === "health" },
+  ];
+  const configure = [
+    scoped(0), scoped(1), scoped(2),
+    ...Object.entries(catalogTitles).map(([kind, title]) => ({ title, href: `#/${kind}`, active: route.view === kind || (kind === "configs" && route.view === "new-config") })),
+    { title: "Connectors", href: connectorsLink(), active: route.view === "connectors" },
+    { title: "Images", href: imagesLink(), active: route.view === "images" },
+    { title: "Daemon", href: daemonLink(), active: route.view === "daemon" || route.view === "daemon-logs" },
+  ];
+  const configureActive = configure.some(item => item.active);
+  // The phone disclosure follows the route: open on a page inside the group, closed on an Operate page.
+  const [more, setMore] = useState(configureActive);
+  useEffect(() => { setMore(configureActive); }, [configureActive, route.view]);
+  const links = (items: typeof operate) => items.map(item => <a key={item.title} href={item.href} aria-current={item.active ? "page" : undefined}>{item.title}</a>);
   return <nav className="resources-nav panel" aria-label="Resources navigation">
-    <a href="#/resources" aria-current={route.view === "dashboard" ? "page" : undefined}>Overview</a>
-    {titles.map((title, depth) => <a key={title} href={listLink(depth)} aria-current={activeDepth === depth ? "page" : undefined}>{title}</a>)}
-    {Object.entries(catalogTitles).map(([kind, title]) => <a key={kind} href={`#/${kind}`} aria-current={route.view === kind || (kind === "configs" && route.view === "new-config") ? "page" : undefined}>{title}</a>)}
-    <a href={connectorsLink()} aria-current={route.view === "connectors" ? "page" : undefined}>Connectors</a>
-    <a href={imagesLink()} aria-current={route.view === "images" ? "page" : undefined}>Images</a>
-    <a href={healthLink()} aria-current={route.view === "health" ? "page" : undefined}>Health</a>
-    <a href={daemonLink()} aria-current={route.view === "daemon" || route.view === "daemon-logs" ? "page" : undefined}>Daemon</a>
+    <div className="resources-nav-group" role="group" aria-labelledby="resources-nav-operate"><span className="resources-nav-label" id="resources-nav-operate">Operate</span>{links(operate)}</div>
+    {mobile
+      ? <details className="resources-nav-group nav-more" open={more} onToggle={event => setMore(event.currentTarget.open)}>
+        <summary className="resources-nav-label" id="resources-nav-configure">Configure</summary>
+        <div className="nav-more-links" role="group" aria-labelledby="resources-nav-configure">{links(configure)}</div>
+      </details>
+      : <div className="resources-nav-group" role="group" aria-labelledby="resources-nav-configure"><span className="resources-nav-label" id="resources-nav-configure">Configure</span>{links(configure)}</div>}
   </nav>;
 }
 function App() {
@@ -644,10 +664,9 @@ function App() {
         <button ref={menuToggle} className="menu-toggle" aria-label="Toggle sidebar" aria-expanded={menuOpen} aria-controls="cell-sidebar" onClick={() => setMenuOpen(!menuOpen)}>☰</button>
         <span className="toolbar-connectivity" role="status" aria-label={`Daemon: ${daemonStatus}`} title={`Daemon: ${daemonStatus}`}><span className={`dot ${daemonTone}`} aria-hidden="true" /></span>
         <InventoryIndicator inventory={inventory} />
-        <nav className="breadcrumbs" aria-label="Resource scope">{isWorkspace || route.view === "resource" ? route.scope.map((name, i) => <a key={i} aria-label={`${kinds[i]}: ${name}`} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>) : <><a href={homeLink}>Resources</a>{connectorsView ? route.scope[0] ? <><a href={connectorsLink()}>Connectors</a><span>{route.scope[0]}</span></> : <span>Connectors</span> : route.view === "health" ? <span>Health</span> : daemonView ? route.view === "daemon" ? <span>Daemon</span> : <><a href={daemonLink()}>Daemon</a><span>Logs</span></> : images ? <><a href={imagesLink()}>Images</a>{route.scope[0] && (route.scope[1] ? <a href={imagesLink(route.scope[0])}>{route.scope[0]}</a> : <span>{route.scope[0]}</span>)}{route.scope[1] && <span>{route.scope[1]}</span>}</> : catalog ? <><a href={`#/${route.view}`}>{catalogTitles[route.view]}</a>{route.scope.slice(0, -1).map((name, i) => <a key={i} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}{route.scope.length > 0 && <span>{route.scope.at(-1)}</span>}</> : heading !== "Resources" && <span>{heading}</span>}</>}</nav>
+        <nav className="breadcrumbs" aria-label="Resource scope">{isWorkspace || route.view === "resource" ? <><a href={homeLink}>Resources</a>{route.scope.map((name, i) => <a key={i} aria-label={`${kinds[i]}: ${name}`} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}</> : <><a href={homeLink}>Resources</a>{connectorsView ? route.scope[0] ? <><a href={connectorsLink()}>Connectors</a><span>{route.scope[0]}</span></> : <span>Connectors</span> : route.view === "health" ? <span>Health</span> : daemonView ? route.view === "daemon" ? <span>Daemon</span> : <><a href={daemonLink()}>Daemon</a><span>Logs</span></> : images ? <><a href={imagesLink()}>Images</a>{route.scope[0] && (route.scope[1] ? <a href={imagesLink(route.scope[0])}>{route.scope[0]}</a> : <span>{route.scope[0]}</span>)}{route.scope[1] && <span>{route.scope[1]}</span>}</> : catalog ? <><a href={`#/${route.view}`}>{catalogTitles[route.view]}</a>{route.scope.slice(0, -1).map((name, i) => <a key={i} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}{route.scope.length > 0 && <span>{route.scope.at(-1)}</span>}</> : heading !== "Resources" && <span>{heading}</span>}</>}</nav>
         <div className="toolbar-actions">
           <a className="header-action new-cell-toolbar-action" href={newCellLink()}>New Cell</a>
-          <a className="header-action" href={homeLink} aria-current={!isWorkspace ? "page" : undefined}>Resources</a>
           <MajordomoToolbarButton dock={dock} />
           <button className="icon-button refresh-button" type="button" aria-label="Refresh" title={inventory.loading ? "Refreshing…" : "Refresh"} aria-busy={inventory.loading} onClick={() => setRevision(value => value + 1)}>
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 11a8.1 8.1 0 0 0-14.9-4L3 10" /><path d="M3 4v6h6" /><path d="M4 13a8.1 8.1 0 0 0 14.9 4L21 14" /><path d="M21 20v-6h-6" /></svg>
@@ -660,7 +679,7 @@ function App() {
         </div>
       </header>
       <div className={`workspace-content ${isWorkspace ? "cell-workspace-content" : ""}${cellTerminalActive ? " cell-screen-content" : ""}`}>
-        {!isWorkspace && !cellScreenScope && <ResourcesNavigation route={route} />}
+        {!isWorkspace && !cellScreenScope && <ResourcesNavigation route={route} mobile={mobile} />}
         {!cellScreenScope && <div className="page-heading"><h1 tabIndex={-1}>{heading}</h1>{headingContext && <p className="page-context mono-id">{headingContext}</p>}</div>}
         <CellDetailsScreen title={heading ?? "Cell"} view={cellView} scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} operations={operations} onLifecycleAction={runCellLifecycle} dockedCell={dockedCell} onOpenDock={() => dock.setOpen(true)} />
         {isWorkspace ? null : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "new-config" ? <Suspense fallback={<p role="status">Loading Config creation form…</p>}><NewConfigPage key={JSON.stringify(route.blueprint ?? [])} revision={revision} inventory={inventory} blueprintScope={route.blueprint} onCreated={() => setRevision(value => value + 1)} /></Suspense> : connectorsView ? <Suspense fallback={<p role="status">Loading connectors…</p>}><ConnectorsPage name={route.scope[0]} target={route.target} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /></Suspense> : route.view === "health" ? <HealthPage revision={revision} major={major} onChanged={() => setRevision(value => value + 1)} /> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} operations={operations} onLifecycleAction={runCellLifecycle} onParentAction={runParentAction} /> : <Dashboard inventory={inventory} />}

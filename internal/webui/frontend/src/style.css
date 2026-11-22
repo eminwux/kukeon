@@ -324,8 +324,19 @@ button:disabled { cursor: default; opacity: .4; }
 .toolbar-connectivity { display: none; }
 .breadcrumbs { min-width: 0; }
 .breadcrumbs span { overflow-wrap: anywhere; }
-.resources-nav { display: flex; flex-wrap: wrap; gap: 2px; padding: 6px; margin-bottom: 16px; }
+/* Primary navigation: an Operate group and a Configure group, each with an eyebrow label (#1568). */
+.resources-nav { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 6px; margin-bottom: 16px; }
+.resources-nav-group { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; min-width: 0; }
+.resources-nav-group + .resources-nav-group { padding-left: 12px; border-left: 1px solid var(--line); }
+.resources-nav-label { padding: 0 6px 0 4px; color: var(--muted); font-size: var(--font-xs); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
 .resources-nav a { padding: 6px 10px; border-radius: 5px; color: var(--muted); font-size: var(--font-sm); }
+/* On phones the Configure group is a disclosure, so the row wraps instead of scrolling sideways. */
+.nav-more { display: block; flex: 1 1 100%; }
+.nav-more > summary { display: flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 10px; border-radius: 5px; cursor: pointer; list-style: none; }
+.nav-more > summary::-webkit-details-marker { display: none; }
+.nav-more > summary::after { content: "▸"; }
+.nav-more[open] > summary::after { content: "▾"; }
+.nav-more-links { display: flex; flex-wrap: wrap; gap: 2px; padding-top: 2px; }
 .resources-nav a:hover, .resources-nav a[aria-current="page"] { background: var(--selected); color: var(--accent); }
 .cell-workspace-content .resource-overview { margin-bottom: 20px; }
 .cell-detail-screen[hidden], .cell-terminal-bar[hidden], .cell-terminal-view[hidden], .cell-overview-content[hidden] { display: none; }
@@ -377,8 +388,7 @@ button:disabled { cursor: default; opacity: .4; }
   .terminal-workspace.is-expanded, .sidebar-collapsed .terminal-workspace.is-expanded { inset: var(--terminal-expanded-top, 164px) 12px 8px; }
   .toolbar-connectivity { display: flex; min-height: 36px; align-items: center; margin-left: -8px; }
   .breadcrumbs { display: none !important; }
-  .resources-nav { flex-wrap: nowrap; overflow-x: auto; }
-  .resources-nav a { white-space: nowrap; }
+  .resources-nav-group + .resources-nav-group { padding-left: 0; padding-top: 4px; border-left: 0; border-top: 1px solid var(--line); }
   .connection { padding: 12px 16px; }
   .cell-screen-content { padding: 10px 12px; }
   .cell-screen-content .page-heading { margin-bottom: 8px; }
