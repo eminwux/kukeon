@@ -1,4 +1,4 @@
-// Copyright 2026 Emiliano Spinella (eminwux)
+// Copyright 2025 Emiliano Spinella (eminwux)
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-package bootstrap
+package gitimport
 
 import (
 	"context"
@@ -23,7 +23,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/eminwux/kukeon/pkg/team/config"
+	"github.com/eminwux/kukeon/internal/errdefs"
 )
 
 var (
@@ -41,6 +41,7 @@ type GitReader interface {
 }
 
 // CommandGit discovers global settings using context-aware Git subprocesses.
+// It reads the global configuration of the account the process runs as.
 type CommandGit struct{}
 
 func (CommandGit) Lookup(ctx context.Context, key string, boolean bool) (string, error) {
@@ -63,61 +64,79 @@ func (CommandGit) Lookup(ctx context.Context, key string, boolean bool) (string,
 			return "", ErrMissing
 		}
 		// Git stderr can echo configured values or input lines. Keep diagnostics
-		// limited to the key (added by discoverGit) and the subprocess exit status.
+		// limited to the key (added by discover) and the subprocess exit status.
 		return "", fmt.Errorf("git config --global lookup failed (check global configuration): %w", err)
 	}
 	return strings.TrimSpace(string(output)), nil
 }
 
-func discoverGit(ctx context.Context, reader GitReader) (*config.Git, []string, error) {
+// settings are the global git settings an import reads.
+type settings struct {
+	name, email    string
+	signingKey     string
+	allowedSigners string
+	// sign lists what the operator signs: commits (commit.gpgsign), tags
+	// (tag.gpgsign).
+	sign []string
+}
+
+// discover reads the global git settings. A missing git executable reads as
+// no settings, with a note.
+func discover(ctx context.Context, reader GitReader) (settings, []string, error) {
 	values := make(map[string]string)
-	for _, key := range []string{"user.name", "user.email", "user.signingkey", "commit.gpgsign", "tag.gpgsign", "gpg.ssh.allowedSignersFile"} {
+	for _, key := range []string{
+		"user.name", "user.email", "user.signingkey", "commit.gpgsign", "tag.gpgsign",
+		"gpg.ssh.allowedSignersFile",
+	} {
 		boolean := key == "commit.gpgsign" || key == "tag.gpgsign"
 		value, err := reader.Lookup(ctx, key, boolean)
 		if ctx.Err() != nil {
-			return nil, nil, ctx.Err()
+			return settings{}, nil, ctx.Err()
 		}
 		switch {
 		case errors.Is(err, ErrMissing):
 			continue
 		case errors.Is(err, ErrUnavailable):
-			return nil, []string{"Git discovery skipped: Git executable is unavailable."}, nil
+			return settings{}, []string{"git is unavailable; the global git configuration was not read."}, nil
 		case err != nil:
-			return nil, nil, fmt.Errorf("discover global Git key %s: %w", key, err)
+			return settings{}, nil, fmt.Errorf("discover global Git key %s: %w", key, err)
 		}
 		value = strings.TrimSpace(value)
 		if boolean && value != "true" && value != "false" {
-			return nil, nil, fmt.Errorf("discover global Git key %s: expected a Git boolean", key)
+			return settings{}, nil, fmt.Errorf(
+				"%w: discover global Git key %s: expected a Git boolean", errdefs.ErrGitImport, key)
 		}
 		values[key] = value
 	}
-	git, diagnostics := gitSettings(values)
-	return git, diagnostics, nil
+	out, notes := gitSettings(values)
+	return out, notes, nil
 }
 
-func gitSettings(values map[string]string) (*config.Git, []string) {
-	git := &config.Git{SigningKey: values["user.signingkey"], AllowedSigners: values["gpg.ssh.allowedSignersFile"]}
-	var diagnostics []string
+// gitSettings reads the discovered values. An incomplete author, and signing
+// enabled without a signing key, are dropped with a note.
+func gitSettings(values map[string]string) (settings, []string) {
+	out := settings{
+		signingKey:     values["user.signingkey"],
+		allowedSigners: values["gpg.ssh.allowedSignersFile"],
+	}
+	var notes []string
 	name, email := values["user.name"], values["user.email"]
 	if name != "" && email != "" {
-		git.Author = &config.Identity{Name: name, Email: email}
-		git.Committer = &config.Identity{Name: name, Email: email}
+		out.name, out.email = name, email
 	} else if name != "" || email != "" {
-		diagnostics = append(diagnostics, "Global Git user.name/user.email is incomplete; omitted author and committer identities.")
+		notes = append(notes,
+			"global git user.name/user.email is incomplete; the identity carries no author or committer.")
 	}
 	for _, entry := range []struct{ key, selection string }{{"commit.gpgsign", "commits"}, {"tag.gpgsign", "tags"}} {
 		if values[entry.key] != "true" {
 			continue
 		}
-		if git.SigningKey != "" {
-			git.Sign = append(git.Sign, entry.selection)
+		if out.signingKey != "" {
+			out.sign = append(out.sign, entry.selection)
 		} else {
-			diagnostics = append(diagnostics, "Global Git "+entry.key+" is enabled without user.signingkey; omitted "+entry.selection+" signing.")
+			notes = append(notes,
+				"global git "+entry.key+" is enabled without user.signingkey; "+entry.selection+" are not signed.")
 		}
 	}
-	if git.Author == nil && git.SigningKey == "" && git.AllowedSigners == "" {
-		diagnostics = append(diagnostics, "No usable global Git settings; omitted spec.git.")
-		return nil, diagnostics
-	}
-	return git, diagnostics
+	return out, notes
 }

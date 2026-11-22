@@ -23,67 +23,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/eminwux/kukeon/internal/team/bootstrap"
 	"github.com/eminwux/kukeon/internal/team/initialize"
 )
 
-// TestInitImportGitIdentityFlags: copying a private key off the host needs the
-// operator's explicit --import-git-identity; the dependent flags only refine it.
-func TestInitImportGitIdentityFlags(t *testing.T) {
-	run := func(t *testing.T, args ...string) (initialize.GitImport, bool, error) {
-		t.Helper()
-		var got initialize.GitImport
-		ran := false
-		cmd := newInitCommand(
-			func() (string, error) { return "/home/operator", nil },
-			func(_ context.Context, opts initialize.Options) (initialize.Result, error) {
-				got, ran = opts.ImportGit, true
-				return initialize.Result{}, nil
-			},
-		)
-		cmd.SilenceUsage, cmd.SilenceErrors = true, true
-		cmd.SetOut(&bytes.Buffer{})
-		cmd.SetErr(&bytes.Buffer{})
-		cmd.SetArgs(args)
-		return got, ran, cmd.Execute()
-	}
-
-	// Default: no consent, nothing forwarded.
-	got, ran, err := run(t)
-	if err != nil || !ran || got != (initialize.GitImport{}) {
-		t.Fatalf("default import = %+v ran=%v err=%v", got, ran, err)
-	}
-	got, ran, err = run(t, "--import-git-identity")
-	if err != nil || !ran || got != (initialize.GitImport{Enabled: true}) {
-		t.Fatalf("consent alone = %+v ran=%v err=%v", got, ran, err)
-	}
-	got, ran, err = run(t, "--force", "--import-git-identity",
-		"--git-key", "/keys/deploy",
-		"--git-key-passphrase-file", "/keys/passphrase",
-		"--git-known-hosts", "/keys/known_hosts",
-	)
-	want := initialize.GitImport{
-		Enabled: true, Key: "/keys/deploy", PassphraseFile: "/keys/passphrase", KnownHostsFile: "/keys/known_hosts",
-	}
-	if err != nil || !ran || got != want {
-		t.Fatalf("import = %+v ran=%v err=%v", got, ran, err)
-	}
-
-	// Each refining flag is refused without consent, before anything runs.
-	for _, args := range [][]string{
-		{"--git-key", "/keys/deploy"},
-		{"--git-key-passphrase-file", "/keys/passphrase"},
-		{"--git-known-hosts", "/keys/known_hosts"},
-		{"--import-git-identity=false", "--git-key", "/keys/deploy"},
-	} {
-		_, ran, err = run(t, args...)
-		if err == nil || ran || !strings.Contains(err.Error(), "require --import-git-identity") {
-			t.Fatalf("%v: ran=%v err=%v", args, ran, err)
-		}
-	}
-}
-
-func TestInitHelpExplainsStoredGitCredentials(t *testing.T) {
+func TestInitHelpPointsAtTheGitConnector(t *testing.T) {
 	cmd := newInitCommand(func() (string, error) { return "", nil },
 		func(context.Context, initialize.Options) (initialize.Result, error) {
 			t.Fatal("init must not run for --help")
@@ -95,36 +38,34 @@ func TestInitHelpExplainsStoredGitCredentials(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{
-		"--import-git-identity", "--git-key ", "--git-key-passphrase-file", "--git-known-hosts",
-		"~/.ssh is never mounted", "consent", "git-ssh",
-	} {
+	for _, want := range []string{"kuke connector import git --default", "never writes it"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("help lacks %q:\n%s", want, out.String())
+		}
+	}
+	for _, gone := range []string{"--import-git-identity", "--git-key", "git-ssh"} {
+		if strings.Contains(out.String(), gone) {
+			t.Errorf("help still mentions %q:\n%s", gone, out.String())
 		}
 	}
 }
 
 const (
-	hostPathNote = "spec.git.signingKey / allowedSigners are host paths and no longer reach a cell"
-	renameNote   = "blueprint claude in realm default replaced in place (content 0000000000000000 → 0123456789abcdef); " +
+	gitHintNote = "no git identity is set; run kuke connector import git --default"
+	renameNote  = "blueprint claude in realm default replaced in place (content 0000000000000000 → 0123456789abcdef); " +
 		"also used by team kukeon (kukeon-pm-claude), whose cells pick up the new content on restart"
 )
 
 // Notes follow the missing-secret guidance on a successful init, and are not
 // printed at all when there are none.
 func TestInitPrintsNotes(t *testing.T) {
-	for _, notes := range [][]string{nil, {hostPathNote, renameNote}} {
+	for _, notes := range [][]string{nil, {gitHintNote, renameNote}} {
 		home := t.TempDir()
 		cmd := newInitCommand(func() (string, error) { return home, nil },
 			func(context.Context, initialize.Options) (initialize.Result, error) {
 				return initialize.Result{
-					EntryPath: filepath.Join(home, ".kuke", "kuketeam.d", "kuke.yaml"),
-					Resources: 5,
-					Bootstrap: bootstrap.Result{
-						Path:    filepath.Join(home, ".kuke", "kuketeams.yaml"),
-						Created: true,
-					},
+					EntryPath:      filepath.Join(home, ".kuke", "kuketeam.d", "kuke.yaml"),
+					Resources:      5,
 					MissingSecrets: []string{"git-ssh  →  kuke create secret git-ssh --realm default --type ssh-key"},
 					Notes:          notes,
 				}, nil
@@ -147,7 +88,7 @@ func TestInitPrintsNotes(t *testing.T) {
 			}
 			continue
 		}
-		want := "Notes:\n  " + hostPathNote + "\n  " + renameNote + "\n"
+		want := "Notes:\n  " + gitHintNote + "\n  " + renameNote + "\n"
 		if !strings.HasSuffix(got, want) || strings.Index(got, "Missing secrets") > strings.Index(got, "Notes:") ||
 			errOut.Len() != 0 {
 			t.Fatalf("output=%q stderr=%q", got, &errOut)
@@ -184,7 +125,7 @@ func TestAddPrintsNotes(t *testing.T) {
 func TestNotesAreNotPrintedOnFailure(t *testing.T) {
 	cmd := newInitCommand(func() (string, error) { return "/home/operator", nil },
 		func(context.Context, initialize.Options) (initialize.Result, error) {
-			return initialize.Result{Notes: []string{hostPathNote}}, context.DeadlineExceeded
+			return initialize.Result{Notes: []string{gitHintNote}}, context.DeadlineExceeded
 		})
 	cmd.SilenceUsage, cmd.SilenceErrors = true, true
 	var out bytes.Buffer

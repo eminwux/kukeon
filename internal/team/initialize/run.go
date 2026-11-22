@@ -28,9 +28,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/eminwux/kukeon/internal/team/bootstrap"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
-	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/compose"
 	"github.com/eminwux/kukeon/pkg/team/config"
 	"gopkg.in/yaml.v3"
@@ -52,13 +50,10 @@ type Options struct {
 	Root, Home, Host, Configuration string
 	Force                           bool
 	// Reapply recomposes the kuke team from its stored entry instead of
-	// initializing. It never touches kuketeams.yaml and excludes Force.
+	// initializing. It excludes Force.
 	Reapply bool
 	Sources map[string]fs.FS
 	Client  Client
-	// ImportGit, when Enabled, stores the operator's SSH key as a secret and
-	// points the configuration's git identity at it. Init only.
-	ImportGit GitImport
 
 	// legacyTeam, when set, names a pre-#1527 init team whose configs runTeam
 	// deletes once the replacement is applied; until then they do not hold the
@@ -68,76 +63,74 @@ type Options struct {
 }
 
 type Result struct {
-	Bootstrap bootstrap.Result
-	EntryPath string
-	Resources int
+	// ConfigPath is the operator's kuketeams.yaml when one exists and was
+	// read; empty when there is none (issue #1591: the file is optional).
+	ConfigPath string
+	EntryPath  string
+	Resources  int
 	// MissingSecrets lists one remediation line per required runtime secret that
 	// does not exist yet; cells using it fail to start until it is created.
 	MissingSecrets []string
 	// Notes are operator-facing remarks: settings that no longer have an
-	// effect, sources no stored git credential covers, renamed blueprints.
+	// effect, a missing git identity, renamed blueprints.
 	Notes []string
 }
 
-// Run initializes only when configuration is absent, unless Force resets it.
+// loadTeamsConfig reads the operator's kuketeams.yaml. The file is optional
+// and hand-written (issue #1591): kuke reads it and never writes it, and a
+// missing file is the empty TeamsConfig. The second return is the path when
+// the file exists.
+func loadTeamsConfig(root string) (*config.TeamsConfig, string, error) {
+	path := filepath.Join(root, "kuketeams.yaml")
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return &config.TeamsConfig{APIVersion: config.APIVersion, Kind: config.Kind}, "", nil
+	}
+	if err != nil {
+		return nil, "", fmt.Errorf("read global configuration %s: %w", path, err)
+	}
+	cfg, err := config.Decode(bytes.NewReader(raw))
+	if err != nil {
+		return nil, "", fmt.Errorf("global configuration %s: %w", path, err)
+	}
+	return cfg, path, nil
+}
+
+// Run initializes the kuke team when it is not registered yet, unless Force
+// resets it. "Already initialized" is the kuke team entry
+// (kuketeam.d/kuke.yaml), not kuketeams.yaml, which init never writes.
 // Partial daemon application is not rolled back; a forced rerun converges the team.
 func Run(ctx context.Context, opts Options) (Result, error) {
 	if opts.Reapply {
 		return reapply(ctx, opts)
 	}
-	configPath := filepath.Join(opts.Root, "kuketeams.yaml")
-	if !opts.Force {
-		if _, err := os.Lstat(configPath); err == nil {
-			return Result{}, fmt.Errorf("init: configuration already exists at %s; use --force to reset it", configPath)
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return Result{}, fmt.Errorf("init: inspect configuration %s: %w", configPath, err)
-		}
-	}
-	boot, err := bootstrap.Run(ctx, bootstrap.Options{Root: opts.Root, Force: opts.Force})
-	result := Result{Bootstrap: boot}
-	if err != nil {
-		return result, err
-	}
-	if !opts.Force && !boot.Created {
-		return result, fmt.Errorf("init: configuration already exists at %s; use --force to reset it", configPath)
-	}
 	entryPath := filepath.Join(opts.Root, "kuketeam.d", majordomoName+".yaml")
-	team := config.Majordomo()
-	var recorded []config.SecretBinding
 	legacyPath := filepath.Join(opts.Root, "kuketeam.d", legacyName+".yaml")
-	if opts.Force {
-		legacy, legacyErr := isLegacyEntry(legacyPath)
-		if legacyErr != nil {
-			return result, legacyErr
+	legacy, err := isLegacyEntry(legacyPath)
+	if err != nil {
+		return Result{}, err
+	}
+	if !opts.Force {
+		if _, statErr := os.Lstat(entryPath); statErr == nil {
+			return Result{}, fmt.Errorf(
+				"init: already initialized (%s); use --force to reset or --reapply to recompose", entryPath)
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			return Result{}, fmt.Errorf("init: inspect %s: %w", entryPath, statErr)
 		}
 		if legacy {
-			opts.legacyTeam = legacyName
-		}
-	} else {
-		team, err = readTeam(entryPath)
-		if err != nil {
-			return result, err
-		}
-		if recorded, err = readEntrySecrets(entryPath); err != nil {
-			return result, err
+			return Result{}, fmt.Errorf(
+				"init: already initialized under the old kukeon team name (%s); use --force to migrate it",
+				legacyPath)
 		}
 	}
-	var (
-		imported    []api.SecretDoc
-		importNotes []string
-	)
-	if opts.ImportGit.Enabled {
-		effective, resolveErr := config.Resolve(boot.Config, team)
-		if resolveErr != nil {
-			return result, resolveErr
-		}
-		imported, importNotes, err = importGitIdentity(boot.Config, effective.Sources, opts.Home, opts.ImportGit)
-		if err != nil {
-			return result, err
-		}
+	if legacy {
+		opts.legacyTeam = legacyName
 	}
-	result, err = runTeam(ctx, opts, boot.Config, team, recorded, result, "kuke team init", imported)
-	result.Notes = append(result.Notes, importNotes...)
+	cfg, configPath, err := loadTeamsConfig(opts.Root)
+	if err != nil {
+		return Result{}, fmt.Errorf("init: %w", err)
+	}
+	result, err := runTeam(ctx, opts, cfg, config.Majordomo(), nil, Result{ConfigPath: configPath}, "kuke team init")
 	if err == nil && opts.legacyTeam != "" {
 		if err = os.Remove(legacyPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return result, fmt.Errorf(
@@ -148,50 +141,18 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		err = nil
 		result.Notes = append(result.Notes, migrationNote(legacyPath))
 	}
-	if err != nil || !opts.ImportGit.Enabled {
-		return result, err
-	}
-	// The secrets exist now; record that the configuration uses them.
-	if err = writeConfig(configPath, boot.Config); err != nil {
-		return result, fmt.Errorf(
-			"resources applied but %s was not updated with the imported git identity: %w; rerun kuke team init --force --import-git-identity",
-			configPath,
-			err,
-		)
-	}
-	return result, nil
-}
-
-// writeConfig atomically replaces the operator configuration.
-func writeConfig(path string, cfg *config.TeamsConfig) error {
-	var encoded bytes.Buffer
-	if err := config.Encode(&encoded, cfg); err != nil {
-		return err
-	}
-	stage, err := stageEntry(path, encoded.Bytes())
-	if err != nil {
-		return err
-	}
-	if err = os.Rename(stage, path); err != nil {
-		_ = os.Remove(stage)
-		return err
-	}
-	return nil
+	return result, err
 }
 
 // reapply recomposes the kuke team from its stored entry and applies it
 // (issue #1509). The entry is the team's editable source: the place to switch
 // the health sweep on, for one. The daemon prunes the configs the new
 // composition no longer renders, and runTeam rewrites the entry only after a
-// fully successful apply. kuketeams.yaml is read, never written.
+// fully successful apply. kuketeams.yaml is read when present, never written.
 func reapply(ctx context.Context, opts Options) (Result, error) {
 	if opts.Force {
 		return Result{}, errors.New("init: --reapply and --force are mutually exclusive: " +
 			"--reapply keeps the stored kuke entry, --force replaces it with the initial declaration")
-	}
-	if opts.ImportGit.Enabled {
-		return Result{}, errors.New(
-			"init: --reapply does not import a git identity; use kuke team init --force --import-git-identity")
 	}
 	entryPath := filepath.Join(opts.Root, "kuketeam.d", majordomoName+".yaml")
 	if _, err := os.Stat(entryPath); err != nil {
@@ -203,17 +164,12 @@ func reapply(ctx context.Context, opts Options) (Result, error) {
 		}
 		return Result{}, fmt.Errorf("init: inspect %s: %w", entryPath, err)
 	}
-	configPath := filepath.Join(opts.Root, "kuketeams.yaml")
-	raw, err := os.ReadFile(configPath)
-	if err != nil {
-		return Result{}, fmt.Errorf("init: --reapply cannot read %s: %w; run kuke team init first", configPath, err)
-	}
-	cfg, err := config.Decode(bytes.NewReader(raw))
-	if err != nil {
-		return Result{}, fmt.Errorf("init: global configuration %s: %w", configPath, err)
-	}
 	// Strict decode: an edit with an unknown or misspelled field stops here,
 	// before any source is fetched or anything reaches the daemon.
+	cfg, configPath, err := loadTeamsConfig(opts.Root)
+	if err != nil {
+		return Result{}, fmt.Errorf("init: %w", err)
+	}
 	team, err := readNamedTeam(entryPath, majordomoName)
 	if err != nil {
 		return Result{}, err
@@ -222,8 +178,7 @@ func reapply(ctx context.Context, opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	result := Result{Bootstrap: bootstrap.Result{Path: configPath, Config: cfg}}
-	return runTeam(ctx, opts, cfg, team, recorded, result, "kuke team init --reapply", nil)
+	return runTeam(ctx, opts, cfg, team, recorded, Result{ConfigPath: configPath}, "kuke team init --reapply")
 }
 
 // runTeam is shared by init and add; staging precedes all daemon writes.
@@ -235,7 +190,6 @@ func runTeam(
 	recorded []config.SecretBinding,
 	result Result,
 	command string,
-	imported []api.SecretDoc,
 ) (Result, error) {
 	name := team.Metadata.Name
 	entryPath := filepath.Join(opts.Root, "kuketeam.d", name+".yaml")
@@ -284,7 +238,7 @@ func runTeam(
 		}
 		defer func() { _ = client.Close() }()
 	}
-	done, err := apply(ctx, client, composed, command, imported, opts.legacyTeam)
+	done, err := apply(ctx, client, composed, command, opts.legacyTeam)
 	if err != nil {
 		if !strings.HasPrefix(command, "kuke team init") {
 			return result, fmt.Errorf(
@@ -334,13 +288,6 @@ func readEntrySecrets(path string) ([]config.SecretBinding, error) {
 		return nil, fmt.Errorf("read team registration %s: %w", path, err)
 	}
 	return entry.Secrets, nil
-}
-
-func readTeam(path string) (*config.Team, error) {
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		return config.Majordomo(), nil
-	}
-	return readNamedTeam(path, majordomoName)
 }
 
 func readNamedTeam(path, name string) (*config.Team, error) {

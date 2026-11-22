@@ -131,8 +131,11 @@ checkout leaves `kuke.yaml` and the `kuke-majordomo-*` configs untouched.
 
 ## The project source and inherited defaults
 
-Prerequisites are Git, an existing valid `~/.kuke/kuketeams.yaml`, kukeond, and
-the parent `default/default/default` realm/space/stack metadata. `add` uses the
+Prerequisites are Git, kukeond, and the parent `default/default/default`
+realm/space/stack metadata. `~/.kuke/kuketeams.yaml` is optional and
+hand-written: `add` reads it when it exists, never writes it, and uses empty
+global defaults without it. It has no `spec.git`; a file that still has one
+fails to decode (see [`kuke team init`](kuke-team-init.md#git-identity-and-credentials)). `add` uses the
 same endpoint and client configuration precedence as
 [`kuke team init`](kuke-team-init.md#daemon-endpoint-and-client-configuration).
 
@@ -176,8 +179,8 @@ the current global defaults. Repeated add replaces the project source and
 revision, retaining explicit selections in an existing valid registration. It
 never resets global configuration.
 
-`add` reads the global role/harness selections, Git identity, parameters, and
-scoped secret bindings. It selects published images from each harness's image
+`add` reads the global role/harness selections, parameters, and scoped secret
+bindings. It selects published images from each harness's image
 catalog. It does not build images or create or start cells. Existing runtime
 secrets are reused; missing ones use an explicit env/file creation source or
 report a kuke provisioning command.
@@ -210,14 +213,18 @@ requested repository, the published image, and its harness/provider
 authentication. `add` does not forward the host SSH agent or copy keys.
 
 Inside a cell, repositories are cloned and pushed with **stored** git
-credentials: the `spec.git` block of `~/.kuke/kuketeams.yaml`, which `add`
-writes as the git defaults of the team's stack (see
-[`kuke team init`](kuke-team-init.md#git-identity-and-credentials) and the
-[git credentials guide](../guides/git-credentials.md)). The transport follows
-the credential, not the URL: a project added by its HTTPS URL is still cloned
-and pushed over SSH when its host is bound to an SSH key, so an API token in the
-cell can never take over a push. `add` prints a note for every runtime-cloned
-SSH source no stored credential covers.
+credentials: the git connector identity a Realm, Space or Stack default names,
+or the one the team names under `connectors.git`. `add` writes no git defaults.
+Store yours with
+[`kuke connector import git --default`](kuke-connector.md#kuke-connector-import-git)
+(see the [git credentials guide](../guides/git-credentials.md)). The transport
+follows the credential, not the URL: a project added by its HTTPS URL is still
+cloned and pushed over SSH when its host is bound to an SSH key, so an API token
+in the cell can never take over a push.
+
+When the team clones a source over SSH that states no credential of its own,
+and neither a scope default nor a Config names a git identity, `add` prints the
+note `no git identity is set; run kuke connector import git --default`.
 
 ## Secrets
 
@@ -258,7 +265,7 @@ No cells created or started.
 
 The count is the team's shared blueprints (one per harness × security profile
 it uses) plus one CellConfig per role/harness pair, plus one headless task CellConfig
-per role/harness pair × selected role task, plus one when the stack's git
+per role/harness pair × selected role task, plus one when the Realm's secret
 defaults were written. A pair's config is named `<team>-<role>-<harness>`, and
 each of its task configs is named `<team>-<role>-<harness>-<task>`. See
 [Tasks](../concepts/team.md#tasks). Missing runtime secrets and notes are listed after

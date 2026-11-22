@@ -437,6 +437,41 @@ sudo kuke create cell --from-config team-dev-codex --connector-method codex=api-
 - `--connector-method <connector>=<method>` is valid with `--from-config` only (`kuke create cell`, `kuke run`). It enables that method's blueprint component in place of the one the Config enables, without changing the Config. A connector the blueprint declares no methods for, or an unknown method, exits non-zero naming the valid choices. The method's identity resolves as for any method (`--connector` > the Config's fill > Stack > Space > Realm); none resolving exits non-zero naming the connector. The choice is recorded in `spec.provenance.connectorMethods` and is used again by `kuke restart`, a reconcile-driven recreate and `--clone`.
 - `git.identityRef` (scope defaults, a Config's `git`, a repo fill's `git`) is expanded by the daemon into author, committer, credentials and signing; fields written next to it win. A cell document or blueprint container that carries `git.identityRef` is rejected.
 - `kuke create registry-credential` stores the credential as a `basic-auth` Secret of the realm and binds the server to it with `secretRef`; re-running it for a server whose entry is still inline moves the password into the Secret. `kuke get realm -o yaml|json` never prints a registry password, inline entries included.
+- The git connector accepts `ssh-key`, `basic-auth` and `opaque`. An `opaque` git identity is author-only: `author` is required, and `hosts`, `sign` and `allowedSignersRef` exit non-zero. `kuke create secret --connector git` without `--type` and without `--from-file` creates one; with `--from-file` it exits non-zero asking for `--type`. An author-only identity given `--from-literal` or `--from-file` exits non-zero with `an author-only git identity stores no value; use --type ssh-key for a key`. A cell whose git identity is author-only gets author and committer, no credential and no signing.
+
+### Importing a git identity (`kuke connector`)
+
+**Intent.** Store the operator's own SSH key and gitconfig author as one git identity, and make it the default every team cell uses. Reference: [`docs/site/cli/kuke-connector.md`](site/cli/kuke-connector.md).
+
+**Sequence.**
+
+```bash
+# 1. preview: nothing stored, no daemon call
+kuke connector import git --dry-run
+
+# 2. store it and make it the default of realm default
+kuke connector import git --default
+
+# 3. inspect identities and Realm defaults
+kuke connector list
+
+# 4. point the Realm default elsewhere, or remove it
+kuke connector default git other-key@default
+kuke connector default git --clear
+```
+
+**Invariants.**
+
+- `import git` reads the home directory and global git configuration of the user running it. The key is `--key`, else the key `user.signingkey` names, else the first of `~/.ssh/id_ed25519`, `id_ecdsa`, `id_rsa`.
+- With a key it stores an `ssh-key` Secret (default `git-ssh`, realm `default`) tagged `git` with `author`, `committer`, `hosts` (default `github.com`) and — only when `commit.gpgsign` / `tag.gpgsign` is set and `user.signingkey` names that same key — `sign`. A GPG or other SSH signing key leaves `sign` unset and prints a note. `gpg.ssh.allowedSignersFile` is stored as `git-allowed-signers` and named in `allowedSignersRef`.
+- Without a key and without `--key` it stores an `opaque` author-only identity `git-author` and says so. Neither a key nor an author exits non-zero naming both. A missing explicit `--key`, an unreadable key, or an encrypted key without `--passphrase-file` exits non-zero.
+- Rerunning updates the Secrets in place (`updated`); the first run reports `created`.
+- `--default` sets the Realm `spec.defaults.git.identityRef` to the imported identity, replacing any existing Realm git default, and prints the old and new (`(was none)` / `(replaces …)`). Without it the command prints the `kuke connector default git …` line to run.
+- `--dry-run` prints `Dry run: nothing is stored.`, the home, the Secret, the key path and the identity fields, and exits 0 without contacting the daemon.
+- `kuke connector default` refuses a Secret that does not exist or is not an identity of the connector; `--clear` takes no identity; a connector with several methods needs `--method`.
+- No `kuke connector` output, error or web UI response carries key material. The web UI's Import from host (`POST /api/connectors/git/import`) runs the same import as the user running `kuke serve`, and refuses key paths outside that user's home directory.
+- `kuke team init` and `kuke team add` never read or store a git identity. When a team clones a source over SSH that states no credential, and no Realm, Space or Stack default and no Config names a git identity, they print `no git identity is set; run kuke connector import git --default`.
+- `~/.kuke/kuketeams.yaml` is optional and never written by kuke; one with `spec.git` exits non-zero with `spec.git was removed; store your git identity with kuke connector import git --default`.
 
 ### Harness mode per cell
 

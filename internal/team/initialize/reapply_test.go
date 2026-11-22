@@ -69,6 +69,12 @@ func editEntry(t *testing.T, path string, edit func(*config.TeamEntry)) {
 
 func TestReapplyEnablesTheSweepFromTheStoredEntry(t *testing.T) {
 	opts, fake, entryPath, configPath := setupReapply(t)
+	// A hand-written kuketeams.yaml is read, never written (issue #1591).
+	writeTeamsConfig(
+		t,
+		opts.Root,
+		"# hand-written\napiVersion: kuketeams.io/v1\nkind: TeamsConfig\nspec:\n  defaults: {}\n",
+	)
 	global, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatal(err)
@@ -83,7 +89,8 @@ func TestReapplyEnablesTheSweepFromTheStoredEntry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fake.applies != applies+1 || fake.team != "kuke" || result.EntryPath != entryPath {
+	if fake.applies != applies+1 || fake.team != "kuke" || result.EntryPath != entryPath ||
+		result.ConfigPath != configPath {
 		t.Fatalf("applies=%d team=%q result=%+v", fake.applies, fake.team, result)
 	}
 	if !bytes.Contains(fake.raw, []byte("cron: '@hourly'")) && !bytes.Contains(fake.raw, []byte("cron: \"@hourly\"")) {

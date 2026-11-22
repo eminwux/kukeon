@@ -9,62 +9,13 @@ Re-running `kuke team init` (and `kuke team add` for each added team) performs t
 
 ## 1. Give the team a stored git identity
 
-Without a stored credential, a cell that clones an SSH remote can no longer authenticate. The quickest path imports the key you already use:
+Without a stored credential, a cell that clones an SSH remote can no longer authenticate. Store the key and author you already use, and make them the Realm default:
 
 ```bash
-kuke team init --force --import-git-identity
+kuke connector import git --default
 ```
 
-`--import-git-identity` is your explicit consent to copy an SSH private key into kukeon. Nothing is read from `~/.ssh` without it. It:
-
-1. picks the key — `--git-key <path>`, else the key your global git config signs with, else `~/.ssh/id_ed25519`, `id_ecdsa` or `id_rsa`;
-2. stores it as the `ssh-key` secret `git-ssh` in the `default` realm (with its `.pub` and `-cert.pub` neighbours when present; an existing `git-ssh` is replaced with the key you named, and a note reports it);
-3. binds it, in `~/.kuke/kuketeams.yaml`, to every host the team clones from;
-4. if you already sign commits **with that key** (`user.signingkey` is its path or its public key), makes it the signing key and stores your allowed-signers file as the secret `git-allowed-signers`. A GPG signer, or one who signs with a different SSH key, gets the credential only and a note; store the signing key as its own `ssh-key` secret and name it in `spec.git.signing`.
-
-| Flag                               | Use                                                                                       |
-| ---------------------------------- | ----------------------------------------------------------------------------------------- |
-| `--git-key <path>`                 | Import this key instead of the discovered one.                                            |
-| `--git-key-passphrase-file <file>` | Required for a passphrase-protected key.                                                  |
-| `--git-known-hosts <file>`         | Pin host keys. Default: the built-in `github.com`, `gitlab.com` and `bitbucket.org` keys. |
-
-Prefer to do it by hand — a dedicated deploy key, an HTTPS token? Create the secret yourself and name it in `~/.kuke/kuketeams.yaml`:
-
-```bash
-sudo kuke create secret git-ssh --realm default --type ssh-key --from-file ~/.ssh/team_deploy_key
-```
-
-```yaml
-# ~/.kuke/kuketeams.yaml
-spec:
-  git:
-    author: { name: Ada Lovelace, email: ada@example.com }
-    committer: { name: Ada Lovelace, email: ada@example.com }
-    credentials:
-      - host: github.com
-        secretRef: { name: git-ssh, realm: default }
-    signing:
-      secretRef: { name: git-ssh, realm: default }
-    sign: [commits, tags]
-```
-
-`spec.git.signingKey` and `spec.git.allowedSigners` — the old host paths — are still read so an existing file loads, but they no longer reach a cell. `kuke team init` and `kuke team add` print a note for every setting that lost its effect and for every SSH source no credential covers.
-
-`kuke team` writes this block as the `spec.defaults.git` of the stack the team lives in, so every team cell inherits it. It only touches the `git` block there: other defaults are kept and credentials for other hosts are merged, not replaced.
-
-A source can state its own identity, which lands in that repo's fill of every role's Config:
-
-```yaml
-spec:
-  defaults:
-    sources:
-      - name: agents
-        url: git@github.com:acme/agents
-        branch: main
-        clonePath: /home/user/agents
-        git:
-          credential: { secretRef: { name: agents-deploy, realm: default } }
-```
+That is the whole step; there is no compatibility path to describe. The [git credentials guide](git-credentials.md) covers what the import stores, the author-only fallback, signing, and setting a default by hand. `kuke team init --import-git-identity` and the `spec.git` block of `~/.kuke/kuketeams.yaml` were removed: delete `spec.git` from the file if it is still there, or it fails to decode.
 
 ## 2. Re-render the team
 
@@ -79,7 +30,7 @@ What you will see in the daemon afterwards:
 | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | Blueprint `<team>-<role>-<harness>` per pair, stack-scoped | Blueprint `<harness>[-<profile>]` per harness × profile, realm-scoped, shared (`claude`, `claude-root`, `claude-root-host`, …) |
 | Role facts baked into the blueprint                        | Role facts in the CellConfig: `values` (image, role path, settings), `repos`, `secrets`, `components`                          |
-| `~/.ssh` bind mount, hardcoded `GIT_SSH_COMMAND`           | Stored credentials from the inherited `git` block                                                                              |
+| `~/.ssh` bind mount, hardcoded `GIT_SSH_COMMAND`           | Stored credentials from the git identity a scope default names                                                                 |
 | Secret slots listed by each role                           | Harness secret slots, plus the `github` connector                                                                              |
 
 The old per-role blueprints are pruned by the same apply. **CellConfig names do not change** (`<team>-<role>-<harness>`), so `kuke run <config>` keeps working. The harness state volume is named `<config>-state` (see [Resource names and state volumes](../concepts/team.md#resource-names-and-state-volumes)); a Volume from an earlier install under the old digest-suffixed name is not reused, so log in to each harness again after re-rendering.
@@ -115,10 +66,10 @@ The `github` connector fills its `github-token` slot from your existing `gh-toke
 
 ## Troubleshooting
 
-| Symptom                                            | Cause and fix                                                                                                                                                                      |
-| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Clone fails with `Permission denied (publickey)`   | No stored credential covers the host. Check the notes `kuke team init` printed; add a `credentials[]` entry or re-run with `--import-git-identity`.                                |
-| Clone fails with `Host key verification failed`    | A forge other than GitHub/GitLab/Bitbucket with no pinned key. Store its key (`--known-hosts-file`, `--git-known-hosts`) or set `hostKeyPolicy: accept-new`.                       |
-| Cell create fails: key is passphrase-protected     | The `ssh-key` secret has an encrypted key and no `passphrase`. Recreate it with `--passphrase-file`.                                                                               |
-| Cell create fails: image is missing capability `…` | The Config's image lacks a capability the blueprint, a component or the Config requires. Pick an image that has it (`kuke get image <ref> -o yaml` lists an image's capabilities). |
-| `gh` works but `git push` is rejected              | Expected separation: the connector token is API-only. Give git its own credential for that host.                                                                                   |
+| Symptom                                            | Cause and fix                                                                                                                                                                                                   |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Clone fails with `Permission denied (publickey)`   | No stored credential covers the host. Run `kuke connector import git --default`, or check `kuke connector list` for the identity the Realm default names and its `hosts`.                                       |
+| Clone fails with `Host key verification failed`    | A forge other than GitHub/GitLab/Bitbucket with no pinned key. Store its key (`--known-hosts` on `kuke connector import git`, `--known-hosts-file` on `kuke create secret`) or set `hostKeyPolicy: accept-new`. |
+| Cell create fails: key is passphrase-protected     | The `ssh-key` secret has an encrypted key and no `passphrase`. Recreate it with `--passphrase-file`.                                                                                                            |
+| Cell create fails: image is missing capability `…` | The Config's image lacks a capability the blueprint, a component or the Config requires. Pick an image that has it (`kuke get image <ref> -o yaml` lists an image's capabilities).                              |
+| `gh` works but `git push` is rejected              | Expected separation: the connector token is API-only. Give git its own credential for that host.                                                                                                                |

@@ -79,15 +79,16 @@ type Result struct {
 	// per harness × security profile, in first-use order.
 	Blueprints []*api.CellBlueprintDoc
 	Pairs      []Pair
-	// Git is the operator's default git identity, credentials and signing
-	// config, to be written as scope defaults. Nil when none is configured.
-	Git *api.ContainerGit
+	// SSHSources names the runtime-cloned sources that clone over SSH with no
+	// credential of their own: without a git identity their clones cannot
+	// authenticate.
+	SSHSources []string
 	// DefaultSecrets are the secret slots the Configs leave to the scope
 	// defaults, each with the Secret the Realm default points at when none is
 	// set yet. Sorted by slot.
 	DefaultSecrets []DefaultSecret
 	// Notes are operator-facing remarks: settings that no longer have an
-	// effect and sources no stored credential covers.
+	// effect.
 	Notes []string
 }
 
@@ -250,9 +251,7 @@ func Compose(cfg *config.TeamsConfig, team *config.Team, opts Options) (*Result,
 	for _, slot := range slices.Sorted(maps.Keys(defaults)) {
 		result.DefaultSecrets = append(result.DefaultSecrets, DefaultSecret{Slot: slot, Reference: defaults[slot]})
 	}
-	gitDefaults, gitNotes := defaultGit(cfg.Spec.Git)
-	result.Git, result.Notes = gitDefaults, append(result.Notes, gitNotes...)
-	result.Notes = append(result.Notes, credentialNotes(result.Git, effective.Sources)...)
+	result.SSHSources = sshSources(effective.Sources)
 	for _, plan := range plans {
 		if slices.Contains(plan.role.Spec.Needs.Mounts, "ssh") {
 			result.Notes = append(result.Notes, fmt.Sprintf(

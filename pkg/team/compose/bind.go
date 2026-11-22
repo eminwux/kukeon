@@ -497,44 +497,11 @@ func repoGit(in *config.SourceGit) *api.RepoGit {
 	return out
 }
 
-// defaultGit renders TeamsConfig.spec.git as the scope-default git block every
-// team cell inherits. It names stored secrets only; the pre-stored-credential
-// host paths are reported, never rendered.
-func defaultGit(g *config.Git) (*api.ContainerGit, []string) {
-	if g == nil {
-		return nil, nil
-	}
-	var notes []string
-	out := &api.ContainerGit{
-		Author: identity(g.Author), Committer: identity(g.Committer), Signing: signing(g.Signing),
-	}
-	for _, c := range g.Credentials {
-		out.Credentials = append(out.Credentials, api.GitCredential{
-			Host: c.Host, SecretRef: secretRef(c.SecretRef), User: c.User, Port: c.Port,
-			HostKeyPolicy: c.HostKeyPolicy,
-		})
-	}
-	if g.Signing != nil {
-		out.Sign = slices.Clone(g.Sign)
-	}
-	if g.SigningKey != "" || g.AllowedSigners != "" {
-		notes = append(notes,
-			"spec.git.signingKey / allowedSigners are host paths and no longer reach a cell; "+
-				"store the key as an ssh-key secret and name it in spec.git.signing "+
-				"(kuke team init --force --import-git-identity does both)",
-		)
-	}
-	if out.Author == nil && out.Committer == nil && out.Signing == nil && len(out.Credentials) == 0 {
-		return nil, notes
-	}
-	return out, notes
-}
-
-// credentialNotes names every runtime-cloned SSH source no stored credential
-// covers: with the host ~/.ssh no longer mounted, such a clone cannot
-// authenticate.
-func credentialNotes(git *api.ContainerGit, sources []config.Source) []string {
-	var notes []string
+// sshSources names every runtime-cloned source that clones over SSH and
+// states no credential of its own: its cells need a git identity with a key
+// for the host (issue #1591).
+func sshSources(sources []config.Source) []string {
+	var names []string
 	for _, source := range sources {
 		if source.ClonePath == "" || (source.Git != nil && source.Git.Credential != nil) {
 			continue
@@ -543,23 +510,11 @@ func credentialNotes(git *api.ContainerGit, sources []config.Source) []string {
 		if strings.HasPrefix(url, "github.com/") {
 			url = "https://" + url
 		}
-		remote := gitcred.ParseRemote(url)
-		if remote.Transport != gitcred.TransportSSH {
-			continue
-		}
-		covered := git != nil && slices.ContainsFunc(git.Credentials, func(c api.GitCredential) bool {
-			host, _, _ := strings.Cut(c.Host, "/")
-			return strings.EqualFold(host, remote.Host)
-		})
-		if !covered {
-			notes = append(notes, fmt.Sprintf(
-				"source %s is cloned over SSH but no stored git credential covers %s; "+
-					"add one to spec.git.credentials (kuke team init --force --import-git-identity imports your key)",
-				source.Name, remote.Host,
-			))
+		if gitcred.ParseRemote(url).Transport == gitcred.TransportSSH {
+			names = append(names, source.Name)
 		}
 	}
-	return notes
+	return names
 }
 
 func envName(value string) string { name, _, _ := strings.Cut(value, "="); return name }

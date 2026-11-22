@@ -269,18 +269,12 @@ func TestGitConnectorOnAConfig(t *testing.T) {
 		cfg.Spec.Git != nil {
 		t.Fatalf("role with repositories: components=%v git=%+v", cfg.Spec.Components, cfg.Spec.Git)
 	}
-	if result.Git != nil {
-		t.Fatalf("a connector choice reached the scope defaults: %+v", result.Git)
-	}
 
 	result = compose1(t, true, map[string]config.ConnectorChoice{"git": {Identity: "bot-key@ops"}})
 	cfg := result.Pairs[0].Config
 	want := &api.ContainerGit{IdentityRef: &api.ContainerSecretRef{Name: "bot-key", Realm: "ops"}}
 	if !reflect.DeepEqual(cfg.Spec.Git, want) {
 		t.Fatalf("config git = %+v, want %+v", cfg.Spec.Git, want)
-	}
-	if result.Git != nil {
-		t.Fatalf("the team's git identity reached the scope defaults: %+v", result.Git)
 	}
 	// Task configs of the pair carry the same identity.
 	for _, task := range result.Pairs[0].Tasks {

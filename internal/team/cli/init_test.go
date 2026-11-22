@@ -24,17 +24,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/eminwux/kukeon/internal/team/bootstrap"
 	"github.com/eminwux/kukeon/internal/team/initialize"
 )
 
 func TestInitOutcomes(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		created bool
-		failure bool
+		name       string
+		configPath bool
+		failure    bool
 	}{
-		{name: "created", created: true}, {name: "failed", failure: true},
+		{name: "no configuration"}, {name: "configuration read", configPath: true}, {name: "failed", failure: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
@@ -48,15 +47,14 @@ func TestInitOutcomes(t *testing.T) {
 					if tc.failure {
 						return initialize.Result{}, sentinel
 					}
-					return initialize.Result{
+					result := initialize.Result{
 						EntryPath: filepath.Join(home, ".kuke", "kuketeam.d", "kuke.yaml"),
 						Resources: 2,
-						Bootstrap: bootstrap.Result{
-							Path:        path,
-							Created:     tc.created,
-							Diagnostics: []string{"discovery diagnostic"},
-						},
-					}, nil
+					}
+					if tc.configPath {
+						result.ConfigPath = path
+					}
+					return result, nil
 				})
 			cmd.SilenceUsage, cmd.SilenceErrors = true, true
 			var stdout, stderr bytes.Buffer
@@ -70,12 +68,12 @@ func TestInitOutcomes(t *testing.T) {
 				}
 				return
 			}
-			status := "Created configuration"
-			if err != nil || !strings.Contains(stdout.String(), status+": "+path) ||
-				!strings.Contains(
-					stdout.String(),
-					"registered kuke team:",
-				) || stderr.String() != "discovery diagnostic\n" {
+			want := "Applied 2 resources; registered kuke team: " +
+				filepath.Join(home, ".kuke", "kuketeam.d", "kuke.yaml") + "\nNo cells created or started.\n"
+			if tc.configPath {
+				want = "Read configuration: " + path + "\n" + want
+			}
+			if err != nil || stdout.String() != want || stderr.Len() != 0 {
 				t.Fatalf("error=%v stdout=%q stderr=%q", err, &stdout, &stderr)
 			}
 		})
@@ -88,12 +86,12 @@ func TestInitForceIsForwarded(t *testing.T) {
 			if !opts.Force {
 				t.Fatal("--force was not forwarded")
 			}
-			return initialize.Result{Bootstrap: bootstrap.Result{Path: opts.Root + "/kuketeams.yaml"}}, nil
+			return initialize.Result{}, nil
 		})
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetArgs([]string{"--force"})
-	if err := cmd.Execute(); err != nil || !strings.Contains(out.String(), "Reset configuration") {
+	if err := cmd.Execute(); err != nil || !strings.Contains(out.String(), "registered kuke team") {
 		t.Fatalf("output=%q err=%v", &out, err)
 	}
 }
@@ -104,26 +102,43 @@ func TestInitReapplyIsForwardedAndExcludesForce(t *testing.T) {
 			if !opts.Reapply || opts.Force {
 				t.Fatalf("options = %+v", opts)
 			}
-			return initialize.Result{Bootstrap: bootstrap.Result{Path: opts.Root + "/kuketeams.yaml"}}, nil
+			return initialize.Result{}, nil
 		})
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetArgs([]string{"--reapply"})
-	if err := cmd.Execute(); err != nil || !strings.Contains(out.String(), "Kept configuration") {
+	if err := cmd.Execute(); err != nil || !strings.Contains(out.String(), "registered kuke team") {
 		t.Fatalf("output=%q err=%v", &out, err)
 	}
 
-	for _, args := range [][]string{{"--reapply", "--force"}, {"--reapply", "--import-git-identity"}} {
-		rejected := newInitCommand(func() (string, error) { return "/home/operator", nil },
+	rejected := newInitCommand(func() (string, error) { return "/home/operator", nil },
+		func(context.Context, initialize.Options) (initialize.Result, error) {
+			t.Fatal("--reapply --force must not run")
+			return initialize.Result{}, nil
+		})
+	rejected.SetOut(&out)
+	rejected.SetErr(&out)
+	rejected.SetArgs([]string{"--reapply", "--force"})
+	if err := rejected.Execute(); err == nil {
+		t.Fatal("accepted --reapply --force")
+	}
+}
+
+// TestInitHasNoGitFlags is AC2: init reads no git identity, so it takes no
+// flag to import one.
+func TestInitHasNoGitFlags(t *testing.T) {
+	for _, flag := range []string{"--import-git-identity", "--git-key", "--git-key-passphrase-file", "--git-known-hosts"} {
+		cmd := newInitCommand(func() (string, error) { return "/home/operator", nil },
 			func(context.Context, initialize.Options) (initialize.Result, error) {
-				t.Fatalf("%v must not run", args)
+				t.Fatalf("%s must not run", flag)
 				return initialize.Result{}, nil
 			})
-		rejected.SetOut(&out)
-		rejected.SetErr(&out)
-		rejected.SetArgs(args)
-		if err := rejected.Execute(); err == nil {
-			t.Fatalf("accepted %v", args)
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&out)
+		cmd.SetArgs([]string{flag})
+		if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "unknown flag") {
+			t.Fatalf("%s: err=%v", flag, err)
 		}
 	}
 }
@@ -134,7 +149,7 @@ func TestInitHelpAndUnsupportedFlagsHaveNoEffects(t *testing.T) {
 			t.Fatal("home resolution must be lazy")
 			return "", nil
 		}, func(context.Context, initialize.Options) (initialize.Result, error) {
-			t.Fatal("bootstrap must not run")
+			t.Fatal("init must not run")
 			return initialize.Result{}, nil
 		})
 		var out bytes.Buffer

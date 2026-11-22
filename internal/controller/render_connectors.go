@@ -335,8 +335,11 @@ func gitLevels() []string {
 
 // gitIdentity is a git identity Secret, read.
 type gitIdentity struct {
-	ref            v1beta1.ContainerSecretRef
-	sshKey         bool
+	ref    v1beta1.ContainerSecretRef
+	sshKey bool
+	// credential reports a key or a password (ssh-key, basic-auth): an
+	// author-only identity (opaque) authenticates nothing.
+	credential     bool
 	author         *v1beta1.GitIdentity
 	committer      *v1beta1.GitIdentity
 	hosts          []string
@@ -365,7 +368,7 @@ func (e *gitIdentityExpander) load(ref v1beta1.ContainerSecretRef) (gitIdentity,
 	desc := v1beta1.BlueprintConnector{
 		Name:        connector.GitIdentityTag,
 		Delivery:    v1beta1.ConnectorDeliveryGit,
-		SecretTypes: []string{v1beta1.SecretTypeSSHKey, v1beta1.SecretTypeBasicAuth},
+		SecretTypes: []string{v1beta1.SecretTypeSSHKey, v1beta1.SecretTypeBasicAuth, v1beta1.SecretTypeOpaque},
 	}
 	if e.desc != nil {
 		desc = *e.desc
@@ -380,11 +383,15 @@ func (e *gitIdentityExpander) load(ref v1beta1.ContainerSecretRef) (gitIdentity,
 		}
 	} else if !slices.Contains(desc.SecretTypes, spec.Type) {
 		return gitIdentity{}, fmt.Errorf(
-			"%w: git.identityRef %s: a git identity is an ssh-key or basic-auth secret, not %s",
+			"%w: git.identityRef %s: a git identity is an ssh-key, basic-auth or opaque (author-only) secret, not %s",
 			errdefs.ErrConnectorIdentity, where, spec.Type)
 	}
 
-	id := gitIdentity{ref: ref, sshKey: spec.Type == v1beta1.SecretTypeSSHKey}
+	id := gitIdentity{
+		ref:        ref,
+		sshKey:     spec.Type == v1beta1.SecretTypeSSHKey,
+		credential: spec.Type == v1beta1.SecretTypeSSHKey || spec.Type == v1beta1.SecretTypeBasicAuth,
+	}
 	person := func(field string) (*v1beta1.GitIdentity, error) {
 		value := strings.TrimSpace(spec.Identity[field])
 		if value == "" {
@@ -403,7 +410,9 @@ func (e *gitIdentityExpander) load(ref v1beta1.ContainerSecretRef) (gitIdentity,
 	if id.committer, err = person(connector.GitFieldCommitter); err != nil {
 		return gitIdentity{}, err
 	}
-	id.hosts = connector.ParseList(spec.Identity[connector.GitFieldHosts])
+	if id.credential {
+		id.hosts = connector.ParseList(spec.Identity[connector.GitFieldHosts])
+	}
 	if id.sshKey {
 		id.sign = connector.ParseList(spec.Identity[connector.GitFieldSign])
 		if value := strings.TrimSpace(spec.Identity[connector.GitFieldAllowedSignersRef]); value != "" {
@@ -486,9 +495,11 @@ func (e *gitIdentityExpander) container(origin string, git *v1beta1.ContainerGit
 	e.refs[origin] = id.ref
 
 	expanded := &v1beta1.ContainerGit{Author: id.author, Committer: id.committer}
-	for _, host := range id.hosts {
-		ref := id.ref
-		expanded.Credentials = append(expanded.Credentials, v1beta1.GitCredential{Host: host, SecretRef: &ref})
+	if id.credential {
+		for _, host := range id.hosts {
+			ref := id.ref
+			expanded.Credentials = append(expanded.Credentials, v1beta1.GitCredential{Host: host, SecretRef: &ref})
+		}
 	}
 	if id.sshKey {
 		ref := id.ref
@@ -504,8 +515,9 @@ func (e *gitIdentityExpander) container(origin string, git *v1beta1.ContainerGit
 
 // repo expands the reference of one source's git block: the identity becomes
 // that source's author, committer, credential and — for an SSH key — signing
-// key. The identity's hosts are not consulted: naming it on a repo says it is
-// the one that repo uses.
+// key; an author-only identity sets the author and committer only. The
+// identity's hosts are not consulted: naming it on a repo says it is the one
+// that repo uses.
 func (e *gitIdentityExpander) repo(origin, name string, git *v1beta1.RepoGit) *v1beta1.RepoGit {
 	if git == nil || git.IdentityRef == nil {
 		return git
@@ -529,7 +541,8 @@ func (e *gitIdentityExpander) repo(origin, name string, git *v1beta1.RepoGit) *v
 	if out.Committer == nil {
 		out.Committer = id.committer
 	}
-	if out.Credential == nil {
+	// An author-only identity sets the author and authenticates nothing.
+	if out.Credential == nil && id.credential {
 		ref := id.ref
 		out.Credential = &v1beta1.GitCredential{SecretRef: &ref}
 	}

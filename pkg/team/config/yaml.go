@@ -127,6 +127,13 @@ func checkNode(n *yaml.Node, typ reflect.Type, field string, active map[*yaml.No
 			}
 			seen[name] = true
 			childType, ok := fields[name]
+			if !ok && name == "git" && field == "spec" {
+				return fmt.Errorf(
+					"%s: spec.git was removed; store your git identity with kuke connector import git --default (line %d)",
+					next,
+					key.Line,
+				)
+			}
 			if !ok && name == "default" && strings.Contains(field, "harnesses[") {
 				return fmt.Errorf(
 					"%s: removed; every listed harness is selected, use roles[].harness to narrow (line %d)",

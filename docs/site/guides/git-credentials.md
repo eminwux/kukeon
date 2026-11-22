@@ -4,20 +4,120 @@ A cell clones, fetches, pushes and signs with **stored** git credentials. Nothin
 
 Three things make up a git setup, and each has one place:
 
-| What                           | Where it lives                                                                                  |
-| ------------------------------ | ----------------------------------------------------------------------------------------------- |
-| The credential and signing key | A typed [`Secret`](../manifests/secret.md): `ssh-key` or `basic-auth`                           |
-| The **default** identity       | A `git` block on the Realm, Space or Stack `spec.defaults` — or on a CellConfig                 |
-| A **per-source** identity      | `git` on one repo: a CellConfig repo fill, a container `repos[]` entry, or a `kuke team` source |
+| What                      | Where it lives                                                                                              |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| The **identity**          | A [git connector](../concepts/connectors.md#git) Secret: `ssh-key`, `basic-auth`, or `opaque` (author-only) |
+| The **default** identity  | `spec.defaults.git.identityRef` on the Realm, Space or Stack — or a `git` block on a CellConfig             |
+| A **per-source** identity | `git` on one repo: a CellConfig repo fill, a container `repos[]` entry, or a `kuke team` source             |
 
 Git credentials are separate from API credentials. A GitHub token given to the [`github` connector](../concepts/blueprint-contract.md#components) reaches the cell as `GH_TOKEN` for the `gh` CLI and is never wired into git.
 
-## 1. Store the credential
+## 1. Import your git identity
+
+The quickest path stores the key and author you already use and makes them the default of the `default` realm:
+
+```bash
+kuke connector import git --default
+```
+
+Run it as your own account, not under `sudo`: it reads the home directory and the global git configuration of the user running it. The `Home:` line of `--dry-run` shows which one.
+
+With an SSH key, it stores one `ssh-key` Secret, `git-ssh` in realm `default`, tagged `git`:
+
+- **The key** is `--key`, else the key `user.signingkey` names, else the first of `~/.ssh/id_ed25519`, `id_ecdsa`, `id_rsa`. The public key (`<key>.pub`) and certificate (`<key>-cert.pub`) next to it are stored too. An encrypted key needs `--passphrase-file`.
+- **The author and committer** come from `user.name` and `user.email`.
+- **The hosts** it authenticates are `github.com`, or `--hosts` (comma-separated or repeated).
+- **Host keys** are the built-in keys of `github.com`, `gitlab.com` and `bitbucket.org`, or the file `--known-hosts` names.
+- **Signing** is on only when `commit.gpgsign` (`sign: commits`) or `tag.gpgsign` (`sign: tags`) is set **and** `user.signingkey` names this same key. A GPG key or a different SSH key does not turn signing on, and a note says so: a cell signing with a key your forge does not know as your signing key would produce unverified commits. To sign, rerun with `--key` naming your signing key.
+- **Allowed signers**: when `gpg.ssh.allowedSignersFile` is set, the file is stored as the Secret `git-allowed-signers` in the same realm and the identity names it (`allowedSignersRef`).
+
+Without a usable key — none found and no `--key` — it stores an **author-only** identity, the `opaque` Secret `git-author`, and says so. Cells get your author and committer, and no credential and no signing: they clone public repositories and commit under your name. With neither a key nor an author the import fails and names both. An explicit `--key` that is missing, an unreadable key, or an encrypted key without `--passphrase-file` is an error.
+
+Rerunning the import updates the Secrets in place. `--name` and `--realm` store the identity under another name or realm.
+
+### Preview first
+
+```console
+$ kuke connector import git --dry-run
+Dry run: nothing is stored.
+Home: /home/me
+Secret: git-ssh@default (type ssh-key, connector git)
+Key: /home/me/.ssh/id_ed25519
+Identity:
+  author: Ada Lovelace <ada@example.com>
+  committer: Ada Lovelace <ada@example.com>
+  hosts: github.com
+  sign: commits
+```
+
+A dry run stores nothing, makes no daemon call and never prints key material. All flags are on the [`kuke connector`](../cli/kuke-connector.md#kuke-connector-import-git) page.
+
+### From the web UI
+
+On the Connectors page, the `git` connector's Identities panel has an **Import from host** action: a realm, the hosts, an optional identity name, an optional key and passphrase file, and _Make it the Realm default_ (on by default). It runs the same import **as the user running `kuke serve`** — that account's `~/.ssh` and global git configuration, which under a service manager may not be your shell account. The result shows the home directory and the key path that were read. Key and passphrase file are paths inside that home directory (`.ssh/id_ed25519`); absolute paths and `..` are refused. `kuke serve` has no authentication: run it on a trusted network or loopback only.
+
+## 2. Set or clear the default
+
+`--default` on the import sets the Realm default, replacing any existing one, and prints the old and the new:
+
+```
+Realm "default" default git identity: git-ssh@default (was none)
+```
+
+Set or clear it later without importing again:
+
+```bash
+kuke connector default git git-ssh              # realm default, identity git-ssh@default
+kuke connector default git git-ssh --realm dev  # realm dev, identity git-ssh@dev
+kuke connector default git --clear              # remove the Realm default
+kuke connector list                             # identities and Realm defaults
+```
+
+The Secret must exist and be a git identity. `kuke connector` sets Realm defaults only; a Space or Stack default is set in its manifest:
+
+```yaml
+apiVersion: v1beta1
+kind: Stack
+metadata: { name: agents }
+spec:
+  id: agents
+  realmId: default
+  spaceId: default
+  defaults:
+    git:
+      identityRef: { name: bot-key, realm: default }
+```
+
+Defaults are live: a Config that names no identity picks up a changed default in its next cell, with nothing to re-render.
+
+The `git` block can also be spelled out instead of, or next to, `identityRef`; written fields win over the identity's:
+
+```yaml
+defaults:
+  git:
+    author: { name: dev-bot, email: dev-bot@example.com }
+    committer: { name: dev-bot, email: dev-bot@example.com }
+    credentials:
+      - host: github.com
+        secretRef: { name: git-ssh, realm: default }
+    signing:
+      secretRef: { name: git-ssh, realm: default }
+    sign: [commits, tags]
+```
+
+The levels merge **Realm → Space → Stack → CellConfig**, deeper winning: `author`, `committer` and `signing` are replaced by the deepest level that sets them, and `credentials[]` merge by `host` — a stack can add a credential for one more host without restating the realm's. A CellConfig's own `spec.git` is the last word.
+
+Inside the cell the result is one container-global gitconfig. It is git's lowest-precedence scope, so a repository's local config still overrides it.
+
+## 3. Store an identity by hand
+
+Use this for a dedicated deploy key, a bot account or an HTTPS token.
 
 ### SSH key
 
 ```bash
-sudo kuke create secret git-ssh --realm default --type ssh-key --from-file ~/.ssh/id_ed25519
+sudo kuke create secret bot-key --realm default --connector git --type ssh-key \
+    --from-file ~/.ssh/id_ed25519 --hosts github.com --author 'Dev Bot <bot@example.com>' --sign commits,tags
 ```
 
 Any OpenSSH key type works (`ed25519`, `rsa`, `ecdsa`). Add what the key needs:
@@ -35,47 +135,31 @@ A passphrase-protected key is never written to the cell decrypted: the kuketty w
 
 ```bash
 # username + personal access token
-printf %s "$TOKEN" | sudo kuke create secret forge-https --realm default \
-    --type basic-auth --username dev-bot --token-stdin
+printf %s "$TOKEN" | sudo kuke create secret forge-https --realm default --connector git \
+    --type basic-auth --username dev-bot --token-stdin --hosts git.example.com
 
 # username + password
-sudo kuke create secret forge-https --realm default \
-    --type basic-auth --username dev-bot --password-stdin
+sudo kuke create secret forge-https --realm default --connector git \
+    --type basic-auth --username dev-bot --password-stdin --hosts git.example.com
 ```
 
 Git reads it through a credential helper scoped to the bound host. The value never appears in a URL, in `git config` or in the environment.
 
-## 2. Set the default identity
+### Author only
 
-Set it once, on the scope every cell below should inherit it from:
-
-```yaml
-apiVersion: v1beta1
-kind: Stack
-metadata: { name: agents }
-spec:
-  id: agents
-  realmId: default
-  spaceId: default
-  defaults:
-    git:
-      author: { name: dev-bot, email: dev-bot@example.com }
-      committer: { name: dev-bot, email: dev-bot@example.com }
-      credentials:
-        - host: github.com
-          secretRef: { name: git-ssh, realm: default }
-      signing:
-        secretRef: { name: git-ssh, realm: default }
-      sign: [commits, tags]
+```bash
+kuke create secret me --connector git --type opaque --author 'Me <me@example.com>'
 ```
 
-The levels merge **Realm → Space → Stack → CellConfig**, deeper winning: `author`, `committer` and `signing` are replaced by the deepest level that sets them, and `credentials[]` merge by `host` — a stack can add a credential for one more host without restating the realm's. A CellConfig's own `spec.git` is the last word.
+`--type opaque` may be left out: `--connector git` without `--type` and without `--from-file` is author-only. An author-only identity stores no value, so `--from-literal` and `--from-file` are refused, and it takes no `hosts`, `sign` or `allowedSignersRef`.
 
-Inside the cell the result is one container-global gitconfig. It is git's lowest-precedence scope, so a repository's local config still overrides it.
+`hosts` is required on an `ssh-key` or `basic-auth` identity. Without `--connector`, the same commands store a plain credential, which you name in `credentials[]` and `signing` by hand.
 
-### Which credential a remote uses
+## 4. Which credential a remote uses
 
-`credentials[].host` is a host or a `host/path` prefix; the longest matching prefix wins:
+An identity expands into one credential per entry of its `hosts`. Written out, that is:
+
+`credentials[].host` — and each entry of an identity's `hosts` — is a host or a `host/path` prefix; the longest matching prefix wins:
 
 ```yaml
 credentials:
@@ -103,11 +187,24 @@ A host key is checked, in this order:
 2. **Built-in** — the published keys of `github.com`, `gitlab.com` and `bitbucket.org`, when the secret pins none.
 3. **`hostKeyPolicy: accept-new`** on the credential — trust on first use. Opt-in, per credential; the default is `strict`.
 
-A self-hosted forge therefore needs either its key pinned in the secret (`--known-hosts-file`) or an explicit `accept-new`.
+A self-hosted forge therefore needs either its key pinned in the secret (`--known-hosts` on the import, `--known-hosts-file` on `kuke create secret`) or an explicit `accept-new`.
 
-## 3. Give one source its own identity
+## 5. Give one source its own identity
 
-Any repo can state its own identity; the fields it leaves out fall back to the default.
+Any repo can state its own identity; the fields it leaves out fall back to the default. The short form names a stored identity:
+
+```yaml
+repos:
+  project:
+    url: git@github.com:acme/app.git
+    branch: main
+    git:
+      identityRef: { name: app-deploy, realm: default }
+```
+
+A repo's `identityRef` is the one that repo uses: its hosts are not consulted. An `ssh-key` or `basic-auth` identity gives the repo its author, committer, credential and — for an SSH key — signing. An author-only identity sets the repo's author and committer and no credential.
+
+The long form spells the fields out:
 
 ```yaml
 apiVersion: v1beta1
@@ -153,6 +250,16 @@ sudo kuke create cell probe --from-config dev-claude --dry-run --explain
 
 The web UI shows the same block in the preview of _New cell_ and _New config_. Secret material is never part of it — only names, types and origins.
 
+## Upgrading
+
+Blueprints carry the connector definitions of the `kuke` build that applied the team. After installing a `kuke` that accepts author-only identities, run `kuke team init --reapply` (or `--force`) before an existing team's cells accept one.
+
+Nothing older is converted:
+
+- `spec.git` in `~/.kuke/kuketeams.yaml` was removed; a file that still has it fails to decode. Delete the block and run `kuke connector import git --default`.
+- The `spec.defaults.git` block an older `kuke team init` wrote on the team's stack stays, and still merges as a Stack level over the Realm default. Remove it from the Stack if the Realm default should win.
+- A `git-ssh` Secret from an older import is not tagged or changed. `kuke connector import git` with the default name overwrites it with a new identity.
+
 ## Reference
 
 | Variant                                        | How                                                            |
@@ -167,7 +274,9 @@ The web UI shows the same block in the preview of _New cell_ and _New config_. S
 | Trust on first use                             | `hostKeyPolicy: accept-new` on the credential                  |
 | Signed commits and tags                        | `signing.secretRef` + `sign`                                   |
 | Signature verification                         | `signing.allowedSignersRef`                                    |
-| One identity for a whole realm / space / stack | `spec.defaults.git` on that scope                              |
-| A different identity for one repo              | `git` on that repo                                             |
+| Your own key and author, from this host        | `kuke connector import git --default`                          |
+| Author and committer only, no key              | `opaque` git identity (author-only)                            |
+| One identity for a whole realm / space / stack | `spec.defaults.git.identityRef` on that scope                  |
+| A different identity for one repo              | `git.identityRef` (or `git` fields) on that repo               |
 
 Field-by-field: [`Secret`](../manifests/secret.md), container [`git`](../manifests/container.md#containergit), [`RepoGit`](../manifests/container.md#repogit).

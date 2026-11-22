@@ -29,17 +29,20 @@ import (
 	"strings"
 
 	intconnector "github.com/eminwux/kukeon/internal/connector"
+	"github.com/eminwux/kukeon/internal/connector/scopedefaults"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/connector"
-	"gopkg.in/yaml.v3"
 )
 
 // The connectors API (issue #1548, §7). Everything here iterates the connector
 // catalog embedded in kuke: no route, payload or branch names a connector, so
 // a connector added as one connector.yaml is served — listed, given
 // identities, defaulted, picked — without a change to this file or to the UI.
+// The one exception is the git connector's import from the host (issue
+// #1591, connector_import.go): the git delivery handler is code, and so is
+// discovering its identity.
 //
 // Secret material is write-only on every route: it travels in a request body,
 // is never read back, and is masked out of any error.
@@ -129,97 +132,15 @@ func viewConnector(conn *connector.Connector) connectorView {
 }
 
 // scopeRef is the Realm, Space and Stack a default or an identity lives at.
-type scopeRef struct {
-	Realm string `json:"realm"`
-	Space string `json:"space,omitempty"`
-	Stack string `json:"stack,omitempty"`
-}
-
-// level names the deepest coordinate the scope sets.
-func (s scopeRef) level() string {
-	switch {
-	case s.Stack != "":
-		return v1beta1.ConnectorScopeStack
-	case s.Space != "":
-		return v1beta1.ConnectorScopeSpace
-	default:
-		return v1beta1.ConnectorScopeRealm
-	}
-}
+type scopeRef = scopedefaults.Scope
 
 // checkScope validates browser-supplied scope coordinates before any of them
 // reaches the daemon's metadata paths.
-func checkScope(s scopeRef) (scopeRef, error) {
-	realm := strings.TrimSpace(s.Realm)
-	rawSpace, rawStack := strings.TrimSpace(s.Space), strings.TrimSpace(s.Stack)
-	if realm == "" {
-		return scopeRef{}, errdefs.ErrRealmNameRequired
-	}
-	if rawStack != "" && rawSpace == "" {
-		return scopeRef{}, fmt.Errorf("%w: scope coordinates cannot contain gaps", errdefs.ErrConfig)
-	}
-	// Each coordinate is guarded inline (not through a loop, helper or struct
-	// field) so the filepath.IsLocal check visibly dominates the returned
-	// values for static path-injection analysis, matching configLookup. An
-	// optional coordinate is copied only once checked, so its unset path
-	// carries the empty literal.
-	unsafe := func() (scopeRef, error) {
-		return scopeRef{}, fmt.Errorf("%w: unsafe scope coordinate", errdefs.ErrConfig)
-	}
-	if !filepath.IsLocal(realm) || !safePathSegment(realm) {
-		return unsafe()
-	}
-	var space, stack string
-	if rawSpace != "" {
-		if !filepath.IsLocal(rawSpace) || !safePathSegment(rawSpace) {
-			return unsafe()
-		}
-		space = rawSpace
-	}
-	if rawStack != "" {
-		if !filepath.IsLocal(rawStack) || !safePathSegment(rawStack) {
-			return unsafe()
-		}
-		stack = rawStack
-	}
-	return scopeRef{Realm: realm, Space: space, Stack: stack}, nil
-}
+func checkScope(s scopeRef) (scopeRef, error) { return scopedefaults.CheckScope(s) }
 
 // checkSecretRef validates a browser-supplied Secret reference.
 func checkSecretRef(ref *v1beta1.ContainerSecretRef) (*v1beta1.ContainerSecretRef, error) {
-	if ref == nil {
-		return nil, nil //nolint:nilnil // no reference is a valid input: it clears a choice
-	}
-	name, realm := strings.TrimSpace(ref.Name), strings.TrimSpace(ref.Realm)
-	rawSpace, rawStack := strings.TrimSpace(ref.Space), strings.TrimSpace(ref.Stack)
-	if name == "" || realm == "" || (rawStack != "" && rawSpace == "") || ref.Cell != "" {
-		return nil, fmt.Errorf("%w: name a secret by name and realm (space and stack optional)", errdefs.ErrConfig)
-	}
-	// Guarded inline, optional coordinates copied only once checked: see
-	// checkScope.
-	unsafe := func() (*v1beta1.ContainerSecretRef, error) {
-		return nil, fmt.Errorf("%w: unsafe secret reference", errdefs.ErrConfig)
-	}
-	if !filepath.IsLocal(name) || !safePathSegment(name) {
-		return unsafe()
-	}
-	if !filepath.IsLocal(realm) || !safePathSegment(realm) {
-		return unsafe()
-	}
-	var space, stack string
-	if rawSpace != "" {
-		if !filepath.IsLocal(rawSpace) || !safePathSegment(rawSpace) {
-			return unsafe()
-		}
-		space = rawSpace
-	}
-	if rawStack != "" {
-		if !filepath.IsLocal(rawStack) || !safePathSegment(rawStack) {
-			return unsafe()
-		}
-		stack = rawStack
-	}
-	return &v1beta1.ContainerSecretRef{Name: name, Realm: realm, Space: space, Stack: stack}, nil
+	return scopedefaults.CheckSecretRef(ref)
 }
 
 // decodeJSONBody decodes exactly one JSON document of at most limit bytes
@@ -254,6 +175,7 @@ func registerConnectorRoutes(mux *http.ServeMux, dial Dial, catalog *connector.C
 	mux.HandleFunc("GET /api/connectors/defaults", resourceRoute(dial, api.defaults))
 	mux.HandleFunc("POST /api/connectors/{connector}/defaults", resourceRoute(dial, api.setDefault))
 	mux.HandleFunc("POST /api/connectors/{connector}/identities", resourceRoute(dial, api.createIdentity))
+	mux.HandleFunc(gitImportPath, resourceRoute(dial, api.importGit))
 	mux.HandleFunc("POST /api/configs/connector", resourceRoute(dial, api.pickForConfig))
 }
 
@@ -354,167 +276,7 @@ func (a connectorAPI) status(ctx context.Context, c kukeonv1.Client, _ *http.Req
 // connectorDefault is the default identity of one connector method across the
 // levels of a scope: what each level sets, and what a Config in the scope
 // that chooses nothing would get.
-type connectorDefault struct {
-	Connector string `json:"connector"`
-	Method    string `json:"method,omitempty"`
-	Component string `json:"component,omitempty"`
-	Delivery  string `json:"delivery"`
-	Slot      string `json:"slot,omitempty"`
-	// Levels maps realm, space and stack to the identity that level sets;
-	// a level that sets none, or that the request did not name, is absent.
-	Levels map[string]v1beta1.ContainerSecretRef `json:"levels"`
-	// Effective is the identity the deepest level sets; Origin is that level.
-	Effective *v1beta1.ContainerSecretRef `json:"effective,omitempty"`
-	Origin    string                      `json:"origin,omitempty"`
-}
-
-// defaultTarget is one place a default identity is stored: the secret slot of
-// a method, or the git identity reference.
-type defaultTarget struct {
-	conn   *connector.Connector
-	method connector.Method
-	slot   string
-	git    bool
-}
-
-func (t defaultTarget) descriptor() v1beta1.BlueprintConnector { return t.conn.Descriptor(t.method) }
-
-// read returns the identity a defaults fill sets for the target.
-func (t defaultTarget) read(d *v1beta1.ScopeDefaults) *v1beta1.ContainerSecretRef {
-	if d == nil {
-		return nil
-	}
-	if t.git {
-		if d.Git == nil {
-			return nil
-		}
-		return d.Git.IdentityRef
-	}
-	return d.Secrets[t.slot].SecretRef
-}
-
-// write sets (or, for a nil identity, clears) the target on a defaults fill.
-func (t defaultTarget) write(d *v1beta1.ScopeDefaults, identity *v1beta1.ContainerSecretRef) {
-	if t.git {
-		var git v1beta1.ContainerGit
-		if d.Git != nil {
-			git = *d.Git
-		}
-		git.IdentityRef = identity
-		d.Git = &git
-		if identity == nil && git.Author == nil && git.Committer == nil && git.SigningKey == "" &&
-			len(git.Sign) == 0 && git.AllowedSigners == "" && len(git.Credentials) == 0 && git.Signing == nil {
-			d.Git = nil
-		}
-		return
-	}
-	secrets := make(map[string]v1beta1.CellConfigSecretFill, len(d.Secrets)+1)
-	for slot, fill := range d.Secrets {
-		secrets[slot] = fill
-	}
-	if identity == nil {
-		delete(secrets, t.slot)
-	} else {
-		secrets[t.slot] = v1beta1.CellConfigSecretFill{SecretRef: identity}
-	}
-	d.Secrets = secrets
-	if len(secrets) == 0 {
-		d.Secrets = nil
-	}
-}
-
-// targets lists every place the catalog's connectors keep a default: one per
-// method delivered through a secret slot, one for a git-delivered connector.
-// A login kept in the state volume has no identity, and a registry credential
-// is bound per server on the Realm, not defaulted.
-func (a connectorAPI) targets() []defaultTarget {
-	var out []defaultTarget
-	for i := range a.catalog.Connectors {
-		conn := &a.catalog.Connectors[i]
-		if len(conn.Spec.Methods) == 0 {
-			if conn.Spec.Delivery == v1beta1.ConnectorDeliveryGit {
-				out = append(out, defaultTarget{conn: conn, git: true})
-			}
-			continue
-		}
-		for _, method := range conn.Spec.Methods {
-			if method.Secret != nil {
-				out = append(out, defaultTarget{conn: conn, method: method, slot: method.Secret.Name})
-			}
-		}
-	}
-	return out
-}
-
-// target resolves the place a request's connector and method keep a default.
-func (a connectorAPI) target(conn *connector.Connector, method string) (defaultTarget, error) {
-	var candidates []defaultTarget
-	for _, t := range a.targets() {
-		if t.conn.Metadata.Name == conn.Metadata.Name {
-			candidates = append(candidates, t)
-		}
-	}
-	if len(candidates) == 0 {
-		return defaultTarget{}, fmt.Errorf(
-			"%w: connector %q takes no default identity", errdefs.ErrConfig, conn.Metadata.Name)
-	}
-	method = strings.TrimSpace(method)
-	for _, t := range candidates {
-		if t.method.Name == method || (method == "" && len(candidates) == 1) {
-			return t, nil
-		}
-	}
-	names := make([]string, 0, len(candidates))
-	for _, t := range candidates {
-		names = append(names, t.method.Name)
-	}
-	return defaultTarget{}, fmt.Errorf(
-		"%w: connector %q: name the method the default is for (one of: %s)",
-		errdefs.ErrConfig, conn.Metadata.Name, strings.Join(names, ", "))
-}
-
-// scopeFills reads the defaults fill of each level of a scope. A level the
-// scope does not name is absent.
-func scopeFills(ctx context.Context, c kukeonv1.Client, scope scopeRef) (map[string]*v1beta1.ScopeDefaults, error) {
-	fills := map[string]*v1beta1.ScopeDefaults{}
-	realm, err := c.GetRealm(ctx, v1beta1.RealmDoc{Metadata: v1beta1.RealmMetadata{Name: scope.Realm}})
-	if err != nil {
-		return nil, err
-	}
-	if !realm.MetadataExists {
-		return nil, errdefs.ErrRealmNotFound
-	}
-	fills[v1beta1.ConnectorScopeRealm] = realm.Realm.Spec.Defaults
-	if scope.Space == "" {
-		return fills, nil
-	}
-	space, err := c.GetSpace(ctx, v1beta1.SpaceDoc{
-		Metadata: v1beta1.SpaceMetadata{Name: scope.Space},
-		Spec:     v1beta1.SpaceSpec{RealmID: scope.Realm},
-	})
-	if err != nil {
-		return nil, err
-	}
-	if !space.MetadataExists {
-		return nil, errdefs.ErrSpaceNotFound
-	}
-	fills[v1beta1.ConnectorScopeSpace] = space.Space.Spec.Defaults.Fill()
-	if scope.Stack == "" {
-		return fills, nil
-	}
-	stack, err := c.GetStack(ctx, v1beta1.StackDoc{
-		Metadata: v1beta1.StackMetadata{Name: scope.Stack},
-		Spec:     v1beta1.StackSpec{RealmID: scope.Realm, SpaceID: scope.Space},
-	})
-	if err != nil {
-		return nil, err
-	}
-	if !stack.MetadataExists {
-		return nil, errdefs.ErrStackNotFound
-	}
-	fills[v1beta1.ConnectorScopeStack] = stack.Stack.Spec.Defaults
-	return fills, nil
-}
+type connectorDefault = scopedefaults.Default
 
 // defaults reports, for the scope named by ?realm[&space[&stack]], the
 // default identity of every connector method at each level and the one that
@@ -527,36 +289,7 @@ func (a connectorAPI) defaults(ctx context.Context, c kukeonv1.Client, r *http.R
 	if err != nil {
 		return nil, err
 	}
-	fills, err := scopeFills(ctx, c, scope)
-	if err != nil {
-		return nil, err
-	}
-	out := []connectorDefault{}
-	for _, t := range a.targets() {
-		row := connectorDefault{
-			Connector: t.conn.Metadata.Name,
-			Method:    t.method.Name,
-			Delivery:  t.conn.Delivery(t.method),
-			Slot:      t.slot,
-			Levels:    map[string]v1beta1.ContainerSecretRef{},
-		}
-		if !t.git {
-			row.Component = t.conn.ComponentName(t.method)
-		} else {
-			row.Component = t.conn.Metadata.Name
-		}
-		for _, level := range intconnector.Scopes { // realm, space, stack: deeper wins
-			ref := t.read(fills[level])
-			if ref == nil {
-				continue
-			}
-			row.Levels[level] = *ref
-			effective := *ref
-			row.Effective, row.Origin = &effective, level
-		}
-		out = append(out, row)
-	}
-	return out, nil
+	return scopedefaults.Defaults(ctx, c, a.catalog, scope)
 }
 
 // defaultRequest sets or clears the default identity of a connector at one
@@ -595,186 +328,14 @@ func (a connectorAPI) setDefault(ctx context.Context, c kukeonv1.Client, r *http
 	if err != nil {
 		return nil, err
 	}
-	target, err := a.target(conn, input.Method)
-	if err != nil {
-		return nil, err
-	}
-	desc := target.descriptor()
-	if !intconnector.AcceptsScope(desc, scope.level()) {
-		return nil, fmt.Errorf(
-			"%w: a default for connector %q is set at %s level, not %s",
-			errdefs.ErrConfig, desc.Name, strings.Join(desc.Scopes, " or "), scope.level())
-	}
-	identity, err := checkSecretRef(input.Identity)
-	if err != nil {
-		return nil, err
-	}
-	if identity != nil {
-		if err = checkIdentity(ctx, c, desc, *identity); err != nil {
-			return nil, err
-		}
-	}
-	action, err := editScopeDefaults(ctx, c, scope, func(d *v1beta1.ScopeDefaults) { target.write(d, identity) })
+	set, err := scopedefaults.Set(ctx, c, a.catalog, conn, scope, input.Method, input.Identity)
 	if err != nil {
 		return nil, err
 	}
 	return defaultResult{
-		Connector: desc.Name, Method: target.method.Name, Scope: scope, Level: scope.level(),
-		Identity: identity, Action: action,
+		Connector: set.Connector, Method: set.Method, Scope: set.Scope, Level: set.Level,
+		Identity: set.Identity, Action: set.Action,
 	}, nil
-}
-
-// checkIdentity confirms a Secret exists and can be an identity of the
-// connector. Only its readable part is looked at.
-func checkIdentity(
-	ctx context.Context, c kukeonv1.Client, desc v1beta1.BlueprintConnector, ref v1beta1.ContainerSecretRef,
-) error {
-	got, err := c.GetSecret(ctx, v1beta1.SecretDoc{Metadata: v1beta1.SecretMetadata{
-		Name: ref.Name, Realm: ref.Realm, Space: ref.Space, Stack: ref.Stack,
-	}})
-	if err != nil {
-		return err
-	}
-	if !got.MetadataExists {
-		return fmt.Errorf("%w: secret %s", errdefs.ErrSecretNotFound, intconnector.FormatSecretRef(ref))
-	}
-	if checkErr := intconnector.CheckSecret(desc, got.Secret.Spec); checkErr != nil {
-		return fmt.Errorf("%w: secret %s: %w", errdefs.ErrConfig, intconnector.FormatSecretRef(ref), checkErr)
-	}
-	return nil
-}
-
-// editScopeDefaults applies edit to the defaults fill of the Realm, Space or
-// Stack the scope names and re-applies that one document. It returns the
-// apply action (updated, unchanged).
-func editScopeDefaults(
-	ctx context.Context, c kukeonv1.Client, scope scopeRef, edit func(*v1beta1.ScopeDefaults),
-) (string, error) {
-	switch scope.level() {
-	case v1beta1.ConnectorScopeStack:
-		return editStackDefaults(ctx, c, scope, edit)
-	case v1beta1.ConnectorScopeSpace:
-		return editSpaceDefaults(ctx, c, scope, edit)
-	default:
-		return editRealmDefaults(ctx, c, scope, edit)
-	}
-}
-
-// editedFill applies edit to a copy of a scope's defaults fill and returns it,
-// or nil when the edit leaves nothing set.
-func editedFill(current *v1beta1.ScopeDefaults, edit func(*v1beta1.ScopeDefaults)) *v1beta1.ScopeDefaults {
-	fill := v1beta1.ScopeDefaults{}
-	if current != nil {
-		fill = *current
-	}
-	edit(&fill)
-	if fill.IsZero() {
-		return nil
-	}
-	return &fill
-}
-
-func editStackDefaults(
-	ctx context.Context, c kukeonv1.Client, scope scopeRef, edit func(*v1beta1.ScopeDefaults),
-) (string, error) {
-	current, err := c.GetStack(ctx, v1beta1.StackDoc{
-		Metadata: v1beta1.StackMetadata{Name: scope.Stack},
-		Spec:     v1beta1.StackSpec{RealmID: scope.Realm, SpaceID: scope.Space},
-	})
-	if err != nil {
-		return "", err
-	}
-	if !current.MetadataExists {
-		return "", errdefs.ErrStackNotFound
-	}
-	desired := current.Stack
-	desired.APIVersion, desired.Kind = v1beta1.APIVersionV1Beta1, v1beta1.KindStack
-	desired.Status = v1beta1.StackStatus{}
-	desired.Spec.RealmID, desired.Spec.SpaceID = scope.Realm, scope.Space
-	if desired.Spec.ID == "" {
-		desired.Spec.ID = desired.Metadata.Name
-	}
-	desired.Spec.Defaults = editedFill(desired.Spec.Defaults, edit)
-	return applyDocument(ctx, c, desired, v1beta1.KindStack)
-}
-
-func editSpaceDefaults(
-	ctx context.Context, c kukeonv1.Client, scope scopeRef, edit func(*v1beta1.ScopeDefaults),
-) (string, error) {
-	current, err := c.GetSpace(ctx, v1beta1.SpaceDoc{
-		Metadata: v1beta1.SpaceMetadata{Name: scope.Space},
-		Spec:     v1beta1.SpaceSpec{RealmID: scope.Realm},
-	})
-	if err != nil {
-		return "", err
-	}
-	if !current.MetadataExists {
-		return "", errdefs.ErrSpaceNotFound
-	}
-	desired := current.Space
-	desired.APIVersion, desired.Kind = v1beta1.APIVersionV1Beta1, v1beta1.KindSpace
-	desired.Status = v1beta1.SpaceStatus{}
-	desired.Spec.RealmID = scope.Realm
-	// A Space's defaults also carry container defaults; only the CellConfig
-	// fill part is edited.
-	defaults := v1beta1.SpaceDefaults{}
-	if desired.Spec.Defaults != nil {
-		defaults = *desired.Spec.Defaults
-	}
-	fill := v1beta1.ScopeDefaults{
-		Values: defaults.Values, Repos: defaults.Repos, Secrets: defaults.Secrets, Git: defaults.Git,
-	}
-	edit(&fill)
-	defaults.Values, defaults.Repos, defaults.Secrets, defaults.Git = fill.Values, fill.Repos, fill.Secrets, fill.Git
-	desired.Spec.Defaults = nil
-	if defaults.Container != nil || !fill.IsZero() {
-		desired.Spec.Defaults = &defaults
-	}
-	return applyDocument(ctx, c, desired, v1beta1.KindSpace)
-}
-
-func editRealmDefaults(
-	ctx context.Context, c kukeonv1.Client, scope scopeRef, edit func(*v1beta1.ScopeDefaults),
-) (string, error) {
-	current, err := c.GetRealm(ctx, v1beta1.RealmDoc{Metadata: v1beta1.RealmMetadata{Name: scope.Realm}})
-	if err != nil {
-		return "", err
-	}
-	if !current.MetadataExists {
-		return "", errdefs.ErrRealmNotFound
-	}
-	// The apply diff replaces the Realm's compatible fields whole, so the live
-	// document — registry credentials and images included — is carried forward.
-	desired := current.Realm
-	desired.APIVersion, desired.Kind = v1beta1.APIVersionV1Beta1, v1beta1.KindRealm
-	desired.Status = v1beta1.RealmStatus{}
-	desired.Spec.Defaults = editedFill(desired.Spec.Defaults, edit)
-	return applyDocument(ctx, c, desired, v1beta1.KindRealm)
-}
-
-// applyDocument applies one document and returns its apply action.
-func applyDocument(ctx context.Context, c kukeonv1.Client, doc any, kind v1beta1.Kind) (string, error) {
-	raw, err := yaml.Marshal(doc)
-	if err != nil {
-		return "", fmt.Errorf("marshal %s document: %w", kind, err)
-	}
-	result, err := c.ApplyDocuments(ctx, raw)
-	if err != nil {
-		return "", err
-	}
-	for _, resource := range result.Resources {
-		if resource.Kind != string(kind) {
-			continue
-		}
-		if resource.Action == "failed" {
-			if resource.Error != "" {
-				return "", fmt.Errorf("%w: apply %s %q: %s", errdefs.ErrConfig, kind, resource.Name, resource.Error)
-			}
-			return "", fmt.Errorf("apply %s failed", kind)
-		}
-		return resource.Action, nil
-	}
-	return "applied", nil
 }
 
 // identityRequest creates an identity of a connector — a tagged Secret — or,
@@ -866,11 +427,21 @@ func (a connectorAPI) createIdentity(ctx context.Context, c kukeonv1.Client, r *
 }
 
 // identityMaterial reads the material of one secret type out of a request. A
-// rejection names what is missing and never the material itself.
-func identityMaterial(input identityRequest, secretType string) (v1beta1.SecretSpec, error) {
+// rejection names what is missing and never the material itself. An
+// author-only git identity (issue #1591) takes no value: it stores the fixed
+// placeholder.
+func identityMaterial(input identityRequest, secretType string, authorOnly bool) (v1beta1.SecretSpec, error) {
 	var spec v1beta1.SecretSpec
 	switch secretType {
 	case v1beta1.SecretTypeOpaque:
+		if authorOnly {
+			if input.Value != "" {
+				return spec, fmt.Errorf(
+					"%w: an author-only git identity stores no value; use type ssh-key for a key", errdefs.ErrConfig)
+			}
+			spec.Data = intconnector.GitAuthorOnlyValue
+			break
+		}
 		value := strings.TrimRight(input.Value, "\r\n")
 		if value == "" {
 			return spec, fmt.Errorf("%w: the secret value is required", errdefs.ErrConfig)
@@ -924,10 +495,10 @@ func (a connectorAPI) identitySecret(conn *connector.Connector, input identityRe
 	}
 	method, _ := conn.Method("")
 	desc := conn.Descriptor(method)
-	if !intconnector.AcceptsScope(desc, scope.level()) {
+	if !intconnector.AcceptsScope(desc, scope.Level()) {
 		return empty, fmt.Errorf(
 			"%w: an identity of connector %q is stored at %s level, not %s",
-			errdefs.ErrConfig, desc.Name, strings.Join(desc.Scopes, " or "), scope.level())
+			errdefs.ErrConfig, desc.Name, strings.Join(desc.Scopes, " or "), scope.Level())
 	}
 	secretType := strings.TrimSpace(input.Type)
 	if secretType == "" {
@@ -938,7 +509,8 @@ func (a connectorAPI) identitySecret(conn *connector.Connector, input identityRe
 		}
 		secretType = desc.SecretTypes[0]
 	}
-	spec, err := identityMaterial(input, secretType)
+	authorOnly := desc.Name == intconnector.GitIdentityTag && secretType == v1beta1.SecretTypeOpaque
+	spec, err := identityMaterial(input, secretType, authorOnly)
 	if err != nil {
 		return empty, err
 	}
@@ -953,6 +525,9 @@ func (a connectorAPI) identitySecret(conn *connector.Connector, input identityRe
 		spec.Identity = identity
 	}
 	if checkErr := intconnector.CheckSecret(desc, spec); checkErr != nil {
+		return empty, fmt.Errorf("%w: %w", errdefs.ErrConfig, checkErr)
+	}
+	if checkErr := intconnector.CheckGitAuthorOnly(spec); checkErr != nil {
 		return empty, fmt.Errorf("%w: %w", errdefs.ErrConfig, checkErr)
 	}
 	return v1beta1.SecretDoc{
@@ -1021,7 +596,7 @@ func (a connectorAPI) pickForConfig(ctx context.Context, c kukeonv1.Client, r *h
 		// a wrong pick fail here with the same message the CLI gives.
 		if conn, known := a.catalog.Find(status.Connector); known {
 			method, _ := conn.Method(status.Method)
-			if err = checkIdentity(ctx, c, conn.Descriptor(method), *identity); err != nil {
+			if err = scopedefaults.CheckIdentity(ctx, c, conn.Descriptor(method), *identity); err != nil {
 				return nil, err
 			}
 		}
@@ -1031,7 +606,7 @@ func (a connectorAPI) pickForConfig(ctx context.Context, c kukeonv1.Client, r *h
 	}
 	cfg.APIVersion, cfg.Kind = v1beta1.APIVersionV1Beta1, v1beta1.KindCellConfig
 	cfg.Status = nil
-	if _, err = applyDocument(ctx, c, cfg, v1beta1.KindCellConfig); err != nil {
+	if _, err = scopedefaults.ApplyDocument(ctx, c, cfg, v1beta1.KindCellConfig); err != nil {
 		return nil, err
 	}
 	updated, err := c.GetConfig(ctx, v1beta1.CellConfigDoc{Metadata: md})

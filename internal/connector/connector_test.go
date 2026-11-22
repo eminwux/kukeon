@@ -25,6 +25,7 @@ import (
 	"github.com/eminwux/kukeon/internal/connector"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	teamconnector "github.com/eminwux/kukeon/pkg/team/connector"
 )
 
 // descriptor is a connector with one field of every type, so the rules are
@@ -327,5 +328,89 @@ func TestRegistryHandler(t *testing.T) {
 	}
 	if connector.RedactRegistryPasswords(nil) != nil {
 		t.Fatal("no credentials stay nil")
+	}
+}
+
+// TestGitIdentityTypes checks the bundled git connector (issue #1591): an
+// ssh-key or basic-auth identity still names the hosts it authenticates, and
+// an opaque one is author-only — it takes no hosts, no signing and no
+// allowed-signers secret, and must carry an author.
+func TestGitIdentityTypes(t *testing.T) {
+	catalog, err := teamconnector.Default()
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, ok := catalog.Find(connector.GitIdentityTag)
+	if !ok {
+		t.Fatal("the bundled catalog has no git connector")
+	}
+	method, _ := conn.Method("")
+	desc := conn.Descriptor(method)
+	const author = "Me <me@example.com>"
+	for _, tc := range []struct {
+		name     string
+		typ      string
+		identity map[string]string
+		want     string // empty: accepted
+	}{
+		{"ssh-key with hosts", v1beta1.SecretTypeSSHKey, map[string]string{"hosts": "github.com"}, ""},
+		{
+			"ssh-key without hosts", v1beta1.SecretTypeSSHKey,
+			map[string]string{"author": author},
+			`requires identity field "hosts"`,
+		},
+		{"basic-auth without hosts", v1beta1.SecretTypeBasicAuth, nil, `requires identity field "hosts"`},
+		{"author-only", v1beta1.SecretTypeOpaque, map[string]string{"author": author, "committer": author}, ""},
+		{
+			"author-only with hosts", v1beta1.SecretTypeOpaque,
+			map[string]string{"author": author, "hosts": "github.com"},
+			`identity field "hosts" applies to a ssh-key or basic-auth secret, not opaque`,
+		},
+		{
+			"author-only with sign", v1beta1.SecretTypeOpaque,
+			map[string]string{"author": author, "sign": "commits"},
+			`identity field "sign" applies to a ssh-key secret, not opaque`,
+		},
+		{
+			"author-only with allowed signers", v1beta1.SecretTypeOpaque,
+			map[string]string{"author": author, "allowedSignersRef": "signers"},
+			`identity field "allowedSignersRef" applies to a ssh-key secret, not opaque`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			checkErr := connector.CheckSecret(desc, v1beta1.SecretSpec{
+				Type: tc.typ, Connector: connector.GitIdentityTag, Identity: tc.identity,
+			})
+			if tc.want == "" {
+				if checkErr != nil {
+					t.Fatal(checkErr)
+				}
+				return
+			}
+			if !errors.Is(checkErr, errdefs.ErrConnectorIdentity) || !strings.Contains(checkErr.Error(), tc.want) {
+				t.Fatalf("err = %v, want %q", checkErr, tc.want)
+			}
+		})
+	}
+
+	authorOnly := v1beta1.SecretSpec{Connector: connector.GitIdentityTag, Data: connector.GitAuthorOnlyValue}
+	if !connector.IsGitAuthorOnly(authorOnly) {
+		t.Fatal("an untyped (opaque) git identity is author-only")
+	}
+	if err = connector.CheckGitAuthorOnly(authorOnly); !errors.Is(err, errdefs.ErrConnectorIdentity) ||
+		!strings.Contains(err.Error(), `"author"`) {
+		t.Fatalf("CheckGitAuthorOnly(no author) = %v, want it to require the author", err)
+	}
+	authorOnly.Identity = map[string]string{"author": author}
+	if err = connector.CheckGitAuthorOnly(authorOnly); err != nil {
+		t.Fatalf("CheckGitAuthorOnly(author) = %v", err)
+	}
+	for _, other := range []v1beta1.SecretSpec{
+		{Type: v1beta1.SecretTypeSSHKey, Connector: connector.GitIdentityTag},
+		{Connector: "other"},
+	} {
+		if connector.IsGitAuthorOnly(other) || connector.CheckGitAuthorOnly(other) != nil {
+			t.Errorf("%+v is not an author-only git identity", other)
+		}
 	}
 }

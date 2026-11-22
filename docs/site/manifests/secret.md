@@ -43,7 +43,7 @@ What the secret holds. Defaults to `opaque`.
 | `basic-auth` | `spec.basicAuth`: a username plus a password **or** a token.       | Git over HTTPS — [`git.credentials[]`](container.md#containergit)       |
 | `ssh-key`    | `spec.sshKey`: an OpenSSH private key and its optional companions. | Git over SSH and SSH signing — `git.credentials[]`, `git.signing`       |
 
-`basic-auth` and `ssh-key` are **git credentials**. They are consumed only through a `git` block and cannot be referenced from a container's `secrets[]`; an `opaque` secret cannot be used as a git credential. See the [git credentials guide](../guides/git-credentials.md). A `basic-auth` secret is also what a Realm's [`registryCredentials[].secretRef`](realm.md#specregistrycredentials-array-optional) names.
+`basic-auth` and `ssh-key` are **git credentials**. They are consumed only through a `git` block and cannot be referenced from a container's `secrets[]`; an `opaque` secret cannot be used as a git credential. An `opaque` Secret tagged `git` is an [author-only git identity](../concepts/connectors.md#author-only-identities): it sets an author and committer and authenticates nothing. See the [git credentials guide](../guides/git-credentials.md). A `basic-auth` secret is also what a Realm's [`registryCredentials[].secretRef`](realm.md#specregistrycredentials-array-optional) names.
 
 ### `spec.connector` (string, optional)
 

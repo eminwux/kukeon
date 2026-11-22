@@ -18,7 +18,6 @@ package initialize
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"io"
 	"io/fs"
@@ -27,7 +26,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/eminwux/kukeon/internal/team/bootstrap"
 	"github.com/eminwux/kukeon/internal/team/teamtest"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	"github.com/eminwux/kukeon/pkg/team/config"
@@ -46,75 +44,97 @@ func sourceFS() map[string]fs.FS {
 
 func setupRun(t *testing.T) Options {
 	t.Helper()
-	// Run bootstraps from the real `git config --global`; keep the developer's
-	// identity out so resource counts do not depend on the host.
-	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	// kuketeams.yaml is optional (issue #1591): a fresh host has none.
 	root := filepath.Join(t.TempDir(), ".kuke")
-	_, err := bootstrap.Run(t.Context(), bootstrap.Options{Root: root, Git: emptyGit{}})
-	if err != nil {
-		t.Fatal(err)
-	}
 	return Options{Root: root, Home: filepath.Dir(root), Sources: sourceFS(), Client: newFake(), Force: true}
 }
 
-type emptyGit struct{}
-
-func (emptyGit) Lookup(context.Context, string, bool) (string, error) {
-	return "", bootstrap.ErrMissing
+// writeTeamsConfig writes a hand-written kuketeams.yaml.
+func writeTeamsConfig(t *testing.T, root, content string) string {
+	t.Helper()
+	path := filepath.Join(root, "kuketeams.yaml")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
-func TestRunExistingConfigurationRequiresForce(t *testing.T) {
+// TestRunExistingEntryRequiresForce: "already initialized" is the kuke team
+// entry, not kuketeams.yaml (issue #1591).
+func TestRunExistingEntryRequiresForce(t *testing.T) {
 	opts := setupRun(t)
-	opts.Force = false
-	path := filepath.Join(opts.Root, "kuketeams.yaml")
-	before, err := os.ReadFile(path)
+	if _, err := Run(t.Context(), opts); err != nil {
+		t.Fatal(err)
+	}
+	entryPath := filepath.Join(opts.Root, "kuketeam.d", "kuke.yaml")
+	before, err := os.ReadFile(entryPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = Run(t.Context(), opts); err == nil || !strings.Contains(err.Error(), "--force") {
-		t.Fatalf("expected existing configuration guidance, got %v", err)
+	opts.Force = false
+	f := newFake()
+	opts.Client = f
+	if _, err = Run(t.Context(), opts); err == nil || !strings.Contains(err.Error(), "already initialized") ||
+		!strings.Contains(err.Error(), "--force") || !strings.Contains(err.Error(), "--reapply") {
+		t.Fatalf("expected already-initialized guidance, got %v", err)
 	}
-	after, err := os.ReadFile(path)
-	if err != nil || !bytes.Equal(before, after) || opts.Client.(*fakeClient).applies != 0 {
-		t.Fatal("existing configuration or daemon changed")
+	after, err := os.ReadFile(entryPath)
+	if err != nil || !bytes.Equal(before, after) || f.applies != 0 {
+		t.Fatal("existing registration or daemon changed")
 	}
 }
 
-func TestRunCreatesMissingConfiguration(t *testing.T) {
-	opts := setupRun(t)
-	path := filepath.Join(opts.Root, "kuketeams.yaml")
-	if err := os.Remove(path); err != nil {
+// TestRunWithoutConfiguration is AC1 and AC4: on a host whose global git
+// configuration signs with an SSH key, init reads none of it, writes no
+// kuketeams.yaml and prints no git note.
+func TestRunWithoutConfiguration(t *testing.T) {
+	gitconfig := filepath.Join(t.TempDir(), "gitconfig")
+	if err := os.WriteFile(gitconfig, []byte("[user]\n\tname = Dev\n\temail = dev@example.com\n"+
+		"\tsigningkey = ~/.ssh/id_ed25519.pub\n[commit]\n\tgpgsign = true\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("GIT_CONFIG_GLOBAL", gitconfig)
+	opts := setupRun(t)
 	opts.Force = false
 	result, err := Run(t.Context(), opts)
-	if err != nil || !result.Bootstrap.Created || result.Resources != 4 {
+	if err != nil || result.Resources != 4 || result.ConfigPath != "" {
 		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if _, statErr := os.Stat(filepath.Join(opts.Root, "kuketeams.yaml")); !os.IsNotExist(statErr) {
+		t.Fatalf("init wrote kuketeams.yaml: %v", statErr)
+	}
+	for _, note := range result.Notes {
+		if strings.Contains(strings.ToLower(note), "git") {
+			t.Fatalf("init printed a git note: %q", note)
+		}
+	}
+	if f := opts.Client.(*fakeClient); f.creates != 0 || f.stackDefaults != nil {
+		t.Fatalf("init stored a secret or stack git defaults: creates=%d stack=%+v", f.creates, f.stackDefaults)
 	}
 }
 
-func TestRunForceResetsConfigurationAndEntry(t *testing.T) {
+// TestRunForceResetsEntryAndKeepsConfiguration: --force replaces the kuke
+// team entry and never touches a hand-written kuketeams.yaml (AC4).
+func TestRunForceResetsEntryAndKeepsConfiguration(t *testing.T) {
 	opts := setupRun(t)
-	path := filepath.Join(opts.Root, "kuketeams.yaml")
-	original, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	original = append([]byte("# authored comment\n"), original...)
-	if err = os.WriteFile(path, original, 0o640); err != nil {
-		t.Fatal(err)
-	}
+	original := []byte("# authored comment\napiVersion: kuketeams.io/v1\nkind: TeamsConfig\nspec:\n  defaults: {}\n")
+	path := writeTeamsConfig(t, opts.Root, string(original))
 	for range 2 {
 		result, runErr := Run(t.Context(), opts)
 		if runErr != nil {
 			t.Fatal(runErr)
 		}
-		if result.Resources != 4 || result.EntryPath != filepath.Join(opts.Root, "kuketeam.d", "kuke.yaml") {
+		if result.Resources != 4 || result.EntryPath != filepath.Join(opts.Root, "kuketeam.d", "kuke.yaml") ||
+			result.ConfigPath != path {
 			t.Fatalf("result=%+v", result)
 		}
 		after, readErr := os.ReadFile(path)
-		if readErr != nil || bytes.Equal(after, original) || bytes.Contains(after, []byte("authored comment")) {
-			t.Fatal("configuration not reset")
+		info, statErr := os.Stat(path)
+		if readErr != nil || statErr != nil || !bytes.Equal(after, original) || info.Mode().Perm() != 0o640 {
+			t.Fatal("init --force touched the hand-written configuration")
 		}
 		entryBytes, readErr := os.ReadFile(result.EntryPath)
 		if readErr != nil {
@@ -128,7 +148,7 @@ func TestRunForceResetsConfigurationAndEntry(t *testing.T) {
 			len(entry.Spec.Harnesses) != 2 {
 			t.Fatal("initial explicit declaration lost")
 		}
-		info, statErr := os.Stat(result.EntryPath)
+		info, statErr = os.Stat(result.EntryPath)
 		if statErr != nil || info.Mode().Perm() != 0o600 {
 			t.Fatal("unsafe entry permissions")
 		}
@@ -136,6 +156,28 @@ func TestRunForceResetsConfigurationAndEntry(t *testing.T) {
 	f := opts.Client.(*fakeClient)
 	if f.applies != 2 || f.team != "kuke" {
 		t.Fatal("rerun did not update stable identity")
+	}
+}
+
+// TestRunRejectsLeftoverSpecGit is D7: a kuketeams.yaml that still carries
+// spec.git fails before anything reaches the daemon, naming the replacement.
+func TestRunRejectsLeftoverSpecGit(t *testing.T) {
+	for _, reapplying := range []bool{false, true} {
+		opts := setupRun(t)
+		if reapplying {
+			if _, err := Run(t.Context(), opts); err != nil {
+				t.Fatal(err)
+			}
+			opts.Force, opts.Reapply = false, true
+		}
+		writeTeamsConfig(t, opts.Root, "apiVersion: kuketeams.io/v1\nkind: TeamsConfig\nspec:\n"+
+			"  git:\n    author: {name: Dev, email: dev@example.com}\n")
+		f := newFake()
+		opts.Client = f
+		_, err := Run(t.Context(), opts)
+		if err == nil || !strings.Contains(err.Error(), "kuke connector import git") || f.applies != 0 {
+			t.Fatalf("reapply=%v: err=%v applies=%d", reapplying, err, f.applies)
+		}
 	}
 }
 

@@ -62,9 +62,6 @@ func TestFixturesAndRoundTrip(t *testing.T) {
 	if global.Spec.Defaults.Roles[1].Harness != "claude" {
 		t.Fatal("role harness override lost")
 	}
-	if global.Spec.Git.Author == global.Spec.Git.Committer {
-		t.Fatal("identity storage aliased")
-	}
 	omitted, empty := fixture(t, "empty-defaults"), fixture(t, "empty-lists")
 	if omitted.Spec.Defaults.Sources != nil || omitted.Spec.Defaults.Roles != nil ||
 		omitted.Spec.Defaults.Harnesses != nil {
@@ -111,55 +108,6 @@ func TestValidate(t *testing.T) {
 	}{
 		{"version", func(c *config.TeamsConfig) { c.APIVersion = "v2" }, "apiVersion:"},
 		{"kind", func(c *config.TeamsConfig) { c.Kind = "ProjectTeam" }, "kind:"},
-		{"optional git", func(c *config.TeamsConfig) { c.Spec.Git = nil }, ""},
-		{"empty git", func(c *config.TeamsConfig) { c.Spec.Git = &config.Git{} }, ""},
-		{"only author", func(c *config.TeamsConfig) { c.Spec.Git.Committer = nil }, ""},
-		{"only committer", func(c *config.TeamsConfig) { c.Spec.Git.Author = nil }, ""},
-		{"blank author name", func(c *config.TeamsConfig) { c.Spec.Git.Author.Name = " " }, "spec.git.author.name:"},
-		{"blank author email", func(c *config.TeamsConfig) { c.Spec.Git.Author.Email = "" }, "spec.git.author.email:"},
-		{
-			"blank committer name",
-			func(c *config.TeamsConfig) { c.Spec.Git.Committer.Name = "" },
-			"spec.git.committer.name:",
-		},
-		{
-			"blank committer email",
-			func(c *config.TeamsConfig) { c.Spec.Git.Committer.Email = "\t" },
-			"spec.git.committer.email:",
-		},
-		{"missing key", func(c *config.TeamsConfig) { c.Spec.Git.SigningKey = " " }, "spec.git.signing:"},
-		{"stored signing secret", func(c *config.TeamsConfig) {
-			c.Spec.Git.SigningKey = ""
-			c.Spec.Git.Signing = &config.GitSigning{
-				SecretRef:         config.SecretRef{Name: "git-ssh", Realm: "default"},
-				AllowedSignersRef: &config.SecretRef{Name: "signers", Realm: "default"},
-			}
-		}, ""},
-		{"signing secret without realm", func(c *config.TeamsConfig) {
-			c.Spec.Git.Signing = &config.GitSigning{SecretRef: config.SecretRef{Name: "git-ssh"}}
-		}, "spec.git.signing.secretRef:"},
-		{"stored credential", func(c *config.TeamsConfig) {
-			c.Spec.Git.Credentials = []config.GitCredential{{
-				Host: "github.com", SecretRef: config.SecretRef{Name: "git-ssh", Realm: "default"},
-				User: "git", Port: 2222, HostKeyPolicy: "accept-new",
-			}}
-		}, ""},
-		{"duplicate credential host", func(c *config.TeamsConfig) {
-			ref := config.SecretRef{Name: "git-ssh", Realm: "default"}
-			c.Spec.Git.Credentials = []config.GitCredential{
-				{Host: "github.com", SecretRef: ref}, {Host: "github.com", SecretRef: ref},
-			}
-		}, "spec.git.credentials[1].host:"},
-		{"credential host with scheme", func(c *config.TeamsConfig) {
-			c.Spec.Git.Credentials = []config.GitCredential{{
-				Host: "https://github.com", SecretRef: config.SecretRef{Name: "git-ssh", Realm: "default"},
-			}}
-		}, "spec.git.credentials[0].host:"},
-		{"credential bad policy", func(c *config.TeamsConfig) {
-			c.Spec.Git.Credentials = []config.GitCredential{{
-				Host: "github.com", SecretRef: config.SecretRef{Name: "git-ssh", Realm: "default"}, HostKeyPolicy: "off",
-			}}
-		}, "spec.git.credentials[0].hostKeyPolicy:"},
 		{"source identity", func(c *config.TeamsConfig) {
 			c.Spec.Defaults.Sources[0].Git = &config.SourceGit{
 				Author:     &config.Identity{Name: "bot", Email: "bot@example.com"},
@@ -174,10 +122,6 @@ func TestValidate(t *testing.T) {
 		{"source credential without secret", func(c *config.TeamsConfig) {
 			c.Spec.Defaults.Sources[0].Git = &config.SourceGit{Credential: &config.SourceCredential{}}
 		}, "sources[0].git.credential.secretRef:"},
-		{"bad signing value", func(c *config.TeamsConfig) { c.Spec.Git.Sign = []string{"all"} }, "spec.git.sign[0]:"},
-		{"blank signing value", func(c *config.TeamsConfig) { c.Spec.Git.Sign = []string{""} }, "spec.git.sign[0]:"},
-		{"sign both", func(c *config.TeamsConfig) { c.Spec.Git.Sign = []string{"commits", "tags"} }, ""},
-		{"key without signing", func(c *config.TeamsConfig) { c.Spec.Git.Sign = nil }, ""},
 		{"no revision", func(c *config.TeamsConfig) { c.Spec.Defaults.Sources[0].Branch = "" }, "exactly one"},
 		{"two revisions", func(c *config.TeamsConfig) { c.Spec.Defaults.Sources[0].Tag = "v1" }, "exactly one"},
 		{"three revisions", func(c *config.TeamsConfig) {
@@ -323,8 +267,8 @@ func TestStrictDecode(t *testing.T) {
 		{"unknown root", header + "oops: true", "oops: unknown field"},
 		{
 			"unknown nested",
-			header + "spec: {git: {author: {name: A, email: a, oops: true}}}",
-			"spec.git.author.oops: unknown field",
+			header + "spec: {defaults: {sources: [{git: {author: {name: A, email: a, oops: true}}}]}}",
+			"spec.defaults.sources[0].git.author.oops: unknown field",
 		},
 		{
 			"unknown selection",
@@ -343,7 +287,17 @@ func TestStrictDecode(t *testing.T) {
 		{"list instead of object", "[]", "expected mapping"},
 		{"wrong list type", header + "spec: {defaults: {roles: {}}}", "spec.defaults.roles: expected list"},
 		{"null list", header + "spec: {defaults: {roles: null}}", "spec.defaults.roles: expected list"},
-		{"wrong string type", header + "spec: {git: {signingKey: 123}}", "spec.git.signingKey: expected string"},
+		{
+			"wrong string type",
+			header + "spec: {defaults: {roles: [{name: 123}]}}",
+			"spec.defaults.roles[0].name: expected string",
+		},
+		// Issue #1591: the git identity moved to the git connector.
+		{
+			"removed spec.git",
+			header + "spec: {git: {author: {name: A, email: a}}}",
+			"spec.git: spec.git was removed; store your git identity with kuke connector import git --default",
+		},
 		{
 			"removed harness default",
 			header + "spec: {defaults: {harnesses: [{default: 'true'}]}}",
@@ -354,8 +308,8 @@ func TestStrictDecode(t *testing.T) {
 		{"cyclic alias", header + "spec: &loop {defaults: {roles: [*loop]}}", "cyclic YAML alias"},
 		{
 			"unknown through alias",
-			header + "spec: {git: {author: &id {name: A, email: a}, committer: *id, sign: *id}}",
-			"spec.git.sign: expected list",
+			header + "spec: {defaults: {sources: [{git: {author: &id {name: A, email: a}, committer: *id, sign: *id}}]}}",
+			"spec.defaults.sources[0].git.sign: expected list",
 		},
 		{
 			"blank explicit harness",
@@ -364,10 +318,14 @@ func TestStrictDecode(t *testing.T) {
 		},
 		{
 			"merge key",
-			header + "spec: {git: {author: &id {name: A, email: a}, committer: {<<: *id}}}",
-			"spec.git.committer: expected string field name",
+			header + "spec: {defaults: {sources: [{git: {author: &id {name: A, email: a}, committer: {<<: *id}}}]}}",
+			"spec.defaults.sources[0].git.committer: expected string field name",
 		},
-		{"valid aliases", header + "spec: {git: {author: &id {name: A, email: a}, committer: *id}}", ""},
+		{
+			"valid aliases",
+			header + "spec: {defaults: {sources: [{name: s, url: u, branch: b, git: {author: &id {name: A, email: a}, committer: *id}}]}}",
+			"",
+		},
 		{"trailing comments", header + "# done\n", ""},
 	}
 	for _, tc := range cases {
@@ -465,7 +423,7 @@ func TestTaggedContainers(t *testing.T) {
 	for _, tc := range []struct{ name, body, want string }{
 		{"null mapping", "spec: !!null {}", "spec: expected mapping"},
 		{"null sequence", "spec: {defaults: {sources: !!null []}}", "spec.defaults.sources: expected list"},
-		{"null mapping alias", "spec: {git: {author: &id !!null {}, committer: *id}}", "spec.git.author: expected mapping"},
+		{"null mapping alias", "spec: {defaults: {sources: [{git: {author: &id !!null {}, committer: *id}}]}}", "spec.defaults.sources[0].git.author: expected mapping"},
 		{"null sequence alias", "spec: {defaults: {sources: &list !!null [], roles: *list}}", "spec.defaults.sources: expected list"},
 		{"custom mapping", "spec: !custom {}", "spec: expected mapping"},
 		{"custom sequence", "spec: {defaults: {sources: !custom []}}", "spec.defaults.sources: expected list"},
@@ -487,13 +445,6 @@ func TestInvalidUTF8(t *testing.T) {
 	}{
 		{"apiVersion", func(c *config.TeamsConfig) { c.APIVersion = invalid }},
 		{"kind", func(c *config.TeamsConfig) { c.Kind = invalid }},
-		{"spec.git.author.name", func(c *config.TeamsConfig) { c.Spec.Git.Author.Name = invalid }},
-		{"spec.git.author.email", func(c *config.TeamsConfig) { c.Spec.Git.Author.Email = invalid }},
-		{"spec.git.committer.name", func(c *config.TeamsConfig) { c.Spec.Git.Committer.Name = invalid }},
-		{"spec.git.committer.email", func(c *config.TeamsConfig) { c.Spec.Git.Committer.Email = invalid }},
-		{"spec.git.signingKey", func(c *config.TeamsConfig) { c.Spec.Git.Sign = nil; c.Spec.Git.SigningKey = invalid }},
-		{"spec.git.allowedSigners", func(c *config.TeamsConfig) { c.Spec.Git.AllowedSigners = invalid }},
-		{"spec.git.sign[0]", func(c *config.TeamsConfig) { c.Spec.Git.Sign[0] = invalid }},
 		{"spec.defaults.sources[0].name", func(c *config.TeamsConfig) { c.Spec.Defaults.Sources[0].Name = invalid }},
 		{"spec.defaults.sources[0].url", func(c *config.TeamsConfig) { c.Spec.Defaults.Sources[0].URL = invalid }},
 		{"spec.defaults.sources[0].branch", func(c *config.TeamsConfig) { c.Spec.Defaults.Sources[0].Branch = invalid }},
@@ -529,9 +480,10 @@ func TestInvalidUTF8(t *testing.T) {
 
 func TestUnicodeRoundTrip(t *testing.T) {
 	cfg := fixture(t, "global")
-	cfg.Spec.Git.Author.Name = "Zoë 🦊"
-	cfg.Spec.Git.SigningKey = "鍵.pub"
-	cfg.Spec.Git.AllowedSigners = "署名者"
+	cfg.Spec.Defaults.Sources[0].Git = &config.SourceGit{
+		Author: &config.Identity{Name: "Zoë 🦊", Email: "zoë@example.com"},
+	}
+	cfg.Spec.Defaults.Roles[0].Path = "署名者/鍵"
 	var out bytes.Buffer
 	if err := config.Encode(&out, cfg); err != nil {
 		t.Fatal(err)

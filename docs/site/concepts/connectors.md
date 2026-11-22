@@ -65,15 +65,15 @@ connector.
 ### `git`
 
 The identity a cell clones, pushes and signs with. A git identity is one
-`ssh-key` or `basic-auth` Secret that also carries readable facts:
+`ssh-key`, `basic-auth` or `opaque` Secret that also carries readable facts:
 
-| Field               | Type              | Meaning                                                       |
-| ------------------- | ----------------- | ------------------------------------------------------------- |
-| `hosts` (required)  | list              | Hosts or URL prefixes the Secret authenticates (`github.com`) |
-| `author`            | `Name <email>`    | Commit author                                                 |
-| `committer`         | `Name <email>`    | Committer; git falls back to the author                       |
-| `sign`              | `commits`, `tags` | What to sign with the key (`ssh-key` only)                    |
-| `allowedSignersRef` | secret reference  | Allowed-signers file used to verify (`ssh-key` only)          |
+| Field               | Type              | Meaning                                                                                                |
+| ------------------- | ----------------- | ------------------------------------------------------------------------------------------------------ |
+| `hosts`             | list              | Hosts or URL prefixes the Secret authenticates (`github.com`); required for `ssh-key` and `basic-auth` |
+| `author`            | `Name <email>`    | Commit author                                                                                          |
+| `committer`         | `Name <email>`    | Committer; git falls back to the author                                                                |
+| `sign`              | `commits`, `tags` | What to sign with the key (`ssh-key` only)                                                             |
+| `allowedSignersRef` | secret reference  | Allowed-signers file used to verify (`ssh-key` only)                                                   |
 
 `git.identityRef` names such a Secret — on a Realm, Space or Stack default, on a
 Config's `git` block, or on one repo's `git`. When a cell is rendered the daemon
@@ -84,6 +84,67 @@ its own author. The rendered cell never carries the reference, only the result.
 
 A role with `needs.repos` requires the connector. It is optional for the cell
 to start: a public repository clones without an identity.
+
+#### Author-only identities
+
+An `opaque` git identity is **author-only**: it carries `author` (required) and
+`committer`, and no key. `hosts`, `sign` and `allowedSignersRef` are rejected
+on it. Its stored value is the fixed placeholder `kukeon:git-author-only`, which
+nothing reads. It is for a user without an SSH key who still wants commits made
+under their name.
+
+- A cell whose default names it gets the author and committer, no credential
+  and no signing.
+- Named on one repo's `git.identityRef`, it sets that repo's author and no
+  credential.
+
+```bash
+kuke create secret me --connector git --type opaque --author 'Me <me@example.com>'
+```
+
+`--type opaque` may be left out: `--connector git` without `--type` and without
+`--from-file` creates an author-only identity. With `--from-file`, `--type` is
+required. An author-only identity takes no value: `--from-literal` and
+`--from-file` fail with
+`an author-only git identity stores no value; use --type ssh-key for a key`.
+
+#### `kuke connector`
+
+[`kuke connector`](../cli/kuke-connector.md) manages git identities and Realm
+defaults from the command line:
+
+```bash
+kuke connector list                      # identities and Realm defaults
+kuke connector import git --default      # store your SSH key and gitconfig author, make it the default
+kuke connector default git git-ssh       # make an existing identity the Realm default
+kuke connector default git --clear       # remove it
+```
+
+`import git` reads the SSH key and the global git configuration of the user
+running it. With a key it stores an `ssh-key` identity (`git-ssh`); without one,
+an author-only identity (`git-author`). It turns signing on only when
+`user.signingkey` names the imported key. See the
+[git credentials guide](../guides/git-credentials.md).
+
+#### Import from host in the web UI
+
+On the Connectors page, the `git` connector's Identities panel has an
+**Import from host** action. It takes a realm, the hosts, an optional identity
+name, an optional key and passphrase file, and a _Make it the Realm default_
+checkbox (on by default). It calls `POST /api/connectors/git/import` with
+`{realm, hosts, name, key, passphraseFile, makeDefault}` and runs the same
+import as `kuke connector import git`.
+
+The import runs **as the user running `kuke serve`**: it reads that account's
+`~/.ssh` and global git configuration. Under a service manager that may not be
+your shell account; the result shows the home directory and the key path that
+were read. The key and passphrase file are paths inside that home directory
+(`.ssh/id_ed25519` or `~/.ssh/id_ed25519`); absolute paths and `..` are refused.
+Key material never appears in a response or an error. `kuke serve` has no
+authentication: see the _Trusted network only_ warning at the top of this page.
+
+The identity create form also offers `opaque` for `git`, with no value field: an
+author-only identity.
 
 ### `registry`
 

@@ -16,17 +16,9 @@
 
 package webserver
 
-import (
-	"path/filepath"
-	"strings"
-)
+import "github.com/eminwux/kukeon/internal/connector/scopedefaults"
 
 // safePathSegment accepts empty optional coordinates and rejects values that
 // could turn a single resource name into a path or escape its resource tree.
-func safePathSegment(value string) bool {
-	if value == "" {
-		return true
-	}
-	return value != "." && value != ".." && filepath.IsLocal(value) &&
-		!strings.ContainsAny(value, `/\\`) && !strings.ContainsRune(value, 0)
-}
+// The rule is shared with `kuke connector`, which validates the same inputs.
+func safePathSegment(value string) bool { return scopedefaults.SafePathSegment(value) }
