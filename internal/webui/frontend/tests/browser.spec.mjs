@@ -2332,6 +2332,67 @@ test("Overview shows an explicit all-Ready state when no cell needs attention", 
   const attention = page.getByRole("region", { name: "Cells needing attention" });
   await expect(attention).toContainText("All cells Ready");
   await expect(attention.getByRole("link")).toHaveCount(0);
+  await expect(attention.locator(".badge")).toHaveText("0 of 2 cells");
+  await expect(page.locator(".drift-badge")).toHaveCount(0);
+});
+
+// Issue #1568, item B: a Ready cell that is out of sync with its Config no longer looks healthy.
+test("config drift shows in Needs attention, the Cells table and the sidebar, and the Overview leads with cells", async ({ page }) => {
+  const statuses = { "dev/api-00": { state: "Ready", outOfSync: true, outOfSyncReason: "image changed" }, "prod/api-00": { state: "Ready", outOfSyncError: "config demo not found" } };
+  await mock(page, path => /\/cells$/.test(path) ? { json: fixture(path, 2).map(cell => ({ ...cell, status: statuses[`${path.split("/")[3]}/${cell.metadata.name}`] ?? { state: "Ready" } })) } : undefined);
+  await page.goto(`${server.url}#/resources`);
+  const attention = page.getByRole("region", { name: "Cells needing attention" });
+  await expect(attention.locator(".panel-heading .badge")).toHaveText("2 of 4 cells");
+  const items = attention.getByRole("listitem");
+  await expect(items).toHaveCount(2);
+  const drifted = items.filter({ hasText: "dev / shared / services" });
+  await expect(drifted.getByRole("link", { name: "api-00", exact: true })).toHaveAttribute("href", "#/resource/dev/shared/services/api-00");
+  await expect(drifted.locator(".state-badge")).toHaveText(["Ready", /^Drift\b/]);
+  await expect(drifted.locator(".attention-reason")).toHaveText("Configuration out of sync: image changed");
+  // The badge is a text label whose accessible text and tooltip carry the reason.
+  await expect(drifted.locator(".drift-badge")).toHaveAttribute("title", "Configuration out of sync: image changed");
+  await expect(drifted.locator(".drift-badge")).toContainText("Configuration out of sync: image changed");
+  const failed = items.filter({ hasText: "prod / shared / services" });
+  await expect(failed.locator(".state-badge")).toHaveText(["Ready", /^Drift unknown/]);
+  await expect(failed.locator(".attention-reason")).toHaveText("Configuration comparison failed: config demo not found");
+  // The attention panel and the cell summary come before the realm, space and stack cards.
+  await expect(page.locator(".summary-card > span")).toHaveText(["Cells", "Realms", "Spaces", "Stacks"]);
+  const tops = await page.evaluate(() => [".attention-panel", ".summary-card-cells", ".summary-card:not(.summary-card-cells)"].map(selector => document.querySelector(selector).getBoundingClientRect().top));
+  expect(tops[0]).toBeLessThan(tops[1]);
+  expect(tops[1]).toBeLessThan(tops[2]);
+  await expect(page.locator(".summary-card-cells").getByRole("list", { name: "Cell states" })).toContainText("Ready");
+
+  const sidebar = page.getByRole("navigation", { name: "Cell navigation" });
+  await expect(sidebar.getByRole("link", { name: "Open dev / shared / services / api-00" }).locator(".drift-badge")).toContainText("Drift");
+  await expect(sidebar.getByRole("link", { name: "Open prod / shared / services / api-00" }).locator(".drift-badge")).toContainText("Drift unknown");
+  await expect(sidebar.getByRole("link", { name: "Open dev / shared / services / api-01" }).locator(".drift-badge")).toHaveCount(0);
+  await expect(sidebar.locator(".drift-badge")).toHaveCount(2);
+
+  await page.goto(`${server.url}#/cells`);
+  const rows = content(page).locator("tbody tr");
+  await expect(rows).toHaveCount(4);
+  await expect(rows.filter({ hasText: "dev / shared / services" }).filter({ hasText: "api-00" }).locator(".drift-badge")).toContainText("Drift");
+  await expect(rows.filter({ hasText: "prod / shared / services" }).filter({ hasText: "api-00" }).locator(".drift-badge")).toContainText("Drift unknown");
+  await expect(content(page).locator(".drift-badge")).toHaveCount(2);
+  // The sidebar row keeps the state badge, the drift badge and the name apart at the narrowest sidebar.
+  const overlap = await sidebar.getByRole("link", { name: "Open dev / shared / services / api-00" }).evaluate(link => {
+    const [state, drift] = [...link.querySelectorAll(".state-badge")].map(el => el.getBoundingClientRect());
+    return !(state.right <= drift.left || drift.right <= state.left || state.bottom <= drift.top || drift.bottom <= state.top);
+  });
+  expect(overlap).toBe(false);
+});
+
+test("Group by leaves out controller-managed label keys unless one is the stored selection", async ({ page }) => {
+  await mock(page, path => /\/cells$/.test(path) ? { json: fixture(path).map(cell => ({ ...cell, metadata: { ...cell.metadata, labels: { team: "platform", "kukeon.io/config": "app", "cell.kukeon.io": cell.metadata.name, "realm.kukeon.io/name": "x" } } })) } : undefined);
+  await page.goto(server.url);
+  const groupBy = page.getByRole("region", { name: "All cells" }).getByLabel("Group by");
+  await expect(page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link")).toHaveCount(2);
+  await expect(groupBy.locator("option")).toHaveText(["None", "kukeon.io/config", "team"]);
+  await page.evaluate(() => localStorage.setItem("kukeon-cell-grouping", "cell.kukeon.io"));
+  await page.reload();
+  await expect(groupBy).toHaveValue("cell.kukeon.io");
+  await expect(groupBy.locator("option")).toHaveText(["None", "cell.kukeon.io", "kukeon.io/config", "team"]);
+  await expect(page.getByRole("navigation", { name: "Cell navigation" }).getByRole("region", { name: "api group" })).toBeVisible();
 });
 
 // Administration → Daemon (issue #1386, steps 6 and 8).

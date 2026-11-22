@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { InventoryResource, Row } from "./inventory";
 import { workspaceLink } from "./routes";
-import { ScopePath, StateBadge } from "./status";
+import { DriftBadge, ScopePath, StateBadge } from "./status";
 import type { TerminalState } from "./terminal";
 
 const groupingKey = "kukeon-cell-grouping";
@@ -9,6 +9,10 @@ const collapsedKey = "kukeon-cell-collapsed-groups";
 const pageSize = 100;
 const groupPageSize = 25;
 const ungrouped = "Ungrouped";
+// Controller-managed identity labels (realm.kukeon.io, cell.kukeon.io, …) repeat the scope or are unique per
+// cell, so Group by leaves them out. Same ".kukeon.io" suffix as managedLabelSuffix in
+// internal/controller/runner/labels.go.
+const managedLabelKey = /^[^/]*\.kukeon\.io(\/|$)/;
 
 function storedGrouping(): string {
   try { return localStorage.getItem(groupingKey) ?? ""; } catch { return ""; }
@@ -35,7 +39,7 @@ export function CellSidebar({ inventory, selectedScope, terminalStates }: {
   const [limits, setLimits] = useState<Record<string, number>>({});
   const [groupLimit, setGroupLimit] = useState(groupPageSize);
   const cells = inventory.data?.rows[3] ?? [];
-  const keys = useMemo(() => [...new Set(cells.flatMap(row => Object.keys(row.doc.metadata.labels ?? {})))].sort(), [cells]);
+  const keys = useMemo(() => [...new Set(cells.flatMap(row => Object.keys(row.doc.metadata.labels ?? {})))].filter(key => key === groupBy || !managedLabelKey.test(key)).sort(), [cells, groupBy]);
   const query = search.trim().toLocaleLowerCase();
   const filtered = useMemo(() => cells.filter(row => !query || row.scope.join(" / ").toLocaleLowerCase().includes(query)), [cells, query]);
   const groups = useMemo(() => {
@@ -84,7 +88,7 @@ export function CellSidebar({ inventory, selectedScope, terminalStates }: {
             const fullName = row.scope.join(" / ");
             const terminalState = terminalStates[JSON.stringify(row.scope)];
             const state = row.doc.status?.state;
-            return <li key={JSON.stringify(row.scope)}><a className="cell-link" href={workspaceLink(row.scope)} aria-current={current ? "page" : undefined} aria-label={`Open ${fullName}`} title={fullName}><span className="cell-link-name">{row.doc.metadata.name}</span>{!sharedScope && <span className="cell-link-scope"><ScopePath parts={row.scope.slice(0, 3)} /></span>}<StateBadge state={state} />{terminalState && <span className={`cell-terminal-state ${terminalState}`}>Terminal {terminalState}</span>}</a></li>;
+            return <li key={JSON.stringify(row.scope)}><a className="cell-link" href={workspaceLink(row.scope)} aria-current={current ? "page" : undefined} aria-label={`Open ${fullName}`} title={fullName}><span className="cell-link-name">{row.doc.metadata.name}</span>{!sharedScope && <span className="cell-link-scope"><ScopePath parts={row.scope.slice(0, 3)} /></span>}<StateBadge state={state} /><DriftBadge status={row.doc.status} />{terminalState && <span className={`cell-terminal-state ${terminalState}`}>Terminal {terminalState}</span>}</a></li>;
           })}</ul>{rows.length > limit && <button className="cell-more" onClick={() => setLimits(old => ({ ...old, [id]: limit + pageSize }))}>Show {Math.min(pageSize, rows.length - limit)} more cells</button>}</>}
         </section>;
       })}

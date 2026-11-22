@@ -8,7 +8,7 @@ import { CellSidebar } from "./cell-sidebar";
 import { useInventory, type Inventory, type InventoryResource, type Doc, type RuntimeStatus } from "./inventory";
 import { apiPath, catalogTitles, daemonLink, healthLink, homeLink, imagesLink, kinds, titles, readRoute, resourceLink, listLink, newCellLink, workspaceLink, type Route } from "./routes";
 import { BrandMark, SidebarRail, SidebarResizer, SidebarToggle, VersionRows, railWidth, useSidebarLayout, versionInfo } from "./sidebar-shell";
-import { ScopePath, SocketPath, StateBadge } from "./status";
+import { DriftBadge, ScopePath, SocketPath, StateBadge, driftReason, hasDrift } from "./status";
 import { DocumentRowLink, Icon } from "./icons";
 import { CgroupPanel } from "./cgroup";
 import { RealmImagesPanel } from "./images";
@@ -58,20 +58,24 @@ function StatusSummary({ status, kind, scope }: { status?: RuntimeStatus; kind: 
     </div>
   </section>;
 }
+// The Overview leads with what an operator acts on (#1568): the cells needing attention and the cell
+// summary come before the realm, space and stack counts.
 function Dashboard({ inventory }: { inventory: Resource<Inventory> }) {
   const partial = inventory.error || inventory.data?.failures.length;
   const cells = inventory.data?.rows[3] ?? [];
   const states = new Map<string, number>();
   for (const row of cells) { const state = row.doc.status?.state || "Not reported"; states.set(state, (states.get(state) ?? 0) + 1); }
-  const attention = cells.filter(row => row.doc.status?.state !== "Ready");
+  // A Ready cell that is out of sync with its Config, or whose comparison failed, needs attention too.
+  const attention = cells.filter(row => row.doc.status?.state !== "Ready" || hasDrift(row.doc.status));
   const cardNote = inventory.loading ? "Refreshing…" : partial ? "Incomplete or stale data" : "View all →";
+  const card = (depth: number) => <a className={`summary-card panel${depth === 3 ? " summary-card-cells" : ""}`} key={titles[depth]} href={listLink(depth)}><span>{titles[depth]}</span><strong>{inventory.data ? inventory.data.rows[depth].length : "—"}</strong>{depth === 3 && states.size > 0 && <ul className="summary-states" aria-label="Cell states">{[...states].map(([state, count]) => <li key={state}><StateBadge state={state} /><span>{count}</span></li>)}</ul>}<small>{cardNote}</small></a>;
   return <>
-    <div className="summary-grid">{titles.map((title, depth) => <a className="summary-card panel" key={title} href={listLink(depth)}><span>{title}</span><strong>{inventory.data ? inventory.data.rows[depth].length : "—"}</strong>{depth === 3 && states.size > 0 && <ul className="summary-states" aria-label="Cell states">{[...states].map(([state, count]) => <li key={state}><StateBadge state={state} /><span>{count}</span></li>)}</ul>}<small>{cardNote}</small></a>)}</div>
     <section className="panel attention-panel" aria-label="Cells needing attention">
       <div className="panel-heading"><h2>Needs attention</h2><span className="badge">{partial ? "Incomplete" : `${attention.length} of ${cells.length} cells`}</span></div>
-      {attention.length ? <ul className="attention-list">{attention.map(row => <li key={JSON.stringify(row.scope)}><a className="resource-name" href={resourceLink(row.scope)}>{row.doc.metadata.name}</a><span className="mono-id">{row.scope.slice(0, 3).join(" / ")}</span><StateBadge state={row.doc.status?.state} /></li>)}</ul>
+      {attention.length ? <ul className="attention-list">{attention.map(row => <li key={JSON.stringify(row.scope)}><a className="resource-name" href={resourceLink(row.scope)}>{row.doc.metadata.name}</a><span className="mono-id">{row.scope.slice(0, 3).join(" / ")}</span><span className="attention-badges"><StateBadge state={row.doc.status?.state} /><DriftBadge status={row.doc.status} /></span>{hasDrift(row.doc.status) && <p className="attention-reason">{driftReason(row.doc.status)}</p>}</li>)}</ul>
         : <p className="attention-empty" role="status">{inventory.loading && !inventory.data ? "Loading cell states…" : partial ? "Cell states could not be fully loaded." : cells.length ? <><StateBadge state="Ready" /> All cells Ready</> : "No cells found."}</p>}
     </section>
+    <div className="summary-grid">{card(3)}{[0, 1, 2].map(card)}</div>
   </>;
 }
 function ResourceList({ depth, inventory, parent, operations, onLifecycleAction, onParentAction }: {
@@ -93,7 +97,7 @@ function ResourceList({ depth, inventory, parent, operations, onLifecycleAction,
   return <section className="panel" aria-label={`${titles[depth]} list`}>
     <div className="list-controls"><label className="search-field">Search<input type="search" placeholder={`Search ${titles[depth].toLowerCase()}…`} value={search} onChange={e => { setSearch(e.target.value); setPage(0); }} /></label>{depth > 0 && <label>Realm<select aria-label="Filter by realm" value={realm} onChange={e => { setRealm(e.target.value); setPage(0); }}><option value="">All realms</option>{inventory.data?.rows[0].map(row => <option key={row.scope[0]}>{row.scope[0]}</option>)}</select></label>}<span className="result-count">{filtered.length} results</span></div>
     {parent.length > 0 && <p className="scope-filter">Scope: {parent.join(" / ")} <a href={listLink(depth)}>Clear scope</a></p>}
-    <div className="table-scroll"><table className="stackable"><thead><tr><th>Name</th><th>State</th>{depth > 0 && <th>Scope</th>}<th><span className="sr-only">Actions</span></th></tr></thead><tbody>{filtered.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(row => <tr key={JSON.stringify(row.scope)}><td data-label="Name"><a className="resource-name" href={resourceLink(row.scope)}>{row.doc.metadata.name}</a></td><td data-label="State"><StateBadge state={row.doc.status?.state} />{depth === 3 && failureStates.includes(row.doc.status?.state ?? "") && <AskMajordomo question={cellQuestion(row.scope, row.doc.status)} subject={`cell ${row.scope.join(" / ")}`} />}</td>{depth > 0 && <td className="scope-cell" data-label="Scope"><ScopePath parts={row.scope.slice(0, -1)} /></td>}<td className="row-actions">{depth === 3 ? <CellRowActions scope={row.scope} state={row.doc.status?.state} operation={operations[JSON.stringify(row.scope)]} onAction={onLifecycleAction} /> : <ParentRowActions scope={row.scope} counts={descendantCounts(inventory.data?.rows ?? [], row.scope)} allowed={parentActionsAllowed(row.scope)} operation={operations[JSON.stringify(row.scope)]} onAction={onParentAction} />}</td></tr>)}</tbody></table></div>
+    <div className="table-scroll"><table className="stackable"><thead><tr><th>Name</th><th>State</th>{depth > 0 && <th>Scope</th>}<th><span className="sr-only">Actions</span></th></tr></thead><tbody>{filtered.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(row => <tr key={JSON.stringify(row.scope)}><td data-label="Name"><a className="resource-name" href={resourceLink(row.scope)}>{row.doc.metadata.name}</a></td><td data-label="State"><StateBadge state={row.doc.status?.state} />{depth === 3 && <DriftBadge status={row.doc.status} />}{depth === 3 && failureStates.includes(row.doc.status?.state ?? "") && <AskMajordomo question={cellQuestion(row.scope, row.doc.status)} subject={`cell ${row.scope.join(" / ")}`} />}</td>{depth > 0 && <td className="scope-cell" data-label="Scope"><ScopePath parts={row.scope.slice(0, -1)} /></td>}<td className="row-actions">{depth === 3 ? <CellRowActions scope={row.scope} state={row.doc.status?.state} operation={operations[JSON.stringify(row.scope)]} onAction={onLifecycleAction} /> : <ParentRowActions scope={row.scope} counts={descendantCounts(inventory.data?.rows ?? [], row.scope)} allowed={parentActionsAllowed(row.scope)} operation={operations[JSON.stringify(row.scope)]} onAction={onParentAction} />}</td></tr>)}</tbody></table></div>
     {!filtered.length && <div className="empty-state"><h3>{inventory.loading ? "Loading resources…" : inventory.error || inventory.data?.failures.length ? "Resources could not be fully loaded" : scoped.length ? "No matching resources" : `No ${titles[depth].toLowerCase()} found`}</h3><p>{search || realm ? "Try another search or clear the filters." : "Refresh to retrieve the latest resource state."}</p></div>}
     <div className="pagination"><span>{filtered.length ? `${currentPage * pageSize + 1}–${Math.min((currentPage + 1) * pageSize, filtered.length)} of ${filtered.length}` : "0 results"}</span><button disabled={!currentPage} onClick={() => setPage(currentPage - 1)}>Previous</button><button disabled={(currentPage + 1) * pageSize >= filtered.length} onClick={() => setPage(currentPage + 1)}>Next</button></div>
   </section>;
