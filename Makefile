@@ -164,11 +164,17 @@ kill:
 # Split into per-module sub-targets so CI can run each as its own named step
 # and a red run names the failing component (issue #696); `make test` keeps
 # running both locally. GOWORK=off (exported above) reaches every sub-recipe.
-.PHONY: test test-root test-kukebuild
+.PHONY: test test-root test-race test-kukebuild
 test: test-root test-kukebuild
 
 test-root:
 	go test $(shell go list ./... | grep -v /e2e)
+
+# The daemon package runs under the race detector on its own: its Serve / Stop
+# tests start and stop background loops concurrently, and a plain `go test`
+# cannot see a race there (#1600).
+test-race:
+	go test -race ./internal/daemon/...
 
 test-kukebuild:
 	cd cmd/kukebuild && go test ./...

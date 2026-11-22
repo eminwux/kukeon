@@ -81,6 +81,9 @@ jobs:
       - name: Run root-module tests
         run: make test-root
 
+      - name: Run daemon tests under the race detector
+        run: make test-race
+
       - name: Run kukebuild module tests
         run: make test-kukebuild
 
