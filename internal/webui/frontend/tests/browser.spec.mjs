@@ -3176,6 +3176,15 @@ test("the cell Advanced actions menu closes on Escape, outside pointer down and 
   await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
   const menu = page.locator("details.cell-advanced-actions");
   const summary = menu.locator("summary");
+  // An Escape in the same task as the opening click, before the async toggle event re-renders, still closes it.
+  expect(await page.evaluate(() => {
+    const details = document.querySelector("details.cell-advanced-actions");
+    details.querySelector("summary").click();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    return details.open;
+  })).toBe(false);
+  await expect(summary).toBeFocused();
+
   await summary.click();
   await expect(menu).toHaveAttribute("open", "");
   await page.keyboard.press("Escape");
@@ -3275,11 +3284,20 @@ function lifecycleMock(state) {
 }
 
 test("cell screen toasts stay clear of the title-row buttons, so Start follows Stop without dismissing the toast", async ({ page }) => {
+  // Eight view × viewport passes take over half the default 30s on a single CPU.
+  test.slow();
   const state = { value: "Ready" };
   const { posts, handler } = lifecycleMock(state);
   await mock(page, handler);
   await page.routeWebSocket("**/attach", readyAttach);
   const row = page.locator(".cell-page-title-row:visible");
+  // After Stop the row re-renders several times (Stop… while pending, Reconnect once the terminal
+  // drops, then Start replacing Stop and Restart), so positional nth() locators from .all() go stale
+  // and wait out the test timeout. Read every rect in one evaluate and poll until the row settles.
+  const rects = locator => locator.evaluateAll(elements => elements.map(element => {
+    const { x, y, width, height } = element.getBoundingClientRect();
+    return { x, y, width, height, label: element.getAttribute("aria-label") ?? element.textContent };
+  }).filter(rect => rect.width && rect.height));
   const overlaps = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
   for (const [width, height] of [[1440, 900], [1024, 768], [768, 1024], [390, 844]]) {
     await page.setViewportSize({ width, height });
@@ -3288,14 +3306,17 @@ test("cell screen toasts stay clear of the title-row buttons, so Start follows S
       await row.getByRole("button", { name: "Stop", exact: true }).click();
       await expect.poll(() => posts.at(-1)).toBe("stop");
       await expect(toasts(page).first()).toHaveClass(/success/);
-      const buttons = await row.getByRole("button").all();
-      for (const toast of await toasts(page).all()) {
-        const box = await toast.boundingBox();
-        for (const button of buttons) {
-          const target = await button.boundingBox();
-          if (target) expect(overlaps(box, target), `${width} ${view}: toast covers ${await button.getAttribute("aria-label")}`).toBe(false);
-        }
-      }
+      await expect(row.getByRole("button", { name: "Start", exact: true })).toBeVisible();
+      await expect.poll(async () => {
+        const buttons = await rects(row.getByRole("button"));
+        const toastRects = await rects(toasts(page));
+        // The success toast auto-dismisses after 5s, the same as this poll's timeout. Without a toast
+        // there is nothing to overlap, so an empty stack must fail rather than pass vacuously.
+        if (!toastRects.length) return ["<no toast>"];
+        const covered = [];
+        for (const toast of toastRects) covered.push(...buttons.filter(button => overlaps(toast, button)).map(button => button.label));
+        return covered;
+      }, { message: `${width} ${view}: toasts cover title-row buttons` }).toEqual([]);
       // No dismiss: the click has to reach Start.
       const count = posts.length;
       await row.getByRole("button", { name: "Start", exact: true }).click({ timeout: 5000 });
