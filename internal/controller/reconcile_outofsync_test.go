@@ -35,6 +35,7 @@ import (
 
 	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/cellconfig"
+	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/controller/runner"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
@@ -771,5 +772,66 @@ func TestReconcileCells_OutOfSync_LookupUsesProvenance(t *testing.T) {
 	}
 	if len(lookups) != 1 {
 		t.Errorf("GetConfig lookups = %+v, want one exact lookup and no widening", lookups)
+	}
+}
+
+// TestReconcileCells_OutOfSync_TargetScopedCellStaysSynced (#1603): a cell
+// created in space "a", stack "b" from a realm-scoped Config is re-rendered
+// in a/b, not in the Config's default scope, so it is not OutOfSync.
+func TestReconcileCells_OutOfSync_TargetScopedCellStaysSynced(t *testing.T) {
+	var updateCalls atomic.Int32
+	mock := stubLineageRunner(
+		func(c intmodel.CellConfig) (intmodel.CellConfig, error) {
+			if c.Metadata.Space != "" || c.Metadata.Stack != "" {
+				return intmodel.CellConfig{}, errdefs.ErrConfigNotFound
+			}
+			return configCarrier(t, sampleConfig()), nil
+		},
+		func(intmodel.CellBlueprint) (intmodel.CellBlueprint, error) {
+			return blueprintCarrier(t, sampleReferencedBlueprint()), nil
+		},
+		func(intmodel.Cell) error {
+			updateCalls.Add(1)
+			return nil
+		},
+	)
+	mock.GetCellFn = func(intmodel.Cell) (intmodel.Cell, error) { return intmodel.Cell{}, errdefs.ErrCellNotFound }
+	mock.ListRealmsFn = func() ([]intmodel.Realm, error) {
+		return []intmodel.Realm{buildTestRealm("kuke-system", "")}, nil
+	}
+	mock.ListSpacesFn = func(string) ([]intmodel.Space, error) {
+		return []intmodel.Space{buildTestSpace("a", "kuke-system")}, nil
+	}
+	mock.ListStacksFn = func(string, string) ([]intmodel.Stack, error) {
+		return []intmodel.Stack{buildTestStack("b", "kuke-system", "a")}, nil
+	}
+
+	preview, err := setupTestController(t, mock).PreviewCellFromConfig(controller.CellFromConfigRequest{
+		Config:      intmodel.CellConfigMetadata{Name: "kukeon-dev", Realm: "kuke-system"},
+		Name:        "dev-ab",
+		TargetSpace: "a",
+		TargetStack: "b",
+	})
+	if err != nil {
+		t.Fatalf("PreviewCellFromConfig: %v", err)
+	}
+	live, err := apischeme.ConvertCellDocToInternal(preview.Cell)
+	if err != nil {
+		t.Fatalf("ConvertCellDocToInternal: %v", err)
+	}
+	if live.Spec.SpaceName != "a" || live.Spec.StackName != "b" {
+		t.Fatalf("live cell scope = %s/%s, want a/b", live.Spec.SpaceName, live.Spec.StackName)
+	}
+
+	res, _ := runOutOfSyncHarness(t, live, mock)
+
+	if res.CellsScanned != 1 {
+		t.Fatalf("CellsScanned = %d, want 1 (the harness must reach the a/b cell)", res.CellsScanned)
+	}
+	if got := updateCalls.Load(); got != 0 {
+		t.Errorf("UpdateCellMetadata calls: got %d, want 0 (an a/b cell rendered in a/b is Synced)", got)
+	}
+	if res.CellsErrored != 0 || len(res.Errors) != 0 {
+		t.Errorf("synced pass surfaced errors: %+v", res)
 	}
 }

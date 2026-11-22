@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { Doc, InventoryResource } from "./inventory";
 import { useResource } from "./request";
 import { cellAdvanced, containerFields } from "./creation-schema.mjs";
 import type { Field } from "./creation-schema.mjs";
-import { MergedValues, type RenderedValue } from "./merged-values";
+import { SourceGroups, SourceIdentities, type RenderedValue } from "./merged-values";
+import { groupGitValues } from "./config-form.mjs";
+import { Disclosure } from "./disclosure";
 import { catalogAPI, referenceScope } from "./catalog-url.mjs";
-import { ConnectorFixes, ConnectorIdentities, ConnectorStateBadge, IdentitySelect, StatusIdentity } from "./connector-ui";
+import { ConnectorFixes, ConnectorStateBadge, IdentitySelect, StatusIdentity } from "./connector-ui";
 import { blocksCells, changedMethods, changedPicks, connectorStatuses, connectorTitle, identitiesFor, methodChoices, methodStatuses, stateResolved, takesIdentity, teamOf, unresolvedConnectors } from "./connectors.mjs";
 import type { Connector, ConnectorStatus, SecretRef } from "./connectors.mjs";
 
@@ -59,9 +61,46 @@ function PreviewDocument({ document, label }: { document: CellDoc; label: string
 }
 // A fresh preview scrolls its review into view, so the summary shows without hunting below the form.
 function useReviewScroll(preview: Preview | undefined) {
-  const review = useRef<HTMLDivElement>(null);
+  const review = useRef<HTMLElement>(null);
   useEffect(() => { if (preview) review.current?.scrollIntoView({ block: "nearest" }); }, [preview]);
   return review;
+}
+
+// What happens after Create (#1603): the cell is started and a terminal attached unless the operator opts out.
+export type CreatedOptions = { start: boolean; attach: boolean };
+
+// PreviewPanel holds only preview output, set apart from the form (#1603): its own heading, a "Not created
+// yet" badge and an accent border, and a control to hide it. Hiding it makes Create render afresh.
+const PreviewPanel = ({ review, onHide, children }: { review: RefObject<HTMLElement | null>; onHide: () => void; children: ReactNode }) =>
+  <section className="panel preview-panel" aria-label="Preview" ref={review}>
+    <div className="panel-heading"><h2>Preview</h2><span className="badge">Not created yet</span><button type="button" className="subtle-button" onClick={onHide}>Hide preview</button></div>
+    <div className="panel-body creation-review">{children}</div>
+  </section>;
+
+// CreationActions is the one action row at the end of a New Cell form (#1603): what happens after creation,
+// then Preview (secondary) and Create (the primary action). Create needs no preview.
+function CreationActions({ start, attach, onStart, onAttach, pending, hasPreview, previewLabel, canPreview, canCreate, onPreview, onCreate }: {
+  start: boolean; attach: boolean; onStart: (value: boolean) => void; onAttach: (value: boolean) => void; pending: boolean;
+  hasPreview: boolean; previewLabel: string; canPreview: boolean; canCreate: boolean; onPreview: () => void; onCreate: () => void;
+}) {
+  return <div className="form-actions">
+    <label className="schema-check"><input type="checkbox" checked={start} disabled={pending} onChange={event => onStart(event.target.checked)} /> Start the cell</label>
+    <label className="schema-check"><input type="checkbox" checked={start && attach} disabled={pending || !start} onChange={event => onAttach(event.target.checked)} /> Attach a terminal</label>
+    <button type="button" disabled={!canPreview} onClick={onPreview}>{hasPreview ? "Refresh preview" : previewLabel}</button>
+    <button type="button" className="primary-action" disabled={!canCreate} onClick={onCreate}>Create Cell</button>
+  </div>;
+}
+
+// TargetSelect picks the space or stack a cell lands in. A coordinate the Config pins is shown, disabled.
+function TargetSelect({ label, value, options, pinned, disabled, onChange }: { label: string; value: string; options: string[]; pinned: boolean; disabled: boolean; onChange: (value: string) => void }) {
+  const choices = options.includes(value) ? options : [value, ...options];
+  return <label className="schema-field">{label}<select value={value} disabled={disabled || pinned} onChange={event => onChange(event.target.value)}>{choices.map(option => <option key={option} value={option}>{option}</option>)}</select>{pinned && <small>Set by the Config's scope.</small>}</label>;
+}
+// initialTarget is where a target select starts (#1603): the Config's own coordinate, else "default" when it
+// is listed, else the first listed one.
+function initialTarget(own: string | undefined, options: string[]): string {
+  if (own) return own;
+  return options.includes("default") || !options.length ? "default" : options[0];
 }
 
 function FieldEditor({ field, value, onChange, path, errors, disabled = false }: { field: Field; value: unknown; onChange: (value: unknown) => void; path: string; errors: Record<string, string>; disabled?: boolean }) {
@@ -101,13 +140,16 @@ function FieldEditor({ field, value, onChange, path, errors, disabled = false }:
   return <label className="schema-field" htmlFor={id}><span>{field.label}{field.required && <b aria-label="required"> *</b>}</span>{input}{field.help && <small id={helpId}>{field.help}</small>}{error && <small className="field-error" id={errorId}>{error}</small>}</label>;
 }
 
-function ConfigCreation({ revision, inventory, configScope, onCreated }: { revision: number; inventory: InventoryResource; configScope?: string[]; onCreated: (cell: CellDoc, start: boolean) => void }) {
+function ConfigCreation({ revision, inventory, configScope, onCreated }: { revision: number; inventory: InventoryResource; configScope?: string[]; onCreated: (cell: CellDoc, options: CreatedOptions) => void }) {
   const configs = useResource<CatalogDoc[]>("/api/catalog/configs", revision);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(configScope ? JSON.stringify(configScope) : "");
+  // Opened from a Config, the form leads with a one-line summary of it; "Change" reveals the chooser (#1603).
+  const [choosing, setChoosing] = useState(!configScope);
   const configRows = (configs.data ?? []).map(doc => ({ doc, scope: scopedName(doc.metadata) }));
   const filtered = configRows.filter(({ scope }) => scopeLabel(scope).toLowerCase().includes(query.toLowerCase()));
   const config = configRows.find(row => JSON.stringify(row.scope) === selected);
+  const showChooser = choosing || (!configs.loading && !config);
   // A saved default or Config pick re-reads the Config, so its connector status follows at once.
   const [saved, setSaved] = useState(0);
   const detail = useResource<CatalogDoc>(config ? catalogAPI("configs", config.scope) : null, revision + saved);
@@ -132,21 +174,41 @@ function ConfigCreation({ revision, inventory, configScope, onCreated }: { revis
   const [name, setName] = useState("");
   const [env, setEnv] = useState("");
   const [ignoreDiskPressure, setIgnoreDiskPressure] = useState(false);
-  const [start, setStart] = useState(false);
+  // Create starts the cell and attaches a terminal by default (#1603); input changes leave both alone.
+  const [start, setStart] = useState(true);
+  const [attach, setAttach] = useState(true);
   const [preview, setPreview] = useState<Preview>();
   const [pending, setPending] = useState(false);
   const [stage, setStage] = useState<"preview" | "create">("preview");
   const [error, setError] = useState("");
-  const targetScope = config ? [config.doc.metadata.realm || "default", config.doc.metadata.space || "default", config.doc.metadata.stack || "default"] : [];
-  const stackMissing = !!config && !!inventory.data && !inventory.data.rows[2].some(row => row.scope[0] === targetScope[0] && row.scope[1] === targetScope[1] && row.scope[2] === targetScope[2]);
-  const supportsAttach = !!preview?.document.spec.containers?.some(container => container.attachable && !container.root);
+  const [connectorsOpen, setConnectorsOpen] = useState(false);
+  const [envOpen, setEnvOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [gitOpen, setGitOpen] = useState(false);
+  // A required connector without an identity opens its section by itself, so the fix is in view.
+  const needsConnector = unresolved.length > 0;
+  useEffect(() => { if (needsConnector) setConnectorsOpen(true); }, [needsConnector]);
+  // The target (#1603): the Config's realm, and a space and stack at or below its scope. A coordinate the
+  // Config sets is pinned; an open one starts on "default" when listed.
+  const ownRealm = config?.doc.metadata.realm || "default";
+  const ownSpace = config?.doc.metadata.space || "";
+  const ownStack = config?.doc.metadata.stack || "";
+  const [pickedSpace, setPickedSpace] = useState<string>();
+  const [pickedStack, setPickedStack] = useState<string>();
+  const spaceOptions = (inventory.data?.rows[1] ?? []).filter(row => row.scope[0] === ownRealm).map(row => row.scope[1]);
+  const targetSpace = ownSpace || pickedSpace || initialTarget("", spaceOptions);
+  const stackOptions = (inventory.data?.rows[2] ?? []).filter(row => row.scope[0] === ownRealm && row.scope[1] === targetSpace).map(row => row.scope[2]);
+  const targetStack = ownStack || pickedStack || initialTarget("", stackOptions);
+  const stackMissing = !!config && !!inventory.data && !inventory.data.rows[2].some(row => row.scope[0] === ownRealm && row.scope[1] === targetSpace && row.scope[2] === targetStack);
   const review = useReviewScroll(preview);
+  function changed() { setPreview(undefined); }
   async function submit(create: boolean) {
     if (!config || pending) return;
     setPending(true); setStage(create ? "create" : "preview"); setError("");
     try {
-      // Only the picks that differ from the Config's own identity are sent, as per-cell overrides.
-      const body = { config: { name: config.doc.metadata.name, realm: config.doc.metadata.realm, space: config.doc.metadata.space, stack: config.doc.metadata.stack }, name: name.trim(), ...(create && preview ? { resolvedName: preview.document.metadata.name, preview: preview.preview } : {}), env: env.split("\n").filter(Boolean), ignoreDiskPressure, ...(Object.keys(overrides).length ? { connectors: overrides } : {}), ...(Object.keys(methods).length ? { methods } : {}) };
+      // Only the picks that differ from the Config's own identity are sent, as per-cell overrides. A create
+      // after a preview sends its token and name, so what was reviewed is what gets created.
+      const body = { config: { name: config.doc.metadata.name, realm: config.doc.metadata.realm, space: config.doc.metadata.space, stack: config.doc.metadata.stack }, name: name.trim(), ...(create && preview ? { resolvedName: preview.document.metadata.name, preview: preview.preview } : {}), env: env.split("\n").filter(Boolean), ignoreDiskPressure, targetSpace, targetStack, ...(Object.keys(overrides).length ? { connectors: overrides } : {}), ...(Object.keys(methods).length ? { methods } : {}) };
       const response = await fetch(`/api/cells/from-config/${create ? "create" : "preview"}`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(body) });
       const result = await response.json();
       if (!response.ok) {
@@ -155,7 +217,7 @@ function ConfigCreation({ revision, inventory, configScope, onCreated }: { revis
         if (result.error?.code === "connector_unresolved" || result.error?.code === "connector_invalid") setSaved(value => value + 1);
         throw new Error(create && (result.error?.code === "unavailable" || response.status >= 500) ? `The creation outcome could not be confirmed. Refresh the Cell inventory before retrying. ${message}` : message);
       }
-      if (create) onCreated(result as CellDoc, start);
+      if (create) onCreated(result as CellDoc, { start, attach: start && attach });
       else setPreview(result as Preview);
     } catch (failure) {
       const message = failure instanceof Error ? failure.message : "The request could not reach the web server.";
@@ -164,8 +226,15 @@ function ConfigCreation({ revision, inventory, configScope, onCreated }: { revis
     finally { setPending(false); }
   }
   const previewBlocked = (preview?.connectors ?? []).some(blocksCells);
-  const connectorPanel = config && detail.data && statuses.length > 0 && <section className="panel cell-connectors" aria-label="Connectors"><div className="panel-heading"><h2>Connectors</h2>{unresolved.length ? <span className="badge needs-connector">Needs connector: {[...new Set(unresolved.map(connectorTitle))].join(", ")}</span> : <span className="badge">{Object.keys(overrides).length + Object.keys(methods).length ? `${Object.keys(overrides).length + Object.keys(methods).length} picked for this cell` : "Config identities"}</span>}</div><div className="panel-body">
-    <p className="description">Each connector starts on the method and identity this Config resolves to. Pick another method or identity of the same connector to use it for this cell only; the Config and the defaults are not changed.</p>
+  const ready = !!detail.data && !!blueprint.data && !stackMissing && unresolved.length === 0;
+  const canCreate = !pending && ready && !previewBlocked;
+  const pickedCount = Object.keys(overrides).length + Object.keys(methods).length;
+  const envCount = env.split("\n").filter(line => line.trim()).length;
+  const blueprintStatus = !blueprintRef ? <p className="error" role="alert">This config does not contain a Blueprint reference.</p> : !blueprintValid ? <p className="error" role="alert">The Blueprint reference is incomplete: {scopeLabel(blueprintScope)}</p> : blueprint.loading ? <p role="status">Checking referenced Blueprint…</p> : blueprint.error ? <div className="error" role="alert"><strong>{blueprint.error.code === "not_found" ? "Blueprint reference is missing" : "Blueprint could not be loaded"}</strong><p>{blueprint.error.message}</p><p>Reference: {scopeLabel(blueprintScope)}</p></div> : null;
+  const connectorPanel = config && detail.data && statuses.length > 0 && <Disclosure className="cell-connectors" label="Connectors" title="Connectors" open={connectorsOpen} onToggle={setConnectorsOpen}
+    summary={unresolved.length ? undefined : `${statuses.length} resolved${pickedCount ? `, ${pickedCount} picked for this cell` : ""}`}
+    badge={unresolved.length ? <span className="badge needs-connector">Needs connector: {[...new Set(unresolved.map(connectorTitle))].join(", ")}</span> : undefined}><div className="panel-body">
+    <p className="description">A method or identity picked here applies to this cell only.</p>
     {team && <p className="connector-team" role="note">This Config's identities are set by team <code>{team}</code>. A pick here still applies to this cell only.</p>}
     {secrets.error && <p className="stale">Identities could not be listed: {secrets.error.message}. Name a secret by hand instead.</p>}
     <ul className="state-list connector-status-list">{statuses.map(status => {
@@ -177,50 +246,65 @@ function ConfigCreation({ revision, inventory, configScope, onCreated }: { revis
       const flagged = unresolved.includes(status);
       return <li key={`${status.connector}:${status.component}`} aria-label={`${title} connector`}><div className="connector-status">
         <div><strong>{title}</strong> <span className="badge">{status.connector}</span>{status.method && <> <span className="badge">{status.method}</span></>} {picked || methodPicked ? <span className="badge">Picked for this cell</span> : <ConnectorStateBadge status={status} />}</div>
-        {choices.length > 0 && <label className="schema-field">Method<select aria-label={`${title} method`} value={methodPicked ?? configStatus.method} disabled={pending} onChange={event => { const next = event.target.value; setMethodPicks(old => ({ ...old, [status.connector]: next === configStatus.method ? undefined : next })); setPicks(old => ({ ...old, [status.connector]: undefined })); setPreview(undefined); setStart(false); }}>{choices.map(method => <option key={method.name} value={method.name}>{method.name}{method.name === configStatus.method ? " (the Config's)" : ""}</option>)}</select><small>{methodPicked ? `${choices.find(method => method.name === methodPicked)?.description ?? ""} Used for this cell only; the Config uses ${configStatus.method}.` : choices.find(method => method.name === configStatus.method)?.description}</small></label>}
-        {takesIdentity(status.delivery) ? <IdentitySelect label={`${title} identity`} identities={identitiesFor(secrets.data, status.connector)} value={picks[status.connector] ?? status.identity} extra={[status.identity]} emptyLabel={methodPicked ? "Use the default identity for this method" : status.identity ? "Use the Config's identity" : status.required ? "No identity — required" : "No identity"} disabled={pending} required={status.required} realm={config.doc.metadata.realm} onChange={ref => { setPicks(old => ({ ...old, [status.connector]: ref })); setPreview(undefined); setStart(false); }} help={methodPicked ? <>The {methodPicked} method resolves its identity from the Realm, Space or Stack defaults unless one is picked here; the preview shows which.</> : <>The Config resolves to: <StatusIdentity status={status} team={team} /></>} /> : <p className="description"><StatusIdentity status={status} team={team} /></p>}
+        {choices.length > 0 && <label className="schema-field">Method<select aria-label={`${title} method`} value={methodPicked ?? configStatus.method} disabled={pending} onChange={event => { const next = event.target.value; setMethodPicks(old => ({ ...old, [status.connector]: next === configStatus.method ? undefined : next })); setPicks(old => ({ ...old, [status.connector]: undefined })); changed(); }}>{choices.map(method => <option key={method.name} value={method.name}>{method.name}{method.name === configStatus.method ? " (the Config's)" : ""}</option>)}</select><small>{methodPicked ? `${choices.find(method => method.name === methodPicked)?.description ?? ""} Used for this cell only; the Config uses ${configStatus.method}.` : choices.find(method => method.name === configStatus.method)?.description}</small></label>}
+        {takesIdentity(status.delivery) ? <IdentitySelect label={`${title} identity`} identities={identitiesFor(secrets.data, status.connector)} value={picks[status.connector] ?? status.identity} extra={[status.identity]} emptyLabel={methodPicked ? "Use the default identity for this method" : status.identity ? "Use the Config's identity" : status.required ? "No identity — required" : "No identity"} disabled={pending} required={status.required} realm={config.doc.metadata.realm} onChange={ref => { setPicks(old => ({ ...old, [status.connector]: ref })); changed(); }} help={methodPicked ? <>The {methodPicked} method resolves its identity from the Realm, Space or Stack defaults unless one is picked here; the preview shows which.</> : <>The Config resolves to: <StatusIdentity status={status} team={team} /></>} /> : <p className="description"><StatusIdentity status={status} team={team} /></p>}
         {flagged && <p className="field-error" role="alert">{title} has no usable identity{status.message ? `: ${status.message}` : ""}. Pick one for this cell above, set a default, or pick one for the Config.</p>}
-        {!methodPicked && status.state !== stateResolved && <ConnectorFixes status={status} connector={connectors.data?.find(item => item.name === status.connector)} config={detail.data!.metadata} identities={identitiesFor(secrets.data, status.connector)} secrets={secrets.data} onChanged={() => { setSaved(value => value + 1); setPreview(undefined); setStart(false); }} />}
+        {!methodPicked && status.state !== stateResolved && <ConnectorFixes status={status} connector={connectors.data?.find(item => item.name === status.connector)} config={detail.data!.metadata} identities={identitiesFor(secrets.data, status.connector)} secrets={secrets.data} onChanged={() => { setSaved(value => value + 1); changed(); }} />}
       </div></li>;
     })}</ul>
-  </div></section>;
+  </div></Disclosure>;
+  const git = groupGitValues(preview?.values);
   return <div className="creation-layout">
-    <section className="panel"><div className="panel-heading"><h2>Choose a CellConfig</h2><span className="badge">Existing config</span></div><div className="panel-body creation-form">
-      {configs.loading && <p role="status">Loading CellConfigs…</p>}{configs.error && <div className="error" role="alert"><strong>CellConfigs unavailable</strong><p>{configs.error.message}</p></div>}{configs.error && configs.data && <p className="stale">Showing stale CellConfigs.</p>}
-      <label>Search CellConfigs<input type="search" value={query} placeholder="Name or full scope" onChange={event => setQuery(event.target.value)} /></label>
-      <label>CellConfig<select value={selected} onChange={event => { setSelected(event.target.value); setPicks({}); setMethodPicks({}); setPreview(undefined); setStart(false); setError(""); }}><option value="">Select a CellConfig…</option>{filtered.map(row => <option key={JSON.stringify(row.scope)} value={JSON.stringify(row.scope)}>{row.doc.metadata.name} — {scopeLabel(row.scope.slice(0, -1))}</option>)}</select></label>
-      {!configs.loading && !configs.error && !configRows.length && <p className="description">No CellConfigs are available.</p>}
-      {inventory.data?.failures.length ? <p className="stale">Inventory is incomplete. Target scope may be unavailable.</p> : null}
+    <section className="panel" aria-label="Config"><div className="panel-heading"><h2>Config</h2>{config && !showChooser && <button type="button" className="subtle-button" onClick={() => setChoosing(true)}>Change</button>}</div><div className="panel-body creation-form">
+      {showChooser ? <>
+        {configs.loading && <p role="status">Loading CellConfigs…</p>}{configs.error && <div className="error" role="alert"><strong>CellConfigs unavailable</strong><p>{configs.error.message}</p></div>}{configs.error && configs.data && <p className="stale">Showing stale CellConfigs.</p>}
+        <label>Search CellConfigs<input type="search" value={query} placeholder="Name or full scope" onChange={event => setQuery(event.target.value)} /></label>
+        <label>CellConfig<select value={selected} onChange={event => { setSelected(event.target.value); setPicks({}); setMethodPicks({}); setPickedSpace(undefined); setPickedStack(undefined); setPreview(undefined); setError(""); }}><option value="">Select a CellConfig…</option>{filtered.map(row => <option key={JSON.stringify(row.scope)} value={JSON.stringify(row.scope)}>{row.doc.metadata.name} — {scopeLabel(row.scope.slice(0, -1))}</option>)}</select></label>
+        {!configs.loading && !configs.error && !configRows.length && <p className="description">No CellConfigs are available.</p>}
+      </> : !config ? <p role="status">Loading CellConfigs…</p> : null}
+      {config && <>
+        {detail.loading && <p role="status">{detail.data ? "Refreshing CellConfig details…" : "Loading CellConfig details…"}</p>}{detail.error && <div className="error" role="alert"><strong>CellConfig details unavailable</strong><p>{detail.error.message}</p></div>}{detail.error && detail.data && <p className="stale">Showing stale CellConfig details.</p>}
+        {detail.data && <p className="config-summary">Config <a className="resource-name" href={catalogLink("configs", config.scope, true)}>{detail.data.metadata.name}</a> <span className="description">{scopeLabel(config.scope.slice(0, -1))}</span>{blueprint.data && blueprintValid && <> · Blueprint <a className="resource-name" href={catalogLink("blueprints", blueprintScope)}>{blueprint.data.metadata.name}</a> <span className="description">{scopeLabel(blueprintScope.slice(0, -1))}</span></>}</p>}
+        {detail.data && blueprintStatus}
+      </>}
     </div></section>
     {config && <>
-      <section className="panel"><div className="panel-heading"><h2>Config relationships and target</h2><span className="badge">{scopeLabel(config.scope)}</span></div><div className="panel-body">
-        {detail.loading && <p role="status">{detail.data ? "Refreshing CellConfig details…" : "Loading CellConfig details…"}</p>}{detail.error && <div className="error" role="alert"><strong>CellConfig details unavailable</strong><p>{detail.error.message}</p></div>}{detail.error && detail.data && <p className="stale">Showing stale CellConfig details.</p>}
-        {detail.data && <><p>Config: <a className="resource-name" href={catalogLink("configs", config.scope, true)}>{detail.data.metadata.name}</a> <span className="description">({scopeLabel(config.scope.slice(0, -1))})</span></p><p>Target: <strong>{detail.data.metadata.realm || "default"} / {detail.data.metadata.space || "default"} / {detail.data.metadata.stack || "default"}</strong></p>{stackMissing && <p className="error" role="alert">The target Stack is not present in the loaded inventory.</p>}
-          <h3>Referenced Blueprint</h3>{!blueprintRef ? <p className="error" role="alert">This config does not contain a Blueprint reference.</p> : !blueprintValid ? <p className="error" role="alert">The Blueprint reference is incomplete: {scopeLabel(blueprintScope)}</p> : blueprint.loading ? <p role="status">Checking referenced Blueprint…</p> : blueprint.error ? <div className="error" role="alert"><strong>{blueprint.error.code === "not_found" ? "Blueprint reference is missing" : "Blueprint could not be loaded"}</strong><p>{blueprint.error.message}</p><p>Reference: {scopeLabel(blueprintScope)}</p></div> : blueprint.data ? <p><a className="resource-name" href={catalogLink("blueprints", blueprintScope)}>{blueprint.data.metadata.name}</a> <span className="description">{scopeLabel(blueprintScope.slice(0, -1))}</span></p> : <p className="description">Blueprint details are unavailable.</p>}
-        </>}
-      </div></section>
-      {connectorPanel}
-      <section className="panel"><div className="panel-heading"><h2>Create a stopped Cell</h2></div><form className="panel-body creation-form" onSubmit={event => { event.preventDefault(); void submit(false); }}>
-        <label>Cell name (optional)<input value={name} disabled={pending} onChange={event => { setName(event.target.value); setPreview(undefined); setStart(false); }} /><small>Leave blank to let kukeon choose a name using its existing naming algorithm.</small></label>
-        <label>Environment overrides<textarea value={env} disabled={pending} placeholder="KEY=VALUE, one per line" onChange={event => { setEnv(event.target.value); setPreview(undefined); setStart(false); }} /></label>
-        <label className="schema-check"><input type="checkbox" checked={ignoreDiskPressure} disabled={pending} onChange={event => { setIgnoreDiskPressure(event.target.checked); setPreview(undefined); setStart(false); }} /> Ignore disk pressure for this creation</label>
-        <p className="description">The daemon renders the existing config and blueprint, merging the Realm, Space and Stack defaults. Environment values are redacted in the preview. Creation leaves the Cell stopped.</p>
-        {error && <p className="error" role="alert">{error}</p>}{pending && <p role="status">{stage === "create" ? "Creating Cell…" : "Preparing preview…"}</p>}
-        <button type="submit" className={preview ? undefined : "primary-action"} disabled={pending || !detail.data || !blueprint.data || stackMissing || unresolved.length > 0}>{preview ? "Refresh preview" : "Preview Cell"}</button>
-        {unresolved.length > 0 && !preview && <><p className="field-error" role="alert">Create is disabled until every required connector resolves: {[...new Set(unresolved.map(connectorTitle))].join(", ")}.</p><button type="button" disabled>Create Cell</button></>}
-        {preview && <div className="creation-review" ref={review}><h3>Review Cell document</h3>
-          <PreviewSummary document={preview.document} connectors={preview.connectors} />
-          <p className="description">The reviewed automatic name is sent back unchanged when creating, so preview and creation use the same name. kukeon may add its default root container during materialization.</p>
-          {preview.connectors && <ConnectorIdentities statuses={preview.connectors} team={team} />}{preview.values && <MergedValues values={preview.values} digest={preview.digest} />}
-          <PreviewDocument document={preview.document} label="Complete Cell preview" />
-          <div className="creation-actions"><button type="button" className="primary-action" disabled={pending || stackMissing || previewBlocked || unresolved.length > 0} onClick={() => void submit(true)}>Create Cell</button><label className="schema-check"><input type="checkbox" checked={start} disabled={pending} onChange={event => setStart(event.target.checked)} /> {supportsAttach ? "Start and attach after creation" : "Start after creation"}</label></div>
-        </div>}
+      <section className="panel" aria-label="Cell"><div className="panel-heading"><h2>Cell</h2></div><form className="panel-body creation-form" onSubmit={event => { event.preventDefault(); if (ready) void submit(false); }}>
+        <label>Cell name (optional)<input value={name} disabled={pending} onChange={event => { setName(event.target.value); changed(); }} /><small>Leave blank to let kukeon pick a name.</small></label>
+        <div className="schema-fields">
+          <p className="schema-field">Realm<strong>{ownRealm}</strong></p>
+          <TargetSelect label="Target space" value={targetSpace} options={spaceOptions} pinned={!!ownSpace} disabled={pending} onChange={value => { setPickedSpace(value); setPickedStack(undefined); changed(); }} />
+          <TargetSelect label="Target stack" value={targetStack} options={stackOptions} pinned={!!ownStack} disabled={pending} onChange={value => { setPickedStack(value); changed(); }} />
+        </div>
+        {stackMissing && <p className="error" role="alert">The target Stack is not present in the loaded inventory.</p>}
+        {inventory.data?.failures.length ? <p className="stale">Inventory is incomplete. Target scope may be unavailable.</p> : null}
       </form></section>
+      {connectorPanel}
+      <Disclosure title="Environment overrides" level={3} summary={envCount ? `${envCount} set` : "None"} open={envOpen} onToggle={setEnvOpen}><div className="panel-body creation-form">
+        <label>Environment overrides<textarea value={env} disabled={pending} placeholder="KEY=VALUE, one per line" onChange={event => { setEnv(event.target.value); changed(); }} /><small>Values are redacted in the preview.</small></label>
+      </div></Disclosure>
+      <Disclosure title="Advanced" level={3} summary={ignoreDiskPressure ? "Ignoring disk pressure" : "Defaults"} open={advancedOpen} onToggle={setAdvancedOpen}><div className="panel-body creation-form">
+        <label className="schema-check"><input type="checkbox" checked={ignoreDiskPressure} disabled={pending} onChange={event => { setIgnoreDiskPressure(event.target.checked); changed(); }} /> Ignore disk pressure for this creation</label>
+      </div></Disclosure>
+      {error && <p className="error" role="alert">{error}</p>}{pending && <p role="status">{stage === "create" ? "Creating Cell…" : "Preparing preview…"}</p>}
+      {preview && <PreviewPanel review={review} onHide={() => setPreview(undefined)}>
+        <PreviewSummary document={preview.document} connectors={preview.connectors} />
+        <SourceGroups values={preview.values} connectors={preview.connectors} team={team} sources={{
+          blueprint: blueprint.data && blueprintValid ? <a className="resource-name" href={catalogLink("blueprints", blueprintScope)}>{blueprint.data.metadata.name}</a> : undefined,
+          config: <a className="resource-name" href={catalogLink("configs", config.scope, true)}>{config.doc.metadata.name}</a>,
+          realm: preview.document.spec.realmId, space: preview.document.spec.spaceId, stack: preview.document.spec.stackId,
+        }} />
+        {(git.repos.length > 0 || git.defaults.length > 0) && <Disclosure title="Git identity per repository" level={3} open={gitOpen} onToggle={setGitOpen}><div className="panel-body"><SourceIdentities values={preview.values ?? []} /></div></Disclosure>}
+        <PreviewDocument document={preview.document} label="Complete Cell preview" />
+        {preview.digest && <p className="description">Render digest: <code>{preview.digest}</code></p>}
+      </PreviewPanel>}
+      {unresolved.length > 0 && <p className="field-error" role="alert">Create is disabled until every required connector resolves: {[...new Set(unresolved.map(connectorTitle))].join(", ")}.</p>}
+      <CreationActions start={start} attach={attach} onStart={setStart} onAttach={setAttach} pending={pending} hasPreview={!!preview} previewLabel="Preview Cell" canPreview={!pending && ready} canCreate={canCreate} onPreview={() => void submit(false)} onCreate={() => void submit(true)} />
     </>}
   </div>;
 }
 
-function ManualCreation({ inventory, onCreated }: { inventory: InventoryResource; onCreated: (cell: CellDoc, start: boolean) => void }) {
+function ManualCreation({ inventory, onCreated }: { inventory: InventoryResource; onCreated: (cell: CellDoc, options: CreatedOptions) => void }) {
   const realms = inventory.data?.rows[0] ?? [];
   const [model, setModel] = useState<FormValue>(() => ({ name: "", realm: "", space: "", stack: "", labels: {}, annotations: {}, spec: { containers: [], autoDelete: false, nestedCgroupRuntime: false, ignoreDiskPressure: false } }));
   const [advanced, setAdvanced] = useState(false);
@@ -229,7 +313,8 @@ function ManualCreation({ inventory, onCreated }: { inventory: InventoryResource
   const [preview, setPreview] = useState<Preview>();
   const [pending, setPending] = useState(false);
   const [stage, setStage] = useState<"preview" | "create">("preview");
-  const [start, setStart] = useState(false);
+  const [start, setStart] = useState(true);
+  const [attach, setAttach] = useState(true);
   const [error, setError] = useState("");
   const realm = String(model.realm ?? "");
   const spaces = (inventory.data?.rows[1] ?? []).filter(row => row.scope[0] === realm);
@@ -248,13 +333,13 @@ function ManualCreation({ inventory, onCreated }: { inventory: InventoryResource
     setModel(old => old.realm ? old : { ...old, realm: defaultRealm.scope[0], space: defaultSpace?.scope[1] ?? "", stack: defaultStack?.scope[2] ?? "" });
   }, [inventory.data, model.realm, realms]);
   const localErrors = useMemo(() => ({ ...fieldErrors({ name: model.name }, [{ key: "name", label: "Cell name", kind: "text", required: true }], "cell"), ...fieldErrors({ realm, space, stack: model.stack }, ["realm", "space", "stack"].map(key => ({ key, label: key, kind: "text" as const, required: true })), "cell"), ...fieldErrors({ containers }, [{ key: "containers", label: "Containers", kind: "objects", fields: containerFields.filter(field => field.required) }], "cell.spec") }), [model, realm, space, spec, containers]);
-  const canPreview = !Object.keys(localErrors).length && !pending;
-  function changeRoot(key: string, value: unknown) { setModel(old => setAt(old, key, value)); setPreview(undefined); setStart(false); setErrors({}); }
-  function changeSpec(key: string, value: unknown) { setModel(old => setAt(old, "spec", setAt(old.spec as FormValue, key, value))); setPreview(undefined); setStart(false); setErrors({}); }
+  function changeRoot(key: string, value: unknown) { setModel(old => setAt(old, key, value)); setPreview(undefined); setErrors({}); }
+  function changeSpec(key: string, value: unknown) { setModel(old => setAt(old, "spec", setAt(old.spec as FormValue, key, value))); setPreview(undefined); setErrors({}); }
   function changeContainer(index: number, key: string, value: unknown) { changeSpec("containers", containers.map((container, i) => i === index ? setAt(container, key, value) : container)); }
   async function submit(create: boolean) {
-    if (!create && !canPreview) { setErrors(localErrors); return; }
     if (pending) return;
+    // A create without a preview runs the same local validation a preview does (#1603).
+    if ((!create || !preview) && Object.keys(localErrors).length) { setErrors(localErrors); return; }
     setPending(true); setStage(create ? "create" : "preview"); setError("");
     try {
       const payload = { name: String(model.name).trim(), realm, space, stack: String(model.stack ?? ""), labels: model.labels, annotations: model.annotations, spec };
@@ -264,7 +349,7 @@ function ManualCreation({ inventory, onCreated }: { inventory: InventoryResource
         const message = result.error?.message ?? result.message ?? `Request failed (HTTP ${response.status})`;
         throw new Error(create && (result.error?.code === "unavailable" || response.status >= 500) ? `The creation outcome could not be confirmed. Refresh the Cell inventory before retrying. ${message}` : message);
       }
-      if (create) onCreated(result as CellDoc, start);
+      if (create) onCreated(result as CellDoc, { start, attach: start && attach });
       else setPreview(result as Preview);
     } catch (failure) {
       const message = failure instanceof Error ? failure.message : "The request could not reach the web server.";
@@ -272,36 +357,35 @@ function ManualCreation({ inventory, onCreated }: { inventory: InventoryResource
     }
     finally { setPending(false); }
   }
-  const previewAttachable = !!preview?.document.spec.containers?.some(container => container.attachable && !container.root);
   const review = useReviewScroll(preview);
-  return <section className="panel"><div className="panel-heading"><h2>Build a Cell specification</h2><span className="badge">No Config or Blueprint</span></div><form className="panel-body creation-form" onSubmit={event => { event.preventDefault(); void submit(false); }}>
-    <div className="schema-section"><h3>Basic Cell configuration</h3><div className="schema-fields">
-      <label className="schema-field" htmlFor="manual-name"><span>Cell name <b aria-label="required"> *</b></span><input id="manual-name" value={String(model.name)} disabled={pending} aria-invalid={!!errors["cell.name"]} aria-describedby={errors["cell.name"] ? "manual-name-error" : undefined} onChange={event => changeRoot("name", event.target.value)} />{errors["cell.name"] && <small id="manual-name-error" className="field-error">{errors["cell.name"]}</small>}</label>
-      <label className="schema-field"><span>Realm <b aria-label="required"> *</b></span><select value={realm} disabled={pending} onChange={event => { changeRoot("realm", event.target.value); changeRoot("space", ""); changeRoot("stack", ""); }}><option value="">Select a Realm…</option>{realms.map(row => <option key={row.scope[0]}>{row.scope[0]}</option>)}</select>{errors["cell.realm"] && <small className="field-error">{errors["cell.realm"]}</small>}</label>
-      <label className="schema-field"><span>Space <b aria-label="required"> *</b></span><select value={space} disabled={pending || !realm} onChange={event => { changeRoot("space", event.target.value); changeRoot("stack", ""); }}><option value="">Select a Space…</option>{spaces.map(row => <option key={row.scope[1]}>{row.scope[1]}</option>)}</select>{errors["cell.space"] && <small className="field-error">{errors["cell.space"]}</small>}</label>
-      <label className="schema-field"><span>Stack <b aria-label="required"> *</b></span><select value={String(model.stack ?? "")} disabled={pending || !space} onChange={event => changeRoot("stack", event.target.value)}><option value="">Select a Stack…</option>{stacks.map(row => <option key={row.scope[2]}>{row.scope[2]}</option>)}</select>{errors["cell.stack"] && <small className="field-error">{errors["cell.stack"]}</small>}</label>
-    </div></div>
-    <div className="schema-section"><h3>Metadata</h3><div className="schema-fields">{(["labels", "annotations"] as const).map(key => <FieldEditor key={key} field={{ key, label: key === "labels" ? "Labels" : "Annotations", kind: "map" }} value={model[key]} path={`cell.${key}`} errors={errors} disabled={pending} onChange={value => changeRoot(key, value)} />)}</div></div>
-    <div className="schema-section"><div className="schema-section-heading"><h3>Workload containers</h3><button type="button" disabled={pending} onClick={() => changeSpec("containers", [...containers, emptyObject(containerFields)])}>Add container</button></div><p className="description">Define workload containers only. kukeon creates its default root container if none is explicitly marked as root.</p>
-      {!containers.length && <p className="empty-state compact-empty">No workload containers added. kukeon will add its default root container when the Cell is created.</p>}
-      {containers.map((container, index) => <section className="container-editor" key={index}><div className="schema-array-heading"><h4>Container {index + 1}{container.id ? ` · ${String(container.id)}` : ""}</h4><button type="button" className="subtle-button" disabled={pending} onClick={() => changeSpec("containers", containers.filter((_, current) => current !== index))}>Remove container</button></div><div className="schema-fields">{containerFields.filter(field => !field.advanced).map(field => <FieldEditor key={field.key} field={field} value={container[field.key]} path={`cell.spec.containers.${index}.${field.key}`} errors={errors} disabled={pending} onChange={value => changeContainer(index, field.key, value)} />)}</div><button type="button" className="subtle-button" aria-expanded={!!containerAdvanced[index]} onClick={() => setContainerAdvanced(old => ({ ...old, [index]: !old[index] }))}>{containerAdvanced[index] ? "Hide" : "Show"} advanced container fields</button>{containerAdvanced[index] && <div className="schema-fields advanced-fields">{containerFields.filter(field => field.advanced).map(field => <FieldEditor key={field.key} field={field} value={container[field.key]} path={`cell.spec.containers.${index}.${field.key}`} errors={errors} disabled={pending} onChange={value => changeContainer(index, field.key, value)} />)}</div>}</section>)}
-    </div>
-    <div className="schema-section"><button type="button" className="subtle-button" aria-expanded={advanced} onClick={() => setAdvanced(value => !value)}>{advanced ? "Hide" : "Show"} advanced Cell configuration</button>{advanced && <div className="schema-fields advanced-fields">{cellAdvanced.map(field => <FieldEditor key={field.key} field={field} value={spec[field.key]} path={`cell.spec.${field.key}`} errors={errors} disabled={pending} onChange={value => changeSpec(field.key, value)} />)}{["autoDelete"].map(key => <FieldEditor key={key} field={{ key, label: "Delete Cell after root exits", kind: "boolean" }} value={spec[key]} path={`cell.spec.${key}`} errors={errors} disabled={pending} onChange={value => changeSpec(key, value)} />)}</div>}</div>
-    <p className="description">Manual Cell input is validated by kukeon's API conversion and daemon on preview and create. The daemon owns runtime status, IDs, provenance, and generated container fields.</p>
-    {inventory.error && <p className="error" role="alert">Scope inventory could not be loaded: {inventory.error.message}</p>}{!!inventory.data?.failures.length && <p className="stale">Scope inventory is incomplete. Verify the selected target resources before creating.</p>}
+  return <div className="creation-layout">
+    <section className="panel"><div className="panel-heading"><h2>Build a Cell specification</h2><span className="badge">No Config or Blueprint</span></div><form className="panel-body creation-form" onSubmit={event => { event.preventDefault(); void submit(false); }}>
+      <div className="schema-section"><h3>Basic Cell configuration</h3><div className="schema-fields">
+        <label className="schema-field" htmlFor="manual-name"><span>Cell name <b aria-label="required"> *</b></span><input id="manual-name" value={String(model.name)} disabled={pending} aria-invalid={!!errors["cell.name"]} aria-describedby={errors["cell.name"] ? "manual-name-error" : undefined} onChange={event => changeRoot("name", event.target.value)} />{errors["cell.name"] && <small id="manual-name-error" className="field-error">{errors["cell.name"]}</small>}</label>
+        <label className="schema-field"><span>Realm <b aria-label="required"> *</b></span><select value={realm} disabled={pending} onChange={event => { changeRoot("realm", event.target.value); changeRoot("space", ""); changeRoot("stack", ""); }}><option value="">Select a Realm…</option>{realms.map(row => <option key={row.scope[0]}>{row.scope[0]}</option>)}</select>{errors["cell.realm"] && <small className="field-error">{errors["cell.realm"]}</small>}</label>
+        <label className="schema-field"><span>Space <b aria-label="required"> *</b></span><select value={space} disabled={pending || !realm} onChange={event => { changeRoot("space", event.target.value); changeRoot("stack", ""); }}><option value="">Select a Space…</option>{spaces.map(row => <option key={row.scope[1]}>{row.scope[1]}</option>)}</select>{errors["cell.space"] && <small className="field-error">{errors["cell.space"]}</small>}</label>
+        <label className="schema-field"><span>Stack <b aria-label="required"> *</b></span><select value={String(model.stack ?? "")} disabled={pending || !space} onChange={event => changeRoot("stack", event.target.value)}><option value="">Select a Stack…</option>{stacks.map(row => <option key={row.scope[2]}>{row.scope[2]}</option>)}</select>{errors["cell.stack"] && <small className="field-error">{errors["cell.stack"]}</small>}</label>
+      </div></div>
+      <div className="schema-section"><h3>Metadata</h3><div className="schema-fields">{(["labels", "annotations"] as const).map(key => <FieldEditor key={key} field={{ key, label: key === "labels" ? "Labels" : "Annotations", kind: "map" }} value={model[key]} path={`cell.${key}`} errors={errors} disabled={pending} onChange={value => changeRoot(key, value)} />)}</div></div>
+      <div className="schema-section"><div className="schema-section-heading"><h3>Workload containers</h3><button type="button" disabled={pending} onClick={() => changeSpec("containers", [...containers, emptyObject(containerFields)])}>Add container</button></div><p className="description">Define workload containers only; kukeon adds its default root container unless one is marked as root.</p>
+        {!containers.length && <p className="empty-state compact-empty">No workload containers added. kukeon will add its default root container when the Cell is created.</p>}
+        {containers.map((container, index) => <section className="container-editor" key={index}><div className="schema-array-heading"><h4>Container {index + 1}{container.id ? ` · ${String(container.id)}` : ""}</h4><button type="button" className="subtle-button" disabled={pending} onClick={() => changeSpec("containers", containers.filter((_, current) => current !== index))}>Remove container</button></div><div className="schema-fields">{containerFields.filter(field => !field.advanced).map(field => <FieldEditor key={field.key} field={field} value={container[field.key]} path={`cell.spec.containers.${index}.${field.key}`} errors={errors} disabled={pending} onChange={value => changeContainer(index, field.key, value)} />)}</div><button type="button" className="subtle-button" aria-expanded={!!containerAdvanced[index]} onClick={() => setContainerAdvanced(old => ({ ...old, [index]: !old[index] }))}>{containerAdvanced[index] ? "Hide" : "Show"} advanced container fields</button>{containerAdvanced[index] && <div className="schema-fields advanced-fields">{containerFields.filter(field => field.advanced).map(field => <FieldEditor key={field.key} field={field} value={container[field.key]} path={`cell.spec.containers.${index}.${field.key}`} errors={errors} disabled={pending} onChange={value => changeContainer(index, field.key, value)} />)}</div>}</section>)}
+      </div>
+      <div className="schema-section"><button type="button" className="subtle-button" aria-expanded={advanced} onClick={() => setAdvanced(value => !value)}>{advanced ? "Hide" : "Show"} advanced Cell configuration</button>{advanced && <div className="schema-fields advanced-fields">{cellAdvanced.map(field => <FieldEditor key={field.key} field={field} value={spec[field.key]} path={`cell.spec.${field.key}`} errors={errors} disabled={pending} onChange={value => changeSpec(field.key, value)} />)}{["autoDelete"].map(key => <FieldEditor key={key} field={{ key, label: "Delete Cell after root exits", kind: "boolean" }} value={spec[key]} path={`cell.spec.${key}`} errors={errors} disabled={pending} onChange={value => changeSpec(key, value)} />)}</div>}</div>
+      {inventory.error && <p className="error" role="alert">Scope inventory could not be loaded: {inventory.error.message}</p>}{!!inventory.data?.failures.length && <p className="stale">Scope inventory is incomplete. Verify the selected target resources before creating.</p>}
+      {Object.keys(errors).length > 0 && <p className="field-error" role="alert">Fix the highlighted fields before previewing or creating.</p>}
+    </form></section>
     {error && <p className="error" role="alert">{error}</p>}{pending && <p role="status">{stage === "create" ? "Creating Cell…" : "Validating and preparing preview…"}</p>}
-    <button type="submit" className={preview ? undefined : "primary-action"} disabled={pending}>{preview ? "Refresh preview" : "Validate and preview Cell"}</button>
-    {preview && <div className="creation-review" ref={review}><h3>Review Cell document</h3>
+    {preview && <PreviewPanel review={review} onHide={() => setPreview(undefined)}>
       <PreviewSummary document={preview.document} />
-      <p className="description">The preview contains your authorable specification. kukeon adds its default root container during creation when you have not explicitly defined one; the returned Cell document will show the daemon’s final specification.</p>
+      <p className="description">kukeon adds its default root container on creation unless one is defined; the created Cell shows the final specification.</p>
       <PreviewDocument document={preview.document} label="Complete manual Cell preview" />
-      <div className="creation-actions"><button type="button" className="primary-action" disabled={pending} onClick={() => void submit(true)}>Create Cell</button><label className="schema-check"><input type="checkbox" checked={start} disabled={pending} onChange={event => setStart(event.target.checked)} /> {previewAttachable ? "Start and attach after creation" : "Start after creation"}</label></div>
-    </div>}
-    {Object.keys(errors).length > 0 && <p className="field-error" role="alert">Fix the highlighted fields before previewing.</p>}
-  </form></section>;
+    </PreviewPanel>}
+    <CreationActions start={start} attach={attach} onStart={setStart} onAttach={setAttach} pending={pending} hasPreview={!!preview} previewLabel="Validate and preview Cell" canPreview={!pending} canCreate={!pending} onPreview={() => void submit(false)} onCreate={() => void submit(true)} />
+  </div>;
 }
 
-export function NewCellPage({ revision, inventory, configScope, onCreated }: { revision: number; inventory: InventoryResource; configScope?: string[]; onCreated: (cell: CellDoc, start: boolean) => void }) {
+export function NewCellPage({ revision, inventory, configScope, onCreated }: { revision: number; inventory: InventoryResource; configScope?: string[]; onCreated: (cell: CellDoc, options: CreatedOptions) => void }) {
   const [method, setMethod] = useState<"config" | "manual">("config");
   return <>
     <div className="creation-method-switch" role="group" aria-label="Cell creation method"><button type="button" aria-pressed={method === "config"} onClick={() => setMethod("config")}>From Config</button><button type="button" aria-pressed={method === "manual"} onClick={() => setMethod("manual")}>Manual</button></div>

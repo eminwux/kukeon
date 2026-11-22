@@ -49,6 +49,11 @@ type createConfigRequest struct {
 	// Methods are the connector methods picked for this cell only, keyed by
 	// connector name — only the ones that differ from the Config's (#1551).
 	Methods map[string]string `json:"methods,omitempty"`
+	// TargetSpace and TargetStack place the cell below the Config's own
+	// scope (#1603). Empty keeps the Config's scope; the daemon refuses a
+	// coordinate the Config pins.
+	TargetSpace string `json:"targetSpace,omitempty"`
+	TargetStack string `json:"targetStack,omitempty"`
 }
 
 func registerCreateRoutes(mux *http.ServeMux, dial Dial) {
@@ -89,7 +94,10 @@ func registerCreateRoutes(mux *http.ServeMux, dial Dial) {
 						"connectors": connectorStatuses(rendered.Connectors),
 					}, nil
 				}
-				if input.Preview != digest {
+				// A create without a token was not previewed (#1603) and
+				// creates the render above; one with a token must match it,
+				// so what was reviewed is what gets created.
+				if input.Preview != "" && input.Preview != digest {
 					return nil, fmt.Errorf("%w: inputs or config changed; preview again", errdefs.ErrConfig)
 				}
 				request := rendered.Request
@@ -143,6 +151,13 @@ func configCell(ctx context.Context, c kukeonv1.Client, input createConfigReques
 	if err != nil {
 		return empty, err
 	}
+	targetSpace, targetStack := strings.TrimSpace(input.TargetSpace), strings.TrimSpace(input.TargetStack)
+	if targetSpace != "" && !safeSegment(targetSpace) {
+		return empty, fmt.Errorf("%w: unsafe target space", errdefs.ErrConfig)
+	}
+	if targetStack != "" && !safeSegment(targetStack) {
+		return empty, fmt.Errorf("%w: unsafe target stack", errdefs.ErrConfig)
+	}
 	// kukeond renders the cell (#1418): defaults merge, slot fills, realm
 	// images and — for an omitted name — the generated <prefix>-<6hex>.
 	request := kukeonv1.CellFromConfigRequest{
@@ -151,6 +166,8 @@ func configCell(ctx context.Context, c kukeonv1.Client, input createConfigReques
 		EnvOverrides:       normalized,
 		ConnectorOverrides: overrides,
 		ConnectorMethods:   methods,
+		TargetSpace:        targetSpace,
+		TargetStack:        targetStack,
 	}
 	preview, err := c.PreviewCellFromConfig(ctx, request)
 	if err != nil {

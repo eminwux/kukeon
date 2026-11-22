@@ -36,6 +36,7 @@ import (
 	"github.com/eminwux/kukeon/internal/gitcred"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/buildinfo"
+	"github.com/eminwux/kukeon/internal/util/naming"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
@@ -79,6 +80,11 @@ type cellBinding struct {
 	// Methods are the per-cell `--connector-method <connector>=<method>`
 	// choices, keyed by connector name (#1551).
 	Methods map[string]string
+	// TargetSpace and TargetStack are the space and stack the cell lands in
+	// when its Config leaves them open (#1603); see cellTargetScope. Empty
+	// keeps the Config's scope, defaulted.
+	TargetSpace string
+	TargetStack string
 }
 
 // bindingFromCell rebuilds the binding a live cell was created with from its
@@ -87,6 +93,10 @@ func bindingFromCell(cell intmodel.Cell) cellBinding {
 	binding := cellBinding{
 		Name:     cell.Metadata.Name,
 		Schedule: cell.Metadata.Labels[v1beta1.LabelSchedule],
+		// A re-render keeps the cell where it lives (#1603), which may be
+		// below its Config's scope.
+		TargetSpace: cell.Spec.SpaceName,
+		TargetStack: cell.Spec.StackName,
 	}
 	if prov := cell.Spec.Provenance; prov != nil {
 		binding.EnvOverrides = prov.EnvOverrides
@@ -128,8 +138,10 @@ type scopeLevels struct {
 // digest, and stamps the provenance annotations. The create RPCs, the preview
 // RPC, the OutOfSync reconciler and the restart re-apply all go through it, so
 // every caller renders the same Cell for the same inputs.
-// The cell lands in the Config's scope with empty coordinates defaulted
-// (cellconfig.CellScope); that scope selects the defaults levels.
+// The cell lands in the binding's target scope (cellTargetScope): the
+// Config's scope with empty coordinates defaulted, unless the binding names a
+// space or stack the Config leaves open (#1603). That scope selects the
+// defaults levels.
 //
 //nolint:funlen // the single render pipeline, kept linear so its step order reads top to bottom.
 func renderCellFromConfig(r runner.Runner, cfg intmodel.CellConfig, binding cellBinding) (cellRender, error) {
@@ -151,6 +163,9 @@ func renderCellFromConfig(r runner.Runner, cfg intmodel.CellConfig, binding cell
 	if err != nil {
 		return cellRender{}, fmt.Errorf("materialize cell: %w", err)
 	}
+	// MaterializeWithName places the cell in the Config's scope; move it to
+	// the target. The Config's metadata stays as is: provenance reads it.
+	cellDoc.Spec.SpaceID, cellDoc.Spec.StackID = resolved.spaceName, resolved.stackName
 	// Re-apply the cell's per-cell --env overrides last (P3 precedence, #1023).
 	cellconfig.ApplyEnvOverrides(&cellDoc, binding.EnvOverrides)
 
@@ -264,9 +279,13 @@ type configResolution struct {
 	cfgRevision string
 	flat        cellblueprint.Flattened
 	levels      scopeLevels
-	merged      v1beta1.CellConfigDoc
-	values      []v1beta1.RenderedValue
-	binding     cellBinding
+	// spaceName and stackName are the target scope the cell lands in
+	// (cellTargetScope); the realm is always the Config's.
+	spaceName string
+	stackName string
+	merged    v1beta1.CellConfigDoc
+	values    []v1beta1.RenderedValue
+	binding   cellBinding
 
 	connectors []v1beta1.ConnectorStatus
 	git        *gitIdentityExpander
@@ -323,7 +342,10 @@ func resolveConfig(r runner.Runner, cfg intmodel.CellConfig, binding cellBinding
 	}
 	bpDoc = flat.Doc
 
-	realmName, spaceName, stackName := cellconfig.CellScope(cfgDoc)
+	realmName, spaceName, stackName, err := cellTargetScope(cfgDoc, binding.TargetSpace, binding.TargetStack)
+	if err != nil {
+		return configResolution{}, err
+	}
 	levels, err := loadScopeLevels(r, realmName, spaceName, stackName)
 	if err != nil {
 		return configResolution{}, err
@@ -376,12 +398,44 @@ func resolveConfig(r runner.Runner, cfg intmodel.CellConfig, binding cellBinding
 		cfgRevision: cfgRevision,
 		flat:        flat,
 		levels:      levels,
+		spaceName:   spaceName,
+		stackName:   stackName,
 		merged:      merged,
 		values:      values,
 		binding:     binding,
 		connectors:  connectorStatuses(r, requirements, merged, values, git),
 		git:         git,
 	}, nil
+}
+
+// cellTargetScope returns the realm/space/stack a cell rendered from cfg
+// lands in. A coordinate the Config sets is pinned; one it leaves empty
+// takes the requested target, else "default" (issue #1603).
+func cellTargetScope(cfg v1beta1.CellConfigDoc, targetSpace, targetStack string) (string, string, string, error) {
+	realm, space, stack := cellconfig.CellScope(cfg)
+	pick := func(kind, own, scoped, target string) (string, error) {
+		target = strings.TrimSpace(target)
+		if target == "" {
+			return scoped, nil
+		}
+		if own = strings.TrimSpace(own); own != "" && own != target {
+			return "", fmt.Errorf("%w: config %q is scoped to %s %q; a cell cannot be created in %s %q",
+				errdefs.ErrConfig, cfg.Metadata.Name, kind, own, kind, target)
+		}
+		if err := naming.ValidateHierarchyName(kind, target); err != nil {
+			return "", fmt.Errorf("%w: target %s: %w", errdefs.ErrConfig, kind, err)
+		}
+		return target, nil
+	}
+	space, err := pick("space", cfg.Metadata.Space, space, targetSpace)
+	if err != nil {
+		return "", "", "", err
+	}
+	stack, err = pick("stack", cfg.Metadata.Stack, stack, targetStack)
+	if err != nil {
+		return "", "", "", err
+	}
+	return realm, space, stack, nil
 }
 
 // inferMode picks the harness mode a cell's own inputs imply when the create

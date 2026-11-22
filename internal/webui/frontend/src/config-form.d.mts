@@ -54,4 +54,6 @@ export function buildSpec(blueprintRef: { name?: string; realm?: string; space?:
 export function missingAnswers(form: BlueprintForm, answers: Answers, mode?: string): string[];
 export interface DefaultIdentityField { field: string; host: string; value: string; origin: string }
 export function groupGitValues(values: RenderedValue[] | undefined): { repos: RepoIdentity[]; defaults: DefaultIdentityField[]; rest: RenderedValue[] };
+export type ValueSource = "blueprint" | "config" | "connectors" | "realm" | "space" | "stack" | "cell" | "other";
+export function groupValuesBySource<C extends object>(values: RenderedValue[] | undefined, connectors: C[] | undefined): Array<{ source: "connectors"; rows: C[] } | { source: Exclude<ValueSource, "connectors">; rows: RenderedValue[] }>;
 export function secretChoices(secrets: unknown[] | undefined, types?: string[]): SecretChoice[];

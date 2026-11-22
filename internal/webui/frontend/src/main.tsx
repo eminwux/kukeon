@@ -585,7 +585,10 @@ function App() {
       setRevision(value => value + 1);
     }
   }
-  async function handleCellCreated(cell: Doc, start: boolean) {
+  // After creation (#1603) the UI lands on cellTerminal only when the cell is started with a terminal attached
+  // and has a workload to attach to; otherwise on cellRead, which never opens a terminal session.
+  async function handleCellCreated(cell: Doc, options: { start: boolean; attach: boolean }) {
+    const start = options.start;
     const spec = cell.spec as { realmId?: unknown; spaceId?: unknown; stackId?: unknown; containers?: { id?: unknown; attachable?: unknown; root?: unknown }[]; tty?: { default?: unknown } } | undefined;
     if (typeof spec?.realmId !== "string" || typeof spec.spaceId !== "string" || typeof spec.stackId !== "string") {
       notify({ key: "create", tone: "error", message: "The daemon created a Cell but returned an incomplete scope. Refresh the inventory to locate it." });
@@ -599,7 +602,8 @@ function App() {
     if (typeof selected?.id === "string") terminals.select(scope, selected.id);
     inventory.upsertCell(cell);
     setRevision(value => value + 1);
-    window.location.hash = workspaceLink(scope);
+    const openTerminal = options.start && options.attach && typeof selected?.id === "string";
+    window.location.hash = openTerminal ? workspaceLink(scope) : resourceLink(scope);
     const key = `create:${JSON.stringify(scope)}`;
     const link = { href: resourceLink(scope), label: "View cell details" };
     notify({ key, tone: start ? "pending" : "success", message: start ? `Cell ${scope.join(" / ")} created. Starting it…` : `Cell ${scope.join(" / ")} created and left stopped.`, link });
@@ -609,7 +613,7 @@ function App() {
       let body: { error?: { message?: string } } = {};
       try { body = await response.json(); } catch { /* Use the HTTP status below. */ }
       if (!response.ok) throw new Error(body.error?.message ?? `HTTP ${response.status}`);
-      notify({ key, tone: "success", message: `Cell ${scope.join(" / ")} started.${selected ? " The terminal will attach to its selected workload when ready." : " No attachable workload was defined."}`, link });
+      notify({ key, tone: "success", message: `Cell ${scope.join(" / ")} started.${!selected ? " No attachable workload was defined." : openTerminal ? " The terminal will attach to its selected workload when ready." : ""}`, link });
     } catch (error) {
       notify({ key, tone: "error", message: `Cell ${scope.join(" / ")} was created stopped, but start failed: ${error instanceof Error ? error.message : "The daemon request failed."}`, link });
     } finally { setRevision(value => value + 1); }

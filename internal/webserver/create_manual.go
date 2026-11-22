@@ -86,7 +86,9 @@ func registerManualCreateRoutes(mux *http.ServeMux, dial Dial) {
 				if strings.HasSuffix(r.URL.Path, "/preview") {
 					return map[string]any{"document": redactCell(doc), "preview": digest}, nil
 				}
-				if input.Preview != digest {
+				// An empty token means no preview was shown (#1603); a
+				// token must still match the document it was issued for.
+				if input.Preview != "" && input.Preview != digest {
 					return nil, fmt.Errorf("%w: inputs or scope changed; review a new preview", errdefs.ErrConfig)
 				}
 				doc.Spec.IgnoreDiskPressure = input.Spec.IgnoreDiskPressure

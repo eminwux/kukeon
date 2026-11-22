@@ -478,3 +478,35 @@ func slicesContain(s []string, want string) bool {
 	}
 	return false
 }
+
+// TestClone_ConfigLineageRendersInSourceScope (#1603): a clone of a cell that
+// lives below its realm-scoped Config's scope is rendered in the source
+// cell's space and stack, so the daemon merges that space's and stack's
+// defaults and the clone lands next to the source.
+func TestClone_ConfigLineageRendersInSourceScope(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	lastConfigRequest = kukeonv1.CellFromConfigRequest{}
+	src := sourceConfigCell()
+	src.Spec.Provenance.BindingRef.Space, src.Spec.Provenance.BindingRef.Stack = "", ""
+	src.Spec.SpaceID, src.Spec.StackID = "a", "b"
+	var got v1beta1.CellDoc
+	fc := cloneFakeClient(t, src, &got)
+	cmd, _ := newTestExecCmd(t, fc)
+	setSourceScope(t, cmd, src)
+	setFlag(t, cmd, "clone", src.Metadata.Name)
+	cmd.SetArgs([]string{"abclone"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if lastConfigRequest.TargetSpace != "a" || lastConfigRequest.TargetStack != "b" {
+		t.Errorf("request target = %q/%q, want the source cell's a/b",
+			lastConfigRequest.TargetSpace, lastConfigRequest.TargetStack)
+	}
+	if lastConfigRequest.Config.Space != "" || lastConfigRequest.Config.Stack != "" {
+		t.Errorf("request config = %+v, want the realm-scoped binding ref", lastConfigRequest.Config)
+	}
+	if got.Spec.SpaceID != "a" || got.Spec.StackID != "b" {
+		t.Errorf("clone scope = %s/%s, want a/b", got.Spec.SpaceID, got.Spec.StackID)
+	}
+}

@@ -249,3 +249,22 @@ func postCreateRaw(t *testing.T, handler http.Handler, path, body, origin string
 	handler.ServeHTTP(response, request)
 	return response
 }
+
+// TestManualCellCreateWithoutPreview (#1603): a manual create with no token
+// creates the validated document; a wrong token is still refused.
+func TestManualCellCreateWithoutPreview(t *testing.T) {
+	client := &creationClient{materializeCreated: true}
+	handler := testCreateHandler(t, client)
+	input := manualCellRequest{Name: "manual-cell", Realm: "realm", Space: "space", Stack: "stack"}
+
+	input.Preview = "stale"
+	refused := postCreate(t, handler, "/api/cells/manual/create", input)
+	if refused.Code != http.StatusBadRequest || client.created != 0 {
+		t.Fatalf("create with a wrong token: %d %s", refused.Code, refused.Body.String())
+	}
+	input.Preview = ""
+	created := postCreate(t, handler, "/api/cells/manual/create", input)
+	if created.Code != http.StatusOK || client.created != 1 || client.doc.Metadata.Name != "manual-cell" {
+		t.Fatalf("create without preview: %d %s", created.Code, created.Body.String())
+	}
+}
