@@ -326,9 +326,16 @@ func loadClientConfiguration(cmd *cobra.Command) error {
 	// template to edit. Skipped silently on permission/IO failures — kuke must
 	// still run with hardcoded defaults.
 	maybeWriteClientConfigurationDefault(cmd, path)
-	doc, err := clientconfig.Load(path)
-	if err != nil {
-		return fmt.Errorf("load client configuration: %w", err)
+	doc := &v1beta1.ClientConfigurationDoc{}
+	// With HOME unset the default path is relative ("tmp/.kuke/kuke.yaml"):
+	// reading it would apply whatever file sits under the working directory.
+	// Only a path the operator chose is read then (#1550).
+	if config.HomeDirKnown() || flagChanged(cmd, "configuration") || envSet(config.KUKE_CONFIGURATION) {
+		loaded, err := clientconfig.Load(path)
+		if err != nil {
+			return fmt.Errorf("load client configuration: %w", err)
+		}
+		doc = loaded
 	}
 	applyClientConfiguration(cmd, doc.Spec)
 	// Mirror the daemon-side LoadServerConfigurationFromFlag: drive
@@ -368,8 +375,8 @@ func loadClientConfiguration(cmd *cobra.Command) error {
 // read-only or the parent directory cannot be created. With $HOME unset the
 // dump is skipped outright: the default path then falls back to a relative
 // "tmp/.kuke/kuke.yaml", and writing it would drop a file into whatever
-// directory kuke ran in (#1550). Reading still falls back to the hardcoded
-// defaults.
+// directory kuke ran in (#1550). loadClientConfiguration skips reading that
+// relative default too, so kuke falls back to the hardcoded defaults.
 func maybeWriteClientConfigurationDefault(_ *cobra.Command, path string) {
 	if !config.HomeDirKnown() {
 		return
