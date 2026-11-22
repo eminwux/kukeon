@@ -1141,10 +1141,21 @@ test("catalog empty results are distinct from retrieval failures", async ({ page
   await expect(page.getByText("No volumes found")).toHaveCount(0);
 });
 
+// New Cell's optional sections are collapsed disclosures (#1603); a test opens one by its heading.
+const newCellSection = (page, title) => content(page).locator(".disclosure").filter({ has: page.locator("summary", { has: page.getByRole("heading", { name: title, exact: true }) }) });
+async function openNewCellSection(page, title) {
+  const section = newCellSection(page, title);
+  if (await section.locator("details").getAttribute("open") === null) await section.locator("summary").click();
+  await expect(section.locator("details")).toHaveAttribute("open");
+}
+const previewPanel = page => page.getByRole("region", { name: "Preview", exact: true });
+
 test("create from config previews, prevents duplicate submits and opens the scoped cell", async ({ page }) => {
   await mockCatalog(page);
   let creates = 0;
+  let started = 0;
   await page.route("**/api/realms/prod/spaces/shared/stacks/services/cells", route => route.fulfill({ json: [...fixture("/api/realms/prod/spaces/shared/stacks/services/cells"), ...(creates ? [doc(["prod", "shared", "services", "new-cell"])] : [])] }));
+  await page.route("**/api/realms/prod/spaces/shared/stacks/services/cells/new-cell/start", route => { started++; return route.fulfill({ json: {} }); });
   await page.route("**/api/cells/from-config/*", async route => {
     const input = route.request().postDataJSON();
     const document = { metadata: { name: input.name }, spec: { realmId: "prod", spaceId: "shared", stackId: "services" } };
@@ -1159,19 +1170,26 @@ test("create from config previews, prevents duplicate submits and opens the scop
   await expect(page).toHaveURL(/#\/new-cell\?config=/);
   await page.getByLabel("Cell name (optional)").fill("new-cell");
   await page.getByRole("button", { name: "Preview Cell", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Review Cell document" })).toBeVisible();
+  await expect(previewPanel(page)).toBeVisible();
   expect(creates).toBe(0);
+  // An input change drops the preview; Create stays on screen, since it needs no preview (#1603).
+  await openNewCellSection(page, "Environment overrides");
   await page.getByLabel("Environment overrides").fill("APP=production");
-  await expect(page.getByRole("button", { name: "Create Cell", exact: true })).toHaveCount(0);
+  await expect(previewPanel(page)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Create Cell", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Preview Cell", exact: true }).click();
+  await expect(previewPanel(page)).toBeVisible();
   await page.getByRole("button", { name: "Create Cell", exact: true }).click();
-  await expect(page).toHaveURL(/#\/workspace\/prod\/shared\/services\/new-cell$/);
+  // The mock cell has no attachable container, so the default start-and-attach lands on cellRead.
+  await expect(page).toHaveURL(/#\/resource\/prod\/shared\/services\/new-cell$/);
   expect(creates).toBe(1);
+  await expect.poll(() => started).toBe(1);
+  await expect(toasts(page)).toContainText("No attachable workload was defined.");
   await expect(page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link", { name: "Open prod / shared / services / new-cell" })).toBeVisible();
 });
 
 // Issue #1568, item D: the preview is a short summary, the JSON is one click away and Create Cell is the
-// one primary action, with the start option beside it.
+// one primary action. #1603: Create needs no preview, the actions sit bottom right and the preview is its own panel.
 test("New Cell from a Config summarizes the preview, keeps the JSON collapsed and wrapped, and makes Create the only primary action", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockCatalog(page);
@@ -1199,27 +1217,37 @@ test("New Cell from a Config summarizes the preview, keeps the JSON collapsed an
   await expect(modes.getByRole("button", { name: "Manual" })).toHaveAttribute("aria-pressed", "false");
   const primary = content(page).locator("button.primary-action:visible");
   await expect(page.getByRole("button", { name: "Preview Cell", exact: true })).toBeEnabled();
-  await expect(primary).toHaveText(["Preview Cell"]);
+  // Create Cell is the only primary-styled button, before and after a preview (#1603).
+  await expect(primary).toHaveText(["Create Cell"]);
+  await expect(page.getByRole("button", { name: "Preview Cell", exact: true })).not.toHaveClass(/primary-action/);
+  // The form above the preview does not move or change when the preview appears.
+  const formBox = () => page.getByRole("region", { name: "Cell", exact: true }).evaluate(el => { const box = el.getBoundingClientRect(); return { top: box.top + scrollY, height: box.height, text: el.textContent }; });
+  const formBefore = await formBox();
   await page.getByRole("button", { name: "Preview Cell", exact: true }).click();
 
-  const review = page.locator(".creation-review");
+  const review = previewPanel(page);
+  await expect(review.getByRole("heading", { name: "Preview", exact: true })).toBeVisible();
+  await expect(review.locator(".badge", { hasText: "Not created yet" })).toBeVisible();
   await expect(review.locator(".creation-summary dt")).toHaveText(["Name", "Scope", "Containers", "Images", "Connectors"]);
   await expect(review.locator(".creation-summary dd")).toHaveText(["worker-7f3a", "prod / shared / services", "2 (work, sidecar)", "ghcr.io/example/app:v1ghcr.io/example/sidecar:v2", "None"]);
   // The summary is on screen without scrolling by hand, and the page is no longer thousands of pixels of JSON.
   await expect(review.locator(".creation-summary")).toBeInViewport({ ratio: 1 });
+  expect(await formBox()).toEqual(formBefore);
   const collapsedHeight = await page.evaluate(() => document.scrollingElement.scrollHeight);
-  // Create Cell is the only primary-styled button; Refresh preview is a plain, content-width button.
   await expect(primary).toHaveText(["Create Cell"]);
   const refresh = page.getByRole("button", { name: "Refresh preview", exact: true });
   await expect(refresh).not.toHaveClass(/primary-action/);
   expect((await refresh.boundingBox()).width).toBeLessThan(200);
-  // The start option sits on the same row, right after Create.
-  const create = review.getByRole("button", { name: "Create Cell", exact: true });
-  const start = review.getByLabel("Start and attach after creation");
-  const [createBox, startBox] = [await create.boundingBox(), await start.boundingBox()];
-  expect(Math.abs((createBox.y + createBox.height / 2) - (startBox.y + startBox.height / 2))).toBeLessThan(12);
-  expect(startBox.x - (createBox.x + createBox.width)).toBeGreaterThan(0);
-  expect(startBox.x - (createBox.x + createBox.width)).toBeLessThan(60);
+  // One action row at the bottom right, below the preview: the options, then Refresh preview, then Create.
+  const actions = content(page).locator(".form-actions");
+  const create = actions.getByRole("button", { name: "Create Cell", exact: true });
+  const [createBox, refreshBox, actionsBox, reviewBox] = [await create.boundingBox(), await refresh.boundingBox(), await actions.boundingBox(), await review.boundingBox()];
+  expect(Math.abs((createBox.x + createBox.width) - (actionsBox.x + actionsBox.width))).toBeLessThan(2);
+  expect(Math.abs((createBox.y + createBox.height / 2) - (refreshBox.y + refreshBox.height / 2))).toBeLessThan(12);
+  expect(refreshBox.x + refreshBox.width).toBeLessThan(createBox.x);
+  expect(actionsBox.y).toBeGreaterThan(reviewBox.y + reviewBox.height - 1);
+  await expect(actions.getByLabel("Start the cell")).toBeChecked();
+  await expect(actions.getByLabel("Attach a terminal")).toBeChecked();
 
   // The full JSON is a collapsed disclosure that wraps instead of widening the page.
   const json = review.locator("details.creation-json");
@@ -1236,13 +1264,19 @@ test("New Cell from a Config summarizes the preview, keeps the JSON collapsed an
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.setViewportSize({ width: 1440, height: 900 });
 
-  // Create with start and attach: the reviewed name and preview token go back unchanged, then the cell starts.
-  await start.check();
+  // Hide preview removes the panel and nothing else.
+  await review.getByRole("button", { name: "Hide preview" }).click();
+  await expect(review).toHaveCount(0);
+  expect(await formBox()).toEqual(formBefore);
+  await page.getByRole("button", { name: "Preview Cell", exact: true }).click();
+  await expect(review).toBeVisible();
+
+  // Create with the defaults: the reviewed name and preview token go back unchanged, the cell starts and attaches.
   await create.click();
   await expect(page).toHaveURL(/#\/workspace\/prod\/shared\/services\/worker-7f3a$/);
   await expect.poll(() => started).toBe(1);
-  expect(requests.map(request => request.step)).toEqual(["preview", "create"]);
-  expect(requests[1].input).toEqual({ config: { name: "shared-name", realm: "prod", space: "shared", stack: "services" }, name: "", resolvedName: "worker-7f3a", preview: "reviewed", env: [], ignoreDiskPressure: false });
+  expect(requests.map(request => request.step)).toEqual(["preview", "preview", "create"]);
+  expect(requests[2].input).toEqual({ config: { name: "shared-name", realm: "prod", space: "shared", stack: "services" }, name: "", resolvedName: "worker-7f3a", preview: "reviewed", env: [], ignoreDiskPressure: false, targetSpace: "shared", targetStack: "services" });
   await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
 });
 
@@ -1263,20 +1297,29 @@ test("manual New Cell keeps validation inline, summarizes the preview and sends 
   await expect(modes.getByRole("button", { name: "Manual" })).toHaveAttribute("aria-pressed", "true");
   await expect(modes.getByRole("button", { name: "From Config" })).toHaveAttribute("aria-pressed", "false");
   const primary = content(page).locator("button.primary-action:visible");
-  await expect(primary).toHaveText(["Validate and preview Cell"]);
+  const validate = page.getByRole("button", { name: "Validate and preview Cell", exact: true });
+  // Create Cell is the one primary action in both methods (#1603); Validate and preview is secondary.
+  await expect(primary).toHaveText(["Create Cell"]);
+  await expect(validate).not.toHaveClass(/primary-action/);
   // Validation errors stay inline, beside the field, and nothing is sent.
+  await validate.click();
+  await expect(page.locator("#manual-name-error")).toHaveText("This field is required.");
+  await expect(page.getByText("Fix the highlighted fields before previewing or creating.")).toBeVisible();
+  // A create without a preview runs the same validation (#1603).
+  await page.locator("#manual-name").fill("x");
+  await page.locator("#manual-name").fill("");
+  await expect(page.locator("#manual-name-error")).toHaveCount(0);
   await primary.click();
   await expect(page.locator("#manual-name-error")).toHaveText("This field is required.");
-  await expect(page.getByText("Fix the highlighted fields before previewing.")).toBeVisible();
   expect(requests).toEqual([]);
   await page.locator("#manual-name").fill("manual-cell");
   await page.getByRole("button", { name: "Add container" }).click();
   await page.getByLabel(/^Container ID/).fill("app");
   await page.getByLabel(/^OCI image/).fill("ghcr.io/example/app:latest");
   await page.getByLabel("Attachable terminal").check();
-  await primary.click();
+  await validate.click();
 
-  const review = page.locator(".creation-review");
+  const review = previewPanel(page);
   await expect(review.locator(".creation-summary dd")).toHaveText(["manual-cell", "dev / shared / services", "1 (app)", "ghcr.io/example/app:latest", "None"]);
   await expect(review.locator(".creation-summary")).toBeInViewport({ ratio: 1 });
   await expect(primary).toHaveText(["Create Cell"]);
@@ -1291,8 +1334,11 @@ test("manual New Cell keeps validation inline, summarizes the preview and sends 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.setViewportSize({ width: 1440, height: 900 });
 
-  await review.getByLabel("Start and attach after creation").check();
-  await review.getByRole("button", { name: "Create Cell", exact: true }).click();
+  // The same action row as From Config, at the bottom right, starting and attaching by default.
+  const actions = content(page).locator(".form-actions");
+  await expect(actions.getByLabel("Start the cell")).toBeChecked();
+  await expect(actions.getByLabel("Attach a terminal")).toBeChecked();
+  await actions.getByRole("button", { name: "Create Cell", exact: true }).click();
   await expect(page).toHaveURL(/#\/workspace\/dev\/shared\/services\/manual-cell$/);
   expect(requests.map(request => request.step)).toEqual(["preview", "create"]);
   expect(requests[1].input).toEqual({ ...requests[0].input, preview: "manual-reviewed" });
@@ -1450,8 +1496,16 @@ test("the config preview of an existing config shows each repo's git identity", 
   await page.goto(`${server.url}#/configs/prod/shared/services/shared-name`);
   await page.getByRole("link", { name: /Create Cell from this Config/ }).click();
   await page.getByRole("button", { name: "Preview Cell", exact: true }).click();
-  await expect(page.getByRole("table", { name: "Git identity for project" }).getByRole("row").nth(1)).toHaveText(/signing.*git-ssh \(ssh-key\).*space/);
-  await expect(page.getByRole("table", { name: "Merged values and their origin" }).getByRole("row")).toHaveCount(2);
+  // Each value is listed under the source that set it (#1603), git values included.
+  const sources = previewPanel(page).getByRole("group", { name: "Preview sources" });
+  await expect(sources.locator(":scope > [role=group]")).toHaveCount(2);
+  await expect(sources.getByRole("table", { name: "From the Config" }).getByRole("row")).toHaveCount(3);
+  await expect(sources.getByRole("table", { name: "Space defaults" }).getByRole("row").nth(1)).toHaveText(/git.*project\.signing.*git-ssh \(ssh-key\)/);
+  // The per-repository identity table sits in a collapsed disclosure.
+  const identity = page.getByRole("table", { name: "Git identity for project" });
+  await expect(identity).toBeHidden();
+  await openNewCellSection(page, "Git identity per repository");
+  await expect(identity.getByRole("row").nth(1)).toHaveText(/signing.*git-ssh \(ssh-key\).*space/);
 });
 
 // kuke team writes realm-only blueprint refs from stack-scoped configs; the
@@ -1607,17 +1661,149 @@ test("create from config resolves configs and blueprint refs scoped at realm, sp
     if (route.request().url().endsWith("create")) { created = input; await route.fulfill({ json: document }); }
     else await route.fulfill({ json: { document, preview: "reviewed" } });
   });
+  await page.route("**/api/realms/prod/spaces/shared/stacks/services/cells/team-1/start", route => route.fulfill({ json: {} }));
   for (const { config, blueprint } of cases) {
     await page.goto(`${server.url}#/new-cell?config=${encodeURIComponent(JSON.stringify(config))}`);
     await expect(page.getByRole("link", { name: "claude", exact: true })).toHaveAttribute("href", `#/blueprints/${blueprint.join("/")}`);
     await expect(page.getByText("Blueprint reference is missing")).toHaveCount(0);
+    // A coordinate the Config is scoped to pins its target select (#1603).
+    const [space, stack] = [page.getByLabel("Target space"), page.getByLabel("Target stack")];
+    if (config.length > 2) { await expect(space).toBeDisabled(); await expect(space).toHaveValue(config[1]); } else await expect(space).toBeEnabled();
+    if (config.length > 3) { await expect(stack).toBeDisabled(); await expect(stack).toHaveValue(config[2]); } else await expect(stack).toBeEnabled();
   }
   await expect(page.getByRole("button", { name: "Preview Cell", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "Preview Cell", exact: true }).click();
-  await expect(page.getByLabel(/Start (and attach )?after creation/)).not.toBeChecked();
+  await expect(page.getByLabel("Start the cell")).toBeChecked();
   await page.getByRole("button", { name: "Create Cell", exact: true }).click();
   await expect.poll(() => created?.config).toEqual({ name: "team", realm: "prod", space: "shared", stack: "services" });
   for (const lookup of lookups) expect(lookup.params).not.toContain(lookup.scope.at(-1));
+});
+
+// #1603: the create action of a Config or Blueprint page is the header row's last, primary item, and
+// nothing sits between the overview and the next panel.
+test("Config and Blueprint pages put their create action in the header row", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockCatalog(page);
+  for (const [kind, name] of [["configs", /Create Cell from this Config/], ["blueprints", /Create Config from this Blueprint/]]) {
+    await page.goto(`${server.url}#/${kind}/prod/shared/services/shared-name`);
+    const actions = content(page).locator(".detail-actions");
+    const link = actions.getByRole("link", { name });
+    await expect(link).toBeVisible();
+    await expect(actions.locator("a, button").last()).toHaveText(name);
+    const [linkBox, rowBox] = [await link.boundingBox(), await actions.boundingBox()];
+    expect(Math.abs((linkBox.x + linkBox.width) - (rowBox.x + rowBox.width))).toBeLessThan(2);
+    // The overview panel is followed directly by another panel, not by a stray link.
+    const overview = content(page).locator("section.panel").filter({ has: page.getByRole("heading", { name: "Resource overview" }) });
+    await expect(overview).toBeVisible();
+    expect(await overview.evaluate(el => el.nextElementSibling?.tagName)).not.toBe("A");
+    await expect(content(page).locator(":scope > a.new-cell-action, .workspace-content > a.new-cell-action")).toHaveCount(0);
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${server.url}#/configs/prod/shared/services/shared-name`);
+  await expect(content(page).locator(".detail-actions").getByRole("link", { name: /Create Cell from this Config/ })).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+// A realm-scoped Config's cells may land in any space and stack of its realm (#1603). The inventory
+// below gives the realm a default space with a default stack, and a space "a" with stacks "b" and "c".
+async function mockTargets(page) {
+  await mockCatalog(page);
+  await page.route("**/api/realms/prod/spaces", route => route.fulfill({ json: [doc(["prod", "default"]), doc(["prod", "shared"]), doc(["prod", "a"])] }));
+  await page.route("**/api/realms/prod/spaces/default/stacks", route => route.fulfill({ json: [doc(["prod", "default", "default"])] }));
+  await page.route("**/api/realms/prod/spaces/a/stacks", route => route.fulfill({ json: [doc(["prod", "a", "b"]), doc(["prod", "a", "c"])] }));
+  const requests = [];
+  const starts = [];
+  await page.route("**/api/cells/from-config/*", async route => {
+    const input = route.request().postDataJSON();
+    const create = route.request().url().endsWith("create");
+    requests.push({ step: create ? "create" : "preview", input });
+    const document = { apiVersion: "kukeon.io/v1beta1", kind: "Cell", metadata: { name: input.resolvedName || input.name || "worker-1a2b3c" }, spec: { realmId: "prod", spaceId: input.targetSpace, stackId: input.targetStack, containers: [{ id: "work", attachable: true }] } };
+    await route.fulfill({ json: create ? document : { document, preview: "reviewed", values: [] } });
+  });
+  await page.route("**/api/realms/prod/spaces/*/stacks/*/cells/worker-1a2b3c/**", route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/start")) { starts.push(path); return route.fulfill({ json: {} }); }
+    if (path.endsWith("/containers")) return route.fulfill({ json: [{ id: "work", attachable: true }] });
+    return route.fallback();
+  });
+  await page.goto(`${server.url}#/new-cell?config=${encodeURIComponent(JSON.stringify(["prod", "shared-name"]))}`);
+  return { requests, starts };
+}
+
+test("New Cell creates, starts and attaches in one click, with no preview", async ({ page }) => {
+  const { requests, starts } = await mockTargets(page);
+  await page.routeWebSocket("**/attach", socket => { socket.send(JSON.stringify({ type: "ready" })); });
+  // Only the essentials are open: the Config summary, the cell name and the target.
+  await expect(page.getByRole("region", { name: "Config", exact: true }).locator(".config-summary")).toContainText("Config shared-name prod");
+  await expect(page.getByLabel("Cell name (optional)")).toBeVisible();
+  await expect(newCellSection(page, "Environment overrides").locator("details")).not.toHaveAttribute("open");
+  await expect(newCellSection(page, "Advanced").locator("details")).not.toHaveAttribute("open");
+  await expect(page.getByLabel("Start the cell")).toBeChecked();
+  await expect(page.getByLabel("Attach a terminal")).toBeChecked();
+  await page.getByRole("button", { name: "Create Cell", exact: true }).click();
+  await expect(page).toHaveURL(/#\/workspace\/prod\/default\/default\/worker-1a2b3c$/);
+  expect(requests.map(request => request.step)).toEqual(["create"]);
+  expect(requests[0].input).not.toHaveProperty("preview");
+  expect(requests[0].input).not.toHaveProperty("resolvedName");
+  expect(requests[0].input).toMatchObject({ config: { name: "shared-name", realm: "prod" }, targetSpace: "default", targetStack: "default" });
+  await expect.poll(() => starts.length).toBe(1);
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
+});
+
+test("New Cell targets a space and stack below a realm-scoped Config, and Attach unticked lands on cellRead", async ({ page }) => {
+  const { requests, starts } = await mockTargets(page);
+  let attaches = 0;
+  await page.routeWebSocket("**/attach", socket => { attaches++; socket.send(JSON.stringify({ type: "ready" })); });
+  const [space, stack] = [page.getByLabel("Target space"), page.getByLabel("Target stack")];
+  await expect(space).toHaveValue("default");
+  await expect(stack).toHaveValue("default");
+  await expect(space.getByRole("option")).toHaveText(["a", "default", "shared"]);
+  await page.getByRole("button", { name: "Preview Cell", exact: true }).click();
+  await expect(previewPanel(page)).toBeVisible();
+  // Changing the space drops the preview and resets the stack by the same rule: no default here, so the first.
+  await space.selectOption("a");
+  await expect(previewPanel(page)).toHaveCount(0);
+  await expect(stack).toHaveValue("b");
+  await expect(stack.getByRole("option")).toHaveText(["b", "c"]);
+  await page.getByRole("button", { name: "Preview Cell", exact: true }).click();
+  await expect(previewPanel(page).locator(".creation-summary dd").nth(1)).toHaveText("prod / a / b");
+  expect(requests.at(-1).input).toMatchObject({ targetSpace: "a", targetStack: "b" });
+  await stack.selectOption("c");
+  await expect(previewPanel(page)).toHaveCount(0);
+  await page.getByRole("button", { name: "Preview Cell", exact: true }).click();
+  await expect(previewPanel(page).locator(".creation-summary dd").nth(1)).toHaveText("prod / a / c");
+
+  // Start without a terminal: the cell starts and the UI opens its read page, with no attach session.
+  await page.getByLabel("Attach a terminal").uncheck();
+  await expect(page.getByLabel("Start the cell")).toBeChecked();
+  await page.getByRole("button", { name: "Create Cell", exact: true }).click();
+  await expect(page).toHaveURL(/#\/resource\/prod\/a\/c\/worker-1a2b3c$/);
+  expect(requests.at(-1)).toMatchObject({ step: "create", input: { targetSpace: "a", targetStack: "c", preview: "reviewed", resolvedName: "worker-1a2b3c" } });
+  await expect.poll(() => starts.length).toBe(1);
+  await expect(toasts(page)).toContainText("started.");
+  await page.waitForTimeout(300);
+  expect(attaches).toBe(0);
+});
+
+test("the New Cell preview lists what each source contributes, in source order", async ({ page }) => {
+  await mockCatalog(page);
+  await page.route("**/api/cells/from-config/*", route => route.fulfill({ json: { document: { metadata: { name: "new-cell" }, spec: { realmId: "prod", spaceId: "shared", stackId: "services" } }, preview: "reviewed", values: [
+    { kind: "value", key: "REGION", value: "", origin: "stack" },
+    { kind: "component", key: "github", value: "", origin: "config" },
+    { kind: "mode", key: "interactive", value: "", origin: "blueprint" },
+    { kind: "image", key: "base", value: "ghcr.io/example/base:v1@sha256:abc", origin: "realm" },
+    { kind: "secret", key: "token", value: "", origin: "space" },
+    { kind: "value", key: "PROMPT", value: "", origin: "cell" },
+  ], connectors: [{ connector: "github", title: "GitHub", component: "github", method: "token", delivery: "env", state: "resolved", identity: { name: "gh-token", realm: "prod" }, origin: "space" }] } }));
+  await page.goto(`${server.url}#/new-cell?config=${encodeURIComponent(JSON.stringify(["prod", "shared", "services", "shared-name"]))}`);
+  await page.getByRole("button", { name: "Preview Cell", exact: true }).click();
+  const sources = previewPanel(page).getByRole("group", { name: "Preview sources" });
+  await expect(sources.locator(":scope > [role=group] > h4")).toHaveText([/^From the Blueprint/, /^From the Config/, /^Connectors/, /^Realm defaults prod/, /^Space defaults shared/, /^Stack defaults services/, /^Set for this cell/]);
+  await expect(sources.getByRole("link", { name: "shared-name" })).toHaveAttribute("href", /#\/configs\/prod\/shared\/services\/shared-name/);
+  const connector = sources.getByRole("table", { name: "Connectors", exact: true }).getByRole("row").nth(1);
+  await expect(connector).toHaveText(/GitHub.*token.*gh-token.*prod.*Space default/);
+  await expect(sources.getByRole("table", { name: "Realm defaults" })).toContainText("ghcr.io/example/base:v1@sha256:abc");
+  await expect(sources.getByRole("table", { name: "Stack defaults" })).toContainText("hidden");
 });
 
 test("kill and purge require explicit confirmation, and the cell Purge dialog offers no no-op options", async ({ page }) => {
@@ -1953,6 +2139,11 @@ test("config and blueprint rows link to the pre-filled creation pages", async ({
   await shortcut.focus();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/#\/new-cell\?config=/);
+  // Opened from a Config, the form shows a one-line summary of it; Change reveals the chooser (#1603).
+  const configPanel = page.getByRole("region", { name: "Config", exact: true });
+  await expect(configPanel.locator(".config-summary")).toContainText("Config shared-name prod / shared / services");
+  await expect(page.getByRole("combobox", { name: /^CellConfig/ })).toHaveCount(0);
+  await configPanel.getByRole("button", { name: "Change" }).click();
   await expect(page.getByRole("combobox", { name: /^CellConfig/ })).toHaveValue(JSON.stringify(scope));
 
   await page.goto(`${server.url}#/blueprints`);
@@ -2187,7 +2378,7 @@ test("create-and-start reports through one toast that links to cellRead without 
   await page.getByRole("link", { name: /Create Cell from this Config/ }).click();
   await page.getByLabel("Cell name (optional)").fill("new-cell");
   await page.getByRole("button", { name: "Preview Cell", exact: true }).click();
-  await page.getByLabel(/Start (and attach )?after creation/).check();
+  // Start and attach are the defaults (#1603).
   await page.getByRole("button", { name: "Create Cell", exact: true }).click();
   await expect(page).toHaveURL(/#\/workspace\/prod\/shared\/services\/new-cell$/);
   await expect.poll(() => started).toBe(true);
@@ -3439,7 +3630,7 @@ test("a team-owned Config shows its identities read-only with only Set default, 
   await expect(demo.getByRole("button")).toHaveCount(0);
   await expect(demo.getByRole("link", { name: "Log in to Demo" })).toHaveAttribute("href", newCellFor("teams"));
   await demo.getByRole("link", { name: "Log in to Demo" }).click();
-  await expect(page.getByRole("heading", { name: "Create a stopped Cell" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Cell", exact: true })).toBeVisible();
 });
 
 test("New Cell pre-selects each connector's effective identity, sends only changed picks and keeps Create disabled while one is unresolved", async ({ page }) => {
@@ -3450,10 +3641,15 @@ test("New Cell pre-selects each connector's effective identity, sends only chang
   const panel = connectorsPanel(page);
   const item = panel.getByRole("listitem", { name: "Example connector" });
   const picker = panel.getByRole("combobox", { name: /^Example identity/ });
-  const review = page.getByRole("table", { name: "Connector identities" });
+  // The preview lists each connector under its Connectors source (#1603).
+  const review = previewPanel(page).getByRole("table", { name: "Connectors", exact: true });
 
-  // A resolved Config: the effective identity is pre-selected and nothing is sent for it.
+  // A resolved Config: the effective identity is pre-selected and nothing is sent for it. Its Connectors
+  // section starts collapsed, with a count (#1603).
   await page.goto(`${server.url}${newCellFor("teams")}`);
+  await expect(newCellSection(page, "Connectors").locator("summary")).toContainText("2 resolved");
+  await expect(newCellSection(page, "Connectors").locator("details")).not.toHaveAttribute("open");
+  await openNewCellSection(page, "Connectors");
   await expect(picker.locator("option:checked")).toHaveText("example-team — dev (opaque)");
   await expect(picker.getByRole("option")).toHaveText(["Use the Config's identity", "example-default — dev (opaque)", "example-team — dev (opaque)", "example-other — dev / shared / services (opaque)", "Name a secret…"]);
   await expect(item).toContainText("set by team kukeon");
@@ -3464,11 +3660,11 @@ test("New Cell pre-selects each connector's effective identity, sends only chang
   await expect(review.getByRole("row", { name: /^Example/ })).toContainText("example-team");
   await expect(review.getByRole("row", { name: /^Demo/ })).toContainText("Login kept in state volume");
   expect(previews()).toHaveLength(1);
-  expect(previews()[0].body).toEqual({ config: { name: "teams", realm: "dev", space: "shared", stack: "services" }, name: "", env: [], ignoreDiskPressure: false });
+  expect(previews()[0].body).toEqual({ config: { name: "teams", realm: "dev", space: "shared", stack: "services" }, name: "", env: [], ignoreDiskPressure: false, targetSpace: "shared", targetStack: "services" });
 
   // Choosing another identity of the connector sends it as an override, for this cell only.
   await picker.selectOption({ label: "example-other — dev / shared / services (opaque)" });
-  await expect(createButton).toHaveCount(0);
+  await expect(previewPanel(page)).toHaveCount(0);
   await expect(item).toContainText("Picked for this cell");
   await previewButton.click();
   await expect(review.getByRole("row", { name: /^Example/ })).toContainText("picked for this cell");
@@ -3485,7 +3681,7 @@ test("New Cell pre-selects each connector's effective identity, sends only chang
   await expect(panel.getByLabel("Example identity secret realm")).toHaveValue("dev");
   await panel.getByLabel("Example identity secret name").fill("untagged");
   await previewButton.click();
-  await expect(page.locator("form.creation-form").getByRole("alert")).toContainText('not an identity of connector "example-token"');
+  await expect(content(page).locator(".creation-layout > .error")).toContainText('not an identity of connector "example-token"');
   expect(previews()[3].body.connectors).toEqual({ "example-token": { name: "untagged", realm: "dev" } });
 
   // The override travels with the create, bound to the reviewed preview.
@@ -3493,14 +3689,23 @@ test("New Cell pre-selects each connector's effective identity, sends only chang
   await page.getByLabel("Cell name (optional)").fill("picked-cell");
   await previewButton.click();
   await expect(review.getByRole("row", { name: /^Example/ })).toContainText("example-default");
+  // Created stopped (#1603): the UI lands on cellRead and no start is requested.
+  const starts = [];
+  page.on("request", request => { if (new URL(request.url()).pathname.endsWith("/start")) starts.push(request.url()); });
+  await page.getByLabel("Start the cell").uncheck();
+  await expect(page.getByLabel("Attach a terminal")).toBeDisabled();
+  await expect(page.getByLabel("Attach a terminal")).not.toBeChecked();
   await createButton.click();
-  await expect(page).toHaveURL(/#\/workspace\/dev\/shared\/services\/picked-cell$/);
+  await expect(page).toHaveURL(/#\/resource\/dev\/shared\/services\/picked-cell$/);
+  await expect(toasts(page)).toContainText("created and left stopped");
+  expect(starts).toEqual([]);
   expect(world.posts("/api/cells/from-config/create")).toHaveLength(1);
   expect(world.posts("/api/cells/from-config/create")[0].body).toMatchObject({ name: "picked-cell", resolvedName: "picked-cell", preview: "reviewed", connectors: { "example-token": { name: "example-default", realm: "dev" } } });
 
-  // An unresolved required connector is flagged before any preview or create.
+  // An unresolved required connector is flagged before any preview or create, and opens its section.
   const sent = previews().length;
   await page.goto(`${server.url}${newCellFor("mine")}`);
+  await expect(newCellSection(page, "Connectors").locator("details")).toHaveAttribute("open");
   await expect(item.getByRole("alert")).toContainText("Example has no usable identity");
   await expect(panel.locator(".panel-heading .needs-connector")).toHaveText("Needs connector: Example");
   await expect(picker.locator("option:checked")).toHaveText("No identity — required");
@@ -3542,10 +3747,11 @@ test("New Cell picks another method of a connector for this cell only and sends 
   const panel = connectorsPanel(page);
   const demo = panel.getByRole("listitem", { name: "Demo connector" });
   const method = panel.getByRole("combobox", { name: "Demo method" });
-  const review = page.getByRole("table", { name: "Connector identities" });
+  const review = previewPanel(page).getByRole("table", { name: "Connectors", exact: true });
 
   // The Config uses the login: the method starts on it and there is no identity to pick.
   await page.goto(`${server.url}${newCellFor("teams")}`);
+  await openNewCellSection(page, "Connectors");
   await expect(method).toHaveValue("login");
   await expect(method.getByRole("option")).toHaveText(["login (the Config's)", "key"]);
   await expect(demo.getByRole("combobox", { name: /^Demo identity/ })).toHaveCount(0);

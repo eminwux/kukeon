@@ -1,4 +1,8 @@
-import { groupGitValues, type RenderedValue } from "./config-form.mjs";
+import type { ReactNode } from "react";
+import { groupGitValues, groupValuesBySource, type RenderedValue } from "./config-form.mjs";
+import { StatusIdentity } from "./connector-ui";
+import { connectorTitle, originLabel, refScope } from "./connectors.mjs";
+import type { ConnectorStatus } from "./connectors.mjs";
 
 export type { RenderedValue };
 
@@ -37,4 +41,31 @@ export function MergedValues({ values, digest }: { values: RenderedValue[]; dige
     </tbody></table>}
     {digest && <p className="description">Render digest: <code>{digest}</code></p>}
   </div></>;
+}
+
+// What each source of a preview is called, and the source it names (#1603).
+const sourceHeadings: Record<string, string> = {
+  blueprint: "From the Blueprint", config: "From the Config", connectors: "Connectors", realm: "Realm defaults",
+  space: "Space defaults", stack: "Stack defaults", cell: "Set for this cell", other: "Other",
+};
+export type PreviewSources = { blueprint?: ReactNode; config?: ReactNode; realm?: string; space?: string; stack?: string };
+
+// SourceGroups lists what each source of a Config render contributes (#1603): the Blueprint, the Config,
+// the connectors, the Realm, Space and Stack defaults and this cell's own picks, in that order. Scalar
+// values stay hidden in the browser, as in MergedValues.
+export function SourceGroups({ values, connectors, sources = {}, team = "" }: { values?: RenderedValue[]; connectors?: ConnectorStatus[]; sources?: PreviewSources; team?: string }) {
+  const groups = groupValuesBySource(values, connectors);
+  if (!groups.length) return <p className="description">No values, repositories, secrets or images were merged.</p>;
+  const named: Record<string, ReactNode> = { blueprint: sources.blueprint, config: sources.config, realm: sources.realm, space: sources.space, stack: sources.stack };
+  return <div className="merged-values source-groups" role="group" aria-label="Preview sources">{groups.map(group => {
+    const heading = sourceHeadings[group.source];
+    // A group, not a region: the form's Connectors section is the page's one "Connectors" region.
+    return <div role="group" key={group.source} aria-label={heading}><h4>{heading}{named[group.source] && <> <span className="description">{named[group.source]}</span></>}</h4>
+      {group.source === "connectors" ? <table aria-label={heading}><thead><tr><th scope="col">Connector</th><th scope="col">Method</th><th scope="col">Identity</th><th scope="col">Decided by</th></tr></thead><tbody>
+        {(group.rows as ConnectorStatus[]).map(status => <tr key={`${status.connector}:${status.component}`}><td>{connectorTitle(status)}</td><td>{status.method || <span className="description">—</span>}</td><td>{status.identity ? <><code>{status.identity.name}</code> <span className="description">{refScope(status.identity).join(" / ")}</span></> : <StatusIdentity status={status} team={team} />}</td><td>{status.origin ? <span className="badge">{originLabel(status.origin, team)}</span> : <span className="description">—</span>}</td></tr>)}
+      </tbody></table> : <table aria-label={heading}><thead><tr><th scope="col">Kind</th><th scope="col">Key</th><th scope="col">Value</th></tr></thead><tbody>
+        {(group.rows as RenderedValue[]).map(value => <tr key={`${value.kind}:${value.key}`}><td>{value.kind}</td><td><code>{value.key}</code></td><td>{value.value ? <code>{value.value}</code> : <span className="description">hidden</span>}</td></tr>)}
+      </tbody></table>}
+    </div>;
+  })}</div>;
 }

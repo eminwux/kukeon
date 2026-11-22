@@ -386,6 +386,28 @@ export function groupGitValues(values) {
   return { repos, defaults, rest };
 }
 
+// valueSources is the order the New Cell preview lists what each source of a
+// render contributes (#1603): what the Blueprint and Config say, the
+// connectors, then the Realm, Space and Stack defaults and the cell's own picks.
+const valueSources = ["blueprint", "config", "connectors", "realm", "space", "stack", "cell"];
+
+// groupValuesBySource splits a preview's merged values by the source that set
+// them, in valueSources order. The connectors group holds the connector
+// statuses. Empty groups are dropped; a value from a source outside the list
+// lands in a last "other" group, so every value is listed exactly once.
+export function groupValuesBySource(values, connectors) {
+  const groups = new Map(valueSources.map(source => [source, []]));
+  const other = [];
+  for (const value of list(values)) {
+    const rows = value && value.origin !== "connectors" ? groups.get(text(value.origin)) : undefined;
+    (rows ?? other).push(value);
+  }
+  groups.set("connectors", list(connectors).slice());
+  const out = valueSources.map(source => ({ source, rows: groups.get(source) })).filter(group => group.rows.length > 0);
+  if (other.length) out.push({ source: "other", rows: other });
+  return out;
+}
+
 // secretChoices narrows the secret catalog to the types a slot accepts. An
 // untyped secret is opaque.
 export function secretChoices(secrets, types) {

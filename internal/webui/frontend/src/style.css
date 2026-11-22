@@ -478,9 +478,15 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--er
 /* New Cell (#1568): one primary action per step, the start option beside Create, and a preview that leads
    with a summary while the full JSON stays collapsed and wrapped. */
 .creation-form > button[type="submit"] { justify-self: start; }
-.creation-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
-.creation-actions .schema-check { align-items: center; }
-.creation-actions .schema-check input { margin: 0; }
+/* New Cell (#1603): one action row at the end of the form, right-aligned, and a preview panel set apart
+   from the form by an accent border. */
+.form-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 10px 16px; }
+.form-actions .schema-check { align-items: center; }
+.form-actions .schema-check input { margin: 0; }
+.preview-panel { border-left: 3px solid var(--accent); }
+.preview-panel > .panel-heading { justify-content: flex-start; gap: 10px; }
+.preview-panel > .panel-heading > button { margin-left: auto; }
+.preview-panel > .creation-review { padding-top: 16px; border-top: 0; }
 .creation-summary { grid-template-columns: 110px minmax(0, 1fr); gap: 6px 18px; }
 .creation-summary-image { display: block; overflow-wrap: anywhere; }
 .creation-json pre { margin-top: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }

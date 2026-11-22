@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { blueprintForm, buildSpec, emptyAnswers, formSections, groupGitValues, imageChoices, imageStatus, missingAnswers, previewMode, requiredCapabilities, secretChoices } from "./config-form.mjs";
+import { blueprintForm, buildSpec, emptyAnswers, formSections, groupGitValues, groupValuesBySource, imageChoices, imageStatus, missingAnswers, previewMode, requiredCapabilities, secretChoices } from "./config-form.mjs";
 
 // The shape `kuke team` renders: one shared blueprint per harness × profile.
 const blueprint = {
@@ -248,4 +248,39 @@ test("secret pickers are limited to the types a slot accepts", () => {
   assert.deepEqual(secretChoices(secrets).map(choice => [choice.name, choice.type]), [["gh-token", "opaque"], ["git-ssh", "ssh-key"], ["git-https", "basic-auth"]]);
   assert.deepEqual(secretChoices(secrets, ["basic-auth", "ssh-key"]).map(choice => choice.name), ["git-ssh", "git-https"]);
   assert.deepEqual(secretChoices(secrets, ["ssh-key"]).map(choice => choice.name), ["git-ssh"]);
+});
+
+test("groupValuesBySource lists each source in order and drops empty ones (#1603)", () => {
+  const values = [
+    { kind: "value", key: "REGION", value: "", origin: "stack" },
+    { kind: "component", key: "github", value: "", origin: "config" },
+    { kind: "mode", key: "interactive", value: "", origin: "blueprint" },
+    { kind: "secret", key: "token", value: "", origin: "realm" },
+    { kind: "value", key: "PROMPT", value: "", origin: "cell" },
+  ];
+  const connectors = [{ connector: "git", method: "ssh", origin: "space" }];
+  const groups = groupValuesBySource(values, connectors);
+  assert.deepEqual(groups.map(group => group.source), ["blueprint", "config", "connectors", "realm", "stack", "cell"]);
+  assert.deepEqual(groups.find(group => group.source === "connectors").rows, connectors);
+  assert.deepEqual(groupValuesBySource([], []), []);
+  assert.deepEqual(groupValuesBySource(undefined, undefined), []);
+  assert.deepEqual(groupValuesBySource(values, []).map(group => group.source), ["blueprint", "config", "realm", "stack", "cell"]);
+});
+
+test("groupValuesBySource keeps git values in their origin group and an unknown origin in other (#1603)", () => {
+  const values = [
+    { kind: "git", key: "project.url", value: "git@example.com:a.git", origin: "config" },
+    { kind: "git", key: "default.author", value: "Ada", origin: "space" },
+    { kind: "image", key: "base", value: "ref", origin: "realm" },
+    { kind: "value", key: "ODD", value: "", origin: "elsewhere" },
+    { kind: "value", key: "NONE", value: "" },
+  ];
+  const groups = groupValuesBySource(values, undefined);
+  assert.deepEqual(groups.map(group => group.source), ["config", "realm", "space", "other"]);
+  assert.deepEqual(groups.find(group => group.source === "space").rows, [values[1]]);
+  assert.deepEqual(groups.at(-1).rows.map(value => value.key), ["ODD", "NONE"]);
+  // Every value appears exactly once across the groups.
+  const listed = groups.flatMap(group => group.rows);
+  assert.equal(listed.length, values.length);
+  for (const value of values) assert.equal(listed.filter(row => row === value).length, 1);
 });
