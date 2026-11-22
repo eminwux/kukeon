@@ -13,4 +13,5 @@ export function formatCgroupValue(value: CgroupValue | undefined, kind?: "bytes"
 export function formatCPUMax(cpuMax: CgroupCPUMax | undefined): Formatted;
 export function formatCgroupList(list: CgroupList | undefined): string;
 export function formatIOMax(io: CgroupIOMax | undefined): string[];
+export function summarizeCgroup(detail: { exists?: boolean; ready?: boolean; live?: { memory?: { current?: CgroupValue; max?: CgroupValue }; pids?: { current?: CgroupValue } } } | undefined): string;
 export function formatDeclared(entry: CgroupDeclared | undefined): { text: string; source: string };

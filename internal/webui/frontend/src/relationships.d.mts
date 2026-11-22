@@ -3,5 +3,6 @@ export type CellRow = { scope: string[]; doc: { metadata: { name: string }; stat
 export type ConfigDoc = { metadata: ScopedReference; spec?: { blueprint?: ScopedReference } };
 export function sameScopedReference(left: ScopedReference, right: ScopedReference): boolean;
 export function configsForBlueprint<T extends ConfigDoc>(configs: T[], blueprint: ScopedReference): T[];
+export function configForCell(doc: { [key: string]: unknown } | null | undefined): ScopedReference | null;
 export function cellsForConfig<T extends CellRow>(cells: T[], config: ScopedReference): T[];
 export function cellsForBlueprint<T extends CellRow, C extends ConfigDoc>(cells: T[], configs: C[]): Array<T & { config: C }>;

@@ -31,6 +31,8 @@ const listSearch = page => page.locator(".list-controls").getByRole("searchbox")
 const terminalTools = page => page.locator(".cell-terminal-tools");
 const toasts = page => page.getByRole("region", { name: "Notifications" }).locator(".toast");
 const content = page => page.locator(".workspace-content");
+// Cell and container pages keep Network and Cgroup collapsed (#1568); a test opens one by its region name.
+const expand = (page, name) => page.getByRole("region", { name }).locator("summary").click();
 const inventoryIndicator = (page, state) => page.locator(".toolbar").getByRole("button", { name: `Inventory ${state}: show details` });
 
 test("terminal selects eligible containers, forwards input and resize, and detaches", async ({ page }) => {
@@ -494,9 +496,13 @@ for (const [width, height] of [[1440, 900], [390, 844]]) {
         : path.endsWith("/containers") ? { json: [{ id: "root", root: true }, { id: "web" }, { id: "shell", attachable: true }] } : undefined);
       await page.goto(`${server.url}#/resource/dev/shared/services/api`);
       const panels = page.locator(".cell-overview-content > .panel");
+      await expect(panels).toHaveCount(5);
+      // Network and Cgroup start collapsed (#1568); this test measures the page with both open.
+      await expect(page.getByRole("region", { name: "cell cgroup" }).getByText("cpu io memory pids", { exact: true })).toBeHidden();
+      await expand(page, "cell network");
+      await expand(page, "cell cgroup");
       await expect(page.getByRole("region", { name: "cell cgroup" }).getByText("cpu io memory pids", { exact: true })).toBeVisible();
       await expect(page.getByRole("region", { name: "cell network" })).toBeVisible();
-      await expect(panels).toHaveCount(5);
       const sizes = await panels.evaluateAll(items => items.map(item => ({ client: item.clientHeight, scroll: item.scrollHeight })));
       for (const size of sizes) expect(size.client).toBeGreaterThanOrEqual(size.scroll);
       expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe(theme);
@@ -508,6 +514,97 @@ for (const [width, height] of [[1440, 900], [390, 844]]) {
     });
   }
 }
+
+// Issue #1568, item C: cellRead leads with status, containers and the source Config; runtime internals are disclosures.
+test("cellRead keeps Network and Cgroup collapsed with a summary line, opens them by keyboard and remembers the choice", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const network = { cell: { bridgeName: "k-0123abcd", hostNetwork: false, ipv4: "10.88.1.5", ipv4State: "assigned", rootContainer: "root", containers: [{ id: "root", root: true }, { id: "web" }] } };
+  const cgroup = { cgroupPath: "/kukeon/dev/shared/services/api", absolutePath: "/sys/fs/cgroup/kukeon/dev/shared/services/api", exists: true, ready: true, subtreeControllers: ["cpu", "memory"], live: { memory: { current: { state: "set", raw: "327155712", value: 327155712 }, max: { state: "set", raw: "1073741824", value: 1073741824 } }, pids: { current: { state: "set", raw: "12", value: 12 } } } };
+  const reads = { network: 0, cgroup: 0 };
+  await mock(page, path => {
+    if (path.endsWith("/cells/api/network")) { reads.network++; return { json: network }; }
+    if (path.endsWith("/cells/api/cgroup")) { reads.cgroup++; return { json: cgroup }; }
+    if (path.endsWith("/containers")) return { json: [{ id: "root", root: true }, { id: "web", attachable: true }] };
+    if (path.endsWith("/cells/api")) return { json: { ...doc(["dev", "shared", "services", "api"]), spec: { realmId: "dev", spaceId: "shared", stackId: "services", provenance: { bindingKind: "config", bindingRef: { name: "app", realm: "dev", space: "shared" } } } } };
+  });
+  await page.goto(`${server.url}#/resource/dev/shared/services/api`);
+  const details = page.getByRole("region", { name: "Cell details" });
+  const networkPanel = page.getByRole("region", { name: "cell network" });
+  const cgroupPanel = page.getByRole("region", { name: "cell cgroup" });
+  await expect(details.locator("details")).toHaveCount(2);
+  await expect(networkPanel.locator("summary")).toContainText("Bridged (space network) · 10.88.1.5 · 2 containers");
+  await expect(cgroupPanel.locator("summary")).toContainText("Ready · memory 312 MiB / 1 GiB · 12 PIDs");
+  for (const panel of [networkPanel, cgroupPanel]) {
+    await expect(panel.locator("details")).not.toHaveAttribute("open");
+    await expect(panel.locator(".panel-body")).toBeHidden();
+  }
+  // Status, containers, then the overview with the source Config: all above the collapsed internals and
+  // inside the first 1440x900 viewport, where the open sections used to push them 2,600px apart.
+  await expect(details.locator(":scope > .panel h2")).toHaveText(["Runtime status", "Containers", "Resource overview", "Network", "Cgroup"]);
+  const config = details.locator(".resource-overview dt:text-is('Config') + dd").getByRole("link");
+  await expect(config).toHaveText("dev / shared / app");
+  await expect(config).toHaveAttribute("href", "#/configs/dev/shared/app");
+  for (const visible of [page.getByRole("heading", { name: "Runtime status" }), details.locator(".container-panel li").filter({ hasText: "web" }), config, networkPanel.locator("summary")]) await expect(visible).toBeInViewport({ ratio: 1 });
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+  expect(await page.evaluate(() => document.scrollingElement.scrollHeight)).toBeLessThan(1100);
+  // Every overview field shown before is still there.
+  await expect(details.locator(".resource-overview dt")).toHaveText(["Config", "Labels", "Name", "Kind", "Scope", "API version"]);
+
+  // Each summary is keyboard-operable: Enter opens Network, Space opens Cgroup.
+  await networkPanel.locator("summary").focus();
+  await page.keyboard.press("Enter");
+  await expect(networkPanel.locator("details")).toHaveAttribute("open");
+  await expect(networkPanel.getByText("k-0123abcd")).toBeVisible();
+  await expect(networkPanel.locator("table.network-containers tr").filter({ hasText: "web" })).toBeVisible();
+  await cgroupPanel.locator("summary").focus();
+  await page.keyboard.press("Space");
+  await expect(cgroupPanel.getByText("/sys/fs/cgroup/kukeon/dev/shared/services/api")).toBeVisible();
+  await expect(cgroupPanel.locator(".cgroup-live")).toBeVisible();
+  // One read per section: the summary line and the body share it.
+  expect(reads).toEqual({ network: 1, cgroup: 1 });
+  await page.keyboard.press("Space");
+  await expect(cgroupPanel.locator(".panel-body")).toBeHidden();
+
+  // The choice is remembered per section across a reload.
+  await page.reload();
+  await expect(networkPanel.locator("details")).toHaveAttribute("open");
+  await expect(networkPanel.getByText("k-0123abcd")).toBeVisible();
+  await expect(cgroupPanel.locator("details")).not.toHaveAttribute("open");
+});
+
+test("a cell not created from a Config says so, and a failed internal read stays visible on the collapsed row", async ({ page }) => {
+  await mock(page, path => path.endsWith("/cells/api/network") ? { status: 403, json: { error: { code: "permission_denied", message: "network read denied" } } } : undefined);
+  await page.goto(`${server.url}#/resource/dev/shared/services/api`);
+  const details = page.getByRole("region", { name: "Cell details" });
+  await expect(details.locator(".resource-overview dt:text-is('Config') + dd")).toHaveText("Not created from a Config");
+  await expect(details.locator(".resource-overview").getByRole("link", { name: /Config/ })).toHaveCount(0);
+  const networkPanel = page.getByRole("region", { name: "cell network" });
+  await expect(networkPanel.locator("summary")).toContainText("Permission denied");
+  await expect(networkPanel.locator("summary")).toContainText("Stale values");
+  await expand(page, "cell network");
+  await expect(networkPanel.getByRole("alert")).toContainText("network read denied");
+});
+
+test("the container page collapses Network and Cgroup the same way, while realm, space and stack pages keep them open", async ({ page }) => {
+  await mock(page, path => path.endsWith("/containers/web/network") ? { json: { cell: { hostNetwork: false, ipv4State: "assigned", ipv4: "10.88.1.5", rootContainer: "root" }, container: { id: "web", ports: ["8080:80"] } } }
+    : path.endsWith("/containers/web/cgroup") ? { json: { cgroupPath: "/kukeon/web", exists: false, ready: false } } : undefined);
+  await page.goto(`${server.url}#/resource/prod/shared/services/api/web`);
+  const networkPanel = page.getByRole("region", { name: "container network" });
+  const cgroupPanel = page.getByRole("region", { name: "container cgroup" });
+  await expect(networkPanel.locator("summary")).toContainText("Cell network namespace · 1 declared port");
+  await expect(cgroupPanel.locator("summary")).toContainText("Cgroup not present");
+  await expect(networkPanel.locator(".panel-body")).toBeHidden();
+  await expect(cgroupPanel.locator(".panel-body")).toBeHidden();
+  await expand(page, "container network");
+  await expect(networkPanel.locator("dt:text-is('Ports') + dd")).toContainText("8080:80");
+  await expand(page, "container cgroup");
+  await expect(cgroupPanel.getByText("kukeond found no cgroup at this path")).toBeVisible();
+  // A realm, space or stack page has no disclosure: its sections render open as before.
+  await page.goto(`${server.url}#/resource/dev/shared`);
+  await expect(page.getByRole("region", { name: "space network" }).locator(".panel-body")).toBeVisible();
+  await expect(page.getByRole("region", { name: "space cgroup" }).locator(".panel-body")).toBeVisible();
+  await expect(content(page).locator("details.disclosure, .disclosure details")).toHaveCount(0);
+});
 
 test("cell sidebar uses full scope for duplicate names and switching reuses inventory", async ({ page }) => {
   let inventoryReads = 0;
@@ -1969,6 +2066,7 @@ test("container cgroup section distinguishes Unlimited, Not available and Not se
   await mock(page, path => path.endsWith("/containers/web/cgroup") ? cgroup(reads++ === 0 ? 1048576 : 2097152) : undefined);
   await page.goto(`${server.url}#/resource/prod/shared/services/api/web`);
   const panel = page.getByRole("region", { name: "container cgroup" });
+  await expand(page, "container cgroup");
   await expect(panel.getByText("/sys/fs/cgroup/kukeon/prod/shared/services/api/prod_shared_services_api_web")).toBeVisible();
   const declared = panel.locator("table.cgroup-declared");
   await expect(declared.locator("tr").filter({ hasText: "Memory limit" })).toContainText("512 MiB");
@@ -2011,9 +2109,10 @@ test("cellRead shows the cell cgroup with nested runtime and delegated controlle
   await mock(page, path => path.endsWith("/cells/api/cgroup") ? { json: { cgroupPath: "/kukeon/dev/shared/services/api", absolutePath: "/sys/fs/cgroup/kukeon/dev/shared/services/api", exists: true, ready: true, nestedCgroupRuntime: true, subtreeControllers: ["cpu", "io", "memory", "pids"], live: { memory: { max: { state: "set", raw: "1073741824", value: 1073741824 } }, io: { state: "set", entries: [] } } } } : undefined);
   await page.goto(`${server.url}#/resource/dev/shared/services/api`);
   const panel = page.getByRole("region", { name: "cell cgroup" });
+  await expand(page, "cell cgroup");
   await expect(panel.getByText("cpu io memory pids", { exact: true })).toBeVisible();
   await expect(panel.getByText("Enabled", { exact: true })).toBeVisible();
-  await expect(panel.getByText("1 GiB", { exact: false })).toBeVisible();
+  await expect(panel.locator(".panel-body").getByText("1 GiB", { exact: false })).toBeVisible();
   await expect(panel.getByText("No device limits")).toBeVisible();
 });
 
@@ -2059,7 +2158,9 @@ test("cellRead network section shows Not running for a stopped cell and the per-
   } } : undefined);
   await page.goto(`${server.url}#/resource/dev/shared/services/api`);
   const panel = page.getByRole("region", { name: "cell network" });
-  await expect(panel.getByText("Bridged (space network)")).toBeVisible();
+  await expand(page, "cell network");
+  await expect(panel.locator("summary")).toContainText("Bridged (space network) · Not running · 2 containers");
+  await expect(panel.locator(".panel-body").getByText("Bridged (space network)")).toBeVisible();
   await expect(panel.getByText("Not running", { exact: true })).toBeVisible();
   const containers = panel.locator("table.network-containers");
   await expect(containers.locator("tr").filter({ hasText: "web" })).toContainText("No (default)");
@@ -2075,6 +2176,7 @@ test("container network section labels defaults, inherited CNI path and unset de
   } } : undefined);
   await page.goto(`${server.url}#/resource/prod/shared/services/api/web`);
   const panel = page.getByRole("region", { name: "container network" });
+  await expand(page, "container network");
   await expect(panel.locator("dt:text-is('Host network') + dd")).toHaveText("Yes");
   await expect(panel.locator("dt:text-is('Host PID') + dd")).toHaveText("No (default)");
   await expect(panel.getByText("Inherited from space (/s.conflist)")).toBeVisible();

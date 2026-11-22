@@ -201,6 +201,16 @@ button:disabled { cursor: default; opacity: .4; }
 .details-grid dd { margin: 0; overflow-wrap: anywhere; }
 .label-badge { margin-right: 8px; display: inline-block; }
 .container-panel { margin-top: 16px; }
+/* Disclosure panels (#1568): the heading row is the summary and carries a one-line digest of the content. */
+.disclosure > details > summary { gap: 10px; cursor: pointer; list-style: none; }
+.disclosure > details > summary::-webkit-details-marker { display: none; }
+.disclosure > details > summary::before { content: "▸"; flex: 0 0 auto; width: 1em; color: var(--muted); }
+.disclosure > details[open] > summary::before { content: "▾"; }
+.disclosure > details:not([open]) > summary { border-bottom-color: transparent; }
+.disclosure > details > summary:hover { background: var(--hover); }
+.disclosure > details > summary:focus-visible { outline-offset: -2px; }
+.disclosure > details > summary > h2 { flex: 0 0 auto; }
+.disclosure-summary { flex: 1; min-width: 0; color: var(--muted); font-size: var(--font-sm); overflow-wrap: anywhere; }
 /* The -1px margin keeps a body-level live region (notifications.tsx) from adding 1px of scroll below the shell. */
 /* Inline-block path segments (status.tsx PathText): no percentage max-width, which would collapse a table
    column to its narrowest segment; shrink-to-fit plus overflow-wrap already keeps a segment within the line. */

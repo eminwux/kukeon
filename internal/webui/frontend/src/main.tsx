@@ -2,7 +2,9 @@ import { StrictMode, Suspense, lazy, useEffect, useLayoutEffect, useRef, useStat
 import { createRoot } from "react-dom/client";
 import "./style.css";
 import { useResource, ErrorNotice, failureTitle, type Resource } from "./request";
-import { CatalogPage, RelatedResources } from "./catalog";
+import { CatalogPage, RelatedResources, catalogLink } from "./catalog";
+import { configForCell } from "./relationships.mjs";
+import { referenceScope } from "./catalog-url.mjs";
 import { TerminalWorkspace, useTerminalSessions, type TerminalManager } from "./terminal";
 import { CellSidebar } from "./cell-sidebar";
 import { useInventory, type Inventory, type InventoryResource, type Doc, type RuntimeStatus } from "./inventory";
@@ -219,14 +221,19 @@ function CellDetailsScreen({ title, view, scope, revision, inventory, manager, t
     };
   }, [terminalExpanded]);
 
+  // The Config this cell was created from, read from spec.provenance like the Config page's "Cells using
+  // this Config" panel reads it the other way.
+  const sourceConfig = detail.data ? configForCell(detail.data) : null;
+  const sourceConfigScope = sourceConfig ? referenceScope(sourceConfig) : [];
   const overview = detail.data && scope && <section className="panel resource-overview">
     <div className="panel-heading"><h2>Resource overview</h2><div className="cell-overview-actions"><StateBadge state={detail.data.status?.state} /><a className="document-action" href={resourceLink(scope, true)} target="_blank" rel="noopener noreferrer">View document</a></div></div>
     <div className="panel-body"><dl className="details-grid">
+      <dt>Config</dt><dd>{sourceConfig ? <a className="resource-name" href={catalogLink("configs", sourceConfigScope)}>{sourceConfigScope.join(" / ")}</a> : "Not created from a Config"}</dd>
+      <dt>Labels</dt><dd>{Object.entries(detail.data.metadata.labels ?? {}).map(([key, value]) => <span className="badge label-badge" key={key}>{key}: {value}</span>)}{!Object.keys(detail.data.metadata.labels ?? {}).length && "No labels"}</dd>
       <dt>Name</dt><dd>{detail.data.metadata.name}</dd>
       <dt>Kind</dt><dd>{detail.data.kind ?? "cell"}</dd>
       <dt>Scope</dt><dd className="mono-id">{scope.join(" / ")}</dd>
       <dt>API version</dt><dd>{detail.data.apiVersion ?? "Not reported"}</dd>
-      <dt>Labels</dt><dd>{Object.entries(detail.data.metadata.labels ?? {}).map(([key, value]) => <span className="badge label-badge" key={key}>{key}: {value}</span>)}{!Object.keys(detail.data.metadata.labels ?? {}).length && "No labels"}</dd>
     </dl></div>
   </section>;
 
@@ -261,7 +268,7 @@ function CellDetailsScreen({ title, view, scope, revision, inventory, manager, t
     <section className="cell-terminal-view" aria-label="Cell terminal" hidden={!terminalView}>
       <TerminalWorkspace scope={scope} revision={revision} inventory={inventory} manager={manager} theme={theme} visible={terminalView && !!scope} controlsHost={terminalToolsHost} onExpandedChange={setTerminalExpanded} dockedCell={dockedCell} onOpenDock={onOpenDock} />
     </section>
-    <section className="cell-overview-content" aria-label="Cell details" hidden={terminalView}>{detail.error && <ErrorNotice error={detail.error} kind="Cell" />}{detail.error && detail.data && <p className="stale">Stale resource details — refresh failed.</p>}{overview}{status}{containerPanel}{scope && !terminalView && <NetworkPanel scope={scope} revision={revision} />}{scope && !terminalView && <CgroupPanel scope={scope} revision={revision} />}</section>
+    <section className="cell-overview-content" aria-label="Cell details" hidden={terminalView}>{detail.error && <ErrorNotice error={detail.error} kind="Cell" />}{detail.error && detail.data && <p className="stale">Stale resource details — refresh failed.</p>}{status}{containerPanel}{overview}{scope && !terminalView && <NetworkPanel scope={scope} revision={revision} />}{scope && !terminalView && <CgroupPanel scope={scope} revision={revision} />}</section>
   </div>;
 }
 

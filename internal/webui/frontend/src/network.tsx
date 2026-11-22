@@ -1,8 +1,9 @@
-import { useResource, ErrorNotice } from "./request";
+import { useResource, ErrorNotice, failureTitle } from "./request";
+import { StoredDisclosure, disclosedKinds } from "./disclosure";
 import { apiPath, kinds } from "./routes";
 import {
   NOT_APPLIED, formatBridge, formatConfigPath, formatContainerCNIPath, formatDeclaredList, formatEgressDefault, formatFlag,
-  formatIPv4, formatNetworkExists, formatNetworkMode, formatRulePorts, formatRuleTarget, formatSubnet,
+  formatIPv4, formatNetworkExists, formatNetworkMode, formatRulePorts, formatRuleTarget, formatSubnet, summarizeCellNetwork, summarizeContainerNetwork,
   type CellNetwork, type ContainerNetwork, type SpaceNetwork,
 } from "./network-format.js";
 
@@ -82,18 +83,21 @@ export function NetworkPanel({ scope, revision }: { scope: string[]; revision: n
   const kind = kinds[scope.length - 1];
   const detail = useResource<NetworkDetail>(`${apiPath(scope)}/network`, revision);
   const data = detail.data && !Array.isArray(detail.data) ? detail.data : undefined;
-  return <section className="panel network-panel" aria-label={`${kind} network`}>
-    <div className="panel-heading"><h2>Network</h2><span className="badge">{detail.error ? "Stale values" : detail.loading ? "Refreshing values" : "Read by kukeond"}</span></div>
-    <div className="panel-body">
-      {detail.loading && !data && <p role="status">Loading network details…</p>}
-      {detail.error && <ErrorNotice error={detail.error} kind={kind} />}
-      {detail.error && data && <p className="stale">Stale network values — refresh failed.</p>}
-      {data && <>
-        {data.container && <ContainerSection container={data.container} cell={data.cell} />}
-        {data.cell && <CellSection cell={data.cell} />}
-        {kind === "cell" && data.cell && <ContainersSummary cell={data.cell} />}
-        {data.space && <SpaceSection space={data.space} />}
-      </>}
-    </div>
-  </section>;
+  const badge = <span className="badge">{detail.error ? "Stale values" : detail.loading ? "Refreshing values" : "Read by kukeond"}</span>;
+  const body = <div className="panel-body">
+    {detail.loading && !data && <p role="status">Loading network details…</p>}
+    {detail.error && <ErrorNotice error={detail.error} kind={kind} />}
+    {detail.error && data && <p className="stale">Stale network values — refresh failed.</p>}
+    {data && <>
+      {data.container && <ContainerSection container={data.container} cell={data.cell} />}
+      {data.cell && <CellSection cell={data.cell} />}
+      {kind === "cell" && data.cell && <ContainersSummary cell={data.cell} />}
+      {data.space && <SpaceSection space={data.space} />}
+    </>}
+  </div>;
+  if (!disclosedKinds.includes(kind)) return <section className="panel network-panel" aria-label={`${kind} network`}><div className="panel-heading"><h2>Network</h2>{badge}</div>{body}</section>;
+  // Collapsed, the heading row still says what the section holds; a failed read stays visible there.
+  const summary = data?.container ? summarizeContainerNetwork(data.container) : data?.cell ? summarizeCellNetwork(data.cell)
+    : detail.error ? failureTitle(detail.error, kind) : detail.loading ? "Loading…" : "Not reported";
+  return <StoredDisclosure id={`${kind}-network`} title="Network" summary={summary} badge={badge} className="network-panel" label={`${kind} network`}>{body}</StoredDisclosure>;
 }

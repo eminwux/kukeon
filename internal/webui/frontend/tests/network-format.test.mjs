@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   ANY_PORT, NOT_ALLOCATED, NOT_RUNNING, NOT_SET, formatBridge, formatConfigPath, formatContainerCNIPath, formatDeclaredList,
   formatEgressDefault, formatFlag, formatIPv4, formatNetworkExists, formatNetworkMode, formatRulePorts, formatRuleTarget, formatSubnet,
+  summarizeCellNetwork, summarizeContainerNetwork,
 } from "../src/network-format.js";
 
 test("absent egress renders as the admit-all default", () => {
@@ -52,4 +53,13 @@ test("container flags default, CNI path inherited, declared lists Not set", () =
   assert.equal(formatContainerCNIPath({ id: "a", cniConfigPath: "/own.conflist", cniConfigPathSource: "container" }), "/own.conflist");
   assert.deepEqual(formatDeclaredList([]), { text: NOT_SET, notApplied: false });
   assert.deepEqual(formatDeclaredList(["8080:80"]), { text: "8080:80", notApplied: true });
+});
+
+test("the collapsed Network row summarizes the mode, the address state and the container count", () => {
+  assert.equal(summarizeCellNetwork({ ipv4State: "assigned", ipv4: "10.88.0.5", containers: [{ id: "root", root: true }, { id: "web" }] }), "Bridged (space network) · 10.88.0.5 · 2 containers");
+  assert.equal(summarizeCellNetwork({ ipv4State: "not-running", containers: [{ id: "root" }] }), `Bridged (space network) · ${NOT_RUNNING} · 1 container`);
+  assert.equal(summarizeCellNetwork({ hostNetwork: true, ipv4State: "host-network" }), "Host · Host network (no CNI attachment)");
+  assert.equal(summarizeCellNetwork(undefined), `Bridged (space network) · ${NOT_RUNNING}`);
+  assert.equal(summarizeContainerNetwork({ id: "web", ports: ["8080:80", "9090"] }), "Cell network namespace · 2 declared ports");
+  assert.equal(summarizeContainerNetwork({ id: "root", root: true, hostNetwork: true }), "Host network · root container · No declared ports");
 });

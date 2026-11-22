@@ -10,6 +10,14 @@ export function configsForBlueprint(configs, blueprint) {
   return configs.filter(config => sameScopedReference(config.spec?.blueprint, blueprint));
 }
 
+// configForCell is the inverse of cellsForConfig: the scoped reference of the Config a cell was created
+// from, read from the same spec.provenance record, or null for a hand-built or blueprint-created cell.
+export function configForCell(doc) {
+  const provenance = doc?.spec?.provenance;
+  if (provenance?.bindingKind !== "config" || !value(provenance.bindingRef, "name")) return null;
+  return Object.fromEntries(["realm", "space", "stack", "name"].map(key => [key, value(provenance.bindingRef, key)]).filter(([, part]) => part));
+}
+
 export function cellsForConfig(cells, config) {
   const seen = new Set();
   return cells.filter(row => {

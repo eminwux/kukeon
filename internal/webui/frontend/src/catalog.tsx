@@ -16,7 +16,7 @@ type CatalogDoc = { metadata: Metadata; spec?: Record<string, unknown>; [key: st
 type Reference = { kind: string; name: string; realm: string; space?: string; stack?: string; cell?: string };
 const coordinates = ["realm", "space", "stack", "cell"] as const;
 function scopeOf(metadata: Metadata): string[] { return coordinates.map(key => metadata[key]).filter((value): value is string => !!value); }
-function catalogLink(kind: string, scope: string[], document = false): string { return `#/${kind}/` + scope.map(encodeURIComponent).join("/") + (document ? "?document=1" : ""); }
+export function catalogLink(kind: string, scope: string[], document = false): string { return `#/${kind}/` + scope.map(encodeURIComponent).join("/") + (document ? "?document=1" : ""); }
 function referenceScope(ref: Reference): string[] { return [...scopeOf(ref), ref.name]; }
 function references(doc: { [key: string]: unknown }): Reference[] {
   const result: Reference[] = [];
