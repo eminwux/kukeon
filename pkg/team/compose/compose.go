@@ -67,6 +67,14 @@ type Options struct {
 
 const defaultScope = "default"
 
+// scriptHarness is the non-LLM harness a program role runs on: its cell runs
+// the role's command, loads no skills and needs no AGENTS.md.
+const scriptHarness = "script"
+
+// errHarnessNotDeclared is planPair's error for a pair whose role does not
+// declare the harness. Compose skips such a pair for an unpinned role.
+var errHarnessNotDeclared = errors.New("role does not support selected harness")
+
 type Scope struct{ Realm, Space, Stack string }
 
 // Result keeps the authored declaration separate from resolved resources.
@@ -173,15 +181,24 @@ func Compose(cfg *config.TeamsConfig, team *config.Team, opts Options) (*Result,
 		if !config.ValidName(role.Name) {
 			return nil, errors.New("role: invalid selection name")
 		}
+		paired := false
 		for _, h := range effective.Harnesses {
 			if !role.Selects(h) {
 				continue
 			}
 			plan, planErr := planPair(
 				cfg, team.Metadata.Name, role, h, effective, opts, lib, catalog, secrets)
+			// An unpinned role pairs only with the team harnesses it
+			// declares; a pinned one must declare its pin. No note for a
+			// skipped pair: every agent role in a team that lists the
+			// script harness would produce one.
+			if errors.Is(planErr, errHarnessNotDeclared) && role.Harness == "" {
+				continue
+			}
 			if planErr != nil {
 				return nil, fmt.Errorf("compose %s/%s: %w", role.Name, h.Name, planErr)
 			}
+			paired = true
 			if err = claimName(owners, plan); err != nil {
 				return nil, err
 			}
@@ -194,6 +211,9 @@ func Compose(cfg *config.TeamsConfig, team *config.Team, opts Options) (*Result,
 			if groupErr := groups[key].add(plan); groupErr != nil {
 				return nil, fmt.Errorf("compose %s/%s: %w", role.Name, h.Name, groupErr)
 			}
+		}
+		if !paired {
+			return nil, fmt.Errorf("compose %s: role %q declares none of the team's harnesses", role.Name, role.Name)
 		}
 	}
 	// Pass 2: one blueprint per group.
@@ -473,7 +493,7 @@ func planPair(
 	}
 	settings, ok := role.Spec.Harnesses[hsel.Name]
 	if !ok {
-		return nil, errors.New("role does not support selected harness")
+		return nil, errHarnessNotDeclared
 	}
 	definition, err := harness.Load(hfs, hsel.Path)
 	if err != nil {
@@ -505,7 +525,7 @@ func planPair(
 	if err = checkSettings(hsel.Name, settings); err != nil {
 		return nil, err
 	}
-	tasks, err := selectTasks(&role, selection)
+	tasks, err := selectTasks(&role, selection, hsel.Name)
 	if err != nil {
 		return nil, err
 	}

@@ -1,0 +1,14 @@
+apiVersion: kuketeams.io/v1
+kind: HarnessImageCatalog
+metadata:
+  name: script
+spec:
+  images:
+    - image: ghcr.io/eminwux/kukeon/base-user:v0.10.0
+      capabilities:
+        - script
+        - git
+        - gh
+        - go
+        - node
+        - make

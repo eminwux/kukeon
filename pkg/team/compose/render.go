@@ -65,10 +65,17 @@ var composed = map[string]bool{
 	"IMAGE": true, "ROLE_SOURCE_DIR": true, "ROLE_PATH": true, "INITIAL_PATH": true, "PROJECT_DIR": true,
 	"HARNESS_SETTINGS": true, "STATE_VOLUME": true, "STATE_VOLUME_REALM": true, "STATE_VOLUME_SPACE": true,
 	"STATE_VOLUME_STACK": true, "ROLE_NAME": true, "SANDBOX": true, "APPROVAL": true, "PERMISSIONS": true,
+	"COMMAND": true,
 }
 
 func checkAssets(source fs.FS, rolePath string, role *model.Role, settings model.RoleHarness, harness string) error {
-	for _, name := range append([]string{path.Join(rolePath, "AGENTS.md")}, role.Spec.Skills...) {
+	// A program role on the script harness loads no instructions and no
+	// skills, so its directory may hold only role.yaml.
+	var assets []string
+	if harness != scriptHarness {
+		assets = append([]string{path.Join(rolePath, "AGENTS.md")}, role.Spec.Skills...)
+	}
+	for _, name := range assets {
 		if !fs.ValidPath(name) {
 			return errors.New("role asset: require source-relative paths")
 		}
@@ -114,7 +121,19 @@ var (
 )
 
 func checkSettings(h string, s model.RoleHarness) error {
+	if h != scriptHarness && s.Command != "" {
+		return fmt.Errorf("command is a script harness setting; harness %s does not run one", h)
+	}
 	switch h {
+	case scriptHarness:
+		if strings.TrimSpace(s.Command) == "" {
+			return errors.New("the script harness requires harnesses.script.command")
+		}
+		// kukeon substitutes ${NAME} in blueprint scalars; the cell's shell
+		// expands $NAME, so the command must use that form.
+		if strings.Contains(s.Command, "${") {
+			return errors.New("harnesses.script.command: write $VAR, not ${VAR}; the cell's shell expands it")
+		}
 	case "codex":
 		if s.Sandbox != "" && !slices.Contains(codexSandboxes, s.Sandbox) {
 			return errors.New("unsupported Codex sandbox setting")

@@ -28,8 +28,9 @@ Two commands drive it:
 
 All documents use `apiVersion: kuketeams.io/v1` and are decoded strictly
 (single document, no unknown fields). This repository ships the `majordomo`
-role under `team/roles/` and the `claude`, `codex`, and `opencode` harnesses
-under `team/harnesses/`; other roles (dev, pm, pr-reviewer, …) can come from any Git
+role under `team/roles/` and the `claude`, `codex`, `opencode`, and `script`
+harnesses under `team/harnesses/` (`script` runs a program role, see
+[Program roles](#program-roles-the-script-harness)); other roles (dev, pm, pr-reviewer, …) can come from any Git
 source, such as the agents repository. The kukeon renderer that turns a pair
 into kukeon documents is embedded in `kuke` (`pkg/team/compose/renderers/kukeon/v1beta1`); see
 [`team/harnesses/templates.md`](https://github.com/eminwux/kukeon/blob/main/team/harnesses/templates.md)
@@ -41,8 +42,11 @@ for the harness and renderer contract.
 `harnesses`. An omitted list inherits the corresponding global default. An
 explicit list replaces it; `[]` selects none. References are checked against
 the effective lists. Each source has exactly one of `branch`, `tag`, or
-`commit`. A role with an explicit `harness` selects only that harness;
-otherwise it selects every harness in the effective list. Harness `default` is
+`commit`. A role with an explicit `harness` selects only that harness, and
+fails if the role does not declare it; otherwise it selects every harness in the
+effective list that the role declares in `spec.harnesses`, and fails only if it
+declares none of them. A team can therefore list `[claude, script]` and keep
+agent roles that declare only `claude`. Harness `default` is
 not supported; use `roles[].harness`. Unselected definitions are neither
 fetched, loaded, nor rendered.
 
@@ -323,6 +327,54 @@ instead.
 A team's entry can also replace a task's argument text with `args`, for example
 `{ name: pick-bug, args: "--label regression" }`. Like `schedule` and
 `suspend`, it overrides only that value.
+
+### Program roles: the script harness
+
+A role that is a plain program, such as a reactor or a poller, runs on the
+`script` harness. Its cell runs a command the role declares, with no model and
+no login, and gets the same connectors, repos, mounts and secrets as any other
+role:
+
+```yaml
+# role.yaml
+apiVersion: kuketeams.io/v1
+kind: Role
+metadata: { name: ticker }
+spec:
+  harnesses:
+    script:
+      command: python3 "$ROLE_SOURCE_DIR/$ROLE_PATH/tick.py"
+  connectors: [github]
+  needs:
+    mounts: [kuke-binary, kukeond-socket]
+  tasks:
+    - { name: tick, args: "--once", schedule: "*/5 * * * *" }
+```
+
+- **`harnesses.script.command`** is required, and only the `script` harness
+  accepts it. The cell runs it as `/bin/bash -c "$COMMAND $ARGS"` from the
+  role's starting directory, and the cell exits with its status. Reference
+  environment variables as `$VAR`, never `${VAR}`: kukeon substitutes the braced
+  form in blueprints, so `kuke team add` rejects it. The command is composed
+  from the role; `spec.parameters` cannot override `COMMAND`.
+- **Tasks** take `args` and name no `skill`: a task config runs the command
+  with the task's `args` appended (`values.ARGS`) instead of a `PROMPT`.
+  `schedule`, `suspend` and the team's overrides work as for any task. A
+  script task that sets `skill` fails `kuke team add`.
+- **State.** `$SCRIPT_STATE_DIR` (`/home/user/.script-state`) is on the pair's
+  state volume, `<team>-<role>-script-state`, which the pair config and its
+  task configs share, so the program keeps a small state directory across
+  runs.
+- **Assets.** A program role's directory may hold only `role.yaml`: the script
+  harness needs no `AGENTS.md` and loads no skills.
+- **Image.** The harness runs on the published
+  `ghcr.io/eminwux/kukeon/base-user` image (bash, git, gh, jq, yq, python3);
+  no harness image is built for it. `base-user` carries no
+  `io.kukeon.capabilities` label yet, so kukeond logs
+  `image declares no capabilities; required capabilities not verified` when it
+  creates a script cell, and creates it.
+- **Modes.** There is only a `headless` mode; a script cell is not an
+  attachable session.
 
 ### The majordomo health sweep
 

@@ -35,8 +35,10 @@ const headlessMode = "headless"
 // team's role entry selects, in the role's declaration order, each with its
 // schedule resolved.
 //
-// A task's name is a resource-name segment unique within the role; its skill
-// must be the base name of one of the role's spec.skills entries. The entry's
+// A task's name is a resource-name segment unique within the role. On a model
+// harness its skill must be the base name of one of the role's spec.skills
+// entries; on the script harness it names no skill, since the cell runs the
+// role's command with the task's args appended. The entry's
 // `tasks` selection selects every task when omitted, none when empty, and
 // fails on a name the role does not declare.
 //
@@ -44,7 +46,7 @@ const headlessMode = "headless"
 // default `schedule` and `suspend`, and each value the team's task entry sets
 // overrides the corresponding default. The returned tasks carry the resolved
 // values in their Schedule and Suspend fields.
-func selectTasks(role *model.Role, selection config.Role) ([]model.RoleTask, error) {
+func selectTasks(role *model.Role, selection config.Role, harnessName string) ([]model.RoleTask, error) {
 	skills := map[string]bool{}
 	for _, skill := range role.Spec.Skills {
 		skills[path.Base(path.Clean(skill))] = true
@@ -58,7 +60,13 @@ func selectTasks(role *model.Role, selection config.Role) ([]model.RoleTask, err
 			return nil, fmt.Errorf("role %s: spec.tasks[%d]: duplicate task name %q", role.Metadata.Name, i, task.Name)
 		}
 		declared[task.Name] = true
-		if !skills[task.Skill] {
+		switch {
+		case harnessName == scriptHarness && task.Skill != "":
+			return nil, fmt.Errorf(
+				"role %s: task %s: the script harness runs the role's command; a task names no skill",
+				role.Metadata.Name, task.Name,
+			)
+		case harnessName != scriptHarness && !skills[task.Skill]:
 			return nil, fmt.Errorf(
 				"role %s: task %s: skill %q is not one of the role's spec.skills",
 				role.Metadata.Name, task.Name, task.Skill,
@@ -132,7 +140,8 @@ func taskPrompt(task model.RoleTask) string {
 
 // bindTasks renders one headless-only, self-deleting CellConfig per selected
 // task of the pair. Each carries the pair's blueprint ref, values, repos,
-// secrets, components and requires, plus the task's PROMPT — and, for a task
+// secrets, components and requires, plus the task's PROMPT (on the script
+// harness, the task's ARGS instead) — and, for a task
 // with a resolved schedule, the spec.schedule kukeond fires it on (issue
 // #1503). A harness without a headless mode gets no task configs; the returned
 // note says so.
@@ -172,7 +181,12 @@ func bindTasks(plan *pairPlan, base *api.CellConfigDoc) ([]*api.CellConfigDoc, s
 		if cc.Spec.Values == nil {
 			cc.Spec.Values = map[string]string{}
 		}
-		cc.Spec.Values["PROMPT"] = taskPrompt(task)
+		switch {
+		case plan.hsel.Name != scriptHarness:
+			cc.Spec.Values["PROMPT"] = taskPrompt(task)
+		case task.Args != "":
+			cc.Spec.Values["ARGS"] = task.Args
+		}
 		if task.Schedule != "" {
 			cc.Spec.Schedule = &api.CellConfigSchedule{Cron: task.Schedule, Suspend: task.Suspend}
 		}

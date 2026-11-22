@@ -166,3 +166,40 @@ func TestSourceInventoryIsPackaged(t *testing.T) {
 		}
 	}
 }
+
+// TestScriptHarnessRunsOnSharedBase checks the script harness builds nothing:
+// its only image is the published base-user at the tag the other catalogs
+// carry.
+func TestScriptHarnessRunsOnSharedBase(t *testing.T) {
+	h, err := harness.Load(os.DirFS(root), "script")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(h.Spec.Images) != 1 || h.Spec.Images[0].Name != "base-user" || !h.Spec.Images[0].Shared() {
+		t.Fatalf("script images = %+v, want one shared base-user entry", h.Spec.Images)
+	}
+	catalog, err := harness.LoadCatalog(os.DirFS(root), "script", h.Metadata.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claude, err := harness.LoadCatalog(os.DirFS(root), "claude", "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const claudePrefix = "ghcr.io/eminwux/kukeon/claude:"
+	tag := strings.TrimPrefix(claude.Spec.Images[0].Image, claudePrefix)
+	if tag == claude.Spec.Images[0].Image {
+		t.Fatalf("claude catalog's first image %q lacks %q", claude.Spec.Images[0].Image, claudePrefix)
+	}
+	if len(catalog.Spec.Images) != 1 || catalog.Spec.Images[0].Image != "ghcr.io/eminwux/kukeon/base-user:"+tag {
+		t.Fatalf("script catalog = %+v, want ghcr.io/eminwux/kukeon/base-user:%s", catalog.Spec.Images, tag)
+	}
+	if !slices.Equal(catalog.Spec.Images[0].Capabilities, h.Spec.Images[0].Capabilities) {
+		t.Fatal("capability drift")
+	}
+	for _, name := range []string{"Dockerfile", "context", "Makefile"} {
+		if _, statErr := os.Stat(filepath.Join(root, "script", name)); !os.IsNotExist(statErr) {
+			t.Fatalf("script harness ships %s; it builds nothing", name)
+		}
+	}
+}

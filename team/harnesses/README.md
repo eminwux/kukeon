@@ -29,6 +29,10 @@ and stays unchanged.
 | `codex`, `codex-root`       | `base-user`, `base-root` | Codex 0.163.0, managed policy and hook |
 | `opencode`, `opencode-root` | `base-user`, `base-root` | OpenCode CLI                           |
 
+The `script` harness, which runs a program role's declared command with no
+model, builds no image: its only `spec.images` entry is `base-user` with no
+`build`, and its catalog lists the published `base-user` reference.
+
 All ten images target Linux amd64 and arm64. Android SDK packages retain the
 upstream Linux distribution; a successful arm64 image build does not certify
 that every SDK executable supports arm64. Agent CLI `latest` defaults and
@@ -41,6 +45,9 @@ are relative to the source repository root; Dockerfiles are relative to their
 context. The variant name supplies the image repository name. Registry and tag
 are command inputs, never Harness fields. The seven variants and their capability
 sets are retained; bases remain shared build intermediates.
+An entry with no `build` instead names a published shared base (`base-user`
+or `base-root`) the harness runs on as-is: it claims no image name, adds no
+Bake target, and its catalog entry is that base's reference at the release tag.
 
 Each sibling `images.yaml` is a generated `kuketeams.io/v1 HarnessImageCatalog`.
 It contains `metadata.name` matching the Harness, plus ordered `spec.images`

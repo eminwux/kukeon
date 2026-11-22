@@ -86,11 +86,23 @@ type Mount struct {
 	ReadOnly bool   `json:"readOnly,omitempty" yaml:"readOnly,omitempty"`
 }
 
+// Image is one image a harness runs on. An entry with a build is an image the
+// harness builds and publishes; an entry with no build names a published
+// shared base (base-user or base-root) the harness runs on as-is.
 type Image struct {
 	Name         string   `json:"name"         yaml:"name"`
 	Build        Build    `json:"build"        yaml:"build"`
 	Capabilities []string `json:"capabilities" yaml:"capabilities"`
 }
+
+// sharedBases are the published base images a build-less image entry may name.
+//
+//nolint:gochecknoglobals // package-level membership set, read-only.
+var sharedBases = map[string]bool{"base-user": true, "base-root": true}
+
+// Shared reports whether the entry names a published shared base rather than
+// an image the harness builds.
+func (i Image) Shared() bool { return i.Build == (Build{}) }
 
 type Build struct {
 	Context    string `json:"context"    yaml:"context"`
@@ -204,7 +216,14 @@ func (h *Harness) Validate() error {
 			return fmt.Errorf("spec.images: duplicate or invalid image name %q", image.Name)
 		}
 		names[image.Name] = true
-		if !relative(image.Build.Context) || !relative(image.Build.Dockerfile) {
+		if image.Shared() {
+			if !sharedBases[image.Name] {
+				return fmt.Errorf(
+					"image %q: an entry with no build must name a shared base (base-user or base-root)",
+					image.Name,
+				)
+			}
+		} else if !relative(image.Build.Context) || !relative(image.Build.Dockerfile) {
 			return fmt.Errorf(
 				"image %q: build context must be repository-relative and Dockerfile context-relative",
 				image.Name,

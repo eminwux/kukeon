@@ -59,16 +59,21 @@ type RoleSpec struct {
 	Tasks []RoleTask `json:"tasks,omitempty"      yaml:"tasks,omitempty"`
 }
 
-// RoleTask is one named task of a role: a skill the role loads, run headless
-// with an optional fixed argument string. The rendered prompt is
-// `Use the <skill> skill`, followed by ` with arguments: <args>` when Args is
-// set. A task may also carry a default schedule (issue #1503).
+// RoleTask is one named task of a role, run headless with an optional fixed
+// argument string. On a model harness the task names a skill the role loads
+// and the rendered prompt is `Use the <skill> skill`, followed by
+// ` with arguments: <args>` when Args is set. On the script harness the task
+// names no skill: the cell runs the role's command with Args appended. A task
+// may also carry a default schedule (issue #1503).
 type RoleTask struct {
 	// Name is the task's resource-name segment, unique within the role.
 	Name string `json:"name"               yaml:"name"`
-	// Skill is the base name of one of the role's spec.skills entries.
-	Skill string `json:"skill"              yaml:"skill"`
-	// Args is optional free text appended to the prompt.
+	// Skill is the base name of one of the role's spec.skills entries. A
+	// model-harness task requires it; a script-harness task must leave it
+	// empty.
+	Skill string `json:"skill,omitempty"    yaml:"skill,omitempty"`
+	// Args is optional free text appended to the prompt (model harnesses) or
+	// to the role's command (script harness).
 	Args string `json:"args,omitempty"     yaml:"args,omitempty"`
 	// Schedule is the role's default cadence for the task: a five-field cron
 	// expression or @hourly/@daily/@weekly/@monthly, read in UTC. `kuke team
@@ -84,7 +89,7 @@ type RoleTask struct {
 
 // RoleHarness is the per-role configuration of a single harness. Different
 // harnesses use different keys (claude reads Settings; codex reads
-// Sandbox/Approval; opencode reads Permissions), so this is a permissive union
+// Sandbox/Approval; opencode reads Permissions; script reads Command), so this is a permissive union
 // of the recognized keys — an empty config (harness enabled with defaults) is
 // valid.
 type RoleHarness struct {
@@ -96,6 +101,10 @@ type RoleHarness struct {
 	Approval string `json:"approval,omitempty"    yaml:"approval,omitempty"`
 	// Permissions selects the permission mode (opencode, e.g. skip).
 	Permissions string `json:"permissions,omitempty" yaml:"permissions,omitempty"`
+	// Command is the command line a script-harness cell runs (script). It is
+	// run by the cell's shell, so it references environment variables as
+	// $VAR, never ${VAR}.
+	Command string `json:"command,omitempty"     yaml:"command,omitempty"`
 	// Secrets are the secret NAMES (resolved against TeamsConfig.secrets) this
 	// harness needs, declared per-harness so a role's Claude cell no longer
 	// carries secret slots only its Codex/OpenCode cells use (agents#750). A
