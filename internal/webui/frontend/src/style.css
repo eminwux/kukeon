@@ -474,6 +474,15 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--er
 .creation-review h3, .creation-form h3 { margin: 0; font-size: var(--font-md); }
 .creation-review pre { max-height: 420px; min-height: 180px; border: 1px solid var(--line); border-radius: 7px; }
 .creation-review > button { justify-self: start; }
+/* New Cell (#1568): one primary action per step, the start option beside Create, and a preview that leads
+   with a summary while the full JSON stays collapsed and wrapped. */
+.creation-form > button[type="submit"] { justify-self: start; }
+.creation-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.creation-actions .schema-check { align-items: center; }
+.creation-actions .schema-check input { margin: 0; }
+.creation-summary { grid-template-columns: 110px minmax(0, 1fr); gap: 6px 18px; }
+.creation-summary-image { display: block; overflow-wrap: anywhere; }
+.creation-json pre { margin-top: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .relationship-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; }
 .relationship-grid .related-resources { margin-top: 0; }
 .related-cell-list li { align-items: center !important; }

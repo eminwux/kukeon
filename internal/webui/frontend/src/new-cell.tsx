@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Doc, InventoryResource } from "./inventory";
 import { useResource } from "./request";
 import { cellAdvanced, containerFields } from "./creation-schema.mjs";
@@ -39,6 +39,29 @@ function fieldErrors(value: FormValue, fields: Field[], prefix: string): Record<
     if (field.kind === "objects" && field.fields && Array.isArray(item)) item.forEach((entry, index) => Object.assign(errors, fieldErrors(entry as FormValue, field.fields!, `${path}.${index}`)));
   }
   return errors;
+}
+
+// The preview leads with a short summary (#1568): what will be created and where. The complete document
+// stays one click away in a collapsed disclosure, wrapped so it never widens the page.
+function PreviewSummary({ document, connectors }: { document: CellDoc; connectors?: ConnectorStatus[] }) {
+  const containers = document.spec.containers ?? [];
+  const images = [...new Set(containers.map(container => container.image).filter((image): image is string => !!image))];
+  return <dl className="details-grid creation-summary">
+    <dt>Name</dt><dd>{document.metadata.name}</dd>
+    <dt>Scope</dt><dd className="mono-id">{scopeLabel([document.spec.realmId, document.spec.spaceId, document.spec.stackId])}</dd>
+    <dt>Containers</dt><dd>{containers.length ? `${containers.length} (${containers.map(container => container.id).join(", ")})` : "None declared"}</dd>
+    <dt>Images</dt><dd>{images.length ? images.map(image => <code className="creation-summary-image" key={image}>{image}</code>) : "None declared"}</dd>
+    <dt>Connectors</dt><dd>{connectors?.length ? connectors.map(status => `${connectorTitle(status)}${status.method ? ` (${status.method})` : ""}`).join(", ") : "None"}</dd>
+  </dl>;
+}
+function PreviewDocument({ document, label }: { document: CellDoc; label: string }) {
+  return <details className="creation-json"><summary>Full preview (JSON)</summary><pre tabIndex={0} aria-label={label}>{JSON.stringify(document, null, 2)}</pre></details>;
+}
+// A fresh preview scrolls its review into view, so the summary shows without hunting below the form.
+function useReviewScroll(preview: Preview | undefined) {
+  const review = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (preview) review.current?.scrollIntoView({ block: "nearest" }); }, [preview]);
+  return review;
 }
 
 function FieldEditor({ field, value, onChange, path, errors, disabled = false }: { field: Field; value: unknown; onChange: (value: unknown) => void; path: string; errors: Record<string, string>; disabled?: boolean }) {
@@ -117,6 +140,7 @@ function ConfigCreation({ revision, inventory, configScope, onCreated }: { revis
   const targetScope = config ? [config.doc.metadata.realm || "default", config.doc.metadata.space || "default", config.doc.metadata.stack || "default"] : [];
   const stackMissing = !!config && !!inventory.data && !inventory.data.rows[2].some(row => row.scope[0] === targetScope[0] && row.scope[1] === targetScope[1] && row.scope[2] === targetScope[2]);
   const supportsAttach = !!preview?.document.spec.containers?.some(container => container.attachable && !container.root);
+  const review = useReviewScroll(preview);
   async function submit(create: boolean) {
     if (!config || pending) return;
     setPending(true); setStage(create ? "create" : "preview"); setError("");
@@ -182,9 +206,15 @@ function ConfigCreation({ revision, inventory, configScope, onCreated }: { revis
         <label className="schema-check"><input type="checkbox" checked={ignoreDiskPressure} disabled={pending} onChange={event => { setIgnoreDiskPressure(event.target.checked); setPreview(undefined); setStart(false); }} /> Ignore disk pressure for this creation</label>
         <p className="description">The daemon renders the existing config and blueprint, merging the Realm, Space and Stack defaults. Environment values are redacted in the preview. Creation leaves the Cell stopped.</p>
         {error && <p className="error" role="alert">{error}</p>}{pending && <p role="status">{stage === "create" ? "Creating Cell…" : "Preparing preview…"}</p>}
-        {preview && <div className="creation-review"><h3>Review Cell document</h3><p>Resolved Cell name: <strong>{preview.document.metadata.name}</strong></p><p className="description">The reviewed automatic name is sent back unchanged when creating, so preview and creation use the same name. kukeon may add its default root container during materialization.</p>{preview.connectors && <ConnectorIdentities statuses={preview.connectors} team={team} />}{preview.values && <MergedValues values={preview.values} digest={preview.digest} />}<pre tabIndex={0} aria-label="Complete Cell preview">{JSON.stringify(preview.document, null, 2)}</pre><label className="schema-check"><input type="checkbox" checked={start} disabled={pending} onChange={event => setStart(event.target.checked)} /> {supportsAttach ? "Start and attach after creation" : "Start after creation"}</label><button type="button" disabled={pending || stackMissing || previewBlocked || unresolved.length > 0} onClick={() => void submit(true)}>Create Cell</button></div>}
+        <button type="submit" className={preview ? undefined : "primary-action"} disabled={pending || !detail.data || !blueprint.data || stackMissing || unresolved.length > 0}>{preview ? "Refresh preview" : "Preview Cell"}</button>
         {unresolved.length > 0 && !preview && <><p className="field-error" role="alert">Create is disabled until every required connector resolves: {[...new Set(unresolved.map(connectorTitle))].join(", ")}.</p><button type="button" disabled>Create Cell</button></>}
-        <button type="submit" disabled={pending || !detail.data || !blueprint.data || stackMissing || unresolved.length > 0}>{preview ? "Refresh preview" : "Preview Cell"}</button>
+        {preview && <div className="creation-review" ref={review}><h3>Review Cell document</h3>
+          <PreviewSummary document={preview.document} connectors={preview.connectors} />
+          <p className="description">The reviewed automatic name is sent back unchanged when creating, so preview and creation use the same name. kukeon may add its default root container during materialization.</p>
+          {preview.connectors && <ConnectorIdentities statuses={preview.connectors} team={team} />}{preview.values && <MergedValues values={preview.values} digest={preview.digest} />}
+          <PreviewDocument document={preview.document} label="Complete Cell preview" />
+          <div className="creation-actions"><button type="button" className="primary-action" disabled={pending || stackMissing || previewBlocked || unresolved.length > 0} onClick={() => void submit(true)}>Create Cell</button><label className="schema-check"><input type="checkbox" checked={start} disabled={pending} onChange={event => setStart(event.target.checked)} /> {supportsAttach ? "Start and attach after creation" : "Start after creation"}</label></div>
+        </div>}
       </form></section>
     </>}
   </div>;
@@ -243,6 +273,7 @@ function ManualCreation({ inventory, onCreated }: { inventory: InventoryResource
     finally { setPending(false); }
   }
   const previewAttachable = !!preview?.document.spec.containers?.some(container => container.attachable && !container.root);
+  const review = useReviewScroll(preview);
   return <section className="panel"><div className="panel-heading"><h2>Build a Cell specification</h2><span className="badge">No Config or Blueprint</span></div><form className="panel-body creation-form" onSubmit={event => { event.preventDefault(); void submit(false); }}>
     <div className="schema-section"><h3>Basic Cell configuration</h3><div className="schema-fields">
       <label className="schema-field" htmlFor="manual-name"><span>Cell name <b aria-label="required"> *</b></span><input id="manual-name" value={String(model.name)} disabled={pending} aria-invalid={!!errors["cell.name"]} aria-describedby={errors["cell.name"] ? "manual-name-error" : undefined} onChange={event => changeRoot("name", event.target.value)} />{errors["cell.name"] && <small id="manual-name-error" className="field-error">{errors["cell.name"]}</small>}</label>
@@ -259,8 +290,13 @@ function ManualCreation({ inventory, onCreated }: { inventory: InventoryResource
     <p className="description">Manual Cell input is validated by kukeon's API conversion and daemon on preview and create. The daemon owns runtime status, IDs, provenance, and generated container fields.</p>
     {inventory.error && <p className="error" role="alert">Scope inventory could not be loaded: {inventory.error.message}</p>}{!!inventory.data?.failures.length && <p className="stale">Scope inventory is incomplete. Verify the selected target resources before creating.</p>}
     {error && <p className="error" role="alert">{error}</p>}{pending && <p role="status">{stage === "create" ? "Creating Cell…" : "Validating and preparing preview…"}</p>}
-    {preview && <div className="creation-review"><h3>Review Cell document</h3><p>Cell scope: <strong>{scopeLabel([preview.document.spec.realmId, preview.document.spec.spaceId, preview.document.spec.stackId, preview.document.metadata.name])}</strong></p><p className="description">The preview contains your authorable specification. kukeon adds its default root container during creation when you have not explicitly defined one; the returned Cell document will show the daemon’s final specification.</p><pre tabIndex={0} aria-label="Complete manual Cell preview">{JSON.stringify(preview.document, null, 2)}</pre><label className="schema-check"><input type="checkbox" checked={start} disabled={pending} onChange={event => setStart(event.target.checked)} /> {previewAttachable ? "Start and attach after creation" : "Start after creation"}</label><button type="button" disabled={pending} onClick={() => void submit(true)}>Create Cell</button></div>}
-    <button type="submit" disabled={pending}>Validate and preview Cell</button>
+    <button type="submit" className={preview ? undefined : "primary-action"} disabled={pending}>{preview ? "Refresh preview" : "Validate and preview Cell"}</button>
+    {preview && <div className="creation-review" ref={review}><h3>Review Cell document</h3>
+      <PreviewSummary document={preview.document} />
+      <p className="description">The preview contains your authorable specification. kukeon adds its default root container during creation when you have not explicitly defined one; the returned Cell document will show the daemon’s final specification.</p>
+      <PreviewDocument document={preview.document} label="Complete manual Cell preview" />
+      <div className="creation-actions"><button type="button" className="primary-action" disabled={pending} onClick={() => void submit(true)}>Create Cell</button><label className="schema-check"><input type="checkbox" checked={start} disabled={pending} onChange={event => setStart(event.target.checked)} /> {previewAttachable ? "Start and attach after creation" : "Start after creation"}</label></div>
+    </div>}
     {Object.keys(errors).length > 0 && <p className="field-error" role="alert">Fix the highlighted fields before previewing.</p>}
   </form></section>;
 }

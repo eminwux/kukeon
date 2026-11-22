@@ -1170,6 +1170,135 @@ test("create from config previews, prevents duplicate submits and opens the scop
   await expect(page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link", { name: "Open prod / shared / services / new-cell" })).toBeVisible();
 });
 
+// Issue #1568, item D: the preview is a short summary, the JSON is one click away and Create Cell is the
+// one primary action, with the start option beside it.
+test("New Cell from a Config summarizes the preview, keeps the JSON collapsed and wrapped, and makes Create the only primary action", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockCatalog(page);
+  const requests = [];
+  const cellDocument = name => ({ apiVersion: "kukeon.io/v1beta1", kind: "Cell", metadata: { name, labels: { note: "x".repeat(400) } }, spec: { realmId: "prod", spaceId: "shared", stackId: "services", containers: [
+    { id: "work", image: "ghcr.io/example/app:v1", attachable: true, env: Array.from({ length: 80 }, (_, i) => `VAR_${i}=<redacted>`) }, { id: "sidecar", image: "ghcr.io/example/sidecar:v2" }] } });
+  await page.route("**/api/cells/from-config/*", async route => {
+    const input = route.request().postDataJSON();
+    const create = route.request().url().endsWith("create");
+    requests.push({ step: create ? "create" : "preview", input });
+    await route.fulfill({ json: create ? cellDocument(input.resolvedName) : { document: cellDocument(input.name || "worker-7f3a"), preview: "reviewed" } });
+  });
+  let started = 0;
+  await page.route("**/api/realms/prod/spaces/shared/stacks/services/cells/worker-7f3a/**", route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/start")) { started++; return route.fulfill({ json: {} }); }
+    if (path.endsWith("/containers")) return route.fulfill({ json: [{ id: "work", attachable: true }] });
+    return route.fallback();
+  });
+  await page.routeWebSocket("**/attach", socket => { socket.send(JSON.stringify({ type: "ready" })); });
+  await page.goto(`${server.url}#/new-cell?config=${encodeURIComponent(JSON.stringify(["prod", "shared", "services", "shared-name"]))}`);
+  // The mode switch is a segmented control that exposes its selected state.
+  const modes = page.getByRole("group", { name: "Cell creation method" });
+  await expect(modes.getByRole("button", { name: "From Config" })).toHaveAttribute("aria-pressed", "true");
+  await expect(modes.getByRole("button", { name: "Manual" })).toHaveAttribute("aria-pressed", "false");
+  const primary = content(page).locator("button.primary-action:visible");
+  await expect(page.getByRole("button", { name: "Preview Cell", exact: true })).toBeEnabled();
+  await expect(primary).toHaveText(["Preview Cell"]);
+  await page.getByRole("button", { name: "Preview Cell", exact: true }).click();
+
+  const review = page.locator(".creation-review");
+  await expect(review.locator(".creation-summary dt")).toHaveText(["Name", "Scope", "Containers", "Images", "Connectors"]);
+  await expect(review.locator(".creation-summary dd")).toHaveText(["worker-7f3a", "prod / shared / services", "2 (work, sidecar)", "ghcr.io/example/app:v1ghcr.io/example/sidecar:v2", "None"]);
+  // The summary is on screen without scrolling by hand, and the page is no longer thousands of pixels of JSON.
+  await expect(review.locator(".creation-summary")).toBeInViewport({ ratio: 1 });
+  const collapsedHeight = await page.evaluate(() => document.scrollingElement.scrollHeight);
+  // Create Cell is the only primary-styled button; Refresh preview is a plain, content-width button.
+  await expect(primary).toHaveText(["Create Cell"]);
+  const refresh = page.getByRole("button", { name: "Refresh preview", exact: true });
+  await expect(refresh).not.toHaveClass(/primary-action/);
+  expect((await refresh.boundingBox()).width).toBeLessThan(200);
+  // The start option sits on the same row, right after Create.
+  const create = review.getByRole("button", { name: "Create Cell", exact: true });
+  const start = review.getByLabel("Start and attach after creation");
+  const [createBox, startBox] = [await create.boundingBox(), await start.boundingBox()];
+  expect(Math.abs((createBox.y + createBox.height / 2) - (startBox.y + startBox.height / 2))).toBeLessThan(12);
+  expect(startBox.x - (createBox.x + createBox.width)).toBeGreaterThan(0);
+  expect(startBox.x - (createBox.x + createBox.width)).toBeLessThan(60);
+
+  // The full JSON is a collapsed disclosure that wraps instead of widening the page.
+  const json = review.locator("details.creation-json");
+  const pre = page.getByLabel("Complete Cell preview");
+  await expect(json).not.toHaveAttribute("open");
+  await expect(pre).toBeHidden();
+  await json.locator("summary").focus();
+  await page.keyboard.press("Enter");
+  await expect(pre).toContainText('"id": "sidecar"');
+  expect(await pre.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  expect(await page.evaluate(() => document.scrollingElement.scrollHeight)).toBeGreaterThan(collapsedHeight);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await pre.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // Create with start and attach: the reviewed name and preview token go back unchanged, then the cell starts.
+  await start.check();
+  await create.click();
+  await expect(page).toHaveURL(/#\/workspace\/prod\/shared\/services\/worker-7f3a$/);
+  await expect.poll(() => started).toBe(1);
+  expect(requests.map(request => request.step)).toEqual(["preview", "create"]);
+  expect(requests[1].input).toEqual({ config: { name: "shared-name", realm: "prod", space: "shared", stack: "services" }, name: "", resolvedName: "worker-7f3a", preview: "reviewed", env: [], ignoreDiskPressure: false });
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
+});
+
+test("manual New Cell keeps validation inline, summarizes the preview and sends the previewed specification unchanged", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mock(page);
+  const requests = [];
+  await page.route("**/api/cells/manual/*", async route => {
+    const input = route.request().postDataJSON();
+    const create = route.request().url().endsWith("create");
+    requests.push({ step: create ? "create" : "preview", input });
+    const document = { apiVersion: "kukeon.io/v1beta1", kind: "Cell", metadata: { name: input.name, annotations: { note: "y".repeat(600) } }, spec: { realmId: input.realm, spaceId: input.space, stackId: input.stack, containers: input.spec.containers } };
+    await route.fulfill({ json: create ? document : { document, preview: "manual-reviewed" } });
+  });
+  await page.goto(`${server.url}#/new-cell`);
+  const modes = page.getByRole("group", { name: "Cell creation method" });
+  await modes.getByRole("button", { name: "Manual" }).click();
+  await expect(modes.getByRole("button", { name: "Manual" })).toHaveAttribute("aria-pressed", "true");
+  await expect(modes.getByRole("button", { name: "From Config" })).toHaveAttribute("aria-pressed", "false");
+  const primary = content(page).locator("button.primary-action:visible");
+  await expect(primary).toHaveText(["Validate and preview Cell"]);
+  // Validation errors stay inline, beside the field, and nothing is sent.
+  await primary.click();
+  await expect(page.locator("#manual-name-error")).toHaveText("This field is required.");
+  await expect(page.getByText("Fix the highlighted fields before previewing.")).toBeVisible();
+  expect(requests).toEqual([]);
+  await page.locator("#manual-name").fill("manual-cell");
+  await page.getByRole("button", { name: "Add container" }).click();
+  await page.getByLabel(/^Container ID/).fill("app");
+  await page.getByLabel(/^OCI image/).fill("ghcr.io/example/app:latest");
+  await page.getByLabel("Attachable terminal").check();
+  await primary.click();
+
+  const review = page.locator(".creation-review");
+  await expect(review.locator(".creation-summary dd")).toHaveText(["manual-cell", "dev / shared / services", "1 (app)", "ghcr.io/example/app:latest", "None"]);
+  await expect(review.locator(".creation-summary")).toBeInViewport({ ratio: 1 });
+  await expect(primary).toHaveText(["Create Cell"]);
+  await expect(page.getByRole("button", { name: "Refresh preview", exact: true })).not.toHaveClass(/primary-action/);
+  const pre = page.getByLabel("Complete manual Cell preview");
+  await expect(pre).toBeHidden();
+  await review.locator("details.creation-json summary").click();
+  await expect(pre).toContainText('"image": "ghcr.io/example/app:latest"');
+  // The raw preview used to be thousands of pixels wide; it now wraps, also on a phone.
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await pre.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  await review.getByLabel("Start and attach after creation").check();
+  await review.getByRole("button", { name: "Create Cell", exact: true }).click();
+  await expect(page).toHaveURL(/#\/workspace\/dev\/shared\/services\/manual-cell$/);
+  expect(requests.map(request => request.step)).toEqual(["preview", "create"]);
+  expect(requests[1].input).toEqual({ ...requests[0].input, preview: "manual-reviewed" });
+  expect(requests[0].input).toMatchObject({ name: "manual-cell", realm: "dev", space: "shared", stack: "services", labels: {}, annotations: {}, spec: { containers: [{ id: "app", image: "ghcr.io/example/app:latest", attachable: true }], autoDelete: false, nestedCgroupRuntime: false, ignoreDiskPressure: false } });
+});
+
 // A shared blueprint as `kuke team` renders it: the form below is derived from
 // this document alone.
 const formBlueprint = {
