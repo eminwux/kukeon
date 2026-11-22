@@ -209,7 +209,7 @@ button:disabled { cursor: default; opacity: .4; }
 .disclosure > details:not([open]) > summary { border-bottom-color: transparent; }
 .disclosure > details > summary:hover { background: var(--hover); }
 .disclosure > details > summary:focus-visible { outline-offset: -2px; }
-.disclosure > details > summary > h2 { flex: 0 0 auto; }
+.disclosure > details > summary > h2, .disclosure > details > summary > h3 { flex: 0 0 auto; }
 .disclosure-summary { flex: 1; min-width: 0; color: var(--muted); font-size: var(--font-sm); overflow-wrap: anywhere; }
 /* The -1px margin keeps a body-level live region (notifications.tsx) from adding 1px of scroll below the shell. */
 /* Inline-block path segments (status.tsx PathText): no percentage max-width, which would collapse a table
@@ -483,6 +483,10 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--er
 .creation-summary { grid-template-columns: 110px minmax(0, 1fr); gap: 6px 18px; }
 .creation-summary-image { display: block; overflow-wrap: anywhere; }
 .creation-json pre { margin-top: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* New Config (#1568): every section after Config is a disclosure whose row counts the answers it holds. */
+.schema-disclosure > details > .schema-section { padding: 14px 16px 16px; }
+.schema-disclosure > details > .schema-section > .description:first-child { margin-top: 0; }
+.disclosure-required { color: var(--status-warning); font-weight: 600; }
 .relationship-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; }
 .relationship-grid .related-resources { margin-top: 0; }
 .related-cell-list li { align-items: center !important; }

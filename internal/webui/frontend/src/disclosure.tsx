@@ -22,8 +22,9 @@ export function useDisclosure(id: string, defaultOpen = false): [boolean, (open:
 
 // Disclosure is the controlled panel: the caller owns the open state (a form opens the sections that hold
 // invalid fields). StoredDisclosure below is the self-contained variant that remembers the operator's choice.
-export function Disclosure({ title, summary, badge, className = "", label, open, onToggle, children }: {
+export function Disclosure({ title, summary, badge, className = "", label, level = 2, open, onToggle, children }: {
   title: string;
+  level?: 2 | 3;
   summary?: ReactNode;
   badge?: ReactNode;
   className?: string;
@@ -34,7 +35,7 @@ export function Disclosure({ title, summary, badge, className = "", label, open,
 }) {
   return <section className={`panel disclosure ${className}`.trim()} aria-label={label}>
     <details open={open} onToggle={event => { if (event.currentTarget.open !== open) onToggle(event.currentTarget.open); }}>
-      <summary className="panel-heading"><h2>{title}</h2><span className="disclosure-summary">{summary}</span>{badge}</summary>
+      <summary className="panel-heading">{level === 3 ? <h3>{title}</h3> : <h2>{title}</h2>}<span className="disclosure-summary">{summary}</span>{badge}</summary>
       {children}
     </details>
   </section>;

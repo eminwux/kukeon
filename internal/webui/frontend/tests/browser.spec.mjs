@@ -1316,6 +1316,13 @@ const formBlueprint = {
     cell: { containers: [{ id: "work", image: "${IMAGE}", repos: [{ name: "role-source", target: "/home/user/agents", required: true }, { name: "project", target: "/home/user/project" }] }] },
   },
 };
+// New Config sections after Config are disclosures (#1568); a test opens one by its heading unless it is open.
+const configSection = (page, title) => page.locator(".schema-disclosure").filter({ has: page.locator("summary h3", { hasText: new RegExp(`^${title}$`) }) });
+async function openSection(page, title) {
+  const section = configSection(page, title);
+  if (await section.locator("details").getAttribute("open") === null) await section.locator("summary").click();
+  await expect(section.locator("details")).toHaveAttribute("open");
+}
 test("a config is created from the form a blueprint describes, and the preview shows each repo's git identity", async ({ page }) => {
   await mock(page, path => path === "/api/realms/prod/image-inventory" ? { json: { realm: "prod", namespace: "prod.kukeon.io", images: [
     { name: "ghcr.io/example/claude-gh:v1", capabilities: ["claude", "git", "gh"], labels: {} },
@@ -1357,6 +1364,7 @@ test("a config is created from the form a blueprint describes, and the preview s
 
   // Typed inputs come from the blueprint: an enum select, a required path.
   await expect(page.getByLabel("ANTHROPIC_MODEL")).toHaveValue("");
+  await openSection(page, "claude");
   await page.getByLabel("ANTHROPIC_MODEL").selectOption("sonnet");
   await page.getByLabel("Config name").fill("dev");
   // The config's scope comes from the inventory; open coordinates stay realm-scoped.
@@ -1370,6 +1378,7 @@ test("a config is created from the form a blueprint describes, and the preview s
   const picker = page.getByLabel("IMAGE from realm images");
   await expect(picker.getByRole("option")).toHaveText(["Choose from the realm's images…", "ghcr.io/example/claude-gh:v1", "ghcr.io/example/claude:v1", "docker.io/library/alpine:3 — capabilities unknown"]);
   await expect(page.getByLabel("github-token secret")).toHaveCount(0);
+  await openSection(page, "Components");
   await page.getByLabel(/^github connector/).check();
   await expect(picker.getByRole("option")).toHaveText(["Choose from the realm's images…", "ghcr.io/example/claude-gh:v1", "docker.io/library/alpine:3 — capabilities unknown"]);
   await expect(page.getByText("This image does not provide: gh.")).toBeVisible();
@@ -1379,6 +1388,7 @@ test("a config is created from the form a blueprint describes, and the preview s
 
   // A mode's own parameters show only when previewing that mode.
   await expect(page.getByLabel("PROMPT")).toHaveCount(0);
+  await openSection(page, "Modes");
   await page.getByLabel("Preview as mode").selectOption("headless");
   await expect(page.getByLabel("PROMPT")).toBeVisible();
   await page.getByLabel("Preview as mode").selectOption("interactive");
@@ -1447,6 +1457,116 @@ test("the config preview of an existing config shows each repo's git identity", 
 // kuke team writes realm-only blueprint refs from stack-scoped configs; the
 // mock 404s any lookup whose scope slots do not match exactly, so a name that
 // leaks into the space or stack slot fails the test.
+// Issue #1568, item E: the New Config form leads with the essentials and discloses the rest on demand.
+async function mockConfigForm(page) {
+  await mock(page, path => path === "/api/realms" ? { json: [doc(["prod"])] } : path === "/api/realms/prod/image-inventory" ? { json: { realm: "prod", namespace: "prod.kukeon.io", images: [
+    { name: "ghcr.io/example/claude-gh:v1", capabilities: ["claude", "git", "gh"], labels: {} }, { name: "ghcr.io/example/claude:v1", capabilities: ["claude", "git"], labels: {} }] } } : undefined);
+  await page.route("**/api/catalog/**", async route => {
+    const [, , kind, name] = new URL(route.request().url()).pathname.split("/").filter(Boolean);
+    if (kind === "blueprints") return route.fulfill({ json: name ? formBlueprint : [{ kind: "CellBlueprint", metadata: formBlueprint.metadata }] });
+    return route.fulfill({ json: kind === "secrets" ? [{ kind: "Secret", metadata: { name: "gh-token", realm: "prod" }, spec: {} }] : [] });
+  });
+  const requests = [];
+  await page.route("**/api/configs/from-blueprint/*", async route => {
+    const input = route.request().postDataJSON();
+    requests.push({ action: route.request().url().split("/").at(-1), input });
+    const config = { apiVersion: "v1beta1", kind: "CellConfig", metadata: input.config, spec: input.spec };
+    await route.fulfill({ json: route.request().url().endsWith("create") ? config : { config, preview: "reviewed", document: { metadata: { name: "dev-abc123" }, spec: { realmId: "prod" } }, values: [] } });
+  });
+  await page.goto(`${server.url}#/new-config?blueprint=${encodeURIComponent(JSON.stringify(["prod", "claude"]))}`);
+  await expect(page.getByRole("heading", { name: "Answer the claude form" })).toBeVisible();
+  return requests;
+}
+
+test("New Config leads with the essential fields and keeps optional sections collapsed with a count of set answers", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockConfigForm(page);
+  const headings = page.locator(".schema-disclosure > details > summary h3");
+  // Sections holding a required answer come first and open by themselves; the rest are collapsed rows.
+  await expect(headings).toHaveText(["Role", "Repositories", "Components", "Modes", "Image", "claude", "Image capabilities", "Default git identity"]);
+  await expect(page.locator(".schema-disclosure > details[open] > summary h3")).toHaveText(["Role", "Repositories"]);
+  await expect(configSection(page, "Role").locator(".disclosure-summary")).toHaveText("Defaults · 1 required");
+  await expect(configSection(page, "Repositories").locator(".disclosure-summary")).toHaveText("Defaults · 1 required");
+  for (const title of ["Components", "Modes", "Image", "claude", "Image capabilities", "Default git identity"]) await expect(configSection(page, title).locator(".disclosure-summary")).toHaveText("Defaults");
+  // Above the fold at 1440x900 are the Config essentials only; the required answers follow, open, and no
+  // optional field shows anywhere until its section is opened.
+  for (const essential of [page.getByLabel("Config name"), page.getByLabel("Config realm"), page.getByLabel("Config space"), page.getByLabel("Config stack")]) await expect(essential).toBeInViewport({ ratio: 1 });
+  for (const required of [page.getByLabel("ROLE_PATH"), page.getByLabel("role-source URL")]) await expect(required).toBeVisible();
+  for (const optional of [page.getByLabel("IMAGE", { exact: true }), page.getByLabel("ANTHROPIC_MODEL"), page.getByLabel("Additional required capabilities"), page.getByLabel("Preview as mode"), page.getByLabel(/^github connector/), page.getByLabel("Override the inherited default identity")]) await expect(optional).toBeHidden();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+
+  // A section opens from the keyboard, and its row counts the answers set inside it.
+  await configSection(page, "claude").locator("summary").focus();
+  await page.keyboard.press("Enter");
+  await page.getByLabel("ANTHROPIC_MODEL").selectOption("sonnet");
+  await expect(configSection(page, "claude").locator(".disclosure-summary")).toHaveText("1 set");
+  await page.getByLabel("ROLE_PATH").fill("dev");
+  await expect(configSection(page, "Role").locator(".disclosure-summary")).toHaveText("1 set");
+  await openSection(page, "Modes");
+  await page.getByLabel("Default mode").selectOption("headless");
+  await expect(configSection(page, "Modes").locator(".disclosure-summary")).toHaveText("1 set");
+  // Enabling a component brings its own section, already open because its secret is required, and opens
+  // the Image section whose default image no longer provides every required capability.
+  await openSection(page, "Components");
+  await page.getByLabel(/^github connector/).check();
+  await expect(configSection(page, "Components").locator(".disclosure-summary")).toHaveText("1 set");
+  await expect(configSection(page, "github").locator("details")).toHaveAttribute("open");
+  await expect(configSection(page, "github").locator(".disclosure-summary")).toHaveText("Defaults · 1 required");
+  await expect(configSection(page, "Image").locator("details")).toHaveAttribute("open");
+  await expect(page.getByText("This image does not provide: gh.")).toBeVisible();
+  // The one primary action is the preview; the review then makes Create Config primary.
+  await expect(content(page).locator("button.primary-action:visible")).toHaveText(["Preview Config"]);
+});
+
+test("submitting New Config with an unmet required answer opens its collapsed section and focuses the first invalid field", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const requests = await mockConfigForm(page);
+  await page.getByLabel("Config name").fill("dev");
+  await openSection(page, "Components");
+  await page.getByLabel(/^github connector/).check();
+  // Collapse every section that holds a required answer, as an operator skimming the form might.
+  for (const title of ["Role", "github", "Repositories"]) {
+    await configSection(page, title).locator("summary").click();
+    await expect(configSection(page, title).locator("details")).not.toHaveAttribute("open");
+  }
+  await expect(page.getByLabel("ROLE_PATH")).toBeHidden();
+  const requiredErrors = page.locator(".field-error").filter({ hasText: "This answer is required." });
+  await expect(requiredErrors).toHaveCount(0);
+  const preview = page.getByRole("button", { name: "Preview Config", exact: true });
+  await preview.click();
+  // Nothing is sent; each section with a missing answer opens and the first invalid field takes focus.
+  for (const title of ["Role", "github", "Repositories"]) await expect(configSection(page, title).locator("details")).toHaveAttribute("open");
+  await expect(page.getByLabel("ROLE_PATH")).toBeFocused();
+  await expect(page.getByLabel("ROLE_PATH")).toHaveAttribute("aria-invalid", "true");
+  await expect(page.getByLabel("github-token secret")).toHaveAttribute("aria-invalid", "true");
+  await expect(page.getByLabel("role-source URL")).toHaveAttribute("aria-invalid", "true");
+  await expect(page.getByLabel("project URL")).not.toHaveAttribute("aria-invalid");
+  await expect(requiredErrors).toHaveCount(3);
+  expect(requests).toEqual([]);
+
+  // An answered field drops its mark at once; the next submit moves focus to the next missing one.
+  await page.getByLabel("ROLE_PATH").fill("dev");
+  await expect(page.getByLabel("ROLE_PATH")).not.toHaveAttribute("aria-invalid");
+  await preview.click();
+  await expect(page.getByLabel("github-token secret")).toBeFocused();
+  await page.getByLabel("github-token secret").selectOption({ label: "gh-token — prod (opaque)" });
+  await configSection(page, "Repositories").locator("summary").click();
+  await preview.click();
+  await expect(configSection(page, "Repositories").locator("details")).toHaveAttribute("open");
+  await expect(page.getByLabel("role-source URL")).toBeFocused();
+  expect(requests).toEqual([]);
+  await page.getByLabel("role-source URL").fill("git@github.com:o/agents.git");
+  await expect(requiredErrors).toHaveCount(0);
+  await preview.click();
+  await expect(page.getByRole("heading", { name: "Review Config" })).toBeVisible();
+  expect(requests).toHaveLength(1);
+  expect(requests[0].input).toEqual({ config: { name: "dev", realm: "prod" }, mode: "interactive", spec: { blueprint: { name: "claude", realm: "prod" }, values: { ROLE_PATH: "dev" }, repos: { "role-source": { url: "git@github.com:o/agents.git" } }, secrets: { "github-token": { secretRef: { name: "gh-token", realm: "prod" } } }, components: ["github"] } });
+  // The review keeps the button hierarchy of New Cell: Create Config is the only primary action.
+  await expect(content(page).locator("button.primary-action:visible")).toHaveText(["Create Config"]);
+  await expect(page.getByRole("button", { name: "Refresh preview", exact: true })).not.toHaveClass(/primary-action/);
+  await expect(page.locator(".creation-review details").filter({ hasText: "Cell this Config renders" })).not.toHaveAttribute("open");
+});
+
 test("create from config resolves configs and blueprint refs scoped at realm, space and stack", async ({ page }) => {
   const scopedMetadata = scope => ({ name: scope.at(-1), realm: scope[0], ...(scope.length > 2 ? { space: scope[1] } : {}), ...(scope.length > 3 ? { stack: scope[2] } : {}) });
   const cases = [
@@ -3371,6 +3491,7 @@ test("New Config offers one method per group and an identity picker per connecto
 
   // The methods of one group are a single choice — never two checkboxes — starting on the catalog's
   // default method. Enabled components are sent in the blueprint's order.
+  await openSection(page, "Components");
   const method = page.getByLabel("Demo method", { exact: true });
   await expect(method.getByRole("option")).toHaveText(["login", "key"]);
   await expect(method).toHaveValue("demo-key");
@@ -3382,12 +3503,16 @@ test("New Config offers one method per group and an identity picker per connecto
   // A login method takes no identity.
   await method.selectOption("demo-login");
   await expect(demoPicker).toHaveCount(0);
+  await openSection(page, "demo-login");
   await expect(page.getByText("Uses the login kept in the harness state volume")).toBeVisible();
   await expect(page.getByRole("note")).toHaveCount(0);
 
   // An ungrouped connector is a toggle; its picker shows the default the Config's scope inherits.
   await page.getByRole("checkbox", { name: /^example-token connector/ }).check();
   const examplePicker = page.getByRole("combobox", { name: /^Example identity/ });
+  // Its identity resolves from the Realm default, so nothing is required and the section stays collapsed.
+  await expect(configSection(page, "example-token").locator("details")).not.toHaveAttribute("open");
+  await openSection(page, "example-token");
   await expect(examplePicker.getByRole("option")).toHaveText(["Default: example-default — dev (Realm default)", "example-default — dev (opaque)", "example-team — dev (opaque)", "example-other — dev / shared / services (opaque)", "Name a secret…"]);
   await expect(examplePicker).toHaveValue("");
   // Choosing Default sends no fill: the Config keeps inheriting.
@@ -3402,6 +3527,7 @@ test("New Config offers one method per group and an identity picker per connecto
   await demoPicker.selectOption({ label: "demo-key-1 — dev (opaque)" });
   await page.getByRole("checkbox", { name: /^repo connector/ }).check();
   const repoPicker = page.getByRole("combobox", { name: /^Repo identity/ });
+  await openSection(page, "repo");
   await expect(repoPicker.getByRole("option")).toHaveText(["No default", "repo-key — dev (ssh-key)", "Name a secret…"]);
   await repoPicker.selectOption({ label: "repo-key — dev (ssh-key)" });
   await page.getByRole("button", { name: "Preview Config", exact: true }).click();

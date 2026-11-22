@@ -62,7 +62,9 @@ export function StatusIdentity({ status, team = "" }: { status: ConnectorStatus;
 // it, any extra reference the caller wants listed (the effective identity),
 // and a by-name entry for a Secret that carries no tag. The empty choice is
 // the caller's "Default"/"None".
-export function IdentitySelect({ label, identities, value, onChange, emptyLabel, extra = [], disabled = false, required = false, help, realm = "" }: {
+export function IdentitySelect({ label, identities, value, onChange, emptyLabel, extra = [], disabled = false, required = false, help, realm = "", id: fixedId, invalid = false }: {
+  id?: string;
+  invalid?: boolean;
   label: string;
   identities: Identity[];
   value: Partial<SecretRef> | undefined;
@@ -74,7 +76,8 @@ export function IdentitySelect({ label, identities, value, onChange, emptyLabel,
   help?: ReactNode;
   realm?: string;
 }) {
-  const id = useId();
+  const generatedId = useId();
+  const id = fixedId ?? generatedId;
   const options = identities.map(identity => ({ ref: secretRef(identity)!, text: `${refLabel(identity)} (${identity.type})` }));
   for (const ref of extra) if (ref && !options.some(option => refKey(option.ref) === refKey(ref))) options.push({ ref, text: `${refLabel(ref)} (not tagged)` });
   const current = refKey(value);
@@ -83,7 +86,7 @@ export function IdentitySelect({ label, identities, value, onChange, emptyLabel,
   const byName = manual || (!!current && !listed);
   const edit = (key: keyof SecretRef, next: string) => onChange({ ...value, [key]: next });
   return <div className="schema-field secret-picker"><label htmlFor={id}><span>{label}{required && <b aria-label="required"> *</b>}</span></label>
-    <select id={id} value={byName ? "manual" : current} disabled={disabled} onChange={event => {
+    <select id={id} value={byName ? "manual" : current} disabled={disabled} aria-invalid={invalid || undefined} onChange={event => {
       if (event.target.value === "manual") { setManual(true); onChange({ name: "", realm }); return; }
       setManual(false);
       onChange(options.find(option => refKey(option.ref) === event.target.value)?.ref);

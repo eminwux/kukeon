@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { InventoryResource } from "./inventory";
 import { ErrorNotice, useResource } from "./request";
+import { Disclosure } from "./disclosure";
 import { newCellLink } from "./routes";
 import { MergedValues } from "./merged-values";
 import { catalogAPI } from "./catalog-url.mjs";
 import { blueprintForm, buildSpec, connectorsWithoutIdentity, emptyAnswers, formSections, groupChoice, imageChoices, imageStatus, missingAnswers, previewMode, requiredCapabilities, secretChoices } from "./config-form.mjs";
-import type { Answers, BlueprintForm, CredentialAnswer, DefaultGitAnswer, Identity, InventoryImage, Parameter, RenderedValue, RepoAnswer, RepoGitAnswer, RepoSlot, SecretChoice, SecretRef, SecretSlot, SigningAnswer } from "./config-form.mjs";
+import type { Answers, BlueprintForm, CredentialAnswer, DefaultGitAnswer, FormSection, Identity, InventoryImage, Parameter, RenderedValue, RepoAnswer, RepoGitAnswer, RepoSlot, SecretChoice, SecretRef, SecretSlot, SigningAnswer } from "./config-form.mjs";
 
 import { ConnectorIdentities, IdentitySelect, connectorsLink } from "./connector-ui";
 import { defaultGroupChoices, defaultRow, deliveryStateVolume, groupComponents, identitiesFor, originLabel, refLabel, scopeParts, scopeQuery, secretRef as identityRef, takesIdentity, targetScope } from "./connectors.mjs";
@@ -15,6 +16,11 @@ type ScopeMetadata = { name: string; realm?: string; space?: string; stack?: str
 type CatalogDoc = { metadata: ScopeMetadata; spec?: Record<string, unknown>; kind?: string };
 type Preview = { config: CatalogDoc; document: unknown; preview: string; digest?: string; values?: RenderedValue[]; connectors?: ConnectorStatus[] };
 type ImageList = { images: InventoryImage[] };
+
+// One collapsible section of the form: `set` counts its answers, `invalid` lists the DOM ids of its fields
+// with an unmet required answer, and `essential` (it holds a required answer) sorts it first.
+type FormBlock = { key: string; title: string; badge?: string; essential: boolean; invalid: string[]; warning: boolean; set: number; body: ReactNode };
+const requiredMessage = "This answer is required.";
 
 const gitTypes = ["basic-auth", "ssh-key"];
 const signingTypes = ["ssh-key"];
@@ -30,13 +36,13 @@ function choiceKey(ref: Partial<SecretRef> | undefined): string {
 
 // Picks a stored secret by scope and name. A slot only offers the secret types
 // it accepts; a secret that does not exist yet can still be named by hand.
-function SecretPicker({ label, value, onChange, choices, disabled, required, help }: { label: string; value: Partial<SecretRef> | undefined; onChange: (value: Partial<SecretRef> | undefined) => void; choices: SecretChoice[]; disabled: boolean; required?: boolean; help?: string }) {
+function SecretPicker({ label, value, onChange, choices, disabled, required, help, invalid }: { label: string; value: Partial<SecretRef> | undefined; onChange: (value: Partial<SecretRef> | undefined) => void; choices: SecretChoice[]; disabled: boolean; required?: boolean; help?: string; invalid?: boolean }) {
   const current = choiceKey(value);
   const listed = choices.some(choice => choiceKey(choice) === current);
   const [manual, setManual] = useState(!!current && !listed);
   const id = fieldId("secret", label);
   return <div className="schema-field secret-picker"><label htmlFor={id}><span>{label}{required && <b aria-label="required"> *</b>}</span></label>
-    <select id={id} value={manual ? "manual" : current} disabled={disabled} onChange={event => {
+    <select id={id} value={manual ? "manual" : current} disabled={disabled} aria-invalid={invalid || undefined} onChange={event => {
       if (event.target.value === "manual") { setManual(true); onChange({ name: "", realm: "default" }); return; }
       setManual(false);
       const choice = choices.find(item => choiceKey(item) === event.target.value);
@@ -48,6 +54,7 @@ function SecretPicker({ label, value, onChange, choices, disabled, required, hel
     </select>
     {manual && <div className="map-entry"><label>Secret name<input value={value?.name ?? ""} disabled={disabled} onChange={event => onChange({ ...value, name: event.target.value })} /></label><label>Realm<input value={value?.realm ?? ""} disabled={disabled} onChange={event => onChange({ ...value, realm: event.target.value })} /></label></div>}
     {help && <small>{help}</small>}
+    {invalid && <small className="field-error">{requiredMessage}</small>}
   </div>;
 }
 
@@ -68,19 +75,19 @@ function SigningFields({ value, sign, onChange, secrets, disabled }: { value: Si
     {value?.secretRef && <div className="schema-field"><span>Sign</span>{["commits", "tags"].map(kind => <label className="schema-check" key={kind}><input type="checkbox" checked={!selected.length || selected.includes(kind)} disabled={disabled} onChange={event => { const all = selected.length ? selected : ["commits", "tags"]; onChange(value, event.target.checked ? [...new Set([...all, kind])] : all.filter(item => item !== kind)); }} />{kind}</label>)}<small>With neither selected, both are signed.</small></div>}</>;
 }
 
-function ParameterField({ item, value, onChange, disabled, images, required }: { item: Parameter; value: string | boolean | undefined; onChange: (value: string | boolean) => void; disabled: boolean; images: InventoryImage[] | undefined; required: string[] }) {
+function ParameterField({ item, value, onChange, disabled, images, required, invalid }: { item: Parameter; value: string | boolean | undefined; onChange: (value: string | boolean) => void; disabled: boolean; images: InventoryImage[] | undefined; required: string[]; invalid?: boolean }) {
   const id = fieldId("param", item.name);
   const helpId = `${id}-help`;
   const must = item.required && !item.hasDefault;
-  const help = <small id={helpId}>{item.description}{item.description && " "}{item.hasDefault && item.type !== "bool" && <>Default: <code>{item.default || "(empty)"}</code></>}</small>;
+  const help = <><small id={helpId}>{item.description}{item.description && " "}{item.hasDefault && item.type !== "bool" && <>Default: <code>{item.default || "(empty)"}</code></>}</small>{invalid && <small className="field-error">{requiredMessage}</small>}</>;
   if (item.type === "bool") return <label className="schema-check"><input id={id} type="checkbox" checked={typeof value === "boolean" ? value : item.default === "true"} disabled={disabled} aria-describedby={helpId} onChange={event => onChange(event.target.checked)} />{item.name}{help}</label>;
   const text = typeof value === "string" ? value : "";
-  if (item.type === "enum") return <label className="schema-field" htmlFor={id}><span>{item.name}{must && <b aria-label="required"> *</b>}</span><select id={id} value={text} disabled={disabled} aria-describedby={helpId} onChange={event => onChange(event.target.value)}><option value="">{item.hasDefault ? `Default (${item.default})` : "Select…"}</option>{item.enum.map(option => <option key={option}>{option}</option>)}</select>{help}</label>;
+  if (item.type === "enum") return <label className="schema-field" htmlFor={id}><span>{item.name}{must && <b aria-label="required"> *</b>}</span><select id={id} value={text} disabled={disabled} aria-invalid={invalid || undefined} aria-describedby={helpId} onChange={event => onChange(event.target.value)}><option value="">{item.hasDefault ? `Default (${item.default})` : "Select…"}</option>{item.enum.map(option => <option key={option}>{option}</option>)}</select>{help}</label>;
   if (item.type === "image") {
     const choices = imageChoices(images, required);
     const status = imageStatus(images, text || item.default, required);
     return <div className="schema-field image-parameter"><label htmlFor={id}><span>{item.name}{must && <b aria-label="required"> *</b>}</span></label>
-      <input id={id} value={text} placeholder={item.default} disabled={disabled} aria-describedby={helpId} onChange={event => onChange(event.target.value)} />
+      <input id={id} value={text} placeholder={item.default} disabled={disabled} aria-invalid={invalid || undefined} aria-describedby={helpId} onChange={event => onChange(event.target.value)} />
       <select aria-label={`${item.name} from realm images`} value={choices.some(choice => choice.name === text) ? text : ""} disabled={disabled || !choices.length} onChange={event => { if (event.target.value) onChange(event.target.value); }}>
         <option value="">{choices.length ? "Choose from the realm's images…" : "No image in this realm provides the required capabilities"}</option>
         {choices.map(choice => <option key={choice.name} value={choice.name}>{choice.name}{choice.status === "unknown" ? " — capabilities unknown" : ""}</option>)}
@@ -91,10 +98,10 @@ function ParameterField({ item, value, onChange, disabled, images, required }: {
       {status.status === "unknown" && <small>This image declares no capabilities; the daemon cannot check it.</small>}
     </div>;
   }
-  return <label className="schema-field" htmlFor={id}><span>{item.name}{must && <b aria-label="required"> *</b>}</span><input id={id} value={text} placeholder={item.default} disabled={disabled} aria-describedby={helpId} onChange={event => onChange(event.target.value)} />{help}</label>;
+  return <label className="schema-field" htmlFor={id}><span>{item.name}{must && <b aria-label="required"> *</b>}</span><input id={id} value={text} placeholder={item.default} disabled={disabled} aria-invalid={invalid || undefined} aria-describedby={helpId} onChange={event => onChange(event.target.value)} />{help}</label>;
 }
 
-function RepoSlotEditor({ slot, value, onChange, secrets, disabled }: { slot: RepoSlot; value: RepoAnswer | undefined; onChange: (value: RepoAnswer) => void; secrets: unknown[] | undefined; disabled: boolean }) {
+function RepoSlotEditor({ slot, value, onChange, secrets, disabled, invalid }: { slot: RepoSlot; value: RepoAnswer | undefined; onChange: (value: RepoAnswer) => void; secrets: unknown[] | undefined; disabled: boolean; invalid?: boolean }) {
   const answer = value ?? {};
   const git: RepoGitAnswer = answer.git ?? { enabled: false };
   const revision = answer.revision ?? "branch";
@@ -102,7 +109,7 @@ function RepoSlotEditor({ slot, value, onChange, secrets, disabled }: { slot: Re
   return <fieldset className="schema-object"><legend>Repository: {slot.name}{slot.required && <b aria-label="required"> *</b>}</legend>
     <p className="description">{slot.required ? "Required." : "Optional — left blank, the repository is not cloned."}{slot.target && <> Cloned to <code>{slot.target}</code>.</>}</p>
     <div className="schema-fields">
-      <label className="schema-field"><span>{slot.name} URL{slot.required && <b aria-label="required"> *</b>}</span><input value={answer.url ?? ""} placeholder="git@github.com:owner/repo.git or https://…" disabled={disabled} onChange={event => onChange({ ...answer, url: event.target.value })} /><small>The transport — SSH or HTTPS — follows the credential bound to this repository.</small></label>
+      <label className="schema-field"><span>{slot.name} URL{slot.required && <b aria-label="required"> *</b>}</span><input id={fieldId("repo", slot.name, "url")} value={answer.url ?? ""} placeholder="git@github.com:owner/repo.git or https://…" disabled={disabled} aria-invalid={invalid || undefined} onChange={event => onChange({ ...answer, url: event.target.value })} /><small>The transport — SSH or HTTPS — follows the credential bound to this repository.</small>{invalid && <small className="field-error">{requiredMessage}</small>}</label>
       <div className="schema-field"><label htmlFor={fieldId("repo", slot.name, "revision")}><span>{slot.name} revision</span></label><div className="map-entry"><select id={fieldId("repo", slot.name, "revision")} value={revision} disabled={disabled} onChange={event => onChange({ ...answer, revision: event.target.value === "ref" ? "ref" : "branch" })}><option value="branch">Branch</option><option value="ref">Tag or commit</option></select><input aria-label={`${slot.name} ${revision === "ref" ? "tag or commit" : "branch"}`} value={(revision === "ref" ? answer.ref : answer.branch) ?? ""} placeholder={revision === "ref" ? "v1.2.3 or a full commit SHA" : "Remote default branch"} disabled={disabled} onChange={event => onChange(revision === "ref" ? { ...answer, ref: event.target.value } : { ...answer, branch: event.target.value })} /></div></div>
     </div>
     <label className="schema-check"><input type="checkbox" checked={git.enabled === true} disabled={disabled} onChange={event => setGit({ ...git, enabled: event.target.checked })} />{slot.name} uses its own git identity<small>Otherwise it uses the default identity inherited from the Realm, Space, Stack or this Config. Unset fields below fall back to that default.</small></label>
@@ -149,6 +156,13 @@ function ConfigForm({ blueprint, blueprintScope, form, revision, inventory, onCr
   const [pending, setPending] = useState(false);
   const [stage, setStage] = useState<"preview" | "create">("preview");
   const [error, setError] = useState("");
+  const [opened, setOpened] = useState<Record<string, boolean>>({});
+  const [showInvalid, setShowInvalid] = useState(false);
+  const [focusRequest, setFocusRequest] = useState<{ id: string }>();
+  const autoOpened = useRef(new Set<string>());
+  const review = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (focusRequest) document.getElementById(focusRequest.id)?.focus(); }, [focusRequest]);
+  useEffect(() => { if (preview) review.current?.scrollIntoView({ block: "nearest" }); }, [preview]);
   const spaces = (inventory.data?.rows[1] ?? []).filter(row => row.scope[0] === realm);
   const stacks = (inventory.data?.rows[2] ?? []).filter(row => row.scope[0] === realm && row.scope[1] === space);
   // Default to the scope cells land in when a coordinate is left open.
@@ -199,13 +213,104 @@ function ConfigForm({ blueprint, blueprintScope, form, revision, inventory, onCr
     }
     finally { setPending(false); }
   }
+  // Progressive disclosure (#1568). The Config section stays open; every other section is a disclosure that
+  // says how many answers it holds. Sections that hold a required answer come first, and a section opens by
+  // itself the first time it has an unmet required answer or an image that lacks a required capability.
+  const missingNames = new Set(missingAnswers(form, effective, mode));
+  const unresolvedIdentities = connectorsWithoutIdentity(form, effective, defaults.data, mode);
+  const answered = (value: string | boolean | undefined) => typeof value === "boolean" || (typeof value === "string" && value !== "");
+  const needed = (item: Parameter) => item.required && !item.hasDefault && item.type !== "bool";
+  const takesPick = (section: FormSection) => !!section.connector && !!section.component && takesIdentity(section.connector.delivery);
+  // The DOM ids of a section's fields with an unmet required answer, in the order the fields render:
+  // parameters, the connector identity, then secret slots.
+  const sectionInvalid = (section: FormSection) => [
+    ...section.parameters.filter(item => needed(item) && missingNames.has(item.name)).map(item => fieldId("param", item.name)),
+    ...(takesPick(section) && !identityRef(answers.connectors[section.component!]) && unresolvedIdentities.includes(section.connector!.title || section.connector!.name) ? [fieldId("identity", section.component!)] : []),
+    ...(takesPick(section) ? [] : section.secrets.filter(slot => slot.required && missingNames.has(slot.name)).map(slot => fieldId("secret", `${slot.name} secret`))),
+  ];
+  const repoInvalid = form.repoSlots.filter(slot => slot.required && missingNames.has(slot.name)).map(slot => fieldId("repo", slot.name, "url"));
+  const invalidIds = new Set([...sections.flatMap(sectionInvalid), ...repoInvalid]);
+  // Fields are marked only after a submit attempt, and only while their answer is still missing.
+  const flagged = (id: string) => showInvalid && invalidIds.has(id);
+  const blocks: FormBlock[] = [];
+  if (optional.length > 0 || groups.length > 0) blocks.push({ key: "components", title: "Components", essential: false, invalid: [], warning: false, set: answers.components.length + Object.keys(answers.groups).length,
+    body: <><p className="description">Optional components bundle the parameters, secrets and image capabilities of one concern. Their fields appear once enabled.</p>
+      {groups.length > 0 && <div className="schema-fields">{groups.map(({ group, members }) => {
+        const chosen = members.find(member => member.name === groupChoice(form, effective, group));
+        const titles = [...new Set(members.map(member => member.connector?.title || member.connector?.name || ""))];
+        const label = `${titles.length === 1 && titles[0] ? titles[0] : group} method`;
+        return <label className="schema-field" key={group}><span>{label}<b aria-label="required"> *</b></span><select aria-label={label} value={chosen?.name ?? ""} disabled={pending} onChange={event => change({ groups: { ...answers.groups, [group]: event.target.value } })}>{members.map(member => <option key={member.name} value={member.name}>{member.connector?.method || member.name}</option>)}</select><small>{chosen?.description}{chosen?.description && " "}The methods of the <code>{group}</code> group are alternatives: a Config enables exactly one.</small></label>;
+      })}</div>}
+      {optional.map(component => <label className="schema-check" key={component.name}><input type="checkbox" checked={answers.components.includes(component.name)} disabled={pending} onChange={event => change({ components: event.target.checked ? [...answers.components, component.name] : answers.components.filter(item => item !== component.name) })} />{component.name} <span className="badge">{component.kind}</span><small>{component.description}{component.requires.length > 0 && <> Requires: {component.requires.join(", ")}.</>}</small></label>)}</> });
+  if (form.modes.length > 0) blocks.push({ key: "modes", title: "Modes", essential: false, invalid: [], warning: false, set: (enabledModes.length < form.modes.length ? 1 : 0) + (answers.modes.default ? 1 : 0),
+    body: <><p className="description">A harness mode is picked per cell at create time, so one Config serves both an attached session and a dispatched run. Choose which modes this Config allows and its default.</p>
+      {form.modes.map(item => <label className="schema-check" key={item}><input type="checkbox" checked={enabledModes.includes(item)} disabled={pending || (enabledModes.length === 1 && enabledModes[0] === item)} onChange={event => change({ modes: { ...answers.modes, enabled: form.modes.filter(candidate => candidate === item ? event.target.checked : enabledModes.includes(candidate)) } })} />Allow {item} mode</label>)}
+      <div className="schema-fields">
+        <label className="schema-field"><span>Default mode</span><select value={enabledModes.includes(answers.modes.default) ? answers.modes.default : ""} disabled={pending} onChange={event => change({ modes: { ...answers.modes, default: event.target.value } })}><option value="">Blueprint default</option>{enabledModes.map(item => <option key={item}>{item}</option>)}</select></label>
+        <label className="schema-field"><span>Preview as mode</span><select value={mode} disabled={pending} onChange={event => { setRequestedMode(event.target.value); reviewChanged(); }}>{enabledModes.map(item => <option key={item}>{item}</option>)}</select><small>Shows that mode's own parameters and secrets and renders the preview cell in it.</small></label>
+      </div></> });
+  for (const section of sections) {
+    const identity = takesPick(section);
+    const picked = identity && !!identityRef(answers.connectors[section.component!]);
+    blocks.push({
+      key: section.key, title: section.kind === "group" ? section.title[0].toUpperCase() + section.title.slice(1) : section.title, badge: section.kind !== "group" ? section.kind : undefined,
+      essential: section.parameters.some(needed) || (identity ? !section.connector!.optional : section.secrets.some(slot => slot.required)),
+      invalid: sectionInvalid(section),
+      warning: section.parameters.some(item => { const value = answers.values[item.name]; return item.type === "image" && imageStatus(images.data?.images, (typeof value === "string" && value) || item.default, required).status === "missing"; }),
+      set: section.parameters.filter(item => answered(answers.values[item.name])).length + (picked ? 1 : 0) + (identity ? 0 : section.secrets.filter(slot => !!answers.secrets[slot.name]).length),
+      body: <>{section.description && <p className="description">{section.description}</p>}{section.kind === "mode" && <p className="description">Values entered here are saved in the Config as that mode's default; a cell can still set them with <code>--param</code>.</p>}
+      <div className="schema-fields">
+        {section.parameters.map(item => <ParameterField key={item.name} item={item} invalid={flagged(fieldId("param", item.name))} value={answers.values[item.name]} disabled={pending} images={images.data?.images} required={required} onChange={value => change({ values: { ...answers.values, [item.name]: value } })} />)}
+        {section.connector && section.component && takesIdentity(section.connector.delivery) && (() => {
+          const { connector, component } = section;
+          const title = connector.title || connector.name;
+          const row = defaultRow(defaults.data, { connector: connector.name, component });
+          const picked = identityRef(answers.connectors[component]);
+          const none = !!defaults.data && !row?.effective;
+          const emptyLabel = !defaults.data ? "Default (inherited from the Realm, Space or Stack)" : row?.effective ? `Default: ${refLabel(row.effective)} (${originLabel(row.origin)})` : connector.optional ? "No default" : "No default — required";
+          const envName = section.secrets[0]?.envName;
+          return <IdentitySelect key={`connector:${component}`} id={fieldId("identity", component)} invalid={flagged(fieldId("identity", component))} label={`${title} identity`} identities={identitiesFor(secrets.data, connector.name)} value={answers.connectors[component]} emptyLabel={emptyLabel} disabled={pending} required={!connector.optional} realm={realm} onChange={ref => { const next = { ...answers.connectors }; if (ref) next[component] = ref; else delete next[component]; change({ connectors: next }); }}
+            help={<>{envName && <>Delivered as {envName}. </>}Choosing the default saves no fill: the Config keeps inheriting it from {scopeParts(target).join(" / ")}.{none && !picked && !connector.optional && <span className="field-error"> Nothing resolves yet — pick an identity or <a href={connectorsLink(connector.name, target)}>set a default</a>.</span>}</>} />;
+        })()}
+        {section.connector?.delivery === deliveryStateVolume && <p className="description connector-login">Uses the login kept in the harness state volume: no stored identity. Log in once from an interactive cell of this Config.</p>}
+        {!(section.connector && takesIdentity(section.connector.delivery)) && section.secrets.map((slot: SecretSlot) => <SecretPicker key={slot.name} label={`${slot.name} secret`} invalid={flagged(fieldId("secret", `${slot.name} secret`))} required={slot.required} value={answers.secrets[slot.name]} choices={secretChoices(secrets.data, ["opaque"])} disabled={pending} help={slot.envName ? `Delivered as ${slot.envName}.` : undefined} onChange={ref => { const next = { ...answers.secrets }; if (ref) next[slot.name] = ref; else delete next[slot.name]; change({ secrets: next }); }} />)}
+      </div></>,
+    });
+  }
+  blocks.push({ key: "capabilities", title: "Image capabilities", essential: false, invalid: [], warning: false, set: answers.requires.trim() ? 1 : 0,
+    body: <><div className="schema-fields"><label className="schema-field"><span>Additional required capabilities</span><input value={answers.requires} placeholder="go, node" disabled={pending} onChange={event => change({ requires: event.target.value })} /><small>Added to the blueprint's and the enabled components'. Currently required: {required.length ? required.join(", ") : "none"}.</small></label></div>
+      {images.error && <p className="stale">Realm images could not be loaded: {images.error.message}. Image references can still be typed.</p>}</> });
+  if (form.repoSlots.length > 0) blocks.push({ key: "repositories", title: "Repositories", essential: form.repoSlots.some(slot => slot.required), warning: false,
+    invalid: repoInvalid,
+    set: form.repoSlots.filter(slot => !!answers.repos[slot.name]?.url?.trim()).length,
+    body: <><p className="description">Each source is cloned by the cell with stored git credentials — nothing from the host is mounted. A source may state its own identity; otherwise it uses the default.</p>
+      {form.repoSlots.map(slot => <RepoSlotEditor key={slot.name} slot={slot} invalid={flagged(fieldId("repo", slot.name, "url"))} value={answers.repos[slot.name]} secrets={secrets.data} disabled={pending} onChange={value => change({ repos: { ...answers.repos, [slot.name]: value } })} />)}</> });
+  blocks.push({ key: "git", title: "Default git identity", essential: false, invalid: [], warning: false, set: answers.git?.enabled ? 1 : 0,
+    body: <><DefaultGitEditor value={answers.git} secrets={secrets.data} disabled={pending} onChange={git => change({ git })} /></> });
+  const ordered = [...blocks.filter(block => block.essential), ...blocks.filter(block => !block.essential)];
+  const attention = blocks.filter(block => block.invalid.length > 0 || block.warning).map(block => block.key).join("\n");
+  useLayoutEffect(() => {
+    const fresh = attention.split("\n").filter(key => key && !autoOpened.current.has(key));
+    if (!fresh.length) return;
+    for (const key of fresh) autoOpened.current.add(key);
+    setOpened(old => ({ ...Object.fromEntries(fresh.map(key => [key, true])), ...old }));
+  }, [attention]);
+  // Submitting with an unmet required answer sends nothing: it opens every section that holds one and puts
+  // the cursor on the first.
+  function previewOrFocus() {
+    const invalid = ordered.flatMap(block => block.invalid.map(id => ({ key: block.key, id })));
+    if (!invalid.length) { void submit(false); return; }
+    setShowInvalid(true);
+    setOpened(old => ({ ...old, ...Object.fromEntries(invalid.map(item => [item.key, true])) }));
+    setFocusRequest({ id: invalid[0].id });
+  }
   if (created) return <section className="panel" aria-label="Config created"><div className="panel-heading"><h2>Config created</h2><span className="badge">{created.slice(0, -1).join(" / ")}</span></div><div className="panel-body creation-form">
     <p className="creation-success" role="status"><span>CellConfig <strong>{created.at(-1)}</strong> was saved. It answers the <strong>{blueprint.metadata.name}</strong> blueprint's form; no cell was created.</span></p>
     <p><a className="resource-name" href={catalogLink("configs", created)}>Open Config {created.at(-1)}</a></p>
     <a className="new-cell-action config-create-action" href={newCellLink(created)}>Create a Cell from it <span aria-hidden="true">→</span></a>
     <button type="button" className="subtle-button" onClick={() => { setCreated(undefined); setName(""); }}>Create another Config from this Blueprint</button>
   </div></section>;
-  return <section className="panel"><div className="panel-heading"><h2>Answer the {blueprint.metadata.name} form</h2><span className="badge">{blueprintScope.slice(0, -1).join(" / ")}</span></div><form className="panel-body creation-form" onSubmit={event => { event.preventDefault(); void submit(false); }}>
+  return <section className="panel"><div className="panel-heading"><h2>Answer the {blueprint.metadata.name} form</h2><span className="badge">{blueprintScope.slice(0, -1).join(" / ")}</span></div><form className="panel-body creation-form" noValidate onSubmit={event => { event.preventDefault(); previewOrFocus(); }}>
     <p className="description">A blueprint is a form; a config is the answers. Every field below comes from the blueprint document — its parameters, components, modes and repository and secret slots. Security posture (root, host mounts) is fixed by the blueprint and cannot be changed here.</p>
     <div className="schema-section"><h3>Config</h3><div className="schema-fields">
       <label className="schema-field" htmlFor="config-name"><span>Config name <b aria-label="required"> *</b></span><input id="config-name" value={name} disabled={pending} onChange={event => { setName(event.target.value); reviewChanged(); }} /></label>
@@ -215,66 +320,26 @@ function ConfigForm({ blueprint, blueprintScope, form, revision, inventory, onCr
       <label className="schema-field"><span>Stack</span><select aria-label="Config stack" value={stack} disabled={pending || !space} onChange={event => { setStack(event.target.value); reviewChanged(); }}><option value="">{space ? "Space-scoped" : "Realm-scoped"}</option>{stacks.map(row => <option key={row.scope[2]}>{row.scope[2]}</option>)}</select><small>Cells land in the Config's scope; an open coordinate means <code>default</code>.</small></label>
     </div></div>
 
-    {(optional.length > 0 || groups.length > 0) && <div className="schema-section"><h3>Components</h3><p className="description">Optional components bundle the parameters, secrets and image capabilities of one concern. Their fields appear once enabled.</p>
-      {groups.length > 0 && <div className="schema-fields">{groups.map(({ group, members }) => {
-        const chosen = members.find(member => member.name === groupChoice(form, effective, group));
-        const titles = [...new Set(members.map(member => member.connector?.title || member.connector?.name || ""))];
-        const label = `${titles.length === 1 && titles[0] ? titles[0] : group} method`;
-        return <label className="schema-field" key={group}><span>{label}<b aria-label="required"> *</b></span><select aria-label={label} value={chosen?.name ?? ""} disabled={pending} onChange={event => change({ groups: { ...answers.groups, [group]: event.target.value } })}>{members.map(member => <option key={member.name} value={member.name}>{member.connector?.method || member.name}</option>)}</select><small>{chosen?.description}{chosen?.description && " "}The methods of the <code>{group}</code> group are alternatives: a Config enables exactly one.</small></label>;
-      })}</div>}
-      {optional.map(component => <label className="schema-check" key={component.name}><input type="checkbox" checked={answers.components.includes(component.name)} disabled={pending} onChange={event => change({ components: event.target.checked ? [...answers.components, component.name] : answers.components.filter(item => item !== component.name) })} />{component.name} <span className="badge">{component.kind}</span><small>{component.description}{component.requires.length > 0 && <> Requires: {component.requires.join(", ")}.</>}</small></label>)}
-    </div>}
+    {ordered.map(block => <Disclosure key={block.key} level={3} className="schema-disclosure" title={block.title} open={opened[block.key] ?? false} onToggle={open => setOpened(old => ({ ...old, [block.key]: open }))}
+      badge={block.badge && <span className="badge">{block.badge}</span>}
+      summary={<>{block.set ? `${block.set} set` : "Defaults"}{block.invalid.length > 0 && <span className="disclosure-required"> · {block.invalid.length} required</span>}</>}>
+      <div className="schema-section">{block.body}</div>
+    </Disclosure>)}
 
-    {form.modes.length > 0 && <div className="schema-section"><h3>Modes</h3><p className="description">A harness mode is picked per cell at create time, so one Config serves both an attached session and a dispatched run. Choose which modes this Config allows and its default.</p>
-      {form.modes.map(item => <label className="schema-check" key={item}><input type="checkbox" checked={enabledModes.includes(item)} disabled={pending || (enabledModes.length === 1 && enabledModes[0] === item)} onChange={event => change({ modes: { ...answers.modes, enabled: form.modes.filter(candidate => candidate === item ? event.target.checked : enabledModes.includes(candidate)) } })} />Allow {item} mode</label>)}
-      <div className="schema-fields">
-        <label className="schema-field"><span>Default mode</span><select value={enabledModes.includes(answers.modes.default) ? answers.modes.default : ""} disabled={pending} onChange={event => change({ modes: { ...answers.modes, default: event.target.value } })}><option value="">Blueprint default</option>{enabledModes.map(item => <option key={item}>{item}</option>)}</select></label>
-        <label className="schema-field"><span>Preview as mode</span><select value={mode} disabled={pending} onChange={event => { setRequestedMode(event.target.value); reviewChanged(); }}>{enabledModes.map(item => <option key={item}>{item}</option>)}</select><small>Shows that mode's own parameters and secrets and renders the preview cell in it.</small></label>
-      </div>
-    </div>}
-
-    {sections.map(section => <div className="schema-section" key={section.key}><h3>{section.kind === "group" ? section.title[0].toUpperCase() + section.title.slice(1) : section.title} {section.kind !== "group" && <span className="badge">{section.kind}</span>}</h3>{section.description && <p className="description">{section.description}</p>}{section.kind === "mode" && <p className="description">Values entered here are saved in the Config as that mode's default; a cell can still set them with <code>--param</code>.</p>}
-      <div className="schema-fields">
-        {section.parameters.map(item => <ParameterField key={item.name} item={item} value={answers.values[item.name]} disabled={pending} images={images.data?.images} required={required} onChange={value => change({ values: { ...answers.values, [item.name]: value } })} />)}
-        {section.connector && section.component && takesIdentity(section.connector.delivery) && (() => {
-          const { connector, component } = section;
-          const title = connector.title || connector.name;
-          const row = defaultRow(defaults.data, { connector: connector.name, component });
-          const picked = identityRef(answers.connectors[component]);
-          const none = !!defaults.data && !row?.effective;
-          const emptyLabel = !defaults.data ? "Default (inherited from the Realm, Space or Stack)" : row?.effective ? `Default: ${refLabel(row.effective)} (${originLabel(row.origin)})` : connector.optional ? "No default" : "No default — required";
-          const envName = section.secrets[0]?.envName;
-          return <IdentitySelect key={`connector:${component}`} label={`${title} identity`} identities={identitiesFor(secrets.data, connector.name)} value={answers.connectors[component]} emptyLabel={emptyLabel} disabled={pending} required={!connector.optional} realm={realm} onChange={ref => { const next = { ...answers.connectors }; if (ref) next[component] = ref; else delete next[component]; change({ connectors: next }); }}
-            help={<>{envName && <>Delivered as {envName}. </>}Choosing the default saves no fill: the Config keeps inheriting it from {scopeParts(target).join(" / ")}.{none && !picked && !connector.optional && <span className="field-error"> Nothing resolves yet — pick an identity or <a href={connectorsLink(connector.name, target)}>set a default</a>.</span>}</>} />;
-        })()}
-        {section.connector?.delivery === deliveryStateVolume && <p className="description connector-login">Uses the login kept in the harness state volume: no stored identity. Log in once from an interactive cell of this Config.</p>}
-        {!(section.connector && takesIdentity(section.connector.delivery)) && section.secrets.map((slot: SecretSlot) => <SecretPicker key={slot.name} label={`${slot.name} secret`} required={slot.required} value={answers.secrets[slot.name]} choices={secretChoices(secrets.data, ["opaque"])} disabled={pending} help={slot.envName ? `Delivered as ${slot.envName}.` : undefined} onChange={ref => { const next = { ...answers.secrets }; if (ref) next[slot.name] = ref; else delete next[slot.name]; change({ secrets: next }); }} />)}
-      </div>
-    </div>)}
-
-    <div className="schema-section"><h3>Image capabilities</h3><div className="schema-fields"><label className="schema-field"><span>Additional required capabilities</span><input value={answers.requires} placeholder="go, node" disabled={pending} onChange={event => change({ requires: event.target.value })} /><small>Added to the blueprint's and the enabled components'. Currently required: {required.length ? required.join(", ") : "none"}.</small></label></div>
-      {images.error && <p className="stale">Realm images could not be loaded: {images.error.message}. Image references can still be typed.</p>}
-    </div>
-
-    {form.repoSlots.length > 0 && <div className="schema-section"><h3>Repositories</h3><p className="description">Each source is cloned by the cell with stored git credentials — nothing from the host is mounted. A source may state its own identity; otherwise it uses the default.</p>
-      {form.repoSlots.map(slot => <RepoSlotEditor key={slot.name} slot={slot} value={answers.repos[slot.name]} secrets={secrets.data} disabled={pending} onChange={value => change({ repos: { ...answers.repos, [slot.name]: value } })} />)}
-    </div>}
-
-    <div className="schema-section"><DefaultGitEditor value={answers.git} secrets={secrets.data} disabled={pending} onChange={git => change({ git })} /></div>
     {secrets.error && <p className="stale">Secrets could not be listed: {secrets.error.message}. Name a secret by hand instead.</p>}
     {defaults.error && <p className="stale">Connector defaults could not be loaded for {scopeParts(target).join(" / ")}: {defaults.error.message}. A picker's Default still inherits whatever the scope sets.</p>}
 
     {missing.length > 0 && <p className="description" role="note">Still required: {missing.join(", ")}.</p>}
     {error && <p className="error" role="alert">{error}</p>}{pending && <p role="status">{stage === "create" ? "Saving Config…" : "Preparing preview…"}</p>}
-    {preview && <div className="creation-review"><h3>Review Config</h3>
+    <button type="submit" className={preview ? undefined : "primary-action"} disabled={pending || !name.trim() || !realm}>{preview ? "Refresh preview" : "Preview Config"}</button>
+    {preview && <div className="creation-review" ref={review}><h3>Review Config</h3>
       <p className="description">The daemon rendered a cell from these answers{mode && <> in <strong>{mode}</strong> mode</>} without saving anything. Creating saves the Config below; no cell is created.</p>
       {preview.connectors && <ConnectorIdentities statuses={preview.connectors} />}
       {preview.values && <MergedValues values={preview.values} digest={preview.digest} />}
       <h4>CellConfig to save</h4><pre tabIndex={0} aria-label="CellConfig to save">{JSON.stringify(preview.config, null, 2)}</pre>
       <details><summary>Cell this Config renders</summary><pre tabIndex={0} aria-label="Cell preview">{JSON.stringify(preview.document, null, 2)}</pre></details>
-      <button type="button" disabled={pending} onClick={() => void submit(true)}>Create Config</button>
+      <button type="button" className="primary-action" disabled={pending} onClick={() => void submit(true)}>Create Config</button>
     </div>}
-    <button type="submit" disabled={pending || !name.trim() || !realm}>{preview ? "Refresh preview" : "Preview Config"}</button>
   </form></section>;
 }
 
