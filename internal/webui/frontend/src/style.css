@@ -196,6 +196,7 @@ button:disabled { cursor: default; opacity: .4; }
 .scope-filter { padding: 0 16px; font-size: var(--font-sm); color: var(--muted); }
 .scope-filter a { color: var(--accent); margin-left: 12px; }
 .detail-actions { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; font-size: var(--font-sm); gap: 12px; }
+.detail-actions > div { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 12px; }
 .details-grid { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 10px 18px; font-size: var(--font-md); }
 .details-grid dt { color: var(--muted); }
 .details-grid dd { margin: 0; overflow-wrap: anywhere; }
