@@ -3309,8 +3309,12 @@ test("cell screen toasts stay clear of the title-row buttons, so Start follows S
       await expect(row.getByRole("button", { name: "Start", exact: true })).toBeVisible();
       await expect.poll(async () => {
         const buttons = await rects(row.getByRole("button"));
+        const toastRects = await rects(toasts(page));
+        // The success toast auto-dismisses after 5s, the same as this poll's timeout. Without a toast
+        // there is nothing to overlap, so an empty stack must fail rather than pass vacuously.
+        if (!toastRects.length) return ["<no toast>"];
         const covered = [];
-        for (const toast of await rects(toasts(page))) covered.push(...buttons.filter(button => overlaps(toast, button)).map(button => button.label));
+        for (const toast of toastRects) covered.push(...buttons.filter(button => overlaps(toast, button)).map(button => button.label));
         return covered;
       }, { message: `${width} ${view}: toasts cover title-row buttons` }).toEqual([]);
       // No dismiss: the click has to reach Start.
