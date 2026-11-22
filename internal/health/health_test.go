@@ -391,3 +391,44 @@ func TestStoreKeepsOnlyTheNewestReports(t *testing.T) {
 		t.Fatalf("Keep=2 kept %d", len(list))
 	}
 }
+
+// runDirCheck returns the state/run-dir check of p.
+func runDirCheck(t *testing.T, p health.Probe) kukeonv1.HealthCheck {
+	t.Helper()
+	for _, check := range p.Checks() {
+		if check.Name == "run-dir" {
+			return check
+		}
+	}
+	t.Fatal("no run-dir check")
+	return kukeonv1.HealthCheck{}
+}
+
+// TestRunDirAcceptsSecretsStagingDir pins that kukeond's own secrets staging
+// directory is not reported as an orphan (#1609).
+func TestRunDirAcceptsSecretsStagingDir(t *testing.T) {
+	p := probe(t)
+	if err := os.Mkdir(filepath.Join(p.SocketDir, "secrets"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if check := runDirCheck(t, p); check.Status != kukeonv1.HealthStatusOK {
+		t.Fatalf("run-dir = %s (%s), want OK", check.Status, check.Detail)
+	}
+}
+
+func TestRunDirWarnsForStrayEntryBesideSecrets(t *testing.T) {
+	p := probe(t)
+	if err := os.Mkdir(filepath.Join(p.SocketDir, "secrets"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(p.SocketDir, "stale.sock"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	check := runDirCheck(t, p)
+	if check.Status != kukeonv1.HealthStatusWarn {
+		t.Fatalf("run-dir = %s (%s), want Warn", check.Status, check.Detail)
+	}
+	if !strings.Contains(check.Detail, "stale.sock") || strings.Contains(check.Detail, "secrets") {
+		t.Fatalf("detail = %q, want it to name stale.sock and not secrets", check.Detail)
+	}
+}

@@ -277,3 +277,20 @@ func TestIsInternalImageRef(t *testing.T) {
 		}
 	}
 }
+
+func TestRunDirEntry(t *testing.T) {
+	for name, want := range map[string]bool{
+		"kukeond.sock": true,
+		"kukeond.pid":  true,
+		"s":            true,
+		"tty":          true,
+		"kukeond":      true,
+		"secrets":      true,
+		"stale.sock":   false,
+		"":             false,
+	} {
+		if got := consts.RunDirEntry(name); got != want {
+			t.Errorf("RunDirEntry(%q) = %v, want %v", name, got, want)
+		}
+	}
+}

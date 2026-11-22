@@ -151,6 +151,12 @@ const (
 	// source stays valid across restarts.
 	KukeondSocketShareSubdir = "kukeond"
 
+	// KukeonSecretsStagingSubdir is the basename of the directory, beside the
+	// kukeond socket, where the daemon stages file-mounted secrets and each
+	// container's git bundle before bind-mounting them into containers. It is
+	// live while any cell with a secret or a git block runs (issue #1609).
+	KukeonSecretsStagingSubdir = "secrets"
+
 	// KukeonMaxSocketPath is Linux's UNIX_PATH_MAX minus the terminating
 	// NUL — the maximum number of bytes a path passed to `connect(2)` on a
 	// unix socket may occupy in sockaddr_un.sun_path. The daemon refuses to
@@ -284,6 +290,19 @@ var RealmNamespaceSuffix = "." + DefaultRealmNamespaceSuffix
 //
 //nolint:gochecknoglobals // process-wide runtime configuration override
 var KukeonCgroupRoot = DefaultKukeonCgroupRoot
+
+// RunDirEntry reports whether name is an entry kukeond itself keeps in its
+// socket directory. `kuke status` and `kuke health` use it to tell kukeon's
+// own state from stray entries.
+func RunDirEntry(name string) bool {
+	switch name {
+	case "kukeond.sock", "kukeond.pid",
+		KukeonSocketSymlinkSubdir, KukeonContainerTTYDir,
+		KukeondSocketShareSubdir, KukeonSecretsStagingSubdir:
+		return true
+	}
+	return false
+}
 
 // ConfigureRuntime overrides the package-level RealmNamespaceSuffix and
 // KukeonCgroupRoot for this process. The kukeond daemon and `kuke init`

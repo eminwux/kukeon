@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/secretstore"
@@ -31,7 +32,7 @@ import (
 // file-mounted secrets before bind-mounting them into containers. The
 // directory lives under /run so contents are ephemeral across reboots on
 // typical deployments.
-const DefaultSecretsStagingDir = "/run/kukeon/secrets"
+const DefaultSecretsStagingDir = "/run/kukeon/" + consts.KukeonSecretsStagingSubdir
 
 // secretFileMode is the mode applied to staged secret files that are bind-
 // mounted into containers. Fixed at 0400 per the Container-secret contract.
