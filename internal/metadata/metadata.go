@@ -159,7 +159,11 @@ func ReadMetadata[T any](ctx context.Context, logger *slog.Logger, file string) 
 	logger.DebugContext(ctx, "reading metadata", "file", file)
 
 	if !existsFilePath(file) {
-		logger.ErrorContext(ctx, "metadata file does not exist", "file", file)
+		// Debug, not Error: a missing file is routine (a probe for a
+		// resource that does not exist, or a dir created before its
+		// metadata.json lands), and callers that treat it as a failure
+		// already log or propagate ErrMissingMetadataFile (#1602).
+		logger.DebugContext(ctx, "metadata file does not exist", "file", file)
 		return zero, fmt.Errorf("metadata file does not exist: %w", errdefs.ErrMissingMetadataFile)
 	}
 	data, err := os.ReadFile(file)
@@ -187,7 +191,11 @@ func ReadMetadata[T any](ctx context.Context, logger *slog.Logger, file string) 
 func ReadRaw(ctx context.Context, logger *slog.Logger, file string) ([]byte, error) {
 	logger.DebugContext(ctx, "reading raw metadata", "file", file)
 	if !existsFilePath(file) {
-		logger.ErrorContext(ctx, "metadata file does not exist", "file", file)
+		// Debug, not Error: a missing file is routine (a probe for a
+		// resource that does not exist, or a dir created before its
+		// metadata.json lands), and callers that treat it as a failure
+		// already log or propagate ErrMissingMetadataFile (#1602).
+		logger.DebugContext(ctx, "metadata file does not exist", "file", file)
 		return nil, fmt.Errorf("metadata file does not exist: %w", errdefs.ErrMissingMetadataFile)
 	}
 	var raw []byte
