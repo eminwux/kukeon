@@ -1199,11 +1199,30 @@ func volumeMountsEqual(a, b []intmodel.VolumeMount) bool {
 		return false
 	}
 	for i := range a {
-		if a[i] != b[i] {
+		// VolumeRef is a pointer, so compare it by value: a freshly
+		// materialized desired spec never shares the pointer with the
+		// stored actual spec, and an identity comparison would flag every
+		// volumeRef-bearing cell OutOfSync (#1606).
+		x, y := a[i], b[i]
+		if !volumeRefEqual(x.VolumeRef, y.VolumeRef) {
+			return false
+		}
+		x.VolumeRef, y.VolumeRef = nil, nil
+		if x != y {
 			return false
 		}
 	}
 	return true
+}
+
+func volumeRefEqual(a, b *intmodel.VolumeRef) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
 }
 
 func reposEqual(a, b []intmodel.ContainerRepo) bool {

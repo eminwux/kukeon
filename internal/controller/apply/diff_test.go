@@ -1332,3 +1332,54 @@ func TestDiffContainer_ReposSecretsNoChange(t *testing.T) {
 		t.Fatalf("expected no changes for identical repos/secrets, got %v", diff.ChangedFields)
 	}
 }
+
+// TestDiffCell_VolumeRefComparedByValue pins issue #1606: a container
+// volume carrying a cross-scope VolumeRef must compare by value, not by
+// pointer identity. A freshly materialized desired spec always allocates
+// its own VolumeRef, so an identity comparison reported every
+// volumeRef-bearing cell OutOfSync right after creation.
+func TestDiffCell_VolumeRefComparedByValue(t *testing.T) {
+	ref := func(name string) *intmodel.VolumeRef {
+		return &intmodel.VolumeRef{Name: name, Realm: "default", Space: "default", Stack: "default"}
+	}
+	mk := func(r *intmodel.VolumeRef) intmodel.Cell {
+		return intmodel.Cell{
+			Metadata: intmodel.CellMetadata{Name: "majordomo"},
+			Spec: intmodel.CellSpec{
+				RealmName: "default", SpaceName: "default", StackName: "default",
+				Containers: []intmodel.ContainerSpec{
+					{ID: "root", Root: true, Image: "busybox:latest"},
+					{ID: "work", Image: "busybox:latest", Volumes: []intmodel.VolumeMount{
+						{Kind: intmodel.VolumeKindBind, Source: "/host", Target: "/cell"},
+						{Kind: intmodel.VolumeKindVolume, Target: "/home/user/.claude", VolumeRef: r, Ensure: true},
+					}},
+				},
+			},
+		}
+	}
+
+	t.Run("distinct equal pointers", func(t *testing.T) {
+		diff := apply.DiffCell(mk(ref("kuke-majordomo-claude-state")), mk(ref("kuke-majordomo-claude-state")))
+		if diff.ChangeType != apply.ChangeTypeNone {
+			t.Errorf("expected no change for equal VolumeRef values, got %v (changed=%v breaking=%v)",
+				diff.ChangeType, diff.ChangedFields, diff.BreakingChanges)
+		}
+	})
+
+	differing := []struct {
+		name            string
+		desired, actual *intmodel.VolumeRef
+	}{
+		{"different name", ref("a"), ref("b")},
+		{"nil desired", nil, ref("a")},
+		{"nil actual", ref("a"), nil},
+	}
+	for _, tc := range differing {
+		t.Run(tc.name, func(t *testing.T) {
+			diff := apply.DiffCell(mk(tc.desired), mk(tc.actual))
+			if diff.ChangeType == apply.ChangeTypeNone {
+				t.Errorf("expected a change for differing VolumeRef, got none")
+			}
+		})
+	}
+}
