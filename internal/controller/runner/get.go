@@ -168,7 +168,7 @@ func (r *Exec) ListSpaces(realmName string) ([]intmodel.Space, error) {
 		}
 
 		for _, entry := range entries {
-			if !entry.IsDir() {
+			if !entry.IsDir() || isReservedScopeSubdir(entry.Name()) {
 				continue
 			}
 
@@ -276,7 +276,7 @@ func (r *Exec) ListStacks(realmName, spaceName string) ([]intmodel.Stack, error)
 				return nil, fmt.Errorf("failed to read realm dir %q: %w", realmDir, err)
 			}
 			for _, entry := range entries {
-				if entry.IsDir() {
+				if entry.IsDir() && !isReservedScopeSubdir(entry.Name()) {
 					spaceDirs = append(spaceDirs, filepath.Join(realmDir, entry.Name()))
 				}
 			}
@@ -299,7 +299,7 @@ func (r *Exec) ListStacks(realmName, spaceName string) ([]intmodel.Stack, error)
 		}
 
 		for _, entry := range entries {
-			if !entry.IsDir() {
+			if !entry.IsDir() || isReservedScopeSubdir(entry.Name()) {
 				continue
 			}
 
@@ -362,7 +362,7 @@ func (r *Exec) ListCells(realmName, spaceName, stackName string) ([]intmodel.Cel
 				return nil, fmt.Errorf("failed to read realm dir %q: %w", realmDir, err)
 			}
 			for _, entry := range entries {
-				if entry.IsDir() {
+				if entry.IsDir() && !isReservedScopeSubdir(entry.Name()) {
 					spaceDirs = append(spaceDirs, filepath.Join(realmDir, entry.Name()))
 				}
 			}
@@ -397,7 +397,7 @@ func (r *Exec) ListCells(realmName, spaceName, stackName string) ([]intmodel.Cel
 				return nil, fmt.Errorf("failed to read space dir %q: %w", spaceDir, err)
 			}
 			for _, entry := range entries {
-				if entry.IsDir() {
+				if entry.IsDir() && !isReservedScopeSubdir(entry.Name()) {
 					stackDirs = append(stackDirs, filepath.Join(spaceDir, entry.Name()))
 				}
 			}
@@ -421,7 +421,7 @@ func (r *Exec) ListCells(realmName, spaceName, stackName string) ([]intmodel.Cel
 		}
 
 		for _, entry := range entries {
-			if !entry.IsDir() {
+			if !entry.IsDir() || isReservedScopeSubdir(entry.Name()) {
 				continue
 			}
 

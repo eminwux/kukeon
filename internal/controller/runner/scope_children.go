@@ -50,6 +50,17 @@ var reservedScopeSubdirs = map[string]struct{}{
 	consts.KukeonVolumeMetaSubdir:   {},
 }
 
+// isReservedScopeSubdir reports whether name is one of the per-scope resource
+// subdirectories in reservedScopeSubdirs rather than a child scope. The
+// ListSpaces/ListStacks/ListCells walkers in get.go use it so a reserved
+// subdir (e.g. <realm>/secrets or <stack>/volumes) is never read as a space,
+// stack, or cell — reading one hit a nonexistent metadata.json on every
+// reconcile tick (#1602).
+func isReservedScopeSubdir(name string) bool {
+	_, reserved := reservedScopeSubdirs[name]
+	return reserved
+}
+
 // childScopeNames returns the child-scope subdirectory names directly under
 // dir, excluding every reserved resource subdirectory (see
 // reservedScopeSubdirs) so none is mistaken for a child space, stack, or cell.
@@ -92,7 +103,7 @@ func (r *Exec) childScopeNames(dir, want string) ([]string, error) {
 		if !entry.IsDir() {
 			continue
 		}
-		if _, reserved := reservedScopeSubdirs[entry.Name()]; reserved {
+		if isReservedScopeSubdir(entry.Name()) {
 			continue
 		}
 		names = append(names, entry.Name())
