@@ -894,9 +894,8 @@ func targetScopeRunner(t *testing.T, cfg ext.CellConfigDoc) *fakeRunner {
 		return s, nil
 	}
 	mock.GetStackFn = func(st intmodel.Stack) (intmodel.Stack, error) {
-		st.Spec.Defaults = &intmodel.ScopeDefaults{Secrets: map[string]intmodel.SecretFill{
-			"token": {SecretRef: &intmodel.ContainerSecretRef{Name: "token-" + st.Spec.SpaceName + "-" + st.Metadata.Name}},
-		}}
+		ref := &intmodel.ContainerSecretRef{Name: "token-" + st.Spec.SpaceName + "-" + st.Metadata.Name}
+		st.Spec.Defaults = &intmodel.ScopeDefaults{Secrets: map[string]intmodel.SecretFill{"token": {SecretRef: ref}}}
 		return st, nil
 	}
 	return mock
