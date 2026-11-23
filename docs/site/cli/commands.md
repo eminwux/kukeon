@@ -19,7 +19,7 @@ Both are hard-linked to the same binary on install. Running `kuke` enters the cl
 | `kuke health`                  | kukeond's health digest and the stored health reports                    |
 | `kuke apply`                   | Apply resource definitions from YAML (multi-document supported)          |
 | `kuke run`                     | Create and start a single cell from a file or per-user profile           |
-| `kuke get`                     | List or describe resources (realm, space, stack, cell, container)        |
+| `kuke get`                     | List or describe resources (realm, space, stack, cell, container, team)  |
 | `kuke create`                  | Create a single resource imperatively                                    |
 | `kuke delete`                  | Delete a resource                                                        |
 | `kuke start` / `stop` / `kill` | Lifecycle operations on cells                                            |
@@ -33,7 +33,7 @@ Both are hard-linked to the same binary on install. Running `kuke` enters the cl
 | `kuke build`                   | Build an OCI image from a Dockerfile into a realm's containerd namespace |
 | `kuke image`                   | Manage container images in a realm's containerd namespace                |
 | `kuke daemon`                  | Manage the `kukeond` daemon cell lifecycle                               |
-| `kuke team init` / `add`       | Compose agent teams and register them with `kukeond`                     |
+| `kuke team`                    | Compose agent teams and apply them to `kukeond`, which stores them       |
 | `kuke connector`               | List connector identities, import a git identity, set Realm defaults     |
 | `kuke uninstall`               | Remove all kukeon runtime state from this host                           |
 | `kuke autocomplete`            | Emit a shell completion script                                           |
@@ -95,6 +95,7 @@ The positional argument is the resource's own name; the flags specify where in t
 - [kuke build](kuke-build.md)
 - [kuke image](kuke-image.md)
 - [kuke daemon](kuke-daemon.md)
+- [kuke team](kuke-team.md) — `apply`, `source`, `defaults`
 - [kuke team init](kuke-team-init.md)
 - [kuke team add](kuke-team-add.md)
 - [kuke connector](kuke-connector.md)

@@ -119,6 +119,7 @@ nav:
       - cli/kuke-write.md
       - cli/kuke-image.md
       - cli/kuke-daemon.md
+      - cli/kuke-team.md
       - cli/kuke-team-init.md
       - cli/kuke-team-add.md
       - cli/kuke-connector.md

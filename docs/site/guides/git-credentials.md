@@ -252,11 +252,11 @@ The web UI shows the same block in the preview of _New cell_ and _New config_. S
 
 ## Upgrading
 
-Blueprints carry the connector definitions of the `kuke` build that applied the team. After installing a `kuke` that accepts author-only identities, run `kuke team init --reapply` (or `--force`) before an existing team's cells accept one.
+Blueprints carry the connector definitions of the `kuke` build that applied the team. After installing a `kuke` that accepts author-only identities, run `kuke team init --reapply` for the kuke team and `kuke team apply NAME` for each other team before an existing team's cells accept one.
 
 Nothing older is converted:
 
-- `spec.git` in `~/.kuke/kuketeams.yaml` was removed; a file that still has it fails to decode. Delete the block and run `kuke connector import git --default`.
+- `spec.git` was removed from the team defaults; a `TeamDefaults` document that still has it fails to decode. Delete the block and run `kuke connector import git --default`.
 - The `spec.defaults.git` block an older `kuke team init` wrote on the team's stack stays, and still merges as a Stack level over the Realm default. Remove it from the Stack if the Realm default should win.
 - A `git-ssh` Secret from an older import is not tagged or changed. `kuke connector import git` with the default name overwrites it with a new identity.
 

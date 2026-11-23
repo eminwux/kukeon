@@ -69,6 +69,24 @@ kuke delete healthreport <name>
 
 Removes one stored [`HealthReport`](kuke-health.md#health-reports-are-a-kind) from the `kuke-system` realm. `latest` is not resolved: name the report (see `kuke get healthreports`). A report has no children, so `--cascade` does not apply.
 
+### kuke delete team
+
+```
+kuke delete team <name> [--realm <r>]
+```
+
+<a id="teams"></a>
+Deletes a stored [team](../concepts/team.md): its Configs, the shared blueprints no other Config references, and the `Team` document. It leaves cells and volumes: it prints each Config and blueprint it removed, the cells still running from a removed Config, and the state volumes (`<config>-state`) it kept. `--realm` defaults to `default`. It refuses the `kuke` system team — reset that with `kuke team init --force`.
+
+```bash
+$ kuke delete team web
+Deleted CellConfig web-dev-claude
+Deleted CellBlueprint claude-root
+Deleted team web
+Still running from a deleted config: cell default/default/default/web-dev-claude-1 (kuke delete cell to remove it)
+Kept state volume default/default/default/web-dev-claude-state (kuke delete volume to remove it)
+```
+
 ## Behavior
 
 1. **Without `--cascade`**, delete fails if the resource has children. It refuses to leave orphaned subtrees behind.

@@ -5,7 +5,7 @@ A release bundles one template set at
 harnesses select it with `spec.renderer: kukeon/v1beta1`. Go embeds the files in
 the executable; composition does not need a renderer checkout or network access.
 
-`pkg/team/harness` owns the strict, single-document `kuketeams.io/v1 Harness` schema.
+`pkg/team/harness` owns the strict, single-document `v1beta1 Harness` schema.
 `pkg/team/compose` resolves it into `rendererInput` (input contract revision **2**),
 then executes the bundled blueprint and shared partials. That contract renders a
 **shared** blueprint — one per harness × security profile, with no role facts in
@@ -35,7 +35,7 @@ Registry references remain in the generated sibling `images.yaml`, unchanged by
 startup or transient image builds.
 
 ```yaml
-apiVersion: kuketeams.io/v1
+apiVersion: v1beta1
 kind: Harness
 metadata:
   name: codex
@@ -230,7 +230,7 @@ External harnesses can use another setup tool, with no Make requirement in the
 generic contract. A complete minimal external example is:
 
 ```yaml
-apiVersion: kuketeams.io/v1
+apiVersion: v1beta1
 kind: Harness
 metadata:
   name: custom

@@ -5,7 +5,7 @@ Earlier `kuke team` releases gave a team cell git access by bind-mounting the op
 - cells clone, push and sign with [stored git credentials](git-credentials.md); **no rendered cell mounts the host `~/.ssh`**;
 - `kuke team` renders one **shared, realm-wide blueprint per harness × security profile**, and each role keeps only a CellConfig.
 
-Re-running `kuke team init` (and `kuke team add` for each added team) performs the migration. This page is what changes and what you have to do.
+Re-applying the teams — `kuke team init --force` for the kuke team, and each project team — performs the migration. This page is what changes and what you have to do.
 
 ## 1. Give the team a stored git identity
 
@@ -15,14 +15,16 @@ Without a stored credential, a cell that clones an SSH remote can no longer auth
 kuke connector import git --default
 ```
 
-That is the whole step; there is no compatibility path to describe. The [git credentials guide](git-credentials.md) covers what the import stores, the author-only fallback, signing, and setting a default by hand. `kuke team init --import-git-identity` and the `spec.git` block of `~/.kuke/kuketeams.yaml` were removed: delete `spec.git` from the file if it is still there, or it fails to decode.
+That is the whole step; there is no compatibility path to describe. The [git credentials guide](git-credentials.md) covers what the import stores, the author-only fallback, signing, and setting a default by hand. `kuke team init --import-git-identity` and the `spec.git` block of the team defaults were removed: a `TeamDefaults` document with `spec.git` fails to decode.
 
 ## 2. Re-render the team
 
 ```bash
 kuke team init --force          # the kuke team
-kuke team add <team> --source … # each added team, same arguments as before
+kuke team apply <team>          # each stored team
 ```
+
+Teams are stored by kukeond. A team from a release that kept teams in per-user files under `~/.kuke` is not stored yet: add it again with `kuke team add <team> --source …` (see [Upgrading from host files](../concepts/team.md#upgrading-from-host-files)).
 
 What you will see in the daemon afterwards:
 

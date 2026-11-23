@@ -23,9 +23,11 @@ If it is unset, stop and tell the user that filing is unavailable in this cell
 and how to opt in:
 
 1. `kuke create secret gh-token --realm default --from-file /path/to/token`
-2. In `~/.kuke/kuketeam.d/kuke.yaml`, add `secrets: [gh-token]` under the
-   majordomo role's `needs:`.
-3. `kuke team init --reapply`, then start a new majordomo session.
+2. `kuke get team kuke -o yaml > kuke.yaml`, and in it add
+   `secrets: [gh-token]` under the majordomo role's `needs:` (or make the same
+   edit to the kuke team's declaration on the web UI's Teams page).
+3. `kuke team apply -f kuke.yaml` (or Apply on the Teams page), then start a
+   new majordomo session.
 
 The same opt-in gives the health sweep its token for `--file-issues`. Do not
 fall back to another credential, and do not say an issue was filed.

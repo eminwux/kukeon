@@ -49,7 +49,7 @@ An entry with no `build` instead names a published shared base (`base-user`
 or `base-root`) the harness runs on as-is: it claims no image name, adds no
 Bake target, and its catalog entry is that base's reference at the release tag.
 
-Each sibling `images.yaml` is a generated `kuketeams.io/v1 HarnessImageCatalog`.
+Each sibling `images.yaml` is a generated `v1beta1 HarnessImageCatalog`.
 It contains `metadata.name` matching the Harness, plus ordered `spec.images`
 entries containing only resolved `image` references and copied `capabilities`.
 Composition reads the selected source/path's sibling catalog, including external

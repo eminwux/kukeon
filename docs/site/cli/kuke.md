@@ -68,4 +68,4 @@ sudo kuke apply -f cell.yaml --verbose --log-level debug
 
 ## Subcommands
 
-See [Commands overview](commands.md) for the list.
+See [Commands overview](commands.md) for the list. The [`kuke team`](kuke-team.md) subcommands take their own `--host` and `--configuration` flags and ignore `--run-path`, `--no-daemon`, `--verbose` and `--log-level`: composition always talks to the daemon, which stores the teams.

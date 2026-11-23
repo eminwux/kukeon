@@ -5,11 +5,14 @@ installed CLI wins when they differ.
 
 ## The opt-in
 
-GitHub access is off by default. One team-entry binding turns it on for the
-interactive majordomo cell and the `health-sweep` task cell together:
+GitHub access is off by default. One binding in the kuke team's stored
+declaration turns it on for the interactive majordomo cell and the
+`health-sweep` task cell together. Read the declaration with
+`kuke get team kuke -o yaml > kuke.yaml` (or open the kuke team on the web UI's
+Teams page) and add:
 
 ```yaml
-# ~/.kuke/kuketeam.d/kuke.yaml
+# kuke.yaml: the stored kuke Team
 spec:
   roles:
     - name: majordomo
@@ -19,8 +22,8 @@ spec:
 ```
 
 The secret is created with `kuke create secret gh-token --realm default
---from-file <path>`, and the configs are rendered again with
-`kuke team init --reapply`. The token arrives as `GH_TOKEN` only. It is not a
+--from-file <path>`, and the team is applied again with
+`kuke team apply -f kuke.yaml` (or Apply on the Teams page). The token arrives as `GH_TOKEN` only. It is not a
 git credential.
 
 ## Draft fields (`kuke health issue -f <file>`)
