@@ -37,7 +37,9 @@ function teamConfigs({ suspend = true, status } = {}) {
 }
 
 // One mutable host: its cells and configs, the requests the page made, and the attach sockets.
-async function world(page, { cells = [], configs = [], reports = [], createError, daemon } = {}) {
+// attach shapes the attach socket: promptDelay holds the prompt frame back that many ms after
+// "ready"; silent sends only "ready", like a program that prints nothing.
+async function world(page, { cells = [], configs = [], reports = [], createError, daemon, attach = {} } = {}) {
   const state = { cells: [...cells], configs, reports, requests: [], sockets: [], messages: [], createError, sweeps: [] };
   const named = name => state.cells.find(item => item.metadata.name === name);
   await page.route("**/api/realms**", async route => {
@@ -95,8 +97,11 @@ async function world(page, { cells = [], configs = [], reports = [], createError
     socket.onMessage(message => { state.messages.push(message); });
     socket.onClose(() => { entry.closed = true; });
     socket.send(JSON.stringify({ type: "ready" }));
+    if (attach.silent) return;
     // The harness asks for bracketed paste before it draws its prompt.
-    socket.send(Buffer.from("\x1b[?2004hmajordomo> "));
+    const prompt = () => { if (!entry.closed) socket.send(Buffer.from("\x1b[?2004hmajordomo> ")); };
+    if (attach.promptDelay) setTimeout(prompt, attach.promptDelay);
+    else prompt();
   });
   return state;
 }
@@ -324,6 +329,48 @@ test("Ask majordomo pastes one unsubmitted bracketed paste carrying the cell's s
   // Nothing submitted it: no carriage return or newline was ever sent.
   expect(pasted(state).join("")).not.toMatch(/[\r\n]/);
   await expect(panel(page).locator(".majordomo-question")).toHaveCount(0);
+});
+
+const askAbout = async (page, name) => {
+  await page.goto(`${server.url}#/resource/default/default/default/${name}`);
+  await page.locator(".cell-page-title-row").getByRole("button", { name: `Ask majordomo about cell default / default / default / ${name}` }).click();
+  await expect(panel(page)).toBeVisible();
+  await expect(connection(page)).toContainText("Attached");
+};
+const question = name => `About the cell ${name} in realm default, space default, stack default (state Failed): what is going on with it, and what should I do?`;
+
+test("Ask majordomo waits for a prompt that arrives after ready and pastes it bracketed", async ({ page }) => {
+  const state = await world(page, { configs: teamConfigs(), cells: [runningMajordomo(), cell("api", "Failed")], attach: { promptDelay: 300 } });
+  await askAbout(page, "api");
+  await expect.poll(() => pasted(state)).toHaveLength(1);
+  expect(pasted(state)[0]).toBe(`\x1b[200~${question("api")}\x1b[201~`);
+  await page.waitForTimeout(500);
+  expect(pasted(state)).toHaveLength(1);
+});
+
+test("Ask majordomo still pastes, unbracketed, into a program that prints nothing", async ({ page }) => {
+  const state = await world(page, { configs: teamConfigs(), cells: [runningMajordomo(), cell("api", "Failed")], attach: { silent: true } });
+  await askAbout(page, "api");
+  const attachedAt = Date.now();
+  await page.waitForTimeout(1000);
+  expect(pasted(state)).toHaveLength(0);
+  await expect.poll(() => pasted(state), { timeout: 5000 }).toHaveLength(1);
+  expect(Date.now() - attachedAt).toBeGreaterThanOrEqual(1000);
+  expect(pasted(state)[0]).toBe(question("api"));
+  await page.waitForTimeout(300);
+  expect(pasted(state)).toHaveLength(1);
+});
+
+test("a second Ask on an attached, idle majordomo session pastes once, bracketed", async ({ page }) => {
+  const state = await world(page, { configs: teamConfigs(), cells: [runningMajordomo(), cell("api", "Failed"), cell("web", "Failed")] });
+  await askAbout(page, "api");
+  await expect.poll(() => pasted(state)).toHaveLength(1);
+  await askAbout(page, "web");
+  await expect.poll(() => pasted(state)).toHaveLength(2);
+  expect(pasted(state)[1]).toBe(`\x1b[200~${question("web")}\x1b[201~`);
+  expect(state.sockets).toHaveLength(1);
+  await page.waitForTimeout(500);
+  expect(pasted(state)).toHaveLength(2);
 });
 
 test("Ask majordomo is on the cell list's failed rows and on config, blueprint, volume and daemon views", async ({ page }) => {
