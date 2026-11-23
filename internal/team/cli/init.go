@@ -25,7 +25,7 @@ import (
 
 func newInitCommand(deps Deps) *cobra.Command {
 	var conn connection
-	var force, reapply bool
+	var force, reapply, upgrade bool
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Apply the kuke team and its majordomo role",
@@ -34,7 +34,13 @@ func newInitCommand(deps Deps) *cobra.Command {
 			"A stored kuke team stops init; --force replaces it with the initial majordomo declaration and " +
 			"--reapply recomposes it from the stored Team (kuke team apply kuke).\n" +
 			"When the realm has no TeamDefaults, init creates one with the kukeon source and its claude and codex " +
-			"harnesses, so a project team needs only roles. An existing TeamDefaults is never changed.\n" +
+			"harnesses, so a project team needs only roles. An existing TeamDefaults is never changed, except " +
+			"by --upgrade.\n" +
+			"--upgrade moves the kukeon source of the stored kuke team and of the TeamDefaults to the revision " +
+			"this kuke was built from and recomposes the kuke team, keeping every other field (spec.secrets " +
+			"included). It never creates the kuke team, leaves a kukeon source with another URL alone, and " +
+			"recomposes no other team. It does not merge a newer majordomo declaration (a new role need, a new " +
+			"harness) into the stored team; --force does that. kuke update and the installer run it.\n" +
 			"No cells are created or started. The daemon and parent runtime scope must already exist.\n\n" +
 			"Init does not read or store a git identity. Team cells clone, push and sign with the git connector " +
 			"identity a Realm, Space or Stack default names; store yours with `kuke connector import git --default`.",
@@ -44,13 +50,18 @@ func newInitCommand(deps Deps) *cobra.Command {
 				return errors.New("--reapply and --force are mutually exclusive: " +
 					"--reapply keeps the stored kuke team, --force replaces it with the initial declaration")
 			}
+			if upgrade && (force || reapply) {
+				return errors.New("--upgrade is mutually exclusive with --force and --reapply: " +
+					"--upgrade re-pins the stored kuke team's kukeon source, --force replaces the team, " +
+					"--reapply recomposes it at its stored revision")
+			}
 			s, err := conn.open(cmd, deps, true)
 			if err != nil {
 				return err
 			}
 			defer s.close()
 			out, err := initialize.Init(cmd.Context(), initialize.InitOptions{
-				Options: s.options(false), Force: force, Reapply: reapply,
+				Options: s.options(false), Force: force, Reapply: reapply, Upgrade: upgrade,
 			})
 			if err != nil {
 				return err
@@ -59,8 +70,13 @@ func newInitCommand(deps Deps) *cobra.Command {
 		},
 	}
 	conn.register(cmd)
-	cmd.Flags().BoolVar(&force, "force", false, "Replace the stored kuke team with the initial majordomo declaration")
+	cmd.Flags().BoolVar(&force, "force", false,
+		"Replace the stored kuke team with the initial majordomo declaration (picks up a newer majordomo "+
+			"declaration; drops spec.secrets)")
 	cmd.Flags().BoolVar(&reapply, "reapply", false,
 		"Recompose and apply the kuke team from its stored Team, pruning obsolete configs")
+	cmd.Flags().BoolVar(&upgrade, "upgrade", false,
+		"Re-pin the kukeon source of the stored kuke team and the TeamDefaults to this kuke's revision and "+
+			"recompose the kuke team")
 	return cmd
 }

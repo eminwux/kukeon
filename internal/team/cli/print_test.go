@@ -103,3 +103,15 @@ func TestPrintInheriting(t *testing.T) {
 		t.Fatalf("got %q", out.String())
 	}
 }
+
+// An outcome with no plan (kuke team init --upgrade with nothing to apply)
+// prints its notes only.
+func TestPrintOutcomeNotesOnly(t *testing.T) {
+	var out bytes.Buffer
+	if err := cli.PrintOutcome(&out, initialize.Outcome{Notes: []string{"kuke team and defaults already at commit x"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := out.String(), "kuke team and defaults already at commit x\n"; got != want {
+		t.Fatalf("output = %q, want %q", got, want)
+	}
+}

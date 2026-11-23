@@ -29,6 +29,12 @@ import (
 // otherwise. `kuke apply -f` prints a Team document's outcome with it.
 func PrintOutcome(w io.Writer, out initialize.Outcome) error {
 	p := &printer{w: w}
+	if out.Result == nil && out.Plan == nil {
+		for _, note := range out.Notes {
+			p.linef("%s", note)
+		}
+		return p.err
+	}
 	if out.Result == nil {
 		p.plan(out.Plan)
 		return p.err
