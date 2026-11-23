@@ -111,6 +111,37 @@ metadata:
 	}
 }
 
+// TestLoadAPIVersion locks #1633: a set apiVersion must be v1beta1, and a
+// file without one still loads.
+func TestLoadAPIVersion(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kuke.yaml")
+	content := `apiVersion: v999
+kind: ClientConfiguration
+spec:
+  host: unix:///tmp/kuke-test.sock
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	_, err := Load(path)
+	if !errors.Is(err, errdefs.ErrClientConfigurationInvalid) {
+		t.Fatalf("Load() error = %v, want wrapping ErrClientConfigurationInvalid", err)
+	}
+	if !strings.Contains(err.Error(), `unsupported apiVersion "v999" (expected v1beta1)`) ||
+		!strings.Contains(err.Error(), path) {
+		t.Errorf("Load() error = %v, want the apiVersion and the file path named", err)
+	}
+
+	content = "kind: ClientConfiguration\nspec:\n  host: unix:///tmp/kuke-test.sock\n"
+	if err = os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if _, err = Load(path); err != nil {
+		t.Fatalf("Load() without apiVersion: %v", err)
+	}
+}
+
 func TestLoadMalformedYAML(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "kuke.yaml")

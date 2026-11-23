@@ -22,12 +22,6 @@ import (
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
-// HealthSchemaVersion names the JSON shape of HealthDigest (issue #1509). It
-// changes only when a field is removed or changes meaning; added fields keep
-// the version. A HealthReport is a v1beta1 kind and carries no schema version
-// (issue #1619).
-const HealthSchemaVersion = "kukeon.io/health/v1"
-
 // Health check statuses.
 const (
 	HealthStatusOK   = "ok"
@@ -69,10 +63,14 @@ type HealthDigestRequest struct {
 // HealthDigest is kukeond's own, deterministic view of its health: no model
 // is involved in producing it. Checks describe the host kukeond runs on, so
 // the answer is the same whether the caller is on the host or inside a cell.
+// It carries the v1beta1 envelope (apiVersion, kind: HealthDigest) like every
+// other kukeon document, but is computed on request and never stored (issue
+// #1633).
 type HealthDigest struct {
-	SchemaVersion string    `json:"schemaVersion"       yaml:"schemaVersion"`
-	Since         time.Time `json:"since"               yaml:"since"`
-	Until         time.Time `json:"until"               yaml:"until"`
+	APIVersion v1beta1.Version `json:"apiVersion"          yaml:"apiVersion"`
+	Kind       v1beta1.Kind    `json:"kind"                yaml:"kind"`
+	Since      time.Time       `json:"since"               yaml:"since"`
+	Until      time.Time       `json:"until"               yaml:"until"`
 	// Clean is true when no check is warn or fail, no error-level log entry
 	// fell in the window, and no cell is Failed or Error.
 	Clean  bool          `json:"clean"               yaml:"clean"`

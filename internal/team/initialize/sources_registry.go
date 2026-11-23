@@ -29,6 +29,7 @@ import (
 
 	"github.com/eminwux/kukeon/internal/team/gitremote"
 	model "github.com/eminwux/kukeon/pkg/api/model/kuketeams"
+	"github.com/eminwux/kukeon/pkg/api/version"
 	"github.com/eminwux/kukeon/pkg/team/config"
 	"gopkg.in/yaml.v3"
 )
@@ -415,7 +416,7 @@ func readKind(tree fs.FS, p string, out any, apiVersion, kind *string, want stri
 	if err != nil || yaml.Unmarshal(raw, out) != nil {
 		return false
 	}
-	return *apiVersion == config.APIVersion && *kind == want
+	return version.Check(*apiVersion) == nil && *kind == want
 }
 
 // ApplyDefaults stores a whole TeamDefaults document (AC14): what sets the

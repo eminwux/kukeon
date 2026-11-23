@@ -80,13 +80,16 @@ and no cell is listed.
 
 ## Digest schema
 
-`-o json` and `-o yaml` print this shape. `schemaVersion` is
-`kukeon.io/health/v1`; it changes only if a field is removed or changes
-meaning. New fields may be added without a version change.
+`-o json` and `-o yaml` print this shape. Like every kukeon document, the
+digest opens with `apiVersion: v1beta1` and its kind, `HealthDigest`. New fields
+may be added without a version change. A digest is computed by kukeond on
+request and never stored: `kuke apply` rejects a `HealthDigest` document as an
+unknown kind.
 
 ```json
 {
-  "schemaVersion": "kukeon.io/health/v1",
+  "apiVersion": "v1beta1",
+  "kind": "HealthDigest",
   "since": "2026-11-17T09:00:00Z",
   "until": "2026-11-17T10:00:00Z",
   "clean": false,
@@ -197,7 +200,7 @@ spec:
 
 | Field                               | Required | Notes                                                                                                                                                                                               |
 | ----------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apiVersion`, `kind`                | no       | `v1beta1` and `HealthReport`; filled when omitted.                                                                                                                                                  |
+| `apiVersion`, `kind`                | yes      | Must be `v1beta1` and `HealthReport`; a report without either is rejected.                                                                                                                          |
 | `metadata.name`                     | no       | kukeond assigns `<createdAt as 20060102T150405.000000000Z>` when omitted. A stored name, or `latest`, is rejected. Letters, digits, `.`, `_` and `-`, at most 128, starting with a letter or digit. |
 | `metadata.realm`                    | no       | Always `kuke-system`; filled when omitted, any other realm is rejected.                                                                                                                             |
 | `spec.createdAt`                    | no       | kukeond sets it when omitted.                                                                                                                                                                       |
@@ -220,9 +223,8 @@ On submission kukeond marks a finding **recurring** when the previous stored
 report already carried the same signature. A hand-started sweep that overlaps a
 scheduled one therefore reports the same finding as recurring, not as new.
 
-A report carries no `schemaVersion`; reports stored before they became a kind
-(under `<run path>/health`) are not read or converted, and kukeond removes that
-directory when it starts.
+Reports stored before they became a kind (under `<run path>/health`) are not
+read or converted, and kukeond removes that directory when it starts.
 
 ### Filing issues (opt-in)
 

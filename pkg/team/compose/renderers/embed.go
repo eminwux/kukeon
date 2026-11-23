@@ -22,5 +22,5 @@ import "embed"
 
 // Templates contains only release-owned template files.
 //
-//go:embed kukeon/v1beta1/*.tmpl.yaml
+//go:embed kukeon/bundled/*.tmpl.yaml
 var Templates embed.FS

@@ -27,6 +27,7 @@ import (
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	"github.com/eminwux/kukeon/pkg/api/version"
 )
 
 // PatchCellMetadata is the locked read-modify-write for a cell's persisted
@@ -93,12 +94,12 @@ func (r *Exec) patchCellMetadataLocked(cell intmodel.Cell, mutate func(fresh *in
 // decodeCellDoc decodes a raw cell metadata document into the internal
 // model, mirroring readCellInternal's version dispatch.
 func decodeCellDoc(raw []byte) (intmodel.Cell, error) {
-	version, err := fs.DetectMetadataVersion(raw)
+	apiVersion, err := fs.DetectMetadataVersion(raw)
 	if err != nil {
 		return intmodel.Cell{}, wrapConversionErr(err)
 	}
-	if version != apischeme.VersionV1Beta1 {
-		return intmodel.Cell{}, wrapConversionErr(fmt.Errorf("unsupported apiVersion %q", version))
+	if checkErr := version.Check(string(apiVersion)); checkErr != nil {
+		return intmodel.Cell{}, wrapConversionErr(checkErr)
 	}
 	var cellDoc v1beta1.CellDoc
 	if unmarshalErr := json.Unmarshal(raw, &cellDoc); unmarshalErr != nil {

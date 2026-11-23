@@ -268,7 +268,9 @@ func TestValidateRejectsSchemaViolations(t *testing.T) {
 	}
 	for name, mutate := range map[string]func(*kukeonv1.HealthReport){
 		"apiVersion":     func(r *kukeonv1.HealthReport) { r.APIVersion = "v1" },
+		"no apiVersion":  func(r *kukeonv1.HealthReport) { r.APIVersion = "" },
 		"kind":           func(r *kukeonv1.HealthReport) { r.Kind = v1beta1.KindVolume },
+		"no kind":        func(r *kukeonv1.HealthReport) { r.Kind = "" },
 		"name":           func(r *kukeonv1.HealthReport) { r.Metadata.Name = "../escape" },
 		"reserved name":  func(r *kukeonv1.HealthReport) { r.Metadata.Name = kukeonv1.HealthReportLatest },
 		"realm":          func(r *kukeonv1.HealthReport) { r.Metadata.Realm = "default" },
@@ -316,10 +318,22 @@ func TestValidateRejectsSchemaViolations(t *testing.T) {
 func TestValidateSubmissionFillsDaemonFields(t *testing.T) {
 	at := time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC)
 	report := validReport(at)
-	report.APIVersion, report.Kind, report.Metadata = "", "", v1beta1.HealthReportMetadata{}
+	report.Metadata = v1beta1.HealthReportMetadata{}
 	report.Spec.CreatedAt = time.Time{}
 	if err := health.ValidateSubmission(report, at); err != nil {
 		t.Fatalf("a submission without name, realm and createdAt is valid: %v", err)
+	}
+	// apiVersion and kind are not filled: a submission must carry both (#1633).
+	for name, mutate := range map[string]func(*kukeonv1.HealthReport){
+		"apiVersion": func(r *kukeonv1.HealthReport) { r.APIVersion = "" },
+		"kind":       func(r *kukeonv1.HealthReport) { r.Kind = "" },
+	} {
+		bad := report
+		mutate(&bad)
+		if err := health.ValidateSubmission(bad, at); !errors.Is(err, errdefs.ErrHealthReportInvalid) ||
+			!strings.Contains(err.Error(), name) {
+			t.Errorf("a submission without %s: %v", name, err)
+		}
 	}
 	report.Metadata.Realm = "default"
 	if err := health.ValidateSubmission(report, at); !errors.Is(err, errdefs.ErrHealthReportInvalid) {
@@ -357,9 +371,16 @@ func TestStoreSubmitListReadSurviveReopen(t *testing.T) {
 		t.Fatalf("latest of empty store: %v", err)
 	}
 
+	unversioned := validReport(at)
+	unversioned.APIVersion = "" // not filled by the store (#1633)
+	if _, err := store.Submit(unversioned); !errors.Is(err, errdefs.ErrHealthReportInvalid) ||
+		!strings.Contains(err.Error(), "apiVersion") {
+		t.Fatalf("a report without apiVersion: %v", err)
+	}
+
 	first := validReport(at)
-	first.APIVersion, first.Kind, first.Metadata.Realm = "", "", "" // filled by the store
-	first.Spec.CreatedAt = time.Time{}                              // assigned by the store
+	first.Metadata.Realm = ""          // filled by the store
+	first.Spec.CreatedAt = time.Time{} // assigned by the store
 	stored, err := store.Submit(first)
 	if err != nil {
 		t.Fatal(err)

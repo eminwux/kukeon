@@ -22,13 +22,14 @@ package config
 import (
 	"fmt"
 
+	"github.com/eminwux/kukeon/pkg/api/version"
 	"gopkg.in/yaml.v3"
 )
 
 const (
 	// APIVersion is the apiVersion of every team document, the one the rest
 	// of kukeon uses (#1618).
-	APIVersion = "v1beta1"
+	APIVersion = version.V1Beta1
 	// KindTeamDefaults is the settings every team of a realm inherits.
 	KindTeamDefaults = "TeamDefaults"
 	// DefaultsName is the only name a TeamDefaults may have: a realm holds at

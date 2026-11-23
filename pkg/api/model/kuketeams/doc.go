@@ -40,9 +40,6 @@
 // application in internal/team/initialize.
 package kuketeams
 
-// APIVersionV1 is the apiVersion every team document carries.
-const APIVersionV1 = "v1beta1"
-
 // Kinds.
 const (
 	// KindRole identifies a per-role document (role.yaml) in a source.
@@ -62,7 +59,7 @@ type Metadata struct {
 	Name string `json:"name" yaml:"name"`
 }
 
-// KnownHarnesses is the set of harness names the v1 contract recognizes. Role
+// KnownHarnesses is the set of harness names the v1beta1 contract recognizes. Role
 // harness keys, Harness.metadata.name, and ImageCatalog images[].harness are all
 // validated against this set.
 //

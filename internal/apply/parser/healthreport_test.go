@@ -93,3 +93,12 @@ func TestParseHealthReportRejects(t *testing.T) {
 		t.Fatal("unknown field accepted")
 	}
 }
+
+// A HealthDigest is computed by kukeond and never stored: `kuke apply` rejects
+// it as an unknown kind (#1633).
+func TestParseHealthDigestRejected(t *testing.T) {
+	_, err := parser.ParseDocument(0, []byte("apiVersion: v1beta1\nkind: HealthDigest\nclean: true\n"))
+	if !errors.Is(err, errdefs.ErrUnknownKind) {
+		t.Fatalf("HealthDigest: got %v, want ErrUnknownKind", err)
+	}
+}

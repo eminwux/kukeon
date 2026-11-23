@@ -24,6 +24,8 @@ import (
 	"slices"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/eminwux/kukeon/pkg/api/version"
 )
 
 func blank(s string) bool { return strings.TrimSpace(s) == "" }
@@ -50,7 +52,7 @@ func Validate(cfg *TeamDefaults) error {
 	if cfg == nil {
 		return errors.New("config: must not be nil")
 	}
-	if cfg.APIVersion != APIVersion {
+	if version.Check(cfg.APIVersion) != nil {
 		return fmt.Errorf("apiVersion: expected %q", APIVersion)
 	}
 	if cfg.Kind != KindTeamDefaults {

@@ -58,6 +58,7 @@ func newStoreClient(t *testing.T, names ...string) *storeClient {
 	at := time.Date(2026, 11, 22, 10, 15, 0, 0, time.UTC)
 	for i, name := range names {
 		_, err := store.Submit(kukeonv1.HealthReport{
+			APIVersion: v1beta1.APIVersionV1Beta1, Kind: v1beta1.KindHealthReport,
 			Metadata: v1beta1.HealthReportMetadata{Name: name},
 			Spec: v1beta1.HealthReportSpec{
 				CreatedAt: at.Add(time.Duration(i) * time.Hour),

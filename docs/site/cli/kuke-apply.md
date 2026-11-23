@@ -27,6 +27,8 @@ Plus all [global flags](kuke.md).
   cat cell.yaml | sudo kuke apply -f -
   ```
 
+Every document must carry `apiVersion: v1beta1`. A document without it is rejected before anything is applied (`document 0 (Realm): apiVersion is required (expected v1beta1)`), as is one with any other value. Documents printed by `kuke get -o yaml` and built by `kuke create` or `kuke team` already carry it.
+
 ## Teams
 
 A manifest may carry the two stored team kinds (see [Teams](../concepts/team.md)):

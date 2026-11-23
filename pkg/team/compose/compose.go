@@ -39,6 +39,7 @@ import (
 	"github.com/distribution/reference"
 	model "github.com/eminwux/kukeon/pkg/api/model/kuketeams"
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	"github.com/eminwux/kukeon/pkg/api/version"
 	"github.com/eminwux/kukeon/pkg/team/component"
 	"github.com/eminwux/kukeon/pkg/team/config"
 	"github.com/eminwux/kukeon/pkg/team/connector"
@@ -514,7 +515,7 @@ func planPair(
 	if err := load(rfs, path.Join(selection.Path, "role.yaml"), &role); err != nil {
 		return nil, err
 	}
-	if role.APIVersion != config.APIVersion || role.Kind != "Role" || !config.ValidName(role.Metadata.Name) {
+	if version.Check(role.APIVersion) != nil || role.Kind != "Role" || !config.ValidName(role.Metadata.Name) {
 		return nil, errors.New("role.yaml: require v1beta1 Role and valid metadata.name")
 	}
 	settings, ok := role.Spec.Harnesses[hsel.Name]

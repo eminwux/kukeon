@@ -30,6 +30,7 @@ import (
 	healthcmd "github.com/eminwux/kukeon/cmd/kuke/health"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 type fakeClient struct {
@@ -104,7 +105,8 @@ var window = time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC)
 
 func dirtyDigest() kukeonv1.HealthDigest {
 	return kukeonv1.HealthDigest{
-		SchemaVersion: kukeonv1.HealthSchemaVersion, Since: window, Until: window.Add(time.Hour),
+		APIVersion: v1beta1.APIVersionV1Beta1, Kind: v1beta1.KindHealthDigest,
+		Since: window, Until: window.Add(time.Hour),
 		Checks: []kukeonv1.HealthCheck{
 			{Section: "host", Name: "containerd", Status: kukeonv1.HealthStatusOK, Detail: "reachable"},
 			{
@@ -168,7 +170,7 @@ func TestDigestJSONSchema(t *testing.T) {
 	if err = json.Unmarshal([]byte(out), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"schemaVersion", "since", "until", "clean", "checks", "logErrors", "cells"} {
+	for _, key := range []string{"apiVersion", "kind", "since", "until", "clean", "checks", "logErrors", "cells"} {
 		if _, ok := decoded[key]; !ok {
 			t.Errorf("json digest lacks %q", key)
 		}
@@ -188,8 +190,11 @@ func TestDigestJSONSchema(t *testing.T) {
 			}
 		}
 	}
+	if _, ok := decoded["schemaVersion"]; ok {
+		t.Error("json digest still carries schemaVersion")
+	}
 	if out, _, err = run(t, &fakeClient{digest: dirtyDigest()}, "", "-o", "yaml"); err != nil ||
-		!strings.Contains(out, "schemaVersion: kukeon.io/health/v1") {
+		!strings.HasPrefix(out, "apiVersion: v1beta1\nkind: HealthDigest\n") {
 		t.Fatalf("yaml digest: %q %v", out, err)
 	}
 	if _, _, err = run(t, &fakeClient{}, "", "-o", "table"); err == nil {

@@ -120,7 +120,7 @@ kind: Harness
 metadata:
   name: shared
 spec:
-  renderer: kukeon/v1beta1
+  renderer: kukeon/bundled
   shell: /bin/bash
   skillPath: $HOME/.agents/skills
   modes:

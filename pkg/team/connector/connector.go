@@ -38,15 +38,14 @@ import (
 	rules "github.com/eminwux/kukeon/internal/connector"
 	model "github.com/eminwux/kukeon/pkg/api/model/kuketeams"
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	"github.com/eminwux/kukeon/pkg/api/version"
 	"github.com/eminwux/kukeon/pkg/team/component"
 	"github.com/eminwux/kukeon/team/connectors"
 	"gopkg.in/yaml.v3"
 )
 
-const (
-	APIVersion = "v1beta1"
-	Kind       = "Connector"
-)
+// Kind identifies a connector document.
+const Kind = "Connector"
 
 // Connector is one `<name>/connector.yaml` document.
 type Connector struct {
@@ -196,7 +195,7 @@ func Load(source fs.FS) (*Catalog, error) {
 
 // Validate checks one connector definition.
 func (c *Connector) Validate() error {
-	if c == nil || c.APIVersion != APIVersion || c.Kind != Kind || !namePattern.MatchString(c.Metadata.Name) {
+	if c == nil || version.Check(c.APIVersion) != nil || c.Kind != Kind || !namePattern.MatchString(c.Metadata.Name) {
 		return errors.New("require v1beta1 Connector with valid metadata.name")
 	}
 	if c.Spec.Title == "" {
@@ -395,7 +394,7 @@ func (c *Catalog) Components() []component.Component {
 		base := func(name, description string, method Method) component.Component {
 			desc := conn.Descriptor(method)
 			return component.Component{
-				APIVersion: component.APIVersion, Kind: component.Kind,
+				APIVersion: version.V1Beta1, Kind: component.Kind,
 				Metadata: model.Metadata{Name: name},
 				Spec: component.Spec{
 					Kind: api.ComponentKindConnector, Description: description,

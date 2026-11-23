@@ -1,8 +1,8 @@
 # Bundled kukeon renderer and Harness startup
 
 A release bundles one template set at
-[`pkg/team/compose/renderers/kukeon/v1beta1`](../../pkg/team/compose/renderers/kukeon/v1beta1). All three packaged
-harnesses select it with `spec.renderer: kukeon/v1beta1`. Go embeds the files in
+[`pkg/team/compose/renderers/kukeon/bundled`](../../pkg/team/compose/renderers/kukeon/bundled). All four packaged
+harnesses select it with `spec.renderer: kukeon/bundled`. Go embeds the files in
 the executable; composition does not need a renderer checkout or network access.
 
 `pkg/team/harness` owns the strict, single-document `v1beta1 Harness` schema.
@@ -40,7 +40,7 @@ kind: Harness
 metadata:
   name: codex
 spec:
-  renderer: kukeon/v1beta1
+  renderer: kukeon/bundled
   shell: /bin/bash
   statePath: $HOME/.codex
   environment:
@@ -235,7 +235,7 @@ kind: Harness
 metadata:
   name: custom
 spec:
-  renderer: kukeon/v1beta1
+  renderer: kukeon/bundled
   skillPath: $HOME/.agents/skills
   shell: /bin/sh
   onInit:

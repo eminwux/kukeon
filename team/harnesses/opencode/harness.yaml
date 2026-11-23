@@ -3,7 +3,7 @@ kind: Harness
 metadata:
   name: opencode
 spec:
-  renderer: kukeon/v1beta1
+  renderer: kukeon/bundled
   shell: /bin/bash
   environment:
     OPENCODE_CONFIG: "${HOME}/.opencode-config"

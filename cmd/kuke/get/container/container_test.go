@@ -19,6 +19,7 @@ package container_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -33,6 +34,7 @@ import (
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"gopkg.in/yaml.v3"
 )
 
 func TestNewContainerCmd(t *testing.T) {
@@ -357,7 +359,9 @@ func TestNewContainerCmd_NamedSingleRow(t *testing.T) {
 		getContainerFn: func(_ v1beta1.ContainerDoc) (kukeonv1.GetContainerResult, error) {
 			return kukeonv1.GetContainerResult{
 				Container: v1beta1.ContainerDoc{
-					Metadata: v1beta1.ContainerMetadata{Name: "co1"},
+					APIVersion: v1beta1.APIVersionV1Beta1,
+					Kind:       v1beta1.KindContainer,
+					Metadata:   v1beta1.ContainerMetadata{Name: "co1"},
 					Spec: v1beta1.ContainerSpec{
 						ID:      "co1",
 						RealmID: "r1",
@@ -423,17 +427,120 @@ func TestNewContainerCmd_NamedSingleRow(t *testing.T) {
 
 	t.Run("-o yaml emits the full document", func(t *testing.T) {
 		out := run(t, "-o", "yaml")
-		if !strings.Contains(out, "metadata:") {
-			t.Errorf("-o yaml should emit the document; got:\n%s", out)
+		var doc v1beta1.ContainerDoc
+		if err := yaml.Unmarshal([]byte(out), &doc); err != nil {
+			t.Fatalf("decode -o yaml: %v\n%s", err, out)
 		}
+		assertContainerDoc(t, doc, "co1", v1beta1.ContainerStateReady)
 	})
 
 	t.Run("-o json emits the full document", func(t *testing.T) {
 		out := run(t, "-o", "json")
-		if !strings.Contains(out, "\"metadata\"") {
-			t.Errorf("-o json should emit the document; got:\n%s", out)
+		var doc v1beta1.ContainerDoc
+		if err := json.Unmarshal([]byte(out), &doc); err != nil {
+			t.Fatalf("decode -o json: %v\n%s", err, out)
+		}
+		assertContainerDoc(t, doc, "co1", v1beta1.ContainerStateReady)
+	})
+}
+
+// TestNewContainerCmd_ListPrintsDocuments locks #1633: the list path prints
+// ContainerDoc documents (apiVersion, kind, metadata, spec, status) for
+// -o yaml|json, the same shape the single-name path prints, with the status
+// GetContainer returned. A container whose probe fails is still listed, with
+// state Unknown.
+func TestNewContainerCmd_ListPrintsDocuments(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	created := time.Date(2026, 11, 23, 10, 0, 0, 0, time.UTC)
+	fake := &fakeClient{
+		listContainersFn: func(_, _, _, _ string) ([]v1beta1.ContainerSpec, error) {
+			return []v1beta1.ContainerSpec{
+				{ID: "co1", RealmID: "r1", SpaceID: "s1", StackID: "st1", CellID: "ce1", Image: "img"},
+				{ID: "co2", RealmID: "r1", SpaceID: "s1", StackID: "st1", CellID: "ce1", Image: "img"},
+			}, nil
+		},
+		getContainerFn: func(doc v1beta1.ContainerDoc) (kukeonv1.GetContainerResult, error) {
+			if doc.Spec.ID == "co2" {
+				return kukeonv1.GetContainerResult{}, errors.New("probe failed")
+			}
+			return kukeonv1.GetContainerResult{
+				Container: v1beta1.ContainerDoc{
+					Metadata: v1beta1.ContainerMetadata{Name: "co1", Labels: map[string]string{"app": "web"}},
+					Status: v1beta1.ContainerStatus{
+						State: v1beta1.ContainerStateReady, RestartCount: 2, CreatedAt: created,
+					},
+				},
+				ContainerExists: true,
+			}, nil
+		},
+	}
+
+	run := func(t *testing.T, args ...string) string {
+		t.Helper()
+		t.Cleanup(viper.Reset)
+		cmd := container.NewContainerCmd()
+		out := &bytes.Buffer{}
+		cmd.SetOut(out)
+		cmd.SetErr(io.Discard)
+		ctx := context.WithValue(context.Background(), container.MockControllerKey{}, kukeonv1.Client(fake))
+		cmd.SetContext(ctx)
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		return out.String()
+	}
+
+	check := func(t *testing.T, docs []v1beta1.ContainerDoc) {
+		t.Helper()
+		if len(docs) != 2 {
+			t.Fatalf("want 2 documents, got %d: %+v", len(docs), docs)
+		}
+		assertContainerDoc(t, docs[0], "co1", v1beta1.ContainerStateReady)
+		assertContainerDoc(t, docs[1], "co2", v1beta1.ContainerStateUnknown)
+		if docs[0].Metadata.Labels["app"] != "web" || docs[0].Status.RestartCount != 2 ||
+			!docs[0].Status.CreatedAt.Equal(created) || docs[0].Spec.Image != "img" {
+			t.Errorf("co1 document does not carry the probed metadata/status: %+v", docs[0])
+		}
+	}
+
+	t.Run("-o yaml", func(t *testing.T) {
+		out := run(t, "-o", "yaml")
+		if !strings.HasPrefix(out, "- apiVersion: v1beta1\n") {
+			t.Errorf("-o yaml must start with a ContainerDoc list item; got:\n%s", out)
+		}
+		var docs []v1beta1.ContainerDoc
+		if err := yaml.Unmarshal([]byte(out), &docs); err != nil {
+			t.Fatalf("decode -o yaml: %v\n%s", err, out)
+		}
+		check(t, docs)
+	})
+
+	t.Run("-o json", func(t *testing.T) {
+		out := run(t, "-o", "json")
+		var docs []v1beta1.ContainerDoc
+		if err := json.Unmarshal([]byte(out), &docs); err != nil {
+			t.Fatalf("decode -o json: %v\n%s", err, out)
+		}
+		check(t, docs)
+	})
+
+	t.Run("table is unchanged", func(t *testing.T) {
+		out := run(t)
+		if !strings.Contains(out, "Ready") || !strings.Contains(out, "Unknown") || strings.Contains(out, "apiVersion") {
+			t.Errorf("table must render STATE from status; got:\n%s", out)
 		}
 	})
+}
+
+func assertContainerDoc(t *testing.T, doc v1beta1.ContainerDoc, name string, state v1beta1.ContainerState) {
+	t.Helper()
+	if doc.APIVersion != v1beta1.APIVersionV1Beta1 || doc.Kind != v1beta1.KindContainer ||
+		doc.Metadata.Name != name || doc.Spec.ID != name || doc.Status.State != state {
+		t.Errorf("document %q: apiVersion=%q kind=%q metadata.name=%q spec.id=%q status.state=%d",
+			name, doc.APIVersion, doc.Kind, doc.Metadata.Name, doc.Spec.ID, doc.Status.State)
+	}
 }
 
 func TestNewContainerCmd_DefaultColumns(t *testing.T) {

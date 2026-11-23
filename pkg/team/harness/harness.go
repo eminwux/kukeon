@@ -33,10 +33,19 @@ import (
 	"github.com/distribution/reference"
 	model "github.com/eminwux/kukeon/pkg/api/model/kuketeams"
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	"github.com/eminwux/kukeon/pkg/api/version"
 	"gopkg.in/yaml.v3"
 )
 
-const APIVersion = "v1beta1"
+// Renderer names the bundled template set a harness selects with
+// spec.renderer (pkg/team/compose/renderers/kukeon/bundled). It names a
+// template directory, not an apiVersion.
+const Renderer = "kukeon/bundled"
+
+// renamedRenderer is the template-set name used before #1633, when the set
+// was named after the apiVersion. It is rejected with a message that names
+// Renderer.
+const renamedRenderer = "kukeon/" + version.V1Beta1
 
 type Harness struct {
 	APIVersion string         `json:"apiVersion" yaml:"apiVersion"`
@@ -143,13 +152,17 @@ func Load(source fs.FS, directory string) (*Harness, error) {
 }
 
 func (h *Harness) Validate() error {
-	if h == nil || h.APIVersion != APIVersion || h.Kind != "Harness" || !namePattern.MatchString(h.Metadata.Name) {
+	if h == nil || version.Check(h.APIVersion) != nil || h.Kind != "Harness" ||
+		!namePattern.MatchString(h.Metadata.Name) {
 		return errors.New("require v1beta1 Harness with valid metadata.name")
 	}
-	if h.Spec.Renderer != "kukeon/v1beta1" {
+	if h.Spec.Renderer == renamedRenderer {
+		return fmt.Errorf("spec.renderer: %q was renamed to %s", renamedRenderer, Renderer)
+	}
+	if h.Spec.Renderer != Renderer {
 		return fmt.Errorf(
-			"spec.renderer: unsupported %q; select bundled kukeon/v1beta1 (migrate legacy template/makeTarget to renderer/onInit)",
-			h.Spec.Renderer,
+			"spec.renderer: unsupported %q; select bundled %s (migrate legacy template/makeTarget to renderer/onInit)",
+			h.Spec.Renderer, Renderer,
 		)
 	}
 	if h.Spec.SkillPath == "" || (h.Spec.Shell != "/bin/bash" && h.Spec.Shell != "/bin/sh") {
@@ -338,7 +351,7 @@ func Generate(h *Harness, registry, tag string) (*ImageCatalog, error) {
 		return nil, err
 	}
 	catalog := &ImageCatalog{
-		APIVersion: APIVersion,
+		APIVersion: version.V1Beta1,
 		Kind:       "HarnessImageCatalog",
 		Metadata:   model.Metadata{Name: h.Metadata.Name},
 	}
@@ -368,7 +381,7 @@ func LoadCatalog(source fs.FS, directory, name string) (*ImageCatalog, error) {
 }
 
 func (c *ImageCatalog) Validate(name string) error {
-	if c == nil || c.APIVersion != APIVersion || c.Kind != "HarnessImageCatalog" || c.Metadata.Name != name ||
+	if c == nil || version.Check(c.APIVersion) != nil || c.Kind != "HarnessImageCatalog" || c.Metadata.Name != name ||
 		!namePattern.MatchString(name) {
 		return fmt.Errorf("require v1beta1 HarnessImageCatalog with metadata.name %q", name)
 	}

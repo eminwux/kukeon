@@ -16,9 +16,12 @@
 
 package v1beta1
 
+import "github.com/eminwux/kukeon/pkg/api/version"
+
 const (
-	// APIVersionV1Beta1 is the canonical API version for this package.
-	APIVersionV1Beta1 Version = "v1beta1"
+	// APIVersionV1Beta1 is the canonical API version for this package. It is
+	// declared once, in pkg/api/version.
+	APIVersionV1Beta1 Version = version.V1Beta1
 )
 
 // Kinds.
@@ -73,6 +76,11 @@ const (
 	// assigns its name and createdAt when they are left out, and a stored
 	// name cannot be applied again. kukeond keeps the newest 50.
 	KindHealthReport Kind = "HealthReport"
+	// KindHealthDigest identifies kukeond's deterministic health digest
+	// (`kuke health -o json|yaml`, issue #1633). Computed by kukeond on
+	// request, never stored. Not a server-side resource — `kuke apply`
+	// rejects it.
+	KindHealthDigest Kind = "HealthDigest"
 	// KindTeam identifies a team's declaration (issue #1618): its project
 	// source, recorded secret bindings and role, harness, source and
 	// connector selections. Realm-scoped. kukeond validates and stores it;

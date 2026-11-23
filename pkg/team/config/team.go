@@ -21,6 +21,8 @@ import (
 	"io"
 	"maps"
 	"slices"
+
+	"github.com/eminwux/kukeon/pkg/api/version"
 )
 
 const (
@@ -88,7 +90,7 @@ func Resolve(cfg *TeamDefaults, team *Team) (Defaults, error) {
 	if err := Validate(cfg); err != nil {
 		return Defaults{}, err
 	}
-	if team == nil || team.APIVersion != APIVersion || team.Kind != KindTeam || !ValidName(team.Metadata.Name) {
+	if team == nil || version.Check(team.APIVersion) != nil || team.Kind != KindTeam || !ValidName(team.Metadata.Name) {
 		return Defaults{}, errors.New("team: require v1beta1 Team and a valid metadata.name")
 	}
 	d := team.Spec.Defaults
@@ -168,7 +170,7 @@ func ValidateTeam(team *Team) error {
 }
 
 func validateTeamBody(team *Team) error {
-	if team.APIVersion != APIVersion || team.Kind != KindTeam {
+	if version.Check(team.APIVersion) != nil || team.Kind != KindTeam {
 		return errors.New("team: require v1beta1 Team")
 	}
 	if team.Metadata.Realm != "" && !ValidName(team.Metadata.Realm) {
@@ -192,7 +194,7 @@ func validateTeamBody(team *Team) error {
 // the realm defaulted: the document kukeond stores once application has
 // succeeded. It does not materialize inherited fields.
 func Declaration(team *Team) (*Team, error) {
-	if team == nil || team.APIVersion != APIVersion || team.Kind != KindTeam || !ValidName(team.Metadata.Name) {
+	if team == nil || version.Check(team.APIVersion) != nil || team.Kind != KindTeam || !ValidName(team.Metadata.Name) {
 		return nil, errors.New("team: invalid declaration")
 	}
 	out := &Team{

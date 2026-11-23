@@ -4,7 +4,7 @@ Every resource in Kukeon has a YAML schema. All manifests share the same shape:
 
 ```yaml
 apiVersion: v1beta1
-kind: <Realm|Space|Stack|Cell|Container|Secret|CellBlueprint|CellConfig>
+kind: <Realm|Space|Stack|Cell|Container|Secret|CellBlueprint|CellConfig|Volume|HealthReport|Team|TeamDefaults>
 metadata:
   name: <string>
   labels:
@@ -17,7 +17,7 @@ status:
 
 ## Supported versions
 
-Only `v1beta1` is currently defined. See [Architecture → API versioning](../architecture/api-versioning.md) for how Kukeon decouples the on-wire schema from internal types, which lets new versions coexist when they ship.
+Only `v1beta1` is currently defined, and `apiVersion` is required: `kuke apply -f` rejects a document without it (`apiVersion is required (expected v1beta1)`) rather than assuming the current version. See [Architecture → API versioning](../architecture/api-versioning.md) for how Kukeon decouples the on-wire schema from internal types, which lets new versions coexist when they ship.
 
 ## What's new in v0.5.0
 
@@ -83,4 +83,4 @@ See [kuke apply](../cli/kuke-apply.md) for the full shape of the command.
 
 ## Round-trip safety
 
-What goes in as YAML comes out as YAML. Kukeon normalizes `apiVersion`, populates defaults, and sets `status.*`, but otherwise preserves the manifest you applied. You can `kuke get -o yaml` and re-`apply` without losing fields.
+What goes in as YAML comes out as YAML. Kukeon populates defaults and sets `status.*`, but otherwise preserves the manifest you applied, including its `apiVersion`. You can `kuke get -o yaml` and re-`apply` without losing fields.

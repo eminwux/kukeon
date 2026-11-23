@@ -140,10 +140,10 @@ func TestSourceInventoryIsPackaged(t *testing.T) {
 		}
 		asset := fields[3]
 		if strings.HasSuffix(asset, "partials.tmpl.yaml") {
-			asset = "pkg/team/compose/renderers/kukeon/v1beta1/partials.tmpl.yaml"
+			asset = "pkg/team/compose/renderers/kukeon/bundled/partials.tmpl.yaml"
 		}
 		if strings.HasSuffix(asset, "blueprint.tmpl.yaml") {
-			asset = "pkg/team/compose/renderers/kukeon/v1beta1/blueprint.tmpl.yaml"
+			asset = "pkg/team/compose/renderers/kukeon/bundled/blueprint.tmpl.yaml"
 		}
 		for _, name := range []string{"claude", "codex", "opencode"} {
 			prefix := "harnesses/" + name + "/"

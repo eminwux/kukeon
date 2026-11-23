@@ -41,6 +41,13 @@ func TestInvalidHarnessSchema(t *testing.T) {
 		{"capability", "[codex, git, gh, go, node, make, root]", "[git, root]", "include harness"},
 		{"obsolete-ref", "    - name: codex-root", "    - ref: codex-root", "field ref not found"},
 		{"extra-document", "kind: Harness", "kind: Harness\n---\nkind: Harness", "invalid"},
+		// The template set was renamed in #1633; the old name is rejected with
+		// a message naming the new one.
+		{
+			"renamed-renderer", "renderer: kukeon/bundled", "renderer: kukeon/v1beta1",
+			`spec.renderer: "kukeon/v1beta1" was renamed to kukeon/bundled`,
+		},
+		{"unknown-renderer", "renderer: kukeon/bundled", "renderer: other/x", "select bundled kukeon/bundled"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			raw := strings.Replace(string(original), test.old, test.value, 1)
@@ -159,7 +166,7 @@ kind: Harness
 metadata:
   name: script
 spec:
-  renderer: kukeon/v1beta1
+  renderer: kukeon/bundled
   shell: /bin/bash
   skillPath: $HOME/.agents/skills
   modes:

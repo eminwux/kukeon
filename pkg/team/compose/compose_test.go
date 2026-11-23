@@ -320,7 +320,7 @@ func TestActionableFailures(t *testing.T) {
 		{"renderer", "spec.renderer: unsupported", func(_ *config.TeamDefaults, _ *compose.Options, s fstest.MapFS) {
 			s["team/harnesses/codex/harness.yaml"].Data = bytes.ReplaceAll(
 				s["team/harnesses/codex/harness.yaml"].Data,
-				[]byte("renderer: kukeon/v1beta1"),
+				[]byte("renderer: kukeon/bundled"),
 				[]byte("renderer: absent/v2"),
 			)
 		}},
@@ -330,7 +330,7 @@ func TestActionableFailures(t *testing.T) {
 			func(_ *config.TeamDefaults, _ *compose.Options, s fstest.MapFS) {
 				s["team/harnesses/codex/harness.yaml"].Data = bytes.ReplaceAll(
 					s["team/harnesses/codex/harness.yaml"].Data,
-					[]byte("renderer: kukeon/v1beta1"),
+					[]byte("renderer: kukeon/bundled"),
 					[]byte("template: blueprint.tmpl.yaml"),
 				)
 			},

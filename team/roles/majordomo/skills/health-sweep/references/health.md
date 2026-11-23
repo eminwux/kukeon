@@ -15,10 +15,12 @@ The digest is computed inside kukeond, so it describes the host even when
 Exit codes with `--exit-code`: `0` clean, `2` findings, `1` the command failed.
 Without the flag, findings also exit `0`.
 
-JSON shape (`schemaVersion: kukeon.io/health/v1`):
+JSON shape (`apiVersion: v1beta1`, `kind: HealthDigest`):
 
 | Field            | Meaning                                                                                                                                                                                |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apiVersion`     | `v1beta1`.                                                                                                                                                                             |
+| `kind`           | `HealthDigest`. A digest is never stored; do not submit it as a report.                                                                                                                |
 | `since`, `until` | The window. Copy both into the report.                                                                                                                                                 |
 | `clean`          | `true` when there is nothing to triage.                                                                                                                                                |
 | `checks[]`       | `section`, `name`, `status` (`ok`/`warn`/`fail`), `detail`, `remediation`. The set is `host/containerd`, `host/cgroup-v2`, `host/cni-plugins`, `state/run-dir`, `state/containerd-ns`. |
@@ -29,12 +31,12 @@ JSON shape (`schemaVersion: kukeon.io/health/v1`):
 ## Report: `kuke health report submit -f <file>`
 
 A `kind: HealthReport` document (`apiVersion: v1beta1`), JSON or YAML. Unknown
-fields are rejected, including the `schemaVersion` and top-level `id` of the
+fields are rejected, including the top-level `id` and version string of the
 report shape before reports became a kind.
 
 | Field                      | Required | Notes                                                        |
 | -------------------------- | -------- | ------------------------------------------------------------ |
-| `apiVersion`, `kind`       | no       | `v1beta1`, `HealthReport`; filled when omitted.              |
+| `apiVersion`, `kind`       | yes      | `v1beta1`, `HealthReport`; a report without either fails.    |
 | `metadata.name`            | no       | kukeond assigns one when omitted. A stored name is rejected. |
 | `metadata.realm`           | no       | Always `kuke-system`; any other realm is rejected.           |
 | `spec.createdAt`           | no       | kukeond sets it when omitted.                                |
