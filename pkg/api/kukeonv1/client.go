@@ -198,9 +198,11 @@ type Client interface {
 	SubmitHealthReport(ctx context.Context, report HealthReport) (HealthReport, error)
 	// ListHealthReports lists the stored reports, newest first.
 	ListHealthReports(ctx context.Context) ([]HealthReportSummary, error)
-	// ReadHealthReport returns one stored report by id, or the newest for
+	// ReadHealthReport returns one stored report by name, or the newest for
 	// HealthReportLatest.
 	ReadHealthReport(ctx context.Context, id string) (HealthReport, error)
+	// DeleteHealthReport deletes one stored report by name (issue #1619).
+	DeleteHealthReport(ctx context.Context, name string) error
 	StopCell(ctx context.Context, doc v1beta1.CellDoc) (StopCellResult, error)
 	KillCell(ctx context.Context, doc v1beta1.CellDoc) (KillCellResult, error)
 
@@ -478,6 +480,7 @@ const (
 	MethodSubmitHealthReport = ServiceName + ".SubmitHealthReport"
 	MethodListHealthReports  = ServiceName + ".ListHealthReports"
 	MethodReadHealthReport   = ServiceName + ".ReadHealthReport"
+	MethodDeleteHealthReport = ServiceName + ".DeleteHealthReport"
 
 	MethodStopCell = ServiceName + ".StopCell"
 	MethodKillCell = ServiceName + ".KillCell"

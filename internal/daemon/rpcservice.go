@@ -455,6 +455,19 @@ func (s *KukeonV1Service) ReadHealthReport(
 	return nil
 }
 
+// DeleteHealthReport deletes one stored health report (issue #1619).
+func (s *KukeonV1Service) DeleteHealthReport(
+	args *kukeonv1.DeleteHealthReportArgs,
+	reply *kukeonv1.DeleteHealthReportReply,
+) error {
+	err := s.core.DeleteHealthReport(s.ctx, args.Name)
+	reply.Err = kukeonv1.ToAPIError(err)
+	if err != nil {
+		s.logger.DebugContext(s.ctx, "DeleteHealthReport returned error", "error", err)
+	}
+	return nil
+}
+
 // ReadDaemonLogs returns a bounded chunk of kukeond's own log stream
 // (issue #1386, step 7). Socket access is the only gate, matching every
 // other read RPC on this service.

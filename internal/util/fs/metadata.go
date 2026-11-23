@@ -417,6 +417,22 @@ func VolumeMetaDir(baseRunPath, realmName, spaceName, stackName string) string {
 	)
 }
 
+// HealthReportsDir returns the directory that holds the stored kind:
+// HealthReport documents: <RunPath>/data/kuke-system/healthreports (issue
+// #1619). It sits under the system realm's metadata tree, so purging that
+// realm removes the reports with it.
+func HealthReportsDir(baseRunPath string) string {
+	return filepath.Join(
+		RealmMetadataDir(baseRunPath, consts.KukeSystemRealmName),
+		consts.KukeonHealthReportsSubdir,
+	)
+}
+
+// HealthReportPath returns the file of one stored HealthReport.
+func HealthReportPath(baseRunPath, name string) string {
+	return filepath.Join(HealthReportsDir(baseRunPath), name)
+}
+
 // VolumeMetaPath returns the host-side path of a single volume's reclaim
 // manifest: <scope>/volume-meta/<name>.json. The ".json" suffix keeps the
 // manifest a file (volumes are directories), so the volumes/ enumerator — which

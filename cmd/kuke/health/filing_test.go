@@ -25,11 +25,13 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	healthcmd "github.com/eminwux/kukeon/cmd/kuke/health"
 	"github.com/eminwux/kukeon/internal/health"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // tokenShaped assembles each fixture from a prefix and a body at run time, so
@@ -144,7 +146,7 @@ func (g *github) count(prefix string) int {
 }
 
 func sweepReport() kukeonv1.HealthReport {
-	return kukeonv1.HealthReport{
+	return kukeonv1.HealthReport{Spec: v1beta1.HealthReportSpec{
 		Since: window, Until: window.Add(3600e9),
 		Cell:    kukeonv1.HealthCellRef{Realm: "default", Space: "default", Stack: "default", Name: "sweep"},
 		Summary: "three findings",
@@ -166,6 +168,13 @@ func sweepReport() kukeonv1.HealthReport {
 				Severity: kukeonv1.HealthSeverityInfo, Evidence: []string{"orphan entries: x.sock"},
 			},
 		},
+	}}
+}
+
+func storedReport(name string, createdAt time.Time, findings []kukeonv1.HealthFinding) kukeonv1.HealthReport {
+	return kukeonv1.HealthReport{
+		Metadata: v1beta1.HealthReportMetadata{Name: name, Realm: "kuke-system"},
+		Spec:     v1beta1.HealthReportSpec{CreatedAt: createdAt, Summary: "x", Findings: findings},
 	}
 }
 
@@ -202,10 +211,10 @@ func TestFilingOpensOneIssuePerNewKukeonFinding(t *testing.T) {
 		}
 	}
 	// The URL is recorded on the kukeon finding only.
-	if report.Findings[0].IssueURL != "https://github.com/acme/ops/issues/1" ||
-		report.Findings[1].IssueURL != "" || report.Findings[2].IssueURL != "" {
+	if report.Spec.Findings[0].IssueURL != "https://github.com/acme/ops/issues/1" ||
+		report.Spec.Findings[1].IssueURL != "" || report.Spec.Findings[2].IssueURL != "" {
 		t.Fatalf("issue URLs = %q %q %q",
-			report.Findings[0].IssueURL, report.Findings[1].IssueURL, report.Findings[2].IssueURL)
+			report.Spec.Findings[0].IssueURL, report.Spec.Findings[1].IssueURL, report.Spec.Findings[2].IssueURL)
 	}
 	// Nothing sent to GitHub carries a secret, a credential URL, the
 	// workload finding or the unclear one.
@@ -244,8 +253,8 @@ func TestFilingCommentsOnTheOpenIssueOfARecurringFinding(t *testing.T) {
 	if len(gh.issues) != 1 || gh.count("POST /repos/acme/ops/issues/1/comments") != 1 {
 		t.Fatalf("a recurring finding must comment, not file again: %v", gh.requests)
 	}
-	if second.Findings[0].IssueURL != first.Findings[0].IssueURL {
-		t.Fatalf("recurring finding lost its issue: %q", second.Findings[0].IssueURL)
+	if second.Spec.Findings[0].IssueURL != first.Spec.Findings[0].IssueURL {
+		t.Fatalf("recurring finding lost its issue: %q", second.Spec.Findings[0].IssueURL)
 	}
 	comment := gh.bodies[len(gh.bodies)-1]
 	if !strings.Contains(comment, "Seen again") ||
@@ -288,13 +297,13 @@ func TestFilingSkipsGitHubWhenNothingIsKukeon(t *testing.T) {
 	server := httptest.NewServer(gh.handler(t))
 	defer server.Close()
 	report := sweepReport()
-	report.Findings = report.Findings[1:]
-	report.Findings[0].IssueURL = "https://github.com/acme/ops/issues/9" // a submitter cannot smuggle one in
+	report.Spec.Findings = report.Spec.Findings[1:]
+	report.Spec.Findings[0].IssueURL = "https://github.com/acme/ops/issues/9" // a submitter cannot smuggle one in
 	if opened, commented, err := filer(server).File(t.Context(), &report, nil); err != nil || opened+commented != 0 {
 		t.Fatalf("opened=%d commented=%d err=%v", opened, commented, err)
 	}
-	if len(gh.requests) != 0 || report.Findings[0].IssueURL != "" {
-		t.Fatalf("requests=%v url=%q", gh.requests, report.Findings[0].IssueURL)
+	if len(gh.requests) != 0 || report.Spec.Findings[0].IssueURL != "" {
+		t.Fatalf("requests=%v url=%q", gh.requests, report.Spec.Findings[0].IssueURL)
 	}
 }
 
@@ -342,8 +351,8 @@ func TestSubmitWithFileIssuesStoresTheIssueURL(t *testing.T) {
 	if err != nil || !strings.Contains(out, "Filed in acme/ops: 1 issues opened, 0 commented") {
 		t.Fatalf("out=%q err=%v", out, err)
 	}
-	if client.submitted.Findings[0].IssueURL != "https://github.com/acme/ops/issues/1" {
-		t.Fatalf("stored report lacks the issue URL: %+v", client.submitted.Findings[0])
+	if client.submitted.Spec.Findings[0].IssueURL != "https://github.com/acme/ops/issues/1" {
+		t.Fatalf("stored report lacks the issue URL: %+v", client.submitted.Spec.Findings[0])
 	}
 	if !strings.Contains(gh.issues[0]["body"].(string), "v0.11.0") {
 		t.Fatal("issue body lacks the daemon's kukeon version")
@@ -360,8 +369,8 @@ func TestSubmitWithFileIssuesStoresTheIssueURL(t *testing.T) {
 	t.Setenv(healthcmd.TokenEnv, "")
 	client = &fakeClient{}
 	_, errOut, err := run(t, client, string(raw), "report", "submit", "-f", "-", "--file-issues", "acme/ops")
-	if err == nil || client.submitted.Summary == "" || !strings.Contains(errOut, "the report is stored") {
-		t.Fatalf("missing token: err=%v stderr=%q stored=%q", err, errOut, client.submitted.Summary)
+	if err == nil || client.submitted.Spec.Summary == "" || !strings.Contains(errOut, "the report is stored") {
+		t.Fatalf("missing token: err=%v stderr=%q stored=%q", err, errOut, client.submitted.Spec.Summary)
 	}
 }
 
@@ -373,19 +382,19 @@ func TestSubmitWithFileIssuesFilesNothingForAnInvalidReport(t *testing.T) {
 	t.Setenv(healthcmd.APIEnv, server.URL)
 
 	duplicate := sweepReport()
-	duplicate.Findings[1].Signature = duplicate.Findings[0].Signature
+	duplicate.Spec.Findings[1].Signature = duplicate.Spec.Findings[0].Signature
 	badSeverity := sweepReport()
-	badSeverity.Findings[0].Severity = "fatal"
+	badSeverity.Spec.Findings[0].Severity = "fatal"
 	noSummary := sweepReport()
-	noSummary.Summary = " "
+	noSummary.Spec.Summary = " "
 	storedID := sweepReport()
-	storedID.ID = "taken"
+	storedID.Metadata.Name = "taken"
 	// No id, but kukeond derives it from createdAt: resubmitting the same
 	// document lands on the stored id.
 	derivedID := sweepReport()
-	derivedID.CreatedAt = window.Add(3600e9)
+	derivedID.Spec.CreatedAt = window.Add(3600e9)
 	reservedID := sweepReport()
-	reservedID.ID = kukeonv1.HealthReportLatest
+	reservedID.Metadata.Name = kukeonv1.HealthReportLatest
 
 	for name, document := range map[string]kukeonv1.HealthReport{
 		"duplicate signature": duplicate, "bad severity": badSeverity, "empty summary": noSummary,
@@ -397,15 +406,16 @@ func TestSubmitWithFileIssuesFilesNothingForAnInvalidReport(t *testing.T) {
 			t.Fatal(err)
 		}
 		client := &fakeClient{version: "v0.11.0", reports: []kukeonv1.HealthReport{
-			{ID: health.ReportID(derivedID.CreatedAt), Summary: "x"}, {ID: "taken", Summary: "x"},
+			storedReport(health.ReportID(derivedID.Spec.CreatedAt), time.Time{}, nil),
+			storedReport("taken", time.Time{}, nil),
 		}}
 		_, errOut, err := run(t, client, string(raw), "report", "submit", "-f", "-", "--file-issues", "acme/ops")
 		if err == nil || !strings.Contains(errOut, "nothing was filed") {
 			t.Fatalf("%s: err=%v stderr=%q", name, err, errOut)
 		}
-		if len(gh.requests) != 0 || client.submitted.Summary != "" {
+		if len(gh.requests) != 0 || client.submitted.Spec.Summary != "" {
 			t.Fatalf("%s: rejected report reached GitHub or kukeond: requests=%v submitted=%q",
-				name, gh.requests, client.submitted.Summary)
+				name, gh.requests, client.submitted.Spec.Summary)
 		}
 	}
 }
@@ -444,12 +454,12 @@ func TestSubmitWithFileIssuesComparesWithTheReportKukeondWill(t *testing.T) {
 	t.Setenv(healthcmd.APIEnv, server.URL)
 
 	document := sweepReport()
-	document.CreatedAt = window.Add(3600e9)
-	kukeonSignature := document.Findings[0].Signature
+	document.Spec.CreatedAt = window.Add(3600e9)
+	kukeonSignature := document.Spec.Findings[0].Signature
 	client := &fakeClient{version: "v0.11.0", reports: []kukeonv1.HealthReport{
 		// Newer than the back-dated document: kukeond does not compare with it.
-		{ID: "newer", CreatedAt: window.Add(7200e9), Findings: []kukeonv1.HealthFinding{{Signature: kukeonSignature}}},
-		{ID: "older", CreatedAt: window, Findings: []kukeonv1.HealthFinding{}},
+		storedReport("newer", window.Add(7200e9), []kukeonv1.HealthFinding{{Signature: kukeonSignature}}),
+		storedReport("older", window, []kukeonv1.HealthFinding{}),
 	}}
 	raw, err := json.Marshal(document)
 	if err != nil {

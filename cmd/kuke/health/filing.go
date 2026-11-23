@@ -117,7 +117,7 @@ func (f *Filer) Title(finding kukeonv1.HealthFinding) string {
 }
 
 func frequency(finding kukeonv1.HealthFinding, report kukeonv1.HealthReport, recurring bool, seenBefore string) string {
-	window := fmt.Sprintf("%s to %s", stamp(report.Since), stamp(report.Until))
+	window := fmt.Sprintf("%s to %s", stamp(report.Spec.Since), stamp(report.Spec.Until))
 	seen := seenBefore
 	if recurring {
 		seen = "recurring: the previous health report also carried it"
@@ -269,14 +269,14 @@ func (f *Filer) File(
 	}
 	recurring := map[string]bool{}
 	if previous != nil {
-		for _, finding := range previous.Findings {
+		for _, finding := range previous.Spec.Findings {
 			recurring[finding.Signature] = true
 		}
 	}
 	var open []ghIssue
 	listed := false
-	for i := range report.Findings {
-		finding := &report.Findings[i]
+	for i := range report.Spec.Findings {
+		finding := &report.Spec.Findings[i]
 		if finding.Classification != kukeonv1.HealthClassKukeon {
 			finding.IssueURL = "" // never carried for workload or unclear
 			continue

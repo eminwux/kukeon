@@ -25,6 +25,7 @@ import (
 	blueprintdelete "github.com/eminwux/kukeon/cmd/kuke/delete/blueprint"
 	"github.com/eminwux/kukeon/cmd/kuke/delete/cell"
 	configdelete "github.com/eminwux/kukeon/cmd/kuke/delete/config"
+	healthreportdelete "github.com/eminwux/kukeon/cmd/kuke/delete/healthreport"
 	"github.com/eminwux/kukeon/cmd/kuke/delete/realm"
 	secretdelete "github.com/eminwux/kukeon/cmd/kuke/delete/secret"
 	"github.com/eminwux/kukeon/cmd/kuke/delete/shared"
@@ -50,7 +51,7 @@ func NewDeleteCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "delete [name]",
 		Aliases: []string{"d"},
-		Short:   "Delete Kukeon resources (realm, space, stack, cell, secret, blueprint, volume, config)",
+		Short:   "Delete Kukeon resources (realm, space, stack, cell, secret, blueprint, volume, config, healthreport)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			// Check if -f flag is provided
 			file, err := cmd.Flags().GetString("file")
@@ -95,6 +96,7 @@ func NewDeleteCmd() *cobra.Command {
 		blueprintdelete.NewBlueprintCmd(),
 		volumedelete.NewVolumeCmd(),
 		configdelete.NewConfigCmd(),
+		healthreportdelete.NewHealthReportCmd(),
 	)
 
 	return cmd
@@ -102,7 +104,9 @@ func NewDeleteCmd() *cobra.Command {
 
 // completeDeleteSubcommands provides shell completion for delete subcommand names.
 func completeDeleteSubcommands(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	subcommands := []string{"realm", "space", "stack", "cell", "secret", "blueprint", "volume", "config"}
+	subcommands := []string{
+		"realm", "space", "stack", "cell", "secret", "blueprint", "volume", "config", "healthreport",
+	}
 
 	if toComplete == "" {
 		return subcommands, cobra.ShellCompDirectiveNoFileComp

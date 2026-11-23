@@ -61,9 +61,9 @@ func (f *fakeClient) SubmitHealthReport(
 	if f.err != nil {
 		return kukeonv1.HealthReport{}, f.err
 	}
-	report.ID = "assigned"
-	if len(report.Findings) > 0 {
-		report.Findings[0].Recurring = true
+	report.Metadata.Name = "assigned"
+	if len(report.Spec.Findings) > 0 {
+		report.Spec.Findings[0].Recurring = true
 	}
 	return report, nil
 }
@@ -72,7 +72,7 @@ func (f *fakeClient) ListHealthReports(context.Context) ([]kukeonv1.HealthReport
 	out := []kukeonv1.HealthReportSummary{}
 	for _, r := range f.reports {
 		out = append(out, kukeonv1.HealthReportSummary{
-			ID: r.ID, CreatedAt: r.CreatedAt, Summary: r.Summary, Findings: len(r.Findings),
+			ID: r.Metadata.Name, CreatedAt: r.Spec.CreatedAt, Summary: r.Spec.Summary, Findings: len(r.Spec.Findings),
 		})
 	}
 	return out, f.err
@@ -80,7 +80,7 @@ func (f *fakeClient) ListHealthReports(context.Context) ([]kukeonv1.HealthReport
 
 func (f *fakeClient) ReadHealthReport(_ context.Context, id string) (kukeonv1.HealthReport, error) {
 	for _, r := range f.reports {
-		if r.ID == id || id == kukeonv1.HealthReportLatest {
+		if r.Metadata.Name == id || id == kukeonv1.HealthReportLatest {
 			return r, nil
 		}
 	}
@@ -221,18 +221,22 @@ func TestSinceForms(t *testing.T) {
 	}
 }
 
-const reportYAML = `since: 2026-11-17T09:00:00Z
-until: 2026-11-17T10:00:00Z
-cell: {realm: default, space: default, stack: default, name: sweep}
-summary: one kukeon defect
-findings:
-  - signature: "start cell failed: task <id>"
-    classification: kukeon
-    severity: error
-    evidence: ["kuke get cell api -o yaml"]
-    suggestedCommands: ["kuke daemon logs"]
-body: |
-  # Sweep
+const reportYAML = `apiVersion: v1beta1
+kind: HealthReport
+metadata: {realm: kuke-system}
+spec:
+  since: 2026-11-17T09:00:00Z
+  until: 2026-11-17T10:00:00Z
+  cell: {realm: default, space: default, stack: default, name: sweep}
+  summary: one kukeon defect
+  findings:
+    - signature: "start cell failed: task <id>"
+      classification: kukeon
+      severity: error
+      evidence: ["kuke get cell api -o yaml"]
+      suggestedCommands: ["kuke daemon logs"]
+  body: |
+    # Sweep
 `
 
 func TestSubmitFromFileAndStdin(t *testing.T) {
@@ -246,8 +250,9 @@ func TestSubmitFromFileAndStdin(t *testing.T) {
 		t.Fatalf("submit: %q %v", out, err)
 	}
 	got := client.submitted
-	if got.Cell.Name != "sweep" || !got.Until.Equal(window) || got.Findings[0].Severity != "error" ||
-		got.Findings[0].SuggestedCommands[0] != "kuke daemon logs" || got.Body != "# Sweep\n" {
+	if got.Kind != "HealthReport" || got.Spec.Cell.Name != "sweep" || !got.Spec.Until.Equal(window) ||
+		got.Spec.Findings[0].Severity != "error" ||
+		got.Spec.Findings[0].SuggestedCommands[0] != "kuke daemon logs" || got.Spec.Body != "# Sweep\n" {
 		t.Fatalf("submitted = %+v", got)
 	}
 
@@ -257,12 +262,18 @@ func TestSubmitFromFileAndStdin(t *testing.T) {
 	}
 	client = &fakeClient{}
 	if _, _, err = run(t, client, string(asJSON), "report", "submit", "-f", "-"); err != nil ||
-		client.submitted.Summary != "one kukeon defect" {
+		client.submitted.Spec.Summary != "one kukeon defect" {
 		t.Fatalf("stdin json: %+v %v", client.submitted, err)
 	}
 
-	if _, _, err = run(t, &fakeClient{}, "summary: x\nunknownField: 1\n", "report", "submit", "-f", "-"); err == nil {
+	if _, _, err = run(t, &fakeClient{}, "kind: HealthReport\nspec: {summary: x}\nunknownField: 1\n",
+		"report", "submit", "-f", "-"); err == nil {
 		t.Fatal("unknown field accepted")
+	}
+	// The pre-kind document, with schemaVersion and a top-level id, is not read.
+	if _, _, err = run(t, &fakeClient{}, "schemaVersion: kukeon.io/health/v1\nid: r1\nsummary: x\n",
+		"report", "submit", "-f", "-"); err == nil {
+		t.Fatal("old report shape accepted")
 	}
 	if _, _, err = run(t, &fakeClient{}, "", "report", "submit"); err == nil {
 		t.Fatal("missing -f accepted")
@@ -279,9 +290,9 @@ func TestReportsAndReport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stored.ID, stored.CreatedAt = "r1", window
-	stored.Findings[0].Recurring = true
-	stored.Findings[0].IssueURL = "https://github.com/o/r/issues/7"
+	stored.Metadata.Name, stored.Spec.CreatedAt = "r1", window
+	stored.Spec.Findings[0].Recurring = true
+	stored.Spec.Findings[0].IssueURL = "https://github.com/o/r/issues/7"
 	client := &fakeClient{reports: []kukeonv1.HealthReport{stored}}
 
 	out, _, err := run(t, client, "", "reports")
@@ -305,7 +316,8 @@ func TestReportsAndReport(t *testing.T) {
 		}
 	}
 	if out, _, err = run(t, client, "", "report", "r1", "-o", "json"); err != nil ||
-		!strings.Contains(out, "\"issueUrl\"") {
+		!strings.Contains(out, "\"issueUrl\"") || !strings.Contains(out, "\"kind\": \"HealthReport\"") ||
+		strings.Contains(out, "schemaVersion") {
 		t.Fatalf("report json: %q %v", out, err)
 	}
 	if _, errOut, readErr := run(t, client, "", "report", "nope"); !errors.Is(

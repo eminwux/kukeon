@@ -101,6 +101,13 @@ const (
 	// runner.reservedScopeSubdirs) so it is never mistaken for a phantom scope.
 	KukeonVolumeMetaSubdir = "volume-meta"
 
+	// KukeonHealthReportsSubdir is the basename of the realm-scope
+	// subdirectory that holds the stored kind: HealthReport documents, one
+	// file per report named by metadata.name (issue #1619). Only the
+	// kuke-system realm has one. It is a reserved scope subdir (see
+	// runner.reservedScopeSubdirs) so it is never mistaken for a space.
+	KukeonHealthReportsSubdir = "healthreports"
+
 	// KukeonContainerTTYDir is the basename of the per-container directory
 	// that owns the sbsh terminal socket plus its capture and log siblings.
 	// kukeon bind-mounts this directory (not a single file) into the
@@ -136,11 +143,10 @@ const (
 	// and so the lock outlives the space directory DeleteSpace removes.
 	KukeonLockSubdir = "locks"
 
-	// KukeonHealthSubdir is the basename of the per-RunPath directory that
-	// holds kukeond's stored health reports (issue #1509). Like the lock
-	// directory it lives outside the metadata tree, so no realm walker
-	// mistakes it for a realm.
-	KukeonHealthSubdir = "health"
+	// KukeonLegacyHealthSubdir is the basename of the per-RunPath directory
+	// that held kukeond's health reports before they became a kind (issues
+	// #1509, #1619). Nothing reads or writes it: kukeond removes it at start.
+	KukeonLegacyHealthSubdir = "health"
 
 	// KukeondSocketShareSubdir is the basename of the directory, beside the
 	// kukeond socket, that holds a hard link to the live socket (issue #1483).

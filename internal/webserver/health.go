@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
@@ -43,6 +44,32 @@ type sweepRequest struct {
 	Config v1beta1.CellConfigMetadata `json:"config"`
 }
 
+// webReport is the JSON shape the Health page reads for one report: the
+// HealthReport document's spec, flattened, with metadata.name as id (issue
+// #1619 kept the page's shape when reports became a kind).
+type webReport struct {
+	ID        string                   `json:"id"`
+	CreatedAt time.Time                `json:"createdAt"`
+	Since     time.Time                `json:"since"`
+	Until     time.Time                `json:"until"`
+	Cell      kukeonv1.HealthCellRef   `json:"cell"`
+	Summary   string                   `json:"summary"`
+	Findings  []kukeonv1.HealthFinding `json:"findings"`
+	Body      string                   `json:"body,omitempty"`
+}
+
+func webReportFromDoc(report *kukeonv1.HealthReport) webReport {
+	findings := report.Spec.Findings
+	if findings == nil {
+		findings = []kukeonv1.HealthFinding{}
+	}
+	return webReport{
+		ID: report.Metadata.Name, CreatedAt: report.Spec.CreatedAt,
+		Since: report.Spec.Since, Until: report.Spec.Until, Cell: report.Spec.Cell,
+		Summary: report.Spec.Summary, Findings: findings, Body: report.Spec.Body,
+	}
+}
+
 // registerHealthRoutes serves the Health page: the reports kukeond stores and
 // the one-shot sweep. Every route goes through a daemon RPC; the server reads
 // no kukeon file itself.
@@ -60,7 +87,11 @@ func registerHealthRoutes(mux *http.ServeMux, dial Dial) {
 		}))
 	mux.HandleFunc("GET /api/health/reports/{id}", resourceRoute(dial,
 		func(ctx context.Context, c kukeonv1.Client, r *http.Request) (any, error) {
-			return c.ReadHealthReport(ctx, r.PathValue("id"))
+			report, err := c.ReadHealthReport(ctx, r.PathValue("id"))
+			if err != nil {
+				return nil, err
+			}
+			return webReportFromDoc(&report), nil
 		}))
 	// "Run sweep now" is `kuke run -d <sweep config>`: one create-and-start
 	// of a cell from the task config, which deletes itself when it ends.

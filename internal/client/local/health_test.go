@@ -18,14 +18,18 @@ package local
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/eminwux/kukeon/internal/controller"
+	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // TestHealthDigestWindowAndReports drives the in-process client — what
@@ -63,11 +67,13 @@ func TestHealthDigestWindowAndReports(t *testing.T) {
 
 	until := time.Now().UTC().Add(-10 * time.Minute).Truncate(time.Second)
 	stored, err := client.SubmitHealthReport(ctx, kukeonv1.HealthReport{
-		Since: until.Add(-time.Hour), Until: until,
-		Cell:    kukeonv1.HealthCellRef{Realm: "default", Space: "default", Stack: "default", Name: "sweep"},
-		Summary: "nothing to file", Findings: []kukeonv1.HealthFinding{},
+		Spec: v1beta1.HealthReportSpec{
+			Since: until.Add(-time.Hour), Until: until,
+			Cell:    kukeonv1.HealthCellRef{Realm: "default", Space: "default", Stack: "default", Name: "sweep"},
+			Summary: "nothing to file", Findings: []kukeonv1.HealthFinding{},
+		},
 	})
-	if err != nil || stored.ID == "" {
+	if err != nil || stored.Metadata.Name == "" || stored.Kind != v1beta1.KindHealthReport {
 		t.Fatalf("submit: %+v %v", stored, err)
 	}
 	digest, err = client.ReadHealthDigest(ctx, kukeonv1.HealthDigestRequest{SinceLastReport: true})
@@ -76,11 +82,78 @@ func TestHealthDigestWindowAndReports(t *testing.T) {
 	}
 
 	list, err := client.ListHealthReports(ctx)
-	if err != nil || len(list) != 1 || list[0].ID != stored.ID {
+	if err != nil || len(list) != 1 || list[0].ID != stored.Metadata.Name {
 		t.Fatalf("list = %+v err=%v", list, err)
 	}
 	if read, readErr := client.ReadHealthReport(ctx, kukeonv1.HealthReportLatest); readErr != nil ||
-		read.ID != stored.ID {
+		read.Metadata.Name != stored.Metadata.Name {
 		t.Fatalf("read latest = %+v err=%v", read, readErr)
+	}
+	if err = client.DeleteHealthReport(ctx, stored.Metadata.Name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = client.ReadHealthReport(ctx, stored.Metadata.Name); !errors.Is(err, errdefs.ErrHealthReportNotFound) {
+		t.Fatalf("read after delete: %v", err)
+	}
+}
+
+// TestApplyHealthReport drives `kuke apply -f` of a HealthReport document: it
+// takes the submit path (assigned createdAt, recurring) and a stored name
+// cannot be applied again (issue #1619).
+func TestApplyHealthReport(t *testing.T) {
+	ctx := context.Background()
+	runPath := t.TempDir()
+	client := New(ctx, slog.New(slog.NewTextHandler(io.Discard, nil)), controller.Options{
+		RunPath:          runPath,
+		ContainerdSocket: filepath.Join(runPath, "no-containerd.sock"),
+	})
+	defer func() { _ = client.Close() }()
+
+	doc := func(name string) []byte {
+		return []byte(`apiVersion: v1beta1
+kind: HealthReport
+metadata:
+  name: ` + name + `
+  realm: kuke-system
+spec:
+  since: 2026-11-22T09:15:00Z
+  until: 2026-11-22T10:15:00Z
+  cell: {realm: default, space: default, stack: default, name: sweep}
+  summary: one kukeon finding
+  findings:
+    - {signature: "start cell failed", classification: kukeon, severity: error, evidence: ["log line"]}
+`)
+	}
+	res, err := client.ApplyDocuments(ctx, doc("first"))
+	if err != nil || len(res.Resources) != 1 || res.Resources[0].Action != "created" ||
+		res.Resources[0].Name != "first" || res.Resources[0].Kind != string(v1beta1.KindHealthReport) {
+		t.Fatalf("apply = %+v err=%v", res, err)
+	}
+	stored, err := client.ReadHealthReport(ctx, "first")
+	if err != nil || stored.Spec.CreatedAt.IsZero() || stored.Spec.Findings[0].Recurring {
+		t.Fatalf("stored = %+v err=%v", stored, err)
+	}
+
+	res, err = client.ApplyDocuments(ctx, doc("first"))
+	if err != nil || len(res.Resources) != 1 || res.Resources[0].Action != "failed" ||
+		!strings.Contains(res.Resources[0].Error, "already stored") {
+		t.Fatalf("re-apply of a stored name = %+v err=%v", res, err)
+	}
+
+	time.Sleep(time.Millisecond) // the second report is created after the first
+	if res, err = client.ApplyDocuments(ctx, doc("second")); err != nil || res.Resources[0].Action != "created" {
+		t.Fatalf("apply second = %+v err=%v", res, err)
+	}
+	second, err := client.ReadHealthReport(ctx, kukeonv1.HealthReportLatest)
+	if err != nil || second.Metadata.Name != "second" || !second.Spec.Findings[0].Recurring {
+		t.Fatalf("latest = %+v err=%v", second, err)
+	}
+
+	if _, err = client.ApplyDocuments(ctx, []byte("apiVersion: v1beta1\nkind: HealthReport\nmetadata: {name: bad}\n"+
+		"spec: {summary: s}\n")); err == nil {
+		t.Fatal("an invalid HealthReport must be rejected")
+	}
+	if _, err = client.ReadHealthReport(ctx, "bad"); !errors.Is(err, errdefs.ErrHealthReportNotFound) {
+		t.Fatalf("an invalid report must write nothing: %v", err)
 	}
 }

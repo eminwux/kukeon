@@ -43,6 +43,7 @@ var kindToSentinel = map[string]error{
 	"CellNotFound":            errdefs.ErrCellNotFound,
 	"HealthReportNotFound":    errdefs.ErrHealthReportNotFound,
 	"HealthReportInvalid":     errdefs.ErrHealthReportInvalid,
+	"HealthReportExists":      errdefs.ErrHealthReportExists,
 	"InvalidCellState":        errdefs.ErrInvalidCellState,
 	"PermissionDenied":        fs.ErrPermission,
 	"RealmNotFound":           errdefs.ErrRealmNotFound,

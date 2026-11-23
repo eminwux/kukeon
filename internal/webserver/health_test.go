@@ -44,7 +44,9 @@ func (c *healthClient) ListHealthReports(context.Context) ([]kukeonv1.HealthRepo
 	for _, report := range c.reports {
 		out = append(
 			out,
-			kukeonv1.HealthReportSummary{ID: report.ID, Summary: report.Summary, Findings: len(report.Findings)},
+			kukeonv1.HealthReportSummary{
+				ID: report.Metadata.Name, Summary: report.Spec.Summary, Findings: len(report.Spec.Findings),
+			},
 		)
 	}
 	return out, nil
@@ -52,7 +54,7 @@ func (c *healthClient) ListHealthReports(context.Context) ([]kukeonv1.HealthRepo
 
 func (c *healthClient) ReadHealthReport(_ context.Context, id string) (kukeonv1.HealthReport, error) {
 	for _, report := range c.reports {
-		if report.ID == id || id == kukeonv1.HealthReportLatest {
+		if report.Metadata.Name == id || id == kukeonv1.HealthReportLatest {
 			return report, nil
 		}
 	}
@@ -107,12 +109,18 @@ func TestHealthReportRoutes(t *testing.T) {
 	}
 
 	client := &healthClient{reports: []kukeonv1.HealthReport{{
-		ID: "r1", Summary: "one defect",
-		Findings: []kukeonv1.HealthFinding{{
-			Signature: "check host/cni-plugins", Classification: kukeonv1.HealthClassKukeon, Recurring: true,
-			Severity: kukeonv1.HealthSeverityError, Evidence: []string{"missing: bridge"},
-			IssueURL: "https://github.com/acme/ops/issues/3",
-		}},
+		APIVersion: v1beta1.APIVersionV1Beta1, Kind: v1beta1.KindHealthReport,
+		Metadata: v1beta1.HealthReportMetadata{Name: "r1", Realm: "kuke-system"},
+		Spec: v1beta1.HealthReportSpec{
+			Summary: "one defect",
+			Cell:    kukeonv1.HealthCellRef{Realm: "default", Space: "default", Stack: "default", Name: "sweep"},
+			Findings: []kukeonv1.HealthFinding{{
+				Signature: "check host/cni-plugins", Classification: kukeonv1.HealthClassKukeon, Recurring: true,
+				Severity: kukeonv1.HealthSeverityError, Evidence: []string{"missing: bridge"},
+				IssueURL: "https://github.com/acme/ops/issues/3",
+			}},
+			Body: "# Sweep",
+		},
 	}}}
 	list := serveHealth(t, client, http.MethodGet, "/api/health/reports", "", "")
 	var summaries []map[string]any
@@ -122,7 +130,10 @@ func TestHealthReportRoutes(t *testing.T) {
 	}
 	read := serveHealth(t, client, http.MethodGet, "/api/health/reports/latest", "", "")
 	var report map[string]any
-	if err := json.Unmarshal(read.Body.Bytes(), &report); err != nil || report["id"] != "r1" {
+	// The page reads the report flat, as before it became a kind (#1619).
+	if err := json.Unmarshal(read.Body.Bytes(), &report); err != nil || report["id"] != "r1" ||
+		report["summary"] != "one defect" || report["body"] != "# Sweep" ||
+		report["cell"].(map[string]any)["name"] != "sweep" || report["schemaVersion"] != nil {
 		t.Fatalf("read: %s (%v)", read.Body, err)
 	}
 	finding := report["findings"].([]any)[0].(map[string]any)

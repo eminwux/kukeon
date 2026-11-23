@@ -67,6 +67,12 @@ const (
 	// Retain` is step 3 (#1237), and the container-side mount kind that
 	// references a Volume is step 4 (#1016).
 	KindVolume Kind = "Volume"
+	// KindHealthReport identifies one triaged health sweep (issue #1619). A
+	// report lives in the kuke-system realm and is stored as the validated
+	// document under that realm's metadata tree. It is immutable: kukeond
+	// assigns its name and createdAt when they are left out, and a stored
+	// name cannot be applied again. kukeond keeps the newest 50.
+	KindHealthReport Kind = "HealthReport"
 	// KindServerConfiguration identifies the kukeond daemon's configuration
 	// document loaded via `kukeond --configuration` (and consumed by
 	// `kuke init --server-configuration`). Not a server-side resource —

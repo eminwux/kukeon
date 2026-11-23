@@ -49,6 +49,8 @@ Cell "wp": created
 
 Applying the same manifest twice is safe. The second run should report `unchanged` for every resource.
 
+The exception is a [`HealthReport`](kuke-health.md#health-reports-are-a-kind): a report is immutable and create-only. `kuke apply -f` stores it exactly as `kuke health report submit -f` does — kukeond assigns `metadata.name` and `spec.createdAt` when they are left out, marks recurring findings and keeps the newest 50 — and applying a name that is already stored is `failed`.
+
 ## Exit codes
 
 - `0` — every resource succeeded.

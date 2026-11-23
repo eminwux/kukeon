@@ -10,12 +10,12 @@ kuke d      <resource> <name> ...                                # alias
 
 ## Persistent flags (inherited by every subcommand)
 
-| Flag             | Default | Description                                                                          |
-| ---------------- | ------- | ------------------------------------------------------------------------------------ |
-| `--cascade`      | `false` | Recursively delete child resources (realm → spaces → stacks → cells)                 |
-| `--force`        | `false` | Skip validation; attempt deletion anyway                                             |
-| `--file`, `-f`   | (empty) | Delete the resources listed in a YAML file                                           |
-| `--output`, `-o` | (empty) | Output format: `json`, `yaml`                                                        |
+| Flag             | Default | Description                                                          |
+| ---------------- | ------- | -------------------------------------------------------------------- |
+| `--cascade`      | `false` | Recursively delete child resources (realm → spaces → stacks → cells) |
+| `--force`        | `false` | Skip validation; attempt deletion anyway                             |
+| `--file`, `-f`   | (empty) | Delete the resources listed in a YAML file                           |
+| `--output`, `-o` | (empty) | Output format: `json`, `yaml`                                        |
 
 Plus all [global flags](kuke.md).
 
@@ -61,6 +61,14 @@ kuke delete config <name> --realm <r> [--space <s>] [--stack <t>] [--force]
 
 Removes the daemon-stored CellConfig document bound to the named scope. The cells the Config stamped are **not** torn down — a Config is a 1:N binding, so it may have many live cells, each its own identity; delete them separately with `kuke delete cell <name>`. For every live cell still carrying this Config's `kukeon.io/config` lineage label, `kuke delete config` emits a one-line notice pointing at that cell to delete (never a refusal). `--cascade` does not apply — a Config has no children in the resource hierarchy.
 
+### kuke delete healthreport
+
+```
+kuke delete healthreport <name>
+```
+
+Removes one stored [`HealthReport`](kuke-health.md#health-reports-are-a-kind) from the `kuke-system` realm. `latest` is not resolved: name the report (see `kuke get healthreports`). A report has no children, so `--cascade` does not apply.
+
 ## Behavior
 
 1. **Without `--cascade`**, delete fails if the resource has children. It refuses to leave orphaned subtrees behind.
@@ -84,6 +92,9 @@ sudo kuke delete blueprint dev --realm kuke-system
 
 # Remove a daemon-stored CellConfig (the live cell it owns is not torn down)
 sudo kuke delete config kukeon-dev --realm kuke-system
+
+# Remove one stored health report
+kuke delete healthreport 20261122T101500.000000000Z
 ```
 
 ## delete vs. purge

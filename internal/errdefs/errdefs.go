@@ -156,6 +156,9 @@ var (
 	// ErrHealthReportInvalid marks a SubmitHealthReport whose document fails
 	// schema validation (#1509). Nothing is stored.
 	ErrHealthReportInvalid = errors.New("invalid health report")
+	// ErrHealthReportExists marks a HealthReport submitted or applied under a
+	// name kukeond already stores. A report is immutable (issue #1619).
+	ErrHealthReportExists = errors.New("health report already exists")
 	// ErrDaemonMethodUnsupported marks an RPC the running kukeond does not
 	// implement — the client is newer than the daemon and kukeond must be
 	// rebuilt/redeployed (e.g. `kuke init --kukeond-image ...`).

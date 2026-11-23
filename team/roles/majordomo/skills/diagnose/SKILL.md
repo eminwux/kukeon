@@ -27,7 +27,7 @@ Run the reads that apply. All of them are read-only.
 | What is the workload showing now?    | `kuke screenshot <cell> --realm R --space S --stack K`, for a running Attachable cell (add `--container <name>` for one container); see the `observe-cell` skill |
 | What did kukeond log?                | `kuke daemon logs` (add `-f` to follow); `kuke health` groups the error-level entries                                                                            |
 | What state are sibling cells in?     | `kuke get cells --realm R`                                                                                                                                       |
-| What has a sweep already found?      | `kuke health reports`, `kuke health report latest`                                                                                                               |
+| What has a sweep already found?      | `kuke get healthreports`, `kuke health report latest` (or `kuke get healthreport latest -o yaml` for the stored document)                                        |
 
 Read the fields that carry the diagnosis ([state and field reference](references/states.md)):
 

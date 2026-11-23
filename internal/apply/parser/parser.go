@@ -24,11 +24,13 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/cellblueprint"
 	"github.com/eminwux/kukeon/internal/cellconfig"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/health"
 	"github.com/eminwux/kukeon/internal/secretstore"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"gopkg.in/yaml.v3"
@@ -49,6 +51,7 @@ type Document struct {
 	CellBlueprintDoc *v1beta1.CellBlueprintDoc
 	CellConfigDoc    *v1beta1.CellConfigDoc
 	VolumeDoc        *v1beta1.VolumeDoc
+	HealthReportDoc  *v1beta1.HealthReportDoc
 }
 
 // ValidationError represents a validation error for a specific document.
@@ -201,6 +204,16 @@ func ParseDocument(index int, raw []byte) (*Document, error) {
 		doc.VolumeDoc = &volumeDoc
 		doc.APIVersion = volumeDoc.APIVersion
 
+	case v1beta1.KindHealthReport:
+		// Decoded strictly, like `kuke health report submit` always has: a
+		// misspelled key in a report is an error, not a dropped field.
+		reportDoc, decodeErr := health.Decode(raw)
+		if decodeErr != nil {
+			return nil, fmt.Errorf("document %d: failed to parse HealthReport: %w", index, decodeErr)
+		}
+		doc.HealthReportDoc = &reportDoc
+		doc.APIVersion = reportDoc.APIVersion
+
 	default:
 		// kind: CellProfile was removed in #626. Give the operator an
 		// explicit migration pointer instead of the generic unknown-kind
@@ -241,7 +254,7 @@ func ValidateDocument(doc *Document) *ValidationError {
 	switch doc.Kind {
 	case v1beta1.KindRealm, v1beta1.KindSpace, v1beta1.KindStack, v1beta1.KindCell,
 		v1beta1.KindContainer, v1beta1.KindSecret, v1beta1.KindCellBlueprint,
-		v1beta1.KindCellConfig, v1beta1.KindVolume:
+		v1beta1.KindCellConfig, v1beta1.KindVolume, v1beta1.KindHealthReport:
 		// Valid kind
 	default:
 		return &ValidationError{
@@ -500,6 +513,11 @@ func ValidateDocument(doc *Document) *ValidationError {
 		if validationErr := validateVolume(doc); validationErr != nil {
 			return validationErr
 		}
+
+	case v1beta1.KindHealthReport:
+		if validationErr := validateHealthReport(doc); validationErr != nil {
+			return validationErr
+		}
 	}
 
 	return nil
@@ -645,6 +663,25 @@ func validateBlueprintScope(md v1beta1.CellBlueprintMetadata) error {
 	}
 	if stack != "" && space == "" {
 		return fmt.Errorf("%w (stack set without space)", errdefs.ErrBlueprintScopeIncomplete)
+	}
+	return nil
+}
+
+// validateHealthReport checks a kind: HealthReport document with kukeond's own
+// rules (health.Validate, issue #1619), after filling what kukeond fills when
+// it is left out: metadata.name, metadata.realm and spec.createdAt. Whether
+// the name is already stored is decided by kukeond on create.
+func validateHealthReport(doc *Document) *ValidationError {
+	if doc.HealthReportDoc == nil {
+		return &ValidationError{Index: doc.Index, Kind: doc.Kind, Err: errors.New("health report document is nil")}
+	}
+	if err := health.ValidateSubmission(*doc.HealthReportDoc, time.Now()); err != nil {
+		return &ValidationError{
+			Index: doc.Index,
+			Kind:  doc.Kind,
+			Name:  doc.HealthReportDoc.Metadata.Name,
+			Err:   err,
+		}
 	}
 	return nil
 }

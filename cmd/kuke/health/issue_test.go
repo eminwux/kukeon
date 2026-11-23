@@ -49,7 +49,7 @@ func TestInvestigationIssueMatchesTheSweepShape(t *testing.T) {
 	sweepBody := gh.issues[0]["body"].(string)
 	sweepTitle := gh.issues[0]["title"].(string)
 
-	finding := report.Findings[0]
+	finding := report.Spec.Findings[0]
 	draft := issueDraft("status.reason: CreateFailed")
 	draft.Signature, draft.Title = finding.Signature, finding.Title
 	rendered := f.Investigation(draft)

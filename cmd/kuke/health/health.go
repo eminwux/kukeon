@@ -263,21 +263,30 @@ func newReportsCmd() *cobra.Command {
 			if output != formatText {
 				return printStructured(w, reports, output)
 			}
-			if len(reports) == 0 {
-				fmt.Fprintln(w, "No health reports stored.")
-				return nil
-			}
-			tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(tw, "ID\tCREATED\tFINDINGS\tRECURRING\tFILED\tSUMMARY")
-			for _, r := range reports {
-				fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%d\t%s\n",
-					r.ID, stamp(r.CreatedAt), r.Findings, r.Recurring, r.Filed, r.Summary)
-			}
-			return tw.Flush()
+			return PrintReportList(w, reports)
 		},
 	}
 	cmd.Flags().StringVarP(&output, "output", "o", formatText, "Output format: text, json, yaml")
 	return cmd
+}
+
+// reportListPadding is the gap between the report list's columns.
+const reportListPadding = 2
+
+// PrintReportList writes the table of stored reports, newest first: the
+// output of `kuke health reports` and `kuke get healthreports`.
+func PrintReportList(w io.Writer, reports []kukeonv1.HealthReportSummary) error {
+	if len(reports) == 0 {
+		fmt.Fprintln(w, "No health reports stored.")
+		return nil
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, reportListPadding, ' ', 0)
+	fmt.Fprintln(tw, "ID\tCREATED\tFINDINGS\tRECURRING\tFILED\tSUMMARY")
+	for _, r := range reports {
+		fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%d\t%s\n",
+			r.ID, stamp(r.CreatedAt), r.Findings, r.Recurring, r.Filed, r.Summary)
+	}
+	return tw.Flush()
 }
 
 func newReportCmd() *cobra.Command {
@@ -318,11 +327,12 @@ func newSubmitCmd() *cobra.Command {
 	var file, fileIssues string
 	cmd := &cobra.Command{
 		Use:   "submit -f <file>",
-		Short: "Validate and store a health report",
-		Long: "Validate a health report document (JSON or YAML; - reads stdin) and store it in\n" +
-			"kukeond. kukeond assigns id and createdAt when the document leaves them out, and\n" +
-			"marks findings the previous report already carried as recurring. Storing a report\n" +
-			"files nothing anywhere.\n\n" +
+		Short: "Validate and store a HealthReport document",
+		Long: "Validate a kind: HealthReport document (JSON or YAML; - reads stdin) and store it\n" +
+			"in kukeond, exactly as `kuke apply -f` does. kukeond assigns metadata.name and\n" +
+			"spec.createdAt when the document leaves them out, marks findings the previous report\n" +
+			"already carried as recurring, and rejects a name it already stores. Storing a\n" +
+			"report files nothing anywhere.\n\n" +
 			"--file-issues <owner>/<repo> is the opt-in exception: once the document passes the\n" +
 			"same validation kukeond applies, and before storing, kuke opens one\n" +
 			"GitHub issue per kukeon finding (or comments on the open issue that already carries\n" +
@@ -367,7 +377,7 @@ func newSubmitCmd() *cobra.Command {
 				if err = validateForFiling(cmd.Context(), client, document, time.Now()); err != nil {
 					return report(cmd, err)
 				}
-				previous := previousReport(cmd.Context(), client, document.CreatedAt)
+				previous := previousReport(cmd.Context(), client, document.Spec.CreatedAt)
 				// A filing failure does not lose the sweep: the report is
 				// still stored, with the URLs obtained so far.
 				opened, commented, filingErr = filer.File(cmd.Context(), &document, previous)
@@ -382,13 +392,13 @@ func newSubmitCmd() *cobra.Command {
 				return report(cmd, err)
 			}
 			recurring := 0
-			for _, finding := range stored.Findings {
+			for _, finding := range stored.Spec.Findings {
 				if finding.Recurring {
 					recurring++
 				}
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Stored health report %s (%d findings, %d recurring)\n",
-				stored.ID, len(stored.Findings), recurring)
+				stored.Metadata.Name, len(stored.Spec.Findings), recurring)
 			if fileIssues != "" {
 				fmt.Fprintf(cmd.OutOrStdout(), "Filed in %s: %d issues opened, %d commented\n",
 					fileIssues, opened, commented)
@@ -399,7 +409,7 @@ func newSubmitCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&file, "file", "f", "", "Report document (JSON or YAML); - reads stdin")
+	cmd.Flags().StringVarP(&file, "file", "f", "", "HealthReport document (JSON or YAML); - reads stdin")
 	cmd.Flags().StringVar(&fileIssues, "file-issues", "",
 		"Opt-in: file kukeon findings as GitHub issues in <owner>/<repo> (needs "+TokenEnv+", set by the "+OptInSecret+" opt-in)")
 	return cmd
@@ -413,7 +423,7 @@ func filedBeforeFailure(
 	w := cmd.ErrOrStderr()
 	fmt.Fprintf(w, "The report was not stored, but filing in %s already ran: %d issues opened, %d commented\n",
 		repo, opened, commented)
-	for _, finding := range document.Findings {
+	for _, finding := range document.Spec.Findings {
 		if finding.IssueURL != "" {
 			fmt.Fprintf(w, "  %s: %s\n", finding.Signature, finding.IssueURL)
 		}
@@ -423,42 +433,38 @@ func filedBeforeFailure(
 	}
 }
 
-// validateForFiling runs kukeond's schema check on document as it will be
-// submitted after filing: id and createdAt filled the way kukeond fills them
-// when absent, and issueUrl cleared on the findings the filer never files. It
-// also refuses an id kukeond already stores. Filing runs only when it passes.
+// validateForFiling runs kukeond's check on document as it will be submitted
+// after filing: metadata.name and spec.createdAt filled the way kukeond fills
+// them when absent, and issueUrl cleared on the findings the filer never
+// files. It also refuses a name kukeond already stores. Filing runs only when
+// it passes.
 func validateForFiling(
 	ctx context.Context, client kukeonv1.Client, document kukeonv1.HealthReport, now time.Time,
 ) error {
 	candidate := document
-	if document.Findings != nil {
-		candidate.Findings = make([]kukeonv1.HealthFinding, len(document.Findings))
-		copy(candidate.Findings, document.Findings)
+	if document.Spec.Findings != nil {
+		candidate.Spec.Findings = make([]kukeonv1.HealthFinding, len(document.Spec.Findings))
+		copy(candidate.Spec.Findings, document.Spec.Findings)
 	}
-	// kukeond derives a missing id from createdAt, so a document with
-	// createdAt but no id is stored under a predictable id: check that one.
-	// Without createdAt, kukeond's own clock picks the id.
-	checkID := document.ID
-	if candidate.CreatedAt.IsZero() {
-		candidate.CreatedAt = now
-	} else if checkID == "" {
-		checkID = health.ReportID(candidate.CreatedAt)
+	// kukeond derives a missing name from createdAt, so a document with
+	// createdAt but no name is stored under a predictable name: check that
+	// one. Without createdAt, kukeond's own clock picks the name.
+	checkName := document.Metadata.Name
+	if checkName == "" && !document.Spec.CreatedAt.IsZero() {
+		checkName = health.ReportID(document.Spec.CreatedAt)
 	}
-	if candidate.ID == "" {
-		candidate.ID = health.ReportID(candidate.CreatedAt)
-	}
-	for i := range candidate.Findings {
-		if candidate.Findings[i].Classification != kukeonv1.HealthClassKukeon {
-			candidate.Findings[i].IssueURL = ""
+	for i := range candidate.Spec.Findings {
+		if candidate.Spec.Findings[i].Classification != kukeonv1.HealthClassKukeon {
+			candidate.Spec.Findings[i].IssueURL = ""
 		}
 	}
-	if err := health.Validate(&candidate); err != nil {
+	if err := health.ValidateSubmission(candidate, now); err != nil {
 		return fmt.Errorf("%w; nothing was filed", err)
 	}
-	if checkID != "" {
-		if _, err := client.ReadHealthReport(ctx, checkID); err == nil {
-			return fmt.Errorf("%w: a report with id %q is already stored; nothing was filed",
-				errdefs.ErrHealthReportInvalid, checkID)
+	if checkName != "" {
+		if _, err := client.ReadHealthReport(ctx, checkName); err == nil {
+			return fmt.Errorf("%w: a report named %q is already stored; nothing was filed",
+				errdefs.ErrHealthReportExists, checkName)
 		}
 	}
 	return nil
@@ -477,7 +483,7 @@ func previousReport(
 			return nil
 		}
 		id = ""
-		for _, summary := range summaries { // newest first
+		for _, summary := range summaries { // newest first; ID is metadata.name
 			if !summary.CreatedAt.After(createdAt) {
 				id = summary.ID
 				break
@@ -494,24 +500,19 @@ func previousReport(
 	return &previous
 }
 
-// DecodeReport reads a report document strictly: an unknown field is an
-// error, so a misspelled key is not silently dropped. JSON is a subset of
-// YAML, so one decoder covers both.
+// DecodeReport reads a HealthReport document strictly: an unknown field is
+// an error, so a misspelled key is not silently dropped. JSON and YAML are
+// both accepted.
 func DecodeReport(raw []byte) (kukeonv1.HealthReport, error) {
-	var document kukeonv1.HealthReport
-	decoder := yaml.NewDecoder(strings.NewReader(string(raw)))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
-		return kukeonv1.HealthReport{}, fmt.Errorf("decode report: %w", err)
-	}
-	return document, nil
+	return health.Decode(raw)
 }
 
 // Markdown renders a stored report for reading: its header, each finding,
 // then the body the sweep wrote.
-func Markdown(r kukeonv1.HealthReport) string {
+func Markdown(report kukeonv1.HealthReport) string {
+	r := &report.Spec
 	var b strings.Builder
-	fmt.Fprintf(&b, "# Health report %s\n\n", r.ID)
+	fmt.Fprintf(&b, "# Health report %s\n\n", report.Metadata.Name)
 	fmt.Fprintf(&b, "- Created: %s\n- Window: %s to %s\n- Submitted by: %s/%s/%s/%s\n\n%s\n",
 		stamp(r.CreatedAt), stamp(r.Since), stamp(r.Until),
 		r.Cell.Realm, r.Cell.Space, r.Cell.Stack, r.Cell.Name, strings.TrimSpace(r.Summary))

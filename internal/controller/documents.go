@@ -67,6 +67,8 @@ func SortDocumentsByKind(docs []parser.Document, reverse bool) []parser.Document
 	// slot further out; the relative order among the scope-targeting kinds is
 	// immaterial since none reference another.
 	kindOrder[v1beta1.KindVolume] = len(kindOrder) + 1
+	// HealthReports reference nothing else in an apply file; they sort last.
+	kindOrder[v1beta1.KindHealthReport] = len(kindOrder) + 1
 
 	// Sort by kind order, then by original index
 	sort.Slice(sorted, func(i, j int) bool {

@@ -1018,6 +1018,19 @@ func (c *UnixClient) ReadHealthReport(ctx context.Context, id string) (HealthRep
 	return reply.Result, nil
 }
 
+// DeleteHealthReport implements Client (issue #1619).
+func (c *UnixClient) DeleteHealthReport(ctx context.Context, name string) error {
+	args := &DeleteHealthReportArgs{Name: name}
+	reply := &DeleteHealthReportReply{}
+	if err := c.call(ctx, MethodDeleteHealthReport, args, reply); err != nil {
+		return err
+	}
+	if reply.Err != nil {
+		return FromAPIError(reply.Err)
+	}
+	return nil
+}
+
 // Ping implements Client.
 func (c *UnixClient) Ping(ctx context.Context) error {
 	args := &PingArgs{}

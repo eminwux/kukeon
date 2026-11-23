@@ -35,6 +35,7 @@ import (
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/firewall"
+	"github.com/eminwux/kukeon/internal/health"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 )
 
@@ -165,6 +166,8 @@ func (s *Server) Serve() error {
 		_ = listener.Close()
 		return err
 	}
+
+	s.removeLegacyHealthStore()
 
 	s.rpc = rpc.NewServer()
 	svc := NewKukeonV1Service(s.ctx, s.logger, s.core)
@@ -299,6 +302,21 @@ func (s *Server) reassertForwardAdmission() error {
 	s.logger.InfoContext(s.ctx, "re-asserted forward admission chain on startup",
 		"chain", firewall.ForwardChainName)
 	return nil
+}
+
+// removeLegacyHealthStore deletes <RunPath>/health, where health reports were
+// kept before they became the HealthReport kind (issue #1619). The reports in
+// it are not read or converted; removing the directory keeps the run-dir
+// health check from reporting it as an orphan. Best-effort: a failure is
+// logged and the daemon still serves.
+func (s *Server) removeLegacyHealthStore() {
+	runPath := s.opts.Controller.RunPath
+	if runPath == "" {
+		return
+	}
+	if err := health.RemoveLegacyStore(runPath); err != nil {
+		s.logger.WarnContext(s.ctx, "remove legacy health report directory failed", "error", err)
+	}
 }
 
 // startReconcileLoop spawns the background cell-reconciliation ticker when
