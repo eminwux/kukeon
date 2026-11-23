@@ -121,3 +121,36 @@ jobs:
           test -x /usr/local/bin/kukebuild
           test -x /usr/local/bin/kukepause
           /usr/local/bin/kuke version
+
+  # Negative path: a temporary directory too small for the release assets
+  # (#1343). The installer must fail before or during the download with a
+  # message that names TMPDIR, not one that sends the operator looking for a
+  # missing release. The runner has sudo and a running containerd, as
+  # prereq-pass relies on.
+  small-tmpdir:
+    name: a full TMPDIR is reported as that, not as a missing release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Mount a 1 MiB tmpfs
+        run: |
+          sudo mkdir -p /mnt/kuke-small
+          sudo mount -t tmpfs -o size=1m,mode=1777 tmpfs /mnt/kuke-small
+      - name: Run installer with TMPDIR on the tmpfs
+        run: |
+          set +e
+          out="$(TMPDIR=/mnt/kuke-small KUKE_VERSION=v0.6.1 KUKE_SKIP_INIT=1 bash scripts/install.sh 2>&1)"
+          rc=$?
+          echo "$out"
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::expected non-zero exit with a full TMPDIR"
+            exit 1
+          fi
+          if ! echo "$out" | grep -q 'TMPDIR'; then
+            echo "::error::expected the failure message to name TMPDIR"
+            exit 1
+          fi
+          if echo "$out" | grep -q 'Confirm KUKE_VERSION'; then
+            echo "::error::a local write failure must not suggest a missing release"
+            exit 1
+          fi
