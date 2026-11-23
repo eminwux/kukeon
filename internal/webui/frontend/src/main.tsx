@@ -10,7 +10,9 @@ import { when } from "./schedule";
 import { TerminalWorkspace, useTerminalSessions, type TerminalManager } from "./terminal";
 import { CellSidebar } from "./cell-sidebar";
 import { useInventory, type Inventory, type InventoryResource, type Doc, type RuntimeStatus } from "./inventory";
-import { apiPath, catalogTitles, daemonLink, healthLink, homeLink, imagesLink, kinds, titles, readRoute, resourceLink, listLink, newCellLink, workspaceLink, type Route } from "./routes";
+import { apiPath, catalogTitles, daemonLink, homeLink, imagesLink, kinds, overviewLink, titles, readRoute, resourceLink, listLink, newCellLink, workspaceLink, type Route } from "./routes";
+import { viewOf } from "./views.mjs";
+import { ManageNav } from "./manage-nav";
 import { BrandMark, SidebarRail, SidebarResizer, SidebarToggle, VersionRows, railWidth, useSidebarLayout, versionInfo } from "./sidebar-shell";
 import { DriftBadge, ScopePath, SocketPath, StateBadge, driftReason, hasDrift } from "./status";
 import { DocumentRowLink, Icon } from "./icons";
@@ -309,39 +311,6 @@ type Theme = "system" | "light" | "dark";
 function initialTheme(): Theme {
   try { const value = localStorage.getItem("kukeon-theme"); return value === "light" || value === "dark" ? value : "system"; }
   catch { return "system"; }
-}
-// Primary navigation in two labelled groups (#1568): day-to-day operations first, then the resources and
-// administration pages. On phones the second group sits behind a disclosure so the row never scrolls sideways.
-function ResourcesNavigation({ route, mobile }: { route: Route; mobile: boolean }) {
-  const activeDepth = route.view === "resource" ? Math.min(route.scope.length - 1, 3) : titles.findIndex(title => title.toLowerCase() === route.view);
-  const scoped = (depth: number) => ({ title: titles[depth], href: listLink(depth), active: activeDepth === depth });
-  const operate = [
-    { title: "Overview", href: "#/resources", active: route.view === "dashboard" },
-    scoped(3),
-    { title: "Health", href: healthLink(), active: route.view === "health" },
-  ];
-  const configure = [
-    scoped(0), scoped(1), scoped(2),
-    ...Object.entries(catalogTitles).map(([kind, title]) => ({ title, href: `#/${kind}`, active: route.view === kind || (kind === "configs" && route.view === "new-config") || (kind === "secrets" && route.view === "new-secret") })),
-    { title: "Connectors", href: connectorsLink(), active: route.view === "connectors" },
-    { title: "Teams", href: teamsLink(), active: route.view === "teams" },
-    { title: "Images", href: imagesLink(), active: route.view === "images" },
-    { title: "Daemon", href: daemonLink(), active: route.view === "daemon" || route.view === "daemon-logs" },
-  ];
-  const configureActive = configure.some(item => item.active);
-  // The phone disclosure follows the route: open on a page inside the group, closed on an Operate page.
-  const [more, setMore] = useState(configureActive);
-  useEffect(() => { setMore(configureActive); }, [configureActive, route.view]);
-  const links = (items: typeof operate) => items.map(item => <a key={item.title} href={item.href} aria-current={item.active ? "page" : undefined}>{item.title}</a>);
-  return <nav className="resources-nav panel" aria-label="Resources navigation">
-    <div className="resources-nav-group" role="group" aria-labelledby="resources-nav-operate"><span className="resources-nav-label" id="resources-nav-operate">Operate</span>{links(operate)}</div>
-    {mobile
-      ? <details className="resources-nav-group nav-more" open={more} onToggle={event => setMore(event.currentTarget.open)}>
-        <summary className="resources-nav-label" id="resources-nav-configure">Configure</summary>
-        <div className="nav-more-links" role="group" aria-labelledby="resources-nav-configure">{links(configure)}</div>
-      </details>
-      : <div className="resources-nav-group" role="group" aria-labelledby="resources-nav-configure"><span className="resources-nav-label" id="resources-nav-configure">Configure</span>{links(configure)}</div>}
-  </nav>;
 }
 function App() {
   const [revision, setRevision] = useState(0);
@@ -655,6 +624,8 @@ function App() {
       notify({ key, tone: "error", message: `Cell ${scope.join(" / ")} was created stopped, but start failed: ${error instanceof Error ? error.message : "The daemon request failed."}`, link });
     } finally { setRevision(value => value + 1); }
   }
+  // Workbench (terminals) or Manage (resources), derived from the route and never stored (#1635).
+  const view = viewOf(route);
   const isWorkspace = route.view === "workspace";
   const cellScreenScope = (isWorkspace || route.view === "resource" && !route.document) && route.scope.length === 4 ? route.scope : null;
   // cellRead flows as an ordinary scrolling page; only cellTerminal pins the shell to the viewport.
@@ -672,12 +643,14 @@ function App() {
   const connectorHeading = connectorsView && route.scope[0] ? connectorTitle?.name === route.scope[0] ? connectorTitle.title : route.scope[0] : undefined;
   // The identity pages of a connector: #/connectors/<name>/new-identity and …/rotate-identity.
   const identityAction = connectorsView && route.scope[0] && route.action ? route.action === "rotate-identity" ? "Rotate identity" : "New identity" : undefined;
-  const heading = connectorsView ? identityAction ?? connectorHeading ?? "Connectors" : teamsView ? route.scope[0] ?? "Teams" : route.view === "health" ? "Health" : route.view === "daemon" ? "Daemon" : route.view === "daemon-logs" ? "Daemon logs" : isWorkspace ? route.scope.at(-1) ?? "Cell" : route.view === "new-cell" ? "New Cell" : route.view === "new-config" ? "New Config" : route.view === "new-secret" ? "New Secret" : images ? route.scope[1] ?? "Images" : catalog ? route.scope.at(-1) ?? catalogTitles[route.view] : route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : "Resources";
+  const heading = connectorsView ? identityAction ?? connectorHeading ?? "Connectors" : teamsView ? route.scope[0] ?? "Teams" : route.view === "health" ? "Health" : route.view === "daemon" ? "Daemon" : route.view === "daemon-logs" ? "Daemon logs" : isWorkspace ? route.scope.at(-1) ?? "Cell" : route.view === "new-cell" ? "New Cell" : route.view === "new-config" ? "New Config" : route.view === "new-secret" ? "New Secret" : images ? route.scope[1] ?? "Images" : catalog ? route.scope.at(-1) ?? catalogTitles[route.view] : route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : route.view === "workbench" ? "Workbench" : "Overview";
   // Only a scope path or realm qualifies the title; generic subtitles were dropped.
   const headingContext = connectorsView ? identityAction ? connectorHeading ?? "" : connectorHeading && connectorHeading !== route.scope[0] ? route.scope[0] : "" : isWorkspace ? route.scope.join(" / ") : images ? route.scope[1] ? route.scope[0] : "" : route.view === "resource" || (catalog && route.scope.length > 0) ? route.scope.join(" / ") : "";
   const daemonStatus = inventory.daemon.error?.code === "permission_denied" ? "Permission denied" : inventory.daemon.error ? "Unavailable" : inventory.daemon.loading ? "Checking…" : "Connected";
   const daemonTone = inventory.daemon.error ? "failed" : inventory.daemon.loading ? "checking" : "";
   const versions = versionInfo(connection.data?.version, connection.data?.daemonVersion);
+  // The breadcrumb root names the view: Workbench pages start at the grid, Manage pages at the Overview.
+  const crumbRoot = view === "workbench" ? <a href={homeLink}>Workbench</a> : <a href={overviewLink}>Overview</a>;
   const shellStyle = { "--sidebar-width": `${sidebar.width}px` } as CSSProperties;
   const pageTitle = heading ? `${heading} · kukeon` : "kukeon";
   useEffect(() => { document.title = pageTitle; }, [pageTitle]);
@@ -694,7 +667,7 @@ function App() {
   }, [routeKey, isWorkspace]);
   return <AskProvider value={dock.ask}><div className={`app-shell${cellScreenScope ? " cell-screen" : ""}${cellTerminalActive ? " cell-screen-active" : ""}${sidebar.collapsed ? " sidebar-collapsed" : ""}${dock.open ? " majordomo-open" : ""}${dock.open && dock.overlay ? " majordomo-overlay" : ""}`} style={shellStyle}>
     <a className="skip-link" href="#main-content" onClick={event => { event.preventDefault(); document.getElementById("main-content")?.focus(); }}>Skip to content</a>
-    <aside className={`sidebar ${menuOpen ? "is-open" : ""}`} id="cell-sidebar" aria-label="Cell sidebar">
+    <aside className={`sidebar ${menuOpen ? "is-open" : ""}`} id="cell-sidebar" aria-label={view === "workbench" ? "Cell sidebar" : "Manage sidebar"}>
       <button ref={sidebarClose} className="sidebar-close" aria-label="Close sidebar" onClick={closeMenu}>×</button>
       <div className="sidebar-panel">
         <div className="sidebar-header">
@@ -702,7 +675,7 @@ function App() {
           <SidebarToggle collapsed={false} onToggle={() => sidebar.setCollapsed(true)} />
         </div>
         <MajordomoSidebarEntry major={major} dock={dock} />
-        <CellSidebar inventory={inventory} selectedScope={cellScreenScope ?? []} terminalStates={terminals.cellStates} />
+        {view === "workbench" ? <CellSidebar inventory={inventory} selectedScope={cellScreenScope ?? []} terminalStates={terminals.cellStates} /> : <ManageNav route={route} />}
         <section className="connection" aria-label="Daemon connection">
           <div className="connection-heading">
             <p className="status" role="status"><span className={`dot ${daemonTone}`} aria-hidden="true" />{daemonStatus}</p>
@@ -713,7 +686,7 @@ function App() {
           {connection.error && <ErrorNotice error={connection.error} />}
         </section>
       </div>
-      {sidebar.collapsed && <SidebarRail inventory={inventory} selectedScope={cellScreenScope ?? []} connection={{ status: daemonStatus, tone: daemonTone, info: versions }} onExpand={() => sidebar.setCollapsed(false)} majordomo={<MajordomoRailButton major={major} dock={dock} />} />}
+      {sidebar.collapsed && <SidebarRail view={view} inventory={inventory} selectedScope={cellScreenScope ?? []} connection={{ status: daemonStatus, tone: daemonTone, info: versions }} onExpand={() => sidebar.setCollapsed(false)} majordomo={<MajordomoRailButton major={major} dock={dock} />} />}
       {!sidebar.collapsed && <SidebarResizer width={sidebar.width} onResize={sidebar.setWidth} />}
     </aside>
     <div className="sidebar-scrim" aria-hidden="true" hidden={!menuOpen} onClick={closeMenu} />
@@ -723,7 +696,11 @@ function App() {
         <button ref={menuToggle} className="menu-toggle" aria-label="Toggle sidebar" aria-expanded={menuOpen} aria-controls="cell-sidebar" onClick={() => setMenuOpen(!menuOpen)}>☰</button>
         <span className="toolbar-connectivity" role="status" aria-label={`Daemon: ${daemonStatus}`} title={`Daemon: ${daemonStatus}`}><span className={`dot ${daemonTone}`} aria-hidden="true" /></span>
         <InventoryIndicator inventory={inventory} />
-        <nav className="breadcrumbs" aria-label="Resource scope">{isWorkspace || route.view === "resource" ? <><a href={homeLink}>Resources</a>{route.scope.map((name, i) => <a key={i} aria-label={`${kinds[i]}: ${name}`} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}</> : <><a href={homeLink}>Resources</a>{connectorsView ? route.scope[0] ? <><a href={connectorsLink()}>Connectors</a>{identityAction ? <><a href={connectorsLink(route.scope[0], route.target ? { realm: route.target[0], space: route.target[1], stack: route.target[2] } : undefined)}>{connectorHeading}</a><span>{identityAction}</span></> : <span>{route.scope[0]}</span>}</> : <span>Connectors</span> : teamsView ? route.scope[0] ? <><a href={teamsLink()}>Teams</a><span>{route.scope[0]}</span></> : <span>Teams</span> : route.view === "health" ? <span>Health</span> : daemonView ? route.view === "daemon" ? <span>Daemon</span> : <><a href={daemonLink()}>Daemon</a><span>Logs</span></> : images ? <><a href={imagesLink()}>Images</a>{route.scope[0] && (route.scope[1] ? <a href={imagesLink(route.scope[0])}>{route.scope[0]}</a> : <span>{route.scope[0]}</span>)}{route.scope[1] && <span>{route.scope[1]}</span>}</> : catalog ? <><a href={`#/${route.view}`}>{catalogTitles[route.view]}</a>{route.scope.slice(0, -1).map((name, i) => <a key={i} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}{route.scope.length > 0 && <span>{route.scope.at(-1)}</span>}</> : heading !== "Resources" && <span>{heading}</span>}</>}</nav>
+        <nav className="view-switch" aria-label="View">
+          <a href={homeLink} aria-current={view === "workbench" ? "true" : undefined}><Icon name="terminal" /><span className="view-switch-label">Workbench</span></a>
+          <a href={overviewLink} aria-current={view === "manage" ? "true" : undefined}><Icon name="manage" /><span className="view-switch-label">Manage</span></a>
+        </nav>
+        <nav className="breadcrumbs" aria-label="Resource scope">{isWorkspace || route.view === "resource" ? <>{crumbRoot}{route.scope.map((name, i) => <a key={i} aria-label={`${kinds[i]}: ${name}`} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}</> : <>{crumbRoot}{connectorsView ? route.scope[0] ? <><a href={connectorsLink()}>Connectors</a>{identityAction ? <><a href={connectorsLink(route.scope[0], route.target ? { realm: route.target[0], space: route.target[1], stack: route.target[2] } : undefined)}>{connectorHeading}</a><span>{identityAction}</span></> : <span>{route.scope[0]}</span>}</> : <span>Connectors</span> : teamsView ? route.scope[0] ? <><a href={teamsLink()}>Teams</a><span>{route.scope[0]}</span></> : <span>Teams</span> : route.view === "health" ? <><a href={daemonLink()}>Daemon</a><span>Health</span></> : daemonView ? route.view === "daemon" ? <span>Daemon</span> : <><a href={daemonLink()}>Daemon</a><span>Logs</span></> : images ? <><a href={imagesLink()}>Images</a>{route.scope[0] && (route.scope[1] ? <a href={imagesLink(route.scope[0])}>{route.scope[0]}</a> : <span>{route.scope[0]}</span>)}{route.scope[1] && <span>{route.scope[1]}</span>}</> : catalog ? <><a href={`#/${route.view}`}>{catalogTitles[route.view]}</a>{route.scope.slice(0, -1).map((name, i) => <a key={i} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}{route.scope.length > 0 && <span>{route.scope.at(-1)}</span>}</> : route.view !== "dashboard" && route.view !== "workbench" && <span>{heading}</span>}</>}</nav>
         <div className="toolbar-actions">
           <a className="header-action new-cell-toolbar-action" href={newCellLink()}>New Cell</a>
           <MajordomoToolbarButton dock={dock} />
@@ -738,7 +715,6 @@ function App() {
         </div>
       </header>
       <div className={`workspace-content ${isWorkspace ? "cell-workspace-content" : ""}${cellTerminalActive ? " cell-screen-content" : ""}`}>
-        {!isWorkspace && !cellScreenScope && <ResourcesNavigation route={route} mobile={mobile} />}
         {!cellScreenScope && <div className="page-heading"><h1 tabIndex={-1}>{heading}</h1>{headingContext && <p className="page-context mono-id">{headingContext}</p>}</div>}
         <CellDetailsScreen title={heading ?? "Cell"} view={cellView} scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} operations={operations} onLifecycleAction={runCellLifecycle} dockedCells={dockedCells} onOpenDock={() => dock.setOpen(true)} />
         {isWorkspace ? null : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "new-config" ? <Suspense fallback={<p role="status">Loading Config creation form…</p>}><NewConfigPage key={JSON.stringify(route.blueprint ?? [])} revision={revision} inventory={inventory} blueprintScope={route.blueprint} onCreated={() => setRevision(value => value + 1)} /></Suspense> : route.view === "new-secret" ? <NewSecretPage inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : connectorsView ? <Suspense fallback={<p role="status">Loading connectors…</p>}><ConnectorsPage name={route.scope[0]} target={route.target} action={route.action} identity={route.identity} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} onTitle={setConnectorTitle} /></Suspense> : teamsView ? <Suspense fallback={<p role="status">Loading teams…</p>}><TeamsPage name={route.scope[0]} revision={revision} onChanged={() => setRevision(value => value + 1)} /></Suspense> : route.view === "health" ? <HealthPage revision={revision} major={major} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} edit={!!route.edit} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} operations={operations} onLifecycleAction={runCellLifecycle} onParentAction={runParentAction} /> : <Dashboard inventory={inventory} />}

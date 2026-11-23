@@ -23,6 +23,8 @@ const glyphs = {
   purge: <><path d="M4.5 7h15" /><path d="M9.5 7V4.5h5V7" /><path d="m6.5 7 1 12a1.5 1.5 0 0 0 1.5 1.5h6a1.5 1.5 0 0 0 1.5-1.5l1-12" /><path d="m10 11.5 4 4m0-4-4 4" /></>,
   edit: <><path d="M4.5 19.5h4l10-10a2.83 2.83 0 0 0-4-4l-10 10Z" /><path d="m13 7 4 4" /></>,
   terminal: <><rect x="3" y="4.5" width="18" height="15" rx="2" /><path d="m7 9.5 3 2.5-3 2.5" /><path d="M12.5 15H17" /></>,
+  // Manage, the resource side of the view switch: two sliders.
+  manage: <><path d="M4 7.5h9M17 7.5h3M4 16.5h3M11 16.5h9" /><circle cx="15" cy="7.5" r="2" /><circle cx="9" cy="16.5" r="2" /></>,
   create: <path d="M12 5v14M5 12h14" />,
   // Majordomo: a bell on its base.
   majordomo: <><path d="M5.5 16.5a6.5 6.5 0 0 1 13 0Z" /><path d="M12 10V7.5" /><path d="M10 7.5h4" /><path d="M3.5 19.5h17" /></>,

@@ -3,6 +3,7 @@ import type { InventoryResource } from "./inventory";
 import { homeLink, workspaceLink } from "./routes";
 import { stateTone } from "./status";
 import { Icon } from "./icons";
+import type { View } from "./views.mjs";
 
 const collapsedKey = "kukeon-sidebar-collapsed";
 const widthKey = "kukeon-sidebar-width";
@@ -105,8 +106,11 @@ export function VersionRows({ info }: { info: ReturnType<typeof versionInfo> }) 
   </div>;
 }
 
-// Collapsed icon rail: brand mark, expand button, one state dot per cell, then the connection dot.
-export function SidebarRail({ inventory, selectedScope, connection, onExpand, majordomo }: {
+// Collapsed icon rail: brand mark, expand button, majordomo, then in Workbench one state dot per cell,
+// then the connection dot. In Manage the rail carries no per-kind icons (#1635): collapsing there is only a
+// way to get the width back.
+export function SidebarRail({ view, inventory, selectedScope, connection, onExpand, majordomo }: {
+  view: View;
   majordomo?: ReactNode;
   inventory: InventoryResource;
   selectedScope: string[];
@@ -119,7 +123,7 @@ export function SidebarRail({ inventory, selectedScope, connection, onExpand, ma
     <a className="rail-brand" href={homeLink} aria-label="kukeon home" title="kukeon"><BrandMark /></a>
     <SidebarToggle collapsed onToggle={onExpand} />
     {majordomo}
-    <nav className="rail-cells" aria-label="Cell shortcuts">
+    {view === "manage" ? <div className="rail-spacer" /> : <nav className="rail-cells" aria-label="Cell shortcuts">
       <ul>{cells.map(row => {
         const fullName = row.scope.join(" / ");
         const state = row.doc.status?.state;
@@ -127,7 +131,7 @@ export function SidebarRail({ inventory, selectedScope, connection, onExpand, ma
         const label = `Open ${fullName} (${state || "state not reported"})`;
         return <li key={JSON.stringify(row.scope)}><a className={`rail-cell tone-${stateTone(state)}`} href={workspaceLink(row.scope)} aria-label={label} title={label} aria-current={current ? "page" : undefined}><span className="state-dot" aria-hidden="true" /></a></li>;
       })}</ul>
-    </nav>
+    </nav>}
     <div className="rail-connection">
       <span className="rail-connection-dot" role="status" aria-label={tooltip} title={tooltip}><span className={`dot ${connection.tone}`} aria-hidden="true" /></span>
       {connection.info.mismatch && <VersionWarning label={connection.info.warning} />}
