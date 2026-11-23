@@ -292,17 +292,9 @@ func checkStateRunDir(rc *runCtx) Result {
 		return r
 	}
 
-	expected := map[string]bool{
-		"kukeond.sock":                   true,
-		"kukeond.pid":                    true,
-		consts.KukeonSocketSymlinkSubdir: true, // "s"
-		consts.KukeonContainerTTYDir:     true, // "tty"
-		consts.KukeondSocketShareSubdir:  true, // "kukeond"
-	}
-
 	var orphans []string
 	for _, e := range entries {
-		if expected[e.Name()] {
+		if consts.RunDirEntry(e.Name()) {
 			continue
 		}
 		orphans = append(orphans, e.Name())

@@ -243,6 +243,10 @@ func planParameters(plan *pairPlan, cfg *config.TeamsConfig) error {
 			known[p.Name] = true
 		}
 	}
+	// Check every name before resolving any: a repeated name is a duplicate
+	// whether its entries are bare or defaulted (#1581), and it must be
+	// reported as that rather than as a missing value for its first entry.
+	seen := map[string]bool{}
 	for _, param := range plan.role.Spec.Needs.Params {
 		name := param.Name
 		if !parameterName.MatchString(name) {
@@ -251,6 +255,13 @@ func planParameters(plan *pairPlan, cfg *config.TeamsConfig) error {
 		if slices.Contains(cellEnvironment, name) {
 			return fmt.Errorf("role needs.params: %q is reserved in the cell environment", name)
 		}
+		if seen[name] {
+			return fmt.Errorf("role needs.params: duplicate parameter %q", name)
+		}
+		seen[name] = true
+	}
+	for _, param := range plan.role.Spec.Needs.Params {
+		name := param.Name
 		if known[name] {
 			if param.Default != nil {
 				return fmt.Errorf("role needs.params: %q is declared by the blueprint; a role cannot default it", name)
@@ -258,9 +269,6 @@ func planParameters(plan *pairPlan, cfg *config.TeamsConfig) error {
 			continue
 		}
 		if param.Default != nil {
-			if _, dup := plan.paramDefaults[name]; dup {
-				return fmt.Errorf("role needs.params: duplicate parameter %q", name)
-			}
 			if plan.paramDefaults == nil {
 				plan.paramDefaults = map[string]string{}
 			}

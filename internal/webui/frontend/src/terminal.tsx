@@ -18,6 +18,11 @@ export type Session = { id: string; scope: string[]; container: string; state: T
 // A paste waiting for its session: delivered once, when the session is attached and on screen.
 type PendingPaste = { text: string; nonce: number };
 const maxConnections = 20;
+// A queued paste waits until the output received so far has been parsed and has been quiet this
+// long, so xterm has seen the program's bracketed-paste request (\x1b[?2004h) before it pastes.
+const pasteSettleMs = 150;
+// A program that prints nothing still gets its paste, this long after it became deliverable.
+const pasteMaxWaitMs = 2000;
 const maxSessions = 20;
 export const cellId = (scope: string[]) => JSON.stringify(scope);
 export const sessionId = (scope: string[], container: string) => JSON.stringify([...scope, container]);
@@ -143,6 +148,9 @@ export function TerminalSession({ session, active, expanded, theme, update, pend
   const sentSize = useRef("");
   const activeNow = useRef(active);
   const wasInterrupted = useRef(false);
+  // Output frames received on the current connection, and how many of them xterm has parsed.
+  const frames = useRef({ received: 0, parsed: 0 });
+  const [drained, setDrained] = useState(0); // bumps when xterm has parsed every frame received so far
   activeNow.current = active;
 
   useEffect(() => {
@@ -216,6 +224,7 @@ export function TerminalSession({ session, active, expanded, theme, update, pend
       return;
     }
     socket.current = connection;
+    frames.current = { received: 0, parsed: 0 };
     connection.binaryType = "arraybuffer";
     let failure = "";
     let ready = false;
@@ -226,7 +235,12 @@ export function TerminalSession({ session, active, expanded, theme, update, pend
     };
     connection.onmessage = event => {
       if (event.data instanceof ArrayBuffer) {
-        terminal.current?.write(new Uint8Array(event.data));
+        const counts = frames.current;
+        counts.received += 1;
+        terminal.current?.write(new Uint8Array(event.data), () => {
+          counts.parsed += 1;
+          if (frames.current === counts && counts.parsed === counts.received) setDrained(count => count + 1);
+        });
         if (!receivedOutput) {
           receivedOutput = true;
           if (ready) update(session.id, session.generation, "attached", "Attached");
@@ -261,13 +275,24 @@ export function TerminalSession({ session, active, expanded, theme, update, pend
   }, [active]);
 
   // Deliver a queued paste once the session is attached and on screen. xterm wraps it in
-  // bracketed-paste markers when the program asked for them, and sends it as one write.
+  // bracketed-paste markers only when it has already parsed the program's request for them, and
+  // the server sends "ready" before any output frame, so the paste also waits for output: until
+  // every frame received so far is parsed and none has arrived for pasteSettleMs, or at most
+  // pasteMaxWaitMs for a program that prints nothing. It is sent once, as one write, never submitted.
+  const waitingSince = useRef<{ nonce: number; at: number } | null>(null);
   useEffect(() => {
     if (!pending || !active || session.state !== "attached" || socket.current?.readyState !== WebSocket.OPEN) return;
-    terminal.current?.paste(pending.text);
-    terminal.current?.focus();
-    onPasted?.(session.id, pending.nonce);
-  }, [pending, active, session.state, session.id, onPasted]);
+    if (waitingSince.current?.nonce !== pending.nonce) waitingSince.current = { nonce: pending.nonce, at: Date.now() };
+    const { received, parsed } = frames.current;
+    const settled = received > 0 && parsed === received;
+    const remaining = Math.max(0, waitingSince.current.at + pasteMaxWaitMs - Date.now());
+    const timer = setTimeout(() => {
+      terminal.current?.paste(pending.text);
+      terminal.current?.focus();
+      onPasted?.(session.id, pending.nonce);
+    }, settled ? Math.min(pasteSettleMs, remaining) : remaining);
+    return () => clearTimeout(timer);
+  }, [pending, active, session.state, session.id, onPasted, drained]);
 
   useEffect(() => {
     if (!active || !expanded) return;

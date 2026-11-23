@@ -434,3 +434,83 @@ func TestMaybeWriteClientConfigurationDefaultWritesAtDefaultPath(t *testing.T) {
 		t.Fatalf("default-path write did not fire: %v", statErr)
 	}
 }
+
+// unknownHomeConfig chdirs into a TempDir, unsets HOME and writes the
+// relative default client configuration (tmp/.kuke/kuke.yaml) there with a
+// distinctive host, returning that relative path and the host (#1577).
+func unknownHomeConfig(t *testing.T) (string, string) {
+	t.Helper()
+	t.Cleanup(viper.Reset)
+	clearKukeEnv(t)
+	restoreRuntimeGlobals(t)
+	t.Setenv(config.KUKE_CONFIGURATION.EnvVar(), "")
+	if err := os.Unsetenv(config.KUKE_CONFIGURATION.EnvVar()); err != nil {
+		t.Fatalf("Unsetenv: %v", err)
+	}
+	t.Chdir(t.TempDir())
+	t.Setenv("HOME", "")
+
+	const host = "unix:///tmp/from-working-directory.sock"
+	path := config.DefaultClientConfigurationFile()
+	if filepath.IsAbs(path) {
+		t.Fatalf("default path with HOME unset is %q, want a relative path", path)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	content := "apiVersion: v1beta1\nkind: ClientConfiguration\nmetadata:\n  name: default\nspec:\n  host: " + host + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	viper.Reset()
+	return path, host
+}
+
+// TestLoadClientConfigurationIgnoresRelativeDefaultWithUnknownHome pins that
+// with HOME unset and no operator-chosen path, a tmp/.kuke/kuke.yaml under the
+// working directory is not applied as the client configuration.
+func TestLoadClientConfigurationIgnoresRelativeDefaultWithUnknownHome(t *testing.T) {
+	_, host := unknownHomeConfig(t)
+	cmd, err := NewKukeCmd()
+	if err != nil {
+		t.Fatalf("NewKukeCmd() error = %v", err)
+	}
+	if loadErr := loadClientConfiguration(cmd); loadErr != nil {
+		t.Fatalf("loadClientConfiguration() error = %v", loadErr)
+	}
+	if got := viper.GetString(config.KUKEON_ROOT_HOST.ViperKey); got == host {
+		t.Fatalf("Host = %q: the working directory's default-path file was applied", got)
+	}
+}
+
+func TestLoadClientConfigurationHonorsFlagWithUnknownHome(t *testing.T) {
+	path, host := unknownHomeConfig(t)
+	cmd, err := NewKukeCmd()
+	if err != nil {
+		t.Fatalf("NewKukeCmd() error = %v", err)
+	}
+	if setErr := cmd.PersistentFlags().Set("configuration", path); setErr != nil {
+		t.Fatalf("set --configuration: %v", setErr)
+	}
+	if loadErr := loadClientConfiguration(cmd); loadErr != nil {
+		t.Fatalf("loadClientConfiguration() error = %v", loadErr)
+	}
+	if got := viper.GetString(config.KUKEON_ROOT_HOST.ViperKey); got != host {
+		t.Fatalf("Host = %q, want %q from the --configuration file", got, host)
+	}
+}
+
+func TestLoadClientConfigurationHonorsEnvWithUnknownHome(t *testing.T) {
+	path, host := unknownHomeConfig(t)
+	t.Setenv(config.KUKE_CONFIGURATION.EnvVar(), path)
+	cmd, err := NewKukeCmd()
+	if err != nil {
+		t.Fatalf("NewKukeCmd() error = %v", err)
+	}
+	if loadErr := loadClientConfiguration(cmd); loadErr != nil {
+		t.Fatalf("loadClientConfiguration() error = %v", loadErr)
+	}
+	if got := viper.GetString(config.KUKEON_ROOT_HOST.ViperKey); got != host {
+		t.Fatalf("Host = %q, want %q from the KUKE_CONFIGURATION file", got, host)
+	}
+}

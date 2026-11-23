@@ -32,9 +32,32 @@ git credential.
 | `severity`       | yes      | `info`, `warning`, `error` or `critical`.                     |
 | `evidence`       | yes      | At least one entry.                                           |
 | `title`          | no       | The symptom; the signature stands in when empty.              |
-| `reproduction`   | no       | Steps or commands that reproduce the defect.                  |
+| `reproduction`   | no       | Steps or commands that reproduce the defect; one block.       |
+| `expected`       | no       | What the operator expected kukeon to do.                      |
+| `actual`         | no       | What kukeon did instead.                                      |
+| `rootCause`      | no       | The code that emits the error: `file:line` and commit.        |
+| `suggestedFix`   | no       | The change that would fix it.                                 |
+| `acceptance`     | no       | List of criteria a fix must meet; renders as `- [ ]` items.   |
 
 Unknown fields are rejected. JSON and YAML are accepted; `-` reads stdin.
+
+The body's sections are, in order: Symptom (with Severity), Expected, Actual,
+Evidence, Reproduction, Root cause, Suggested fix, Acceptance criteria, kukeon
+version, Signature, the "Filed by" line and the marker. A section whose field
+is empty is left out, so a draft without the optional fields renders in the
+sweep's shape. The four prose fields render as markdown text, not in a fence.
+
+## Follow-up comments (`kuke health issue --comment -f <file>`)
+
+`--comment` reads a hand-written markdown file (`-` reads stdin) and prints it
+redacted by the same sanitizer, as plain markdown rather than JSON. It decodes
+no draft and contacts nothing. Empty or whitespace-only input is refused with
+`comment text is empty`. Post a follow-up only from its output:
+
+```sh
+kuke health issue --comment -f notes.md > comment.md
+gh issue comment <n> -R <owner>/<repo> --body-file comment.md
+```
 
 ## Sweep signature forms
 

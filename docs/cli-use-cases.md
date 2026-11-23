@@ -512,6 +512,7 @@ kuke attach <cell> --container <con>                   # alias: att
 
 - `kuke get cell <missing>` exits non-zero with a `not found` message that names the realm/space/stack scope it searched.
 - `kuke log` exits 0 with empty stdout when the container has produced no captured output yet. `-f` blocks until SIGINT.
+- `kuke log -f` that has printed at least one chunk keeps following across a kukeond restart from the same cursor, printing nothing during the outage, and exits non-zero with `kukeond unreachable for 2m0s` after two minutes without a daemon. A transport error on the first request, or without `-f`, is returned at once.
 - `kuke log` and `kuke attach` auto-pick the container when the cell has exactly one non-root attachable; otherwise `--container` is required.
 - `kuke attach` requires an Attachable-tagged container (a sbsh-style terminal); attaching to a non-attachable container exits non-zero.
 - Every Attachable container's wrapper writes its own debug log. By default it lands at the per-container `tty/kuketty.log` (peer to `tty/capture` inside the kukeon-controlled bind mount) — a daemon-rendered path, always present after first attach, that operators read directly to diagnose attach-session misbehavior. Cells that need the log elsewhere can pin `spec.containers[].tty.logFile` to an alternate in-container path; the daemon stamps it verbatim without anchoring or rewriting, and the always-on invariant (a non-empty log path on every attachable) still holds. Verbosity is configurable per cell via `spec.containers[].tty.logLevel` (one of `debug` / `info` / `warn` / `error`). When the cell omits it, the renderer falls through to the daemon-wide `spec.kukettyLogLevel` on the ServerConfiguration document (`KUKEOND_KUKETTY_LOG_LEVEL` env / `--kuketty-log-level` flag); the final hardcoded fallback is `info`, so the kuketty wrapper never starts without a usable level.
@@ -662,6 +663,8 @@ kuke health report latest                        # one report as markdown
 - kukeond keeps the newest 50 reports; they survive a daemon restart. Storing a report files nothing.
 - `--file-issues <owner>/<repo>` on `report submit` is the only path that leaves the host, needs `GH_TOKEN` (set by the `github` connector when the install binds the `gh-token` secret to majordomo), files `kukeon` findings only, and still stores the report when filing fails (exit 1); the missing-token error names `GH_TOKEN` and the opt-in.
 - `kuke health issue -f <draft>` renders a diagnosed kukeon defect as JSON (`title`, `body`, `comment`, `marker`) with the same sanitizer, title format and signature marker as `--file-issues`, files nothing, and refuses a draft not classified `kukeon` (exit 1).
+- `kuke health issue -f <draft>` accepts the optional `expected`, `actual`, `rootCause`, `suggestedFix` and `acceptance` fields and renders each as its own sanitized body section, omitting empty ones, so a draft without them renders unchanged; `reproduction` renders as one fenced block and the body still ends with the marker.
+- `kuke health issue --comment -f <file>` prints the markdown file (`-` reads stdin) redacted by the same sanitizer as plain markdown, not JSON, decodes no draft and contacts nothing; empty or whitespace-only input exits 1 with `comment text is empty`.
 
 ### `--no-daemon` future
 

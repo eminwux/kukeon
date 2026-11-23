@@ -49,8 +49,12 @@ what evidence is missing.
 Use the repository the user names. Otherwise use the one the health sweep files
 to: the `--file-issues <owner>/<repo>` argument in the `PROMPT` value of the
 sweep's config (`kuke get configs`, then
-`kuke get config <name>-health-sweep -o yaml`). If neither names one, ask the
-user. Confirm access before going further:
+`kuke get config <name>-health-sweep -o yaml`). If neither names one, offer
+the kukeon source repository of this cell's own Config as the default and ask
+the user to confirm it: `kuke get config <name> -o yaml` (the majordomo Config
+the sweep's config is named after), field `spec.repos.role-source.url`. On a
+stock install that is `https://github.com/eminwux/kukeon`. Do not file until
+the user has confirmed a repository. Confirm access before going further:
 
 ```sh
 gh repo view <owner>/<repo> --json nameWithOwner,hasIssuesEnabled
@@ -72,7 +76,13 @@ evidence:
   - "status.reason: CreateFailed ..."
   - "kuke health: host/cni-plugins fail: missing: bridge"
 reproduction:
-  - "kuke start api --realm default --space default --stack default"
+  - "kuke start <cell> --realm default --space default --stack default"
+expected: "`kuke start <cell>` brings the cell to Ready."
+actual: "The cell stays Failed with status.reason CreateFailed."
+rootCause: "`internal/cni/attach.go:42` (commit `abc1234`) drops the bridge error."
+suggestedFix: "Return the bridge error from `attach` so the cell reports it."
+acceptance:
+  - "`kuke start <cell>` on a host without the bridge plugin reports the missing plugin."
 ```
 
 - `signature` decides deduplication. When the defect is one a sweep would
@@ -85,7 +95,22 @@ reproduction:
   occurrence.
 
 - `evidence` quotes the output you gathered, each entry with the command that
-  produced it. `reproduction` lists the steps or commands that reproduce it.
+  produced it. `reproduction` lists the steps or commands that reproduce it;
+  it renders as one block. Write it with placeholder names (`<cell>`,
+  `<secret>`), so no instance name or secret name leaves the host.
+
+- `expected`, `actual`, `rootCause`, `suggestedFix` and `acceptance` make the
+  issue self-contained: a reader must not need a follow-up comment to act on
+  it. Fill all five whenever the diagnosis supports them. They render as
+  markdown text, so inline code and `file:line` references read normally;
+  `acceptance` renders as `- [ ]` checkboxes.
+
+- When `ROLE_SOURCE_DIR` is set, use that kukeon source checkout: find the
+  code that emits the error and put its `file:line` plus the commit
+  (`git -C "$ROLE_SOURCE_DIR" rev-parse --short HEAD`) in `rootCause`.
+
+- A health report ID is local to this host and means nothing to a reader of
+  the issue: write it as `local report <id>`, or leave it out.
 
 Render it:
 
@@ -98,6 +123,24 @@ shapes, credential URLs, `key=value` secrets and the `GH_TOKEN` value itself),
 adds the kukeon version and the signature marker, and refuses a draft that is
 not classified `kukeon`. File only the rendered text: never paste evidence
 into `gh` yourself, since it would skip the redaction.
+
+## 3a. Check the rendered text before posting
+
+The sanitizer knows token shapes, not this host. Before anything is posted,
+search the rendered title, body and comment, and any rendered follow-up
+comment, for what must not leave the host, without printing it:
+
+```sh
+jq -r '.title, .body, .comment' /tmp/file-kukeon-bug/issue.json > /tmp/file-kukeon-bug/rendered.txt
+grep -qF -- "$GH_TOKEN" /tmp/file-kukeon-bug/rendered.txt && echo "token found"
+grep -nE '/home/[^/ ]+|/root/' /tmp/file-kukeon-bug/rendered.txt
+grep -nE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' /tmp/file-kukeon-bug/rendered.txt
+kuke get secrets -o json | jq -r '.[].metadata.name' | grep -nwF -f - /tmp/file-kukeon-bug/rendered.txt
+```
+
+If anything matches (the token, a home-directory path, an email address or the
+name of a secret on this host), stop: fix the draft, render it again and
+repeat this check. Do not post text that failed it.
 
 ## 4. Look for an existing issue
 
@@ -126,7 +169,17 @@ A failed query is not an empty result: report it and do not file.
 
 ## 5. Comment or create
 
-- **A matching open issue exists**: add the rendered comment to it.
+- **A matching open issue exists**: add the rendered comment to it. A
+  hand-written follow-up (an analysis, a root cause found later) goes through
+  the same sanitizer first, and through the check in 3a:
+
+  ```sh
+  kuke health issue --comment -f /tmp/file-kukeon-bug/notes.md > /tmp/file-kukeon-bug/comment.md
+  gh issue comment <n> -R <owner>/<repo> --body-file /tmp/file-kukeon-bug/comment.md
+  ```
+
+  Never post text that did not come out of `kuke health issue`. For the
+  rendered sweep-style note:
 
   ```sh
   jq -r .comment /tmp/file-kukeon-bug/issue.json > /tmp/file-kukeon-bug/comment.md

@@ -5,7 +5,7 @@ import {
   groupComponents, identitiesFor, identityErrors, identityFields, identityPayload, importPayload, importsFromHost, isRegistry, loginMethods, methodChoices, methodStatuses, originLabel, refKey, refLabel,
   registryEntries, sameRef, scopeAt, scopeFromParts, scopeLevel, scopeQuery, secretRef, storesNoValue, takesIdentity, targetScope, teamOf, unresolvedConnectors, usageFor,
 } from "./connectors.mjs";
-import { blueprintForm, buildSpec, connectorsWithoutIdentity, emptyAnswers, formSections, groupChoice, missingAnswers } from "./config-form.mjs";
+import { blueprintForm, buildSpec, componentsWithoutIdentity, connectorsWithoutIdentity, emptyAnswers, formSections, groupChoice, missingAnswers } from "./config-form.mjs";
 
 // Test-only connectors: nothing in the UI knows these names. `example-token`
 // is the one the acceptance criterion describes — env delivery, one readable
@@ -213,6 +213,33 @@ test("a connector slot is required only when neither a pick nor a scope default 
   answers.connectors = { "demo-key": { name: "demo", realm: "dev" } };
   assert.deepEqual(connectorsWithoutIdentity(form, answers, defaults), []);
   assert.deepEqual(connectorsWithoutIdentity(form, { ...answers, connectors: {} }, []), ["Demo", "Example"]);
+});
+
+test("the missing-identity check is per component when two components bind one connector", () => {
+  // A test-only connector with two components enabled together (no group); only the first has a
+  // scope default, so only the second is unresolved.
+  const twin = { name: "twin", title: "Twin", method: "token", delivery: "env" };
+  const form = blueprintForm({
+    metadata: { name: "twins", realm: "dev" },
+    spec: {
+      components: [
+        { kind: "connector", name: "twin-a", optional: true, connector: twin, secrets: [{ name: "twin-a", envName: "TWIN_A", required: true }] },
+        { kind: "connector", name: "twin-b", optional: true, connector: twin, secrets: [{ name: "twin-b", envName: "TWIN_B", required: true }] },
+      ],
+    },
+  });
+  const answers = emptyAnswers(form);
+  answers.components = ["twin-a", "twin-b"];
+  assert.deepEqual(formSections(form, answers).filter(section => section.connector).map(section => section.component), ["twin-a", "twin-b"], "both components are enabled on their own");
+  const defaults = [
+    { connector: "twin", component: "twin-a", levels: { realm: { name: "twin-default", realm: "dev" } }, effective: { name: "twin-default", realm: "dev" }, origin: "realm" },
+    { connector: "twin", component: "twin-b", levels: {} },
+  ];
+  assert.deepEqual(componentsWithoutIdentity(form, answers, defaults), ["twin-b"]);
+  assert.deepEqual(connectorsWithoutIdentity(form, answers, defaults), ["Twin"], "the title is reported once, as before");
+  assert.deepEqual(componentsWithoutIdentity(form, answers, undefined), [], "unknown defaults report nothing");
+  answers.connectors = { "twin-b": { name: "twin-other", realm: "dev" } };
+  assert.deepEqual(componentsWithoutIdentity(form, answers, defaults), []);
 });
 
 test("only the picks that differ from the effective identity are sent as overrides", () => {

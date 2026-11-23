@@ -5,8 +5,9 @@
 // the root module's graph are deliberately kept apart (they have clashed
 // before, e.g. the monolithic vs. split google.golang.org/genproto ambiguous
 // import), and a workspace-union build re-couples them — the very coupling this
-// split removes. Keep this `go` line equal to both modules' `go` directive. Build and test each module on its own (GOWORK=off), which is
-// what `make` and CI do and what the Dockerfile builder (no go.work) sees.
+// split removes. Keep this `go` line equal to both modules' `go` directive.
+// Build and test each module on its own (GOWORK=off), which is what `make` and
+// CI do and what the Dockerfile builder (no go.work) sees.
 go 1.26.6
 
 use (

@@ -270,6 +270,44 @@ cleanup_tmpdir() {
     fi
 }
 
+# A full or unwritable temporary filesystem is reported as that, with a TMPDIR
+# hint, not as a failed download (#1343).
+tmpdir_hint() {
+    printf '    Set TMPDIR to a writable filesystem with free space and retry, for example:\n' >&2
+    printf '      mkdir -p "$HOME/.cache"\n' >&2
+    printf '      curl -fsSL https://kukeon.io/install.sh | TMPDIR="$HOME/.cache" bash\n' >&2
+}
+
+create_install_tmpdir() {
+    if ! INSTALL_TMPDIR="$(mktemp -d -t kuke-install.XXXXXX 2>/dev/null)"; then
+        fail "could not create a temporary directory under ${TMPDIR:-/tmp}"
+        tmpdir_hint
+        exit 1
+    fi
+    if ! : >"${INSTALL_TMPDIR}/.write-test" 2>/dev/null; then
+        fail "temporary directory is not writable: ${INSTALL_TMPDIR}"
+        tmpdir_hint
+        exit 1
+    fi
+    rm -f "${INSTALL_TMPDIR}/.write-test"
+}
+
+# available_kb_for <path> prints the free KiB of the filesystem holding <path>,
+# or nothing when df is unavailable.
+available_kb_for() {
+    if command -v df >/dev/null 2>&1; then
+        df -Pk "$1" 2>/dev/null | awk 'NR == 2 {print $4}' || true
+    fi
+}
+
+# content_length_for <url> prints the asset's Content-Length after redirects,
+# or nothing when the header is missing.
+content_length_for() {
+    curl -fsSLI "$1" 2>/dev/null \
+        | awk 'tolower($1) == "content-length:" {gsub("\r", "", $2); len=$2} END {print len}' \
+        || true
+}
+
 # fetch_verified <asset-name> <dest-path>
 # Downloads the per-arch release asset to <dest-path>, fetches its `.sha256`
 # companion and verifies the digest (honoring KUKE_SKIP_CHECKSUM). Factored out
@@ -283,10 +321,38 @@ fetch_verified() {
     sha_path="${dest}.sha256"
 
     step "Downloading ${asset} ${KUKE_VERSION}"
-    if ! curl -fsSL -o "$dest" "$asset_url"; then
+    # Compare free space with the asset size when both are known; skip the
+    # check silently when either is missing.
+    local asset_bytes avail_kb need_kb
+    asset_bytes="$(content_length_for "$asset_url")"
+    avail_kb="$(available_kb_for "$INSTALL_TMPDIR")"
+    case "$asset_bytes" in '' | *[!0-9]*) asset_bytes="" ;; esac
+    case "$avail_kb" in '' | *[!0-9]*) avail_kb="" ;; esac
+    if [ -n "$asset_bytes" ] && [ -n "$avail_kb" ]; then
+        need_kb=$(((asset_bytes + 1023) / 1024 + 1024))
+        if [ "$avail_kb" -lt "$need_kb" ]; then
+            fail "not enough free space in temporary directory: ${INSTALL_TMPDIR}"
+            printf '    needed:    %s KiB\n' "$need_kb" >&2
+            printf '    available: %s KiB\n' "$avail_kb" >&2
+            tmpdir_hint
+            exit 1
+        fi
+    fi
+    local curl_err="${INSTALL_TMPDIR}/curl.err" curl_rc
+    set +e
+    curl -fsSL -o "$dest" "$asset_url" 2>"$curl_err"
+    curl_rc="$?"
+    set -e
+    if [ "$curl_rc" -ne 0 ]; then
         fail "download failed: ${asset_url}"
-        printf '    Confirm KUKE_VERSION=%s exists at\n' "$KUKE_VERSION" >&2
-        printf '      https://github.com/%s/releases\n' "$KUKE_REPO" >&2
+        [ -s "$curl_err" ] && sed 's/^/    /' "$curl_err" >&2
+        if [ "$curl_rc" -eq 23 ]; then
+            printf '    curl fetched the asset but could not write it to %s\n' "$dest" >&2
+            tmpdir_hint
+        else
+            printf '    Confirm KUKE_VERSION=%s exists at\n' "$KUKE_VERSION" >&2
+            printf '      https://github.com/%s/releases\n' "$KUKE_REPO" >&2
+        fi
         exit 1
     fi
     ok "downloaded $(wc -c <"$dest" | tr -d ' ') bytes"
@@ -330,7 +396,7 @@ do_install() {
     fi
     ok "version: ${KUKE_VERSION}"
 
-    INSTALL_TMPDIR="$(mktemp -d -t kuke-install.XXXXXX)"
+    create_install_tmpdir
     trap cleanup_tmpdir EXIT
     kuke_path="${INSTALL_TMPDIR}/kuke"
     kukebuild_path="${INSTALL_TMPDIR}/kukebuild"

@@ -26,10 +26,9 @@
 // BuildKit's ~160-package moby / runc / grpc closure advances independently of
 // the root module, which links zero BuildKit packages. Both modules pin the
 // same `go` directive and containerd version. The module is wired for local dev
-// via the repo-root
-// go.work. kukebuild imports no kukeon package: the only cross-module surface
-// (the realm->namespace suffix) is resolved from the public kukeond.yaml
-// config key, not a private internal/consts symbol.
+// via the repo-root go.work. kukebuild imports no kukeon package: the only
+// cross-module surface (the realm->namespace suffix) is resolved from the
+// public kukeond.yaml config key, not a private internal/consts symbol.
 //
 // kukebuild is a standalone binary — not argv[0]-dispatched from the kuke
 // multi-call binary — for the same reason kuketty is (see cmd/kuketty/main.go):

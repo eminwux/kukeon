@@ -190,6 +190,9 @@ func TestRoleParamDefaultFailures(t *testing.T) {
 			"    params:\n      - { name: REGION, default: a }\n      - { name: REGION, default: b }\n",
 			`duplicate parameter "REGION"`,
 		},
+		{"duplicate-default-then-bare", "    params:\n      - { name: REGION, default: a }\n      - REGION\n", `duplicate parameter "REGION"`},
+		{"duplicate-bare-then-default", "    params:\n      - REGION\n      - { name: REGION, default: a }\n", `duplicate parameter "REGION"`},
+		{"duplicate-bare-then-bare", "    params:\n      - REGION\n      - REGION\n", `duplicate parameter "REGION"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, opts := withRoleParams(t, tc.params, "")

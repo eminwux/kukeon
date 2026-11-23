@@ -5,7 +5,7 @@ kuke health [--since <duration|RFC3339|last-report>] [-o text|json|yaml] [--exit
 kuke health reports [-o text|json|yaml]
 kuke health report <id|latest> [-o markdown|json|yaml]
 kuke health report submit -f <file> [--file-issues <owner>/<repo>]
-kuke health issue -f <file>
+kuke health issue [--comment] -f <file>
 ```
 
 `kuke health` shows kukeond's **health digest**: host and state checks, the
@@ -243,19 +243,42 @@ redacted as well.
 The draft (JSON or YAML; `-` reads stdin) has the fields below. Unknown fields
 are rejected, and a draft not classified `kukeon` is refused.
 
-| Field            | Required | Notes                                                                       |
-| ---------------- | -------- | --------------------------------------------------------------------------- |
-| `signature`      | yes      | The sweep's signature when one applies, so the markers match.               |
-| `classification` | yes      | Must be `kukeon`.                                                           |
-| `severity`       | yes      | `info`, `warning`, `error` or `critical`.                                   |
-| `evidence`       | yes      | At least one entry.                                                         |
-| `title`          | no       | The symptom; the signature stands in when empty.                            |
-| `reproduction`   | no       | Steps or commands that reproduce the defect, rendered in their own section. |
+| Field            | Required | Notes                                                               |
+| ---------------- | -------- | ------------------------------------------------------------------- |
+| `signature`      | yes      | The sweep's signature when one applies, so the markers match.       |
+| `classification` | yes      | Must be `kukeon`.                                                   |
+| `severity`       | yes      | `info`, `warning`, `error` or `critical`.                           |
+| `evidence`       | yes      | At least one entry.                                                 |
+| `title`          | no       | The symptom; the signature stands in when empty.                    |
+| `reproduction`   | no       | Steps or commands that reproduce the defect, rendered as one block. |
+| `expected`       | no       | What the operator expected kukeon to do.                            |
+| `actual`         | no       | What kukeon did instead.                                            |
+| `rootCause`      | no       | The code that emits the error, such as `file:line` and the commit.  |
+| `suggestedFix`   | no       | The change that would fix the defect.                               |
+| `acceptance`     | no       | A list of criteria a fix must meet, rendered as `- [ ]` checkboxes. |
+
+The body's sections are Symptom (with Severity), Expected, Actual, Evidence,
+Reproduction, Root cause, Suggested fix, Acceptance criteria, kukeon version
+and Signature, followed by the marker. A section whose field is empty is left
+out, so a draft without the optional fields renders in the sweep's shape. The
+four prose fields are sanitized and rendered as markdown text, not in a code
+fence, so `file:line` references and inline code read normally.
 
 The output has `title`, `body` (a new issue's body, ending with the marker),
 `comment` (the note for an open issue that already carries the marker) and
 `marker`. The kukeon version comes from kukeond, or reads `unknown` when it is
 unreachable.
+
+```bash
+kuke health issue --comment -f notes.md > comment.md
+```
+
+With `--comment`, the file (`-` reads stdin) is a hand-written markdown
+follow-up for an issue that is already open, not a draft. `kuke` prints it
+redacted by the same sanitizer, including the `GH_TOKEN` value, as plain
+markdown rather than JSON, ready for `gh issue comment --body-file`. It decodes
+no draft and contacts nothing; empty or whitespace-only input is an error
+(`comment text is empty`).
 
 ## When to use `kuke health` vs `kuke status`
 

@@ -385,6 +385,47 @@ func TestCheckStateRunDir_Orphans(t *testing.T) {
 	}
 }
 
+// runDirWithKukeonEntries returns a temp dir holding every entry kukeond
+// keeps in its socket directory, the secrets staging directory included.
+func runDirWithKukeonEntries(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, name := range []string{"kukeond.sock", "kukeond.pid"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte{}, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"s", "tty", "kukeond", "secrets"} {
+		if err := os.Mkdir(filepath.Join(dir, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// TestCheckStateRunDir_SecretsStagingDirIsOK pins that kukeond's own secrets
+// staging directory is not reported as an orphan (#1609).
+func TestCheckStateRunDir_SecretsStagingDirIsOK(t *testing.T) {
+	rc := &runCtx{runPath: runDirWithKukeonEntries(t)}
+	if r := checkStateRunDir(rc); r.Status != StatusOK {
+		t.Fatalf("expected OK with only kukeon entries; got %s (%s)", r.Status, r.Detail)
+	}
+}
+
+func TestCheckStateRunDir_StrayEntryBesideSecretsWarns(t *testing.T) {
+	dir := runDirWithKukeonEntries(t)
+	if err := os.WriteFile(filepath.Join(dir, "stale.sock"), []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := checkStateRunDir(&runCtx{runPath: dir})
+	if r.Status != StatusWARN {
+		t.Fatalf("expected WARN with stale.sock orphan; got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "stale.sock") || strings.Contains(r.Detail, "secrets") {
+		t.Fatalf("Detail = %q, want it to name stale.sock and not secrets", r.Detail)
+	}
+}
+
 // TestCheckStateRunDir_AbsentDirIsOK covers the bare-host case: a host
 // that never ran `kuke init` has no /run/kukeon, and we don't want
 // false-positive WARN/FAIL rows for an environment that legitimately

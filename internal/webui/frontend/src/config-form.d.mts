@@ -44,6 +44,7 @@ export function blueprintForm(blueprint: unknown): BlueprintForm;
 export function emptyAnswers(form: BlueprintForm): Answers;
 export function groupChoice(form: BlueprintForm, answers: Answers, group: string): string;
 export function connectorSections(form: BlueprintForm, answers: Answers, mode?: string): Array<FormSection & { connector: ComponentConnector; component: string }>;
+export function componentsWithoutIdentity(form: BlueprintForm, answers: Answers, defaults: Array<{ connector: string; component?: string; effective?: unknown }> | undefined, mode?: string): string[];
 export function connectorsWithoutIdentity(form: BlueprintForm, answers: Answers, defaults: Array<{ connector: string; component?: string; effective?: unknown }> | undefined, mode?: string): string[];
 export function previewMode(form: BlueprintForm, answers: Answers, requested?: string): string;
 export function formSections(form: BlueprintForm, answers: Answers, mode?: string): FormSection[];

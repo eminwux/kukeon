@@ -44,6 +44,16 @@ type IssueDraft struct {
 	Evidence []string `json:"evidence"               yaml:"evidence"`
 	// Reproduction lists the steps or commands that reproduce the defect.
 	Reproduction []string `json:"reproduction,omitempty" yaml:"reproduction,omitempty"`
+	// Expected and Actual contrast the behavior the operator expected with
+	// what kukeon did.
+	Expected string `json:"expected,omitempty"     yaml:"expected,omitempty"`
+	Actual   string `json:"actual,omitempty"       yaml:"actual,omitempty"`
+	// RootCause names the code that emits the error (file:line and commit,
+	// from the source checkout when one is available).
+	RootCause    string `json:"rootCause,omitempty"    yaml:"rootCause,omitempty"`
+	SuggestedFix string `json:"suggestedFix,omitempty" yaml:"suggestedFix,omitempty"`
+	// Acceptance lists the criteria a fix must meet, one checkbox each.
+	Acceptance []string `json:"acceptance,omitempty"   yaml:"acceptance,omitempty"`
 }
 
 // RenderedIssue is what `kuke health issue` prints. Everything in it is
@@ -93,7 +103,9 @@ func DecodeIssueDraft(raw []byte) (IssueDraft, error) {
 
 // Investigation renders draft as an issue: the sweep's title, symptom,
 // evidence, kukeon version and signature marker, with the reproduction steps
-// in place of the sweep's frequency.
+// in place of the sweep's frequency. The optional expected/actual, root cause,
+// suggested fix and acceptance sections render only when the draft sets them,
+// so a draft without them renders as the sweep shape.
 func (f *Filer) Investigation(draft IssueDraft) RenderedIssue {
 	finding := kukeonv1.HealthFinding{
 		Signature: draft.Signature, Classification: draft.Classification,
@@ -105,9 +117,20 @@ func (f *Filer) Investigation(draft IssueDraft) RenderedIssue {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "## Symptom\n\n%s\n\nSeverity: %s\n\n", Sanitize(symptom, f.Token), draft.Severity)
+	f.prose(&b, "Expected", draft.Expected)
+	f.prose(&b, "Actual", draft.Actual)
 	fmt.Fprintf(&b, "## Evidence\n\n%s\n", f.evidence(draft.Evidence))
 	if len(draft.Reproduction) > 0 {
-		fmt.Fprintf(&b, "## Reproduction\n\n%s\n", f.evidence(draft.Reproduction))
+		fmt.Fprintf(&b, "## Reproduction\n\n%s\n", f.block(draft.Reproduction))
+	}
+	f.prose(&b, "Root cause", draft.RootCause)
+	f.prose(&b, "Suggested fix", draft.SuggestedFix)
+	if len(draft.Acceptance) > 0 {
+		b.WriteString("## Acceptance criteria\n\n")
+		for _, item := range draft.Acceptance {
+			fmt.Fprintf(&b, "- [ ] %s\n", strings.TrimSpace(Sanitize(item, f.Token)))
+		}
+		b.WriteString("\n")
 	}
 	fmt.Fprintf(&b, "## kukeon version\n\n%s\n\n", f.Version)
 	fmt.Fprintf(&b, "Signature: `%s`\n\n", Sanitize(draft.Signature, f.Token))
@@ -121,10 +144,33 @@ func (f *Filer) Investigation(draft IssueDraft) RenderedIssue {
 	}
 }
 
+// prose writes a sanitized markdown section for text, or nothing when text
+// is empty. It is markdown, not a fence, so file:line references and inline
+// code read normally.
+func (f *Filer) prose(b *strings.Builder, heading, text string) {
+	clean := strings.TrimSpace(Sanitize(text, f.Token))
+	if clean == "" {
+		return
+	}
+	fmt.Fprintf(b, "## %s\n\n%s\n\n", heading, clean)
+}
+
+// block renders lines as one fenced block.
+func (f *Filer) block(lines []string) string {
+	clean := strings.TrimRight(Sanitize(strings.Join(lines, "\n"), f.Token), "\n")
+	if len(clean) > maxEvidence {
+		clean = clean[:maxEvidence] + "\n[truncated]"
+	}
+	return "```\n" + strings.ReplaceAll(clean, "```", "'''") + "\n```\n"
+}
+
 func newIssueCmd() *cobra.Command {
-	var file string
+	var (
+		file    string
+		comment bool
+	)
 	cmd := &cobra.Command{
-		Use:   "issue -f <file>",
+		Use:   "issue [--comment] -f <file>",
 		Short: "Render a diagnosed kukeon defect as a redacted GitHub issue",
 		Long: "Render an issue draft (JSON or YAML; - reads stdin) as the title, body, comment and\n" +
 			"signature marker a GitHub issue for it carries, redacted by the same sanitizer and in\n" +
@@ -132,7 +178,10 @@ func newIssueCmd() *cobra.Command {
 			"issue for the same signature dedupe against each other. It prints JSON and contacts\n" +
 			"nothing but kukeond, for the kukeon version; the caller does the filing.\n\n" +
 			"Only kukeon defects render: a draft classified workload or unclear is refused.\n" +
-			"The value of " + TokenEnv + ", when set, is redacted as well.",
+			"The value of " + TokenEnv + ", when set, is redacted as well.\n\n" +
+			"With --comment, the file is a hand-written markdown follow-up instead of a draft:\n" +
+			"it is printed redacted, as plain markdown, ready for gh issue comment --body-file.\n" +
+			"No draft is decoded and nothing is contacted.",
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -146,6 +195,16 @@ func newIssueCmd() *cobra.Command {
 				raw, err = io.ReadAll(cmd.InOrStdin())
 			} else {
 				raw, err = os.ReadFile(file)
+			}
+			if comment {
+				if err != nil {
+					return report(cmd, fmt.Errorf("read comment: %w", err))
+				}
+				if strings.TrimSpace(string(raw)) == "" {
+					return report(cmd, errors.New("comment text is empty"))
+				}
+				_, err = io.WriteString(cmd.OutOrStdout(), Sanitize(string(raw), os.Getenv(TokenEnv)))
+				return err
 			}
 			if err != nil {
 				return report(cmd, fmt.Errorf("read issue draft: %w", err))
@@ -169,6 +228,9 @@ func newIssueCmd() *cobra.Command {
 			return encoder.Encode(filer.Investigation(draft))
 		},
 	}
-	cmd.Flags().StringVarP(&file, "file", "f", "", "Issue draft document (JSON or YAML); - reads stdin")
+	cmd.Flags().StringVarP(&file, "file", "f", "",
+		"Issue draft document (JSON or YAML), or with --comment a markdown file; - reads stdin")
+	cmd.Flags().BoolVar(&comment, "comment", false,
+		"Print the file as a redacted markdown follow-up comment instead of rendering a draft")
 	return cmd
 }

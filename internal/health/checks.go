@@ -143,16 +143,9 @@ func (p Probe) runDir() kukeonv1.HealthCheck {
 		check.Detail = fmt.Sprintf("%s (read failed: %v)", p.SocketDir, err)
 		return check
 	}
-	expected := map[string]bool{
-		"kukeond.sock":                   true,
-		"kukeond.pid":                    true,
-		consts.KukeonSocketSymlinkSubdir: true,
-		consts.KukeonContainerTTYDir:     true,
-		consts.KukeondSocketShareSubdir:  true,
-	}
 	var orphans []string
 	for _, entry := range entries {
-		if !expected[entry.Name()] {
+		if !consts.RunDirEntry(entry.Name()) {
 			orphans = append(orphans, entry.Name())
 		}
 	}

@@ -204,9 +204,24 @@ const scheduleTickSlack = 50 * time.Millisecond
 // their scheduled Configs fired. Lifetime matches the reconcile loop's —
 // s.ctx or Stop ends it.
 func (s *Server) startScheduleLoop() {
+	if !s.beginLoop() {
+		return
+	}
 	s.logger.InfoContext(s.ctx, "starting schedule loop", "interval", s.scheduleInterval)
-	s.loopWG.Add(1)
 	go s.runScheduleLoop()
+}
+
+// beginLoop registers one background loop with loopWG. It reports false
+// once Stop has begun, so no loop starts against a controller Stop is
+// closing. Taking s.mu orders every Add before Stop's Wait.
+func (s *Server) beginLoop() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return false
+	}
+	s.loopWG.Add(1)
+	return true
 }
 
 func (s *Server) runScheduleLoop() {
@@ -311,9 +326,11 @@ func (s *Server) startReconcileLoop() {
 			"interval", s.opts.ReconcileInterval)
 		return
 	}
+	if !s.beginLoop() {
+		return
+	}
 	s.logger.InfoContext(s.ctx, "starting reconcile loop",
 		"interval", s.opts.ReconcileInterval)
-	s.loopWG.Add(1)
 	go s.runReconcileLoop(s.opts.ReconcileInterval)
 }
 
