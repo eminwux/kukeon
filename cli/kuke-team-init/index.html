@@ -3780,8 +3780,8 @@ kukeond endpoint and the <code>ClientConfiguration</code> themselves.</p>
 declaration. Recorded secret bindings are not kept by <code>--force</code>: it starts
 again from the initial declaration.</p>
 <p>When the <code>default</code> realm has no <code>TeamDefaults</code>, init creates one in the same
-apply, with the <code>kukeon</code> source and its <code>codex</code> and <code>claude</code> harnesses and no
-default roles, so a project team needs only roles. An existing <code>TeamDefaults</code>
+apply, with the <code>kukeon</code> source (at the same revision as the <code>kuke</code> team, below)
+and its <code>codex</code> and <code>claude</code> harnesses and no default roles, so a project team needs only roles. An existing <code>TeamDefaults</code>
 is never changed, with or without <code>--force</code>. See
 <a href="../../concepts/team/#sources-and-defaults">Sources and defaults</a>.</p>
 <p>The command fetches only the sources used by the selected role/harness
@@ -3803,7 +3803,7 @@ harnesses come from the kukeon repository (<code>team/roles/</code> and <code>te
 <a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span><span class="nt">sources</span><span class="p">:</span>
 <a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kukeon</span>
 <a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">      </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">github.com/eminwux/kukeon</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">      </span><span class="nt">branch</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">main</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">      </span><span class="nt">tag</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v0.10.0</span><span class="w"> </span><span class="c1"># the revision this kuke was built from</span>
 <a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">      </span><span class="nt">clonePath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/home/user/kukeon-src</span>
 <a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">  </span><span class="nt">roles</span><span class="p">:</span>
 <a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">majordomo</span>
@@ -3820,6 +3820,15 @@ harnesses come from the kukeon repository (<code>team/roles/</code> and <code>te
 <a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a><span class="w">      </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kukeon</span>
 <a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">team/harnesses/claude</span>
 </code></pre></div>
+<p>The <code>kukeon</code> source is pinned to the revision the running <code>kuke</code> was built
+from, because <code>kuke</code> reads exactly one schema version of the documents it
+fetches: a release build pins its tag, a development build pins the clean
+commit it was built from, and only a build that knows neither (a dirty tree,
+or no VCS stamp) falls back to <code>branch: main</code>. When a fetched document is
+rejected anyway, the error names each fetched source with its URL and
+revision. A source revision and the binary then disagree on schema version.
+A stored <code>kuke</code> team (<code>--reapply</code>) and an existing <code>TeamDefaults</code> keep the
+revision they were stored with.</p>
 <p>This applies the shared blueprints <code>codex</code> and <code>claude</code> — one per harness ×
 security profile, realm-wide, see <a href="../../concepts/team/#shared-blueprints">Teams</a> —
 and the CellConfigs <code>kuke-majordomo-codex</code> and <code>kuke-majordomo-claude</code>, labelled
@@ -4000,7 +4009,7 @@ blueprints and configs on cleanup.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 23, 2026 11:25:24 UTC">November 23, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 23, 2026 12:00:30 UTC">November 23, 2026</span>
   </span>
 
     
