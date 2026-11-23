@@ -743,3 +743,22 @@ a.subtle-button { display: inline-flex; align-items: center; min-height: var(--t
 /* "Stopped · N": the cells the Workbench hides, opened in Manage → Cells (#1635). */
 .cell-stopped-link { display: inline-flex; align-items: center; min-block-size: var(--target-min); margin: 8px 8px 0; color: var(--muted); font-size: var(--font-sm); }
 .cell-stopped-link:hover { color: var(--accent); }
+/* Workbench grid (#1635): one tile per active cell with a plain-text thumbnail of its terminal screen. */
+.workbench-status { color: var(--muted); font-size: var(--font-sm); }
+.workbench-status p { margin: 0 0 10px; }
+.cell-grid-group + .cell-grid-group { margin-top: 18px; }
+.cell-grid-heading { display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px; font-size: var(--font-md); }
+.cell-grid-heading small { color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+.cell-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr)); gap: 12px; }
+.cell-grid > li { min-width: 0; }
+.cell-tile { display: flex; flex-direction: column; gap: 6px; width: 100%; min-width: 0; padding: 10px 12px 12px; border-radius: 8px; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+button.cell-tile { border: 1px solid var(--line); background: var(--panel); }
+.cell-tile:hover { border-color: var(--accent); background: var(--panel); }
+.cell-tile-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.cell-tile-name { flex: 1 1 auto; min-width: 0; font-size: var(--font-md); overflow-wrap: anywhere; }
+.cell-tile-head .state-badge { font-size: var(--font-sm); padding: 0 5px; }
+.cell-tile-scope { min-width: 0; color: var(--muted); font-size: var(--font-sm); overflow-wrap: anywhere; }
+.cell-tile-screen { display: block; box-sizing: border-box; height: calc(12 * 1.4em + 16px); margin: 0; padding: 8px; overflow: hidden; border: 1px solid var(--line); border-radius: 6px; background: var(--terminal-bg); color: var(--text); font-family: var(--mono); font-size: var(--font-xs); line-height: 1.4; white-space: pre; max-height: none; }
+.cell-tile-empty { display: grid; place-items: center; color: var(--muted); font-family: inherit; font-size: var(--font-sm); white-space: normal; }
+.cell-tile-foot { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: var(--font-sm); }
+.workbench .cell-stopped-link { margin: 14px 0 0; }
