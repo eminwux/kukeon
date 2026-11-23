@@ -6,21 +6,92 @@ closes the HTTP listener and request-owned daemon connections; it does not stop
 kukeond or workloads. The binary embeds all frontend assets and needs no Node.js
 or external asset files at runtime.
 
-## Resources and the cell sidebar
+## Workbench and Manage
 
-The UI opens to the **Resources** dashboard; `#/`, `#/workspace` without a cell
-scope, and unparsable URLs all land there. The persistent sidebar lists every
-accessible cell, including stopped, failed, and non-attachable cells. Search by cell name or any
-part of its realm, space, and stack scope. Each link shows the parent scope and
-reported state, so duplicate names remain distinct. Select a cell to open its
-terminal, status, overview, and containers. On narrow screens, open the cell
-sidebar with the menu button; selection closes it.
+The UI has two views that share one top bar. **Workbench** is where the
+operator works in cell terminals: the terminal grid, a cell's screen (terminal
+and details), its container pages and **New Cell**. **Manage** is everything
+else: the Overview and every resource and administration page. The view
+follows the URL and is never stored, so Back and Forward restore it with the
+page. The top bar's **Workbench | Manage** switch marks the current side with
+`aria-current`; **Workbench** opens the grid (`#/`) and **Manage** opens the
+Overview (`#/resources`). At phone width the switch shows icons, which keep
+their names for assistive technology. The kukeon logo, in the sidebar and on
+the collapsed rail, always opens the grid. **New Cell**, **Majordomo**,
+**Refresh** and the appearance toggle stay in the top bar in both views.
+Switching views never detaches a terminal: every attached session stays
+mounted while a Manage page is open.
 
-On wider screens, the sidebar's collapse button reduces it to an icon rail with
-the kukeon mark, an expand button, one state dot per cell (named by its full
-scope), and the connection dot. Drag the sidebar's right edge, or focus it and
-use the arrow keys, Home, or End, to resize it within fixed bounds. The collapsed
-state and width are stored only in this browser. The **Connected** section shows
+`#/`, the empty hash, `#/workspace` without a cell scope and unparsable URLs
+open the Workbench grid. `#/resources`, `#/administration` and `#/dashboard`
+open the Overview. No earlier URL changed shape.
+
+### Workbench grid
+
+The grid shows one tile per active cell: its name, scope, state badge, drift
+badge and the last 12 non-blank rows of its terminal screen as plain text,
+clipped on the right and never wrapped (no colours, no terminal instance per
+tile). A tile opens the cell's terminal; a tile for a cell docked in the
+[majordomo panel](#docked-panel) opens the panel instead and does not
+navigate. Tiles are grouped by the sidebar's **Group by**; inside a group, cells
+that need attention (a state other than Ready, or drift) come first, then
+scope order. A cell whose state has no live terminal, or whose screen cannot be
+read (`screen_unavailable`), shows a state-only tile reading **No terminal
+screen**. With no active cell the grid shows an empty state with **New Cell**.
+
+Thumbnails come from [`GET …/cells/{cell}/screenshot`](#read-only-api). The
+grid reads them only while it is the current page and the browser tab is
+visible, only for the tiles on screen, every five seconds, with at most four
+requests in flight; a tick is skipped while the previous pass is still
+running, and cells in a state with no live terminal are never requested. A
+failed refresh keeps the last screen and marks the tile **Stale**. A screenshot
+does not attach and does not count against terminal connections.
+
+### Cell sidebar (Workbench)
+
+The Workbench sidebar lists **active** cells: every cell whose state is not
+`Stopped` or `Exited`. Failed, Error, Degraded, Pending and Unknown cells stay
+listed because they need a look, and the open cell is always listed whatever
+its state. When cells are hidden, **Stopped · N** under the list (and under the
+grid) opens `#/cells?state=inactive`, the Cells table filtered to stopped or
+exited cells. The search and **Group by** typed in the sidebar also filter and
+group the grid. Search by cell name or any part of its realm, space, and stack
+scope. Each link shows the parent scope and reported state, so duplicate names
+remain distinct. Select a cell to open its terminal, status, overview, and
+containers. On narrow screens, open the sidebar with the menu button; it shows
+the sidebar of the current view, and selection closes it.
+
+### Manage sidebar
+
+On a Manage page the sidebar is one flat list, the **Manage navigation**:
+Overview, Realms, Spaces, Stacks, Cells, Blueprints, Configs, Volumes, Secrets,
+Connectors, Teams, Images and Daemon. The current page's link is marked: the
+kind's link on its list and detail pages, Configs on New Config, Secrets on New
+Secret, Daemon on its Status, Health and Logs tabs. No page has a horizontal
+navigation row. The breadcrumb root is **Overview** on Manage pages and
+**Workbench** on Workbench pages.
+
+The Overview (`#/resources`) leads with the cells needing attention and the
+cell summary, then the realm, space and stack counts and a **Health** card: the
+time of the newest stored sweep report and its number of findings, **No report
+stored**, or **Unavailable** when the list cannot be read; it opens the Daemon
+page's Health tab. The **Manage** side of the switch shows a dot, with the
+reasons in its accessible name and tooltip, when the daemon is unreachable or
+permission is denied, when the web and daemon versions differ, or when the
+newest report has findings and has not been shown on the Health tab in this
+browser. Showing the newest report on the Health tab clears that reason; the
+last report id shown is stored under `kukeon-health-seen`, in this browser only.
+
+### Sidebar layout
+
+Both sidebars carry the majordomo entry and the **Connected** section. On
+wider screens, the sidebar's collapse button reduces it to an icon rail with
+the kukeon mark, an expand button, the majordomo button, in Workbench one state
+dot per active cell (named by its full scope), and the connection dot. The
+Manage rail has no per-kind icons; collapsing there only gives the width back.
+Drag the sidebar's right edge, or focus it and use the arrow keys, Home, or
+End, to resize it within fixed bounds. The collapsed state and width are shared
+by both views and stored only in this browser. The **Connected** section shows
 the `web` (`kuke serve`) and `daemon` (kukeond) versions; a warning icon appears
 when both are known and differ. An unreachable daemon shows `daemon unknown`.
 `GET /api/connection` returns `endpoint`, `version`, and, when kukeond answers
@@ -43,7 +114,10 @@ the current page only, at most six requests at a time. An allocated subnet, a
 legacy conflist subnet (**(legacy conflist)**), an unallocated one (**Not
 allocated**) and a failed read (**Unavailable**, with the error as its tooltip)
 render differently; a failed read never breaks the table. In the **Cells** table,
-a cell a schedule created carries a **Scheduled** badge beside its state.
+a cell a schedule created carries a **Scheduled** badge beside its state, and a
+**State** filter offers **All states**, **Active**, **Stopped or exited**, then
+each state present; `?state=` (`active`, `inactive` or a state name)
+preselects it.
 
 A cell page's **Resource overview** has:
 
@@ -152,14 +226,11 @@ running returns `operation_in_progress` (409). An overlap is the same target,
 an ancestor, or a descendant. These routes use the same Host/Origin checks as
 every other route.
 
-Open **Administration** for the resource dashboard and its navigation, which
-has two labelled groups: **Operate** (Overview, Cells, Health) and **Configure**
-(Realms, Spaces, Stacks, Blueprints, Configs, Volumes, Secrets, Connectors,
-Images, Daemon). On phones the Configure group is a disclosure. The dashboard
-leads with **Needs attention**: every cell that is not Ready, and every Ready
+Open **Manage** for the Overview and the [Manage navigation](#manage-sidebar).
+The Overview leads with **Needs attention**: every cell that is not Ready, and every Ready
 cell that is out of sync with its Config or whose comparison failed, with the
 reason. The cell count and daemon-reported cell states follow, then the realm,
-space and stack counts. Containers are reached through
+space and stack counts and the Health card. Containers are reached through
 their cell details. Select a resource kind to open its list across scopes.
 Lists show name, reported state, and parent scope. Search by name or scope, filter
 by realm, and use the paging controls for collections larger than 25 entries.
@@ -201,8 +272,10 @@ sidebar lists the **web** (`kuke serve`) and **daemon** (kukeond) versions from
 
 ## Daemon health
 
-**Resources → Daemon** (`#/daemon`) checks connectivity to kukeond by sending a
-ping over the selected socket with the server's permissions. The page shows:
+**Manage → Daemon** has three tabs: **Status** (`#/daemon`), **Health**
+(`#/daemon/health`, the [sweep reports](#health-page)) and **Logs**
+(`#/daemon/logs`). The Status tab checks connectivity to kukeond by sending a
+ping over the selected socket with the server's permissions. It shows:
 
 - **Connectivity**: **Reachable**, **Unavailable** (no socket, connection
   refused, or no answer within five seconds), **Permission denied** (the server
@@ -217,7 +290,7 @@ ping over the selected socket with the server's permissions. The page shows:
 **Check again** repeats the check, as does the toolbar **Refresh**. A reachable
 daemon does not mean cells, containers, cgroups, networking, or other
 subsystems are healthy. To check those, review cell states in **Overview**,
-read the [daemon logs](#daemon-logs), open the [Health page](#health-page), or
+read the [daemon logs](#daemon-logs), open the [Health tab](#health-page), or
 run `kuke health`.
 
 ## Majordomo
@@ -308,7 +381,8 @@ discarded.
 
 ### Health page
 
-**Resources → Health** (`#/health`) shows what the
+**Manage → Daemon → Health** (`#/daemon/health`; the historical `#/health`
+opens the same tab) shows what the
 [health sweep](site/concepts/team.md#the-majordomo-health-sweep) has reported.
 Everything on it is read from kukeond through `kuke serve`; the server reads no
 kukeon file itself.
@@ -340,7 +414,7 @@ kukeon file itself.
 
 ## Daemon logs
 
-**Resources → Daemon → Logs** (`#/daemon/logs`) shows kukeond's own
+**Manage → Daemon → Logs** (`#/daemon/logs`) shows kukeond's own
 stdout/stderr, the same stream `kuke daemon logs` prints. It opens with the
 newest output, up to 64 KiB. Earlier output that was not loaded is marked
 **Earlier output is not shown.**
@@ -552,7 +626,7 @@ and daemon failures use the same notices as other resource views.
 
 ## Images
 
-**Resources → Images** browses the images installed in a realm's containerd
+**Manage → Images** browses the images installed in a realm's containerd
 namespace. It opens on the `default` realm (or the first realm when there is no
 `default`); the **Realm** selector switches the scope, and only that realm's
 namespace (for example `default.kukeon.io`) is listed. Select an image
@@ -682,7 +756,7 @@ Elsewhere in the UI:
 
 ## Teams
 
-**Configure → Teams** (`#/teams`) manages the [teams](site/concepts/team.md)
+**Manage → Teams** (`#/teams`) manages the [teams](site/concepts/team.md)
 kukeond stores, through the same code as `kuke team` (`internal/team/initialize`):
 a preview here is `--dry-run`, an apply is the CLI's apply. Composition runs in
 `kuke serve` as the account running it: sources are fetched with that
@@ -866,6 +940,22 @@ specification, so a stopped cell's last output can still be read.
   missing cell or container returns `not_found` (404), and a kukeond that
   predates the route returns `daemon_outdated` (501).
 
+`/api/realms/{realm}/spaces/{space}/stacks/{stack}/cells/{cell}/screenshot?container={name}`
+returns a cell's rendered terminal screen as text, the same sbsh `Screenshot`
+read as `kuke screenshot`, as `{ "container", "cols", "rows", "cursorX",
+"cursorY", "cursorVisible", "altScreen", "text" }` (no ANSI rendering). The
+[Workbench grid](#workbench-grid) makes one request per tile. A screenshot does
+not attach, and the terminal bytes never traverse kukeond.
+
+- Without `?container=`, the server picks the cell's `spec.tty.default` when
+  that container is attachable and not root, otherwise the first non-root
+  attachable container in list order. Unlike `kuke screenshot`, several
+  attachable containers are not an error.
+- A cell that is not live, a cell with no attachable container, a container
+  that is not attachable, and a container task that is not running return
+  `screen_unavailable` (404). A missing cell returns `not_found` (404). Any
+  other failure keeps its usual code, for example `unavailable` (503).
+
 Each name is a URL-encoded path segment. Collections return daemon documents,
 except containers, whose collection returns daemon container specs. Realm
 registry passwords are blanked (see [Registry credentials](#registry-credentials))
@@ -874,7 +964,7 @@ filtered, and no direct resource-store reads are made.
 
 Errors use `{ "error": { "code": "...", "message": "..." } }`:
 `permission_denied` (403), `not_found` (404), `log_unavailable` (404),
-`invalid_request` (400),
+`screen_unavailable` (404), `invalid_request` (400),
 `daemon_outdated` (501), or `unavailable` (503). `daemon_outdated` means the
 running kukeond predates the request (for example the `/cgroup` route against a
 daemon built before it); redeploy kukeond with the same build as `kuke`. Requests
@@ -887,13 +977,14 @@ curl http://127.0.0.1:5129/api/realms
 
 ## Layout and appearance
 
-The sidebar holds the kukeon brand (a link to Resources), the cell inventory,
-and daemon connection and version information; the toolbar holds **New Cell**,
-refresh, and appearance controls, and its breadcrumb starts at **Resources**.
-Resources shows its resource
-navigation above the current view. Existing `#/dashboard`, resource, catalog, and
-hierarchy bookmarks still open their Administration views; browser history keeps
-working across both areas.
+The sidebar holds the kukeon brand (a link to the Workbench grid), the
+majordomo entry, the view's own list (active cells in Workbench, the Manage
+navigation in Manage), and daemon connection and version information. The
+toolbar holds the **Workbench | Manage** switch, **New Cell**, **Majordomo**,
+refresh, and appearance controls; its breadcrumb starts at **Workbench** or
+**Overview** for the current view. Existing `#/dashboard`, `#/health`,
+resource, catalog, and hierarchy bookmarks still open their pages; browser
+history keeps working across both views.
 
 Use **Appearance** to choose **System**, **Light**, or **Dark**. System follows the
 device preference, including changes while the page is open. Explicit choices
