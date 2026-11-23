@@ -3713,16 +3713,32 @@
     modelhub --&gt; controller</code></pre>
 <h2 id="pkgapimodelv1beta1-the-external-types">pkg/api/model/v1beta1 — the external types<a class="headerlink" href="#pkgapimodelv1beta1-the-external-types" title="Permanent link">&para;</a></h2>
 <p>Everything a manifest can say lives here:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pkg/api/model/v1beta1/
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── api.go         (Version, Kind)
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├── consts.go      (APIVersionV1Beta1, KindRealm, ...)
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── realm.go       (RealmDoc, RealmSpec, ...)
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>├── space.go       (SpaceDoc, SpaceSpec, ...)
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>├── stack.go       (StackDoc, ...)
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>├── cell.go        (CellDoc, CellSpec, ContainerSpec, ...)
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>├── container.go   (ContainerDoc, ContainerSpec, ...)
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>└── network.go     (Network types)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pkg/api/version/
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>└── version.go                  (V1Beta1, Check: the one apiVersion declaration and check)
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>pkg/api/model/v1beta1/
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>├── api.go                      (Version, Kind)
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>├── consts.go                   (APIVersionV1Beta1, KindRealm, KindHealthDigest, ...)
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>├── realm.go                    (RealmDoc, RealmSpec, ...)
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>├── space.go                    (SpaceDoc, SpaceSpec, ...)
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>├── stack.go                    (StackDoc, ...)
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>├── cell.go                     (CellDoc, CellSpec, ContainerSpec, ...)
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>├── container.go                (ContainerDoc, ContainerSpec, ...)
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>├── secret.go                   (SecretDoc, ...)
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>├── cellblueprint.go            (CellBlueprintDoc, ...)
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>├── cellconfig.go               (CellConfigDoc, ...)
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>├── volume.go                   (VolumeDoc, ...)
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>├── healthreport.go             (HealthReport document types)
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>├── team.go                     (TeamDoc, TeamDefaultsDoc)
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>├── serverconfiguration.go      (ServerConfigurationDoc)
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>├── clientconfiguration.go      (ClientConfigurationDoc)
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>├── connector.go                (connector catalog types)
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>└── network.go                  (Network types)
 </code></pre></div>
+<p><code>pkg/api/version</code> is a leaf package that imports nothing from this module, so
+every reader — the apply parser, the health-report store, the team packages,
+the configuration loaders — compares <code>apiVersion</code> through <code>version.Check</code>
+instead of declaring the string again.</p>
 <p>Fields, tag names, and JSON/YAML layout here are <strong>the public contract</strong>. Renames or removals are breaking changes. New versions get their own sibling package (<code>pkg/api/model/v1/...</code>, <code>pkg/api/model/v1beta2/...</code>, etc.) rather than mutating the current one.</p>
 <h2 id="internalmodelhub-the-internal-types">internal/modelhub — the internal types<a class="headerlink" href="#internalmodelhub-the-internal-types" title="Permanent link">&para;</a></h2>
 <p><code>modelhub</code> mirrors the same resources without a version tag:</p>
@@ -3738,17 +3754,18 @@
 <ul>
 <li><code>Convert&lt;Resource&gt;DocToInternal(ext) → (internal, error)</code> — external → internal.</li>
 <li><code>Build&lt;Resource&gt;ExternalFromInternal(internal, version) → (external, error)</code> — internal → external for a given API version.</li>
-<li><code>Normalize&lt;Resource&gt;(ext) → (internal, version, error)</code> — external → internal with version defaulting (empty <code>apiVersion</code> means "latest supported").</li>
+<li><code>Normalize&lt;Resource&gt;(ext) → (internal, version, error)</code> — external → internal. An empty <code>apiVersion</code> is treated as <code>v1beta1</code> here, but only for documents built in code (for example a probe <code>ContainerDoc</code>). User-written YAML never reaches <code>Normalize*</code> without one: <code>kuke apply</code> and the health-report store reject a document whose <code>apiVersion</code> is missing before conversion.</li>
 </ul>
 <p>Every request crosses <code>apischeme</code> on the way in, and every response crosses it on the way out. Controllers never see <code>v1beta1.RealmDoc</code>.</p>
 <h2 id="why-this-indirection">Why this indirection?<a class="headerlink" href="#why-this-indirection" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Multiple API versions coexist cheaply.</strong> When <code>v1</code> ships, <code>apischeme</code> gains a new switch arm; the controller is unchanged.</li>
 <li><strong>Field renames don't ripple.</strong> <code>SpaceSpec.RealmID</code> (external) and <code>SpaceSpec.RealmName</code> (internal) can drift; <code>apischeme</code> reconciles them.</li>
-<li><strong>Storage can be version-aware independently.</strong> Today we serialize the internal form; if we need to persist the external form for diff-ability, that's a <code>apischeme</code> change, not a controller change.</li>
+<li><strong>Storage can be version-aware independently.</strong> The runner stores the external <code>v1beta1</code> document (for example <code>apischeme.BuildRealmExternalFromInternal(..., VersionV1Beta1)</code> in <code>internal/controller/runner/metadata.go</code>), so stored metadata is diff-able and carries its own <code>apiVersion</code>; changing what is persisted is an <code>apischeme</code> change, not a controller change.</li>
 </ul>
 <h2 id="unsupported-versions">Unsupported versions<a class="headerlink" href="#unsupported-versions" title="Permanent link">&para;</a></h2>
-<p>Manifests with an <code>apiVersion</code> that Kukeon doesn't know about fail loudly at <code>Normalize*</code>. There is no silent upgrade or "closest match" behavior — a request is either in a supported version or it is rejected.</p>
+<p>Every user-written document must carry <code>apiVersion</code>. <code>kuke apply -f</code> (and <code>kuke run -f</code>) rejects a document without one with <code>apiVersion is required (expected v1beta1)</code>, and one with a version Kukeon doesn't know about with <code>unsupported apiVersion "&lt;value&gt;" (expected v1beta1)</code>; both match <code>errdefs.ErrUnsupportedAPIVersion</code>. A missing value is not read as "latest": once a second version exists, that reading would silently change meaning. There is no silent upgrade or "closest match" behavior — a request is either in a supported version or it is rejected.</p>
+<p>The two configuration files (<code>kukeond --configuration</code>, <code>kuke --configuration</code>) are the exception: a file without <code>apiVersion</code> still loads, so an existing <code>/etc/kukeon/kukeond.yaml</code> keeps working, but a set value must be <code>v1beta1</code>.</p>
 <h2 id="today-one-supported-version">Today: one supported version<a class="headerlink" href="#today-one-supported-version" title="Permanent link">&para;</a></h2>
 <p><code>v1beta1</code> is the only version currently in the tree. <code>v1</code> is planned once the resource model stabilizes. Both will live side by side when that happens; nothing about <code>v1beta1</code> will be removed without a deprecation window.</p>
 <h2 id="read-next">Read next<a class="headerlink" href="#read-next" title="Permanent link">&para;</a></h2>
@@ -3778,7 +3795,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="April 21, 2026 12:22:34 UTC">April 21, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 23, 2026 21:59:25 UTC">November 23, 2026</span>
   </span>
 
     
