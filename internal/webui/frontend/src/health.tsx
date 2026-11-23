@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { systemTeam, teamsLink } from "./teams.mjs";
 import { useResource, ErrorNotice } from "./request";
 import { AskMajordomo, configScope, oneLine, sweepTask, type ConfigDoc, type Majordomo } from "./majordomo";
+import { ScheduleDetails, cellLinker, when } from "./schedule";
+import type { InventoryResource } from "./inventory";
 
 type Finding = {
   signature: string; classification: string; severity: string; recurring?: boolean; title?: string; count?: number;
@@ -13,9 +15,6 @@ type Report = {
 };
 type Summary = { id: string; createdAt: string; since: string; until: string; summary: string; findings: number; recurring: number; filed: number };
 
-function when(value?: string) {
-  return value && !value.startsWith("0001-") && Number.isFinite(Date.parse(value)) ? <time dateTime={value}>{new Date(value).toLocaleString()}</time> : "—";
-}
 function configLink(scope: string[]): string { return "#/configs/" + scope.map(encodeURIComponent).join("/"); }
 const classTone: Record<string, string> = { kukeon: "error", workload: "warning", unclear: "neutral" };
 
@@ -53,7 +52,7 @@ function EnableSweep({ configs }: { configs: ConfigDoc[] }) {
   </div>;
 }
 
-function SweepSchedule({ config, onRun, running }: { config: ConfigDoc; onRun: (config: ConfigDoc) => void; running: boolean }) {
+function SweepSchedule({ config, onRun, running, inventory }: { config: ConfigDoc; onRun: (config: ConfigDoc) => void; running: boolean; inventory: InventoryResource }) {
   const schedule = config.spec?.schedule;
   const status = config.status?.schedule;
   const scope = [...configScope(config), config.metadata.name];
@@ -63,17 +62,11 @@ function SweepSchedule({ config, onRun, running }: { config: ConfigDoc; onRun: (
       <span className={`state-badge tone-${!schedule ? "neutral" : schedule.suspend ? "stopped" : "ok"}`}><span className="state-dot" aria-hidden="true" />{!schedule ? "No schedule" : schedule.suspend ? "Suspended" : "Scheduled"}</span>
       <button type="button" disabled={running} aria-busy={running || undefined} aria-label={`Run sweep now with ${config.metadata.name}`} onClick={() => onRun(config)}>{running ? "Starting sweep…" : "Run sweep now"}</button>
     </div>
-    <dl className="details-grid">
-      <dt>Cron</dt><dd className="mono-id">{schedule?.cron ?? "—"}{schedule?.timezone ? ` (${schedule.timezone})` : schedule?.cron ? " (UTC)" : ""}</dd>
-      <dt>Suspended</dt><dd>{schedule ? schedule.suspend ? "Yes" : "No" : "—"}</dd>
-      <dt>Next fire</dt><dd>{when(status?.nextScheduleTime)}</dd>
-      <dt>Last fire</dt><dd>{when(status?.lastScheduleTime)}{status?.lastCell ? <> · <span className="mono-id">{status.lastCell}</span></> : null}</dd>
-      <dt>Last error</dt><dd>{status?.lastError ? <span className="health-last-error">{status.lastError}</span> : "None"}</dd>
-    </dl>
+    {schedule ? <ScheduleDetails schedule={schedule} status={status} cellLink={cellLinker(inventory.data, config)} /> : <p className="description">This Config has no schedule.</p>}
   </li>;
 }
 
-export function HealthPage({ revision, major, onChanged }: { revision: number; major: Majordomo; onChanged: () => void }) {
+export function HealthPage({ revision, major, inventory, onChanged }: { revision: number; major: Majordomo; inventory: InventoryResource; onChanged: () => void }) {
   const [reads, setReads] = useState(0);
   const [selected, setSelected] = useState("latest");
   const [running, setRunning] = useState("");
@@ -113,7 +106,7 @@ export function HealthPage({ revision, major, onChanged }: { revision: number; m
         {major.configs.error && <ErrorNotice error={major.configs.error} kind="Configs" />}
         {major.configs.data && !major.sweeps.length && <p className="description" role="status">No health-sweep config found. Run <code>kuke team init</code> on the host to apply majordomo and its sweep task.</p>}
         {suspended.length > 0 && <EnableSweep configs={suspended} />}
-        <ul className="health-sweeps">{major.sweeps.map(config => <SweepSchedule key={JSON.stringify([...configScope(config), config.metadata.name])} config={config} onRun={runSweep} running={running === config.metadata.name} />)}</ul>
+        <ul className="health-sweeps">{major.sweeps.map(config => <SweepSchedule key={JSON.stringify([...configScope(config), config.metadata.name])} config={config} onRun={runSweep} running={running === config.metadata.name} inventory={inventory} />)}</ul>
         {sweepResult && <div className={sweepResult.tone === "error" ? "error" : "health-sweep-started"} role={sweepResult.tone === "error" ? "alert" : "status"}>{sweepResult.tone === "error" && <strong>Sweep did not start</strong>}<p>{sweepResult.message}</p></div>}
       </div>
     </section>

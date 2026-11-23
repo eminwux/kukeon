@@ -108,3 +108,18 @@ export function configsForStateVolume(configs, volume) {
   }
   return result;
 }
+
+// The label kukeond stamps on every cell a schedule fires, naming its Config.
+export const scheduleLabel = "kukeon.io/schedule";
+// scheduledRun reads a cell a schedule created: the Config it ran and, from the `<config>-<unix seconds>`
+// name kukeond gives every fire, when it fired. The fire time is recorded nowhere else on the cell, so it
+// is undefined when the suffix is not a plausible unix time (2000 through 2199). Null for any other cell.
+export function scheduledRun(doc) {
+  const config = doc?.metadata?.labels?.[scheduleLabel];
+  if (typeof config !== "string" || !config) return null;
+  const name = value(doc.metadata, "name");
+  const suffix = name.startsWith(`${config}-`) ? name.slice(config.length + 1) : "";
+  const seconds = /^\d{9,10}$/.test(suffix) ? Number(suffix) : NaN;
+  const firedAt = seconds >= 946684800 && seconds < 7258118400 ? new Date(seconds * 1000).toISOString() : undefined;
+  return { config, firedAt };
+}

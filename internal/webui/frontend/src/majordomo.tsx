@@ -4,6 +4,7 @@ import type { InventoryResource, Row, Doc, RuntimeStatus } from "./inventory";
 import { apiPath } from "./routes";
 import { StateBadge } from "./status";
 import { Icon } from "./icons";
+import type { Schedule, ScheduleStatus } from "./schedule-format.mjs";
 import { TerminalSession, cellId, sessionId, unavailableStates, type TerminalManager, type Theme } from "./terminal";
 
 // Majordomo is found by label, never by name: its configs and cells carry the kuke team and the
@@ -17,10 +18,10 @@ export const sweepTask = "health-sweep";
 // The one interactive cell the web UI creates.
 const cellName = "majordomo";
 
-export type ScheduleStatus = { lastScheduleTime?: string; nextScheduleTime?: string; lastCell?: string; activeCells?: string[]; skippedFires?: number; lastError?: string };
+export type { ScheduleStatus } from "./schedule-format.mjs";
 export type ConfigDoc = {
   metadata: { name: string; realm?: string; space?: string; stack?: string; labels?: Record<string, string> };
-  spec?: { blueprint?: { name?: string }; schedule?: { cron?: string; timezone?: string; suspend?: boolean }; [key: string]: unknown };
+  spec?: { blueprint?: { name?: string }; schedule?: Schedule; [key: string]: unknown };
   status?: { schedule?: ScheduleStatus };
 };
 type Labels = Record<string, string> | undefined;

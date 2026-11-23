@@ -9,3 +9,5 @@ export function cellsForBlueprint<T extends CellRow, C extends ConfigDoc>(cells:
 export type VolumeMountUse<T extends CellRow> = { row: T; container: string; target: string; readOnly: boolean; ensure: boolean; by: "source" | "volumeRef" };
 export function volumeMounts<T extends CellRow>(cells: T[], volumes: Array<{ metadata: ScopedReference }> | undefined, volume: { metadata: ScopedReference } | ScopedReference): Array<VolumeMountUse<T>>;
 export function configsForStateVolume<C extends { metadata: ScopedReference; status?: unknown }>(configs: C[] | undefined, volume: { metadata: ScopedReference } | ScopedReference): Array<{ config: C; connectors: string[] }>;
+export const scheduleLabel: string;
+export function scheduledRun(doc: { metadata?: { name?: string; labels?: Record<string, string> } } | null | undefined): { config: string; firedAt?: string } | null;

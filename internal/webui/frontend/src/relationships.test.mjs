@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { cellsForBlueprint, cellsForConfig, configForCell, configsForBlueprint, configsForStateVolume, sameScopedReference, volumeMounts } from "./relationships.mjs";
+import { cellsForBlueprint, cellsForConfig, configForCell, configsForBlueprint, configsForStateVolume, sameScopedReference, scheduledRun, volumeMounts } from "./relationships.mjs";
 
 const blueprint = { name: "base", realm: "r1", space: "shared", stack: "images" };
 const configA = { metadata: { name: "app", realm: "r1", space: "team-a", stack: "dev" }, spec: { blueprint } };
@@ -77,4 +77,14 @@ test("configsForStateVolume finds the Configs keeping a login in a Volume", () =
   ];
   assert.deepEqual(configsForStateVolume(configs, login), [{ config: configs[0], connectors: ["Harness"] }]);
   assert.deepEqual(configsForStateVolume(undefined, login), []);
+});
+
+// #1630: a scheduled cell's fire time is in its name only.
+test("scheduledRun reads the Config and the fire time of a scheduled cell", () => {
+  const labels = { "kukeon.io/schedule": "health-sweep" };
+  assert.deepEqual(scheduledRun({ metadata: { name: "health-sweep-1763892000", labels } }), { config: "health-sweep", firedAt: "2025-11-23T10:00:00.000Z" });
+  assert.deepEqual(scheduledRun({ metadata: { name: "renamed-by-hand", labels } }), { config: "health-sweep", firedAt: undefined }, "the label alone still says it is a scheduled run");
+  assert.deepEqual(scheduledRun({ metadata: { name: "health-sweep-12", labels } }), { config: "health-sweep", firedAt: undefined }, "not a plausible unix time");
+  assert.equal(scheduledRun({ metadata: { name: "health-sweep-1763892000" } }), null, "no label");
+  assert.equal(scheduledRun(undefined), null);
 });
