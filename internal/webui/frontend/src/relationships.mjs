@@ -110,7 +110,7 @@ export function configsForStateVolume(configs, volume) {
 }
 
 // The label kukeond stamps on every cell a schedule fires, naming its Config.
-export const scheduleLabel = "kukeon.io/schedule";
+const scheduleLabel = "kukeon.io/schedule";
 // scheduledRun reads a cell a schedule created: the Config it ran and, from the `<config>-<unix seconds>`
 // name kukeond gives every fire, when it fired. The fire time is recorded nowhere else on the cell, so it
 // is undefined when the suffix is not a plausible unix time (2000 through 2199). Null for any other cell.

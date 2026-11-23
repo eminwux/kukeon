@@ -74,7 +74,7 @@ function fromConfig(row: Row, doc: ConfigDoc): boolean {
   return row.doc.metadata.labels?.[configLabel] === doc.metadata.name && row.scope[0] === configScope(doc)[0];
 }
 // cellConfig is the Config a majordomo cell was created from.
-export function cellConfig(row: Row, configs: ConfigDoc[]): ConfigDoc | undefined {
+function cellConfig(row: Row, configs: ConfigDoc[]): ConfigDoc | undefined {
   return configs.find(doc => fromConfig(row, doc));
 }
 function createdAt(row: Row): number {

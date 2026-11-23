@@ -74,9 +74,11 @@ func registerCatalogSecretRoute(mux *http.ServeMux, dial Dial) {
 }
 
 // writeCatalogSecret is the web UI's New Secret and Replace value. Create
-// never overwrites and replace never creates; a Secret tagged with a
-// connector is not written here, because the daemon's overwrite is wholesale
-// and would erase the tag — its identity route rotates it. The daemon's own
+// refuses an existing Secret and replace refuses a missing one; a Secret
+// tagged with a connector is not written here, because the daemon's overwrite
+// is wholesale and would erase the tag — its identity route rotates it. These
+// guards are a read before the write, not atomic: a concurrent write to the
+// same name between the two calls is not detected. The daemon's own
 // validation errors are untyped over the RPC, so the material is validated
 // here first and a rejection is a 400.
 func writeCatalogSecret(ctx context.Context, c kukeonv1.Client, r *http.Request) (any, error) {

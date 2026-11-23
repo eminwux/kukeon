@@ -379,7 +379,8 @@ test("the secret form validates and builds untagged Secret writes", () => {
   assert.deepEqual(secretErrors(blank), ["Name is required.", "Value is required."]);
   assert.deepEqual(secretErrors({ ...blank, name: ".types", value: "x" }), ["A name cannot start with a dot."]);
   assert.deepEqual(secretErrors({ ...blank, name: "t", type: "tls", value: "v" }), ["Type must be one of: opaque, basic-auth, ssh-key."]);
-  assert.deepEqual(secretErrors({ ...blank, name: "t", value: "   " }), ["Value is required."]);
+  assert.deepEqual(secretErrors({ ...blank, name: "t", value: "\r\n" }), ["Value is required."], "only trailing newlines are trimmed, as the server does");
+  assert.deepEqual(secretErrors({ ...blank, name: "t", value: "   " }), [], "whitespace is a value the server accepts");
   assert.deepEqual(secretErrors({ ...replaceForm, username: "bot" }, true), ["Password or token is required."], "replace asks for no name");
   assert.deepEqual(secretErrors({ ...blank, name: "k", type: "ssh-key" }), ["Private key is required."]);
 

@@ -941,7 +941,10 @@ through the connector's identities route instead, since an overwrite would
 erase the tag. Missing material, an unknown type, a type change, an unsafe name
 or one starting with `.`, and a non-JSON or malformed body return
 `invalid_request` (400); the server validates the material the way kukeond does
-before sending it. A success returns `{ "name", "scope", "type", "action" }`,
+before sending it. The existence, type and tag checks read the stored Secret
+before writing it and are not atomic: a concurrent write to the same name and
+scope (another tab or `kuke create secret`) between the read and the write is
+not detected. A success returns `{ "name", "scope", "type", "action" }`,
 with `action` `created` or `updated`. No response or error ever contains the
 submitted material.
 

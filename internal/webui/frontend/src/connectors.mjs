@@ -359,7 +359,8 @@ export function secretErrors(form, replace = false) {
   if (!secretTypes.includes(form?.type)) errors.push(`Type must be one of: ${secretTypes.join(", ")}.`);
   if (form?.type === secretBasicAuth) { if (!trimmed(form.username)) errors.push("Username is required."); if (!text(form.password)) errors.push("Password or token is required."); }
   else if (form?.type === secretSSHKey) { if (!trimmed(form.privateKey)) errors.push("Private key is required."); }
-  else if (!trimmed(form?.value)) errors.push("Value is required.");
+  // kukeond trims only trailing newlines from an opaque value (identityMaterial).
+  else if (!text(form?.value).replace(/[\r\n]+$/, "")) errors.push("Value is required.");
   return errors;
 }
 // secretPayload builds the body of POST /api/catalog/secrets/{name}: the type,
