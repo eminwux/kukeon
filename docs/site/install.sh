@@ -5,15 +5,20 @@
 # install.sh — one-line installer for kukeon.
 #
 #   curl -fsSL https://kukeon.io/install.sh | bash
+#   curl -fsSL https://kukeon.io/install.sh | KUKE_CHANNEL=stable bash
 #   curl -fsSL https://kukeon.io/install.sh | bash -s -- --check
 #
 # Collapses the multi-step manual install (download → chmod → install →
-# hardlink → init) into a single invocation. Checks but never installs host
-# prerequisites (containerd, cgroups v2) — auto-installing those
+# hardlink → init → kuke team init) into a single invocation. Checks but never
+# installs host prerequisites (containerd, cgroups v2) — auto-installing those
 # has too much blast radius on arbitrary user systems; surface a distro-aware
-# hint instead.
+# hint instead. After install, `sudo kuke update` keeps the host on its channel.
 #
 # Env overrides:
+#   KUKE_CHANNEL           edge (default: the newest build of main) or stable
+#                          (the latest release tag). KUKE_VERSION alone means
+#                          stable; KUKE_VERSION with KUKE_CHANNEL=edge is an
+#                          error (edge builds cannot be pinned)
 #   KUKE_VERSION           pin a release tag (default: resolve via GitHub API)
 #   KUKE_REPO              GitHub repo path (default: eminwux/kukeon — for forks)
 #   KUKE_INSTALL_PREFIX    install dir (default: /usr/local/bin)
@@ -25,16 +30,29 @@
 #                          on a live host, skip the daemon version check and
 #                          keep an intentionally pinned older daemon (preserves
 #                          the historical silent-skip behavior)
+#   KUKE_SKIP_TEAM_INIT=1  skip `kuke team init` (fresh host) or
+#                          `kuke team init --upgrade` (live host)
 
 set -euo pipefail
 
 KUKE_REPO="${KUKE_REPO:-eminwux/kukeon}"
 KUKE_INSTALL_PREFIX="${KUKE_INSTALL_PREFIX:-/usr/local/bin}"
 KUKE_VERSION="${KUKE_VERSION:-}"
+KUKE_CHANNEL="${KUKE_CHANNEL:-}"
 KUKE_SKIP_INIT="${KUKE_SKIP_INIT:-}"
 KUKE_SKIP_CHECKSUM="${KUKE_SKIP_CHECKSUM:-}"
 KUKE_SKIP_KUKEBUILD="${KUKE_SKIP_KUKEBUILD:-}"
 KUKE_SKIP_DAEMON_UPGRADE="${KUKE_SKIP_DAEMON_UPGRADE:-}"
+KUKE_SKIP_TEAM_INIT="${KUKE_SKIP_TEAM_INIT:-}"
+
+# The release the assets are downloaded from: `edge` (the rolling prerelease)
+# or the stable tag. Set by resolve_channel / do_install.
+KUKE_RELEASE_TAG=""
+# The immutable kukeond image matching the installed binaries: :sha-<short> on
+# edge, :<tag> on stable. Same rule as config.BuildVersion.ImageTag.
+KUKEOND_IMAGE=""
+# Outcome of the team step: skipped | ok | failed.
+KUKE_TEAM_INIT="skipped"
 
 # Set by handle_running_daemon when a live host's daemon is older than the
 # binaries just installed; main exits non-zero on this so the installer never
@@ -65,13 +83,18 @@ usage() {
     cat <<EOF
 Usage: install.sh [--check] [--help]
 
-Installs kukeon (kuke + kukeond + kukebuild + kukepause) on a Linux host.
+Installs kukeon (kuke + kukeond + kukebuild + kukepause) on a Linux host,
+initializes the runtime and stores the kuke team (majordomo). Keep the host
+current afterwards with \`sudo kuke update\`.
 
   --check    Run prerequisite checks only; do not touch the system.
   --help     Show this help.
 
 Env overrides:
+  KUKE_CHANNEL           edge (default: newest build of main) or stable (latest
+                         release tag). KUKE_VERSION alone implies stable.
   KUKE_VERSION           Pin a release tag (default: resolve latest via GitHub API).
+                         Cannot be combined with KUKE_CHANNEL=edge.
   KUKE_REPO              GitHub repo (default: eminwux/kukeon).
   KUKE_INSTALL_PREFIX    Install dir (default: /usr/local/bin).
   KUKE_SKIP_INIT=1       Skip the post-install \`kuke init\` step.
@@ -80,6 +103,7 @@ Env overrides:
   KUKE_SKIP_DAEMON_UPGRADE=1
                          On a live host, skip the daemon version check and keep
                          an intentionally pinned older daemon.
+  KUKE_SKIP_TEAM_INIT=1  Skip \`kuke team init\` (or \`--upgrade\` on a live host).
 EOF
 }
 
@@ -90,6 +114,36 @@ while [ "$#" -gt 0 ]; do
         *) fail "unknown argument: $1"; usage >&2; exit 2 ;;
     esac
 done
+
+# --- Channel -----------------------------------------------------------------
+# Validated before the prerequisite checks so a bad value touches nothing.
+# KUKE_VERSION alone means stable; an edge build cannot be pinned.
+resolve_channel() {
+    if [ -z "$KUKE_CHANNEL" ]; then
+        if [ -n "$KUKE_VERSION" ]; then
+            KUKE_CHANNEL="stable"
+        else
+            KUKE_CHANNEL="edge"
+        fi
+    fi
+    case "$KUKE_CHANNEL" in
+        edge)
+            if [ -n "$KUKE_VERSION" ]; then
+                fail "KUKE_VERSION=${KUKE_VERSION} cannot be combined with KUKE_CHANNEL=edge: edge builds cannot be pinned."
+                printf '    Use KUKE_CHANNEL=stable KUKE_VERSION=%s, or drop KUKE_VERSION.\n' "$KUKE_VERSION" >&2
+                exit 2
+            fi
+            KUKE_RELEASE_TAG="edge"
+            ;;
+        stable)
+            ;;
+        *)
+            fail "unknown KUKE_CHANNEL=${KUKE_CHANNEL} (supported: edge, stable)"
+            exit 2
+            ;;
+    esac
+}
+resolve_channel
 
 # --- Distro detection --------------------------------------------------------
 # Used only to render an actionable "install containerd" hint. Falls through
@@ -260,6 +314,36 @@ resolve_latest_version() {
     printf '%s\n' "$tag"
 }
 
+# resolve_edge_version prints the version of the newest edge build, read from
+# the VERSION asset of the rolling `edge` prerelease (uploaded last, so the
+# binaries and the image it names are already published).
+resolve_edge_version() {
+    local url="https://github.com/${KUKE_REPO}/releases/download/edge/VERSION"
+    local version
+    if ! version="$(curl -fsSL "$url" 2>/dev/null)"; then
+        fail "no edge build published yet: could not read ${url}"
+        printf '    Install the latest release instead:  KUKE_CHANNEL=stable bash install.sh\n' >&2
+        exit 1
+    fi
+    version="$(printf '%s' "$version" | tr -d '[:space:]')"
+    if ! printf '%s\n' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-g[0-9a-f]+$'; then
+        fail "the edge VERSION asset at ${url} is malformed: '${version}'"
+        printf '    Install the latest release instead:  KUKE_CHANNEL=stable bash install.sh\n' >&2
+        exit 1
+    fi
+    printf '%s\n' "$version"
+}
+
+# kukeond_image_for <channel> <version> prints the immutable kukeond image the
+# daemon is created from — never :edge or :latest (a reused tag is how a stale
+# daemon image survived in #857).
+kukeond_image_for() {
+    case "$1" in
+        edge) printf 'ghcr.io/%s:sha-%s\n' "$KUKE_REPO" "${2##*-g}" ;;
+        *) printf 'ghcr.io/%s:%s\n' "$KUKE_REPO" "$2" ;;
+    esac
+}
+
 # --- Install -----------------------------------------------------------------
 # Global so the EXIT trap below can see it after do_install returns. A `local`
 # binding would be invisible by the time the trap fires in the outer shell.
@@ -316,7 +400,7 @@ content_length_for() {
 fetch_verified() {
     local asset="$1" dest="$2"
     local asset_url sha_url sha_path
-    asset_url="https://github.com/${KUKE_REPO}/releases/download/${KUKE_VERSION}/${asset}"
+    asset_url="https://github.com/${KUKE_REPO}/releases/download/${KUKE_RELEASE_TAG}/${asset}"
     sha_url="${asset_url}.sha256"
     sha_path="${dest}.sha256"
 
@@ -349,6 +433,9 @@ fetch_verified() {
         if [ "$curl_rc" -eq 23 ]; then
             printf '    curl fetched the asset but could not write it to %s\n' "$dest" >&2
             tmpdir_hint
+        elif [ "$KUKE_CHANNEL" = "edge" ]; then
+            printf '    The edge build may have been replaced during the install; run the installer again,\n' >&2
+            printf '    or install the latest release:  KUKE_CHANNEL=stable bash install.sh\n' >&2
         else
             printf '    Confirm KUKE_VERSION=%s exists at\n' "$KUKE_VERSION" >&2
             printf '      https://github.com/%s/releases\n' "$KUKE_REPO" >&2
@@ -390,11 +477,17 @@ do_install() {
     local arch kuke_path kukebuild_path kukepause_path
     arch="$(detect_platform)"
 
-    step "Resolving release version"
-    if [ -z "$KUKE_VERSION" ]; then
+    step "Resolving ${KUKE_CHANNEL} version"
+    if [ "$KUKE_CHANNEL" = "edge" ]; then
+        KUKE_VERSION="$(resolve_edge_version)"
+    elif [ -z "$KUKE_VERSION" ]; then
         KUKE_VERSION="$(resolve_latest_version)"
     fi
-    ok "version: ${KUKE_VERSION}"
+    if [ "$KUKE_CHANNEL" = "stable" ]; then
+        KUKE_RELEASE_TAG="$KUKE_VERSION"
+    fi
+    KUKEOND_IMAGE="$(kukeond_image_for "$KUKE_CHANNEL" "$KUKE_VERSION")"
+    ok "version: ${KUKE_VERSION} (${KUKE_CHANNEL}; kukeond image ${KUKEOND_IMAGE})"
 
     create_install_tmpdir
     trap cleanup_tmpdir EXIT
@@ -429,6 +522,21 @@ do_install() {
     fi
     fetch_verified "kukepause-linux-${arch}" "$kukepause_path"
     chmod +x "$kukepause_path"
+
+    # The edge assets are replaced by every merge to main. A downloaded kuke
+    # that does not report the VERSION read above means a new build landed
+    # between the downloads; nothing is installed yet, so stop here.
+    if [ "$KUKE_CHANNEL" = "edge" ]; then
+        local got
+        got="$("$kuke_path" version --no-daemon 2>/dev/null | head -n1 || true)"
+        if [ "$got" != "Client: ${KUKE_VERSION}" ]; then
+            fail "edge build changed during download, run the installer again"
+            printf '    expected: Client: %s\n' "$KUKE_VERSION" >&2
+            printf '    got:      %s\n' "${got:-<no output>}" >&2
+            exit 1
+        fi
+        ok "downloaded kuke reports ${KUKE_VERSION}"
+    fi
 
     step "Installing to ${KUKE_INSTALL_PREFIX}"
     $SUDO install -m 0755 "$kuke_path" "${KUKE_INSTALL_PREFIX}/kuke"
@@ -466,8 +574,12 @@ do_install() {
     # skew + recreate command instead of an unqualified skip (issue #1260).
     if [ -S /run/kukeon/kukeond.sock ]; then
         handle_running_daemon
+        if [ -z "$KUKE_DAEMON_SKEW" ] && [ -z "$KUKE_SKIP_DAEMON_UPGRADE" ]; then
+            run_team_step upgrade
+        fi
     else
         $SUDO kuke init
+        run_team_step init
     fi
 
     install_systemd_unit
@@ -475,39 +587,93 @@ do_install() {
 }
 
 # --- Running-daemon version gate ---------------------------------------------
-# A binary upgrade on a live host leaves the old kukeond running. The previous
-# liveness-only skip (socket present → skip) declared that a success even when
-# the daemon predated the new binaries, ending in a client/daemon version skew
-# the installer just called done (issue #1260). This compares the live daemon's
-# version against the just-installed client and, on a mismatch, surfaces the
-# exact `kuke daemon recreate` command rather than a silent skip.
-#
+# A binary upgrade on a live host leaves the old kukeond running (issue #1260).
 # `kuke version --strict` prints the Client/Daemon lines and exits non-zero
 # only on a real version mismatch; an unreachable daemon (socket present but
 # dead) prints a warning and exits 0, so it falls through to the historical
-# skip rather than a spurious recreate prompt. The installer does not auto-cycle
-# the daemon — a recreate tears down and re-provisions the kuke-system kukeond
-# cell, too aggressive to do unprompted from a piped curl|bash — so it prints
-# the copy-pasteable command and lets main exit non-zero on the skew.
+# skip rather than a recreate.
+#
+# On a mismatch the installer recreates the daemon from the immutable image of
+# the binaries it just installed (issue #1638 reverses #1260's print-only
+# choice). The recreate cycles only the kuke-system kukeond cell — workload
+# cells and /opt/kukeon/data/default are untouched — and pulls the image
+# before it stops anything, so an image that cannot be pulled leaves the old
+# daemon running. When the recreate or the follow-up version check fails, the
+# installer prints the command, records the skew, and main exits non-zero.
+# KUKE_SKIP_DAEMON_UPGRADE=1 keeps an intentionally pinned older daemon.
 handle_running_daemon() {
     if [ -n "$KUKE_SKIP_DAEMON_UPGRADE" ]; then
         ok "kukeond already running at /run/kukeon/kukeond.sock — skipping \`kuke init\` (KUKE_SKIP_DAEMON_UPGRADE=1)"
         return 0
     fi
 
+    local kuke_bin="${KUKE_INSTALL_PREFIX}/kuke"
     local version_out
-    if version_out="$($SUDO kuke version --strict 2>&1)"; then
+    if version_out="$($SUDO "$kuke_bin" version --strict 2>&1)"; then
         ok "kukeond already running at /run/kukeon/kukeond.sock (version-matched) — skipping \`kuke init\`"
         return 0
     fi
 
+    step "Upgrading kukeond to ${KUKE_VERSION} (${KUKEOND_IMAGE})"
+    printf '%s\n' "$version_out" | sed 's/^/    /'
+    if $SUDO "$kuke_bin" daemon recreate --kukeond-image "$KUKEOND_IMAGE" &&
+        version_out="$($SUDO "$kuke_bin" version --strict 2>&1)" &&
+        printf '%s\n' "$version_out" | grep -qxF "Daemon: ${KUKE_VERSION}"; then
+        printf '%s\n' "$version_out" | sed 's/^/    /'
+        ok "kukeond recreated; client and daemon both report ${KUKE_VERSION}"
+        return 0
+    fi
+
     KUKE_DAEMON_SKEW=1
-    fail "kukeond is older than the binaries just installed (client ${KUKE_VERSION}) — leaving a client/daemon version skew."
+    fail "could not upgrade kukeond to the binaries just installed (client ${KUKE_VERSION}) — leaving a client/daemon version skew."
     printf '%s\n' "$version_out" | sed 's/^/    /' >&2
-    printf '\n    Upgrade the daemon to match. Workload cells are untouched — recreate\n' >&2
-    printf '    only cycles the kuke-system kukeond cell:\n\n' >&2
-    printf '      %ssudo kuke daemon recreate --kukeond-image ghcr.io/%s:%s%s\n\n' "$C_BOLD" "$KUKE_REPO" "$KUKE_VERSION" "$C_RESET" >&2
+    printf '\n    Retry the upgrade. Workload cells are untouched — recreate only cycles\n' >&2
+    printf '    the kuke-system kukeond cell:\n\n' >&2
+    printf '      %ssudo kuke daemon recreate --kukeond-image %s%s\n\n' "$C_BOLD" "$KUKEOND_IMAGE" "$C_RESET" >&2
     printf '    To keep an intentionally pinned older daemon, re-run with KUKE_SKIP_DAEMON_UPGRADE=1.\n' >&2
+    return 0
+}
+
+# --- kuke team ---------------------------------------------------------------
+# run_team_step init|upgrade stores the kuke team (majordomo) on a fresh host,
+# or moves a stored one to the revision of the binaries just installed on a
+# live host. `kuke init` and `kuke team init` stay two commands: team init is a
+# daemon client that fetches github.com/eminwux/kukeon at the binary's commit,
+# so it needs git and network access the runtime bootstrap does not. A missing
+# git or a failed team step is a warning; the install still succeeds. Runs
+# through $SUDO because the invoking user's kukeon group membership is not
+# active until the next login.
+run_team_step() {
+    local mode="$1" kuke_bin="${KUKE_INSTALL_PREFIX}/kuke"
+    local -a args=(team init)
+    if [ "$mode" = "upgrade" ]; then
+        args+=(--upgrade)
+    fi
+    local cmd="sudo kuke ${args[*]}"
+    if [ -n "$KUKE_SKIP_TEAM_INIT" ]; then
+        warn "KUKE_SKIP_TEAM_INIT=1 set — skipping \`kuke ${args[*]}\`. Run it later:"
+        printf '      %s\n' "$cmd"
+        return 0
+    fi
+    # A pinned older release has no --upgrade; skip without a message.
+    if [ "$mode" = "upgrade" ] && ! "$kuke_bin" team init --help 2>/dev/null | grep -q -- '--upgrade'; then
+        return 0
+    fi
+    step "Composing the kuke team (kuke ${args[*]})"
+    if ! command -v git >/dev/null 2>&1; then
+        KUKE_TEAM_INIT="failed"
+        warn "git is not on PATH — skipping \`kuke ${args[*]}\`, which fetches the kukeon team sources."
+        printf '    Install git, then run:\n      %s\n' "$cmd" >&2
+        return 0
+    fi
+    if $SUDO "$kuke_bin" "${args[@]}"; then
+        KUKE_TEAM_INIT="ok"
+        ok "kuke team stored"
+    else
+        KUKE_TEAM_INIT="failed"
+        warn "\`kuke ${args[*]}\` failed — the runtime is installed; run it later:"
+        printf '      %s\n' "$cmd" >&2
+    fi
     return 0
 }
 
@@ -658,7 +824,16 @@ print_next_steps() {
     print_group_note
     cat <<EOF
 
-${C_GREEN}${C_BOLD}✓ kukeon installed and initialized${C_RESET}
+${C_GREEN}${C_BOLD}✓ kukeon ${KUKE_VERSION} (${KUKE_CHANNEL}) installed and initialized${C_RESET}
+EOF
+    if [ "$KUKE_TEAM_INIT" = "ok" ]; then
+        cat <<EOF
+
+Talk to the majordomo of the kuke team:
+  ${C_BOLD}kuke run --from-config kuke-majordomo-codex${C_RESET}   (or kuke-majordomo-claude)
+EOF
+    fi
+    cat <<EOF
 
 Try your first session — create a cell from an image, list it, start it:
   ${C_BOLD}kuke create cell my-first --image docker.io/library/alpine:3${C_RESET}
@@ -670,6 +845,9 @@ Or, for a one-shot interactive session (create + start + attach):
 
 Or apply a manifest:
   ${C_BOLD}kuke apply -f my-stack.yaml${C_RESET}
+
+Stay current with the ${KUKE_CHANNEL} channel:
+  ${C_BOLD}sudo kuke update${C_RESET}
 
 Docs:    https://kukeon.io
 Issues:  https://github.com/${KUKE_REPO}/issues

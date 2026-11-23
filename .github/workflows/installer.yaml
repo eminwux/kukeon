@@ -154,3 +154,31 @@ jobs:
             echo "::error::a local write failure must not suggest a missing release"
             exit 1
           fi
+
+  # Negative path: an unknown KUKE_CHANNEL is rejected with exit 2 before the
+  # prerequisite checks touch anything (issue #1638). The edge install itself
+  # is smoked by edge.yaml after each publish: nothing in a PR can exercise the
+  # `edge` prerelease before the edge workflow has run on main.
+  invalid-channel:
+    name: an unknown KUKE_CHANNEL exits 2 and installs nothing
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run installer with KUKE_CHANNEL=nightly
+        run: |
+          set +e
+          out="$(KUKE_CHANNEL=nightly bash scripts/install.sh 2>&1)"
+          rc=$?
+          echo "$out"
+          if [ "$rc" -ne 2 ]; then
+            echo "::error::expected exit 2 for KUKE_CHANNEL=nightly, got ${rc}"
+            exit 1
+          fi
+          if ! echo "$out" | grep -q 'KUKE_CHANNEL'; then
+            echo "::error::expected the failure message to name KUKE_CHANNEL"
+            exit 1
+          fi
+          if [ -e /usr/local/bin/kuke ]; then
+            echo "::error::installer touched /usr/local/bin/kuke despite an invalid channel"
+            exit 1
+          fi
