@@ -20,17 +20,19 @@ function fixture(path, cellCount = 1) {
 }
 // A container with no stream file yet: the log view's neutral empty state.
 const noLog = { status: 404, json: { error: { code: "log_unavailable", message: "container log stream unavailable" } } };
+// A cell with no terminal screen to read: the Workbench grid's state-only tile (#1635).
+const noScreen = { status: 404, json: { error: { code: "screen_unavailable", message: "no screen" } } };
 async function mock(page, handler = () => undefined) {
   await page.route("**/api/realms**", async route => {
     const path = new URL(route.request().url()).pathname;
     const result = await handler(path, route.request());
-    await route.fulfill(result ?? (path.endsWith("/log") ? noLog : { json: fixture(path) }));
+    await route.fulfill(result ?? (path.endsWith("/log") ? noLog : path.endsWith("/screenshot") ? noScreen : { json: fixture(path) }));
   });
 }
 // One GET …/containers/{name}/log reply: text starting at byte `start`, ending at the stream's end.
 const logChunk = (text, start = 0) => ({ json: { source: "/mock/log", data: Buffer.from(text).toString("base64"), start, next: start + Buffer.byteLength(text), size: start + Buffer.byteLength(text), truncated: false, more: false } });
 const failure = { status: 503, json: { error: { code: "unavailable", message: "Scoped read failed" } } };
-const nav = page => page.getByRole("navigation", { name: "Resources navigation" });
+const nav = page => page.getByRole("navigation", { name: "Manage navigation" });
 const listSearch = page => page.locator(".list-controls").getByRole("searchbox");
 const terminalTools = page => page.locator(".cell-terminal-tools");
 const toasts = page => page.getByRole("region", { name: "Notifications" }).locator(".toast");
@@ -277,8 +279,8 @@ test("Workspace retains independent scoped terminals, focus and resize while swi
   const resizedBefore = messages.get(devPath).filter(message => typeof message === "string" && JSON.parse(message).type === "resize").length;
   await page.setViewportSize({ width: 900, height: 700 });
   await expect.poll(() => messages.get(devPath).filter(message => typeof message === "string" && JSON.parse(message).type === "resize").length).toBeGreaterThan(resizedBefore);
-  await page.locator(".breadcrumbs").getByRole("link", { name: "Resources", exact: true }).click();
-  await expect(page.locator(".page-heading h1")).toHaveText("Resources");
+  await page.locator(".breadcrumbs").getByRole("link", { name: "Workbench", exact: true }).click();
+  await expect(page.locator(".page-heading h1")).toHaveText("Workbench");
   expect(closed).toEqual([]);
   await cells.getByRole("link", { name: "Open dev / shared / services / api" }).click();
   await expect(terminalTools(page).locator(".terminal-connection-state")).toHaveText("Attached");
@@ -358,52 +360,64 @@ test("terminal error offers a new attachment and stopped cells release sessions"
   await expect.poll(() => closed).toBeGreaterThan(closedBefore);
 });
 
-test("Resources is home and retains resource summaries and navigation", async ({ page }) => {
+test("the Workbench grid is home and the Overview keeps resource summaries and the Manage navigation", async ({ page }) => {
   await mock(page);
   await page.goto(server.url);
-  await expect(page.locator(".page-heading h1")).toHaveText("Resources");
+  await expect(page.locator(".page-heading h1")).toHaveText("Workbench");
   // The document title names the page (#1567).
-  await expect(page).toHaveTitle("Resources · kukeon");
+  await expect(page).toHaveTitle("Workbench · kukeon");
   await expect(page.locator('link[rel="icon"][type="image/svg+xml"]')).toHaveAttribute("href", /^\/assets\/.+\.svg$/);
-  const brand = page.getByRole("complementary", { name: "Cell sidebar" }).getByRole("link", { name: "kukeon", exact: true });
-  await expect(brand).toHaveAttribute("href", "#/resources");
+  const brand = page.locator("#cell-sidebar").getByRole("link", { name: "kukeon", exact: true });
+  await expect(brand).toHaveAttribute("href", "#/");
   await expect(brand.locator(".mark svg")).toHaveCount(1);
   await expect(page.getByText("LOCAL WORKSPACE")).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Workspace", exact: true })).toHaveCount(0);
   await expect(page.getByRole("region", { name: "Workspace welcome" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "+ New Cell" })).toHaveCount(0);
   expect(await page.evaluate(() => document.body.innerText)).not.toMatch(/Kukeon|Workspace/);
-  for (const hash of ["#/", "#/workspace", "#/workspace/dev", "#/%E0%A4%A"]) {
+  for (const hash of ["#/", "", "#/workspace", "#/workspace/dev", "#/%E0%A4%A"]) {
     await page.goto(`${server.url}${hash}`);
-    await expect(page.locator(".page-heading h1"), hash).toHaveText("Resources");
-    await expect(page.locator(".summary-card").filter({ hasText: "Cells" }).locator("strong")).toHaveText("2");
+    await expect(page.locator(".page-heading h1"), hash).toHaveText("Workbench");
+    await expect(page.getByRole("region", { name: "Cell terminals" }).locator(".cell-tile"), hash).toHaveCount(2);
   }
+  for (const hash of ["#/resources", "#/administration", "#/dashboard"]) {
+    await page.goto(`${server.url}${hash}`);
+    await expect(page.locator(".page-heading h1"), hash).toHaveText("Overview");
+    await expect(page.locator(".summary-card").filter({ hasText: "Cells" }).locator("strong"), hash).toHaveText("2");
+  }
+  await expect(page).toHaveTitle("Overview · kukeon");
+  // The logo opens the grid from Manage too.
+  const manageBrand = page.getByRole("complementary", { name: "Manage sidebar" }).getByRole("link", { name: "kukeon", exact: true });
+  await expect(manageBrand).toHaveAttribute("href", "#/");
   await page.goto(`${server.url}#/cells`);
-  await brand.click();
-  await expect(page).toHaveURL(/#\/resources$/);
-  await expect(page.locator(".page-heading h1")).toHaveText("Resources");
+  await manageBrand.click();
+  await expect(page).toHaveURL(/#\/$/);
+  await expect(page.locator(".page-heading h1")).toHaveText("Workbench");
+  await page.goto(`${server.url}#/resources`);
   for (const type of ["Realms", "Spaces", "Stacks", "Cells"]) {
     await expect(page.locator(".summary-card").filter({ hasText: type }).locator("strong")).toHaveText("2");
     await expect(nav(page).getByRole("link", { name: type, exact: true })).toBeVisible();
   }
-  // Navigation is two labelled groups: operations first, then resources and administration (#1568).
-  const groups = { Operate: ["Overview", "Cells", "Health"], Configure: ["Realms", "Spaces", "Stacks", "Blueprints", "Configs", "Volumes", "Secrets", "Connectors", "Teams", "Images", "Daemon"] };
-  for (const [label, links] of Object.entries(groups)) {
-    const group = nav(page).getByRole("group", { name: label, exact: true });
-    await expect(group.getByRole("link")).toHaveText(links);
-  }
-  await expect(nav(page).getByRole("link")).toHaveCount(14);
+  // One flat list, no group headings (#1635).
+  await expect(nav(page).getByRole("link")).toHaveText(["Overview", "Realms", "Spaces", "Stacks", "Cells", "Blueprints", "Configs", "Volumes", "Secrets", "Connectors", "Teams", "Images", "Daemon"]);
+  await expect(nav(page).getByRole("group")).toHaveCount(0);
+  await expect(nav(page).getByRole("heading")).toHaveCount(0);
+  await expect(page.getByText(/^(Operate|Configure)$/i)).toHaveCount(0);
   await expect(nav(page).locator('[aria-current="page"]')).toHaveText(["Overview"]);
-  // The toolbar no longer repeats the breadcrumb root, which still leads home.
-  await expect(page.locator(".toolbar-actions").getByRole("link", { name: "Resources" })).toHaveCount(0);
+  await expect(page.locator(".resources-nav")).toHaveCount(0);
+  // The toolbar no longer repeats the breadcrumb root, which leads to the Overview on Manage pages.
+  await expect(page.locator(".toolbar-actions").getByRole("link", { name: "Overview" })).toHaveCount(0);
   await expect(page.locator(".toolbar-actions").getByRole("link", { name: "New Cell", exact: true })).toBeVisible();
-  await expect(page.locator(".breadcrumbs").getByRole("link", { name: "Resources", exact: true })).toHaveAttribute("href", "#/resources");
+  await expect(page.locator(".breadcrumbs").getByRole("link", { name: "Overview", exact: true })).toHaveAttribute("href", "#/resources");
   await expect(page.locator(".summary-card").filter({ hasText: "Cells" }).getByRole("list", { name: "Cell states" })).toContainText("Running");
   const attention = page.getByRole("region", { name: "Cells needing attention" });
   await expect(attention.getByRole("link", { name: "api", exact: true })).toHaveAttribute("href", "#/resource/prod/shared/services/api");
   await expect(attention.getByRole("listitem")).toHaveCount(1);
   await expect(page.getByRole("heading", { name: "Resource overview" })).toHaveCount(0);
   await expect(page.locator("pre")).toHaveCount(0);
+  // A Manage page has no cell list; the Workbench sidebar does.
+  await expect(page.getByRole("navigation", { name: "Cell navigation" })).toHaveCount(0);
+  await page.locator(".view-switch").getByRole("link", { name: "Workbench" }).click();
   await expect(page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link", { name: "Open dev / shared / services / api" })).toBeVisible();
 });
 
@@ -792,7 +806,7 @@ test("sidebar grouping, missing labels, search, collapse, and preference persist
   await mock(page, path => {
     if (!path.endsWith("/cells")) return;
     const prod = path.includes("/prod/");
-    return { json: fixture(path).map(cell => ({ ...cell, metadata: { ...cell.metadata, labels: prod ? {} : { team: "platform" } }, status: { state: prod ? "Stopped" : "Failed" } })) };
+    return { json: fixture(path).map(cell => ({ ...cell, metadata: { ...cell.metadata, labels: prod ? {} : { team: "platform" } }, status: { state: prod ? "Degraded" : "Failed" } })) };
   });
   await page.goto(server.url);
   const sidebar = page.getByRole("region", { name: "All cells" });
@@ -800,7 +814,7 @@ test("sidebar grouping, missing labels, search, collapse, and preference persist
   await expect(sidebar.getByLabel("Group by")).toHaveValue("");
   await expect(cells.getByRole("link")).toHaveCount(2);
   await expect(cells.getByRole("link", { name: "Open dev / shared / services / api" })).toContainText("Failed");
-  await expect(cells.getByRole("link", { name: "Open prod / shared / services / api" })).toContainText("Stopped");
+  await expect(cells.getByRole("link", { name: "Open prod / shared / services / api" })).toContainText("Degraded");
   await sidebar.getByLabel("Group by").selectOption("team");
   await expect(cells.getByRole("region", { name: "platform group" })).toBeVisible();
   await expect(cells.getByRole("region", { name: "Ungrouped group" })).toBeVisible();
@@ -913,7 +927,12 @@ test("empty inventory keeps the toolbar New Cell entry point without inventing c
   await page.route("**/api/realms**", route => route.fulfill({ json: [] }));
   await page.goto(server.url);
   await expect(page.getByRole("region", { name: "All cells" })).toContainText("No cells found");
-  await expect(page.locator(".page-heading h1")).toHaveText("Resources");
+  await expect(page.locator(".page-heading h1")).toHaveText("Workbench");
+  // The grid's empty state offers New Cell too (#1635).
+  const grid = page.getByRole("region", { name: "Cell terminals" });
+  await expect(grid.getByRole("heading", { name: "No active cells" })).toBeVisible();
+  await expect(grid.getByRole("link", { name: "New Cell", exact: true })).toHaveAttribute("href", "#/new-cell");
+  await expect(grid.locator(".cell-tile")).toHaveCount(0);
   await page.locator(".toolbar").getByRole("link", { name: "New Cell", exact: true }).click();
   await expect(page).toHaveURL(/#\/new-cell$/);
   await expect(page.locator(".page-heading h1")).toHaveText("New Cell");
@@ -1057,13 +1076,13 @@ test("theme icon cycles through system, light, and dark preferences", async ({ p
   await expect.poll(scheme).toBe("light");
 });
 
-test("mobile cell navigation closes after selection and Resources fits the screen", async ({ page }) => {
+test("mobile cell navigation closes after selection and the Workbench fits the screen", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   // A collapsed desktop preference must not leak into the mobile drawer.
   await page.addInitScript(() => localStorage.setItem("kukeon-sidebar-collapsed", "true"));
   await mock(page);
   await page.goto(server.url);
-  await expect(page.locator(".page-heading h1")).toHaveText("Resources");
+  await expect(page.locator(".page-heading h1")).toHaveText("Workbench");
   await expect(page.locator(".toolbar").getByRole("link", { name: "New Cell", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Expand sidebar" })).toHaveCount(0);
   await expect(page.getByRole("separator", { name: "Resize sidebar" })).toBeHidden();
@@ -1077,42 +1096,39 @@ test("mobile cell navigation closes after selection and Resources fits the scree
   // Phones hide the breadcrumbs, so the way home from a cell is the drawer's brand link.
   await page.getByRole("button", { name: "Toggle sidebar" }).click();
   await page.getByRole("complementary", { name: "Cell sidebar" }).getByRole("link", { name: "kukeon", exact: true }).click();
-  await expect(page.locator(".page-heading h1")).toHaveText("Resources");
-  await expect(nav(page).getByRole("link", { name: "Overview" })).toBeVisible();
+  await expect(page.locator(".page-heading h1")).toHaveText("Workbench");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 });
 
-// Issue #1568, item A: on phones the Configure group is a disclosure and the navigation never scrolls sideways.
-test("phone navigation fits the screen and reaches every Configure page through its disclosure", async ({ page }) => {
+// #1635: on phones the drawer shows the sidebar of the current view; Manage is one vertical list, so no
+// page scrolls sideways and every Manage page is one tap away.
+test("phone drawer shows the Manage navigation on Manage pages and reaches every page", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await mock(page);
   await mockDaemon(page);
   await page.goto(`${server.url}#/resources`);
-  const bar = page.locator(".resources-nav");
-  const fits = async () => expect(await bar.evaluate(el => el.scrollWidth <= el.clientWidth + 1 && getComputedStyle(el).overflowX !== "auto")).toBe(true);
-  await expect(nav(page).getByRole("group", { name: "Operate" }).getByRole("link")).toHaveText(["Overview", "Cells", "Health"]);
-  await expect(nav(page).getByRole("link", { name: "Daemon" })).toBeHidden();
+  const fits = async () => expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await fits();
-  const configure = nav(page).locator("summary", { hasText: "Configure" });
-  await configure.focus();
-  await page.keyboard.press("Enter");
-  await expect(nav(page).getByRole("group", { name: "Configure" }).getByRole("link")).toHaveCount(11);
-  await fits();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole("button", { name: "Toggle sidebar" }).click();
+  const drawer = page.getByRole("complementary", { name: "Manage sidebar" });
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByRole("navigation", { name: "Cell navigation" })).toHaveCount(0);
+  await expect(nav(page).getByRole("link")).toHaveCount(13);
+  for (const link of await nav(page).getByRole("link").all()) await expect(link).toBeVisible();
   await nav(page).getByRole("link", { name: "Daemon" }).click();
+  await expect(drawer).toBeHidden();
   await expect(page.locator(".page-heading h1")).toHaveText("Daemon");
-  // A page inside the group keeps the disclosure open and marks the active link.
+  await fits();
+  await page.getByRole("button", { name: "Toggle sidebar" }).click();
   await expect(nav(page).getByRole("link", { name: "Daemon" })).toHaveAttribute("aria-current", "page");
+  await nav(page).getByRole("link", { name: "Secrets" }).click();
+  await expect(page.locator(".page-heading h1")).toHaveText("Secrets");
   await fits();
-  // An Operate page collapses it again.
-  await nav(page).getByRole("link", { name: "Cells" }).click();
-  await expect(page.locator(".page-heading h1")).toHaveText("Cells");
-  await expect(nav(page).getByRole("link", { name: "Cells" })).toHaveAttribute("aria-current", "page");
-  await expect(nav(page).getByRole("link", { name: "Daemon" })).toBeHidden();
-  // A deep link into the group opens it.
-  await page.goto(`${server.url}#/secrets`);
-  await expect(nav(page).getByRole("link", { name: "Secrets" })).toHaveAttribute("aria-current", "page");
-  await fits();
+  // On a Workbench page the same drawer lists the cells.
+  await page.locator(".view-switch").getByRole("link", { name: "Workbench" }).click();
+  await page.getByRole("button", { name: "Toggle sidebar" }).click();
+  await expect(page.getByRole("complementary", { name: "Cell sidebar" }).getByRole("navigation", { name: "Cell navigation" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Manage navigation" })).toHaveCount(0);
 });
 
 test("cell status cards and container observations expose reported runtime state", async ({ page }) => {
@@ -2051,7 +2067,7 @@ test("confirmed deletion closes only that cell terminal and removes only that ce
   await expect(dialog.getByText("dev / shared / services / api", { exact: true })).toBeVisible();
   await dialog.getByLabel("I understand Delete removes this cell but does not perform Purge cleanup.").check();
   await dialog.getByRole("button", { name: "Confirm Delete" }).click();
-  await expect(page).toHaveURL(/#\/resources$/);
+  await expect(page).toHaveURL(/#\/$/);
   await expect.poll(() => openSockets.size).toBe(1);
   expect([...openSockets].every(path => path.includes("/realms/prod/"))).toBeTruthy();
   const cells = page.getByRole("navigation", { name: "Cell navigation" });
@@ -3076,17 +3092,11 @@ test("config drift shows in Needs attention, the Cells table and the sidebar, an
   await expect(failed.locator(".state-badge")).toHaveText(["Ready", /^Drift unknown/]);
   await expect(failed.locator(".attention-reason")).toHaveText("Configuration comparison failed: config demo not found");
   // The attention panel and the cell summary come before the realm, space and stack cards.
-  await expect(page.locator(".summary-card > span")).toHaveText(["Cells", "Realms", "Spaces", "Stacks"]);
+  await expect(page.locator(".summary-card > span")).toHaveText(["Cells", "Realms", "Spaces", "Stacks", "Health"]);
   const tops = await page.evaluate(() => [".attention-panel", ".summary-card-cells", ".summary-card:not(.summary-card-cells)"].map(selector => document.querySelector(selector).getBoundingClientRect().top));
   expect(tops[0]).toBeLessThan(tops[1]);
   expect(tops[1]).toBeLessThan(tops[2]);
   await expect(page.locator(".summary-card-cells").getByRole("list", { name: "Cell states" })).toContainText("Ready");
-
-  const sidebar = page.getByRole("navigation", { name: "Cell navigation" });
-  await expect(sidebar.getByRole("link", { name: "Open dev / shared / services / api-00" }).locator(".drift-badge")).toContainText("Drift");
-  await expect(sidebar.getByRole("link", { name: "Open prod / shared / services / api-00" }).locator(".drift-badge")).toContainText("Drift unknown");
-  await expect(sidebar.getByRole("link", { name: "Open dev / shared / services / api-01" }).locator(".drift-badge")).toHaveCount(0);
-  await expect(sidebar.locator(".drift-badge")).toHaveCount(2);
 
   await page.goto(`${server.url}#/cells`);
   const rows = content(page).locator("tbody tr");
@@ -3094,6 +3104,15 @@ test("config drift shows in Needs attention, the Cells table and the sidebar, an
   await expect(rows.filter({ hasText: "dev / shared / services" }).filter({ hasText: "api-00" }).locator(".drift-badge")).toContainText("Drift");
   await expect(rows.filter({ hasText: "prod / shared / services" }).filter({ hasText: "api-00" }).locator(".drift-badge")).toContainText("Drift unknown");
   await expect(content(page).locator(".drift-badge")).toHaveCount(2);
+
+  // The Workbench sidebar and grid carry the same badges.
+  await page.goto(server.url);
+  await expect(page.getByRole("region", { name: "Cell terminals" }).locator(".drift-badge")).toHaveCount(2);
+  const sidebar = page.getByRole("navigation", { name: "Cell navigation" });
+  await expect(sidebar.getByRole("link", { name: "Open dev / shared / services / api-00" }).locator(".drift-badge")).toContainText("Drift");
+  await expect(sidebar.getByRole("link", { name: "Open prod / shared / services / api-00" }).locator(".drift-badge")).toContainText("Drift unknown");
+  await expect(sidebar.getByRole("link", { name: "Open dev / shared / services / api-01" }).locator(".drift-badge")).toHaveCount(0);
+  await expect(sidebar.locator(".drift-badge")).toHaveCount(2);
   // The sidebar row keeps the state badge, the drift badge and the name apart at the narrowest sidebar.
   const overlap = await sidebar.getByRole("link", { name: "Open dev / shared / services / api-00" }).evaluate(link => {
     const [state, drift] = [...link.querySelectorAll(".state-badge")].map(el => el.getBoundingClientRect());
@@ -3331,7 +3350,19 @@ test("sidebar collapses to a persisted icon rail with accessible cell dots", asy
   await expect(rail.getByRole("link", { name: "Open prod / shared / services / api (Running)" })).toBeVisible();
   expect((await sidebar.boundingBox()).width).toBeLessThan(80);
   await expect(sidebar.getByRole("separator", { name: "Resize sidebar" })).toHaveCount(0);
-  await expect(sidebar.getByRole("link", { name: "kukeon home" })).toHaveAttribute("href", "#/resources");
+  await expect(sidebar.getByRole("link", { name: "kukeon home" })).toHaveAttribute("href", "#/");
+
+  // The Manage rail keeps the brand, expand, majordomo and connection controls and no cell dots (#1635).
+  await page.goto(`${server.url}#/resources`);
+  const manageRail = page.getByRole("complementary", { name: "Manage sidebar" });
+  await expect(manageRail.getByRole("button", { name: "Expand sidebar" })).toBeVisible();
+  await expect(manageRail.getByRole("link", { name: "kukeon home" })).toHaveAttribute("href", "#/");
+  await expect(manageRail.locator(".rail-connection-dot")).toBeVisible();
+  await expect(manageRail.getByRole("button", { name: /^Majordomo \(/ })).toBeVisible();
+  await expect(manageRail.getByRole("navigation", { name: "Cell shortcuts" })).toHaveCount(0);
+  await expect(manageRail.getByRole("navigation", { name: "Manage navigation" })).toBeHidden();
+  expect((await manageRail.boundingBox()).width).toBeLessThan(80);
+  await page.goto(server.url);
 
   await page.reload();
   await expect(sidebar.getByRole("button", { name: "Expand sidebar" })).toBeVisible();
@@ -3402,6 +3433,13 @@ test("Connected section shows web and daemon versions and warns only on a mismat
   await expect(rail.getByRole("status")).toHaveAttribute("title", "Daemon: Connected · web v0.7.0 · daemon v0.6.2");
   await expect(rail.getByRole("img", { name: "Version mismatch: web v0.7.0 ≠ daemon v0.6.2" })).toBeVisible();
   await page.getByRole("button", { name: "Expand sidebar" }).click();
+  // Both sidebars carry the Connected section and the majordomo entry (#1635).
+  for (const [hash, name] of [["#/", "Cell sidebar"], ["#/configs", "Manage sidebar"]]) {
+    await page.goto(`${server.url}${hash}`);
+    const sidebar = page.getByRole("complementary", { name });
+    await expect(sidebar.getByLabel("Daemon connection").getByRole("definition"), hash).toHaveText(["v0.7.0", "v0.6.2"]);
+    await expect(sidebar.getByRole("region", { name: "Majordomo", exact: true }), hash).toBeVisible();
+  }
 
   daemonVersion = "v0.7.0";
   await page.getByRole("button", { name: "Refresh" }).click();
@@ -4329,13 +4367,16 @@ test("resource-name and breadcrumb links have a 24px hit target and resizers sho
   expect((await name.boundingBox()).height).toBeGreaterThanOrEqual(24);
   // A table row with a name link stays the compact height (about 36px with a state badge).
   expect((await content(page).locator("tbody tr").first().boundingBox()).height).toBeLessThanOrEqual(38);
-  const home = page.getByRole("navigation", { name: "Resource scope" }).getByRole("link", { name: "Resources" });
+  const home = page.getByRole("navigation", { name: "Resource scope" }).getByRole("link", { name: "Overview" });
   expect((await home.boundingBox()).height).toBeGreaterThanOrEqual(24);
+  // The Manage links and the view switch have the same hit target (#1635).
+  for (const link of await nav(page).getByRole("link").all()) expect((await link.boundingBox()).height).toBeGreaterThanOrEqual(24);
+  for (const link of await page.locator(".view-switch").getByRole("link").all()) expect((await link.boundingBox()).height).toBeGreaterThanOrEqual(24);
 
   await page.goto(`${server.url}#/resource/dev/shared/services`);
   // The root crumb leads the scope crumbs on resource and cell screens (#1568).
   const crumbs = page.getByRole("navigation", { name: "Resource scope" }).getByRole("link");
-  await expect(crumbs).toHaveText(["Resources", "dev", "shared", "services"]);
+  await expect(crumbs).toHaveText(["Overview", "dev", "shared", "services"]);
   for (const crumb of await crumbs.all()) expect((await crumb.boundingBox()).height).toBeGreaterThanOrEqual(24);
 
   const handle = page.getByRole("separator", { name: "Resize sidebar" });
@@ -4411,8 +4452,8 @@ test("route changes focus the new page heading and title the document; the first
   await mock(page);
   await page.goto(`${server.url}#/resources`);
   const heading = page.locator("main .page-heading h1");
-  await expect(heading).toHaveText("Resources");
-  await expect(page).toHaveTitle("Resources · kukeon");
+  await expect(heading).toHaveText("Overview");
+  await expect(page).toHaveTitle("Overview · kukeon");
   // The initial load leaves focus where the browser put it.
   await expect(heading).not.toBeFocused();
 
@@ -4939,4 +4980,358 @@ test("the Spaces table shows each Space's CIDR, distinguishing unallocated, lega
   await listSearch(page).fill("alpha");
   await expect(list.getByRole("row")).toHaveCount(2);
   expect(total).toBe(9);
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Workbench and Manage (#1635).
+
+const switchSide = page => page.locator(".view-switch").locator('a[aria-current="true"]');
+const grid = page => page.getByRole("region", { name: "Cell terminals" });
+const tile = (page, scope) => grid(page).getByRole("link", { name: `Open ${scope}`, exact: true });
+const screenshotPath = scope => `/api/realms/${scope[0]}/spaces/${scope[1]}/stacks/${scope[2]}/cells/${scope[3]}/screenshot`;
+const screen = (text, extra = {}) => ({ json: { container: "shell", cols: 80, rows: 24, cursorX: 0, cursorY: 0, cursorVisible: true, altScreen: false, text, ...extra } });
+// Cells reported in the given states by scope key "realm/cell"; the rest keep their fixture state.
+function withStates(path, states, count = 1) {
+  if (!path.endsWith("/cells")) return undefined;
+  return { json: fixture(path, count).map(cell => {
+    const state = states[`${cell.spec.scope[0]}/${cell.metadata.name}`];
+    return state ? { ...cell, status: { ...cell.status, ...(typeof state === "string" ? { state } : state) } } : cell;
+  }) };
+}
+async function mockReports(page, reports) {
+  await page.route("**/api/health/**", route => {
+    const path = new URL(route.request().url()).pathname;
+    if (typeof reports === "function") return route.fulfill(reports(path));
+    if (path === "/api/health/reports") return route.fulfill({ json: reports.map(({ id, createdAt, findings }) => ({ id, createdAt, since: createdAt, until: createdAt, summary: `Report ${id}`, findings: findings.length, recurring: 0, filed: 0 })) });
+    const id = decodeURIComponent(path.split("/").at(-1));
+    const found = id === "latest" ? reports[0] : reports.find(report => report.id === id);
+    return route.fulfill(found ? { json: { ...found, since: found.createdAt, until: found.createdAt, summary: `Report ${found.id}` } } : { status: 404, json: { error: { code: "not_found", message: "no report" } } });
+  });
+}
+const finding = signature => ({ signature, classification: "kukeon", severity: "high", recurring: false });
+
+test("each route family shows its view's sidebar and side of the switch", async ({ page }) => {
+  await mock(page, path => path.endsWith("/containers") ? { json: [{ id: "shell", attachable: true }] } : undefined);
+  await mockCatalog(page);
+  const workbench = ["#/", "#/workspace/dev/shared/services/api", "#/new-cell", "#/resource/dev/shared/services/api", "#/resource/dev/shared/services/api?document=1", "#/resource/dev/shared/services/api/web"];
+  const manage = ["#/resources", "#/realms", "#/cells", "#/resource/dev", "#/resource/dev/shared/services", "#/configs", "#/new-config", "#/secrets", "#/connectors", "#/teams", "#/images", "#/daemon", "#/daemon/logs", "#/health", "#/daemon/health"];
+  for (const hash of [...workbench, ...manage]) {
+    const isWorkbench = workbench.includes(hash);
+    await page.goto(`${server.url}${hash}`);
+    await expect(page.locator("#cell-sidebar"), hash).toHaveAttribute("aria-label", isWorkbench ? "Cell sidebar" : "Manage sidebar");
+    await expect(switchSide(page), hash).toHaveText(isWorkbench ? "Workbench" : "Manage");
+    await expect(page.getByRole("navigation", { name: "Manage navigation" }), hash).toHaveCount(isWorkbench ? 0 : 1);
+    await expect(page.getByRole("navigation", { name: "Cell navigation" }), hash).toHaveCount(isWorkbench ? 1 : 0);
+    // No page renders a horizontal navigation row.
+    await expect(page.locator(".resources-nav, .nav-more"), hash).toHaveCount(0);
+    // New Cell, Majordomo, refresh and theme stay in the top bar.
+    for (const name of [/^New Cell$/, /majordomo panel/, /^Refresh$/, /^Appearance/]) await expect(page.locator(".toolbar").getByRole(name.source.includes("New Cell") ? "link" : "button", { name }), `${hash} ${name}`).toHaveCount(1);
+  }
+  // The switch links home and to the Overview, and the breadcrumb root follows the view.
+  await expect(page.locator(".view-switch").getByRole("link", { name: "Workbench" })).toHaveAttribute("href", "#/");
+  await expect(page.locator(".view-switch").getByRole("link", { name: "Manage" })).toHaveAttribute("href", "#/resources");
+  await expect(page.locator(".breadcrumbs a").first()).toHaveText("Overview");
+  await page.goto(`${server.url}#/resource/dev/shared/services/api`);
+  await expect(page.locator(".breadcrumbs a").first()).toHaveText("Workbench");
+});
+
+test("switching to Manage and back keeps an attached terminal", async ({ page }) => {
+  await mock(page, path => path.endsWith("/containers") ? { json: [{ id: "shell", attachable: true }] } : undefined);
+  let attaches = 0;
+  const closed = [];
+  await page.routeWebSocket("**/attach", socket => { attaches++; socket.onClose(() => closed.push(socket.url())); socket.send(JSON.stringify({ type: "ready" })); socket.send(Buffer.from("$ ")); });
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  const state = terminalTools(page).locator(".terminal-connection-state");
+  await expect(state).toHaveText("Attached");
+  for (let i = 0; i < 3; i++) {
+    await page.locator(".view-switch").getByRole("link", { name: "Manage" }).click();
+    await expect(page.locator(".page-heading h1")).toHaveText("Overview");
+    await nav(page).getByRole("link", { name: "Configs" }).click();
+    await expect(page.locator(".page-heading h1")).toHaveText("Configs");
+    await page.locator(".view-switch").getByRole("link", { name: "Workbench" }).click();
+    await page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link", { name: "Open dev / shared / services / api" }).click();
+    await expect(state).toHaveText("Attached");
+  }
+  expect(attaches).toBe(1);
+  expect(closed).toEqual([]);
+});
+
+test("Back and Forward across a view switch restore the page and its sidebar", async ({ page }) => {
+  await mock(page);
+  await page.goto(`${server.url}#/cells`);
+  await expect(page.locator(".page-heading h1")).toHaveText("Cells");
+  await page.locator(".view-switch").getByRole("link", { name: "Workbench" }).click();
+  await expect(page.locator(".page-heading h1")).toHaveText("Workbench");
+  await expect(page.getByRole("complementary", { name: "Cell sidebar" })).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/#\/cells$/);
+  await expect(page.locator(".page-heading h1")).toHaveText("Cells");
+  await expect(page.getByRole("complementary", { name: "Manage sidebar" })).toBeVisible();
+  await expect(nav(page).getByRole("link", { name: "Cells" })).toHaveAttribute("aria-current", "page");
+  await page.goForward();
+  await expect(page.locator(".page-heading h1")).toHaveText("Workbench");
+  await expect(page.getByRole("complementary", { name: "Cell sidebar" })).toBeVisible();
+  await expect(switchSide(page)).toHaveText("Workbench");
+});
+
+test("grid tiles show the terminal's last rows, attention first, and a state-only tile without a screen", async ({ page }) => {
+  const rows = Array.from({ length: 20 }, (_, i) => `row ${i + 1}   `).join("\n") + "\n\n\n";
+  await mock(page, path => {
+    if (path === screenshotPath(["dev", "shared", "services", "api-00"])) return screen(rows);
+    if (path === screenshotPath(["dev", "shared", "services", "api-01"])) return noScreen;
+    return withStates(path, { "dev/api-00": "Ready", "dev/api-01": "Ready", "prod/api-00": { state: "Ready", outOfSync: true, outOfSyncReason: "image changed" }, "prod/api-01": "Failed" }, 2);
+  });
+  await page.goto(server.url);
+  // Attention first (drift, then Failed, in scope order), then the Ready cells in scope order.
+  await expect(grid(page).locator(".cell-tile-name")).toHaveText(["api-00", "api-01", "api-00", "api-01"]);
+  await expect(grid(page).locator(".cell-tile .cell-tile-scope")).toHaveText(["prod / shared / services", "prod / shared / services", "dev / shared / services", "dev / shared / services"]);
+  const shown = tile(page, "dev / shared / services / api-00");
+  await expect(shown).toHaveAttribute("href", "#/workspace/dev/shared/services/api-00");
+  await expect(shown.locator("pre")).toHaveText(Array.from({ length: 12 }, (_, i) => `row ${i + 9}`).join("\n"));
+  await expect(shown).toContainText("Ready");
+  await expect(tile(page, "dev / shared / services / api-01")).toContainText("No terminal screen");
+  await expect(tile(page, "prod / shared / services / api-01")).toContainText("Failed");
+  await expect(tile(page, "prod / shared / services / api-01")).toContainText("No terminal screen");
+  await expect(tile(page, "prod / shared / services / api-00")).toContainText("Drift");
+  await shown.click();
+  await expect(page).toHaveURL(/#\/workspace\/dev\/shared\/services\/api-00$/);
+});
+
+test("terminal text in a tile renders as text, never as HTML", async ({ page }) => {
+  await mock(page, path => path.endsWith("/screenshot") ? screen('<img src=x onerror="window.injected=1"><b>bold</b>') : undefined);
+  await page.goto(server.url);
+  await expect(tile(page, "dev / shared / services / api").locator("pre")).toHaveText('<img src=x onerror="window.injected=1"><b>bold</b>');
+  await expect(grid(page).locator("pre img, pre b")).toHaveCount(0);
+  expect(await page.evaluate(() => window.injected)).toBeUndefined();
+});
+
+test("grid polling reads only visible tiles on the grid page and keeps the last screen when a refresh fails", async ({ page }) => {
+  test.setTimeout(60_000);
+  const requests = [];
+  let failNext = false;
+  await mock(page, path => {
+    // Every cell Ready, so the grid keeps scope order: dev api-00 first, prod api-39 far below the fold.
+    if (!path.endsWith("/screenshot")) return path.endsWith("/cells") ? { json: fixture(path, 40).map(cell => ({ ...cell, status: { state: "Ready" } })) } : undefined;
+    requests.push(path);
+    if (failNext && path === screenshotPath(["dev", "shared", "services", "api-00"])) return failure;
+    return screen(`screen of ${path.split("/").at(-2)}`);
+  });
+  await page.goto(`${server.url}#/resources`);
+  await expect(page.locator(".page-heading h1")).toHaveText("Overview");
+  await page.waitForTimeout(1500);
+  expect(requests).toEqual([]);
+  await page.locator(".view-switch").getByRole("link", { name: "Workbench" }).click();
+  const first = tile(page, "dev / shared / services / api-00");
+  await expect(first.locator("pre")).toHaveText("screen of api-00");
+  // Tiles far below the fold are not read.
+  const last = screenshotPath(["prod", "shared", "services", "api-39"]);
+  expect(requests).not.toContain(last);
+  expect(new Set(requests).size).toBeLessThan(80);
+  // A failed refresh keeps the text and marks the tile stale.
+  failNext = true;
+  await expect(first.locator(".cell-tile-stale")).toHaveText("Stale", { timeout: 12_000 });
+  await expect(first.locator("pre")).toHaveText("screen of api-00");
+  // Leaving the grid stops polling.
+  await page.locator(".view-switch").getByRole("link", { name: "Manage" }).click();
+  await expect(page.locator(".page-heading h1")).toHaveText("Overview");
+  const count = requests.length;
+  await page.waitForTimeout(6000);
+  expect(requests.length).toBe(count);
+});
+
+test("grid polling pauses while the browser tab is hidden", async ({ page }) => {
+  test.setTimeout(40_000);
+  const requests = [];
+  await mock(page, path => { if (path.endsWith("/screenshot")) { requests.push(path); return screen("$ "); } });
+  await page.goto(server.url);
+  await expect(tile(page, "dev / shared / services / api").locator("pre")).toHaveText("$");
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  const count = requests.length;
+  await page.waitForTimeout(6000);
+  expect(requests.length).toBe(count);
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await expect.poll(() => requests.length, { timeout: 8000 }).toBeGreaterThan(count);
+});
+
+test("a Stopped cell leaves the sidebar, rail and grid, and Stopped · 1 opens the filtered Cells table", async ({ page }) => {
+  await mock(page, path => withStates(path, { "prod/api": "Stopped" }));
+  await page.goto(server.url);
+  const cells = page.getByRole("navigation", { name: "Cell navigation" });
+  await expect(cells.getByRole("link")).toHaveCount(1);
+  await expect(cells.getByRole("link", { name: "Open prod / shared / services / api" })).toHaveCount(0);
+  await expect(grid(page).locator(".cell-tile")).toHaveCount(1);
+  await expect(tile(page, "prod / shared / services / api")).toHaveCount(0);
+  const sidebarLink = page.getByRole("region", { name: "All cells" }).getByRole("link", { name: "Stopped · 1" });
+  await expect(sidebarLink).toHaveAttribute("href", "#/cells?state=inactive");
+  await expect(grid(page).getByRole("link", { name: "Stopped · 1" })).toHaveAttribute("href", "#/cells?state=inactive");
+  await page.getByRole("button", { name: "Collapse sidebar" }).click();
+  await expect(page.getByRole("navigation", { name: "Cell shortcuts" }).getByRole("link")).toHaveCount(1);
+  await page.getByRole("button", { name: "Expand sidebar" }).click();
+  await sidebarLink.click();
+  await expect(page).toHaveURL(/#\/cells\?state=inactive$/);
+  await expect(page.getByLabel("Filter by state")).toHaveValue("inactive");
+  await expect(page.getByRole("row")).toHaveCount(2);
+  await expect(page.getByRole("row").nth(1)).toContainText("prod / shared / services");
+  // All states, Active, Stopped or exited, then each state present.
+  await expect(page.getByLabel("Filter by state").locator("option")).toHaveText(["All states", "Active", "Stopped or exited", "Ready", "Stopped"]);
+  await page.getByLabel("Filter by state").selectOption("active");
+  await expect(page.getByRole("row")).toHaveCount(2);
+  await expect(page.getByRole("row").nth(1)).toContainText("dev / shared / services");
+  await page.getByLabel("Filter by state").selectOption("");
+  await expect(page.getByRole("row")).toHaveCount(3);
+  await page.goto(`${server.url}#/cells?state=Ready`);
+  await expect(page.getByLabel("Filter by state")).toHaveValue("Ready");
+  await expect(page.getByRole("row")).toHaveCount(2);
+});
+
+test("the open cell stays in the sidebar whatever its state", async ({ page }) => {
+  await mock(page, path => withStates(path, { "prod/api": "Stopped" }));
+  await page.goto(`${server.url}#/workspace/prod/shared/services/api`);
+  const cells = page.getByRole("navigation", { name: "Cell navigation" });
+  await expect(cells.getByRole("link", { name: "Open prod / shared / services / api" })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("region", { name: "All cells" }).getByRole("link", { name: /^Stopped · / })).toHaveCount(0);
+  await page.locator(".view-switch").getByRole("link", { name: "Workbench" }).click();
+  await expect(cells.getByRole("link", { name: "Open prod / shared / services / api" })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "All cells" }).getByRole("link", { name: "Stopped · 1" })).toBeVisible();
+});
+
+test("the sidebar search and group-by filter and group the grid", async ({ page }) => {
+  await mock(page, path => {
+    if (!path.endsWith("/cells")) return;
+    const prod = path.includes("/prod/");
+    return { json: fixture(path).map(cell => ({ ...cell, metadata: { ...cell.metadata, labels: { team: prod ? "ops" : "platform" } } })) };
+  });
+  await page.goto(server.url);
+  const sidebar = page.getByRole("region", { name: "All cells" });
+  await expect(grid(page).locator(".cell-tile")).toHaveCount(2);
+  await sidebar.getByRole("searchbox").fill("prod /");
+  await expect(grid(page).locator(".cell-tile")).toHaveCount(1);
+  await expect(tile(page, "prod / shared / services / api")).toBeVisible();
+  await sidebar.getByRole("searchbox").fill("");
+  await sidebar.getByLabel("Group by").selectOption("team");
+  await expect(grid(page).getByRole("region", { name: "ops group" }).locator(".cell-tile")).toHaveCount(1);
+  await expect(grid(page).getByRole("region", { name: "platform group" }).locator(".cell-tile")).toHaveCount(1);
+  await expect(page.getByRole("navigation", { name: "Cell navigation" }).getByRole("region", { name: "ops group" })).toBeVisible();
+  await page.reload();
+  await expect(sidebar.getByLabel("Group by")).toHaveValue("team");
+  expect(await page.evaluate(() => localStorage.getItem("kukeon-cell-grouping"))).toBe("team");
+  await expect(grid(page).getByRole("region", { name: "ops group" })).toBeVisible();
+});
+
+test("the Manage navigation marks the current kind on list, detail and form pages", async ({ page }) => {
+  await mock(page);
+  await mockCatalog(page);
+  await mockDaemon(page);
+  const current = { "#/resources": "Overview", "#/realms": "Realms", "#/resource/dev": "Realms", "#/resource/dev/shared": "Spaces", "#/resource/dev/shared/services": "Stacks", "#/cells": "Cells", "#/configs": "Configs", "#/new-config": "Configs", "#/new-secret": "Secrets", "#/teams": "Teams", "#/images": "Images", "#/daemon": "Daemon", "#/daemon/logs": "Daemon", "#/health": "Daemon", "#/daemon/health": "Daemon" };
+  for (const [hash, name] of Object.entries(current)) {
+    await page.goto(`${server.url}${hash}`);
+    await expect(nav(page).locator('[aria-current="page"]'), hash).toHaveText([name]);
+  }
+});
+
+test("the Daemon page has Status, Health and Logs tabs and #/health opens Health", async ({ page }) => {
+  await mock(page);
+  await mockDaemon(page);
+  await mockReports(page, [{ id: "r1", createdAt: "2026-11-20T10:00:00Z", findings: [finding("kukeond restart loop")] }]);
+  const tabs = page.getByRole("navigation", { name: "Daemon sections" });
+  await page.goto(`${server.url}#/resources`);
+  await nav(page).getByRole("link", { name: "Daemon" }).click();
+  await expect(page).toHaveURL(/#\/daemon$/);
+  await expect(tabs.getByRole("link")).toHaveText(["Status", "Health", "Logs"]);
+  await expect(tabs.locator('[aria-current="page"]')).toHaveText("Status");
+  await expect(page.getByRole("region", { name: "Daemon connectivity" })).toBeVisible();
+  await expect(tabs.getByRole("link", { name: "Health" })).toHaveAttribute("href", "#/daemon/health");
+  for (const hash of ["#/daemon/health", "#/health"]) {
+    await page.goto(`${server.url}${hash}`);
+    await expect(page.locator(".page-heading h1"), hash).toHaveText("Health");
+    await expect(tabs.locator('[aria-current="page"]'), hash).toHaveText("Health");
+    await expect(page.getByRole("region", { name: "Health report" }), hash).toContainText("kukeond restart loop");
+    await expect(page.locator(".breadcrumbs > *"), hash).toHaveText(["Overview", "Daemon", "Health"]);
+  }
+  await tabs.getByRole("link", { name: "Logs" }).click();
+  await expect(page.locator(".page-heading h1")).toHaveText("Daemon logs");
+  await expect(tabs.locator('[aria-current="page"]')).toHaveText("Logs");
+});
+
+test("the Overview heading reads Overview and its Health card shows the newest report", async ({ page }) => {
+  await mock(page);
+  let mode = "report";
+  await mockReports(page, path => mode === "error" ? failure
+    : mode === "none" ? { json: [] }
+      : path === "/api/health/reports" ? { json: [{ id: "r2", createdAt: "2026-11-21T09:30:00Z", since: "", until: "", summary: "", findings: 3, recurring: 0, filed: 0 }, { id: "r1", createdAt: "2026-11-20T09:30:00Z", since: "", until: "", summary: "", findings: 1, recurring: 0, filed: 0 }] } : failure);
+  await page.goto(`${server.url}#/resources`);
+  await expect(page.locator(".page-heading h1")).toHaveText("Overview");
+  const card = page.locator(".summary-card").filter({ hasText: "Health" });
+  await expect(card).toHaveAttribute("href", "#/daemon/health");
+  await expect(card.locator("strong")).toHaveText("3 findings");
+  await expect(card.locator("time")).toHaveAttribute("datetime", "2026-11-21T09:30:00Z");
+  mode = "none";
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(card).toContainText("No report stored");
+  mode = "error";
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(card).toContainText("Unavailable");
+});
+
+test("the Manage dot names a new report with findings until the Health tab shows it, and a version mismatch", async ({ page }) => {
+  await mock(page);
+  await mockDaemon(page);
+  await mockReports(page, [{ id: "r2", createdAt: "2026-11-21T09:30:00Z", findings: [finding("a"), finding("b")] }, { id: "r1", createdAt: "2026-11-20T09:30:00Z", findings: [] }]);
+  const manage = page.locator(".view-switch").getByRole("link", { name: /^Manage/ });
+  await page.goto(server.url);
+  await expect(manage).toHaveAccessibleName("Manage: 2 findings in the latest health report");
+  await expect(manage.locator(".view-switch-dot")).toHaveCount(1);
+  await manage.click();
+  await page.locator(".summary-card").filter({ hasText: "Health" }).click();
+  await expect(page.getByRole("region", { name: "Health report" })).toContainText("Report r2");
+  await expect(manage).toHaveAccessibleName("Manage");
+  await expect(manage.locator(".view-switch-dot")).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem("kukeon-health-seen"))).toBe("r2");
+  await page.reload();
+  await expect(page.locator(".page-heading h1")).toHaveText("Health");
+  await page.goto(server.url);
+  await expect(manage.locator(".view-switch-dot")).toHaveCount(0);
+  // A version mismatch is a reason of its own.
+  await page.route("**/api/connection", route => route.fulfill({ json: { endpoint: "unix:///run/kukeon/kukeond.sock", version: "v0.7.0", daemonVersion: "v0.6.2" } }));
+  await page.reload();
+  await expect(manage).toHaveAccessibleName("Manage: Version mismatch");
+  await expect(manage.locator(".view-switch-dot")).toHaveCount(1);
+});
+
+test("the Manage dot names an unreachable daemon", async ({ page }) => {
+  await page.route("**/api/realms**", route => route.fulfill({ status: 403, json: { error: { code: "permission_denied", message: "denied" } } }));
+  await page.goto(server.url);
+  await expect(page.locator(".view-switch").getByRole("link", { name: /^Manage/ })).toHaveAccessibleName("Manage: Daemon: permission denied");
+});
+
+test("at 390×844 the switch shows named icons, the grid is one column and nothing scrolls sideways", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mock(page, path => path.endsWith("/screenshot") ? screen("x".repeat(400)) : path.endsWith("/cells") ? { json: fixture(path, 3) } : undefined);
+  await page.goto(server.url);
+  const links = page.locator(".view-switch").getByRole("link");
+  await expect(links).toHaveCount(2);
+  await expect(page.locator(".view-switch").getByRole("link", { name: "Workbench" })).toBeVisible();
+  await expect(page.locator(".view-switch").getByRole("link", { name: "Manage" })).toBeVisible();
+  for (const label of await page.locator(".view-switch-label").all()) expect(await label.evaluate(el => el.getBoundingClientRect().width <= 1)).toBe(true);
+  // prod cells report Running, which needs attention, so the first tile is prod api-00.
+  await expect(tile(page, "prod / shared / services / api-00").locator("pre")).toContainText("xxxx");
+  const lefts = await grid(page).locator(".cell-tile").evaluateAll(tiles => [...new Set(tiles.map(el => Math.round(el.getBoundingClientRect().left)))]);
+  expect(lefts).toHaveLength(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  // The toolbar wraps without overlapping: the switch, New Cell and the refresh button do not intersect.
+  const boxes = await Promise.all([page.locator(".view-switch"), page.locator(".toolbar").getByRole("link", { name: "New Cell", exact: true }), page.locator(".toolbar").getByRole("button", { name: "Refresh" })].map(locator => locator.boundingBox()));
+  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+    const [a, b] = [boxes[i], boxes[j]];
+    expect(a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y).toBe(true);
+  }
+  for (const hash of ["#/resources", "#/cells", "#/daemon", "#/teams"]) {
+    await page.goto(`${server.url}${hash}`);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), hash).toBe(true);
+  }
 });

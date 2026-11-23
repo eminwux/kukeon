@@ -57,6 +57,8 @@ async function world(page, { cells = [], configs = [], reports = [], createError
     if (parts.length === 5) return leaf([{ metadata: { name: "default" }, status: { state: "Ready" } }]);
     if (parts.length === 7) return leaf(state.cells);
     if (parts.length === 8) { const found = named(decodeURIComponent(parts[7])); return found ? leaf(found) : route.fulfill({ status: 404, json: { error: { code: "not_found", message: "cell not found" } } }); }
+    // The Workbench grid's thumbnails (#1635): no screen to read.
+    if (parts.length === 9 && parts[8] === "screenshot") return route.fulfill({ status: 404, json: { error: { code: "screen_unavailable", message: "no screen" } } });
     if (parts.length === 9 && parts[8] === "containers") return leaf([{ id: "agent", attachable: true }, { id: "pause", root: true, attachable: true }]);
     return leaf({ metadata: { name: parts.at(-1) }, status: { state: "Ready" } });
   });
@@ -550,8 +552,14 @@ for (const [width, height] of [[1440, 900], [390, 844]]) test(`three majordomo t
 test("the Health page shows the latest report, its findings and the history", async ({ page }) => {
   const state = await world(page, { configs: teamConfigs(), reports, cells: [runningMajordomo()] });
   await page.goto(`${server.url}#/resources`);
-  await page.getByRole("navigation", { name: "Resources navigation" }).getByRole("link", { name: "Health" }).click();
+  // Health is the Daemon page's second tab (#1635).
+  await page.getByRole("navigation", { name: "Manage navigation" }).getByRole("link", { name: "Daemon" }).click();
+  const tabs = page.getByRole("navigation", { name: "Daemon sections" });
+  await tabs.getByRole("link", { name: "Health" }).click();
+  await expect(page).toHaveURL(/#\/daemon\/health$/);
   await expect(page.getByRole("heading", { level: 1, name: "Health" })).toBeVisible();
+  await expect(tabs.getByRole("link")).toHaveText(["Status", "Health", "Logs"]);
+  await expect(tabs.locator('[aria-current="page"]')).toHaveText("Health");
 
   const report = page.getByRole("region", { name: "Health report" });
   await expect(report.getByRole("heading", { name: "Latest report" })).toBeVisible();
@@ -652,4 +660,41 @@ test("an enabled sweep shows no reapply instructions, and a host without majordo
   await world(page, { configs: [] });
   await page.reload();
   await expect(page.getByRole("region", { name: "Sweep schedule" })).toContainText("No health-sweep config found.");
+});
+
+// #1635: the Workbench grid and the Manage sidebar with majordomo docked.
+test("a grid tile for a docked majordomo cell opens the panel and does not navigate", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await world(page, { configs: teamConfigs(), cells: [runningMajordomo(), cell("api", "Ready")] });
+  await page.goto(server.url);
+  const grid = page.getByRole("region", { name: "Cell terminals" });
+  const docked = grid.getByRole("button", { name: "Open default / default / default / majordomo in the majordomo panel" });
+  await expect(docked).toBeVisible();
+  await expect(grid.getByRole("link", { name: "Open default / default / default / api", exact: true })).toHaveAttribute("href", "#/workspace/default/default/default/api");
+  await expect(panel(page)).toBeHidden();
+  const url = page.url();
+  await docked.click();
+  await expect(panel(page)).toBeVisible();
+  expect(page.url()).toBe(url);
+  await expect(page.locator(".page-heading h1")).toHaveText("Workbench");
+});
+
+test("with the majordomo panel docked at 1440×900 the Manage sidebar and a list page do not overflow", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await world(page, { configs: teamConfigs(), cells: [runningMajordomo(), cell("api", "Ready")] });
+  await page.addInitScript(() => localStorage.setItem("kukeon-majordomo-open", "true"));
+  for (const hash of ["#/resources", "#/cells", "#/configs", "#/teams", "#/daemon"]) {
+    await page.goto(`${server.url}${hash}`);
+    await expect(panel(page), hash).toBeVisible();
+    const manage = page.getByRole("navigation", { name: "Manage navigation" });
+    await expect(manage.getByRole("link"), hash).toHaveCount(13);
+    // One vertical list: every link is on its own line and inside the sidebar.
+    const boxes = await manage.getByRole("link").evaluateAll(links => links.map(link => link.getBoundingClientRect()).map(box => ({ left: Math.round(box.left), right: Math.round(box.right), top: Math.round(box.top) })));
+    expect(new Set(boxes.map(box => box.left)).size, hash).toBe(1);
+    expect(new Set(boxes.map(box => box.top)).size, hash).toBe(13);
+    const sidebar = await page.locator("#cell-sidebar").boundingBox();
+    for (const box of boxes) expect(box.right, hash).toBeLessThanOrEqual(Math.round(sidebar.x + sidebar.width));
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), hash).toBe(true);
+    expect(await page.locator("main").evaluate(el => el.scrollWidth <= el.clientWidth + 1), hash).toBe(true);
+  }
 });

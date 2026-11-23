@@ -82,7 +82,7 @@ export function CellSidebar({ inventory, selectedScope, terminalStates, filter }
         </section>;
       })}
       {groups.length > groupLimit && <button className="cell-more" onClick={() => setGroupLimit(value => value + groupPageSize)}>Show {Math.min(groupPageSize, groups.length - groupLimit)} more groups</button>}
-      <StoppedCellsLink hidden={hidden} />
     </nav>
+    <StoppedCellsLink hidden={hidden} />
   </section>;
 }

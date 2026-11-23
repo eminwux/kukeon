@@ -742,7 +742,8 @@ a.subtle-button { display: inline-flex; align-items: center; min-height: var(--t
 .manage-link[aria-current="page"] { background: var(--selected); color: var(--accent); }
 .rail-spacer { flex: 1; }
 /* "Stopped · N": the cells the Workbench hides, opened in Manage → Cells (#1635). */
-.cell-stopped-link { display: inline-flex; align-items: center; min-block-size: var(--target-min); margin: 8px 8px 0; color: var(--muted); font-size: var(--font-sm); }
+.cell-stopped-link { display: inline-flex; align-items: center; min-block-size: var(--target-min); color: var(--muted); font-size: var(--font-sm); }
+.cell-navigation > .cell-stopped-link { flex: none; margin: 0 16px 10px; }
 .cell-stopped-link:hover { color: var(--accent); }
 /* Workbench grid (#1635): one tile per active cell with a plain-text thumbnail of its terminal screen. */
 .workbench-status { color: var(--muted); font-size: var(--font-sm); }
