@@ -62,7 +62,7 @@ function SweepSchedule({ config, onRun, running, inventory }: { config: ConfigDo
       <span className={`state-badge tone-${!schedule ? "neutral" : schedule.suspend ? "stopped" : "ok"}`}><span className="state-dot" aria-hidden="true" />{!schedule ? "No schedule" : schedule.suspend ? "Suspended" : "Scheduled"}</span>
       <button type="button" disabled={running} aria-busy={running || undefined} aria-label={`Run sweep now with ${config.metadata.name}`} onClick={() => onRun(config)}>{running ? "Starting sweep…" : "Run sweep now"}</button>
     </div>
-    {schedule ? <ScheduleDetails schedule={schedule} status={status} cellLink={cellLinker(inventory.data, config)} /> : <p className="description">This Config has no schedule.</p>}
+    {schedule ? <ScheduleDetails schedule={schedule} status={status} state={false} cellLink={cellLinker(inventory.data, config)} /> : <p className="description">This Config has no schedule.</p>}
   </li>;
 }
 

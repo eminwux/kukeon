@@ -27,12 +27,12 @@ export function cellLinker(inventory: Inventory | undefined, config: { metadata:
 
 // ScheduleDetails is the definition list of one schedule (#1630): its definition from spec.schedule and
 // what kukeond's scheduler reports in status.schedule. Shared by a Config's page and the Health page.
-// Nothing here edits a schedule.
-export function ScheduleDetails({ schedule, status, cellLink }: { schedule: Schedule; status?: ScheduleStatus; cellLink: (name: string) => string | undefined }) {
+// Nothing here edits a schedule. A caller that already badges the state passes state={false}.
+export function ScheduleDetails({ schedule, status, cellLink, state = true }: { schedule: Schedule; status?: ScheduleStatus; cellLink: (name: string) => string | undefined; state?: boolean }) {
   const deadline = deadlineText(schedule);
   const active = status?.activeCells ?? [];
   return <dl className="details-grid schedule-details">
-    <dt>State</dt><dd><span className={`state-badge tone-${schedule.suspend ? "stopped" : "ok"}`}><span className="state-dot" aria-hidden="true" />{schedule.suspend ? "Suspended" : "Scheduled"}</span></dd>
+    {state && <><dt>State</dt><dd><span className={`state-badge tone-${schedule.suspend ? "stopped" : "ok"}`}><span className="state-dot" aria-hidden="true" />{schedule.suspend ? "Suspended" : "Scheduled"}</span></dd></>}
     <dt>Cron</dt><dd className="mono-id">{scheduleText(schedule)}</dd>
     <dt>Concurrency policy</dt><dd>{concurrencyText(schedule)}</dd>
     {deadline && <><dt>Starting deadline</dt><dd>{deadline}</dd></>}
