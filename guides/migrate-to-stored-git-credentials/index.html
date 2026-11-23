@@ -2485,6 +2485,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../cli/kuke-team/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke team
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../cli/kuke-team-init/" class="md-nav__link">
         
   
@@ -3609,16 +3637,17 @@
 <li>cells clone, push and sign with <a href="../git-credentials/">stored git credentials</a>; <strong>no rendered cell mounts the host <code>~/.ssh</code></strong>;</li>
 <li><code>kuke team</code> renders one <strong>shared, realm-wide blueprint per harness × security profile</strong>, and each role keeps only a CellConfig.</li>
 </ul>
-<p>Re-running <code>kuke team init</code> (and <code>kuke team add</code> for each added team) performs the migration. This page is what changes and what you have to do.</p>
+<p>Re-applying the teams — <code>kuke team init --force</code> for the kuke team, and each project team — performs the migration. This page is what changes and what you have to do.</p>
 <h2 id="1-give-the-team-a-stored-git-identity">1. Give the team a stored git identity<a class="headerlink" href="#1-give-the-team-a-stored-git-identity" title="Permanent link">&para;</a></h2>
 <p>Without a stored credential, a cell that clones an SSH remote can no longer authenticate. Store the key and author you already use, and make them the Realm default:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke<span class="w"> </span>connector<span class="w"> </span>import<span class="w"> </span>git<span class="w"> </span>--default
 </code></pre></div>
-<p>That is the whole step; there is no compatibility path to describe. The <a href="../git-credentials/">git credentials guide</a> covers what the import stores, the author-only fallback, signing, and setting a default by hand. <code>kuke team init --import-git-identity</code> and the <code>spec.git</code> block of <code>~/.kuke/kuketeams.yaml</code> were removed: delete <code>spec.git</code> from the file if it is still there, or it fails to decode.</p>
+<p>That is the whole step; there is no compatibility path to describe. The <a href="../git-credentials/">git credentials guide</a> covers what the import stores, the author-only fallback, signing, and setting a default by hand. <code>kuke team init --import-git-identity</code> and the <code>spec.git</code> block of the team defaults were removed: a <code>TeamDefaults</code> document with <code>spec.git</code> fails to decode.</p>
 <h2 id="2-re-render-the-team">2. Re-render the team<a class="headerlink" href="#2-re-render-the-team" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>kuke<span class="w"> </span>team<span class="w"> </span>init<span class="w"> </span>--force<span class="w">          </span><span class="c1"># the kuke team</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>kuke<span class="w"> </span>team<span class="w"> </span>add<span class="w"> </span>&lt;team&gt;<span class="w"> </span>--source<span class="w"> </span>…<span class="w"> </span><span class="c1"># each added team, same arguments as before</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>kuke<span class="w"> </span>team<span class="w"> </span>apply<span class="w"> </span>&lt;team&gt;<span class="w">          </span><span class="c1"># each stored team</span>
 </code></pre></div>
+<p>Teams are stored by kukeond. A team from a release that kept teams in per-user files under <code>~/.kuke</code> is not stored yet: add it again with <code>kuke team add &lt;team&gt; --source …</code> (see <a href="../../concepts/team/#upgrading-from-host-files">Upgrading from host files</a>).</p>
 <p>What you will see in the daemon afterwards:</p>
 <table>
 <thead>
@@ -3734,7 +3763,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 22, 2026 11:30:41 UTC">November 22, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 23, 2026 11:25:24 UTC">November 23, 2026</span>
   </span>
 
     

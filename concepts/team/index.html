@@ -1224,10 +1224,38 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#where-the-files-live" class="md-nav__link">
+  <a href="#where-teams-live" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Where the files live
+        Where teams live
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Where teams live">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-team-is-stored-only-with-its-configs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A Team is stored only with its Configs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-team-document" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Team document
       
     </span>
   </a>
@@ -1235,10 +1263,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#selections-and-persistence" class="md-nav__link">
+  <a href="#selections-and-inheritance" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Selections and persistence
+        Selections and inheritance
       
     </span>
   </a>
@@ -1246,10 +1274,32 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#reusable-defaults-after-init" class="md-nav__link">
+  <a href="#sources-and-defaults" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Reusable defaults after init
+        Sources and defaults
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#previewing-a-change" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Previewing a change
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#upgrading-from-host-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading from host files
       
     </span>
   </a>
@@ -2629,6 +2679,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../cli/kuke-team/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke team
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../cli/kuke-team-init/" class="md-nav__link">
         
   
@@ -3673,10 +3751,38 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#where-the-files-live" class="md-nav__link">
+  <a href="#where-teams-live" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Where the files live
+        Where teams live
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Where teams live">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-team-is-stored-only-with-its-configs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A Team is stored only with its Configs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-team-document" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Team document
       
     </span>
   </a>
@@ -3684,10 +3790,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#selections-and-persistence" class="md-nav__link">
+  <a href="#selections-and-inheritance" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Selections and persistence
+        Selections and inheritance
       
     </span>
   </a>
@@ -3695,10 +3801,32 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#reusable-defaults-after-init" class="md-nav__link">
+  <a href="#sources-and-defaults" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Reusable defaults after init
+        Sources and defaults
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#previewing-a-change" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Previewing a change
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#upgrading-from-host-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading from host files
       
     </span>
   </a>
@@ -3895,19 +4023,55 @@
 <p>A <strong>team</strong> is a set of agent cells composed from <strong>roles</strong> (what an agent is
 told to do) and <strong>harnesses</strong> (which agent CLI runs it, in which image). For
 every selected role × harness pair, <code>kuke team</code> renders one <code>CellConfig</code> — the
-pair's answers — against a <strong>shared</strong> <code>CellBlueprint</code>, applies them to kukeond,
-and records the accepted declaration on the host. Composing a team never creates or
-starts cells: launch them explicitly, for example with
+pair's answers — against a <strong>shared</strong> <code>CellBlueprint</code> and applies them to
+kukeond, which stores the team's declaration with them. Composing a team never
+creates or starts cells: launch them explicitly, for example with
 <code>kuke run --from-config &lt;team&gt;-&lt;role&gt;-&lt;harness&gt;</code>.</p>
-<p>Two commands drive it:</p>
+<p>The commands that drive it:</p>
 <ul>
-<li><a href="../../cli/kuke-team-init/"><code>kuke team init</code></a> creates the global configuration
-  and applies the <code>kuke</code> team, whose one role is <code>majordomo</code>. <code>kuke</code> is the
-  operator's reserved system team; <code>add</code> refuses that name.</li>
-<li><a href="../../cli/kuke-team-add/"><code>kuke team add</code></a> composes a project team from a
-  directory's <code>kuketeam.yaml</code> or from a named Git source.</li>
+<li><a href="../../cli/kuke-team-init/"><code>kuke team init</code></a> applies the <code>kuke</code> team, whose
+  one role is <code>majordomo</code>. <code>kuke</code> is the operator's reserved system team; <code>add</code>
+  refuses that name and <code>kuke delete team</code> refuses to delete it.</li>
+<li><a href="../../cli/kuke-team-add/"><code>kuke team add</code></a> creates a project team from a Git
+  repository (and the <code>kuketeam.yaml</code> it commits, if any) or from a local
+  checkout.</li>
+<li><a href="../../cli/kuke-team/#kuke-team-apply"><code>kuke team apply</code></a> recomposes a stored
+  team, or applies a Team document from a file.</li>
+<li><a href="../../cli/kuke-team/#kuke-team-source"><code>kuke team source</code></a> and
+  <a href="../../cli/kuke-team/#kuke-team-defaults"><code>kuke team defaults</code></a> edit what every
+  team inherits.</li>
+<li><a href="../../cli/kuke-get/#teams"><code>kuke get team</code></a>,
+  <a href="../../cli/kuke-get/#teams"><code>kuke get teamdefaults</code></a> and
+  <a href="../../cli/kuke-delete/#teams"><code>kuke delete team</code></a> are the generic verbs.</li>
 </ul>
-<h2 id="where-the-files-live">Where the files live<a class="headerlink" href="#where-the-files-live" title="Permanent link">&para;</a></h2>
+<p>The web UI's <strong>Teams</strong> page does the same through the same code: see
+<a href="https://github.com/eminwux/kukeon/blob/main/docs/web-server.md#teams">web server → Teams</a>.</p>
+<h2 id="where-teams-live">Where teams live<a class="headerlink" href="#where-teams-live" title="Permanent link">&para;</a></h2>
+<p>kukeond stores two kinds. Both are realm-scoped <code>v1beta1</code> documents, decoded
+strictly (one document, no unknown fields), kept under the realm's metadata
+tree, surviving a daemon restart, and deleted when the realm is purged.</p>
+<table>
+<thead>
+<tr>
+<th>Kind</th>
+<th>Name</th>
+<th>Holds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Team</code></td>
+<td>the team</td>
+<td>One team's declaration: its selections, its project source and the secret bindings it recorded. Unique across realms.</td>
+</tr>
+<tr>
+<td><code>TeamDefaults</code></td>
+<td><code>default</code> (one/realm)</td>
+<td>The registered sources, the default roles and harnesses, connector choices, parameters and secret bindings teams inherit.</td>
+</tr>
+</tbody>
+</table>
+<p>Definitions are read from sources, never stored:</p>
 <table>
 <thead>
 <tr>
@@ -3918,19 +4082,9 @@ starts cells: launch them explicitly, for example with
 </thead>
 <tbody>
 <tr>
-<td><code>~/.kuke/kuketeams.yaml</code></td>
-<td>host</td>
-<td><code>TeamsConfig</code>, optional and hand-written: global defaults (sources, roles, harnesses), parameters, secret bindings.</td>
-</tr>
-<tr>
-<td><code>~/.kuke/kuketeam.d/&lt;team&gt;.yaml</code></td>
-<td>host</td>
-<td><code>TeamEntry</code>: the accepted declaration of one registered team. Written only after a fully successful apply.</td>
-</tr>
-<tr>
 <td><code>kuketeam.yaml</code></td>
 <td>project repo</td>
-<td><code>Team</code>: the project's selections, read by <code>kuke team add DIRECTORY</code>.</td>
+<td>A <code>Team</code> document: the project's selections, read by <code>kuke team add</code> from the fetched revision.</td>
 </tr>
 <tr>
 <td><code>roles/&lt;role&gt;/</code></td>
@@ -3944,89 +4098,170 @@ starts cells: launch them explicitly, for example with
 </tr>
 </tbody>
 </table>
-<p>All documents use <code>apiVersion: kuketeams.io/v1</code> and are decoded strictly
-(single document, no unknown fields). This repository ships the <code>majordomo</code>
-role under <code>team/roles/</code> and the <code>claude</code>, <code>codex</code>, <code>opencode</code>, and <code>script</code>
+<p>Every team document — <code>Team</code>, <code>TeamDefaults</code>, and the source documents <code>Role</code>,
+<code>Harness</code>, <code>HarnessImageCatalog</code>, <code>Component</code> and <code>Connector</code> — has
+<code>apiVersion: v1beta1</code>. The source documents are read by <code>kuke</code> from a fetched
+source; <code>kuke apply</code> rejects them. This repository ships the <code>majordomo</code> role
+under <code>team/roles/</code> and the <code>claude</code>, <code>codex</code>, <code>opencode</code>, and <code>script</code>
 harnesses under <code>team/harnesses/</code> (<code>script</code> runs a program role, see
-<a href="#program-roles-the-script-harness">Program roles</a>); other roles (dev, pm, pr-reviewer, …) can come from any Git
-source, such as the agents repository. The kukeon renderer that turns a pair
-into kukeon documents is embedded in <code>kuke</code> (<code>pkg/team/compose/renderers/kukeon/v1beta1</code>); see
+<a href="#program-roles-the-script-harness">Program roles</a>); other roles (dev, pm,
+pr-reviewer, …) can come from any Git source, such as the agents repository.
+The kukeon renderer that turns a pair into kukeon documents is embedded in
+<code>kuke</code> (<code>pkg/team/compose/renderers/kukeon/v1beta1</code>); see
 <a href="https://github.com/eminwux/kukeon/blob/main/team/harnesses/templates.md"><code>team/harnesses/templates.md</code></a>
 for the harness and renderer contract.</p>
-<h2 id="selections-and-persistence">Selections and persistence<a class="headerlink" href="#selections-and-persistence" title="Permanent link">&para;</a></h2>
-<p><code>TeamsConfig.spec.defaults</code> and <code>Team.spec</code> share <code>sources</code>, <code>roles</code>, and
-<code>harnesses</code>. An omitted list inherits the corresponding global default. An
-explicit list replaces it; <code>[]</code> selects none. References are checked against
-the effective lists. Each source has exactly one of <code>branch</code>, <code>tag</code>, or
-<code>commit</code>. A role with an explicit <code>harness</code> selects only that harness, and
-fails if the role does not declare it; otherwise it selects every harness in the
-effective list that the role declares in <code>spec.harnesses</code>, and fails only if it
-declares none of them. A team can therefore list <code>[claude, script]</code> and keep
-agent roles that declare only <code>claude</code>. Harness <code>default</code> is
-not supported; use <code>roles[].harness</code>. Unselected definitions are neither
-fetched, loaded, nor rendered.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuketeams.io/v1</span>
+<h3 id="a-team-is-stored-only-with-its-configs">A Team is stored only with its Configs<a class="headerlink" href="#a-team-is-stored-only-with-its-configs" title="Permanent link">&para;</a></h3>
+<p>Composition runs in <code>kuke</code> — it fetches sources with your git configuration —
+and sends kukeond one <strong>team apply</strong>: the composed blueprints and Configs, any
+Secrets it creates, and the <code>Team</code> document last. kukeond stores the <code>Team</code>
+only in that apply, only when its name matches the team being applied, and
+only when every other document in it applied. A <code>Team</code> document sent on its own
+(<code>kuke apply</code> of a raw document without composition) is rejected with a message
+naming <code>kuke apply -f</code> and <code>kuke team apply -f</code>. The stored Team is therefore
+always what was last applied, overrides included.</p>
+<p><code>kuke apply -f FILE</code> handles both kinds: a <code>TeamDefaults</code> document is stored as
+it is, and each <code>Team</code> document is composed and applied exactly as
+<code>kuke team apply -f FILE</code> does. The file's other documents are applied first,
+so a <code>TeamDefaults</code> in the same file is what its Teams inherit; if one of them
+fails, the Teams are skipped.</p>
+<h2 id="the-team-document">The Team document<a class="headerlink" href="#the-team-document" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Team</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nt">metadata</span><span class="p">:</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">example</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="c1"># All selections omitted: inherit the operator's defaults.</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">acme</span><span class="w"> </span><span class="c1"># required when stored; kuke team add NAME overrides it</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span><span class="w"> </span><span class="c1"># optional; omitted means default</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span><span class="nt">projectSource</span><span class="p">:</span><span class="w"> </span><span class="c1"># added by kuke team add; optional in a file</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">project</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">    </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">git@github.com:acme/acme</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">    </span><span class="nt">branch</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">main</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">    </span><span class="nt">clonePath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/home/user/acme</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="w">  </span><span class="nt">sources</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[]</span><span class="w"> </span><span class="c1"># selections: omitted inherits the TeamDefaults' list</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="w">  </span><span class="nt">roles</span><span class="p">:</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">dev</span><span class="p p-Indicator">,</span><span class="nt"> source</span><span class="p">:</span><span class="w"> </span><span class="nv">agents</span><span class="p p-Indicator">,</span><span class="nt"> path</span><span class="p">:</span><span class="w"> </span><span class="nv">dev</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="w">  </span><span class="nt">harnesses</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[]</span><span class="w"> </span><span class="c1"># [] selects none</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="w">  </span><span class="nt">connectors</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{}</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="w">  </span><span class="nt">secrets</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[]</span><span class="w"> </span><span class="c1"># recorded secret bindings (see Secret declarations)</span>
 </code></pre></div>
-<p>A <code>TeamEntry</code> has the same <code>metadata</code> and <code>spec</code> as the accepted <code>Team</code>, plus
-the <code>projectSource</code> that <code>kuke team add</code> resolves. Effective defaults are not
-persisted, and omitted versus explicit-empty lists round-trip unchanged, so a
-later recomposition picks up the current global defaults.</p>
+<p>A repository's <code>kuketeam.yaml</code> is this same document, usually without
+<code>metadata.realm</code> and <code>spec.projectSource</code> — <code>kuke team add</code> fills the project
+source from the repository it fetched. <code>kuke get team NAME -o yaml</code> prints the
+stored one, ready to edit and pass to <code>kuke team apply -f</code>.</p>
+<h2 id="selections-and-inheritance">Selections and inheritance<a class="headerlink" href="#selections-and-inheritance" title="Permanent link">&para;</a></h2>
+<p><code>TeamDefaults.spec.defaults</code> and <code>Team.spec</code> share <code>sources</code>, <code>roles</code>,
+<code>harnesses</code> and <code>connectors</code>. An omitted list inherits the corresponding
+default. An explicit list replaces it; <code>[]</code> selects none. Omitted versus <code>[]</code>
+round-trips unchanged through apply and get. Effective defaults are never
+copied into a team, so a later recomposition picks up the current defaults —
+but changing the defaults recomposes nothing by itself: every command that
+changes them prints the teams that inherit them and the
+<code>kuke team apply NAME</code> that recomposes each.</p>
+<p>References are checked against the effective lists. Each source has exactly
+one of <code>branch</code>, <code>tag</code>, or <code>commit</code>. A role with an explicit <code>harness</code> selects
+only that harness, and fails if the role does not declare it; otherwise it
+selects every harness in the effective list that the role declares in
+<code>spec.harnesses</code>, and fails only if it declares none of them. A team can
+therefore list <code>[claude, script]</code> and keep agent roles that declare only
+<code>claude</code>. Harness <code>default</code> is not supported; use <code>roles[].harness</code>.
+Unselected definitions are neither fetched, loaded, nor rendered.</p>
+<p>When a team ends up with no role × harness pair, the error says which input
+was empty — no <code>kuketeam.yaml</code> in the repository, no default roles, no default
+harnesses — and names <code>--role</code> and <code>kuke team source add</code>.</p>
 <p>Authored <code>roles[].needs.image</code> contains <strong>capability names</strong>, never image
 URLs. These additions cannot erase requirements in <code>Role.spec.needs.image</code>. The
 selected harness is also a mandatory image capability. One catalog image must
 satisfy the complete set; catalog order breaks ties, and a root-capable image
-is not selected unless <code>root</code> is requested. The team name <code>root</code> grants no
-privilege. Published image references are read from the <code>images.yaml</code> beside
-the selected <code>harness.yaml</code>; no registry lookup is made. An update re-resolves
-the image from the current definitions and catalog.</p>
-<h2 id="reusable-defaults-after-init">Reusable defaults after init<a class="headerlink" href="#reusable-defaults-after-init" title="Permanent link">&para;</a></h2>
-<p><code>~/.kuke/kuketeams.yaml</code> is optional and hand-written: kuke reads it and never
-writes it, and a missing file means empty global defaults. <code>kuke team init</code> and
-<code>kuke team add</code> both work without it. Create it to declare reusable sources,
-roles, and harnesses. Both harnesses are listed here; dev narrows to Claude and pm to
-Codex:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuketeams.io/v1</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">TeamsConfig</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">defaults</span><span class="p">:</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">    </span><span class="nt">sources</span><span class="p">:</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kukeon</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">        </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">github.com/eminwux/kukeon</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">        </span><span class="nt">branch</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">main</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">agents</span>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">        </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">github.com/eminwux/agents</span>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">        </span><span class="nt">branch</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">main</span>
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">    </span><span class="nt">roles</span><span class="p">:</span>
-<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dev</span>
-<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">        </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">agents</span>
-<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="w">        </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dev</span>
-<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="w">        </span><span class="nt">initialPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/home/user/work</span>
-<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="w">        </span><span class="nt">harness</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude</span>
-<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pm</span>
-<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="w">        </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">agents</span>
-<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a><span class="w">        </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pm</span>
-<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a><span class="w">        </span><span class="nt">initialPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">$HOME</span>
-<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a><span class="w">        </span><span class="nt">harness</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">codex</span>
-<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a><span class="w">    </span><span class="nt">harnesses</span><span class="p">:</span>
-<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">codex</span>
-<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a><span class="w">        </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kukeon</span>
-<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a><span class="w">        </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">team/harnesses/codex</span>
-<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude</span>
-<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a><span class="w">        </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kukeon</span>
-<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a><span class="w">        </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">team/harnesses/claude</span>
+is not selected unless <code>root</code> is requested. The team name <code>root</code> is reserved
+and grants no privilege. Published image references are read from the
+<code>images.yaml</code> beside the selected <code>harness.yaml</code>; no registry lookup is made. An
+update re-resolves the image from the current definitions and catalog.</p>
+<h2 id="sources-and-defaults">Sources and defaults<a class="headerlink" href="#sources-and-defaults" title="Permanent link">&para;</a></h2>
+<p>The realm's <code>TeamDefaults</code> is what a team that omits a list inherits. When the
+realm has none, <code>kuke team init</code> creates one with the <code>kukeon</code> source and its
+<code>claude</code> and <code>codex</code> harnesses, so a project team needs only roles; an existing
+<code>TeamDefaults</code> is never changed by init. Register further sources and pick the
+defaults with:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>kuke<span class="w"> </span>team<span class="w"> </span><span class="nb">source</span><span class="w"> </span>add<span class="w"> </span>agents<span class="w"> </span>--url<span class="w"> </span>git@github.com:eminwux/agents<span class="w">   </span><span class="c1"># default branch discovered</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>kuke<span class="w"> </span>team<span class="w"> </span><span class="nb">source</span><span class="w"> </span>show<span class="w"> </span>agents<span class="w">                                       </span><span class="c1"># roles and harnesses it offers</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>kuke<span class="w"> </span>team<span class="w"> </span>defaults<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--role<span class="w"> </span>agents:dev<span class="w"> </span>--role<span class="w"> </span><span class="nv">pm</span><span class="o">=</span>agents:pm<span class="w"> </span>--harness<span class="w"> </span>claude
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>kuke<span class="w"> </span>get<span class="w"> </span>teamdefaults<span class="w"> </span>-o<span class="w"> </span>yaml
+</code></pre></div>
+<p><code>source add</code> checks the URL, fetches the source once and lists what it found; a
+source that offers roles is cloned into its role cells at <code>/home/user/&lt;name&gt;</code>
+unless <code>--clone-path</code> says otherwise. <code>source remove</code> is refused while a default
+or a stored team references the source. Connectors, parameters and secret
+bindings are set by applying a whole <code>TeamDefaults</code> document:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">TeamDefaults</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span><span class="nt">defaults</span><span class="p">:</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">    </span><span class="nt">sources</span><span class="p">:</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">kukeon</span><span class="p p-Indicator">,</span><span class="nt"> url</span><span class="p">:</span><span class="w"> </span><span class="nv">github.com/eminwux/kukeon</span><span class="p p-Indicator">,</span><span class="nt"> branch</span><span class="p">:</span><span class="w"> </span><span class="nv">main</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="nt">          name</span><span class="p">:</span><span class="w"> </span><span class="nv">agents</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="nt">          url</span><span class="p">:</span><span class="w"> </span><span class="nv">github.com/eminwux/agents</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="nt">          branch</span><span class="p">:</span><span class="w"> </span><span class="nv">main</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="nt">          clonePath</span><span class="p">:</span><span class="w"> </span><span class="nv">/home/user/agents</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="w">        </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="w">    </span><span class="nt">roles</span><span class="p">:</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="nt">          name</span><span class="p">:</span><span class="w"> </span><span class="nv">dev</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="nt">          source</span><span class="p">:</span><span class="w"> </span><span class="nv">agents</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a><span class="nt">          path</span><span class="p">:</span><span class="w"> </span><span class="nv">dev</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a><span class="nt">          initialPath</span><span class="p">:</span><span class="w"> </span><span class="nv">/home/user/work</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a><span class="nt">          harness</span><span class="p">:</span><span class="w"> </span><span class="nv">claude</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a><span class="w">        </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span>
+<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a><span class="nt">          name</span><span class="p">:</span><span class="w"> </span><span class="nv">pm</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a><span class="nt">          source</span><span class="p">:</span><span class="w"> </span><span class="nv">agents</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a><span class="nt">          path</span><span class="p">:</span><span class="w"> </span><span class="nv">pm</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a><span class="nt">          initialPath</span><span class="p">:</span><span class="w"> </span><span class="nv">$HOME</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a><span class="nt">          harness</span><span class="p">:</span><span class="w"> </span><span class="nv">codex</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-2-30" name="__codelineno-2-30" href="#__codelineno-2-30"></a><span class="w">        </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-2-31" name="__codelineno-2-31" href="#__codelineno-2-31"></a><span class="w">    </span><span class="nt">harnesses</span><span class="p">:</span>
+<a id="__codelineno-2-32" name="__codelineno-2-32" href="#__codelineno-2-32"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">codex</span><span class="p p-Indicator">,</span><span class="nt"> source</span><span class="p">:</span><span class="w"> </span><span class="nv">kukeon</span><span class="p p-Indicator">,</span><span class="nt"> path</span><span class="p">:</span><span class="w"> </span><span class="nv">team/harnesses/codex</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-2-33" name="__codelineno-2-33" href="#__codelineno-2-33"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">claude</span><span class="p p-Indicator">,</span><span class="nt"> source</span><span class="p">:</span><span class="w"> </span><span class="nv">kukeon</span><span class="p p-Indicator">,</span><span class="nt"> path</span><span class="p">:</span><span class="w"> </span><span class="nv">team/harnesses/claude</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-2-34" name="__codelineno-2-34" href="#__codelineno-2-34"></a><span class="w">  </span><span class="nt">parameters</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{}</span>
+<a id="__codelineno-2-35" name="__codelineno-2-35" href="#__codelineno-2-35"></a><span class="w">  </span><span class="nt">secrets</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[]</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>defaults.yaml
 </code></pre></div>
 <p>Check external role paths, runtime <code>clonePath</code> requirements, image
 capabilities, and secret prerequisites against the selected source revision
 before use.</p>
+<h2 id="previewing-a-change">Previewing a change<a class="headerlink" href="#previewing-a-change" title="Permanent link">&para;</a></h2>
+<p><code>kuke team add</code> and <code>kuke team apply</code> take <code>--dry-run</code>, and the web UI's
+Preview button runs the same plan. A preview prints where the declaration came
+from (the repository file at its commit, the defaults, a file, or the stored
+Team), the declaration itself, each source with the commit it resolved to,
+each role × harness with its Config name, image, tasks with their schedules,
+and its connectors and components, then the Configs that would be created,
+re-rendered and pruned, the missing secrets, and notes. It creates no Secret,
+applies no document and reads no secret value. Preview and apply each compose
+from scratch, so a branch may move between them; the apply result is
+authoritative.</p>
+<h2 id="upgrading-from-host-files">Upgrading from host files<a class="headerlink" href="#upgrading-from-host-files" title="Permanent link">&para;</a></h2>
+<p>Earlier releases kept teams in files under <code>~/.kuke</code> on the host — a teams file
+for the defaults and a drop-in directory with one file per team. Those files
+are no longer read. When either exists, <code>kuke team init</code>, <code>add</code> and <code>apply</code>
+print one note saying so; nothing is converted or imported. Run
+<code>kuke team init</code> and add each team again with <code>kuke team add</code>, then delete the
+old files.</p>
+<p>The move to stored teams is also a <strong>flag day</strong> for the document header: every
+team document is <code>apiVersion: v1beta1</code>, and the old group-qualified header is
+rejected with the normal decode error — nothing accepts both. A <code>kuke</code> built
+before this change cannot compose any team from <code>main</code>, because the harness
+documents carry the new header, and a <code>kuke</code> built after it cannot read a
+repository whose <code>kuketeam.yaml</code> or <code>role.yaml</code> still has the old one. Upgrade
+<code>kuke</code> and your role sources (such as the agents repository) together.</p>
 <h2 id="starting-directory">Starting directory<a class="headerlink" href="#starting-directory" title="Permanent link">&para;</a></h2>
-<p><code>initialPath</code> is accepted on role selections in global defaults, Team, and
-TeamEntry. An explicit roles list replaces the entire global list, so omitting
+<p><code>initialPath</code> is accepted on role selections in the TeamDefaults and in a
+Team. An explicit roles list replaces the entire default list, so omitting
 <code>initialPath</code> on a replacement role uses the home fallback rather than
-borrowing a path from the same-named global role.</p>
+borrowing a path from the same-named default role.</p>
 <p>Supported values are clean absolute Unix paths (including <code>/</code>), <code>$HOME</code>, and
 <code>$HOME/subdirectory</code>, with path components of letters, digits, <code>_</code>, <code>.</code>, and
 <code>-</code>. Relative paths, <code>~</code>, <code>${HOME}</code>, other variables, shell expressions,
@@ -4155,106 +4390,106 @@ shared blueprint it stopped using only when no other CellConfig references it.</
 <p>A harness declares the ways it starts under <code>spec.modes</code> in <code>harness.yaml</code> —
 the shipped ones declare <code>interactive</code> and <code>headless</code>. The mode is picked per
 cell, so one role Config serves both:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>kuke<span class="w"> </span>run<span class="w"> </span>acme-dev-claude<span class="w">                                               </span><span class="c1"># interactive</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>kuke<span class="w"> </span>run<span class="w"> </span>acme-dev-claude<span class="w"> </span>--mode<span class="w"> </span>headless<span class="w"> </span>--param<span class="w"> </span><span class="nv">PROMPT</span><span class="o">=</span><span class="s2">"triage #42"</span><span class="w"> </span>-d
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>kuke<span class="w"> </span>run<span class="w"> </span>acme-dev-claude<span class="w">                                               </span><span class="c1"># interactive</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>kuke<span class="w"> </span>run<span class="w"> </span>acme-dev-claude<span class="w"> </span>--mode<span class="w"> </span>headless<span class="w"> </span>--param<span class="w"> </span><span class="nv">PROMPT</span><span class="o">=</span><span class="s2">"triage #42"</span><span class="w"> </span>-d
 </code></pre></div>
 <h3 id="tasks">Tasks<a class="headerlink" href="#tasks" title="Permanent link">&para;</a></h3>
 <p>A role can declare named <strong>tasks</strong> in <code>role.yaml</code>: unattended runs that need no
 runtime arguments. Each task names one of the role's skills by base name, and
 can add a fixed argument string:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># role.yaml</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="nt">skills</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">dev/skills/pick-issue</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">dev/skills/pick-changes</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span><span class="nt">tasks</span><span class="p">:</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">pick-issue</span><span class="p p-Indicator">,</span><span class="nt"> skill</span><span class="p">:</span><span class="w"> </span><span class="nv">pick-issue</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">pick-bug</span><span class="p p-Indicator">,</span><span class="nt"> skill</span><span class="p">:</span><span class="w"> </span><span class="nv">pick-issue</span><span class="p p-Indicator">,</span><span class="nt"> args</span><span class="p">:</span><span class="w"> </span><span class="s">"--label</span><span class="nv"> </span><span class="s">bug"</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">pick-changes</span><span class="p p-Indicator">,</span><span class="nt"> skill</span><span class="p">:</span><span class="w"> </span><span class="nv">pick-changes</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># role.yaml</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="nt">skills</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">dev/skills/pick-issue</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">dev/skills/pick-changes</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span><span class="nt">tasks</span><span class="p">:</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">pick-issue</span><span class="p p-Indicator">,</span><span class="nt"> skill</span><span class="p">:</span><span class="w"> </span><span class="nv">pick-issue</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">pick-bug</span><span class="p p-Indicator">,</span><span class="nt"> skill</span><span class="p">:</span><span class="w"> </span><span class="nv">pick-issue</span><span class="p p-Indicator">,</span><span class="nt"> args</span><span class="p">:</span><span class="w"> </span><span class="s">"--label</span><span class="nv"> </span><span class="s">bug"</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">pick-changes</span><span class="p p-Indicator">,</span><span class="nt"> skill</span><span class="p">:</span><span class="w"> </span><span class="nv">pick-changes</span><span class="w"> </span><span class="p p-Indicator">}</span>
 </code></pre></div>
 <p>A team's role entry picks which of them it uses. If <code>tasks</code> is omitted, the team
 gets all of the role's tasks. <code>tasks: []</code> gives none, and a name the role does
-not declare fails <code>kuke team add</code>. A task whose <code>skill</code> is not one of the role's
+not declare fails the apply. A task whose <code>skill</code> is not one of the role's
 <code>spec.skills</code> also fails, with an error that names the role, the task and the
 skill.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># kuketeam.yaml</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span><span class="nt">roles</span><span class="p">:</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">dev</span><span class="p p-Indicator">,</span><span class="nt"> source</span><span class="p">:</span><span class="w"> </span><span class="nv">agents</span><span class="p p-Indicator">,</span><span class="nt"> path</span><span class="p">:</span><span class="w"> </span><span class="nv">dev</span><span class="p p-Indicator">,</span><span class="nt"> tasks</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">pick-issue</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">pick-bug</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># kuketeam.yaml</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span><span class="nt">roles</span><span class="p">:</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">dev</span><span class="p p-Indicator">,</span><span class="nt"> source</span><span class="p">:</span><span class="w"> </span><span class="nv">agents</span><span class="p p-Indicator">,</span><span class="nt"> path</span><span class="p">:</span><span class="w"> </span><span class="nv">dev</span><span class="p p-Indicator">,</span><span class="nt"> tasks</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">pick-issue</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">pick-bug</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="p p-Indicator">}</span>
 </code></pre></div>
-<p><code>kuke team add</code> renders each selected task as its own CellConfig per selected
+<p>Applying the team renders each selected task as its own CellConfig per selected
 harness (the role entry's <code>harness</code> pin applies), named
 <code>&lt;team&gt;-&lt;role&gt;-&lt;harness&gt;-&lt;task&gt;</code> and labelled <code>kukeon.io/task: &lt;task&gt;</code> next to
 the team and role labels. It has the same blueprint, values, repos, secrets, components
 and requires as the pair's config, plus:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">modes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> enabled</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">headless</span><span class="p p-Indicator">],</span><span class="nt"> default</span><span class="p">:</span><span class="w"> </span><span class="nv">headless</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="nt">values</span><span class="p">:</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">    </span><span class="p p-Indicator">{</span><span class="nt"> PROMPT</span><span class="p">:</span><span class="w"> </span><span class="s">"Use</span><span class="nv"> </span><span class="s">the</span><span class="nv"> </span><span class="s">pick-issue</span><span class="nv"> </span><span class="s">skill</span><span class="nv"> </span><span class="s">with</span><span class="nv"> </span><span class="s">arguments:</span><span class="nv"> </span><span class="s">--label</span><span class="nv"> </span><span class="s">bug"</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">...</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">  </span><span class="nt">autoDelete</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">modes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> enabled</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">headless</span><span class="p p-Indicator">],</span><span class="nt"> default</span><span class="p">:</span><span class="w"> </span><span class="nv">headless</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span><span class="nt">values</span><span class="p">:</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">    </span><span class="p p-Indicator">{</span><span class="nt"> PROMPT</span><span class="p">:</span><span class="w"> </span><span class="s">"Use</span><span class="nv"> </span><span class="s">the</span><span class="nv"> </span><span class="s">pick-issue</span><span class="nv"> </span><span class="s">skill</span><span class="nv"> </span><span class="s">with</span><span class="nv"> </span><span class="s">arguments:</span><span class="nv"> </span><span class="s">--label</span><span class="nv"> </span><span class="s">bug"</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">...</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">  </span><span class="nt">autoDelete</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 </code></pre></div>
 <p>The prompt is the same for every harness: <code>Use the &lt;skill&gt; skill</code>, followed by
 <code>with arguments: &lt;args&gt;</code> when <code>args</code> is set. Launch a task with no <code>--rm</code> and
 no <code>--param</code>. The cell deletes itself when the run ends:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>kuke<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>acme-dev-claude-pick-bug
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>kuke<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>acme-dev-claude-pick-bug
 </code></pre></div>
 <p>A harness without a <code>headless</code> mode gets no task configs, and the output says
 why. The pair's interactive config does not change. Tasks that need a value at
 run time (<code>issue &lt;N&gt;</code>) still go through it:
 <code>kuke run --rm -d acme-dev-claude --mode headless --param PROMPT="work on issue 22"</code>.
-When a task is deselected, or the role stops declaring it, the next
-<code>kuke team add</code> prunes its config along with the team's other obsolete configs.</p>
+When a task is deselected, or the role stops declaring it, the next apply of
+the team prunes its config along with the team's other obsolete configs.</p>
 <h4 id="scheduling-a-task">Scheduling a task<a class="headerlink" href="#scheduling-a-task" title="Permanent link">&para;</a></h4>
 <p>A task config can run on a schedule instead of by hand. How often a task runs
 is a deployment decision, so the team sets it. An entry in a role's <code>tasks</code> is
 either a task name or an object that also gives the task's cadence:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># kuketeam.yaml</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span><span class="nt">roles</span><span class="p">:</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dev</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">      </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">agents</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dev</span>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">      </span><span class="nt">tasks</span><span class="p">:</span>
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pick-issue</span><span class="w"> </span><span class="c1"># runs only when started by hand</span>
-<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">pick-bug</span><span class="p p-Indicator">,</span><span class="nt"> schedule</span><span class="p">:</span><span class="w"> </span><span class="s">"*/15</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*"</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">pick-nits</span><span class="p p-Indicator">,</span><span class="nt"> schedule</span><span class="p">:</span><span class="w"> </span><span class="s">"@daily"</span><span class="p p-Indicator">,</span><span class="nt"> suspend</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># kuketeam.yaml</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">  </span><span class="nt">roles</span><span class="p">:</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dev</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">      </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">agents</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dev</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="w">      </span><span class="nt">tasks</span><span class="p">:</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pick-issue</span><span class="w"> </span><span class="c1"># runs only when started by hand</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">pick-bug</span><span class="p p-Indicator">,</span><span class="nt"> schedule</span><span class="p">:</span><span class="w"> </span><span class="s">"*/15</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*"</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">pick-nits</span><span class="p p-Indicator">,</span><span class="nt"> schedule</span><span class="p">:</span><span class="w"> </span><span class="s">"@daily"</span><span class="p p-Indicator">,</span><span class="nt"> suspend</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="w"> </span><span class="p p-Indicator">}</span>
 </code></pre></div>
 <p><code>schedule</code> is a five-field cron expression or one of <code>@hourly</code>, <code>@daily</code>,
 <code>@weekly</code>, <code>@monthly</code>, read in UTC. <code>suspend: true</code> keeps the schedule but
 switches it off.</p>
 <p>A role can ship defaults for both, so a team that just names the task gets
 them:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># role.yaml</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span><span class="nt">tasks</span><span class="p">:</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="nt">        name</span><span class="p">:</span><span class="w"> </span><span class="nv">pick-bug</span><span class="p p-Indicator">,</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="nt">        skill</span><span class="p">:</span><span class="w"> </span><span class="nv">pick-issue</span><span class="p p-Indicator">,</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="nt">        args</span><span class="p">:</span><span class="w"> </span><span class="s">"--label</span><span class="nv"> </span><span class="s">bug"</span><span class="p p-Indicator">,</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="nt">        schedule</span><span class="p">:</span><span class="w"> </span><span class="s">"*/30</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*"</span><span class="p p-Indicator">,</span>
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="w">      </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span>
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="nt">        name</span><span class="p">:</span><span class="w"> </span><span class="nv">health-sweep</span><span class="p p-Indicator">,</span>
-<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="nt">        skill</span><span class="p">:</span><span class="w"> </span><span class="nv">health-sweep</span><span class="p p-Indicator">,</span>
-<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="nt">        schedule</span><span class="p">:</span><span class="w"> </span><span class="s">"@hourly"</span><span class="p p-Indicator">,</span>
-<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="nt">        suspend</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">,</span>
-<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="w">      </span><span class="p p-Indicator">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># role.yaml</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">  </span><span class="nt">tasks</span><span class="p">:</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="nt">        name</span><span class="p">:</span><span class="w"> </span><span class="nv">pick-bug</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="nt">        skill</span><span class="p">:</span><span class="w"> </span><span class="nv">pick-issue</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="nt">        args</span><span class="p">:</span><span class="w"> </span><span class="s">"--label</span><span class="nv"> </span><span class="s">bug"</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="nt">        schedule</span><span class="p">:</span><span class="w"> </span><span class="s">"*/30</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*"</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="w">      </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span>
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="nt">        name</span><span class="p">:</span><span class="w"> </span><span class="nv">health-sweep</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="nt">        skill</span><span class="p">:</span><span class="w"> </span><span class="nv">health-sweep</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="nt">        schedule</span><span class="p">:</span><span class="w"> </span><span class="s">"@hourly"</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="nt">        suspend</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">,</span>
+<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="w">      </span><span class="p p-Indicator">}</span>
 </code></pre></div>
 <p>Each value a team's entry sets overrides the role's default for that value, and
 the other one is kept. The <code>pick-bug</code> entry above replaces the role's
 <code>*/30 * * * *</code> with <code>*/15 * * * *</code>. A role can ship a schedule that is off
 until a team opts in, as <code>health-sweep</code> does: the team turns it on with
 <code>{ name: health-sweep, suspend: false }</code>. A <code>suspend</code> on a task that ends up
-with no schedule fails <code>kuke team add</code>, because there is nothing for it to
+with no schedule fails the apply, because there is nothing for it to
 switch.</p>
-<p><code>kuke team add</code> renders the resolved values into the task config's
+<p>Applying the team renders the resolved values into the task config's
 <a href="../../manifests/config/#specschedule-object-optional"><code>spec.schedule</code></a>, and
 kukeond then fires the config on that schedule: each fire starts a
 <code>&lt;config&gt;-&lt;unix-fire-time&gt;</code> cell, and a fire is skipped while the previous one
 is still running. A task with no schedule renders as before. See what is
 scheduled, and when it next fires, with <code>kuke get configs</code>.</p>
-<p>Team configs are re-rendered: <code>kuke team add</code> rewrites every one of them whole.
-A <code>schedule</code> or <code>suspend</code> edited by hand on a task config is therefore lost on
-the next <code>kuke team add</code>. Change it in <code>kuketeam.yaml</code> (or the role's defaults)
-instead.</p>
+<p>Team configs are re-rendered: each apply of the team rewrites every one of
+them whole. A <code>schedule</code> or <code>suspend</code> edited by hand on a task config is
+therefore lost on the next apply. Change it in the team's declaration (or the
+role's defaults) instead.</p>
 <p>A team's entry can also replace a task's argument text with <code>args</code>, for example
 <code>{ name: pick-bug, args: "--label regression" }</code>. Like <code>schedule</code> and
 <code>suspend</code>, it overrides only that value.</p>
@@ -4263,31 +4498,31 @@ instead.</p>
 <code>script</code> harness. Its cell runs a command the role declares, with no model and
 no login, and gets the same connectors, repos, mounts and secrets as any other
 role:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># role.yaml</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuketeams.io/v1</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Role</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="nt">metadata</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">ticker</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">  </span><span class="nt">harnesses</span><span class="p">:</span>
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="w">    </span><span class="nt">script</span><span class="p">:</span>
-<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">python3 "$ROLE_SOURCE_DIR/$ROLE_PATH/tick.py"</span>
-<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="w">  </span><span class="nt">connectors</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">github</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="w">  </span><span class="nt">needs</span><span class="p">:</span>
-<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="w">    </span><span class="nt">mounts</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">kuke-binary</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">kukeond-socket</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="w">  </span><span class="nt">tasks</span><span class="p">:</span>
-<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">tick</span><span class="p p-Indicator">,</span><span class="nt"> args</span><span class="p">:</span><span class="w"> </span><span class="s">"--once"</span><span class="p p-Indicator">,</span><span class="nt"> schedule</span><span class="p">:</span><span class="w"> </span><span class="s">"*/5</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*"</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># role.yaml</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Role</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="nt">metadata</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">ticker</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="w">  </span><span class="nt">harnesses</span><span class="p">:</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="w">    </span><span class="nt">script</span><span class="p">:</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">python3 "$ROLE_SOURCE_DIR/$ROLE_PATH/tick.py"</span>
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="w">  </span><span class="nt">connectors</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">github</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="w">  </span><span class="nt">needs</span><span class="p">:</span>
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a><span class="w">    </span><span class="nt">mounts</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">kuke-binary</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">kukeond-socket</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a><span class="w">  </span><span class="nt">tasks</span><span class="p">:</span>
+<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">tick</span><span class="p p-Indicator">,</span><span class="nt"> args</span><span class="p">:</span><span class="w"> </span><span class="s">"--once"</span><span class="p p-Indicator">,</span><span class="nt"> schedule</span><span class="p">:</span><span class="w"> </span><span class="s">"*/5</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*"</span><span class="w"> </span><span class="p p-Indicator">}</span>
 </code></pre></div>
 <ul>
 <li><strong><code>harnesses.script.command</code></strong> is required, and only the <code>script</code> harness
   accepts it. The cell runs it as <code>/bin/bash -c "$COMMAND $ARGS"</code> from the
   role's starting directory, and the cell exits with its status. Reference
   environment variables as <code>$VAR</code>, never <code>${VAR}</code>: kukeon substitutes the braced
-  form in blueprints, so <code>kuke team add</code> rejects it. The command is composed
+  form in blueprints, so composition rejects it. The command is composed
   from the role; <code>spec.parameters</code> cannot override <code>COMMAND</code>.</li>
 <li><strong>Tasks</strong> take <code>args</code> and name no <code>skill</code>: a task config runs the command
   with the task's <code>args</code> appended (<code>values.ARGS</code>) instead of a <code>PROMPT</code>.
   <code>schedule</code>, <code>suspend</code> and the team's overrides work as for any task. A
-  script task that sets <code>skill</code> fails <code>kuke team add</code>.</li>
+  script task that sets <code>skill</code> fails composition.</li>
 <li><strong>State.</strong> <code>$SCRIPT_STATE_DIR</code> (<code>/home/user/.script-state</code>) is on the pair's
   state volume, <code>&lt;team&gt;-&lt;role&gt;-script-state</code>, which the pair config and its
   task configs share, so the program keeps a small state directory across
@@ -4309,10 +4544,12 @@ switching on the five-minute tick the role ships suspended. To stop the
 reactor:</p>
 <ul>
 <li><strong>Durably:</strong> set <code>tasks: [{ name: tick, suspend: true }]</code> on the role entry
-  in <code>kuketeam.yaml</code> (or remove the role entry) and run <code>kuke team add</code>.</li>
+  in the stored team (or remove the role entry) and run
+  <code>kuke team apply -f kukeon.yaml</code>, starting from
+  <code>kuke get team kukeon -o yaml &gt; kukeon.yaml</code>.</li>
 <li><strong>Immediately:</strong> <code>kuke delete config kukeon-pipeline-script-tick</code>. No new
   tick fires, and worker cells that are already running are left alone. The
-  next <code>kuke team add</code> renders the config again.</li>
+  next apply of the team renders the config again.</li>
 </ul>
 <h3 id="the-majordomo-health-sweep">The majordomo health sweep<a class="headerlink" href="#the-majordomo-health-sweep" title="Permanent link">&para;</a></h3>
 <p>The <code>kuke</code> team's <code>majordomo</code> role declares one task, <code>health-sweep</code>, with
@@ -4324,29 +4561,31 @@ model credits on sweeps until its user turns them on.</p>
 otherwise triages each finding and stores one report in kukeond. It never
 restarts, deletes or changes anything; fixes appear in the report as suggested
 commands.</p>
-<p>To turn sweeps on, edit the kuke team's stored entry and reapply it. The
-entry is the team's source: <code>kuke team init</code> writes it and
-<code>kuke team init --reapply</code> recomposes the team from it.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># ~/.kuke/kuketeam.d/kuke.yaml</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">  </span><span class="nt">roles</span><span class="p">:</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">majordomo</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">      </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kukeon</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">team/roles/majordomo</span>
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="w">      </span><span class="nt">initialPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">$HOME</span>
-<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="w">      </span><span class="nt">needs</span><span class="p">:</span>
-<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="w">        </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">go</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="w">      </span><span class="nt">tasks</span><span class="p">:</span>
-<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">health-sweep</span><span class="p p-Indicator">,</span><span class="nt"> suspend</span><span class="p">:</span><span class="w"> </span><span class="nv">false</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<p>To turn sweeps on, edit the kuke team's stored declaration and apply it — on
+the web UI's Teams page (the Health page links it), or from the CLI:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>kuke<span class="w"> </span>get<span class="w"> </span>team<span class="w"> </span>kuke<span class="w"> </span>-o<span class="w"> </span>yaml<span class="w"> </span>&gt;<span class="w"> </span>kuke.yaml
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>kuke<span class="w"> </span>team<span class="w"> </span>init<span class="w"> </span>--reapply
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>kuke<span class="w"> </span>get<span class="w"> </span>config<span class="w"> </span>kuke-majordomo-claude-health-sweep<span class="w"> </span>-o<span class="w"> </span>yaml<span class="w">   </span><span class="c1"># spec.schedule, status.schedule</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># kuke.yaml: the stored kuke Team</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">  </span><span class="nt">roles</span><span class="p">:</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">majordomo</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="w">      </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kukeon</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">team/roles/majordomo</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="w">      </span><span class="nt">initialPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">$HOME</span>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="w">      </span><span class="nt">needs</span><span class="p">:</span>
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="w">        </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">go</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="w">      </span><span class="nt">tasks</span><span class="p">:</span>
+<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">health-sweep</span><span class="p p-Indicator">,</span><span class="nt"> suspend</span><span class="p">:</span><span class="w"> </span><span class="nv">false</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>kuke<span class="w"> </span>team<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>kuke.yaml<span class="w"> </span>--dry-run<span class="w">                        </span><span class="c1"># preview</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>kuke<span class="w"> </span>team<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>kuke.yaml
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>kuke<span class="w"> </span>get<span class="w"> </span>config<span class="w"> </span>kuke-majordomo-claude-health-sweep<span class="w"> </span>-o<span class="w"> </span>yaml<span class="w">   </span><span class="c1"># spec.schedule, status.schedule</span>
 </code></pre></div>
 <p>Change the cadence the same way, with <code>schedule: "*/30 * * * *"</code> in the task
 entry. Run one sweep by hand at any time, suspended or not:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>kuke<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>kuke-majordomo-claude-health-sweep
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>kuke<span class="w"> </span>health<span class="w"> </span>reports
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>kuke<span class="w"> </span>health<span class="w"> </span>report<span class="w"> </span>latest
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>kuke<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>kuke-majordomo-claude-health-sweep
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>kuke<span class="w"> </span>health<span class="w"> </span>reports
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>kuke<span class="w"> </span>health<span class="w"> </span>report<span class="w"> </span>latest
 </code></pre></div>
 <p>The sweep cell deletes itself when it ends. It uses the same state volume as
 the interactive <code>kuke-majordomo-&lt;harness&gt;</code> config, so it runs with the
@@ -4359,29 +4598,30 @@ it on for both the interactive cell and the sweep:</p>
 <ol>
 <li>Create the token as a secret named <code>gh-token</code>:</li>
 </ol>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>kuke<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>gh-token<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--from-file<span class="w"> </span>/path/to/token
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>kuke<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>gh-token<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--from-file<span class="w"> </span>/path/to/token
 </code></pre></div>
 <ol>
-<li>In the kuke entry, give the role that secret, and tell the sweep where to
+<li>In the kuke team's declaration (<code>kuke get team kuke -o yaml &gt; kuke.yaml</code>,
+   or the Teams page), give the role that secret, and tell the sweep where to
    file if it should:</li>
 </ol>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="c1"># ~/.kuke/kuketeam.d/kuke.yaml</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="w">  </span><span class="nt">roles</span><span class="p">:</span>
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">majordomo</span>
-<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="w">      </span><span class="c1"># ...</span>
-<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="w">      </span><span class="nt">needs</span><span class="p">:</span>
-<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="w">        </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">go</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="w">        </span><span class="nt">secrets</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">gh-token</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="c1"># enables the github connector: GH_TOKEN + gh</span>
-<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="w">      </span><span class="nt">tasks</span><span class="p">:</span>
-<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">health-sweep</span>
-<a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a><span class="w">          </span><span class="nt">suspend</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
-<a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a><span class="w">          </span><span class="nt">args</span><span class="p">:</span><span class="w"> </span><span class="s">"--file-issues</span><span class="nv"> </span><span class="s">&lt;owner&gt;/&lt;repo&gt;"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="c1"># kuke.yaml: the stored kuke Team</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="w">  </span><span class="nt">roles</span><span class="p">:</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">majordomo</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="w">      </span><span class="c1"># ...</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="w">      </span><span class="nt">needs</span><span class="p">:</span>
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="w">        </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">go</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a><span class="w">        </span><span class="nt">secrets</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">gh-token</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="c1"># enables the github connector: GH_TOKEN + gh</span>
+<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a><span class="w">      </span><span class="nt">tasks</span><span class="p">:</span>
+<a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">health-sweep</span>
+<a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a><span class="w">          </span><span class="nt">suspend</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+<a id="__codelineno-17-12" name="__codelineno-17-12" href="#__codelineno-17-12"></a><span class="w">          </span><span class="nt">args</span><span class="p">:</span><span class="w"> </span><span class="s">"--file-issues</span><span class="nv"> </span><span class="s">&lt;owner&gt;/&lt;repo&gt;"</span>
 </code></pre></div>
 <ol>
-<li>Run <code>kuke team init --reapply</code>.</li>
+<li>Run <code>kuke team apply -f kuke.yaml</code> (or Apply on the Teams page).</li>
 </ol>
-<p><code>needs.secrets</code> in a team entry adds runtime secrets to a role for that team
+<p><code>needs.secrets</code> in a team's role entry adds runtime secrets to a role for that team
 only; the role itself still requires none. <code>gh-token</code> enables the
 <a href="#connectors"><code>github</code> connector</a>, so the interactive <code>kuke-majordomo-&lt;harness&gt;</code>
 cell and its <code>health-sweep</code> task cell both get the token as <code>GH_TOKEN</code> and an
@@ -4404,10 +4644,10 @@ turn it on.</p>
 <h3 id="connectors">Connectors<a class="headerlink" href="#connectors" title="Permanent link">&para;</a></h3>
 <p>A <a href="../connectors/">connector</a> is a kind of access a cell needs. A role enables
 one by name:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># role.yaml</span>
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="w">  </span><span class="nt">connectors</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">github</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="c1"># GH_TOKEN for the gh CLI, plus the `gh` image capability</span>
-<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="w">  </span><span class="nt">forges</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">github-issues</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="c1"># optional; implies the github connector</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="c1"># role.yaml</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="w">  </span><span class="nt">connectors</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">github</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="c1"># GH_TOKEN for the gh CLI, plus the `gh` image capability</span>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="w">  </span><span class="nt">forges</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">github-issues</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="c1"># optional; implies the github connector</span>
 </code></pre></div>
 <p>The <code>github</code> connector's token is used only for the GitHub API. It is never a
 git credential: clone, push and signing use the git identity below. The older
@@ -4419,20 +4659,20 @@ authenticates the pair's harness (<code>claude</code> or <code>codex</code> — 
 methods per Config, the login by default) and <code>git</code>, for a role with
 <code>needs.repos</code>.</p>
 <p>A team decides <strong>how</strong> each connector is delivered and <strong>which identity</strong> fills
-it under <code>connectors</code>, in its <code>kind: Team</code> file or TeamEntry; a role entry
+it under <code>connectors</code> in its Team declaration; a role entry
 overrides the team for that role and can give the role a connector it does not
 ask for itself:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># kuketeam.yaml (kind: Team) or ~/.kuke/kuketeam.d/&lt;team&gt;.yaml</span>
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w">  </span><span class="nt">connectors</span><span class="p">:</span>
-<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="w">    </span><span class="nt">claude</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> method</span><span class="p">:</span><span class="w"> </span><span class="nv">subscription</span><span class="p p-Indicator">,</span><span class="nt"> identity</span><span class="p">:</span><span class="w"> </span><span class="nv">claude-team</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="w">    </span><span class="nt">github</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> identity</span><span class="p">:</span><span class="w"> </span><span class="nv">work-github</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="w">    </span><span class="nt">git</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> identity</span><span class="p">:</span><span class="w"> </span><span class="nv">bot-key</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="w">  </span><span class="nt">roles</span><span class="p">:</span>
-<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">reviewer</span>
-<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="w">      </span><span class="c1"># ...</span>
-<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="w">      </span><span class="nt">connectors</span><span class="p">:</span>
-<a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a><span class="w">        </span><span class="nt">github</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> identity</span><span class="p">:</span><span class="w"> </span><span class="nv">review-github</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="c1"># kind: Team — a repository's kuketeam.yaml or the stored declaration</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="w">  </span><span class="nt">connectors</span><span class="p">:</span>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="w">    </span><span class="nt">claude</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> method</span><span class="p">:</span><span class="w"> </span><span class="nv">subscription</span><span class="p p-Indicator">,</span><span class="nt"> identity</span><span class="p">:</span><span class="w"> </span><span class="nv">claude-team</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="w">    </span><span class="nt">github</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> identity</span><span class="p">:</span><span class="w"> </span><span class="nv">work-github</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a><span class="w">    </span><span class="nt">git</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> identity</span><span class="p">:</span><span class="w"> </span><span class="nv">bot-key</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a><span class="w">  </span><span class="nt">roles</span><span class="p">:</span>
+<a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">reviewer</span>
+<a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a><span class="w">      </span><span class="c1"># ...</span>
+<a id="__codelineno-19-10" name="__codelineno-19-10" href="#__codelineno-19-10"></a><span class="w">      </span><span class="nt">connectors</span><span class="p">:</span>
+<a id="__codelineno-19-11" name="__codelineno-19-11" href="#__codelineno-19-11"></a><span class="w">        </span><span class="nt">github</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> identity</span><span class="p">:</span><span class="w"> </span><span class="nv">review-github</span><span class="w"> </span><span class="p p-Indicator">}</span>
 </code></pre></div>
 <p><code>identity</code> names a stored Secret, <code>name[@realm[/space[/stack]]]</code>. A connector
 left out — or an entry with no identity — uses the default method and inherits
@@ -4447,7 +4687,7 @@ identity a Realm, Space or Stack default names (<code>spec.defaults.git.identity
 or the one the team names under <a href="#connectors"><code>connectors.git</code></a>. <code>kuke team</code>
 reads no git identity from the host and writes no git defaults. Store yours with
 <a href="../../cli/kuke-connector/#kuke-connector-import-git"><code>kuke connector import git --default</code></a>.</p>
-<p><code>TeamsConfig</code> has no <code>spec.git</code>: a <code>kuketeams.yaml</code> that still has one fails to
+<p><code>TeamDefaults</code> has no <code>spec.git</code>: a document that still has one fails to
 decode and names <code>kuke connector import git --default</code>. A source may state its
 own identity with <code>sources[].git</code> (author, committer, credential, signing); it
 is rendered into that repo's fill of each CellConfig. The remote transport
@@ -4461,7 +4701,7 @@ role's <code>needs.mounts: [ssh]</code> is still accepted but mounts nothing.</p
 <p>A source is the single declaration of its URL and branch/tag/commit. Optional
 <code>sources[].clonePath</code> requests a runtime clone at an absolute in-cell
 destination; omitting it requests no runtime clone. The initial <code>kuke</code>
-TeamEntry clones its role source to <code>/home/user/kukeon-src</code>.</p>
+team clones its role source to <code>/home/user/kukeon-src</code>.</p>
 <p>The selected role's source and every <code>Role.spec.needs.repos</code> slot must resolve
 to an effective source with <code>clonePath</code>. Other effective sources with
 <code>clonePath</code> also request clones. Clone destinations must be unique. The
@@ -4473,7 +4713,7 @@ destinations, URLs and revisions are bound through <code>CellConfig</code> value
 <code>spec.repos</code>. Branches map to <code>branch</code>; tags and
 commits map to <code>ref</code>. The harness launchers preserve this checkout: they do not
 switch branches or pull newer revisions during launch.</p>
-<p><code>TeamsConfig.spec.parameters</code> is a string map of declared scalar parameters.
+<p><code>TeamDefaults.spec.parameters</code> is a string map of declared scalar parameters.
 Each composition binds only keys its blueprint declares. Required parameters
 without defaults must be supplied, and unknown keys fail. The parameters
 composition derives from the role and source selections (<code>IMAGE</code>, <code>ROLE_PATH</code>,
@@ -4482,12 +4722,12 @@ to the full resource identity. Parameters must not hold credentials: use secret
 bindings instead.</p>
 <p>A role declares the further parameters it reads in <code>Role.spec.needs.params</code>.
 Each entry is a bare name, which the operator must supply in
-<code>TeamsConfig.spec.parameters</code>, or a <code>{ name, default }</code> mapping that carries
+<code>TeamDefaults.spec.parameters</code>, or a <code>{ name, default }</code> mapping that carries
 the role's own value:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="nt">needs</span><span class="p">:</span>
-<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="w">  </span><span class="nt">params</span><span class="p">:</span>
-<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REGION</span>
-<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">AGENTS_REPO</span><span class="p p-Indicator">,</span><span class="nt"> default</span><span class="p">:</span><span class="w"> </span><span class="s">"${ROLE_SOURCE_REPO}"</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="nt">needs</span><span class="p">:</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="w">  </span><span class="nt">params</span><span class="p">:</span>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REGION</span>
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">AGENTS_REPO</span><span class="p p-Indicator">,</span><span class="nt"> default</span><span class="p">:</span><span class="w"> </span><span class="s">"${ROLE_SOURCE_REPO}"</span><span class="w"> </span><span class="p p-Indicator">}</span>
 </code></pre></div>
 <p>A default may reference any composed fact as <code>${FACT}</code>. Besides the values
 composition derives (<code>ROLE_PATH</code>, <code>ROLE_SOURCE_DIR</code>, …) there is
@@ -4498,7 +4738,7 @@ a trailing <code>.git</code>. A fork's roles therefore point at the fork without
 <code>spec.parameters</code> cannot set it.</p>
 <p>The resolved value is written to the <code>CellConfig</code> and exported into the cell
 environment under the parameter's name. Precedence, highest first:
-<code>TeamsConfig.spec.parameters.&lt;NAME&gt;</code>, then the role's default, then the
+<code>TeamDefaults.spec.parameters.&lt;NAME&gt;</code>, then the role's default, then the
 blueprint's empty default. A role cannot set a default for a parameter the
 blueprint or composition already declares (<code>PROMPT</code>, <code>AGENT_NAME</code>, <code>IMAGE</code>, …).
 When a URL does not reduce to <code>&lt;owner&gt;/&lt;repo&gt;</code> (a nested group path, a local
@@ -4522,9 +4762,9 @@ requires <code>openrouter-api-key</code>.</p>
 <p>Each required secret is bound by name, in this order of precedence:</p>
 <ol>
 <li>the identity the team chose for the secret's connector (<code>connectors</code>, above);</li>
-<li>the binding recorded in the team's TeamEntry (<code>~/.kuke/kuketeam.d/&lt;team&gt;.yaml</code>
-   <code>secrets:</code>), including any operator edit to it;</li>
-<li>a global <code>TeamsConfig.spec.secrets</code> binding;</li>
+<li>the binding recorded in the team's stored declaration (<code>spec.secrets</code>),
+   including any operator edit to it;</li>
+<li>a <code>TeamDefaults.spec.secrets</code> binding;</li>
 <li>the default: the slot is left to the Realm → Space → Stack defaults.</li>
 </ol>
 <p>A binding from 1–3 is written as a fill on the Config. The default is not: the
@@ -4540,27 +4780,29 @@ sets later is the one every such Config uses.</p>
 <code>envName</code> differs is rejected.
 A role secret no harness or component declares becomes an optional slot on the
 shared blueprint, with the binding's <code>envName</code>.</p>
-<p>Composition records every binding the selected pairs use in the TeamEntry, so a
-repeated add or a recomposition from the entry alone keeps them. Bindings for
+<p>Composition records every binding the selected pairs use in the stored Team's
+<code>spec.secrets</code>, so a recomposition (<code>kuke team apply NAME</code>) keeps them, and so
+do <code>kuke team add --force</code> and <code>kuke team apply -f FILE</code> — the file's own
+<code>spec.secrets</code> come first, the stored ones beneath them. Bindings for
 requirements no selected pair uses are dropped. Because the recorded binding
-wins, change a binding after its first add by editing the TeamEntry (or delete
-it there to fall back to the global binding or default). A requirement whose
-name cannot yield an environment identifier (e.g. it starts with a digit) must
-be bound explicitly. The project's <code>kind: Team</code> file never declares bindings.</p>
-<p>An explicit global binding looks like this:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="c1"># Optional, under TeamsConfig.spec (or the same shape under TeamEntry secrets).</span>
-<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="nt">secrets</span><span class="p">:</span>
-<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">openrouter-api-key</span><span class="w"> </span><span class="c1"># identifier in Role.spec.harnesses.opencode.secrets</span>
-<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="w">    </span><span class="nt">secretRef</span><span class="p">:</span>
-<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">provider-account</span>
-<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="w">      </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auth</span>
-<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="w">      </span><span class="nt">space</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">shared</span>
-<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a><span class="w">      </span><span class="nt">stack</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">operators</span>
-<a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a><span class="w">    </span><span class="nt">envName</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OPENROUTER_API_KEY</span>
-<a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a><span class="w">    </span><span class="c1"># Optional fallback if application finds no runtime secret:</span>
-<a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a><span class="w">    </span><span class="nt">source</span><span class="p">:</span>
-<a id="__codelineno-18-12" name="__codelineno-18-12" href="#__codelineno-18-12"></a><span class="w">      </span><span class="nt">env</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OPERATOR_OPENROUTER_KEY</span>
-<a id="__codelineno-18-13" name="__codelineno-18-13" href="#__codelineno-18-13"></a><span class="w">      </span><span class="c1"># Alternatively: file: /absolute/path/to/private/provider-key</span>
+wins, change a binding after the first apply by editing the stored declaration
+(or delete it there to fall back to the TeamDefaults binding or default). A
+requirement whose name cannot yield an environment identifier (e.g. it starts
+with a digit) must be bound explicitly.</p>
+<p>An explicit binding looks like this:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="c1"># Optional, under TeamDefaults.spec (or the same shape under Team spec.secrets).</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="nt">secrets</span><span class="p">:</span>
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">openrouter-api-key</span><span class="w"> </span><span class="c1"># identifier in Role.spec.harnesses.opencode.secrets</span>
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="w">    </span><span class="nt">secretRef</span><span class="p">:</span>
+<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">provider-account</span>
+<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a><span class="w">      </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auth</span>
+<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a><span class="w">      </span><span class="nt">space</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">shared</span>
+<a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a><span class="w">      </span><span class="nt">stack</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">operators</span>
+<a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a><span class="w">    </span><span class="nt">envName</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OPENROUTER_API_KEY</span>
+<a id="__codelineno-21-10" name="__codelineno-21-10" href="#__codelineno-21-10"></a><span class="w">    </span><span class="c1"># Optional fallback if application finds no runtime secret:</span>
+<a id="__codelineno-21-11" name="__codelineno-21-11" href="#__codelineno-21-11"></a><span class="w">    </span><span class="nt">source</span><span class="p">:</span>
+<a id="__codelineno-21-12" name="__codelineno-21-12" href="#__codelineno-21-12"></a><span class="w">      </span><span class="nt">env</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OPERATOR_OPENROUTER_KEY</span>
+<a id="__codelineno-21-13" name="__codelineno-21-13" href="#__codelineno-21-13"></a><span class="w">      </span><span class="c1"># Alternatively: file: /absolute/path/to/private/provider-key</span>
 </code></pre></div>
 <p><code>name</code>, the scoped <code>secretRef</code>, and <code>envName</code> are required. <code>source</code> is
 optional; when present it names exactly one environment <strong>variable</strong> or
@@ -4568,7 +4810,8 @@ absolute file <strong>path</strong> — there is no inline value field. Composit
 secret <strong>references</strong> in configs and consumption slots in blueprints; it never
 reads values or emits <code>Secret</code> documents. Application checks runtime existence,
 reuses existing secrets, and reads a creation source only when a secret is
-missing.</p>
+missing — in the process that applies: the CLI, or <code>kuke serve</code> and its
+account for the web UI. A dry run reads none.</p>
 <h2 id="resource-names-and-state-volumes">Resource names and state volumes<a class="headerlink" href="#resource-names-and-state-volumes" title="Permanent link">&para;</a></h2>
 <p>Pairs follow role order, then harness order. Each pair's config
 is named <code>&lt;team&gt;-&lt;role&gt;-&lt;harness&gt;</code>, with dots and punctuation runs collapsed
@@ -4629,7 +4872,7 @@ when the team is applied or a cell is launched.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 22, 2026 17:10:47 UTC">November 22, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 23, 2026 11:25:24 UTC">November 23, 2026</span>
   </span>
 
     

@@ -2613,6 +2613,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../cli/kuke-team/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke team
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../cli/kuke-team-init/" class="md-nav__link">
         
   
@@ -4068,10 +4096,10 @@
 </code></pre></div>
 <p>The web UI shows the same block in the preview of <em>New cell</em> and <em>New config</em>. Secret material is never part of it — only names, types and origins.</p>
 <h2 id="upgrading">Upgrading<a class="headerlink" href="#upgrading" title="Permanent link">&para;</a></h2>
-<p>Blueprints carry the connector definitions of the <code>kuke</code> build that applied the team. After installing a <code>kuke</code> that accepts author-only identities, run <code>kuke team init --reapply</code> (or <code>--force</code>) before an existing team's cells accept one.</p>
+<p>Blueprints carry the connector definitions of the <code>kuke</code> build that applied the team. After installing a <code>kuke</code> that accepts author-only identities, run <code>kuke team init --reapply</code> for the kuke team and <code>kuke team apply NAME</code> for each other team before an existing team's cells accept one.</p>
 <p>Nothing older is converted:</p>
 <ul>
-<li><code>spec.git</code> in <code>~/.kuke/kuketeams.yaml</code> was removed; a file that still has it fails to decode. Delete the block and run <code>kuke connector import git --default</code>.</li>
+<li><code>spec.git</code> was removed from the team defaults; a <code>TeamDefaults</code> document that still has it fails to decode. Delete the block and run <code>kuke connector import git --default</code>.</li>
 <li>The <code>spec.defaults.git</code> block an older <code>kuke team init</code> wrote on the team's stack stays, and still merges as a Stack level over the Realm default. Remove it from the Stack if the Realm default should win.</li>
 <li>A <code>git-ssh</code> Secret from an older import is not tagged or changed. <code>kuke connector import git</code> with the default name overwrites it with a new identity.</li>
 </ul>
@@ -4165,7 +4193,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 22, 2026 11:30:41 UTC">November 22, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 23, 2026 11:25:24 UTC">November 23, 2026</span>
   </span>
 
     

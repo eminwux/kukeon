@@ -2039,6 +2039,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#teams" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Teams
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#label-selector-l-selector" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2498,6 +2509,34 @@
     
   
     kuke daemon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-team/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke team
   
 
     
@@ -3606,6 +3645,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#teams" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Teams
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#label-selector-l-selector" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3674,7 +3724,7 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke get &lt;resource&gt; [NAME] [flags]
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>kuke g   &lt;resource&gt; [NAME] [flags]      # alias
 </code></pre></div>
-<p>Resources: <code>realm</code>, <code>space</code>, <code>stack</code>, <code>cell</code>, <code>container</code>, <code>image</code>, <code>blueprint</code>, <code>config</code>, <code>healthreport</code>. Each subcommand also accepts its plural (<code>realms</code>, <code>spaces</code>, …, <code>images</code>, <code>blueprints</code>, <code>configs</code>, <code>healthreports</code>) and a short alias (<code>r</code>, <code>sp</code>, <code>st</code>, <code>ce</code>, <code>co</code>, <code>img</code>, <code>bp</code>, <code>cfg</code>, <code>hr</code>).</p>
+<p>Resources: <code>realm</code>, <code>space</code>, <code>stack</code>, <code>cell</code>, <code>container</code>, <code>image</code>, <code>blueprint</code>, <code>config</code>, <code>healthreport</code>, <code>team</code>, <code>teamdefaults</code>. Each subcommand also accepts its plural (<code>realms</code>, <code>spaces</code>, …, <code>images</code>, <code>blueprints</code>, <code>configs</code>, <code>healthreports</code>, <code>teams</code>) and a short alias (<code>r</code>, <code>sp</code>, <code>st</code>, <code>ce</code>, <code>co</code>, <code>img</code>, <code>bp</code>, <code>cfg</code>, <code>hr</code>); <code>teamdefaults</code> is also spelled <code>team-defaults</code>.</p>
 <h2 id="common-flags">Common flags<a class="headerlink" href="#common-flags" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -3740,6 +3790,14 @@
 <tr>
 <td><code>get healthreport [name\|latest]</code></td>
 <td>none (a HealthReport always lives in <code>kuke-system</code>)</td>
+</tr>
+<tr>
+<td><code>get team [name]</code></td>
+<td><code>--realm</code> (omit to list every realm; defaults to <code>default</code> for a named team)</td>
+</tr>
+<tr>
+<td><code>get teamdefaults</code></td>
+<td><code>--realm</code> (default <code>default</code>)</td>
 </tr>
 </tbody>
 </table>
@@ -3876,16 +3934,48 @@
 <a id="__codelineno-1-54" name="__codelineno-1-54" href="#__codelineno-1-54"></a>kuke<span class="w"> </span>get<span class="w"> </span>healthreports
 <a id="__codelineno-1-55" name="__codelineno-1-55" href="#__codelineno-1-55"></a>kuke<span class="w"> </span>get<span class="w"> </span>healthreport<span class="w"> </span>latest<span class="w"> </span>-o<span class="w"> </span>yaml
 </code></pre></div>
+<h2 id="teams">Teams<a class="headerlink" href="#teams" title="Permanent link">&para;</a></h2>
+<p><code>kuke get teams</code> prints each stored <a href="../../concepts/team/">team</a> with its realm, project URL and ref, roles and number of Configs. A team whose declaration omits <code>roles</code> shows <code>(defaults)</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>kuke<span class="w"> </span>get<span class="w"> </span>teams
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>NAME<span class="w">    </span>REALM<span class="w">    </span>PROJECT<span class="w">                            </span>REF<span class="w">   </span>ROLES<span class="w">                 </span>CONFIGS
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>kuke<span class="w">    </span>default<span class="w">  </span>-<span class="w">                                  </span>-<span class="w">     </span>majordomo<span class="w">             </span><span class="m">4</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>web<span class="w">     </span>default<span class="w">  </span>git@github.com:acme/web.git<span class="w">        </span>main<span class="w">  </span><span class="o">(</span>defaults<span class="o">)</span><span class="w">            </span><span class="m">3</span>
+</code></pre></div>
+<p><code>kuke get team NAME</code> prints its roles, harnesses and Configs; <code>-o yaml</code> prints the stored Team document exactly as kukeond keeps it — the file to edit and pass to <a href="../kuke-team/#kuke-team-apply"><code>kuke team apply -f</code></a>; <code>-o json</code> prints the summary. <code>kuke get teams -o yaml</code> prints every stored document.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>kuke<span class="w"> </span>get<span class="w"> </span>team<span class="w"> </span>web
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>Team:<span class="w">      </span>web
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>Realm:<span class="w">     </span>default
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>Project:<span class="w">   </span>git@github.com:acme/web.git<span class="w"> </span><span class="o">(</span>main<span class="o">)</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>Roles:<span class="w">     </span><span class="o">(</span>defaults<span class="o">)</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>Harnesses:<span class="w"> </span><span class="o">(</span>defaults<span class="o">)</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>Configs:
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">  </span>web-dev-claude
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">  </span>web-dev-codex
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">  </span>web-dev-claude-pick-issue
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>kuke<span class="w"> </span>get<span class="w"> </span>team<span class="w"> </span>kuke<span class="w"> </span>-o<span class="w"> </span>yaml<span class="w"> </span>&gt;<span class="w"> </span>kuke.yaml
+</code></pre></div>
+<p><code>kuke get teamdefaults</code> prints the realm's registered sources and its default roles and harnesses; <code>-o yaml</code> prints the stored <code>TeamDefaults</code> document, which also carries connectors, parameters and secret bindings. A realm with none says so and names <code>kuke team init</code>, which creates it.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>kuke<span class="w"> </span>get<span class="w"> </span>teamdefaults
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>TeamDefaults<span class="w"> </span>of<span class="w"> </span>realm<span class="w"> </span>default
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>SOURCE<span class="w">  </span>URL<span class="w">                            </span>REF<span class="w">          </span>CLONE<span class="w"> </span>PATH
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>kukeon<span class="w">  </span>github.com/eminwux/kukeon<span class="w">      </span>branch<span class="w"> </span>main<span class="w">  </span>-
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>agents<span class="w">  </span>git@github.com:eminwux/agents<span class="w">  </span>branch<span class="w"> </span>main<span class="w">  </span>/home/user/agents
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>Default<span class="w"> </span>roles:<span class="w">     </span><span class="nv">dev</span><span class="o">=</span>agents:dev
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>Default<span class="w"> </span>harnesses:<span class="w"> </span><span class="nv">codex</span><span class="o">=</span>kukeon:team/harnesses/codex,<span class="w"> </span><span class="nv">claude</span><span class="o">=</span>kukeon:team/harnesses/claude
+</code></pre></div>
 <h2 id="label-selector-l-selector">Label selector (<code>-l</code>/<code>--selector</code>)<a class="headerlink" href="#label-selector-l-selector" title="Permanent link">&para;</a></h2>
 <p>Filter list results by label query. The flag is wired on every <code>kuke get &lt;kind&gt;</code> verb (realm, space, stack, cell, container).</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Cells labeled env=prod</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>cell<span class="w"> </span>-l<span class="w"> </span><span class="nv">env</span><span class="o">=</span>prod
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># Cells with the `debug` label absent</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>cell<span class="w"> </span>-l<span class="w"> </span><span class="s1">'!debug'</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="c1"># Comma-separated AND</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>cell<span class="w"> </span>-l<span class="w"> </span><span class="s1">'env=prod,tier!=db'</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># Cells labeled env=prod</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>cell<span class="w"> </span>-l<span class="w"> </span><span class="nv">env</span><span class="o">=</span>prod
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># Cells with the `debug` label absent</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>cell<span class="w"> </span>-l<span class="w"> </span><span class="s1">'!debug'</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="c1"># Comma-separated AND</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>cell<span class="w"> </span>-l<span class="w"> </span><span class="s1">'env=prod,tier!=db'</span>
 </code></pre></div>
 <p>A positional <code>NAME</code> plus <code>-l</code> is rejected — a selector queries the list path, a name queries the single-resource path; mixing them is ambiguous. Malformed selectors fail before any controller call.</p>
 <h2 id="get-vs-refresh"><code>get</code> vs <code>refresh</code><a class="headerlink" href="#get-vs-refresh" title="Permanent link">&para;</a></h2>
@@ -3924,7 +4014,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 23, 2026 00:27:24 UTC">November 23, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 23, 2026 11:25:24 UTC">November 23, 2026</span>
   </span>
 
     
