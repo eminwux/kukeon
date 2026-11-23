@@ -3,12 +3,12 @@ RELEASE_DIR := release
 # kukebuild lives in its own Go module (cmd/kukebuild/go.mod, issue #655) whose
 # BuildKit closure is deliberately kept apart from the root module's dependency
 # graph (the two have clashed before, e.g. the monolithic vs. split
-# google.golang.org/genproto). The repo-root go.work wires both modules for editor / gopls
-# navigation, but a workspace-union build re-couples those graphs and fails with
-# an ambiguous import — the exact coupling this split removes. So every build /
-# test here runs per-module (GOWORK=off), matching the single-module resolution
-# CI and the Docker builder (no go.work) use. Exported so it reaches every
-# recipe and the $(shell) below.
+# google.golang.org/genproto). The repo-root go.work wires both modules for
+# editor / gopls navigation, but a workspace-union build re-couples those graphs
+# and fails with an ambiguous import — the exact coupling this split removes. So
+# every build / test here runs per-module (GOWORK=off), matching the
+# single-module resolution CI and the Docker builder (no go.work) use. Exported
+# so it reaches every recipe and the $(shell) below.
 export GOWORK := off
 
 # ----- Version sourcing -----
