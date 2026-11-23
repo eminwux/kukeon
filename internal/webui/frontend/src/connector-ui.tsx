@@ -142,6 +142,26 @@ function IdentityFieldInput({ field, value, onChange, disabled, secrets, listId 
   return <label className="schema-field">{label}<input value={value} placeholder={field.type === fieldPerson ? "Name <email>" : field.type === fieldList ? "Comma-separated" : undefined} disabled={disabled} autoComplete="off" spellCheck={false} onChange={event => onChange(event.target.value)} />{help}</label>;
 }
 
+// SecretMaterialFields are the write-only inputs of one Secret type, shared by
+// the identity form and the New Secret / Replace value form. An author-only
+// identity takes none.
+export function SecretMaterialFields({ type, form, set, pending, authorOnly = false }: { type: string; form: IdentityFormState; set: (next: Partial<IdentityFormState>) => void; pending: boolean; authorOnly?: boolean }) {
+  const secretInput = { autoComplete: "new-password", spellCheck: false, disabled: pending } as const;
+  return <div className="schema-fields">
+    {type === secretBasicAuth ? <>
+      <label className="schema-field"><span>Username<b aria-label="required"> *</b></span><input value={form.username} autoComplete="off" spellCheck={false} disabled={pending} onChange={event => set({ username: event.target.value })} /></label>
+      <label className="schema-field"><span>Password or token<b aria-label="required"> *</b></span><input type="password" value={form.password} {...secretInput} onChange={event => set({ password: event.target.value })} /></label>
+    </> : type === secretSSHKey ? <>
+      <label className="schema-field identity-key"><span>Private key<b aria-label="required"> *</b></span><textarea value={form.privateKey} placeholder="Paste the private key, armor lines included" {...secretInput} onChange={event => set({ privateKey: event.target.value })} /></label>
+      <label className="schema-field"><span>Passphrase</span><input type="password" value={form.passphrase} {...secretInput} onChange={event => set({ passphrase: event.target.value })} /></label>
+      <label className="schema-field"><span>Public key</span><input value={form.publicKey} placeholder="ssh-ed25519 AAAA…" autoComplete="off" spellCheck={false} disabled={pending} onChange={event => set({ publicKey: event.target.value })} /></label>
+      <label className="schema-field"><span>Certificate</span><input value={form.certificate} autoComplete="off" spellCheck={false} disabled={pending} onChange={event => set({ certificate: event.target.value })} /></label>
+      <label className="schema-field identity-key"><span>Known hosts</span><textarea value={form.knownHosts} placeholder="example.com ssh-ed25519 AAAA…" autoComplete="off" spellCheck={false} disabled={pending} onChange={event => set({ knownHosts: event.target.value })} /></label>
+    </> : authorOnly ? <p className="description identity-no-value">An author-only identity: it stores no value, and gives cells the author and committer only — no credential and no signing.</p>
+      : <label className="schema-field"><span>Value<b aria-label="required"> *</b></span><input type="password" value={form.value} {...secretInput} onChange={event => set({ value: event.target.value })} /></label>}
+  </div>;
+}
+
 // IdentityForm creates an identity of a connector — a tagged Secret — or, for
 // an existing one, rotates it: same name and scope, new value. The form is
 // generated from the connector's secretTypes and fields. Material is
@@ -164,7 +184,6 @@ export function IdentityForm({ connector, scope, existing, secrets, onSaved, onC
   const title = connector.title || connector.name;
   const target = scopeParts(scope).join(" / ");
   const set = (next: Partial<IdentityFormState>) => { setForm(old => ({ ...old, ...next })); setError(undefined); };
-  const secretInput = { autoComplete: "new-password", spellCheck: false, disabled: pending } as const;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -193,19 +212,7 @@ export function IdentityForm({ connector, scope, existing, secrets, onSaved, onC
       {types.length > 1 && <label className="schema-field"><span>Secret type</span><select value={form.type} disabled={pending} onChange={event => set({ type: event.target.value })}>{types.map(type => <option key={type}>{type}</option>)}</select></label>}
       {identityFields(connector, form.type).map(field => <IdentityFieldInput key={field.name} field={field} value={form.fields[field.name] ?? ""} disabled={pending} secrets={secrets} listId={`${listId}-${field.name}`} onChange={value => set({ fields: { ...form.fields, [field.name]: value } })} />)}
     </div>
-    <div className="schema-fields">
-      {form.type === secretBasicAuth ? <>
-        <label className="schema-field"><span>Username<b aria-label="required"> *</b></span><input value={form.username} autoComplete="off" spellCheck={false} disabled={pending} onChange={event => set({ username: event.target.value })} /></label>
-        <label className="schema-field"><span>Password or token<b aria-label="required"> *</b></span><input type="password" value={form.password} {...secretInput} onChange={event => set({ password: event.target.value })} /></label>
-      </> : form.type === secretSSHKey ? <>
-        <label className="schema-field identity-key"><span>Private key<b aria-label="required"> *</b></span><textarea value={form.privateKey} placeholder="Paste the private key, armor lines included" {...secretInput} onChange={event => set({ privateKey: event.target.value })} /></label>
-        <label className="schema-field"><span>Passphrase</span><input type="password" value={form.passphrase} {...secretInput} onChange={event => set({ passphrase: event.target.value })} /></label>
-        <label className="schema-field"><span>Public key</span><input value={form.publicKey} placeholder="ssh-ed25519 AAAA…" autoComplete="off" spellCheck={false} disabled={pending} onChange={event => set({ publicKey: event.target.value })} /></label>
-        <label className="schema-field"><span>Certificate</span><input value={form.certificate} autoComplete="off" spellCheck={false} disabled={pending} onChange={event => set({ certificate: event.target.value })} /></label>
-        <label className="schema-field identity-key"><span>Known hosts</span><textarea value={form.knownHosts} placeholder="example.com ssh-ed25519 AAAA…" autoComplete="off" spellCheck={false} disabled={pending} onChange={event => set({ knownHosts: event.target.value })} /></label>
-      </> : storesNoValue(connector, form.type) ? <p className="description identity-no-value">An author-only identity: it stores no value, and gives cells the author and committer only — no credential and no signing.</p>
-        : <label className="schema-field"><span>Value<b aria-label="required"> *</b></span><input type="password" value={form.value} {...secretInput} onChange={event => set({ value: event.target.value })} /></label>}
-    </div>
+    <SecretMaterialFields type={form.type} form={form} set={set} pending={pending} authorOnly={storesNoValue(connector, form.type)} />
     <div className="connector-actions">
       <button type="submit" disabled={pending}>{pending ? "Saving…" : existing ? "Rotate identity" : "Create identity"}</button>
       {onCancel && <button type="button" className="subtle-button" disabled={pending} onClick={onCancel}>Cancel</button>}

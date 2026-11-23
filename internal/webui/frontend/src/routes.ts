@@ -1,7 +1,7 @@
 export const kinds = ["realm", "space", "stack", "cell", "container"];
 export const titles = ["Realms", "Spaces", "Stacks", "Cells"];
 export const catalogTitles: Record<string, string> = { blueprints: "Blueprints", configs: "Configs", volumes: "Volumes", secrets: "Secrets" };
-export type Route = { view: string; scope: string[]; parent: string[]; document: boolean; config?: string[]; blueprint?: string[]; target?: string[] };
+export type Route = { view: string; scope: string[]; parent: string[]; document: boolean; config?: string[]; blueprint?: string[]; target?: string[]; edit?: boolean; action?: string; identity?: string[] };
 
 const HOME = (): Route => ({ view: "dashboard", scope: [], parent: [], document: false });
 export const homeLink = "#/resources";
@@ -25,6 +25,8 @@ export function readRoute(): Route {
       try { blueprint = JSON.parse(params.get("blueprint") ?? "null"); } catch { blueprint = null; }
       return { view: "new-config", scope: [], parent: [], document: false, blueprint: Array.isArray(blueprint) && blueprint.every(value => typeof value === "string") ? blueprint.slice(0, 4) : undefined };
     }
+    // #/new-secret opens the New Secret page.
+    if (parts[0] === "new-secret") return { view: "new-secret", scope: [], parent: [], document: false };
     // #/connectors lists the connector catalog; #/connectors/<name>?scope=[realm, space, stack] opens one
     // connector with its scope pickers on that scope.
     if (parts[0] === "connectors") {
@@ -42,7 +44,8 @@ export function readRoute(): Route {
     if (path === "/resources" || path === "/administration" || path === "/dashboard") return { view: "dashboard", scope: [], parent: [], document: false };
     // #/images/<realm>/<image reference>; the reference is one encoded segment.
     if (parts[0] === "images") return { view: "images", scope: parts.slice(1, 3), parent: [], document: false };
-    if (Object.keys(catalogTitles).includes(parts[0])) return { view: parts[0], scope: parts.slice(1, 6), parent: [], document: params.has("document") };
+    // #/secrets/<scope…>/<name>?edit=1 opens a Secret with its Replace value form.
+    if (Object.keys(catalogTitles).includes(parts[0])) return { view: parts[0], scope: parts.slice(1, 6), parent: [], document: params.has("document"), edit: params.has("edit") };
     if (parts[0] === "resource") return { view: "resource", scope: parts.slice(1, 6), parent: [], document: params.has("document") };
     if (titles.some(title => title.toLowerCase() === parts[0])) {
       const parent: unknown = JSON.parse(params.get("parent") ?? "[]");
@@ -62,6 +65,13 @@ export function newCellLink(config?: string[]): string {
 }
 export function newConfigLink(blueprint?: string[]): string {
   return "#/new-config" + (blueprint?.length ? `?blueprint=${encodeURIComponent(JSON.stringify(blueprint))}` : "");
+}
+export function newSecretLink(): string {
+  return "#/new-secret";
+}
+// catalogPageLink opens a catalog document's page; edit opens a Secret's Replace value form.
+export function catalogPageLink(kind: string, scope: string[], options: { document?: boolean; edit?: boolean } = {}): string {
+  return `#/${kind}/` + scope.map(encodeURIComponent).join("/") + (options.document ? "?document=1" : options.edit ? "?edit=1" : "");
 }
 export function healthLink(): string {
   return "#/health";

@@ -97,3 +97,8 @@ export function identityErrors(connector: { fields?: ConnectorField[]; secretTyp
 export function identityPayload(connector: { fields?: ConnectorField[]; secretTypes?: string[]; methods?: unknown[]; delivery?: string } | undefined, scope: Partial<Scope>, form: IdentityForm): Record<string, unknown>;
 export function clearMaterial(form: IdentityForm): IdentityForm;
 export function registryEntries(realm: unknown): RegistryEntry[];
+export const secretTypes: string[];
+export function secretTypeOf(doc: { spec?: { type?: string } } | undefined): string;
+export function emptySecretForm(existing?: { metadata?: { name?: string }; spec?: { type?: string } }): IdentityForm;
+export function secretErrors(form: IdentityForm, replace?: boolean): string[];
+export function secretPayload(form: IdentityForm, replace?: boolean): Record<string, string | boolean>;

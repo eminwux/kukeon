@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   allowedLevels, blockingConnectors, blocksCells, changedMethods, changedPicks, clearMaterial, connectorLevels, defaultGroupChoices, defaultRow, defaultTargets, emptyIdentityForm, formatSecretReference,
   groupComponents, identitiesFor, identityErrors, identityFields, identityPayload, importPayload, importsFromHost, isRegistry, loginMethods, methodChoices, methodStatuses, originLabel, refKey, refLabel,
-  registryEntries, sameRef, scopeAt, scopeFromParts, scopeLevel, scopeQuery, secretRef, storesNoValue, takesIdentity, targetScope, teamOf, unresolvedConnectors, usageFor,
+  emptySecretForm, registryEntries, sameRef, scopeAt, scopeFromParts, scopeLevel, scopeQuery, secretErrors, secretPayload, secretRef, secretTypeOf, storesNoValue, takesIdentity, targetScope, teamOf, unresolvedConnectors, usageFor,
 } from "./connectors.mjs";
 import { blueprintForm, buildSpec, componentsWithoutIdentity, connectorsWithoutIdentity, emptyAnswers, formSections, groupChoice, missingAnswers } from "./config-form.mjs";
 
@@ -364,4 +364,29 @@ test("a git-delivered connector's opaque identity is author-only and importable"
   assert.deepEqual(importPayload({ realm: " dev ", hosts: "github.com, gitlab.com/group", name: "", key: " .ssh/id_work ", passphraseFile: "", makeDefault: true }),
     { realm: "dev", makeDefault: true, hosts: ["github.com", "gitlab.com/group"], key: ".ssh/id_work" });
   assert.deepEqual(importPayload({}), { realm: "default", makeDefault: false });
+});
+
+// #1630: New Secret and Replace value write untagged Secrets of the three types.
+test("the secret form validates and builds untagged Secret writes", () => {
+  assert.equal(secretTypeOf({ spec: { type: "" } }), "opaque", "an opaque Secret reads back with an empty type");
+  assert.equal(secretTypeOf({ spec: { type: "ssh-key" } }), "ssh-key");
+  assert.equal(secretTypeOf(undefined), "opaque");
+  const blank = emptySecretForm();
+  assert.equal(blank.name, ""); assert.equal(blank.type, "opaque");
+  const replaceForm = emptySecretForm({ metadata: { name: "login" }, spec: { type: "basic-auth" } });
+  assert.equal(replaceForm.name, "login"); assert.equal(replaceForm.type, "basic-auth"); assert.equal(replaceForm.password, "");
+
+  assert.deepEqual(secretErrors(blank), ["Name is required.", "Value is required."]);
+  assert.deepEqual(secretErrors({ ...blank, name: ".types", value: "x" }), ["A name cannot start with a dot."]);
+  assert.deepEqual(secretErrors({ ...blank, name: "t", type: "tls", value: "v" }), ["Type must be one of: opaque, basic-auth, ssh-key."]);
+  assert.deepEqual(secretErrors({ ...blank, name: "t", value: "   " }), ["Value is required."]);
+  assert.deepEqual(secretErrors({ ...replaceForm, username: "bot" }, true), ["Password or token is required."], "replace asks for no name");
+  assert.deepEqual(secretErrors({ ...blank, name: "k", type: "ssh-key" }), ["Private key is required."]);
+
+  assert.deepEqual(secretPayload({ ...blank, name: "t", value: "v\n" }), { type: "opaque", value: "v\n" }, "the name and scope travel in the URL");
+  assert.deepEqual(secretPayload({ ...replaceForm, username: " bot ", password: "p w" }, true), { type: "basic-auth", replace: true, username: "bot", password: "p w" });
+  assert.deepEqual(secretPayload({ ...blank, type: "ssh-key", privateKey: "KEY", knownHosts: "h k" }), { type: "ssh-key", privateKey: "KEY", knownHosts: "h k" });
+  for (const body of [secretPayload({ ...blank, value: "v" }), secretPayload({ ...replaceForm, username: "u", password: "p" }, true)]) {
+    assert.equal("connector" in body, false); assert.equal("identity" in body, false); assert.equal("name" in body, false);
+  }
 });

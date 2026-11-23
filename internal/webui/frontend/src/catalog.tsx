@@ -1,8 +1,8 @@
 import { useRef, useState } from "react";
 import { teamsLink } from "./teams.mjs";
-import { teamOf } from "./connectors.mjs";
+import { secretTypeOf, teamOf } from "./connectors.mjs";
 import { ErrorNotice, useResource } from "./request";
-import { catalogTitles, newCellLink, newConfigLink, workspaceLink } from "./routes";
+import { catalogPageLink, catalogTitles, newCellLink, newConfigLink, newSecretLink, workspaceLink } from "./routes";
 import { ScopePath, StateBadge } from "./status";
 import type { InventoryResource, Row } from "./inventory";
 import { cellsForBlueprint, cellsForConfig, configsForBlueprint, type ConfigDoc } from "./relationships.mjs";
@@ -11,7 +11,8 @@ import { catalogAPI, catalogDeleteAPI } from "./catalog-url.mjs";
 import { useNotify } from "./notifications";
 import { useModalDialog } from "./focus";
 import { AskMajordomo, catalogQuestion } from "./majordomo";
-import { ConfigConnectors, NeedsConnectorBadge } from "./connector-ui";
+import { ConfigConnectors, NeedsConnectorBadge, connectorsLink } from "./connector-ui";
+import { SecretForm } from "./secret-form";
 
 type Metadata = { name: string; realm?: string; space?: string; stack?: string; cell?: string; labels?: Record<string, string>; annotations?: Record<string, string> };
 type CatalogDoc = { metadata: Metadata; spec?: Record<string, unknown>; [key: string]: unknown };
@@ -215,14 +216,28 @@ function CatalogList({ kind, revision, inventory, onChanged }: { kind: string; r
     {kind === "secrets" && <p className="description">Metadata only. Secret values are never returned by this browser.</p>}
     {failure && <div className="error" role="alert"><strong>Delete failed: {failure.target}</strong><p>{failure.message}</p></div>}
     <section className="panel" aria-label={`${catalogTitles[kind]} list`} aria-busy={list.loading}>
-      <div className="list-controls"><label className="search-field">Search<input type="search" value={query} placeholder={`Search ${kind}…`} onChange={e => { setQuery(e.target.value); setPage(0); }} /></label><label>Realm<select aria-label="Filter by realm" value={realm} onChange={e => { setRealm(e.target.value); setPage(0); }}><option value="">All realms</option>{[...new Set(list.data?.map(doc => doc.metadata.realm))].sort().map(name => <option key={name}>{name}</option>)}</select></label><span className="result-count">{rows.length} results</span>{(kind === "blueprints" || kind === "configs") && <a className="document-action" href={newConfigLink()}>New Config</a>}</div>
+      <div className="list-controls"><label className="search-field">Search<input type="search" value={query} placeholder={`Search ${kind}…`} onChange={e => { setQuery(e.target.value); setPage(0); }} /></label><label>Realm<select aria-label="Filter by realm" value={realm} onChange={e => { setRealm(e.target.value); setPage(0); }}><option value="">All realms</option>{[...new Set(list.data?.map(doc => doc.metadata.realm))].sort().map(name => <option key={name}>{name}</option>)}</select></label><span className="result-count">{rows.length} results</span>{(kind === "blueprints" || kind === "configs") && <a className="document-action" href={newConfigLink()}>New Config</a>}{kind === "secrets" && <a className="document-action" href={newSecretLink()}>New Secret</a>}</div>
       {list.loading && <p className="scope-filter" role="status">Loading {kind}…</p>}
-      <div className="table-scroll"><table className="stackable"><thead><tr><th>Name</th><th>Scope</th><th>Type</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{rows.slice(currentPage * 25, (currentPage + 1) * 25).map(doc => { const scope = [...scopeOf(doc.metadata), doc.metadata.name]; return <tr key={JSON.stringify(scope)}><td data-label="Name"><a className="resource-name" href={catalogLink(kind, scope)}>{doc.metadata.name}</a>{kind === "configs" && <> <NeedsConnectorBadge config={doc} /></>}</td><td className="scope-cell" data-label="Scope"><ScopePath parts={scope.slice(0, -1)} /></td><td data-label="Type">{doc.kind as string || catalogTitles[kind]}</td><td className="row-actions"><RowActions>{kind === "configs" && <RowAction icon="create" href={newCellLink(scope)} label={`New cell from config ${scope.join(" / ")}`} title="New cell from this config" />}{kind === "blueprints" && <RowAction icon="create" href={newConfigLink(scope)} label={`New config from blueprint ${scope.join(" / ")}`} title="New config from this blueprint" />}<DocumentRowLink href={catalogLink(kind, scope, true)} label={scope.join(" / ")} /><RowAction icon="delete" danger label={`Delete ${singular[kind].toLowerCase()} ${scope.join(" / ")}`} title="Delete…" disabled={pending.has(JSON.stringify(scope))} busy={pending.has(JSON.stringify(scope))} onClick={() => setConfirming(doc)} /></RowActions></td></tr>; })}</tbody></table></div>
+      <div className="table-scroll"><table className="stackable"><thead><tr><th>Name</th><th>Scope</th><th>Type</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{rows.slice(currentPage * 25, (currentPage + 1) * 25).map(doc => { const scope = [...scopeOf(doc.metadata), doc.metadata.name]; return <tr key={JSON.stringify(scope)}><td data-label="Name"><a className="resource-name" href={catalogLink(kind, scope)}>{doc.metadata.name}</a>{kind === "configs" && <> <NeedsConnectorBadge config={doc} /></>}</td><td className="scope-cell" data-label="Scope"><ScopePath parts={scope.slice(0, -1)} /></td><td data-label="Type">{doc.kind as string || catalogTitles[kind]}</td><td className="row-actions"><RowActions>{kind === "configs" && <RowAction icon="create" href={newCellLink(scope)} label={`New cell from config ${scope.join(" / ")}`} title="New cell from this config" />}{kind === "blueprints" && <RowAction icon="create" href={newConfigLink(scope)} label={`New config from blueprint ${scope.join(" / ")}`} title="New config from this blueprint" />}{kind === "secrets" && !secretConnector(doc) && <RowAction icon="edit" href={catalogPageLink(kind, scope, { edit: true })} label={`Replace value of secret ${scope.join(" / ")}`} title="Replace value…" />}<DocumentRowLink href={catalogLink(kind, scope, true)} label={scope.join(" / ")} /><RowAction icon="delete" danger label={`Delete ${singular[kind].toLowerCase()} ${scope.join(" / ")}`} title="Delete…" disabled={pending.has(JSON.stringify(scope))} busy={pending.has(JSON.stringify(scope))} onClick={() => setConfirming(doc)} /></RowActions></td></tr>; })}</tbody></table></div>
       {!list.loading && !rows.length && <div className="empty-state"><h3>{list.error ? "Resources could not be loaded" : list.data?.length ? "No matching resources" : `No ${kind} found`}</h3></div>}
       <div className="pagination"><span>{rows.length ? `${currentPage * 25 + 1}–${Math.min((currentPage + 1) * 25, rows.length)} of ${rows.length}` : "0 results"}</span><button disabled={!currentPage} onClick={() => setPage(currentPage - 1)}>Previous</button><button disabled={(currentPage + 1) * 25 >= rows.length} onClick={() => setPage(currentPage + 1)}>Next</button></div>
     </section>
     {confirming && <CatalogDeleteConfirmation kind={kind} doc={confirming} revision={revision} inventory={inventory} onCancel={() => setConfirming(null)} onConfirm={() => { const scope = [...scopeOf(confirming.metadata), confirming.metadata.name]; setConfirming(null); void runDelete(scope); }} />}
   </>;
+}
+// secretConnector names the connector a Secret is an identity of: such a Secret
+// is rotated on the connector's page, never replaced from the catalog.
+function secretConnector(doc: CatalogDoc): string { return typeof doc.spec?.connector === "string" ? doc.spec.connector : ""; }
+// SecretValue is a Secret page's write side: Replace value for an untagged
+// Secret, a link to its connector for an identity.
+function SecretValue({ doc, scope, edit, onChanged }: { doc: CatalogDoc; scope: string[]; edit: boolean; onChanged: () => void }) {
+  const connector = secretConnector(doc);
+  const plain = catalogPageLink("secrets", scope);
+  if (connector) return <section className="panel secret-value" aria-label="Secret value"><div className="panel-heading"><h2>Value</h2></div><div className="panel-body"><p className="description">This Secret is an identity of connector <a className="resource-name" href={connectorsLink(connector)}><code>{connector}</code></a>. Rotate it on the connector's page, which checks it against the connector; it is not replaced here.</p></div></section>;
+  return <section className="panel secret-value" aria-label="Secret value"><div className="panel-heading"><h2>Value</h2>{!edit && <a className="document-action" href={catalogPageLink("secrets", scope, { edit: true })}>Replace value</a>}</div><div className="panel-body">
+    {edit ? <SecretForm scope={scope.slice(0, -1)} existing={doc as { metadata: Metadata; spec?: { type?: string } }} onSaved={() => { onChanged(); window.location.hash = plain; }} onCancel={() => { window.location.hash = plain; }} />
+      : <p className="description">The value is write-only and never shown. Replace value stores new material under the same name, scope and type.</p>}
+  </div></section>;
 }
 // The catalog kinds majordomo can be asked about, and what each is called in a question.
 const askKinds: Record<string, string> = { configs: "CellConfig", blueprints: "CellBlueprint", volumes: "volume" };
@@ -233,7 +248,7 @@ function catalogState(kind: string, doc: CatalogDoc): string {
   if (kind === "volumes") return `stored${spec.reclaimPolicy ? `, reclaim policy ${spec.reclaimPolicy}` : ""}`;
   return "stored";
 }
-function CatalogDetails({ kind, scope, document, revision, inventory, onChanged }: { kind: string; scope: string[]; document: boolean; revision: number; inventory: InventoryResource; onChanged: () => void }) {
+function CatalogDetails({ kind, scope, document, edit = false, revision, inventory, onChanged }: { kind: string; scope: string[]; document: boolean; edit?: boolean; revision: number; inventory: InventoryResource; onChanged: () => void }) {
   const detail = useResource<CatalogDoc>(catalogAPI(kind, scope), revision);
   const doc = detail.data;
   return <>
@@ -245,13 +260,14 @@ function CatalogDetails({ kind, scope, document, revision, inventory, onChanged 
     {detail.error && <ErrorNotice error={detail.error} kind={catalogTitles[kind].replace(/s$/, "")} />}
     {detail.error && doc && <p className="stale">Stale {kind} document — refresh failed.</p>}
     {kind === "secrets" && <p className="description">Secret values are redacted. Only daemon-exposed metadata is available.</p>}
-    {doc && <section className="panel"><div className="panel-heading"><h2>{document ? "API document" : "Resource overview"}</h2><span className="badge" title={`Edits are not supported here. Delete ${kind} from the list.`}>No edits — delete from list</span></div>{document ? <pre tabIndex={0} aria-label={`Complete ${kind} JSON`}>{JSON.stringify(doc, null, 2)}</pre> : <div className="panel-body"><dl className="details-grid"><dt>Name</dt><dd>{doc.metadata.name}</dd><dt>Scope</dt><dd>{scopeOf(doc.metadata).join(" / ")}</dd><dt>Kind</dt><dd>{doc.kind as string}</dd><dt>Labels</dt><dd>{Object.entries(doc.metadata.labels ?? {}).map(([key, value]) => <span className="badge label-badge" key={key}>{key}: {value}</span>)}{!Object.keys(doc.metadata.labels ?? {}).length && "No labels"}</dd>{kind === "configs" && teamOf(doc) && <><dt>Team</dt><dd><a className="resource-name" href={teamsLink(teamOf(doc))}>{teamOf(doc)}</a> <span className="description">Rendered by the team; edit it on the Teams page.</span></dd></>}{kind === "volumes" && <><dt>Reclaim policy</dt><dd>{doc.spec?.reclaimPolicy as string || "Default (Delete)"}</dd></>}</dl><p className="description">Use View document for every API-exposed field.</p></div>}</section>}
+    {doc && <section className="panel"><div className="panel-heading"><h2>{document ? "API document" : "Resource overview"}</h2>{kind !== "secrets" && <span className="badge" title={`Edits are not supported here. Delete ${kind} from the list.`}>No edits — delete from list</span>}</div>{document ? <pre tabIndex={0} aria-label={`Complete ${kind} JSON`}>{JSON.stringify(doc, null, 2)}</pre> : <div className="panel-body"><dl className="details-grid"><dt>Name</dt><dd>{doc.metadata.name}</dd><dt>Scope</dt><dd>{scopeOf(doc.metadata).join(" / ")}</dd><dt>Kind</dt><dd>{doc.kind as string}</dd>{kind === "secrets" && <><dt>Type</dt><dd>{secretTypeOf(doc)}</dd>{secretConnector(doc) && <><dt>Identity of connector</dt><dd><a className="resource-name" href={connectorsLink(secretConnector(doc))}><code>{secretConnector(doc)}</code></a></dd></>}</>}<dt>Labels</dt><dd>{Object.entries(doc.metadata.labels ?? {}).map(([key, value]) => <span className="badge label-badge" key={key}>{key}: {value}</span>)}{!Object.keys(doc.metadata.labels ?? {}).length && "No labels"}</dd>{kind === "configs" && teamOf(doc) && <><dt>Team</dt><dd><a className="resource-name" href={teamsLink(teamOf(doc))}>{teamOf(doc)}</a> <span className="description">Rendered by the team; edit it on the Teams page.</span></dd></>}{kind === "volumes" && <><dt>Reclaim policy</dt><dd>{doc.spec?.reclaimPolicy as string || "Default (Delete)"}</dd></>}</dl><p className="description">Use View document for every API-exposed field.</p></div>}</section>}
+    {doc && kind === "secrets" && !document && <SecretValue doc={doc} scope={scope} edit={edit} onChanged={onChanged} />}
     {doc && kind === "configs" && !document && <ConfigConnectors doc={doc} scope={scope} revision={revision} onChanged={onChanged} />}
     {doc && !document && <RelatedResources doc={doc} revision={revision} />}
     {doc && kind === "configs" && !document && <ConfigRelationships doc={doc} revision={revision} inventory={inventory} />}
     {doc && kind === "blueprints" && !document && <BlueprintRelationships doc={doc} revision={revision} inventory={inventory} />}
   </>;
 }
-export function CatalogPage(props: { kind: string; scope: string[]; document: boolean; revision: number; inventory: InventoryResource; onChanged: () => void }) {
+export function CatalogPage(props: { kind: string; scope: string[]; document: boolean; edit?: boolean; revision: number; inventory: InventoryResource; onChanged: () => void }) {
   return props.scope.length ? <CatalogDetails key={props.kind + JSON.stringify(props.scope)} {...props} /> : <CatalogList key={props.kind} kind={props.kind} revision={props.revision} inventory={props.inventory} onChanged={props.onChanged} />;
 }
