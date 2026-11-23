@@ -2011,6 +2011,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#health-reports-are-a-kind" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Health reports are a kind
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#kuke-health-reports" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3645,6 +3656,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#health-reports-are-a-kind" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Health reports are a kind
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#kuke-health-reports" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3750,14 +3772,15 @@
 <h1 id="kuke-health">kuke health<a class="headerlink" href="#kuke-health" title="Permanent link">&para;</a></h1>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke health [--since &lt;duration|RFC3339|last-report&gt;] [-o text|json|yaml] [--exit-code]
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>kuke health reports [-o text|json|yaml]
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>kuke health report &lt;id|latest&gt; [-o markdown|json|yaml]
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>kuke health report &lt;name|latest&gt; [-o markdown|json|yaml]
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>kuke health report submit -f &lt;file&gt; [--file-issues &lt;owner&gt;/&lt;repo&gt;]
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>kuke health issue [--comment] -f &lt;file&gt;
 </code></pre></div>
 <p><code>kuke health</code> shows kukeond's <strong>health digest</strong>: host and state checks, the
 error-level entries of kukeond's own log, and the cells in a failed state. The
-subcommands read and write <strong>health reports</strong>, the triaged result of a
-majordomo <a href="../../concepts/team/#the-majordomo-health-sweep">health sweep</a>.</p>
+subcommands read and write <strong>health reports</strong> — <code>kind: HealthReport</code>
+documents, the triaged result of a majordomo
+<a href="../../concepts/team/#the-majordomo-health-sweep">health sweep</a>.</p>
 <p>The digest is computed inside kukeond, by plain code with no model involved.
 <code>kuke</code> only asks for it over the daemon socket, so the answer describes the
 host whether you run <code>kuke health</code> on the host or in a cell that mounts the
@@ -3942,38 +3965,53 @@ meaning. New fields may be added without a version change.</p>
 </tr>
 </tbody>
 </table>
+<h2 id="health-reports-are-a-kind">Health reports are a kind<a class="headerlink" href="#health-reports-are-a-kind" title="Permanent link">&para;</a></h2>
+<p>A health report is a <code>v1beta1</code> <strong><code>HealthReport</code></strong> in the <code>kuke-system</code> realm.
+kukeond stores each report as the validated document under the system realm's
+metadata tree (<code>&lt;run path&gt;/data/kuke-system/healthreports/&lt;name&gt;</code>), so reports
+survive a kukeond restart and go with the realm when it is purged. They are
+operational state, not a system of record: storing a report files nothing
+anywhere. A report is immutable; it can be stored and deleted, never changed.</p>
+<p>The generic verbs work on reports as on any other kind:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>kuke<span class="w"> </span>get<span class="w"> </span>healthreports<span class="w">                    </span><span class="c1"># same as kuke health reports</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>kuke<span class="w"> </span>get<span class="w"> </span>healthreport<span class="w"> </span>&lt;name<span class="p">|</span>latest&gt;<span class="w">       </span><span class="c1"># one report; -o yaml|json prints the document</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>report.yaml<span class="w">                 </span><span class="c1"># same as kuke health report submit -f</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>kuke<span class="w"> </span>delete<span class="w"> </span>healthreport<span class="w"> </span>&lt;name&gt;<span class="w">           </span><span class="c1"># delete one report</span>
+</code></pre></div>
+<p>kukeond keeps the newest 50 reports and drops older ones on each submission.</p>
 <h2 id="kuke-health-reports">kuke health reports<a class="headerlink" href="#kuke-health-reports" title="Permanent link">&para;</a></h2>
-<p>Lists the reports kukeond stores, newest first: id, creation time, and how many
-findings each has, how many were recurring and how many were filed. <code>-o json</code>
-prints an array (<code>[]</code> when there are none).</p>
+<p>Lists the reports kukeond stores, newest first: name (the <code>ID</code> column),
+creation time, and how many findings each has, how many were recurring and how
+many were filed. <code>-o json</code> prints an array (<code>[]</code> when there are none).
+<code>kuke get healthreports</code> prints the same.</p>
 <h2 id="kuke-health-report">kuke health report<a class="headerlink" href="#kuke-health-report" title="Permanent link">&para;</a></h2>
-<p><code>kuke health report &lt;id&gt;</code> prints one report; <code>latest</code> selects the newest.
+<p><code>kuke health report &lt;name&gt;</code> prints one report; <code>latest</code> selects the newest.
 The default output is markdown for reading. <code>-o json</code> and <code>-o yaml</code> print the
-stored document.</p>
-<p>kukeond keeps the newest 50 reports and drops older ones on each submission.
-Reports are files under kukeond's run path, so they survive a kukeond restart.
-They are operational state, not a system of record: storing a report files
-nothing anywhere.</p>
+stored <code>HealthReport</code> document.</p>
 <h2 id="kuke-health-report-submit">kuke health report submit<a class="headerlink" href="#kuke-health-report-submit" title="Permanent link">&para;</a></h2>
-<p><code>kuke health report submit -f &lt;file&gt;</code> validates a report document and stores
-it. <code>-f -</code> reads stdin. The document is JSON or YAML, and unknown fields are
-rejected.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">since</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2026-11-17T09:00:00Z</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nt">until</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2026-11-17T10:00:00Z</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nt">cell</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> realm</span><span class="p">:</span><span class="w"> </span><span class="nv">default</span><span class="p p-Indicator">,</span><span class="nt"> space</span><span class="p">:</span><span class="w"> </span><span class="nv">default</span><span class="p p-Indicator">,</span><span class="nt"> stack</span><span class="p">:</span><span class="w"> </span><span class="nv">default</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">sweep-1a2b3c</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="nt">summary</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">One kukeon defect, one workload failure.</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="nt">findings</span><span class="p">:</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">signature</span><span class="p">:</span><span class="w"> </span><span class="s">"cell</span><span class="nv"> </span><span class="s">default/default/default/api</span><span class="nv"> </span><span class="s">Failed"</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">    </span><span class="nt">classification</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kukeon</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">    </span><span class="nt">severity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">error</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">    </span><span class="nt">title</span><span class="p">:</span><span class="w"> </span><span class="s">"api</span><span class="nv"> </span><span class="s">fails</span><span class="nv"> </span><span class="s">to</span><span class="nv"> </span><span class="s">start:</span><span class="nv"> </span><span class="s">CNI</span><span class="nv"> </span><span class="s">attach</span><span class="nv"> </span><span class="s">error"</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">    </span><span class="nt">evidence</span><span class="p">:</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"status.reason:</span><span class="nv"> </span><span class="s">CreateFailed"</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">    </span><span class="nt">suggestedCommands</span><span class="p">:</span>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"kuke</span><span class="nv"> </span><span class="s">restart</span><span class="nv"> </span><span class="s">api</span><span class="nv"> </span><span class="s">--realm</span><span class="nv"> </span><span class="s">default</span><span class="nv"> </span><span class="s">--space</span><span class="nv"> </span><span class="s">default</span><span class="nv"> </span><span class="s">--stack</span><span class="nv"> </span><span class="s">default"</span>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="nt">body</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="w">  </span><span class="no"># Health sweep</span>
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="w">  </span><span class="no">...</span>
+<p><code>kuke health report submit -f &lt;file&gt;</code> validates a <code>HealthReport</code> document and
+stores it, exactly as <code>kuke apply -f</code> does. <code>-f -</code> reads stdin. The document is
+JSON or YAML, and unknown fields are rejected.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">HealthReport</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="nt">metadata</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> realm</span><span class="p">:</span><span class="w"> </span><span class="nv">kuke-system</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w"> </span><span class="c1"># name is assigned when omitted</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span><span class="nt">since</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2026-11-17T09:00:00Z</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">  </span><span class="nt">until</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2026-11-17T10:00:00Z</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">  </span><span class="nt">cell</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> realm</span><span class="p">:</span><span class="w"> </span><span class="nv">default</span><span class="p p-Indicator">,</span><span class="nt"> space</span><span class="p">:</span><span class="w"> </span><span class="nv">default</span><span class="p p-Indicator">,</span><span class="nt"> stack</span><span class="p">:</span><span class="w"> </span><span class="nv">default</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">sweep-1a2b3c</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">  </span><span class="nt">summary</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">One kukeon defect, one workload failure.</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">  </span><span class="nt">findings</span><span class="p">:</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">signature</span><span class="p">:</span><span class="w"> </span><span class="s">"cell</span><span class="nv"> </span><span class="s">default/default/default/api</span><span class="nv"> </span><span class="s">Failed"</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="w">      </span><span class="nt">classification</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kukeon</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="w">      </span><span class="nt">severity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">error</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="w">      </span><span class="nt">title</span><span class="p">:</span><span class="w"> </span><span class="s">"api</span><span class="nv"> </span><span class="s">fails</span><span class="nv"> </span><span class="s">to</span><span class="nv"> </span><span class="s">start:</span><span class="nv"> </span><span class="s">CNI</span><span class="nv"> </span><span class="s">attach</span><span class="nv"> </span><span class="s">error"</span>
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="w">      </span><span class="nt">evidence</span><span class="p">:</span>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"status.reason:</span><span class="nv"> </span><span class="s">CreateFailed"</span>
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a><span class="w">      </span><span class="nt">suggestedCommands</span><span class="p">:</span>
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"kuke</span><span class="nv"> </span><span class="s">restart</span><span class="nv"> </span><span class="s">api</span><span class="nv"> </span><span class="s">--realm</span><span class="nv"> </span><span class="s">default</span><span class="nv"> </span><span class="s">--space</span><span class="nv"> </span><span class="s">default</span><span class="nv"> </span><span class="s">--stack</span><span class="nv"> </span><span class="s">default"</span>
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a><span class="w">  </span><span class="nt">body</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
+<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a><span class="w">    </span><span class="no"># Health sweep</span>
+<a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a><span class="w">    </span><span class="no">...</span>
 </code></pre></div>
 <table>
 <thead>
@@ -3985,82 +4023,92 @@ rejected.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>id</code></td>
+<td><code>apiVersion</code>, <code>kind</code></td>
 <td>no</td>
-<td>kukeond assigns one when omitted. A duplicate id, or <code>latest</code>, is rejected.</td>
+<td><code>v1beta1</code> and <code>HealthReport</code>; filled when omitted.</td>
 </tr>
 <tr>
-<td><code>createdAt</code></td>
+<td><code>metadata.name</code></td>
+<td>no</td>
+<td>kukeond assigns <code>&lt;createdAt as 20060102T150405.000000000Z&gt;</code> when omitted. A stored name, or <code>latest</code>, is rejected. Letters, digits, <code>.</code>, <code>_</code> and <code>-</code>, at most 128, starting with a letter or digit.</td>
+</tr>
+<tr>
+<td><code>metadata.realm</code></td>
+<td>no</td>
+<td>Always <code>kuke-system</code>; filled when omitted, any other realm is rejected.</td>
+</tr>
+<tr>
+<td><code>spec.createdAt</code></td>
 <td>no</td>
 <td>kukeond sets it when omitted.</td>
 </tr>
 <tr>
-<td><code>since</code>, <code>until</code></td>
+<td><code>spec.since</code>, <code>spec.until</code></td>
 <td>yes</td>
 <td>The digest window the report covers; <code>until</code> must not precede <code>since</code>.</td>
 </tr>
 <tr>
-<td><code>cell</code></td>
+<td><code>spec.cell</code></td>
 <td>yes</td>
 <td><code>realm</code>, <code>space</code>, <code>stack</code> and <code>name</code> of the submitting cell.</td>
 </tr>
 <tr>
-<td><code>summary</code></td>
+<td><code>spec.summary</code></td>
 <td>yes</td>
 <td></td>
 </tr>
 <tr>
-<td><code>findings</code></td>
+<td><code>spec.findings</code></td>
 <td>yes</td>
 <td>A list; <code>[]</code> is valid.</td>
 </tr>
 <tr>
-<td><code>body</code></td>
+<td><code>spec.body</code></td>
 <td>no</td>
 <td>Markdown.</td>
 </tr>
 <tr>
-<td><code>findings[].signature</code></td>
+<td><code>spec.findings[].signature</code></td>
 <td>yes</td>
 <td>Unique within the report. Identifies the finding across reports.</td>
 </tr>
 <tr>
-<td><code>findings[].classification</code></td>
+<td><code>spec.findings[].classification</code></td>
 <td>yes</td>
 <td><code>kukeon</code>, <code>workload</code> or <code>unclear</code>.</td>
 </tr>
 <tr>
-<td><code>findings[].severity</code></td>
+<td><code>spec.findings[].severity</code></td>
 <td>yes</td>
 <td><code>info</code>, <code>warning</code>, <code>error</code> or <code>critical</code>.</td>
 </tr>
 <tr>
-<td><code>findings[].evidence</code></td>
+<td><code>spec.findings[].evidence</code></td>
 <td>yes</td>
 <td>At least one entry.</td>
 </tr>
 <tr>
-<td><code>findings[].title</code></td>
+<td><code>spec.findings[].title</code></td>
 <td>no</td>
 <td></td>
 </tr>
 <tr>
-<td><code>findings[].count</code></td>
+<td><code>spec.findings[].count</code></td>
 <td>no</td>
 <td>Occurrences in the window.</td>
 </tr>
 <tr>
-<td><code>findings[].suggestedCommands</code></td>
+<td><code>spec.findings[].suggestedCommands</code></td>
 <td>no</td>
 <td>Commands for the reader. Nothing runs them.</td>
 </tr>
 <tr>
-<td><code>findings[].issueUrl</code></td>
+<td><code>spec.findings[].issueUrl</code></td>
 <td>no</td>
 <td>An <code>https</code> URL, allowed only on a <code>kukeon</code> finding.</td>
 </tr>
 <tr>
-<td><code>findings[].recurring</code></td>
+<td><code>spec.findings[].recurring</code></td>
 <td>—</td>
 <td>Computed by kukeond; a submitted value is ignored.</td>
 </tr>
@@ -4069,6 +4117,9 @@ rejected.</p>
 <p>On submission kukeond marks a finding <strong>recurring</strong> when the previous stored
 report already carried the same signature. A hand-started sweep that overlaps a
 scheduled one therefore reports the same finding as recurring, not as new.</p>
+<p>A report carries no <code>schemaVersion</code>; reports stored before they became a kind
+(under <code>&lt;run path&gt;/health</code>) are not read or converted, and kukeond removes that
+directory when it starts.</p>
 <h3 id="filing-issues-opt-in">Filing issues (opt-in)<a class="headerlink" href="#filing-issues-opt-in" title="Permanent link">&para;</a></h3>
 <p>By default nothing is filed. <code>--file-issues &lt;owner&gt;/&lt;repo&gt;</code> makes <code>kuke</code> first
 validate the report the way kukeond will (a report kukeond would reject files
@@ -4095,7 +4146,7 @@ opened or commented on to stderr and exits <code>1</code>. See
 how an install turns it on. <code>KUKE_HEALTH_GITHUB_API</code> overrides the API base URL
 for GitHub Enterprise.</p>
 <h2 id="rendering-an-issue-for-a-diagnosed-defect">Rendering an issue for a diagnosed defect<a class="headerlink" href="#rendering-an-issue-for-a-diagnosed-defect" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>kuke<span class="w"> </span>health<span class="w"> </span>issue<span class="w"> </span>-f<span class="w"> </span>draft.yaml
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>kuke<span class="w"> </span>health<span class="w"> </span>issue<span class="w"> </span>-f<span class="w"> </span>draft.yaml
 </code></pre></div>
 <p><code>kuke health issue</code> renders a kukeon defect found outside a sweep, by an
 interactive majordomo investigation, as the title, body, comment and signature
@@ -4183,7 +4234,7 @@ fence, so <code>file:line</code> references and inline code read normally.</p>
 <code>comment</code> (the note for an open issue that already carries the marker) and
 <code>marker</code>. The kukeon version comes from kukeond, or reads <code>unknown</code> when it is
 unreachable.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>kuke<span class="w"> </span>health<span class="w"> </span>issue<span class="w"> </span>--comment<span class="w"> </span>-f<span class="w"> </span>notes.md<span class="w"> </span>&gt;<span class="w"> </span>comment.md
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>kuke<span class="w"> </span>health<span class="w"> </span>issue<span class="w"> </span>--comment<span class="w"> </span>-f<span class="w"> </span>notes.md<span class="w"> </span>&gt;<span class="w"> </span>comment.md
 </code></pre></div>
 <p>With <code>--comment</code>, the file (<code>-</code> reads stdin) is a hand-written markdown
 follow-up for an issue that is already open, not a draft. <code>kuke</code> prints it
@@ -4253,7 +4304,7 @@ down. Use <code>kuke health</code> for a running install, and always from inside
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 23, 2026 00:25:54 UTC">November 23, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 23, 2026 00:27:24 UTC">November 23, 2026</span>
   </span>
 
     
