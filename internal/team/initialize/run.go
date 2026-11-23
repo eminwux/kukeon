@@ -242,6 +242,11 @@ func withRerun(err error, command string) error {
 	if errors.Is(err, errNotStored) {
 		return err
 	}
+	// A document fetched from a source is not a local prerequisite (#1631).
+	var skew *sourceSkewError
+	if errors.As(err, &skew) {
+		return fmt.Errorf("%w, then rerun %s", err, command)
+	}
 	return fmt.Errorf("%w; after fixing the prerequisite, rerun %s", err, command)
 }
 
