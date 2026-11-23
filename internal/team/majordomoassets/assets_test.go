@@ -215,8 +215,11 @@ func checkHarnessSettings(t *testing.T, role definition, roleDir string) {
 			t.Fatalf("Claude settings allow kuke write: %q", rule)
 		}
 	}
+	// No Codex sandbox override: every majordomo session dials the kukeond
+	// socket, which workspace-write denies, so Codex falls back to the
+	// codex-host default, danger-full-access (issue #1628).
 	codex := role.Spec.Harnesses["codex"]
-	if codex.Sandbox != "workspace-write" || codex.Approval != "on-request" {
+	if codex.Sandbox != "" || codex.Approval != "on-request" {
 		t.Fatal("unexpected Codex permissions")
 	}
 	if role.Spec.Harnesses["opencode"].Permissions != "ask" {

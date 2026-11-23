@@ -61,6 +61,9 @@ func TestSharedRendererProfiles(t *testing.T) {
 				[]byte("  needs:"),
 				[]byte("  needs:\n"+repos+"    mounts: [ssh]"),
 			)
+			// The shipped role sets no Codex sandbox; select a narrower one so
+			// the root profile's danger-full-access override stays exercised.
+			editRole(source, "      approval: on-request", "      sandbox: workspace-write\n      approval: on-request")
 			opts.Sources["kukeon"] = source
 			if root {
 				cfg.Spec.Defaults.Roles[0].Needs.Image = append(cfg.Spec.Defaults.Roles[0].Needs.Image, "root")

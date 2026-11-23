@@ -65,7 +65,7 @@ def collect():
     injected = [s for m in messages for s in text_parts(m.get('content', [])) if s.startswith(('# AGENTS.md instructions', '<skills_instructions>', '## Skills'))]
     tool_output = [s for r in records if r.get('type') == 'response_item' and r['payload'].get('type') in ('function_call_output', 'custom_tool_call_output') for s in text_parts(r['payload'].get('output'))]
     contexts = [r['payload'] for r in records if r.get('type') == 'turn_context']
-    config_loaded = any(c.get('approval_policy') == 'never' and c.get('sandbox_policy', {}).get('type') == 'workspace-write' for c in contexts)
+    config_loaded = any(c.get('approval_policy') == 'never' and c.get('sandbox_policy', {}).get('type') == 'danger-full-access' for c in contexts)
     return {
         'thread_id': session_id,
         'source_revision': subprocess.check_output(['git', '-C', str(checkout), 'rev-parse', 'HEAD'], text=True).strip(),

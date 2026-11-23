@@ -338,8 +338,8 @@ func TestActionableFailures(t *testing.T) {
 		{"unsupported-setting", "unsupported Codex", func(_ *config.TeamDefaults, _ *compose.Options, s fstest.MapFS) {
 			s["team/roles/majordomo/role.yaml"].Data = bytes.ReplaceAll(
 				s["team/roles/majordomo/role.yaml"].Data,
-				[]byte("workspace-write"),
-				[]byte("made-up"),
+				[]byte("      approval: on-request"),
+				[]byte("      sandbox: made-up\n      approval: on-request"),
 			)
 		}},
 		{"parameter", "missing required parameter", func(_ *config.TeamDefaults, _ *compose.Options, s fstest.MapFS) {
@@ -478,7 +478,7 @@ func assertRootResources(t *testing.T, result *compose.Result) {
 		"ROLE_PATH":       "team/roles/majordomo",
 		"INITIAL_PATH":    "/home/user",
 		"ROLE_NAME":       "majordomo",
-		"SANDBOX":         "workspace-write",
+		"SANDBOX":         "danger-full-access",
 		"APPROVAL":        "on-request",
 		"AGENT_NAME":      "root-majordomo-codex",
 		"STATE_VOLUME":    "root-majordomo-codex-state",
@@ -528,7 +528,7 @@ func assertRootResources(t *testing.T, result *compose.Result) {
 	env := envOf(rendered)
 	for key, value := range map[string]string{
 		"ROLE_SOURCE_DIR": "/home/user/kukeon-src", "ROLE_PATH": "team/roles/majordomo",
-		"INITIAL_PATH": "/home/user", "CODEX_SANDBOX": "workspace-write", "CODEX_APPROVAL": "on-request",
+		"INITIAL_PATH": "/home/user", "CODEX_SANDBOX": "danger-full-access", "CODEX_APPROVAL": "on-request",
 		"AGENTS_ROLE": "majordomo", "AGENT_NAME": "root-majordomo-codex",
 	} {
 		if env[key] != value {
