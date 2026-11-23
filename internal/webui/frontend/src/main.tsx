@@ -18,7 +18,9 @@ import { CgroupPanel } from "./cgroup";
 import { RealmImagesPanel } from "./images";
 import { registryEntries } from "./connectors.mjs";
 import { ImagesPage } from "./image-inventory";
-import { NetworkPanel, networkKinds } from "./network";
+import { NetworkPanel, networkKinds, type NetworkDetail } from "./network";
+import { formatIPv4, formatSubnet, type SpaceNetwork } from "./network-format.js";
+import { useSpaceSubnets } from "./space-subnets";
 import { DaemonHealthPage, DaemonLogsPage } from "./daemon";
 import { CellLifecycleControls, CellRowActions, type LifecycleAction, type LifecycleFeedback, type PurgeOptions } from "./lifecycle";
 import { InventoryIndicator, NotificationProvider, useNotify } from "./notifications";
@@ -85,6 +87,13 @@ function Dashboard({ inventory }: { inventory: Resource<Inventory> }) {
     <div className="summary-grid">{card(3)}{[0, 1, 2].map(card)}</div>
   </>;
 }
+// SpaceCIDR renders one Space's subnet: allocated, legacy conflist and unallocated read differently, and a
+// failed read says so without breaking the row.
+function SpaceCIDR({ subnet }: { subnet?: Resource<SpaceNetwork> }) {
+  if (subnet?.data) return <span className={subnet.data.subnetSource === "allocator" && subnet.data.subnetCIDR ? undefined : "description"}>{formatSubnet(subnet.data)}</span>;
+  if (subnet?.error) return <span className="cidr-error" title={subnet.error.message}>Unavailable</span>;
+  return <span className="description" aria-label="Loading subnet">…</span>;
+}
 function ResourceList({ depth, inventory, parent, operations, onLifecycleAction, onParentAction }: {
   depth: number;
   inventory: Resource<Inventory>;
@@ -101,10 +110,13 @@ function ResourceList({ depth, inventory, parent, operations, onLifecycleAction,
   const filtered = scoped.filter(row => (!realm || row.scope[0] === realm) && row.scope.join(" / ").toLowerCase().includes(search.toLowerCase()));
   const pageSize = 25;
   const currentPage = Math.min(page, Math.max(0, Math.ceil(filtered.length / pageSize) - 1));
+  const shown = filtered.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
+  // The Spaces table reads each visible Space's subnet: a Space document carries no CIDR.
+  const subnets = useSpaceSubnets(depth === 1 ? shown.map(row => row.scope) : [], inventory.data?.updatedAt ?? "");
   return <section className="panel" aria-label={`${titles[depth]} list`}>
     <div className="list-controls"><label className="search-field">Search<input type="search" placeholder={`Search ${titles[depth].toLowerCase()}…`} value={search} onChange={e => { setSearch(e.target.value); setPage(0); }} /></label>{depth > 0 && <label>Realm<select aria-label="Filter by realm" value={realm} onChange={e => { setRealm(e.target.value); setPage(0); }}><option value="">All realms</option>{inventory.data?.rows[0].map(row => <option key={row.scope[0]}>{row.scope[0]}</option>)}</select></label>}<span className="result-count">{filtered.length} results</span></div>
     {parent.length > 0 && <p className="scope-filter">Scope: {parent.join(" / ")} <a href={listLink(depth)}>Clear scope</a></p>}
-    <div className="table-scroll"><table className="stackable"><thead><tr><th>Name</th><th>State</th>{depth > 0 && <th>Scope</th>}<th><span className="sr-only">Actions</span></th></tr></thead><tbody>{filtered.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(row => <tr key={JSON.stringify(row.scope)}><td data-label="Name"><a className="resource-name" href={resourceLink(row.scope)}>{row.doc.metadata.name}</a></td><td data-label="State"><StateBadge state={row.doc.status?.state} />{depth === 3 && <DriftBadge status={row.doc.status} />}{depth === 3 && scheduledRun(row.doc) && <span className="badge scheduled-badge" title={`Scheduled run of Config ${scheduledRun(row.doc)!.config}`}>Scheduled</span>}{depth === 3 && failureStates.includes(row.doc.status?.state ?? "") && <AskMajordomo question={cellQuestion(row.scope, row.doc.status)} subject={`cell ${row.scope.join(" / ")}`} />}</td>{depth > 0 && <td className="scope-cell" data-label="Scope"><ScopePath parts={row.scope.slice(0, -1)} /></td>}<td className="row-actions">{depth === 3 ? <CellRowActions scope={row.scope} state={row.doc.status?.state} operation={operations[JSON.stringify(row.scope)]} onAction={onLifecycleAction} /> : <ParentRowActions scope={row.scope} counts={descendantCounts(inventory.data?.rows ?? [], row.scope)} allowed={parentActionsAllowed(row.scope)} operation={operations[JSON.stringify(row.scope)]} onAction={onParentAction} />}</td></tr>)}</tbody></table></div>
+    <div className="table-scroll"><table className="stackable"><thead><tr><th>Name</th><th>State</th>{depth === 1 && <th>CIDR</th>}{depth > 0 && <th>Scope</th>}<th><span className="sr-only">Actions</span></th></tr></thead><tbody>{shown.map(row => <tr key={JSON.stringify(row.scope)}><td data-label="Name"><a className="resource-name" href={resourceLink(row.scope)}>{row.doc.metadata.name}</a></td><td data-label="State"><StateBadge state={row.doc.status?.state} />{depth === 3 && <DriftBadge status={row.doc.status} />}{depth === 3 && scheduledRun(row.doc) && <span className="badge scheduled-badge" title={`Scheduled run of Config ${scheduledRun(row.doc)!.config}`}>Scheduled</span>}{depth === 3 && failureStates.includes(row.doc.status?.state ?? "") && <AskMajordomo question={cellQuestion(row.scope, row.doc.status)} subject={`cell ${row.scope.join(" / ")}`} />}</td>{depth === 1 && <td className="space-cidr mono-id" data-label="CIDR"><SpaceCIDR subnet={subnets[JSON.stringify(row.scope)]} /></td>}{depth > 0 && <td className="scope-cell" data-label="Scope"><ScopePath parts={row.scope.slice(0, -1)} /></td>}<td className="row-actions">{depth === 3 ? <CellRowActions scope={row.scope} state={row.doc.status?.state} operation={operations[JSON.stringify(row.scope)]} onAction={onLifecycleAction} /> : <ParentRowActions scope={row.scope} counts={descendantCounts(inventory.data?.rows ?? [], row.scope)} allowed={parentActionsAllowed(row.scope)} operation={operations[JSON.stringify(row.scope)]} onAction={onParentAction} />}</td></tr>)}</tbody></table></div>
     {!filtered.length && <div className="empty-state"><h3>{inventory.loading ? "Loading resources…" : inventory.error || inventory.data?.failures.length ? "Resources could not be fully loaded" : scoped.length ? "No matching resources" : `No ${titles[depth].toLowerCase()} found`}</h3><p>{search || realm ? "Try another search or clear the filters." : "Refresh to retrieve the latest resource state."}</p></div>}
     <div className="pagination"><span>{filtered.length ? `${currentPage * pageSize + 1}–${Math.min((currentPage + 1) * pageSize, filtered.length)} of ${filtered.length}` : "0 results"}</span><button disabled={!currentPage} onClick={() => setPage(currentPage - 1)}>Previous</button><button disabled={(currentPage + 1) * pageSize >= filtered.length} onClick={() => setPage(currentPage + 1)}>Next</button></div>
   </section>;
@@ -230,6 +242,12 @@ function CellDetailsScreen({ title, view, scope, revision, inventory, manager, t
   // A scheduled run names its Config by label and its fire time by name; the Config itself is read only
   // on cellRead, for its schedule.
   const run = detail.data ? scheduledRun(detail.data) : null;
+  // One network read per refresh on cellRead, shared by the IP address row and the Network section;
+  // cellTerminal reads none.
+  const network = useResource<NetworkDetail>(scope && !terminalView ? `${apiPath(scope)}/network` : null, revision);
+  const cellNetwork = network.data && !Array.isArray(network.data) ? network.data.cell : undefined;
+  const ipRow = <><dt>IP address</dt><dd className="cell-ip">{cellNetwork ? <>{cellNetwork.ipv4State === "assigned" ? <code>{formatIPv4(cellNetwork)}</code> : formatIPv4(cellNetwork)}{cellNetwork.ipv4State === "assigned" && cellNetwork.rootContainer && <span className="description"> · root container <code>{cellNetwork.rootContainer}</code></span>}</>
+    : network.error ? <span title={network.error.message}>Unavailable</span> : network.loading ? "…" : "Not reported"}</dd></>;
   const sourceConfigDoc = useResource<{ spec?: { schedule?: Schedule }; status?: { schedule?: ScheduleStatus } }>(sourceConfig && !terminalView ? catalogAPI("configs", sourceConfigScope) : null, revision);
   const sourceSchedule = sourceConfigDoc.data?.spec?.schedule;
   const scheduleRow = (run || sourceSchedule) && <><dt>Schedule</dt><dd className="cell-schedule">
@@ -241,6 +259,7 @@ function CellDetailsScreen({ title, view, scope, revision, inventory, manager, t
     <div className="panel-heading"><h2>Resource overview</h2><div className="cell-overview-actions"><StateBadge state={detail.data.status?.state} /><a className="document-action" href={resourceLink(scope, true)} target="_blank" rel="noopener noreferrer">View document</a></div></div>
     <div className="panel-body"><dl className="details-grid">
       <dt>Config</dt><dd>{sourceConfig ? <a className="resource-name" href={catalogLink("configs", sourceConfigScope)}>{sourceConfigScope.join(" / ")}</a> : "Not created from a Config"}</dd>
+      {ipRow}
       {scheduleRow}
       <dt>Labels</dt><dd>{Object.entries(detail.data.metadata.labels ?? {}).map(([key, value]) => <span className="badge label-badge" key={key}>{key}: {value}</span>)}{!Object.keys(detail.data.metadata.labels ?? {}).length && "No labels"}</dd>
       <dt>Name</dt><dd>{detail.data.metadata.name}</dd>
@@ -281,7 +300,7 @@ function CellDetailsScreen({ title, view, scope, revision, inventory, manager, t
     <section className="cell-terminal-view" aria-label="Cell terminal" hidden={!terminalView}>
       <TerminalWorkspace scope={scope} revision={revision} inventory={inventory} manager={manager} theme={theme} visible={terminalView && !!scope} controlsHost={terminalToolsHost} onExpandedChange={setTerminalExpanded} dockedCell={dockedCell} onOpenDock={onOpenDock} operation={operation} onLifecycleAction={onLifecycleAction} />
     </section>
-    <section className="cell-overview-content" aria-label="Cell details" hidden={terminalView}>{detail.error && <ErrorNotice error={detail.error} kind="Cell" />}{detail.error && detail.data && <p className="stale">Stale resource details — refresh failed.</p>}{status}{containerPanel}{overview}{scope && !terminalView && <NetworkPanel scope={scope} revision={revision} />}{scope && !terminalView && <CgroupPanel scope={scope} revision={revision} />}</section>
+    <section className="cell-overview-content" aria-label="Cell details" hidden={terminalView}>{detail.error && <ErrorNotice error={detail.error} kind="Cell" />}{detail.error && detail.data && <p className="stale">Stale resource details — refresh failed.</p>}{status}{containerPanel}{overview}{scope && !terminalView && <NetworkPanel scope={scope} revision={revision} detail={network} />}{scope && !terminalView && <CgroupPanel scope={scope} revision={revision} />}</section>
   </div>;
 }
 

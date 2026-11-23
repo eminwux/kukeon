@@ -738,3 +738,4 @@ a.subtle-button { display: inline-flex; align-items: center; min-height: var(--t
 .team-picker legend { padding: 0 4px; }
 .team-source { margin: 8px 0 12px; display: grid; gap: 8px; }
 .team-plan h3 { margin: 12px 0 4px; }
+.cidr-error { color: var(--status-error); }
