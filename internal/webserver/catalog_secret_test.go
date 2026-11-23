@@ -252,7 +252,6 @@ func TestCatalogSecretRejections(t *testing.T) {
 			t.Errorf("%s: stored a rejected secret", name)
 		}
 	}
-
 }
 
 // TestCatalogSecretNonJSON: a request without the JSON content type is a 400.
