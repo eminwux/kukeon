@@ -66,7 +66,8 @@ func (c *secretClient) CreateSecret(_ context.Context, doc v1beta1.SecretDoc) (k
 
 func secretHandler(t *testing.T, c *secretClient) http.Handler {
 	t.Helper()
-	handler, err := newHandler("http://localhost:5129", "test", func(context.Context) (kukeonv1.Client, error) { return c, nil })
+	dial := func(context.Context) (kukeonv1.Client, error) { return c, nil }
+	handler, err := newHandler("http://localhost:5129", "test", dial)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +176,8 @@ func TestCatalogSecretReplace(t *testing.T) {
 
 	c := stored()
 	code, body := postSecret(t, c, "token?realm=dev", `{"replace":true,"value":"material-two"}`)
-	if code != http.StatusOK || !strings.Contains(body, `"action":"updated"`) || strings.Contains(body, "material-two") {
+	if code != http.StatusOK || !strings.Contains(body, `"action":"updated"`) ||
+		strings.Contains(body, "material-two") {
 		t.Fatalf("replace opaque: status=%d body=%s", code, body)
 	}
 	if c.created[0].Spec.Data != "material-two" || c.created[0].Spec.Connector != "" {
@@ -189,7 +191,8 @@ func TestCatalogSecretReplace(t *testing.T) {
 	}
 
 	c = stored()
-	code, body = postSecret(t, c, "sock?realm=dev&space=web&stack=api&cell=cell", `{"replace":true,"value":"material-two"}`)
+	code, body = postSecret(t, c, "sock?realm=dev&space=web&stack=api&cell=cell",
+		`{"replace":true,"value":"material-two"}`)
 	if code != http.StatusOK || !strings.Contains(body, `"action":"updated"`) {
 		t.Fatalf("replace cell-scoped: status=%d body=%s", code, body)
 	}
