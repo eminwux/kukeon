@@ -13,7 +13,7 @@ anything in kukeon, and it never asks a question: nobody is attached.
 
 Only these, and only as reads plus the one submission:
 
-- `kuke health ...` (the digest, `reports`, `report <id|latest>`)
+- `kuke health ...` (the digest, `reports`, `report <name|latest>`)
 - `kuke get ...`
 - `kuke log ...`
 - `kuke screenshot ...` (a running Attachable cell's current screen, as
@@ -97,31 +97,36 @@ That also covers a manual sweep that overlaps a scheduled one.
 
 ## 3. Write the report
 
-Write one YAML document to `/tmp/health-sweep/report.yaml`:
+Write one `kind: HealthReport` document to `/tmp/health-sweep/report.yaml`:
 
 ```yaml
-since: <digest.since>
-until: <digest.until>
-cell: { realm: <realm>, space: <space>, stack: <stack>, name: <this cell's name> }
-summary: <one sentence: how many findings, how many are kukeon defects>
-findings:
-  - signature: "cell default/default/default/api Failed"
-    classification: kukeon
-    severity: error
-    title: "api failed to start: CNI attach error"
-    evidence:
-      - "status.reason: CreateFailed ..."
-    suggestedCommands:
-      - "kuke restart api --realm default --space default --stack default"
-body: |
-  # Health sweep <until>
-  ...
+apiVersion: v1beta1
+kind: HealthReport
+metadata: { realm: kuke-system }
+spec:
+  since: <digest.since>
+  until: <digest.until>
+  cell: { realm: <realm>, space: <space>, stack: <stack>, name: <this cell's name> }
+  summary: <one sentence: how many findings, how many are kukeon defects>
+  findings:
+    - signature: "cell default/default/default/api Failed"
+      classification: kukeon
+      severity: error
+      title: "api failed to start: CNI attach error"
+      evidence:
+        - "status.reason: CreateFailed ..."
+      suggestedCommands:
+        - "kuke restart api --realm default --space default --stack default"
+  body: |
+    # Health sweep <until>
+    ...
 ```
 
-`since` and `until` are the digest's own values. This cell's identity is in the
-`KUKEON_REALM`, `KUKEON_SPACE`, `KUKEON_STACK` and `KUKEON_CELL_NAME`
-environment variables. Leave
-`id` and `createdAt` out: kukeond assigns them.
+`spec.since` and `spec.until` are the digest's own values. This cell's identity
+is in the `KUKEON_REALM`, `KUKEON_SPACE`, `KUKEON_STACK` and `KUKEON_CELL_NAME`
+environment variables. A report always lives in the `kuke-system` realm. Leave
+`metadata.name` and `spec.createdAt` out: kukeond assigns them. Do not add
+`schemaVersion` or a top-level `id`: unknown fields are rejected.
 
 The `body` is markdown for a person: the summary, then one section per finding
 with what happened, why it is classified as it is, and the suggested commands.

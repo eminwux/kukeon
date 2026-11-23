@@ -28,19 +28,23 @@ JSON shape (`schemaVersion: kukeon.io/health/v1`):
 
 ## Report: `kuke health report submit -f <file>`
 
-A JSON or YAML document. Unknown fields are rejected.
+A `kind: HealthReport` document (`apiVersion: v1beta1`), JSON or YAML. Unknown
+fields are rejected, including the `schemaVersion` and top-level `id` of the
+report shape before reports became a kind.
 
-| Field            | Required | Notes                                                     |
-| ---------------- | -------- | --------------------------------------------------------- |
-| `id`             | no       | kukeond assigns one when omitted.                         |
-| `createdAt`      | no       | kukeond sets it when omitted.                             |
-| `since`, `until` | yes      | RFC3339; the digest window.                               |
-| `cell`           | yes      | `realm`, `space`, `stack`, `name` of the submitting cell. |
-| `summary`        | yes      | One sentence.                                             |
-| `findings`       | yes      | A list; `[]` is valid.                                    |
-| `body`           | no       | Markdown for a person.                                    |
+| Field                      | Required | Notes                                                        |
+| -------------------------- | -------- | ------------------------------------------------------------ |
+| `apiVersion`, `kind`       | no       | `v1beta1`, `HealthReport`; filled when omitted.              |
+| `metadata.name`            | no       | kukeond assigns one when omitted. A stored name is rejected. |
+| `metadata.realm`           | no       | Always `kuke-system`; any other realm is rejected.           |
+| `spec.createdAt`           | no       | kukeond sets it when omitted.                                |
+| `spec.since`, `spec.until` | yes      | RFC3339; the digest window.                                  |
+| `spec.cell`                | yes      | `realm`, `space`, `stack`, `name` of the submitting cell.    |
+| `spec.summary`             | yes      | One sentence.                                                |
+| `spec.findings`            | yes      | A list; `[]` is valid.                                       |
+| `spec.body`                | no       | Markdown for a person.                                       |
 
-Each finding:
+Each finding (`spec.findings[]`):
 
 | Field               | Required | Notes                                                              |
 | ------------------- | -------- | ------------------------------------------------------------------ |
@@ -55,4 +59,6 @@ Each finding:
 | `recurring`         | no       | Ignored on submission: kukeond computes it.                        |
 
 kukeond keeps the newest 50 reports. Read them back with `kuke health reports`
-and `kuke health report <id|latest> [-o markdown|json|yaml]`.
+and `kuke health report <name|latest> [-o markdown|json|yaml]`, or with the
+generic verbs `kuke get healthreports` and
+`kuke get healthreport <name|latest> [-o yaml|json]`.

@@ -133,7 +133,8 @@ func (c *Client) readHealthLog(ctx context.Context, digest *kukeonv1.HealthDiges
 
 func (c *Client) healthStore() *health.Store { return health.NewStore(c.ctrl.RunPath()) }
 
-// SubmitHealthReport implements kukeonv1.Client (issue #1509).
+// SubmitHealthReport implements kukeonv1.Client (issues #1509, #1619). It is
+// the same create path `kuke apply` of a HealthReport document takes.
 func (c *Client) SubmitHealthReport(
 	_ context.Context, report kukeonv1.HealthReport,
 ) (kukeonv1.HealthReport, error) {
@@ -148,4 +149,9 @@ func (c *Client) ListHealthReports(_ context.Context) ([]kukeonv1.HealthReportSu
 // ReadHealthReport implements kukeonv1.Client (issue #1509).
 func (c *Client) ReadHealthReport(_ context.Context, id string) (kukeonv1.HealthReport, error) {
 	return c.healthStore().Read(id)
+}
+
+// DeleteHealthReport implements kukeonv1.Client (issue #1619).
+func (c *Client) DeleteHealthReport(_ context.Context, name string) error {
+	return c.healthStore().Delete(name)
 }

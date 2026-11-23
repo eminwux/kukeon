@@ -198,6 +198,10 @@ func (FakeClient) ReadHealthReport(context.Context, string) (HealthReport, error
 	return HealthReport{}, ErrUnexpectedCall
 }
 
+func (FakeClient) DeleteHealthReport(context.Context, string) error {
+	return ErrUnexpectedCall
+}
+
 func (FakeClient) LogContainer(context.Context, v1beta1.ContainerDoc) (LogContainerResult, error) {
 	return LogContainerResult{}, ErrUnexpectedCall
 }

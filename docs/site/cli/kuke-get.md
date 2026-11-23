@@ -7,7 +7,7 @@ kuke get <resource> [NAME] [flags]
 kuke g   <resource> [NAME] [flags]      # alias
 ```
 
-Resources: `realm`, `space`, `stack`, `cell`, `container`, `image`, `blueprint`, `config`. Each subcommand also accepts its plural (`realms`, `spaces`, …, `images`, `blueprints`, `configs`) and a short alias (`r`, `sp`, `st`, `ce`, `co`, `img`, `bp`, `cfg`).
+Resources: `realm`, `space`, `stack`, `cell`, `container`, `image`, `blueprint`, `config`, `healthreport`. Each subcommand also accepts its plural (`realms`, `spaces`, …, `images`, `blueprints`, `configs`, `healthreports`) and a short alias (`r`, `sp`, `st`, `ce`, `co`, `img`, `bp`, `cfg`, `hr`).
 
 ## Common flags
 
@@ -22,16 +22,17 @@ Plus all [global flags](kuke.md). Every `kuke get <kind>` accepts the explicit `
 
 Each subcommand takes the flags that scope the query:
 
-| Subcommand             | Scope flags                                                                          |
-| ---------------------- | ------------------------------------------------------------------------------------ |
-| `get realm [name]`     | none (realms are top-level)                                                          |
-| `get space [name]`     | `--realm` (default `default`)                                                        |
-| `get stack [name]`     | `--realm`, `--space`                                                                 |
-| `get cell [name]`      | `--realm`, `--space`, `--stack`                                                      |
-| `get container [name]` | `--realm`, `--space`, `--stack`, `--cell`                                            |
-| `get image [ref]`      | `--realm` (omit for cross-realm listing; defaults to `default` on the describe path) |
-| `get blueprint [name]` | `--realm`, `--space`, `--stack` (no `--cell` — Blueprints are never cell-scoped)     |
-| `get config [name]`    | `--realm`, `--space`, `--stack` (no `--cell` — Configs are never cell-scoped)        |
+| Subcommand                        | Scope flags                                                                          |
+| --------------------------------- | ------------------------------------------------------------------------------------ |
+| `get realm [name]`                | none (realms are top-level)                                                          |
+| `get space [name]`                | `--realm` (default `default`)                                                        |
+| `get stack [name]`                | `--realm`, `--space`                                                                 |
+| `get cell [name]`                 | `--realm`, `--space`, `--stack`                                                      |
+| `get container [name]`            | `--realm`, `--space`, `--stack`, `--cell`                                            |
+| `get image [ref]`                 | `--realm` (omit for cross-realm listing; defaults to `default` on the describe path) |
+| `get blueprint [name]`            | `--realm`, `--space`, `--stack` (no `--cell` — Blueprints are never cell-scoped)     |
+| `get config [name]`               | `--realm`, `--space`, `--stack` (no `--cell` — Configs are never cell-scoped)        |
+| `get healthreport [name\|latest]` | none (a HealthReport always lives in `kuke-system`)                                  |
 
 All scope flags default to `default`. See the [realm default note](commands.md#convention-positional-arg--flags).
 
@@ -44,17 +45,20 @@ All scope flags default to `default`. See the [realm default note](commands.md#c
 
 Per-kind column contracts. The default table is what `kuke get <kind>` (no `-o wide`) emits; `-o wide` appends the listed extras.
 
-| Kind        | Default columns                                  | `-o wide` appends                             |
-| ----------- | ------------------------------------------------ | --------------------------------------------- |
-| `realm`     | `NAME STATE AGE`                                 | `NAMESPACE`                                   |
-| `space`     | `NAME REALM STATE AGE`                           | `EGRESS NET-DEFAULTS`                         |
-| `stack`     | `NAME REALM SPACE STATE AGE`                     | _(none — stack carries no wide-only signals)_ |
-| `cell`      | `NAME REALM SPACE STACK STATE SYNC AGE`          | `CONTAINERS BRIDGE DIVERGENCE`                |
-| `container` | `NAME REALM SPACE STACK CELL STATE RESTARTS AGE` | `IMAGE EXIT`                                  |
-| `image`     | `NAME REALM CREATED` (cross-realm default)       | `DIGEST`                                      |
-| `blueprint` | `NAME REALM SPACE STACK AGE`                     | _(none)_                                      |
-| `config`    | `NAME REALM SPACE STACK SCHEDULE NEXT`           | `CONNECTORS`                                  |
-| `secret`    | `NAME TYPE CONNECTOR REALM SPACE STACK CELL`     | `IDENTITY`                                    |
+| Kind           | Default columns                                                                 | `-o wide` appends                             |
+| -------------- | ------------------------------------------------------------------------------- | --------------------------------------------- |
+| `realm`        | `NAME STATE AGE`                                                                | `NAMESPACE`                                   |
+| `space`        | `NAME REALM STATE AGE`                                                          | `EGRESS NET-DEFAULTS`                         |
+| `stack`        | `NAME REALM SPACE STATE AGE`                                                    | _(none — stack carries no wide-only signals)_ |
+| `cell`         | `NAME REALM SPACE STACK STATE SYNC AGE`                                         | `CONTAINERS BRIDGE DIVERGENCE`                |
+| `container`    | `NAME REALM SPACE STACK CELL STATE RESTARTS AGE`                                | `IMAGE EXIT`                                  |
+| `image`        | `NAME REALM CREATED` (cross-realm default)                                      | `DIGEST`                                      |
+| `blueprint`    | `NAME REALM SPACE STACK AGE`                                                    | _(none)_                                      |
+| `config`       | `NAME REALM SPACE STACK SCHEDULE NEXT`                                          | `CONNECTORS`                                  |
+| `secret`       | `NAME TYPE CONNECTOR REALM SPACE STACK CELL`                                    | `IDENTITY`                                    |
+| `healthreport` | `ID CREATED FINDINGS RECURRING FILED SUMMARY` (the `kuke health reports` table) | _(none)_                                      |
+
+`kuke get healthreports` prints exactly what [`kuke health reports`](kuke-health.md#kuke-health-reports) prints, in every output format (a list is the report summaries). `kuke get healthreport <name>` — or `latest`, the newest report — prints one row; `-o yaml` / `-o json` print the stored [`HealthReport`](kuke-health.md#health-reports-are-a-kind) document.
 
 `SYNC` (`InSync`/`OutOfSync`/`-`) is computed for cells that carry a `kukeon.io/config=<name>` lineage label; non-lineage cells render `-`. The `-o wide` `DIVERGENCE` column expands an `OutOfSync` cell with a one-line summary of what diverged (image, env, mounts, …). See `kuke restart` for the reconcile verb.
 
@@ -122,6 +126,10 @@ sudo kuke get blueprints --realm kuke-system
 
 # Show one CellConfig as YAML
 sudo kuke get config kukeon-dev --realm kuke-system -o yaml
+
+# Stored health reports, newest first; the newest one as its HealthReport document
+kuke get healthreports
+kuke get healthreport latest -o yaml
 ```
 
 ## Label selector (`-l`/`--selector`)

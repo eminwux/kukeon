@@ -243,55 +243,101 @@ func TestClean(t *testing.T) {
 
 func validReport(at time.Time) kukeonv1.HealthReport {
 	return kukeonv1.HealthReport{
-		Since: at.Add(-time.Hour), Until: at, CreatedAt: at,
-		Cell:    kukeonv1.HealthCellRef{Realm: "default", Space: "default", Stack: "default", Name: "sweep"},
-		Summary: "one kukeon defect",
-		Findings: []kukeonv1.HealthFinding{{
-			Signature: "start cell failed: task <id>", Classification: kukeonv1.HealthClassKukeon,
-			Severity: kukeonv1.HealthSeverityError, Evidence: []string{"kuke get cell api -o yaml"},
-		}},
-		Body: "# Sweep\n",
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindHealthReport,
+		Metadata:   v1beta1.HealthReportMetadata{Realm: "kuke-system"},
+		Spec: v1beta1.HealthReportSpec{
+			Since: at.Add(-time.Hour), Until: at, CreatedAt: at,
+			Cell:    kukeonv1.HealthCellRef{Realm: "default", Space: "default", Stack: "default", Name: "sweep"},
+			Summary: "one kukeon defect",
+			Findings: []kukeonv1.HealthFinding{{
+				Signature: "start cell failed: task <id>", Classification: kukeonv1.HealthClassKukeon,
+				Severity: kukeonv1.HealthSeverityError, Evidence: []string{"kuke get cell api -o yaml"},
+			}},
+			Body: "# Sweep\n",
+		},
 	}
 }
 
 func TestValidateRejectsSchemaViolations(t *testing.T) {
 	at := time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC)
 	ok := validReport(at)
-	ok.ID = "r1"
+	ok.Metadata.Name = "r1"
 	if err := health.Validate(&ok); err != nil {
 		t.Fatalf("valid report rejected: %v", err)
 	}
 	for name, mutate := range map[string]func(*kukeonv1.HealthReport){
-		"id":             func(r *kukeonv1.HealthReport) { r.ID = "../escape" },
-		"reserved id":    func(r *kukeonv1.HealthReport) { r.ID = kukeonv1.HealthReportLatest },
-		"created":        func(r *kukeonv1.HealthReport) { r.CreatedAt = time.Time{} },
-		"window":         func(r *kukeonv1.HealthReport) { r.Since = time.Time{} },
-		"window order":   func(r *kukeonv1.HealthReport) { r.Until = r.Since.Add(-time.Second) },
-		"cell":           func(r *kukeonv1.HealthReport) { r.Cell.Name = "" },
-		"summary":        func(r *kukeonv1.HealthReport) { r.Summary = " " },
-		"findings":       func(r *kukeonv1.HealthReport) { r.Findings = nil },
-		"signature":      func(r *kukeonv1.HealthReport) { r.Findings[0].Signature = "" },
-		"classification": func(r *kukeonv1.HealthReport) { r.Findings[0].Classification = "ours" },
-		"severity":       func(r *kukeonv1.HealthReport) { r.Findings[0].Severity = "bad" },
-		"evidence":       func(r *kukeonv1.HealthReport) { r.Findings[0].Evidence = nil },
-		"issue scheme":   func(r *kukeonv1.HealthReport) { r.Findings[0].IssueURL = "http://example.test/1" },
-		"issue on workload": func(r *kukeonv1.HealthReport) {
-			r.Findings[0].Classification = kukeonv1.HealthClassWorkload
-			r.Findings[0].IssueURL = "https://github.com/o/r/issues/1"
+		"apiVersion":     func(r *kukeonv1.HealthReport) { r.APIVersion = "v1" },
+		"kind":           func(r *kukeonv1.HealthReport) { r.Kind = v1beta1.KindVolume },
+		"name":           func(r *kukeonv1.HealthReport) { r.Metadata.Name = "../escape" },
+		"reserved name":  func(r *kukeonv1.HealthReport) { r.Metadata.Name = kukeonv1.HealthReportLatest },
+		"realm":          func(r *kukeonv1.HealthReport) { r.Metadata.Realm = "default" },
+		"created":        func(r *kukeonv1.HealthReport) { r.Spec.CreatedAt = time.Time{} },
+		"window":         func(r *kukeonv1.HealthReport) { r.Spec.Since = time.Time{} },
+		"window order":   func(r *kukeonv1.HealthReport) { r.Spec.Until = r.Spec.Since.Add(-time.Second) },
+		"cell":           func(r *kukeonv1.HealthReport) { r.Spec.Cell.Name = "" },
+		"summary":        func(r *kukeonv1.HealthReport) { r.Spec.Summary = " " },
+		"findings":       func(r *kukeonv1.HealthReport) { r.Spec.Findings = nil },
+		"signature":      func(r *kukeonv1.HealthReport) { r.Spec.Findings[0].Signature = "" },
+		"classification": func(r *kukeonv1.HealthReport) { r.Spec.Findings[0].Classification = "ours" },
+		"severity":       func(r *kukeonv1.HealthReport) { r.Spec.Findings[0].Severity = "bad" },
+		"evidence":       func(r *kukeonv1.HealthReport) { r.Spec.Findings[0].Evidence = nil },
+		"issue scheme": func(r *kukeonv1.HealthReport) {
+			r.Spec.Findings[0].IssueURL = "http://example.test/1"
 		},
-		"duplicate signature": func(r *kukeonv1.HealthReport) { r.Findings = append(r.Findings, r.Findings[0]) },
+		"issue on workload": func(r *kukeonv1.HealthReport) {
+			r.Spec.Findings[0].Classification = kukeonv1.HealthClassWorkload
+			r.Spec.Findings[0].IssueURL = "https://github.com/o/r/issues/1"
+		},
+		"duplicate signature": func(r *kukeonv1.HealthReport) {
+			r.Spec.Findings = append(r.Spec.Findings, r.Spec.Findings[0])
+		},
 	} {
 		bad := validReport(at)
-		bad.ID = "r1"
+		bad.Metadata.Name = "r1"
 		mutate(&bad)
 		if err := health.Validate(&bad); !errors.Is(err, errdefs.ErrHealthReportInvalid) {
 			t.Errorf("%s: err = %v", name, err)
 		}
 	}
 	empty := validReport(at)
-	empty.ID, empty.Findings = "r2", []kukeonv1.HealthFinding{}
+	empty.Metadata.Name, empty.Spec.Findings = "r2", []kukeonv1.HealthFinding{}
 	if err := health.Validate(&empty); err != nil {
 		t.Fatalf("a report with no findings is valid: %v", err)
+	}
+	// The name kukeond assigns passes the name check.
+	assigned := validReport(at)
+	assigned.Metadata.Name = health.ReportID(at)
+	if err := health.Validate(&assigned); err != nil {
+		t.Fatalf("assigned name %q rejected: %v", assigned.Metadata.Name, err)
+	}
+}
+
+func TestValidateSubmissionFillsDaemonFields(t *testing.T) {
+	at := time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC)
+	report := validReport(at)
+	report.APIVersion, report.Kind, report.Metadata = "", "", v1beta1.HealthReportMetadata{}
+	report.Spec.CreatedAt = time.Time{}
+	if err := health.ValidateSubmission(report, at); err != nil {
+		t.Fatalf("a submission without name, realm and createdAt is valid: %v", err)
+	}
+	report.Metadata.Realm = "default"
+	if err := health.ValidateSubmission(report, at); !errors.Is(err, errdefs.ErrHealthReportInvalid) {
+		t.Fatalf("a report outside kuke-system: %v", err)
+	}
+}
+
+func TestDecodeIsStrict(t *testing.T) {
+	doc := "apiVersion: v1beta1\nkind: HealthReport\nmetadata: {name: r1}\nspec:\n  summary: s\n  findings: []\n"
+	report, err := health.Decode([]byte(doc))
+	if err != nil || report.Metadata.Name != "r1" || report.Spec.Summary != "s" {
+		t.Fatalf("decode = %+v, %v", report, err)
+	}
+	if _, err = health.Decode([]byte(doc + "  sumary: typo\n")); err == nil {
+		t.Fatal("an unknown field must be an error")
+	}
+	if _, err = health.Decode([]byte("schemaVersion: kukeon.io/health/v1\nid: r1\n")); err == nil {
+		t.Fatal("the pre-kind report shape must be rejected")
 	}
 }
 
@@ -300,6 +346,9 @@ func TestStoreSubmitListReadSurviveReopen(t *testing.T) {
 	at := time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC)
 	store := health.NewStore(runPath)
 	store.Now = func() time.Time { return at }
+	if want := filepath.Join(runPath, "data", "kuke-system", "healthreports"); store.Dir != want {
+		t.Fatalf("store dir = %s, want %s", store.Dir, want)
+	}
 
 	if _, ok, err := store.LastUntil(); ok || err != nil {
 		t.Fatalf("empty store: ok=%v err=%v", ok, err)
@@ -309,32 +358,49 @@ func TestStoreSubmitListReadSurviveReopen(t *testing.T) {
 	}
 
 	first := validReport(at)
-	first.CreatedAt = time.Time{} // assigned by the store
+	first.APIVersion, first.Kind, first.Metadata.Realm = "", "", "" // filled by the store
+	first.Spec.CreatedAt = time.Time{}                              // assigned by the store
 	stored, err := store.Submit(first)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.ID != health.ReportID(at) || !stored.CreatedAt.Equal(at) ||
-		stored.SchemaVersion != kukeonv1.HealthSchemaVersion || stored.Findings[0].Recurring {
+	if stored.Metadata.Name != health.ReportID(at) || !stored.Spec.CreatedAt.Equal(at) ||
+		stored.Metadata.Realm != "kuke-system" || stored.Kind != v1beta1.KindHealthReport ||
+		stored.APIVersion != v1beta1.APIVersionV1Beta1 || stored.Spec.Findings[0].Recurring {
 		t.Fatalf("stored = %+v", stored)
+	}
+	raw, err := os.ReadFile(filepath.Join(store.Dir, stored.Metadata.Name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "schemaVersion") || !strings.Contains(string(raw), "kind: HealthReport") {
+		t.Fatalf("stored document:\n%s", raw)
 	}
 
 	second := validReport(at.Add(time.Hour))
-	second.ID = "second"
-	second.Findings = append(second.Findings, kukeonv1.HealthFinding{
+	second.Metadata.Name = "second"
+	second.Spec.Findings = append(second.Spec.Findings, kukeonv1.HealthFinding{
 		Signature: "cell default/default/default/job Error", Classification: kukeonv1.HealthClassWorkload,
 		Severity: kukeonv1.HealthSeverityWarning, Evidence: []string{"exit code 3"},
 	})
-	second.Findings[0].Recurring = false
-	second.Findings[1].Recurring = true // the store decides, not the submitter
+	second.Spec.Findings[0].Recurring = false
+	second.Spec.Findings[1].Recurring = true // the store decides, not the submitter
 	if stored, err = store.Submit(second); err != nil {
 		t.Fatal(err)
 	}
-	if !stored.Findings[0].Recurring || stored.Findings[1].Recurring {
-		t.Fatalf("recurrence = %+v", stored.Findings)
+	if !stored.Spec.Findings[0].Recurring || stored.Spec.Findings[1].Recurring {
+		t.Fatalf("recurrence = %+v", stored.Spec.Findings)
 	}
-	if _, err = store.Submit(second); !errors.Is(err, errdefs.ErrHealthReportInvalid) {
-		t.Fatalf("duplicate id: %v", err)
+	if _, err = store.Submit(second); !errors.Is(err, errdefs.ErrHealthReportExists) {
+		t.Fatalf("duplicate name: %v", err)
+	}
+	invalid := validReport(at)
+	invalid.Metadata.Name, invalid.Spec.Summary = "invalid", ""
+	if _, err = store.Submit(invalid); !errors.Is(err, errdefs.ErrHealthReportInvalid) {
+		t.Fatalf("invalid report: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(store.Dir, "invalid")); !os.IsNotExist(statErr) {
+		t.Fatalf("an invalid report must write nothing: %v", statErr)
 	}
 
 	// A new Store over the same run path is what a restarted kukeond sees.
@@ -344,14 +410,70 @@ func TestStoreSubmitListReadSurviveReopen(t *testing.T) {
 		t.Fatalf("list = %+v err=%v", list, err)
 	}
 	latest, err := reopened.Read(kukeonv1.HealthReportLatest)
-	if err != nil || latest.ID != "second" || latest.Body != "# Sweep\n" {
+	if err != nil || latest.Metadata.Name != "second" || latest.Spec.Body != "# Sweep\n" {
 		t.Fatalf("latest = %+v err=%v", latest, err)
 	}
 	if until, ok, lastErr := reopened.LastUntil(); lastErr != nil || !ok || !until.Equal(at.Add(time.Hour)) {
 		t.Fatalf("LastUntil = %v %v %v", until, ok, lastErr)
 	}
 	if _, err = reopened.Read("missing"); !errors.Is(err, errdefs.ErrHealthReportNotFound) {
-		t.Fatalf("missing id: %v", err)
+		t.Fatalf("missing name: %v", err)
+	}
+}
+
+func TestStoreDelete(t *testing.T) {
+	at := time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC)
+	store := health.NewStore(t.TempDir())
+	for i, name := range []string{"older", "newer"} {
+		report := validReport(at.Add(time.Duration(i) * time.Hour))
+		report.Metadata.Name = name
+		if _, err := store.Submit(report); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.Delete(kukeonv1.HealthReportLatest); !errors.Is(err, errdefs.ErrHealthReportInvalid) {
+		t.Fatalf("delete latest: %v", err)
+	}
+	if err := store.Delete("../escape"); !errors.Is(err, errdefs.ErrHealthReportNotFound) {
+		t.Fatalf("delete unsafe name: %v", err)
+	}
+	if err := store.Delete("newer"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Delete("newer"); !errors.Is(err, errdefs.ErrHealthReportNotFound) {
+		t.Fatalf("delete twice: %v", err)
+	}
+	latest, err := store.Read(kukeonv1.HealthReportLatest)
+	if err != nil || latest.Metadata.Name != "older" {
+		t.Fatalf("latest after delete = %+v err=%v", latest, err)
+	}
+	// The last-report cursor follows the newest report still stored.
+	if until, ok, lastErr := store.LastUntil(); lastErr != nil || !ok || !until.Equal(at) {
+		t.Fatalf("LastUntil = %v %v %v", until, ok, lastErr)
+	}
+}
+
+func TestRemoveLegacyStore(t *testing.T) {
+	runPath := t.TempDir()
+	legacy := filepath.Join(runPath, "health", "reports")
+	if err := os.MkdirAll(legacy, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacy, "old.json"),
+		[]byte(`{"schemaVersion":"kukeon.io/health/v1","id":"old"}`), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := health.RemoveLegacyStore(runPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(runPath, "health")); !os.IsNotExist(err) {
+		t.Fatalf("legacy directory still present: %v", err)
+	}
+	if err := health.RemoveLegacyStore(runPath); err != nil {
+		t.Fatalf("an absent legacy directory is not an error: %v", err)
+	}
+	if list, err := health.NewStore(runPath).List(); err != nil || len(list) != 0 {
+		t.Fatalf("an old report must not be read: %+v %v", list, err)
 	}
 }
 

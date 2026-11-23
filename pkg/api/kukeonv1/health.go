@@ -16,11 +16,16 @@
 
 package kukeonv1
 
-import "time"
+import (
+	"time"
 
-// HealthSchemaVersion names the JSON shape of HealthDigest and HealthReport
-// (issue #1509). It changes only when a field is removed or changes meaning;
-// added fields keep the version.
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+)
+
+// HealthSchemaVersion names the JSON shape of HealthDigest (issue #1509). It
+// changes only when a field is removed or changes meaning; added fields keep
+// the version. A HealthReport is a v1beta1 kind and carries no schema version
+// (issue #1619).
 const HealthSchemaVersion = "kukeon.io/health/v1"
 
 // Health check statuses.
@@ -122,56 +127,18 @@ type HealthCell struct {
 }
 
 // HealthCellRef names the cell that submitted a report.
-type HealthCellRef struct {
-	Realm string `json:"realm" yaml:"realm"`
-	Space string `json:"space" yaml:"space"`
-	Stack string `json:"stack" yaml:"stack"`
-	Name  string `json:"name"  yaml:"name"`
-}
+type HealthCellRef = v1beta1.HealthCellRef
 
-// HealthReport is one triaged health sweep. kukeond stores the newest reports
-// as operational state; storing one files nothing anywhere.
-type HealthReport struct {
-	SchemaVersion string `json:"schemaVersion,omitempty" yaml:"schemaVersion,omitempty"`
-	// ID identifies the report. kukeond assigns one when a submission leaves
-	// it empty.
-	ID string `json:"id"                      yaml:"id"`
-	// CreatedAt is set by kukeond when a submission leaves it zero.
-	CreatedAt time.Time `json:"createdAt"               yaml:"createdAt"`
-	// Since and Until are the digest window the report covers.
-	Since time.Time `json:"since"                   yaml:"since"`
-	Until time.Time `json:"until"                   yaml:"until"`
-	// Cell is the cell that ran the sweep.
-	Cell     HealthCellRef   `json:"cell"                    yaml:"cell"`
-	Summary  string          `json:"summary"                 yaml:"summary"`
-	Findings []HealthFinding `json:"findings"                yaml:"findings"`
-	// Body is the report as markdown, for people.
-	Body string `json:"body,omitempty"          yaml:"body,omitempty"`
-}
+// HealthReport is one triaged health sweep: the v1beta1 HealthReport document
+// (issue #1619). kukeond stores the newest reports as operational state;
+// storing one files nothing anywhere.
+type HealthReport = v1beta1.HealthReportDoc
 
 // HealthFinding is one triaged finding of a report.
-type HealthFinding struct {
-	// Signature identifies the finding across reports: the digest's log
-	// signature, check name or cell identity it came from.
-	Signature      string `json:"signature"                   yaml:"signature"`
-	Classification string `json:"classification"              yaml:"classification"`
-	Severity       string `json:"severity"                    yaml:"severity"`
-	// Recurring is set by kukeond on submission: true when the previous
-	// stored report already carried a finding with the same signature.
-	Recurring bool   `json:"recurring"                   yaml:"recurring"`
-	Title     string `json:"title,omitempty"             yaml:"title,omitempty"`
-	// Count is how many times the finding occurred in the window, when the
-	// digest counted it (a log group's count). Zero means not counted.
-	Count int `json:"count,omitempty"             yaml:"count,omitempty"`
-	// Evidence is what supports the finding: command output, log samples.
-	Evidence []string `json:"evidence"                    yaml:"evidence"`
-	// SuggestedCommands are commands the reader may run; nothing runs them.
-	SuggestedCommands []string `json:"suggestedCommands,omitempty" yaml:"suggestedCommands,omitempty"`
-	// IssueURL is the issue filed for the finding, when filing is enabled.
-	IssueURL string `json:"issueUrl,omitempty"          yaml:"issueUrl,omitempty"`
-}
+type HealthFinding = v1beta1.HealthFinding
 
-// HealthReportSummary is one row of ListHealthReports.
+// HealthReportSummary is one row of ListHealthReports. ID is the report's
+// metadata.name.
 type HealthReportSummary struct {
 	ID        string    `json:"id"        yaml:"id"`
 	CreatedAt time.Time `json:"createdAt" yaml:"createdAt"`
@@ -183,7 +150,8 @@ type HealthReportSummary struct {
 	Filed     int       `json:"filed"     yaml:"filed"`
 }
 
-// HealthReportLatest is the id ReadHealthReport accepts for the newest report.
+// HealthReportLatest is the name ReadHealthReport accepts for the newest
+// report. No report may be stored under it.
 const HealthReportLatest = "latest"
 
 // ReadHealthDigestArgs is the wire request for ReadHealthDigest.
@@ -218,7 +186,8 @@ type ListHealthReportsReply struct {
 	Err    *APIError
 }
 
-// ReadHealthReportArgs is the wire request for ReadHealthReport.
+// ReadHealthReportArgs is the wire request for ReadHealthReport. ID is the
+// report's metadata.name, or HealthReportLatest.
 type ReadHealthReportArgs struct {
 	ID string
 }
@@ -227,4 +196,15 @@ type ReadHealthReportArgs struct {
 type ReadHealthReportReply struct {
 	Result HealthReport
 	Err    *APIError
+}
+
+// DeleteHealthReportArgs is the wire request for DeleteHealthReport. Name is
+// the report's metadata.name; HealthReportLatest is not resolved.
+type DeleteHealthReportArgs struct {
+	Name string
+}
+
+// DeleteHealthReportReply is the wire reply for DeleteHealthReport.
+type DeleteHealthReportReply struct {
+	Err *APIError
 }

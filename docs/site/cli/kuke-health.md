@@ -3,15 +3,16 @@
 ```
 kuke health [--since <duration|RFC3339|last-report>] [-o text|json|yaml] [--exit-code]
 kuke health reports [-o text|json|yaml]
-kuke health report <id|latest> [-o markdown|json|yaml]
+kuke health report <name|latest> [-o markdown|json|yaml]
 kuke health report submit -f <file> [--file-issues <owner>/<repo>]
 kuke health issue [--comment] -f <file>
 ```
 
 `kuke health` shows kukeond's **health digest**: host and state checks, the
 error-level entries of kukeond's own log, and the cells in a failed state. The
-subcommands read and write **health reports**, the triaged result of a
-majordomo [health sweep](../concepts/team.md#the-majordomo-health-sweep).
+subcommands read and write **health reports** — `kind: HealthReport`
+documents, the triaged result of a majordomo
+[health sweep](../concepts/team.md#the-majordomo-health-sweep).
 
 The digest is computed inside kukeond, by plain code with no model involved.
 `kuke` only asks for it over the daemon socket, so the answer describes the
@@ -132,70 +133,96 @@ meaning. New fields may be added without a version change.
 | `cells[].classification` | `kukeon` or `workload`                                                    |
 | `cells[].reason/message` | kukeond's own description of the state; absent when it recorded none.     |
 
+## Health reports are a kind
+
+A health report is a `v1beta1` **`HealthReport`** in the `kuke-system` realm.
+kukeond stores each report as the validated document under the system realm's
+metadata tree (`<run path>/data/kuke-system/healthreports/<name>`), so reports
+survive a kukeond restart and go with the realm when it is purged. They are
+operational state, not a system of record: storing a report files nothing
+anywhere. A report is immutable; it can be stored and deleted, never changed.
+
+The generic verbs work on reports as on any other kind:
+
+```bash
+kuke get healthreports                    # same as kuke health reports
+kuke get healthreport <name|latest>       # one report; -o yaml|json prints the document
+kuke apply -f report.yaml                 # same as kuke health report submit -f
+kuke delete healthreport <name>           # delete one report
+```
+
+kukeond keeps the newest 50 reports and drops older ones on each submission.
+
 ## kuke health reports
 
-Lists the reports kukeond stores, newest first: id, creation time, and how many
-findings each has, how many were recurring and how many were filed. `-o json`
-prints an array (`[]` when there are none).
+Lists the reports kukeond stores, newest first: name (the `ID` column),
+creation time, and how many findings each has, how many were recurring and how
+many were filed. `-o json` prints an array (`[]` when there are none).
+`kuke get healthreports` prints the same.
 
 ## kuke health report
 
-`kuke health report <id>` prints one report; `latest` selects the newest.
+`kuke health report <name>` prints one report; `latest` selects the newest.
 The default output is markdown for reading. `-o json` and `-o yaml` print the
-stored document.
-
-kukeond keeps the newest 50 reports and drops older ones on each submission.
-Reports are files under kukeond's run path, so they survive a kukeond restart.
-They are operational state, not a system of record: storing a report files
-nothing anywhere.
+stored `HealthReport` document.
 
 ## kuke health report submit
 
-`kuke health report submit -f <file>` validates a report document and stores
-it. `-f -` reads stdin. The document is JSON or YAML, and unknown fields are
-rejected.
+`kuke health report submit -f <file>` validates a `HealthReport` document and
+stores it, exactly as `kuke apply -f` does. `-f -` reads stdin. The document is
+JSON or YAML, and unknown fields are rejected.
 
 ```yaml
-since: 2026-11-17T09:00:00Z
-until: 2026-11-17T10:00:00Z
-cell: { realm: default, space: default, stack: default, name: sweep-1a2b3c }
-summary: One kukeon defect, one workload failure.
-findings:
-  - signature: "cell default/default/default/api Failed"
-    classification: kukeon
-    severity: error
-    title: "api fails to start: CNI attach error"
-    evidence:
-      - "status.reason: CreateFailed"
-    suggestedCommands:
-      - "kuke restart api --realm default --space default --stack default"
-body: |
-  # Health sweep
-  ...
+apiVersion: v1beta1
+kind: HealthReport
+metadata: { realm: kuke-system } # name is assigned when omitted
+spec:
+  since: 2026-11-17T09:00:00Z
+  until: 2026-11-17T10:00:00Z
+  cell: { realm: default, space: default, stack: default, name: sweep-1a2b3c }
+  summary: One kukeon defect, one workload failure.
+  findings:
+    - signature: "cell default/default/default/api Failed"
+      classification: kukeon
+      severity: error
+      title: "api fails to start: CNI attach error"
+      evidence:
+        - "status.reason: CreateFailed"
+      suggestedCommands:
+        - "kuke restart api --realm default --space default --stack default"
+  body: |
+    # Health sweep
+    ...
 ```
 
-| Field                          | Required | Notes                                                                       |
-| ------------------------------ | -------- | --------------------------------------------------------------------------- |
-| `id`                           | no       | kukeond assigns one when omitted. A duplicate id, or `latest`, is rejected. |
-| `createdAt`                    | no       | kukeond sets it when omitted.                                               |
-| `since`, `until`               | yes      | The digest window the report covers; `until` must not precede `since`.      |
-| `cell`                         | yes      | `realm`, `space`, `stack` and `name` of the submitting cell.                |
-| `summary`                      | yes      |                                                                             |
-| `findings`                     | yes      | A list; `[]` is valid.                                                      |
-| `body`                         | no       | Markdown.                                                                   |
-| `findings[].signature`         | yes      | Unique within the report. Identifies the finding across reports.            |
-| `findings[].classification`    | yes      | `kukeon`, `workload` or `unclear`.                                          |
-| `findings[].severity`          | yes      | `info`, `warning`, `error` or `critical`.                                   |
-| `findings[].evidence`          | yes      | At least one entry.                                                         |
-| `findings[].title`             | no       |                                                                             |
-| `findings[].count`             | no       | Occurrences in the window.                                                  |
-| `findings[].suggestedCommands` | no       | Commands for the reader. Nothing runs them.                                 |
-| `findings[].issueUrl`          | no       | An `https` URL, allowed only on a `kukeon` finding.                         |
-| `findings[].recurring`         | —        | Computed by kukeond; a submitted value is ignored.                          |
+| Field                               | Required | Notes                                                                                                                                                                                               |
+| ----------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apiVersion`, `kind`                | no       | `v1beta1` and `HealthReport`; filled when omitted.                                                                                                                                                  |
+| `metadata.name`                     | no       | kukeond assigns `<createdAt as 20060102T150405.000000000Z>` when omitted. A stored name, or `latest`, is rejected. Letters, digits, `.`, `_` and `-`, at most 128, starting with a letter or digit. |
+| `metadata.realm`                    | no       | Always `kuke-system`; filled when omitted, any other realm is rejected.                                                                                                                             |
+| `spec.createdAt`                    | no       | kukeond sets it when omitted.                                                                                                                                                                       |
+| `spec.since`, `spec.until`          | yes      | The digest window the report covers; `until` must not precede `since`.                                                                                                                              |
+| `spec.cell`                         | yes      | `realm`, `space`, `stack` and `name` of the submitting cell.                                                                                                                                        |
+| `spec.summary`                      | yes      |                                                                                                                                                                                                     |
+| `spec.findings`                     | yes      | A list; `[]` is valid.                                                                                                                                                                              |
+| `spec.body`                         | no       | Markdown.                                                                                                                                                                                           |
+| `spec.findings[].signature`         | yes      | Unique within the report. Identifies the finding across reports.                                                                                                                                    |
+| `spec.findings[].classification`    | yes      | `kukeon`, `workload` or `unclear`.                                                                                                                                                                  |
+| `spec.findings[].severity`          | yes      | `info`, `warning`, `error` or `critical`.                                                                                                                                                           |
+| `spec.findings[].evidence`          | yes      | At least one entry.                                                                                                                                                                                 |
+| `spec.findings[].title`             | no       |                                                                                                                                                                                                     |
+| `spec.findings[].count`             | no       | Occurrences in the window.                                                                                                                                                                          |
+| `spec.findings[].suggestedCommands` | no       | Commands for the reader. Nothing runs them.                                                                                                                                                         |
+| `spec.findings[].issueUrl`          | no       | An `https` URL, allowed only on a `kukeon` finding.                                                                                                                                                 |
+| `spec.findings[].recurring`         | —        | Computed by kukeond; a submitted value is ignored.                                                                                                                                                  |
 
 On submission kukeond marks a finding **recurring** when the previous stored
 report already carried the same signature. A hand-started sweep that overlaps a
 scheduled one therefore reports the same finding as recurring, not as new.
+
+A report carries no `schemaVersion`; reports stored before they became a kind
+(under `<run path>/health`) are not read or converted, and kukeond removes that
+directory when it starts.
 
 ### Filing issues (opt-in)
 

@@ -293,7 +293,7 @@ kukeon file itself.
 | Method | Path                       | Purpose                                                                                                                                   |
 | ------ | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET`  | `/api/health/reports`      | Stored reports, newest first.                                                                                                             |
-| `GET`  | `/api/health/reports/{id}` | One report; `latest` is the newest. `404` when there is none.                                                                             |
+| `GET`  | `/api/health/reports/{id}` | One report by `metadata.name`; `latest` is the newest. `404` when there is none. The `HealthReport` spec flattened, with `id`.            |
 | `POST` | `/api/health/sweep`        | Run one sweep. Body `{"config":{"name","realm","space","stack"}}`; only a config labelled as majordomo's `health-sweep` task is accepted. |
 
 ## Daemon logs

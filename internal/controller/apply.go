@@ -21,11 +21,13 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 
 	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/apply/parser"
 	applypkg "github.com/eminwux/kukeon/internal/controller/apply"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/health"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
@@ -327,6 +329,23 @@ func (b *Exec) ApplyDocuments(docs []parser.Document, team string) (ApplyResult,
 			resourceResult.Name = volume.Metadata.Name
 			reconcileResult, reconcileErr = applypkg.ReconcileVolume(b.runner, volume)
 
+		case v1beta1.KindHealthReport:
+			if doc.HealthReportDoc == nil {
+				resourceResult.Action = actionFailed
+				resourceResult.Error = errors.New("health report document is nil")
+				result.Resources = append(result.Resources, resourceResult)
+				continue
+			}
+			// A report is immutable and create-only (issue #1619): apply takes
+			// the same path as SubmitHealthReport — kukeond assigns the name
+			// and createdAt when they are left out, marks recurring findings,
+			// rejects a stored name, and keeps the newest reports.
+			resourceResult.Name = doc.HealthReportDoc.Metadata.Name
+			reconcileResult, reconcileErr = b.applyHealthReport(*doc.HealthReportDoc)
+			if reconcileErr == nil {
+				resourceResult.Name = reconcileResult.Name
+			}
+
 		default:
 			resourceResult.Action = actionFailed
 			resourceResult.Error = fmt.Errorf("%w: %s", errdefs.ErrUnknownKind, doc.Kind)
@@ -355,6 +374,23 @@ func (b *Exec) ApplyDocuments(docs []parser.Document, team string) (ApplyResult,
 	}
 
 	return result, nil
+}
+
+// applyHealthReport stores a HealthReport document through the health store.
+func (b *Exec) applyHealthReport(doc v1beta1.HealthReportDoc) (applypkg.ReconcileResult, error) {
+	stored, err := health.NewStore(b.opts.RunPath).Submit(doc)
+	if err != nil {
+		return applypkg.ReconcileResult{}, err
+	}
+	return applypkg.ReconcileResult{
+		Action: "created",
+		Kind:   string(v1beta1.KindHealthReport),
+		Name:   stored.Metadata.Name,
+		Details: map[string]string{
+			"realm":    stored.Metadata.Realm,
+			"findings": strconv.Itoa(len(stored.Spec.Findings)),
+		},
+	}, nil
 }
 
 // scopedRef identifies one Blueprint or Config by its scope-coordinate tuple

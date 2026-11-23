@@ -26,6 +26,7 @@ import (
 	"github.com/eminwux/kukeon/internal/daemon"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 type healthClientFake struct {
@@ -34,6 +35,7 @@ type healthClientFake struct {
 	request kukeonv1.HealthDigestRequest
 	report  kukeonv1.HealthReport
 	readID  string
+	deleted string
 	err     error
 }
 
@@ -48,7 +50,7 @@ func (h *healthClientFake) SubmitHealthReport(
 	_ context.Context, report kukeonv1.HealthReport,
 ) (kukeonv1.HealthReport, error) {
 	h.report = report
-	report.ID = "stored"
+	report.Metadata.Name = "stored"
 	return report, h.err
 }
 
@@ -58,7 +60,12 @@ func (h *healthClientFake) ListHealthReports(context.Context) ([]kukeonv1.Health
 
 func (h *healthClientFake) ReadHealthReport(_ context.Context, id string) (kukeonv1.HealthReport, error) {
 	h.readID = id
-	return kukeonv1.HealthReport{ID: "stored"}, h.err
+	return kukeonv1.HealthReport{Metadata: v1beta1.HealthReportMetadata{Name: "stored"}}, h.err
+}
+
+func (h *healthClientFake) DeleteHealthReport(_ context.Context, name string) error {
+	h.deleted = name
+	return h.err
 }
 
 func TestHealthRPCsForwardRequestsAndResults(t *testing.T) {
@@ -72,10 +79,10 @@ func TestHealthRPCsForwardRequestsAndResults(t *testing.T) {
 		t.Fatalf("digest: reply=%+v err=%v", digestReply, err)
 	}
 
-	submitted := kukeonv1.HealthReport{Summary: "s", Until: time.Unix(10, 0).UTC()}
+	submitted := kukeonv1.HealthReport{Spec: v1beta1.HealthReportSpec{Summary: "s", Until: time.Unix(10, 0).UTC()}}
 	submitReply := &kukeonv1.SubmitHealthReportReply{}
 	if err := svc.SubmitHealthReport(&kukeonv1.SubmitHealthReportArgs{Report: submitted}, submitReply); err != nil ||
-		submitReply.Err != nil || submitReply.Result.ID != "stored" || !reflect.DeepEqual(core.report, submitted) {
+		submitReply.Err != nil || submitReply.Result.Metadata.Name != "stored" || !reflect.DeepEqual(core.report, submitted) {
 		t.Fatalf("submit: reply=%+v err=%v", submitReply, err)
 	}
 
@@ -87,13 +94,21 @@ func TestHealthRPCsForwardRequestsAndResults(t *testing.T) {
 
 	readReply := &kukeonv1.ReadHealthReportReply{}
 	if err := svc.ReadHealthReport(&kukeonv1.ReadHealthReportArgs{ID: "latest"}, readReply); err != nil ||
-		readReply.Result.ID != "stored" || core.readID != "latest" {
+		readReply.Result.Metadata.Name != "stored" || core.readID != "latest" {
 		t.Fatalf("read: reply=%+v err=%v", readReply, err)
+	}
+
+	deleteReply := &kukeonv1.DeleteHealthReportReply{}
+	if err := svc.DeleteHealthReport(&kukeonv1.DeleteHealthReportArgs{Name: "stored"}, deleteReply); err != nil ||
+		deleteReply.Err != nil || core.deleted != "stored" {
+		t.Fatalf("delete: reply=%+v err=%v", deleteReply, err)
 	}
 }
 
 func TestHealthRPCsSurfaceSentinels(t *testing.T) {
-	for _, sentinel := range []error{errdefs.ErrHealthReportNotFound, errdefs.ErrHealthReportInvalid} {
+	for _, sentinel := range []error{
+		errdefs.ErrHealthReportNotFound, errdefs.ErrHealthReportInvalid, errdefs.ErrHealthReportExists,
+	} {
 		svc := daemon.NewKukeonV1Service(context.Background(), discardLogger(), &healthClientFake{err: sentinel})
 		readReply := &kukeonv1.ReadHealthReportReply{}
 		if err := svc.ReadHealthReport(&kukeonv1.ReadHealthReportArgs{ID: "x"}, readReply); err != nil {

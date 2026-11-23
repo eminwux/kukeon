@@ -650,6 +650,9 @@ kuke health --since last-report --exit-code      # 0 clean, 2 findings, 1 failur
 kuke health report submit -f report.yaml         # validate and store a triaged report
 kuke health reports                              # stored reports, newest first
 kuke health report latest                        # one report as markdown
+kuke get healthreports                           # the same list, as a kind
+kuke get healthreport latest -o yaml             # the stored HealthReport document
+kuke delete healthreport <name>                  # delete one report
 ```
 
 **Invariants.**
@@ -659,8 +662,8 @@ kuke health report latest                        # one report as markdown
 - Error-level kukeond log entries in the window are grouped by a signature with timestamps, IDs and numbers masked; each group reports count, first/last seen and a sample. The default window is one hour; `--since last-report` starts at the newest report's `until`, falling back to one hour.
 - `Failed` cells are tagged `kukeon` and `Error` cells `workload`, each with full scope and since-time.
 - `--exit-code` exits 0 on a clean digest and 2 on findings, printing nothing to stderr in either case; any command failure exits 1. Without the flag, findings exit 0.
-- `report submit` rejects a document that fails the schema (unknown field, missing window, cell, summary or findings, a finding without signature, classification, severity or evidence) and stores nothing. kukeond assigns `id` and `createdAt` when omitted and sets `recurring` itself from the previous report.
-- kukeond keeps the newest 50 reports; they survive a daemon restart. Storing a report files nothing.
+- A report is a `v1beta1` `kind: HealthReport` in the `kuke-system` realm. `report submit -f` and `kuke apply -f` take the same create path: both reject a document that fails validation (unknown field, a realm other than `kuke-system`, missing window, cell, summary or findings, a finding without signature, classification, severity or evidence) and store nothing. kukeond assigns `metadata.name` and `spec.createdAt` when omitted and sets `recurring` itself from the previous report. A report is immutable: a stored name is rejected.
+- kukeond keeps the newest 50 reports under the system realm's metadata tree; they survive a daemon restart. Storing a report files nothing. `kuke get healthreports` prints what `kuke health reports` prints; `kuke delete healthreport <name>` removes one (`latest` is not resolved for a delete). Reports from before the kind (`<run path>/health`) are not read: kukeond removes that directory at start.
 - `--file-issues <owner>/<repo>` on `report submit` is the only path that leaves the host, needs `GH_TOKEN` (set by the `github` connector when the install binds the `gh-token` secret to majordomo), files `kukeon` findings only, and still stores the report when filing fails (exit 1); the missing-token error names `GH_TOKEN` and the opt-in.
 - `kuke health issue -f <draft>` renders a diagnosed kukeon defect as JSON (`title`, `body`, `comment`, `marker`) with the same sanitizer, title format and signature marker as `--file-issues`, files nothing, and refuses a draft not classified `kukeon` (exit 1).
 - `kuke health issue -f <draft>` accepts the optional `expected`, `actual`, `rootCause`, `suggestedFix` and `acceptance` fields and renders each as its own sanitized body section, omitting empty ones, so a draft without them renders unchanged; `reproduction` renders as one fenced block and the body still ends with the marker.

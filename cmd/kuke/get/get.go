@@ -23,6 +23,7 @@ import (
 	cellcmd "github.com/eminwux/kukeon/cmd/kuke/get/cell"
 	configcmd "github.com/eminwux/kukeon/cmd/kuke/get/config"
 	containercmd "github.com/eminwux/kukeon/cmd/kuke/get/container"
+	healthreportcmd "github.com/eminwux/kukeon/cmd/kuke/get/healthreport"
 	imagecmd "github.com/eminwux/kukeon/cmd/kuke/get/image"
 	realmcmd "github.com/eminwux/kukeon/cmd/kuke/get/realm"
 	secretcmd "github.com/eminwux/kukeon/cmd/kuke/get/secret"
@@ -40,7 +41,7 @@ func NewGetCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "get [name]",
 		Aliases: []string{"g"},
-		Short:   "Get or list Kukeon resources (realm, space, stack, cell, container, image, secret, blueprint, volume, config)",
+		Short:   "Get or list Kukeon resources (realm, space, stack, cell, container, image, secret, blueprint, volume, config, healthreport)",
 		Run: func(cmd *cobra.Command, _ []string) {
 			_ = cmd.Help()
 		},
@@ -67,6 +68,7 @@ func NewGetCmd() *cobra.Command {
 		blueprintcmd.NewBlueprintCmd(),
 		volumecmd.NewVolumeCmd(),
 		configcmd.NewConfigCmd(),
+		healthreportcmd.NewHealthReportCmd(),
 	)
 
 	return cmd
@@ -76,6 +78,7 @@ func NewGetCmd() *cobra.Command {
 func completeGetSubcommands(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	subcommands := []string{
 		"realm", "space", "stack", "cell", "container", "image", "secret", "blueprint", "volume", "config",
+		"healthreport",
 	}
 
 	if toComplete == "" {
