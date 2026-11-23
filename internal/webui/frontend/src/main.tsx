@@ -9,6 +9,8 @@ import { scheduleText, type Schedule, type ScheduleStatus } from "./schedule-for
 import { when } from "./schedule";
 import { TerminalWorkspace, useTerminalSessions, type TerminalManager } from "./terminal";
 import { CellSidebar } from "./cell-sidebar";
+import { useCellFilter } from "./cell-filter";
+import { matchesState } from "./cells.mjs";
 import { useInventory, type Inventory, type InventoryResource, type Doc, type RuntimeStatus } from "./inventory";
 import { apiPath, catalogTitles, daemonLink, homeLink, imagesLink, kinds, overviewLink, titles, readRoute, resourceLink, listLink, newCellLink, workspaceLink, type Route } from "./routes";
 import { viewOf } from "./views.mjs";
@@ -96,30 +98,35 @@ function SpaceCIDR({ subnet }: { subnet?: Resource<SpaceNetwork> }) {
   if (subnet?.error) return <span className="cidr-error" title={subnet.error.message}>Unavailable</span>;
   return <span className="description" aria-label="Loading subnet">…</span>;
 }
-function ResourceList({ depth, inventory, parent, operations, onLifecycleAction, onParentAction }: {
+function ResourceList({ depth, inventory, parent, state: initialState, operations, onLifecycleAction, onParentAction }: {
   depth: number;
   inventory: Resource<Inventory>;
   parent: string[];
+  // The Cells table's State filter, preselected by ?state= (#1635).
+  state?: string;
   operations: Record<string, LifecycleFeedback>;
   onLifecycleAction: (scope: string[], action: LifecycleAction, state?: string, options?: PurgeOptions) => void;
   onParentAction: (scope: string[], action: ParentAction, options: PurgeOptions) => void;
 }) {
   const [search, setSearch] = useState("");
   const [realm, setRealm] = useState("");
+  const [state, setState] = useState(depth === 3 ? initialState ?? "" : "");
   const [page, setPage] = useState(0);
   const rows = inventory.data?.rows[depth] ?? [];
   const scoped = rows.filter(row => parent.every((name, i) => row.scope[i] === name));
-  const filtered = scoped.filter(row => (!realm || row.scope[0] === realm) && row.scope.join(" / ").toLowerCase().includes(search.toLowerCase()));
+  const filtered = scoped.filter(row => (!realm || row.scope[0] === realm) && (depth !== 3 || matchesState(row.doc.status?.state, state)) && row.scope.join(" / ").toLowerCase().includes(search.toLowerCase()));
+  // All states, Active, Stopped or exited, then each state present in the rows (and a preselected one).
+  const states = [...new Set([...rows.map(row => row.doc.status?.state || ""), ...(state && !["active", "inactive"].includes(state) ? [state] : [])].filter(Boolean))].sort();
   const pageSize = 25;
   const currentPage = Math.min(page, Math.max(0, Math.ceil(filtered.length / pageSize) - 1));
   const shown = filtered.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
   // The Spaces table reads each visible Space's subnet: a Space document carries no CIDR.
   const subnets = useSpaceSubnets(depth === 1 ? shown.map(row => row.scope) : [], inventory.data?.updatedAt ?? "");
   return <section className="panel" aria-label={`${titles[depth]} list`}>
-    <div className="list-controls"><label className="search-field">Search<input type="search" placeholder={`Search ${titles[depth].toLowerCase()}…`} value={search} onChange={e => { setSearch(e.target.value); setPage(0); }} /></label>{depth > 0 && <label>Realm<select aria-label="Filter by realm" value={realm} onChange={e => { setRealm(e.target.value); setPage(0); }}><option value="">All realms</option>{inventory.data?.rows[0].map(row => <option key={row.scope[0]}>{row.scope[0]}</option>)}</select></label>}<span className="result-count">{filtered.length} results</span></div>
+    <div className="list-controls"><label className="search-field">Search<input type="search" placeholder={`Search ${titles[depth].toLowerCase()}…`} value={search} onChange={e => { setSearch(e.target.value); setPage(0); }} /></label>{depth > 0 && <label>Realm<select aria-label="Filter by realm" value={realm} onChange={e => { setRealm(e.target.value); setPage(0); }}><option value="">All realms</option>{inventory.data?.rows[0].map(row => <option key={row.scope[0]}>{row.scope[0]}</option>)}</select></label>}{depth === 3 && <label>State<select aria-label="Filter by state" value={state} onChange={e => { setState(e.target.value); setPage(0); }}><option value="">All states</option><option value="active">Active</option><option value="inactive">Stopped or exited</option>{states.map(value => <option key={value} value={value}>{value}</option>)}</select></label>}<span className="result-count">{filtered.length} results</span></div>
     {parent.length > 0 && <p className="scope-filter">Scope: {parent.join(" / ")} <a href={listLink(depth)}>Clear scope</a></p>}
     <div className="table-scroll"><table className="stackable"><thead><tr><th>Name</th><th>State</th>{depth === 1 && <th>CIDR</th>}{depth > 0 && <th>Scope</th>}<th><span className="sr-only">Actions</span></th></tr></thead><tbody>{shown.map(row => <tr key={JSON.stringify(row.scope)}><td data-label="Name"><a className="resource-name" href={resourceLink(row.scope)}>{row.doc.metadata.name}</a></td><td data-label="State"><StateBadge state={row.doc.status?.state} />{depth === 3 && <DriftBadge status={row.doc.status} />}{depth === 3 && scheduledRun(row.doc) && <span className="badge scheduled-badge" title={`Scheduled run of Config ${scheduledRun(row.doc)!.config}`}>Scheduled</span>}{depth === 3 && failureStates.includes(row.doc.status?.state ?? "") && <AskMajordomo question={cellQuestion(row.scope, row.doc.status)} subject={`cell ${row.scope.join(" / ")}`} />}</td>{depth === 1 && <td className="space-cidr mono-id" data-label="CIDR"><SpaceCIDR subnet={subnets[JSON.stringify(row.scope)]} /></td>}{depth > 0 && <td className="scope-cell" data-label="Scope"><ScopePath parts={row.scope.slice(0, -1)} /></td>}<td className="row-actions">{depth === 3 ? <CellRowActions scope={row.scope} state={row.doc.status?.state} operation={operations[JSON.stringify(row.scope)]} onAction={onLifecycleAction} /> : <ParentRowActions scope={row.scope} counts={descendantCounts(inventory.data?.rows ?? [], row.scope)} allowed={parentActionsAllowed(row.scope)} operation={operations[JSON.stringify(row.scope)]} onAction={onParentAction} />}</td></tr>)}</tbody></table></div>
-    {!filtered.length && <div className="empty-state"><h3>{inventory.loading ? "Loading resources…" : inventory.error || inventory.data?.failures.length ? "Resources could not be fully loaded" : scoped.length ? "No matching resources" : `No ${titles[depth].toLowerCase()} found`}</h3><p>{search || realm ? "Try another search or clear the filters." : "Refresh to retrieve the latest resource state."}</p></div>}
+    {!filtered.length && <div className="empty-state"><h3>{inventory.loading ? "Loading resources…" : inventory.error || inventory.data?.failures.length ? "Resources could not be fully loaded" : scoped.length ? "No matching resources" : `No ${titles[depth].toLowerCase()} found`}</h3><p>{search || realm || state ? "Try another search or clear the filters." : "Refresh to retrieve the latest resource state."}</p></div>}
     <div className="pagination"><span>{filtered.length ? `${currentPage * pageSize + 1}–${Math.min((currentPage + 1) * pageSize, filtered.length)} of ${filtered.length}` : "0 results"}</span><button disabled={!currentPage} onClick={() => setPage(currentPage - 1)}>Previous</button><button disabled={(currentPage + 1) * pageSize >= filtered.length} onClick={() => setPage(currentPage + 1)}>Next</button></div>
   </section>;
 }
@@ -326,6 +333,7 @@ function App() {
   // The open connector's display title, reported by the Connectors page once its catalog has loaded.
   const [connectorTitle, setConnectorTitle] = useState<{ name: string; title: string }>();
   const sidebar = useSidebarLayout();
+  const cellFilter = useCellFilter();
   const menuToggle = useRef<HTMLButtonElement>(null);
   const sidebarClose = useRef<HTMLButtonElement>(null);
   const restoreMenuFocus = useRef(false);
@@ -675,7 +683,7 @@ function App() {
           <SidebarToggle collapsed={false} onToggle={() => sidebar.setCollapsed(true)} />
         </div>
         <MajordomoSidebarEntry major={major} dock={dock} />
-        {view === "workbench" ? <CellSidebar inventory={inventory} selectedScope={cellScreenScope ?? []} terminalStates={terminals.cellStates} /> : <ManageNav route={route} />}
+        {view === "workbench" ? <CellSidebar inventory={inventory} selectedScope={cellScreenScope ?? []} terminalStates={terminals.cellStates} filter={cellFilter} /> : <ManageNav route={route} />}
         <section className="connection" aria-label="Daemon connection">
           <div className="connection-heading">
             <p className="status" role="status"><span className={`dot ${daemonTone}`} aria-hidden="true" />{daemonStatus}</p>
@@ -717,7 +725,7 @@ function App() {
       <div className={`workspace-content ${isWorkspace ? "cell-workspace-content" : ""}${cellTerminalActive ? " cell-screen-content" : ""}`}>
         {!cellScreenScope && <div className="page-heading"><h1 tabIndex={-1}>{heading}</h1>{headingContext && <p className="page-context mono-id">{headingContext}</p>}</div>}
         <CellDetailsScreen title={heading ?? "Cell"} view={cellView} scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} operations={operations} onLifecycleAction={runCellLifecycle} dockedCells={dockedCells} onOpenDock={() => dock.setOpen(true)} />
-        {isWorkspace ? null : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "new-config" ? <Suspense fallback={<p role="status">Loading Config creation form…</p>}><NewConfigPage key={JSON.stringify(route.blueprint ?? [])} revision={revision} inventory={inventory} blueprintScope={route.blueprint} onCreated={() => setRevision(value => value + 1)} /></Suspense> : route.view === "new-secret" ? <NewSecretPage inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : connectorsView ? <Suspense fallback={<p role="status">Loading connectors…</p>}><ConnectorsPage name={route.scope[0]} target={route.target} action={route.action} identity={route.identity} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} onTitle={setConnectorTitle} /></Suspense> : teamsView ? <Suspense fallback={<p role="status">Loading teams…</p>}><TeamsPage name={route.scope[0]} revision={revision} onChanged={() => setRevision(value => value + 1)} /></Suspense> : route.view === "health" ? <HealthPage revision={revision} major={major} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} edit={!!route.edit} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} operations={operations} onLifecycleAction={runCellLifecycle} onParentAction={runParentAction} /> : <Dashboard inventory={inventory} />}
+        {isWorkspace ? null : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "new-config" ? <Suspense fallback={<p role="status">Loading Config creation form…</p>}><NewConfigPage key={JSON.stringify(route.blueprint ?? [])} revision={revision} inventory={inventory} blueprintScope={route.blueprint} onCreated={() => setRevision(value => value + 1)} /></Suspense> : route.view === "new-secret" ? <NewSecretPage inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : connectorsView ? <Suspense fallback={<p role="status">Loading connectors…</p>}><ConnectorsPage name={route.scope[0]} target={route.target} action={route.action} identity={route.identity} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} onTitle={setConnectorTitle} /></Suspense> : teamsView ? <Suspense fallback={<p role="status">Loading teams…</p>}><TeamsPage name={route.scope[0]} revision={revision} onChanged={() => setRevision(value => value + 1)} /></Suspense> : route.view === "health" ? <HealthPage revision={revision} major={major} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} edit={!!route.edit} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent) + (route.state ?? "")} depth={depth} inventory={inventory} parent={route.parent} state={route.state} operations={operations} onLifecycleAction={runCellLifecycle} onParentAction={runParentAction} /> : <Dashboard inventory={inventory} />}
         <footer>Daemon inventory · {inventory.data ? <>Last refreshed <time dateTime={inventory.data.updatedAt}>{new Date(inventory.data.updatedAt).toLocaleTimeString()}</time></> : "Not refreshed yet"} · Refresh to retrieve the latest state.</footer>
       </div>
     </main>

@@ -4,6 +4,7 @@ import { homeLink, workspaceLink } from "./routes";
 import { stateTone } from "./status";
 import { Icon } from "./icons";
 import type { View } from "./views.mjs";
+import { activeCells } from "./cells.mjs";
 
 const collapsedKey = "kukeon-sidebar-collapsed";
 const widthKey = "kukeon-sidebar-width";
@@ -117,7 +118,8 @@ export function SidebarRail({ view, inventory, selectedScope, connection, onExpa
   connection: { status: string; tone: string; info: ReturnType<typeof versionInfo> };
   onExpand: () => void;
 }): ReactNode {
-  const cells = inventory.data?.rows[3] ?? [];
+  // Like the Workbench sidebar, the rail lists active cells and the open one (#1635).
+  const cells = activeCells(inventory.data?.rows[3] ?? [], selectedScope);
   const tooltip = `Daemon: ${connection.status} · ${connection.info.summary}`;
   return <div className="sidebar-rail">
     <a className="rail-brand" href={homeLink} aria-label="kukeon home" title="kukeon"><BrandMark /></a>
