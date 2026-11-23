@@ -43,9 +43,10 @@ const SystemTeamName = "kuke"
 
 // MajordomoSource is the source the kuke team reads its majordomo role and
 // harnesses from, and the one kuke team init registers in a realm's first
-// TeamDefaults. It has no clonePath there: only the kuke team clones it.
+// TeamDefaults. It has no clonePath there: only the kuke team clones it. It is
+// pinned to this binary's own revision (KukeonSource, #1631).
 func MajordomoSource() Source {
-	return Source{Name: "kukeon", URL: "github.com/eminwux/kukeon", Branch: "main"}
+	return KukeonSource()
 }
 
 // MajordomoHarnesses are the shipped harnesses of the kukeon source, the ones

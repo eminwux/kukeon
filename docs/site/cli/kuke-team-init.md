@@ -49,8 +49,8 @@ declaration. Recorded secret bindings are not kept by `--force`: it starts
 again from the initial declaration.
 
 When the `default` realm has no `TeamDefaults`, init creates one in the same
-apply, with the `kukeon` source and its `codex` and `claude` harnesses and no
-default roles, so a project team needs only roles. An existing `TeamDefaults`
+apply, with the `kukeon` source (at the same revision as the `kuke` team, below)
+and its `codex` and `claude` harnesses and no default roles, so a project team needs only roles. An existing `TeamDefaults`
 is never changed, with or without `--force`. See
 [Sources and defaults](../concepts/team.md#sources-and-defaults).
 
@@ -76,7 +76,7 @@ spec:
   sources:
     - name: kukeon
       url: github.com/eminwux/kukeon
-      branch: main
+      tag: v0.10.0 # the revision this kuke was built from
       clonePath: /home/user/kukeon-src
   roles:
     - name: majordomo
@@ -93,6 +93,16 @@ spec:
       source: kukeon
       path: team/harnesses/claude
 ```
+
+The `kukeon` source is pinned to the revision the running `kuke` was built
+from, because `kuke` reads exactly one schema version of the documents it
+fetches: a release build pins its tag, a development build pins the clean
+commit it was built from, and only a build that knows neither (a dirty tree,
+or no VCS stamp) falls back to `branch: main`. When a fetched document is
+rejected anyway, the error names each fetched source with its URL and
+revision. A source revision and the binary then disagree on schema version.
+A stored `kuke` team (`--reapply`) and an existing `TeamDefaults` keep the
+revision they were stored with.
 
 This applies the shared blueprints `codex` and `claude` — one per harness ×
 security profile, realm-wide, see [Teams](../concepts/team.md#shared-blueprints) —

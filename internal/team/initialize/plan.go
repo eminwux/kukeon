@@ -183,7 +183,7 @@ func plan(ctx context.Context, client Client, req request) (*Plan, error) {
 		Scope:   compose.Scope{Realm: team.Metadata.Realm},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("preflight composition: %w", err)
+		return nil, compositionError(err, effective.Sources, trees.trees)
 	}
 	if len(composed.Pairs) == 0 {
 		return nil, emptySelection(req)
