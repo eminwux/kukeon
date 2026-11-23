@@ -138,13 +138,13 @@ func AddSource(ctx context.Context, opts SourceOptions) (DefaultsChange, error) 
 		source.ClonePath = "/home/user/" + source.Name
 	}
 	contents.Source = source
-	action := "created"
+	action := actionCreated
 	list := defaults.Spec.Defaults.Sources
 	if i := slices.IndexFunc(list, func(s config.Source) bool { return s.Name == source.Name }); i >= 0 {
 		list = slices.Clone(list)
 		source.Git = list[i].Git
 		list[i] = source
-		action = "updated"
+		action = actionUpdated
 	} else {
 		list = append(slices.Clone(list), source)
 	}
@@ -260,7 +260,7 @@ func SetDefaults(ctx context.Context, opts Options, roles, harnesses []string) (
 		defaults.Spec.Defaults.Harnesses = scratch.Spec.Harnesses
 	}
 	change, err := writeDefaults(ctx, opts.Client, defaults)
-	change.Action = "updated"
+	change.Action = actionUpdated
 	return change, err
 }
 
@@ -444,9 +444,9 @@ func ApplyDefaults(ctx context.Context, opts Options, raw []byte) (DefaultsChang
 		return DefaultsChange{}, err
 	}
 	change, err := writeDefaults(ctx, opts.Client, defaults)
-	change.Action = "updated"
+	change.Action = actionUpdated
 	if !found {
-		change.Action = "created"
+		change.Action = actionCreated
 	}
 	return change, err
 }

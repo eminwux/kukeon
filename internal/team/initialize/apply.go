@@ -59,8 +59,13 @@ type Client interface {
 	ApplyDocumentsForTeam(context.Context, []byte, string) (kukeonv1.ApplyDocumentsResult, error)
 }
 
-// actionPruned is the apply action of a document a team apply deleted.
-const actionPruned = "pruned"
+// Apply actions, as kukeond reports them and as a TeamDefaults change is
+// reported: a document a team apply deleted, created or changed.
+const (
+	actionPruned  = "pruned"
+	actionCreated = "created"
+	actionUpdated = "updated"
+)
 
 var _ Client = (kukeonv1.Client)(nil)
 
@@ -732,7 +737,7 @@ func checkResults(result kukeonv1.ApplyDocumentsResult, expected int, command st
 		switch {
 		case resource.Action == "failed" || resource.Error != "":
 			failures = append(failures, fmt.Sprintf("%s %s: %s", resource.Kind, resource.Name, resource.Error))
-		case resource.Action == "created" || resource.Action == "updated" || resource.Action == "unchanged":
+		case resource.Action == actionCreated || resource.Action == actionUpdated || resource.Action == "unchanged":
 			accepted++
 		case resource.Action != actionPruned:
 			failures = append(
