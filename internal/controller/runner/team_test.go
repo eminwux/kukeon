@@ -200,3 +200,49 @@ func TestTeamStore_RealmPurgeRemovesTeams(t *testing.T) {
 		})
 	}
 }
+
+// TestTeamStore_RejectsUnsafeRefs pins the runner-side path guard: a team or
+// realm name that is not a single local path segment never reaches the
+// filesystem, even if a caller skipped the controller's validation.
+func TestTeamStore_RejectsUnsafeRefs(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+
+	refs := []struct{ realm, name string }{
+		{"default", "../escape"},
+		{"default", "a/b"},
+		{"default", ".."},
+		{"default", ""},
+		{"..", "alpha"},
+		{"/abs", "alpha"},
+		{"default", `a\b`},
+	}
+	for _, ref := range refs {
+		team := testTeam(ref.realm, ref.name, "x")
+		if _, err := r.WriteTeam(team); !errors.Is(err, errdefs.ErrInvalidTeam) {
+			t.Errorf("WriteTeam(%q/%q) error = %v, want ErrInvalidTeam", ref.realm, ref.name, err)
+		}
+		if _, err := r.GetTeam(team); !errors.Is(err, errdefs.ErrInvalidTeam) {
+			t.Errorf("GetTeam(%q/%q) error = %v, want ErrInvalidTeam", ref.realm, ref.name, err)
+		}
+		if err := r.DeleteTeam(team); !errors.Is(err, errdefs.ErrInvalidTeam) {
+			t.Errorf("DeleteTeam(%q/%q) error = %v, want ErrInvalidTeam", ref.realm, ref.name, err)
+		}
+		defaults := intmodel.TeamDefaults{
+			Metadata: intmodel.TeamMetadata{Name: ref.name, Realm: ref.realm}, Document: []byte("x"),
+		}
+		if _, err := r.WriteTeamDefaults(defaults); !errors.Is(err, errdefs.ErrInvalidTeam) {
+			t.Errorf("WriteTeamDefaults(%q/%q) error = %v, want ErrInvalidTeam", ref.realm, ref.name, err)
+		}
+		if _, err := r.GetTeamDefaults(defaults); !errors.Is(err, errdefs.ErrInvalidTeam) {
+			t.Errorf("GetTeamDefaults(%q/%q) error = %v, want ErrInvalidTeam", ref.realm, ref.name, err)
+		}
+	}
+	entries, err := os.ReadDir(runPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("unsafe refs created %d entries under RunPath", len(entries))
+	}
+}

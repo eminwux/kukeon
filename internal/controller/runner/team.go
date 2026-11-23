@@ -36,12 +36,29 @@ const (
 	teamExtension             = ".yaml"
 )
 
+// teamPathSafe reports whether a team or realm name is a single local path
+// segment. The controller validates names before calling the runner; each
+// runner method repeats the check inline so the filepath.IsLocal guard
+// dominates the path it builds, both for defense in depth and for static
+// path-injection analysis (CodeQL go/path-injection).
+func teamPathSafe(value string) bool {
+	return value != "" && value != "." && value != ".." && filepath.IsLocal(value) &&
+		!strings.ContainsAny(value, `/\\`) && !strings.ContainsRune(value, 0)
+}
+
+func unsafeTeamRef(md intmodel.TeamMetadata) error {
+	return fmt.Errorf("%w: unsafe team reference %q in realm %q", errdefs.ErrInvalidTeam, md.Name, md.Realm)
+}
+
 // WriteTeam persists a Team's validated document to
 // <RunPath>/data/<realm>/teams/<name>.yaml atomically (temp file + rename).
 // It reports whether the document was newly created. The caller has checked
 // the realm exists.
 func (r *Exec) WriteTeam(team intmodel.Team) (bool, error) {
 	md := team.Metadata
+	if !filepath.IsLocal(md.Realm) || !filepath.IsLocal(md.Name) || !teamPathSafe(md.Realm) || !teamPathSafe(md.Name) {
+		return false, unsafeTeamRef(md)
+	}
 	return r.writeTeamDocument(
 		fs.TeamsDir(r.opts.RunPath, md.Realm), fs.TeamPath(r.opts.RunPath, md.Realm, md.Name),
 		".team-*.tmp", team.Document, "team", md,
@@ -52,6 +69,9 @@ func (r *Exec) WriteTeam(team intmodel.Team) (bool, error) {
 // when none is stored.
 func (r *Exec) GetTeam(team intmodel.Team) (intmodel.Team, error) {
 	md := team.Metadata
+	if !filepath.IsLocal(md.Realm) || !filepath.IsLocal(md.Name) || !teamPathSafe(md.Realm) || !teamPathSafe(md.Name) {
+		return intmodel.Team{}, unsafeTeamRef(md)
+	}
 	data, err := os.ReadFile(fs.TeamPath(r.opts.RunPath, md.Realm, md.Name))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -102,6 +122,9 @@ func (r *Exec) ListTeams(realmName string) ([]intmodel.Team, error) {
 // errdefs.ErrTeamNotFound when none is stored.
 func (r *Exec) DeleteTeam(team intmodel.Team) error {
 	md := team.Metadata
+	if !filepath.IsLocal(md.Realm) || !filepath.IsLocal(md.Name) || !teamPathSafe(md.Realm) || !teamPathSafe(md.Name) {
+		return unsafeTeamRef(md)
+	}
 	if err := os.Remove(fs.TeamPath(r.opts.RunPath, md.Realm, md.Name)); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return errdefs.ErrTeamNotFound
@@ -116,6 +139,9 @@ func (r *Exec) DeleteTeam(team intmodel.Team) error {
 // <RunPath>/data/<realm>/team-defaults/<name>.yaml atomically.
 func (r *Exec) WriteTeamDefaults(defaults intmodel.TeamDefaults) (bool, error) {
 	md := defaults.Metadata
+	if !filepath.IsLocal(md.Realm) || !filepath.IsLocal(md.Name) || !teamPathSafe(md.Realm) || !teamPathSafe(md.Name) {
+		return false, unsafeTeamRef(md)
+	}
 	return r.writeTeamDocument(
 		fs.TeamDefaultsDir(r.opts.RunPath, md.Realm), fs.TeamDefaultsPath(r.opts.RunPath, md.Realm, md.Name),
 		".team-defaults-*.tmp", defaults.Document, "team defaults", md,
@@ -126,6 +152,9 @@ func (r *Exec) WriteTeamDefaults(defaults intmodel.TeamDefaults) (bool, error) {
 // errdefs.ErrTeamDefaultsNotFound when the realm stores none.
 func (r *Exec) GetTeamDefaults(defaults intmodel.TeamDefaults) (intmodel.TeamDefaults, error) {
 	md := defaults.Metadata
+	if !filepath.IsLocal(md.Realm) || !filepath.IsLocal(md.Name) || !teamPathSafe(md.Realm) || !teamPathSafe(md.Name) {
+		return intmodel.TeamDefaults{}, unsafeTeamRef(md)
+	}
 	data, err := os.ReadFile(fs.TeamDefaultsPath(r.opts.RunPath, md.Realm, md.Name))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
