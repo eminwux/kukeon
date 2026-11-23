@@ -50,6 +50,7 @@ import (
 
 	"github.com/eminwux/kukeon/internal/gitcred/gitplan"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	"github.com/eminwux/kukeon/pkg/api/version"
 	sbshlogging "github.com/eminwux/sbsh/pkg/logging"
 	sbshserver "github.com/eminwux/sbsh/pkg/terminal/server"
 	"golang.org/x/sys/unix"
@@ -332,7 +333,7 @@ func loadContainerDoc(path string) (*v1beta1.ContainerDoc, error) {
 	if err = json.Unmarshal(data, &doc); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
-	if doc.APIVersion != v1beta1.APIVersionV1Beta1 {
+	if version.Check(string(doc.APIVersion)) != nil {
 		return nil, fmt.Errorf("config %s: apiVersion %q, want %q",
 			path, doc.APIVersion, v1beta1.APIVersionV1Beta1)
 	}

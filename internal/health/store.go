@@ -32,6 +32,7 @@ import (
 	"github.com/eminwux/kukeon/internal/util/fs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	"github.com/eminwux/kukeon/pkg/api/version"
 	"gopkg.in/yaml.v3"
 )
 
@@ -222,15 +223,10 @@ func ReportID(createdAt time.Time) string {
 }
 
 // Defaults fills what kukeond fills on a submission that leaves it out:
-// apiVersion, kind, metadata.realm, spec.createdAt (from now) and
-// metadata.name (from spec.createdAt).
+// metadata.realm, spec.createdAt (from now) and metadata.name (from
+// spec.createdAt). apiVersion and kind are not filled: a report must carry
+// both, and Validate rejects one that does not (issue #1633).
 func Defaults(report *kukeonv1.HealthReport, now time.Time) {
-	if report.APIVersion == "" {
-		report.APIVersion = v1beta1.APIVersionV1Beta1
-	}
-	if report.Kind == "" {
-		report.Kind = v1beta1.KindHealthReport
-	}
 	if report.Metadata.Realm == "" {
 		report.Metadata.Realm = consts.KukeSystemRealmName
 	}
@@ -371,7 +367,7 @@ func Validate(report *kukeonv1.HealthReport) error {
 	var problems []string
 	add := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
 
-	if report.APIVersion != v1beta1.APIVersionV1Beta1 {
+	if version.Check(string(report.APIVersion)) != nil {
 		add("apiVersion: must be %s", v1beta1.APIVersionV1Beta1)
 	}
 	if report.Kind != v1beta1.KindHealthReport {

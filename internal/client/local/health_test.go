@@ -51,7 +51,8 @@ func TestHealthDigestWindowAndReports(t *testing.T) {
 	if got := digest.Until.Sub(digest.Since); got != kukeonv1.DefaultHealthWindow {
 		t.Fatalf("default window = %v", got)
 	}
-	if digest.SchemaVersion != kukeonv1.HealthSchemaVersion || len(digest.Checks) != 5 || digest.Clean ||
+	if digest.APIVersion != v1beta1.APIVersionV1Beta1 || digest.Kind != v1beta1.KindHealthDigest ||
+		len(digest.Checks) != 5 || digest.Clean ||
 		digest.LogNote == "" || digest.Cells == nil || digest.LogErrors == nil {
 		t.Fatalf("digest = %+v", digest)
 	}
@@ -67,6 +68,7 @@ func TestHealthDigestWindowAndReports(t *testing.T) {
 
 	until := time.Now().UTC().Add(-10 * time.Minute).Truncate(time.Second)
 	stored, err := client.SubmitHealthReport(ctx, kukeonv1.HealthReport{
+		APIVersion: v1beta1.APIVersionV1Beta1, Kind: v1beta1.KindHealthReport,
 		Spec: v1beta1.HealthReportSpec{
 			Since: until.Add(-time.Hour), Until: until,
 			Cell:    kukeonv1.HealthCellRef{Realm: "default", Space: "default", Stack: "default", Name: "sweep"},
@@ -155,5 +157,21 @@ spec:
 	}
 	if _, err = client.ReadHealthReport(ctx, "bad"); !errors.Is(err, errdefs.ErrHealthReportNotFound) {
 		t.Fatalf("an invalid report must write nothing: %v", err)
+	}
+
+	// The daemon's apply path requires apiVersion and rejects a HealthDigest
+	// (#1633).
+	unversioned := strings.Replace(string(doc("third")), "apiVersion: v1beta1\n", "", 1)
+	if _, err = client.ApplyDocuments(ctx, []byte(unversioned)); err == nil ||
+		!strings.Contains(err.Error(), "apiVersion is required (expected v1beta1)") {
+		t.Fatalf("a document without apiVersion: %v", err)
+	}
+	if _, err = client.ReadHealthReport(ctx, "third"); !errors.Is(err, errdefs.ErrHealthReportNotFound) {
+		t.Fatalf("a document without apiVersion must write nothing: %v", err)
+	}
+	digestDoc := []byte("apiVersion: v1beta1\nkind: HealthDigest\nclean: true\n")
+	if _, err = client.ApplyDocuments(ctx, digestDoc); err == nil ||
+		!strings.Contains(err.Error(), errdefs.ErrUnknownKind.Error()) {
+		t.Fatalf("a HealthDigest document: %v", err)
 	}
 }

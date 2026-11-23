@@ -35,6 +35,7 @@ import (
 	"github.com/eminwux/kukeon/internal/cellblueprint"
 	model "github.com/eminwux/kukeon/pkg/api/model/kuketeams"
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	"github.com/eminwux/kukeon/pkg/api/version"
 	"github.com/eminwux/kukeon/pkg/team/component"
 	"github.com/eminwux/kukeon/pkg/team/compose/renderers"
 	"github.com/eminwux/kukeon/pkg/team/config"
@@ -153,7 +154,7 @@ func checkSettings(h string, s model.RoleHarness) error {
 	return nil
 }
 
-// rendererInput is contract revision 2 for the bundled kukeon/v1beta1 set: a
+// rendererInput is contract revision 2 for the bundled kukeon/bundled set: a
 // shared blueprint, free of role facts. Lists and mounts remain structured;
 // scripts are opaque shell source.
 type rendererInput struct {
@@ -201,7 +202,7 @@ func render(
 	tpl, err := template.New(filename).
 		Funcs(funcs).
 		Option("missingkey=error").
-		ParseFS(renderers.Templates, "kukeon/v1beta1/*.tmpl.yaml")
+		ParseFS(renderers.Templates, harness.Renderer+"/*.tmpl.yaml")
 	if err != nil {
 		return nil, fmt.Errorf("bundled renderer: %w", err)
 	}
@@ -217,7 +218,8 @@ func render(
 	if err = decode(output.Bytes(), filename, &bp); err != nil {
 		return nil, err
 	}
-	if bp.APIVersion != api.APIVersionV1Beta1 || bp.Kind != api.KindCellBlueprint || len(bp.Spec.Cell.Containers) == 0 {
+	if version.Check(string(bp.APIVersion)) != nil || bp.Kind != api.KindCellBlueprint ||
+		len(bp.Spec.Cell.Containers) == 0 {
 		return nil, errors.New("template must render a v1beta1 CellBlueprint with containers")
 	}
 	// Catch a component/template collision here, where the message can name

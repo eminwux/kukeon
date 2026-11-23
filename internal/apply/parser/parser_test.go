@@ -713,9 +713,14 @@ metadata:
 	if !strings.Contains(validationErr.Error(), errdefs.ErrUnsupportedAPIVersion.Error()) {
 		t.Errorf("expected error about unsupported apiVersion, got: %v", validationErr)
 	}
+	if !errors.Is(validationErr.Err, errdefs.ErrUnsupportedAPIVersion) {
+		t.Errorf("expected errors.Is ErrUnsupportedAPIVersion, got: %v", validationErr.Err)
+	}
 }
 
-func TestValidateDocument_DefaultAPIVersion(t *testing.T) {
+// A document without apiVersion is rejected; the error names the field and the
+// expected value (#1633).
+func TestValidateDocument_MissingAPIVersion(t *testing.T) {
 	yaml := `kind: Realm
 metadata:
   name: test-realm
@@ -726,8 +731,22 @@ metadata:
 	}
 
 	validationErr := parser.ValidateDocument(doc)
-	if validationErr != nil {
-		t.Fatalf("expected no validation error (empty apiVersion should default), got: %v", validationErr)
+	if validationErr == nil {
+		t.Fatal("expected a validation error for a document without apiVersion, got nil")
+	}
+	if !errors.Is(validationErr.Err, errdefs.ErrUnsupportedAPIVersion) {
+		t.Errorf("expected errors.Is ErrUnsupportedAPIVersion, got: %v", validationErr.Err)
+	}
+	if !strings.Contains(validationErr.Error(), "apiVersion is required (expected v1beta1)") {
+		t.Errorf("expected the error to name apiVersion and v1beta1, got: %v", validationErr)
+	}
+
+	doc, err = parser.ParseDocument(0, []byte("apiVersion: v1beta1\n"+yaml))
+	if err != nil {
+		t.Fatalf("ParseDocument failed: %v", err)
+	}
+	if validationErr = parser.ValidateDocument(doc); validationErr != nil {
+		t.Fatalf("expected the same document with apiVersion: v1beta1 to validate, got: %v", validationErr)
 	}
 }
 

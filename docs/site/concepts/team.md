@@ -56,7 +56,7 @@ harnesses under `team/harnesses/` (`script` runs a program role, see
 [Program roles](#program-roles-the-script-harness)); other roles (dev, pm,
 pr-reviewer, …) can come from any Git source, such as the agents repository.
 The kukeon renderer that turns a pair into kukeon documents is embedded in
-`kuke` (`pkg/team/compose/renderers/kukeon/v1beta1`); see
+`kuke` (`pkg/team/compose/renderers/kukeon/bundled`); see
 [`team/harnesses/templates.md`](https://github.com/eminwux/kukeon/blob/main/team/harnesses/templates.md)
 for the harness and renderer contract.
 

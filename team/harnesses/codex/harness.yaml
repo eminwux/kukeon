@@ -3,7 +3,7 @@ kind: Harness
 metadata:
   name: codex
 spec:
-  renderer: kukeon/v1beta1
+  renderer: kukeon/bundled
   shell: /bin/bash
   statePath: $HOME/.codex
   environment:

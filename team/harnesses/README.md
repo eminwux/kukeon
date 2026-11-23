@@ -59,7 +59,7 @@ source document models; kukeon's Role, seed and daemon document models remain
 unchanged, so this schema migration requires no upstream kukeon release.
 
 [templates.md](templates.md) defines the shared renderer and startup contract.
-All harnesses select the bundled `kukeon/v1beta1` template set. Their complete
+All harnesses select the bundled `kukeon/bundled` template set. Their complete
 `spec.onInit` scripts call image-owned `Makefile.start setup` and launch the agent.
 Container assets and Dockerfiles live under each harness's `context/`; authored
 build contexts point there, with Dockerfile names relative to that context.

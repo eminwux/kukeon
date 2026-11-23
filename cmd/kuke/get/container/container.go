@@ -176,41 +176,17 @@ func runContainerCmd(cmd *cobra.Command, args []string) error {
 			return printContainer(cmd, &result.Container, outputFormat)
 		}
 		// table / wide: render the single found container as a one-row table
-		// with the same columns as the list view (kubectl parity). Build the
-		// single-element spec slice + probe map the list renderer expects,
-		// backfilling scope coordinates the daemon may leave unset on the
-		// returned spec (same defensive backfill the list path applies).
-		spec := result.Container.Spec
-		if spec.ID == "" {
-			spec.ID = name
+		// with the same columns as the list view (kubectl parity), backfilling
+		// scope coordinates the daemon may leave unset on the returned spec
+		// (same defensive backfill the list path applies).
+		found := result.Container
+		if found.Spec.ID == "" {
+			found.Spec.ID = name
 		}
-		if spec.RealmID == "" {
-			spec.RealmID = realm
-		}
-		if spec.SpaceID == "" {
-			spec.SpaceID = space
-		}
-		if spec.StackID == "" {
-			spec.StackID = stack
-		}
-		if spec.CellID == "" {
-			spec.CellID = cell
-		}
-		st := result.Container.Status
-		probes := map[string]containerProbe{
-			spec.ID: {
-				state:        containerStateToString(st.State),
-				restartCount: st.RestartCount,
-				createdAt:    st.CreatedAt,
-				exitCode:     st.ExitCode,
-				exitSignal:   st.ExitSignal,
-				labels:       result.Container.Metadata.Labels,
-			},
-		}
+		backfillScope(&found.Spec, realm, space, stack, cell)
 		return printContainersWithState(
 			cmd,
-			[]v1beta1.ContainerSpec{spec},
-			probes,
+			[]v1beta1.ContainerDoc{found},
 			outputFormat,
 			wide,
 			"",
@@ -231,80 +207,69 @@ func runContainerCmd(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// containerProbes carries per-container Metadata.Labels alongside state
-	// for the post-loop selector filter: ListContainers returns
-	// ContainerSpec (which carries no labels), so the filter has to wait
-	// until each container's ContainerDoc is in hand. When the GetContainer
-	// probe fails the labels stay nil — the selector then treats that
-	// container as "no labels", which is the same conservative call
-	// ContainerStateUnknown already makes for state.
-	containerProbes := make(map[string]containerProbe, len(specs))
+	// ListContainers returns ContainerSpec only, so each container is probed
+	// with GetContainer for its metadata (labels, for the post-loop selector
+	// filter) and status (the STATE / RESTARTS / AGE / EXIT columns and the
+	// -o yaml|json status). The result is one ContainerDoc per container, the
+	// same document `kuke get container <name> -o yaml` prints (#1633). When
+	// the probe fails the labels stay nil — the selector then treats that
+	// container as "no labels" — and the state is ContainerStateUnknown.
+	docs := make([]v1beta1.ContainerDoc, 0, len(specs))
 	for i := range specs {
 		spec := specs[i]
-		if spec.RealmID == "" {
-			spec.RealmID = realm
+		backfillScope(&spec, realm, space, stack, cell)
+		doc := v1beta1.ContainerDoc{
+			APIVersion: v1beta1.APIVersionV1Beta1,
+			Kind:       v1beta1.KindContainer,
+			Metadata:   v1beta1.ContainerMetadata{Name: spec.ID},
+			Spec:       spec,
 		}
-		if spec.SpaceID == "" {
-			spec.SpaceID = space
-		}
-		if spec.StackID == "" {
-			spec.StackID = stack
-		}
-		if spec.CellID == "" {
-			spec.CellID = cell
-		}
-		probe := v1beta1.ContainerDoc{
-			Metadata: v1beta1.ContainerMetadata{Name: spec.ID},
-			Spec:     spec,
-		}
-		probeResult, err := client.GetContainer(cmd.Context(), probe)
-		if err != nil {
-			cmd.PrintErrln("Warning: failed to get container state for", spec.ID, ":", err)
-			containerProbes[spec.ID] = containerProbe{state: "Unknown"}
+		probeResult, probeErr := client.GetContainer(cmd.Context(), doc)
+		if probeErr != nil {
+			cmd.PrintErrln("Warning: failed to get container state for", spec.ID, ":", probeErr)
+			doc.Status.State = v1beta1.ContainerStateUnknown
+			docs = append(docs, doc)
 			continue
 		}
-		st := probeResult.Container.Status
-		containerProbes[spec.ID] = containerProbe{
-			state:        containerStateToString(st.State),
-			restartCount: st.RestartCount,
-			createdAt:    st.CreatedAt,
-			exitCode:     st.ExitCode,
-			exitSignal:   st.ExitSignal,
-			labels:       probeResult.Container.Metadata.Labels,
-		}
+		doc.Metadata.Labels = probeResult.Container.Metadata.Labels
+		doc.Status = probeResult.Container.Status
+		docs = append(docs, doc)
 	}
 
 	if !selector.Empty() {
-		filtered := make([]v1beta1.ContainerSpec, 0, len(specs))
-		for i := range specs {
-			if selector.Matches(containerProbes[specs[i].ID].labels) {
-				filtered = append(filtered, specs[i])
+		filtered := make([]v1beta1.ContainerDoc, 0, len(docs))
+		for i := range docs {
+			if selector.Matches(docs[i].Metadata.Labels) {
+				filtered = append(filtered, docs[i])
 			}
 		}
-		specs = filtered
+		docs = filtered
 	}
 
 	return printContainersWithState(
 		cmd,
-		specs,
-		containerProbes,
+		docs,
 		outputFormat,
 		wide,
 		emptyMsg,
 	)
 }
 
-// containerProbe carries the per-container fields a list-path probe pulls
-// from GetContainer for the table renderer. State is the human-readable
-// label; the rest source the RESTARTS / AGE / EXIT columns. labels feeds
-// the post-loop selector filter — see runContainerCmd's probe loop.
-type containerProbe struct {
-	state        string
-	restartCount int
-	createdAt    time.Time
-	exitCode     int
-	exitSignal   string
-	labels       map[string]string
+// backfillScope fills the scope coordinates the daemon may leave unset on a
+// returned spec from the scope the command was invoked with.
+func backfillScope(spec *v1beta1.ContainerSpec, realm, space, stack, cell string) {
+	if spec.RealmID == "" {
+		spec.RealmID = realm
+	}
+	if spec.SpaceID == "" {
+		spec.SpaceID = space
+	}
+	if spec.StackID == "" {
+		spec.StackID = stack
+	}
+	if spec.CellID == "" {
+		spec.CellID = cell
+	}
 }
 
 // buildEmptyResultMessage describes the queried filter set when zero rows
@@ -422,10 +387,12 @@ func printContainer(cmd *cobra.Command, container interface{}, format shared.Out
 	}
 }
 
+// printContainersWithState prints containers as a list of ContainerDoc for
+// -o yaml|json, or as a table whose STATE / RESTARTS / AGE / EXIT columns read
+// each document's status.
 func printContainersWithState(
 	cmd *cobra.Command,
-	containers []v1beta1.ContainerSpec,
-	probes map[string]containerProbe,
+	containers []v1beta1.ContainerDoc,
 	format shared.OutputFormat,
 	wide bool,
 	emptyMsg string,
@@ -450,23 +417,20 @@ func printContainersWithState(
 		now := time.Now()
 		rows := make([][]string, 0, len(containers))
 		for i := range containers {
-			c := &containers[i]
-			p, ok := probes[c.ID]
-			if !ok {
-				p = containerProbe{state: "Unknown"}
-			}
+			c := &containers[i].Spec
+			st := &containers[i].Status
 			row := []string{
 				containerDisplayName(c),
 				c.RealmID,
 				c.SpaceID,
 				c.StackID,
 				c.CellID,
-				p.state,
-				strconv.Itoa(p.restartCount),
-				shared.RenderAge(p.createdAt, now),
+				containerStateToString(st.State),
+				strconv.Itoa(st.RestartCount),
+				shared.RenderAge(st.CreatedAt, now),
 			}
 			if wide {
-				row = append(row, c.Image, renderExit(p.exitCode, p.exitSignal))
+				row = append(row, c.Image, renderExit(st.ExitCode, st.ExitSignal))
 			}
 			rows = append(rows, row)
 		}

@@ -31,6 +31,7 @@ import (
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	"github.com/eminwux/kukeon/pkg/api/version"
 	"gopkg.in/yaml.v3"
 )
 
@@ -63,6 +64,16 @@ func Load(path string) (*v1beta1.ServerConfigurationDoc, error) {
 			path, doc.Kind, v1beta1.KindServerConfiguration,
 			errdefs.ErrServerConfigurationInvalid,
 		)
+	}
+	// A missing apiVersion still loads, so an existing file written without
+	// one keeps working; a set one must be supported (#1633).
+	if doc.APIVersion != "" {
+		if versionErr := version.Check(string(doc.APIVersion)); versionErr != nil {
+			return nil, fmt.Errorf(
+				"server configuration %q: %w: %w",
+				path, versionErr, errdefs.ErrServerConfigurationInvalid,
+			)
+		}
 	}
 	return &doc, nil
 }

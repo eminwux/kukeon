@@ -26,6 +26,7 @@ import (
 
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	"github.com/eminwux/kukeon/pkg/api/version"
 	"gopkg.in/yaml.v3"
 )
 
@@ -75,7 +76,7 @@ func resolveHost(opts ConnectOptions) (string, error) {
 			return "", fmt.Errorf("invalid client configuration %s", path)
 		}
 		if (doc.Kind != "" && doc.Kind != api.KindClientConfiguration) ||
-			(doc.APIVersion != "" && doc.APIVersion != api.APIVersionV1Beta1) {
+			(doc.APIVersion != "" && version.Check(string(doc.APIVersion)) != nil) {
 			return "", fmt.Errorf("invalid client configuration kind/version in %s", path)
 		}
 	}

@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	"github.com/eminwux/kukeon/pkg/api/version"
 	"github.com/eminwux/kukeon/pkg/team/harness"
 )
 
@@ -66,9 +67,9 @@ func TestBundledHarnessesDeclareBothModes(t *testing.T) {
 
 func validHarness() *harness.Harness {
 	return &harness.Harness{
-		APIVersion: harness.APIVersion, Kind: "Harness",
+		APIVersion: version.V1Beta1, Kind: "Harness",
 		Spec: harness.Spec{
-			SkillPath: "$HOME/.agent/skills", Renderer: "kukeon/v1beta1", Shell: "/bin/sh",
+			SkillPath: "$HOME/.agent/skills", Renderer: harness.Renderer, Shell: "/bin/sh",
 			Environment: map[string]string{"AGENT_HOME": "${HOME}/.agent"},
 			Parameters:  []api.CellBlueprintParameter{{Name: "MODEL"}},
 			Secrets:     []api.BlueprintSecretSlot{{Name: "agent-login", EnvName: "AGENT_LOGIN"}},

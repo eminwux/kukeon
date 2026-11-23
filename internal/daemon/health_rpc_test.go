@@ -43,7 +43,9 @@ func (h *healthClientFake) ReadHealthDigest(
 	_ context.Context, req kukeonv1.HealthDigestRequest,
 ) (kukeonv1.HealthDigest, error) {
 	h.request = req
-	return kukeonv1.HealthDigest{Clean: true, SchemaVersion: kukeonv1.HealthSchemaVersion}, h.err
+	return kukeonv1.HealthDigest{
+		APIVersion: v1beta1.APIVersionV1Beta1, Kind: v1beta1.KindHealthDigest, Clean: true,
+	}, h.err
 }
 
 func (h *healthClientFake) SubmitHealthReport(

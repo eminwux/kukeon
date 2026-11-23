@@ -3,7 +3,7 @@ kind: Harness
 metadata:
   name: script
 spec:
-  renderer: kukeon/v1beta1
+  renderer: kukeon/bundled
   shell: /bin/bash
   # A program role loads no skills. The Harness contract requires the field;
   # nothing reads it for this harness.

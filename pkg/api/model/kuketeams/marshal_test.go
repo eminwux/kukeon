@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	model "github.com/eminwux/kukeon/pkg/api/model/kuketeams"
+	"github.com/eminwux/kukeon/pkg/api/version"
 	"gopkg.in/yaml.v3"
 )
 
@@ -32,7 +33,7 @@ func TestRoundTripAllKinds(t *testing.T) {
 
 	roleDefault := "${ROLE_SOURCE_REPO}"
 	role := model.Role{
-		APIVersion: model.APIVersionV1, Kind: model.KindRole,
+		APIVersion: version.V1Beta1, Kind: model.KindRole,
 		Metadata: model.Metadata{Name: "dev"},
 		Spec: model.RoleSpec{
 			Harnesses: map[string]model.RoleHarness{"claude": {Settings: "s.json"}},
@@ -51,7 +52,7 @@ func TestRoundTripAllKinds(t *testing.T) {
 	})
 
 	h := model.Harness{
-		APIVersion: model.APIVersionV1, Kind: model.KindHarness,
+		APIVersion: version.V1Beta1, Kind: model.KindHarness,
 		Metadata: model.Metadata{Name: "claude"},
 		Spec: model.HarnessSpec{
 			SkillPath:  "/s",
@@ -71,7 +72,7 @@ func TestRoundTripAllKinds(t *testing.T) {
 	})
 
 	ic := model.ImageCatalog{
-		APIVersion: model.APIVersionV1, Kind: model.KindImageCatalog,
+		APIVersion: version.V1Beta1, Kind: model.KindImageCatalog,
 		Spec: model.ImageCatalogSpec{Images: []model.ImageCatalogEntry{{
 			Ref: "claude", Harness: "claude", Image: "registry.eminwux.com/claude:latest",
 			Build:        model.ImageCatalogBuild{Context: "harnesses/claude", Dockerfile: "Dockerfile"},

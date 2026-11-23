@@ -27,6 +27,7 @@ import (
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/health"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // ReadHealthDigest implements kukeonv1.Client (issue #1509). The checks run
@@ -51,7 +52,8 @@ func (c *Client) ReadHealthDigest(
 		since = until.Add(-kukeonv1.DefaultHealthWindow)
 	}
 	digest := kukeonv1.HealthDigest{
-		SchemaVersion: kukeonv1.HealthSchemaVersion, Since: since, Until: until,
+		APIVersion: v1beta1.APIVersionV1Beta1, Kind: v1beta1.KindHealthDigest,
+		Since: since, Until: until,
 		LogErrors: []kukeonv1.HealthLogGroup{},
 	}
 

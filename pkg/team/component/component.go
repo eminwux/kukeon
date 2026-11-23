@@ -34,13 +34,12 @@ import (
 
 	model "github.com/eminwux/kukeon/pkg/api/model/kuketeams"
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	"github.com/eminwux/kukeon/pkg/api/version"
 	"gopkg.in/yaml.v3"
 )
 
-const (
-	APIVersion = "v1beta1"
-	Kind       = "Component"
-)
+// Kind identifies a component document.
+const Kind = "Component"
 
 type Component struct {
 	APIVersion string         `json:"apiVersion" yaml:"apiVersion"`
@@ -147,7 +146,7 @@ func Load(source fs.FS, catalog ...Component) ([]Component, error) {
 }
 
 func (c *Component) Validate() error {
-	if c == nil || c.APIVersion != APIVersion || c.Kind != Kind || !namePattern.MatchString(c.Metadata.Name) {
+	if c == nil || version.Check(c.APIVersion) != nil || c.Kind != Kind || !namePattern.MatchString(c.Metadata.Name) {
 		return errors.New("require v1beta1 Component with valid metadata.name")
 	}
 	if c.Spec.Kind != api.ComponentKindConnector && c.Spec.Kind != api.ComponentKindForge {

@@ -125,8 +125,9 @@ spec:
 `spec.since` and `spec.until` are the digest's own values. This cell's identity
 is in the `KUKEON_REALM`, `KUKEON_SPACE`, `KUKEON_STACK` and `KUKEON_CELL_NAME`
 environment variables. A report always lives in the `kuke-system` realm. Leave
-`metadata.name` and `spec.createdAt` out: kukeond assigns them. Do not add
-`schemaVersion` or a top-level `id`: unknown fields are rejected.
+`metadata.name` and `spec.createdAt` out: kukeond assigns them. Keep
+`apiVersion: v1beta1` and `kind: HealthReport`: a report without them is
+rejected. Do not add a top-level `id`: unknown fields are rejected.
 
 The `body` is markdown for a person: the summary, then one section per finding
 with what happened, why it is classified as it is, and the suggested commands.

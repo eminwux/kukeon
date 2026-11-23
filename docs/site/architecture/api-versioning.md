@@ -23,16 +23,33 @@ flowchart TB
 Everything a manifest can say lives here:
 
 ```
+pkg/api/version/
+└── version.go                  (V1Beta1, Check: the one apiVersion declaration and check)
+
 pkg/api/model/v1beta1/
-├── api.go         (Version, Kind)
-├── consts.go      (APIVersionV1Beta1, KindRealm, ...)
-├── realm.go       (RealmDoc, RealmSpec, ...)
-├── space.go       (SpaceDoc, SpaceSpec, ...)
-├── stack.go       (StackDoc, ...)
-├── cell.go        (CellDoc, CellSpec, ContainerSpec, ...)
-├── container.go   (ContainerDoc, ContainerSpec, ...)
-└── network.go     (Network types)
+├── api.go                      (Version, Kind)
+├── consts.go                   (APIVersionV1Beta1, KindRealm, KindHealthDigest, ...)
+├── realm.go                    (RealmDoc, RealmSpec, ...)
+├── space.go                    (SpaceDoc, SpaceSpec, ...)
+├── stack.go                    (StackDoc, ...)
+├── cell.go                     (CellDoc, CellSpec, ContainerSpec, ...)
+├── container.go                (ContainerDoc, ContainerSpec, ...)
+├── secret.go                   (SecretDoc, ...)
+├── cellblueprint.go            (CellBlueprintDoc, ...)
+├── cellconfig.go               (CellConfigDoc, ...)
+├── volume.go                   (VolumeDoc, ...)
+├── healthreport.go             (HealthReport document types)
+├── team.go                     (TeamDoc, TeamDefaultsDoc)
+├── serverconfiguration.go      (ServerConfigurationDoc)
+├── clientconfiguration.go      (ClientConfigurationDoc)
+├── connector.go                (connector catalog types)
+└── network.go                  (Network types)
 ```
+
+`pkg/api/version` is a leaf package that imports nothing from this module, so
+every reader — the apply parser, the health-report store, the team packages,
+the configuration loaders — compares `apiVersion` through `version.Check`
+instead of declaring the string again.
 
 Fields, tag names, and JSON/YAML layout here are **the public contract**. Renames or removals are breaking changes. New versions get their own sibling package (`pkg/api/model/v1/...`, `pkg/api/model/v1beta2/...`, etc.) rather than mutating the current one.
 
@@ -56,7 +73,7 @@ These are what the controller and utility code operate on. They don't carry `api
 
 - `Convert<Resource>DocToInternal(ext) → (internal, error)` — external → internal.
 - `Build<Resource>ExternalFromInternal(internal, version) → (external, error)` — internal → external for a given API version.
-- `Normalize<Resource>(ext) → (internal, version, error)` — external → internal with version defaulting (empty `apiVersion` means "latest supported").
+- `Normalize<Resource>(ext) → (internal, version, error)` — external → internal. An empty `apiVersion` is treated as `v1beta1` here, but only for documents built in code (for example a probe `ContainerDoc`). User-written YAML never reaches `Normalize*` without one: `kuke apply` and the health-report store reject a document whose `apiVersion` is missing before conversion.
 
 Every request crosses `apischeme` on the way in, and every response crosses it on the way out. Controllers never see `v1beta1.RealmDoc`.
 
@@ -64,11 +81,13 @@ Every request crosses `apischeme` on the way in, and every response crosses it o
 
 - **Multiple API versions coexist cheaply.** When `v1` ships, `apischeme` gains a new switch arm; the controller is unchanged.
 - **Field renames don't ripple.** `SpaceSpec.RealmID` (external) and `SpaceSpec.RealmName` (internal) can drift; `apischeme` reconciles them.
-- **Storage can be version-aware independently.** Today we serialize the internal form; if we need to persist the external form for diff-ability, that's a `apischeme` change, not a controller change.
+- **Storage can be version-aware independently.** The runner stores the external `v1beta1` document (for example `apischeme.BuildRealmExternalFromInternal(..., VersionV1Beta1)` in `internal/controller/runner/metadata.go`), so stored metadata is diff-able and carries its own `apiVersion`; changing what is persisted is an `apischeme` change, not a controller change.
 
 ## Unsupported versions
 
-Manifests with an `apiVersion` that Kukeon doesn't know about fail loudly at `Normalize*`. There is no silent upgrade or "closest match" behavior — a request is either in a supported version or it is rejected.
+Every user-written document must carry `apiVersion`. `kuke apply -f` (and `kuke run -f`) rejects a document without one with `apiVersion is required (expected v1beta1)`, and one with a version Kukeon doesn't know about with `unsupported apiVersion "<value>" (expected v1beta1)`; both match `errdefs.ErrUnsupportedAPIVersion`. A missing value is not read as "latest": once a second version exists, that reading would silently change meaning. There is no silent upgrade or "closest match" behavior — a request is either in a supported version or it is rejected.
+
+The two configuration files (`kukeond --configuration`, `kuke --configuration`) are the exception: a file without `apiVersion` still loads, so an existing `/etc/kukeon/kukeond.yaml` keeps working, but a set value must be `v1beta1`.
 
 ## Today: one supported version
 

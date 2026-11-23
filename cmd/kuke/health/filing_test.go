@@ -146,7 +146,7 @@ func (g *github) count(prefix string) int {
 }
 
 func sweepReport() kukeonv1.HealthReport {
-	return kukeonv1.HealthReport{Spec: v1beta1.HealthReportSpec{
+	report := kukeonv1.HealthReport{Spec: v1beta1.HealthReportSpec{
 		Since: window, Until: window.Add(3600e9),
 		Cell:    kukeonv1.HealthCellRef{Realm: "default", Space: "default", Stack: "default", Name: "sweep"},
 		Summary: "three findings",
@@ -169,6 +169,8 @@ func sweepReport() kukeonv1.HealthReport {
 			},
 		},
 	}}
+	report.APIVersion, report.Kind = v1beta1.APIVersionV1Beta1, v1beta1.KindHealthReport
+	return report
 }
 
 func storedReport(name string, createdAt time.Time, findings []kukeonv1.HealthFinding) kukeonv1.HealthReport {

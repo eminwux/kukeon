@@ -34,6 +34,7 @@ import (
 	"github.com/eminwux/kukeon/internal/health"
 	"github.com/eminwux/kukeon/internal/secretstore"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	"github.com/eminwux/kukeon/pkg/api/version"
 	"github.com/eminwux/kukeon/pkg/team/config"
 	"gopkg.in/yaml.v3"
 )
@@ -64,6 +65,16 @@ type ValidationError struct {
 	Kind  v1beta1.Kind
 	Name  string
 	Err   error
+}
+
+// apiVersionError carries version.Check's message and matches
+// errdefs.ErrUnsupportedAPIVersion under errors.Is.
+type apiVersionError struct{ err error }
+
+func (e apiVersionError) Error() string { return e.err.Error() }
+
+func (e apiVersionError) Unwrap() []error {
+	return []error{errdefs.ErrUnsupportedAPIVersion, e.err}
 }
 
 func (e *ValidationError) Error() string {
@@ -258,18 +269,13 @@ func ParseDocument(index int, raw []byte) (*Document, error) {
 
 // ValidateDocument validates a parsed document for required fields and constraints.
 func ValidateDocument(doc *Document) *ValidationError {
-	// Validate apiVersion
-	apiVersion := apischeme.DefaultVersion(doc.APIVersion)
-	if apiVersion != apischeme.VersionV1Beta1 {
+	// Validate apiVersion. A user-written document must carry it: an empty
+	// value is rejected rather than read as the latest version (#1633).
+	if err := version.Check(string(doc.APIVersion)); err != nil {
 		return &ValidationError{
 			Index: doc.Index,
 			Kind:  doc.Kind,
-			Err: fmt.Errorf(
-				"%w: %s (expected %s)",
-				errdefs.ErrUnsupportedAPIVersion,
-				doc.APIVersion,
-				apischeme.VersionV1Beta1,
-			),
+			Err:   apiVersionError{err: err},
 		}
 	}
 
