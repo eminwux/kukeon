@@ -282,6 +282,9 @@ func apiErrorStatus(err error) (int, string) {
 		return teamStatus, teamCode
 	}
 	switch {
+	// First: a wrapped ErrContainerNotFound or ErrAttach* must not win (#1635).
+	case errors.Is(err, errScreenUnavailable):
+		status, code = http.StatusNotFound, "screen_unavailable"
 	case errors.Is(err, errdefs.ErrDaemonMethodUnsupported):
 		status, code = http.StatusNotImplemented, "daemon_outdated"
 	case errors.Is(err, errdefs.ErrDaemonLogUnavailable),
