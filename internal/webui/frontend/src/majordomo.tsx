@@ -6,6 +6,7 @@ import { StateBadge } from "./status";
 import { Icon } from "./icons";
 import type { Schedule, ScheduleStatus } from "./schedule-format.mjs";
 import { TerminalSession, cellId, sessionId, unavailableStates, type TerminalManager, type Theme } from "./terminal";
+import { configForCell, sameScopedReference } from "./relationships.mjs";
 
 // Majordomo is found by label, never by name: its configs and cells carry the kuke team and the
 // majordomo role, and a task config additionally names its task.
@@ -15,8 +16,10 @@ const taskLabel = "kukeon.io/task";
 const team = "kuke";
 const role = "majordomo";
 export const sweepTask = "health-sweep";
-// The one interactive cell the web UI creates.
+// The first interactive cell the web UI creates; a further one is named after its Config (#1630).
 const cellName = "majordomo";
+// The active docked cell, by cellId, kept per browser.
+const activeKey = "kukeon-majordomo-active";
 
 export type { ScheduleStatus } from "./schedule-format.mjs";
 export type ConfigDoc = {
@@ -48,19 +51,50 @@ export type Majordomo = {
   pairs: ConfigDoc[];
   // health-sweep task configs.
   sweeps: ConfigDoc[];
-  // The interactive cell, when one exists.
+  // Every interactive majordomo cell, oldest first: each is docked in the panel, one tab each.
+  cells: Row[];
+  // The active one, when any exists.
   cell?: Row;
+  // Interactive configs no majordomo cell was created from: what Add majordomo offers.
+  unused: ConfigDoc[];
+  // select makes a docked cell, by cellId, the active one.
+  select: (key: string) => void;
 };
+
+function configRef(doc: ConfigDoc) {
+  return { name: doc.metadata.name, realm: doc.metadata.realm, space: doc.metadata.space, stack: doc.metadata.stack };
+}
+// cellConfig is the Config a majordomo cell was created from, read from its provenance.
+export function cellConfig(row: Row, configs: ConfigDoc[]): ConfigDoc | undefined {
+  const ref = configForCell(row.doc);
+  return ref ? configs.find(doc => sameScopedReference(configRef(doc), ref)) : undefined;
+}
+function createdAt(row: Row): number {
+  const value = Date.parse(row.doc.status?.createdAt ?? "");
+  return Number.isFinite(value) && !(row.doc.status?.createdAt ?? "").startsWith("0001-") ? value : Number.MAX_SAFE_INTEGER;
+}
 
 export function useMajordomo(inventory: InventoryResource, revision: number): Majordomo {
   const configs = useResource<ConfigDoc[]>("/api/catalog/configs", revision);
-  return useMemo(() => {
+  // The choice survives inventory refreshes: only the user, or the loss of the chosen cell, changes it.
+  const [chosen, setChosen] = useState(() => stored(activeKey) ?? "");
+  const select = useMemo(() => (key: string) => { setChosen(key); save(activeKey, key); }, []);
+  const result = useMemo(() => {
     const all = configs.data ?? [];
-    const cells = (inventory.data?.rows[3] ?? []).filter(row => isMajordomoCell(row.doc));
-    // More than one can only come from the CLI; the panel then follows a running one.
-    const cell = cells.find(row => row.doc.status?.state === "Ready") ?? cells[0];
-    return { configs, pairs: all.filter(isMajordomoConfig), sweeps: all.filter(isSweepConfig), cell };
-  }, [configs, inventory.data]);
+    // Ordered by creation, then scope: a cell that appears or sorts first by name never moves the others.
+    const cells = (inventory.data?.rows[3] ?? []).filter(row => isMajordomoCell(row.doc))
+      .sort((a, b) => createdAt(a) - createdAt(b) || a.scope.join("/").localeCompare(b.scope.join("/")));
+    const cell = cells.find(row => cellId(row.scope) === chosen) ?? cells.find(row => row.doc.status?.state === "Ready") ?? cells[0];
+    const pairs = all.filter(isMajordomoConfig);
+    const unused = pairs.filter(doc => !cells.some(row => { const ref = configForCell(row.doc); return !!ref && sameScopedReference(configRef(doc), ref); }));
+    return { configs, pairs, sweeps: all.filter(isSweepConfig), cells, cell, unused, select };
+  }, [configs, inventory.data, chosen, select]);
+  // Pin the fallback once a complete inventory shows the chosen cell is gone (or none was chosen), so a
+  // cell that starts or appears later does not take the panel.
+  const fallback = result.cell ? cellId(result.cell.scope) : "";
+  const complete = !!inventory.data && !inventory.data.failures.length;
+  useEffect(() => { if (complete && fallback && fallback !== chosen && !result.cells.some(row => cellId(row.scope) === chosen)) select(fallback); }, [complete, fallback, chosen, result.cells, select]);
+  return result;
 }
 
 // Text bound for majordomo's terminal travels as one line: a newline inside a paste could submit it
@@ -156,7 +190,7 @@ export function useMajordomoDock(viewport: number, sidebarWidth: number) {
 export type MajordomoDock = ReturnType<typeof useMajordomoDock>;
 
 function entryState(major: Majordomo): { label: string; state?: string } {
-  if (major.cell) return { label: major.cell.doc.status?.state || "State not reported", state: major.cell.doc.status?.state };
+  if (major.cell) return { label: `${major.cell.doc.status?.state || "State not reported"}${major.cells.length > 1 ? `, ${major.cells.length} cells` : ""}`, state: major.cell.doc.status?.state };
   if (major.configs.loading && !major.configs.data) return { label: "Checking…" };
   if (major.configs.error && !major.configs.data) return { label: "Unavailable" };
   return { label: major.pairs.length ? "Not enabled" : "Needs kuke team init" };
@@ -169,6 +203,7 @@ export function MajordomoSidebarEntry({ major, dock }: { major: Majordomo; dock:
     <button type="button" className="majordomo-entry-button" aria-expanded={dock.open} aria-controls="majordomo-panel" onClick={() => dock.setOpen(true)}>
       <Icon name="majordomo" /><span className="majordomo-entry-name">Majordomo</span>
       {state ? <StateBadge state={state} /> : <span className="badge">{label}</span>}
+      {major.cells.length > 1 && <span className="badge majordomo-count" aria-label={`${major.cells.length} majordomo cells`} title={`${major.cells.length} majordomo cells`}>{major.cells.length}</span>}
     </button>
   </section>;
 }
@@ -226,7 +261,38 @@ function Resizer({ width, max, onResize }: { width: number; max: number; onResiz
 
 type Container = { id: string; attachable?: boolean; root?: boolean };
 
-// The docked panel. It stays mounted while collapsed, so collapsing never detaches the session.
+// MajordomoTabs switches the active docked cell (#1630): one tab per cell, labelled with the Config it came
+// from, with its state. Switching only changes which session is shown; none is detached.
+function MajordomoTabs({ major }: { major: Majordomo }) {
+  const list = useRef<HTMLDivElement>(null);
+  const all = major.configs.data ?? [];
+  const activeId = major.cell ? cellId(major.cell.scope) : "";
+  function key(event: KeyboardEvent<HTMLDivElement>) {
+    const index = major.cells.findIndex(row => cellId(row.scope) === activeId);
+    const next = event.key === "ArrowRight" ? index + 1 : event.key === "ArrowLeft" ? index - 1 : event.key === "Home" ? 0 : event.key === "End" ? major.cells.length - 1 : null;
+    if (next === null) return;
+    event.preventDefault();
+    const row = major.cells[(next + major.cells.length) % major.cells.length];
+    major.select(cellId(row.scope));
+    requestAnimationFrame(() => list.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.focus());
+  }
+  return <div className="majordomo-tabs" role="tablist" aria-label="Majordomo cells" ref={list} onKeyDown={key}>
+    {major.cells.map(row => {
+      const id = cellId(row.scope);
+      const selected = id === activeId;
+      const label = cellConfig(row, all)?.metadata.name ?? configForCell(row.doc)?.name ?? row.doc.metadata.name;
+      const state = row.doc.status?.state;
+      const tone = state === "Ready" ? "ok" : state && unavailableStates.has(state) ? "stopped" : "pending";
+      return <button key={id} type="button" role="tab" className="majordomo-tab" aria-selected={selected} aria-controls="majordomo-screens" tabIndex={selected ? 0 : -1} title={`${row.scope.join(" / ")} (${state || "state not reported"})`} onClick={() => major.select(id)}>
+        <span className={`state-dot tone-${tone}`} aria-hidden="true" /><span className="majordomo-tab-label">{label}</span><span className="sr-only">, {state || "state not reported"}</span>
+      </button>;
+    })}
+  </div>;
+}
+
+// The docked panel. It stays mounted while collapsed, so collapsing never detaches a session. Every
+// majordomo cell is docked here; the attach, reconnect and paste logic follows the active one, and the
+// sessions of the others stay mounted behind it.
 export function MajordomoPanel({ major, dock, inventory, manager, theme, revision, onChanged }: {
   major: Majordomo;
   dock: MajordomoDock;
@@ -244,36 +310,44 @@ export function MajordomoPanel({ major, dock, inventory, manager, theme, revisio
   const eligible = containers.data?.filter(container => container.attachable && !container.root) ?? [];
   const selected = eligible.some(container => container.id === manager.selection[key]) ? manager.selection[key] : eligible[0]?.id ?? "";
   const currentId = scope && selected ? sessionId(scope, selected) : "";
-  const sessions = manager.sessions.filter(item => cellId(item.scope) === key);
+  const docked = major.cells.map(row => cellId(row.scope));
+  const sessions = manager.sessions.filter(item => docked.includes(cellId(item.scope)));
   const current = sessions.find(item => item.id === currentId);
-  const [detached, setDetached] = useState(false);
+  // A deliberate Detach holds per cell until Reconnect, across tab switches.
+  const [detached, setDetached] = useState<Record<string, boolean>>({});
   const [chosen, setChosen] = useState("");
+  const [adding, setAdding] = useState(false);
   const [pending, setPending] = useState<"" | "enable" | "start">("");
   const [failure, setFailure] = useState("");
-  const config = major.pairs.find(doc => JSON.stringify([...configScope(doc), doc.metadata.name]) === chosen) ?? major.pairs[0];
+  // The setup form offers every interactive Config for the first cell, and only the unused ones after.
+  const offered = major.cell ? major.unused : major.pairs;
+  const config = offered.find(doc => JSON.stringify([...configScope(doc), doc.metadata.name]) === chosen) ?? offered[0];
+  const containersReady = !containers.loading && !!containers.data;
 
-  useEffect(() => { setDetached(false); }, [key]);
-  // Attach when the panel is opened on a running cell; a deliberate Detach holds until Reconnect.
+  // Attach when the panel shows a running cell — on the first activation of its tab — unless detached.
   useEffect(() => {
-    if (!dock.open || !scope || !running || !selected || current || detached || containers.loading) return;
+    if (!dock.open || !scope || !running || !selected || current || detached[key] || !containersReady) return;
     manager.attach(scope, selected);
-  }, [dock.open, key, running, selected, current, detached, containers.loading, manager.attach]);
-  // A waiting question goes to the terminal as soon as there is a session to take it.
+  }, [dock.open, key, running, selected, current, detached[key], containersReady, manager.attach]);
+  // A waiting question goes to the active tab's terminal as soon as it has a session to take it.
   useEffect(() => {
     if (!dock.question || !current || current.state !== "attached") return;
     manager.paste(current.id, dock.question);
     dock.clearQuestion();
   }, [dock.question, current?.id, current?.state]);
+  useEffect(() => { if (!offered.length) setAdding(false); }, [offered.length]);
 
   async function start(target: string[]) {
     const started = await postJSON(`${apiPath(target)}/start`);
     if (!started.ok) throw new Error(started.body.error?.message ?? `HTTP ${started.status}`);
   }
   async function enable() {
-    if (!config || pending || major.cell) return;
+    if (!config || pending || (major.cell && !adding)) return;
     setPending("enable"); setFailure("");
+    // The first cell is `majordomo`; a further one is named after its Config.
+    const name = major.cells.length ? config.metadata.name : cellName;
     try {
-      const request = { config: { name: config.metadata.name, realm: config.metadata.realm, space: config.metadata.space, stack: config.metadata.stack }, name: cellName, env: [], ignoreDiskPressure: false };
+      const request = { config: { name: config.metadata.name, realm: config.metadata.realm, space: config.metadata.space, stack: config.metadata.stack }, name, env: [], ignoreDiskPressure: false };
       const preview = await postJSON("/api/cells/from-config/preview", request);
       if (!preview.ok) throw new Error(preview.body.error?.message ?? `HTTP ${preview.status}`);
       const document = preview.body.document as Doc | undefined;
@@ -281,7 +355,10 @@ export function MajordomoPanel({ major, dock, inventory, manager, theme, revisio
       if (!created.ok) throw new Error(created.body.error?.message ?? `HTTP ${created.status}`);
       const cell = created.body as unknown as Doc;
       inventory.upsertCell(cell);
-      await start([...configScope(config), cell.metadata.name]);
+      const target = [...configScope(config), cell.metadata.name];
+      major.select(cellId(target));
+      setAdding(false);
+      await start(target);
     } catch (error) {
       setFailure(error instanceof Error ? error.message : "The request could not reach the web server.");
     } finally { setPending(""); onChanged(); }
@@ -298,21 +375,25 @@ export function MajordomoPanel({ major, dock, inventory, manager, theme, revisio
   const connection = !scope ? { tone: "disconnected", label: "No majordomo cell" }
     : !running ? { tone: "disconnected", label: `Cell is ${cellState || "in an unknown state"}` }
       : current ? { tone: current.state, label: current.state === "attached" ? "Attached" : current.state === "connecting" ? "Connecting…" : current.message || "Disconnected" }
-        : detached ? { tone: "disconnected", label: "Detached" }
+        : detached[key] ? { tone: "disconnected", label: "Detached" }
           : !containers.loading && !eligible.length ? { tone: "disconnected", label: "No attachable container" }
             : { tone: "connecting", label: "Connecting…" };
   const canReconnect = !!scope && running && !!selected && !live;
-  const reconnect = () => { if (scope && selected) { setDetached(false); manager.attach(scope, selected); } };
+  const reconnect = () => { if (scope && selected) { setDetached(old => ({ ...old, [key]: false })); manager.attach(scope, selected); } };
+  const form = (title: string, note: string) => <>
+    <p>{title}</p>
+    <label>Harness<select value={config ? JSON.stringify([...configScope(config), config.metadata.name]) : ""} disabled={!!pending} onChange={event => setChosen(event.target.value)}>{offered.map(doc => { const id = JSON.stringify([...configScope(doc), doc.metadata.name]); return <option key={id} value={id}>{doc.metadata.name}</option>; })}</select></label>
+    <button type="button" className="majordomo-primary" disabled={!!pending || !config} aria-busy={pending === "enable" || undefined} onClick={enable}>{pending === "enable" ? (major.cell ? "Adding majordomo…" : "Enabling majordomo…") : major.cell ? "Add majordomo" : "Enable majordomo"}</button>
+    <small>{note}</small>
+  </>;
   const setup = !scope ? <div className="majordomo-setup">
     {major.configs.loading && !major.configs.data ? <p role="status">Looking for majordomo configs…</p>
       : major.configs.error && !major.configs.data ? <ErrorNotice error={major.configs.error} kind="Configs" />
         : !major.pairs.length ? <div className="majordomo-missing" role="status"><strong>Majordomo is not installed on this host.</strong><p>Run <code>kuke team init</code> on the host to apply its configs, then refresh.</p></div>
-          : <>
-            <p>Majordomo is kukeon's own assistant: ask it for help, and it changes things only when you ask.</p>
-            <label>Harness<select value={config ? JSON.stringify([...configScope(config), config.metadata.name]) : ""} disabled={!!pending} onChange={event => setChosen(event.target.value)}>{major.pairs.map(doc => { const id = JSON.stringify([...configScope(doc), doc.metadata.name]); return <option key={id} value={id}>{doc.metadata.name}</option>; })}</select></label>
-            <button type="button" className="majordomo-primary" disabled={!!pending} aria-busy={pending === "enable" || undefined} onClick={enable}>{pending === "enable" ? "Enabling majordomo…" : "Enable majordomo"}</button>
-            <small>Creates and starts one cell named <code>{cellName}</code> from the selected config.</small>
-          </>}
+          : form("Majordomo is kukeon's own assistant: ask it for help, and it changes things only when you ask.", `Creates and starts one cell named ${cellName} from the selected config.`)}
+  </div> : adding ? <div className="majordomo-setup majordomo-add" role="group" aria-label="Add majordomo">
+    {form("Add another majordomo with a different harness. Each runs in its own cell, in its own tab.", `Creates and starts a cell named after the selected config.`)}
+    <button type="button" className="text-button" disabled={!!pending} onClick={() => setAdding(false)}>Cancel</button>
   </div> : !running ? <div className="majordomo-setup">
     <p role="status">The majordomo cell <code>{scope.join(" / ")}</code> is <StateBadge state={cellState} />.</p>
     <button type="button" className="majordomo-primary" disabled={!!pending} aria-busy={pending === "start" || undefined} onClick={startCell}>{pending === "start" ? "Starting…" : "Start"}</button>
@@ -324,17 +405,19 @@ export function MajordomoPanel({ major, dock, inventory, manager, theme, revisio
       <h2><Icon name="majordomo" />Majordomo</h2>
       <span className={`terminal-connection-state ${connection.tone}`} role="status" title={connection.label}><span className="state-dot" aria-hidden="true" /><span className="majordomo-connection-label">{connection.label}</span></span>
       <div className="majordomo-header-actions">
+        {!!major.cell && major.unused.length > 0 && <button type="button" className="icon-button" aria-label="Add majordomo" title="Add majordomo with another harness" aria-expanded={adding} onClick={() => setAdding(value => !value)}><Icon name="create" /></button>}
         {canReconnect && <button type="button" className="icon-button" aria-label="Reconnect majordomo" title="Reconnect" onClick={reconnect}><Icon name="reconnect" /></button>}
-        {live && current && <button type="button" className="icon-button" aria-label="Detach majordomo" title="Detach" onClick={() => { setDetached(true); manager.detach(current.id); }}><Icon name="detach" /></button>}
+        {live && current && <button type="button" className="icon-button" aria-label="Detach majordomo" title="Detach" onClick={() => { setDetached(old => ({ ...old, [key]: true })); manager.detach(current.id); }}><Icon name="detach" /></button>}
         <button type="button" className="icon-button" aria-label="Collapse majordomo panel" title="Collapse (the session stays attached)" onClick={() => dock.setOpen(false)}><Icon name="sidebarExpand" /></button>
       </div>
     </header>
+    {major.cells.length > 1 && <MajordomoTabs major={major} />}
     {dock.question && <p className="majordomo-question" role="status"><strong>Waiting to paste:</strong> {dock.question} <button type="button" className="text-button" onClick={dock.clearQuestion}>Discard</button></p>}
-    {failure && <div className="error" role="alert"><strong>{scope ? "Majordomo did not start" : "Majordomo could not be enabled"}</strong><p>{failure}</p></div>}
+    {failure && <div className="error" role="alert"><strong>{scope && !adding ? "Majordomo did not start" : major.cell ? "Majordomo could not be added" : "Majordomo could not be enabled"}</strong><p>{failure}</p></div>}
     {setup}
-    {scope && running && containers.error && !live && <ErrorNotice error={containers.error} kind="Containers" />}
-    <div className="majordomo-screens" hidden={!scope || !running}>
-      {sessions.map(session => <TerminalSession key={session.id} session={session} active={dock.open && session.id === currentId} expanded={false} theme={theme} update={manager.update} pending={manager.pastes[session.id]} onPasted={manager.pasteDelivered} />)}
+    {scope && running && !adding && containers.error && !live && <ErrorNotice error={containers.error} kind="Containers" />}
+    <div className="majordomo-screens" id="majordomo-screens" role={major.cells.length > 1 ? "tabpanel" : undefined} aria-label={major.cell ? `Terminal of ${major.cell.doc.metadata.name}` : undefined} hidden={!scope || !running || adding}>
+      {sessions.map(session => <TerminalSession key={session.id} session={session} active={dock.open && !adding && session.id === currentId} expanded={false} theme={theme} update={manager.update} pending={manager.pastes[session.id]} onPasted={manager.pasteDelivered} />)}
     </div>
   </aside>;
 }

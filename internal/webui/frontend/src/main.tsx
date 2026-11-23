@@ -181,8 +181,8 @@ async function readCellPresence(scope: string[]): Promise<boolean | null> {
 
 // cellTerminal (#/workspace/...) and cellRead (#/resource/...) share one mounted screen so switching
 // between them keeps the TerminalWorkspace, and therefore every attached session, alive.
-function CellDetailsScreen({ title, view, scope, revision, inventory, manager, theme, operations, onLifecycleAction, dockedCell, onOpenDock }: {
-  dockedCell: string;
+function CellDetailsScreen({ title, view, scope, revision, inventory, manager, theme, operations, onLifecycleAction, dockedCells, onOpenDock }: {
+  dockedCells: string[];
   onOpenDock: () => void;
   title: string;
   view: CellView;
@@ -298,7 +298,7 @@ function CellDetailsScreen({ title, view, scope, revision, inventory, manager, t
       </div>
     </div>}
     <section className="cell-terminal-view" aria-label="Cell terminal" hidden={!terminalView}>
-      <TerminalWorkspace scope={scope} revision={revision} inventory={inventory} manager={manager} theme={theme} visible={terminalView && !!scope} controlsHost={terminalToolsHost} onExpandedChange={setTerminalExpanded} dockedCell={dockedCell} onOpenDock={onOpenDock} operation={operation} onLifecycleAction={onLifecycleAction} />
+      <TerminalWorkspace scope={scope} revision={revision} inventory={inventory} manager={manager} theme={theme} visible={terminalView && !!scope} controlsHost={terminalToolsHost} onExpandedChange={setTerminalExpanded} dockedCells={dockedCells} onOpenDock={onOpenDock} operation={operation} onLifecycleAction={onLifecycleAction} />
     </section>
     <section className="cell-overview-content" aria-label="Cell details" hidden={terminalView}>{detail.error && <ErrorNotice error={detail.error} kind="Cell" />}{detail.error && detail.data && <p className="stale">Stale resource details — refresh failed.</p>}{status}{containerPanel}{overview}{scope && !terminalView && <NetworkPanel scope={scope} revision={revision} detail={network} />}{scope && !terminalView && <CgroupPanel scope={scope} revision={revision} />}</section>
   </div>;
@@ -393,7 +393,8 @@ function App() {
   const dock = useMajordomoDock(viewport, sidebarWidth);
   // The toast stack is a sibling of the shell, so the rendered dock width is published on the root.
   useLayoutEffect(() => { document.documentElement.style.setProperty("--majordomo-width", `${dock.effectiveWidth}px`); }, [dock.effectiveWidth]);
-  const dockedCell = major.cell ? JSON.stringify(major.cell.scope) : "";
+  // Every majordomo cell is docked in the panel; their terminals never open in the cell screen.
+  const dockedCells = major.cells.map(row => JSON.stringify(row.scope));
   function recordOperation(scope: string[], operation: LifecycleFeedback) {
     const key = JSON.stringify(scope);
     setOperations(old => ({ ...old, [key]: operation }));
@@ -738,7 +739,7 @@ function App() {
       <div className={`workspace-content ${isWorkspace ? "cell-workspace-content" : ""}${cellTerminalActive ? " cell-screen-content" : ""}`}>
         {!isWorkspace && !cellScreenScope && <ResourcesNavigation route={route} mobile={mobile} />}
         {!cellScreenScope && <div className="page-heading"><h1 tabIndex={-1}>{heading}</h1>{headingContext && <p className="page-context mono-id">{headingContext}</p>}</div>}
-        <CellDetailsScreen title={heading ?? "Cell"} view={cellView} scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} operations={operations} onLifecycleAction={runCellLifecycle} dockedCell={dockedCell} onOpenDock={() => dock.setOpen(true)} />
+        <CellDetailsScreen title={heading ?? "Cell"} view={cellView} scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} operations={operations} onLifecycleAction={runCellLifecycle} dockedCells={dockedCells} onOpenDock={() => dock.setOpen(true)} />
         {isWorkspace ? null : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "new-config" ? <Suspense fallback={<p role="status">Loading Config creation form…</p>}><NewConfigPage key={JSON.stringify(route.blueprint ?? [])} revision={revision} inventory={inventory} blueprintScope={route.blueprint} onCreated={() => setRevision(value => value + 1)} /></Suspense> : route.view === "new-secret" ? <NewSecretPage inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : connectorsView ? <Suspense fallback={<p role="status">Loading connectors…</p>}><ConnectorsPage name={route.scope[0]} target={route.target} action={route.action} identity={route.identity} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} onTitle={setConnectorTitle} /></Suspense> : teamsView ? <Suspense fallback={<p role="status">Loading teams…</p>}><TeamsPage name={route.scope[0]} revision={revision} onChanged={() => setRevision(value => value + 1)} /></Suspense> : route.view === "health" ? <HealthPage revision={revision} major={major} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} edit={!!route.edit} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent)} depth={depth} inventory={inventory} parent={route.parent} operations={operations} onLifecycleAction={runCellLifecycle} onParentAction={runParentAction} /> : <Dashboard inventory={inventory} />}
         <footer>Daemon inventory · {inventory.data ? <>Last refreshed <time dateTime={inventory.data.updatedAt}>{new Date(inventory.data.updatedAt).toLocaleTimeString()}</time></> : "Not refreshed yet"} · Refresh to retrieve the latest state.</footer>
       </div>

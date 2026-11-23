@@ -647,6 +647,17 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--er
 .majordomo-header .terminal-connection-state { display: inline-flex; align-items: center; gap: 8px; width: auto; min-width: 0; flex: 1; padding: 0 6px; font-size: var(--font-sm); cursor: default; }
 .majordomo-connection-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
 .majordomo-header-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+/* One tab per docked majordomo cell (#1630): three fit the 320px minimum dock width; more wrap. */
+.majordomo-tabs { display: flex; flex-wrap: wrap; gap: 4px; flex: 0 0 auto; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.majordomo-tab { display: inline-flex; align-items: center; flex: 1 1 88px; min-width: 0; max-width: 100%; min-height: var(--target-min); padding: 4px 8px; border-color: transparent; background: transparent; color: var(--muted); font-size: var(--font-sm); }
+.majordomo-tab[aria-selected="true"] { border-color: var(--line); background: var(--selected); color: var(--text); font-weight: 600; }
+.majordomo-tab:focus-visible { outline: 2px solid transparent; box-shadow: var(--focus-ring); }
+.majordomo-tab-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.majordomo-tab .state-dot { flex-shrink: 0; }
+.majordomo-tab .tone-ok { color: var(--status-ok); }
+.majordomo-tab .tone-stopped { color: var(--status-stopped); }
+.majordomo-tab .tone-pending { color: var(--status-pending); }
+.majordomo-count { min-width: 20px; text-align: center; }
 .majordomo-question { flex: 0 0 auto; margin: 0; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--status-pending-bg); color: var(--status-pending); font-size: var(--font-sm); overflow-wrap: anywhere; }
 .majordomo-setup { display: grid; gap: 12px; align-content: start; padding: 16px; font-size: var(--font-md); line-height: 1.6; }
 .majordomo-setup p { margin: 0; }
