@@ -246,8 +246,9 @@ function CellDetailsScreen({ title, view, scope, revision, inventory, manager, t
   // cellTerminal reads none.
   const network = useResource<NetworkDetail>(scope && !terminalView ? `${apiPath(scope)}/network` : null, revision);
   const cellNetwork = network.data && !Array.isArray(network.data) ? network.data.cell : undefined;
-  const ipRow = <><dt>IP address</dt><dd className="cell-ip">{cellNetwork ? <>{cellNetwork.ipv4State === "assigned" ? <code>{formatIPv4(cellNetwork)}</code> : formatIPv4(cellNetwork)}{cellNetwork.ipv4State === "assigned" && cellNetwork.rootContainer && <span className="description"> · root container <code>{cellNetwork.rootContainer}</code></span>}</>
-    : network.error ? <span title={network.error.message}>Unavailable</span> : network.loading ? "…" : "Not reported"}</dd></>;
+  // A failed read wins over the last value: the row never shows an address the daemon could not confirm.
+  const ipRow = <><dt>IP address</dt><dd className="cell-ip">{network.error ? <span title={network.error.message}>Unavailable</span> : cellNetwork ? <>{cellNetwork.ipv4State === "assigned" ? <code>{formatIPv4(cellNetwork)}</code> : formatIPv4(cellNetwork)}{cellNetwork.ipv4State === "assigned" && cellNetwork.rootContainer && <span className="description"> · root container <code>{cellNetwork.rootContainer}</code></span>}</>
+    : network.loading ? "…" : "Not reported"}</dd></>;
   const sourceConfigDoc = useResource<{ spec?: { schedule?: Schedule }; status?: { schedule?: ScheduleStatus } }>(sourceConfig && !terminalView ? catalogAPI("configs", sourceConfigScope) : null, revision);
   const sourceSchedule = sourceConfigDoc.data?.spec?.schedule;
   const scheduleRow = (run || sourceSchedule) && <><dt>Schedule</dt><dd className="cell-schedule">
