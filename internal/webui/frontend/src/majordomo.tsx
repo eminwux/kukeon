@@ -64,10 +64,18 @@ export type Majordomo = {
 function configRef(doc: ConfigDoc) {
   return { name: doc.metadata.name, realm: doc.metadata.realm, space: doc.metadata.space, stack: doc.metadata.stack };
 }
-// cellConfig is the Config a majordomo cell was created from, read from its provenance.
-export function cellConfig(row: Row, configs: ConfigDoc[]): ConfigDoc | undefined {
+// The lineage label kukeond stamps on a cell created from a Config.
+const configLabel = "kukeon.io/config";
+// fromConfig reports whether a cell was created from a Config: by its spec.provenance, else by its lineage
+// label within the Config's Realm.
+function fromConfig(row: Row, doc: ConfigDoc): boolean {
   const ref = configForCell(row.doc);
-  return ref ? configs.find(doc => sameScopedReference(configRef(doc), ref)) : undefined;
+  if (ref) return sameScopedReference(configRef(doc), ref);
+  return row.doc.metadata.labels?.[configLabel] === doc.metadata.name && row.scope[0] === configScope(doc)[0];
+}
+// cellConfig is the Config a majordomo cell was created from.
+export function cellConfig(row: Row, configs: ConfigDoc[]): ConfigDoc | undefined {
+  return configs.find(doc => fromConfig(row, doc));
 }
 function createdAt(row: Row): number {
   const value = Date.parse(row.doc.status?.createdAt ?? "");
@@ -86,7 +94,7 @@ export function useMajordomo(inventory: InventoryResource, revision: number): Ma
       .sort((a, b) => createdAt(a) - createdAt(b) || a.scope.join("/").localeCompare(b.scope.join("/")));
     const cell = cells.find(row => cellId(row.scope) === chosen) ?? cells.find(row => row.doc.status?.state === "Ready") ?? cells[0];
     const pairs = all.filter(isMajordomoConfig);
-    const unused = pairs.filter(doc => !cells.some(row => { const ref = configForCell(row.doc); return !!ref && sameScopedReference(configRef(doc), ref); }));
+    const unused = pairs.filter(doc => !cells.some(row => fromConfig(row, doc)));
     return { configs, pairs, sweeps: all.filter(isSweepConfig), cells, cell, unused, select };
   }, [configs, inventory.data, chosen, select]);
   // Pin the fallback once a complete inventory shows the chosen cell is gone (or none was chosen), so a
@@ -276,11 +284,14 @@ function MajordomoTabs({ major }: { major: Majordomo }) {
     major.select(cellId(row.scope));
     requestAnimationFrame(() => list.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.focus());
   }
+  const configName = (row: Row) => cellConfig(row, all)?.metadata.name ?? configForCell(row.doc)?.name ?? row.doc.metadata.labels?.[configLabel] ?? row.doc.metadata.name;
+  const names = major.cells.map(configName);
   return <div className="majordomo-tabs" role="tablist" aria-label="Majordomo cells" ref={list} onKeyDown={key}>
-    {major.cells.map(row => {
+    {major.cells.map((row, index) => {
       const id = cellId(row.scope);
       const selected = id === activeId;
-      const label = cellConfig(row, all)?.metadata.name ?? configForCell(row.doc)?.name ?? row.doc.metadata.name;
+      // Labelled by Config; two cells of one Config are told apart by cell name.
+      const label = names.indexOf(names[index]) === names.lastIndexOf(names[index]) ? names[index] : row.doc.metadata.name;
       const state = row.doc.status?.state;
       const tone = state === "Ready" ? "ok" : state && unavailableStates.has(state) ? "stopped" : "pending";
       return <button key={id} type="button" role="tab" className="majordomo-tab" aria-selected={selected} aria-controls="majordomo-screens" tabIndex={selected ? 0 : -1} title={`${row.scope.join(" / ")} (${state || "state not reported"})`} onClick={() => major.select(id)}>

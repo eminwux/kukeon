@@ -270,7 +270,9 @@ export function TerminalSession({ session, active, expanded, theme, update, pend
 
   useEffect(() => {
     if (!active) { terminal.current?.blur(); return; }
-    const frame = requestAnimationFrame(() => { fitNow.current(); terminal.current?.focus(); });
+    // A session activated from a tab list (the majordomo tabs) leaves focus on the tab, so the arrow keys
+    // keep moving between tabs instead of typing into the terminal.
+    const frame = requestAnimationFrame(() => { fitNow.current(); if (!document.activeElement?.closest('[role="tablist"]')) terminal.current?.focus(); });
     return () => cancelAnimationFrame(frame);
   }, [active]);
 
