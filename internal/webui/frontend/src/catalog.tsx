@@ -2,10 +2,10 @@ import { useRef, useState } from "react";
 import { teamsLink } from "./teams.mjs";
 import { secretTypeOf, teamOf } from "./connectors.mjs";
 import { ErrorNotice, useResource } from "./request";
-import { catalogPageLink, catalogTitles, newCellLink, newConfigLink, newSecretLink, workspaceLink } from "./routes";
+import { catalogPageLink, catalogTitles, newCellLink, newConfigLink, newSecretLink, resourceLink, workspaceLink } from "./routes";
 import { ScopePath, StateBadge } from "./status";
 import type { InventoryResource, Row } from "./inventory";
-import { cellsForBlueprint, cellsForConfig, configsForBlueprint, type ConfigDoc } from "./relationships.mjs";
+import { cellsForBlueprint, cellsForConfig, configsForBlueprint, configsForStateVolume, volumeMounts, type ConfigDoc } from "./relationships.mjs";
 import { DocumentRowLink, RowAction, RowActions } from "./icons";
 import { catalogAPI, catalogDeleteAPI } from "./catalog-url.mjs";
 import { useNotify } from "./notifications";
@@ -64,19 +64,60 @@ function lineageReference(metadata: Metadata): Reference {
 function relationResourceLink(kind: string, scope: string[]): string { return catalogLink(kind, scope); }
 function scopeLabel(scope: string[]): string { return scope.join(" / "); }
 function cellScope(row: Row): string[] { return row.scope.length === 4 ? row.scope : [...row.scope.slice(0, 3), row.doc.metadata.name]; }
-function RelatedCellList({ rows, inventory, configLabel }: { rows: Array<Row & { config?: RelatedCatalogDoc }>; inventory: InventoryResource; configLabel?: boolean }) {
+// InventoryNotices says how far a list derived from the shared Cell inventory can be trusted.
+function InventoryNotices({ inventory }: { inventory: InventoryResource }) {
   return <>
     {inventory.loading && !inventory.data && <p role="status">Loading shared Cell inventory…</p>}
     {inventory.loading && inventory.data && <p role="status">Refreshing Cell inventory; displayed Cells come from the last completed retrieval.</p>}
     {inventory.error && <p className="stale">Cell inventory could not be refreshed: {inventory.error.message}</p>}
     {!!inventory.data?.failures.length && <p className="stale">Cell inventory is incomplete; this relationship list may be partial.</p>}
     {!inventory.data && !inventory.loading && !inventory.error && <p className="empty-state">Cell inventory has not been retrieved.</p>}
+  </>;
+}
+function RelatedCellList({ rows, inventory, configLabel }: { rows: Array<Row & { config?: RelatedCatalogDoc }>; inventory: InventoryResource; configLabel?: boolean }) {
+  return <>
+    <InventoryNotices inventory={inventory} />
     {rows.length > 0 && <ul className="state-list related-cell-list">{rows.map(row => {
       const scope = cellScope(row);
       return <li key={JSON.stringify(scope)}><div><a className="resource-name" href={workspaceLink(scope)}>{row.doc.metadata.name}</a><p className="description">{scopeLabel(scope.slice(0, -1))}</p>{configLabel && row.config && <p className="description">Config: <a href={relationResourceLink("configs", [...scopeOf(row.config.metadata), row.config.metadata.name])}>{row.config.metadata.name}</a> · {scopeLabel(scopeOf(row.config.metadata))}</p>}</div><StateBadge state={row.doc.status?.state} /><a className="document-action" href={workspaceLink(scope)}>Open terminal</a></li>;
     })}</ul>}
     {inventory.data && !rows.length && !inventory.loading && !inventory.error && !inventory.data.failures.length && <p className="description">No related Cells found.</p>}
   </>;
+}
+// VolumeMountTable lists the cells that mount a Volume: one row per mount, so a cell mounting it in two
+// containers shows twice.
+function VolumeMountTable({ mounts, inventory }: { mounts: ReturnType<typeof volumeMounts<Row>>; inventory: InventoryResource }) {
+  return <>
+    <InventoryNotices inventory={inventory} />
+    {mounts.length > 0 && <div className="table-scroll"><table className="stackable volume-mounts" aria-label="Cells mounting this Volume"><thead><tr><th>Cell</th><th>State</th><th>Container</th><th>Mount path</th><th>Access</th><th>Created with the cell</th></tr></thead><tbody>{mounts.map((use, i) => <tr key={i}>
+      <td data-label="Cell"><a className="resource-name" href={resourceLink(use.row.scope)}>{use.row.doc.metadata.name}</a><p className="description">{scopeLabel(use.row.scope.slice(0, -1))}{use.by === "source" ? " · by name" : ""}</p></td>
+      <td data-label="State"><StateBadge state={use.row.doc.status?.state} /></td>
+      <td data-label="Container"><code>{use.container || "—"}</code></td>
+      <td data-label="Mount path"><code>{use.target || "—"}</code></td>
+      <td data-label="Access">{use.readOnly ? "Read-only" : "Read-write"}</td>
+      <td data-label="Created with the cell">{use.ensure ? "Yes (ensure)" : "No"}</td>
+    </tr>)}</tbody></table></div>}
+    {inventory.data && !mounts.length && !inventory.loading && !inventory.error && !inventory.data.failures.length && <p className="description">No cell in the inventory mounts this Volume.</p>}
+  </>;
+}
+function VolumeRelationships({ doc, revision, inventory }: { doc: CatalogDoc; revision: number; inventory: InventoryResource }) {
+  const volumes = useResource<CatalogDoc[]>("/api/catalog/volumes", revision);
+  const configs = useResource<RelatedCatalogDoc[]>("/api/catalog/configs", revision);
+  const mounts = inventory.data && volumes.data ? volumeMounts(inventory.data.rows[3], volumes.data, doc) : [];
+  const logins = configsForStateVolume(configs.data, doc);
+  return <div className="relationship-grid">
+    <section className="panel related-resources volume-mounted-by" aria-label="Mounted by"><div className="panel-heading"><h2>Mounted by</h2><span className="badge">{inventory.data && volumes.data ? `${mounts.length} mount${mounts.length === 1 ? "" : "s"}` : "Resolving…"}</span></div><div className="panel-body">
+      <p className="description">Every cell in the inventory whose spec mounts this Volume, whatever its state. A mount by name resolves like kukeond does: the Volume of that name in the cell's Stack, else its Space, else its Realm.</p>
+      {volumes.error && <ErrorNotice error={volumes.error} kind="Volume" />}
+      <VolumeMountTable mounts={mounts} inventory={inventory} />
+    </div></section>
+    <section className="panel related-resources" aria-label="Login state for"><div className="panel-heading"><h2>Login state for</h2></div><div className="panel-body">
+      <p className="description">Configs whose connector keeps a harness login in this Volume.</p>
+      {configs.loading && !configs.data && <p role="status">Loading CellConfigs…</p>}{configs.error && <ErrorNotice error={configs.error} kind="CellConfig" />}
+      {logins.length > 0 && <ul className="state-list">{logins.map(({ config, connectors }) => { const scope = [...scopeOf(config.metadata), config.metadata.name]; return <li key={JSON.stringify(scope)}><div><a className="resource-name" href={catalogLink("configs", scope)}>{config.metadata.name}</a><p className="description">{scopeLabel(scope.slice(0, -1))} · {connectors.join(", ")}</p></div></li>; })}</ul>}
+      {configs.data && !logins.length && !configs.error && <p className="description">No Config keeps a login in this Volume.</p>}
+    </div></section>
+  </div>;
 }
 function ConfigRelationships({ doc, revision, inventory }: { doc: CatalogDoc; revision: number; inventory: InventoryResource }) {
   const ref = doc.spec?.blueprint as Reference | undefined;
@@ -115,13 +156,22 @@ const singular: Record<string, string> = { blueprints: "Blueprint", configs: "Co
 const deleteConsequence: Record<string, string> = {
   configs: "Delete removes this CellConfig document from kukeond. Cells created from it are not deleted; they keep running and lose only their Config lineage.",
   blueprints: "Delete removes this CellBlueprint document from kukeond. Configs created from it are independent copies and are not deleted.",
-  volumes: "Delete removes this Volume and its daemon-provisioned directory, including the data stored in it. kukeond refuses while a running cell mounts the Volume.",
+  volumes: "Delete removes this Volume and its daemon-provisioned directory, including the data stored in it. kukeond refuses while a Ready or Degraded cell mounts the Volume.",
   secrets: "Delete removes this Secret's daemon-stored value. kukeond refuses while a cell references it through secretRef. The value is never shown here.",
 };
 // Dependents the catalog already loads elsewhere: Cells by Config lineage, and Configs (plus their Cells)
 // by Blueprint reference. Nothing else is inferred.
 function DeleteDependents({ kind, doc, revision, inventory }: { kind: string; doc: CatalogDoc; revision: number; inventory: InventoryResource }) {
   const configs = useResource<RelatedCatalogDoc[]>(kind === "blueprints" ? "/api/catalog/configs" : null, revision);
+  const volumes = useResource<CatalogDoc[]>(kind === "volumes" ? "/api/catalog/volumes" : null, revision);
+  if (kind === "volumes") {
+    const mounts = inventory.data && volumes.data ? volumeMounts(inventory.data.rows[3], volumes.data, doc) : [];
+    return <section className="catalog-delete-dependents" aria-label="Known related resources"><h3>Cells mounting this Volume</h3>
+      <p className="description">kukeond refuses the delete while a Ready or Degraded cell mounts the Volume. Stopped cells keep their mount in the spec and fail to start once it is gone.</p>
+      {volumes.error && <ErrorNotice error={volumes.error} kind="Volume" />}
+      <VolumeMountTable mounts={mounts} inventory={inventory} />
+    </section>;
+  }
   if (kind === "configs") {
     const cells = inventory.data ? cellsForConfig(inventory.data.rows[3], lineageReference(doc.metadata)) as Row[] : [];
     return <section className="catalog-delete-dependents" aria-label="Known related resources"><h3>Cells created from this Config</h3><RelatedCellList rows={cells} inventory={inventory} /></section>;
@@ -172,6 +222,8 @@ async function readCatalogPresence(kind: string, scope: string[]): Promise<boole
 }
 function CatalogList({ kind, revision, inventory, onChanged }: { kind: string; revision: number; inventory: InventoryResource; onChanged: () => void }) {
   const list = useResource<CatalogDoc[]>(`/api/catalog/${kind}`, revision);
+  // A mount count is shown only from a complete inventory: a partial one would undercount.
+  const mountedBy = (doc: CatalogDoc) => kind !== "volumes" || !inventory.data || inventory.data.failures.length || !list.data ? "—" : String(volumeMounts(inventory.data.rows[3], list.data, doc).length);
   const { notify } = useNotify();
   const [confirming, setConfirming] = useState<CatalogDoc | null>(null);
   const [pending, setPending] = useState<Set<string>>(() => new Set());
@@ -218,7 +270,7 @@ function CatalogList({ kind, revision, inventory, onChanged }: { kind: string; r
     <section className="panel" aria-label={`${catalogTitles[kind]} list`} aria-busy={list.loading}>
       <div className="list-controls"><label className="search-field">Search<input type="search" value={query} placeholder={`Search ${kind}…`} onChange={e => { setQuery(e.target.value); setPage(0); }} /></label><label>Realm<select aria-label="Filter by realm" value={realm} onChange={e => { setRealm(e.target.value); setPage(0); }}><option value="">All realms</option>{[...new Set(list.data?.map(doc => doc.metadata.realm))].sort().map(name => <option key={name}>{name}</option>)}</select></label><span className="result-count">{rows.length} results</span>{(kind === "blueprints" || kind === "configs") && <a className="document-action" href={newConfigLink()}>New Config</a>}{kind === "secrets" && <a className="document-action" href={newSecretLink()}>New Secret</a>}</div>
       {list.loading && <p className="scope-filter" role="status">Loading {kind}…</p>}
-      <div className="table-scroll"><table className="stackable"><thead><tr><th>Name</th><th>Scope</th><th>Type</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{rows.slice(currentPage * 25, (currentPage + 1) * 25).map(doc => { const scope = [...scopeOf(doc.metadata), doc.metadata.name]; return <tr key={JSON.stringify(scope)}><td data-label="Name"><a className="resource-name" href={catalogLink(kind, scope)}>{doc.metadata.name}</a>{kind === "configs" && <> <NeedsConnectorBadge config={doc} /></>}</td><td className="scope-cell" data-label="Scope"><ScopePath parts={scope.slice(0, -1)} /></td><td data-label="Type">{doc.kind as string || catalogTitles[kind]}</td><td className="row-actions"><RowActions>{kind === "configs" && <RowAction icon="create" href={newCellLink(scope)} label={`New cell from config ${scope.join(" / ")}`} title="New cell from this config" />}{kind === "blueprints" && <RowAction icon="create" href={newConfigLink(scope)} label={`New config from blueprint ${scope.join(" / ")}`} title="New config from this blueprint" />}{kind === "secrets" && !secretConnector(doc) && <RowAction icon="edit" href={catalogPageLink(kind, scope, { edit: true })} label={`Replace value of secret ${scope.join(" / ")}`} title="Replace value…" />}<DocumentRowLink href={catalogLink(kind, scope, true)} label={scope.join(" / ")} /><RowAction icon="delete" danger label={`Delete ${singular[kind].toLowerCase()} ${scope.join(" / ")}`} title="Delete…" disabled={pending.has(JSON.stringify(scope))} busy={pending.has(JSON.stringify(scope))} onClick={() => setConfirming(doc)} /></RowActions></td></tr>; })}</tbody></table></div>
+      <div className="table-scroll"><table className="stackable"><thead><tr><th>Name</th><th>Scope</th>{kind === "volumes" ? <><th>Reclaim policy</th><th>Mounted by</th></> : <th>Type</th>}<th><span className="sr-only">Actions</span></th></tr></thead><tbody>{rows.slice(currentPage * 25, (currentPage + 1) * 25).map(doc => { const scope = [...scopeOf(doc.metadata), doc.metadata.name]; return <tr key={JSON.stringify(scope)}><td data-label="Name"><a className="resource-name" href={catalogLink(kind, scope)}>{doc.metadata.name}</a>{kind === "configs" && <> <NeedsConnectorBadge config={doc} /></>}</td><td className="scope-cell" data-label="Scope"><ScopePath parts={scope.slice(0, -1)} /></td>{kind === "volumes" ? <><td data-label="Reclaim policy">{doc.spec?.reclaimPolicy as string || "Delete"}</td><td data-label="Mounted by" title="Cells in the inventory that mount this Volume">{mountedBy(doc)}</td></> : <td data-label="Type">{doc.kind as string || catalogTitles[kind]}</td>}<td className="row-actions"><RowActions>{kind === "configs" && <RowAction icon="create" href={newCellLink(scope)} label={`New cell from config ${scope.join(" / ")}`} title="New cell from this config" />}{kind === "blueprints" && <RowAction icon="create" href={newConfigLink(scope)} label={`New config from blueprint ${scope.join(" / ")}`} title="New config from this blueprint" />}{kind === "secrets" && !secretConnector(doc) && <RowAction icon="edit" href={catalogPageLink(kind, scope, { edit: true })} label={`Replace value of secret ${scope.join(" / ")}`} title="Replace value…" />}<DocumentRowLink href={catalogLink(kind, scope, true)} label={scope.join(" / ")} /><RowAction icon="delete" danger label={`Delete ${singular[kind].toLowerCase()} ${scope.join(" / ")}`} title="Delete…" disabled={pending.has(JSON.stringify(scope))} busy={pending.has(JSON.stringify(scope))} onClick={() => setConfirming(doc)} /></RowActions></td></tr>; })}</tbody></table></div>
       {!list.loading && !rows.length && <div className="empty-state"><h3>{list.error ? "Resources could not be loaded" : list.data?.length ? "No matching resources" : `No ${kind} found`}</h3></div>}
       <div className="pagination"><span>{rows.length ? `${currentPage * 25 + 1}–${Math.min((currentPage + 1) * 25, rows.length)} of ${rows.length}` : "0 results"}</span><button disabled={!currentPage} onClick={() => setPage(currentPage - 1)}>Previous</button><button disabled={(currentPage + 1) * 25 >= rows.length} onClick={() => setPage(currentPage + 1)}>Next</button></div>
     </section>
@@ -260,12 +312,13 @@ function CatalogDetails({ kind, scope, document, edit = false, revision, invento
     {detail.error && <ErrorNotice error={detail.error} kind={catalogTitles[kind].replace(/s$/, "")} />}
     {detail.error && doc && <p className="stale">Stale {kind} document — refresh failed.</p>}
     {kind === "secrets" && <p className="description">Secret values are redacted. Only daemon-exposed metadata is available.</p>}
-    {doc && <section className="panel"><div className="panel-heading"><h2>{document ? "API document" : "Resource overview"}</h2>{kind !== "secrets" && <span className="badge" title={`Edits are not supported here. Delete ${kind} from the list.`}>No edits — delete from list</span>}</div>{document ? <pre tabIndex={0} aria-label={`Complete ${kind} JSON`}>{JSON.stringify(doc, null, 2)}</pre> : <div className="panel-body"><dl className="details-grid"><dt>Name</dt><dd>{doc.metadata.name}</dd><dt>Scope</dt><dd>{scopeOf(doc.metadata).join(" / ")}</dd><dt>Kind</dt><dd>{doc.kind as string}</dd>{kind === "secrets" && <><dt>Type</dt><dd>{secretTypeOf(doc)}</dd>{secretConnector(doc) && <><dt>Identity of connector</dt><dd><a className="resource-name" href={connectorsLink(secretConnector(doc))}><code>{secretConnector(doc)}</code></a></dd></>}</>}<dt>Labels</dt><dd>{Object.entries(doc.metadata.labels ?? {}).map(([key, value]) => <span className="badge label-badge" key={key}>{key}: {value}</span>)}{!Object.keys(doc.metadata.labels ?? {}).length && "No labels"}</dd>{kind === "configs" && teamOf(doc) && <><dt>Team</dt><dd><a className="resource-name" href={teamsLink(teamOf(doc))}>{teamOf(doc)}</a> <span className="description">Rendered by the team; edit it on the Teams page.</span></dd></>}{kind === "volumes" && <><dt>Reclaim policy</dt><dd>{doc.spec?.reclaimPolicy as string || "Default (Delete)"}</dd></>}</dl><p className="description">Use View document for every API-exposed field.</p></div>}</section>}
+    {doc && <section className="panel"><div className="panel-heading"><h2>{document ? "API document" : "Resource overview"}</h2>{kind !== "secrets" && <span className="badge" title={`Edits are not supported here. Delete ${kind} from the list.`}>No edits — delete from list</span>}</div>{document ? <pre tabIndex={0} aria-label={`Complete ${kind} JSON`}>{JSON.stringify(doc, null, 2)}</pre> : <div className="panel-body"><dl className="details-grid"><dt>Name</dt><dd>{doc.metadata.name}</dd><dt>Scope</dt><dd>{scopeOf(doc.metadata).join(" / ")}</dd><dt>Kind</dt><dd>{doc.kind as string}</dd>{kind === "secrets" && <><dt>Type</dt><dd>{secretTypeOf(doc)}</dd>{secretConnector(doc) && <><dt>Identity of connector</dt><dd><a className="resource-name" href={connectorsLink(secretConnector(doc))}><code>{secretConnector(doc)}</code></a></dd></>}</>}{kind !== "volumes" && <><dt>Labels</dt><dd>{Object.entries(doc.metadata.labels ?? {}).map(([key, value]) => <span className="badge label-badge" key={key}>{key}: {value}</span>)}{!Object.keys(doc.metadata.labels ?? {}).length && "No labels"}</dd></>}{kind === "configs" && teamOf(doc) && <><dt>Team</dt><dd><a className="resource-name" href={teamsLink(teamOf(doc))}>{teamOf(doc)}</a> <span className="description">Rendered by the team; edit it on the Teams page.</span></dd></>}{kind === "volumes" && <><dt>Reclaim policy</dt><dd>{doc.spec?.reclaimPolicy as string || "Default (Delete)"}</dd></>}</dl><p className="description">Use View document for every API-exposed field.</p></div>}</section>}
     {doc && kind === "secrets" && !document && <SecretValue doc={doc} scope={scope} edit={edit} onChanged={onChanged} />}
     {doc && kind === "configs" && !document && <ConfigConnectors doc={doc} scope={scope} revision={revision} onChanged={onChanged} />}
     {doc && !document && <RelatedResources doc={doc} revision={revision} />}
     {doc && kind === "configs" && !document && <ConfigRelationships doc={doc} revision={revision} inventory={inventory} />}
     {doc && kind === "blueprints" && !document && <BlueprintRelationships doc={doc} revision={revision} inventory={inventory} />}
+    {doc && kind === "volumes" && !document && <VolumeRelationships doc={doc} revision={revision} inventory={inventory} />}
   </>;
 }
 export function CatalogPage(props: { kind: string; scope: string[]; document: boolean; edit?: boolean; revision: number; inventory: InventoryResource; onChanged: () => void }) {
