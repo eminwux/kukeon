@@ -147,6 +147,7 @@ func newHandlerWithCatalog(
 	mux.HandleFunc("GET /api/realms/{name}/images", realmImagesHandler(dial))
 	registerResourceRoutes(mux, dial)
 	registerConnectorRoutes(mux, dial, catalog)
+	registerTeamRoutes(mux, dial)
 	registerDaemonRoutes(mux, endpoint, dial)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -276,6 +277,9 @@ func apiErrorStatus(err error) (int, string) {
 	status, code := http.StatusServiceUnavailable, "unavailable"
 	if connectorStatus, connectorCode, ok := connectorErrorStatus(err); ok {
 		return connectorStatus, connectorCode
+	}
+	if teamStatus, teamCode, ok := teamErrorStatus(err); ok {
+		return teamStatus, teamCode
 	}
 	switch {
 	case errors.Is(err, errdefs.ErrDaemonMethodUnsupported):

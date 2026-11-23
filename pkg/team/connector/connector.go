@@ -44,7 +44,7 @@ import (
 )
 
 const (
-	APIVersion = "kuketeams.io/v1"
+	APIVersion = "v1beta1"
 	Kind       = "Connector"
 )
 
@@ -197,7 +197,7 @@ func Load(source fs.FS) (*Catalog, error) {
 // Validate checks one connector definition.
 func (c *Connector) Validate() error {
 	if c == nil || c.APIVersion != APIVersion || c.Kind != Kind || !namePattern.MatchString(c.Metadata.Name) {
-		return errors.New("require kuketeams.io/v1 Connector with valid metadata.name")
+		return errors.New("require v1beta1 Connector with valid metadata.name")
 	}
 	if c.Spec.Title == "" {
 		return errors.New("spec.title is required")

@@ -29,7 +29,7 @@ const agentsRepoDefault = "    params:\n      - { name: AGENTS_REPO, default: \"
 
 // withRoleParams composes the majordomo role with the given needs.params
 // block, its source cloned from url.
-func withRoleParams(t *testing.T, params, url string) (*config.TeamsConfig, compose.Options) {
+func withRoleParams(t *testing.T, params, url string) (*config.TeamDefaults, compose.Options) {
 	t.Helper()
 	cfg, opts := fixture(t)
 	source := copiedSource(t)

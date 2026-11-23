@@ -4,74 +4,74 @@
 kuke team init [--force | --reapply] [--host ENDPOINT] [--configuration PATH]
 ```
 
-Apply the `kuke` team, whose one role is `majordomo`, to kukeond and register
-it at `~/.kuke/kuketeam.d/kuke.yaml`. `init` creates no cells and starts nothing; launch a composed
-cell explicitly with kuke afterwards (for example
-`kuke run --from-config kuke-majordomo-codex`).
+Apply the `kuke` team, whose one role is `majordomo`, to kukeond, which stores
+the `Team` with the Configs composed from it. `init` creates no cells and
+starts nothing; launch a composed cell explicitly with kuke afterwards (for
+example `kuke run --from-config kuke-majordomo-codex`).
 
 `kuke` is the operator's system team, named after the `kuke-` system prefix
-(cf. the `kuke-system` realm). The name is reserved: `kuke team add` refuses it,
-so a project team — including kukeon's own, which is named `kukeon` — can never
-take over its registration or its configs.
+(cf. the `kuke-system` realm). The name is reserved: `kuke team add` refuses it
+and `kuke delete team` refuses to delete it, so a project team — including
+kukeon's own, which is named `kukeon` — can never take over its configs.
 
-To register a project team after `init`, use [`kuke team add`](kuke-team-add.md).
-For the shared composition model, see [Teams](../concepts/team.md).
+To add a project team after `init`, use [`kuke team add`](kuke-team-add.md).
+For the other team verbs see [`kuke team`](kuke-team.md); for the composition
+model, see [Teams](../concepts/team.md).
 
 ## Flags
 
 | Flag              | Default | Description                                                                                  |
 | ----------------- | ------- | -------------------------------------------------------------------------------------------- |
-| `--force`         | `false` | Replace the registered `kuke` team with the initial majordomo declaration and apply it.      |
-| `--reapply`       | `false` | Recompose and apply the `kuke` team from its stored entry. Excludes `--force`.               |
+| `--force`         | `false` | Replace the stored `kuke` team with the initial majordomo declaration and apply it.          |
+| `--reapply`       | `false` | Recompose and apply the `kuke` team from its stored Team. Excludes `--force`.                |
 | `--host`          | —       | kukeond Unix endpoint. Overrides `KUKEON_HOST` and `ClientConfiguration.spec.host`.          |
 | `--configuration` | —       | kuke `ClientConfiguration` path. Defaults to `KUKE_CONFIGURATION`, then `~/.kuke/kuke.yaml`. |
 
-The git identity flags `--import-git-identity`, `--git-key`,
-`--git-key-passphrase-file` and `--git-known-hosts` were removed. Init does not
-read or store a git identity; use
+Init does not read or store a git identity; use
 [`kuke connector import git --default`](kuke-connector.md#kuke-connector-import-git)
 (see [Git identity and credentials](#git-identity-and-credentials)).
 
 kuke's global flags (`--verbose`, `--log-level`, `--run-path`, `--no-daemon`)
 are accepted but have no effect on `kuke team` subcommands: they resolve the
-operator home, the kukeond endpoint and the `ClientConfiguration` themselves.
+kukeond endpoint and the `ClientConfiguration` themselves.
 
 ## What it does
 
-"Already initialized" means the `kuke` team entry
-`~/.kuke/kuketeam.d/kuke.yaml` exists. Without `--force` (or `--reapply`) init
-then exits without contacting the daemon:
+"Already initialized" means kukeond stores a Team named `kuke`. Without
+`--force` (or `--reapply`) init then stops before fetching anything:
 
 ```
-init: already initialized (/home/me/.kuke/kuketeam.d/kuke.yaml); use --force to reset or --reapply to recompose
+init: already initialized (team kuke is stored); use --force to reset or --reapply to recompose
 ```
 
-`kuke team init --force` applies the initial `kuke` team and replaces the entry
-with the initial majordomo declaration after successful application. It
-[migrates](#migrating-from-the-kukeon-team-name) a host initialized while the
-team was still named `kukeon`.
+`kuke team init --force` applies the initial `kuke` team, replacing the stored
+declaration. Recorded secret bindings are not kept by `--force`: it starts
+again from the initial declaration.
 
-`~/.kuke/kuketeams.yaml` is optional and hand-written. Init reads it when it
-exists and never writes it, `--force` included; without it init uses empty
-global defaults. See [reusable defaults](../concepts/team.md#reusable-defaults-after-init).
+When the `default` realm has no `TeamDefaults`, init creates one in the same
+apply, with the `kukeon` source and its `codex` and `claude` harnesses and no
+default roles, so a project team needs only roles. An existing `TeamDefaults`
+is never changed, with or without `--force`. See
+[Sources and defaults](../concepts/team.md#sources-and-defaults).
 
 The command fetches only the sources used by the selected role/harness
 definitions into temporary Git checkouts, and composes the kuke team's
 blueprints and configs. Git must be installed and able to read those sources
 without a terminal prompt. `branch`, `tag`, and `commit` selectors are fetched
 explicitly; no checkout in the current directory is used. Fetched definitions
-are removed after the invocation. Runtime repository URLs and clone
-destinations still come from the authored configuration.
+are removed after the invocation.
 
-The initial accepted declaration contains the majordomo selections directly. The
-majordomo role and both harnesses come from the kukeon repository (`team/roles/` and
-`team/harnesses/`):
+The initial declaration contains the majordomo selections directly, so the
+`kuke` team does not depend on the defaults. The majordomo role and both
+harnesses come from the kukeon repository (`team/roles/` and `team/harnesses/`).
+`kuke get team kuke -o yaml` prints it:
 
 ```yaml
-apiVersion: kuketeams.io/v1
-kind: TeamEntry
+apiVersion: v1beta1
+kind: Team
 metadata:
   name: kuke
+  realm: default
 spec:
   sources:
     - name: kukeon
@@ -97,9 +97,7 @@ spec:
 This applies the shared blueprints `codex` and `claude` — one per harness ×
 security profile, realm-wide, see [Teams](../concepts/team.md#shared-blueprints) —
 and the CellConfigs `kuke-majordomo-codex` and `kuke-majordomo-claude`, labelled
-`kukeon.io/team: kuke`, that reference them. Init does not start them. The explicit entry keeps
-recomposition independent of global operator defaults. Configure reusable
-[global defaults](../concepts/team.md#reusable-defaults-after-init) separately.
+`kukeon.io/team: kuke`, that reference them. Init does not start them.
 
 ## Daemon endpoint and client configuration
 
@@ -117,22 +115,21 @@ missing file, an unreadable file, invalid YAML, or a wrong kind/version is an
 error. Only the Unix transport is accepted. Init does not start the daemon.
 
 Blueprints and configs target the `default` realm, space, and stack. Preflight
-checks that the parent metadata exists, checks secret prerequisites, and stages
-a complete `0600` TeamEntry before mutating the daemon. Provision missing parent
-scopes with kuke (`kuke init` creates `default/default/default`). Init never
-creates, starts, restarts, or deletes cells. `ApplyDocumentsForTeam` receives
-the stable team name `kuke`, so reruns update that team's resources and prune
-obsolete team-owned configs. A shared blueprint the team stops using is removed
-only when no other CellConfig references it. A shared blueprint that already
-exists with different content is replaced in place, whichever team's configs
-use it, so every team sees the same content; a note names the old and new
-content digest and the other configs using it, whose cells turn `OutOfSync`
-until `kuke restart`. Only a blueprint kuke team did not render (no
-`kukeon.io/shared: "true"` label) is never overwritten: this team's is applied
-as `<name>-<content digest>` instead. A `<name>-<content digest>` copy an
-earlier version forked for a shared blueprint is migrated: the team's configs
-move back to `<name>`, and the copy is removed, or reported while another
-config still uses it. It does not prune credentials or running cells.
+checks that the parent metadata exists and checks secret prerequisites before
+mutating the daemon. Provision missing parent scopes with kuke (`kuke init`
+creates `default/default/default`). Init never creates, starts, restarts, or
+deletes cells. `ApplyDocumentsForTeam` receives the stable team name `kuke`, so
+reruns update that team's resources and prune obsolete team-owned configs; the
+`Team` document is stored last, and only when every other document applied
+(see [A Team is stored only with its Configs](../concepts/team.md#a-team-is-stored-only-with-its-configs)).
+A shared blueprint the team stops using is removed only when no other
+CellConfig references it. A shared blueprint that already exists with different
+content is replaced in place, whichever team's configs use it, so every team
+sees the same content; a note names the old and new content digest and the
+other configs using it, whose cells turn `OutOfSync` until `kuke restart`. Only
+a blueprint kuke team did not render (no `kukeon.io/shared: "true"` label) is
+never overwritten: this team's is applied as `<name>-<content digest>` instead.
+It does not prune credentials or running cells.
 
 ## Git identity and credentials
 
@@ -164,16 +161,8 @@ no git identity is set; run kuke connector import git --default
 
 A role's `needs.mounts: [ssh]` mounts nothing; init prints a note for it.
 
-`~/.kuke/kuketeams.yaml` has no `spec.git`. A file that still has one fails to
-decode:
-
-```
-spec.git: spec.git was removed; store your git identity with kuke connector import git --default (line 4)
-```
-
-Delete the block and run `kuke connector import git --default`. Nothing is
-converted: a `spec.git` block, the stack `spec.defaults.git` an older init
-wrote and an older `git-ssh` secret are left as they are.
+A `TeamDefaults` has no `spec.git`; a document that still has one fails to
+decode and names `kuke connector import git --default`.
 
 Blueprints carry the connector definitions of the `kuke` build that applied the
 team. After upgrading `kuke`, run `kuke team init --reapply` (or `--force`)
@@ -194,14 +183,14 @@ creation.
 
 For a missing secret, init checks the required parent scope and resolves only
 an explicit `source.env` variable or `source.file` path. Missing or empty values
-fail preflight. File sources follow kuke's trailing-newline removal. All
-required sources are checked before the first create, and shared runtime
-identities are created once. Creation happens before dependent blueprints and
-configs are applied. Credentials and remote secret-error text are never printed
-or saved in the TeamEntry or the blueprint/config request.
+fail. File sources follow kuke's trailing-newline removal. All required sources
+are checked before the first create, and shared runtime identities are created
+once. Creation happens before dependent blueprints and configs are applied.
+Credentials and remote secret-error text are never printed or stored in the
+Team or the blueprint/config request.
 
 A missing secret without a creation source does not fail init or add. The
-blueprints/configs are still applied and the team registered (kukeond resolves
+blueprints/configs are still applied and the team stored (kukeond resolves
 secret references only when a cell launches), and the command exits 0 after
 listing each missing runtime secret once:
 
@@ -212,119 +201,71 @@ Missing secrets (cells will not start until they exist):
 
 Create them before launching cells; no rerun is needed. `kuke run` still fails
 on a cell whose secret is absent. The actual command uses the binding's
-resolved name and scope. A cell-scoped
-reference requires a `Secret` manifest with its exact metadata coordinates,
-applied with `kuke apply -f /path/to/secret.yaml`.
+resolved name and scope. A cell-scoped reference requires a `Secret` manifest
+with its exact metadata coordinates, applied with
+`kuke apply -f /path/to/secret.yaml`.
 
 Init rechecks existence immediately before each create and never retries a
 secret write, including when a transport failure leaves its outcome ambiguous.
 On a rerun, a secret accepted by the previous attempt is discovered and reused.
 Secret rotation is not an init action; rotate explicitly with kuke.
 
-## Registration and recovery
+## Editing and reapplying the kuke team
 
-The accepted authored declaration is saved atomically at
-`~/.kuke/kuketeam.d/kuke.yaml`. It retains explicit selections and
-omitted/empty list semantics, with no resolved credentials or duplicated
-effective defaults. `init --force` uses the initial majordomo declaration
-regardless of an existing `kuke.yaml`. The name `kuke` is reserved for this
-team. Init does not discover or migrate other registrations, apart from the
-legacy `kukeon.yaml` [below](#migrating-from-the-kukeon-team-name).
-
-### Reapplying an edited entry
-
-`~/.kuke/kuketeam.d/kuke.yaml` is the kuke team's editable source.
-`kuke team init --reapply` recomposes the team from it, applies the result, and
-has kukeond prune the team's configs the new composition no longer renders. Use
-it after editing the entry, for example to
-[turn on the health sweep](../concepts/team.md#the-majordomo-health-sweep).
+The stored `kuke` Team is the team's editable source. Edit it and apply it,
+for example to [turn on the health sweep](../concepts/team.md#the-majordomo-health-sweep):
 
 ```bash
-$EDITOR ~/.kuke/kuketeam.d/kuke.yaml
-kuke team init --reapply
+kuke get team kuke -o yaml > kuke.yaml
+$EDITOR kuke.yaml
+kuke team apply -f kuke.yaml --dry-run   # preview
+kuke team apply -f kuke.yaml
 ```
 
-- The entry is rewritten only after a fully successful apply, like every
-  registration. A failed apply leaves your edit in place.
-- `~/.kuke/kuketeams.yaml` is read when present and never written.
-- The entry is decoded strictly: an unknown or misspelled field, or a task the
-  role does not declare, fails before anything is fetched or applied.
-- Without a stored entry the command fails and tells you to run
+The web UI's Teams page does the same: edit the declaration as YAML, preview,
+apply. `kuke team init --reapply` (equal to `kuke team apply kuke`) recomposes
+the team from its stored Team without changing it, applies the result, and has
+kukeond prune the team's configs the new composition no longer renders — after
+the role or harness definitions changed upstream, or after a `kuke` upgrade.
+
+- The stored Team changes only with a fully successful apply. A failed apply
+  leaves the previous declaration stored.
+- A Team document is decoded strictly: an unknown or misspelled field, or a
+  task the role does not declare, fails before anything is applied.
+- Without a stored `kuke` Team, `--reapply` fails and tells you to run
   `kuke team init` first; it never creates one.
-- `--reapply --force` is rejected. `--force` discards the entry and starts
-  again from the initial declaration; `--reapply` keeps it.
+- `--reapply --force` is rejected. `--force` discards the stored declaration
+  and starts again from the initial one; `--reapply` keeps it.
 - `--reapply` does not import a git identity; nothing in `kuke team` does. Use
   [`kuke connector import git --default`](kuke-connector.md#kuke-connector-import-git).
 
-### Migrating from the `kukeon` team name
+A failure — a secret failure, RPC failure, total resource failure, partial
+apply, prune failure, or incomplete response — returns nonzero and leaves the
+previously stored Team unchanged; a first-time failure stores no Team.
+Successful resources and created secrets are not rolled back: rerun
+`kuke team init --force` (or `--reapply`) after fixing the prerequisite to
+converge the same `kuke` identity.
 
-The init team was named `kukeon` before it became `kuke`. That collided with
-kukeon's own project team (`metadata.name: kukeon` in the repository's
-`kuketeam.yaml`): `kuke team add .` in a kukeon checkout overwrote the init
-team's entry and pruned its configs, since both carried
-`kukeon.io/team: kukeon`. A host initialized under the old name holds
-`~/.kuke/kuketeam.d/kukeon.yaml` and the configs `kukeon-majordomo-codex`,
-`kukeon-majordomo-claude` and `kukeon-majordomo-<harness>-health-sweep`.
+## Upgrading from host files
 
-Run `kuke team init --force`. When `kukeon.yaml` is the legacy init declaration
-— a `kukeon` entry with no `projectSource` whose roles are only `majordomo`
-(or `operator`, see below) — init:
-
-1. applies `kuke-majordomo-codex` and `kuke-majordomo-claude` (and their
-   health-sweep configs) labelled `kukeon.io/team: kuke`,
-2. deletes every config labelled `kukeon.io/team: kukeon`, and registers
-   `~/.kuke/kuketeam.d/kuke.yaml`,
-3. removes `kukeon.yaml` and prints a note saying so.
-
-Nothing is deleted until the `kuke` team has passed the daemon preflight and
-been applied, so a missing stack or an unreadable secret source leaves the
-`kukeon` team as it was. The legacy entry is removed only after the `kuke` team
-is registered, so a failed run leaves it in place and rerunning `--force`
-finishes the migration. Until then, `kuke team add` refuses the name `kukeon`. A `kukeon.yaml` holding any other declaration — a project team
-registered with `kuke team add`, or an init entry you added roles to — is left
-untouched, together with its configs. Like any `--force`, the migration starts
-from the initial declaration: re-make edits you had made to `kukeon.yaml` (an
-enabled health sweep, for one) in `kuke.yaml` and run `kuke team init --reapply`.
-Cells already created from the old configs are not touched.
-
-Log in to each harness once more afterwards. The state volume that holds the
-harness login is named after the config (`<config>-state`), so a `kuke-majordomo-*` cell starts
-with a new, empty volume. The old `kukeon-majordomo-*` volumes are left in
-place; delete them with `kuke delete volume` when you no longer need them.
-
-### Migrating from the `operator` role
-
-The team's role was named `operator` before it became `majordomo`, and its
-configs were `kukeon-operator-codex` and `kukeon-operator-claude`. On a host
-initialized then, `kuke team init --force` migrates as above: the legacy entry
-counts as the init declaration, so the `kukeon-operator-*` configs (labelled
-`kukeon.io/team: kukeon`) are deleted and the `kuke-majordomo-*` configs
-applied. The same re-login applies; the old `kukeon-operator-*` volumes are left
-in place.
-
-Registration follows full blueprint/config success only. A secret failure, RPC
-failure, total resource failure, partial apply, prune failure, or incomplete
-response returns nonzero and leaves any prior TeamEntry unchanged. A first-time
-failure creates no registration. Successful resources and created secrets are
-not rolled back: rerun `kuke team init --force` after fixing the prerequisite to
-converge the same `kuke` identity. A registration write failure after
-application is reported as such and is also recovered by rerunning
-`init --force`.
+Earlier releases kept the kuke team in a file under `~/.kuke` and read global
+defaults from another. Those files are no longer read: when either exists,
+init prints one note saying so and nothing is converted. Run
+`kuke team init` (or `--force`) and re-make any edits you had made — an enabled
+health sweep, for one — in the stored Team. See
+[Upgrading from host files](../concepts/team.md#upgrading-from-host-files).
 
 ## Output
 
 ```
-Read configuration: /home/me/.kuke/kuketeams.yaml
-Applied 4 resources; registered kuke team: /home/me/.kuke/kuketeam.d/kuke.yaml
+Applied 6 resources; stored team kuke.
 No cells created or started.
 ```
 
-The `Read configuration` line is printed only when `~/.kuke/kuketeams.yaml`
-exists.
-
-Missing runtime secrets and notes follow when there are any:
+Pruned configs, missing runtime secrets and notes follow when there are any:
 
 ```
+Pruned configs: kuke-majordomo-opencode
 Missing secrets (cells will not start until they exist):
   git-ssh  →  kuke create secret git-ssh --realm default --type ssh-key --from-file /path/to/private-key  (git credential; or --type basic-auth)
   bot-key  →  kuke create secret bot-key --realm default --connector git --type ssh-key --from-file /path/to/private-key --hosts github.com --author 'Name <email>'  (git identity; or --type basic-auth)
@@ -337,8 +278,9 @@ with the `--connector git` form, since a cell renders only with a Secret tagged
 for the git connector; replace the example host and author with your own. A
 credential named directly keeps the plain `--type ssh-key` form.
 
-The resource count is the shared blueprints plus the CellConfigs, plus one when
-the Realm's secret defaults were written.
+The resource count is the shared blueprints plus the CellConfigs, plus the
+`Team` document, plus one when the Realm's secret defaults were written and one
+for a `TeamDefaults` init created.
 
 ## Validation
 

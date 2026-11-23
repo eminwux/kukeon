@@ -75,7 +75,7 @@ func TestBundledLibrary(t *testing.T) {
 
 func document(name, spec string) *fstest.MapFile {
 	return &fstest.MapFile{Data: []byte(
-		"apiVersion: kuketeams.io/v1\nkind: Component\nmetadata:\n  name: " + name + "\nspec:\n" + spec,
+		"apiVersion: v1beta1\nkind: Component\nmetadata:\n  name: " + name + "\nspec:\n" + spec,
 	)}
 }
 
@@ -117,11 +117,11 @@ func TestLoadRejectsInvalidLibraries(t *testing.T) {
 		{"harness-kind", fstest.MapFS{"tracker/component.yaml": document("tracker", "  kind: harness\n")}, "spec.kind: expected connector or forge"},
 		{"missing-kind", fstest.MapFS{"tracker/component.yaml": document("tracker", "  description: none\n")}, "spec.kind"},
 		{"wrong-document-kind", fstest.MapFS{"tracker/component.yaml": {Data: []byte(
-			"apiVersion: kuketeams.io/v1\nkind: Harness\nmetadata: {name: tracker}\nspec: {kind: connector}\n",
-		)}}, "require kuketeams.io/v1 Component"},
+			"apiVersion: v1beta1\nkind: Harness\nmetadata: {name: tracker}\nspec: {kind: connector}\n",
+		)}}, "require v1beta1 Component"},
 		{"wrong-api-version", fstest.MapFS{"tracker/component.yaml": {Data: []byte(
-			"apiVersion: v1beta1\nkind: Component\nmetadata: {name: tracker}\nspec: {kind: connector}\n",
-		)}}, "require kuketeams.io/v1 Component"},
+			"apiVersion: v1alpha1\nkind: Component\nmetadata: {name: tracker}\nspec: {kind: connector}\n",
+		)}}, "require v1beta1 Component"},
 		{"invalid-name", fstest.MapFS{"Tracker/component.yaml": document("Tracker", "  kind: connector\n")}, "valid metadata.name"},
 		{"name-differs-from-directory", fstest.MapFS{"tracker/component.yaml": document("other", "  kind: connector\n")}, "metadata.name must match its directory"},
 		{"needs-unknown", fstest.MapFS{"tracker/component.yaml": document("tracker", "  kind: forge\n  needs: [absent]\n")}, `needs unknown component "absent"`},

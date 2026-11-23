@@ -25,7 +25,7 @@ import (
 	"github.com/eminwux/kukeon/pkg/team/config"
 )
 
-// secretBindings resolves requirement bindings by precedence: recorded TeamEntry
+// secretBindings resolves requirement bindings by precedence: recorded team
 // binding, then global spec.secrets, then a generated default in the team realm.
 type secretBindings struct {
 	recorded, global []config.SecretBinding
@@ -36,7 +36,7 @@ type secretBindings struct {
 
 func newSecretBindings(
 	recorded []config.SecretBinding,
-	cfg *config.TeamsConfig,
+	cfg *config.TeamDefaults,
 	realm string,
 ) (*secretBindings, error) {
 	if err := config.ValidateSecrets("secrets", recorded); err != nil {
@@ -56,7 +56,7 @@ func newSecretBindings(
 // default is not written into a Config as a fill but left to the scope
 // defaults, so it stays a live inheritance (issue #1548). A recorded or global
 // binding that names exactly the default secret counts as the default too;
-// TeamEntries written before connectors recorded every generated default.
+// Teams recorded before connectors recorded every generated default.
 func (s *secretBindings) lookup(name string) (config.SecretBinding, bool, error) {
 	if binding, ok := s.used[name]; ok {
 		return binding, s.isDefault(binding, name), nil

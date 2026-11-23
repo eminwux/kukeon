@@ -721,3 +721,14 @@ td .ask-majordomo { margin-left: 8px; vertical-align: middle; }
 .identity-form .error, .connector-fix .error, .connector-default .error { margin: 0; }
 .connector-identities-preview .setup-error { margin: 4px 0 0; }
 .connector-login { margin: 0; }
+
+/* Teams page (#1618). */
+.team-ref { display: flex; gap: 8px; }
+.team-ref select { flex: 0 0 auto; }
+.team-ref input { flex: 1 1 auto; min-width: 0; }
+.team-yaml { grid-column: 1 / -1; }
+.team-yaml textarea { min-height: 220px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--font-sm); }
+.team-picker { border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; display: grid; gap: 4px; }
+.team-picker legend { padding: 0 4px; }
+.team-source { margin: 8px 0 12px; display: grid; gap: 8px; }
+.team-plan h3 { margin: 12px 0 4px; }

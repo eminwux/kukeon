@@ -115,7 +115,7 @@ func TestBuildSkipsSharedBaseEntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	source["harnesses/shared/harness.yaml"] = &fstest.MapFile{Data: []byte(`apiVersion: kuketeams.io/v1
+	source["harnesses/shared/harness.yaml"] = &fstest.MapFile{Data: []byte(`apiVersion: v1beta1
 kind: Harness
 metadata:
   name: shared

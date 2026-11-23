@@ -17,6 +17,7 @@
 package parser
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -33,6 +34,7 @@ import (
 	"github.com/eminwux/kukeon/internal/health"
 	"github.com/eminwux/kukeon/internal/secretstore"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	"github.com/eminwux/kukeon/pkg/team/config"
 	"gopkg.in/yaml.v3"
 )
 
@@ -52,6 +54,8 @@ type Document struct {
 	CellConfigDoc    *v1beta1.CellConfigDoc
 	VolumeDoc        *v1beta1.VolumeDoc
 	HealthReportDoc  *v1beta1.HealthReportDoc
+	TeamDoc          *v1beta1.TeamDoc
+	TeamDefaultsDoc  *v1beta1.TeamDefaultsDoc
 }
 
 // ValidationError represents a validation error for a specific document.
@@ -214,6 +218,25 @@ func ParseDocument(index int, raw []byte) (*Document, error) {
 		doc.HealthReportDoc = &reportDoc
 		doc.APIVersion = reportDoc.APIVersion
 
+	case v1beta1.KindTeam:
+		// Team documents decode strictly (issue #1618): an unknown or
+		// misspelled field is rejected with the decoder's message, the same
+		// one kuke gives for a repository's kuketeam.yaml.
+		var teamDoc v1beta1.TeamDoc
+		if decodeErr := config.DecodeStrict(bytes.NewReader(raw), &teamDoc); decodeErr != nil {
+			return nil, fmt.Errorf("document %d: failed to parse Team: %w", index, decodeErr)
+		}
+		doc.TeamDoc = &teamDoc
+		doc.APIVersion = teamDoc.APIVersion
+
+	case v1beta1.KindTeamDefaults:
+		var defaultsDoc v1beta1.TeamDefaultsDoc
+		if decodeErr := config.DecodeStrict(bytes.NewReader(raw), &defaultsDoc); decodeErr != nil {
+			return nil, fmt.Errorf("document %d: failed to parse TeamDefaults: %w", index, decodeErr)
+		}
+		doc.TeamDefaultsDoc = &defaultsDoc
+		doc.APIVersion = defaultsDoc.APIVersion
+
 	default:
 		// kind: CellProfile was removed in #626. Give the operator an
 		// explicit migration pointer instead of the generic unknown-kind
@@ -254,7 +277,8 @@ func ValidateDocument(doc *Document) *ValidationError {
 	switch doc.Kind {
 	case v1beta1.KindRealm, v1beta1.KindSpace, v1beta1.KindStack, v1beta1.KindCell,
 		v1beta1.KindContainer, v1beta1.KindSecret, v1beta1.KindCellBlueprint,
-		v1beta1.KindCellConfig, v1beta1.KindVolume, v1beta1.KindHealthReport:
+		v1beta1.KindCellConfig, v1beta1.KindVolume, v1beta1.KindHealthReport,
+		v1beta1.KindTeam, v1beta1.KindTeamDefaults:
 		// Valid kind
 	default:
 		return &ValidationError{
@@ -518,9 +542,83 @@ func ValidateDocument(doc *Document) *ValidationError {
 		if validationErr := validateHealthReport(doc); validationErr != nil {
 			return validationErr
 		}
+
+	case v1beta1.KindTeam:
+		if validationErr := validateTeam(doc); validationErr != nil {
+			return validationErr
+		}
+
+	case v1beta1.KindTeamDefaults:
+		if validationErr := validateTeamDefaults(doc); validationErr != nil {
+			return validationErr
+		}
 	}
 
 	return nil
+}
+
+// validateTeam checks a Team document as kukeond stores it (issue #1618):
+// a valid name and realm and the declaration's body rules. Its selections
+// may name sources the realm's TeamDefaults registers, so they are checked
+// against those only when kuke composes the team.
+func validateTeam(doc *Document) *ValidationError {
+	if doc.TeamDoc == nil {
+		return &ValidationError{Index: doc.Index, Kind: doc.Kind, Err: errors.New("team document is nil")}
+	}
+	team := TeamConfig(doc.TeamDoc)
+	if err := config.ValidateTeam(team); err != nil {
+		return &ValidationError{
+			Index: doc.Index, Kind: doc.Kind, Name: team.Metadata.Name,
+			Err: fmt.Errorf("%w: %w", errdefs.ErrInvalidTeam, err),
+		}
+	}
+	return nil
+}
+
+// validateTeamDefaults checks a TeamDefaults document: named default, in a
+// valid realm, with the same rules kuke applies before composing.
+func validateTeamDefaults(doc *Document) *ValidationError {
+	if doc.TeamDefaultsDoc == nil {
+		return &ValidationError{Index: doc.Index, Kind: doc.Kind, Err: errors.New("team defaults document is nil")}
+	}
+	defaults := TeamDefaultsConfig(doc.TeamDefaultsDoc)
+	err := config.Validate(defaults)
+	switch {
+	case err != nil:
+	case defaults.Metadata.Name != config.DefaultsName:
+		err = fmt.Errorf("metadata.name: a realm has one TeamDefaults, named %q", config.DefaultsName)
+	case !config.ValidName(defaults.Metadata.Realm):
+		err = errors.New("metadata.realm: require a valid realm name")
+	}
+	if err != nil {
+		return &ValidationError{
+			Index: doc.Index, Kind: doc.Kind, Name: defaults.Metadata.Name,
+			Err: fmt.Errorf("%w: %w", errdefs.ErrInvalidTeam, err),
+		}
+	}
+	return nil
+}
+
+// TeamConfig converts a parsed Team document to the declaration type kuke
+// composes from. The two share their spec.
+func TeamConfig(doc *v1beta1.TeamDoc) *config.Team {
+	return &config.Team{
+		APIVersion: string(apischeme.DefaultVersion(doc.APIVersion)),
+		Kind:       string(doc.Kind),
+		Metadata:   config.Metadata{Name: doc.Metadata.Name, Realm: doc.Metadata.Realm},
+		Spec:       doc.Spec,
+	}
+}
+
+// TeamDefaultsConfig converts a parsed TeamDefaults document to the type kuke
+// composes with.
+func TeamDefaultsConfig(doc *v1beta1.TeamDefaultsDoc) *config.TeamDefaults {
+	return &config.TeamDefaults{
+		APIVersion: string(apischeme.DefaultVersion(doc.APIVersion)),
+		Kind:       string(doc.Kind),
+		Metadata:   config.Metadata{Name: doc.Metadata.Name, Realm: doc.Metadata.Realm},
+		Spec:       doc.Spec,
+	}
 }
 
 // validateSecretSpec enforces the per-type shape of a Secret's material (issue

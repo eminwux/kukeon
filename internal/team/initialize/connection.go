@@ -17,21 +17,45 @@
 package initialize
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"gopkg.in/yaml.v3"
 )
 
 const defaultHost = "unix:///run/kukeon/kukeond.sock"
 
+// ConnectOptions locate kukeond for the kuke team verbs, which resolve their
+// own endpoint: the subtree does not load kuke's root configuration.
+type ConnectOptions struct {
+	// Root is the operator's ~/.kuke directory, where kuke.yaml lives.
+	Root          string
+	Host          string
+	Configuration string
+}
+
+// Connect dials kukeond for a kuke team verb. The caller closes the client.
+func Connect(ctx context.Context, opts ConnectOptions) (kukeonv1.Client, error) {
+	host, err := resolveHost(opts)
+	if err != nil {
+		return nil, err
+	}
+	client, err := kukeonv1.Dial(ctx, host)
+	if err != nil {
+		return nil, fmt.Errorf("kukeond connection configuration: %w", err)
+	}
+	return client, nil
+}
+
 // Match kuke's precedence: flag > KUKEON_HOST > ClientConfiguration > default.
 // The loader is local because kukeon's clientconfig package is internal.
-func resolveHost(opts Options) (string, error) {
+func resolveHost(opts ConnectOptions) (string, error) {
 	path := opts.Configuration
 	explicit := path != ""
 	if path == "" {

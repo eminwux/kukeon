@@ -154,7 +154,7 @@ func assertGenerated(t *testing.T, h *harness.Harness, c *harness.ImageCatalog, 
 
 // sharedHarness is a minimal harness whose only image is build-less.
 func sharedHarness(imageName string) string {
-	return `apiVersion: kuketeams.io/v1
+	return `apiVersion: v1beta1
 kind: Harness
 metadata:
   name: script

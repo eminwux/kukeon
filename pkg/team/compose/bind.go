@@ -44,7 +44,7 @@ import (
 // name, and otherwise an optional slot the shared blueprint gains for it.
 //
 // A slot is filled in the Config only when its identity was chosen: by the
-// team's `connectors`, or by a TeamEntry / TeamsConfig binding that names
+// team's `connectors`, or by a recorded or TeamDefaults binding that names
 // something other than the default secret. Every other slot is left to the
 // Realm → Space → Stack defaults (issue #1548), so it resolves when a cell is
 // created and follows a later change of a default.
@@ -230,7 +230,7 @@ var cellEnvironment = []string{
 // planParameters records the role-declared parameters the shared blueprint
 // does not already declare, and checks each has a value: the operator's, or
 // the default the role declares for it.
-func planParameters(plan *pairPlan, cfg *config.TeamsConfig) error {
+func planParameters(plan *pairPlan, cfg *config.TeamDefaults) error {
 	known := map[string]bool{"PROMPT": true, "AGENT_NAME": true}
 	for name := range composed {
 		known[name] = true
@@ -286,7 +286,7 @@ func planParameters(plan *pairPlan, cfg *config.TeamsConfig) error {
 // bind writes the CellConfig of one pair: the answers to the shared
 // blueprint's form.
 func bind(
-	plan *pairPlan, bp *api.CellBlueprintDoc, cfg *config.TeamsConfig, team *config.Team, opts Options,
+	plan *pairPlan, bp *api.CellBlueprintDoc, cfg *config.TeamDefaults, team *config.Team, opts Options,
 ) (Pair, error) {
 	name := plan.configName()
 	cc := &api.CellConfigDoc{
@@ -346,7 +346,7 @@ func bind(
 	return pair, nil
 }
 
-func bindValues(plan *pairPlan, bp *api.CellBlueprintDoc, cfg *config.TeamsConfig, cc *api.CellConfigDoc) error {
+func bindValues(plan *pairPlan, bp *api.CellBlueprintDoc, cfg *config.TeamDefaults, cc *api.CellConfigDoc) error {
 	settings := plan.settings
 	root := plan.profile.Root
 	sandbox, approval := settings.Sandbox, settings.Approval
@@ -449,8 +449,8 @@ func bindRepos(plan *pairPlan, cc *api.CellConfigDoc, team *config.Team) error {
 		}
 		// Add's project declaration distinguishes a tag from a same-named
 		// branch all the way through the runtime checkout contract.
-		if source.Name == projectSlot && team.ProjectSource != nil && team.ProjectSource.Tag != "" {
-			ref = "refs/tags/" + team.ProjectSource.Tag
+		if source.Name == projectSlot && team.Spec.ProjectSource != nil && team.Spec.ProjectSource.Tag != "" {
+			ref = "refs/tags/" + team.Spec.ProjectSource.Tag
 		}
 		url := source.URL
 		if strings.HasPrefix(url, "github.com/") {

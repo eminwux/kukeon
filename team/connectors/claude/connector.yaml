@@ -4,7 +4,7 @@
 # enables exactly one on every claude Config. `login` is the default because it
 # is what a cell did before connectors existed: with no token in its
 # environment, Claude Code uses the login kept in the harness state volume.
-apiVersion: kuketeams.io/v1
+apiVersion: v1beta1
 kind: Connector
 metadata:
   name: claude

@@ -26,7 +26,7 @@ import (
 
 func TestImageSelectionRequiresCompleteCapabilities(t *testing.T) {
 	catalog := &harness.ImageCatalog{
-		APIVersion: "kuketeams.io/v1", Kind: "HarnessImageCatalog",
+		APIVersion: "v1beta1", Kind: "HarnessImageCatalog",
 		Metadata: model.Metadata{Name: "codex"},
 		Spec: harness.CatalogSpec{Images: []harness.CatalogImage{
 			{Image: "registry.test/root:v1", Capabilities: []string{"codex", "gh", "go", "root"}},

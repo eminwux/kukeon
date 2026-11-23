@@ -20,181 +20,182 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
-	"github.com/eminwux/kukeon/internal/team/teamtest"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	"github.com/eminwux/kukeon/pkg/team/config"
-	"gopkg.in/yaml.v3"
 )
 
-// sourceFS is the repository's team definitions with the majordomo role made
-// plain (no host mounts, no task), so these tests count only what they add.
-func sourceFS() map[string]fs.FS {
-	source, err := teamtest.PlainSource("../../..")
-	if err != nil {
-		panic(err)
-	}
-	return map[string]fs.FS{"kukeon": source}
-}
-
-func setupRun(t *testing.T) Options {
+// setupInit is init against an empty fake daemon with the plain definitions.
+func setupInit(t *testing.T) (InitOptions, *fakeClient) {
 	t.Helper()
-	// kuketeams.yaml is optional (issue #1591): a fresh host has none.
-	root := filepath.Join(t.TempDir(), ".kuke")
-	return Options{Root: root, Home: filepath.Dir(root), Sources: sourceFS(), Client: newFake(), Force: true}
-}
-
-// writeTeamsConfig writes a hand-written kuketeams.yaml.
-func writeTeamsConfig(t *testing.T, root, content string) string {
-	t.Helper()
-	path := filepath.Join(root, "kuketeams.yaml")
-	if err := os.MkdirAll(root, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(content), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	return path
-}
-
-// TestRunExistingEntryRequiresForce: "already initialized" is the kuke team
-// entry, not kuketeams.yaml (issue #1591).
-func TestRunExistingEntryRequiresForce(t *testing.T) {
-	opts := setupRun(t)
-	if _, err := Run(t.Context(), opts); err != nil {
-		t.Fatal(err)
-	}
-	entryPath := filepath.Join(opts.Root, "kuketeam.d", "kuke.yaml")
-	before, err := os.ReadFile(entryPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	opts.Force = false
 	f := newFake()
-	opts.Client = f
-	if _, err = Run(t.Context(), opts); err == nil || !strings.Contains(err.Error(), "already initialized") ||
-		!strings.Contains(err.Error(), "--force") || !strings.Contains(err.Error(), "--reapply") {
-		t.Fatalf("expected already-initialized guidance, got %v", err)
-	}
-	after, err := os.ReadFile(entryPath)
-	if err != nil || !bytes.Equal(before, after) || f.applies != 0 {
-		t.Fatal("existing registration or daemon changed")
-	}
+	return InitOptions{Options: Options{Client: f, Sources: sourceFS()}}, f
 }
 
-// TestRunWithoutConfiguration is AC1 and AC4: on a host whose global git
-// configuration signs with an SSH key, init reads none of it, writes no
-// kuketeams.yaml and prints no git note.
-func TestRunWithoutConfiguration(t *testing.T) {
+// TestInitAppliesTheKukeTeamAndCreatesDefaults is AC7: init applies the kuke
+// Team in one team apply, stores it, and gives a realm without TeamDefaults
+// one with the kukeon source and its claude and codex harnesses. It reads
+// nothing of the host's git configuration.
+func TestInitAppliesTheKukeTeamAndCreatesDefaults(t *testing.T) {
 	gitconfig := filepath.Join(t.TempDir(), "gitconfig")
 	if err := os.WriteFile(gitconfig, []byte("[user]\n\tname = Dev\n\temail = dev@example.com\n"+
 		"\tsigningkey = ~/.ssh/id_ed25519.pub\n[commit]\n\tgpgsign = true\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("GIT_CONFIG_GLOBAL", gitconfig)
-	opts := setupRun(t)
-	opts.Force = false
-	result, err := Run(t.Context(), opts)
-	if err != nil || result.Resources != 4 || result.ConfigPath != "" {
-		t.Fatalf("result=%+v err=%v", result, err)
+	opts, f := setupInit(t)
+	out, err := Init(t.Context(), opts)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, statErr := os.Stat(filepath.Join(opts.Root, "kuketeams.yaml")); !os.IsNotExist(statErr) {
-		t.Fatalf("init wrote kuketeams.yaml: %v", statErr)
+	// Two blueprints, two configs, the TeamDefaults and the Team.
+	if out.Result == nil || out.Result.Resources != 6 || out.Result.Team != "kuke" {
+		t.Fatalf("result = %+v", out.Result)
 	}
-	for _, note := range result.Notes {
+	if !slices.Equal(f.writes, []string{"apply-team kuke"}) {
+		t.Fatalf("writes = %v, want one team apply", f.writes)
+	}
+	kinds, _ := appliedDocs(t, f.raw)
+	if kinds[0] != "TeamDefaults" || kinds[len(kinds)-1] != "Team" {
+		t.Fatalf("apply stream kinds = %v", kinds)
+	}
+	team := storedTeam(t, f, "kuke")
+	if len(team.Spec.Roles) != 1 || team.Spec.Roles[0].Name != "majordomo" || len(team.Spec.Sources) != 1 ||
+		len(team.Spec.Harnesses) != 2 || team.Metadata.Realm != "default" {
+		t.Fatalf("stored kuke team = %+v", team.Spec)
+	}
+	defaults := storedDefaults(t, f)
+	d := defaults.Spec.Defaults
+	if len(d.Sources) != 1 || d.Sources[0] != config.MajordomoSource() || d.Roles != nil ||
+		!slices.Equal(d.Harnesses, config.MajordomoHarnesses()) {
+		t.Fatalf("initial defaults = %+v", d)
+	}
+	for _, note := range out.Result.Notes {
 		if strings.Contains(strings.ToLower(note), "git") {
 			t.Fatalf("init printed a git note: %q", note)
 		}
 	}
-	if f := opts.Client.(*fakeClient); f.creates != 0 || f.stackDefaults != nil {
+	if f.creates != 0 || f.stackDefaults != nil {
 		t.Fatalf("init stored a secret or stack git defaults: creates=%d stack=%+v", f.creates, f.stackDefaults)
 	}
 }
 
-// TestRunForceResetsEntryAndKeepsConfiguration: --force replaces the kuke
-// team entry and never touches a hand-written kuketeams.yaml (AC4).
-func TestRunForceResetsEntryAndKeepsConfiguration(t *testing.T) {
-	opts := setupRun(t)
-	original := []byte("# authored comment\napiVersion: kuketeams.io/v1\nkind: TeamsConfig\nspec:\n  defaults: {}\n")
-	path := writeTeamsConfig(t, opts.Root, string(original))
-	for range 2 {
-		result, runErr := Run(t.Context(), opts)
-		if runErr != nil {
-			t.Fatal(runErr)
-		}
-		if result.Resources != 4 || result.EntryPath != filepath.Join(opts.Root, "kuketeam.d", "kuke.yaml") ||
-			result.ConfigPath != path {
-			t.Fatalf("result=%+v", result)
-		}
-		after, readErr := os.ReadFile(path)
-		info, statErr := os.Stat(path)
-		if readErr != nil || statErr != nil || !bytes.Equal(after, original) || info.Mode().Perm() != 0o640 {
-			t.Fatal("init --force touched the hand-written configuration")
-		}
-		entryBytes, readErr := os.ReadFile(result.EntryPath)
-		if readErr != nil {
-			t.Fatal(readErr)
-		}
-		entry, decodeErr := config.DecodeEntry(bytes.NewReader(entryBytes))
-		if decodeErr != nil {
-			t.Fatal(decodeErr)
-		}
-		if entry.Metadata.Name != "kuke" || len(entry.Spec.Roles) != 1 || len(entry.Spec.Sources) != 1 ||
-			len(entry.Spec.Harnesses) != 2 {
-			t.Fatal("initial explicit declaration lost")
-		}
-		info, statErr = os.Stat(result.EntryPath)
-		if statErr != nil || info.Mode().Perm() != 0o600 {
-			t.Fatal("unsafe entry permissions")
-		}
+// TestInitAlreadyInitialized: "already initialized" is the stored kuke Team.
+func TestInitAlreadyInitialized(t *testing.T) {
+	opts, f := setupInit(t)
+	if _, err := Init(t.Context(), opts); err != nil {
+		t.Fatal(err)
 	}
-	f := opts.Client.(*fakeClient)
-	if f.applies != 2 || f.team != "kuke" {
-		t.Fatal("rerun did not update stable identity")
+	before, writes := f.teams["kuke"], len(f.writes)
+	_, err := Init(t.Context(), opts)
+	if err == nil || !strings.Contains(err.Error(), "already initialized") ||
+		!strings.Contains(err.Error(), "--force") || !strings.Contains(err.Error(), "--reapply") {
+		t.Fatalf("expected already-initialized guidance, got %v", err)
+	}
+	if !bytes.Equal(before, f.teams["kuke"]) || len(f.writes) != writes {
+		t.Fatal("existing team or daemon changed")
 	}
 }
 
-// TestRunRejectsLeftoverSpecGit is D7: a kuketeams.yaml that still carries
-// spec.git fails before anything reaches the daemon, naming the replacement.
-func TestRunRejectsLeftoverSpecGit(t *testing.T) {
+// TestInitForceResetsTheTeamAndNeverTheDefaults: --force replaces the stored
+// kuke Team with the initial declaration; an existing TeamDefaults is never
+// changed or re-sent (AC7).
+func TestInitForceResetsTheTeamAndNeverTheDefaults(t *testing.T) {
+	opts, f := setupInit(t)
+	custom := config.Majordomo()
+	custom.Spec.Roles = []config.Role{
+		{Name: "custom", Source: "kukeon", Path: "team/roles/majordomo", Harness: "codex", InitialPath: "/opt/custom"},
+	}
+	storeTeam(t, f, custom)
+	defaults := config.EmptyDefaults(config.DefaultRealm)
+	defaults.Spec.Defaults.Sources = []config.Source{config.MajordomoSource()}
+	defaults.Spec.Defaults.Harnesses = config.MajordomoHarnesses()[:1]
+	storeDefaults(t, f, defaults)
+	original := slices.Clone(f.defaults)
+	opts.Force = true
+	for range 2 {
+		out, err := Init(t.Context(), opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out.Result.Resources != 5 {
+			t.Fatalf("resources = %d, want 2 blueprints, 2 configs and the Team", out.Result.Resources)
+		}
+		if kinds, _ := appliedDocs(t, f.raw); slices.Contains(kinds, "TeamDefaults") {
+			t.Fatal("init re-sent an existing TeamDefaults")
+		}
+		if bytes.Contains(f.raw, []byte("kuke-custom-codex")) {
+			t.Fatal("authored majordomo selection retained")
+		}
+		if team := storedTeam(t, f, "kuke"); team.Spec.Roles[0].Name != "majordomo" {
+			t.Fatal("stored team was not reset")
+		}
+		if !bytes.Equal(original, f.defaults) {
+			t.Fatal("init changed the TeamDefaults")
+		}
+	}
+	if f.applies != 2 || f.team != "kuke" || len(f.plain) != 0 {
+		t.Fatalf("applies=%d team=%q plain=%d", f.applies, f.team, len(f.plain))
+	}
+}
+
+// TestInitForceReplacesAnUndecodableTeam: a stored kuke Team that no longer
+// decodes blocks a plain init but not a forced one.
+func TestInitForceReplacesAnUndecodableTeam(t *testing.T) {
+	opts, f := setupInit(t)
+	f.teams["kuke"] = []byte("apiVersion: v1beta1\nkind: Team\nmetadata: {name: kuke}\nspec: {unknown: true}\n")
+	if _, err := Init(t.Context(), opts); err == nil || f.applies != 0 {
+		t.Fatalf("undecodable stored team accepted: %v", err)
+	}
+	opts.Force = true
+	if _, err := Init(t.Context(), opts); err != nil {
+		t.Fatal(err)
+	}
+	if team := storedTeam(t, f, "kuke"); team.Spec.Roles[0].Name != "majordomo" {
+		t.Fatal("the undecodable team was not replaced")
+	}
+}
+
+// TestInitRejectsStoredDefaultsWithSpecGit is D7: a TeamDefaults that still
+// carries spec.git fails before anything reaches the daemon.
+func TestInitRejectsStoredDefaultsWithSpecGit(t *testing.T) {
 	for _, reapplying := range []bool{false, true} {
-		opts := setupRun(t)
+		opts, f := setupInit(t)
 		if reapplying {
-			if _, err := Run(t.Context(), opts); err != nil {
+			if _, err := Init(t.Context(), opts); err != nil {
 				t.Fatal(err)
 			}
-			opts.Force, opts.Reapply = false, true
+			opts.Reapply = true
 		}
-		writeTeamsConfig(t, opts.Root, "apiVersion: kuketeams.io/v1\nkind: TeamsConfig\nspec:\n"+
-			"  git:\n    author: {name: Dev, email: dev@example.com}\n")
-		f := newFake()
-		opts.Client = f
-		_, err := Run(t.Context(), opts)
-		if err == nil || !strings.Contains(err.Error(), "kuke connector import git") || f.applies != 0 {
-			t.Fatalf("reapply=%v: err=%v applies=%d", reapplying, err, f.applies)
+		f.defaults = []byte("apiVersion: v1beta1\nkind: TeamDefaults\nmetadata: {name: default, realm: default}\n" +
+			"spec:\n  git:\n    author: {name: Dev, email: dev@example.com}\n")
+		applies := f.applies
+		_, err := Init(t.Context(), opts)
+		if err == nil || !strings.Contains(err.Error(), "kuke connector import git") || f.applies != applies {
+			t.Fatalf("reapply=%v: err=%v applies=%d", reapplying, err, f.applies-applies)
 		}
 	}
 }
 
-func TestRegistrationOnlyChangesAfterFullSuccess(t *testing.T) {
+// TestInitFailuresStoreNothing is AC4 through init: a failed apply leaves the
+// stored Team as it was, or absent.
+func TestInitFailuresStoreNothing(t *testing.T) {
 	for _, existing := range []bool{false, true} {
 		for _, mode := range []string{"rpc", "total", "partial", "preflight"} {
 			t.Run(fmt.Sprintf("existing-%t/%s", existing, mode), func(t *testing.T) {
-				opts := setupRun(t)
-				entryPath := filepath.Join(opts.Root, "kuketeam.d", "kuke.yaml")
+				opts, f := setupInit(t)
+				opts.Force = true
 				if existing {
-					if _, err := Run(t.Context(), opts); err != nil {
+					if _, err := Init(t.Context(), opts); err != nil {
 						t.Fatal(err)
 					}
 				}
-				before, _ := os.ReadFile(entryPath)
-				f := newFake()
-				opts.Client = f
+				before, had := f.teams["kuke"]
 				switch mode {
 				case "rpc":
 					f.applyErr = io.EOF
@@ -211,108 +212,34 @@ func TestRegistrationOnlyChangesAfterFullSuccess(t *testing.T) {
 				case "preflight":
 					f.missingRealm = true
 				}
-				result, err := Run(t.Context(), opts)
-				if err == nil || result.EntryPath != "" {
-					t.Fatalf("claimed successful registration: %+v, %v", result, err)
+				out, err := Init(t.Context(), opts)
+				if err == nil || out.Result != nil {
+					t.Fatalf("claimed success: %+v, %v", out.Result, err)
 				}
-				after, readErr := os.ReadFile(entryPath)
-				if existing {
-					if readErr != nil || !bytes.Equal(before, after) {
-						t.Fatal("prior registration changed")
-					}
-				} else if !os.IsNotExist(readErr) {
-					t.Fatal("failed team registered")
-				}
-				entries, readErr := os.ReadDir(filepath.Join(opts.Root, "kuketeam.d"))
-				if readErr != nil {
-					t.Fatal(readErr)
-				}
-				for _, entry := range entries {
-					if strings.HasPrefix(entry.Name(), ".kuke-") {
-						t.Fatal("staging file leaked")
-					}
+				after, has := f.teams["kuke"]
+				if had != has || !bytes.Equal(before, after) {
+					t.Fatal("the stored team changed on a failed init")
 				}
 			})
 		}
 	}
 }
 
-func TestRunForceResetsExistingMajordomoDeclaration(t *testing.T) {
-	opts := setupRun(t)
-	team := config.Majordomo()
-	team.Spec.Roles = []config.Role{
-		{Name: "custom", Source: "kukeon", Path: "team/roles/majordomo", Harness: "codex", InitialPath: "/opt/custom"},
-	}
-	entry, err := config.Entry(team)
+// TestInitDryRunWritesNothing is AC10 through init.
+func TestInitDryRunWritesNothing(t *testing.T) {
+	opts, f := setupInit(t)
+	opts.DryRun = true
+	out, err := Init(t.Context(), opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := yaml.Marshal(entry)
-	if err != nil {
-		t.Fatal(err)
+	if out.Result != nil || len(f.writes) != 0 || f.defaults != nil || len(f.teams) != 0 {
+		t.Fatalf("dry run wrote: result=%+v writes=%v", out.Result, f.writes)
 	}
-	path := filepath.Join(opts.Root, "kuketeam.d", "kuke.yaml")
-	if err = os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err = os.WriteFile(path, raw, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = Run(t.Context(), opts); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(opts.Client.(*fakeClient).raw), "kuke-custom-codex") {
-		t.Fatal("authored majordomo selection retained")
-	}
-	after, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	accepted, err := config.DecodeEntry(bytes.NewReader(after))
-	if err != nil || accepted.Spec.Roles[0].Name != "majordomo" {
-		t.Fatal("entry was not reset")
-	}
-}
-
-func TestForceReplacesInvalidExistingEntry(t *testing.T) {
-	for _, raw := range []string{"kind: Wrong\n", "apiVersion: kuketeams.io/v1\nkind: TeamEntry\nmetadata:\n  name: different\nspec: {}\n"} {
-		opts := setupRun(t)
-		path := filepath.Join(opts.Root, "kuketeam.d", "kuke.yaml")
-		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := Run(t.Context(), opts); err != nil {
-			t.Fatal(err)
-		}
-		if opts.Client.(*fakeClient).applies != 1 {
-			t.Fatal("initial majordomo was not applied")
-		}
-	}
-}
-
-func TestLegacyRootRegistrationIsUntouched(t *testing.T) {
-	opts := setupRun(t)
-	legacy := filepath.Join(opts.Root, "kuketeam.d", "root.yaml")
-	if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	original := []byte(
-		"# legacy declaration kept verbatim\napiVersion: kuketeams.io/v1\nkind: TeamEntry\nmetadata: {name: root}\nspec: {}\n",
-	)
-	if err := os.WriteFile(legacy, original, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Run(t.Context(), opts); err != nil {
-		t.Fatal(err)
-	}
-	after, err := os.ReadFile(legacy)
-	if err != nil || !bytes.Equal(after, original) {
-		t.Fatal("legacy registration changed")
-	}
-	if opts.Client.(*fakeClient).team != "kuke" {
-		t.Fatal("applied legacy identity")
+	p := out.Plan
+	if p.Origin.Kind != OriginInitial || len(p.Pairs) != 2 ||
+		!slices.Equal(p.Create, []string{"kuke-majordomo-claude", "kuke-majordomo-codex"}) ||
+		len(p.Rerender) != 0 || len(p.Prune) != 0 {
+		t.Fatalf("plan = %+v", p)
 	}
 }

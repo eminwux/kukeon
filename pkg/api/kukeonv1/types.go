@@ -1377,3 +1377,106 @@ type GetNetworkDetailResult struct {
 	Cell      *CellNetworkDetail      `json:"cell,omitempty"`
 	Container *ContainerNetworkDetail `json:"container,omitempty"`
 }
+
+// ---- Teams (issue #1618) ----
+
+// Team and TeamDefaults documents travel as YAML bytes, never as JSON-encoded
+// structs: the declaration types keep an omitted list apart from an empty one
+// only in their YAML form. Writes go through ApplyDocuments; these are the
+// reads and the delete.
+
+// TeamRef names one stored Team. An empty Realm means realm default.
+type TeamRef struct {
+	Name  string
+	Realm string
+}
+
+// TeamSummary is what kukeond reads out of a stored Team for a list: where
+// its project comes from, what it selects, and the Configs it has now,
+// counted from the kukeon.io/team label.
+type TeamSummary struct {
+	Name  string `json:"name"`
+	Realm string `json:"realm"`
+	// ProjectURL and ProjectRef are the team's spec.projectSource; empty for
+	// a team without one (the kuke team).
+	ProjectURL string `json:"projectUrl,omitempty"`
+	ProjectRef string `json:"projectRef,omitempty"`
+	// Roles and Harnesses are the names the declaration selects. Inherited
+	// reports that the declaration omits the list and takes the defaults'.
+	Roles              []string `json:"roles"`
+	RolesInherited     bool     `json:"rolesInherited"`
+	Harnesses          []string `json:"harnesses"`
+	HarnessesInherited bool     `json:"harnessesInherited"`
+	// Configs are the names of the stored CellConfigs labelled with the team.
+	Configs []string `json:"configs"`
+}
+
+type GetTeamArgs struct {
+	Ref TeamRef
+}
+
+type GetTeamReply struct {
+	Result GetTeamResult
+	Err    *APIError
+}
+
+// GetTeamResult carries a stored Team's document and its summary. Exists is
+// false, with no error, when no Team of the name is stored.
+type GetTeamResult struct {
+	Exists   bool
+	Document []byte
+	Summary  TeamSummary
+}
+
+type ListTeamsArgs struct {
+	// Realm filters the list; empty lists every realm.
+	Realm string
+}
+
+type ListTeamsReply struct {
+	Teams []GetTeamResult
+	Err   *APIError
+}
+
+type DeleteTeamArgs struct {
+	Ref TeamRef
+}
+
+type DeleteTeamReply struct {
+	Result DeleteTeamResult
+	Err    *APIError
+}
+
+// DeleteTeamResult reports what deleting a team removed and what it left: the
+// team's Configs and the shared blueprints nothing else references go; cells
+// and volumes stay.
+type DeleteTeamResult struct {
+	Deleted bool
+	// Removed are the Configs and blueprints deleted, as an apply reports a
+	// prune.
+	Removed []ApplyResourceResult
+	// LiveCells are the scope paths of the cells still running from a
+	// removed Config.
+	LiveCells []string
+	// KeptVolumes are the scope paths of the removed Configs' state volumes,
+	// which stay until deleted with kuke delete volume.
+	KeptVolumes []string
+}
+
+type GetTeamDefaultsArgs struct {
+	// Realm is the realm whose TeamDefaults to read; empty means default.
+	Realm string
+}
+
+type GetTeamDefaultsReply struct {
+	Result GetTeamDefaultsResult
+	Err    *APIError
+}
+
+// GetTeamDefaultsResult carries a realm's stored TeamDefaults document.
+// Exists is false, with no error, when the realm stores none.
+type GetTeamDefaultsResult struct {
+	Exists   bool
+	Realm    string
+	Document []byte
+}

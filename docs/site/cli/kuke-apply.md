@@ -27,6 +27,17 @@ Plus all [global flags](kuke.md).
   cat cell.yaml | sudo kuke apply -f -
   ```
 
+## Teams
+
+A manifest may carry the two stored team kinds (see [Teams](../concepts/team.md)):
+
+- A **`TeamDefaults`** document (`metadata.name: default`, one per realm) is stored as it is and reported like any other resource. Connectors, parameters and secret bindings of the defaults are set this way. The output then names the stored teams that inherit the defaults and the `kuke team apply NAME` that recomposes each, since a defaults change recomposes nothing by itself.
+- A **`Team`** document is not sent to kukeond as it is: `kuke` composes it — fetching its sources — and applies it exactly as [`kuke team apply -f FILE`](kuke-team.md#kuke-team-apply) does, so kukeond stores it only with the Configs composed from it. Its outcome is printed as `kuke team apply` prints it; with `-o json`/`-o yaml` it is one `{kind: Team, action: applied}` entry.
+
+The manifest's other documents are applied first, in one request, so a `TeamDefaults` in the same file is what its Teams inherit. If any of them fails, the Teams are skipped (`Team "web": skipped (another document in the file failed)`, or a `failed` entry in structured output). A Team that fails composition is reported as `failed` and the file's later Teams are still composed; the command then exits non-zero. A `Team` document sent to kukeond by any other path is rejected.
+
+The source documents a team is composed from — `Role`, `Harness`, `HarnessImageCatalog`, `Component`, `Connector` — are read from a fetched source and rejected by `kuke apply`.
+
 ## Per-resource outcome
 
 For each resource in the manifest, `apply` emits one of:

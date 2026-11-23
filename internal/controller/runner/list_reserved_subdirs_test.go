@@ -49,6 +49,8 @@ func reservedScopeSubdirNames() []string {
 		consts.KukeonVolumesSubdir,
 		consts.KukeonVolumeMetaSubdir,
 		consts.KukeonHealthReportsSubdir,
+		consts.KukeonTeamsSubdir,
+		consts.KukeonTeamDefaultsSubdir,
 	}
 }
 

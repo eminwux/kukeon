@@ -30,35 +30,6 @@ import (
 func TestRoundTripAllKinds(t *testing.T) {
 	t.Parallel()
 
-	pt := model.ProjectTeam{
-		APIVersion: model.APIVersionV1, Kind: model.KindProjectTeam,
-		Metadata: model.Metadata{Name: "sbsh"},
-		Spec: model.ProjectTeamSpec{
-			Source:   model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"},
-			Defaults: model.ProjectTeamDefaults{Harnesses: []string{"claude"}},
-			Roles:    []model.ProjectTeamRole{{Ref: "dev", Needs: &model.ProjectRoleNeeds{Image: []string{"go"}}}},
-		},
-	}
-	assertJSONYAML(t, "ProjectTeam", pt, func(got model.ProjectTeam) bool {
-		return got.Spec.Source.Repo == "github.com/eminwux/agents" && got.Spec.Source.Tag == "v1.4.0" &&
-			len(got.Spec.Roles) == 1 && got.Spec.Roles[0].Needs.Image[0] == "go"
-	})
-
-	te := model.TeamEntry{
-		APIVersion: model.APIVersionV1, Kind: model.KindTeamEntry,
-		Metadata: model.Metadata{Name: "sbsh"},
-		Spec: model.TeamEntrySpec{
-			Path:    "/home/op/src/sbsh",
-			TeamDir: "/home/op/.kuke/teams/sbsh",
-			Source:  &model.TeamSource{Repo: "github.com/eminwux/agents", Branch: "main"},
-		},
-	}
-	assertJSONYAML(t, "TeamEntry", te, func(got model.TeamEntry) bool {
-		return got.Metadata.Name == "sbsh" && got.Spec.Path == "/home/op/src/sbsh" &&
-			got.Spec.TeamDir == "/home/op/.kuke/teams/sbsh" &&
-			got.Spec.Source != nil && got.Spec.Source.Branch == "main" && got.Spec.Source.Floating()
-	})
-
 	roleDefault := "${ROLE_SOURCE_REPO}"
 	role := model.Role{
 		APIVersion: model.APIVersionV1, Kind: model.KindRole,
@@ -109,27 +80,6 @@ func TestRoundTripAllKinds(t *testing.T) {
 	}
 	assertJSONYAML(t, "ImageCatalog", ic, func(got model.ImageCatalog) bool {
 		return len(got.Spec.Images) == 1 && got.Spec.Images[0].Build.Context == "harnesses/claude"
-	})
-}
-
-// TestTeamsConfigSpecRoundTripsHomeDirAndRepoOwner asserts the
-// .spec.homeDir / .spec.repoOwner override fields (added with the
-// .operator.HOME_DIR / .operator.REPO_OWNER blueprint facts) survive a
-// JSON/YAML round-trip — both default to derived values at render time,
-// but the explicit override must marshal in both encodings.
-func TestTeamsConfigSpecRoundTripsHomeDirAndRepoOwner(t *testing.T) {
-	t.Parallel()
-	tc := model.TeamsConfig{
-		APIVersion: model.APIVersionV1, Kind: model.KindTeamsConfig,
-		Spec: model.TeamsConfigSpec{
-			Registry:  "registry.local",
-			HomeDir:   "/home/op",
-			RepoOwner: "eminwux",
-		},
-	}
-	assertJSONYAML(t, "TeamsConfig+HomeDir+RepoOwner", tc, func(got model.TeamsConfig) bool {
-		return got.Spec.HomeDir == "/home/op" && got.Spec.RepoOwner == "eminwux" &&
-			got.Spec.Registry == "registry.local"
 	})
 }
 

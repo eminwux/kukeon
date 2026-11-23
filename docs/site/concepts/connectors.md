@@ -234,11 +234,14 @@ connector or of the wrong type is an error even for an optional connector.
 
 ## Teams
 
-A team picks a method and an identity per connector in its `kind: Team` file or
-its TeamEntry; a role entry overrides the team for that role.
+A team picks a method and an identity per connector under `spec.connectors` of
+its Team declaration — a repository's `kuketeam.yaml`, or the declaration
+kukeond stores (`kuke get team NAME -o yaml`, the web UI's Teams page). A team
+that omits `connectors` inherits the realm `TeamDefaults`' map. A role entry
+overrides the team for that role.
 
 ```yaml
-apiVersion: kuketeams.io/v1
+apiVersion: v1beta1
 kind: Team
 metadata:
   name: backend
@@ -313,7 +316,8 @@ effective method and identity. A connector with several methods offers a method
 picker; choosing another identity or method sends the same overrides, and the
 preview shows the methods and identities the cell will use. A per-cell pick is
 allowed on a team-owned Config too: only the Config's own page shows its
-identities read-only, because `kuke team add` re-renders it.
+identities read-only, because applying the team re-renders it; that page links
+the team, whose declaration is edited on the Teams page.
 
 ## Why login volumes are not shared across roles
 
@@ -339,7 +343,7 @@ no Go and no TypeScript names a connector, and a test
 (`pkg/team/connector/guard_test.go`) enforces it.
 
 ```yaml
-apiVersion: kuketeams.io/v1
+apiVersion: v1beta1
 kind: Connector
 metadata:
   name: example-token # must match the directory

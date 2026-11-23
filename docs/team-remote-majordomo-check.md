@@ -1,8 +1,10 @@
 # Checking the published Codex majordomo (`kuke team`)
 
-This opt-in check exercises the real `kuke team init` command followed by an
-explicit `kuke run --from-config kuke-majordomo-codex`. Initialization applies
-configuration and registers the kuke team; it does not start cells. A passing
+This opt-in check exercises the real `kuke team apply -f` command, with a
+pinned `kuke` Team document, followed by an explicit
+`kuke run --from-config kuke-majordomo-codex`. The apply composes and applies
+the configuration, and kukeond stores the kuke Team with it; it does not start
+cells. A passing
 check requires a live work container, the published image's digest, and a
 completed authenticated Codex turn with command-generated installation evidence.
 
@@ -12,7 +14,7 @@ completed authenticated Codex turn with command-generated installation evidence.
   and working containerd, networking, DNS, GitHub access, and GHCR image pulls,
   running the same kukeon revision as the driver checkout.
 - `go`, `git`, `make`, and a compatible `kuke` CLI on the test driver's PATH
-  (the driver itself runs `./kuke team init` from the checkout).
+  (the driver itself runs `./kuke team apply -f` from the checkout).
   The image provides Python 3, Git, Make, and Codex. The driver reads the work
   container's output with `kuke log`, which streams it over the kukeond socket,
   so it needs access to `/run/kukeon/kukeond.sock` but not to `/opt/kukeon`.
@@ -23,7 +25,7 @@ completed authenticated Codex turn with command-generated installation evidence.
   image is an unmet prerequisite for this check. Publish/make the intended
   release publicly pullable separately; neither this target nor `init` builds
   an image, publishes one, or creates a release tag.
-- A reachable, full source commit SHA in `eminwux/kukeon`. Both initialization
+- A reachable, full source commit SHA in `eminwux/kukeon`. Both the apply
   and the in-cell clone use this commit. By default it is the driver's `HEAD`;
   set `KUKETEAMS_REMOTE_REVISION` when testing unpushed driver changes against an
   already published source revision. Use matching majordomo/harness assets: their
@@ -108,12 +110,14 @@ live test is not successful remote-image verification.
 
 The driver:
 
-1. Runs `kuke team init` in an isolated client HOME with an explicit Codex-only
-   `kuke` entry and its source commit pinned. Fresh init normally selects both
-   Codex and Claude; this check intentionally verifies Codex alone.
-   Reads back the majordomo blueprint/config and kuke TeamEntry, checks repository
-   pinning and absence of base-role secret bindings, and compares runtime cell
-   identities/recipes and secret metadata before and after initialization.
+1. Runs `kuke team apply -f <pinned kuke Team>` in an isolated client HOME:
+   the `kuke` Team declares the majordomo role on Codex alone, with its kukeon
+   source pinned to the source commit, so it does not depend on the realm's
+   `TeamDefaults`. Fresh init normally selects both Codex and Claude; this check
+   intentionally verifies Codex alone. Reads back the stored kuke Team
+   (`GetTeam`) and the majordomo blueprint/config, checks repository pinning and
+   absence of base-role secret bindings, and compares runtime cell
+   identities/recipes and secret metadata before and after the apply.
 2. Fetches and hashes the catalog image's published manifest. Once authentication
    volume metadata is present, pins **only its new test-owned blueprint** to
    that digest with a single `kuke apply -f`. This test-only pin prevents a stale
@@ -149,7 +153,10 @@ the `failure` field instead of interpreting a partial report as a pass.
 
 On success or ordinary failure, cleanup kills only the unique test cell and
 deletes only `kuke-majordomo-codex` config/blueprint documents bearing its kuke
-team label. It removes its temporary HOME/registration. It never deletes or
+team label. It removes its temporary HOME. The stored `kuke` Team stays — it
+is the pinned Codex-only declaration — so on a daemon that is not disposable,
+reset it with `kuke team init --force` afterwards (`kuke delete team` refuses
+`kuke` by design). It never deletes or
 rotates secrets, deletes state volumes, cascades a realm/space/stack, purges
 images, or touches unrelated teams and persistent data. The pre-authenticated
 volume and pulled image cache remain for reruns.

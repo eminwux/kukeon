@@ -121,3 +121,25 @@ func TestInUseRefusalsRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// TestTeamErrorKinds pins the wire kinds of the issue #1618 team sentinels.
+func TestTeamErrorKinds(t *testing.T) {
+	for kind, sentinel := range map[string]error{
+		"TeamNotFound":         errdefs.ErrTeamNotFound,
+		"TeamDefaultsNotFound": errdefs.ErrTeamDefaultsNotFound,
+		"TeamApplyOnly":        errdefs.ErrTeamApplyOnly,
+		"TeamNameInUse":        errdefs.ErrTeamNameInUse,
+		"TeamReserved":         errdefs.ErrTeamReserved,
+		"InvalidTeam":          errdefs.ErrInvalidTeam,
+	} {
+		serverErr := fmt.Errorf("%w: alpha", sentinel)
+		apiErr := kukeonv1.ToAPIError(serverErr)
+		if apiErr.Kind != kind {
+			t.Errorf("Kind = %q, want %q", apiErr.Kind, kind)
+		}
+		if clientErr := kukeonv1.FromAPIError(apiErr); !errors.Is(clientErr, sentinel) ||
+			clientErr.Error() != serverErr.Error() {
+			t.Errorf("%s round trip = %v", kind, clientErr)
+		}
+	}
+}

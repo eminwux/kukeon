@@ -128,6 +128,13 @@ func (b *Exec) ApplyDocuments(docs []parser.Document, team string) (ApplyResult,
 		}
 	}
 
+	// A Team is stored only together with what was composed from it, so its
+	// name must be the team the call is for (issue #1618, D6).
+	pendingTeam, teamErr := b.pendingTeam(docs, team)
+	if teamErr != nil {
+		return result, teamErr
+	}
+
 	// Sort documents by dependency order
 	sortedDocs := SortDocumentsByKind(docs, false)
 
@@ -346,6 +353,27 @@ func (b *Exec) ApplyDocuments(docs []parser.Document, team string) (ApplyResult,
 				resourceResult.Name = reconcileResult.Name
 			}
 
+		case v1beta1.KindTeamDefaults:
+			if doc.TeamDefaultsDoc == nil {
+				resourceResult.Action = actionFailed
+				resourceResult.Error = errors.New("team defaults document is nil")
+				result.Resources = append(result.Resources, resourceResult)
+				continue
+			}
+			defaults, err := apischeme.NormalizeTeamDefaults(*doc.TeamDefaultsDoc)
+			if err != nil {
+				resourceResult.Action = actionFailed
+				resourceResult.Error = fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+				result.Resources = append(result.Resources, resourceResult)
+				continue
+			}
+			resourceResult.Name = defaults.Metadata.Name
+			reconcileResult, reconcileErr = applypkg.ReconcileTeamDefaults(b.runner, defaults)
+
+		case v1beta1.KindTeam:
+			// Stored after every other document and the prune, below.
+			continue
+
 		default:
 			resourceResult.Action = actionFailed
 			resourceResult.Error = fmt.Errorf("%w: %s", errdefs.ErrUnknownKind, doc.Kind)
@@ -373,6 +401,10 @@ func (b *Exec) ApplyDocuments(docs []parser.Document, team string) (ApplyResult,
 		result.Resources = append(result.Resources, pruneResults...)
 	}
 
+	if pendingTeam != nil {
+		result.Resources = append(result.Resources, b.storeTeam(*pendingTeam, result.Resources))
+	}
+
 	return result, nil
 }
 
@@ -391,6 +423,90 @@ func (b *Exec) applyHealthReport(doc v1beta1.HealthReportDoc) (applypkg.Reconcil
 			"findings": strconv.Itoa(len(stored.Spec.Findings)),
 		},
 	}, nil
+}
+
+// pendingTeam returns the Team document of a team apply, or nil when the call
+// carries none. A Team is accepted only in the team apply for its own name,
+// at most one per call, and only when no other realm stores a team of that
+// name: the team prune is by label across every realm, so a name is unique
+// per host. Checked before anything is written.
+func (b *Exec) pendingTeam(docs []parser.Document, team string) (*parser.Document, error) {
+	var found *parser.Document
+	for i := range docs {
+		doc := &docs[i]
+		if doc.Kind != v1beta1.KindTeam {
+			continue
+		}
+		if doc.TeamDoc == nil {
+			return nil, errors.New("team document is nil")
+		}
+		name := doc.TeamDoc.Metadata.Name
+		switch {
+		case team == "":
+			return nil, fmt.Errorf("document %d (Team %q): %w", doc.Index, name, errdefs.ErrTeamApplyOnly)
+		case name != team:
+			return nil, fmt.Errorf(
+				"document %d (Team %q): the team apply is for team %q: %w", doc.Index, name, team,
+				errdefs.ErrTeamApplyOnly,
+			)
+		case found != nil:
+			return nil, fmt.Errorf("document %d: a team apply carries one Team document", doc.Index)
+		}
+		found = doc
+	}
+	if found == nil {
+		return nil, nil //nolint:nilnil // an apply without a Team document is the usual case
+	}
+	stored, err := b.runner.ListTeams("")
+	if err != nil {
+		return nil, err
+	}
+	realm := found.TeamDoc.Metadata.Realm
+	for _, other := range stored {
+		if other.Metadata.Name == team && other.Metadata.Realm != realm {
+			return nil, fmt.Errorf(
+				"%w: team %q is stored in realm %q",
+				errdefs.ErrTeamNameInUse,
+				team,
+				other.Metadata.Realm,
+			)
+		}
+	}
+	return found, nil
+}
+
+// storeTeam writes the team apply's Team document last, and only when every
+// other document of the call applied and the prune removed what it had to:
+// a stored Team never promises Configs that are not there.
+func (b *Exec) storeTeam(doc parser.Document, applied []ResourceResult) ResourceResult {
+	out := ResourceResult{
+		Index: doc.Index, Kind: string(v1beta1.KindTeam), Name: doc.TeamDoc.Metadata.Name,
+		Details: map[string]string{"realm": doc.TeamDoc.Metadata.Realm},
+	}
+	failed := 0
+	for _, r := range applied {
+		if r.Action == actionFailed || r.Error != nil {
+			failed++
+		}
+	}
+	if failed > 0 {
+		out.Action = actionFailed
+		out.Error = fmt.Errorf("%w: team not stored: %d of the documents composed from it failed",
+			errdefs.ErrWriteTeam, failed)
+		return out
+	}
+	stored, err := apischeme.NormalizeTeam(*doc.TeamDoc)
+	if err != nil {
+		out.Action, out.Error = actionFailed, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+		return out
+	}
+	reconciled, err := applypkg.ReconcileTeam(b.runner, stored)
+	if err != nil {
+		out.Action, out.Error = actionFailed, err
+		return out
+	}
+	out.Action = reconciled.Action
+	return out
 }
 
 // scopedRef identifies one Blueprint or Config by its scope-coordinate tuple

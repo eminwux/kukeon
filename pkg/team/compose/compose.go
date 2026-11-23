@@ -53,8 +53,10 @@ import (
 type Options struct {
 	Sources map[string]fs.FS
 	Scope   Scope
-	// Secrets are the bindings recorded in the team's existing TeamEntry; they
-	// take precedence over global spec.secrets and generated defaults.
+	// Secrets are bindings recorded for the team elsewhere, such as by the
+	// stored Team a declaration replaces. The declaration's own
+	// spec.secrets win over them; both take precedence over the defaults'
+	// spec.secrets and generated defaults.
 	Secrets []config.SecretBinding
 	// Components overrides the bundled component library (forges, and
 	// connectors defined outside the catalog). Nil selects the library
@@ -78,9 +80,10 @@ var errHarnessNotDeclared = errors.New("role does not support selected harness")
 type Scope struct{ Realm, Space, Stack string }
 
 // Result keeps the authored declaration separate from resolved resources.
-// Entry is a candidate for #13 to persist only after successful application.
+// Team is the document to store once application has succeeded: the
+// authored declaration with the secret bindings composition used.
 type Result struct {
-	Entry *config.TeamEntry
+	Team *config.Team
 	// Scope is the normalized scope the team's CellConfigs live in.
 	Scope Scope
 	// Blueprints are the shared realm-wide blueprints the pairs reference, one
@@ -128,9 +131,23 @@ type SecretRequirement struct {
 	Default bool
 }
 
+// recordedBindings is the declaration's bindings followed by the other
+// recorded ones it does not override.
+func recordedBindings(own, other []config.SecretBinding) []config.SecretBinding {
+	out := slices.Clone(own)
+	for _, binding := range other {
+		if !slices.ContainsFunc(own, func(b config.SecretBinding) bool { return b.Name == binding.Name }) {
+			out = append(out, binding)
+		}
+	}
+	return out
+}
+
 // Compose resolves whole-list inheritance and selected role/harness pairs. The
 // returned objects are independent of inputs and ordered by authored selections.
-func Compose(cfg *config.TeamsConfig, team *config.Team, opts Options) (*Result, error) {
+//
+//nolint:gocyclo,cyclop,funlen // pre-existing complexity; issue #1618 renamed its input types only
+func Compose(cfg *config.TeamDefaults, team *config.Team, opts Options) (*Result, error) {
 	effective, err := config.Resolve(cfg, team)
 	if err != nil {
 		return nil, err
@@ -140,7 +157,7 @@ func Compose(cfg *config.TeamsConfig, team *config.Team, opts Options) (*Result,
 		return nil, err
 	}
 	opts.Scope = scope
-	entry, err := config.Entry(team)
+	entry, err := config.Declaration(team)
 	if err != nil {
 		return nil, err
 	}
@@ -163,8 +180,8 @@ func Compose(cfg *config.TeamsConfig, team *config.Team, opts Options) (*Result,
 	if err != nil {
 		return nil, fmt.Errorf("component library: %w", err)
 	}
-	result := &Result{Entry: entry, Scope: scope}
-	secrets, err := newSecretBindings(opts.Secrets, cfg, scope.Realm)
+	result := &Result{Team: entry, Scope: scope}
+	secrets, err := newSecretBindings(recordedBindings(team.Spec.Secrets, opts.Secrets), cfg, scope.Realm)
 	if err != nil {
 		return nil, err
 	}
@@ -258,7 +275,7 @@ func Compose(cfg *config.TeamsConfig, team *config.Team, opts Options) (*Result,
 	if err = secrets.checkParameters(cfg.Spec.Parameters); err != nil {
 		return nil, err
 	}
-	result.Entry.Secrets = secrets.entry()
+	result.Team.Spec.Secrets = secrets.entry()
 	defaults := map[string]config.SecretRef{}
 	for _, plan := range plans {
 		result.Notes = append(result.Notes, plan.notes...)
@@ -474,7 +491,7 @@ func (p *pairPlan) extraRepos() []config.Source {
 //
 //nolint:funlen // linear load-and-validate of one pair's definitions.
 func planPair(
-	cfg *config.TeamsConfig,
+	cfg *config.TeamDefaults,
 	team string,
 	selection config.Role,
 	hsel config.Harness,
@@ -498,7 +515,7 @@ func planPair(
 		return nil, err
 	}
 	if role.APIVersion != config.APIVersion || role.Kind != "Role" || !config.ValidName(role.Metadata.Name) {
-		return nil, errors.New("role.yaml: require kuketeams.io/v1 Role and valid metadata.name")
+		return nil, errors.New("role.yaml: require v1beta1 Role and valid metadata.name")
 	}
 	settings, ok := role.Spec.Harnesses[hsel.Name]
 	if !ok {

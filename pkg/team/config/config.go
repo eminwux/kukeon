@@ -14,7 +14,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-// Package config defines and validates operator-owned TeamsConfig documents.
+// Package config defines and validates the team documents: Team, one team's
+// declaration, and TeamDefaults, the settings every team in a realm inherits.
 // It performs no filesystem, environment, Git, daemon, or network discovery.
 package config
 
@@ -25,24 +26,61 @@ import (
 )
 
 const (
-	APIVersion = "kuketeams.io/v1"
-	Kind       = "TeamsConfig"
+	// APIVersion is the apiVersion of every team document, the one the rest
+	// of kukeon uses (#1618).
+	APIVersion = "v1beta1"
+	// KindTeamDefaults is the settings every team of a realm inherits.
+	KindTeamDefaults = "TeamDefaults"
+	// DefaultsName is the only name a TeamDefaults may have: a realm holds at
+	// most one.
+	DefaultsName = "default"
 )
 
-// TeamsConfig is the global configuration; it contains selections, not fetched definitions.
-type TeamsConfig struct {
-	APIVersion string `yaml:"apiVersion"`
-	Kind       string `yaml:"kind"`
-	Spec       Spec   `yaml:"spec"`
+// TeamDefaults is a realm's team defaults; it contains selections, not
+// fetched definitions.
+type TeamDefaults struct {
+	APIVersion string   `yaml:"apiVersion"`
+	Kind       string   `yaml:"kind"`
+	Metadata   Metadata `yaml:"metadata"`
+	Spec       Spec     `yaml:"spec"`
+}
+
+// EmptyDefaults is the TeamDefaults of a realm that stores none.
+func EmptyDefaults(realm string) *TeamDefaults {
+	return &TeamDefaults{
+		APIVersion: APIVersion, Kind: KindTeamDefaults,
+		Metadata: Metadata{Name: DefaultsName, Realm: realm},
+	}
 }
 
 // Spec has no git block: a git identity is a git connector identity, stored
 // with `kuke connector import git` (issue #1591). A leftover `spec.git` fails
 // to decode with an error that says so.
 type Spec struct {
+	// Defaults are the sources every team may use and the selections a
+	// team that omits a list inherits. Its sources are the registered
+	// sources (`kuke team source`).
 	Defaults   Defaults          `yaml:"defaults"`
 	Secrets    []SecretBinding   `yaml:"secrets,omitempty"`
 	Parameters map[string]string `yaml:"parameters,omitempty"`
+}
+
+// MarshalYAML keeps an explicit empty list or map instead of erasing it with
+// omitempty, so a stored document reads back as it was written.
+func (s Spec) MarshalYAML() (any, error) {
+	var out struct {
+		Defaults   Defaults           `yaml:"defaults"`
+		Secrets    *[]SecretBinding   `yaml:"secrets,omitempty"`
+		Parameters *map[string]string `yaml:"parameters,omitempty"`
+	}
+	out.Defaults = s.Defaults
+	if s.Secrets != nil {
+		out.Secrets = &s.Secrets
+	}
+	if s.Parameters != nil {
+		out.Parameters = &s.Parameters
+	}
+	return out, nil
 }
 
 // GitSigning names the stored ssh-key secret to sign with and, optionally, the
@@ -102,15 +140,19 @@ type ConnectorChoice struct {
 	Identity string `yaml:"identity,omitempty"`
 }
 
-// MarshalYAML keeps explicit empty lists instead of erasing them with omitempty.
+// MarshalYAML keeps explicit empty lists and an explicit empty connectors
+// map instead of erasing them with omitempty: empty selects nothing, omitted
+// inherits.
 func (d Defaults) MarshalYAML() (any, error) {
 	var out struct {
-		Connectors map[string]ConnectorChoice `yaml:"connectors,omitempty"`
-		Sources    *[]Source                  `yaml:"sources,omitempty"`
-		Roles      *[]Role                    `yaml:"roles,omitempty"`
-		Harnesses  *[]Harness                 `yaml:"harnesses,omitempty"`
+		Connectors *map[string]ConnectorChoice `yaml:"connectors,omitempty"`
+		Sources    *[]Source                   `yaml:"sources,omitempty"`
+		Roles      *[]Role                     `yaml:"roles,omitempty"`
+		Harnesses  *[]Harness                  `yaml:"harnesses,omitempty"`
 	}
-	out.Connectors = d.Connectors
+	if d.Connectors != nil {
+		out.Connectors = &d.Connectors
+	}
 	if d.Sources != nil {
 		out.Sources = &d.Sources
 	}
@@ -153,7 +195,7 @@ type Role struct {
 	// spec.tasks) the team renders as headless task CellConfigs. Nil (the
 	// field omitted) selects every task the role declares; a non-nil empty
 	// list selects none. A pointer so an authored `tasks: []` survives a
-	// TeamEntry round-trip instead of being erased by omitempty. An entry is
+	// Team round-trip instead of being erased by omitempty. An entry is
 	// a task name, or `{ name, schedule?, suspend? }` to set the task's
 	// cadence for this team (issue #1503).
 	Tasks *[]TaskSelection `yaml:"tasks,omitempty"`
@@ -290,25 +332,56 @@ type Team struct {
 	APIVersion string   `yaml:"apiVersion"`
 	Kind       string   `yaml:"kind"`
 	Metadata   Metadata `yaml:"metadata"`
-	// ProjectSource is additive to resolved sources; authored lists still replace defaults.
-	ProjectSource *Source  `yaml:"projectSource,omitempty"`
-	Spec          Defaults `yaml:"spec"`
+	Spec       TeamSpec `yaml:"spec"`
 }
 
-type Metadata struct {
-	Name string `yaml:"name"`
-}
+// TeamSpec is a team's declaration: the project source, the recorded secret
+// bindings and the four selection fields of Defaults, inlined so a
+// declaration reads `spec.roles` like the defaults it inherits from.
+type TeamSpec struct {
+	Defaults `yaml:",inline"`
 
-// TeamEntry records the accepted authored declaration, not effective defaults or
-// resolved image references. It can be recomposed without the original input.
-type TeamEntry struct {
-	APIVersion string   `yaml:"apiVersion"`
-	Kind       string   `yaml:"kind"`
-	Metadata   Metadata `yaml:"metadata"`
 	// ProjectSource is additive to resolved sources; authored lists still replace defaults.
 	ProjectSource *Source `yaml:"projectSource,omitempty"`
-	// Secrets records every binding the selected pairs used. Composition prefers
-	// these over global spec.secrets, so operator edits survive repeated adds.
+	// Secrets records every binding the selected pairs used. Composition
+	// prefers these over the defaults' spec.secrets, so edits survive a
+	// recomposition.
 	Secrets []SecretBinding `yaml:"secrets,omitempty"`
-	Spec    Defaults        `yaml:"spec"`
+}
+
+// MarshalYAML writes the spec with explicit empty lists kept: Defaults'
+// own MarshalYAML would otherwise be promoted and drop the other fields.
+func (s TeamSpec) MarshalYAML() (any, error) {
+	var out struct {
+		ProjectSource *Source                     `yaml:"projectSource,omitempty"`
+		Secrets       *[]SecretBinding            `yaml:"secrets,omitempty"`
+		Connectors    *map[string]ConnectorChoice `yaml:"connectors,omitempty"`
+		Sources       *[]Source                   `yaml:"sources,omitempty"`
+		Roles         *[]Role                     `yaml:"roles,omitempty"`
+		Harnesses     *[]Harness                  `yaml:"harnesses,omitempty"`
+	}
+	out.ProjectSource = s.ProjectSource
+	if s.Connectors != nil {
+		out.Connectors = &s.Connectors
+	}
+	if s.Secrets != nil {
+		out.Secrets = &s.Secrets
+	}
+	if s.Sources != nil {
+		out.Sources = &s.Sources
+	}
+	if s.Roles != nil {
+		out.Roles = &s.Roles
+	}
+	if s.Harnesses != nil {
+		out.Harnesses = &s.Harnesses
+	}
+	return out, nil
+}
+
+// Metadata names a Team or a TeamDefaults and the realm it lives in. A
+// repository's kuketeam.yaml may leave both out.
+type Metadata struct {
+	Name  string `yaml:"name,omitempty"`
+	Realm string `yaml:"realm,omitempty"`
 }

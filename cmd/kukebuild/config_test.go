@@ -28,7 +28,7 @@ func writeConfig(t *testing.T, suffix string) string {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "kukeond.yaml")
-	body := "apiVersion: kukeon.io/v1beta1\nkind: ServerConfiguration\nspec:\n  containerdNamespaceSuffix: " + suffix + "\n"
+	body := "apiVersion: v1beta1\nkind: ServerConfiguration\nspec:\n  containerdNamespaceSuffix: " + suffix + "\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestResolveNamespaceSuffixEmptyKeyFallsBack(t *testing.T) {
 	// File present but containerdNamespaceSuffix omitted: use the default.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "kukeond.yaml")
-	body := "apiVersion: kukeon.io/v1beta1\nkind: ServerConfiguration\nspec:\n  socket: /run/kukeon/kukeond.sock\n"
+	body := "apiVersion: v1beta1\nkind: ServerConfiguration\nspec:\n  socket: /run/kukeon/kukeond.sock\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}

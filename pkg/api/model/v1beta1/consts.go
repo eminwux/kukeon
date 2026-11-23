@@ -73,6 +73,38 @@ const (
 	// assigns its name and createdAt when they are left out, and a stored
 	// name cannot be applied again. kukeond keeps the newest 50.
 	KindHealthReport Kind = "HealthReport"
+	// KindTeam identifies a team's declaration (issue #1618): its project
+	// source, recorded secret bindings and role, harness, source and
+	// connector selections. Realm-scoped. kukeond validates and stores it;
+	// kuke composes it into CellBlueprints and CellConfigs, and kukeond
+	// accepts it only in the team apply that carries them. A repository's
+	// kuketeam.yaml is a Team document.
+	KindTeam Kind = "Team"
+	// KindTeamDefaults identifies the settings every team of a realm
+	// inherits (issue #1618): registered sources, default roles and
+	// harnesses, connectors, parameters and secret bindings. Realm-scoped,
+	// at most one per realm, named default.
+	KindTeamDefaults Kind = "TeamDefaults"
+	// KindRole identifies a role definition (role.yaml) kuke reads from a
+	// fetched team source. Not a server-side resource — `kuke apply`
+	// rejects it.
+	KindRole Kind = "Role"
+	// KindHarness identifies a harness definition (harness.yaml) kuke reads
+	// from a fetched team source. Not a server-side resource — `kuke apply`
+	// rejects it.
+	KindHarness Kind = "Harness"
+	// KindHarnessImageCatalog identifies a harness's image catalog
+	// (images.yaml) kuke reads from a fetched team source. Not a
+	// server-side resource — `kuke apply` rejects it.
+	KindHarnessImageCatalog Kind = "HarnessImageCatalog"
+	// KindComponent identifies a component definition kuke reads from its
+	// component library. Not a server-side resource — `kuke apply` rejects
+	// it.
+	KindComponent Kind = "Component"
+	// KindConnector identifies a connector definition kuke reads from its
+	// connector catalog. Not a server-side resource — `kuke apply` rejects
+	// it.
+	KindConnector Kind = "Connector"
 	// KindServerConfiguration identifies the kukeond daemon's configuration
 	// document loaded via `kukeond --configuration` (and consumed by
 	// `kuke init --server-configuration`). Not a server-side resource —

@@ -216,6 +216,22 @@ type Runner interface {
 	// nil) when no running cell mounts it.
 	VolumeMountedByLiveCell(volume intmodel.Volume) (cellRef string, mounted bool, err error)
 
+	// WriteTeam persists a `kind: Team`'s validated document under its realm
+	// (issue #1618) and reports whether it was newly created.
+	WriteTeam(team intmodel.Team) (created bool, err error)
+	// GetTeam reads one stored Team; errdefs.ErrTeamNotFound when absent.
+	GetTeam(team intmodel.Team) (intmodel.Team, error)
+	// ListTeams lists the stored Teams of a realm, or of every realm when
+	// realmName is empty, with their documents.
+	ListTeams(realmName string) ([]intmodel.Team, error)
+	// DeleteTeam removes one stored Team; errdefs.ErrTeamNotFound when absent.
+	DeleteTeam(team intmodel.Team) error
+	// WriteTeamDefaults persists a realm's `kind: TeamDefaults` document.
+	WriteTeamDefaults(defaults intmodel.TeamDefaults) (created bool, err error)
+	// GetTeamDefaults reads a realm's TeamDefaults;
+	// errdefs.ErrTeamDefaultsNotFound when the realm stores none.
+	GetTeamDefaults(defaults intmodel.TeamDefaults) (intmodel.TeamDefaults, error)
+
 	// WriteConfig persists a `kind: CellConfig`'s serialized document to the
 	// daemon-managed, root-owned, world-readable file under the scope's metadata
 	// tree (issue #624). Returns whether the file was newly created (vs.

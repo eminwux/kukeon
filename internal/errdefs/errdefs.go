@@ -165,6 +165,9 @@ var (
 	ErrDaemonMethodUnsupported = errors.New(
 		"kukeond does not support this request; upgrade kukeond to match the client",
 	)
+	// ErrDaemonTransport marks a request that never got a daemon answer: the
+	// connection failed, closed or timed out. It carries no remote text.
+	ErrDaemonTransport = errors.New("kukeond transport/connection failed")
 
 	// Container-related errors.
 
@@ -716,6 +719,43 @@ var (
 	// of the same name already lives in the target scope — the caller
 	// (`kuke create config`) surfaces it as a hard collision.
 	ErrConfigExists = errors.New("config already exists")
+
+	// Team / TeamDefaults kind errors (issue #1618). Both are realm-scoped
+	// documents kukeond validates and stores; kuke composes them.
+
+	// ErrTeamNotFound is returned when no Team of the name is stored.
+	ErrTeamNotFound = errors.New("team not found")
+	// ErrTeamDefaultsNotFound is returned when the realm stores no
+	// TeamDefaults.
+	ErrTeamDefaultsNotFound = errors.New("team defaults not found")
+	// ErrWriteTeam wraps a failure to persist a Team or TeamDefaults document.
+	ErrWriteTeam = errors.New("failed to write team document")
+	// ErrGetTeam wraps a failure to read a stored Team or TeamDefaults.
+	ErrGetTeam = errors.New("failed to get team")
+	// ErrListTeams wraps a failure to enumerate stored Teams.
+	ErrListTeams = errors.New("failed to list teams")
+	// ErrDeleteTeam wraps a failure to delete a stored Team.
+	ErrDeleteTeam = errors.New("failed to delete team")
+	// ErrTeamApplyOnly is returned when a Team document reaches kukeond
+	// outside the team apply that carries the documents composed from it: a
+	// stored Team is never an empty promise.
+	ErrTeamApplyOnly = errors.New(
+		"a Team is stored only with the Configs composed from it; apply it with kuke apply -f or kuke team apply -f",
+	)
+	// ErrTeamNameInUse is returned when a Team's name is already used by a
+	// team in another realm: team names are unique per host.
+	ErrTeamNameInUse = errors.New("team name is already used in another realm")
+	// ErrTeamExists is returned by kuke team add when a team of the name is
+	// stored already: add creates, replacing needs --force.
+	ErrTeamExists = errors.New("team already exists")
+	// ErrTeamReserved is returned by a delete of the kuke system team.
+	ErrTeamReserved = errors.New("team kuke is the system team; reset it with kuke team init --force")
+	// ErrTeamScopeNotFound fires when a Team's or TeamDefaults' realm does
+	// not exist.
+	ErrTeamScopeNotFound = errors.New("team realm does not exist")
+	// ErrInvalidTeam wraps a Team or TeamDefaults document that does not
+	// decode or validate.
+	ErrInvalidTeam = errors.New("invalid team document")
 
 	// ErrRenderDigestMismatch is returned by CreateCellFromConfig when the
 	// caller pinned the digest of an earlier PreviewCellFromConfig and the

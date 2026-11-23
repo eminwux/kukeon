@@ -280,37 +280,24 @@ func (d *remoteDriver) writeYAML(path string, value any) {
 }
 
 func (d *remoteDriver) initialize() {
-	cfg := &config.TeamsConfig{
-		APIVersion: config.APIVersion,
-		Kind:       config.Kind,
-		Spec: config.Spec{Defaults: config.Defaults{
-			Sources: []config.Source{
-				{
-					Name:      "kukeon",
-					URL:       "https://github.com/eminwux/kukeon",
-					Commit:    d.report.SourceRevision,
-					ClonePath: "/home/user/kukeon-src",
-				},
-			},
-			Roles:     []config.Role{{Name: "majordomo", Source: "kukeon", Path: "team/roles/majordomo"}},
-			Harnesses: []config.Harness{{Name: "codex", Source: "kukeon", Path: "team/harnesses/codex"}},
-		}},
-	}
-	if err := os.MkdirAll(filepath.Join(d.home, ".kuke"), 0o700); err != nil {
-		d.fail("prepare isolated home")
-	}
+	// The kuke team, declared explicitly with the kukeon source pinned at the
+	// revision under test, so the check does not depend on the realm's
+	// TeamDefaults.
 	declaration := config.Majordomo()
-	declaration.Spec = cfg.Spec.Defaults
-	cfg.Spec.Defaults = config.Defaults{}
-	d.writeYAML(filepath.Join(d.home, ".kuke", "kuketeams.yaml"), cfg)
-	preparedEntry, entryErr := config.Entry(declaration)
-	if entryErr != nil {
-		d.fail("prepare explicit majordomo declaration")
+	declaration.Spec.Defaults = config.Defaults{
+		Sources: []config.Source{
+			{
+				Name:      "kukeon",
+				URL:       "https://github.com/eminwux/kukeon",
+				Commit:    d.report.SourceRevision,
+				ClonePath: "/home/user/kukeon-src",
+			},
+		},
+		Roles:     []config.Role{{Name: "majordomo", Source: "kukeon", Path: "team/roles/majordomo"}},
+		Harnesses: []config.Harness{{Name: "codex", Source: "kukeon", Path: "team/harnesses/codex"}},
 	}
-	if err := os.MkdirAll(filepath.Join(d.home, ".kuke", "kuketeam.d"), 0o700); err != nil {
-		d.fail("prepare registration directory")
-	}
-	d.writeYAML(filepath.Join(d.home, ".kuke", "kuketeam.d", "kuke.yaml"), preparedEntry)
+	teamPath := filepath.Join(d.home, "kuke.yaml")
+	d.writeYAML(teamPath, declaration)
 	d.clientPath = filepath.Join(d.home, "client.yaml")
 	d.writeYAML(
 		d.clientPath,
@@ -322,18 +309,20 @@ func (d *remoteDriver) initialize() {
 	)
 	d.report.Commands = append(
 		d.report.Commands,
-		"kuke team init --host <selected Unix endpoint> --configuration <isolated client.yaml>",
+		"kuke team apply -f <pinned kuke Team> --host <selected Unix endpoint> --configuration <isolated client.yaml>",
 	)
-	if _, err := d.run(d.binary, "team", "init", "--host", d.host, "--configuration", d.clientPath); err != nil {
-		d.fail("kuke team init failed; check scope prerequisites and published source accessibility")
+	if _, err := d.run(
+		d.binary, "team", "apply", "-f", teamPath, "--host", d.host, "--configuration", d.clientPath,
+	); err != nil {
+		d.fail("kuke team apply failed; check scope prerequisites and published source accessibility")
 	}
-	entryRaw, err := os.ReadFile(filepath.Join(d.home, ".kuke", "kuketeam.d", "kuke.yaml"))
-	if err != nil {
-		d.fail("kuke registration is missing")
+	stored, err := d.client.GetTeam(d.ctx, kukeonv1.TeamRef{Name: "kuke", Realm: "default"})
+	if err != nil || !stored.Exists {
+		d.fail("kuke Team is not stored")
 	}
-	entry, err := config.DecodeEntry(bytes.NewReader(entryRaw))
-	if err != nil || entry.Metadata.Name != "kuke" {
-		d.fail("kuke registration is invalid")
+	team, err := config.DecodeTeam(bytes.NewReader(stored.Document))
+	if err != nil || team.Metadata.Name != "kuke" {
+		d.fail("stored kuke Team is invalid")
 	}
 	bp, err := d.client.GetBlueprint(d.ctx, blueprintLookup())
 	if err != nil || !bp.MetadataExists || bp.Blueprint.Metadata.Labels[api.LabelTeam] != "kuke" {
@@ -369,7 +358,7 @@ func (d *remoteDriver) verifyInitIsolation() {
 	d.report.Checks = append(
 		d.report.Checks,
 		"init applied/read back majordomo blueprint and config",
-		"kukeon TeamEntry decoded",
+		"stored kuke Team decoded",
 		"base Codex requires no secret bindings; secret metadata unchanged",
 		"runtime cell identities and recipes unchanged by init",
 	)

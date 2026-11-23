@@ -7,7 +7,7 @@ kuke get <resource> [NAME] [flags]
 kuke g   <resource> [NAME] [flags]      # alias
 ```
 
-Resources: `realm`, `space`, `stack`, `cell`, `container`, `image`, `blueprint`, `config`, `healthreport`. Each subcommand also accepts its plural (`realms`, `spaces`, …, `images`, `blueprints`, `configs`, `healthreports`) and a short alias (`r`, `sp`, `st`, `ce`, `co`, `img`, `bp`, `cfg`, `hr`).
+Resources: `realm`, `space`, `stack`, `cell`, `container`, `image`, `blueprint`, `config`, `healthreport`, `team`, `teamdefaults`. Each subcommand also accepts its plural (`realms`, `spaces`, …, `images`, `blueprints`, `configs`, `healthreports`, `teams`) and a short alias (`r`, `sp`, `st`, `ce`, `co`, `img`, `bp`, `cfg`, `hr`); `teamdefaults` is also spelled `team-defaults`.
 
 ## Common flags
 
@@ -33,6 +33,8 @@ Each subcommand takes the flags that scope the query:
 | `get blueprint [name]`            | `--realm`, `--space`, `--stack` (no `--cell` — Blueprints are never cell-scoped)     |
 | `get config [name]`               | `--realm`, `--space`, `--stack` (no `--cell` — Configs are never cell-scoped)        |
 | `get healthreport [name\|latest]` | none (a HealthReport always lives in `kuke-system`)                                  |
+| `get team [name]`                 | `--realm` (omit to list every realm; defaults to `default` for a named team)         |
+| `get teamdefaults`                | `--realm` (default `default`)                                                        |
 
 All scope flags default to `default`. See the [realm default note](commands.md#convention-positional-arg--flags).
 
@@ -130,6 +132,48 @@ sudo kuke get config kukeon-dev --realm kuke-system -o yaml
 # Stored health reports, newest first; the newest one as its HealthReport document
 kuke get healthreports
 kuke get healthreport latest -o yaml
+```
+
+## Teams
+
+`kuke get teams` prints each stored [team](../concepts/team.md) with its realm, project URL and ref, roles and number of Configs. A team whose declaration omits `roles` shows `(defaults)`:
+
+```bash
+kuke get teams
+NAME    REALM    PROJECT                            REF   ROLES                 CONFIGS
+kuke    default  -                                  -     majordomo             4
+web     default  git@github.com:acme/web.git        main  (defaults)            3
+```
+
+`kuke get team NAME` prints its roles, harnesses and Configs; `-o yaml` prints the stored Team document exactly as kukeond keeps it — the file to edit and pass to [`kuke team apply -f`](kuke-team.md#kuke-team-apply); `-o json` prints the summary. `kuke get teams -o yaml` prints every stored document.
+
+```bash
+kuke get team web
+Team:      web
+Realm:     default
+Project:   git@github.com:acme/web.git (main)
+Roles:     (defaults)
+Harnesses: (defaults)
+Configs:
+  web-dev-claude
+  web-dev-codex
+  web-dev-claude-pick-issue
+
+kuke get team kuke -o yaml > kuke.yaml
+```
+
+`kuke get teamdefaults` prints the realm's registered sources and its default roles and harnesses; `-o yaml` prints the stored `TeamDefaults` document, which also carries connectors, parameters and secret bindings. A realm with none says so and names `kuke team init`, which creates it.
+
+```bash
+kuke get teamdefaults
+TeamDefaults of realm default
+
+SOURCE  URL                            REF          CLONE PATH
+kukeon  github.com/eminwux/kukeon      branch main  -
+agents  git@github.com:eminwux/agents  branch main  /home/user/agents
+
+Default roles:     dev=agents:dev
+Default harnesses: codex=kukeon:team/harnesses/codex, claude=kukeon:team/harnesses/claude
 ```
 
 ## Label selector (`-l`/`--selector`)

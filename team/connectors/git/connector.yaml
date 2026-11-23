@@ -10,7 +10,7 @@
 # no key, so a user without an SSH key still gets a commit identity. Its value
 # is a fixed placeholder nothing reads; `kuke connector import git` and
 # `kuke create secret --connector git --type opaque` supply it.
-apiVersion: kuketeams.io/v1
+apiVersion: v1beta1
 kind: Connector
 metadata:
   name: git

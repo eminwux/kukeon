@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { systemTeam, teamsLink } from "./teams.mjs";
 import { useResource, ErrorNotice } from "./request";
 import { AskMajordomo, configScope, oneLine, sweepTask, type ConfigDoc, type Majordomo } from "./majordomo";
 
@@ -38,17 +39,16 @@ function reportQuestion(report: Report): string {
   return oneLine(`About health report ${report.id} (created ${report.createdAt}, window ${report.since} to ${report.until}, ${report.findings.length} findings, ${kukeon} classified kukeon): read it with "kuke health report ${report.id}" and walk me through what needs attention first.`);
 }
 
-// The reapply edit suspended sweeps need, shown once for every suspended sweep config (#1568). Schedules are
-// never edited from the browser.
+// Suspended sweeps are turned on in the kuke team's stored declaration (#1568, #1618): the Teams page
+// edits and reapplies it. Schedules are never edited from this page.
 function EnableSweep({ configs }: { configs: ConfigDoc[] }) {
-  const edit = `# ~/.kuke/kuketeam.d/kuke.yaml, under spec.roles[] for the majordomo role\ntasks:\n  - { name: ${sweepTask}, suspend: false }`;
+  const edit = `# under spec.roles[] for the majordomo role\ntasks:\n  - { name: ${sweepTask}, suspend: false }`;
   const names = configs.map(config => config.metadata.name);
   return <div className="health-enable" role="note">
     <strong>Sweeps are suspended.</strong>
-    <p>{names.length === 1 ? `${names[0]} ships` : `These ${names.length} sweep configs ship`} switched off so no install spends model credits unasked. To turn sweeps on, edit the kuke team entry on the host and reapply it:</p>
+    <p>{names.length === 1 ? `${names[0]} ships` : `These ${names.length} sweep configs ship`} switched off so no install spends model credits unasked. To turn sweeps on, edit the <a href={teamsLink(systemTeam)}>kuke team</a>'s declaration on the Teams page, preview and apply it:</p>
     {names.length > 1 && <ul className="health-suspended" aria-label="Suspended sweeps">{names.map((name, index) => <li key={index} className="mono-id">{name}</li>)}</ul>}
     <pre tabIndex={0}>{edit}</pre>
-    <pre tabIndex={0}>kuke team init --reapply</pre>
     <p className="description">The schedule cannot be changed from this page.</p>
   </div>;
 }

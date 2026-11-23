@@ -28,13 +28,13 @@ import (
 	"github.com/eminwux/kukeon/pkg/team/config"
 )
 
-func fixture(t *testing.T, name string) *config.TeamsConfig {
+func fixture(t *testing.T, name string) *config.TeamDefaults {
 	t.Helper()
 	data, err := os.ReadFile("testdata/" + name + ".yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := config.Decode(bytes.NewReader(data))
+	cfg, err := config.DecodeDefaults(bytes.NewReader(data))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestFixturesAndRoundTrip(t *testing.T) {
 			if err := config.Encode(&encoded, cfg); err != nil {
 				t.Fatal(err)
 			}
-			decoded, err := config.Decode(&encoded)
+			decoded, err := config.DecodeDefaults(&encoded)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -89,7 +89,7 @@ func TestSelectionListRoundTrips(t *testing.T) {
 			if err := config.Encode(&out, cfg); err != nil {
 				t.Fatal(err)
 			}
-			got, err := config.Decode(&out)
+			got, err := config.DecodeDefaults(&out)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -103,12 +103,12 @@ func TestSelectionListRoundTrips(t *testing.T) {
 func TestValidate(t *testing.T) {
 	cases := []struct {
 		name   string
-		change func(*config.TeamsConfig)
+		change func(*config.TeamDefaults)
 		want   string
 	}{
-		{"version", func(c *config.TeamsConfig) { c.APIVersion = "v2" }, "apiVersion:"},
-		{"kind", func(c *config.TeamsConfig) { c.Kind = "ProjectTeam" }, "kind:"},
-		{"source identity", func(c *config.TeamsConfig) {
+		{"version", func(c *config.TeamDefaults) { c.APIVersion = "v2" }, "apiVersion:"},
+		{"kind", func(c *config.TeamDefaults) { c.Kind = "ProjectTeam" }, "kind:"},
+		{"source identity", func(c *config.TeamDefaults) {
 			c.Spec.Defaults.Sources[0].Git = &config.SourceGit{
 				Author:     &config.Identity{Name: "bot", Email: "bot@example.com"},
 				Credential: &config.SourceCredential{SecretRef: config.SecretRef{Name: "deploy", Realm: "default"}},
@@ -116,93 +116,93 @@ func TestValidate(t *testing.T) {
 				Sign:       []string{"commits"},
 			}
 		}, ""},
-		{"source identity blank author", func(c *config.TeamsConfig) {
+		{"source identity blank author", func(c *config.TeamDefaults) {
 			c.Spec.Defaults.Sources[0].Git = &config.SourceGit{Author: &config.Identity{Name: "bot"}}
 		}, "sources[0].git.author.email:"},
-		{"source credential without secret", func(c *config.TeamsConfig) {
+		{"source credential without secret", func(c *config.TeamDefaults) {
 			c.Spec.Defaults.Sources[0].Git = &config.SourceGit{Credential: &config.SourceCredential{}}
 		}, "sources[0].git.credential.secretRef:"},
-		{"no revision", func(c *config.TeamsConfig) { c.Spec.Defaults.Sources[0].Branch = "" }, "exactly one"},
-		{"two revisions", func(c *config.TeamsConfig) { c.Spec.Defaults.Sources[0].Tag = "v1" }, "exactly one"},
-		{"three revisions", func(c *config.TeamsConfig) {
+		{"no revision", func(c *config.TeamDefaults) { c.Spec.Defaults.Sources[0].Branch = "" }, "exactly one"},
+		{"two revisions", func(c *config.TeamDefaults) { c.Spec.Defaults.Sources[0].Tag = "v1" }, "exactly one"},
+		{"three revisions", func(c *config.TeamDefaults) {
 			c.Spec.Defaults.Sources[0].Tag = "v1"
 			c.Spec.Defaults.Sources[0].Commit = "abc"
 		}, "exactly one"},
 		{
 			"blank revision",
-			func(c *config.TeamsConfig) { c.Spec.Defaults.Sources[0].Branch = " " },
+			func(c *config.TeamDefaults) { c.Spec.Defaults.Sources[0].Branch = " " },
 			"sources[0].branch:",
 		},
-		{"literal version branch", func(c *config.TeamsConfig) { c.Spec.Defaults.Sources[0].Branch = "v1.4.0" }, ""},
-		{"tag", func(c *config.TeamsConfig) {
+		{"literal version branch", func(c *config.TeamDefaults) { c.Spec.Defaults.Sources[0].Branch = "v1.4.0" }, ""},
+		{"tag", func(c *config.TeamDefaults) {
 			c.Spec.Defaults.Sources[0].Branch = ""
 			c.Spec.Defaults.Sources[0].Tag = "v1.4.0"
 		}, ""},
-		{"commit", func(c *config.TeamsConfig) {
+		{"commit", func(c *config.TeamDefaults) {
 			c.Spec.Defaults.Sources[0].Branch = ""
 			c.Spec.Defaults.Sources[0].Commit = "abcd"
 		}, ""},
-		{"blank URL", func(c *config.TeamsConfig) { c.Spec.Defaults.Sources[0].URL = " " }, "sources[0].url:"},
+		{"blank URL", func(c *config.TeamDefaults) { c.Spec.Defaults.Sources[0].URL = " " }, "sources[0].url:"},
 		{
 			"blank source name",
-			func(c *config.TeamsConfig) { c.Spec.Defaults.Sources[0].Name = " " },
+			func(c *config.TeamDefaults) { c.Spec.Defaults.Sources[0].Name = " " },
 			"sources[0].name:",
 		},
-		{"blank role name", func(c *config.TeamsConfig) { c.Spec.Defaults.Roles[0].Name = " " }, "roles[0].name:"},
+		{"blank role name", func(c *config.TeamDefaults) { c.Spec.Defaults.Roles[0].Name = " " }, "roles[0].name:"},
 		{
 			"blank harness name",
-			func(c *config.TeamsConfig) { c.Spec.Defaults.Harnesses[0].Name = "" },
+			func(c *config.TeamDefaults) { c.Spec.Defaults.Harnesses[0].Name = "" },
 			"harnesses[0].name:",
 		},
-		{"duplicate source", func(c *config.TeamsConfig) {
+		{"duplicate source", func(c *config.TeamDefaults) {
 			c.Spec.Defaults.Sources = append(c.Spec.Defaults.Sources, c.Spec.Defaults.Sources[0])
 		}, "sources[1].name: duplicate"},
-		{"duplicate role", func(c *config.TeamsConfig) {
+		{"duplicate role", func(c *config.TeamDefaults) {
 			c.Spec.Defaults.Roles = append(c.Spec.Defaults.Roles, c.Spec.Defaults.Roles[0])
 		}, "roles[2].name: duplicate"},
-		{"duplicate harness", func(c *config.TeamsConfig) {
+		{"duplicate harness", func(c *config.TeamDefaults) {
 			c.Spec.Defaults.Harnesses = append(c.Spec.Defaults.Harnesses, c.Spec.Defaults.Harnesses[0])
 		}, "harnesses[2].name: duplicate"},
-		{"cross-list names", func(c *config.TeamsConfig) {
+		{"cross-list names", func(c *config.TeamDefaults) {
 			c.Spec.Defaults.Roles[0].Name = "kuketeams"
 			c.Spec.Defaults.Harnesses[0].Name = "kuketeams"
 		}, ""},
 		{
 			"unknown role source",
-			func(c *config.TeamsConfig) { c.Spec.Defaults.Roles[0].Source = "missing" },
+			func(c *config.TeamDefaults) { c.Spec.Defaults.Roles[0].Source = "missing" },
 			"roles[0].source: unknown",
 		},
 		{
 			"unknown harness source",
-			func(c *config.TeamsConfig) { c.Spec.Defaults.Harnesses[0].Source = "missing" },
+			func(c *config.TeamDefaults) { c.Spec.Defaults.Harnesses[0].Source = "missing" },
 			"harnesses[0].source: unknown",
 		},
 		{
 			"blank source reference",
-			func(c *config.TeamsConfig) { c.Spec.Defaults.Roles[0].Source = " " },
+			func(c *config.TeamDefaults) { c.Spec.Defaults.Roles[0].Source = " " },
 			"roles[0].source:",
 		},
 		{
 			"unknown harness",
-			func(c *config.TeamsConfig) { c.Spec.Defaults.Roles[0].Harness = "missing" },
+			func(c *config.TeamDefaults) { c.Spec.Defaults.Roles[0].Harness = "missing" },
 			"roles[0].harness: unknown harness",
 		},
 		{
 			"blank harness reference",
-			func(c *config.TeamsConfig) { c.Spec.Defaults.Roles[0].Harness = " " },
+			func(c *config.TeamDefaults) { c.Spec.Defaults.Roles[0].Harness = " " },
 			"roles[0].harness:",
 		},
-		{"no harnesses", func(c *config.TeamsConfig) { c.Spec.Defaults.Harnesses = nil }, "roles[1].harness:"},
-		{"explicit harness", func(c *config.TeamsConfig) { c.Spec.Defaults.Roles[0].Harness = "claude" }, ""},
+		{"no harnesses", func(c *config.TeamDefaults) { c.Spec.Defaults.Harnesses = nil }, "roles[1].harness:"},
+		{"explicit harness", func(c *config.TeamDefaults) { c.Spec.Defaults.Roles[0].Harness = "claude" }, ""},
 		{
 			"blank image",
-			func(c *config.TeamsConfig) { c.Spec.Defaults.Roles[0].Needs.Image = []string{"go", " "} },
+			func(c *config.TeamDefaults) { c.Spec.Defaults.Roles[0].Needs.Image = []string{"go", " "} },
 			"roles[0].needs.image[1]:",
 		},
-		{"empty image list", func(c *config.TeamsConfig) { c.Spec.Defaults.Roles[0].Needs.Image = []string{} }, ""},
+		{"empty image list", func(c *config.TeamDefaults) { c.Spec.Defaults.Roles[0].Needs.Image = []string{} }, ""},
 		{
 			"no roles",
-			func(c *config.TeamsConfig) { c.Spec.Defaults.Roles = nil },
+			func(c *config.TeamDefaults) { c.Spec.Defaults.Roles = nil },
 			"",
 		},
 	}
@@ -254,16 +254,16 @@ func assertError(t *testing.T, err error, want string) {
 }
 
 func TestStrictDecode(t *testing.T) {
-	const header = "apiVersion: kuketeams.io/v1\nkind: TeamsConfig\n"
+	const header = "apiVersion: v1beta1\nkind: TeamDefaults\n"
 	cases := []struct{ name, data, want string }{
 		{"empty", "", "empty YAML"},
 		{"comments", "# no document\n", "empty YAML"},
 		{"null", "null", "expected mapping"},
 		{"empty document", "---\n", "expected mapping"},
 		{"malformed", header + "spec: [", "invalid YAML"},
-		{"wrong version", "apiVersion: v2\nkind: TeamsConfig", "apiVersion:"},
-		{"wrong kind", "apiVersion: kuketeams.io/v1\nkind: Team", "kind:"},
-		{"missing version", "kind: TeamsConfig", "apiVersion:"},
+		{"wrong version", "apiVersion: v2\nkind: TeamDefaults", "apiVersion:"},
+		{"wrong kind", "apiVersion: v1beta1\nkind: Team", "kind:"},
+		{"missing version", "kind: TeamDefaults", "apiVersion:"},
 		{"unknown root", header + "oops: true", "oops: unknown field"},
 		{
 			"unknown nested",
@@ -275,7 +275,7 @@ func TestStrictDecode(t *testing.T) {
 			header + "spec: {defaults: {roles: [{name: dev, oops: true}]}}",
 			"spec.defaults.roles[0].oops: unknown field",
 		},
-		{"duplicate root", header + "kind: TeamsConfig", "kind: duplicate key"},
+		{"duplicate root", header + "kind: TeamDefaults", "kind: duplicate key"},
 		{
 			"duplicate nested",
 			header + "spec: {defaults: {sources: [], sources: []}}",
@@ -330,7 +330,7 @@ func TestStrictDecode(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg, err := config.Decode(strings.NewReader(tc.data))
+			cfg, err := config.DecodeDefaults(strings.NewReader(tc.data))
 			assertError(t, err, tc.want)
 			if err != nil && cfg != nil {
 				t.Fatal("decode returned an invalid model")
@@ -341,7 +341,7 @@ func TestStrictDecode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = config.Decode(bytes.NewReader(data))
+	_, err = config.DecodeDefaults(bytes.NewReader(data))
 	assertError(t, err, "spec.defaults.roles[0].source: unknown source")
 }
 
@@ -368,7 +368,7 @@ func (b brokenIO) Write([]byte) (int, error) { return 0, b.err }
 
 func TestIOFailures(t *testing.T) {
 	sentinel := errors.New("broken stream")
-	const document = "apiVersion: kuketeams.io/v1\nkind: TeamsConfig\n...\n"
+	const document = "apiVersion: v1beta1\nkind: TeamDefaults\n...\n"
 	readers := []struct {
 		name   string
 		reader io.Reader
@@ -379,7 +379,7 @@ func TestIOFailures(t *testing.T) {
 	}
 	for _, tc := range readers {
 		t.Run("reader/"+tc.name, func(t *testing.T) {
-			_, err := config.Decode(tc.reader)
+			_, err := config.DecodeDefaults(tc.reader)
 			if !errors.Is(err, sentinel) {
 				t.Fatalf("original read error not preserved: %v", err)
 			}
@@ -419,7 +419,7 @@ type partialWriter struct{ err error }
 func (w partialWriter) Write(p []byte) (int, error) { return len(p) / 2, w.err }
 
 func TestTaggedContainers(t *testing.T) {
-	const header = "apiVersion: kuketeams.io/v1\nkind: TeamsConfig\n"
+	const header = "apiVersion: v1beta1\nkind: TeamDefaults\n"
 	for _, tc := range []struct{ name, body, want string }{
 		{"null mapping", "spec: !!null {}", "spec: expected mapping"},
 		{"null sequence", "spec: {defaults: {sources: !!null []}}", "spec.defaults.sources: expected list"},
@@ -431,7 +431,7 @@ func TestTaggedContainers(t *testing.T) {
 		{"valid sequence alias", "spec: {defaults: {sources: &list !!seq [], roles: *list, harnesses: *list}}", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := config.Decode(strings.NewReader(header + tc.body))
+			_, err := config.DecodeDefaults(strings.NewReader(header + tc.body))
 			assertError(t, err, tc.want)
 		})
 	}
@@ -441,29 +441,29 @@ func TestInvalidUTF8(t *testing.T) {
 	invalid := string([]byte{0xff})
 	for _, tc := range []struct {
 		field  string
-		change func(*config.TeamsConfig)
+		change func(*config.TeamDefaults)
 	}{
-		{"apiVersion", func(c *config.TeamsConfig) { c.APIVersion = invalid }},
-		{"kind", func(c *config.TeamsConfig) { c.Kind = invalid }},
-		{"spec.defaults.sources[0].name", func(c *config.TeamsConfig) { c.Spec.Defaults.Sources[0].Name = invalid }},
-		{"spec.defaults.sources[0].url", func(c *config.TeamsConfig) { c.Spec.Defaults.Sources[0].URL = invalid }},
-		{"spec.defaults.sources[0].branch", func(c *config.TeamsConfig) { c.Spec.Defaults.Sources[0].Branch = invalid }},
-		{"spec.defaults.sources[0].tag", func(c *config.TeamsConfig) {
+		{"apiVersion", func(c *config.TeamDefaults) { c.APIVersion = invalid }},
+		{"kind", func(c *config.TeamDefaults) { c.Kind = invalid }},
+		{"spec.defaults.sources[0].name", func(c *config.TeamDefaults) { c.Spec.Defaults.Sources[0].Name = invalid }},
+		{"spec.defaults.sources[0].url", func(c *config.TeamDefaults) { c.Spec.Defaults.Sources[0].URL = invalid }},
+		{"spec.defaults.sources[0].branch", func(c *config.TeamDefaults) { c.Spec.Defaults.Sources[0].Branch = invalid }},
+		{"spec.defaults.sources[0].tag", func(c *config.TeamDefaults) {
 			c.Spec.Defaults.Sources[0].Branch = ""
 			c.Spec.Defaults.Sources[0].Tag = invalid
 		}},
-		{"spec.defaults.sources[0].commit", func(c *config.TeamsConfig) {
+		{"spec.defaults.sources[0].commit", func(c *config.TeamDefaults) {
 			c.Spec.Defaults.Sources[0].Branch = ""
 			c.Spec.Defaults.Sources[0].Commit = invalid
 		}},
-		{"spec.defaults.roles[0].name", func(c *config.TeamsConfig) { c.Spec.Defaults.Roles[0].Name = invalid }},
-		{"spec.defaults.roles[0].source", func(c *config.TeamsConfig) { c.Spec.Defaults.Roles[0].Source = invalid }},
-		{"spec.defaults.roles[0].path", func(c *config.TeamsConfig) { c.Spec.Defaults.Roles[0].Path = invalid }},
-		{"spec.defaults.roles[0].harness", func(c *config.TeamsConfig) { c.Spec.Defaults.Roles[0].Harness = invalid }},
-		{"spec.defaults.roles[0].needs.image[0]", func(c *config.TeamsConfig) { c.Spec.Defaults.Roles[0].Needs.Image[0] = invalid }},
-		{"spec.defaults.harnesses[0].name", func(c *config.TeamsConfig) { c.Spec.Defaults.Harnesses[0].Name = invalid }},
-		{"spec.defaults.harnesses[0].source", func(c *config.TeamsConfig) { c.Spec.Defaults.Harnesses[0].Source = invalid }},
-		{"spec.defaults.harnesses[0].path", func(c *config.TeamsConfig) { c.Spec.Defaults.Harnesses[0].Path = invalid }},
+		{"spec.defaults.roles[0].name", func(c *config.TeamDefaults) { c.Spec.Defaults.Roles[0].Name = invalid }},
+		{"spec.defaults.roles[0].source", func(c *config.TeamDefaults) { c.Spec.Defaults.Roles[0].Source = invalid }},
+		{"spec.defaults.roles[0].path", func(c *config.TeamDefaults) { c.Spec.Defaults.Roles[0].Path = invalid }},
+		{"spec.defaults.roles[0].harness", func(c *config.TeamDefaults) { c.Spec.Defaults.Roles[0].Harness = invalid }},
+		{"spec.defaults.roles[0].needs.image[0]", func(c *config.TeamDefaults) { c.Spec.Defaults.Roles[0].Needs.Image[0] = invalid }},
+		{"spec.defaults.harnesses[0].name", func(c *config.TeamDefaults) { c.Spec.Defaults.Harnesses[0].Name = invalid }},
+		{"spec.defaults.harnesses[0].source", func(c *config.TeamDefaults) { c.Spec.Defaults.Harnesses[0].Source = invalid }},
+		{"spec.defaults.harnesses[0].path", func(c *config.TeamDefaults) { c.Spec.Defaults.Harnesses[0].Path = invalid }},
 	} {
 		t.Run(tc.field, func(t *testing.T) {
 			cfg := fixture(t, "global")
@@ -488,7 +488,7 @@ func TestUnicodeRoundTrip(t *testing.T) {
 	if err := config.Encode(&out, cfg); err != nil {
 		t.Fatal(err)
 	}
-	got, err := config.Decode(&out)
+	got, err := config.DecodeDefaults(&out)
 	if err != nil {
 		t.Fatal(err)
 	}

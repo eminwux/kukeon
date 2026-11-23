@@ -33,10 +33,10 @@ import (
 
 // composeTeam composes the majordomo role on codex and claude for the team
 // "root", after change adjusts the global configuration.
-func composeTeam(t *testing.T, change func(*config.TeamsConfig)) *compose.Result {
+func composeTeam(t *testing.T, change func(*config.TeamDefaults)) *compose.Result {
 	t.Helper()
 	const name = "root"
-	cfg := &config.TeamsConfig{APIVersion: config.APIVersion, Kind: config.Kind, Spec: config.Spec{
+	cfg := &config.TeamDefaults{APIVersion: config.APIVersion, Kind: config.KindTeamDefaults, Spec: config.Spec{
 		Defaults: config.Defaults{
 			Sources: []config.Source{{
 				Name: "kukeon", URL: "github.com/eminwux/kukeon", Branch: "main", ClonePath: "/home/user/kukeon-src",
@@ -51,8 +51,7 @@ func composeTeam(t *testing.T, change func(*config.TeamsConfig)) *compose.Result
 	if change != nil {
 		change(cfg)
 	}
-	team := config.Root()
-	team.Metadata.Name = name
+	team := inheritingTeam(name)
 	result, err := compose.Compose(cfg, team, compose.Options{Sources: sourceFS()})
 	if err != nil {
 		t.Fatal(err)
@@ -115,19 +114,20 @@ func configReferencing(name, team string, ref api.CellConfigBlueprintRef) api.Ce
 // config once. Two roles on one harness share its blueprint.
 func TestResourceAccountingCountsSharedBlueprintsOnce(t *testing.T) {
 	f := newFake()
-	result := composeTeam(t, func(cfg *config.TeamsConfig) {
+	result := composeTeam(t, func(cfg *config.TeamDefaults) {
 		cfg.Spec.Defaults.Roles = append(cfg.Spec.Defaults.Roles,
 			config.Role{Name: "second", Source: "kukeon", Path: "team/roles/majordomo"})
 	})
 	if len(result.Pairs) != 4 || len(result.Blueprints) != 2 {
 		t.Fatalf("pairs=%d blueprints=%d", len(result.Pairs), len(result.Blueprints))
 	}
-	done, err := apply(t.Context(), f, result, "kuke team init", "")
+	done, err := apply(t.Context(), f, result)
 	if err != nil {
 		t.Fatal(err)
 	}
 	kinds, names := appliedDocs(t, f.raw)
-	if done.resources != 6 || len(kinds) != 6 ||
+	// Two shared blueprints, four configs and the Team.
+	if done.resources != 7 || len(kinds) != 7 || kinds[6] != "Team" ||
 		!slices.Equal(names["CellBlueprint"], []string{"codex", "claude"}) || len(names["CellConfig"]) != 4 {
 		t.Fatalf("resources=%d docs=%v", done.resources, names)
 	}
@@ -141,8 +141,8 @@ func TestResourceAccountingCountsSharedBlueprintsOnce(t *testing.T) {
 		{Action: "created"},
 		{Action: "created"},
 	}
-	if _, err = apply(t.Context(), f, result, "kuke team init", ""); err == nil ||
-		!strings.Contains(err.Error(), "4 of 6 resources accepted") {
+	if _, err = apply(t.Context(), f, result); err == nil ||
+		!strings.Contains(err.Error(), "4 of 7 resources accepted") {
 		t.Fatalf("err=%v", err)
 	}
 }
@@ -160,15 +160,13 @@ func TestSharedBlueprintNames(t *testing.T) {
 		// users is the other configs the replacement note names; empty means
 		// no replacement note.
 		users string
-		// legacy names the team a forced init is migrating from (#1527).
-		legacy string
 	}{
-		{"absent", func(*fakeClient, *compose.Result) {}, false, "", ""},
+		{"absent", func(*fakeClient, *compose.Result) {}, false, ""},
 		{"same-content", func(f *fakeClient, r *compose.Result) {
 			f.blueprints["default/codex"] = storedShared("codex", r.Blueprints[0].Metadata.Labels[api.LabelContentDigest])
 			// Even when another team uses it: identical content is the same blueprint.
 			f.configs = []api.CellConfigDoc{configReferencing("other-majordomo-codex", "other", plain)}
-		}, false, "", ""},
+		}, false, ""},
 		{"different-content-used-by-another-team", func(f *fakeClient, _ *compose.Result) {
 			f.blueprints["default/codex"] = storedShared("codex", "0000000000000000")
 			f.configs = []api.CellConfigDoc{
@@ -176,31 +174,18 @@ func TestSharedBlueprintNames(t *testing.T) {
 				configReferencing("other-majordomo-codex", "other", plain),
 				configReferencing("other-pm-codex", "other", plain),
 			}
-		}, false, "team other (other-majordomo-codex, other-pm-codex)", ""},
+		}, false, "team other (other-majordomo-codex, other-pm-codex)"},
 		{"different-content-used-by-a-hand-written-config", func(f *fakeClient, _ *compose.Result) {
 			f.blueprints["default/codex"] = storedShared("codex", "0000000000000000")
 			f.configs = []api.CellConfigDoc{configReferencing("mine", "", plain)}
-		}, false, "configs without a team (mine)", ""},
+		}, false, "configs without a team (mine)"},
 		{"different-content-used-only-by-this-team", func(f *fakeClient, _ *compose.Result) {
 			f.blueprints["default/codex"] = storedShared("codex", "0000000000000000")
 			f.configs = []api.CellConfigDoc{configReferencing("root-majordomo-codex", "root", plain)}
-		}, false, "", ""},
-		// The init team being migrated from kukeon (#1527) loses its configs
-		// once the replacement is applied: the note does not name them.
-		{"different-content-used-only-by-the-legacy-team", func(f *fakeClient, _ *compose.Result) {
-			f.blueprints["default/codex"] = storedShared("codex", "0000000000000000")
-			f.configs = []api.CellConfigDoc{configReferencing("kukeon-majordomo-codex", legacyName, plain)}
-		}, false, "", legacyName},
-		{"different-content-used-by-the-legacy-team-and-another", func(f *fakeClient, _ *compose.Result) {
-			f.blueprints["default/codex"] = storedShared("codex", "0000000000000000")
-			f.configs = []api.CellConfigDoc{
-				configReferencing("kukeon-majordomo-codex", legacyName, plain),
-				configReferencing("other-majordomo-codex", "other", plain),
-			}
-		}, false, "team other (other-majordomo-codex)", legacyName},
+		}, false, ""},
 		{"different-content-unreferenced", func(f *fakeClient, _ *compose.Result) {
 			f.blueprints["default/codex"] = storedShared("codex", "0000000000000000")
-		}, false, "", ""},
+		}, false, ""},
 		{"another-team-references-a-same-named-blueprint-elsewhere", func(f *fakeClient, _ *compose.Result) {
 			f.blueprints["default/codex"] = storedShared("codex", "0000000000000000")
 			f.configs = []api.CellConfigDoc{
@@ -208,19 +193,19 @@ func TestSharedBlueprintNames(t *testing.T) {
 				configReferencing("other-scope", "other", api.CellConfigBlueprintRef{Name: "codex", Realm: "default", Space: "default"}),
 				configReferencing("other-name", "other", api.CellConfigBlueprintRef{Name: "claude", Realm: "default"}),
 			}
-		}, false, "", ""},
+		}, false, ""},
 		// A blueprint kuke team did not render is never overwritten, used or not.
 		{"not-shared", func(f *fakeClient, _ *compose.Result) {
 			doc := storedShared("codex", "")
 			doc.Metadata.Labels = map[string]string{api.LabelTeam: "legacy"}
 			f.blueprints["default/codex"] = doc
-		}, true, "", ""},
+		}, true, ""},
 		{"not-shared-used-by-another-team", func(f *fakeClient, _ *compose.Result) {
 			doc := storedShared("codex", "")
 			doc.Metadata.Labels = nil
 			f.blueprints["default/codex"] = doc
 			f.configs = []api.CellConfigDoc{configReferencing("other-majordomo-codex", "other", plain)}
-		}, true, "", ""},
+		}, true, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFake()
@@ -234,7 +219,7 @@ func TestSharedBlueprintNames(t *testing.T) {
 					result = composeTeam(t, nil)
 					codex = result.Blueprints[0]
 				}
-				done, err := apply(t.Context(), f, result, "kuke team init", tc.legacy)
+				done, err := apply(t.Context(), f, result)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -274,7 +259,7 @@ func TestSharedBlueprintNames(t *testing.T) {
 					wantNote != "" && !slices.Equal(done.notes, []string{wantNote}) {
 					t.Fatalf("attempt %d: notes = %q, want %q", attempt, done.notes, wantNote)
 				}
-				if done.resources != 4 {
+				if done.resources != 5 {
 					t.Fatalf("resources = %d", done.resources)
 				}
 				if tc.renamed {
@@ -325,7 +310,7 @@ func TestSharedBlueprintForkIsMigrated(t *testing.T) {
 	result := composeTeam(t, nil)
 	digest := result.Blueprints[0].Metadata.Labels[api.LabelContentDigest]
 	fork := forkedRealm(t, f, result, false)
-	done, err := apply(t.Context(), f, result, "kuke team init", "")
+	done, err := apply(t.Context(), f, result)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -353,7 +338,7 @@ func TestSharedBlueprintForkIsMigrated(t *testing.T) {
 		t.Fatalf("notes = %q, want %q", done.notes, want)
 	}
 	// Once migrated, a rerun has nothing left to report.
-	if done, err = apply(t.Context(), f, composeTeam(t, nil), "kuke team init", ""); err != nil ||
+	if done, err = apply(t.Context(), f, composeTeam(t, nil)); err != nil ||
 		len(done.notes) != 0 {
 		t.Fatalf("rerun notes = %q err=%v", done.notes, err)
 	}
@@ -365,7 +350,7 @@ func TestSharedBlueprintForkStillReferencedIsReported(t *testing.T) {
 	f.prune = true
 	result := composeTeam(t, nil)
 	fork := forkedRealm(t, f, result, true)
-	done, err := apply(t.Context(), f, result, "kuke team init", "")
+	done, err := apply(t.Context(), f, result)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +370,7 @@ func TestSharedBlueprintForkNotPrunedIsReported(t *testing.T) {
 	f := newFake()
 	result := composeTeam(t, nil)
 	fork := forkedRealm(t, f, result, false)
-	done, err := apply(t.Context(), f, result, "kuke team init", "")
+	done, err := apply(t.Context(), f, result)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,30 +409,34 @@ func TestIsDigestName(t *testing.T) {
 func TestSharedBlueprintLookupFailureAppliesNothing(t *testing.T) {
 	f := newFake()
 	f.blueprintErr = errors.New("permission denied: sensitive-detail")
-	_, err := apply(t.Context(), f, composeTeam(t, nil), "kuke team init", "")
+	_, err := apply(t.Context(), f, composeTeam(t, nil))
 	if err == nil || !strings.Contains(err.Error(), "blueprint codex lookup") ||
 		strings.Contains(err.Error(), "sensitive-detail") || f.applies != 0 || f.creates != 0 {
 		t.Fatalf("err=%v applies=%d", err, f.applies)
 	}
 }
 
-// The replacement note reaches the operator through the run result.
-func TestRunReportsReplacedSharedBlueprint(t *testing.T) {
-	opts := setupRun(t)
-	f := opts.Client.(*fakeClient)
+// The replacement note reaches the operator through the init result.
+func TestInitReportsReplacedSharedBlueprint(t *testing.T) {
+	opts, f := setupInit(t)
 	f.blueprints["default/claude"] = storedShared("claude", "0000000000000000")
 	f.configs = []api.CellConfigDoc{
 		configReferencing("other-dev-claude", "other", api.CellConfigBlueprintRef{Name: "claude", Realm: "default"}),
 	}
-	result, err := Run(t.Context(), opts)
+	out, err := Init(t.Context(), opts)
 	if err != nil {
 		t.Fatal(err)
 	}
+	result := out.Result
 	const replaced = "blueprint claude in realm default replaced in place (content 0000000000000000 → "
 	if len(result.Notes) != 1 || !strings.HasPrefix(result.Notes[0], replaced) ||
 		!strings.Contains(result.Notes[0], "also used by team other (other-dev-claude)") ||
-		result.Resources != 4 {
+		result.Resources != 6 {
 		t.Fatalf("notes=%v resources=%d", result.Notes, result.Resources)
+	}
+	// The plan carried the same note before anything was written.
+	if !slices.Equal(out.Plan.Notes, result.Notes) {
+		t.Fatalf("plan notes = %v", out.Plan.Notes)
 	}
 	if _, names := appliedDocs(t, f.raw); !slices.Contains(names["CellBlueprint"], "claude") {
 		t.Fatalf("blueprints applied as %v, want claude under its plain name", names["CellBlueprint"])
@@ -461,11 +450,11 @@ func TestApplyLeavesTheStackGitAlone(t *testing.T) {
 	f.stackDefaults = &api.ScopeDefaults{
 		Git: &api.ContainerGit{Author: &api.GitIdentity{Name: "Kept", Email: "k@example.com"}},
 	}
-	done, err := apply(t.Context(), f, composeTeam(t, nil), "kuke team init", "")
+	done, err := apply(t.Context(), f, composeTeam(t, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kinds, _ := appliedDocs(t, f.raw); done.resources != 4 || slices.Contains(kinds, "Stack") ||
+	if kinds, _ := appliedDocs(t, f.raw); done.resources != 5 || slices.Contains(kinds, "Stack") ||
 		f.stackDefaults.Git.Author.Name != "Kept" {
 		t.Fatalf("resources=%d kinds=%v", done.resources, kinds)
 	}
@@ -477,7 +466,7 @@ func TestApplyLeavesTheStackGitAlone(t *testing.T) {
 func TestMissingGitSecretsAreReported(t *testing.T) {
 	deploy := config.SecretRef{Name: "deploy-key", Realm: "default"}
 	signers := config.SecretRef{Name: "signers", Realm: "default"}
-	withSecrets := func(cfg *config.TeamsConfig) {
+	withSecrets := func(cfg *config.TeamDefaults) {
 		cfg.Spec.Defaults.Sources[0].Git = &config.SourceGit{
 			Credential: &config.SourceCredential{SecretRef: deploy},
 			Signing:    &config.GitSigning{SecretRef: deploy, AllowedSignersRef: &signers},
@@ -485,7 +474,7 @@ func TestMissingGitSecretsAreReported(t *testing.T) {
 	}
 	f := newFake()
 	f.secrets[api.SecretMetadata{Name: "signers", Realm: "default"}] = "present"
-	done, err := apply(t.Context(), f, composeTeam(t, withSecrets), "kuke team init", "")
+	done, err := apply(t.Context(), f, composeTeam(t, withSecrets))
 	if err != nil || f.applies != 1 || f.creates != 0 {
 		t.Fatalf("err=%v applies=%d creates=%d", err, f.applies, f.creates)
 	}
@@ -501,14 +490,14 @@ func TestMissingGitSecretsAreReported(t *testing.T) {
 	for _, name := range []string{"signers", "deploy-key"} {
 		f.secrets[api.SecretMetadata{Name: name, Realm: "default"}] = "present"
 	}
-	done, err = apply(t.Context(), f, composeTeam(t, withSecrets), "kuke team init", "")
+	done, err = apply(t.Context(), f, composeTeam(t, withSecrets))
 	if err != nil || len(done.missing) != 0 || f.creates != 0 || len(done.notes) != 0 {
 		t.Fatalf("missing=%q creates=%d notes=%q err=%v", done.missing, f.creates, done.notes, err)
 	}
 	// A failed lookup gates the apply and reports no daemon text.
 	f = newFake()
 	f.lookupErr = errors.New("denied: sensitive-detail")
-	if _, err = apply(t.Context(), f, composeTeam(t, withSecrets), "kuke team init", ""); err == nil ||
+	if _, err = apply(t.Context(), f, composeTeam(t, withSecrets)); err == nil ||
 		f.applies != 0 || strings.Contains(err.Error(), "sensitive-detail") {
 		t.Fatalf("err=%v applies=%d", err, f.applies)
 	}
@@ -521,25 +510,24 @@ func TestAddHintsAtAMissingGitIdentity(t *testing.T) {
 	const hint = "no git identity is set; run kuke connector import git --default"
 	for _, withDefault := range []bool{false, true} {
 		opts, _ := setupAdd(t)
-		fake := newFake()
+		fake := opts.Client.(*fakeClient)
 		if withDefault {
 			fake.realmDefaults = &api.ScopeDefaults{Git: &api.ContainerGit{
 				IdentityRef: &api.ContainerSecretRef{Name: "git-ssh", Realm: "default"},
 			}}
 		}
-		opts.Client = fake
-		result, err := Add(t.Context(), opts)
+		out, err := Add(t.Context(), opts)
 		if err != nil {
 			t.Fatal(err)
 		}
 		count := 0
-		for _, note := range result.Notes {
+		for _, note := range out.Result.Notes {
 			if note == hint {
 				count++
 			}
 		}
 		if want := map[bool]int{false: 1, true: 0}[withDefault]; count != want {
-			t.Fatalf("default=%v: notes = %v, want the hint %d time(s)", withDefault, result.Notes, want)
+			t.Fatalf("default=%v: notes = %v, want the hint %d time(s)", withDefault, out.Result.Notes, want)
 		}
 		if bytes.Contains(fake.raw, []byte("kind: Stack")) {
 			t.Fatal("add wrote stack git defaults")

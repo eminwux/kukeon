@@ -14,184 +14,145 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-package cli
+package cli_test
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/team/initialize"
+	"github.com/eminwux/kukeon/pkg/team/config"
 )
 
-func TestInitOutcomes(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		configPath bool
-		failure    bool
-	}{
-		{name: "no configuration"}, {name: "configuration read", configPath: true}, {name: "failed", failure: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			home := t.TempDir()
-			path := filepath.Join(home, ".kuke", "kuketeams.yaml")
-			sentinel := errors.New("read configuration " + path + ": permission denied")
-			cmd := newInitCommand(func() (string, error) { return home, nil },
-				func(ctx context.Context, opts initialize.Options) (initialize.Result, error) {
-					if ctx != t.Context() || opts.Root != filepath.Join(home, ".kuke") {
-						t.Fatal("dependencies not forwarded")
-					}
-					if tc.failure {
-						return initialize.Result{}, sentinel
-					}
-					result := initialize.Result{
-						EntryPath: filepath.Join(home, ".kuke", "kuketeam.d", "kuke.yaml"),
-						Resources: 2,
-					}
-					if tc.configPath {
-						result.ConfigPath = path
-					}
-					return result, nil
-				})
-			cmd.SilenceUsage, cmd.SilenceErrors = true, true
-			var stdout, stderr bytes.Buffer
-			cmd.SetOut(&stdout)
-			cmd.SetErr(&stderr)
-			cmd.SetArgs([]string{})
-			err := cmd.ExecuteContext(t.Context())
-			if tc.failure {
-				if !errors.Is(err, sentinel) || stdout.Len() != 0 || stderr.Len() != 0 {
-					t.Fatalf("error=%v stdout=%q stderr=%q", err, &stdout, &stderr)
-				}
-				return
-			}
-			want := "Applied 2 resources; registered kuke team: " +
-				filepath.Join(home, ".kuke", "kuketeam.d", "kuke.yaml") + "\nNo cells created or started.\n"
-			if tc.configPath {
-				want = "Read configuration: " + path + "\n" + want
-			}
-			if err != nil || stdout.String() != want || stderr.Len() != 0 {
-				t.Fatalf("error=%v stdout=%q stderr=%q", err, &stdout, &stderr)
-			}
-		})
+// TestInitStoresTheKukeTeamAndInitialDefaults is AC7: init applies the kuke
+// Team, and creates the TeamDefaults in the same team apply when the realm
+// has none.
+func TestInitStoresTheKukeTeamAndInitialDefaults(t *testing.T) {
+	h := newHarness(t)
+	out, err := h.run(t, "init")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "stored team kuke") || !strings.Contains(out, "No cells created or started") {
+		t.Fatalf("output:\n%s", out)
+	}
+	if h.store.team != "kuke" || h.store.teams["kuke"] == nil {
+		t.Fatalf("team apply for %q; stored %v", h.store.team, h.store.teams)
+	}
+	team, err := config.DecodeTeam(bytes.NewReader(h.store.teams["kuke"]))
+	if err != nil || team.Metadata.Name != "kuke" || team.Metadata.Realm != "default" {
+		t.Fatalf("stored kuke Team: %v %+v", err, team)
+	}
+	defaults := h.store.storedDefaults(t)
+	if len(defaults.Spec.Defaults.Sources) != 1 || defaults.Spec.Defaults.Sources[0].Name != "kukeon" ||
+		len(defaults.Spec.Defaults.Harnesses) != 2 || defaults.Spec.Defaults.Roles != nil {
+		t.Fatalf("initial TeamDefaults: %+v", defaults.Spec.Defaults)
+	}
+	if !h.store.closed {
+		t.Fatal("client left open")
 	}
 }
 
-func TestInitForceIsForwarded(t *testing.T) {
-	cmd := newInitCommand(func() (string, error) { return "/home/operator", nil },
-		func(_ context.Context, opts initialize.Options) (initialize.Result, error) {
-			if !opts.Force {
-				t.Fatal("--force was not forwarded")
-			}
-			return initialize.Result{}, nil
-		})
-	var out bytes.Buffer
-	cmd.SetOut(&out)
-	cmd.SetArgs([]string{"--force"})
-	if err := cmd.Execute(); err != nil || !strings.Contains(out.String(), "registered kuke team") {
-		t.Fatalf("output=%q err=%v", &out, err)
+// TestInitNeverChangesExistingDefaults is AC7: an existing TeamDefaults is
+// kept, with and without --force.
+func TestInitNeverChangesExistingDefaults(t *testing.T) {
+	for _, args := range [][]string{{"init"}, {"init", "--force"}} {
+		h := newHarness(t)
+		h.store.putDefaults(t, initialize.InitialDefaults("default"))
+		h.store.defaults = append([]byte("# the operator's own\n"), h.store.defaults...)
+		before := string(h.store.defaults)
+		if len(args) > 1 {
+			h.store.putTeam(t, config.Majordomo())
+		}
+		if _, err := h.run(t, args...); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		if string(h.store.defaults) != before || strings.Contains(string(h.store.applied), "kind: TeamDefaults") {
+			t.Fatalf("%v changed the TeamDefaults:\n%s", args, h.store.applied)
+		}
 	}
 }
 
-func TestInitReapplyIsForwardedAndExcludesForce(t *testing.T) {
-	cmd := newInitCommand(func() (string, error) { return "/home/operator", nil },
-		func(_ context.Context, opts initialize.Options) (initialize.Result, error) {
-			if !opts.Reapply || opts.Force {
-				t.Fatalf("options = %+v", opts)
-			}
-			return initialize.Result{}, nil
-		})
-	var out bytes.Buffer
-	cmd.SetOut(&out)
-	cmd.SetArgs([]string{"--reapply"})
-	if err := cmd.Execute(); err != nil || !strings.Contains(out.String(), "registered kuke team") {
-		t.Fatalf("output=%q err=%v", &out, err)
+// TestInitAlreadyInitialized is AC7: "already initialized" is the stored kuke
+// Team, and nothing is applied.
+func TestInitAlreadyInitialized(t *testing.T) {
+	h := newHarness(t)
+	h.store.putTeam(t, config.Majordomo())
+	_, err := h.run(t, "init")
+	if err == nil || !strings.Contains(err.Error(), "already initialized") ||
+		!strings.Contains(err.Error(), "--force") || !strings.Contains(err.Error(), "--reapply") {
+		t.Fatalf("error = %v", err)
 	}
-
-	rejected := newInitCommand(func() (string, error) { return "/home/operator", nil },
-		func(context.Context, initialize.Options) (initialize.Result, error) {
-			t.Fatal("--reapply --force must not run")
-			return initialize.Result{}, nil
-		})
-	rejected.SetOut(&out)
-	rejected.SetErr(&out)
-	rejected.SetArgs([]string{"--reapply", "--force"})
-	if err := rejected.Execute(); err == nil {
-		t.Fatal("accepted --reapply --force")
+	if h.store.writes != 0 {
+		t.Fatalf("writes = %d", h.store.writes)
 	}
 }
 
-// TestInitHasNoGitFlags is AC2: init reads no git identity, so it takes no
-// flag to import one.
+// TestInitReapplyRecomposesTheStoredTeam is AC7/AC12: --reapply is kuke team
+// apply kuke, and needs a stored kuke Team.
+func TestInitReapplyRecomposesTheStoredTeam(t *testing.T) {
+	h := newHarness(t)
+	if _, err := h.run(t, "init", "--reapply"); err == nil || !strings.Contains(err.Error(), "kuke team init first") {
+		t.Fatalf("reapply without a stored team: %v", err)
+	}
+	h.store.putTeam(t, config.Majordomo())
+	h.store.putDefaults(t, initialize.InitialDefaults("default"))
+	out, err := h.run(t, "init", "--reapply")
+	if err != nil || !strings.Contains(out, "stored team kuke") {
+		t.Fatalf("reapply: %v\n%s", err, out)
+	}
+}
+
+func TestInitReapplyExcludesForce(t *testing.T) {
+	h := newHarness(t)
+	_, err := h.run(t, "init", "--reapply", "--force")
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("error = %v", err)
+	}
+	if len(h.connect) != 0 {
+		t.Fatal("dialled kukeond for invalid flags")
+	}
+}
+
+// TestInitHasNoGitFlags: init reads no git identity, so it takes no flag to
+// import one, and its help points at the git connector.
 func TestInitHasNoGitFlags(t *testing.T) {
+	h := newHarness(t)
 	for _, flag := range []string{"--import-git-identity", "--git-key", "--git-key-passphrase-file", "--git-known-hosts"} {
-		cmd := newInitCommand(func() (string, error) { return "/home/operator", nil },
-			func(context.Context, initialize.Options) (initialize.Result, error) {
-				t.Fatalf("%s must not run", flag)
-				return initialize.Result{}, nil
-			})
-		var out bytes.Buffer
-		cmd.SetOut(&out)
-		cmd.SetErr(&out)
-		cmd.SetArgs([]string{flag})
-		if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "unknown flag") {
+		if _, err := h.run(t, "init", flag); err == nil || !strings.Contains(err.Error(), "unknown flag") {
 			t.Fatalf("%s: err=%v", flag, err)
 		}
 	}
-}
-
-func TestInitHelpAndUnsupportedFlagsHaveNoEffects(t *testing.T) {
-	for _, args := range [][]string{{"--help"}, {"--build"}, {"--config", "elsewhere"}, {"extra"}} {
-		cmd := newInitCommand(func() (string, error) {
-			t.Fatal("home resolution must be lazy")
-			return "", nil
-		}, func(context.Context, initialize.Options) (initialize.Result, error) {
-			t.Fatal("init must not run")
-			return initialize.Result{}, nil
-		})
-		var out bytes.Buffer
-		cmd.SetOut(&out)
-		cmd.SetErr(&out)
-		cmd.SetArgs(args)
-		err := cmd.Execute()
-		if args[0] == "--help" {
-			if err != nil || !strings.Contains(out.String(), "No cells are created or started") {
-				t.Fatalf("error=%v output=%q", err, &out)
-			}
-		} else if err == nil {
-			t.Fatalf("accepted %v", args)
-		}
+	out, err := h.run(t, "init", "--help")
+	if err != nil || !strings.Contains(out, "kuke connector import git --default") {
+		t.Fatalf("help: %v\n%s", err, out)
+	}
+	if len(h.connect) != 0 {
+		t.Fatal("dialled kukeond for help or a bad flag")
 	}
 }
 
 func TestInitHomeFailure(t *testing.T) {
-	sentinel := errors.New("home unavailable")
-	cmd := newInitCommand(func() (string, error) { return "", sentinel }, initialize.Run)
-	cmd.SetArgs([]string{})
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-	if err := cmd.Execute(); !errors.Is(err, sentinel) || !strings.Contains(err.Error(), "home directory") {
+	h := newHarness(t)
+	h.homeErr = errors.New("home unavailable")
+	if _, err := h.run(t, "init"); !errors.Is(err, h.homeErr) || !strings.Contains(err.Error(), "home directory") {
 		t.Fatalf("error = %v", err)
 	}
 }
 
-func TestInitForwardsConnectionFlags(t *testing.T) {
-	home := t.TempDir()
-	cmd := newInitCommand(
-		func() (string, error) { return home, nil },
-		func(_ context.Context, opts initialize.Options) (initialize.Result, error) {
-			if opts.Home != home || opts.Host != "unix:///chosen.sock" || opts.Configuration != "/chosen/kuke.yaml" {
-				t.Fatalf("options=%+v", opts)
-			}
-			return initialize.Result{}, nil
-		},
-	)
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetArgs([]string{"--host", "unix:///chosen.sock", "--configuration", "/chosen/kuke.yaml"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+// TestConnectionFlagsAreForwarded: every verb dials through the same
+// endpoint flags (G2).
+func TestConnectionFlagsAreForwarded(t *testing.T) {
+	h := newHarness(t)
+	h.store.putTeam(t, config.Majordomo())
+	_, _ = h.run(t, "init", "--host", "unix:///chosen.sock", "--configuration", "/chosen/kuke.yaml")
+	want := initialize.ConnectOptions{
+		Root: filepath.Join(h.home, ".kuke"), Host: "unix:///chosen.sock", Configuration: "/chosen/kuke.yaml",
+	}
+	if len(h.connect) != 1 || h.connect[0] != want {
+		t.Fatalf("connect = %+v, want %+v", h.connect, want)
 	}
 }

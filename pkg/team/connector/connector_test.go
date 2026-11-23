@@ -29,7 +29,7 @@ import (
 
 func document(name, spec string) *fstest.MapFile {
 	return &fstest.MapFile{Data: []byte(
-		"apiVersion: kuketeams.io/v1\nkind: Connector\nmetadata:\n  name: " + name + "\nspec:\n" + spec,
+		"apiVersion: v1beta1\nkind: Connector\nmetadata:\n  name: " + name + "\nspec:\n" + spec,
 	)}
 }
 

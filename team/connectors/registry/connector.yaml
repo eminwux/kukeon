@@ -3,7 +3,7 @@
 # An identity is a basic-auth Secret in the Realm; a Realm's
 # spec.registryCredentials[] entry binds it to a registry server through
 # `secretRef`. It is a Realm concern only: it never appears on a Config.
-apiVersion: kuketeams.io/v1
+apiVersion: v1beta1
 kind: Connector
 metadata:
   name: registry

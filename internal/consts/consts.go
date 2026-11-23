@@ -108,6 +108,21 @@ const (
 	// runner.reservedScopeSubdirs) so it is never mistaken for a space.
 	KukeonHealthReportsSubdir = "healthreports"
 
+	// KukeonTeamsSubdir is the basename of the per-realm subdirectory that
+	// owns daemon-stored `kind: Team` documents (issue #1618): one
+	// `<name>.yaml` per team, under the realm's metadata directory (e.g.
+	// <RunPath>/data/<realm>/teams/) so a realm purge reclaims it. A team
+	// declaration carries source URLs and secret references, never secret
+	// bytes, so like the configs subdir it is root-owned and world-readable
+	// (0o755 / 0o644).
+	KukeonTeamsSubdir = "teams"
+
+	// KukeonTeamDefaultsSubdir is the basename of the per-realm subdirectory
+	// that owns the realm's `kind: TeamDefaults` document (issue #1618):
+	// `default.yaml`, the only name a TeamDefaults has. Same placement and
+	// modes as KukeonTeamsSubdir.
+	KukeonTeamDefaultsSubdir = "team-defaults"
+
 	// KukeonContainerTTYDir is the basename of the per-container directory
 	// that owns the sbsh terminal socket plus its capture and log siblings.
 	// kukeon bind-mounts this directory (not a single file) into the

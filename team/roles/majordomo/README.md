@@ -42,7 +42,7 @@ self-contained: skill paths in [`role.yaml`](role.yaml) are **source-checkout
 relative**, matching agents conventions; Claude's `settings` is **role-relative**.
 No common or specialized agents roles, hooks, status lines, GitHub CLI, or GitHub
 credentials are required. The `go` image capability matches the initial
-kukeon TeamEntry selection; it does not dynamically install runtime prerequisites.
+kuke team selection; it does not dynamically install runtime prerequisites.
 
 ## Prerequisites and authority
 

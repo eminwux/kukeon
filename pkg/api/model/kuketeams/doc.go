@@ -14,83 +14,50 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-// Package kuketeams holds the Go types for the team-distribution contract
-// (issue #793, epic #792). The kinds — ProjectTeam, TeamsConfig, TeamEntry,
-// Role, Harness, and ImageCatalog — model in-repo team composition:
+// Package kuketeams holds the Go types of the source documents a team is
+// composed from (issue #793, epic #792; issue #1618). Role, Harness and
+// ImageCatalog live in a source repository and are read by kuke from the
+// fetched tree:
 //
-//   - ProjectTeam (committed in each project repo, `kuketeam.yaml`) declares the
-//     roster: which pinned agents source, which roles, which harness defaults.
-//   - TeamsConfig (host, operator-owned, `~/.kuke/kuketeams.yaml`, optional and
-//     hand-written) carries operator facts only — registry, source clone URLs,
-//     secret sources. A git identity is a git connector identity instead
-//     (`kuke connector import git`, issue #1591).
-//   - TeamEntry (host, `~/.kuke/kuketeam.d/<team>.yaml`, one per team) carries
-//     the per-team composition record: `kuke team init` writes the operator's
-//     system team's `kuketeam.d/kuke.yaml` (the reserved name `kuke`, #1527),
-//     and `kuke team add` writes one file per added team — a drop-in directory
-//     so a corrupt write touches one team, not all (#796).
-//   - Role / Harness / ImageCatalog live in the pinned agents source. They
-//     declare, respectively, a role's skills + harness configs + needs, a
-//     harness's base image + skill path + make target, and the prebuilt
-//     image → capability map that is the v1 image selector input.
+//   - Role (role.yaml) declares a role's skills, per-harness configs, tasks
+//     and needs.
+//   - Harness (harness.yaml) declares a harness's base image, skill path and
+//     make target.
+//   - ImageCatalog (harnesses/images.yaml) is the prebuilt image to
+//     capability map that is the image selector input.
 //
-// All five kinds are GVK objects sharing one API group, kuketeams.io/v1. The
-// agents-side kinds (Role / Harness / ImageCatalog) are authored in the agents
-// repo but deserialized here — kukeon's parser owns the schema shape of all
-// five. Content versioning is carried solely by the structured `source`
-// reference (TeamSource: repo + one of tag/branch/commit) in
-// ProjectTeam/TeamEntry; the agents kinds carry no in-file version field (it
-// would be redundant with the ref and drift-prone).
+// Every team document is apiVersion v1beta1 (issue #1618). The documents
+// kukeond stores — Team and TeamDefaults — are declared in
+// pkg/api/model/v1beta1 over the types in pkg/team/config; the source
+// documents here are never sent to kukeond, and `kuke apply` rejects them.
+// The source documents carry no in-file version field: the ref a source is
+// read at (one of branch, tag or commit) is the version authority.
 //
 // The team-layer types are declarative sugar that render onto the existing
-// v1beta1 runtime: Role.needs.repos fill the shared
-// blueprint's repo slots, Role.needs.mounts select the blueprint's security
-// profile. This package defines the parsed surface only; composition lives in
-// pkg/team/compose and application in internal/team/initialize.
+// v1beta1 runtime: Role.needs.repos fill the shared blueprint's repo slots,
+// Role.needs.mounts select the blueprint's security profile. This package
+// defines the parsed surface only; composition lives in pkg/team/compose and
+// application in internal/team/initialize.
 package kuketeams
 
-// APIVersionV1 is the canonical API version (group/version) shared by every
-// team-distribution kind. Unlike the v1beta1 runtime types, the team kinds use
-// a group-qualified apiVersion so they never collide with the apply/get surface.
-const APIVersionV1 = "kuketeams.io/v1"
+// APIVersionV1 is the apiVersion every team document carries.
+const APIVersionV1 = "v1beta1"
 
 // Kinds.
 const (
-	// KindProjectTeam identifies the per-project roster committed as
-	// kuketeam.yaml in each project repo.
-	KindProjectTeam = "ProjectTeam"
-	// KindTeamsConfig identifies the host-side, operator-owned global-facts
-	// document (~/.kuke/kuketeams.yaml), optional and written by hand.
-	KindTeamsConfig = "TeamsConfig"
-	// KindTeamEntry identifies a host-side, per-team composition record
-	// (~/.kuke/kuketeam.d/<team>.yaml) — one document per team file.
-	// `kuke team init` writes the kuke team's (kuke.yaml); `kuke team
-	// add` writes each added team's, and refuses the reserved name kuke.
-	KindTeamEntry = "TeamEntry"
-	// KindRole identifies a per-role document (role.yaml) in the agents source.
+	// KindRole identifies a per-role document (role.yaml) in a source.
 	KindRole = "Role"
-	// KindHarness identifies a per-harness document (harness.yaml) in the
-	// agents source.
+	// KindHarness identifies a per-harness document (harness.yaml) in a
+	// source.
 	KindHarness = "Harness"
 	// KindImageCatalog identifies the prebuilt-image → capability map
-	// (harnesses/images.yaml) in the agents source — the v1 selector input.
+	// (harnesses/images.yaml) in a source — the image selector input.
 	KindImageCatalog = "ImageCatalog"
 )
 
-// Secret source modes for TeamsConfig.secrets — a secret declares where its
-// value comes from, never an inline value.
-const (
-	// SecretFromEnv reads the secret value from a host environment variable
-	// named by the entry's Key.
-	SecretFromEnv = "env"
-	// SecretFromFile reads the secret value from a host file path named by the
-	// entry's Key.
-	SecretFromFile = "file"
-)
-
-// Metadata is the name-only metadata block carried by ProjectTeam, Role, and
-// Harness. The team kinds intentionally omit a version field — the structured
-// source ref (repo + one of tag/branch/commit) is the version authority.
+// Metadata is the name-only metadata block carried by Role and Harness. The
+// source documents intentionally omit a version field — the source's ref is
+// the version authority.
 type Metadata struct {
 	Name string `json:"name" yaml:"name"`
 }

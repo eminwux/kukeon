@@ -24,54 +24,73 @@ import (
 )
 
 const (
-	KindTeam      = "Team"
-	KindTeamEntry = "TeamEntry"
-)
+	// ProjectSourceName is the name of a team's spec.projectSource: the
+	// repository the team works on.
+	ProjectSourceName = "project"
 
-// Root returns a legacy root declaration inheriting global defaults.
-// Init uses Majordomo instead; this helper does not migrate registrations.
-func Root() *Team {
-	return &Team{APIVersion: APIVersion, Kind: KindTeam, Metadata: Metadata{Name: "root"}}
-}
+	// KindTeam is one team's declaration: what kukeond stores and what a
+	// repository's kuketeam.yaml is.
+	KindTeam = "Team"
+	// DefaultRealm is the realm a team, and the defaults it inherits, live in
+	// when a document names none. Every team is in realm default (#1618 D14).
+	DefaultRealm = "default"
+)
 
 // SystemTeamName is the team kuke team init registers: the operator's own
 // system team, named after the kuke- system prefix (cf. kuke-system) so it can
 // never share an identity with a project team such as kukeon's own (#1527).
 const SystemTeamName = "kuke"
 
+// MajordomoSource is the source the kuke team reads its majordomo role and
+// harnesses from, and the one kuke team init registers in a realm's first
+// TeamDefaults. It has no clonePath there: only the kuke team clones it.
+func MajordomoSource() Source {
+	return Source{Name: "kukeon", URL: "github.com/eminwux/kukeon", Branch: "main"}
+}
+
+// MajordomoHarnesses are the shipped harnesses of the kukeon source, the ones
+// the kuke team runs on and the defaults init registers.
+func MajordomoHarnesses() []Harness {
+	return []Harness{
+		{Name: "codex", Source: "kukeon", Path: "team/harnesses/codex"},
+		{Name: "claude", Source: "kukeon", Path: "team/harnesses/claude"},
+	}
+}
+
 // Majordomo returns the self-contained initial declaration of the kuke team:
 // the majordomo role on both shipped harnesses.
 func Majordomo() *Team {
-	return &Team{APIVersion: APIVersion, Kind: KindTeam, Metadata: Metadata{Name: SystemTeamName}, Spec: Defaults{
-		Sources: []Source{
-			{Name: "kukeon", URL: "github.com/eminwux/kukeon", Branch: "main", ClonePath: "/home/user/kukeon-src"},
-		},
-		Roles: []Role{
-			{
-				Name:        "majordomo",
-				Source:      "kukeon",
-				Path:        "team/roles/majordomo",
-				InitialPath: "$HOME",
-				Needs:       &Needs{Image: []string{"go"}},
+	source := MajordomoSource()
+	source.ClonePath = "/home/user/kukeon-src"
+	return &Team{
+		APIVersion: APIVersion, Kind: KindTeam,
+		Metadata: Metadata{Name: SystemTeamName, Realm: DefaultRealm},
+		Spec: TeamSpec{Defaults: Defaults{
+			Sources: []Source{source},
+			Roles: []Role{
+				{
+					Name:        "majordomo",
+					Source:      "kukeon",
+					Path:        "team/roles/majordomo",
+					InitialPath: "$HOME",
+					Needs:       &Needs{Image: []string{"go"}},
+				},
 			},
-		},
-		Harnesses: []Harness{
-			{Name: "codex", Source: "kukeon", Path: "team/harnesses/codex"},
-			{Name: "claude", Source: "kukeon", Path: "team/harnesses/claude"},
-		},
-	}}
+			Harnesses: MajordomoHarnesses(),
+		}},
+	}
 }
 
 // Resolve applies whole-list inheritance, validates effective references, and
 // retains the original declaration. Explicit empty slices select none.
-func Resolve(cfg *TeamsConfig, team *Team) (Defaults, error) {
+func Resolve(cfg *TeamDefaults, team *Team) (Defaults, error) {
 	if err := Validate(cfg); err != nil {
 		return Defaults{}, err
 	}
 	if team == nil || team.APIVersion != APIVersion || team.Kind != KindTeam || !ValidName(team.Metadata.Name) {
-		return Defaults{}, errors.New("team: require kuketeams.io/v1 Team and a valid metadata.name")
+		return Defaults{}, errors.New("team: require v1beta1 Team and a valid metadata.name")
 	}
-	d := team.Spec
+	d := team.Spec.Defaults
 	if d.Sources == nil {
 		d.Sources = cfg.Spec.Defaults.Sources
 	}
@@ -84,35 +103,38 @@ func Resolve(cfg *TeamsConfig, team *Team) (Defaults, error) {
 	if d.Connectors == nil {
 		d.Connectors = cfg.Spec.Defaults.Connectors
 	}
-	if team.ProjectSource != nil {
-		if team.ProjectSource.Name != "project" {
-			return Defaults{}, errors.New("projectSource: name must be project")
+	if project := team.Spec.ProjectSource; project != nil {
+		if project.Name != ProjectSourceName {
+			return Defaults{}, errors.New("spec.projectSource: name must be project")
 		}
 		for _, source := range d.Sources {
-			if source.Name == "project" {
+			if source.Name == ProjectSourceName {
 				return Defaults{}, errors.New(
-					"projectSource: source name project conflicts with resolved sources; rename the inherited/authored source",
+					"spec.projectSource: source name project conflicts with resolved sources; rename the inherited/authored source",
 				)
 			}
 		}
-		d.Sources = append(slices.Clone(d.Sources), *team.ProjectSource)
+		d.Sources = append(slices.Clone(d.Sources), *project)
 	}
 	return d, validateSelections(&d)
 }
 
 // DecodeTeamDeclaration decodes a strict Team document before caller-supplied
-// naming defaults/overrides. Resolve validates its final name and selections.
+// naming defaults/overrides: metadata.name and metadata.realm may be left
+// out, as in a repository's kuketeam.yaml. Resolve validates its final name
+// and selections.
 func DecodeTeamDeclaration(r io.Reader) (*Team, error) {
 	var team Team
 	if err := decodeDocument(r, &team); err != nil {
 		return nil, err
 	}
-	if team.APIVersion != APIVersion || team.Kind != KindTeam {
-		return nil, errors.New("team: require kuketeams.io/v1 Team")
+	if err := validateTeamBody(&team); err != nil {
+		return nil, err
 	}
 	return &team, nil
 }
 
+// DecodeTeam decodes a strict, named Team document.
 func DecodeTeam(r io.Reader) (*Team, error) {
 	team, err := DecodeTeamDeclaration(r)
 	if err != nil {
@@ -124,43 +146,71 @@ func DecodeTeam(r io.Reader) (*Team, error) {
 	return team, nil
 }
 
-// Entry copies the authored declaration without materializing inherited fields.
-// It must only be persisted after application has succeeded.
-func Entry(team *Team) (*TeamEntry, error) {
+// ValidateTeam checks a Team document as kukeond stores it: the header, a
+// valid name and realm, and the body rules DecodeTeamDeclaration applies.
+// The selections are checked against the defaults only at composition, as a
+// role may name an inherited source.
+func ValidateTeam(team *Team) error {
+	if team == nil {
+		return errors.New("team: must not be nil")
+	}
+	if err := validateTeamBody(team); err != nil {
+		return err
+	}
+	if !ValidName(team.Metadata.Name) {
+		return errors.New("metadata.name: require a valid team name")
+	}
+	if !ValidName(team.Metadata.Realm) {
+		return errors.New("metadata.realm: require a valid realm name")
+	}
+	return nil
+}
+
+func validateTeamBody(team *Team) error {
+	if team.APIVersion != APIVersion || team.Kind != KindTeam {
+		return errors.New("team: require v1beta1 Team")
+	}
+	if team.Metadata.Realm != "" && !ValidName(team.Metadata.Realm) {
+		return errors.New("metadata.realm: require a valid realm name")
+	}
+	if project := team.Spec.ProjectSource; project != nil {
+		if project.Name != "" && project.Name != ProjectSourceName {
+			return errors.New("spec.projectSource: name must be project")
+		}
+		if project.ClonePath != "" && !SafePath(project.ClonePath) {
+			return errors.New("spec.projectSource.clonePath: require an absolute in-cell path")
+		}
+	}
+	if err := validateConnectors("spec.connectors", team.Spec.Connectors); err != nil {
+		return err
+	}
+	return ValidateSecrets("spec.secrets", team.Spec.Secrets)
+}
+
+// Declaration returns an independent copy of the authored declaration, with
+// the realm defaulted: the document kukeond stores once application has
+// succeeded. It does not materialize inherited fields.
+func Declaration(team *Team) (*Team, error) {
 	if team == nil || team.APIVersion != APIVersion || team.Kind != KindTeam || !ValidName(team.Metadata.Name) {
 		return nil, errors.New("team: invalid declaration")
 	}
-	return &TeamEntry{
-		APIVersion:    APIVersion,
-		Kind:          KindTeamEntry,
-		Metadata:      team.Metadata,
-		ProjectSource: cloneSource(team.ProjectSource),
-		Spec:          cloneSelections(team.Spec),
-	}, nil
-}
-
-func DecodeEntry(r io.Reader) (*TeamEntry, error) {
-	var entry TeamEntry
-	if err := decodeDocument(r, &entry); err != nil {
-		return nil, err
+	out := &Team{
+		APIVersion: APIVersion,
+		Kind:       KindTeam,
+		Metadata:   team.Metadata,
+		Spec: TeamSpec{
+			ProjectSource: cloneSource(team.Spec.ProjectSource),
+			Secrets:       slices.Clone(team.Spec.Secrets),
+			Defaults:      cloneSelections(team.Spec.Defaults),
+		},
 	}
-	if entry.APIVersion != APIVersion || entry.Kind != KindTeamEntry || !ValidName(entry.Metadata.Name) {
-		return nil, errors.New("entry: require kuketeams.io/v1 TeamEntry and a valid metadata.name")
+	if out.Metadata.Realm == "" {
+		out.Metadata.Realm = DefaultRealm
 	}
-	if err := ValidateSecrets("secrets", entry.Secrets); err != nil {
-		return nil, err
+	if team.Spec.Secrets != nil && out.Spec.Secrets == nil {
+		out.Spec.Secrets = []SecretBinding{}
 	}
-	return &entry, nil
-}
-
-func (e TeamEntry) Team() *Team {
-	return &Team{
-		APIVersion:    e.APIVersion,
-		Kind:          KindTeam,
-		Metadata:      e.Metadata,
-		ProjectSource: cloneSource(e.ProjectSource),
-		Spec:          cloneSelections(e.Spec),
-	}
+	return out, nil
 }
 
 func cloneSelections(d Defaults) Defaults {

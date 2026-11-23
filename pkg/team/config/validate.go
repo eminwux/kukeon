@@ -46,15 +46,21 @@ func required(field, value string) error {
 
 // Validate checks structural validity and global references without mutating cfg.
 // It does not require signing keys or source paths to exist on this host.
-func Validate(cfg *TeamsConfig) error {
+func Validate(cfg *TeamDefaults) error {
 	if cfg == nil {
 		return errors.New("config: must not be nil")
 	}
 	if cfg.APIVersion != APIVersion {
 		return fmt.Errorf("apiVersion: expected %q", APIVersion)
 	}
-	if cfg.Kind != Kind {
-		return fmt.Errorf("kind: expected %q", Kind)
+	if cfg.Kind != KindTeamDefaults {
+		return fmt.Errorf("kind: expected %q", KindTeamDefaults)
+	}
+	if cfg.Metadata.Name != "" && cfg.Metadata.Name != DefaultsName {
+		return fmt.Errorf("metadata.name: a realm has one TeamDefaults, named %q", DefaultsName)
+	}
+	if cfg.Metadata.Realm != "" && !ValidName(cfg.Metadata.Realm) {
+		return errors.New("metadata.realm: require a valid realm name")
 	}
 	if err := validateBindings(&cfg.Spec); err != nil {
 		return err

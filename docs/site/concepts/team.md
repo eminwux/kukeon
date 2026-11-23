@@ -3,125 +3,243 @@
 A **team** is a set of agent cells composed from **roles** (what an agent is
 told to do) and **harnesses** (which agent CLI runs it, in which image). For
 every selected role × harness pair, `kuke team` renders one `CellConfig` — the
-pair's answers — against a **shared** `CellBlueprint`, applies them to kukeond,
-and records the accepted declaration on the host. Composing a team never creates or
-starts cells: launch them explicitly, for example with
+pair's answers — against a **shared** `CellBlueprint` and applies them to
+kukeond, which stores the team's declaration with them. Composing a team never
+creates or starts cells: launch them explicitly, for example with
 `kuke run --from-config <team>-<role>-<harness>`.
 
-Two commands drive it:
+The commands that drive it:
 
-- [`kuke team init`](../cli/kuke-team-init.md) creates the global configuration
-  and applies the `kuke` team, whose one role is `majordomo`. `kuke` is the
-  operator's reserved system team; `add` refuses that name.
-- [`kuke team add`](../cli/kuke-team-add.md) composes a project team from a
-  directory's `kuketeam.yaml` or from a named Git source.
+- [`kuke team init`](../cli/kuke-team-init.md) applies the `kuke` team, whose
+  one role is `majordomo`. `kuke` is the operator's reserved system team; `add`
+  refuses that name and `kuke delete team` refuses to delete it.
+- [`kuke team add`](../cli/kuke-team-add.md) creates a project team from a Git
+  repository (and the `kuketeam.yaml` it commits, if any) or from a local
+  checkout.
+- [`kuke team apply`](../cli/kuke-team.md#kuke-team-apply) recomposes a stored
+  team, or applies a Team document from a file.
+- [`kuke team source`](../cli/kuke-team.md#kuke-team-source) and
+  [`kuke team defaults`](../cli/kuke-team.md#kuke-team-defaults) edit what every
+  team inherits.
+- [`kuke get team`](../cli/kuke-get.md#teams),
+  [`kuke get teamdefaults`](../cli/kuke-get.md#teams) and
+  [`kuke delete team`](../cli/kuke-delete.md#teams) are the generic verbs.
 
-## Where the files live
+The web UI's **Teams** page does the same through the same code: see
+[web server → Teams](https://github.com/eminwux/kukeon/blob/main/docs/web-server.md#teams).
 
-| File                             | Where        | Holds                                                                                                               |
-| -------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------- |
-| `~/.kuke/kuketeams.yaml`         | host         | `TeamsConfig`, optional and hand-written: global defaults (sources, roles, harnesses), parameters, secret bindings. |
-| `~/.kuke/kuketeam.d/<team>.yaml` | host         | `TeamEntry`: the accepted declaration of one registered team. Written only after a fully successful apply.          |
-| `kuketeam.yaml`                  | project repo | `Team`: the project's selections, read by `kuke team add DIRECTORY`.                                                |
-| `roles/<role>/`                  | a source     | Role definition (`role.yaml`) and the instruction/skill assets materialized into the harness home.                  |
-| `harnesses/<harness>/`           | a source     | Harness definition (`harness.yaml`), image catalog (`images.yaml`), and image build context.                        |
+## Where teams live
 
-All documents use `apiVersion: kuketeams.io/v1` and are decoded strictly
-(single document, no unknown fields). This repository ships the `majordomo`
-role under `team/roles/` and the `claude`, `codex`, `opencode`, and `script`
+kukeond stores two kinds. Both are realm-scoped `v1beta1` documents, decoded
+strictly (one document, no unknown fields), kept under the realm's metadata
+tree, surviving a daemon restart, and deleted when the realm is purged.
+
+| Kind           | Name                  | Holds                                                                                                                     |
+| -------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `Team`         | the team              | One team's declaration: its selections, its project source and the secret bindings it recorded. Unique across realms.     |
+| `TeamDefaults` | `default` (one/realm) | The registered sources, the default roles and harnesses, connector choices, parameters and secret bindings teams inherit. |
+
+Definitions are read from sources, never stored:
+
+| File                   | Where        | Holds                                                                                              |
+| ---------------------- | ------------ | -------------------------------------------------------------------------------------------------- |
+| `kuketeam.yaml`        | project repo | A `Team` document: the project's selections, read by `kuke team add` from the fetched revision.    |
+| `roles/<role>/`        | a source     | Role definition (`role.yaml`) and the instruction/skill assets materialized into the harness home. |
+| `harnesses/<harness>/` | a source     | Harness definition (`harness.yaml`), image catalog (`images.yaml`), and image build context.       |
+
+Every team document — `Team`, `TeamDefaults`, and the source documents `Role`,
+`Harness`, `HarnessImageCatalog`, `Component` and `Connector` — has
+`apiVersion: v1beta1`. The source documents are read by `kuke` from a fetched
+source; `kuke apply` rejects them. This repository ships the `majordomo` role
+under `team/roles/` and the `claude`, `codex`, `opencode`, and `script`
 harnesses under `team/harnesses/` (`script` runs a program role, see
-[Program roles](#program-roles-the-script-harness)); other roles (dev, pm, pr-reviewer, …) can come from any Git
-source, such as the agents repository. The kukeon renderer that turns a pair
-into kukeon documents is embedded in `kuke` (`pkg/team/compose/renderers/kukeon/v1beta1`); see
+[Program roles](#program-roles-the-script-harness)); other roles (dev, pm,
+pr-reviewer, …) can come from any Git source, such as the agents repository.
+The kukeon renderer that turns a pair into kukeon documents is embedded in
+`kuke` (`pkg/team/compose/renderers/kukeon/v1beta1`); see
 [`team/harnesses/templates.md`](https://github.com/eminwux/kukeon/blob/main/team/harnesses/templates.md)
 for the harness and renderer contract.
 
-## Selections and persistence
+### A Team is stored only with its Configs
 
-`TeamsConfig.spec.defaults` and `Team.spec` share `sources`, `roles`, and
-`harnesses`. An omitted list inherits the corresponding global default. An
-explicit list replaces it; `[]` selects none. References are checked against
-the effective lists. Each source has exactly one of `branch`, `tag`, or
-`commit`. A role with an explicit `harness` selects only that harness, and
-fails if the role does not declare it; otherwise it selects every harness in the
-effective list that the role declares in `spec.harnesses`, and fails only if it
-declares none of them. A team can therefore list `[claude, script]` and keep
-agent roles that declare only `claude`. Harness `default` is
-not supported; use `roles[].harness`. Unselected definitions are neither
-fetched, loaded, nor rendered.
+Composition runs in `kuke` — it fetches sources with your git configuration —
+and sends kukeond one **team apply**: the composed blueprints and Configs, any
+Secrets it creates, and the `Team` document last. kukeond stores the `Team`
+only in that apply, only when its name matches the team being applied, and
+only when every other document in it applied. A `Team` document sent on its own
+(`kuke apply` of a raw document without composition) is rejected with a message
+naming `kuke apply -f` and `kuke team apply -f`. The stored Team is therefore
+always what was last applied, overrides included.
+
+`kuke apply -f FILE` handles both kinds: a `TeamDefaults` document is stored as
+it is, and each `Team` document is composed and applied exactly as
+`kuke team apply -f FILE` does. The file's other documents are applied first,
+so a `TeamDefaults` in the same file is what its Teams inherit; if one of them
+fails, the Teams are skipped.
+
+## The Team document
 
 ```yaml
-apiVersion: kuketeams.io/v1
+apiVersion: v1beta1
 kind: Team
 metadata:
-  name: example
-# All selections omitted: inherit the operator's defaults.
+  name: acme # required when stored; kuke team add NAME overrides it
+  realm: default # optional; omitted means default
+spec:
+  projectSource: # added by kuke team add; optional in a file
+    name: project
+    url: git@github.com:acme/acme
+    branch: main
+    clonePath: /home/user/acme
+  sources: [] # selections: omitted inherits the TeamDefaults' list
+  roles:
+    - { name: dev, source: agents, path: dev }
+  harnesses: [] # [] selects none
+  connectors: {}
+  secrets: [] # recorded secret bindings (see Secret declarations)
 ```
 
-A `TeamEntry` has the same `metadata` and `spec` as the accepted `Team`, plus
-the `projectSource` that `kuke team add` resolves. Effective defaults are not
-persisted, and omitted versus explicit-empty lists round-trip unchanged, so a
-later recomposition picks up the current global defaults.
+A repository's `kuketeam.yaml` is this same document, usually without
+`metadata.realm` and `spec.projectSource` — `kuke team add` fills the project
+source from the repository it fetched. `kuke get team NAME -o yaml` prints the
+stored one, ready to edit and pass to `kuke team apply -f`.
+
+## Selections and inheritance
+
+`TeamDefaults.spec.defaults` and `Team.spec` share `sources`, `roles`,
+`harnesses` and `connectors`. An omitted list inherits the corresponding
+default. An explicit list replaces it; `[]` selects none. Omitted versus `[]`
+round-trips unchanged through apply and get. Effective defaults are never
+copied into a team, so a later recomposition picks up the current defaults —
+but changing the defaults recomposes nothing by itself: every command that
+changes them prints the teams that inherit them and the
+`kuke team apply NAME` that recomposes each.
+
+References are checked against the effective lists. Each source has exactly
+one of `branch`, `tag`, or `commit`. A role with an explicit `harness` selects
+only that harness, and fails if the role does not declare it; otherwise it
+selects every harness in the effective list that the role declares in
+`spec.harnesses`, and fails only if it declares none of them. A team can
+therefore list `[claude, script]` and keep agent roles that declare only
+`claude`. Harness `default` is not supported; use `roles[].harness`.
+Unselected definitions are neither fetched, loaded, nor rendered.
+
+When a team ends up with no role × harness pair, the error says which input
+was empty — no `kuketeam.yaml` in the repository, no default roles, no default
+harnesses — and names `--role` and `kuke team source add`.
 
 Authored `roles[].needs.image` contains **capability names**, never image
 URLs. These additions cannot erase requirements in `Role.spec.needs.image`. The
 selected harness is also a mandatory image capability. One catalog image must
 satisfy the complete set; catalog order breaks ties, and a root-capable image
-is not selected unless `root` is requested. The team name `root` grants no
-privilege. Published image references are read from the `images.yaml` beside
-the selected `harness.yaml`; no registry lookup is made. An update re-resolves
-the image from the current definitions and catalog.
+is not selected unless `root` is requested. The team name `root` is reserved
+and grants no privilege. Published image references are read from the
+`images.yaml` beside the selected `harness.yaml`; no registry lookup is made. An
+update re-resolves the image from the current definitions and catalog.
 
-## Reusable defaults after init
+## Sources and defaults
 
-`~/.kuke/kuketeams.yaml` is optional and hand-written: kuke reads it and never
-writes it, and a missing file means empty global defaults. `kuke team init` and
-`kuke team add` both work without it. Create it to declare reusable sources,
-roles, and harnesses. Both harnesses are listed here; dev narrows to Claude and pm to
-Codex:
+The realm's `TeamDefaults` is what a team that omits a list inherits. When the
+realm has none, `kuke team init` creates one with the `kukeon` source and its
+`claude` and `codex` harnesses, so a project team needs only roles; an existing
+`TeamDefaults` is never changed by init. Register further sources and pick the
+defaults with:
+
+```bash
+kuke team source add agents --url git@github.com:eminwux/agents   # default branch discovered
+kuke team source show agents                                       # roles and harnesses it offers
+kuke team defaults set --role agents:dev --role pm=agents:pm --harness claude
+kuke get teamdefaults -o yaml
+```
+
+`source add` checks the URL, fetches the source once and lists what it found; a
+source that offers roles is cloned into its role cells at `/home/user/<name>`
+unless `--clone-path` says otherwise. `source remove` is refused while a default
+or a stored team references the source. Connectors, parameters and secret
+bindings are set by applying a whole `TeamDefaults` document:
 
 ```yaml
-apiVersion: kuketeams.io/v1
-kind: TeamsConfig
+apiVersion: v1beta1
+kind: TeamDefaults
+metadata:
+  name: default
+  realm: default
 spec:
   defaults:
     sources:
-      - name: kukeon
-        url: github.com/eminwux/kukeon
-        branch: main
-      - name: agents
-        url: github.com/eminwux/agents
-        branch: main
+      - { name: kukeon, url: github.com/eminwux/kukeon, branch: main }
+      - {
+          name: agents,
+          url: github.com/eminwux/agents,
+          branch: main,
+          clonePath: /home/user/agents,
+        }
     roles:
-      - name: dev
-        source: agents
-        path: dev
-        initialPath: /home/user/work
-        harness: claude
-      - name: pm
-        source: agents
-        path: pm
-        initialPath: $HOME
-        harness: codex
+      - {
+          name: dev,
+          source: agents,
+          path: dev,
+          initialPath: /home/user/work,
+          harness: claude,
+        }
+      - {
+          name: pm,
+          source: agents,
+          path: pm,
+          initialPath: $HOME,
+          harness: codex,
+        }
     harnesses:
-      - name: codex
-        source: kukeon
-        path: team/harnesses/codex
-      - name: claude
-        source: kukeon
-        path: team/harnesses/claude
+      - { name: codex, source: kukeon, path: team/harnesses/codex }
+      - { name: claude, source: kukeon, path: team/harnesses/claude }
+  parameters: {}
+  secrets: []
+```
+
+```bash
+kuke apply -f defaults.yaml
 ```
 
 Check external role paths, runtime `clonePath` requirements, image
 capabilities, and secret prerequisites against the selected source revision
 before use.
 
+## Previewing a change
+
+`kuke team add` and `kuke team apply` take `--dry-run`, and the web UI's
+Preview button runs the same plan. A preview prints where the declaration came
+from (the repository file at its commit, the defaults, a file, or the stored
+Team), the declaration itself, each source with the commit it resolved to,
+each role × harness with its Config name, image, tasks with their schedules,
+and its connectors and components, then the Configs that would be created,
+re-rendered and pruned, the missing secrets, and notes. It creates no Secret,
+applies no document and reads no secret value. Preview and apply each compose
+from scratch, so a branch may move between them; the apply result is
+authoritative.
+
+## Upgrading from host files
+
+Earlier releases kept teams in files under `~/.kuke` on the host — a teams file
+for the defaults and a drop-in directory with one file per team. Those files
+are no longer read. When either exists, `kuke team init`, `add` and `apply`
+print one note saying so; nothing is converted or imported. Run
+`kuke team init` and add each team again with `kuke team add`, then delete the
+old files.
+
+The move to stored teams is also a **flag day** for the document header: every
+team document is `apiVersion: v1beta1`, and the old group-qualified header is
+rejected with the normal decode error — nothing accepts both. A `kuke` built
+before this change cannot compose any team from `main`, because the harness
+documents carry the new header, and a `kuke` built after it cannot read a
+repository whose `kuketeam.yaml` or `role.yaml` still has the old one. Upgrade
+`kuke` and your role sources (such as the agents repository) together.
+
 ## Starting directory
 
-`initialPath` is accepted on role selections in global defaults, Team, and
-TeamEntry. An explicit roles list replaces the entire global list, so omitting
+`initialPath` is accepted on role selections in the TeamDefaults and in a
+Team. An explicit roles list replaces the entire default list, so omitting
 `initialPath` on a replacement role uses the home fallback rather than
-borrowing a path from the same-named global role.
+borrowing a path from the same-named default role.
 
 Supported values are clean absolute Unix paths (including `/`), `$HOME`, and
 `$HOME/subdirectory`, with path components of letters, digits, `_`, `.`, and
@@ -221,7 +339,7 @@ spec:
 
 A team's role entry picks which of them it uses. If `tasks` is omitted, the team
 gets all of the role's tasks. `tasks: []` gives none, and a name the role does
-not declare fails `kuke team add`. A task whose `skill` is not one of the role's
+not declare fails the apply. A task whose `skill` is not one of the role's
 `spec.skills` also fails, with an error that names the role, the task and the
 skill.
 
@@ -232,7 +350,7 @@ spec:
     - { name: dev, source: agents, path: dev, tasks: [pick-issue, pick-bug] }
 ```
 
-`kuke team add` renders each selected task as its own CellConfig per selected
+Applying the team renders each selected task as its own CellConfig per selected
 harness (the role entry's `harness` pin applies), named
 `<team>-<role>-<harness>-<task>` and labelled `kukeon.io/task: <task>` next to
 the team and role labels. It has the same blueprint, values, repos, secrets, components
@@ -258,8 +376,8 @@ A harness without a `headless` mode gets no task configs, and the output says
 why. The pair's interactive config does not change. Tasks that need a value at
 run time (`issue <N>`) still go through it:
 `kuke run --rm -d acme-dev-claude --mode headless --param PROMPT="work on issue 22"`.
-When a task is deselected, or the role stops declaring it, the next
-`kuke team add` prunes its config along with the team's other obsolete configs.
+When a task is deselected, or the role stops declaring it, the next apply of
+the team prunes its config along with the team's other obsolete configs.
 
 #### Scheduling a task
 
@@ -310,20 +428,20 @@ the other one is kept. The `pick-bug` entry above replaces the role's
 `*/30 * * * *` with `*/15 * * * *`. A role can ship a schedule that is off
 until a team opts in, as `health-sweep` does: the team turns it on with
 `{ name: health-sweep, suspend: false }`. A `suspend` on a task that ends up
-with no schedule fails `kuke team add`, because there is nothing for it to
+with no schedule fails the apply, because there is nothing for it to
 switch.
 
-`kuke team add` renders the resolved values into the task config's
+Applying the team renders the resolved values into the task config's
 [`spec.schedule`](../manifests/config.md#specschedule-object-optional), and
 kukeond then fires the config on that schedule: each fire starts a
 `<config>-<unix-fire-time>` cell, and a fire is skipped while the previous one
 is still running. A task with no schedule renders as before. See what is
 scheduled, and when it next fires, with `kuke get configs`.
 
-Team configs are re-rendered: `kuke team add` rewrites every one of them whole.
-A `schedule` or `suspend` edited by hand on a task config is therefore lost on
-the next `kuke team add`. Change it in `kuketeam.yaml` (or the role's defaults)
-instead.
+Team configs are re-rendered: each apply of the team rewrites every one of
+them whole. A `schedule` or `suspend` edited by hand on a task config is
+therefore lost on the next apply. Change it in the team's declaration (or the
+role's defaults) instead.
 
 A team's entry can also replace a task's argument text with `args`, for example
 `{ name: pick-bug, args: "--label regression" }`. Like `schedule` and
@@ -338,7 +456,7 @@ role:
 
 ```yaml
 # role.yaml
-apiVersion: kuketeams.io/v1
+apiVersion: v1beta1
 kind: Role
 metadata: { name: ticker }
 spec:
@@ -356,12 +474,12 @@ spec:
   accepts it. The cell runs it as `/bin/bash -c "$COMMAND $ARGS"` from the
   role's starting directory, and the cell exits with its status. Reference
   environment variables as `$VAR`, never `${VAR}`: kukeon substitutes the braced
-  form in blueprints, so `kuke team add` rejects it. The command is composed
+  form in blueprints, so composition rejects it. The command is composed
   from the role; `spec.parameters` cannot override `COMMAND`.
 - **Tasks** take `args` and name no `skill`: a task config runs the command
   with the task's `args` appended (`values.ARGS`) instead of a `PROMPT`.
   `schedule`, `suspend` and the team's overrides work as for any task. A
-  script task that sets `skill` fails `kuke team add`.
+  script task that sets `skill` fails composition.
 - **State.** `$SCRIPT_STATE_DIR` (`/home/user/.script-state`) is on the pair's
   state volume, `<team>-<role>-script-state`, which the pair config and its
   task configs share, so the program keeps a small state directory across
@@ -383,10 +501,12 @@ switching on the five-minute tick the role ships suspended. To stop the
 reactor:
 
 - **Durably:** set `tasks: [{ name: tick, suspend: true }]` on the role entry
-  in `kuketeam.yaml` (or remove the role entry) and run `kuke team add`.
+  in the stored team (or remove the role entry) and run
+  `kuke team apply -f kukeon.yaml`, starting from
+  `kuke get team kukeon -o yaml > kukeon.yaml`.
 - **Immediately:** `kuke delete config kukeon-pipeline-script-tick`. No new
   tick fires, and worker cells that are already running are left alone. The
-  next `kuke team add` renders the config again.
+  next apply of the team renders the config again.
 
 ### The majordomo health sweep
 
@@ -401,12 +521,15 @@ otherwise triages each finding and stores one report in kukeond. It never
 restarts, deletes or changes anything; fixes appear in the report as suggested
 commands.
 
-To turn sweeps on, edit the kuke team's stored entry and reapply it. The
-entry is the team's source: `kuke team init` writes it and
-`kuke team init --reapply` recomposes the team from it.
+To turn sweeps on, edit the kuke team's stored declaration and apply it — on
+the web UI's Teams page (the Health page links it), or from the CLI:
+
+```bash
+kuke get team kuke -o yaml > kuke.yaml
+```
 
 ```yaml
-# ~/.kuke/kuketeam.d/kuke.yaml
+# kuke.yaml: the stored kuke Team
 spec:
   roles:
     - name: majordomo
@@ -420,7 +543,8 @@ spec:
 ```
 
 ```bash
-kuke team init --reapply
+kuke team apply -f kuke.yaml --dry-run                        # preview
+kuke team apply -f kuke.yaml
 kuke get config kuke-majordomo-claude-health-sweep -o yaml   # spec.schedule, status.schedule
 ```
 
@@ -450,11 +574,12 @@ it on for both the interactive cell and the sweep:
    kuke create secret gh-token --realm default --from-file /path/to/token
    ```
 
-2. In the kuke entry, give the role that secret, and tell the sweep where to
+2. In the kuke team's declaration (`kuke get team kuke -o yaml > kuke.yaml`,
+   or the Teams page), give the role that secret, and tell the sweep where to
    file if it should:
 
    ```yaml
-   # ~/.kuke/kuketeam.d/kuke.yaml
+   # kuke.yaml: the stored kuke Team
    spec:
      roles:
        - name: majordomo
@@ -468,9 +593,9 @@ it on for both the interactive cell and the sweep:
              args: "--file-issues <owner>/<repo>"
    ```
 
-3. Run `kuke team init --reapply`.
+3. Run `kuke team apply -f kuke.yaml` (or Apply on the Teams page).
 
-`needs.secrets` in a team entry adds runtime secrets to a role for that team
+`needs.secrets` in a team's role entry adds runtime secrets to a role for that team
 only; the role itself still requires none. `gh-token` enables the
 [`github` connector](#connectors), so the interactive `kuke-majordomo-<harness>`
 cell and its `health-sweep` task cell both get the token as `GH_TOKEN` and an
@@ -518,12 +643,12 @@ methods per Config, the login by default) and `git`, for a role with
 `needs.repos`.
 
 A team decides **how** each connector is delivered and **which identity** fills
-it under `connectors`, in its `kind: Team` file or TeamEntry; a role entry
+it under `connectors` in its Team declaration; a role entry
 overrides the team for that role and can give the role a connector it does not
 ask for itself:
 
 ```yaml
-# kuketeam.yaml (kind: Team) or ~/.kuke/kuketeam.d/<team>.yaml
+# kind: Team — a repository's kuketeam.yaml or the stored declaration
 spec:
   connectors:
     claude: { method: subscription, identity: claude-team }
@@ -552,7 +677,7 @@ or the one the team names under [`connectors.git`](#connectors). `kuke team`
 reads no git identity from the host and writes no git defaults. Store yours with
 [`kuke connector import git --default`](../cli/kuke-connector.md#kuke-connector-import-git).
 
-`TeamsConfig` has no `spec.git`: a `kuketeams.yaml` that still has one fails to
+`TeamDefaults` has no `spec.git`: a document that still has one fails to
 decode and names `kuke connector import git --default`. A source may state its
 own identity with `sources[].git` (author, committer, credential, signing); it
 is rendered into that repo's fill of each CellConfig. The remote transport
@@ -569,7 +694,7 @@ role's `needs.mounts: [ssh]` is still accepted but mounts nothing.
 A source is the single declaration of its URL and branch/tag/commit. Optional
 `sources[].clonePath` requests a runtime clone at an absolute in-cell
 destination; omitting it requests no runtime clone. The initial `kuke`
-TeamEntry clones its role source to `/home/user/kukeon-src`.
+team clones its role source to `/home/user/kukeon-src`.
 
 The selected role's source and every `Role.spec.needs.repos` slot must resolve
 to an effective source with `clonePath`. Other effective sources with
@@ -584,7 +709,7 @@ destinations, URLs and revisions are bound through `CellConfig` values and
 commits map to `ref`. The harness launchers preserve this checkout: they do not
 switch branches or pull newer revisions during launch.
 
-`TeamsConfig.spec.parameters` is a string map of declared scalar parameters.
+`TeamDefaults.spec.parameters` is a string map of declared scalar parameters.
 Each composition binds only keys its blueprint declares. Required parameters
 without defaults must be supplied, and unknown keys fail. The parameters
 composition derives from the role and source selections (`IMAGE`, `ROLE_PATH`,
@@ -594,7 +719,7 @@ bindings instead.
 
 A role declares the further parameters it reads in `Role.spec.needs.params`.
 Each entry is a bare name, which the operator must supply in
-`TeamsConfig.spec.parameters`, or a `{ name, default }` mapping that carries
+`TeamDefaults.spec.parameters`, or a `{ name, default }` mapping that carries
 the role's own value:
 
 ```yaml
@@ -614,7 +739,7 @@ a trailing `.git`. A fork's roles therefore point at the fork without an edit.
 
 The resolved value is written to the `CellConfig` and exported into the cell
 environment under the parameter's name. Precedence, highest first:
-`TeamsConfig.spec.parameters.<NAME>`, then the role's default, then the
+`TeamDefaults.spec.parameters.<NAME>`, then the role's default, then the
 blueprint's empty default. A role cannot set a default for a parameter the
 blueprint or composition already declares (`PROMPT`, `AGENT_NAME`, `IMAGE`, …).
 When a URL does not reduce to `<owner>/<repo>` (a nested group path, a local
@@ -643,9 +768,9 @@ requires `openrouter-api-key`.
 Each required secret is bound by name, in this order of precedence:
 
 1. the identity the team chose for the secret's connector (`connectors`, above);
-2. the binding recorded in the team's TeamEntry (`~/.kuke/kuketeam.d/<team>.yaml`
-   `secrets:`), including any operator edit to it;
-3. a global `TeamsConfig.spec.secrets` binding;
+2. the binding recorded in the team's stored declaration (`spec.secrets`),
+   including any operator edit to it;
+3. a `TeamDefaults.spec.secrets` binding;
 4. the default: the slot is left to the Realm → Space → Stack defaults.
 
 A binding from 1–3 is written as a fill on the Config. The default is not: the
@@ -663,18 +788,20 @@ A shared blueprint fixes where a secret lands: a harness slot
 A role secret no harness or component declares becomes an optional slot on the
 shared blueprint, with the binding's `envName`.
 
-Composition records every binding the selected pairs use in the TeamEntry, so a
-repeated add or a recomposition from the entry alone keeps them. Bindings for
+Composition records every binding the selected pairs use in the stored Team's
+`spec.secrets`, so a recomposition (`kuke team apply NAME`) keeps them, and so
+do `kuke team add --force` and `kuke team apply -f FILE` — the file's own
+`spec.secrets` come first, the stored ones beneath them. Bindings for
 requirements no selected pair uses are dropped. Because the recorded binding
-wins, change a binding after its first add by editing the TeamEntry (or delete
-it there to fall back to the global binding or default). A requirement whose
-name cannot yield an environment identifier (e.g. it starts with a digit) must
-be bound explicitly. The project's `kind: Team` file never declares bindings.
+wins, change a binding after the first apply by editing the stored declaration
+(or delete it there to fall back to the TeamDefaults binding or default). A
+requirement whose name cannot yield an environment identifier (e.g. it starts
+with a digit) must be bound explicitly.
 
-An explicit global binding looks like this:
+An explicit binding looks like this:
 
 ```yaml
-# Optional, under TeamsConfig.spec (or the same shape under TeamEntry secrets).
+# Optional, under TeamDefaults.spec (or the same shape under Team spec.secrets).
 secrets:
   - name: openrouter-api-key # identifier in Role.spec.harnesses.opencode.secrets
     secretRef:
@@ -695,7 +822,8 @@ absolute file **path** — there is no inline value field. Composition emits
 secret **references** in configs and consumption slots in blueprints; it never
 reads values or emits `Secret` documents. Application checks runtime existence,
 reuses existing secrets, and reads a creation source only when a secret is
-missing.
+missing — in the process that applies: the CLI, or `kuke serve` and its
+account for the web UI. A dry run reads none.
 
 ## Resource names and state volumes
 

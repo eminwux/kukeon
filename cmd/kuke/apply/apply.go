@@ -17,14 +17,20 @@
 package apply
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 
 	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
+	"github.com/eminwux/kukeon/internal/apply/parser"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	teamcli "github.com/eminwux/kukeon/internal/team/cli"
+	"github.com/eminwux/kukeon/internal/team/initialize"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 // MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
@@ -42,9 +48,11 @@ const (
 // OutOfSync on Config-lineage cells and reconciles implicitly).
 func NewApplyCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:           "apply -f <file>",
-		Short:         "Apply resource definitions from a YAML file or stdin",
-		Long:          "Apply resource definitions from a YAML file or stdin (-f).",
+		Use:   "apply -f <file>",
+		Short: "Apply resource definitions from a YAML file or stdin",
+		Long: "Apply resource definitions from a YAML file or stdin (-f).\n\n" +
+			"A Team document is composed by kuke, exactly as kuke team apply -f composes it, and kukeond stores " +
+			"it with the Configs composed from it; the other documents are applied as they are.",
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: false,
@@ -112,15 +120,143 @@ func runApplyFile(cmd *cobra.Command, client kukeonv1.Client, flags applyFlags) 
 		return fmt.Errorf("failed to read input: %w", err)
 	}
 
-	result, err := client.ApplyDocuments(cmd.Context(), rawYAML)
+	rest, teams, hasDefaults, err := splitTeams(rawYAML)
 	if err != nil {
 		return err
 	}
 
-	if flags.output == outputFormatJSON || flags.output == outputFormatYAML {
-		return printApplyResultJSON(cmd, result, flags.output)
+	// Documents other than Teams are applied as before, first, so a
+	// TeamDefaults in the same file is what its Teams inherit.
+	var result kukeonv1.ApplyDocumentsResult
+	if len(rest) > 0 {
+		if result, err = client.ApplyDocuments(cmd.Context(), rest); err != nil {
+			return err
+		}
 	}
-	return printApplyResult(cmd, result)
+	structured := flags.output == outputFormatJSON || flags.output == outputFormatYAML
+	var applyErr error
+	if !structured {
+		applyErr = printApplyResult(cmd, result)
+		if hasDefaults && applyErr == nil {
+			teams, inhErr := initialize.InheritingTeams(cmd.Context(), client)
+			if inhErr != nil {
+				return inhErr
+			}
+			if err = teamcli.PrintInheriting(cmd.OutOrStdout(), teams); err != nil {
+				return err
+			}
+		}
+	}
+	// A Team composes against what the rest of the file applied, so one
+	// failed document there skips every Team rather than composing against
+	// defaults the file meant to change.
+	if failedResults(result) && len(teams) > 0 {
+		for _, team := range teams {
+			name := teamName(team)
+			if structured {
+				result.Resources = append(result.Resources, kukeonv1.ApplyResourceResult{
+					Kind: string(v1beta1.KindTeam), Name: name, Action: "failed",
+					Error: "not applied: another document in the file failed",
+				})
+				continue
+			}
+			cmd.Printf("%s %q: skipped (another document in the file failed)\n", v1beta1.KindTeam, name)
+		}
+		if structured {
+			return printApplyResultJSON(cmd, result, flags.output)
+		}
+		return applyErr
+	}
+	// Each Team is composed here, as kuke team apply -f composes it (D7):
+	// kukeond stores it only with the Configs composed from it. A Team that
+	// fails is reported and the rest are still tried, so the output names
+	// every document in the file.
+	var teamErrs []error
+	for _, team := range teams {
+		out, teamErr := initialize.ApplyFile(cmd.Context(), initialize.Options{Client: client}, team, flags.file)
+		if teamErr != nil {
+			name := teamName(team)
+			teamErrs = append(teamErrs, fmt.Errorf("%s %q: %w", v1beta1.KindTeam, name, teamErr))
+			if structured {
+				result.Resources = append(result.Resources, kukeonv1.ApplyResourceResult{
+					Kind: string(v1beta1.KindTeam), Name: name, Action: "failed", Error: teamErr.Error(),
+				})
+				continue
+			}
+			cmd.Printf("%s %q: failed\n", v1beta1.KindTeam, name)
+			continue
+		}
+		if structured {
+			result.Resources = append(result.Resources, kukeonv1.ApplyResourceResult{
+				Kind: string(v1beta1.KindTeam), Name: out.Result.Team, Action: "applied",
+			})
+			continue
+		}
+		if err = teamcli.PrintOutcome(cmd.OutOrStdout(), out); err != nil {
+			return err
+		}
+	}
+	teamsErr := errors.Join(teamErrs...)
+	if structured {
+		if err = printApplyResultJSON(cmd, result, flags.output); err != nil {
+			return err
+		}
+		return teamsErr
+	}
+	if teamsErr != nil {
+		return teamsErr
+	}
+	return applyErr
+}
+
+func failedResults(result kukeonv1.ApplyDocumentsResult) bool {
+	for _, resource := range result.Resources {
+		if resource.Action == "failed" {
+			return true
+		}
+	}
+	return false
+}
+
+// teamName reads a Team document's metadata.name for a message.
+func teamName(doc []byte) string {
+	var head struct {
+		Metadata struct {
+			Name string `yaml:"name"`
+		} `yaml:"metadata"`
+	}
+	_ = yaml.Unmarshal(doc, &head)
+	return head.Metadata.Name
+}
+
+// splitTeams separates a file's Team documents from the rest, and reports
+// whether it holds a TeamDefaults.
+func splitTeams(rawYAML []byte) ([]byte, [][]byte, bool, error) {
+	docs, err := parser.ParseDocuments(bytes.NewReader(rawYAML))
+	if err != nil {
+		return nil, nil, false, fmt.Errorf("failed to parse YAML: %w", err)
+	}
+	var rest []byte
+	var teams [][]byte
+	hasDefaults := false
+	for _, doc := range docs {
+		kind, kindErr := parser.DetectKind(doc)
+		if kindErr != nil {
+			return nil, nil, false, kindErr
+		}
+		switch kind { //nolint:exhaustive // only the team kinds are told apart
+		case v1beta1.KindTeam:
+			teams = append(teams, doc)
+			continue
+		case v1beta1.KindTeamDefaults:
+			hasDefaults = true
+		}
+		if len(rest) > 0 {
+			rest = append(rest, []byte("\n---\n")...)
+		}
+		rest = append(rest, doc...)
+	}
+	return rest, teams, hasDefaults, nil
 }
 
 func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {

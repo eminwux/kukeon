@@ -606,12 +606,12 @@ func TestGitHubConnector(t *testing.T) {
 					t.Fatalf("%s requires = %v err=%v", pair.Harness, flat.Doc.Spec.Requires, flatErr)
 				}
 			}
-			if len(result.Entry.Secrets) != 1 || result.Entry.Secrets[0].Name != tc.entry ||
-				result.Entry.Secrets[0].SecretRef.Name != tc.secret {
-				t.Fatalf("recorded bindings = %+v", result.Entry.Secrets)
+			if len(result.Team.Spec.Secrets) != 1 || result.Team.Spec.Secrets[0].Name != tc.entry ||
+				result.Team.Spec.Secrets[0].SecretRef.Name != tc.secret {
+				t.Fatalf("recorded bindings = %+v", result.Team.Spec.Secrets)
 			}
 			// Recomposing from the recorded entry keeps the same wiring.
-			opts.Secrets = result.Entry.Secrets
+			opts.Secrets = result.Team.Spec.Secrets
 			again, err := compose.Compose(cfg, selectedTeam(cfg), opts)
 			if err != nil || !reflect.DeepEqual(again.Pairs[0].Config, result.Pairs[0].Config) {
 				t.Fatalf("recompose changed the config: %v", err)
@@ -641,7 +641,7 @@ func TestUnknownComponentsAreRejected(t *testing.T) {
 // composition before anything is rendered.
 func TestComponentLibraryOverride(t *testing.T) {
 	cfg, opts := fixture(t)
-	opts.Components = fstest.MapFS{"tracker/component.yaml": &fstest.MapFile{Data: []byte(`apiVersion: kuketeams.io/v1
+	opts.Components = fstest.MapFS{"tracker/component.yaml": &fstest.MapFile{Data: []byte(`apiVersion: v1beta1
 kind: Component
 metadata: {name: tracker}
 spec:
@@ -738,7 +738,7 @@ func TestPerSourceGitIdentity(t *testing.T) {
 // states no credential of its own, so application can say when nothing gives
 // the team a git identity (issue #1591). It fails nothing and notes nothing.
 func TestSSHSourcesAreReported(t *testing.T) {
-	sshSource := func(cfg *config.TeamsConfig) {
+	sshSource := func(cfg *config.TeamDefaults) {
 		cfg.Spec.Defaults.Sources = append(
 			cfg.Spec.Defaults.Sources,
 			config.Source{
@@ -753,11 +753,11 @@ func TestSSHSourcesAreReported(t *testing.T) {
 	ref := config.SecretRef{Name: "git-ssh", Realm: "default"}
 	for _, tc := range []struct {
 		name   string
-		change func(*config.TeamsConfig)
+		change func(*config.TeamDefaults)
 		want   []string
 	}{
-		{"ssh-source", func(*config.TeamsConfig) {}, []string{"agents"}},
-		{"source-credential", func(c *config.TeamsConfig) {
+		{"ssh-source", func(*config.TeamDefaults) {}, []string{"agents"}},
+		{"source-credential", func(c *config.TeamDefaults) {
 			c.Spec.Defaults.Sources[1].Git = &config.SourceGit{Credential: &config.SourceCredential{SecretRef: ref}}
 		}, nil},
 	} {

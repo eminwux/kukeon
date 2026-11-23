@@ -48,10 +48,13 @@ func TestCommands(t *testing.T) {
 		{"init help", []string{"init", "--help"}, "No cells are created or started", ""},
 		{"init build unsupported", []string{"init", "--build"}, "", "unknown flag"},
 		{"init argument", []string{"init", "extra"}, "", "unknown command"},
-		{"add help", []string{"add", "--help"}, "add DIRECTORY | NAME --source REPOSITORY", ""},
+		{"add help", []string{"add", "--help"}, "add NAME --source REPOSITORY | DIRECTORY", ""},
 		{"add requires argument", []string{"add"}, "", "accepts 1 arg(s)"},
 		{"add exclusive revisions", []string{"add", "x", "--source", "s", "--tag", "t", "--commit", "c"}, "", "none of the others can be"},
-		{"no placeholder apply", []string{"apply"}, "", "unknown command"},
+		{"apply help", []string{"apply", "--help"}, "apply NAME | -f FILE", ""},
+		{"source help", []string{"source", "--help"}, "TeamDefaults", ""},
+		{"defaults help", []string{"defaults", "--help"}, "kuke apply -f", ""},
+		{"source add requires url", []string{"source", "add", "x"}, "", `"url" not set`},
 		{"no placeholder update", []string{"update"}, "", "unknown command"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

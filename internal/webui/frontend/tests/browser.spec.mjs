@@ -6,7 +6,7 @@ test.beforeEach(async () => { server = await startServer(); });
 test.afterEach(async () => { await server?.stop(); });
 const kinds = ["Realm", "Space", "Stack", "Cell", "Container"];
 function doc(scope) {
-  return { apiVersion: "kukeon.io/v1beta1", kind: kinds[scope.length - 1], metadata: { name: scope.at(-1), labels: { team: "platform" } }, spec: { scope, futureField: { nested: true } }, status: { state: scope[0] === "prod" ? "Running" : "Ready" } };
+  return { apiVersion: "v1beta1", kind: kinds[scope.length - 1], metadata: { name: scope.at(-1), labels: { team: "platform" } }, spec: { scope, futureField: { nested: true } }, status: { state: scope[0] === "prod" ? "Running" : "Ready" } };
 }
 function fixture(path, cellCount = 1) {
   const parts = path.split("/").filter(Boolean).slice(1);
@@ -387,12 +387,12 @@ test("Resources is home and retains resource summaries and navigation", async ({
     await expect(nav(page).getByRole("link", { name: type, exact: true })).toBeVisible();
   }
   // Navigation is two labelled groups: operations first, then resources and administration (#1568).
-  const groups = { Operate: ["Overview", "Cells", "Health"], Configure: ["Realms", "Spaces", "Stacks", "Blueprints", "Configs", "Volumes", "Secrets", "Connectors", "Images", "Daemon"] };
+  const groups = { Operate: ["Overview", "Cells", "Health"], Configure: ["Realms", "Spaces", "Stacks", "Blueprints", "Configs", "Volumes", "Secrets", "Connectors", "Teams", "Images", "Daemon"] };
   for (const [label, links] of Object.entries(groups)) {
     const group = nav(page).getByRole("group", { name: label, exact: true });
     await expect(group.getByRole("link")).toHaveText(links);
   }
-  await expect(nav(page).getByRole("link")).toHaveCount(13);
+  await expect(nav(page).getByRole("link")).toHaveCount(14);
   await expect(nav(page).locator('[aria-current="page"]')).toHaveText(["Overview"]);
   // The toolbar no longer repeats the breadcrumb root, which still leads home.
   await expect(page.locator(".toolbar-actions").getByRole("link", { name: "Resources" })).toHaveCount(0);
@@ -1094,7 +1094,7 @@ test("phone navigation fits the screen and reaches every Configure page through 
   const configure = nav(page).locator("summary", { hasText: "Configure" });
   await configure.focus();
   await page.keyboard.press("Enter");
-  await expect(nav(page).getByRole("group", { name: "Configure" }).getByRole("link")).toHaveCount(10);
+  await expect(nav(page).getByRole("group", { name: "Configure" }).getByRole("link")).toHaveCount(11);
   await fits();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await nav(page).getByRole("link", { name: "Daemon" }).click();
@@ -1164,7 +1164,7 @@ function catalogDoc(kind, scope) {
   const spec = kind === "configs" ? { blueprint: { name: "template", realm: "library" }, values: { PORT: "8080" } }
     : kind === "blueprints" ? { prefix: "worker", cell: { containers: [{ id: "web", image: "nginx" }] } }
     : kind === "volumes" ? { reclaimPolicy: "Retain" } : {};
-  return { apiVersion: "kukeon.io/v1beta1", kind: { configs: "CellConfig", blueprints: "CellBlueprint", volumes: "Volume", secrets: "Secret" }[kind], metadata, spec };
+  return { apiVersion: "v1beta1", kind: { configs: "CellConfig", blueprints: "CellBlueprint", volumes: "Volume", secrets: "Secret" }[kind], metadata, spec };
 }
 async function mockCatalog(page, handler) {
   await mock(page);
@@ -1340,7 +1340,7 @@ test("New Cell from a Config summarizes the preview, keeps the JSON collapsed an
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockCatalog(page);
   const requests = [];
-  const cellDocument = name => ({ apiVersion: "kukeon.io/v1beta1", kind: "Cell", metadata: { name, labels: { note: "x".repeat(400) } }, spec: { realmId: "prod", spaceId: "shared", stackId: "services", containers: [
+  const cellDocument = name => ({ apiVersion: "v1beta1", kind: "Cell", metadata: { name, labels: { note: "x".repeat(400) } }, spec: { realmId: "prod", spaceId: "shared", stackId: "services", containers: [
     { id: "work", image: "ghcr.io/example/app:v1", attachable: true, env: Array.from({ length: 80 }, (_, i) => `VAR_${i}=<redacted>`) }, { id: "sidecar", image: "ghcr.io/example/sidecar:v2" }] } });
   await page.route("**/api/cells/from-config/*", async route => {
     const input = route.request().postDataJSON();
@@ -1434,7 +1434,7 @@ test("manual New Cell keeps validation inline, summarizes the preview and sends 
     const input = route.request().postDataJSON();
     const create = route.request().url().endsWith("create");
     requests.push({ step: create ? "create" : "preview", input });
-    const document = { apiVersion: "kukeon.io/v1beta1", kind: "Cell", metadata: { name: input.name, annotations: { note: "y".repeat(600) } }, spec: { realmId: input.realm, spaceId: input.space, stackId: input.stack, containers: input.spec.containers } };
+    const document = { apiVersion: "v1beta1", kind: "Cell", metadata: { name: input.name, annotations: { note: "y".repeat(600) } }, spec: { realmId: input.realm, spaceId: input.space, stackId: input.stack, containers: input.spec.containers } };
     await route.fulfill({ json: create ? document : { document, preview: "manual-reviewed" } });
   });
   await page.goto(`${server.url}#/new-cell`);
@@ -1863,7 +1863,7 @@ async function mockTargets(page) {
     const input = route.request().postDataJSON();
     const create = route.request().url().endsWith("create");
     requests.push({ step: create ? "create" : "preview", input });
-    const document = { apiVersion: "kukeon.io/v1beta1", kind: "Cell", metadata: { name: input.resolvedName || input.name || "worker-1a2b3c" }, spec: { realmId: "prod", spaceId: input.targetSpace, stackId: input.targetStack, containers: [{ id: "work", attachable: true }] } };
+    const document = { apiVersion: "v1beta1", kind: "Cell", metadata: { name: input.resolvedName || input.name || "worker-1a2b3c" }, spec: { realmId: "prod", spaceId: input.targetSpace, stackId: input.targetStack, containers: [{ id: "work", attachable: true }] } };
     await route.fulfill({ json: create ? document : { document, preview: "reviewed", values: [] } });
   });
   await page.route("**/api/realms/prod/spaces/*/stacks/*/cells/worker-1a2b3c/**", route => {
@@ -4464,4 +4464,141 @@ test("the cell title row stays on one line at 1024 and 768, truncating the name"
       expect((await row.boundingBox()).height, `${hash} at ${width}`).toBeLessThanOrEqual(48);
     }
   }
+});
+
+// Teams (#1618, AC16 and AC17). The teams API is mocked: the page only shapes requests and renders the
+// plans, summaries and results the server returns, and every action posts the CLI's inputs.
+function teamsWorld() {
+  const summary = (name, extra = {}) => ({ name, realm: "default", roles: [], rolesInherited: true, harnesses: [], harnessesInherited: true, configs: [], ...extra });
+  const plan = (team, origin) => ({
+    command: `kuke team add ${team}`, origin, declaration: `apiVersion: v1beta1\nkind: Team\nmetadata:\n  name: ${team}\n`,
+    sources: [{ name: "project", url: "https://example.test/web", ref: "main", commit: "0123456789abcdef0123456789abcdef01234567" }],
+    pairs: [{ role: "dev", harness: "claude", config: `${team}-dev-claude`, image: "kukeon.internal/claude:1", components: ["github"], tasks: [{ name: "pick-issue", config: `${team}-dev-claude-pick-issue`, schedule: "@hourly" }] }],
+    create: [`${team}-dev-claude`], rerender: [], prune: [], missingSecrets: ["gh-token"], createSecrets: [], notes: [],
+  });
+  return {
+    requests: [],
+    teams: [summary("kuke", { system: true, roles: ["majordomo"], rolesInherited: false, configs: ["kuke-majordomo-claude"] }), summary("web", { projectUrl: "https://example.test/web", projectRef: "main", configs: ["web-dev-claude"] })],
+    sources: { sources: [{ name: "agents", url: "https://example.test/agents", branch: "main", clonePath: "/home/user/agents" }], defaultRoles: [{ name: "dev", source: "agents", path: "dev" }], defaultHarnesses: [{ name: "claude", source: "kukeon", path: "team/harnesses/claude" }] },
+    plan,
+    exists: true,
+  };
+}
+async function mockTeams(page) {
+  const world = teamsWorld();
+  await mock(page);
+  await page.route(url => url.pathname === "/api/catalog/configs", route => route.fulfill({ json: [{ metadata: { name: "web-dev-claude", realm: "default", space: "web", stack: "default", labels: { "kukeon.io/team": "web" } } }] }));
+  await page.route(url => url.pathname.startsWith("/api/teams") || url.pathname.startsWith("/api/team-sources") || url.pathname === "/api/team-defaults", async route => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    const body = request.method() === "POST" ? request.postDataJSON() : undefined;
+    if (body !== undefined) world.requests.push({ path, body });
+    if (request.method() === "GET" && path === "/api/teams") return route.fulfill({ json: { teams: world.teams } });
+    if (request.method() === "GET" && path === "/api/team-sources") return route.fulfill({ json: world.sources });
+    if (request.method() === "GET" && path.startsWith("/api/teams/")) {
+      const team = world.teams.find(item => item.name === decodeURIComponent(path.split("/")[3]));
+      return team ? route.fulfill({ json: { summary: team, document: `apiVersion: v1beta1\nkind: Team\nmetadata:\n  name: ${team.name}\n  realm: default\n` } }) : route.fulfill({ status: 404, json: { error: { code: "not_found", message: "team not found" } } });
+    }
+    if (path === "/api/teams/preview") return route.fulfill({ json: { plan: world.plan(body.name || "web", body.source ? { kind: "repository file", detail: "kuketeam.yaml at 0123456789ab" } : { kind: "file", detail: "declaration" }) } });
+    if (path === "/api/teams") {
+      if (body.source && world.exists && !body.force) return route.fulfill({ status: 409, json: { error: { code: "already_exists", message: "add: team already exists: web; run kuke team apply web to recompose it from its stored declaration, or add it again with --force to replace the declaration" } } });
+      return route.fulfill({ json: { plan: world.plan(body.name || "web", { kind: "file" }), result: { team: body.name || "web", resources: 4, pruned: [], missingSecrets: [], notes: [] } } });
+    }
+    if (path.endsWith("/delete") && path.startsWith("/api/teams/")) return route.fulfill({ json: { deleted: true, removed: [{ kind: "CellConfig", name: "web-dev-claude", action: "deleted" }], liveCells: ["default/web/default/web-dev-claude-1"], keptVolumes: ["default/web/default/web-dev-claude-state"] } });
+    if (path.endsWith("/inspect")) return route.fulfill({ json: { source: world.sources.sources[0], commit: "fedcba9876543210fedcba9876543210fedcba98", roles: [{ name: "dev", path: "dev", harnesses: ["claude"], tasks: ["pick-issue"], default: true }, { name: "pm", path: "pm", harnesses: [], tasks: [], default: false }], harnesses: [] } });
+    if (path === "/api/team-defaults") return route.fulfill({ json: { action: "updated", inheriting: ["web"] } });
+    return route.fulfill({ status: 404, json: { error: { code: "not_found", message: path } } });
+  });
+  return world;
+}
+
+test("Teams page lists teams, previews and adds one with the CLI's inputs, and asks before replacing a stored team", async ({ page }) => {
+  const world = await mockTeams(page);
+  await page.goto(`${server.url}#/resources`);
+  await nav(page).getByRole("link", { name: "Teams" }).click();
+  await expect(page).toHaveURL(/#\/teams$/);
+  await expect(page.locator(".page-heading h1")).toHaveText("Teams");
+  const list = page.getByRole("region", { name: "Teams list" });
+  await expect(list.getByRole("row")).toHaveCount(3);
+  await expect(list.getByRole("row").filter({ hasText: "kuke" }).first()).toContainText("system");
+  await expect(list.getByRole("link", { name: "web" })).toHaveAttribute("href", "#/teams/web");
+
+  const add = page.getByRole("region", { name: "Add team" });
+  await expect(add.getByRole("button", { name: "Add team" })).toBeDisabled();
+  await add.getByLabel("Repository URL").fill("https://example.test/web");
+  await add.getByRole("button", { name: "Preview" }).click();
+  const preview = add.getByRole("region", { name: "Preview" });
+  await expect(preview).toContainText("repository file (kuketeam.yaml at 0123456789ab)");
+  await expect(preview.getByRole("table", { name: "Role and harness pairs" })).toContainText("pick-issue (@hourly)");
+  await expect(preview.getByRole("list", { name: "Missing secrets" })).toContainText("gh-token");
+  expect(world.requests.at(-1)).toEqual({ path: "/api/teams/preview", body: { name: "", source: "https://example.test/web", useRepoFile: true, roles: null, harnesses: null } });
+
+  await add.getByRole("button", { name: "Add team" }).click();
+  await expect(add.getByRole("alert").first()).toContainText("kuke team apply web");
+  await add.getByRole("button", { name: "Replace the stored declaration" }).click();
+  await expect(page).toHaveURL(/#\/teams\/web$/);
+  expect(world.requests.at(-1)).toEqual({ path: "/api/teams", body: { name: "", source: "https://example.test/web", useRepoFile: true, roles: null, harnesses: null, force: true } });
+});
+
+test("a team page edits the declaration as YAML with a preview, links its Configs and deletes after a confirmation", async ({ page }) => {
+  const world = await mockTeams(page);
+  await page.goto(`${server.url}#/teams/web`);
+  await expect(page.locator(".page-heading h1")).toHaveText("web");
+  const overview = page.getByRole("region", { name: "Team overview" });
+  await expect(overview.getByRole("link", { name: "web-dev-claude" })).toHaveAttribute("href", "#/configs/default/web/default/web-dev-claude");
+  const declaration = page.getByRole("region", { name: "Team declaration" });
+  await expect(declaration.getByRole("button", { name: "Apply" })).toBeDisabled();
+  const yaml = declaration.getByLabel("Team declaration YAML");
+  await yaml.fill("apiVersion: v1beta1\nkind: Team\nmetadata:\n  name: web\nspec:\n  roles: []\n");
+  await declaration.getByRole("button", { name: "Preview" }).click();
+  await expect(page.getByRole("region", { name: "Preview" })).toContainText("web-dev-claude");
+  expect(world.requests.at(-1)).toEqual({ path: "/api/teams/preview", body: { name: "web", declaration: "apiVersion: v1beta1\nkind: Team\nmetadata:\n  name: web\nspec:\n  roles: []\n" } });
+  await declaration.getByRole("button", { name: "Apply" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "applied: 4 resources" })).toBeVisible();
+  expect(world.requests.at(-1).path).toBe("/api/teams");
+
+  await overview.getByRole("button", { name: "Delete" }).click();
+  const dialog = page.getByRole("dialog", { name: "Delete team" });
+  await expect(dialog.getByRole("button", { name: "Confirm Delete" })).toBeDisabled();
+  await dialog.getByRole("checkbox").check();
+  await dialog.getByRole("button", { name: "Confirm Delete" }).click();
+  const deleted = page.getByRole("region", { name: "Deleted team" });
+  await expect(deleted).toContainText("CellConfig web-dev-claude");
+  await expect(deleted).toContainText("default/web/default/web-dev-claude-1");
+  await expect(deleted).toContainText("default/web/default/web-dev-claude-state");
+  expect(world.requests.at(-1)).toEqual({ path: "/api/teams/web/delete", body: {} });
+});
+
+test("the kuke team cannot be deleted from its page", async ({ page }) => {
+  await mockTeams(page);
+  await page.goto(`${server.url}#/teams/kuke`);
+  const overview = page.getByRole("region", { name: "Team overview" });
+  await expect(overview.getByRole("button", { name: "Reapply" })).toBeVisible();
+  await expect(overview.getByRole("button", { name: "Delete" })).toHaveCount(0);
+  await expect(overview).toContainText("kuke team init --force");
+});
+
+test("Teams page shows what a source offers and toggles a default role", async ({ page }) => {
+  const world = await mockTeams(page);
+  await page.goto(`${server.url}#/teams`);
+  const sources = page.getByRole("region", { name: "Team sources" });
+  const source = sources.getByRole("listitem", { name: "Source agents" });
+  await expect(source).toContainText("cloned at /home/user/agents");
+  await source.getByRole("button", { name: "agents" }).click();
+  await source.getByRole("button", { name: "Show contents" }).click();
+  await expect(source.getByRole("table", { name: "Roles in agents" })).toContainText("pick-issue");
+  await expect(source.getByRole("checkbox", { name: "Default role dev" })).toBeChecked();
+  await source.getByRole("checkbox", { name: "Default role pm" }).click();
+  expect(world.requests.at(-1)).toEqual({ path: "/api/team-defaults", body: { roles: ["dev", "pm=agents:pm"] } });
+  await expect(sources.getByRole("status")).toContainText("Teams inheriting from the defaults: web.");
+});
+
+test("a team-owned Config's page links to its team", async ({ page }) => {
+  await mockTeams(page);
+  await page.route(url => url.pathname === "/api/catalog/configs/web-dev-claude", route => route.fulfill({ json: {
+    kind: "CellConfig", metadata: { name: "web-dev-claude", realm: "default", space: "web", stack: "default", labels: { "kukeon.io/team": "web" } }, spec: { blueprint: { name: "web-dev" } },
+  } }));
+  await page.goto(`${server.url}#/configs/default/web/default/web-dev-claude`);
+  await expect(page.getByRole("heading", { name: "Resource overview" })).toBeVisible();
+  await expect(page.locator(".details-grid").getByRole("link", { name: "web", exact: true })).toHaveAttribute("href", "#/teams/web");
 });

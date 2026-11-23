@@ -20,8 +20,10 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/config"
@@ -55,13 +57,14 @@ func TestDirectoryAddDiscoveryAndRepeat(t *testing.T) {
 			if mode != "worktree" && configErr != nil {
 				t.Fatal(configErr)
 			}
-			for range 2 {
-				result, err := Add(t.Context(), opts)
+			for attempt := range 2 {
+				opts.Force = attempt == 1
+				out, err := Add(t.Context(), opts)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if result.Resources != 2 || filepath.Base(result.EntryPath) != expectedName+".yaml" {
-					t.Fatalf("result=%+v", result)
+				if out.Result.Resources != 3 || out.Result.Team != expectedName {
+					t.Fatalf("result=%+v", out.Result)
 				}
 				assertDirectoryEntry(t, opts, expectedName, mode, commit)
 			}
@@ -85,11 +88,11 @@ func assertDirectoryEntry(t *testing.T, opts AddOptions, expectedName, mode, com
 	t.Helper()
 	accepted := opts
 	accepted.Name = expectedName
-	raw, entry := readAddEntry(t, accepted)
-	if entry.Spec.Sources != nil || entry.Spec.Roles != nil || entry.Spec.Harnesses != nil {
+	raw, team := readAdded(t, accepted)
+	if team.Spec.Sources != nil || team.Spec.Roles != nil || team.Spec.Harnesses != nil {
 		t.Fatal("inheritance frozen")
 	}
-	source := entry.ProjectSource
+	source := team.Spec.ProjectSource
 	if source.URL != "git@work-alias:owner/project.git" || source.ClonePath != "/home/user/"+expectedName {
 		t.Fatalf("source=%+v", source)
 	}
@@ -99,22 +102,13 @@ func assertDirectoryEntry(t *testing.T, opts AddOptions, expectedName, mode, com
 	if mode != "branch" && (source.Commit != commit || source.Branch != "") {
 		t.Fatal("detached commit lost")
 	}
-	// A saved entry is self-contained; Resolve never consults the directory.
-	cfgFile, err := os.Open(filepath.Join(opts.Root, "kuketeams.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := config.Decode(cfgFile)
-	_ = cfgFile.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
-	effective, err := config.Resolve(cfg, entry.Team())
+	// A stored team is self-contained; Resolve never consults the directory.
+	effective, err := config.Resolve(storedDefaults(t, opts.Client.(*fakeClient)), team)
 	if err != nil || len(effective.Sources) != 2 {
 		t.Fatalf("inherited definitions lost: %v", err)
 	}
 	if bytes.Contains(raw, []byte(opts.Directory)) {
-		t.Fatal("entry depends on input path")
+		t.Fatal("stored team depends on the input path")
 	}
 }
 
@@ -134,7 +128,7 @@ func TestDirectoryDeclarationPrecedence(t *testing.T) {
 			case "basename":
 				team.Metadata.Name, expectedName = "", filepath.Base(opts.Directory)
 			case "local-source":
-				team.ProjectSource = &config.Source{
+				team.Spec.ProjectSource = &config.Source{
 					Name:      "project",
 					URL:       "git@local-alias:owner/repo",
 					Tag:       "v1",
@@ -142,10 +136,10 @@ func TestDirectoryDeclarationPrecedence(t *testing.T) {
 				}
 				fixtureGit(t, opts.Directory, "remote", "remove", "origin")
 			case "source-override":
-				team.ProjectSource = &config.Source{Name: "project", URL: "https://invalid.test/repo", Tag: "v1"}
+				team.Spec.ProjectSource = &config.Source{Name: "project", URL: "https://invalid.test/repo", Tag: "v1"}
 				opts.Source = "git@override-alias:owner/repo"
 			case "revision-override":
-				team.ProjectSource = &config.Source{Name: "project", Tag: "missing-tag"}
+				team.Spec.ProjectSource = &config.Source{Name: "project", Tag: "missing-tag"}
 				opts.Commit = commit
 			}
 			raw, err := yaml.Marshal(team)
@@ -154,32 +148,28 @@ func TestDirectoryDeclarationPrecedence(t *testing.T) {
 			}
 			path := filepath.Join(opts.Directory, "kuketeam.yaml")
 			writeFixture(t, path, string(raw))
-			declaration, err := directoryTeam(t.Context(), opts)
+			out, err := Add(t.Context(), opts)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if declaration.Metadata.Name != expectedName {
-				t.Fatalf("name=%s", declaration.Metadata.Name)
+			if out.Result.Team != expectedName || out.Result.Resources != 3 {
+				t.Fatalf("result = %+v", out.Result)
 			}
-			result, err := Add(t.Context(), opts)
-			if err != nil {
-				t.Fatal(err)
+			if out.Plan.Origin.Kind != OriginDirectory || !strings.HasSuffix(out.Plan.Origin.Detail, "kuketeam.yaml") {
+				t.Fatalf("origin = %+v", out.Plan.Origin)
 			}
 			accepted := opts
 			accepted.Name = expectedName
-			_, entry := readAddEntry(t, accepted)
-			if result.Resources != 2 {
-				t.Fatal("missing application")
-			}
+			_, entry := readAdded(t, accepted)
+			project := entry.Spec.ProjectSource
 			if mode == "local-source" &&
-				(entry.ProjectSource.URL != team.ProjectSource.URL || entry.ProjectSource.Tag != "v1" || entry.ProjectSource.ClonePath != "/workspace/code") {
+				(project.URL != team.Spec.ProjectSource.URL || project.Tag != "v1" || project.ClonePath != "/workspace/code") {
 				t.Fatal("authored source overwritten")
 			}
-			if mode == "source-override" &&
-				(entry.ProjectSource.URL != opts.Source || entry.ProjectSource.Tag != "v1") {
+			if mode == "source-override" && (project.URL != opts.Source || project.Tag != "v1") {
 				t.Fatal("source override lost local revision")
 			}
-			if mode == "revision-override" && (entry.ProjectSource.Commit != commit || entry.ProjectSource.Tag != "") {
+			if mode == "revision-override" && (project.Commit != commit || project.Tag != "") {
 				t.Fatal("revision override did not replace selector")
 			}
 			after, err := os.ReadFile(path)
@@ -195,15 +185,16 @@ func TestDirectoryInvalidInputsBeforeApplication(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			opts, _ := setupDirectoryAdd(t)
 			opts.Name = "chosen"
-			// A successful registration must survive all subsequent input/preflight errors.
+			// A stored team must survive all subsequent input/preflight errors.
 			if _, err := Add(t.Context(), opts); err != nil {
 				t.Fatal(err)
 			}
-			before, _ := readAddEntry(t, opts)
-			fake := newFake()
-			opts.Client = fake
+			before, _ := readAdded(t, opts)
+			fake := opts.Client.(*fakeClient)
+			writes := len(fake.writes)
+			opts.Force = true
 			path := filepath.Join(opts.Directory, "kuketeam.yaml")
-			prefix := "apiVersion: kuketeams.io/v1\nkind: Team\n"
+			prefix := "apiVersion: v1beta1\nkind: Team\n"
 			switch mode {
 			case "missing-origin":
 				fixtureGit(t, opts.Directory, "remote", "remove", "origin")
@@ -224,7 +215,7 @@ func TestDirectoryInvalidInputsBeforeApplication(t *testing.T) {
 			case "unknown-field":
 				writeFixture(t, path, prefix+"unknown: true\n")
 			case "wrong-kind":
-				writeFixture(t, path, "apiVersion: kuketeams.io/v1\nkind: ProjectTeam\n")
+				writeFixture(t, path, "apiVersion: v1beta1\nkind: ProjectTeam\n")
 			case "multiple-docs":
 				writeFixture(t, path, prefix+"---\n"+prefix)
 			case "empty-file":
@@ -250,7 +241,7 @@ func TestDirectoryInvalidInputsBeforeApplication(t *testing.T) {
 					prefix+"spec:\n  roles:\n    - {name: missing, source: nonexistent, path: roles/missing}\n",
 				)
 			case "two-revisions":
-				writeFixture(t, path, prefix+"projectSource: {name: project, branch: trunk, tag: v1}\n")
+				writeFixture(t, path, prefix+"spec:\n  projectSource: {name: project, branch: trunk, tag: v1}\n")
 			}
 			_, err := Add(t.Context(), opts)
 			if err == nil || strings.Contains(err.Error(), "unsafe-canary") {
@@ -258,8 +249,9 @@ func TestDirectoryInvalidInputsBeforeApplication(t *testing.T) {
 			}
 			accepted := opts
 			accepted.Name = "chosen"
-			after, _ := readAddEntry(t, accepted)
-			if !bytes.Equal(before, after) || fake.applies != 0 || fake.creates != 0 {
+			accepted.Client = fake
+			after, _ := readAdded(t, accepted)
+			if !bytes.Equal(before, after) || len(fake.writes) != writes {
 				t.Fatal("invalid input mutated accepted state")
 			}
 		})
@@ -272,95 +264,80 @@ func TestDirectoryExplicitInputsWithoutGit(t *testing.T) {
 	if _, err := Add(t.Context(), opts); err != nil {
 		t.Fatal(err)
 	}
+	opts.Force = true
 	opts.Source = "" // Revision alone must not invent a remote.
 	if _, err := Add(t.Context(), opts); err == nil || !strings.Contains(err.Error(), "--source") {
 		t.Fatalf("error=%v", err)
 	}
 }
 
-func TestDirectoryPartialApplyPreservesRegistration(t *testing.T) {
+func TestDirectoryPartialApplyPreservesTheStoredTeam(t *testing.T) {
 	opts, _ := setupDirectoryAdd(t)
 	opts.Name = "chosen"
 	if _, err := Add(t.Context(), opts); err != nil {
 		t.Fatal(err)
 	}
-	before, _ := readAddEntry(t, opts)
-	fake := newFake()
+	before, _ := readAdded(t, opts)
+	fake := opts.Client.(*fakeClient)
 	configureAddFailure(t, &opts, fake, "partial")
-	opts.Client = fake
+	opts.Force = true
 	_, err := Add(t.Context(), opts)
-	if err == nil || !strings.Contains(err.Error(), "rerun kuke team add <directory> --name chosen") {
+	if err == nil || !strings.Contains(err.Error(), "rerun kuke team add <directory> --name chosen") ||
+		!strings.Contains(err.Error(), "team not stored") {
 		t.Fatalf("error=%v", err)
 	}
-	after, _ := readAddEntry(t, opts)
+	after, _ := readAdded(t, opts)
 	if !bytes.Equal(before, after) {
-		t.Fatal("partial application replaced entry")
+		t.Fatal("partial application replaced the stored team")
 	}
 }
 
+// TestDirectoryExplicitEmptyLists: an authored [] survives into the plan and
+// selects nothing, which AC11 explains.
 func TestDirectoryExplicitEmptyLists(t *testing.T) {
 	opts, _ := setupDirectoryAdd(t)
 	writeFixture(
 		t,
 		filepath.Join(opts.Directory, "kuketeam.yaml"),
-		"apiVersion: kuketeams.io/v1\nkind: Team\nspec: {sources: [], roles: [], harnesses: []}\n",
+		"apiVersion: v1beta1\nkind: Team\nspec: {sources: [], roles: [], harnesses: []}\n",
 	)
-	declaration, err := directoryTeam(t.Context(), opts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if declaration.Spec.Sources == nil || declaration.Spec.Roles == nil || declaration.Spec.Harnesses == nil {
-		t.Fatal("explicit empty lists erased")
-	}
-	entry, err := config.Entry(declaration)
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, err := yaml.Marshal(entry)
-	if err != nil {
-		t.Fatal(err)
-	}
-	saved, err := config.DecodeEntry(bytes.NewReader(raw))
-	if err != nil || saved.Spec.Sources == nil || saved.Spec.Roles == nil || saved.Spec.Harnesses == nil {
-		t.Fatal("entry lost empty selections")
-	}
-	_, err = Add(t.Context(), opts)
-	if err == nil || !strings.Contains(err.Error(), "no role/harness pairs") {
+	_, err := Add(t.Context(), opts)
+	if err == nil || !strings.Contains(err.Error(), "selects no role × harness pair") ||
+		!strings.Contains(err.Error(), "--role") {
 		t.Fatalf("empty selection ignored: %v", err)
+	}
+	if f := opts.Client.(*fakeClient); len(f.writes) != 0 {
+		t.Fatalf("writes = %v", f.writes)
 	}
 }
 
 func TestDirectoryPersistsAuthoredSelectionsWithoutInput(t *testing.T) {
 	opts, _ := setupDirectoryAdd(t)
 	opts.Name = "chosen"
-	input := "apiVersion: kuketeams.io/v1\nkind: Team\nspec:\n  roles:\n    - {name: worker, source: kukeon, path: team/roles/majordomo, harness: codex}\n"
+	input := "apiVersion: v1beta1\nkind: Team\nspec:\n  roles:\n    - {name: worker, source: kukeon, path: team/roles/majordomo, harness: codex}\n"
 	path := filepath.Join(opts.Directory, "kuketeam.yaml")
 	writeFixture(t, path, input)
 	if _, err := Add(t.Context(), opts); err != nil {
 		t.Fatal(err)
 	}
-	_, entry := readAddEntry(t, opts)
-	if len(entry.Spec.Roles) != 1 || entry.Spec.Roles[0].Name != "worker" || entry.Spec.Sources != nil ||
-		entry.Spec.Harnesses != nil {
+	_, team := readAdded(t, opts)
+	if len(team.Spec.Roles) != 1 || team.Spec.Roles[0].Name != "worker" || team.Spec.Sources != nil ||
+		team.Spec.Harnesses != nil {
 		t.Fatal("authored list replacement or omissions lost")
 	}
-	// Recomposition uses only the saved TeamEntry and the current global defaults.
+	// Recomposition uses only the stored Team and the current defaults.
 	if err := os.RemoveAll(opts.Directory); err != nil {
 		t.Fatal(err)
 	}
-	cfgBytes, err := os.ReadFile(filepath.Join(opts.Root, "kuketeams.yaml"))
+	changeAddConfig(t, opts, func(cfg *config.TeamDefaults) { cfg.Spec.Defaults.Roles[0].Name = "new-global-role" })
+	out, err := ApplyStored(t.Context(), opts.Options, "chosen", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := config.Decode(bytes.NewReader(cfgBytes))
-	if err != nil {
-		t.Fatal(err)
+	if out.Plan.Origin.Kind != OriginStored || out.Plan.Pairs[0].Role != "worker" {
+		t.Fatalf("plan = %+v", out.Plan)
 	}
-	cfg.Spec.Defaults.Roles[0].Name = "new-global-role"
-	if _, err = runTeam(t.Context(), opts.Options, cfg, entry.Team(), entry.Secrets, Result{}, "saved declaration"); err != nil {
-		t.Fatal(err)
-	}
-	_, saved := readAddEntry(t, opts)
+	_, saved := readAdded(t, opts)
 	if saved.Spec.Roles[0].Name != "worker" || saved.Spec.Harnesses != nil {
 		t.Fatal("recomposition flattened inheritance or replaced authored list")
 	}
@@ -384,21 +361,26 @@ func TestDirectoryNamePrecedence(t *testing.T) {
 				writeFixture(
 					t,
 					filepath.Join(dir, "kuketeam.yaml"),
-					"apiVersion: kuketeams.io/v1\nkind: Team\nmetadata: {name: "+tc.local+"}\n",
+					"apiVersion: v1beta1\nkind: Team\nmetadata: {name: "+tc.local+"}\n",
 				)
 			}
-			team, err := directoryTeam(
-				t.Context(),
-				AddOptions{Directory: dir, Name: tc.flag, Source: "git@host:owner/project", Branch: "main"},
-			)
+			fake := newFake()
+			storeDefaults(t, fake, addDefaults())
+			// An injected project tree: nothing is fetched.
+			sources := sourceFS()
+			sources["project"] = fstest.MapFS{}
+			out, err := Add(t.Context(), AddOptions{
+				Options:   Options{Client: fake, Sources: sources, DryRun: true},
+				Directory: dir, Name: tc.flag, Source: "git@host:owner/project", Branch: "main",
+			})
 			if tc.want == "" {
 				if err == nil || !strings.Contains(err.Error(), "--name") {
 					t.Fatalf("invalid name needs guidance: %v", err)
 				}
 				return
 			}
-			if err != nil || team.Metadata.Name != tc.want {
-				t.Fatalf("name precedence: team=%+v err=%v", team, err)
+			if err != nil || out.Plan.Team.Metadata.Name != tc.want {
+				t.Fatalf("name precedence: plan=%+v err=%v", out.Plan, err)
 			}
 		})
 	}
@@ -458,8 +440,7 @@ func TestAddRejectsReservedNames(t *testing.T) {
 		for _, form := range []string{"positional", "flag", "metadata"} {
 			t.Run(name+"/"+form, func(t *testing.T) {
 				opts, _ := setupDirectoryAdd(t)
-				fake := newFake()
-				opts.Client = fake
+				fake := opts.Client.(*fakeClient)
 				switch form {
 				case "positional":
 					opts.Directory, opts.Name, opts.Source = "", name, "git@work-alias:owner/project.git"
@@ -467,84 +448,31 @@ func TestAddRejectsReservedNames(t *testing.T) {
 					opts.Name = name
 				case "metadata":
 					writeFixture(t, filepath.Join(opts.Directory, "kuketeam.yaml"),
-						"apiVersion: kuketeams.io/v1\nkind: Team\nmetadata: {name: "+name+"}\n")
+						"apiVersion: v1beta1\nkind: Team\nmetadata: {name: "+name+"}\n")
 				}
 				_, err := Add(t.Context(), opts)
 				if err == nil || !strings.Contains(err.Error(), `"`+name+`" is reserved`) {
 					t.Fatalf("reserved name %s accepted or unexplained: %v", name, err)
 				}
-				if fake.applies != 0 || fake.creates != 0 || len(fake.deleted) != 0 {
+				if len(fake.writes) != 0 || len(fake.teams) != 0 {
 					t.Fatal("reserved name reached the daemon")
-				}
-				entry := filepath.Join(opts.Root, "kuketeam.d", name+".yaml")
-				if _, statErr := os.Stat(entry); !os.IsNotExist(statErr) {
-					t.Fatalf("reserved name registered: %v", statErr)
 				}
 			})
 		}
 	}
 }
 
-// TestAddRefusesTheLegacyInitEntry: on a host not yet migrated from the
-// kukeon init team, add under that name (positional or from metadata.name)
-// is refused: recording a project source on the entry would stop init
-// --force from ever migrating it.
-func TestAddRefusesTheLegacyInitEntry(t *testing.T) {
-	for _, form := range []string{"positional", "metadata"} {
-		t.Run(form, func(t *testing.T) {
-			opts, _ := setupDirectoryAdd(t)
-			fake := newFake()
-			opts.Client = fake
-			switch form {
-			case "positional":
-				opts.Directory, opts.Name, opts.Source = "", legacyName, "git@work-alias:owner/project.git"
-			case "metadata":
-				writeFixture(t, filepath.Join(opts.Directory, "kuketeam.yaml"),
-					"apiVersion: kuketeams.io/v1\nkind: Team\nmetadata: {name: kukeon}\n")
-			}
-			path := filepath.Join(opts.Root, "kuketeam.d", "kukeon.yaml")
-			before := writeEntry(t, path, legacyEntry())
-			_, err := Add(t.Context(), opts)
-			if err == nil || !strings.Contains(err.Error(), "run kuke team init --force first") {
-				t.Fatalf("add over the legacy entry accepted or unexplained: %v", err)
-			}
-			if fake.applies != 0 || fake.creates != 0 || len(fake.deleted) != 0 {
-				t.Fatal("refused add reached the daemon")
-			}
-			after, readErr := os.ReadFile(path)
-			if readErr != nil || !bytes.Equal(before, after) {
-				t.Fatalf("legacy entry changed: %v", readErr)
-			}
-		})
-	}
-}
-
 // TestAddKukeonProjectKeepsTheInitTeam is the #1527 collision: with the init
-// team applied, adding kukeon's own checkout (metadata.name: kukeon) registers
-// a separate team and leaves kuke.yaml and the kuke-majordomo-* configs alone.
+// team applied, adding kukeon's own checkout (metadata.name: kukeon) stores
+// a separate team and leaves the kuke Team and its configs alone.
 func TestAddKukeonProjectKeepsTheInitTeam(t *testing.T) {
 	opts, _ := setupDirectoryAdd(t)
 	fake := opts.Client.(*fakeClient)
 	fake.prune = true
-	globalPath := filepath.Join(opts.Root, "kuketeams.yaml")
-	global, err := os.ReadFile(globalPath)
-	if err != nil {
+	if _, err := Init(t.Context(), InitOptions{Options: opts.Options}); err != nil {
 		t.Fatal(err)
 	}
-	initOpts := opts.Options
-	initOpts.Force = true
-	if _, err = Run(t.Context(), initOpts); err != nil {
-		t.Fatal(err)
-	}
-	// Restore the add fixture's defaults; init --force reset them.
-	if err = os.WriteFile(globalPath, global, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	kukePath := filepath.Join(opts.Root, "kuketeam.d", "kuke.yaml")
-	kukeBefore, err := os.ReadFile(kukePath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	kukeBefore := slices.Clone(fake.teams["kuke"])
 	majordomo := map[string]bool{}
 	for _, cfg := range fake.configs {
 		if cfg.Metadata.Labels[api.LabelTeam] == "kuke" {
@@ -556,17 +484,16 @@ func TestAddKukeonProjectKeepsTheInitTeam(t *testing.T) {
 	}
 
 	writeFixture(t, filepath.Join(opts.Directory, "kuketeam.yaml"),
-		"apiVersion: kuketeams.io/v1\nkind: Team\nmetadata: {name: kukeon}\n")
-	result, err := Add(t.Context(), opts)
+		"apiVersion: v1beta1\nkind: Team\nmetadata: {name: kukeon}\n")
+	out, err := Add(t.Context(), opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fake.team != "kukeon" || result.EntryPath != filepath.Join(opts.Root, "kuketeam.d", "kukeon.yaml") {
-		t.Fatalf("team=%q entry=%s", fake.team, result.EntryPath)
+	if fake.team != "kukeon" || out.Result.Team != "kukeon" || fake.teams["kukeon"] == nil {
+		t.Fatalf("team=%q result=%+v", fake.team, out.Result)
 	}
-	kukeAfter, err := os.ReadFile(kukePath)
-	if err != nil || !bytes.Equal(kukeBefore, kukeAfter) {
-		t.Fatalf("init entry changed by add: %v", err)
+	if !bytes.Equal(kukeBefore, fake.teams["kuke"]) {
+		t.Fatal("the kuke Team changed by add")
 	}
 	kept := map[string]bool{}
 	for _, cfg := range fake.configs {
