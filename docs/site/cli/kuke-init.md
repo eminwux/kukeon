@@ -51,7 +51,9 @@ The `kukeond` daemon runs as a container inside the cell `kuke-system / kukeon /
 
 `--kukeond-image` takes precedence. When not set, Kukeon composes the image reference from build-time constants:
 
-- Release builds: `ghcr.io/eminwux/kukeon:<version>` where `<version>` is the semver tag.
+- Stable builds (the version is exactly a release tag, `v0.10.0`): `ghcr.io/eminwux/kukeon:v0.10.0`.
+- Edge builds (the `git describe --long` form of a `main` commit, `v0.10.0-77-gabc1234`): `ghcr.io/eminwux/kukeon:sha-abc1234`, the immutable per-commit tag the edge workflow publishes. The moving `:edge` tag is never used.
+- Any other `v`-prefixed version (`-dirty`, a prerelease tag): that version used as the tag.
 - Dev builds (no tag or non-`v`-prefixed version): `ghcr.io/eminwux/kukeon:latest`.
 
 For local iteration, pre-load a local image with [`kuke image load --from-docker`](kuke-image.md) and pass `--kukeond-image docker.io/library/kukeon-local:dev` or whatever tag you built.

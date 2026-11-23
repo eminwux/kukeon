@@ -71,7 +71,9 @@ Tears down the existing kukeond cell (stop, delete, clear socket+pid) and re-pro
 
 Requires `--kukeond-image` and errors with `ErrHostNotInitialized` when the host has not been bootstrapped by `kuke init` yet.
 
-Image-load is out of scope: the desired image must already be present in the `kuke-system` realm (via `kuke build` or `kuke image load`) before invoking this command.
+Before it stops anything, recreate makes the image present in the `kuke-system` realm: an image already there is used as is, otherwise it is pulled anonymously. A ref that cannot be pulled fails the command with `pull kukeond image <ref>: …` and leaves the running daemon untouched. `kukeon.internal/...` refs are never pulled; they must already be built into the realm with `kuke build --realm kuke-system`.
+
+Right before re-provisioning, recreate also restages `kukepause` under `<run-path>/bin` from the `kukepause` on `PATH` (or next to `kuke`), so an upgraded `kukepause` reaches the host without a full `kuke init`. [`kuke update`](kuke-update.md) runs this verb with the image of the build it installs.
 
 | Flag                     | Default                            | Description                                                                                                                              |
 | ------------------------ | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |

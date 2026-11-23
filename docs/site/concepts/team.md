@@ -142,7 +142,10 @@ update re-resolves the image from the current definitions and catalog.
 The realm's `TeamDefaults` is what a team that omits a list inherits. When the
 realm has none, `kuke team init` creates one with the `kukeon` source and its
 `claude` and `codex` harnesses, so a project team needs only roles; an existing
-`TeamDefaults` is never changed by init. Register further sources and pick the
+`TeamDefaults` is never changed by init, except that
+[`kuke team init --upgrade`](../cli/kuke-team-init.md#upgrading-the-kuke-team)
+(which `kuke update` and the installer run) moves its `kukeon` source to the
+revision of the running `kuke`. Register further sources and pick the
 defaults with:
 
 ```bash

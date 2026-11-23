@@ -124,6 +124,7 @@ nav:
       - cli/kuke-team-add.md
       - cli/kuke-connector.md
       - cli/kuke-uninstall.md
+      - cli/kuke-update.md
       - cli/kuke-autocomplete.md
       - cli/kuke-version.md
       - cli/kukeond.md
