@@ -122,7 +122,7 @@ After installation, a manually provisioned dedicated cell can launch with:
 
 ```sh
 claude --settings /path/to/kukeon/team/roles/majordomo/config/claude.settings.json
-codex --sandbox workspace-write --ask-for-approval on-request
+codex --sandbox danger-full-access --ask-for-approval on-request
 # Set OPENROUTER_MODEL to the selected provider/model; authentication is supplied separately.
 opencode
 ```
@@ -138,9 +138,13 @@ Both start in the in-cell `$HOME`. Set the accepted entry's role `initialPath`
 to an absolute in-cell directory or `$HOME/subdirectory` to change that location;
 role assets remain installed from `team/roles/majordomo` independently.
 
-The adapters do not bypass permission prompts or add privileges. Access outside
-Codex's workspace sandbox may need an approved escalation or an explicitly
-configured runtime policy. Materialization does not launch an agent or a cell.
+The adapters do not bypass permission prompts or add privileges. The role sets
+no Codex sandbox, so Codex uses the `codex-host` blueprint default,
+`danger-full-access`: every majordomo session dials the kukeond socket, and
+Codex's `workspace-write` sandbox denies that `connect()` (headless tasks run
+with approval `never` and cannot escalate). The cell is then Codex's only
+boundary: a non-privileged container with the kukeond socket and `kuke` mounted
+read-only. Materialization does not launch an agent or a cell.
 
 ## Delivery boundary and provenance
 

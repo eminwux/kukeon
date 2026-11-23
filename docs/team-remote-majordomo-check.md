@@ -126,9 +126,9 @@ The driver:
 3. Runs `kuke run --from-config kuke-majordomo-codex --name majordomo-check-<unique>
 --realm default --space default --stack default --env PROMPT=<probe> --detach`.
    The supported `PROMPT` override selects the existing `codex exec --json`
-   startup path, with workspace-write sandbox and approval never for the batch
-   turn. There is no invented shell-input protocol, PTY timing assumption, or
-   automatic startup in `init`.
+   startup path, with the danger-full-access sandbox and approval never for
+   the batch turn. There is no invented shell-input protocol, PTY timing
+   assumption, or automatic startup in `init`.
 4. Requires a live root task and Ready `work` container, checks the work image's
    digest reference, and reads `kuke log` privately. A tool-executed Python probe
    verifies the installed policy/skill links, source revision, image-owned hook

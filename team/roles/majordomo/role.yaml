@@ -13,7 +13,6 @@ spec:
     claude:
       settings: config/claude.settings.json
     codex:
-      sandbox: workspace-write
       approval: on-request
     opencode:
       permissions: ask
