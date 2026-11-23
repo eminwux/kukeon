@@ -187,6 +187,10 @@ func ApplyFile(ctx context.Context, opts Options, raw []byte, path string) (Outc
 	if team.Metadata.Realm == "" {
 		team.Metadata.Realm = config.DefaultRealm
 	}
+	if team.Metadata.Realm != config.DefaultRealm {
+		return Outcome{}, fmt.Errorf("team file %s: teams live in realm %s; remove metadata.realm %q",
+			path, config.DefaultRealm, team.Metadata.Realm)
+	}
 	stored, err := StoredTeam(ctx, opts.Client, team.Metadata.Name)
 	if err != nil {
 		return Outcome{}, err

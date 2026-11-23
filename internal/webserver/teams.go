@@ -19,8 +19,10 @@ package webserver
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
@@ -51,6 +53,8 @@ import (
 const (
 	// maxTeamBody bounds a team request: a declaration is a few KiB.
 	maxTeamBody = 256 << 10
+	// maxTeamActionBody bounds an action request, whose body is only {}.
+	maxTeamActionBody = 64
 	// yamlIndent is how a declaration is indented, as kuke prints one.
 	yamlIndent = 2
 	// teamRealm is the realm teams are managed in.
@@ -93,14 +97,45 @@ func (a *teamAPI) register(mux *http.ServeMux, dial Dial) {
 	mux.HandleFunc("POST /api/teams", op(func(ctx context.Context, c kukeonv1.Client, r *http.Request) (any, error) {
 		return a.applyTeam(ctx, c, r, false)
 	}))
-	mux.HandleFunc("POST /api/teams/{name}/reapply", op(a.reapplyTeam))
-	mux.HandleFunc("POST /api/teams/{name}/delete", read(a.deleteTeam))
+	mux.HandleFunc("POST /api/teams/{name}/reapply", emptyJSONRequest(op(a.reapplyTeam)))
+	mux.HandleFunc("POST /api/teams/{name}/delete", emptyJSONRequest(read(a.deleteTeam)))
 	mux.HandleFunc("GET /api/team-sources", op(a.listSources))
 	mux.HandleFunc("POST /api/team-sources", op(a.addSource))
-	mux.HandleFunc("POST /api/team-sources/{name}/inspect", op(a.inspectSource))
-	mux.HandleFunc("POST /api/team-sources/{name}/delete", op(a.removeSource))
+	mux.HandleFunc("POST /api/team-sources/{name}/inspect", emptyJSONRequest(op(a.inspectSource)))
+	mux.HandleFunc("POST /api/team-sources/{name}/delete", emptyJSONRequest(op(a.removeSource)))
 	mux.HandleFunc("GET /api/team-defaults", read(a.getDefaults))
 	mux.HandleFunc("POST /api/team-defaults", op(a.setDefaults))
+}
+
+// emptyJSONRequest gates an action route whose request carries nothing but
+// its path. Like decodeCatalogDeleteRequest it requires Content-Type:
+// application/json, which a cross-site HTML form cannot send, so a plain
+// <form method=post> cannot reapply or delete a team or a source. The body
+// may be empty or {}. The check runs before kukeond is dialed.
+func emptyJSONRequest(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := decodeEmptyJSONRequest(r); err != nil {
+			writeAPIError(w, err)
+			return
+		}
+		next(w, r)
+	}
+}
+
+func decodeEmptyJSONRequest(r *http.Request) error {
+	if r.Header.Get("Content-Type") != jsonContentType {
+		return fmt.Errorf("%w: JSON request required", errdefs.ErrConfig)
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(nil, r.Body, maxTeamActionBody))
+	decoder.DisallowUnknownFields()
+	var options struct{}
+	if err := decoder.Decode(&options); err != nil && err != io.EOF {
+		return fmt.Errorf("%w: this request accepts only an empty JSON object", errdefs.ErrConfig)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return fmt.Errorf("%w: expected one JSON document", errdefs.ErrConfig)
+	}
+	return nil
 }
 
 func (a *teamAPI) options(client kukeonv1.Client, dryRun bool) initialize.Options {

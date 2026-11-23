@@ -440,11 +440,20 @@ func TestApplyFile(t *testing.T) {
 		"apiVersion: v1beta1\nkind: Team\nmetadata: {name: root}\n",
 		"apiVersion: v1beta1\nkind: Team\nspec: {}\n",
 		"apiVersion: " + oldTeamHeader + "\nkind: Team\nmetadata: {name: filed}\n",
+		"apiVersion: v1beta1\nkind: Team\nmetadata: {name: filed, realm: other}\n",
 	} {
 		writes := len(f.writes)
 		if _, err = ApplyFile(t.Context(), opts, []byte(bad), "bad.yaml"); err == nil ||
 			!strings.Contains(err.Error(), "bad.yaml") || len(f.writes) != writes {
 			t.Fatalf("accepted %q: %v", bad, err)
 		}
+	}
+	// Teams live in realm default (D14), as Add enforces: a file naming
+	// another realm is refused rather than merged against default's stored
+	// team and stored where ApplyStored and Add can never find it.
+	_, err = ApplyFile(t.Context(), opts,
+		[]byte("apiVersion: v1beta1\nkind: Team\nmetadata: {name: filed, realm: other}\n"), "other.yaml")
+	if err == nil || !strings.Contains(err.Error(), `remove metadata.realm "other"`) {
+		t.Fatalf("non-default realm: %v", err)
 	}
 }

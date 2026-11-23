@@ -26,6 +26,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"sort"
 	"strings"
@@ -656,5 +657,46 @@ func TestTeamRoutesAreRegistered(t *testing.T) {
 	req := connectorRequest(t, served, http.MethodGet, "/api/team-defaults", "")
 	if req.Code != http.StatusOK {
 		t.Fatalf("GET /api/team-defaults: %d %s", req.Code, req.Body)
+	}
+}
+
+// TestTeamActionsRequireJSON: the action routes whose request carries only a
+// path refuse a request a cross-site HTML form can send (no JSON
+// Content-Type), and a body other than empty or {}, before they touch
+// kukeond; the web UI's {} body is accepted.
+func TestTeamActionsRequireJSON(t *testing.T) {
+	c, h := teamFixture(t)
+	c.putTeam(t, storedProj())
+	writes, defaults := c.writes, string(c.defaults)
+	routes := []string{
+		"/api/teams/proj/reapply",
+		"/api/teams/proj/delete",
+		"/api/team-sources/kukeon/inspect",
+		"/api/team-sources/extra/delete",
+	}
+	for _, route := range routes {
+		for _, tc := range []struct{ contentType, body string }{
+			{"", ""},
+			{"application/x-www-form-urlencoded", "confirm=1"},
+			{"text/plain", "{}"},
+			{"application/json", `{"force":true}`},
+			{"application/json", "{}{}"},
+		} {
+			req := httptest.NewRequest(http.MethodPost, "http://localhost:5129"+route, strings.NewReader(tc.body))
+			req.Header.Set("Origin", "http://evil.example")
+			if tc.contentType != "" {
+				req.Header.Set("Content-Type", tc.contentType)
+			}
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			expectError(t, w, w.Body.Bytes(), http.StatusBadRequest, "invalid_request")
+		}
+	}
+	if c.writes != writes || c.teams["proj"] == nil || len(c.deleted) != 0 || string(c.defaults) != defaults {
+		t.Fatalf("a refused request changed state: writes=%d deleted=%v", c.writes, c.deleted)
+	}
+	w := connectorRequest(t, h, http.MethodPost, "/api/teams/proj/reapply", "{}")
+	if w.Code != http.StatusOK {
+		t.Fatalf("reapply with {}: %d %s", w.Code, w.Body)
 	}
 }

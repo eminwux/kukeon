@@ -214,3 +214,57 @@ func TestApplyFileSkipsTeamsAfterAFailedDocument(t *testing.T) {
 		})
 	}
 }
+
+// TestApplyFileReportsEveryTeamFailure: a Team that fails composition does not
+// stop the apply. Every later Team is still tried, and the output (text or
+// structured) names the documents already applied and each failed Team
+// before the command returns the error.
+func TestApplyFileReportsEveryTeamFailure(t *testing.T) {
+	const manifest = "apiVersion: v1beta1\nkind: Realm\nmetadata:\n  name: r1\nspec:\n  namespace: r1\n" +
+		"---\napiVersion: v1beta1\nkind: Team\nmetadata:\n  name: alpha\nspec:\n  sources: []\n  roles: []\n  harnesses: []\n" +
+		"---\napiVersion: v1beta1\nkind: Team\nmetadata:\n  name: beta\nspec:\n  sources: []\n  roles: []\n  harnesses: []\n"
+	for _, output := range []string{"", "json", "yaml"} {
+		t.Run("output="+output, func(t *testing.T) {
+			fake := &teamFake{}
+			fake.applyFn = func([]byte) (kukeonv1.ApplyDocumentsResult, error) {
+				return kukeonv1.ApplyDocumentsResult{Resources: []kukeonv1.ApplyResourceResult{
+					{Kind: "Realm", Name: "r1", Action: "created"},
+				}}, nil
+			}
+			cmd := apply.NewApplyCmd()
+			buf := &bytes.Buffer{}
+			cmd.SetOut(buf)
+			cmd.SetErr(buf)
+			cmd.SetContext(context.WithValue(context.Background(), apply.MockControllerKey{}, kukeonv1.Client(fake)))
+			args := []string{"-f", writeTempYAML(t, manifest)}
+			if output != "" {
+				args = append(args, "-o", output)
+			}
+			cmd.SetArgs(args)
+			err := cmd.Execute()
+			if err == nil || !strings.Contains(err.Error(), `Team "alpha"`) ||
+				!strings.Contains(err.Error(), `Team "beta"`) || !strings.Contains(err.Error(), "--role") {
+				t.Fatalf("err = %v, want both Teams' composition errors", err)
+			}
+			tried := strings.Join(fake.events, ",")
+			if !strings.Contains(tried, "GetTeam alpha") || !strings.Contains(tried, "GetTeam beta") {
+				t.Fatalf("events = %v, want both Teams tried", fake.events)
+			}
+			out := buf.String()
+			var want []string
+			switch output {
+			case "":
+				want = []string{`Realm "r1": created`, `Team "alpha": failed`, `Team "beta": failed`}
+			case "json":
+				want = []string{`"name": "r1"`, `"name": "alpha"`, `"name": "beta"`, `"action": "failed"`}
+			default:
+				want = []string{"name: r1", "name: alpha", "name: beta", "action: failed"}
+			}
+			for _, w := range want {
+				if !strings.Contains(out, w) {
+					t.Fatalf("output missing %q:\n%s", w, out)
+				}
+			}
+		})
+	}
+}

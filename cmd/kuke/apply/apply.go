@@ -168,11 +168,23 @@ func runApplyFile(cmd *cobra.Command, client kukeonv1.Client, flags applyFlags) 
 		return applyErr
 	}
 	// Each Team is composed here, as kuke team apply -f composes it (D7):
-	// kukeond stores it only with the Configs composed from it.
+	// kukeond stores it only with the Configs composed from it. A Team that
+	// fails is reported and the rest are still tried, so the output names
+	// every document in the file.
+	var teamErrs []error
 	for _, team := range teams {
 		out, teamErr := initialize.ApplyFile(cmd.Context(), initialize.Options{Client: client}, team, flags.file)
 		if teamErr != nil {
-			return teamErr
+			name := teamName(team)
+			teamErrs = append(teamErrs, fmt.Errorf("%s %q: %w", v1beta1.KindTeam, name, teamErr))
+			if structured {
+				result.Resources = append(result.Resources, kukeonv1.ApplyResourceResult{
+					Kind: string(v1beta1.KindTeam), Name: name, Action: "failed", Error: teamErr.Error(),
+				})
+				continue
+			}
+			cmd.Printf("%s %q: failed\n", v1beta1.KindTeam, name)
+			continue
 		}
 		if structured {
 			result.Resources = append(result.Resources, kukeonv1.ApplyResourceResult{
@@ -184,8 +196,15 @@ func runApplyFile(cmd *cobra.Command, client kukeonv1.Client, flags applyFlags) 
 			return err
 		}
 	}
+	teamsErr := errors.Join(teamErrs...)
 	if structured {
-		return printApplyResultJSON(cmd, result, flags.output)
+		if err = printApplyResultJSON(cmd, result, flags.output); err != nil {
+			return err
+		}
+		return teamsErr
+	}
+	if teamsErr != nil {
+		return teamsErr
 	}
 	return applyErr
 }
