@@ -1,17 +1,20 @@
 export const kinds = ["realm", "space", "stack", "cell", "container"];
 export const titles = ["Realms", "Spaces", "Stacks", "Cells"];
 export const catalogTitles: Record<string, string> = { blueprints: "Blueprints", configs: "Configs", volumes: "Volumes", secrets: "Secrets" };
-export type Route = { view: string; scope: string[]; parent: string[]; document: boolean; config?: string[]; blueprint?: string[]; target?: string[]; edit?: boolean; action?: string; identity?: string[] };
+export type Route = { view: string; scope: string[]; parent: string[]; document: boolean; config?: string[]; blueprint?: string[]; target?: string[]; edit?: boolean; action?: string; identity?: string[]; state?: string };
 
-const HOME = (): Route => ({ view: "dashboard", scope: [], parent: [], document: false });
-export const homeLink = "#/resources";
+// Home is the Workbench grid (#1635); the Overview, the first Manage page, lives at #/resources.
+const HOME = (): Route => ({ view: "workbench", scope: [], parent: [], document: false });
+export const homeLink = "#/";
+export const overviewLink = "#/resources";
 
 export function readRoute(): Route {
   try {
     const raw = window.location.hash.slice(1);
     const [path, query] = raw.split("?");
     const params = new URLSearchParams(query);
-    // Resources is home: the empty hash, #/workspace without a cell scope and unparsable hashes land on it.
+    // The Workbench grid is home: #/, the empty hash, #/workspace without a cell scope and unparsable
+    // hashes land on it.
     if (!path || path === "/" || path === "/workspace") return HOME();
     const parts = path.split("/").filter(Boolean).map(decodeURIComponent);
     if (parts[0] === "new-cell") {
@@ -41,10 +44,10 @@ export function readRoute(): Route {
     }
     // #/teams lists the stored teams and the sources; #/teams/<name> opens one team.
     if (parts[0] === "teams") return { view: "teams", scope: parts.slice(1, 2), parent: [], document: false };
-    // #/daemon (health) and #/daemon/logs live under Administration.
-    // #/health: majordomo's health reports and the sweep schedule.
+    // The Daemon page's tabs: #/daemon (Status, the connectivity check), #/daemon/health (Health,
+    // majordomo's sweep reports and schedule) and #/daemon/logs. #/health is the historical Health route.
     if (parts[0] === "health") return { view: "health", scope: [], parent: [], document: false };
-    if (parts[0] === "daemon") return { view: parts[1] === "logs" ? "daemon-logs" : "daemon", scope: [], parent: [], document: false };
+    if (parts[0] === "daemon") return { view: parts[1] === "logs" ? "daemon-logs" : parts[1] === "health" ? "health" : "daemon", scope: [], parent: [], document: false };
     if (parts[0] === "workspace") return parts.length === 5 ? { view: "workspace", scope: parts.slice(1), parent: [], document: false } : HOME();
     if (path === "/resources" || path === "/administration" || path === "/dashboard") return { view: "dashboard", scope: [], parent: [], document: false };
     // #/images/<realm>/<image reference>; the reference is one encoded segment.
@@ -54,7 +57,9 @@ export function readRoute(): Route {
     if (parts[0] === "resource") return { view: "resource", scope: parts.slice(1, 6), parent: [], document: params.has("document") };
     if (titles.some(title => title.toLowerCase() === parts[0])) {
       const parent: unknown = JSON.parse(params.get("parent") ?? "[]");
-      return { view: parts[0], scope: [], parent: Array.isArray(parent) && parent.every(p => typeof p === "string") ? parent.slice(0, 4) : [], document: false };
+      // ?state= preselects the Cells table's State filter (#1635).
+      const state = params.get("state") ?? undefined;
+      return { view: parts[0], scope: [], parent: Array.isArray(parent) && parent.every(p => typeof p === "string") ? parent.slice(0, 4) : [], document: false, ...(state ? { state } : {}) };
     }
     // Historical hierarchy bookmarks have no /resource prefix.
     return { view: "resource", scope: parts.slice(0, 5), parent: [], document: false };
@@ -79,7 +84,7 @@ export function catalogPageLink(kind: string, scope: string[], options: { docume
   return `#/${kind}/` + scope.map(encodeURIComponent).join("/") + (options.document ? "?document=1" : options.edit ? "?edit=1" : "");
 }
 export function healthLink(): string {
-  return "#/health";
+  return "#/daemon/health";
 }
 export function daemonLink(section?: "logs"): string {
   return "#/daemon" + (section ? `/${section}` : "");
@@ -90,8 +95,9 @@ export function imagesLink(realm?: string, ref?: string): string {
 export function resourceLink(scope: string[], document = false): string {
   return "#/resource/" + scope.map(encodeURIComponent).join("/") + (document ? "?document=1" : "");
 }
-export function listLink(depth: number, parent: string[] = []): string {
-  return `#/${titles[depth].toLowerCase()}` + (parent.length ? `?parent=${encodeURIComponent(JSON.stringify(parent))}` : "");
+export function listLink(depth: number, parent: string[] = [], state?: string): string {
+  const query = [parent.length ? `parent=${encodeURIComponent(JSON.stringify(parent))}` : "", state ? `state=${encodeURIComponent(state)}` : ""].filter(Boolean).join("&");
+  return `#/${titles[depth].toLowerCase()}` + (query ? `?${query}` : "");
 }
 export function apiPath(scope: string[]): string {
   return "/api/" + scope.map((name, i) => `${kinds[i]}s/${encodeURIComponent(name)}`).join("/");
