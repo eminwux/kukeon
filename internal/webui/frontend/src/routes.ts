@@ -32,7 +32,12 @@ export function readRoute(): Route {
     if (parts[0] === "connectors") {
       let target: unknown;
       try { target = JSON.parse(params.get("scope") ?? "null"); } catch { target = null; }
-      return { view: "connectors", scope: parts.slice(1, 2), parent: [], document: false, target: Array.isArray(target) && target.every(value => typeof value === "string") ? target.slice(0, 3) : undefined };
+      // #/connectors/<name>/new-identity?scope=[…] and #/connectors/<name>/rotate-identity?identity=[realm, space?, stack?, name]
+      // are the identity pages.
+      let identity: unknown;
+      try { identity = JSON.parse(params.get("identity") ?? "null"); } catch { identity = null; }
+      const action = parts[2] === "new-identity" || parts[2] === "rotate-identity" ? parts[2] : undefined;
+      return { view: "connectors", scope: parts.slice(1, 2), parent: [], document: false, target: Array.isArray(target) && target.every(value => typeof value === "string") ? target.slice(0, 3) : undefined, action, identity: action && Array.isArray(identity) && identity.length >= 2 && identity.every(value => typeof value === "string") ? identity.slice(0, 4) : undefined };
     }
     // #/teams lists the stored teams and the sources; #/teams/<name> opens one team.
     if (parts[0] === "teams") return { view: "teams", scope: parts.slice(1, 2), parent: [], document: false };

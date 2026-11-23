@@ -716,6 +716,12 @@ td .ask-majordomo { margin-left: 8px; vertical-align: middle; }
 .health-suspended { margin: 6px 0; padding-left: 18px; }
 .connector-default table, .connector-identities table { background: var(--panel); }
 .connector-effective { margin: 0; font-size: var(--font-sm); }
+/* The Default identity panel leads with what resolves (#1630). */
+.connector-default .connector-effective { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 10px 12px; border: 1px solid var(--status-ok-line); border-radius: 7px; background: var(--status-ok-bg); }
+.connector-default .connector-effective.is-unresolved { border-color: var(--status-warning-line); background: var(--status-warning-bg); }
+.connector-effective-name { font-size: var(--font-lg); overflow-wrap: anywhere; }
+.connector-default-levels.panel { margin: 0; background: var(--panel); }
+a.subtle-button { display: inline-flex; align-items: center; min-height: var(--target-min); padding: 4px 10px; border: 1px solid var(--line); border-radius: 7px; }
 .identity-form .identity-key { grid-column: 1 / -1; }
 .identity-form textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--font-sm); }
 .identity-form .error, .connector-fix .error, .connector-default .error { margin: 0; }

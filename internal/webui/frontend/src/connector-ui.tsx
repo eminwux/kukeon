@@ -34,6 +34,17 @@ export function connectorsLink(connector?: string, scope?: Partial<Scope>): stri
   const parts = scopeParts(scope);
   return "#/connectors" + (connector ? `/${encodeURIComponent(connector)}` : "") + (connector && parts.length ? `?scope=${encodeURIComponent(JSON.stringify(parts))}` : "");
 }
+// newIdentityLink opens a connector's New identity page, storing on the given scope.
+export function newIdentityLink(connector: string, scope?: Partial<Scope>): string {
+  const parts = scopeParts(scope);
+  return `#/connectors/${encodeURIComponent(connector)}/new-identity` + (parts.length ? `?scope=${encodeURIComponent(JSON.stringify(parts))}` : "");
+}
+// rotateIdentityLink opens the Rotate page of one stored identity; scope is the connector page's to return to.
+export function rotateIdentityLink(connector: string, identity: Partial<SecretRef>, scope?: Partial<Scope>): string {
+  const ref = secretRef(identity);
+  const parts = scopeParts(scope);
+  return `#/connectors/${encodeURIComponent(connector)}/rotate-identity` + (ref ? `?identity=${encodeURIComponent(JSON.stringify([...refScope(ref), ref.name]))}` : "") + (parts.length ? `${ref ? "&" : "?"}scope=${encodeURIComponent(JSON.stringify(parts))}` : "");
+}
 function levelTitle(level: string): string { return `${level[0].toUpperCase()}${level.slice(1)}`; }
 export function levelLabel(level: string, scope: Partial<Scope>): string { return `${levelTitle(level)} — ${scopeParts(scopeAt(scope, level)).join(" / ")}`; }
 
