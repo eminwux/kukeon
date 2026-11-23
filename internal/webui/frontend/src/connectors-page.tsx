@@ -1,15 +1,15 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { ErrorNotice, useResource, type Failure } from "./request";
 import { useNotify } from "./notifications";
-import type { Doc, InventoryResource } from "./inventory";
+import type { InventoryResource } from "./inventory";
+import { imagesLink } from "./routes";
 import { CatalogDeleteConfirmation } from "./catalog";
 import { catalogDeleteAPI } from "./catalog-url.mjs";
-import { RegistryCredentialsPanel } from "./registry-credentials";
 import { IdentityForm, IdentitySelect, ScopeGroup, ScopePicker, connectorAPI, connectorsLink, levelLabel, newIdentityLink, rotateIdentityLink, sendJSON, toFailure } from "./connector-ui";
 import { Disclosure } from "./disclosure";
 import {
   allowedLevels, connectorLevels, defaultRow, defaultScopeName, defaultTargets, deliveryEnv, deliveryFile, deliveryGit, deliveryRegistry, deliveryStateVolume, identitiesFor, importPayload, importsFromHost,
-  isRegistry, loginMethods, refKey, refLabel, refScope, registryEntries, scopeAt, scopeFromParts, scopeLevel, scopeLevels, scopeParts, scopeQuery, secretRef, targetScope, usageFor,
+  isRegistry, listedConnectors, loginMethods, refKey, refLabel, refScope, scopeAt, scopeFromParts, scopeLevel, scopeLevels, scopeParts, scopeQuery, secretRef, targetScope, usageFor,
 } from "./connectors.mjs";
 import type { Connector, ConnectorDefault, ConnectorUsage, DefaultTarget, Identity, ImportForm, ImportResult, Scope, SecretRef } from "./connectors.mjs";
 
@@ -293,27 +293,6 @@ function DefaultsPanel({ connector, identities, revision, inventory, initialScop
   </section>;
 }
 
-// RegistryPanel is the registry-delivered connector: Realm only. It lists the
-// Realm's registry entries and saves Secret-backed ones through the same form
-// the Realm page uses.
-function RegistryPanel({ connector, revision, inventory, initialScope, onChanged }: { connector: Connector; revision: number; inventory: InventoryResource; initialScope: Scope | undefined; onChanged: () => void }) {
-  const title = connector.title || connector.name;
-  const [scope, setScope] = useScope(inventory, initialScope && scopeAt(initialScope, scopeLevels[0]));
-  const realm = useResource<Doc>(scope.realm ? `/api/realms/${encodeURIComponent(scope.realm)}` : null, revision);
-  return <>
-    <section className="panel" aria-label={`${title} realm`}>
-      <div className="panel-heading"><h2>Realm</h2><span className="badge">Realm only</span></div>
-      <div className="panel-body">
-        <p className="description">A registry credential belongs to one Realm: it authenticates that Realm's image pulls and is bound to a registry server. It is never part of a Config or a cell.</p>
-        <ScopePicker label="Registry" inventory={inventory} levels={[scopeLevels[0]]} value={scope} onChange={setScope} />
-        {realm.loading && !realm.data && scope.realm && <p role="status">Loading the Realm's registry entries…</p>}
-        {realm.error && <ErrorNotice error={realm.error} />}
-      </div>
-    </section>
-    {scope.realm && realm.data && <RegistryCredentialsPanel realm={scope.realm} credentials={registryEntries(realm.data).map(entry => ({ serverAddress: entry.server || undefined, username: entry.username || undefined, secretRef: entry.secret }))} onSaved={onChanged} />}
-  </>;
-}
-
 function ConnectorDetail({ connector, usage, secrets, secretsError, secretsLoading, target, action, identity, revision, inventory, onChanged }: {
   connector: Connector;
   usage: ConnectorUsage[] | undefined;
@@ -360,8 +339,8 @@ function ConnectorDetail({ connector, usage, secrets, secretsError, secretsLoadi
       </div>
     </section>}
     <DefaultsPanel key={`defaults:${scopeParts(target).join("/")}`} connector={connector} identities={identities} revision={revision} inventory={inventory} initialScope={target} onChanged={onChanged} />
-    {storesIdentity && <IdentitiesPanel connector={connector} identities={identities} secretsError={secretsError} revision={revision} inventory={inventory} target={target} onChanged={onChanged} />}
-    {registry && <RegistryPanel connector={connector} revision={revision} inventory={inventory} initialScope={target} onChanged={onChanged} />}
+    {registry && <section className="panel connector-registry-notice" aria-label={`${title} on the Images page`}><div className="panel-body"><p role="note">A registry credential authenticates a Realm's image pulls; nothing of it is injected into a cell. Registry credentials are listed and added on the <a href={imagesLink(target?.realm)}>Images</a> page, per Realm.</p></div></section>}
+    {storesIdentity && !registry && <IdentitiesPanel connector={connector} identities={identities} secretsError={secretsError} revision={revision} inventory={inventory} target={target} onChanged={onChanged} />}
   </>;
 }
 
@@ -381,7 +360,7 @@ export function ConnectorsPage({ name, target, action, identity, revision, inven
     {usage.error && <p className="stale">Config usage could not be loaded: {usage.error.message}</p>}
     {!name && secrets.error && <p className="stale">Identities could not be listed: {secrets.error.message}</p>}
     {!name && <p className="description connectors-intro">A connector is a kind of access a cell needs. An identity is the stored credential that fills it — chosen per cell or per Config, or inherited from a Realm, Space or Stack default.</p>}
-    {catalog.data && !name && <ConnectorList connectors={catalog.data} usage={usage.data} secrets={secrets.data} />}
+    {catalog.data && !name && <ConnectorList connectors={listedConnectors(catalog.data)} usage={usage.data} secrets={secrets.data} />}
     {catalog.data && name && !connector && <div className="error" role="alert"><strong>Unknown connector</strong><p>No connector named {name} is defined. <a href={connectorsLink()}>Back to connectors</a></p></div>}
     {connector && <ConnectorDetail key={connector.name} connector={connector} usage={usage.data} secrets={secrets.data} secretsError={secrets.error} secretsLoading={secrets.loading && !secrets.data} target={scope} action={action} identity={identity} revision={revision} inventory={inventory} onChanged={onChanged} />}
   </>;

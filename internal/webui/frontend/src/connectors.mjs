@@ -377,6 +377,11 @@ export function secretPayload(form, replace = false) {
   return body;
 }
 
+// listedConnectors are the connectors the Connectors page lists: a registry
+// credential authenticates a Realm's image pulls, injects nothing into a cell
+// and is managed on the Images page (#1630). Only the delivery handler decides.
+export function listedConnectors(connectors) { return list(connectors).filter(connector => !isRegistry(connector)); }
+
 // registryEntries reads a Realm's registry credentials: a Secret-backed entry
 // names its Secret, a legacy inline entry its username. A password is never
 // part of either.

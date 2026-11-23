@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   allowedLevels, blockingConnectors, blocksCells, changedMethods, changedPicks, clearMaterial, connectorLevels, defaultGroupChoices, defaultRow, defaultTargets, emptyIdentityForm, formatSecretReference,
-  groupComponents, identitiesFor, identityErrors, identityFields, identityPayload, importPayload, importsFromHost, isRegistry, loginMethods, methodChoices, methodStatuses, originLabel, refKey, refLabel,
+  groupComponents, identitiesFor, listedConnectors, identityErrors, identityFields, identityPayload, importPayload, importsFromHost, isRegistry, loginMethods, methodChoices, methodStatuses, originLabel, refKey, refLabel,
   emptySecretForm, registryEntries, sameRef, scopeAt, scopeFromParts, scopeLevel, scopeQuery, secretErrors, secretPayload, secretRef, secretTypeOf, storesNoValue, takesIdentity, targetScope, teamOf, unresolvedConnectors, usageFor,
 } from "./connectors.mjs";
 import { blueprintForm, buildSpec, componentsWithoutIdentity, connectorsWithoutIdentity, emptyAnswers, formSections, groupChoice, missingAnswers } from "./config-form.mjs";
@@ -389,4 +389,12 @@ test("the secret form validates and builds untagged Secret writes", () => {
   for (const body of [secretPayload({ ...blank, value: "v" }), secretPayload({ ...replaceForm, username: "u", password: "p" }, true)]) {
     assert.equal("connector" in body, false); assert.equal("identity" in body, false); assert.equal("name" in body, false);
   }
+});
+
+// #1630: registry credentials live on the Images page; the list filters by delivery handler only.
+test("listedConnectors leaves out registry-delivered connectors, whatever they are called", () => {
+  const renamed = { ...pulls, name: "image-pull-secrets", title: "Image pulls" };
+  const withMethods = { ...pulls, name: "methods-win", methods: [{ name: "token", component: "x", delivery: "env", slot: "x" }] };
+  assert.deepEqual(listedConnectors([example, pulls, repo, renamed, withMethods]).map(connector => connector.name), ["example-token", repo.name, "methods-win"]);
+  assert.deepEqual(listedConnectors(undefined), []);
 });

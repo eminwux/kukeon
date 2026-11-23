@@ -102,3 +102,4 @@ export function secretTypeOf(doc: { spec?: { type?: string } } | undefined): str
 export function emptySecretForm(existing?: { metadata?: { name?: string }; spec?: { type?: string } }): IdentityForm;
 export function secretErrors(form: IdentityForm, replace?: boolean): string[];
 export function secretPayload(form: IdentityForm, replace?: boolean): Record<string, string | boolean>;
+export function listedConnectors(connectors: Connector[] | undefined): Connector[];

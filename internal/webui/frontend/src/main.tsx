@@ -14,7 +14,7 @@ import { DriftBadge, ScopePath, SocketPath, StateBadge, driftReason, hasDrift } 
 import { DocumentRowLink, Icon } from "./icons";
 import { CgroupPanel } from "./cgroup";
 import { RealmImagesPanel } from "./images";
-import { RegistryCredentialsPanel, type RegistryCredential } from "./registry-credentials";
+import { registryEntries } from "./connectors.mjs";
 import { ImagesPage } from "./image-inventory";
 import { NetworkPanel, networkKinds } from "./network";
 import { DaemonHealthPage, DaemonLogsPage } from "./daemon";
@@ -110,9 +110,7 @@ function ResourceList({ depth, inventory, parent, operations, onLifecycleAction,
 function ResourceDetails({ route, revision }: { route: Route; revision: number }) {
   const depth = route.scope.length - 1;
   const kind = kinds[depth];
-  // A saved registry credential re-reads the realm summary without a full refresh.
-  const [saved, setSaved] = useState(0);
-  const detail = useResource<Doc>(apiPath(route.scope), revision + saved);
+  const detail = useResource<Doc>(apiPath(route.scope), revision);
   const containers = useResource<{ id: string; attachable?: boolean; root?: boolean }[]>(depth === 3 ? `${apiPath(route.scope)}/containers` : null, revision);
   const status = detail.data && (depth === 3 || depth === 4) && !route.document && <StatusSummary status={detail.data.status} kind={kind} />;
   const overview = detail.data && <section className="panel resource-overview"><div className="panel-heading"><h2>{route.document ? "API document" : "Resource overview"}</h2><StateBadge state={detail.data.status?.state} /></div>{route.document ? <pre tabIndex={0} aria-label={`Complete ${kind} JSON`}>{JSON.stringify(detail.data, null, 2)}</pre> : <div className="panel-body"><dl className="details-grid"><dt>Name</dt><dd>{detail.data.metadata.name}</dd><dt>Kind</dt><dd>{detail.data.kind ?? kind}</dd><dt>Scope</dt><dd className="mono-id">{route.scope.join(" / ")}</dd><dt>API version</dt><dd>{detail.data.apiVersion ?? "Not reported"}</dd><dt>Labels</dt><dd>{Object.entries(detail.data.metadata.labels ?? {}).map(([key, value]) => <span className="badge label-badge" key={key}>{key}: {value}</span>)}{!Object.keys(detail.data.metadata.labels ?? {}).length && "No labels"}</dd></dl>{depth < 3 && <a className="text-link" href={listLink(depth + 1, route.scope)}>View {titles[depth + 1].toLowerCase()} in this {kind} →</a>}</div>}</section>;
@@ -127,8 +125,7 @@ function ResourceDetails({ route, revision }: { route: Route; revision: number }
     {overview}
     {related}
     {containerPanel}
-    {depth === 0 && detail.data && !route.document && <RealmImagesPanel realm={route.scope[0]} revision={revision} />}
-    {depth === 0 && detail.data && !route.document && <RegistryCredentialsPanel realm={route.scope[0]} credentials={((detail.data.spec as { registryCredentials?: RegistryCredential[] } | undefined)?.registryCredentials) ?? []} onSaved={() => setSaved(n => n + 1)} />}
+    {depth === 0 && detail.data && !route.document && <RealmImagesPanel realm={route.scope[0]} revision={revision} credentials={registryEntries(detail.data).length} />}
     {detail.data && !route.document && networkKinds.includes(kind) && <NetworkPanel scope={route.scope} revision={revision} />}
     {detail.data && !route.document && <CgroupPanel scope={route.scope} revision={revision} />}
   </>;
