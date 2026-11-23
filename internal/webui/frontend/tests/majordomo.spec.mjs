@@ -92,9 +92,9 @@ async function world(page, { cells = [], configs = [], reports = [], createError
   });
   if (daemon) await page.route("**/api/daemon/health", route => route.fulfill({ json: daemon }));
   await page.routeWebSocket("**/attach", socket => {
-    const entry = { url: new URL(socket.url()).pathname, closed: false, send: data => socket.send(data), close: () => socket.close() };
+    const entry = { url: new URL(socket.url()).pathname, closed: false, messages: [], send: data => socket.send(data), close: () => socket.close() };
     state.sockets.push(entry);
-    socket.onMessage(message => { state.messages.push(message); });
+    socket.onMessage(message => { state.messages.push(message); entry.messages.push(message); });
     socket.onClose(() => { entry.closed = true; });
     socket.send(JSON.stringify({ type: "ready" }));
     if (attach.silent) return;
@@ -436,6 +436,117 @@ const reports = [
   },
 ];
 
+// #1630, item H: every majordomo cell is docked in the panel, one tab each.
+const attachPath = name => `/api/realms/default/spaces/default/stacks/default/cells/${name}/containers/agent/attach`;
+const majordomoCell = (name, configName, createdAt) => cell(name, "Ready", { ...majordomoLabels, "kukeon.io/config": configName }, createdAt ? { createdAt } : {});
+const tabs = page => panel(page).getByRole("tablist", { name: "Majordomo cells" }).getByRole("tab");
+const bracketed = socket => socket.messages.filter(message => Buffer.isBuffer(message) && message.toString().includes("\x1b[200~"));
+
+test("each majordomo cell is a tab ordered by creation; switching keeps every session and Ask pastes into the active one", async ({ page }) => {
+  const failed = cell("api", "Failed");
+  // majordomo sorts first by name, but assistant-b was created first.
+  const state = await world(page, { configs: teamConfigs(), cells: [majordomoCell("majordomo", "kuke-majordomo-claude", "2026-11-02T10:00:00Z"), majordomoCell("assistant-b", "assistant-b", "2026-11-01T10:00:00Z"), failed] });
+  await page.goto(`${server.url}#/resources`);
+  await expect(page.getByRole("region", { name: "Majordomo", exact: true }).locator(".majordomo-count")).toHaveText("2");
+  await entry(page).click();
+  await expect(tabs(page)).toHaveText([/^assistant-b/, /^kuke-majordomo-claude/]);
+  await expect(tabs(page).nth(0)).toHaveAttribute("aria-selected", "true");
+  await expect(tabs(page).nth(1)).toHaveAttribute("aria-selected", "false");
+  await expect(panel(page).locator("#majordomo-screens")).toHaveAttribute("role", "tabpanel");
+  await expect(connection(page)).toContainText("Attached");
+  expect(state.sockets.map(socket => socket.url)).toEqual([attachPath("assistant-b")]);
+
+  // Switching attaches the other cell and keeps the first session open behind it.
+  await tabs(page).nth(1).click();
+  await expect(tabs(page).nth(1)).toHaveAttribute("aria-selected", "true");
+  await expect(connection(page)).toContainText("Attached");
+  await expect.poll(() => state.sockets.map(socket => socket.url)).toEqual([attachPath("assistant-b"), attachPath("majordomo")]);
+  // The keyboard moves between tabs; going back re-attaches nothing.
+  await tabs(page).nth(1).press("ArrowLeft");
+  await expect(tabs(page).nth(0)).toHaveAttribute("aria-selected", "true");
+  await expect(tabs(page).nth(0)).toBeFocused();
+  await tabs(page).nth(0).press("End");
+  await expect(tabs(page).nth(1)).toHaveAttribute("aria-selected", "true");
+  await tabs(page).nth(1).press("Home");
+  await expect(tabs(page).nth(0)).toHaveAttribute("aria-selected", "true");
+  expect(state.sockets).toHaveLength(2);
+  expect(state.sockets.map(socket => socket.closed)).toEqual([false, false]);
+
+  // A majordomo cell that appears later, even one that sorts first, does not take the panel.
+  state.cells.push(majordomoCell("early", "kuke-majordomo-claude", "2026-10-01T10:00:00Z"));
+  // The overlaid panel covers the toolbar at this width, so Refresh is used from the keyboard.
+  await page.getByRole("button", { name: "Refresh" }).press("Enter");
+  // Two cells of one Config are labelled by cell name.
+  await expect(tabs(page)).toHaveText([/^early/, /^assistant-b/, /^majordomo/]);
+  await expect(tabs(page).nth(1)).toHaveAttribute("aria-selected", "true");
+  await expect(tabs(page).nth(1)).toContainText("assistant-b");
+
+  // Ask pastes into the active tab's session only.
+  await page.goto(`${server.url}#/resource/default/default/default/api`);
+  await page.locator(".cell-page-title-row").getByRole("button", { name: "Ask majordomo about cell default / default / default / api" }).click();
+  await expect.poll(() => bracketed(state.sockets[0]).length).toBe(1);
+  expect(bracketed(state.sockets[1])).toHaveLength(0);
+  expect(state.sockets).toHaveLength(2);
+
+  // Every docked cell's own screen points at the panel instead of opening a second terminal.
+  for (const name of ["assistant-b", "majordomo"]) {
+    await page.goto(`${server.url}#/workspace/default/default/default/${name}`);
+    await expect(page.getByRole("region", { name: "Terminal workspace" })).toContainText("This cell's terminal is docked in the Majordomo panel.");
+  }
+  expect(state.sockets).toHaveLength(2);
+
+  // The choice survives a reload.
+  await page.reload();
+  await entry(page).click();
+  await expect(tabs(page).nth(1)).toHaveAttribute("aria-selected", "true");
+  await expect(tabs(page).nth(1)).toContainText("assistant-b");
+});
+
+test("Add majordomo offers only the harness configs no cell was created from and opens the new cell in its own tab", async ({ page }) => {
+  const state = await world(page, { configs: teamConfigs(), cells: [majordomoCell("majordomo", "kuke-majordomo-claude", "2026-11-01T10:00:00Z")] });
+  await page.goto(`${server.url}#/resources`);
+  await entry(page).click();
+  await expect(connection(page)).toContainText("Attached");
+  // One cell: no tab strip.
+  await expect(panel(page).getByRole("tablist")).toHaveCount(0);
+  await panel(page).getByRole("button", { name: "Add majordomo" }).click();
+  const add = panel(page).getByRole("group", { name: "Add majordomo" });
+  await expect(add.getByLabel("Harness").locator("option")).toHaveText(["assistant-b"]);
+  await add.getByRole("button", { name: "Add majordomo" }).click();
+  await expect.poll(() => state.requests).toEqual(["preview assistant-b as assistant-b", "create assistant-b as assistant-b", "POST cells/assistant-b/start"]);
+  await expect(tabs(page)).toHaveText([/^kuke-majordomo-claude/, /^assistant-b/]);
+  await expect(tabs(page).nth(1)).toHaveAttribute("aria-selected", "true");
+  await expect(connection(page)).toContainText("Attached");
+  await expect.poll(() => state.sockets.map(socket => socket.url)).toEqual([attachPath("majordomo"), attachPath("assistant-b")]);
+  expect(state.sockets[0].closed).toBe(false);
+  // Every harness config now has a cell: nothing is left to add.
+  await expect(panel(page).getByRole("button", { name: "Add majordomo" })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Majordomo", exact: true }).locator(".majordomo-count")).toHaveText("2");
+});
+
+for (const [width, height] of [[1440, 900], [390, 844]]) test(`three majordomo tabs fit the panel at ${width}×${height} without scrolling the page sideways`, async ({ page }) => {
+  await page.setViewportSize({ width, height });
+  await page.addInitScript(() => localStorage.setItem("kukeon-majordomo-open", "true"));
+  const configs = [...teamConfigs(), config("kuke-majordomo-codex-with-a-long-name", majordomoLabels)];
+  await world(page, { configs, cells: [
+    majordomoCell("majordomo", "kuke-majordomo-claude", "2026-11-01T10:00:00Z"),
+    majordomoCell("assistant-b", "assistant-b", "2026-11-02T10:00:00Z"),
+    majordomoCell("kuke-majordomo-codex-with-a-long-name", "kuke-majordomo-codex-with-a-long-name", "2026-11-03T10:00:00Z"),
+  ] });
+  await page.goto(`${server.url}#/resources`);
+  await expect(panel(page)).toBeVisible();
+  await expect(tabs(page)).toHaveCount(3);
+  const box = await panel(page).boundingBox();
+  for (let i = 0; i < 3; i++) {
+    await expect(tabs(page).nth(i)).toBeVisible();
+    const tab = await tabs(page).nth(i).boundingBox();
+    expect(tab.x).toBeGreaterThanOrEqual(box.x - 1);
+    expect(tab.x + tab.width).toBeLessThanOrEqual(box.x + box.width + 1);
+    expect(tab.height).toBeGreaterThanOrEqual(24);
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+});
+
 test("the Health page shows the latest report, its findings and the history", async ({ page }) => {
   const state = await world(page, { configs: teamConfigs(), reports, cells: [runningMajordomo()] });
   await page.goto(`${server.url}#/resources`);
@@ -482,9 +593,12 @@ test("the Health page shows the sweep schedule from the task config, runs a swee
   await expect(schedule.getByRole("link", { name: "kuke-majordomo-claude-health-sweep" })).toHaveAttribute("href", "#/configs/default/default/default/kuke-majordomo-claude-health-sweep");
   const rows = schedule.locator(".health-sweep dl");
   await expect(rows).toContainText("@hourly (UTC)");
-  await expect(rows.locator("dd").nth(1)).toHaveText("Yes");
-  await expect(rows.locator("time").nth(0)).toHaveAttribute("datetime", "2026-11-17T10:00:00Z");
-  await expect(rows.locator("time").nth(1)).toHaveAttribute("datetime", "2026-11-17T09:00:00Z");
+  // The entry's badge carries the state; the list does not repeat it. A suspended schedule has no next fire.
+  await expect(schedule.locator(".health-sweep .state-badge")).toHaveText("Suspended");
+  await expect(rows.locator("dt", { hasText: /^State$/ })).toHaveCount(0);
+  await expect(rows.locator("dt", { hasText: "Next fire" }).locator("+ dd")).toHaveText("— (suspended)");
+  await expect(rows.locator("time")).toHaveCount(1);
+  await expect(rows.locator("time").nth(0)).toHaveAttribute("datetime", "2026-11-17T09:00:00Z");
   await expect(rows).toContainText("kuke-majordomo-claude-health-sweep-aa11bb");
   await expect(rows).toContainText("create cell: disk pressure");
 
@@ -531,7 +645,7 @@ test("an enabled sweep shows no reapply instructions, and a host without majordo
   await page.goto(`${server.url}#/health`);
   const schedule = page.getByRole("region", { name: "Sweep schedule" });
   await expect(schedule.locator(".health-sweep .state-badge")).toHaveText("Scheduled");
-  await expect(schedule.locator(".health-sweep dl dd").nth(1)).toHaveText("No");
+  await expect(schedule.locator(".health-sweep dl dt", { hasText: "Next fire" }).locator("+ dd")).toHaveText("—");
   await expect(schedule.getByRole("note")).toHaveCount(0);
 
   await page.unrouteAll({ behavior: "ignoreErrors" });

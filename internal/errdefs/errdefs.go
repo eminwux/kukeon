@@ -524,6 +524,10 @@ var (
 	ErrListSecrets    = errors.New("failed to list secrets")
 	ErrDeleteSecret   = errors.New("failed to delete secret")
 
+	// ErrSecretAlreadyExists is a create that would overwrite a stored
+	// Secret: the web UI's New Secret never replaces one (issue #1630).
+	ErrSecretAlreadyExists = errors.New("secret already exists")
+
 	// Repo-related errors (containers[].repos[], issue #617).
 
 	ErrRepoNameRequired      = errors.New("repo name is required")

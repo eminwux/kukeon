@@ -287,7 +287,8 @@ func apiErrorStatus(err error) (int, string) {
 	case errors.Is(err, errdefs.ErrDaemonLogUnavailable),
 		errors.Is(err, errdefs.ErrContainerLogUnavailable):
 		status, code = http.StatusNotFound, "log_unavailable"
-	case errors.Is(err, errdefs.ErrCellAlreadyExists):
+	case errors.Is(err, errdefs.ErrCellAlreadyExists),
+		errors.Is(err, errdefs.ErrSecretAlreadyExists):
 		status, code = http.StatusConflict, "already_exists"
 	case errors.Is(err, errdefs.ErrSecretInUse),
 		errors.Is(err, errdefs.ErrVolumeInUse):

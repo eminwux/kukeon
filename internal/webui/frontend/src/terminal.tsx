@@ -270,7 +270,9 @@ export function TerminalSession({ session, active, expanded, theme, update, pend
 
   useEffect(() => {
     if (!active) { terminal.current?.blur(); return; }
-    const frame = requestAnimationFrame(() => { fitNow.current(); terminal.current?.focus(); });
+    // A session activated from a tab list (the majordomo tabs) leaves focus on the tab, so the arrow keys
+    // keep moving between tabs instead of typing into the terminal.
+    const frame = requestAnimationFrame(() => { fitNow.current(); if (!document.activeElement?.closest('[role="tablist"]')) terminal.current?.focus(); });
     return () => cancelAnimationFrame(frame);
   }, [active]);
 
@@ -308,9 +310,9 @@ export function TerminalSession({ session, active, expanded, theme, update, pend
   </div>;
 }
 
-// dockedCell is the cell whose terminal lives in the majordomo panel. Its sessions are mounted
-// there and nowhere else, so this workspace neither renders nor attaches them.
-export function TerminalWorkspace({ scope, revision, inventory, manager, theme, visible = true, controlsHost, onExpandedChange, dockedCell = "", onOpenDock, operation, onLifecycleAction }: { scope: string[] | null; revision: number; inventory: InventoryResource; manager: Manager; theme: Theme; visible?: boolean; controlsHost: HTMLDivElement | null; onExpandedChange: (expanded: boolean) => void; dockedCell?: string; onOpenDock?: () => void; operation?: LifecycleFeedback; onLifecycleAction?: (scope: string[], action: LifecycleAction, state?: string) => void }) {
+// dockedCells are the cells whose terminals live in the majordomo panel, by cellId. Their sessions are
+// mounted there and nowhere else, so this workspace neither renders nor attaches them.
+export function TerminalWorkspace({ scope, revision, inventory, manager, theme, visible = true, controlsHost, onExpandedChange, dockedCells = [], onOpenDock, operation, onLifecycleAction }: { scope: string[] | null; revision: number; inventory: InventoryResource; manager: Manager; theme: Theme; visible?: boolean; controlsHost: HTMLDivElement | null; onExpandedChange: (expanded: boolean) => void; dockedCells?: string[]; onOpenDock?: () => void; operation?: LifecycleFeedback; onLifecycleAction?: (scope: string[], action: LifecycleAction, state?: string) => void }) {
   const [expanded, setExpanded] = useState(false);
   const [skipAutoAttachFor, setSkipAutoAttachFor] = useState("");
   const expandButton = useRef<HTMLButtonElement>(null);
@@ -348,7 +350,7 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
   // Containers without a terminal are still listed: their output shows in the log view.
   const logOnly = workloads.filter(container => !container.attachable);
   const key = scope ? cellId(scope) : "";
-  const docked = !!key && key === dockedCell;
+  const docked = !!key && dockedCells.includes(key);
   const openInCell = manager.sessions.filter(item => cellId(item.scope) === key);
   // Attachable first, then log-only, then retained sessions whose container is gone: the default stays the first attachable one.
   const options = [
@@ -428,7 +430,7 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
         </div>}
       </>}
       <div className="terminal-screens" id="terminal-screens" ref={screens}>
-        {manager.sessions.filter(session => cellId(session.scope) !== dockedCell).map(session => <TerminalSession key={session.id} session={session} active={!!scope && visible && !logs && session.id === currentId} expanded={expanded} theme={theme} update={manager.update} pending={manager.pastes[session.id]} onPasted={manager.pasteDelivered} />)}
+        {manager.sessions.filter(session => !dockedCells.includes(cellId(session.scope))).map(session => <TerminalSession key={session.id} session={session} active={!!scope && visible && !logs && session.id === currentId} expanded={expanded} theme={theme} update={manager.update} pending={manager.pastes[session.id]} onPasted={manager.pasteDelivered} />)}
         {/* Not mounting the log while hidden is what keeps cellRead free of log requests (#1566). */}
         {visible && logs && <ContainerLog key={sessionId(scope!, selected)} scope={scope!} container={selected} attachable={selectedEligible} live={!unavailable} cellState={cellState} revision={revision} theme={theme} expanded={expanded} />}
       </div>

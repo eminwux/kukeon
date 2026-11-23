@@ -1,4 +1,4 @@
-import { useResource, ErrorNotice, failureTitle } from "./request";
+import { useResource, ErrorNotice, failureTitle, type Resource } from "./request";
 import { StoredDisclosure, disclosedKinds } from "./disclosure";
 import { apiPath, kinds } from "./routes";
 import {
@@ -8,7 +8,7 @@ import {
 } from "./network-format.js";
 
 // NetworkDetail mirrors kukeonv1.GetNetworkDetailResult (issue #1411).
-type NetworkDetail = { space?: SpaceNetwork; cell?: CellNetwork; container?: ContainerNetwork };
+export type NetworkDetail = { space?: SpaceNetwork; cell?: CellNetwork; container?: ContainerNetwork };
 
 // networkKinds are the resource kinds with networking fields; realms and
 // stacks have none.
@@ -79,9 +79,12 @@ function ContainerSection({ container, cell }: { container: ContainerNetwork; ce
   </>;
 }
 
-export function NetworkPanel({ scope, revision }: { scope: string[]; revision: number }) {
+// NetworkPanel reads the scope's network detail itself, unless the page already read it and passes it in
+// (the cell page shares one read with its overview's IP address row).
+export function NetworkPanel({ scope, revision, detail: shared }: { scope: string[]; revision: number; detail?: Resource<NetworkDetail> }) {
   const kind = kinds[scope.length - 1];
-  const detail = useResource<NetworkDetail>(`${apiPath(scope)}/network`, revision);
+  const own = useResource<NetworkDetail>(shared ? null : `${apiPath(scope)}/network`, revision);
+  const detail = shared ?? own;
   const data = detail.data && !Array.isArray(detail.data) ? detail.data : undefined;
   const badge = <span className="badge">{detail.error ? "Stale values" : detail.loading ? "Refreshing values" : "Read by kukeond"}</span>;
   const body = <div className="panel-body">

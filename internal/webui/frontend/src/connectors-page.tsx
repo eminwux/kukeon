@@ -1,14 +1,15 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { ErrorNotice, useResource, type Failure } from "./request";
 import { useNotify } from "./notifications";
-import type { Doc, InventoryResource } from "./inventory";
+import type { InventoryResource } from "./inventory";
+import { imagesLink } from "./routes";
 import { CatalogDeleteConfirmation } from "./catalog";
 import { catalogDeleteAPI } from "./catalog-url.mjs";
-import { RegistryCredentialsPanel } from "./registry-credentials";
-import { IdentityForm, IdentitySelect, ScopeGroup, ScopePicker, connectorAPI, connectorsLink, levelLabel, sendJSON, toFailure } from "./connector-ui";
+import { IdentityForm, IdentitySelect, ScopeGroup, ScopePicker, connectorAPI, connectorsLink, levelLabel, newIdentityLink, rotateIdentityLink, sendJSON, toFailure } from "./connector-ui";
+import { Disclosure } from "./disclosure";
 import {
   allowedLevels, connectorLevels, defaultRow, defaultScopeName, defaultTargets, deliveryEnv, deliveryFile, deliveryGit, deliveryRegistry, deliveryStateVolume, identitiesFor, importPayload, importsFromHost,
-  isRegistry, loginMethods, refKey, refLabel, refScope, registryEntries, scopeAt, scopeFromParts, scopeLevel, scopeLevels, scopeParts, scopeQuery, secretRef, targetScope, usageFor,
+  isRegistry, listedConnectors, loginMethods, refKey, refLabel, refScope, scopeAt, scopeFromParts, scopeLevel, scopeLevels, scopeParts, scopeQuery, secretRef, targetScope, usageFor,
 } from "./connectors.mjs";
 import type { Connector, ConnectorDefault, ConnectorUsage, DefaultTarget, Identity, ImportForm, ImportResult, Scope, SecretRef } from "./connectors.mjs";
 
@@ -65,9 +66,9 @@ function ConnectorList({ connectors, usage, secrets }: { connectors: Connector[]
 // identity (#1591): the SSH key and git configuration of the account running
 // `kuke serve`, stored as one identity — the same import as
 // `kuke connector import git`. Only paths and readable fields come back.
-function ImportFromHost({ connector, inventory, onChanged }: { connector: Connector; inventory: InventoryResource; onChanged: () => void }) {
+function ImportFromHost({ connector, inventory, initiallyOpen = false, onChanged }: { connector: Connector; inventory: InventoryResource; initiallyOpen?: boolean; onChanged: () => void }) {
   const title = connector.title || connector.name;
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(initiallyOpen);
   const [scope, setScope] = useScope(inventory, undefined);
   const [form, setForm] = useState<Omit<ImportForm, "realm">>({ hosts: "", name: "", key: "", passphraseFile: "", makeDefault: true });
   const [pending, setPending] = useState(false);
@@ -117,27 +118,22 @@ function ImportFromHost({ connector, inventory, onChanged }: { connector: Connec
 }
 
 // IdentitiesPanel lists a connector's identities — the Secrets tagged with it —
-// and creates, rotates and deletes them.
-function IdentitiesPanel({ connector, identities, secrets, secretsError, revision, inventory, initialScope, onChanged }: {
+// and deletes them. Creating and rotating one are pages of their own.
+function IdentitiesPanel({ connector, identities, secretsError, revision, inventory, target, onChanged }: {
   connector: Connector;
   identities: Identity[];
-  secrets: unknown[] | undefined;
   secretsError: Failure | undefined;
   revision: number;
   inventory: InventoryResource;
-  initialScope: Scope | undefined;
+  target: Scope | undefined;
   onChanged: () => void;
 }) {
   const title = connector.title || connector.name;
   const registry = isRegistry(connector);
-  const [store, setStore] = useScope(inventory, initialScope && scopeAt(initialScope, scopeLevels[0]));
-  const [rotating, setRotating] = useState<Identity>();
   const [confirming, setConfirming] = useState<Identity>();
   const [pending, setPending] = useState("");
   const [failure, setFailure] = useState<{ target: string; message: string }>();
   const { notify } = useNotify();
-  const levels = connectorLevels(connector);
-  const storable = !!store.realm && levels.includes(scopeLevel(store));
   const fieldNames = connector.fields.map(field => field.name);
 
   async function remove(identity: Identity) {
@@ -153,7 +149,7 @@ function IdentitiesPanel({ connector, identities, secrets, secretsError, revisio
   }
 
   return <section className="panel connector-identities" aria-label={`${title} identities`}>
-    <div className="panel-heading"><h2>Identities</h2><span className="badge">{identities.length} stored</span></div>
+    <div className="panel-heading"><h2>Identities</h2><span className="badge">{identities.length} stored</span>{!registry && <a className="document-action" href={newIdentityLink(connector.name, target)}>New identity</a>}</div>
     <div className="panel-body">
       <p className="description">An identity is a Secret tagged <code>{connector.name}</code>. Only its name, scope, type and readable fields are shown: values are write-only and never returned to the browser.</p>
       {secretsError && <p className="stale">Identities could not be listed: {secretsError.message}</p>}
@@ -165,25 +161,61 @@ function IdentitiesPanel({ connector, identities, secrets, secretsError, revisio
           <td>{identity.type}</td>
           <td>{[...fieldNames.filter(name => name in identity.identity), ...Object.keys(identity.identity).filter(name => !fieldNames.includes(name))].map(name => <span className="badge label-badge" key={name}>{name}: {identity.identity[name]}</span>)}{!Object.keys(identity.identity).length && <span className="description">—</span>}</td>
           <td className="connector-row-actions">
-            <button type="button" className="subtle-button" aria-label={`Rotate ${title} identity ${refLabel(identity)}`} disabled={!!pending} onClick={() => setRotating(identity)}>Rotate</button>
+            <a className="subtle-button" href={rotateIdentityLink(connector.name, identity, target)} aria-label={`Rotate ${title} identity ${refLabel(identity)}`}>Rotate</a>
             <button type="button" className="subtle-button danger-action" aria-label={`Delete ${title} identity ${refLabel(identity)}`} disabled={!!pending} onClick={() => setConfirming(identity)}>{pending === refKey(identity) ? "Deleting…" : "Delete"}</button>
           </td>
         </tr>)}
-      </tbody></table></div> : <p>No {title} identities are stored.</p>}
-      {rotating && <IdentityForm key={`rotate:${refKey(rotating)}`} connector={connector} scope={secretRef(rotating)!} existing={rotating} secrets={secrets} onSaved={() => { setRotating(undefined); onChanged(); }} onCancel={() => setRotating(undefined)} />}
-      {importsFromHost(connector) && <ImportFromHost connector={connector} inventory={inventory} onChanged={onChanged} />}
-      {registry ? <p className="description">A registry identity is created together with the registry entry that uses it, below.</p> : <>
-        <ScopeGroup title="Stored identity scope" description={<>Where a new {title} identity is stored: the Realm, Space or Stack its Secret is saved in.</>}><ScopePicker label="Identity" inventory={inventory} levels={levels} value={store} onChange={setStore} />
-          {store.realm && !storable && <p className="field-error" role="alert">{title} identities are stored at {levels.join(" or ")} level.</p>}</ScopeGroup>
-        <IdentityForm key={`new:${scopeParts(store).join("/")}`} connector={connector} scope={store} secrets={secrets} onSaved={() => onChanged()} />
-      </>}
+      </tbody></table></div> : <p>No {title} identities are stored.{!registry && <> <a href={newIdentityLink(connector.name, target)}>Create one</a>.</>}</p>}
     </div>
     {confirming && <CatalogDeleteConfirmation kind="secrets" doc={{ metadata: { name: confirming.name, realm: confirming.realm, ...(confirming.space ? { space: confirming.space } : {}), ...(confirming.stack ? { stack: confirming.stack } : {}) } }} revision={revision} inventory={inventory} onCancel={() => setConfirming(undefined)} onConfirm={() => { const identity = confirming; setConfirming(undefined); void remove(identity); }} />}
   </section>;
 }
 
-// DefaultTargetEditor shows what each level of a scope sets as the default of
-// one connector method, which one wins, and sets or clears a level.
+// IdentityPage is #/connectors/<name>/new-identity — where the identity is
+// stored, its form and, for a connector that imports from the host, the import
+// — or #/connectors/<name>/rotate-identity, the rotate form of one identity.
+// Saving or cancelling returns to the connector page.
+function IdentityPage({ connector, action, identity, target, identities, secrets, secretsLoading, inventory, onChanged }: {
+  connector: Connector;
+  action: string;
+  identity: string[] | undefined;
+  target: Scope | undefined;
+  identities: Identity[];
+  secrets: unknown[] | undefined;
+  secretsLoading: boolean;
+  inventory: InventoryResource;
+  onChanged: () => void;
+}) {
+  const title = connector.title || connector.name;
+  const back = connectorsLink(connector.name, target);
+  const leave = () => { window.location.hash = back; };
+  const saved = () => { onChanged(); leave(); };
+  const levels = connectorLevels(connector);
+  const [store, setStore] = useScope(inventory, target && scopeAt(target, scopeLevels[0]));
+  const storable = !!store.realm && levels.includes(scopeLevel(store));
+  const rotate = action === "rotate-identity";
+  const wanted = identity ? refKey({ name: identity.at(-1) ?? "", ...scopeFromParts(identity.slice(0, -1)) }) : "";
+  const existing = rotate ? identities.find(item => refKey(item) === wanted) : undefined;
+  return <>
+    <div className="detail-actions"><a href={back}>← Back to {title}</a></div>
+    <section className="panel connector-identity-page" aria-label={rotate ? `Rotate ${title} identity` : `New ${title} identity`}><div className="panel-body">
+      {rotate ? existing ? <IdentityForm key={`rotate:${refKey(existing)}`} connector={connector} scope={secretRef(existing)!} existing={existing} secrets={secrets} onSaved={saved} onCancel={leave} />
+        : secretsLoading ? <p role="status">Loading identities…</p>
+          : <div className="error" role="alert"><strong>Identity not found</strong><p>No {title} identity {identity?.at(-1) ? <code>{identity.at(-1)}</code> : ""} is stored{identity && identity.length > 1 ? <> in {identity.slice(0, -1).join(" / ")}</> : ""}. <a href={back}>Back to {title}</a></p></div>
+        : <>
+          <ScopeGroup title="Stored identity scope" description={<>Where the new {title} identity is stored: the Realm, Space or Stack its Secret is saved in.</>}><ScopePicker label="Identity" inventory={inventory} levels={levels} value={store} onChange={setStore} />
+            {store.realm && !storable && <p className="field-error" role="alert">{title} identities are stored at {levels.join(" or ")} level.</p>}</ScopeGroup>
+          <IdentityForm key={`new:${scopeParts(store).join("/")}`} connector={connector} scope={store} secrets={secrets} onSaved={saved} onCancel={leave} />
+          {importsFromHost(connector) && <ImportFromHost connector={connector} inventory={inventory} initiallyOpen onChanged={onChanged} />}
+        </>}
+    </div></section>
+  </>;
+}
+
+// DefaultTargetEditor leads with the identity that resolves for one connector
+// method in the chosen scope and the level it comes from, then lets the user
+// choose another at any level the connector allows. The per-level table, with
+// its Clear buttons, sits behind a disclosure.
 function DefaultTargetEditor({ connector, target, scope, row, identities, onChanged }: { connector: Connector; target: DefaultTarget; scope: Scope; row: ConnectorDefault | undefined; identities: Identity[]; onChanged: () => void }) {
   const title = connector.title || connector.name;
   const name = target.method ? `${title} ${target.method}` : title;
@@ -191,6 +223,7 @@ function DefaultTargetEditor({ connector, target, scope, row, identities, onChan
   const shown = scopeLevels.filter(level => scopeLevel(scopeAt(scope, level)) === level);
   const [level, setLevel] = useState("");
   const [choice, setChoice] = useState<Partial<SecretRef>>();
+  const [levelsOpen, setLevelsOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<Failure>();
   const { notify } = useNotify();
@@ -208,29 +241,33 @@ function DefaultTargetEditor({ connector, target, scope, row, identities, onChan
     } catch (caught) { setError(toFailure(caught)); }
     finally { setPending(false); }
   }
+  const setLevels = shown.filter(item => row?.levels?.[item]).length;
   return <div className="connector-default" role="group" aria-label={`${name} default`}>
-    <h3>{target.method ? <><code>{target.method}</code> method</> : "Default identity"}</h3>
+    <h3>{target.method ? <><code>{target.method}</code> method</> : "Resolves to"}</h3>
+    <p className={`connector-effective${row?.effective ? "" : " is-unresolved"}`} role="status">{row?.effective
+      ? <><strong className="connector-effective-name">{row.effective.name}</strong> <span className="description">{refScope(row.effective).join(" / ")}</span> <span className="badge">{row.origin ? `${row.origin[0].toUpperCase()}${row.origin.slice(1)} default` : "Default"}</span>{row.origin && <span className="description"> — from the {levelLabel(row.origin, scope)} level</span>}</>
+      : <><strong className="connector-effective-name">No default resolves in this scope.</strong> <span className="description">A Config here that picks no identity cannot create cells.</span></>}</p>
     <p className="description">Delivered as {deliveryText({ delivery: target.delivery, ...connector.methods.find(method => method.name === target.method) })}.{target.description && <> {target.description}</>}</p>
-    <div className="table-scroll"><table aria-label={`${name} defaults by level`}><thead><tr><th scope="col">Level</th><th scope="col">Scope</th><th scope="col">Default identity</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead><tbody>
-      {shown.map(item => {
-        const set = row?.levels?.[item];
-        return <tr key={item}>
-          <td>{item}</td>
-          <td className="scope-cell">{scopeParts(scopeAt(scope, item)).join(" / ")}</td>
-          <td>{set ? <><code>{set.name}</code> <span className="description">{refScope(set).join(" / ")}</span></> : allowed.includes(item) ? <span className="description">Not set</span> : <span className="description">Not available: {title} defaults are set at {connectorLevels(connector).join(" or ")} level</span>}{row?.origin === item && <> <span className="badge">Effective</span></>}</td>
-          <td className="connector-row-actions">{set && allowed.includes(item) && <button type="button" className="subtle-button" aria-label={`Clear ${name} default at ${item} level`} disabled={pending} onClick={() => void save(item, null)}>Clear</button>}</td>
-        </tr>;
-      })}
-    </tbody></table></div>
-    <p className="connector-effective" role="status">{row?.effective ? <>Effective: <code>{row.effective.name}</code> <span className="description">{refScope(row.effective).join(" / ")}</span> — from the {row.origin} level.</> : <>No default in this scope. A Config here that picks no identity cannot create cells.</>}</p>
-    <h4>{target.method ? "Per-method scope" : "Level to set"}</h4>
-    <p className="description">The level of the default scope above at which {target.method ? <>the <code>{target.method}</code> method's default</> : "this default"} is saved.{target.method && " Each method keeps its own default."}</p>
     <div className="schema-fields">
       <label className="schema-field"><span>Level</span><select aria-label={`${name} default level`} value={picked} disabled={pending || !allowed.length} onChange={event => setLevel(event.target.value)}>{allowed.map(item => <option key={item} value={item}>{levelLabel(item, scope)}</option>)}</select></label>
-      <IdentitySelect label={`${name} default identity`} identities={identities} value={choice} emptyLabel="Select an identity…" disabled={pending} realm={scope.realm} onChange={setChoice} />
+      {identities.length ? <IdentitySelect label={`${name} default identity`} identities={identities} value={choice} emptyLabel="Select an identity…" disabled={pending} realm={scope.realm} onChange={setChoice} />
+        : <div className="schema-field"><span>Identity</span><p className="description">No {title} identity is stored. <a href={newIdentityLink(connector.name, scope)}>Create an identity</a> to set it as the default.</p></div>}
     </div>
-    <div className="connector-actions"><button type="button" disabled={!ref || !picked || pending} onClick={() => void save(picked, ref ?? null)}>{pending ? "Saving…" : "Set default"}</button></div>
+    {identities.length > 0 && <div className="connector-actions"><button type="button" disabled={!ref || !picked || pending} onClick={() => void save(picked, ref ?? null)}>{pending ? "Saving…" : "Set default"}</button></div>}
     {error && <ErrorNotice error={error} kind="Scope" />}
+    <Disclosure level={3} className="connector-default-levels" title="Defaults by level" summary={`${setLevels} of ${shown.length} set`} label={`${name} defaults by level`} open={levelsOpen} onToggle={setLevelsOpen}>
+      <div className="table-scroll"><table aria-label={`${name} defaults by level`}><thead><tr><th scope="col">Level</th><th scope="col">Scope</th><th scope="col">Default identity</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead><tbody>
+        {shown.map(item => {
+          const set = row?.levels?.[item];
+          return <tr key={item}>
+            <td>{item}</td>
+            <td className="scope-cell">{scopeParts(scopeAt(scope, item)).join(" / ")}</td>
+            <td>{set ? <><code>{set.name}</code> <span className="description">{refScope(set).join(" / ")}</span></> : allowed.includes(item) ? <span className="description">Not set</span> : <span className="description">Not available: {title} defaults are set at {connectorLevels(connector).join(" or ")} level</span>}{row?.origin === item && <> <span className="badge">Effective</span></>}</td>
+            <td className="connector-row-actions">{set && allowed.includes(item) && <button type="button" className="subtle-button" aria-label={`Clear ${name} default at ${item} level`} disabled={pending} onClick={() => void save(item, null)}>Clear</button>}</td>
+          </tr>;
+        })}
+      </tbody></table></div>
+    </Disclosure>
   </div>;
 }
 
@@ -241,11 +278,11 @@ function DefaultsPanel({ connector, identities, revision, inventory, initialScop
   const defaults = useResource<ConnectorDefault[]>(scope.realm && targets.length ? `/api/connectors/defaults?${scopeQuery(scope)}` : null, revision);
   if (!targets.length) return null;
   const levels = connectorLevels(connector);
-  return <section className="panel connector-defaults" aria-label={`${title} defaults`}>
-    <div className="panel-heading"><h2>Defaults</h2><span className="badge">{levels.join(" · ")}</span></div>
+  return <section className="panel connector-defaults" aria-label={`${title} default identity`}>
+    <div className="panel-heading"><h2>Default identity</h2><span className="badge">{levels.join(" · ")}</span></div>
     <div className="panel-body">
       <p className="description">A default fills {title} for every Config in the scope that picked no identity. The deepest level wins: Stack over Space over Realm. Changing one takes effect at once — no Config is re-rendered.</p>
-      <ScopeGroup title="Default scope" description={<>Whose defaults are shown and set below: every level of this scope, from its Realm down.</>}><ScopePicker label="Default" inventory={inventory} levels={levels} value={scope} onChange={setScope} /></ScopeGroup>
+      <ScopeGroup title="Default scope" description={<>The scope whose default is shown and set: every level of it, from its Realm down.</>}><ScopePicker label="Default" inventory={inventory} levels={levels} value={scope} onChange={setScope} /></ScopeGroup>
       {!scope.realm ? <p className="description">Choose a Realm to see and set its defaults.</p> : <>
         {defaults.loading && !defaults.data && <p role="status">Loading defaults…</p>}
         {defaults.error && <ErrorNotice error={defaults.error} kind="Scope" />}
@@ -256,32 +293,14 @@ function DefaultsPanel({ connector, identities, revision, inventory, initialScop
   </section>;
 }
 
-// RegistryPanel is the registry-delivered connector: Realm only. It lists the
-// Realm's registry entries and saves Secret-backed ones through the same form
-// the Realm page uses.
-function RegistryPanel({ connector, revision, inventory, initialScope, onChanged }: { connector: Connector; revision: number; inventory: InventoryResource; initialScope: Scope | undefined; onChanged: () => void }) {
-  const title = connector.title || connector.name;
-  const [scope, setScope] = useScope(inventory, initialScope && scopeAt(initialScope, scopeLevels[0]));
-  const realm = useResource<Doc>(scope.realm ? `/api/realms/${encodeURIComponent(scope.realm)}` : null, revision);
-  return <>
-    <section className="panel" aria-label={`${title} realm`}>
-      <div className="panel-heading"><h2>Realm</h2><span className="badge">Realm only</span></div>
-      <div className="panel-body">
-        <p className="description">A registry credential belongs to one Realm: it authenticates that Realm's image pulls and is bound to a registry server. It is never part of a Config or a cell.</p>
-        <ScopePicker label="Registry" inventory={inventory} levels={[scopeLevels[0]]} value={scope} onChange={setScope} />
-        {realm.loading && !realm.data && scope.realm && <p role="status">Loading the Realm's registry entries…</p>}
-        {realm.error && <ErrorNotice error={realm.error} />}
-      </div>
-    </section>
-    {scope.realm && realm.data && <RegistryCredentialsPanel realm={scope.realm} credentials={registryEntries(realm.data).map(entry => ({ serverAddress: entry.server || undefined, username: entry.username || undefined, secretRef: entry.secret }))} onSaved={onChanged} />}
-  </>;
-}
-
-function ConnectorDetail({ connector, usage, secrets, secretsError, target, revision, inventory, onChanged }: {
+function ConnectorDetail({ connector, usage, secrets, secretsError, secretsLoading, target, action, identity, revision, inventory, onChanged }: {
   connector: Connector;
   usage: ConnectorUsage[] | undefined;
   secrets: unknown[] | undefined;
   secretsError: Failure | undefined;
+  secretsLoading: boolean;
+  action?: string;
+  identity?: string[];
   target: Scope | undefined;
   revision: number;
   inventory: InventoryResource;
@@ -293,6 +312,7 @@ function ConnectorDetail({ connector, usage, secrets, secretsError, target, revi
   const registry = isRegistry(connector);
   const storesIdentity = registry || defaultTargets(connector).length > 0;
   const logins = loginMethods(connector);
+  if (action && storesIdentity && !registry) return <IdentityPage connector={connector} action={action} identity={identity} target={target} identities={identities} secrets={secrets} secretsLoading={secretsLoading} inventory={inventory} onChanged={onChanged} />;
   return <>
     <div className="detail-actions"><a href={connectorsLink()}>← Back to connectors</a></div>
     <section className="panel" aria-label={`${title} connector`}>
@@ -318,13 +338,13 @@ function ConnectorDetail({ connector, usage, secrets, secretsError, target, revi
         <ul className="state-list">{missing.map(item => <li key={`${configLink(item.config)}:${item.component}`}><div><a className="resource-name" href={configLink(item.config)}>{item.config.name}</a><p className="description">{[item.config.realm, item.config.space, item.config.stack].filter(Boolean).join(" / ")}{item.method && <> · {item.method} method</>}</p>{item.message && <p className="setup-error">{item.message}</p>}</div><a className="document-action" href={connectorsLink(connector.name, targetScope(item.config))} aria-label={`Set a ${title} default for the scope of ${item.config.name}`}>Set a default for its scope</a></li>)}</ul>
       </div>
     </section>}
-    {storesIdentity && <IdentitiesPanel connector={connector} identities={identities} secrets={secrets} secretsError={secretsError} revision={revision} inventory={inventory} initialScope={target} onChanged={onChanged} />}
     <DefaultsPanel key={`defaults:${scopeParts(target).join("/")}`} connector={connector} identities={identities} revision={revision} inventory={inventory} initialScope={target} onChanged={onChanged} />
-    {registry && <RegistryPanel connector={connector} revision={revision} inventory={inventory} initialScope={target} onChanged={onChanged} />}
+    {registry && <section className="panel connector-registry-notice" aria-label={`${title} on the Images page`}><div className="panel-body"><p role="note">A registry credential authenticates a Realm's image pulls; nothing of it is injected into a cell. Registry credentials are listed and added on the <a href={imagesLink(target?.realm)}>Images</a> page, per Realm.</p></div></section>}
+    {storesIdentity && !registry && <IdentitiesPanel connector={connector} identities={identities} secretsError={secretsError} revision={revision} inventory={inventory} target={target} onChanged={onChanged} />}
   </>;
 }
 
-export function ConnectorsPage({ name, target, revision, inventory, onChanged, onTitle }: { name?: string; target?: string[]; revision: number; inventory: InventoryResource; onChanged: () => void; onTitle?: (connector: { name: string; title: string }) => void }) {
+export function ConnectorsPage({ name, target, action, identity, revision, inventory, onChanged, onTitle }: { name?: string; target?: string[]; action?: string; identity?: string[]; revision: number; inventory: InventoryResource; onChanged: () => void; onTitle?: (connector: { name: string; title: string }) => void }) {
   const catalog = useResource<Connector[]>("/api/connectors", revision);
   const usage = useResource<ConnectorUsage[]>("/api/connectors/status", revision);
   const secrets = useResource<unknown[]>("/api/catalog/secrets", revision);
@@ -340,8 +360,8 @@ export function ConnectorsPage({ name, target, revision, inventory, onChanged, o
     {usage.error && <p className="stale">Config usage could not be loaded: {usage.error.message}</p>}
     {!name && secrets.error && <p className="stale">Identities could not be listed: {secrets.error.message}</p>}
     {!name && <p className="description connectors-intro">A connector is a kind of access a cell needs. An identity is the stored credential that fills it — chosen per cell or per Config, or inherited from a Realm, Space or Stack default.</p>}
-    {catalog.data && !name && <ConnectorList connectors={catalog.data} usage={usage.data} secrets={secrets.data} />}
+    {catalog.data && !name && <ConnectorList connectors={listedConnectors(catalog.data)} usage={usage.data} secrets={secrets.data} />}
     {catalog.data && name && !connector && <div className="error" role="alert"><strong>Unknown connector</strong><p>No connector named {name} is defined. <a href={connectorsLink()}>Back to connectors</a></p></div>}
-    {connector && <ConnectorDetail key={connector.name} connector={connector} usage={usage.data} secrets={secrets.data} secretsError={secrets.error} target={scope} revision={revision} inventory={inventory} onChanged={onChanged} />}
+    {connector && <ConnectorDetail key={connector.name} connector={connector} usage={usage.data} secrets={secrets.data} secretsError={secrets.error} secretsLoading={secrets.loading && !secrets.data} target={scope} action={action} identity={identity} revision={revision} inventory={inventory} onChanged={onChanged} />}
   </>;
 }

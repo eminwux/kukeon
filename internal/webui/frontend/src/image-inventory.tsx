@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { ErrorNotice, useResource } from "./request";
 import { imagesLink } from "./routes";
+import { RegistryCredentialsPanel } from "./registry-credentials";
+import { registryEntries } from "./connectors.mjs";
 import { UNAVAILABLE, formatImageCreated, formatImageSize, formatImageText, shortDigest, sortedLabels } from "./image-format.js";
 
 // InventoryImage mirrors the kuke serve image-inventory response (#1406).
@@ -8,7 +10,7 @@ import { UNAVAILABLE, formatImageCreated, formatImageSize, formatImageText, shor
 export type InventoryImage = { name: string; size: number | null; createdAt: string | null; digest: string; mediaType: string; labels: Record<string, string> };
 type ImageList = { realm: string; namespace: string; images: InventoryImage[] };
 type ImageDetail = { realm: string; namespace: string; image: InventoryImage };
-type RealmDoc = { metadata: { name: string } };
+type RealmDoc = { metadata: { name: string }; spec?: unknown };
 
 const pageSize = 25;
 function inventoryAPI(realm: string, ref?: string): string {
@@ -26,6 +28,21 @@ function RealmPicker({ realm, revision }: { realm: string; revision: number }) {
     {!names.length && <option value="">{realms.loading ? "Loading realms…" : "No realms"}</option>}
     {names.map(name => <option key={name} value={name}>{name}</option>)}
   </select></label>;
+}
+
+// RealmRegistryCredentials is the selected Realm's registry credentials, the
+// pull credentials of its images (#1630): listed and added or replaced here,
+// where they take effect, rather than among the connectors of a cell.
+function RealmRegistryCredentials({ realm, revision }: { realm: string; revision: number }) {
+  const [saved, setSaved] = useState(0);
+  const doc = useResource<RealmDoc>(`/api/realms/${encodeURIComponent(realm)}`, revision + saved);
+  if (doc.loading && !doc.data) return <p role="status">Loading registry credentials…</p>;
+  if (doc.error && !doc.data) return <ErrorNotice error={doc.error} />;
+  if (!doc.data) return null;
+  return <>
+    {doc.error && <p className="stale">Stale registry credentials — refresh failed.</p>}
+    <RegistryCredentialsPanel realm={realm} credentials={registryEntries(doc.data).map(entry => ({ serverAddress: entry.server || undefined, username: entry.username || undefined, secretRef: entry.secret }))} onSaved={() => setSaved(n => n + 1)} />
+  </>;
 }
 
 function ImageListView({ realm, revision }: { realm: string; revision: number }) {
@@ -59,6 +76,7 @@ function ImageListView({ realm, revision }: { realm: string; revision: number })
       {!list.loading && !rows.length && <div className="empty-state"><h3>{list.error ? "Images could not be loaded" : images.length ? "No matching images" : "No images found"}</h3><p>{list.error ? "Refresh to retry." : images.length ? "Try another search." : `No images are installed in realm ${realm}'s containerd namespace.`}</p></div>}
       <div className="pagination"><span>{rows.length ? `${currentPage * pageSize + 1}–${Math.min((currentPage + 1) * pageSize, rows.length)} of ${rows.length}` : "0 results"}</span><button disabled={!currentPage} onClick={() => setPage(currentPage - 1)}>Previous</button><button disabled={(currentPage + 1) * pageSize >= rows.length} onClick={() => setPage(currentPage + 1)}>Next</button></div>
     </section>
+    <RealmRegistryCredentials realm={realm} revision={revision} />
   </>;
 }
 

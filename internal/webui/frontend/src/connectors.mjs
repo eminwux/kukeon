@@ -340,6 +340,49 @@ export function clearMaterial(form) {
   return { ...form, value: "", password: "", privateKey: "", passphrase: "", publicKey: "", certificate: "", knownHosts: "" };
 }
 
+// Untagged Secrets (#1630): New Secret and Replace value write any of the
+// three Secret types without a connector. The material is the identity form's.
+export const secretTypes = [secretOpaque, secretBasicAuth, secretSSHKey];
+// secretTypeOf is a stored Secret's type: an opaque Secret reads back empty.
+export function secretTypeOf(doc) { return text(doc?.spec?.type) || secretOpaque; }
+// emptySecretForm is a blank New Secret form, or the Replace form of a stored
+// Secret: its name and type, material blank.
+export function emptySecretForm(existing) {
+  const type = existing ? secretTypeOf(existing) : secretOpaque;
+  return { ...emptyIdentityForm({ secretTypes: [type] }), name: text(existing?.metadata?.name) };
+}
+// secretErrors names what keeps a New Secret or Replace form from being sent.
+export function secretErrors(form, replace = false) {
+  const errors = [];
+  if (!replace && !trimmed(form?.name)) errors.push("Name is required.");
+  if (!replace && trimmed(form?.name).startsWith(".")) errors.push("A name cannot start with a dot.");
+  if (!secretTypes.includes(form?.type)) errors.push(`Type must be one of: ${secretTypes.join(", ")}.`);
+  if (form?.type === secretBasicAuth) { if (!trimmed(form.username)) errors.push("Username is required."); if (!text(form.password)) errors.push("Password or token is required."); }
+  else if (form?.type === secretSSHKey) { if (!trimmed(form.privateKey)) errors.push("Private key is required."); }
+  // kukeond trims only trailing newlines from an opaque value (identityMaterial).
+  else if (!text(form?.value).replace(/[\r\n]+$/, "")) errors.push("Value is required.");
+  return errors;
+}
+// secretPayload builds the body of POST /api/catalog/secrets/{name}: the type,
+// replace for Replace value, and the material of that type. The name and scope
+// travel in the URL; material only ever in this body.
+export function secretPayload(form, replace = false) {
+  const type = secretTypes.includes(form?.type) ? form.type : secretOpaque;
+  const body = { type };
+  if (replace) body.replace = true;
+  if (type === secretBasicAuth) { body.username = trimmed(form.username); body.password = text(form.password); }
+  else if (type === secretSSHKey) {
+    body.privateKey = text(form.privateKey);
+    for (const key of ["passphrase", "publicKey", "certificate", "knownHosts"]) if (text(form[key])) body[key] = text(form[key]);
+  } else body.value = text(form?.value);
+  return body;
+}
+
+// listedConnectors are the connectors the Connectors page lists: a registry
+// credential authenticates a Realm's image pulls, injects nothing into a cell
+// and is managed on the Images page (#1630). Only the delivery handler decides.
+export function listedConnectors(connectors) { return list(connectors).filter(connector => !isRegistry(connector)); }
+
 // registryEntries reads a Realm's registry credentials: a Secret-backed entry
 // names its Secret, a legacy inline entry its username. A password is never
 // part of either.

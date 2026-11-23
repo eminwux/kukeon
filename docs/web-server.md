@@ -37,6 +37,28 @@ headers expand and collapse. The sidebar initially shows 25 groups and 100 cells
 per group, with controls to reveal more. The selected key and collapsed groups are stored only in
 this browser. If inventory becomes unavailable, retained cells are marked stale.
 
+The **Spaces** table has a **CIDR** column: each Space's subnet, read through
+`GET …/spaces/{space}/network` (a Space document carries no CIDR) for the rows on
+the current page only, at most six requests at a time. An allocated subnet, a
+legacy conflist subnet (**(legacy conflist)**), an unallocated one (**Not
+allocated**) and a failed read (**Unavailable**, with the error as its tooltip)
+render differently; a failed read never breaks the table. In the **Cells** table,
+a cell a schedule created carries a **Scheduled** badge beside its state.
+
+A cell page's **Resource overview** has:
+
+- **IP address** — the IPv4 CNI assigned to the cell's root container, which owns
+  the network namespace the other containers join, and that container's name;
+  without one, why: **Not running**, **Host network (no CNI attachment)** or
+  **Not assigned (no CNI attachment cached)**; a failed read is **Unavailable**
+  with the error as its tooltip, never the last address. The page makes one
+  `GET …/cells/{cell}/network` request per refresh, shared by this row and the
+  Network section; the terminal view makes none.
+- **Schedule**, for a cell a schedule created (label `kukeon.io/schedule`) or a
+  cell of a scheduled Config — "Scheduled run of `<config>`, fired `<time>`",
+  where the fire time is read from the `<config>-<unix seconds>` name, and the
+  Config's cron, next fire and last fire, linking to the Config.
+
 The toolbar's **New Cell** button opens a guided workflow with **From Config** and **Manual** methods.
 Config creation uses the selected CellConfig and its referenced Blueprint;
 manual creation exposes Cell and Container authorable fields in Basic and
@@ -214,9 +236,10 @@ majordomo, even if it selects that role.
 ### Sidebar entry and enabling
 
 A **Majordomo** entry is always at the top of the sidebar (and on the collapsed
-rail). It shows the majordomo cell's state, **Not enabled** when the configs
-exist but no cell does, or **Needs kuke team init** when no majordomo config is
-found. Clicking it opens the panel.
+rail). It shows the active majordomo cell's state — with a count badge when there is
+more than one — **Not enabled** when the configs exist but no cell does, or
+**Needs kuke team init** when no majordomo config is found. Clicking it opens
+the panel.
 
 - **No majordomo configs**: the panel says to run `kuke team init` on the host.
 - **Configs, no cell**: pick a harness config and click **Enable majordomo**.
@@ -227,8 +250,23 @@ found. Clicking it opens the panel.
 - **Stopped cell**: the panel shows its state and a **Start** button.
 - **Running cell**: the panel attaches.
 
-Once a majordomo cell exists the enable action is gone, so the UI never creates
-a second one.
+Every interactive majordomo cell is docked in the panel — one created by hand
+from another harness Config as well. With more than one, the panel shows one tab
+per cell under its header, labelled with the Config the cell came from (by cell
+name when two cells share a Config; the full scope is its tooltip) and a state
+dot; arrow keys, `Home` and `End` move between tabs, and focus stays on the tab
+rather than moving into the terminal. Cells are ordered by creation time, then scope. The active tab is stored
+in this browser (`kukeon-majordomo-active`) and changes only when you change it:
+another cell appearing, starting or sorting first never takes the panel. If the
+active cell is gone, the panel falls back to the first Ready one. Switching tabs
+detaches nothing: a tab's session attaches the first time it is shown and stays
+attached afterwards.
+
+With at least one majordomo cell and at least one majordomo Config that has no
+cell, the header's **Add majordomo** button shows the setup form restricted to
+those Configs, with **Cancel**. It creates and starts a cell named after the
+chosen Config (the first cell is still `majordomo`) and makes it the active
+tab. No limit is enforced; the layout is designed for three tabs, and more wrap.
 
 ### Docked panel
 
@@ -244,8 +282,9 @@ the toolbar button; the toolbar button also hides it.
   **Reconnect** attaches again in one click. **Detach** closes the session
   until you reconnect.
 
-The majordomo cell's own terminal screen (`#/workspace/…/majordomo`) points at
-the panel instead of opening a second terminal for the same session.
+The terminal screen of every docked majordomo cell (`#/workspace/…/<cell>`)
+points at the panel instead of opening a second terminal for the same session.
+**Ask majordomo** pastes into the active tab.
 
 ### Ask majordomo
 
@@ -275,9 +314,11 @@ Everything on it is read from kukeond through `kuke serve`; the server reads no
 kukeon file itself.
 
 - **Sweep schedule**, from each health-sweep task config's `spec.schedule` and
-  `status.schedule`: the cron expression, whether it is suspended, the next and
-  last fire, and the last error. These are the values
-  `kuke get config <name> -o yaml` prints.
+  `status.schedule`, rendered by the same component as a Config's
+  [Schedule panel](#blueprints-configs-volumes-and-secrets): scheduled or
+  suspended, the cron expression and time zone, the concurrency policy, the
+  next and last fire, the last and active cells, the skipped fires and the last
+  error. These are the values `kuke get config <name> -o yaml` prints.
 - **Run sweep now** starts one sweep cell from that config, the same as
   `kuke run -d <config>`. A sweep submits a report only if it finds something.
 - While sweeps are suspended, the page shows the task entry that turns them on
@@ -337,9 +378,37 @@ open the relevant realm, space, stack, or cell.
 
 Blueprints, configs, and volumes may be realm-, space-, or stack-scoped. Secrets
 may also be cell-scoped. List responses expose metadata; open **View document**
-to retrieve all fields supported by the daemon's detail API. Volume overviews
-show the returned reclaim policy. Secret views display metadata only; secret
-`spec.data` is cleared before HTTP serialization in both lists and details.
+to retrieve all fields supported by the daemon's detail API. Secret views display
+metadata only; secret `spec.data` is cleared before HTTP serialization in both
+lists and details.
+
+The **Volumes** table shows each Volume's **Reclaim policy** (`Delete` when
+unset) and **Mounted by**, the number of mounts by cells in the inventory ("—"
+while the inventory is loading or incomplete). A Volume's page lists, under
+**Mounted by**, every cell in the inventory whose spec mounts it, whatever the
+cell's state: cell, state, container, mount path, read-only or read-write, and
+whether the mount is `ensure: true` (created with the cell). A `volumeRef` names
+its Volume exactly; a bare `source` name is resolved the way kukeond resolves it:
+the Volume of that name at the cell's Stack, else its Space, else its Realm.
+Templated names (`${…}`) are resolved only when a cell is materialized and are
+not counted. **Login state for** lists the Configs whose connector status names
+the Volume as a harness login's state volume (`status.connectors[].volumeRef`).
+Volume metadata carries no labels, so the Volume page has no Labels row; size,
+host path and creation time are not recorded by the daemon and not shown.
+
+A **Config** page shows a **Schedule** panel when the Config has
+`spec.schedule`: Scheduled or Suspended, the cron expression with its time zone
+(UTC when unset), the concurrency policy, the starting deadline when set, the
+next and last fire, the last cell, the active cells, the skipped fires and the
+last error. Cells that still exist link to their page; a deleted one is marked
+so — scheduled cells delete themselves when they end. Before kukeond's
+scheduler first visits the Config, the status rows read "—". A Config without a
+schedule shows **Schedule: None** in its overview. The **Configs** table has
+**Schedule** and **Next fire** columns with the content of `kuke get config`'s
+`SCHEDULE` and `NEXT` columns (the next fire in UTC, or `suspended`). The Health
+page renders its sweep schedules through the same component. No control edits a
+schedule: it is edited in the Config document (for the kuke team, in the team's
+declaration on the [Teams](#teams) page).
 
 Config overviews link to their referenced Blueprint and list Cells whose stored
 provenance points to that exact scoped Config. Blueprint overviews list
@@ -356,17 +425,36 @@ Refresh updates the current list/document and reference checks. Empty results,
 loading, retrieval failures, missing targets, and retained stale data are shown
 separately. No catalog data is read directly from daemon storage.
 
-Documents cannot be edited in the browser, but every Blueprint, Config, Volume,
-and Secret row has a **Delete** row action matching `kuke delete
+Blueprints, Configs and Volumes cannot be edited in the browser. Secrets can be
+created and replaced (below). Every Blueprint, Config, Volume, and Secret row has
+a **Delete** row action matching `kuke delete
 blueprint|config|volume|secret`. The confirmation names the kind and full scope
 and needs an acknowledgement before anything is sent. For Configs it lists the
 Cells created from the Config; for Blueprints it lists the Configs that reference
-it and their Cells. Only relationships the UI already loads are shown. Deleting
+it and their Cells; for Volumes it lists the cells mounting it and says that
+kukeond refuses while a Ready or Degraded cell mounts the Volume. Only relationships the UI already loads are shown. Deleting
 a Config or Blueprint never deletes those dependents. Volume deletion removes the
 daemon-provisioned directory and its data. Secret values are never shown. The row
 is removed only when a fresh read reports the resource missing; daemon refusals,
 such as a Secret still referenced by a cell or a Volume mounted by a running
 cell, are shown verbatim and the row stays.
+
+The **Secrets** list has a **New Secret** action (`#/new-secret`): choose where
+the Secret is stored — a Realm, Space or Stack from the inventory — then a name,
+a type (`opaque`, `basic-auth` or `ssh-key`) and that type's material. The Secret
+is stored untagged; a connector identity is created from its connector's page. A
+name already stored in that scope is refused with 409 and nothing is written;
+the form links to the stored Secret. An untagged Secret's page — including a
+cell-scoped one — has **Replace value** (also a row action, and
+`#/secrets/…?edit=1`): it keeps the name, scope and type and asks only for new
+material. Running cells keep the value they started with; a cell reads the new
+value when its containers are created again, and a restart re-reads only Secrets
+delivered as environment variables. A Secret whose `spec.connector` is set has
+no Replace form: its page names the connector and links to it, where the
+identity is rotated, and the write route refuses it. Material follows the
+identity form's rules: it travels only in the POST body, is cleared from the form
+before the request is sent, and is never returned to the browser or echoed in an
+error.
 
 ## Cgroup details
 
@@ -425,10 +513,12 @@ allocator state, and the CNI result cache, and returns them over its
 Unix-socket API. `kuke serve` never reads `/opt/kukeon` or `/var/lib/cni`
 itself. Refresh re-reads every runtime value.
 
-- **Space**: network name (`<realm>-<space>`), bridge, subnet, CNI config path,
+- **Space**: network name (`<realm>-<space>`), bridge, subnet (also the Spaces
+  table's **CIDR** column), CNI config path,
   whether the CNI network (conflist) is present, the egress default, and the
   egress allow rules (host or CIDR, with ports).
-- **Cell**: network mode, bridge, the root container's IPv4, the network
+- **Cell**: network mode, bridge, the root container's IPv4 (also the
+  overview's **IP address** row, from the same request), the network
   namespace owner, and a per-container summary of host network, host PID, and
   declared ports. A cell is in **Host** mode when any of its containers sets
   `hostNetwork`, the same rule the runner uses to put the root container (and
@@ -482,13 +572,18 @@ views; a failed refresh keeps the last list and marks it stale.
 
 kukeond reads the inventory over its Unix-socket API (the read-only
 `ListImages` and `GetImage` methods); `kuke serve` never opens the containerd
-socket. The view is read-only: load, delete, prune, and build images with
-`kuke image` and `kuke build`, which stay daemon-independent.
+socket. The image list is read-only: load, delete, prune, and build images with
+`kuke image` and `kuke build`, which stay daemon-independent. Below the list,
+the selected Realm's [registry credentials](#registry-credentials) are shown
+with the form to add or replace one; switching the Realm switches both.
 
 ## Registry credentials
 
-A realm's overview includes **Registry credentials**, the per-realm
-private-registry pull credentials `kuke create registry-credential` manages.
+The [Images](#images) page (`#/images/{realm}`) includes **Registry
+credentials**, the per-realm private-registry pull credentials
+`kuke create registry-credential` manages: they authenticate the Realm's image
+pulls, and nothing of them is injected into a cell. A realm's overview shows how
+many are configured in its Images panel and links to the Images page.
 The table lists each entry's server and username; an entry with an empty
 server is the default, which applies to the registry named in the image
 reference. Passwords and tokens are never displayed.
@@ -506,7 +601,7 @@ carries the token; an entry that still has an inline password is replaced by
 the Secret-backed one. The response is
 `{ "realm", "server", "username", "secret", "action" }`, without the token.
 kukeond applies the updated realm as a compatible change (no realm recreate),
-and the overview reloads after a successful save. Validation, permission, and daemon
+and the list reloads after a successful save. Validation, permission, and daemon
 errors use the standard notices and never repeat the submitted token.
 
 Every realm response (`/api/realms`, `/api/realms/{name}`, and its **View
@@ -520,6 +615,11 @@ is written per connector — it renders what `GET /api/connectors` returns, so a
 connector added as one `connector.yaml` appears here with its identity form,
 its methods and its defaults.
 
+The list leaves out a connector delivered as a registry credential (no methods,
+`delivery: registry`): opening its page shows a notice linking to the
+[Images](#images) page, where registry credentials are managed. The UI decides
+this by the delivery handler only, never by a connector's name.
+
 The list shows, per connector, how it is delivered (one line per method), how
 many identities are stored, how many Configs require it, and how many of those
 have no identity. A connector with such Configs carries a **Needs a default**
@@ -528,24 +628,28 @@ affected Config's scope.
 
 A connector's page (`#/connectors/<name>`) has:
 
+- **Default identity** — for a chosen scope and each method that takes an
+  identity, the identity that resolves there and the level it comes from, or
+  **No default resolves in this scope**. Below it, a Level and an Identity
+  picker set another identity as the default at any level the connector allows
+  (with no identity stored, a link to the new-identity page replaces the picker).
+  **Defaults by level**, a disclosure, holds the per-level table with its
+  **Clear** buttons. The deepest level wins. A change takes effect at once: no
+  Config is re-rendered. A connector that can only be defaulted at some levels
+  says so on the others.
 - **Identities** — the Secrets tagged with the connector: name, scope, type and
   the readable identity fields. Values are write-only and never returned to the
-  browser. The form below the table stores a new identity at a chosen Realm,
-  Space or Stack; its fields come from the connector's descriptor (a token, a
-  username and password, or an SSH key with its optional parts). **Rotate**
-  replaces the value stored under an existing name; **Delete** uses the same
-  confirmation as the Secrets catalog, and a Secret still referenced by a cell
-  is refused.
-- **Defaults** — for a chosen scope, what each level (Realm, Space, Stack) sets
-  as the default identity of each method, and which one is **Effective**. The
-  deepest level wins. **Set default** writes one level, **Clear** removes it. A
-  change takes effect at once: no Config is re-rendered. A connector that can
-  only be defaulted at some levels says so on the others.
+  browser. **New identity** opens `#/connectors/<name>/new-identity`: where the
+  identity is stored (a Realm, Space or Stack), the identity form — its fields
+  come from the connector's descriptor (a token, a username and password, or an
+  SSH key with its optional parts) — and, for a connector that imports from the
+  host, the **Import from host** form, open. **Rotate** opens
+  `#/connectors/<name>/rotate-identity?identity=[realm, space?, stack?, name]`,
+  which replaces the value stored under that name. Both return to the connector
+  page on success or Cancel. **Delete** uses the same confirmation as the
+  Secrets catalog, and a Secret still referenced by a cell is refused.
 - **Needs a default** — the Configs that require the connector and resolve to
   no identity, each with a link that opens the defaults on that Config's scope.
-- For the connector that authenticates image pulls, the Realm's registry
-  entries and the [Registry credentials](#registry-credentials) form instead of
-  scoped defaults: a registry credential belongs to one Realm.
 
 A method that keeps its login in the harness state volume has no identity and
 no default; the page says so and shows no picker for it.
@@ -801,6 +905,8 @@ persist in this browser when local storage is available.
 - `GET /api/catalog/{kind}/{name}` reads a complete daemon-exposed document.
 - `POST /api/catalog/{kind}/{name}/delete` deletes one resource through the
   daemon's `DeleteBlueprint`, `DeleteConfig`, `DeleteVolume`, or `DeleteSecret`.
+- `POST /api/catalog/secrets/{name}` creates an untagged Secret, or replaces
+  the material of a stored one, through the daemon's `CreateSecret`.
 
 Optional list query parameters `realm`, `space`, `stack`, and (secrets only)
 `cell` filter the scope subtree. Detail queries require `realm` and use the exact
@@ -817,6 +923,30 @@ running cell, returns `in_use` (409). Other daemon errors keep their usual
 mapping. Every error message is the daemon's own text. A success returns
 `kind`, `name`, `scope`, and `deleted`, and for Configs `backRefCells`: the
 Cells that still carry the Config's lineage label.
+
+The Secret write takes the detail scope query (`realm`, then optional `space`,
+`stack` and, for a replace only, `cell`) and requires `Content-Type:
+application/json` with exactly one JSON object of at most 256 KiB; unknown fields
+are refused. The body is `{ "type"?, "replace"?, "value"?, "username"?,
+"password"?, "privateKey"?, "passphrase"?, "publicKey"?, "certificate"?,
+"knownHosts"? }`: `value` for `opaque` (a trailing newline is trimmed),
+`username` and `password` for `basic-auth`, `privateKey` (a trailing newline is
+added) and the optional rest for `ssh-key`. Without `replace` it creates: `type`
+defaults to `opaque`, a cell scope is refused, and a Secret already stored under
+that name and scope returns `already_exists` (409) and writes nothing. With
+`replace` it replaces: a missing Secret returns `not_found` (404), the type is
+the stored one (a different `type` is refused), and a Secret whose
+`spec.connector` is set is refused with 400 naming the connector — rotate it
+through the connector's identities route instead, since an overwrite would
+erase the tag. Missing material, an unknown type, a type change, an unsafe name
+or one starting with `.`, and a non-JSON or malformed body return
+`invalid_request` (400); the server validates the material the way kukeond does
+before sending it. The existence, type and tag checks read the stored Secret
+before writing it and are not atomic: a concurrent write to the same name and
+scope (another tab or `kuke create secret`) between the read and the write is
+not detected. A success returns `{ "name", "scope", "type", "action" }`,
+with `action` `created` or `updated`. No response or error ever contains the
+submitted material.
 
 ### Connectors HTTP API
 

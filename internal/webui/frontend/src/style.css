@@ -647,6 +647,17 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--er
 .majordomo-header .terminal-connection-state { display: inline-flex; align-items: center; gap: 8px; width: auto; min-width: 0; flex: 1; padding: 0 6px; font-size: var(--font-sm); cursor: default; }
 .majordomo-connection-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
 .majordomo-header-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+/* One tab per docked majordomo cell (#1630): three fit the 320px minimum dock width; more wrap. */
+.majordomo-tabs { display: flex; flex-wrap: wrap; gap: 4px; flex: 0 0 auto; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.majordomo-tab { display: inline-flex; align-items: center; flex: 1 1 88px; min-width: 0; max-width: 100%; min-height: var(--target-min); padding: 4px 8px; border-color: transparent; background: transparent; color: var(--muted); font-size: var(--font-sm); }
+.majordomo-tab[aria-selected="true"] { border-color: var(--line); background: var(--selected); color: var(--text); font-weight: 600; }
+.majordomo-tab:focus-visible { outline: 2px solid transparent; box-shadow: var(--focus-ring); }
+.majordomo-tab-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.majordomo-tab .state-dot { flex-shrink: 0; }
+.majordomo-tab .tone-ok { color: var(--status-ok); }
+.majordomo-tab .tone-stopped { color: var(--status-stopped); }
+.majordomo-tab .tone-pending { color: var(--status-pending); }
+.majordomo-count { min-width: 20px; text-align: center; }
 .majordomo-question { flex: 0 0 auto; margin: 0; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--status-pending-bg); color: var(--status-pending); font-size: var(--font-sm); overflow-wrap: anywhere; }
 .majordomo-setup { display: grid; gap: 12px; align-content: start; padding: 16px; font-size: var(--font-md); line-height: 1.6; }
 .majordomo-setup p { margin: 0; }
@@ -716,6 +727,12 @@ td .ask-majordomo { margin-left: 8px; vertical-align: middle; }
 .health-suspended { margin: 6px 0; padding-left: 18px; }
 .connector-default table, .connector-identities table { background: var(--panel); }
 .connector-effective { margin: 0; font-size: var(--font-sm); }
+/* The Default identity panel leads with what resolves (#1630). */
+.connector-default .connector-effective { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 10px 12px; border: 1px solid var(--status-ok-line); border-radius: 7px; background: var(--status-ok-bg); }
+.connector-default .connector-effective.is-unresolved { border-color: var(--status-warning-line); background: var(--status-warning-bg); }
+.connector-effective-name { font-size: var(--font-lg); overflow-wrap: anywhere; }
+.connector-default-levels.panel { margin: 0; background: var(--panel); }
+a.subtle-button { display: inline-flex; align-items: center; min-height: var(--target-min); padding: 4px 10px; border: 1px solid var(--line); border-radius: 7px; }
 .identity-form .identity-key { grid-column: 1 / -1; }
 .identity-form textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--font-sm); }
 .identity-form .error, .connector-fix .error, .connector-default .error { margin: 0; }
@@ -732,3 +749,4 @@ td .ask-majordomo { margin-left: 8px; vertical-align: middle; }
 .team-picker legend { padding: 0 4px; }
 .team-source { margin: 8px 0 12px; display: grid; gap: 8px; }
 .team-plan h3 { margin: 12px 0 4px; }
+.cidr-error { color: var(--status-error); }
