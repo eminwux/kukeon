@@ -194,6 +194,15 @@ func (c *client) pullImage(namespace string, imageRef string, creds []RegistryCr
 	return image, nil
 }
 
+// PullImage ensures ref is present in namespace, pulling it anonymously when
+// it is not already local. It wraps pullImage with no registry credentials,
+// so `kuke daemon recreate` can fetch the kukeond image before it stops the
+// running daemon. kukeon.internal refs keep pullImage's no-pull contract.
+func (c *client) PullImage(namespace, ref string) error {
+	_, err := c.pullImage(namespace, ref, nil)
+	return err
+}
+
 // LoadImage imports an OCI/docker image tarball into the specified
 // containerd namespace and returns the names of the imported images.
 //

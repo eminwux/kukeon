@@ -350,6 +350,11 @@ type Runner interface {
 	// namespace. Returns errdefs.ErrImageNotFound when the ref is absent.
 	DeleteImage(namespace, ref string) error
 
+	// PullImage ensures ref is present in the given containerd namespace,
+	// pulling it anonymously when absent. kukeon.internal refs are never
+	// pulled.
+	PullImage(namespace, ref string) error
+
 	// PruneImages reclaims dangling image layers and the orphaned leases
 	// pinning them in the given containerd namespace, leaving tagged
 	// images and snapshots backing live containers untouched.

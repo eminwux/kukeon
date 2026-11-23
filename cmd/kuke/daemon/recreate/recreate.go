@@ -21,9 +21,12 @@
 // dev-loop: `kuke daemon recreate --kukeond-image <ref>` replaces the manual
 // `kuke daemon reset && kuke build && kuke init` sequence.
 //
-// Image-load is intentionally out of scope: the verb assumes the desired
-// kukeond image is already in the kuke-system realm. Operators call
-// `kuke build` (or `kuke image load`) before `kuke daemon recreate`.
+// The image is pulled into the kuke-system realm when it is not already there,
+// before anything is stopped: a ref that cannot be pulled fails the verb with
+// the running daemon untouched (issue #1638). kukeon.internal/... refs are
+// never pulled; they must already be built into the realm with `kuke build`.
+// The staged kukepause under <RunPath>/bin is refreshed right before the cell
+// is re-provisioned, so an upgraded kukepause reaches the host.
 package recreate
 
 import (
@@ -57,6 +60,17 @@ type MockSocketDirKey struct{}
 // Production always calls ProvisionKukeondCell on the controller.
 type MockProvisionKukeondCellKey struct{}
 
+// MockPullImageKey injects a stub for the pre-teardown image pull so unit
+// tests can drive the recreate flow without containerd. The stub receives
+// the resolved image ref. Production pulls the ref into the kuke-system realm
+// through the in-process client.
+type MockPullImageKey struct{}
+
+// MockStageKukepauseKey injects a stub for the kukepause restage step so unit
+// tests need neither a kukepause binary nor root. Production copies
+// kukepause into <RunPath>/bin and re-asserts root:kukeon 0o750 on it.
+type MockStageKukepauseKey struct{}
+
 // MockWaitForReadyKey injects a stub for the wait-for-ready step so unit
 // tests can verify the teardown phase without a real listening socket.
 type MockWaitForReadyKey struct{}
@@ -79,10 +93,7 @@ func resolveProvisionKukeondCell(
 		return stub()
 	}
 
-	runPath := viper.GetString(config.KUKEON_ROOT_RUN_PATH.ViperKey)
-	if runPath == "" {
-		runPath = config.DefaultRunPath()
-	}
+	runPath := resolveRunPath()
 	socketPath := viper.GetString(config.KUKEOND_SOCKET.ViperKey)
 	if socketPath == "" {
 		socketPath = config.KUKEOND_SOCKET.Default
@@ -112,6 +123,51 @@ func resolveProvisionKukeondCell(
 
 	_, err = ctrl.ProvisionKukeondCell()
 	return err
+}
+
+// resolvePullImage pulls image into the kuke-system realm unless it is
+// already there. Tests inject a stub via MockPullImageKey.
+func resolvePullImage(cmd *cobra.Command, logger *slog.Logger, image string) error {
+	if stub, ok := cmd.Context().Value(MockPullImageKey{}).(func(string) error); ok && stub != nil {
+		return stub(image)
+	}
+	client := local.New(cmd.Context(), logger, controller.Options{
+		RunPath:          resolveRunPath(),
+		ContainerdSocket: viper.GetString(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey),
+	})
+	defer func() { _ = client.Close() }()
+	return client.PullImage(cmd.Context(), consts.KukeSystemRealmName, image)
+}
+
+// resolveStageKukepause refreshes the staged kukepause under <RunPath>/bin.
+// Tests inject a stub via MockStageKukepauseKey. Production mirrors
+// `kuke init`: copy, then root:kukeon 0o750 so later root containers can exec
+// it.
+func resolveStageKukepause(cmd *cobra.Command) error {
+	if stub, ok := cmd.Context().Value(MockStageKukepauseKey{}).(func() error); ok && stub != nil {
+		return stub()
+	}
+	path, err := lifecycle.StageKukepause(resolveRunPath())
+	if err != nil {
+		return err
+	}
+	gid, err := lifecycle.LookupKukeonGID()
+	if err != nil {
+		return fmt.Errorf("resolve kukeon group gid: %w", err)
+	}
+	if err = sysuser.ChownAndChmod(path, 0, gid, lifecycle.KukepauseStagedMode); err != nil {
+		return fmt.Errorf("restore kukepause exec bit %q: %w", path, err)
+	}
+	cmd.Printf("kukepause staged: %s\n", path)
+	return nil
+}
+
+func resolveRunPath() string {
+	runPath := viper.GetString(config.KUKEON_ROOT_RUN_PATH.ViperKey)
+	if runPath == "" {
+		runPath = config.DefaultRunPath()
+	}
+	return runPath
 }
 
 // resolveWaitForReady picks the wait-for-ready implementation. Tests inject a
@@ -152,9 +208,11 @@ func NewRecreateCmd() *cobra.Command {
 			"The cell-creation path is shared with `kuke init`, so the two cannot drift.\n\n" +
 			"Requires --kukeond-image and errors with ErrHostNotInitialized when the " +
 			"host has not been bootstrapped by `kuke init` yet.\n\n" +
-			"Image-load is out of scope: the desired image must already be present in " +
-			"the kuke-system realm (via `kuke build` or `kuke image load`) before " +
-			"invoking this command.",
+			"The image is pulled into the kuke-system realm when it is not already " +
+			"there, before the running daemon is stopped: a ref that cannot be pulled " +
+			"fails the command and leaves the daemon running. kukeon.internal/... refs " +
+			"are never pulled and must already be built with `kuke build --realm kuke-system`. " +
+			"The staged kukepause binary is refreshed before the cell is re-provisioned.",
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: false,
@@ -225,6 +283,12 @@ func runRecreate(cmd *cobra.Command, _ []string) error {
 		return errdefs.ErrHostNotInitialized
 	}
 
+	// Make the image present before anything is stopped, so a ref that
+	// cannot be pulled leaves the running daemon in place (issue #1638).
+	if pullErr := resolvePullImage(cmd, logger, image); pullErr != nil {
+		return fmt.Errorf("pull kukeond image %s: %w", image, pullErr)
+	}
+
 	if lifecycle.IsCellRunning(getRes.Cell) {
 		if stopErr := lifecycle.StopPhase(cmd, client, doc, timeout); stopErr != nil {
 			return stopErr
@@ -267,6 +331,12 @@ func runRecreate(cmd *cobra.Command, _ []string) error {
 	// Phase 2: Re-provision using the shared controller helper.
 	if ensureErr := lifecycle.ResolveEnsureSocketDir(cmd)(); ensureErr != nil {
 		return fmt.Errorf("ensure kukeond socket dir: %w", ensureErr)
+	}
+
+	// Refresh the staged kukepause: the daemon never re-copies an existing
+	// one, so without this an upgraded kukepause would never reach the host.
+	if stageErr := resolveStageKukepause(cmd); stageErr != nil {
+		return fmt.Errorf("stage kukepause: %w", stageErr)
 	}
 
 	if err = resolveProvisionKukeondCell(cmd, logger, image, serverConfigPath); err != nil {

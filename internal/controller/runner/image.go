@@ -121,6 +121,23 @@ func (r *Exec) DeleteImage(namespace, ref string) error {
 	return r.ctrClient.DeleteImage(namespace, ref)
 }
 
+// PullImage ensures ref is present in the given containerd namespace,
+// pulling it anonymously when it is not already local.
+func (r *Exec) PullImage(namespace, ref string) error {
+	namespace = strings.TrimSpace(namespace)
+	if namespace == "" {
+		return errdefs.ErrCheckNamespaceExists
+	}
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return errdefs.ErrImageNotFound
+	}
+	if err := r.ensureClientConnected(); err != nil {
+		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+	}
+	return r.ctrClient.PullImage(namespace, ref)
+}
+
 // PruneImages reclaims dangling image layers and the orphaned leases pinning
 // them in the given containerd namespace. The caller (controller) resolves
 // the realm to a namespace and ensures the realm exists; this method only

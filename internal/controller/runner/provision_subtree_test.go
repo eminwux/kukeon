@@ -194,6 +194,7 @@ func (c *subtreeRecorderClient) ContainerRootChainID(string, string) (string, er
 	panic("unexpected")
 }
 
+func (c *subtreeRecorderClient) PullImage(string, string) error { return nil }
 func (c *subtreeRecorderClient) DeleteImage(string, string) error {
 	panic("unexpected")
 }

@@ -167,6 +167,12 @@ type Client interface {
 	// failures.
 	DeleteImage(namespace, ref string) error
 
+	// PullImage makes ref present in the specified containerd namespace:
+	// a local hit returns immediately, otherwise the image is pulled
+	// anonymously. kukeon.internal refs are never pulled; a local miss on
+	// one returns errdefs.ErrInternalImageNotBuilt.
+	PullImage(namespace, ref string) error
+
 	// PruneImages reclaims dangling image layers and the orphaned leases
 	// pinning them in the specified containerd namespace, leaving tagged
 	// images and the snapshots backing live containers untouched. Returns

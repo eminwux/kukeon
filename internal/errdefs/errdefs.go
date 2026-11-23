@@ -326,6 +326,11 @@ var (
 	// not-found. Not-found is reported via ErrImageNotFound.
 	ErrDeleteImage = errors.New("failed to delete image")
 
+	// ErrPullImage wraps the underlying error when making one image ref
+	// present in a realm's namespace fails (`kuke daemon recreate` pulls
+	// the kukeond image before it stops the running daemon).
+	ErrPullImage = errors.New("failed to pull image")
+
 	// ErrPruneImages wraps the underlying containerd error when reclaiming
 	// dangling image layers and the orphaned leases pinning them in a
 	// realm's namespace fails (`kuke image prune`).
