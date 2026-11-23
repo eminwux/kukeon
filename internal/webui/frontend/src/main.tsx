@@ -1,4 +1,4 @@
-import { StrictMode, Suspense, lazy, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { StrictMode, Suspense, lazy, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
 import { useResource, ErrorNotice, failureTitle, type Resource } from "./request";
@@ -12,8 +12,8 @@ import { CellSidebar } from "./cell-sidebar";
 import { useCellFilter } from "./cell-filter";
 import { matchesState } from "./cells.mjs";
 import { useInventory, type Inventory, type InventoryResource, type Doc, type RuntimeStatus } from "./inventory";
-import { apiPath, catalogTitles, daemonLink, homeLink, imagesLink, kinds, overviewLink, titles, readRoute, resourceLink, listLink, newCellLink, workspaceLink, type Route } from "./routes";
-import { viewOf } from "./views.mjs";
+import { apiPath, catalogTitles, daemonLink, healthLink, homeLink, imagesLink, kinds, overviewLink, titles, readRoute, resourceLink, listLink, newCellLink, workspaceLink, type Route } from "./routes";
+import { manageAttention, viewOf } from "./views.mjs";
 import { ManageNav } from "./manage-nav";
 import { WorkbenchGrid } from "./workbench";
 import { BrandMark, SidebarRail, SidebarResizer, SidebarToggle, VersionRows, railWidth, useSidebarLayout, versionInfo } from "./sidebar-shell";
@@ -32,7 +32,7 @@ import { InventoryIndicator, NotificationProvider, useNotify } from "./notificat
 import { cellRemovalConfirmed, cellsWithin, deleteOperationComplete, descendantCounts, parentActionsAllowed, purgeOperationComplete, requestedPurgeOptions } from "./lifecycle-policy.js";
 import { ParentRowActions, type ParentAction } from "./scope-actions";
 import { AskMajordomo, AskProvider, MajordomoPanel, MajordomoRailButton, MajordomoSidebarEntry, MajordomoToolbarButton, cellQuestion, mobileMaxWidth, useMajordomo, useMajordomoDock, useViewportWidth } from "./majordomo";
-import { HealthPage } from "./health";
+import { HealthPage, storedHealthSeen, type Summary } from "./health";
 import { connectorsLink } from "./connector-ui";
 import { teamsLink } from "./teams.mjs";
 import { NewSecretPage } from "./secret-form";
@@ -74,7 +74,16 @@ function StatusSummary({ status, kind, scope }: { status?: RuntimeStatus; kind: 
 }
 // The Overview leads with what an operator acts on (#1568): the cells needing attention and the cell
 // summary come before the realm, space and stack counts.
-function Dashboard({ inventory }: { inventory: Resource<Inventory> }) {
+// The Health card (#1635): the newest stored sweep report and its findings, on the Daemon page's Health tab.
+function HealthCard({ reports }: { reports: Resource<Summary[]> }) {
+  const latest = reports.data?.[0];
+  return <a className="summary-card panel summary-card-health" href={healthLink()}>
+    <span>Health</span>
+    <strong>{latest ? `${latest.findings} ${latest.findings === 1 ? "finding" : "findings"}` : "—"}</strong>
+    <small>{latest ? <>Latest report {when(latest.createdAt)}</> : reports.error ? "Unavailable" : reports.data ? "No report stored" : "Loading…"}</small>
+  </a>;
+}
+function Dashboard({ inventory, reports }: { inventory: Resource<Inventory>; reports: Resource<Summary[]> }) {
   const partial = inventory.error || inventory.data?.failures.length;
   const cells = inventory.data?.rows[3] ?? [];
   const states = new Map<string, number>();
@@ -89,7 +98,7 @@ function Dashboard({ inventory }: { inventory: Resource<Inventory> }) {
       {attention.length ? <ul className="attention-list">{attention.map(row => <li key={JSON.stringify(row.scope)}><a className="resource-name" href={resourceLink(row.scope)}>{row.doc.metadata.name}</a><span className="mono-id">{row.scope.slice(0, 3).join(" / ")}</span><span className="attention-badges"><StateBadge state={row.doc.status?.state} /><DriftBadge status={row.doc.status} /></span>{hasDrift(row.doc.status) && <p className="attention-reason">{driftReason(row.doc.status)}</p>}</li>)}</ul>
         : <p className="attention-empty" role="status">{inventory.loading && !inventory.data ? "Loading cell states…" : partial ? "Cell states could not be fully loaded." : cells.length ? <><StateBadge state="Ready" /> All cells Ready</> : "No cells found."}</p>}
     </section>
-    <div className="summary-grid">{card(3)}{[0, 1, 2].map(card)}</div>
+    <div className="summary-grid">{card(3)}{[0, 1, 2].map(card)}<HealthCard reports={reports} /></div>
   </>;
 }
 // SpaceCIDR renders one Space's subnet: allocated, legacy conflist and unallocated read differently, and a
@@ -363,6 +372,17 @@ function App() {
   }, [theme]);
   const connection = useResource<{ endpoint: string; version: string; daemonVersion?: string }>("/api/connection", revision);
   const inventory = useInventory(revision);
+  // The newest health report feeds the Overview's Health card and the Manage dot (#1635).
+  const [reportReads, setReportReads] = useState(0);
+  const reports = useResource<Summary[]>("/api/health/reports", revision + reportReads);
+  const [seenId, setSeenId] = useState(storedHealthSeen);
+  const latestReport = useRef<string | undefined>(undefined);
+  latestReport.current = reports.data?.[0]?.id;
+  // The Health tab reads its own list; a report it shows that this list has not seen yet re-reads it.
+  const markReportSeen = useCallback((id: string) => {
+    setSeenId(id);
+    if (latestReport.current !== id) setReportReads(value => value + 1);
+  }, []);
   const terminals = useTerminalSessions(inventory);
   const major = useMajordomo(inventory, revision);
   const viewport = useViewportWidth();
@@ -658,6 +678,8 @@ function App() {
   const daemonStatus = inventory.daemon.error?.code === "permission_denied" ? "Permission denied" : inventory.daemon.error ? "Unavailable" : inventory.daemon.loading ? "Checking…" : "Connected";
   const daemonTone = inventory.daemon.error ? "failed" : inventory.daemon.loading ? "checking" : "";
   const versions = versionInfo(connection.data?.version, connection.data?.daemonVersion);
+  // Why the Manage side of the switch shows a dot; empty means no dot.
+  const attention = manageAttention({ daemonError: inventory.daemon.error, versionMismatch: versions.mismatch, reports: reports.data, seenId });
   // The breadcrumb root names the view: Workbench pages start at the grid, Manage pages at the Overview.
   const crumbRoot = view === "workbench" ? <a href={homeLink}>Workbench</a> : <a href={overviewLink}>Overview</a>;
   const shellStyle = { "--sidebar-width": `${sidebar.width}px` } as CSSProperties;
@@ -707,7 +729,7 @@ function App() {
         <InventoryIndicator inventory={inventory} />
         <nav className="view-switch" aria-label="View">
           <a href={homeLink} aria-current={view === "workbench" ? "true" : undefined}><Icon name="terminal" /><span className="view-switch-label">Workbench</span></a>
-          <a href={overviewLink} aria-current={view === "manage" ? "true" : undefined}><Icon name="manage" /><span className="view-switch-label">Manage</span></a>
+          <a href={overviewLink} aria-current={view === "manage" ? "true" : undefined} aria-label={attention.length ? `Manage: ${attention.join("; ")}` : undefined} title={attention.length ? attention.join("; ") : undefined}><Icon name="manage" /><span className="view-switch-label">Manage</span>{attention.length > 0 && <span className="view-switch-dot" aria-hidden="true" />}</a>
         </nav>
         <nav className="breadcrumbs" aria-label="Resource scope">{isWorkspace || route.view === "resource" ? <>{crumbRoot}{route.scope.map((name, i) => <a key={i} aria-label={`${kinds[i]}: ${name}`} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}</> : <>{crumbRoot}{connectorsView ? route.scope[0] ? <><a href={connectorsLink()}>Connectors</a>{identityAction ? <><a href={connectorsLink(route.scope[0], route.target ? { realm: route.target[0], space: route.target[1], stack: route.target[2] } : undefined)}>{connectorHeading}</a><span>{identityAction}</span></> : <span>{route.scope[0]}</span>}</> : <span>Connectors</span> : teamsView ? route.scope[0] ? <><a href={teamsLink()}>Teams</a><span>{route.scope[0]}</span></> : <span>Teams</span> : route.view === "health" ? <><a href={daemonLink()}>Daemon</a><span>Health</span></> : daemonView ? route.view === "daemon" ? <span>Daemon</span> : <><a href={daemonLink()}>Daemon</a><span>Logs</span></> : images ? <><a href={imagesLink()}>Images</a>{route.scope[0] && (route.scope[1] ? <a href={imagesLink(route.scope[0])}>{route.scope[0]}</a> : <span>{route.scope[0]}</span>)}{route.scope[1] && <span>{route.scope[1]}</span>}</> : catalog ? <><a href={`#/${route.view}`}>{catalogTitles[route.view]}</a>{route.scope.slice(0, -1).map((name, i) => <a key={i} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}{route.scope.length > 0 && <span>{route.scope.at(-1)}</span>}</> : route.view !== "dashboard" && route.view !== "workbench" && <span>{heading}</span>}</>}</nav>
         <div className="toolbar-actions">
@@ -726,7 +748,7 @@ function App() {
       <div className={`workspace-content ${isWorkspace ? "cell-workspace-content" : ""}${cellTerminalActive ? " cell-screen-content" : ""}`}>
         {!cellScreenScope && <div className="page-heading"><h1 tabIndex={-1}>{heading}</h1>{headingContext && <p className="page-context mono-id">{headingContext}</p>}</div>}
         <CellDetailsScreen title={heading ?? "Cell"} view={cellView} scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} operations={operations} onLifecycleAction={runCellLifecycle} dockedCells={dockedCells} onOpenDock={() => dock.setOpen(true)} />
-        {isWorkspace ? null : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "new-config" ? <Suspense fallback={<p role="status">Loading Config creation form…</p>}><NewConfigPage key={JSON.stringify(route.blueprint ?? [])} revision={revision} inventory={inventory} blueprintScope={route.blueprint} onCreated={() => setRevision(value => value + 1)} /></Suspense> : route.view === "new-secret" ? <NewSecretPage inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : connectorsView ? <Suspense fallback={<p role="status">Loading connectors…</p>}><ConnectorsPage name={route.scope[0]} target={route.target} action={route.action} identity={route.identity} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} onTitle={setConnectorTitle} /></Suspense> : teamsView ? <Suspense fallback={<p role="status">Loading teams…</p>}><TeamsPage name={route.scope[0]} revision={revision} onChanged={() => setRevision(value => value + 1)} /></Suspense> : route.view === "health" ? <HealthPage revision={revision} major={major} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} edit={!!route.edit} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : route.view === "workbench" ? <WorkbenchGrid inventory={inventory} filter={cellFilter} dockedCells={dockedCells} onOpenDock={() => dock.setOpen(true)} terminalStates={terminals.cellStates} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent) + (route.state ?? "")} depth={depth} inventory={inventory} parent={route.parent} state={route.state} operations={operations} onLifecycleAction={runCellLifecycle} onParentAction={runParentAction} /> : <Dashboard inventory={inventory} />}
+        {isWorkspace ? null : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "new-config" ? <Suspense fallback={<p role="status">Loading Config creation form…</p>}><NewConfigPage key={JSON.stringify(route.blueprint ?? [])} revision={revision} inventory={inventory} blueprintScope={route.blueprint} onCreated={() => setRevision(value => value + 1)} /></Suspense> : route.view === "new-secret" ? <NewSecretPage inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : connectorsView ? <Suspense fallback={<p role="status">Loading connectors…</p>}><ConnectorsPage name={route.scope[0]} target={route.target} action={route.action} identity={route.identity} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} onTitle={setConnectorTitle} /></Suspense> : teamsView ? <Suspense fallback={<p role="status">Loading teams…</p>}><TeamsPage name={route.scope[0]} revision={revision} onChanged={() => setRevision(value => value + 1)} /></Suspense> : route.view === "health" ? <HealthPage revision={revision} major={major} inventory={inventory} onChanged={() => setRevision(value => value + 1)} onSeen={markReportSeen} /> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} edit={!!route.edit} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : route.view === "workbench" ? <WorkbenchGrid inventory={inventory} filter={cellFilter} dockedCells={dockedCells} onOpenDock={() => dock.setOpen(true)} terminalStates={terminals.cellStates} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent) + (route.state ?? "")} depth={depth} inventory={inventory} parent={route.parent} state={route.state} operations={operations} onLifecycleAction={runCellLifecycle} onParentAction={runParentAction} /> : <Dashboard inventory={inventory} reports={reports} />}
         <footer>Daemon inventory · {inventory.data ? <>Last refreshed <time dateTime={inventory.data.updatedAt}>{new Date(inventory.data.updatedAt).toLocaleTimeString()}</time></> : "Not refreshed yet"} · Refresh to retrieve the latest state.</footer>
       </div>
     </main>

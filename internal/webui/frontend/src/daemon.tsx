@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ErrorNotice, toFailure, useResource, type Failure } from "./request";
-import { daemonLink } from "./routes";
+import { daemonLink, healthLink, overviewLink } from "./routes";
 import type { InventoryResource } from "./inventory";
 import { MAX_CHARS, MAX_LINES, applyChunk, emptyLogBuffer, healthLabel, healthTone, type LogBuffer, type LogChunk } from "./log-buffer.js";
 import { AskMajordomo, oneLine } from "./majordomo";
@@ -32,9 +32,11 @@ export function HealthBadge({ status }: { status?: string }) {
   return <span className={`state-badge tone-${healthTone(status)}`}><span className="state-dot" aria-hidden="true" />{healthLabel(status)}</span>;
 }
 
-export function DaemonNav({ current }: { current: "health" | "logs" }) {
+// The Daemon page's tabs (#1635): Status (the connectivity check), Health (the sweep reports) and Logs.
+export function DaemonNav({ current }: { current: "status" | "health" | "logs" }) {
   return <nav className="daemon-tabs" aria-label="Daemon sections">
-    <a href={daemonLink()} aria-current={current === "health" ? "page" : undefined}>Health</a>
+    <a href={daemonLink()} aria-current={current === "status" ? "page" : undefined}>Status</a>
+    <a href={healthLink()} aria-current={current === "health" ? "page" : undefined}>Health</a>
     <a href={daemonLink("logs")} aria-current={current === "logs" ? "page" : undefined}>Logs</a>
   </nav>;
 }
@@ -50,7 +52,7 @@ export function DaemonHealthPage({ revision, inventory }: { revision: number; in
   const data = health.data;
   const versionsDiffer = !!data?.daemonVersion && displayVersion(data.daemonVersion) !== displayVersion(data.serverVersion);
   return <>
-    <DaemonNav current="health" />
+    <DaemonNav current="status" />
     {health.error && <ErrorNotice error={health.error} kind="Daemon" />}
     {health.error && data && <p className="stale">Stale health result — the web server could not be reached.</p>}
     <section className="panel daemon-health" aria-label="Daemon connectivity" aria-busy={health.loading}>
@@ -72,7 +74,7 @@ export function DaemonHealthPage({ revision, inventory }: { revision: number; in
     </section>
     <section className="panel" aria-label="Health scope">
       <div className="panel-heading"><h2>What this check covers</h2></div>
-      <div className="panel-body"><p className="description">Connectivity means kukeond answered a ping on the selected socket using this server's permissions. It does not report the health of cells, containers, cgroups, networking or other subsystems. Review cell states in <a className="text-link" href="#/resources">Overview</a>, read the <a className="text-link" href={daemonLink("logs")}>daemon logs</a>, or run <code>kuke status</code> for host pre-flight and state-consistency checks.</p></div>
+      <div className="panel-body"><p className="description">Connectivity means kukeond answered a ping on the selected socket using this server's permissions. It does not report the health of cells, containers, cgroups, networking or other subsystems. Review cell states in <a className="text-link" href={overviewLink}>Overview</a>, read the <a className="text-link" href={daemonLink("logs")}>daemon logs</a>, or run <code>kuke status</code> for host pre-flight and state-consistency checks.</p></div>
     </section>
   </>;
 }

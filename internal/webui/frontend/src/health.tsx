@@ -4,6 +4,14 @@ import { useResource, ErrorNotice } from "./request";
 import { AskMajordomo, configScope, oneLine, sweepTask, type ConfigDoc, type Majordomo } from "./majordomo";
 import { ScheduleDetails, cellLinker, when } from "./schedule";
 import type { InventoryResource } from "./inventory";
+import { DaemonNav } from "./daemon";
+
+// The id of the last health report shown on the Health tab in this browser (#1635): the Manage side of
+// the view switch shows a dot for a newer report with findings.
+export const healthSeenKey = "kukeon-health-seen";
+export function storedHealthSeen(): string | null {
+  try { return localStorage.getItem(healthSeenKey); } catch { return null; }
+}
 
 type Finding = {
   signature: string; classification: string; severity: string; recurring?: boolean; title?: string; count?: number;
@@ -13,7 +21,7 @@ type Report = {
   id: string; createdAt: string; since: string; until: string; summary: string; body?: string;
   cell?: { realm: string; space: string; stack: string; name: string }; findings: Finding[];
 };
-type Summary = { id: string; createdAt: string; since: string; until: string; summary: string; findings: number; recurring: number; filed: number };
+export type Summary = { id: string; createdAt: string; since: string; until: string; summary: string; findings: number; recurring: number; filed: number };
 
 function configLink(scope: string[]): string { return "#/configs/" + scope.map(encodeURIComponent).join("/"); }
 const classTone: Record<string, string> = { kukeon: "error", workload: "warning", unclear: "neutral" };
@@ -66,7 +74,7 @@ function SweepSchedule({ config, onRun, running, inventory }: { config: ConfigDo
   </li>;
 }
 
-export function HealthPage({ revision, major, inventory, onChanged }: { revision: number; major: Majordomo; inventory: InventoryResource; onChanged: () => void }) {
+export function HealthPage({ revision, major, inventory, onChanged, onSeen }: { revision: number; major: Majordomo; inventory: InventoryResource; onChanged: () => void; onSeen: (id: string) => void }) {
   const [reads, setReads] = useState(0);
   const [selected, setSelected] = useState("latest");
   const [running, setRunning] = useState("");
@@ -97,8 +105,17 @@ export function HealthPage({ revision, major, inventory, onChanged }: { revision
   }
 
   const current = hasReports ? report.data : undefined;
+  // Showing the newest report marks it seen, which clears the Manage dot's report reason.
+  const newest = list.data?.[0]?.id;
+  const seen = current && current.id === newest ? current.id : undefined;
+  useEffect(() => {
+    if (!seen) return;
+    try { localStorage.setItem(healthSeenKey, seen); } catch { /* Preferences are optional. */ }
+    onSeen(seen);
+  }, [seen, onSeen]);
   const suspended = major.sweeps.filter(config => config.spec?.schedule?.suspend);
   return <>
+    <DaemonNav current="health" />
     <section className="panel health-schedule" aria-label="Sweep schedule">
       <div className="panel-heading"><h2>Sweep schedule</h2><span className="badge">From the task config</span></div>
       <div className="panel-body">

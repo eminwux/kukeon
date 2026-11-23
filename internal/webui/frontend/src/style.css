@@ -116,7 +116,8 @@ footer { color: var(--muted); font-size: var(--font-sm); margin-top: 18px; }
   .sidebar { z-index: 10; }
   .sidebar-scrim:not([hidden]) { display: block; position: fixed; inset: 0; z-index: 9; background: var(--scrim); }
 }
-.summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }
+.summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }
+@media (max-width: 760px) { .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .summary-card { padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
 .summary-card:hover { border-color: var(--accent); }
 /* The cell summary leads the grid on its own row; realm, space and stack counts follow (#1568). */
