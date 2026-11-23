@@ -5,7 +5,7 @@
 # `github` connector's token, and the agent works against the repository it is
 # checked out in. How an explicit issue-destination binding reaches the agent
 # is still open (see issue #1472, step 15).
-apiVersion: kuketeams.io/v1
+apiVersion: v1beta1
 kind: Component
 metadata:
   name: github-issues

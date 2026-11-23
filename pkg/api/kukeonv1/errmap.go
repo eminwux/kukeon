@@ -81,6 +81,13 @@ var kindToSentinel = map[string]error{
 	"ConnectorIdentity":       errdefs.ErrConnectorIdentity,
 	"ConnectorMethod":         errdefs.ErrConnectorMethod,
 	"VolumeInUse":             errdefs.ErrVolumeInUse,
+	"TeamNotFound":            errdefs.ErrTeamNotFound,
+	"TeamDefaultsNotFound":    errdefs.ErrTeamDefaultsNotFound,
+	"TeamApplyOnly":           errdefs.ErrTeamApplyOnly,
+	"TeamNameInUse":           errdefs.ErrTeamNameInUse,
+	"TeamReserved":            errdefs.ErrTeamReserved,
+	"InvalidTeam":             errdefs.ErrInvalidTeam,
+	"TeamScopeNotFound":       errdefs.ErrTeamScopeNotFound,
 }
 
 // sentinelToKind is the reverse lookup, populated lazily.

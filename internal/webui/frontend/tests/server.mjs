@@ -343,7 +343,7 @@ export async function mockConnectorAPI(page, world) {
     const [, , realm, action] = new URL(request.url()).pathname.split("/").filter(Boolean).map(decodeURIComponent);
     if (!action) {
       if (request.method() !== "GET") return route.fallback();
-      return route.fulfill({ json: { apiVersion: "kukeon.io/v1beta1", kind: "Realm", metadata: { name: realm, labels: {} }, spec: { namespace: `${realm}.kukeon.io`, registryCredentials: world.registry[realm] ?? [] }, status: { state: "Ready" } } });
+      return route.fulfill({ json: { apiVersion: "v1beta1", kind: "Realm", metadata: { name: realm, labels: {} }, spec: { namespace: `${realm}.kukeon.io`, registryCredentials: world.registry[realm] ?? [] }, status: { state: "Ready" } } });
     }
     const body = record(request);
     const name = `registry-${body.server || "default"}`;

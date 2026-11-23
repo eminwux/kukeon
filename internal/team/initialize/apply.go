@@ -28,6 +28,7 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/connector"
+	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/compose"
@@ -35,9 +36,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Client deliberately has no cell lifecycle methods. Init can only read scope,
-// create explicitly sourced secrets, and apply blueprint/config documents (plus
-// the team realm's secret defaults).
+// Client deliberately has no cell lifecycle methods. A team command can only
+// read scope, the stored teams and defaults, create explicitly sourced
+// secrets, and apply documents (blueprints, configs, the Team itself, the
+// team realm's secret defaults and the TeamDefaults).
 type Client interface {
 	Close() error
 	Ping(context.Context) error
@@ -50,111 +52,147 @@ type Client interface {
 	GetBlueprint(context.Context, api.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error)
 	ListConfigs(context.Context, string, string, string) ([]api.CellConfigDoc, error)
 	GetConfig(context.Context, api.CellConfigDoc) (kukeonv1.GetConfigResult, error)
-	DeleteConfig(context.Context, api.CellConfigDoc) (kukeonv1.DeleteConfigResult, error)
+	GetTeam(context.Context, kukeonv1.TeamRef) (kukeonv1.GetTeamResult, error)
+	ListTeams(context.Context, string) ([]kukeonv1.GetTeamResult, error)
+	GetTeamDefaults(context.Context, string) (kukeonv1.GetTeamDefaultsResult, error)
+	ApplyDocuments(context.Context, []byte) (kukeonv1.ApplyDocumentsResult, error)
 	ApplyDocumentsForTeam(context.Context, []byte, string) (kukeonv1.ApplyDocumentsResult, error)
 }
 
-var _ Client = (*kukeonv1.UnixClient)(nil)
+// actionPruned is the apply action of a document a team apply deleted.
+const actionPruned = "pruned"
 
-// applied reports what one application did.
-type applied struct {
-	// resources counts the accepted blueprints, configs and scope documents.
-	resources int
-	// missing lists one remediation line per runtime secret that does not exist.
-	missing []string
-	// notes are operator-facing remarks from application.
-	notes []string
+var _ Client = (kukeonv1.Client)(nil)
+
+// pendingSecret is a runtime secret the plan found missing that has a
+// creation source. The commit reads the source, never the plan.
+type pendingSecret struct {
+	doc    api.SecretDoc
+	source *config.SecretSource
 }
 
-// Apply preflights all sources/scopes before writing anything to the daemon.
-// It never retries an ambiguous write. Secrets stay outside the document stream.
-// Required secrets that are absent and have no creation source do not block
-// application; Apply returns one remediation line per missing runtime secret.
-func Apply(ctx context.Context, client Client, result *compose.Result) ([]string, error) {
-	out, err := apply(ctx, client, result, "kuke team init", "")
-	return out.missing, err
-}
-
-// legacyTeam, when set, names a team whose configs the caller removes once
-// apply succeeds (the pre-#1527 init team): they do not make a shared
-// blueprint foreign, so its replacement keeps the plain names.
-func apply(
-	ctx context.Context, client Client, result *compose.Result, command string, legacyTeam string,
-) (applied, error) {
-	var out applied
-	if result.Entry == nil || len(result.Pairs) == 0 {
-		return out, errors.New("preflight: empty team composition")
+// preflight runs the read-only checks of a team application and settles what
+// it will write (issue #1618, step 4): shared blueprint names, the realm
+// secret defaults, the secrets to create and the ones missing. It reads no
+// secret value and writes nothing.
+func preflight(ctx context.Context, client Client, plan *Plan) error {
+	result := plan.composed
+	if result.Team == nil || len(result.Pairs) == 0 {
+		return errors.New("preflight: empty team composition")
 	}
 	if err := client.Ping(ctx); err != nil {
-		return out, fmt.Errorf("kukeond connection/preflight: %w", err)
+		return fmt.Errorf("kukeond connection/preflight: %w", err)
 	}
 	scope := config.SecretRef{Realm: result.Scope.Realm, Space: result.Scope.Space, Stack: result.Scope.Stack}
-	if err := checkScope(ctx, client, scope, command); err != nil {
-		return out, err
+	if err := checkScope(ctx, client, scope, plan.Command); err != nil {
+		return err
 	}
 	// Settle shared blueprint names before anything references them.
-	renamed, superseded, err := resolveSharedNames(ctx, client, result, legacyTeam)
+	renamed, superseded, err := resolveSharedNames(ctx, client, result)
 	if err != nil {
-		return out, err
+		return err
 	}
-	out.notes = append(out.notes, renamed...)
-	raw, err := result.MarshalYAML()
-	if err != nil {
-		return out, err
-	}
-	expected := len(result.Blueprints) + result.Configs()
+	plan.Notes = append(plan.Notes, renamed...)
+	plan.superseded = superseded
 	// Slots the Configs leave to the scope defaults get a Realm default once;
 	// a default that is already set — at any level — is the operator's.
 	needsGit := needsGitIdentity(result)
 	realmDoc, inherited, gitDefault, err := secretDefaultsDocument(ctx, client, result, needsGit)
 	if err != nil {
-		return out, err
+		return err
 	}
 	if needsGit && !gitDefault {
-		out.notes = append(out.notes, noGitIdentityNote)
+		plan.Notes = append(plan.Notes, noGitIdentityNote)
 	}
-	if realmDoc != nil {
-		raw = append(append(realmDoc, []byte("---\n")...), raw...)
-		expected++
-	}
-	secrets, missing, err := prepareSecrets(ctx, client, result, command, inherited)
+	plan.realmDoc = realmDoc
+	pending, missing, err := prepareSecrets(ctx, client, result, plan.Command, inherited)
 	if err != nil {
-		return out, err
+		return err
 	}
 	gitMissing, err := missingGitSecrets(ctx, client, result)
 	if err != nil {
-		return out, err
+		return err
 	}
+	plan.pending = pending
 	missing = append(missing, gitMissing...)
-	out.missing = missing
-	for _, secret := range secrets {
+	plan.MissingSecrets = missing
+	return nil
+}
+
+// commit writes what a plan settled: the secrets with a creation source, then
+// one team apply carrying every composed document and the Team, which
+// kukeond stores only when all of them applied. It never retries an ambiguous
+// write.
+func commit(ctx context.Context, client Client, plan *Plan) (Result, error) {
+	result := Result{Team: plan.Team.Metadata.Name, Plan: plan}
+	raw, err := plan.composed.MarshalYAML()
+	if err != nil {
+		return result, err
+	}
+	expected := len(plan.composed.Blueprints) + plan.composed.Configs()
+	var prefix [][]byte
+	if plan.realmDoc != nil {
+		prefix = append(prefix, plan.realmDoc)
+		expected++
+	}
+	if plan.defaultsDoc != nil {
+		prefix = append(prefix, plan.defaultsDoc)
+		expected++
+	}
+	teamDoc, err := yaml.Marshal(plan.composed.Team)
+	if err != nil {
+		return result, fmt.Errorf("encode Team: %w", err)
+	}
+	for i := len(prefix) - 1; i >= 0; i-- {
+		raw = append(append(slices.Clone(prefix[i]), []byte("---\n")...), raw...)
+	}
+	raw = append(append(raw, []byte("---\n")...), teamDoc...)
+	expected++
+	// Every value is read before any secret is created, so a missing source
+	// writes nothing.
+	docs := make([]api.SecretDoc, 0, len(plan.pending))
+	for _, secret := range plan.pending {
+		value, readErr := readSecret(secret.source, plan.Command)
+		if readErr != nil {
+			return result, fmt.Errorf("preflight secret %s: %w", secret.doc.Metadata.Name, readErr)
+		}
+		doc := secret.doc
+		doc.Spec.Data = value
+		docs = append(docs, doc)
+	}
+	for _, doc := range docs {
 		// Close most of the preflight/create window and reuse a competing
 		// creator's value. The existing API has no atomic create-only gate.
-		ref := secret.Metadata
-		lookup := api.SecretDoc{APIVersion: secret.APIVersion, Kind: secret.Kind, Metadata: secret.Metadata}
+		lookup := api.SecretDoc{APIVersion: doc.APIVersion, Kind: doc.Kind, Metadata: doc.Metadata}
 		got, lookupErr := client.GetSecret(ctx, lookup)
 		if lookupErr != nil {
-			return out, requestError("recheck", "secret "+ref.Name, lookupErr)
+			return result, requestError("recheck", "secret "+doc.Metadata.Name, lookupErr)
 		}
 		if got.MetadataExists {
 			continue
 		}
-		if err = createSecret(ctx, client, secret, command); err != nil {
-			return out, err
+		if err = createSecret(ctx, client, doc, plan.Command); err != nil {
+			return result, err
 		}
 	}
 	// CellConfigs only reference secrets structurally; kukeond resolves them at
 	// cell launch, so configs referencing a missing secret still apply.
-	response, err := client.ApplyDocumentsForTeam(ctx, raw, result.Entry.Metadata.Name)
+	response, err := client.ApplyDocumentsForTeam(ctx, raw, plan.Team.Metadata.Name)
 	if err != nil {
-		return out, fmt.Errorf("kukeond apply RPC failed (application may be partial; registration unchanged): %w", err)
+		return result, fmt.Errorf("kukeond apply RPC failed (application may be partial; team not stored): %w", err)
 	}
-	if err = checkResults(response, expected, command); err != nil {
-		return out, err
+	if err = checkResults(response, expected, plan.Command); err != nil {
+		return result, err
 	}
-	out.notes = append(out.notes, supersededNotes(superseded, response)...)
-	out.resources = expected
-	return out, nil
+	result.Notes = append(slices.Clone(plan.Notes), supersededNotes(plan.superseded, response)...)
+	result.MissingSecrets = plan.MissingSecrets
+	result.Resources = expected
+	for _, r := range response.Resources {
+		if r.Action == actionPruned && r.Kind == string(api.KindCellConfig) {
+			result.Pruned = append(result.Pruned, r.Name)
+		}
+	}
+	return result, nil
 }
 
 func createSecret(ctx context.Context, client Client, secret api.SecretDoc, command string) error {
@@ -175,18 +213,17 @@ func createSecret(ctx context.Context, client Client, secret api.SecretDoc, comm
 // new content, and their cells go OutOfSync until restarted. A note names the
 // replaced blueprint, its old and new digest, and the other configs using it.
 // Only a blueprint kuke team did not render is never overwritten: this team's
-// copy then takes a content-digest suffix and its configs follow. Configs of
-// legacyTeam, which is being replaced, are not reported as another team's.
+// copy then takes a content-digest suffix and its configs follow.
 //
 // The second return lists the digest-named copies this team's configs used
 // until now and stop using (forks from before #1560, or an earlier revision of
 // a hand-written-plain-name fork): the daemon prunes each one nothing else
 // references, and the caller reports the outcome.
 func resolveSharedNames(
-	ctx context.Context, client Client, result *compose.Result, legacyTeam string,
+	ctx context.Context, client Client, result *compose.Result,
 ) ([]string, []supersededCopy, error) {
 	var notes []string
-	team := result.Entry.Metadata.Name
+	team := result.Team.Metadata.Name
 	refs := &configRefs{client: client}
 	for _, bp := range result.Blueprints {
 		md := bp.Metadata
@@ -210,7 +247,7 @@ func resolveSharedNames(
 			result.RenameBlueprint(bp, name)
 		case existing[api.LabelContentDigest] == digest:
 		default:
-			users, usersErr := refs.users(ctx, md.Realm, md.Name, team, legacyTeam)
+			users, usersErr := refs.users(ctx, md.Realm, md.Name, team)
 			if usersErr != nil {
 				return nil, nil, usersErr
 			}
@@ -302,7 +339,7 @@ func supersededNotes(superseded []supersededCopy, response kukeonv1.ApplyDocumen
 	var notes []string
 	for _, copied := range superseded {
 		pruned := slices.ContainsFunc(response.Resources, func(r kukeonv1.ApplyResourceResult) bool {
-			return r.Kind == string(api.KindCellBlueprint) && r.Name == copied.name && r.Action == "pruned" &&
+			return r.Kind == string(api.KindCellBlueprint) && r.Name == copied.name && r.Action == actionPruned &&
 				(r.Details["realm"] == "" || r.Details["realm"] == copied.realm)
 		})
 		switch {
@@ -697,7 +734,7 @@ func checkResults(result kukeonv1.ApplyDocumentsResult, expected int, command st
 			failures = append(failures, fmt.Sprintf("%s %s: %s", resource.Kind, resource.Name, resource.Error))
 		case resource.Action == "created" || resource.Action == "updated" || resource.Action == "unchanged":
 			accepted++
-		case resource.Action != "pruned":
+		case resource.Action != actionPruned:
 			failures = append(
 				failures,
 				fmt.Sprintf("%s %s: unexpected action %q", resource.Kind, resource.Name, resource.Action),
@@ -706,7 +743,7 @@ func checkResults(result kukeonv1.ApplyDocumentsResult, expected int, command st
 	}
 	if len(failures) > 0 {
 		return fmt.Errorf(
-			"per-resource application failed (%d accepted, %d failures); registration unchanged; rerun %s: %s",
+			"per-resource application failed (%d accepted, %d failures); team not stored; rerun %s: %s",
 			accepted,
 			len(failures),
 			command,
@@ -715,7 +752,7 @@ func checkResults(result kukeonv1.ApplyDocumentsResult, expected int, command st
 	}
 	if accepted != expected {
 		return fmt.Errorf(
-			"incomplete apply response: %d of %d resources accepted; registration unchanged",
+			"incomplete apply response: %d of %d resources accepted; team not stored",
 			accepted,
 			expected,
 		)
@@ -736,7 +773,7 @@ func prepareSecrets(
 	result *compose.Result,
 	command string,
 	inherited map[string]config.SecretRef,
-) ([]api.SecretDoc, []string, error) {
+) ([]pendingSecret, []string, error) {
 	// Deduplicate by complete runtime identity, not role/harness identifier.
 	requirements := map[config.SecretRef]*config.SecretSource{}
 	var order []config.SecretRef
@@ -761,7 +798,7 @@ func prepareSecrets(
 			}
 		}
 	}
-	var pending []api.SecretDoc
+	var pending []pendingSecret
 	var missing []string
 	for _, ref := range order {
 		doc := api.SecretDoc{
@@ -789,12 +826,13 @@ func prepareSecrets(
 			missing = append(missing, missingSecret(ref))
 			continue
 		}
-		value, err := readSecret(source, command)
-		if err != nil {
-			return nil, nil, fmt.Errorf("preflight secret %s: %w", ref.Name, err)
+		if (source.Env == "") == (source.File == "") {
+			return nil, nil, fmt.Errorf(
+				"preflight secret %s: configure exactly one env or file creation source",
+				ref.Name,
+			)
 		}
-		doc.Spec.Data = value
-		pending = append(pending, doc)
+		pending = append(pending, pendingSecret{doc: doc, source: source})
 	}
 	return pending, missing, nil
 }
@@ -850,7 +888,11 @@ func requestError(operation, subject string, err error) error {
 		errors.Is(err, rpc.ErrShutdown) ||
 		errors.Is(err, context.Canceled) ||
 		errors.Is(err, context.DeadlineExceeded) {
-		return fmt.Errorf("%s %s: kukeond transport/connection failed", subject, operation)
+		return fmt.Errorf("%s %s: %w", subject, operation, errdefs.ErrDaemonTransport)
+	}
+	// An outdated daemon is named by its sentinel, whose text is kukeon's own.
+	if errors.Is(err, errdefs.ErrDaemonMethodUnsupported) {
+		return fmt.Errorf("%s %s: %w", subject, operation, errdefs.ErrDaemonMethodUnsupported)
 	}
 	return fmt.Errorf("%s %s: daemon rejected request; check permissions and scope", subject, operation)
 }

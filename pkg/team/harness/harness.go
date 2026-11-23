@@ -36,7 +36,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const APIVersion = "kuketeams.io/v1"
+const APIVersion = "v1beta1"
 
 type Harness struct {
 	APIVersion string         `json:"apiVersion" yaml:"apiVersion"`
@@ -144,7 +144,7 @@ func Load(source fs.FS, directory string) (*Harness, error) {
 
 func (h *Harness) Validate() error {
 	if h == nil || h.APIVersion != APIVersion || h.Kind != "Harness" || !namePattern.MatchString(h.Metadata.Name) {
-		return errors.New("require kuketeams.io/v1 Harness with valid metadata.name")
+		return errors.New("require v1beta1 Harness with valid metadata.name")
 	}
 	if h.Spec.Renderer != "kukeon/v1beta1" {
 		return fmt.Errorf(
@@ -370,7 +370,7 @@ func LoadCatalog(source fs.FS, directory, name string) (*ImageCatalog, error) {
 func (c *ImageCatalog) Validate(name string) error {
 	if c == nil || c.APIVersion != APIVersion || c.Kind != "HarnessImageCatalog" || c.Metadata.Name != name ||
 		!namePattern.MatchString(name) {
-		return fmt.Errorf("require kuketeams.io/v1 HarnessImageCatalog with metadata.name %q", name)
+		return fmt.Errorf("require v1beta1 HarnessImageCatalog with metadata.name %q", name)
 	}
 	if len(c.Spec.Images) == 0 {
 		return errors.New("spec.images: at least one image required")

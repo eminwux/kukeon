@@ -1059,3 +1059,49 @@ func (c *UnixClient) PingVersion(ctx context.Context) (string, error) {
 	}
 	return reply.Version, nil
 }
+
+// ---- Teams (issue #1618) ----
+
+func (c *UnixClient) GetTeam(ctx context.Context, ref TeamRef) (GetTeamResult, error) {
+	reply := &GetTeamReply{}
+	if err := c.call(ctx, MethodGetTeam, &GetTeamArgs{Ref: ref}, reply); err != nil {
+		return GetTeamResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
+func (c *UnixClient) ListTeams(ctx context.Context, realm string) ([]GetTeamResult, error) {
+	reply := &ListTeamsReply{}
+	if err := c.call(ctx, MethodListTeams, &ListTeamsArgs{Realm: realm}, reply); err != nil {
+		return nil, err
+	}
+	if reply.Err != nil {
+		return nil, FromAPIError(reply.Err)
+	}
+	return reply.Teams, nil
+}
+
+func (c *UnixClient) DeleteTeam(ctx context.Context, ref TeamRef) (DeleteTeamResult, error) {
+	reply := &DeleteTeamReply{}
+	if err := c.call(ctx, MethodDeleteTeam, &DeleteTeamArgs{Ref: ref}, reply); err != nil {
+		return DeleteTeamResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
+func (c *UnixClient) GetTeamDefaults(ctx context.Context, realm string) (GetTeamDefaultsResult, error) {
+	reply := &GetTeamDefaultsReply{}
+	if err := c.call(ctx, MethodGetTeamDefaults, &GetTeamDefaultsArgs{Realm: realm}, reply); err != nil {
+		return GetTeamDefaultsResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}

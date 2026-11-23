@@ -784,6 +784,61 @@ func (c *Client) DeleteConfig(
 	}, nil
 }
 
+// ---- Teams (issue #1618) ----
+
+func (c *Client) GetTeam(_ context.Context, ref kukeonv1.TeamRef) (kukeonv1.GetTeamResult, error) {
+	record, found, err := c.ctrl.GetTeam(ref.Name, ref.Realm)
+	if err != nil || !found {
+		return kukeonv1.GetTeamResult{}, err
+	}
+	return teamResult(record), nil
+}
+
+func (c *Client) ListTeams(_ context.Context, realm string) ([]kukeonv1.GetTeamResult, error) {
+	records, err := c.ctrl.ListTeams(realm)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]kukeonv1.GetTeamResult, 0, len(records))
+	for _, record := range records {
+		out = append(out, teamResult(record))
+	}
+	return out, nil
+}
+
+func (c *Client) DeleteTeam(_ context.Context, ref kukeonv1.TeamRef) (kukeonv1.DeleteTeamResult, error) {
+	res, err := c.ctrl.DeleteTeam(ref.Name, ref.Realm)
+	out := kukeonv1.DeleteTeamResult{
+		Deleted:     err == nil,
+		Removed:     convertResourceResults(res.Removed),
+		LiveCells:   res.LiveCells,
+		KeptVolumes: res.KeptVolumes,
+	}
+	return out, err
+}
+
+func (c *Client) GetTeamDefaults(_ context.Context, realm string) (kukeonv1.GetTeamDefaultsResult, error) {
+	got, found, err := c.ctrl.GetTeamDefaults(realm)
+	if err != nil || !found {
+		return kukeonv1.GetTeamDefaultsResult{}, err
+	}
+	return kukeonv1.GetTeamDefaultsResult{Exists: true, Realm: got.Metadata.Realm, Document: got.Document}, nil
+}
+
+func teamResult(record controller.TeamRecord) kukeonv1.GetTeamResult {
+	s := record.Summary
+	return kukeonv1.GetTeamResult{
+		Exists:   true,
+		Document: record.Team.Document,
+		Summary: kukeonv1.TeamSummary{
+			Name: s.Name, Realm: s.Realm, ProjectURL: s.ProjectURL, ProjectRef: s.ProjectRef,
+			Roles: s.Roles, RolesInherited: s.RolesInherited,
+			Harnesses: s.Harnesses, HarnessesInherited: s.HarnessesInherited,
+			Configs: s.Configs,
+		},
+	}
+}
+
 // ---- Purge ----
 
 func (c *Client) PurgeRealm(
@@ -982,10 +1037,12 @@ func (c *Client) applyDocuments(
 		return kukeonv1.ApplyDocumentsResult{}, err
 	}
 
-	out := kukeonv1.ApplyDocumentsResult{
-		Resources: make([]kukeonv1.ApplyResourceResult, 0, len(res.Resources)),
-	}
-	for _, r := range res.Resources {
+	return kukeonv1.ApplyDocumentsResult{Resources: convertResourceResults(res.Resources)}, nil
+}
+
+func convertResourceResults(results []controller.ResourceResult) []kukeonv1.ApplyResourceResult {
+	out := make([]kukeonv1.ApplyResourceResult, 0, len(results))
+	for _, r := range results {
 		item := kukeonv1.ApplyResourceResult{
 			Index:   r.Index,
 			Kind:    r.Kind,
@@ -997,9 +1054,9 @@ func (c *Client) applyDocuments(
 		if r.Error != nil {
 			item.Error = r.Error.Error()
 		}
-		out.Resources = append(out.Resources, item)
+		out = append(out, item)
 	}
-	return out, nil
+	return out
 }
 
 func (c *Client) DeleteDocuments(

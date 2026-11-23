@@ -2,7 +2,7 @@
 # has never heard of. It is not part of the embedded catalog; the tests that
 # load it prove that one file like this is all a new connector takes — no Go
 # and no TypeScript names it.
-apiVersion: kuketeams.io/v1
+apiVersion: v1beta1
 kind: Connector
 metadata:
   name: example-token

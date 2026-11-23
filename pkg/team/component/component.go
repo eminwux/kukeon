@@ -38,7 +38,7 @@ import (
 )
 
 const (
-	APIVersion = "kuketeams.io/v1"
+	APIVersion = "v1beta1"
 	Kind       = "Component"
 )
 
@@ -148,7 +148,7 @@ func Load(source fs.FS, catalog ...Component) ([]Component, error) {
 
 func (c *Component) Validate() error {
 	if c == nil || c.APIVersion != APIVersion || c.Kind != Kind || !namePattern.MatchString(c.Metadata.Name) {
-		return errors.New("require kuketeams.io/v1 Component with valid metadata.name")
+		return errors.New("require v1beta1 Component with valid metadata.name")
 	}
 	if c.Spec.Kind != api.ComponentKindConnector && c.Spec.Kind != api.ComponentKindForge {
 		return fmt.Errorf("spec.kind: expected %s or %s", api.ComponentKindConnector, api.ComponentKindForge)

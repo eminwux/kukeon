@@ -1,10 +1,10 @@
-// Copyright 2025 Emiliano Spinella (eminwux)
+// Copyright 2026 Emiliano Spinella (eminwux)
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,102 +21,90 @@ import (
 	"errors"
 	"io/fs"
 	"os"
-	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/team/config"
-	"gopkg.in/yaml.v3"
 )
 
 // setupReapply initializes the kuke team from the role as shipped (host
 // mounts and the suspended health sweep included) and returns options for a
 // following --reapply against the same fake daemon.
-func setupReapply(t *testing.T) (Options, *fakeClient, string, string) {
+func setupReapply(t *testing.T) (InitOptions, *fakeClient) {
 	t.Helper()
-	opts := setupRun(t)
+	opts, fake := setupInit(t)
 	opts.Sources = map[string]fs.FS{"kukeon": os.DirFS("../../..")}
-	if _, err := Run(t.Context(), opts); err != nil {
+	if _, err := Init(t.Context(), opts); err != nil {
 		t.Fatal(err)
 	}
-	fake := opts.Client.(*fakeClient)
 	if !bytes.Contains(fake.raw, []byte("name: kuke-majordomo-codex-health-sweep")) ||
 		!bytes.Contains(fake.raw, []byte("suspend: true")) {
 		t.Fatalf("init must render the sweep suspended:\n%s", fake.raw)
 	}
-	opts.Force, opts.Reapply = false, true
-	return opts, fake, filepath.Join(opts.Root, "kuketeam.d", "kuke.yaml"), filepath.Join(opts.Root, "kuketeams.yaml")
+	opts.Reapply = true
+	return opts, fake
 }
 
-func editEntry(t *testing.T, path string, edit func(*config.TeamEntry)) {
-	t.Helper()
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	entry, err := config.DecodeEntry(bytes.NewReader(raw))
-	if err != nil {
-		t.Fatal(err)
-	}
-	edit(entry)
-	if raw, err = yaml.Marshal(entry); err != nil {
-		t.Fatal(err)
-	}
-	if err = os.WriteFile(path, raw, 0o600); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestReapplyEnablesTheSweepFromTheStoredEntry(t *testing.T) {
-	opts, fake, entryPath, configPath := setupReapply(t)
-	// A hand-written kuketeams.yaml is read, never written (issue #1591).
-	writeTeamsConfig(
-		t,
-		opts.Root,
-		"# hand-written\napiVersion: kuketeams.io/v1\nkind: TeamsConfig\nspec:\n  defaults: {}\n",
-	)
-	global, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestReapplyEnablesTheSweepFromTheStoredTeam(t *testing.T) {
+	opts, fake := setupReapply(t)
+	defaults := slices.Clone(fake.defaults)
 	on := false
-	editEntry(t, entryPath, func(entry *config.TeamEntry) {
-		entry.Spec.Roles[0].Tasks = &[]config.TaskSelection{{Name: "health-sweep", Suspend: &on}}
+	editTeam(t, fake, "kuke", func(team *config.Team) {
+		team.Spec.Roles[0].Tasks = &[]config.TaskSelection{{Name: "health-sweep", Suspend: &on}}
 	})
 	applies := fake.applies
 
-	result, err := Run(t.Context(), opts)
+	out, err := Init(t.Context(), opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fake.applies != applies+1 || fake.team != "kuke" || result.EntryPath != entryPath ||
-		result.ConfigPath != configPath {
-		t.Fatalf("applies=%d team=%q result=%+v", fake.applies, fake.team, result)
+	if fake.applies != applies+1 || fake.team != "kuke" || out.Plan.Origin.Kind != OriginStored ||
+		out.Plan.Command != "kuke team init --reapply" {
+		t.Fatalf("applies=%d team=%q plan=%+v", fake.applies, fake.team, out.Plan)
 	}
 	if !bytes.Contains(fake.raw, []byte("cron: '@hourly'")) && !bytes.Contains(fake.raw, []byte("cron: \"@hourly\"")) {
 		t.Fatalf("sweep schedule missing:\n%s", fake.raw)
 	}
 	if bytes.Contains(fake.raw, []byte("suspend: true")) {
-		t.Fatal("sweep is still suspended after the entry switched it on")
+		t.Fatal("sweep is still suspended after the stored team switched it on")
 	}
-	if after, readErr := os.ReadFile(configPath); readErr != nil || !bytes.Equal(global, after) {
-		t.Fatal("kuketeams.yaml must be untouched by --reapply")
+	if !bytes.Equal(defaults, fake.defaults) {
+		t.Fatal("the TeamDefaults must be untouched by --reapply")
 	}
-	rewritten, err := os.ReadFile(entryPath)
-	if err != nil || !bytes.Contains(rewritten, []byte("suspend: false")) {
-		t.Fatalf("entry lost the edit: %s (%v)", rewritten, err)
+	if team := storedTeam(t, fake, "kuke"); team.Spec.Roles[0].Tasks == nil ||
+		(*team.Spec.Roles[0].Tasks)[0].Suspend == nil || *(*team.Spec.Roles[0].Tasks)[0].Suspend {
+		t.Fatal("the stored team lost the edit")
+	}
+}
+
+// TestReapplyIsApplyStoredKuke is AC12: kuke team apply kuke equals kuke team
+// init --reapply.
+func TestReapplyIsApplyStoredKuke(t *testing.T) {
+	opts, fake := setupReapply(t)
+	if _, err := Init(t.Context(), opts); err != nil {
+		t.Fatal(err)
+	}
+	reapplied := slices.Clone(fake.raw)
+	if _, err := ApplyStored(t.Context(), opts.Options, "kuke", ""); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(reapplied, fake.raw) || fake.team != "kuke" {
+		t.Fatal("kuke team apply kuke and kuke team init --reapply differ")
 	}
 }
 
 // A config the new composition no longer renders is absent from the apply
 // set; kukeond prunes every kuke-labelled config the set does not include.
 func TestReapplyDropsObsoleteConfigsFromTheApplySet(t *testing.T) {
-	opts, fake, entryPath, _ := setupReapply(t)
-	editEntry(t, entryPath, func(entry *config.TeamEntry) {
-		entry.Spec.Roles[0].Tasks = &[]config.TaskSelection{}
-		entry.Spec.Harnesses = entry.Spec.Harnesses[:1]
+	opts, fake := setupReapply(t)
+	editTeam(t, fake, "kuke", func(team *config.Team) {
+		team.Spec.Roles[0].Tasks = &[]config.TaskSelection{}
+		team.Spec.Harnesses = team.Spec.Harnesses[:1]
 	})
-	if _, err := Run(t.Context(), opts); err != nil {
+	out, err := Init(t.Context(), opts)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if fake.team != "kuke" {
@@ -130,87 +118,80 @@ func TestReapplyDropsObsoleteConfigsFromTheApplySet(t *testing.T) {
 	if !bytes.Contains(fake.raw, []byte("name: kuke-majordomo-codex")) {
 		t.Fatal("the remaining config is missing")
 	}
+	// The plan names what the daemon prunes.
+	for _, gone := range []string{"kuke-majordomo-claude", "kuke-majordomo-codex-health-sweep"} {
+		if !slices.Contains(out.Plan.Prune, gone) {
+			t.Errorf("plan prune = %v, want %s", out.Plan.Prune, gone)
+		}
+	}
 }
 
 func TestReapplyRefusals(t *testing.T) {
-	t.Run("no entry", func(t *testing.T) {
-		opts, fake, entryPath, _ := setupReapply(t)
-		if err := os.Remove(entryPath); err != nil {
-			t.Fatal(err)
+	t.Run("no stored team", func(t *testing.T) {
+		opts, fake := setupInit(t)
+		opts.Reapply = true
+		_, err := Init(t.Context(), opts)
+		if err == nil || !strings.Contains(err.Error(), "kuke team init") || len(fake.writes) != 0 {
+			t.Fatalf("err = %v writes=%v", err, fake.writes)
 		}
-		applies := fake.applies
-		_, err := Run(t.Context(), opts)
-		if err == nil || !strings.Contains(err.Error(), "kuke team init") || !strings.Contains(err.Error(), entryPath) {
-			t.Fatalf("err = %v", err)
-		}
-		if fake.applies != applies {
-			t.Fatal("daemon was contacted without an entry")
-		}
-		if _, statErr := os.Stat(entryPath); !errors.Is(statErr, os.ErrNotExist) {
-			t.Fatal("--reapply must not create an entry")
+		if _, err = ApplyStored(t.Context(), opts.Options, "other", ""); !errors.Is(err, errdefs.ErrTeamNotFound) ||
+			!strings.Contains(err.Error(), "kuke team add other") {
+			t.Fatalf("apply of an unstored team: %v", err)
 		}
 	})
 	t.Run("with force", func(t *testing.T) {
-		opts, fake, _, _ := setupReapply(t)
+		opts, fake := setupReapply(t)
 		opts.Force = true
 		applies := fake.applies
-		if _, err := Run(t.Context(), opts); err == nil || !strings.Contains(err.Error(), "mutually exclusive") ||
+		if _, err := Init(t.Context(), opts); err == nil || !strings.Contains(err.Error(), "mutually exclusive") ||
 			fake.applies != applies {
 			t.Fatalf("err = %v applies=%d", err, fake.applies-applies)
 		}
 	})
-	t.Run("invalid edited entry", func(t *testing.T) {
+	t.Run("invalid stored team", func(t *testing.T) {
 		for name, mutate := range map[string]func(string) string{
 			"unknown field": func(s string) string {
-				return strings.Replace(s, "spec:\n", "spec:\n  sweepEnabled: true\n", 1)
+				return strings.Replace(s, "spec:\n", "spec:\n    sweepEnabled: true\n", 1)
 			},
 			"misspelled task key": func(s string) string {
-				return strings.Replace(s, "initialPath:", "tasks: [{name: health-sweep, suspended: false}]\n      initialPath:", 1)
+				return strings.Replace(s, "initialPath:", "tasks: [{name: health-sweep, suspended: false}]\n          initialPath:", 1)
 			},
 			"unknown task": func(s string) string {
-				return strings.Replace(s, "initialPath:", "tasks: [nightly-sweep]\n      initialPath:", 1)
+				return strings.Replace(s, "initialPath:", "tasks: [nightly-sweep]\n          initialPath:", 1)
 			},
 		} {
-			opts, fake, entryPath, _ := setupReapply(t)
-			raw, err := os.ReadFile(entryPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			edited := mutate(string(raw))
-			if edited == string(raw) {
+			opts, fake := setupReapply(t)
+			raw := string(fake.teams["kuke"])
+			edited := mutate(raw)
+			if edited == raw {
 				t.Fatalf("%s: fixture edit did not apply:\n%s", name, raw)
 			}
-			if err = os.WriteFile(entryPath, []byte(edited), 0o600); err != nil {
-				t.Fatal(err)
-			}
+			fake.teams["kuke"] = []byte(edited)
 			applies := fake.applies
-			if _, err = Run(t.Context(), opts); err == nil {
+			if _, err := Init(t.Context(), opts); err == nil {
 				t.Errorf("%s: accepted", name)
 			}
 			if fake.applies != applies {
 				t.Errorf("%s: something was applied", name)
 			}
-			if after, readErr := os.ReadFile(entryPath); readErr != nil || string(after) != edited {
-				t.Errorf("%s: the edited entry was rewritten", name)
+			if string(fake.teams["kuke"]) != edited {
+				t.Errorf("%s: the stored team was rewritten", name)
 			}
 		}
 	})
-	t.Run("failed apply keeps the entry", func(t *testing.T) {
-		opts, fake, entryPath, _ := setupReapply(t)
+	t.Run("failed apply keeps the stored team", func(t *testing.T) {
+		opts, fake := setupReapply(t)
 		on := false
-		editEntry(t, entryPath, func(entry *config.TeamEntry) {
-			entry.Spec.Roles[0].Tasks = &[]config.TaskSelection{{Name: "health-sweep", Suspend: &on}}
+		editTeam(t, fake, "kuke", func(team *config.Team) {
+			team.Spec.Roles[0].Tasks = &[]config.TaskSelection{{Name: "health-sweep", Suspend: &on}}
 		})
-		before, err := os.ReadFile(entryPath)
-		if err != nil {
-			t.Fatal(err)
-		}
+		before := slices.Clone(fake.teams["kuke"])
 		fake.applyErr = errors.New("daemon refused")
-		if _, err = Run(t.Context(), opts); err == nil {
+		if _, err := Init(t.Context(), opts); err == nil {
 			t.Fatal("apply failure not reported")
 		}
-		if after, readErr := os.ReadFile(entryPath); readErr != nil || !bytes.Equal(before, after) {
-			t.Fatal("the entry was rewritten after a failed apply")
+		if !bytes.Equal(before, fake.teams["kuke"]) {
+			t.Fatal("the stored team was rewritten after a failed apply")
 		}
 	})
 }

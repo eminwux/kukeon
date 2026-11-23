@@ -19,6 +19,7 @@ package config
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -760,6 +761,35 @@ func CompleteConfigNames(cmd *cobra.Command, args []string, toComplete string) (
 		}
 	}
 
+	return names, cobra.ShellCompDirectiveNoFileComp
+}
+
+// CompleteTeamNames provides shell completion for stored team names (issue
+// #1618), in the realm named by --realm or in every realm.
+func CompleteTeamNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) >= 1 {
+		return []string{}, cobra.ShellCompDirectiveNoFileComp
+	}
+	client, err := completionClient(cmd)
+	if err != nil {
+		return []string{}, cobra.ShellCompDirectiveNoFileComp
+	}
+	defer func() { _ = client.Close() }()
+
+	ctx, cancel := context.WithTimeout(cmd.Context(), completionTimeout)
+	defer cancel()
+
+	teams, err := client.ListTeams(ctx, getFlagValueWithDefault(cmd, "realm", ""))
+	if err != nil {
+		return []string{}, cobra.ShellCompDirectiveNoFileComp
+	}
+	names := make([]string, 0, len(teams))
+	for _, team := range teams {
+		name := team.Summary.Name
+		if (toComplete == "" || strings.HasPrefix(name, toComplete)) && !slices.Contains(names, name) {
+			names = append(names, name)
+		}
+	}
 	return names, cobra.ShellCompDirectiveNoFileComp
 }
 

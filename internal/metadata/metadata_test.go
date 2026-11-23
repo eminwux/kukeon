@@ -49,7 +49,7 @@ func TestWriteMetadata_ParentDirModeIsGroupTraversable(t *testing.T) {
 	doc := struct {
 		APIVersion string `json:"apiVersion"`
 		Kind       string `json:"kind"`
-	}{APIVersion: "kukeon/v1beta1", Kind: "Cell"}
+	}{APIVersion: "v1beta1", Kind: "Cell"}
 
 	if err := metadata.WriteMetadata(context.Background(), logger, doc, target); err != nil {
 		t.Fatalf("WriteMetadata: %v", err)
@@ -85,7 +85,7 @@ func TestWriteMetadata_ChmodIsIdempotent_OnReuse(t *testing.T) {
 	doc := struct {
 		APIVersion string `json:"apiVersion"`
 		Kind       string `json:"kind"`
-	}{APIVersion: "kukeon/v1beta1", Kind: "Cell"}
+	}{APIVersion: "v1beta1", Kind: "Cell"}
 
 	if err := metadata.WriteMetadata(context.Background(), logger, doc, target); err != nil {
 		t.Fatalf("WriteMetadata: %v", err)

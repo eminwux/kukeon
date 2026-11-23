@@ -26,18 +26,18 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestTeamEntryRoundTripsPreserveInheritance(t *testing.T) {
-	for _, lists := range []string{"", "  roles: []\n  harnesses: []\n", "  sources: []\n", "  sources:\n    - {name: custom, url: https://example.test/custom, tag: v2, clonePath: /opt/custom}\n"} {
+func TestTeamRoundTripsPreserveInheritance(t *testing.T) {
+	for _, lists := range []string{"", "  roles: []\n  harnesses: []\n", "  sources: []\n", "  connectors: {}\n", "  sources:\n    - {name: custom, url: https://example.test/custom, tag: v2, clonePath: /opt/custom}\n"} {
 		t.Run(lists, func(t *testing.T) {
-			raw := "apiVersion: kuketeams.io/v1\nkind: Team\nmetadata:\n  name: root\nspec:\n" + lists
+			raw := "apiVersion: v1beta1\nkind: Team\nmetadata:\n  name: root\nspec:\n" + lists
 			if lists == "" {
-				raw = "apiVersion: kuketeams.io/v1\nkind: Team\nmetadata:\n  name: root\n"
+				raw = "apiVersion: v1beta1\nkind: Team\nmetadata:\n  name: root\n"
 			}
 			team, err := config.DecodeTeam(strings.NewReader(raw))
 			if err != nil {
 				t.Fatal(err)
 			}
-			entry, err := config.Entry(team)
+			entry, err := config.Declaration(team)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -45,11 +45,13 @@ func TestTeamEntryRoundTripsPreserveInheritance(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			decoded, err := config.DecodeEntry(bytes.NewReader(encoded))
+			decoded, err := config.DecodeTeam(bytes.NewReader(encoded))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(team, decoded.Team()) {
+			// The declaration defaults an omitted realm; nothing else changes.
+			team.Metadata.Realm = config.DefaultRealm
+			if !reflect.DeepEqual(team, decoded) {
 				t.Fatalf("round trip changed selections: %s", encoded)
 			}
 			if strings.Contains(string(encoded), "image:") {
@@ -60,14 +62,14 @@ func TestTeamEntryRoundTripsPreserveInheritance(t *testing.T) {
 }
 
 func TestEntryCopiesAuthoredImageCapabilities(t *testing.T) {
-	team := config.Root()
+	team := inheritingTeam()
 	team.Spec.Roles = []config.Role{
 		{
 			Name: "majordomo", Source: "kukeon", Path: "team/roles/majordomo",
 			Needs: &config.Needs{Image: []string{"go"}},
 		},
 	}
-	entry, err := config.Entry(team)
+	entry, err := config.Declaration(team)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +81,7 @@ func TestEntryCopiesAuthoredImageCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := config.DecodeEntry(bytes.NewReader(raw))
+	decoded, err := config.DecodeTeam(bytes.NewReader(raw))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,18 +110,18 @@ func TestEntryCopiesSourceGitIdentity(t *testing.T) {
 			Sign:    []string{"commits"},
 		}
 	}
-	team := config.Root()
+	team := inheritingTeam()
 	team.Spec.Sources = []config.Source{
 		{Name: "kukeon", URL: "https://example.test/roles", Branch: "main", ClonePath: "/opt/roles", Git: identity()},
 	}
-	team.ProjectSource = &config.Source{
+	team.Spec.ProjectSource = &config.Source{
 		Name: "project", URL: "git@example.test:team/project", Branch: "main", ClonePath: "/opt/project", Git: identity(),
 	}
-	entry, err := config.Entry(team)
+	entry, err := config.Declaration(team)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, authored := range []*config.SourceGit{team.Spec.Sources[0].Git, team.ProjectSource.Git} {
+	for _, authored := range []*config.SourceGit{team.Spec.Sources[0].Git, team.Spec.ProjectSource.Git} {
 		authored.Author.Name = "changed"
 		authored.Committer.Email = "changed"
 		authored.Credential.SecretRef.Name = "changed"
@@ -127,7 +129,7 @@ func TestEntryCopiesSourceGitIdentity(t *testing.T) {
 		authored.Signing.AllowedSignersRef.Name = "changed"
 		authored.Sign[0] = "tags"
 	}
-	for _, recorded := range []*config.SourceGit{entry.Spec.Sources[0].Git, entry.ProjectSource.Git} {
+	for _, recorded := range []*config.SourceGit{entry.Spec.Sources[0].Git, entry.Spec.ProjectSource.Git} {
 		if !reflect.DeepEqual(recorded, identity()) {
 			t.Fatalf("entry aliases the authored source identity: %+v", recorded)
 		}
@@ -136,16 +138,16 @@ func TestEntryCopiesSourceGitIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := config.DecodeEntry(bytes.NewReader(raw))
+	decoded, err := config.DecodeTeam(bytes.NewReader(raw))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(entry, decoded) || !reflect.DeepEqual(decoded.Team().ProjectSource.Git, identity()) {
+	if !reflect.DeepEqual(entry, decoded) || !reflect.DeepEqual(decoded.Spec.ProjectSource.Git, identity()) {
 		t.Fatalf("source identity lost in the registration round trip:\n%s", raw)
 	}
 	// A source without its own identity records none.
 	team.Spec.Sources[0].Git = nil
-	if entry, err = config.Entry(team); err != nil || entry.Spec.Sources[0].Git != nil {
+	if entry, err = config.Declaration(team); err != nil || entry.Spec.Sources[0].Git != nil {
 		t.Fatalf("entry invented a source identity: %v", err)
 	}
 	if raw, err = yaml.Marshal(entry.Spec.Sources[0]); err != nil || bytes.Contains(raw, []byte("git:")) {
@@ -154,8 +156,8 @@ func TestEntryCopiesSourceGitIdentity(t *testing.T) {
 }
 
 func TestStructuralSecretContract(t *testing.T) {
-	const base = `apiVersion: kuketeams.io/v1
-kind: TeamsConfig
+	const base = `apiVersion: v1beta1
+kind: TeamDefaults
 spec:
   defaults: {}
   secrets:
@@ -164,7 +166,7 @@ spec:
       secretRef: {name: account-key, realm: auth, space: shared, stack: operators}
 `
 	for _, src := range []string{"", "      source: {env: OPERATOR_PROVIDER_KEY}\n", "      source: {file: /no/such/credential}\n"} {
-		cfg, err := config.Decode(strings.NewReader(base + src))
+		cfg, err := config.DecodeDefaults(strings.NewReader(base + src))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -172,7 +174,7 @@ spec:
 		if encodeErr := config.Encode(&raw, cfg); encodeErr != nil {
 			t.Fatal(encodeErr)
 		}
-		decoded, err := config.Decode(&raw)
+		decoded, err := config.DecodeDefaults(&raw)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -192,7 +194,7 @@ spec:
 		{"duplicate-name", base + strings.TrimPrefix(base, strings.Split(base, "  secrets:\n")[0]+"  secrets:\n"), "duplicate"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := config.Decode(strings.NewReader(tc.raw))
+			_, err := config.DecodeDefaults(strings.NewReader(tc.raw))
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err=%v; wanted %q", err, tc.want)
 			}
@@ -203,12 +205,12 @@ spec:
 	}
 }
 
-func TestStrictTeamAndEntry(t *testing.T) {
+func TestStrictTeam(t *testing.T) {
 	for _, raw := range []string{
-		"apiVersion: kuketeams.io/v1\nkind: Team\nmetadata: {name: root}\nspec: {images: [resolved]}\n",
-		"apiVersion: kuketeams.io/v1\nkind: Team\nmetadata: {name: root}\nspec: {roles: null}\n",
-		"apiVersion: kuketeams.io/v1\nkind: Team\nmetadata: {name: root}\nspec: {roles: [], roles: []}\n",
-		"apiVersion: kuketeams.io/v1\nkind: Team\nmetadata: {name: root}\n---\nkind: Team\n",
+		"apiVersion: v1beta1\nkind: Team\nmetadata: {name: root}\nspec: {images: [resolved]}\n",
+		"apiVersion: v1beta1\nkind: Team\nmetadata: {name: root}\nspec: {roles: null}\n",
+		"apiVersion: v1beta1\nkind: Team\nmetadata: {name: root}\nspec: {roles: [], roles: []}\n",
+		"apiVersion: v1beta1\nkind: Team\nmetadata: {name: root}\n---\nkind: Team\n",
 	} {
 		if _, err := config.DecodeTeam(strings.NewReader(raw)); err == nil {
 			t.Fatalf("accepted %s", raw)
@@ -216,30 +218,30 @@ func TestStrictTeamAndEntry(t *testing.T) {
 	}
 }
 
-func TestEntrySecretBindings(t *testing.T) {
-	const head = "apiVersion: kuketeams.io/v1\nkind: TeamEntry\nmetadata: {name: root}\n"
-	raw := head + "secrets:\n  - {name: gh-token, secretRef: {name: gh-token, realm: default}, envName: GH_TOKEN}\nspec: {}\n"
-	entry, err := config.DecodeEntry(strings.NewReader(raw))
-	if err != nil || len(entry.Secrets) != 1 || entry.Secrets[0].EnvName != "GH_TOKEN" {
+func TestTeamSecretBindings(t *testing.T) {
+	const head = "apiVersion: v1beta1\nkind: Team\nmetadata: {name: root}\nspec:\n"
+	raw := head + "  secrets:\n  - {name: gh-token, secretRef: {name: gh-token, realm: default}, envName: GH_TOKEN}\n"
+	entry, err := config.DecodeTeam(strings.NewReader(raw))
+	if err != nil || len(entry.Spec.Secrets) != 1 || entry.Spec.Secrets[0].EnvName != "GH_TOKEN" {
 		t.Fatalf("entry=%+v err=%v", entry, err)
 	}
 	encoded, err := yaml.Marshal(entry)
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, err := config.DecodeEntry(bytes.NewReader(encoded))
+	again, err := config.DecodeTeam(bytes.NewReader(encoded))
 	if err != nil || !reflect.DeepEqual(again, entry) {
 		t.Fatalf("round trip: %v %s", err, encoded)
 	}
 	for want, raw := range map[string]string{
 		"secrets[0].token: unknown field": head +
-			"secrets:\n  - {name: gh-token, secretRef: {name: gh-token, realm: default}, envName: GH_TOKEN, token: x}\n",
-		"secrets[1].name": head + "secrets:\n" +
+			"  secrets:\n  - {name: gh-token, secretRef: {name: gh-token, realm: default}, envName: GH_TOKEN, token: x}\n",
+		"secrets[1].name": head + "  secrets:\n" +
 			"  - {name: gh-token, secretRef: {name: a, realm: default}, envName: A}\n" +
 			"  - {name: gh-token, secretRef: {name: b, realm: default}, envName: B}\n",
-		"secrets[0].envName": head + "secrets:\n  - {name: gh-token, secretRef: {name: a, realm: default}, envName: 1A}\n",
+		"secrets[0].envName": head + "  secrets:\n  - {name: gh-token, secretRef: {name: a, realm: default}, envName: 1A}\n",
 	} {
-		if _, err = config.DecodeEntry(strings.NewReader(raw)); err == nil || !strings.Contains(err.Error(), want) {
+		if _, err = config.DecodeTeam(strings.NewReader(raw)); err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("want %q, got %v", want, err)
 		}
 	}
@@ -262,8 +264,8 @@ func TestDefaultSecretBinding(t *testing.T) {
 }
 
 func TestSourceClonePathValidationAndRoundTrip(t *testing.T) {
-	const base = `apiVersion: kuketeams.io/v1
-kind: TeamsConfig
+	const base = `apiVersion: v1beta1
+kind: TeamDefaults
 spec:
   defaults:
     sources:
@@ -272,7 +274,7 @@ spec:
         tag: v2
 `
 	for _, value := range []string{"", "        clonePath: /opt/roles\n"} {
-		cfg, err := config.Decode(strings.NewReader(base + value))
+		cfg, err := config.DecodeDefaults(strings.NewReader(base + value))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -280,13 +282,13 @@ spec:
 		if err = config.Encode(&out, cfg); err != nil {
 			t.Fatal(err)
 		}
-		decoded, err := config.Decode(&out)
+		decoded, err := config.DecodeDefaults(&out)
 		if err != nil || !reflect.DeepEqual(cfg, decoded) {
 			t.Fatalf("round trip: %v", err)
 		}
 	}
 	for _, value := range []string{"relative", "/opt/../roles", "/opt/with space", "/"} {
-		if _, err := config.Decode(strings.NewReader(base + "        clonePath: " + value + "\n")); err == nil {
+		if _, err := config.DecodeDefaults(strings.NewReader(base + "        clonePath: " + value + "\n")); err == nil {
 			t.Fatalf("accepted clone path %q", value)
 		}
 	}
@@ -296,11 +298,11 @@ spec:
         branch: topic
         clonePath: /opt/roles
 `
-	if _, err := config.Decode(strings.NewReader(duplicate)); err == nil ||
+	if _, err := config.DecodeDefaults(strings.NewReader(duplicate)); err == nil ||
 		!strings.Contains(err.Error(), "duplicate clone") {
 		t.Fatalf("duplicate destinations: %v", err)
 	}
-	team, err := config.DecodeTeam(strings.NewReader(`apiVersion: kuketeams.io/v1
+	team, err := config.DecodeTeam(strings.NewReader(`apiVersion: v1beta1
 kind: Team
 metadata: {name: root}
 spec:
@@ -310,7 +312,7 @@ spec:
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := config.Decode(strings.NewReader(base))
+	cfg, err := config.DecodeDefaults(strings.NewReader(base))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,18 +322,18 @@ spec:
 }
 
 func TestProjectSourceIsAdditiveAndRetainsInheritance(t *testing.T) {
-	cfg := &config.TeamsConfig{
+	cfg := &config.TeamDefaults{
 		APIVersion: config.APIVersion,
-		Kind:       config.Kind,
+		Kind:       config.KindTeamDefaults,
 		Spec: config.Spec{
 			Defaults: config.Defaults{
 				Sources: []config.Source{{Name: "definitions", URL: "https://example.test/defs", Branch: "main"}},
 			},
 		},
 	}
-	team := config.Root()
+	team := inheritingTeam()
 	team.Metadata.Name = "example"
-	team.ProjectSource = &config.Source{
+	team.Spec.ProjectSource = &config.Source{
 		Name:      "project",
 		URL:       "git@alias:owner/repo",
 		Branch:    "trunk",
@@ -341,7 +343,7 @@ func TestProjectSourceIsAdditiveAndRetainsInheritance(t *testing.T) {
 	if err != nil || len(effective.Sources) != 2 || team.Spec.Sources != nil {
 		t.Fatalf("error=%v", err)
 	}
-	entry, err := config.Entry(team)
+	entry, err := config.Declaration(team)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,17 +351,17 @@ func TestProjectSourceIsAdditiveAndRetainsInheritance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	accepted, err := config.DecodeEntry(bytes.NewReader(raw))
+	accepted, err := config.DecodeTeam(bytes.NewReader(raw))
 	if err != nil {
 		t.Fatal(err)
 	}
 	cfg.Spec.Defaults.Sources[0].Branch = "next"
-	effective, err = config.Resolve(cfg, accepted.Team())
+	effective, err = config.Resolve(cfg, accepted)
 	if err != nil || effective.Sources[0].Branch != "next" || effective.Sources[1].Branch != "trunk" {
 		t.Fatal("defaults frozen")
 	}
-	team.ProjectSource.Branch = "changed"
-	if entry.ProjectSource.Branch != "trunk" {
+	team.Spec.ProjectSource.Branch = "changed"
+	if entry.Spec.ProjectSource.Branch != "trunk" {
 		t.Fatal("project declaration aliased")
 	}
 	// Authored lists still replace rather than merge the defaults.
@@ -375,8 +377,8 @@ func TestProjectSourceIsAdditiveAndRetainsInheritance(t *testing.T) {
 }
 
 func TestInitialPathAndHarnessSelection(t *testing.T) {
-	cfg, err := config.Decode(strings.NewReader(`apiVersion: kuketeams.io/v1
-kind: TeamsConfig
+	cfg, err := config.DecodeDefaults(strings.NewReader(`apiVersion: v1beta1
+kind: TeamDefaults
 spec:
   defaults:
     sources: [{name: defs, url: github.com/example/defs, branch: main}]
@@ -390,7 +392,7 @@ spec:
 	if err != nil {
 		t.Fatal(err)
 	}
-	team := config.Root()
+	team := inheritingTeam()
 	inherited, err := config.Resolve(cfg, team)
 	if err != nil || len(inherited.Roles) != 2 || inherited.Roles[0].InitialPath != "/home/user/work" ||
 		inherited.Roles[1].InitialPath != "$HOME" {
@@ -402,7 +404,7 @@ spec:
 		if resolveErr != nil || len(resolved.Roles) != 1 || resolved.Roles[0].InitialPath != value {
 			t.Fatalf("replacement: %+v, %v", resolved, resolveErr)
 		}
-		entry, entryErr := config.Entry(team)
+		entry, entryErr := config.Declaration(team)
 		if entryErr != nil {
 			t.Fatal(entryErr)
 		}
@@ -410,8 +412,8 @@ spec:
 		if marshalErr != nil {
 			t.Fatal(marshalErr)
 		}
-		decoded, decodeErr := config.DecodeEntry(bytes.NewReader(raw))
-		if decodeErr != nil || !reflect.DeepEqual(decoded.Team(), team) {
+		decoded, decodeErr := config.DecodeTeam(bytes.NewReader(raw))
+		if decodeErr != nil || !reflect.DeepEqual(decoded, team) {
 			t.Fatalf("round trip: %s: %v", raw, decodeErr)
 		}
 		raw, marshalErr = yaml.Marshal(team)
@@ -438,18 +440,16 @@ spec:
 		}
 	}
 	// The removed harness default is rejected everywhere with migration guidance.
-	for _, kind := range []string{"TeamsConfig", "Team", "TeamEntry"} {
+	for _, kind := range []string{"TeamDefaults", "Team"} {
 		for _, value := range []string{"true", "false"} {
 			harnesses := "  harnesses: [{name: codex, source: defs, path: codex, default: " + value + "}]\n"
-			raw := "apiVersion: kuketeams.io/v1\nkind: " + kind + "\nmetadata: {name: test}\nspec:\n" + harnesses
+			raw := "apiVersion: v1beta1\nkind: " + kind + "\nmetadata: {name: test}\nspec:\n" + harnesses
 			switch kind {
-			case "TeamsConfig":
-				raw = "apiVersion: kuketeams.io/v1\nkind: TeamsConfig\nspec:\n  defaults:\n  " + harnesses
-				_, err = config.Decode(strings.NewReader(raw))
-			case "Team":
-				_, err = config.DecodeTeam(strings.NewReader(raw))
+			case "TeamDefaults":
+				raw = "apiVersion: v1beta1\nkind: TeamDefaults\nspec:\n  defaults:\n  " + harnesses
+				_, err = config.DecodeDefaults(strings.NewReader(raw))
 			default:
-				_, err = config.DecodeEntry(strings.NewReader(raw))
+				_, err = config.DecodeTeam(strings.NewReader(raw))
 			}
 			if err == nil || !strings.Contains(err.Error(), "harnesses[0].default: removed") ||
 				!strings.Contains(err.Error(), "roles[].harness") {
@@ -461,10 +461,10 @@ spec:
 
 // TestRoleTaskSelectionRoundTrips pins issue #1491: an omitted `tasks`
 // (every task) and an explicit `tasks: []` (none) stay distinct through the
-// TeamEntry round-trip, and selection names are validated.
+// Team round-trip, and selection names are validated.
 func TestRoleTaskSelectionRoundTrips(t *testing.T) {
-	cfg, err := config.Decode(strings.NewReader(`apiVersion: kuketeams.io/v1
-kind: TeamsConfig
+	cfg, err := config.DecodeDefaults(strings.NewReader(`apiVersion: v1beta1
+kind: TeamDefaults
 spec:
   defaults:
     sources: [{name: defs, url: github.com/example/defs, branch: main}]
@@ -486,12 +486,12 @@ spec:
 			{Name: "health-sweep", Suspend: &on},
 		},
 	} {
-		team := config.Root()
+		team := inheritingTeam()
 		team.Spec.Roles = []config.Role{{Name: "dev", Source: "defs", Path: "dev", Tasks: tasks}}
 		if _, err = config.Resolve(cfg, team); err != nil {
 			t.Fatal(err)
 		}
-		entry, entryErr := config.Entry(team)
+		entry, entryErr := config.Declaration(team)
 		if entryErr != nil {
 			t.Fatal(entryErr)
 		}
@@ -499,8 +499,8 @@ spec:
 		if marshalErr != nil {
 			t.Fatal(marshalErr)
 		}
-		decoded, decodeErr := config.DecodeEntry(bytes.NewReader(raw))
-		if decodeErr != nil || !reflect.DeepEqual(decoded.Team(), team) {
+		decoded, decodeErr := config.DecodeTeam(bytes.NewReader(raw))
+		if decodeErr != nil || !reflect.DeepEqual(decoded, team) {
 			t.Fatalf("round trip of %v: %s: %v", tasks, raw, decodeErr)
 		}
 		got := decoded.Spec.Roles[0]
@@ -514,7 +514,7 @@ spec:
 		{{Name: "a"}, {Name: "a", Schedule: "@daily"}},
 		{{Name: ""}},
 	} {
-		team := config.Root()
+		team := inheritingTeam()
 		team.Spec.Roles = []config.Role{{Name: "dev", Source: "defs", Path: "dev", Tasks: &bad}}
 		if _, err = config.Resolve(cfg, team); err == nil {
 			t.Fatalf("tasks %+v accepted", bad)
@@ -526,7 +526,7 @@ spec:
 // items (issue #1503): a bare task name, and a mapping that also sets the
 // task's schedule. A bare name is written back as a bare name.
 func TestRoleTaskEntryYAMLForms(t *testing.T) {
-	const teamYAML = `apiVersion: kuketeams.io/v1
+	const teamYAML = `apiVersion: v1beta1
 kind: Team
 metadata:
   name: root
@@ -599,5 +599,14 @@ spec:
 		if _, err = config.DecodeTeam(strings.NewReader(bad)); err == nil {
 			t.Errorf("%s: task entry %s accepted", name, entry)
 		}
+	}
+}
+
+// inheritingTeam is a team whose declaration omits every list.
+func inheritingTeam() *config.Team {
+	return &config.Team{
+		APIVersion: config.APIVersion,
+		Kind:       config.KindTeam,
+		Metadata:   config.Metadata{Name: "root", Realm: config.DefaultRealm},
 	}
 }

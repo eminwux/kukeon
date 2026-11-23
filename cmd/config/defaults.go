@@ -82,11 +82,9 @@ func HomeDirKnown() bool {
 }
 
 // DefaultKukeDir is the per-operator kuke state directory (~/.kuke) holding
-// the client configuration, the optional hand-written team-distribution
-// global-facts file (kuketeams.yaml), and the per-team drop-in directory
-// (kuketeam.d/). Falls
-// back to "tmp" when the home directory cannot be determined, matching the
-// other default-path helpers; writers gate on HomeDirKnown.
+// the client configuration. Teams are stored by kukeond, not here (issue
+// #1618). Falls back to "tmp" when the home directory cannot be determined,
+// matching the other default-path helpers; writers gate on HomeDirKnown.
 func DefaultKukeDir() string {
 	base, err := os.UserHomeDir()
 	if err != nil {

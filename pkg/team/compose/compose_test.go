@@ -55,16 +55,22 @@ func publishedCodexImage(t *testing.T) string {
 	return image
 }
 
-// emptyConfig is the TeamsConfig of a host with no kuketeams.yaml (issue
-// #1591: the file is optional).
-func emptyConfig() *config.TeamsConfig {
-	return &config.TeamsConfig{APIVersion: config.APIVersion, Kind: config.Kind}
+// inheritingTeam is a team whose declaration omits every list, so it takes
+// all of them from the TeamDefaults.
+func inheritingTeam() *config.Team {
+	return &config.Team{APIVersion: config.APIVersion, Kind: config.KindTeam, Metadata: config.Metadata{Name: "root"}}
 }
 
-func fixture(t *testing.T) (*config.TeamsConfig, compose.Options) {
+// emptyConfig is the TeamDefaults of a realm that stores none (issue
+// #1618: a realm need not store one).
+func emptyConfig() *config.TeamDefaults {
+	return &config.TeamDefaults{APIVersion: config.APIVersion, Kind: config.KindTeamDefaults}
+}
+
+func fixture(t *testing.T) (*config.TeamDefaults, compose.Options) {
 	t.Helper()
 	base := emptyConfig()
-	base.Spec.Defaults = config.Majordomo().Spec
+	base.Spec.Defaults = config.Majordomo().Spec.Defaults
 	base.Spec.Defaults.Harnesses = base.Spec.Defaults.Harnesses[:1]
 	return base, compose.Options{
 		Sources: map[string]fs.FS{"kukeon": copiedSource(t)},
@@ -125,12 +131,12 @@ func TestRootDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(before, after) || result.Entry.Spec.Roles != nil {
+	if !bytes.Equal(before, after) || result.Team.Spec.Roles != nil {
 		t.Fatal("composition mutated/materialized authored selection")
 	}
 }
 
-func allHarnesses(cfg *config.TeamsConfig) {
+func allHarnesses(cfg *config.TeamDefaults) {
 	cfg.Spec.Defaults.Harnesses = []config.Harness{
 		{Name: "codex", Source: "kukeon", Path: "team/harnesses/codex"},
 		{Name: "claude", Source: "kukeon", Path: "team/harnesses/claude"},
@@ -138,8 +144,8 @@ func allHarnesses(cfg *config.TeamsConfig) {
 	}
 }
 
-func selectedTeam(cfg *config.TeamsConfig) *config.Team {
-	team := config.Root()
+func selectedTeam(cfg *config.TeamDefaults) *config.Team {
+	team := inheritingTeam()
 	if len(cfg.Spec.Defaults.Harnesses) > 1 {
 		team.Spec.Harnesses = slices.Clone(cfg.Spec.Defaults.Harnesses)
 	}
@@ -287,31 +293,31 @@ func TestMandatoryRequirementsAndSourceDeclarations(t *testing.T) {
 func TestActionableFailures(t *testing.T) {
 	cases := []struct {
 		name, want string
-		change     func(*config.TeamsConfig, *compose.Options, fstest.MapFS)
+		change     func(*config.TeamDefaults, *compose.Options, fstest.MapFS)
 	}{
 		{
 			"role-source",
 			"missing clonePath for required role source",
-			func(c *config.TeamsConfig, _ *compose.Options, _ fstest.MapFS) {
+			func(c *config.TeamDefaults, _ *compose.Options, _ fstest.MapFS) {
 				c.Spec.Defaults.Sources[0].ClonePath = ""
 			},
 		},
-		{"capability", "no published image", func(c *config.TeamsConfig, _ *compose.Options, _ fstest.MapFS) {
+		{"capability", "no published image", func(c *config.TeamDefaults, _ *compose.Options, _ fstest.MapFS) {
 			c.Spec.Defaults.Roles[0].Needs.Image = []string{"absent-capability"}
 		}},
 		{
 			"source",
 			"missing materialized",
-			func(_ *config.TeamsConfig, o *compose.Options, _ fstest.MapFS) { o.Sources = nil },
+			func(_ *config.TeamDefaults, o *compose.Options, _ fstest.MapFS) { o.Sources = nil },
 		},
 		{
 			"role",
 			"read definition",
-			func(_ *config.TeamsConfig, _ *compose.Options, s fstest.MapFS) {
+			func(_ *config.TeamDefaults, _ *compose.Options, s fstest.MapFS) {
 				delete(s, "team/roles/majordomo/role.yaml")
 			},
 		},
-		{"renderer", "spec.renderer: unsupported", func(_ *config.TeamsConfig, _ *compose.Options, s fstest.MapFS) {
+		{"renderer", "spec.renderer: unsupported", func(_ *config.TeamDefaults, _ *compose.Options, s fstest.MapFS) {
 			s["team/harnesses/codex/harness.yaml"].Data = bytes.ReplaceAll(
 				s["team/harnesses/codex/harness.yaml"].Data,
 				[]byte("renderer: kukeon/v1beta1"),
@@ -321,7 +327,7 @@ func TestActionableFailures(t *testing.T) {
 		{
 			"legacy-template",
 			"legacy template/makeTarget",
-			func(_ *config.TeamsConfig, _ *compose.Options, s fstest.MapFS) {
+			func(_ *config.TeamDefaults, _ *compose.Options, s fstest.MapFS) {
 				s["team/harnesses/codex/harness.yaml"].Data = bytes.ReplaceAll(
 					s["team/harnesses/codex/harness.yaml"].Data,
 					[]byte("renderer: kukeon/v1beta1"),
@@ -329,29 +335,33 @@ func TestActionableFailures(t *testing.T) {
 				)
 			},
 		},
-		{"unsupported-setting", "unsupported Codex", func(_ *config.TeamsConfig, _ *compose.Options, s fstest.MapFS) {
+		{"unsupported-setting", "unsupported Codex", func(_ *config.TeamDefaults, _ *compose.Options, s fstest.MapFS) {
 			s["team/roles/majordomo/role.yaml"].Data = bytes.ReplaceAll(
 				s["team/roles/majordomo/role.yaml"].Data,
 				[]byte("workspace-write"),
 				[]byte("made-up"),
 			)
 		}},
-		{"parameter", "missing required parameter", func(_ *config.TeamsConfig, _ *compose.Options, s fstest.MapFS) {
+		{"parameter", "missing required parameter", func(_ *config.TeamDefaults, _ *compose.Options, s fstest.MapFS) {
 			s["team/roles/majordomo/role.yaml"].Data = bytes.ReplaceAll(
 				s["team/roles/majordomo/role.yaml"].Data,
 				[]byte("  needs:"),
 				[]byte("  needs:\n    params: [REGION]"),
 			)
 		}},
-		{"unknown-parameter", "unsupported parameter", func(c *config.TeamsConfig, _ *compose.Options, _ fstest.MapFS) {
-			c.Spec.Parameters = map[string]string{"WRONG": "value"}
-		}},
-		{"secret", "secrets[0]", func(c *config.TeamsConfig, o *compose.Options, _ fstest.MapFS) {
+		{
+			"unknown-parameter",
+			"unsupported parameter",
+			func(c *config.TeamDefaults, _ *compose.Options, _ fstest.MapFS) {
+				c.Spec.Parameters = map[string]string{"WRONG": "value"}
+			},
+		},
+		{"secret", "secrets[0]", func(c *config.TeamDefaults, o *compose.Options, _ fstest.MapFS) {
 			allHarnesses(c)
 			c.Spec.Defaults.Roles[0].Harness = "opencode"
 			o.Secrets = []config.SecretBinding{{Name: "openrouter-api-key", EnvName: "1BAD"}}
 		}},
-		{"seed", "field seeds not found", func(c *config.TeamsConfig, _ *compose.Options, s fstest.MapFS) {
+		{"seed", "field seeds not found", func(c *config.TeamDefaults, _ *compose.Options, s fstest.MapFS) {
 			allHarnesses(c)
 			c.Spec.Defaults.Roles[0].Harness = "claude"
 			s["team/harnesses/claude/harness.yaml"].Data = bytes.ReplaceAll(
@@ -362,7 +372,7 @@ func TestActionableFailures(t *testing.T) {
 				),
 			)
 		}},
-		{"mount", "unsupported mount", func(_ *config.TeamsConfig, _ *compose.Options, s fstest.MapFS) {
+		{"mount", "unsupported mount", func(_ *config.TeamDefaults, _ *compose.Options, s fstest.MapFS) {
 			s["team/roles/majordomo/role.yaml"].Data = bytes.ReplaceAll(
 				s["team/roles/majordomo/role.yaml"].Data,
 				[]byte("  needs:"),
@@ -685,8 +695,8 @@ func TestSecretBindingsGeneratedAndRecorded(t *testing.T) {
 				t.Fatal(err)
 			}
 			// Only bindings the selected pairs use are recorded; stale ones drop.
-			if !reflect.DeepEqual(result.Entry.Secrets, []config.SecretBinding{tc.want}) {
-				t.Fatalf("entry secrets = %+v", result.Entry.Secrets)
+			if !reflect.DeepEqual(result.Team.Spec.Secrets, []config.SecretBinding{tc.want}) {
+				t.Fatalf("entry secrets = %+v", result.Team.Spec.Secrets)
 			}
 			pair := result.Pairs[0]
 			rendered := work(t, pair, interactive)
@@ -714,9 +724,9 @@ func TestSecretBindingsGeneratedAndRecorded(t *testing.T) {
 			}
 			// Recomposing from the recorded entry alone yields the same bindings.
 			cfg.Spec.Secrets = nil
-			opts.Secrets = result.Entry.Secrets
+			opts.Secrets = result.Team.Spec.Secrets
 			again, err := compose.Compose(cfg, selectedTeam(cfg), opts)
-			if err != nil || !reflect.DeepEqual(again.Entry.Secrets, result.Entry.Secrets) {
+			if err != nil || !reflect.DeepEqual(again.Team.Spec.Secrets, result.Team.Spec.Secrets) {
 				t.Fatalf("recompose: %v %+v", err, again)
 			}
 		})
@@ -1020,7 +1030,7 @@ func TestStateVolumeNames(t *testing.T) {
 
 // withProject makes the majordomo role need the project repo and gives the
 // team a project source.
-func withProject(t *testing.T, cfg *config.TeamsConfig, opts compose.Options) {
+func withProject(t *testing.T, cfg *config.TeamDefaults, opts compose.Options) {
 	t.Helper()
 	source := copiedSource(t)
 	source["team/roles/majordomo/role.yaml"].Data = bytes.ReplaceAll(
@@ -1420,7 +1430,7 @@ func TestMajordomoSweepOptIn(t *testing.T) {
 		}
 	}
 	// The recorded entry keeps the opt-in, so a later --reapply renders the same.
-	raw, err := yaml.Marshal(result.Entry)
+	raw, err := yaml.Marshal(result.Team)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1445,7 +1455,7 @@ func TestInheritedHarnessListAndRoleOverride(t *testing.T) {
 		{"claude", []string{"claude"}},
 	} {
 		cfg.Spec.Defaults.Roles[0].Harness = test.harness
-		result, err := compose.Compose(cfg, config.Root(), opts)
+		result, err := compose.Compose(cfg, inheritingTeam(), opts)
 		if err != nil {
 			t.Fatal(err)
 		}

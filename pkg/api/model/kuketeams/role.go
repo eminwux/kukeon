@@ -105,7 +105,7 @@ type RoleHarness struct {
 	// run by the cell's shell, so it references environment variables as
 	// $VAR, never ${VAR}.
 	Command string `json:"command,omitempty"     yaml:"command,omitempty"`
-	// Secrets are the secret NAMES (resolved against TeamsConfig.secrets) this
+	// Secrets are the secret NAMES (resolved against the TeamDefaults spec.secrets) this
 	// harness needs, declared per-harness so a role's Claude cell no longer
 	// carries secret slots only its Codex/OpenCode cells use (agents#750). A
 	// name the harness or one of its modes declares fills that slot; `gh-token`
@@ -126,7 +126,7 @@ type RoleHarness struct {
 //     accepted but mounts nothing: cells use stored git credentials.
 //   - Params: parameters supplied at materialization time. An entry is a bare
 //     name or a {name, default} mapping (see RoleParam).
-//   - Secrets: secret names resolved against TeamsConfig.secrets.
+//   - Secrets: secret names resolved against the TeamDefaults spec.secrets.
 type RoleNeeds struct {
 	Image   []string    `json:"image,omitempty"   yaml:"image,omitempty"`
 	Repos   []string    `json:"repos,omitempty"   yaml:"repos,omitempty"`
@@ -136,7 +136,7 @@ type RoleNeeds struct {
 }
 
 // RoleParam is one `needs.params` entry: a bare parameter name, which the
-// operator must supply in TeamsConfig.spec.parameters unless kukeon already
+// operator must supply in the TeamDefaults spec.parameters unless kukeon already
 // knows it, or a mapping that also carries the role's default:
 //
 //	params:
@@ -144,7 +144,7 @@ type RoleNeeds struct {
 //	  - { name: FEEDBACK_REPO, default: "${ROLE_SOURCE_REPO}" }
 //
 // The default may reference composed facts as ${FACT}; a value in
-// TeamsConfig.spec.parameters overrides it.
+// the TeamDefaults spec.parameters overrides it.
 type RoleParam struct {
 	// Name is the parameter name.
 	Name string `json:"name"              yaml:"name"`

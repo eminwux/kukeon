@@ -40,7 +40,7 @@ const (
 
 // tickerYAML is a program role: a role.yaml and nothing else, no AGENTS.md
 // and no skills.
-const tickerYAML = `apiVersion: kuketeams.io/v1
+const tickerYAML = `apiVersion: v1beta1
 kind: Role
 metadata: { name: ticker }
 spec:
@@ -72,7 +72,7 @@ func scriptFixture(
 	t *testing.T,
 	harnesses []config.Harness,
 	roles ...config.Role,
-) (*config.TeamsConfig, compose.Options, fstest.MapFS) {
+) (*config.TeamDefaults, compose.Options, fstest.MapFS) {
 	t.Helper()
 	cfg, opts := fixture(t)
 	source := copiedSource(t)
@@ -85,8 +85,8 @@ func scriptFixture(
 
 // scriptTeam selects every default harness, including a single one, so the
 // team does not fall back to the fixture's selection.
-func scriptTeam(cfg *config.TeamsConfig) *config.Team {
-	team := config.Root()
+func scriptTeam(cfg *config.TeamDefaults) *config.Team {
+	team := inheritingTeam()
 	team.Spec.Harnesses = slices.Clone(cfg.Spec.Defaults.Harnesses)
 	return team
 }
@@ -362,7 +362,7 @@ func TestScriptRoleNeedsNoAgentsFile(t *testing.T) {
 
 // agentRoleYAML is a model role on the team's two model harnesses, standing in
 // for the agents repository's dev, pm and pr-reviewer roles.
-const agentRoleYAML = `apiVersion: kuketeams.io/v1
+const agentRoleYAML = `apiVersion: v1beta1
 kind: Role
 metadata: { name: %s }
 spec:
@@ -374,7 +374,7 @@ spec:
 
 // pipelineYAML stands in for the agents repository's pipeline role: a program
 // role on the script harness whose tick ships switched off.
-const pipelineYAML = `apiVersion: kuketeams.io/v1
+const pipelineYAML = `apiVersion: v1beta1
 kind: Role
 metadata: { name: pipeline }
 spec:
@@ -401,7 +401,7 @@ func TestKukeonTeamRunsThePipeline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	team.ProjectSource = &config.Source{
+	team.Spec.ProjectSource = &config.Source{
 		Name: "project", URL: "git@github.com:eminwux/kukeon", Branch: "main", ClonePath: "/home/user/kukeon",
 	}
 	agents := fstest.MapFS{"pipeline/role.yaml": &fstest.MapFile{Data: []byte(pipelineYAML)}}

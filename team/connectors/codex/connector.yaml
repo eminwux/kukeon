@@ -4,7 +4,7 @@
 # enables exactly one on every codex Config. `login` is the default: on a
 # personal ChatGPT plan `codex login` is the only option, and it is what a cell
 # did before connectors existed.
-apiVersion: kuketeams.io/v1
+apiVersion: v1beta1
 kind: Connector
 metadata:
   name: codex

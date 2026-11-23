@@ -102,7 +102,7 @@ func TestDefaultRoleAssets(t *testing.T) {
 	if decodeErr := decoder.Decode(&role); decodeErr != nil {
 		t.Fatal(decodeErr)
 	}
-	if role.APIVersion != "kuketeams.io/v1" || role.Kind != "Role" || role.Metadata.Name != selection.Name {
+	if role.APIVersion != "v1beta1" || role.Kind != "Role" || role.Metadata.Name != selection.Name {
 		t.Fatalf("invalid role identity: %+v", role)
 	}
 	if !reflect.DeepEqual(role.Spec.Needs.Image, selection.Needs.Image) {

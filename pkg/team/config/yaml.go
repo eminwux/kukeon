@@ -21,14 +21,16 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
-// Decode accepts exactly one strict YAML document and returns a validated model.
-func Decode(r io.Reader) (*TeamsConfig, error) {
-	var cfg TeamsConfig
+// DecodeDefaults accepts exactly one strict TeamDefaults document and returns
+// a validated model.
+func DecodeDefaults(r io.Reader) (*TeamDefaults, error) {
+	var cfg TeamDefaults
 	if err := decodeDocument(r, &cfg); err != nil {
 		return nil, err
 	}
@@ -36,6 +38,13 @@ func Decode(r io.Reader) (*TeamsConfig, error) {
 		return nil, err
 	}
 	return &cfg, nil
+}
+
+// DecodeStrict decodes exactly one YAML document into out, rejecting unknown
+// and duplicate fields and scalars of the wrong type, with the same messages
+// the team decoders give. It validates no field values.
+func DecodeStrict(r io.Reader, out any) error {
+	return decodeDocument(r, out)
 }
 
 func decodeDocument(r io.Reader, out any) error {
@@ -107,10 +116,7 @@ func checkNode(n *yaml.Node, typ reflect.Type, field string, active map[*yaml.No
 			return fmt.Errorf("%s: expected mapping", location(field))
 		}
 		fields := map[string]reflect.Type{}
-		for i := range typ.NumField() {
-			f := typ.Field(i)
-			fields[strings.Split(f.Tag.Get("yaml"), ",")[0]] = f.Type
-		}
+		collectFields(typ, fields)
 		seen := map[string]bool{}
 		for i := 0; i < len(n.Content); i += 2 {
 			key, value := n.Content[i], n.Content[i+1]
@@ -197,6 +203,20 @@ func checkNode(n *yaml.Node, typ reflect.Type, field string, active map[*yaml.No
 	return nil
 }
 
+// collectFields maps each YAML field name of typ to its type, flattening
+// `,inline` fields the way the decoder does.
+func collectFields(typ reflect.Type, fields map[string]reflect.Type) {
+	for i := range typ.NumField() {
+		f := typ.Field(i)
+		tag := strings.Split(f.Tag.Get("yaml"), ",")
+		if slices.Contains(tag[1:], "inline") {
+			collectFields(f.Type, fields)
+			continue
+		}
+		fields[tag[0]] = f.Type
+	}
+}
+
 func location(field string) string {
 	if field == "" {
 		return "config"
@@ -206,7 +226,7 @@ func location(field string) string {
 
 // Encode validates before writing and preserves semantic selection-list values.
 // Neither validation nor encoding mutates cfg.
-func Encode(w io.Writer, cfg *TeamsConfig) error {
+func Encode(w io.Writer, cfg *TeamDefaults) error {
 	if err := Validate(cfg); err != nil {
 		return err
 	}

@@ -14,11 +14,11 @@ const majordomoLabels = { "kukeon.io/team": "kuke", "kukeon.io/role": "majordomo
 const sweepLabels = { ...majordomoLabels, "kukeon.io/task": "health-sweep" };
 
 function config(name, labels, extra = {}) {
-  return { apiVersion: "kukeon.io/v1beta1", kind: "CellConfig", metadata: { name, realm: scope[0], space: scope[1], stack: scope[2], labels }, spec: { blueprint: { name: "claude-host", realm: "default" }, ...extra.spec }, ...(extra.status ? { status: extra.status } : {}) };
+  return { apiVersion: "v1beta1", kind: "CellConfig", metadata: { name, realm: scope[0], space: scope[1], stack: scope[2], labels }, spec: { blueprint: { name: "claude-host", realm: "default" }, ...extra.spec }, ...(extra.status ? { status: extra.status } : {}) };
 }
 function cell(name, state, labels = {}, status = {}) {
   return {
-    apiVersion: "kukeon.io/v1beta1", kind: "Cell", metadata: { name, labels },
+    apiVersion: "v1beta1", kind: "Cell", metadata: { name, labels },
     spec: { realmId: scope[0], spaceId: scope[1], stackId: scope[2], containers: [{ id: "agent", attachable: true }, { id: "pause", root: true, attachable: true }], tty: { default: "agent" } },
     status: { state, ...status },
   };
@@ -64,8 +64,8 @@ async function world(page, { cells = [], configs = [], reports = [], createError
     const url = new URL(route.request().url());
     const [, , , kind, name] = url.pathname.split("/");
     const list = kind === "configs" ? state.configs
-      : kind === "blueprints" ? [{ apiVersion: "kukeon.io/v1beta1", kind: "CellBlueprint", metadata: { name: "claude-host", realm: "default" }, spec: {} }]
-        : kind === "volumes" ? [{ apiVersion: "kukeon.io/v1beta1", kind: "Volume", metadata: { name: "kuke-majordomo-claude", realm: "default", space: "default", stack: "default" }, spec: { reclaimPolicy: "Retain" } }] : [];
+      : kind === "blueprints" ? [{ apiVersion: "v1beta1", kind: "CellBlueprint", metadata: { name: "claude-host", realm: "default" }, spec: {} }]
+        : kind === "volumes" ? [{ apiVersion: "v1beta1", kind: "Volume", metadata: { name: "kuke-majordomo-claude", realm: "default", space: "default", stack: "default" }, spec: { reclaimPolicy: "Retain" } }] : [];
     if (!name) return route.fulfill({ json: list });
     const found = list.find(item => item.metadata.name === decodeURIComponent(name));
     return found ? route.fulfill({ json: found }) : route.fulfill({ status: 404, json: { error: { code: "not_found", message: "not found" } } });
@@ -472,7 +472,7 @@ test("the Health page shows the latest report, its findings and the history", as
   expect(pasted(state).find(message => message.includes("\x1b[200~"))).toContain('kuke health report 20261117T090000.000000000Z');
 });
 
-test("the Health page shows the sweep schedule from the task config, runs a sweep now and explains --reapply while suspended", async ({ page }) => {
+test("the Health page shows the sweep schedule from the task config, runs a sweep now and links the kuke team while suspended", async ({ page }) => {
   const status = { schedule: { lastScheduleTime: "2026-11-17T09:00:00Z", nextScheduleTime: "2026-11-17T10:00:00Z", lastCell: "kuke-majordomo-claude-health-sweep-aa11bb", lastError: "create cell: disk pressure" } };
   const state = await world(page, { configs: teamConfigs({ suspend: true, status }), reports: [] });
   await page.goto(`${server.url}#/health`);
@@ -488,13 +488,14 @@ test("the Health page shows the sweep schedule from the task config, runs a swee
   await expect(rows).toContainText("kuke-majordomo-claude-health-sweep-aa11bb");
   await expect(rows).toContainText("create cell: disk pressure");
 
-  // Suspended: the edit and the command are shown, and nothing on the page edits the schedule.
+  // Suspended: the edit and a link to the kuke team are shown, and nothing on the page edits the schedule.
   const enable = schedule.getByRole("note");
   await expect(enable).toHaveCount(1);
   await expect(enable).toContainText("Sweeps are suspended.");
   await expect(enable).toContainText("kuke-majordomo-claude-health-sweep ships switched off");
   await expect(enable).toContainText("{ name: health-sweep, suspend: false }");
-  await expect(enable).toContainText("kuke team init --reapply");
+  await expect(enable.getByRole("link", { name: "kuke team" })).toHaveAttribute("href", "#/teams/kuke");
+  await expect(enable).not.toContainText("kuketeam");
   await expect(schedule.locator("input, select, textarea")).toHaveCount(0);
   await expect(schedule.getByRole("button")).toHaveCount(1);
 
@@ -518,7 +519,7 @@ test("two suspended sweep configs share one suspended notice that names both, an
   await expect(notice).toContainText("Sweeps are suspended.");
   await expect(notice.getByRole("list", { name: "Suspended sweeps" }).getByRole("listitem")).toHaveText(["kuke-majordomo-claude-health-sweep", "kuke-majordomo-codex-health-sweep"]);
   await expect(notice).not.toContainText("kuke-majordomo-enabled-health-sweep");
-  await expect(notice.locator("pre")).toHaveText([/\{ name: health-sweep, suspend: false \}/, "kuke team init --reapply"]);
+  await expect(notice.locator("pre")).toHaveText([/\{ name: health-sweep, suspend: false \}/]);
   // The notice sits above the sweep list instead of inside every suspended entry.
   await expect(schedule.locator(".health-sweep").getByRole("note")).toHaveCount(0);
   expect(await notice.evaluate(el => el.compareDocumentPosition(document.querySelector(".health-sweeps")) & Node.DOCUMENT_POSITION_FOLLOWING)).toBeTruthy();

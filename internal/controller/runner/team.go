@@ -1,0 +1,162 @@
+// Copyright 2026 Emiliano Spinella (eminwux)
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// SPDX-License-Identifier: Apache-2.0
+
+package runner
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/fs"
+)
+
+// teamFileMode and teamsDirMode follow the configs directory (issue #1618): a
+// team document holds source URLs and secret references, never secret bytes.
+const (
+	teamsDirMode  os.FileMode = 0o755
+	teamFileMode  os.FileMode = 0o644
+	teamExtension             = ".yaml"
+)
+
+// WriteTeam persists a Team's validated document to
+// <RunPath>/data/<realm>/teams/<name>.yaml atomically (temp file + rename).
+// It reports whether the document was newly created. The caller has checked
+// the realm exists.
+func (r *Exec) WriteTeam(team intmodel.Team) (bool, error) {
+	md := team.Metadata
+	return r.writeTeamDocument(
+		fs.TeamsDir(r.opts.RunPath, md.Realm), fs.TeamPath(r.opts.RunPath, md.Realm, md.Name),
+		".team-*.tmp", team.Document, "team", md,
+	)
+}
+
+// GetTeam reads one stored Team's document. Returns errdefs.ErrTeamNotFound
+// when none is stored.
+func (r *Exec) GetTeam(team intmodel.Team) (intmodel.Team, error) {
+	md := team.Metadata
+	data, err := os.ReadFile(fs.TeamPath(r.opts.RunPath, md.Realm, md.Name))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return intmodel.Team{}, errdefs.ErrTeamNotFound
+		}
+		return intmodel.Team{}, fmt.Errorf("%w: %w", errdefs.ErrGetTeam, err)
+	}
+	return intmodel.Team{Metadata: md, Document: data}, nil
+}
+
+// ListTeams enumerates the stored Teams of realmName, or of every realm when
+// it is empty, with their documents.
+func (r *Exec) ListTeams(realmName string) ([]intmodel.Team, error) {
+	realmDirs, err := r.resolveRealmDirs(realmName)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrListTeams, err)
+	}
+	var out []intmodel.Team
+	for _, realmDir := range realmDirs {
+		realm := filepath.Base(realmDir)
+		dir := fs.TeamsDir(r.opts.RunPath, realm)
+		entries, readErr := os.ReadDir(dir)
+		if readErr != nil {
+			if os.IsNotExist(readErr) {
+				continue
+			}
+			return nil, fmt.Errorf("%w: read teams dir %q: %w", errdefs.ErrListTeams, dir, readErr)
+		}
+		for _, entry := range entries {
+			name, ok := strings.CutSuffix(entry.Name(), teamExtension)
+			if entry.IsDir() || !ok || strings.HasPrefix(entry.Name(), ".") {
+				continue
+			}
+			team, getErr := r.GetTeam(intmodel.Team{Metadata: intmodel.TeamMetadata{Name: name, Realm: realm}})
+			if errors.Is(getErr, errdefs.ErrTeamNotFound) {
+				continue // Deleted between the read and the get.
+			}
+			if getErr != nil {
+				return nil, fmt.Errorf("%w: %w", errdefs.ErrListTeams, getErr)
+			}
+			out = append(out, team)
+		}
+	}
+	return out, nil
+}
+
+// DeleteTeam removes one stored Team's document. Returns
+// errdefs.ErrTeamNotFound when none is stored.
+func (r *Exec) DeleteTeam(team intmodel.Team) error {
+	md := team.Metadata
+	if err := os.Remove(fs.TeamPath(r.opts.RunPath, md.Realm, md.Name)); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return errdefs.ErrTeamNotFound
+		}
+		return fmt.Errorf("%w: %w", errdefs.ErrDeleteTeam, err)
+	}
+	r.logger.InfoContext(r.ctx, "team deleted", "name", md.Name, "realm", md.Realm)
+	return nil
+}
+
+// WriteTeamDefaults persists a realm's TeamDefaults document to
+// <RunPath>/data/<realm>/team-defaults/<name>.yaml atomically.
+func (r *Exec) WriteTeamDefaults(defaults intmodel.TeamDefaults) (bool, error) {
+	md := defaults.Metadata
+	return r.writeTeamDocument(
+		fs.TeamDefaultsDir(r.opts.RunPath, md.Realm), fs.TeamDefaultsPath(r.opts.RunPath, md.Realm, md.Name),
+		".team-defaults-*.tmp", defaults.Document, "team defaults", md,
+	)
+}
+
+// GetTeamDefaults reads a realm's stored TeamDefaults. Returns
+// errdefs.ErrTeamDefaultsNotFound when the realm stores none.
+func (r *Exec) GetTeamDefaults(defaults intmodel.TeamDefaults) (intmodel.TeamDefaults, error) {
+	md := defaults.Metadata
+	data, err := os.ReadFile(fs.TeamDefaultsPath(r.opts.RunPath, md.Realm, md.Name))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return intmodel.TeamDefaults{}, errdefs.ErrTeamDefaultsNotFound
+		}
+		return intmodel.TeamDefaults{}, fmt.Errorf("%w: %w", errdefs.ErrGetTeam, err)
+	}
+	return intmodel.TeamDefaults{Metadata: md, Document: data}, nil
+}
+
+func (r *Exec) writeTeamDocument(
+	dir, path, pattern string, document []byte, what string, md intmodel.TeamMetadata,
+) (bool, error) {
+	if err := os.MkdirAll(dir, teamsDirMode); err != nil {
+		return false, fmt.Errorf("%w: create %s dir: %w", errdefs.ErrWriteTeam, what, err)
+	}
+	if err := os.Chmod(dir, teamsDirMode); err != nil {
+		return false, fmt.Errorf("%w: chmod %s dir: %w", errdefs.ErrWriteTeam, what, err)
+	}
+	_, statErr := os.Stat(path)
+	created := errors.Is(statErr, os.ErrNotExist)
+	if statErr != nil && !created {
+		return false, fmt.Errorf("%w: stat %s: %w", errdefs.ErrWriteTeam, what, statErr)
+	}
+	if err := atomicWriteFileMode(dir, path, pattern, document, teamFileMode); err != nil {
+		return false, fmt.Errorf("%w: %w", errdefs.ErrWriteTeam, err)
+	}
+	action := "updated"
+	if created {
+		action = "created"
+	}
+	r.logger.InfoContext(r.ctx, what+" "+action, "name", md.Name, "realm", md.Realm)
+	return created, nil
+}

@@ -17,32 +17,37 @@
 package cli
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/team/initialize"
 	"github.com/spf13/cobra"
 )
 
-func newAddCommand(
-	homeDir func() (string, error),
-	run func(context.Context, initialize.AddOptions) (initialize.Result, error),
-) *cobra.Command {
+func newAddCommand(deps Deps) *cobra.Command {
+	var conn connection
 	var opts initialize.AddOptions
-	var name string
+	var name, file string
 	cmd := &cobra.Command{
-		Use:   "add DIRECTORY | NAME --source REPOSITORY",
-		Short: "Apply and register a project team from a directory or Git source",
-		Args:  cobra.ExactArgs(1),
+		Use:   "add NAME --source REPOSITORY | DIRECTORY",
+		Short: "Add a project team from a Git repository or a local checkout",
+		Long: "Add a team: compose it and apply it to kukeond, which stores the Team with its Configs.\n\n" +
+			"NAME --source REPOSITORY fetches the repository and uses its kuketeam.yaml, read from the fetched " +
+			"revision, when there is one; otherwise the team inherits the defaults. DIRECTORY reads the local " +
+			"checkout's kuketeam.yaml, origin and branch.\n" +
+			"--role and --harness replace the corresponding list: a bare NAME picks the default of that name, " +
+			"[NAME=]SOURCE:PATH names any role in a registered source. -f FILE replaces the whole declaration and " +
+			"--no-repo-file ignores the repository's file.\n" +
+			"add creates: a stored team of the same name is an error; use kuke team apply NAME to recompose it " +
+			"or --force to replace its declaration (the recorded secret bindings are kept).\n" +
+			"--dry-run prints what would be applied and writes nothing. No cells are created or started.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			for _, name := range []string{"name", "source", "branch", "tag", "commit"} {
-				if cmd.Flags().Changed(name) {
-					value, _ := cmd.Flags().GetString(name)
+			for _, flag := range []string{"name", "source", "branch", "tag", "commit"} {
+				if cmd.Flags().Changed(flag) {
+					value, _ := cmd.Flags().GetString(flag)
 					if strings.TrimSpace(value) == "" {
 						return errors.New("add: explicit name, source, and revision flags must not be empty")
 					}
@@ -67,76 +72,50 @@ func newAddCommand(
 					opts.Name = name
 				}
 			}
-			home, err := homeDir()
-			if err != nil {
-				return fmt.Errorf("resolve operator home directory: %w", err)
+			if !cmd.Flags().Changed("role") {
+				opts.Roles = nil
 			}
-			opts.Home, opts.Root = home, filepath.Join(home, ".kuke")
-			result, err := run(cmd.Context(), opts)
+			if !cmd.Flags().Changed("harness") {
+				opts.Harnesses = nil
+			}
+			if file != "" {
+				raw, err := os.ReadFile(file)
+				if err != nil {
+					return fmt.Errorf("add: read %s: %w", file, err)
+				}
+				opts.File, opts.FileName = raw, file
+			}
+			s, err := conn.open(cmd, deps, true)
 			if err != nil {
 				return err
 			}
-			_, err = fmt.Fprintf(
-				cmd.OutOrStdout(),
-				"Applied %d resources; registered team %s: %s\nNo cells created or started.\n",
-				result.Resources,
-				strings.TrimSuffix(filepath.Base(result.EntryPath), ".yaml"),
-				result.EntryPath,
-			)
-			if err == nil {
-				err = printMissingSecrets(cmd.OutOrStdout(), result.MissingSecrets)
+			defer s.close()
+			dryRun := opts.DryRun
+			opts.Options = s.options(dryRun)
+			out, err := initialize.Add(cmd.Context(), opts)
+			if err != nil {
+				return err
 			}
-			if err == nil {
-				err = printNotes(cmd.OutOrStdout(), result.Notes)
-			}
-			return err
+			return PrintOutcome(cmd.OutOrStdout(), out)
 		},
 	}
+	conn.register(cmd)
 	cmd.Flags().StringVar(&opts.Source, "source", "", "Project Git remote (SCP-style SSH, ssh://, or HTTPS)")
-	cmd.Flags().
-		StringVar(&opts.Branch, "branch", "", "Select a branch (default: local HEAD for directories, remote HEAD for named sources)")
+	cmd.Flags().StringVar(&opts.Branch, "branch", "",
+		"Select a branch (default: local HEAD for directories, remote HEAD for named sources)")
 	cmd.Flags().StringVar(&opts.Tag, "tag", "", "Select a tag")
 	cmd.Flags().StringVar(&opts.Commit, "commit", "", "Select a full commit object ID")
-	cmd.Flags().StringVar(&opts.Host, "host", "", "kukeond Unix endpoint (overrides KUKEON_HOST and kuke.yaml)")
-	cmd.Flags().StringVar(&opts.Configuration, "configuration", "", "kuke ClientConfiguration path")
-	cmd.Flags().
-		StringVar(&name, "name", "", "Override the team name (default: local Team metadata.name, then directory basename)")
+	cmd.Flags().StringVar(&name, "name", "",
+		"Override the team name (default: the directory's kuketeam.yaml metadata.name, then its basename)")
+	cmd.Flags().StringArrayVar(&opts.Roles, "role", nil,
+		"Replace the roles: a default role's NAME or [NAME=]SOURCE:PATH (repeatable)")
+	cmd.Flags().StringArrayVar(&opts.Harnesses, "harness", nil,
+		"Replace the harnesses: a default harness's NAME or [NAME=]SOURCE:PATH (repeatable)")
+	cmd.Flags().StringVarP(&file, "file", "f", "", "Use the Team document in FILE as the whole declaration")
+	cmd.Flags().BoolVar(&opts.NoRepoFile, "no-repo-file", false, "Ignore the repository's kuketeam.yaml")
+	cmd.Flags().BoolVar(&opts.Force, "force", false, "Replace a stored team of the same name")
+	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "Print what would be applied; write nothing")
 	cmd.MarkFlagsMutuallyExclusive("branch", "tag", "commit")
+	cmd.MarkFlagsMutuallyExclusive("file", "no-repo-file")
 	return cmd
-}
-
-func defaultAddCommand() *cobra.Command { return newAddCommand(os.UserHomeDir, initialize.Add) }
-
-// printNotes lists what the operator should know after a successful apply:
-// settings that no longer have an effect and sources without a git credential.
-func printNotes(w io.Writer, notes []string) error {
-	if len(notes) == 0 {
-		return nil
-	}
-	if _, err := fmt.Fprintln(w, "Notes:"); err != nil {
-		return err
-	}
-	for _, line := range notes {
-		if _, err := fmt.Fprintf(w, "  %s\n", line); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// printMissingSecrets reports runtime secrets the team needs but kukeon lacks;
-// application already succeeded, so this is guidance, not a failure.
-func printMissingSecrets(w io.Writer, missing []string) error {
-	if len(missing) == 0 {
-		return nil
-	}
-	if _, err := fmt.Fprintln(w, "Missing secrets (cells will not start until they exist):"); err != nil {
-		return err
-	}
-	for _, line := range missing {
-		if _, err := fmt.Fprintf(w, "  %s\n", line); err != nil {
-			return err
-		}
-	}
-	return nil
 }

@@ -14,7 +14,11 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-// Package initialize applies the kuke team's configuration without managing cells.
+// Package initialize composes kuke teams and applies them to kukeond (issue
+// #1618): kukeond stores the Team and TeamDefaults documents, this package
+// fetches sources, composes and applies, without managing cells. The CLI
+// (internal/team/cli), `kuke apply` and the web server all call it, with a
+// client they own.
 package initialize
 
 import (
@@ -23,314 +27,250 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
-	"path/filepath"
-	"slices"
-	"strings"
 
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
-	"github.com/eminwux/kukeon/pkg/team/compose"
 	"github.com/eminwux/kukeon/pkg/team/config"
 	"gopkg.in/yaml.v3"
 )
 
 const (
 	majordomoName = config.SystemTeamName
-	rootName      = "root" // Reserved legacy identity; never migrated by init.
-	// legacyName is what the init team was called before #1527. A host
-	// initialized then holds kuketeam.d/kukeon.yaml and kukeon-majordomo-*
-	// configs, which init --force migrates; kukeon is otherwise an ordinary
-	// project team name (kukeon's own kuketeam.yaml uses it).
-	legacyName = "kukeon"
+	rootName      = "root" // Reserved legacy identity.
 )
 
-// Options supplies operator paths and optional test/embedding dependencies.
-// An injected Client remains caller-owned; otherwise Run opens and closes it.
+// Options are what every team operation takes: the daemon client, which the
+// caller dials and closes (an operation never dials), and optional injected
+// definition trees that replace fetching (tests and embedders).
 type Options struct {
-	Root, Home, Host, Configuration string
-	Force                           bool
-	// Reapply recomposes the kuke team from its stored entry instead of
-	// initializing. It excludes Force.
-	Reapply bool
-	Sources map[string]fs.FS
 	Client  Client
-
-	// legacyTeam, when set, names a pre-#1527 init team whose configs runTeam
-	// deletes once the replacement is applied; until then they do not hold the
-	// replacement's shared blueprints. Set only by a forced init that found
-	// that team.
-	legacyTeam string
+	Sources map[string]fs.FS
+	// DryRun stops after the plan: nothing is created or applied and no
+	// secret value is read.
+	DryRun bool
 }
 
-type Result struct {
-	// ConfigPath is the operator's kuketeams.yaml when one exists and was
-	// read; empty when there is none (issue #1591: the file is optional).
-	ConfigPath string
-	EntryPath  string
-	Resources  int
-	// MissingSecrets lists one remediation line per required runtime secret that
-	// does not exist yet; cells using it fail to start until it is created.
-	MissingSecrets []string
-	// Notes are operator-facing remarks: settings that no longer have an
-	// effect, a missing git identity, renamed blueprints.
-	Notes []string
+// Outcome is what a team operation returns: the plan, and the result when it
+// was committed (nil on a dry run).
+type Outcome struct {
+	Plan   *Plan
+	Result *Result
 }
 
-// loadTeamsConfig reads the operator's kuketeams.yaml. The file is optional
-// and hand-written (issue #1591): kuke reads it and never writes it, and a
-// missing file is the empty TeamsConfig. The second return is the path when
-// the file exists.
-func loadTeamsConfig(root string) (*config.TeamsConfig, string, error) {
-	path := filepath.Join(root, "kuketeams.yaml")
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return &config.TeamsConfig{APIVersion: config.APIVersion, Kind: config.Kind}, "", nil
+func (o Options) check() error {
+	if o.Client == nil {
+		return errors.New("team: no kukeond client")
 	}
-	if err != nil {
-		return nil, "", fmt.Errorf("read global configuration %s: %w", path, err)
-	}
-	cfg, err := config.Decode(bytes.NewReader(raw))
-	if err != nil {
-		return nil, "", fmt.Errorf("global configuration %s: %w", path, err)
-	}
-	return cfg, path, nil
+	return nil
 }
 
-// Run initializes the kuke team when it is not registered yet, unless Force
-// resets it. "Already initialized" is the kuke team entry
-// (kuketeam.d/kuke.yaml), not kuketeams.yaml, which init never writes.
-// Partial daemon application is not rolled back; a forced rerun converges the team.
-func Run(ctx context.Context, opts Options) (Result, error) {
+// InitOptions select init's mode.
+type InitOptions struct {
+	Options
+
+	// Force replaces the stored kuke team with the initial declaration.
+	Force bool
+	// Reapply recomposes the kuke team from its stored Team: kuke team apply
+	// kuke. It excludes Force.
+	Reapply bool
+}
+
+// Init applies the kuke team (issue #1618, AC7). "Already initialized" is the
+// stored kuke Team. When the realm has no TeamDefaults, init creates one in
+// the same apply, with the kukeon source and its claude and codex harnesses,
+// so a project team needs only roles; an existing TeamDefaults is never
+// changed. Partial daemon application is not rolled back; a forced rerun
+// converges the team.
+func Init(ctx context.Context, opts InitOptions) (Outcome, error) {
+	if err := opts.check(); err != nil {
+		return Outcome{}, err
+	}
 	if opts.Reapply {
-		return reapply(ctx, opts)
+		if opts.Force {
+			return Outcome{}, errors.New("init: --reapply and --force are mutually exclusive: " +
+				"--reapply keeps the stored kuke team, --force replaces it with the initial declaration")
+		}
+		return ApplyStored(ctx, opts.Options, majordomoName, "kuke team init --reapply")
 	}
-	entryPath := filepath.Join(opts.Root, "kuketeam.d", majordomoName+".yaml")
-	legacyPath := filepath.Join(opts.Root, "kuketeam.d", legacyName+".yaml")
-	legacy, err := isLegacyEntry(legacyPath)
-	if err != nil {
-		return Result{}, err
-	}
+	// --force replaces the stored team without consulting it, so a stored
+	// declaration that no longer decodes is reset too.
 	if !opts.Force {
-		if _, statErr := os.Lstat(entryPath); statErr == nil {
-			return Result{}, fmt.Errorf(
-				"init: already initialized (%s); use --force to reset or --reapply to recompose", entryPath)
-		} else if !errors.Is(statErr, os.ErrNotExist) {
-			return Result{}, fmt.Errorf("init: inspect %s: %w", entryPath, statErr)
-		}
-		if legacy {
-			return Result{}, fmt.Errorf(
-				"init: already initialized under the old kukeon team name (%s); use --force to migrate it",
-				legacyPath)
-		}
-	}
-	if legacy {
-		opts.legacyTeam = legacyName
-	}
-	cfg, configPath, err := loadTeamsConfig(opts.Root)
-	if err != nil {
-		return Result{}, fmt.Errorf("init: %w", err)
-	}
-	result, err := runTeam(ctx, opts, cfg, config.Majordomo(), nil, Result{ConfigPath: configPath}, "kuke team init")
-	if err == nil && opts.legacyTeam != "" {
-		if err = os.Remove(legacyPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return result, fmt.Errorf(
-				"team %s applied but the legacy entry %s was not removed: %w; remove it by hand",
-				majordomoName, legacyPath, err,
-			)
-		}
-		err = nil
-		result.Notes = append(result.Notes, migrationNote(legacyPath))
-	}
-	return result, err
-}
-
-// reapply recomposes the kuke team from its stored entry and applies it
-// (issue #1509). The entry is the team's editable source: the place to switch
-// the health sweep on, for one. The daemon prunes the configs the new
-// composition no longer renders, and runTeam rewrites the entry only after a
-// fully successful apply. kuketeams.yaml is read when present, never written.
-func reapply(ctx context.Context, opts Options) (Result, error) {
-	if opts.Force {
-		return Result{}, errors.New("init: --reapply and --force are mutually exclusive: " +
-			"--reapply keeps the stored kuke entry, --force replaces it with the initial declaration")
-	}
-	entryPath := filepath.Join(opts.Root, "kuketeam.d", majordomoName+".yaml")
-	if _, err := os.Stat(entryPath); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return Result{}, fmt.Errorf(
-				"init: --reapply needs the stored kuke entry at %s, which does not exist; "+
-					"run kuke team init first (or kuke team init --force to start over, "+
-					"which also migrates a host initialized under the old kukeon name)", entryPath)
-		}
-		return Result{}, fmt.Errorf("init: inspect %s: %w", entryPath, err)
-	}
-	// Strict decode: an edit with an unknown or misspelled field stops here,
-	// before any source is fetched or anything reaches the daemon.
-	cfg, configPath, err := loadTeamsConfig(opts.Root)
-	if err != nil {
-		return Result{}, fmt.Errorf("init: %w", err)
-	}
-	team, err := readNamedTeam(entryPath, majordomoName)
-	if err != nil {
-		return Result{}, err
-	}
-	recorded, err := readEntrySecrets(entryPath)
-	if err != nil {
-		return Result{}, err
-	}
-	return runTeam(ctx, opts, cfg, team, recorded, Result{ConfigPath: configPath}, "kuke team init --reapply")
-}
-
-// runTeam is shared by init and add; staging precedes all daemon writes.
-func runTeam(
-	ctx context.Context,
-	opts Options,
-	cfg *config.TeamsConfig,
-	team *config.Team,
-	recorded []config.SecretBinding,
-	result Result,
-	command string,
-) (Result, error) {
-	name := team.Metadata.Name
-	entryPath := filepath.Join(opts.Root, "kuketeam.d", name+".yaml")
-	effective, err := config.Resolve(cfg, team)
-	if err != nil {
-		return result, err
-	}
-	sources := opts.Sources
-	if sources == nil {
-		var cleanup func()
-		sources, cleanup, err = materializeSources(ctx, effective, team.ProjectSource != nil)
+		stored, err := StoredTeam(ctx, opts.Client, majordomoName)
 		if err != nil {
-			return result, err
+			return Outcome{}, fmt.Errorf("init: %w; use --force to reset it", err)
 		}
-		defer cleanup()
+		if stored != nil {
+			return Outcome{}, errors.New(
+				"init: already initialized (team kuke is stored); use --force to reset or --reapply to recompose")
+		}
 	}
-	composed, err := compose.Compose(cfg, team, compose.Options{
-		Sources: sources,
-		Secrets: recorded,
+	defaults, found, err := readDefaults(ctx, opts.Client, config.DefaultRealm)
+	if err != nil {
+		return Outcome{}, fmt.Errorf("init: %w", err)
+	}
+	var defaultsDoc []byte
+	if !found {
+		defaults = InitialDefaults(config.DefaultRealm)
+		if defaultsDoc, err = yaml.Marshal(defaults); err != nil {
+			return Outcome{}, fmt.Errorf("init: encode TeamDefaults: %w", err)
+		}
+	}
+	return run(ctx, opts.Options, request{
+		command:     "kuke team init",
+		origin:      Origin{Kind: OriginInitial},
+		defaults:    defaults,
+		team:        config.Majordomo(),
+		have:        injectedSources(opts.Sources),
+		defaultsDoc: defaultsDoc,
 	})
+}
+
+// InitialDefaults is the TeamDefaults init creates in a realm that has none:
+// the kukeon source, at the ref the kuke team reads it from and with no
+// clonePath, and its codex and claude harnesses. It has no default roles:
+// those come from sources the operator registers.
+func InitialDefaults(realm string) *config.TeamDefaults {
+	defaults := config.EmptyDefaults(realm)
+	defaults.Spec.Defaults = config.Defaults{
+		Sources:   []config.Source{config.MajordomoSource()},
+		Harnesses: config.MajordomoHarnesses(),
+	}
+	return defaults
+}
+
+// ApplyStored recomposes a team from its stored Team without consulting its
+// repository's kuketeam.yaml (AC12): the generalized init --reapply. The
+// daemon prunes the Configs the new composition no longer renders.
+func ApplyStored(ctx context.Context, opts Options, name, command string) (Outcome, error) {
+	if err := opts.check(); err != nil {
+		return Outcome{}, err
+	}
+	if command == "" {
+		command = "kuke team apply " + name
+	}
+	stored, err := StoredTeam(ctx, opts.Client, name)
 	if err != nil {
-		return result, fmt.Errorf("preflight composition: %w", err)
+		return Outcome{}, err
 	}
-	if len(composed.Pairs) == 0 {
-		return result, errors.New("preflight: team selects no role/harness pairs")
-	}
-	// Encode and validate local entry publication before any daemon mutation.
-	entryBytes, err := yaml.Marshal(composed.Entry)
-	if err != nil {
-		return result, fmt.Errorf("encode TeamEntry: %w", err)
-	}
-	stage, err := stageEntry(entryPath, entryBytes)
-	if err != nil {
-		return result, err
-	}
-	defer func() { _ = os.Remove(stage) }()
-	client := opts.Client
-	if client == nil {
-		host, hostErr := resolveHost(opts)
-		if hostErr != nil {
-			return result, hostErr
+	if stored == nil {
+		if name == majordomoName {
+			return Outcome{}, errors.New(
+				"team kuke is not stored; run kuke team init first (or kuke team init --force to start over)")
 		}
-		client, err = kukeonv1.Dial(ctx, host)
-		if err != nil {
-			return result, fmt.Errorf("kukeond connection configuration: %w", err)
-		}
-		defer func() { _ = client.Close() }()
+		return Outcome{}, notStored(name, config.DefaultRealm)
 	}
-	done, err := apply(ctx, client, composed, command, opts.legacyTeam)
+	defaults, _, err := readDefaults(ctx, opts.Client, stored.Metadata.Realm)
 	if err != nil {
-		if !strings.HasPrefix(command, "kuke team init") {
-			return result, fmt.Errorf(
-				"%w; after fixing the prerequisite, rerun %s with the same revision flags",
-				err,
-				command,
-			)
+		return Outcome{}, err
+	}
+	return run(ctx, opts, request{
+		command: command, origin: Origin{Kind: OriginStored}, defaults: defaults, team: stored,
+		have: injectedSources(opts.Sources),
+	})
+}
+
+// ApplyFile composes the Team document in raw and stores it, creating the
+// team when it is new (AC12). raw is a Team document, which is also what a
+// repository's kuketeam.yaml is; when it has no spec.projectSource the stored
+// team's is kept, and the stored team's secret bindings are kept beneath the
+// document's own. `kuke apply -f` calls it for each Team document (D7).
+func ApplyFile(ctx context.Context, opts Options, raw []byte, path string) (Outcome, error) {
+	if err := opts.check(); err != nil {
+		return Outcome{}, err
+	}
+	team, err := config.DecodeTeam(bytes.NewReader(raw))
+	if err != nil {
+		return Outcome{}, fmt.Errorf("team file %s: %w", path, err)
+	}
+	if team.Metadata.Name == rootName {
+		return Outcome{}, fmt.Errorf("team file %s: team name %q is reserved", path, rootName)
+	}
+	if team.Metadata.Realm == "" {
+		team.Metadata.Realm = config.DefaultRealm
+	}
+	stored, err := StoredTeam(ctx, opts.Client, team.Metadata.Name)
+	if err != nil {
+		return Outcome{}, err
+	}
+	var recorded []config.SecretBinding
+	if stored != nil {
+		if team.Spec.ProjectSource == nil {
+			team.Spec.ProjectSource = stored.Spec.ProjectSource
 		}
-		return result, err
+		recorded = stored.Spec.Secrets
+	}
+	if project := team.Spec.ProjectSource; project != nil && project.Name == "" {
+		project.Name = config.ProjectSourceName
+	}
+	defaults, _, err := readDefaults(ctx, opts.Client, team.Metadata.Realm)
+	if err != nil {
+		return Outcome{}, err
+	}
+	return run(ctx, opts, request{
+		command:  "kuke team apply -f " + path,
+		origin:   Origin{Kind: OriginFile, Detail: path},
+		defaults: defaults,
+		team:     team,
+		recorded: recorded,
+		have:     injectedSources(opts.Sources),
+	})
+}
+
+// run plans req and, unless this is a dry run, commits the plan.
+func run(ctx context.Context, opts Options, req request) (Outcome, error) {
+	p, err := plan(ctx, opts.Client, req)
+	if err != nil {
+		return Outcome{}, withRerun(err, req.command)
+	}
+	if opts.DryRun {
+		return Outcome{Plan: p}, nil
 	}
 	if err = ctx.Err(); err != nil {
-		return result, fmt.Errorf("resources applied but registration unchanged: %w; rerun %s", err, command)
+		return Outcome{Plan: p}, err
 	}
-	// The replacement is applied, so removing the legacy team's configs can no
-	// longer leave the host with neither team: a preflight or apply failure
-	// above returned with them intact.
-	if opts.legacyTeam != "" {
-		if err = removeTeamConfigs(ctx, client, opts.legacyTeam); err != nil {
-			return result, err
-		}
+	result, err := commit(ctx, opts.Client, p)
+	if err != nil {
+		return Outcome{Plan: p}, withRerun(err, req.command)
 	}
-	if err = os.Rename(stage, entryPath); err != nil {
-		return result, fmt.Errorf(
-			"resources applied but registration failed at %s: %w; rerun %s",
-			entryPath,
-			err, command,
-		)
-	}
-	result.EntryPath, result.Resources = entryPath, done.resources
-	result.MissingSecrets = done.missing
-	result.Notes = append(slices.Clone(composed.Notes), done.notes...)
-	return result, nil
+	return Outcome{Plan: p, Result: &result}, nil
 }
 
-// readEntrySecrets returns the bindings recorded by a previous registration so
-// operator edits to them survive recomposition. An absent entry records none.
-func readEntrySecrets(path string) ([]config.SecretBinding, error) {
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+func withRerun(err error, command string) error {
+	if errors.Is(err, errNotStored) {
+		return err
 	}
-	if err != nil {
-		return nil, fmt.Errorf("read team registration %s: %w", path, err)
-	}
-	entry, err := config.DecodeEntry(bytes.NewReader(raw))
-	if err != nil {
-		return nil, fmt.Errorf("read team registration %s: %w", path, err)
-	}
-	return entry.Secrets, nil
+	return fmt.Errorf("%w; after fixing the prerequisite, rerun %s", err, command)
 }
 
-func readNamedTeam(path, name string) (*config.Team, error) {
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return &config.Team{
-			APIVersion: config.APIVersion,
-			Kind:       config.KindTeam,
-			Metadata:   config.Metadata{Name: name},
-		}, nil
-	}
+// StoredTeam reads the stored Team of name in realm default, or nil when none
+// is stored.
+func StoredTeam(ctx context.Context, client Client, name string) (*config.Team, error) {
+	got, err := client.GetTeam(ctx, kukeonv1.TeamRef{Name: name, Realm: config.DefaultRealm})
 	if err != nil {
-		return nil, fmt.Errorf("read team registration %s: %w", path, err)
+		return nil, requestError("lookup", "team "+name, err)
 	}
-	entry, err := config.DecodeEntry(bytes.NewReader(raw))
+	if !got.Exists {
+		return nil, nil //nolint:nilnil // an unstored team is an answer, not an error
+	}
+	team, err := config.DecodeTeam(bytes.NewReader(got.Document))
 	if err != nil {
-		return nil, fmt.Errorf("read team registration %s: %w", path, err)
+		return nil, fmt.Errorf("stored team %s: %w", name, err)
 	}
-	if entry.Metadata.Name != name {
-		return nil, errors.New("registration must match the requested team name")
-	}
-	return entry.Team(), nil
+	return team, nil
 }
 
-func stageEntry(path string, data []byte) (string, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return "", fmt.Errorf("prepare team registration: %w", err)
-	}
-	f, err := os.CreateTemp(filepath.Dir(path), "."+strings.TrimSuffix(filepath.Base(path), ".yaml")+"-*.yaml")
+// readDefaults reads realm's stored TeamDefaults; found is false and the
+// empty defaults are returned when the realm stores none.
+func readDefaults(ctx context.Context, client Client, realm string) (*config.TeamDefaults, bool, error) {
+	got, err := client.GetTeamDefaults(ctx, realm)
 	if err != nil {
-		return "", fmt.Errorf("stage team registration: %w", err)
+		return nil, false, requestError("lookup", "team defaults", err)
 	}
-	_, err = f.Write(data)
-	if err == nil {
-		err = f.Sync()
+	if !got.Exists {
+		return config.EmptyDefaults(realm), false, nil
 	}
-	closeErr := f.Close()
-	if err == nil {
-		err = closeErr
-	}
+	defaults, err := config.DecodeDefaults(bytes.NewReader(got.Document))
 	if err != nil {
-		_ = os.Remove(f.Name())
-		return "", fmt.Errorf("stage team registration: %w", err)
+		return nil, false, fmt.Errorf("stored team defaults of realm %s: %w", realm, err)
 	}
-	return f.Name(), nil
+	return defaults, true, nil
 }

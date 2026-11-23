@@ -228,6 +228,20 @@ type Client interface {
 	// still carry the back-reference label so the caller can emit a notice.
 	DeleteConfig(ctx context.Context, doc v1beta1.CellConfigDoc) (DeleteConfigResult, error)
 
+	// GetTeam reads one stored Team's document and summary (issue #1618).
+	// Exists is false, with no error, when none of the name is stored.
+	GetTeam(ctx context.Context, ref TeamRef) (GetTeamResult, error)
+	// ListTeams lists the stored Teams of a realm, or of every realm when
+	// realm is empty.
+	ListTeams(ctx context.Context, realm string) ([]GetTeamResult, error)
+	// DeleteTeam deletes a team's Configs, the shared blueprints no other
+	// Config references, and then its Team document. Cells and volumes stay.
+	// The kuke system team is refused.
+	DeleteTeam(ctx context.Context, ref TeamRef) (DeleteTeamResult, error)
+	// GetTeamDefaults reads a realm's stored TeamDefaults document. Exists is
+	// false, with no error, when the realm stores none.
+	GetTeamDefaults(ctx context.Context, realm string) (GetTeamDefaultsResult, error)
+
 	PurgeRealm(ctx context.Context, doc v1beta1.RealmDoc, force, cascade bool) (PurgeRealmResult, error)
 	PurgeSpace(ctx context.Context, doc v1beta1.SpaceDoc, force, cascade bool) (PurgeSpaceResult, error)
 	PurgeStack(ctx context.Context, doc v1beta1.StackDoc, force, cascade bool) (PurgeStackResult, error)
@@ -493,6 +507,11 @@ const (
 	MethodDeleteBlueprint = ServiceName + ".DeleteBlueprint"
 	MethodDeleteConfig    = ServiceName + ".DeleteConfig"
 	MethodDeleteVolume    = ServiceName + ".DeleteVolume"
+
+	MethodGetTeam         = ServiceName + ".GetTeam"
+	MethodListTeams       = ServiceName + ".ListTeams"
+	MethodDeleteTeam      = ServiceName + ".DeleteTeam"
+	MethodGetTeamDefaults = ServiceName + ".GetTeamDefaults"
 
 	MethodPurgeRealm = ServiceName + ".PurgeRealm"
 	MethodPurgeSpace = ServiceName + ".PurgeSpace"

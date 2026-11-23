@@ -1,4 +1,5 @@
 import { useId, useState, type FormEvent, type ReactNode } from "react";
+import { teamsLink } from "./teams.mjs";
 import { ErrorNotice, useResource, type Failure } from "./request";
 import { useNotify } from "./notifications";
 import type { InventoryResource } from "./inventory";
@@ -293,7 +294,7 @@ function PickForConfig({ status, config, identities, onChanged, onClose }: { sta
 
 // ConnectorFixes offers the two ways to give a connector an identity: a scope
 // default, or a pick saved in the Config. A team-owned Config offers only the
-// default — `kuke team add` re-renders its fills.
+// default — applying the team re-renders its fills.
 export function ConnectorFixes({ status, connector, config, identities, secrets, onChanged }: {
   status: ConnectorStatus;
   connector: Connector | undefined;
@@ -354,7 +355,7 @@ export function ConfigConnectors({ doc, scope, revision, onChanged }: { doc: Con
     <div className="panel-heading"><h2>Connectors</h2>{blocking.length ? <NeedsConnectorBadge config={doc} /> : <span className="badge">All resolved</span>}</div>
     <div className="panel-body">
       <p className="description">What this Config needs access to, and the identity each connector uses for a cell created now. An identity comes from the Config's own pick, else the Stack, Space or Realm default.</p>
-      {team && <p className="connector-team" role="note">Identities are set by team <code>{team}</code>. They are read-only here because <code>kuke team add</code> re-renders this Config; change them in the team definition, or set a scope default.</p>}
+      {team && <p className="connector-team" role="note">Identities are set by team <a href={teamsLink(team)}><code>{team}</code></a>. They are read-only here because applying the team re-renders this Config; change them in the team's declaration on the Teams page, or set a scope default.</p>}
       {catalog.error && <p className="stale">The connector catalog could not be loaded: {catalog.error.message}</p>}
       {secrets.error && <p className="stale">Identities could not be listed: {secrets.error.message}. Name a secret by hand instead.</p>}
       <ul className="state-list connector-status-list">{statuses.map(status => <li key={`${status.connector}:${status.component}`} aria-label={`${connectorTitle(status)} connector`}>

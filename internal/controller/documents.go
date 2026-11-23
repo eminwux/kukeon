@@ -69,6 +69,12 @@ func SortDocumentsByKind(docs []parser.Document, reverse bool) []parser.Document
 	kindOrder[v1beta1.KindVolume] = len(kindOrder) + 1
 	// HealthReports reference nothing else in an apply file; they sort last.
 	kindOrder[v1beta1.KindHealthReport] = len(kindOrder) + 1
+	// TeamDefaults target an existing realm and reference nothing kukeond
+	// stores, so they sort with the other scope-targeting kinds.
+	kindOrder[v1beta1.KindTeamDefaults] = len(kindOrder) + 1
+	// A Team sorts after every kind composed from it (issue #1618): kukeond
+	// stores it only once all of them applied.
+	kindOrder[v1beta1.KindTeam] = len(kindOrder) + 1
 
 	// Sort by kind order, then by original index
 	sort.Slice(sorted, func(i, j int) bool {

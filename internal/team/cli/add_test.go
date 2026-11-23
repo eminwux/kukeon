@@ -14,135 +14,230 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-package cli
+package cli_test
 
 import (
 	"bytes"
-	"context"
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 
+	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/team/initialize"
+	"github.com/eminwux/kukeon/pkg/team/config"
 )
 
-func TestAddCLIForwardsOptions(t *testing.T) {
-	for _, failure := range []bool{false, true} {
-		t.Run(map[bool]string{false: "success", true: "failure"}[failure], func(t *testing.T) {
-			home := t.TempDir()
-			sentinel := errors.New("fixture failure")
-			cmd := newAddCommand(
-				func() (string, error) { return home, nil },
-				func(ctx context.Context, opts initialize.AddOptions) (initialize.Result, error) {
-					if ctx != t.Context() || opts.Name != "kukeon" ||
-						opts.Source != "git@github.com:eminwux/kukeon.git" ||
-						opts.Tag != "v1" ||
-						opts.Home != home ||
-						opts.Root != filepath.Join(home, ".kuke") ||
-						opts.Host != "unix:///chosen.sock" ||
-						opts.Configuration != "/chosen/kuke.yaml" {
-						t.Fatal("options lost")
-					}
-					if failure {
-						return initialize.Result{}, sentinel
-					}
-					return initialize.Result{
-						Resources: 2, EntryPath: "/fixture/kukeon.yaml",
-						MissingSecrets: []string{"gh-token  →  kuke create secret gh-token --realm default"},
-					}, nil
-				},
-			)
-			cmd.SilenceUsage, cmd.SilenceErrors = true, true
-			var out bytes.Buffer
-			cmd.SetOut(&out)
-			cmd.SetErr(&out)
-			cmd.SetArgs(
-				[]string{
-					"kukeon",
-					"--source",
-					"git@github.com:eminwux/kukeon.git",
-					"--tag",
-					"v1",
-					"--host",
-					"unix:///chosen.sock",
-					"--configuration",
-					"/chosen/kuke.yaml",
-				},
-			)
-			err := cmd.ExecuteContext(t.Context())
-			if failure {
-				if !errors.Is(err, sentinel) || out.Len() != 0 {
-					t.Fatal("bad failure output")
-				}
-				return
-			}
-			if err != nil || !strings.Contains(out.String(), "registered team kukeon") ||
-				!strings.Contains(out.String(), "Missing secrets (cells will not start until they exist):\n"+
-					"  gh-token  →  kuke create secret gh-token --realm default\n") {
-				t.Fatalf("output=%s error=%v", &out, err)
-			}
-		})
+const projectURL = "https://example.test/proj.git"
+
+// repoTeam is a project's kuketeam.yaml: one role from the kukeon source.
+const repoTeam = `apiVersion: v1beta1
+kind: Team
+metadata:
+  name: other
+spec:
+  roles:
+    - {name: lead, source: kukeon, path: team/roles/majordomo}
+`
+
+// projectHarness is a harness whose project repository carries file as its
+// kuketeam.yaml (none when empty), with the initial TeamDefaults stored.
+func projectHarness(t *testing.T, file string) *harness {
+	t.Helper()
+	h := newHarness(t)
+	project := fstest.MapFS{"README.md": {Data: []byte("project\n")}}
+	if file != "" {
+		project["kuketeam.yaml"] = &fstest.MapFile{Data: []byte(file)}
+	}
+	h.sources["project"] = project
+	// A role from the kukeon source needs it cloned into the cell.
+	defaults := initialize.InitialDefaults("default")
+	defaults.Spec.Defaults.Sources[0].ClonePath = "/home/user/kukeon-src"
+	h.store.putDefaults(t, defaults)
+	return h
+}
+
+func addArgs(extra ...string) []string {
+	return append([]string{"add", "proj", "--source", projectURL, "--branch", "main"}, extra...)
+}
+
+func (s *store) storedTeam(t *testing.T, name string) *config.Team {
+	t.Helper()
+	raw, ok := s.teams[name]
+	if !ok {
+		t.Fatalf("team %s is not stored", name)
+	}
+	team, err := config.DecodeTeam(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("stored team %s: %v\n%s", name, err, raw)
+	}
+	return team
+}
+
+func roleNames(team *config.Team) []string {
+	var out []string
+	for _, r := range team.Spec.Roles {
+		out = append(out, r.Name)
+	}
+	return out
+}
+
+// TestAddReadsTheRepositoryFile is AC8: the repository's kuketeam.yaml is
+// read from the fetched tree, NAME wins over its metadata.name, and the
+// stored Team carries the project source.
+func TestAddReadsTheRepositoryFile(t *testing.T) {
+	h := projectHarness(t, repoTeam)
+	out, err := h.run(t, addArgs()...)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	team := h.store.storedTeam(t, "proj")
+	if h.store.team != "proj" || team.Metadata.Name != "proj" || strings.Join(roleNames(team), ",") != "lead" {
+		t.Fatalf("stored %+v via team apply %q", team, h.store.team)
+	}
+	project := team.Spec.ProjectSource
+	if project == nil || project.URL != projectURL || project.Branch != "main" ||
+		project.ClonePath != "/home/user/proj" {
+		t.Fatalf("project source = %+v", project)
+	}
+	if _, ok := h.store.teams["other"]; ok {
+		t.Fatal("the file's metadata.name was stored")
 	}
 }
 
-func TestAddCLIRejectsInvalidArgumentsWithoutEffects(t *testing.T) {
-	for _, args := range [][]string{{"--help"}, {"kukeon"}, {".", "--source", ""}, {".", "--name", ""}, {"/nonexistent/directory"}, {"kukeon", "--source", "https://example.test/repo", "--branch", ""}, {"kukeon", "extra", "--source", "https://example.test/repo"}, {"kukeon", "--source", "https://example.test/repo", "--branch", "trunk", "--tag", "v1"}, {"kukeon", "--source", "https://example.test/repo", "--build"}} {
-		cmd := newAddCommand(
-			func() (string, error) { t.Fatal("resolved home before validation"); return "", nil },
-			func(context.Context, initialize.AddOptions) (initialize.Result, error) {
-				t.Fatal("add ran")
-				return initialize.Result{}, nil
-			},
-		)
-		cmd.SetOut(&bytes.Buffer{})
-		cmd.SetErr(&bytes.Buffer{})
-		cmd.SetArgs(args)
-		err := cmd.Execute()
-		if args[0] == "--help" {
-			if err != nil {
-				t.Fatal(err)
-			}
-		} else if err == nil {
-			t.Fatal("accepted invalid args")
+// TestAddDryRunWritesNothing is AC10.
+func TestAddDryRunWritesNothing(t *testing.T) {
+	h := projectHarness(t, repoTeam)
+	out, err := h.run(t, addArgs("--dry-run")...)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if h.store.writes != 0 || len(h.store.teams) != 0 {
+		t.Fatalf("dry run wrote: writes=%d teams=%v", h.store.writes, h.store.teams)
+	}
+	for _, want := range []string{
+		"Dry run: nothing was applied", "declaration from repository file kuketeam.yaml at", "Declaration:",
+		"name: proj", "Sources:", "project  " + projectURL + "  branch main", "Pairs:", "lead ×", "Configs to create:",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("dry run output lacks %q:\n%s", want, out)
 		}
 	}
 }
 
-func TestAddCLIDirectoryOptionsAndOutput(t *testing.T) {
-	for _, named := range []bool{false, true} {
-		t.Run(map[bool]string{false: "inferred", true: "overridden"}[named], func(t *testing.T) {
-			directory := t.TempDir()
-			cmd := newAddCommand(func() (string, error) { return "/home/operator", nil },
-				func(_ context.Context, opts initialize.AddOptions) (initialize.Result, error) {
-					if opts.Directory != directory || opts.Source != "git@host:owner/project" || opts.Tag != "v1" {
-						t.Fatalf("options=%+v", opts)
-					}
-					expected := ""
-					if named {
-						expected = "chosen"
-					}
-					if opts.Name != expected {
-						t.Fatalf("name=%q", opts.Name)
-					}
-					return initialize.Result{
-						Resources: 2,
-						EntryPath: "/home/operator/.kuke/kuketeam.d/resolved.yaml",
-					}, nil
-				})
-			args := []string{directory, "--source", "git@host:owner/project", "--tag", "v1"}
-			if named {
-				args = append(args, "--name", "chosen")
+// TestAddWithoutFileInheritsAndExplainsAnEmptySelection is AC8 and AC11.
+func TestAddWithoutFileInheritsAndExplainsAnEmptySelection(t *testing.T) {
+	for name, args := range map[string][]string{
+		"no file":      addArgs(),
+		"no-repo-file": addArgs("--no-repo-file"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			file := ""
+			if name == "no-repo-file" {
+				file = repoTeam
 			}
-			cmd.SetArgs(args)
-			var out bytes.Buffer
-			cmd.SetOut(&out)
-			if err := cmd.Execute(); err != nil {
-				t.Fatal(err)
+			h := projectHarness(t, file)
+			_, err := h.run(t, args...)
+			if err == nil || !strings.Contains(err.Error(), "no kuketeam.yaml") ||
+				!strings.Contains(err.Error(), "--role") || !strings.Contains(err.Error(), "kuke team source add") {
+				t.Fatalf("error = %v", err)
 			}
-			if !strings.Contains(out.String(), "registered team resolved:") {
-				t.Fatalf("output=%s", out.String())
+			if h.store.writes != 0 {
+				t.Fatalf("writes = %d", h.store.writes)
 			}
 		})
+	}
+}
+
+// TestAddOverrides is AC9: --role replaces the declaration's list, -f
+// replaces the whole declaration, and the stored Team is what was applied.
+func TestAddOverrides(t *testing.T) {
+	t.Run("role", func(t *testing.T) {
+		h := projectHarness(t, repoTeam)
+		if _, err := h.run(t, addArgs("--role", "boss=kukeon:team/roles/majordomo")...); err != nil {
+			t.Fatal(err)
+		}
+		if got := roleNames(h.store.storedTeam(t, "proj")); strings.Join(got, ",") != "boss" {
+			t.Fatalf("roles = %v", got)
+		}
+	})
+	t.Run("file", func(t *testing.T) {
+		h := projectHarness(t, repoTeam)
+		file := writeFile(t, "team.yaml", strings.ReplaceAll(repoTeam, "name: lead", "name: chief"))
+		if _, err := h.run(t, addArgs("-f", file)...); err != nil {
+			t.Fatal(err)
+		}
+		if got := roleNames(h.store.storedTeam(t, "proj")); strings.Join(got, ",") != "chief" {
+			t.Fatalf("roles = %v", got)
+		}
+	})
+	t.Run("unknown default role", func(t *testing.T) {
+		h := projectHarness(t, repoTeam)
+		if _, err := h.run(t, addArgs("--role", "nobody")...); err == nil || h.store.writes != 0 {
+			t.Fatalf("err=%v writes=%d", err, h.store.writes)
+		}
+	})
+}
+
+// TestAddCreatesReplacingNeedsForce is AC8a: a stored team of the name stops
+// add before anything is fetched; --force replaces the declaration. (That the
+// recorded secret bindings a composition uses are kept is pinned in
+// internal/team/initialize.)
+func TestAddCreatesReplacingNeedsForce(t *testing.T) {
+	h := projectHarness(t, repoTeam)
+	binding, err := config.DefaultSecretBinding("gh-token", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := &config.Team{
+		APIVersion: config.APIVersion, Kind: config.KindTeam,
+		Metadata: config.Metadata{Name: "proj", Realm: "default"},
+		Spec: config.TeamSpec{
+			Secrets: []config.SecretBinding{binding},
+			Defaults: config.Defaults{
+				Roles: []config.Role{{Name: "old", Source: "kukeon", Path: "team/roles/majordomo"}},
+			},
+		},
+	}
+	h.store.putTeam(t, stored)
+	// No project tree: a fetch would fail, so the error proves none ran.
+	delete(h.sources, "project")
+	_, err = h.run(t, "add", "proj", "--source", "https://example.invalid/none.git", "--branch", "main")
+	if !errors.Is(err, errdefs.ErrTeamExists) || !strings.Contains(err.Error(), "kuke team apply proj") ||
+		!strings.Contains(err.Error(), "--force") {
+		t.Fatalf("error = %v", err)
+	}
+	if h.store.writes != 0 {
+		t.Fatalf("writes = %d", h.store.writes)
+	}
+	h = projectHarness(t, repoTeam)
+	h.store.putTeam(t, stored)
+	if out, forceErr := h.run(t, addArgs("--force")...); forceErr != nil {
+		t.Fatalf("%v\n%s", forceErr, out)
+	}
+	if got := roleNames(h.store.storedTeam(t, "proj")); strings.Join(got, ",") != "lead" {
+		t.Fatalf("forced team roles = %v\n%s", got, h.store.teams["proj"])
+	}
+}
+
+func TestAddRejectsInvalidArgumentsWithoutEffects(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"add", "proj"}, "NAME --source REPOSITORY"},
+		{[]string{"add", "proj", "--source", " "}, "must not be empty"},
+		{[]string{"add", "./missing"}, "unavailable or is not a directory"},
+		{[]string{"add", "proj", "--source", projectURL, "--tag", "t", "--commit", "c"}, "none of the others can be"},
+		{[]string{"add", "proj", "--source", projectURL, "-f", "x", "--no-repo-file"}, "none of the others can be"},
+		{[]string{"add", "proj", "--source", projectURL, "-f", "/does/not/exist"}, "read /does/not/exist"},
+	} {
+		h := newHarness(t)
+		if _, err := h.run(t, tc.args...); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("%v: error = %v, want %q", tc.args, err, tc.want)
+		}
+		if len(h.connect) != 0 || h.store.writes != 0 {
+			t.Fatalf("%v dialled kukeond or wrote", tc.args)
+		}
 	}
 }

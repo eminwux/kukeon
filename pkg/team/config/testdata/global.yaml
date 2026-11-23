@@ -1,5 +1,5 @@
-apiVersion: kuketeams.io/v1
-kind: TeamsConfig
+apiVersion: v1beta1
+kind: TeamDefaults
 spec:
   defaults:
     sources:

@@ -366,6 +366,30 @@ func ConfigStatusPath(baseRunPath, realmName, spaceName, stackName, configName s
 	)
 }
 
+// TeamsDir returns the realm's teams directory, which owns the daemon-stored
+// `kind: Team` documents (issue #1618). A Team is realm-scoped only.
+func TeamsDir(baseRunPath, realmName string) string {
+	return filepath.Join(RealmMetadataDir(baseRunPath, realmName), consts.KukeonTeamsSubdir)
+}
+
+// TeamPath returns the host-side path of one stored team document:
+// <realm>/teams/<name>.yaml, root-owned and 0o644.
+func TeamPath(baseRunPath, realmName, teamName string) string {
+	return filepath.Join(TeamsDir(baseRunPath, realmName), teamName+".yaml")
+}
+
+// TeamDefaultsDir returns the realm's team-defaults directory, which owns its
+// `kind: TeamDefaults` document (issue #1618).
+func TeamDefaultsDir(baseRunPath, realmName string) string {
+	return filepath.Join(RealmMetadataDir(baseRunPath, realmName), consts.KukeonTeamDefaultsSubdir)
+}
+
+// TeamDefaultsPath returns the host-side path of a realm's TeamDefaults
+// document: <realm>/team-defaults/<name>.yaml (the name is always default).
+func TeamDefaultsPath(baseRunPath, realmName, name string) string {
+	return filepath.Join(TeamDefaultsDir(baseRunPath, realmName), name+".yaml")
+}
+
 // VolumeScopeDir returns the metadata directory of the scope a `kind: Volume`
 // is bound to (issue #1018). Like a CellBlueprint a Volume is scopable at
 // realm/space/stack only — never cell — so the deepest coordinate this resolves

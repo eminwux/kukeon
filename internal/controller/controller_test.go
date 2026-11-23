@@ -35,6 +35,14 @@ import (
 
 // fakeRunner implements runner.Runner interface for testing.
 type fakeRunner struct {
+	// Team methods (issue #1618)
+	WriteTeamFn         func(team intmodel.Team) (bool, error)
+	GetTeamFn           func(team intmodel.Team) (intmodel.Team, error)
+	ListTeamsFn         func(realmName string) ([]intmodel.Team, error)
+	DeleteTeamFn        func(team intmodel.Team) error
+	WriteTeamDefaultsFn func(defaults intmodel.TeamDefaults) (bool, error)
+	GetTeamDefaultsFn   func(defaults intmodel.TeamDefaults) (intmodel.TeamDefaults, error)
+
 	// Realm methods
 	GetRealmFn                       func(realm intmodel.Realm) (intmodel.Realm, error)
 	ListRealmsFn                     func() ([]intmodel.Realm, error)
@@ -438,6 +446,48 @@ func (f *fakeRunner) DeleteConfig(config intmodel.CellConfig) error {
 		return f.DeleteConfigFn(config)
 	}
 	return errors.New("unexpected call to DeleteConfig")
+}
+
+func (f *fakeRunner) WriteTeam(team intmodel.Team) (bool, error) {
+	if f.WriteTeamFn != nil {
+		return f.WriteTeamFn(team)
+	}
+	return false, errors.New("unexpected call to WriteTeam")
+}
+
+func (f *fakeRunner) GetTeam(team intmodel.Team) (intmodel.Team, error) {
+	if f.GetTeamFn != nil {
+		return f.GetTeamFn(team)
+	}
+	return intmodel.Team{}, errors.New("unexpected call to GetTeam")
+}
+
+func (f *fakeRunner) ListTeams(realmName string) ([]intmodel.Team, error) {
+	if f.ListTeamsFn != nil {
+		return f.ListTeamsFn(realmName)
+	}
+	return nil, errors.New("unexpected call to ListTeams")
+}
+
+func (f *fakeRunner) DeleteTeam(team intmodel.Team) error {
+	if f.DeleteTeamFn != nil {
+		return f.DeleteTeamFn(team)
+	}
+	return errors.New("unexpected call to DeleteTeam")
+}
+
+func (f *fakeRunner) WriteTeamDefaults(defaults intmodel.TeamDefaults) (bool, error) {
+	if f.WriteTeamDefaultsFn != nil {
+		return f.WriteTeamDefaultsFn(defaults)
+	}
+	return false, errors.New("unexpected call to WriteTeamDefaults")
+}
+
+func (f *fakeRunner) GetTeamDefaults(defaults intmodel.TeamDefaults) (intmodel.TeamDefaults, error) {
+	if f.GetTeamDefaultsFn != nil {
+		return f.GetTeamDefaultsFn(defaults)
+	}
+	return intmodel.TeamDefaults{}, errors.New("unexpected call to GetTeamDefaults")
 }
 
 // GetConfigScheduleStatus defaults to "none stored" so tests of unscheduled

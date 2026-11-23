@@ -25,7 +25,6 @@ import (
 
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
-	"github.com/eminwux/kukeon/pkg/team/config"
 )
 
 // TestKukeondIntegration requires an explicitly selected disposable kukeond with
@@ -42,8 +41,7 @@ func TestKukeondIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = client.Close() }()
-	team := config.Root()
-	team.Metadata.Name = fmt.Sprintf("init-check-%d", time.Now().UnixNano())
+	team := inheritingTeam(fmt.Sprintf("init-check-%d", time.Now().UnixNano()))
 	result := compositionFor(t, "codex", nil, team)
 	// Shared blueprints belong to the realm, not to this check: one that
 	// existed before is not removed (applying replaces it in place when its
@@ -58,6 +56,13 @@ func TestKukeondIntegration(t *testing.T) {
 		created[bp.Metadata.Name] = !got.MetadataExists
 	}
 	defer func() {
+		// The configs go first, so deleting the Team afterwards prunes no
+		// shared blueprint that existed before this run.
+		defer func() {
+			if _, deleteErr := client.DeleteTeam(t.Context(), kukeonv1.TeamRef{Name: team.Metadata.Name}); deleteErr != nil {
+				t.Errorf("cleanup team: %v", deleteErr)
+			}
+		}()
 		for _, pair := range result.Pairs {
 			if _, deleteErr := client.DeleteConfig(t.Context(), *pair.Config); deleteErr != nil {
 				t.Errorf("cleanup config: %v", deleteErr)
@@ -82,8 +87,13 @@ func TestKukeondIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 2 {
-		if _, err = Apply(t.Context(), client, result); err != nil {
+		if _, err = applyMissing(t.Context(), client, result); err != nil {
 			t.Fatal(err)
+		}
+		// The Team is stored with the documents composed from it (AC4).
+		if got, getErr := client.GetTeam(t.Context(), kukeonv1.TeamRef{Name: team.Metadata.Name}); getErr != nil ||
+			!got.Exists {
+			t.Fatalf("team readback: exists=%v error=%v", got.Exists, getErr)
 		}
 		for _, pair := range result.Pairs {
 			bp, readErr := client.GetBlueprint(t.Context(), *pair.Blueprint)

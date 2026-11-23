@@ -4,7 +4,7 @@
 # git credential: clone, fetch, push and signing keep using the cell's git
 # identity (the git connector — an SSH key or basic-auth secret), so enabling
 # this connector can never make a push use the API token.
-apiVersion: kuketeams.io/v1
+apiVersion: v1beta1
 kind: Connector
 metadata:
   name: github

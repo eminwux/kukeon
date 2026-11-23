@@ -32,6 +32,8 @@ export function readRoute(): Route {
       try { target = JSON.parse(params.get("scope") ?? "null"); } catch { target = null; }
       return { view: "connectors", scope: parts.slice(1, 2), parent: [], document: false, target: Array.isArray(target) && target.every(value => typeof value === "string") ? target.slice(0, 3) : undefined };
     }
+    // #/teams lists the stored teams and the sources; #/teams/<name> opens one team.
+    if (parts[0] === "teams") return { view: "teams", scope: parts.slice(1, 2), parent: [], document: false };
     // #/daemon (health) and #/daemon/logs live under Administration.
     // #/health: majordomo's health reports and the sweep schedule.
     if (parts[0] === "health") return { view: "health", scope: [], parent: [], document: false };

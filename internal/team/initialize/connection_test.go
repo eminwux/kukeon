@@ -34,7 +34,7 @@ func TestHostPrecedence(t *testing.T) {
 	t.Setenv("KUKE_CONFIGURATION", "")
 	t.Setenv("KUKEON_HOST", "")
 	root := t.TempDir()
-	opts := Options{Root: root}
+	opts := ConnectOptions{Root: root}
 	host, err := resolveHost(opts)
 	if err != nil || host != defaultHost {
 		t.Fatalf("host=%s error=%v", host, err)
@@ -120,8 +120,27 @@ func (s *WireService) GetConfig(a *kukeonv1.GetConfigArgs, r *kukeonv1.GetConfig
 
 func (s *WireService) ApplyDocuments(a *kukeonv1.ApplyDocumentsArgs, r *kukeonv1.ApplyDocumentsReply) error {
 	var err error
-	r.Result, err = s.Client.ApplyDocumentsForTeam(context.Background(), a.RawYAML, a.Team)
+	if a.Team == "" {
+		r.Result, err = s.Client.ApplyDocuments(context.Background(), a.RawYAML)
+	} else {
+		r.Result, err = s.Client.ApplyDocumentsForTeam(context.Background(), a.RawYAML, a.Team)
+	}
 	r.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
+func (s *WireService) GetTeam(a *kukeonv1.GetTeamArgs, r *kukeonv1.GetTeamReply) error {
+	r.Result, _ = s.Client.GetTeam(context.Background(), a.Ref)
+	return nil
+}
+
+func (s *WireService) ListTeams(a *kukeonv1.ListTeamsArgs, r *kukeonv1.ListTeamsReply) error {
+	r.Teams, _ = s.Client.ListTeams(context.Background(), a.Realm)
+	return nil
+}
+
+func (s *WireService) GetTeamDefaults(a *kukeonv1.GetTeamDefaultsArgs, r *kukeonv1.GetTeamDefaultsReply) error {
+	r.Result, _ = s.Client.GetTeamDefaults(context.Background(), a.Realm)
 	return nil
 }
 
@@ -153,39 +172,50 @@ func serveWire(t *testing.T, f *fakeClient) string {
 	return "unix://" + path
 }
 
+// TestInitOverUnixSocketAndClientConfiguration: Connect resolves the host
+// from the client configuration, and the stored Team and TeamDefaults travel
+// over the wire as YAML bytes.
 func TestInitOverUnixSocketAndClientConfiguration(t *testing.T) {
-	opts := setupRun(t)
 	f := newFake()
 	host := serveWire(t, f)
-	opts.Client = nil
 	t.Setenv("KUKE_CONFIGURATION", "")
 	t.Setenv("KUKEON_HOST", "")
-	if err := os.MkdirAll(opts.Root, 0o700); err != nil {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "kuke.yaml"), []byte("kind: ClientConfiguration\nspec:\n  host: "+host+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(opts.Root, "kuke.yaml"), []byte("kind: ClientConfiguration\nspec:\n  host: "+host+"\n"), 0o600); err != nil {
+	client, err := Connect(t.Context(), ConnectOptions{Root: root})
+	if err != nil {
 		t.Fatal(err)
 	}
-	for range 2 {
-		result, err := Run(t.Context(), opts)
-		if err != nil || result.EntryPath == "" {
-			t.Fatalf("result=%+v error=%v", result, err)
-		}
+	defer func() { _ = client.Close() }()
+	opts := InitOptions{Options: Options{Client: client, Sources: sourceFS()}}
+	if _, err = Init(t.Context(), opts); err != nil {
+		t.Fatal(err)
 	}
-	if f.applies != 2 || f.team != "kuke" {
-		t.Fatal("wire did not carry stable team identity")
+	// The second init reads the stored Team back over the wire.
+	if _, err = Init(t.Context(), opts); err == nil || !strings.Contains(err.Error(), "already initialized") {
+		t.Fatalf("second init: %v", err)
+	}
+	opts.Reapply = true
+	if _, err = Init(t.Context(), opts); err != nil {
+		t.Fatal(err)
+	}
+	if f.applies != 2 || f.team != "kuke" || f.defaults == nil {
+		t.Fatalf("wire did not carry stable team identity: applies=%d team=%q", f.applies, f.team)
 	}
 }
 
-func TestUnavailableSocketDoesNotRegister(t *testing.T) {
-	opts := setupRun(t)
-	opts.Client = nil
-	opts.Host = "unix://" + filepath.Join(t.TempDir(), "absent.sock")
-	_, err := Run(t.Context(), opts)
-	if err == nil || !strings.Contains(err.Error(), "connection/preflight") {
-		t.Fatalf("error=%v", err)
+// TestUnavailableSocketFailsSafely: an absent daemon fails the first read
+// with the transport class, never a partial write.
+func TestUnavailableSocketFailsSafely(t *testing.T) {
+	client, err := Connect(t.Context(), ConnectOptions{Host: "unix://" + filepath.Join(t.TempDir(), "absent.sock")})
+	if err != nil {
+		return // Refused at connect: nothing could be written.
 	}
-	if _, err = os.Stat(filepath.Join(opts.Root, "kuketeam.d", "kuke.yaml")); !os.IsNotExist(err) {
-		t.Fatal("registered on transport failure")
+	defer func() { _ = client.Close() }()
+	_, err = Init(t.Context(), InitOptions{Options: Options{Client: client, Sources: sourceFS()}})
+	if err == nil || !strings.Contains(err.Error(), "transport") {
+		t.Fatalf("error=%v", err)
 	}
 }

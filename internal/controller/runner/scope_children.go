@@ -30,8 +30,9 @@ import (
 // <RunPath>/data/<realm>/[<space>/[<stack>/[<cell>/]]]: secrets/ (#619),
 // blueprints/ (#620), configs/ (#624), config-status/ (#1503, the schedule
 // state of scheduled configs), volumes/ (#1018), volume-meta/ (#1237, the
-// daemon-owned reclaim manifests for volumes), and healthreports/ (#1619, the
-// stored HealthReport documents of the kuke-system realm). The subtree-list
+// daemon-owned reclaim manifests for volumes), healthreports/ (#1619, the
+// stored HealthReport documents of the kuke-system realm), and the
+// realm-level teams/ and team-defaults/ (#1618). The subtree-list
 // walkers in secret.go / blueprint.go / config.go / volume.go enumerate child
 // scopes by reading the scope dir and must skip every entry in this set,
 // otherwise a reserved resource subdir would be mistaken for a phantom
@@ -50,6 +51,8 @@ var reservedScopeSubdirs = map[string]struct{}{
 	consts.KukeonVolumesSubdir:       {},
 	consts.KukeonVolumeMetaSubdir:    {},
 	consts.KukeonHealthReportsSubdir: {},
+	consts.KukeonTeamsSubdir:         {},
+	consts.KukeonTeamDefaultsSubdir:  {},
 }
 
 // isReservedScopeSubdir reports whether name is one of the per-scope resource

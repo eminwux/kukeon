@@ -562,6 +562,38 @@ func (s *KukeonV1Service) DeleteConfig(
 	return nil
 }
 
+// ---- Teams (issue #1618) ----
+
+func (s *KukeonV1Service) GetTeam(args *kukeonv1.GetTeamArgs, reply *kukeonv1.GetTeamReply) error {
+	result, err := s.core.GetTeam(s.ctx, args.Ref)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
+func (s *KukeonV1Service) ListTeams(args *kukeonv1.ListTeamsArgs, reply *kukeonv1.ListTeamsReply) error {
+	teams, err := s.core.ListTeams(s.ctx, args.Realm)
+	reply.Teams = teams
+	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
+func (s *KukeonV1Service) DeleteTeam(args *kukeonv1.DeleteTeamArgs, reply *kukeonv1.DeleteTeamReply) error {
+	result, err := s.core.DeleteTeam(s.ctx, args.Ref)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
+func (s *KukeonV1Service) GetTeamDefaults(
+	args *kukeonv1.GetTeamDefaultsArgs, reply *kukeonv1.GetTeamDefaultsReply,
+) error {
+	result, err := s.core.GetTeamDefaults(s.ctx, args.Realm)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
 // ---- Purge ----
 
 func (s *KukeonV1Service) PurgeRealm(args *kukeonv1.PurgeRealmArgs, reply *kukeonv1.PurgeRealmReply) error {

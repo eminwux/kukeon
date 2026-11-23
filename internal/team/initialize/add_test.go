@@ -18,7 +18,6 @@ package initialize
 
 import (
 	"bytes"
-	"context"
 	"encoding/pem"
 	"errors"
 	"io"
@@ -35,8 +34,8 @@ import (
 
 	"github.com/eminwux/kukeon/internal/team/teamtest"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
+	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/config"
-	"gopkg.in/yaml.v3"
 )
 
 func fixtureGit(t *testing.T, dir string, args ...string) string {
@@ -49,28 +48,22 @@ func fixtureGit(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(raw))
 }
 
+// addDefaults is the TeamDefaults the add tests start from: the kuke team's
+// sources and role on the codex harness.
+func addDefaults() *config.TeamDefaults {
+	cfg := config.EmptyDefaults(config.DefaultRealm)
+	cfg.Spec.Defaults = config.Majordomo().Spec.Defaults
+	cfg.Spec.Defaults.Harnesses = cfg.Spec.Defaults.Harnesses[:1]
+	return cfg
+}
+
 // Use actual Git object transfer through a controlled OpenSSH-compatible shim.
 // No provider, real identity, network host, or recorded credential is involved.
 func setupAddRun(t *testing.T) Options {
 	t.Helper()
-	opts := setupRun(t)
-	cfg := &config.TeamsConfig{
-		APIVersion: config.APIVersion,
-		Kind:       config.Kind,
-		Spec:       config.Spec{Defaults: config.Majordomo().Spec},
-	}
-	cfg.Spec.Defaults.Harnesses = cfg.Spec.Defaults.Harnesses[:1]
-	var raw bytes.Buffer
-	if err := config.Encode(&raw, cfg); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(opts.Root, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(opts.Root, "kuketeams.yaml"), raw.Bytes(), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return opts
+	f := newFake()
+	storeDefaults(t, f, addDefaults())
+	return Options{Client: f, Sources: sourceFS()}
 }
 
 func setupAdd(t *testing.T) (AddOptions, string) {
@@ -131,19 +124,16 @@ func writeFixture(t *testing.T, path, text string) {
 	}
 }
 
-func readAddEntry(t *testing.T, opts AddOptions) ([]byte, *config.TeamEntry) {
+// readAdded reads the stored Team of opts.Name from the fake daemon.
+func readAdded(t *testing.T, opts AddOptions) ([]byte, *config.Team) {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(opts.Root, "kuketeam.d", opts.Name+".yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	entry, err := config.DecodeEntry(bytes.NewReader(raw))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return raw, entry
+	f := opts.Client.(*fakeClient)
+	return f.teams[opts.Name], storedTeam(t, f, opts.Name)
 }
 
+// TestAddNativeSSHRevisionsAndRepeat fetches the project over a controlled
+// SSH shim at each kind of revision. A repeated add of a stored team is
+// refused (AC8a); with --force it replaces the declaration and converges.
 func TestAddNativeSSHRevisionsAndRepeat(t *testing.T) {
 	for _, mode := range []string{"default", "branch", "tag", "commit", "ssh-url", "ssh-alias", "example", "core-ssh-command"} {
 		t.Run(mode, func(t *testing.T) {
@@ -168,29 +158,28 @@ func TestAddNativeSSHRevisionsAndRepeat(t *testing.T) {
 				fixtureGit(t, ".", "config", "--global", "core.sshCommand", os.Getenv("GIT_SSH_COMMAND"))
 				t.Setenv("GIT_SSH_COMMAND", "")
 			}
-			cfgPath := filepath.Join(opts.Root, "kuketeams.yaml")
-			before, readErr := os.ReadFile(cfgPath)
-			if readErr != nil {
-				t.Fatal(readErr)
-			}
-			for range 2 {
-				result, err := Add(t.Context(), opts)
+			fake := opts.Client.(*fakeClient)
+			defaults := slices.Clone(fake.defaults)
+			for attempt := range 2 {
+				opts.Force = attempt == 1
+				out, err := Add(t.Context(), opts)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if result.Resources != 2 {
-					t.Fatal("wrong resource count")
+				// One blueprint, one config and the Team.
+				if out.Result.Resources != 3 {
+					t.Fatalf("resources = %d", out.Result.Resources)
+				}
+				if out.Plan.Origin.Kind != OriginDefaults {
+					t.Fatalf("origin = %+v, want defaults (the fixture has no kuketeam.yaml)", out.Plan.Origin)
 				}
 				assertAcceptedAdd(t, opts, mode, commit)
-
-				after, afterErr := os.ReadFile(cfgPath)
-				if afterErr != nil || !bytes.Equal(before, after) {
-					t.Fatal("global configuration reset")
+				if !bytes.Equal(defaults, fake.defaults) {
+					t.Fatal("add changed the TeamDefaults")
 				}
 			}
-			entries, err := os.ReadDir(filepath.Join(opts.Root, "kuketeam.d"))
-			if err != nil || len(entries) != 1 || opts.Client.(*fakeClient).applies != 2 {
-				t.Fatal("repeat add duplicated entry or leaked stage")
+			if len(fake.teams) != 1 || fake.applies != 2 {
+				t.Fatalf("teams=%d applies=%d", len(fake.teams), fake.applies)
 			}
 		})
 	}
@@ -221,19 +210,28 @@ func TestAddNativeSSHRevisionObjectFormats(t *testing.T) {
 					otherFormat = "sha1"
 				}
 				t.Setenv("GIT_DEFAULT_HASH", otherFormat)
-				sources, cleanup, err := materializeSources(t.Context(), config.Defaults{
-					Sources: []config.Source{source},
-				}, true)
+				if mode != "default" {
+					sources, cleanup, err := materializeSources(t.Context(), config.Defaults{
+						Sources: []config.Source{source},
+					}, true)
+					if err != nil {
+						t.Fatal(err)
+					}
+					raw, err := fs.ReadFile(sources["project"], "README")
+					cleanup()
+					if err != nil || string(raw) != "project fixture" {
+						t.Fatalf("revision checkout content = %q, error = %v", raw, err)
+					}
+				}
+				out, err := Add(t.Context(), opts)
 				if err != nil {
 					t.Fatal(err)
 				}
-				defer cleanup()
-				raw, err := fs.ReadFile(sources["project"], "README")
-				if err != nil || string(raw) != "project fixture" {
-					t.Fatalf("revision checkout content = %q, error = %v", raw, err)
-				}
-				if _, err = Add(t.Context(), opts); err != nil {
-					t.Fatal(err)
+				// The plan records the commit the project was fetched at.
+				if len(out.Plan.Sources) == 0 || !slices.ContainsFunc(out.Plan.Sources, func(s PlannedSource) bool {
+					return s.Name == "project" && s.Commit == commit
+				}) {
+					t.Fatalf("planned sources = %+v, want project at %s", out.Plan.Sources, commit)
 				}
 				acceptedMode := mode
 				if mode == "annotated-tag" {
@@ -245,50 +243,43 @@ func TestAddNativeSSHRevisionObjectFormats(t *testing.T) {
 	}
 }
 
-func changeAddConfig(t *testing.T, opts AddOptions, change func(*config.TeamsConfig)) {
+// changeAddConfig edits the TeamDefaults stored in the add's fake daemon.
+func changeAddConfig(t *testing.T, opts AddOptions, change func(*config.TeamDefaults)) {
 	t.Helper()
-	path := filepath.Join(opts.Root, "kuketeams.yaml")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := config.Decode(bytes.NewReader(raw))
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := opts.Client.(*fakeClient)
+	cfg := storedDefaults(t, f)
 	change(cfg)
-	var out bytes.Buffer
-	if err = config.Encode(&out, cfg); err != nil {
-		t.Fatal(err)
-	}
-	if err = os.WriteFile(path, out.Bytes(), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	storeDefaults(t, f, cfg)
 }
 
-func TestAddFailuresPreserveAcceptedEntry(t *testing.T) {
-	for _, mode := range []string{"missing-branch", "missing-tag", "missing-commit", "rpc", "partial", "socket", "scope", "secret-lookup", "registration-stage", "invalid-entry", "image", "definition", "collision", "clone-collision", "credentials"} {
+// TestAddFailuresPreserveAcceptedTeam: after a successful add, a forced add
+// that fails anywhere before or during the apply leaves the stored Team as it
+// was, and nothing is applied before the preflight passes.
+func TestAddFailuresPreserveAcceptedTeam(t *testing.T) {
+	for _, mode := range []string{"missing-branch", "missing-tag", "missing-commit", "rpc", "partial", "scope", "secret-lookup", "image", "definition", "collision", "clone-collision", "credentials"} {
 		t.Run(mode, func(t *testing.T) {
 			opts, _ := setupAdd(t)
 			if _, err := Add(t.Context(), opts); err != nil {
 				t.Fatal(err)
 			}
-			before, _ := readAddEntry(t, opts)
-			fake := newFake()
-			opts.Client = fake
+			fake := opts.Client.(*fakeClient)
+			before, _ := readAdded(t, opts)
+			accepted := opts
+			applies, creates := fake.applies, fake.creates
+			opts.Force = true
 			configureAddFailure(t, &opts, fake, mode)
-			result, err := Add(t.Context(), opts)
-			if err == nil || result.EntryPath != "" || strings.Contains(err.Error(), "unsafe-canary") {
+			out, err := Add(t.Context(), opts)
+			if err == nil || out.Result != nil || strings.Contains(err.Error(), "unsafe-canary") {
 				t.Fatalf("failure not safe: %v", err)
 			}
-			if mode != "rpc" && mode != "partial" && fake.applies != 0 {
+			if mode != "rpc" && mode != "partial" && fake.applies != applies {
 				t.Fatal("applied before preflight")
 			}
-			if mode != "registration-stage" && mode != "invalid-entry" && mode != "clone-collision" {
-				after, _ := readAddEntry(t, opts)
-				if !bytes.Equal(before, after) {
-					t.Fatal("failed update replaced accepted entry")
-				}
+			if fake.creates != creates {
+				t.Fatal("a secret was created")
+			}
+			if after, _ := readAdded(t, accepted); !bytes.Equal(before, after) {
+				t.Fatal("failed update replaced the stored team")
 			}
 		})
 	}
@@ -378,7 +369,7 @@ func TestAddHTTPSCredentialHelperAndPublic(t *testing.T) {
 			if _, err := Add(t.Context(), opts); err != nil {
 				t.Fatal(err)
 			}
-			raw, _ := readAddEntry(t, opts)
+			raw, _ := readAdded(t, opts)
 			if bytes.Contains(raw, []byte("fixture-only")) ||
 				bytes.Contains(opts.Client.(*fakeClient).raw, []byte("fixture-only")) {
 				t.Fatal("helper credential persisted")
@@ -393,53 +384,18 @@ func TestAddHTTPSCredentialHelperAndPublic(t *testing.T) {
 				default:
 					fixtureGit(t, repo, "config", "--global", "credential.helper", "")
 				}
-				fake := newFake()
-				opts.Client = fake
+				fake := opts.Client.(*fakeClient)
+				applies := fake.applies
+				opts.Force = true
 				if _, err := Add(t.Context(), opts); err == nil || strings.Contains(err.Error(), "fixture-only") {
 					t.Fatal("missing HTTPS credentials did not fail safely")
 				}
-				after, _ := readAddEntry(t, opts)
-				if !bytes.Equal(before, after) || fake.applies != 0 {
+				after, _ := readAdded(t, opts)
+				if !bytes.Equal(before, after) || fake.applies != applies {
 					t.Fatal("authentication failure mutated accepted state")
 				}
 			}
 		})
-	}
-}
-
-// Ensure cancellation after daemon success reports the actual registration state.
-type cancelApplyClient struct {
-	*fakeClient
-
-	cancel context.CancelFunc
-}
-
-func (f cancelApplyClient) ApplyDocumentsForTeam(
-	ctx context.Context,
-	raw []byte,
-	team string,
-) (kukeonv1.ApplyDocumentsResult, error) {
-	result, err := f.fakeClient.ApplyDocumentsForTeam(ctx, raw, team)
-	f.cancel()
-	return result, err
-}
-
-func TestAddPostApplyRegistrationFailure(t *testing.T) {
-	opts, _ := setupAdd(t)
-	if _, err := Add(t.Context(), opts); err != nil {
-		t.Fatal(err)
-	}
-	before, _ := readAddEntry(t, opts)
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	opts.Client = cancelApplyClient{newFake(), cancel}
-	_, err := Add(ctx, opts)
-	if err == nil || !strings.Contains(err.Error(), "resources applied but registration unchanged") {
-		t.Fatalf("error=%v", err)
-	}
-	after, _ := readAddEntry(t, opts)
-	if !bytes.Equal(before, after) {
-		t.Fatal("registration changed after cancellation")
 	}
 }
 
@@ -450,9 +406,10 @@ func TestAddTransportFailuresAreNoninteractiveAndSafe(t *testing.T) {
 			if _, err := Add(t.Context(), opts); err != nil {
 				t.Fatal(err)
 			}
-			before, _ := readAddEntry(t, opts)
-			fake := newFake()
-			opts.Client = fake
+			before, _ := readAdded(t, opts)
+			fake := opts.Client.(*fakeClient)
+			writes := len(fake.writes)
+			opts.Force = true
 			shim := filepath.Join(t.TempDir(), "failed-ssh")
 			writeFixture(
 				t,
@@ -470,26 +427,11 @@ func TestAddTransportFailuresAreNoninteractiveAndSafe(t *testing.T) {
 					t.Fatalf("unsafe/unactionable Git failure: %v", err)
 				}
 			}
-			after, _ := readAddEntry(t, opts)
-			if !bytes.Equal(before, after) || fake.applies != 0 || fake.creates != 0 {
-				t.Fatal("Git failure mutated registration/daemon")
+			after, _ := readAdded(t, opts)
+			if !bytes.Equal(before, after) || len(fake.writes) != writes {
+				t.Fatal("Git failure mutated the stored team or the daemon")
 			}
 		})
-	}
-}
-
-func TestAddOverUnixSocket(t *testing.T) {
-	opts, _ := setupAdd(t)
-	fake := newFake()
-	opts.Client = nil
-	opts.Host = serveWire(t, fake)
-	for range 2 {
-		if _, err := Add(t.Context(), opts); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if fake.team != "kukeon" || fake.applies != 2 {
-		t.Fatal("socket contract lost named ownership")
 	}
 }
 
@@ -498,21 +440,22 @@ func TestAddReusesScopedSecretsAndNewDefaults(t *testing.T) {
 	if _, err := Add(t.Context(), opts); err != nil {
 		t.Fatal(err)
 	}
-	changeAddConfig(t, opts, func(cfg *config.TeamsConfig) {
+	changeAddConfig(t, opts, func(cfg *config.TeamDefaults) {
 		cfg.Spec.Defaults.Roles[0].Name = "updated"
 		cfg.Spec.Defaults.Harnesses = []config.Harness{
 			{Name: "opencode", Source: "kukeon", Path: "team/harnesses/opencode"},
 		}
 		cfg.Spec.Secrets = []config.SecretBinding{binding(&config.SecretSource{File: "/nonexistent/host-token"})}
 	})
-	fake := newFake()
+	fake := opts.Client.(*fakeClient)
 	fake.secrets[metadata(binding(nil).SecretRef)] = "unsafe-canary"
-	opts.Client = fake
+	lookups := fake.lookups
+	opts.Force = true
 	if _, err := Add(t.Context(), opts); err != nil {
 		t.Fatal(err)
 	}
-	raw, entry := readAddEntry(t, opts)
-	if entry.Spec.Roles != nil || entry.Spec.Harnesses != nil || fake.creates != 0 || fake.lookups != 1 ||
+	raw, team := readAdded(t, opts)
+	if team.Spec.Roles != nil || team.Spec.Harnesses != nil || fake.creates != 0 || fake.lookups != lookups+1 ||
 		!bytes.Contains(fake.raw, []byte("kukeon-updated-opencode")) ||
 		bytes.Contains(raw, []byte("unsafe-canary")) ||
 		bytes.Contains(fake.raw, []byte("unsafe-canary")) {
@@ -520,105 +463,64 @@ func TestAddReusesScopedSecretsAndNewDefaults(t *testing.T) {
 	}
 }
 
+// TestAddRecordsSecretBindingsAndWarnsOnMissing: the stored Team records the
+// secret bindings it was composed with; an operator edit to a recorded
+// binding outlives the TeamDefaults' bindings, also through add --force.
 func TestAddRecordsSecretBindingsAndWarnsOnMissing(t *testing.T) {
 	opts, _ := setupAdd(t)
-	changeAddConfig(t, opts, func(cfg *config.TeamsConfig) {
+	changeAddConfig(t, opts, func(cfg *config.TeamDefaults) {
 		cfg.Spec.Defaults.Harnesses = []config.Harness{
 			{Name: "opencode", Source: "kukeon", Path: "team/harnesses/opencode"},
 		}
 		cfg.Spec.Secrets = nil
 	})
-	fake := newFake()
-	opts.Client = fake
-	result, err := Add(t.Context(), opts)
+	fake := opts.Client.(*fakeClient)
+	out, err := Add(t.Context(), opts)
 	want := "openrouter-api-key  →  kuke create secret openrouter-api-key --realm default --from-file /path/to/token"
 	if err != nil || fake.applies != 1 || fake.creates != 0 ||
-		!slices.Equal(result.MissingSecrets, []string{want}) {
-		t.Fatalf("missing=%q err=%v applies=%d", result.MissingSecrets, err, fake.applies)
+		!slices.Equal(out.Result.MissingSecrets, []string{want}) {
+		t.Fatalf("missing=%q err=%v applies=%d", out.Result.MissingSecrets, err, fake.applies)
 	}
-	_, entry := readAddEntry(t, opts)
-	if len(entry.Secrets) != 1 || entry.Secrets[0].EnvName != "OPENROUTER_API_KEY" ||
-		entry.Secrets[0].SecretRef != (config.SecretRef{Name: "openrouter-api-key", Realm: "default"}) {
-		t.Fatalf("entry secrets = %+v", entry.Secrets)
+	_, team := readAdded(t, opts)
+	if len(team.Spec.Secrets) != 1 || team.Spec.Secrets[0].EnvName != "OPENROUTER_API_KEY" ||
+		team.Spec.Secrets[0].SecretRef != (config.SecretRef{Name: "openrouter-api-key", Realm: "default"}) {
+		t.Fatalf("team secrets = %+v", team.Spec.Secrets)
 	}
-	// An operator edit to the recorded binding outlives global bindings. The
-	// edit repoints the runtime secret; the destination is the harness's.
-	entry.Secrets[0].SecretRef.Name = "edited-router-key"
-	edited, err := yaml.Marshal(entry)
-	if err != nil {
-		t.Fatal(err)
+	// The edit repoints the runtime secret; the destination is the harness's.
+	editTeam(t, fake, opts.Name, func(team *config.Team) { team.Spec.Secrets[0].SecretRef.Name = "edited-router-key" })
+	changeAddConfig(t, opts, func(cfg *config.TeamDefaults) { cfg.Spec.Secrets = []config.SecretBinding{binding(nil)} })
+	fake.secrets[api.SecretMetadata{Name: "edited-router-key", Realm: "default"}] = "present"
+	opts.Force = true
+	if out, err = Add(t.Context(), opts); err != nil || len(out.Result.MissingSecrets) != 0 {
+		t.Fatalf("missing=%q err=%v", out.Result.MissingSecrets, err)
 	}
-	writeFixture(t, filepath.Join(opts.Root, "kuketeam.d", opts.Name+".yaml"), string(edited))
-	changeAddConfig(t, opts, func(cfg *config.TeamsConfig) { cfg.Spec.Secrets = []config.SecretBinding{binding(nil)} })
-	fake.secrets[metadata(entry.Secrets[0].SecretRef)] = "present"
-	if result, err = Add(t.Context(), opts); err != nil || len(result.MissingSecrets) != 0 {
-		t.Fatalf("missing=%q err=%v", result.MissingSecrets, err)
-	}
-	if _, entry = readAddEntry(t, opts); entry.Secrets[0].SecretRef.Name != "edited-router-key" ||
+	if _, team = readAdded(t, opts); team.Spec.Secrets[0].SecretRef.Name != "edited-router-key" ||
 		!bytes.Contains(fake.raw, []byte("name: edited-router-key")) ||
 		bytes.Contains(fake.raw, []byte("provider-account")) {
 		t.Fatal("recorded binding replaced")
 	}
 	// A recorded destination the shared blueprint cannot honor is refused
-	// before anything is applied, and the accepted registration is kept.
+	// before anything is applied, and the stored team is kept.
 	applies := fake.applies
-	entry.Secrets[0].EnvName = "ROUTER_KEY"
-	if edited, err = yaml.Marshal(entry); err != nil {
-		t.Fatal(err)
-	}
-	accepted, _ := readAddEntry(t, opts)
-	writeFixture(t, filepath.Join(opts.Root, "kuketeam.d", opts.Name+".yaml"), string(edited))
+	editTeam(t, fake, opts.Name, func(team *config.Team) { team.Spec.Secrets[0].EnvName = "ROUTER_KEY" })
+	edited := slices.Clone(fake.teams[opts.Name])
 	if _, err = Add(t.Context(), opts); err == nil || fake.applies != applies ||
 		!strings.Contains(err.Error(), "differs from the harness destination") {
 		t.Fatalf("moved destination: err=%v applies=%d", err, fake.applies)
 	}
-	writeFixture(t, filepath.Join(opts.Root, "kuketeam.d", opts.Name+".yaml"), string(accepted))
+	if !bytes.Equal(edited, fake.teams[opts.Name]) {
+		t.Fatal("a refused add rewrote the stored team")
+	}
+	editTeam(t, fake, opts.Name, func(team *config.Team) { team.Spec.Secrets[0].EnvName = "OPENROUTER_API_KEY" })
 	// Deselecting the requirement drops its binding.
-	changeAddConfig(t, opts, func(cfg *config.TeamsConfig) {
+	changeAddConfig(t, opts, func(cfg *config.TeamDefaults) {
 		cfg.Spec.Defaults.Harnesses = []config.Harness{{Name: "codex", Source: "kukeon", Path: "team/harnesses/codex"}}
 	})
 	if _, err = Add(t.Context(), opts); err != nil {
 		t.Fatal(err)
 	}
-	if _, entry = readAddEntry(t, opts); entry.Secrets != nil {
-		t.Fatalf("stale bindings kept: %+v", entry.Secrets)
-	}
-}
-
-type removeStageClient struct {
-	*fakeClient
-
-	root string
-}
-
-func (f removeStageClient) ApplyDocumentsForTeam(
-	ctx context.Context,
-	raw []byte,
-	team string,
-) (kukeonv1.ApplyDocumentsResult, error) {
-	result, err := f.fakeClient.ApplyDocumentsForTeam(ctx, raw, team)
-	stages, _ := filepath.Glob(filepath.Join(f.root, "kuketeam.d", ".kukeon-*.yaml"))
-	for _, stage := range stages {
-		_ = os.Remove(stage)
-	}
-	return result, err
-}
-
-func TestAddRenameFailurePreservesEntry(t *testing.T) {
-	opts, _ := setupAdd(t)
-	if _, err := Add(t.Context(), opts); err != nil {
-		t.Fatal(err)
-	}
-	before, _ := readAddEntry(t, opts)
-	opts.Client = removeStageClient{newFake(), opts.Root}
-	_, err := Add(t.Context(), opts)
-	if err == nil || !strings.Contains(err.Error(), "resources applied but registration failed") ||
-		!strings.Contains(err.Error(), "kuke team add kukeon") {
-		t.Fatalf("error=%v", err)
-	}
-	after, _ := readAddEntry(t, opts)
-	if !bytes.Equal(before, after) {
-		t.Fatal("prior registration replaced")
+	if _, team = readAdded(t, opts); team.Spec.Secrets != nil {
+		t.Fatalf("stale bindings kept: %+v", team.Spec.Secrets)
 	}
 }
 
@@ -667,17 +569,21 @@ func TestAddFetchesDefinitionsAndProjectWithoutLocalSources(t *testing.T) {
 		"-m",
 		"definitions",
 	)
-	changeAddConfig(t, opts, func(cfg *config.TeamsConfig) {
+	changeAddConfig(t, opts, func(cfg *config.TeamDefaults) {
 		cfg.Spec.Defaults.Sources[0].URL = "git@work-alias:owner/definitions.git"
 		cfg.Spec.Defaults.Sources[0].Branch = "trunk"
 	})
 	opts.Sources = nil
-	if _, err := Add(t.Context(), opts); err != nil {
+	out, err := Add(t.Context(), opts)
+	if err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := readAddEntry(t, opts)
+	raw, _ := readAdded(t, opts)
 	if bytes.Contains(raw, []byte("definitions.git")) {
-		t.Fatal("effective defaults frozen into registration")
+		t.Fatal("effective defaults frozen into the stored team")
+	}
+	if len(out.Plan.Sources) != 2 {
+		t.Fatalf("planned sources = %+v, want kukeon and project", out.Plan.Sources)
 	}
 }
 
@@ -694,20 +600,20 @@ func TestAddRejectsCredentialURLBeforeAnyGitInvocation(t *testing.T) {
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatal("Git invoked before credential URL rejection")
 	}
-	if _, err := os.Stat(filepath.Join(opts.Root, "kuketeam.d", opts.Name+".yaml")); !os.IsNotExist(err) {
-		t.Fatal("rejected URL persisted")
+	if f := opts.Client.(*fakeClient); len(f.teams) != 0 || len(f.writes) != 0 {
+		t.Fatal("rejected URL reached the daemon")
 	}
 }
 
 func assertAcceptedAdd(t *testing.T, opts AddOptions, mode, commit string) {
 	t.Helper()
-	raw, entry := readAddEntry(t, opts)
-	if entry.ProjectSource == nil || entry.ProjectSource.URL != opts.Source || entry.Spec.Sources != nil ||
-		entry.Spec.Roles != nil ||
-		entry.Spec.Harnesses != nil {
+	raw, team := readAdded(t, opts)
+	if team.Spec.ProjectSource == nil || team.Spec.ProjectSource.URL != opts.Source || team.Spec.Sources != nil ||
+		team.Spec.Roles != nil ||
+		team.Spec.Harnesses != nil {
 		t.Fatalf("inheritance lost: %s", raw)
 	}
-	project := entry.ProjectSource
+	project := team.Spec.ProjectSource
 	switch mode {
 	case "tag":
 		if project.Tag != "v1" || project.Branch != "" ||
@@ -748,43 +654,24 @@ func configureAddFailure(t *testing.T, opts *AddOptions, fake *fakeClient, mode 
 			{Action: "created"},
 			{Action: "failed", Error: "fixture failure"},
 		}
-	case "socket":
-		opts.Client = nil
-		opts.Host = "unix://" + filepath.Join(t.TempDir(), "absent.sock")
 	case "scope":
 		fake.missingRealm = true
 	case "secret-lookup":
-		changeAddConfig(t, *opts, func(cfg *config.TeamsConfig) {
+		changeAddConfig(t, *opts, func(cfg *config.TeamDefaults) {
 			cfg.Spec.Defaults.Harnesses = []config.Harness{
 				{Name: "opencode", Source: "kukeon", Path: "team/harnesses/opencode"},
 			}
 			cfg.Spec.Secrets = []config.SecretBinding{binding(nil)}
 		})
 		fake.lookupErr = errors.New("unsafe-canary")
-	case "registration-stage":
-		// Preserve the old entry while making directory staging impossible.
-		global, readErr := os.ReadFile(filepath.Join(opts.Root, "kuketeams.yaml"))
-		if readErr != nil {
-			t.Fatal(readErr)
-		}
-		opts.Root = filepath.Join(t.TempDir(), ".kuke")
-		if err := os.MkdirAll(opts.Root, 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(opts.Root, "kuketeams.yaml"), global, 0o600); err != nil {
-			t.Fatal(err)
-		}
-		writeFixture(t, filepath.Join(opts.Root, "kuketeam.d"), "not a directory")
-	case "invalid-entry":
-		writeFixture(t, filepath.Join(opts.Root, "kuketeam.d", opts.Name+".yaml"), "kind: Wrong\n")
 	case "image":
-		changeAddConfig(t, *opts, func(cfg *config.TeamsConfig) {
+		changeAddConfig(t, *opts, func(cfg *config.TeamDefaults) {
 			cfg.Spec.Defaults.Roles[0].Needs = &config.Needs{Image: []string{"unavailable-capability"}}
 		})
 	case "definition":
 		opts.Sources = map[string]fs.FS{}
 	case "collision":
-		changeAddConfig(t, *opts, func(cfg *config.TeamsConfig) {
+		changeAddConfig(t, *opts, func(cfg *config.TeamDefaults) {
 			cfg.Spec.Defaults.Sources = append(
 				cfg.Spec.Defaults.Sources,
 				config.Source{Name: "project", URL: "https://example.test/repo", Branch: "main"},

@@ -28,73 +28,26 @@ import (
 	"github.com/eminwux/kukeon/pkg/team/config"
 )
 
-// directoryTeam reads only: the checkout and authored declaration stay untouched.
-func directoryTeam(ctx context.Context, opts AddOptions) (*config.Team, error) {
-	dir, err := filepath.Abs(opts.Directory)
-	if err != nil {
-		return nil, fmt.Errorf("add directory: %w", err)
-	}
-	info, err := os.Stat(dir)
-	if err != nil {
-		return nil, fmt.Errorf("add directory: %w", err)
-	}
-	if !info.IsDir() {
-		return nil, errors.New("add: directory input must be a directory")
-	}
-	team, err := readDirectoryTeam(dir)
-	if err != nil {
-		return nil, err
-	}
-
-	if opts.Name != "" {
-		team.Metadata.Name = opts.Name
-	}
-	if team.Metadata.Name == "" {
-		team.Metadata.Name = filepath.Base(dir)
-	}
-	if err = validateAddName(team.Metadata.Name); err != nil {
-		return nil, err
-	}
-	if team.ProjectSource == nil {
-		team.ProjectSource = &config.Source{Name: "project"}
-	}
-	source := team.ProjectSource
-	if source.Name == "" {
-		source.Name = "project"
-	}
-	if source.ClonePath == "" {
-		source.ClonePath = "/home/user/" + team.Metadata.Name
-	}
-	if opts.Source != "" {
-		source.URL = opts.Source
-	}
-	if opts.Branch != "" || opts.Tag != "" || opts.Commit != "" {
-		source.Branch, source.Tag, source.Commit = opts.Branch, opts.Tag, opts.Commit
-	}
-	if err = discoverDirectorySource(ctx, dir, source); err != nil {
-		return nil, err
-	}
-	return team, nil
-}
-
+// readDirectoryTeam reads a local checkout's kuketeam.yaml, or nil when it has
+// none. The checkout stays untouched.
 func readDirectoryTeam(dir string) (*config.Team, error) {
-	team := &config.Team{APIVersion: config.APIVersion, Kind: config.KindTeam}
-	path := filepath.Join(dir, "kuketeam.yaml")
+	path := filepath.Join(dir, teamFileName)
 	_, err := os.Lstat(path)
-	if err == nil {
-		f, openErr := os.Open(path)
-		if openErr != nil {
-			return nil, fmt.Errorf("add: cannot read local kuketeam.yaml: %w", openErr)
-		}
-		team, err = config.DecodeTeamDeclaration(f)
-		_ = f.Close()
-		if err != nil {
-			return nil, fmt.Errorf("add local kuketeam.yaml: %w", err)
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil //nolint:nilnil // a directory without kuketeam.yaml inherits the defaults
+	}
+	if err != nil {
 		return nil, fmt.Errorf("add: cannot read local kuketeam.yaml: %w", err)
 	}
-
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("add: cannot read local kuketeam.yaml: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	team, err := config.DecodeTeamDeclaration(f)
+	if err != nil {
+		return nil, fmt.Errorf("add local kuketeam.yaml: %w", err)
+	}
 	return team, nil
 }
 

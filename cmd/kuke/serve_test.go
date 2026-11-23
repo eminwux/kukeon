@@ -52,7 +52,7 @@ func TestServeConfiguration(t *testing.T) {
 			}
 			t.Setenv("KUKEON_NO_DAEMON", "true") // serve must remain daemon-only.
 			path := filepath.Join(t.TempDir(), "client.yaml")
-			if err := os.WriteFile(path, []byte("apiVersion: kukeon.io/v1beta1\nkind: ClientConfiguration\nspec:\n  host: unix:///tmp/from-file.sock\n"), 0o600); err != nil {
+			if err := os.WriteFile(path, []byte("apiVersion: v1beta1\nkind: ClientConfiguration\nspec:\n  host: unix:///tmp/from-file.sock\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			cmd, err := NewKukeCmd()

@@ -252,6 +252,22 @@ func (FakeClient) DeleteConfig(context.Context, v1beta1.CellConfigDoc) (DeleteCo
 	return DeleteConfigResult{}, ErrUnexpectedCall
 }
 
+func (FakeClient) GetTeam(context.Context, TeamRef) (GetTeamResult, error) {
+	return GetTeamResult{}, ErrUnexpectedCall
+}
+
+func (FakeClient) ListTeams(context.Context, string) ([]GetTeamResult, error) {
+	return nil, ErrUnexpectedCall
+}
+
+func (FakeClient) DeleteTeam(context.Context, TeamRef) (DeleteTeamResult, error) {
+	return DeleteTeamResult{}, ErrUnexpectedCall
+}
+
+func (FakeClient) GetTeamDefaults(context.Context, string) (GetTeamDefaultsResult, error) {
+	return GetTeamDefaultsResult{}, ErrUnexpectedCall
+}
+
 func (FakeClient) PurgeRealm(context.Context, v1beta1.RealmDoc, bool, bool) (PurgeRealmResult, error) {
 	return PurgeRealmResult{}, ErrUnexpectedCall
 }
