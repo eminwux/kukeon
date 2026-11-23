@@ -423,11 +423,13 @@ export function connectorSections(form, answers, mode = "") {
   return formSections(form, answers, mode).filter(section => section.connector);
 }
 
-// connectorsWithoutIdentity names the required connectors of the form that
-// nothing fills: no identity picked for the Config and, per the scope defaults
-// read for its target (GET /api/connectors/defaults), no default either.
+// componentsWithoutIdentity names the connector components of the form that
+// take a required identity nothing fills: no identity picked for the Config
+// and, per the scope defaults read for its target (GET /api/connectors/defaults),
+// no default row for that connector and component either. Each component is
+// judged on its own, so two components binding one connector can differ.
 // Unknown defaults (not loaded) report nothing.
-export function connectorsWithoutIdentity(form, answers, defaults, mode = "") {
+export function componentsWithoutIdentity(form, answers, defaults, mode = "") {
   if (!Array.isArray(defaults)) return [];
   const missing = [];
   for (const section of connectorSections(form, answers, mode)) {
@@ -436,7 +438,16 @@ export function connectorsWithoutIdentity(form, answers, defaults, mode = "") {
     if (connector.optional || !(slotDelivery(connector) || connector.delivery === deliveryGit)) continue;
     if (secretRef(answers.connectors?.[name])) continue;
     const row = defaults.find(item => item?.connector === connector.name && item.component === name);
-    if (!row?.effective) missing.push(connector.title || connector.name);
+    if (!row?.effective) missing.push(name);
   }
   return missing;
+}
+
+// connectorsWithoutIdentity names, by title, the connectors of the components
+// componentsWithoutIdentity reports.
+export function connectorsWithoutIdentity(form, answers, defaults, mode = "") {
+  const unresolved = componentsWithoutIdentity(form, answers, defaults, mode);
+  if (unresolved.length === 0) return [];
+  const titles = new Map(connectorSections(form, answers, mode).map(section => [section.component, section.connector.title || section.connector.name]));
+  return unresolved.map(component => titles.get(component));
 }

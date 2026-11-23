@@ -5,7 +5,7 @@ import { Disclosure } from "./disclosure";
 import { newCellLink } from "./routes";
 import { MergedValues } from "./merged-values";
 import { catalogAPI } from "./catalog-url.mjs";
-import { blueprintForm, buildSpec, connectorsWithoutIdentity, emptyAnswers, formSections, groupChoice, imageChoices, imageStatus, missingAnswers, previewMode, requiredCapabilities, secretChoices } from "./config-form.mjs";
+import { blueprintForm, buildSpec, componentsWithoutIdentity, connectorsWithoutIdentity, emptyAnswers, formSections, groupChoice, imageChoices, imageStatus, missingAnswers, previewMode, requiredCapabilities, secretChoices } from "./config-form.mjs";
 import type { Answers, BlueprintForm, CredentialAnswer, DefaultGitAnswer, FormSection, Identity, InventoryImage, Parameter, RenderedValue, RepoAnswer, RepoGitAnswer, RepoSlot, SecretChoice, SecretRef, SecretSlot, SigningAnswer } from "./config-form.mjs";
 
 import { ConnectorIdentities, IdentitySelect, connectorsLink } from "./connector-ui";
@@ -222,7 +222,8 @@ function ConfigForm({ blueprint, blueprintScope, form, revision, inventory, onCr
   // says how many answers it holds. Sections that hold a required answer come first, and a section opens by
   // itself the first time it has an unmet required answer or an image that lacks a required capability.
   const missingNames = new Set(missingAnswers(form, effective, mode));
-  const unresolvedIdentities = connectorsWithoutIdentity(form, effective, defaults.data, mode);
+  // Keyed on the component: two components may bind one connector and resolve differently.
+  const unresolvedComponents = componentsWithoutIdentity(form, effective, defaults.data, mode);
   const answered = (value: string | boolean | undefined) => typeof value === "boolean" || (typeof value === "string" && value !== "");
   const needed = (item: Parameter) => item.required && !item.hasDefault && item.type !== "bool";
   const takesPick = (section: FormSection) => !!section.connector && !!section.component && takesIdentity(section.connector.delivery);
@@ -230,7 +231,7 @@ function ConfigForm({ blueprint, blueprintScope, form, revision, inventory, onCr
   // parameters, the connector identity, then secret slots.
   const sectionInvalid = (section: FormSection) => [
     ...section.parameters.filter(item => needed(item) && missingNames.has(item.name)).map(item => fieldId("param", item.name)),
-    ...(takesPick(section) && !identityRef(answers.connectors[section.component!]) && unresolvedIdentities.includes(section.connector!.title || section.connector!.name) ? [fieldId("identity", section.component!)] : []),
+    ...(takesPick(section) && !identityRef(answers.connectors[section.component!]) && unresolvedComponents.includes(section.component!) ? [fieldId("identity", section.component!)] : []),
     ...(takesPick(section) ? [] : section.secrets.filter(slot => slot.required && missingNames.has(slot.name)).map(slot => fieldId("secret", `${slot.name} secret`))),
   ];
   const repoInvalid = form.repoSlots.filter(slot => slot.required && missingNames.has(slot.name)).map(slot => fieldId("repo", slot.name, "url"));
