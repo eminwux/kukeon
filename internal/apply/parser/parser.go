@@ -33,6 +33,7 @@ import (
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/health"
 	"github.com/eminwux/kukeon/internal/secretstore"
+	"github.com/eminwux/kukeon/internal/team/gitremote"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/api/version"
 	"github.com/eminwux/kukeon/pkg/team/config"
@@ -57,6 +58,7 @@ type Document struct {
 	HealthReportDoc  *v1beta1.HealthReportDoc
 	TeamDoc          *v1beta1.TeamDoc
 	TeamDefaultsDoc  *v1beta1.TeamDefaultsDoc
+	SourceDoc        *v1beta1.SourceDoc
 }
 
 // ValidationError represents a validation error for a specific document.
@@ -248,6 +250,18 @@ func ParseDocument(index int, raw []byte) (*Document, error) {
 		doc.TeamDefaultsDoc = &defaultsDoc
 		doc.APIVersion = defaultsDoc.APIVersion
 
+	case v1beta1.KindSource:
+		var sourceDoc v1beta1.SourceDoc
+		if decodeErr := config.DecodeStrict(bytes.NewReader(raw), &sourceDoc); decodeErr != nil {
+			return nil, fmt.Errorf("document %d: failed to parse Source: %w", index, decodeErr)
+		}
+		// Teams and their Sources live in realm default (#1618 D14).
+		if sourceDoc.Metadata.Realm == "" {
+			sourceDoc.Metadata.Realm = config.DefaultRealm
+		}
+		doc.SourceDoc = &sourceDoc
+		doc.APIVersion = sourceDoc.APIVersion
+
 	default:
 		// kind: CellProfile was removed in #626. Give the operator an
 		// explicit migration pointer instead of the generic unknown-kind
@@ -284,7 +298,7 @@ func ValidateDocument(doc *Document) *ValidationError {
 	case v1beta1.KindRealm, v1beta1.KindSpace, v1beta1.KindStack, v1beta1.KindCell,
 		v1beta1.KindContainer, v1beta1.KindSecret, v1beta1.KindCellBlueprint,
 		v1beta1.KindCellConfig, v1beta1.KindVolume, v1beta1.KindHealthReport,
-		v1beta1.KindTeam, v1beta1.KindTeamDefaults:
+		v1beta1.KindTeam, v1beta1.KindTeamDefaults, v1beta1.KindSource:
 		// Valid kind
 	default:
 		return &ValidationError{
@@ -558,15 +572,21 @@ func ValidateDocument(doc *Document) *ValidationError {
 		if validationErr := validateTeamDefaults(doc); validationErr != nil {
 			return validationErr
 		}
+
+	case v1beta1.KindSource:
+		if validationErr := validateSource(doc); validationErr != nil {
+			return validationErr
+		}
 	}
 
 	return nil
 }
 
 // validateTeam checks a Team document as kukeond stores it (issue #1618):
-// a valid name and realm and the declaration's body rules. Its selections
-// may name sources the realm's TeamDefaults registers, so they are checked
-// against those only when kuke composes the team.
+// a valid name and realm, the declaration's body rules and source entries
+// that only reference stored Sources (#1643, AC3). Its selections may name
+// stored Sources, so they are checked against those only when kuke composes
+// the team (D8).
 func validateTeam(doc *Document) *ValidationError {
 	if doc.TeamDoc == nil {
 		return &ValidationError{Index: doc.Index, Kind: doc.Kind, Err: errors.New("team document is nil")}
@@ -582,13 +602,15 @@ func validateTeam(doc *Document) *ValidationError {
 }
 
 // validateTeamDefaults checks a TeamDefaults document: named default, in a
-// valid realm, with the same rules kuke applies before composing.
+// valid realm, listing no sources (#1643, AC2), with the rules kuke applies
+// before composing except the check of the sources its default roles and
+// harnesses name, which are stored Sources resolved at composition (D8).
 func validateTeamDefaults(doc *Document) *ValidationError {
 	if doc.TeamDefaultsDoc == nil {
 		return &ValidationError{Index: doc.Index, Kind: doc.Kind, Err: errors.New("team defaults document is nil")}
 	}
 	defaults := TeamDefaultsConfig(doc.TeamDefaultsDoc)
-	err := config.Validate(defaults)
+	err := config.ValidateStoredDefaults(defaults)
 	switch {
 	case err != nil:
 	case defaults.Metadata.Name != config.DefaultsName:
@@ -600,6 +622,33 @@ func validateTeamDefaults(doc *Document) *ValidationError {
 		return &ValidationError{
 			Index: doc.Index, Kind: doc.Kind, Name: defaults.Metadata.Name,
 			Err: fmt.Errorf("%w: %w", errdefs.ErrInvalidTeam, err),
+		}
+	}
+	return nil
+}
+
+// validateSource checks a Source document (issue #1643, AC1): a valid name
+// other than project in a valid realm, an address git can fetch and exactly
+// one ref.
+func validateSource(doc *Document) *ValidationError {
+	if doc.SourceDoc == nil {
+		return &ValidationError{Index: doc.Index, Kind: doc.Kind, Err: errors.New("source document is nil")}
+	}
+	md := doc.SourceDoc.Metadata
+	err := config.ValidateSource(md.Name, doc.SourceDoc.Spec)
+	switch {
+	case err != nil:
+	case !config.ValidName(md.Realm):
+		err = errors.New("metadata.realm: require a valid realm name")
+	default:
+		if _, urlErr := gitremote.URL(doc.SourceDoc.Spec.URL); urlErr != nil {
+			err = fmt.Errorf("spec.url: %w", urlErr)
+		}
+	}
+	if err != nil {
+		return &ValidationError{
+			Index: doc.Index, Kind: doc.Kind, Name: md.Name,
+			Err: fmt.Errorf("%w: %w", errdefs.ErrInvalidSource, err),
 		}
 	}
 	return nil

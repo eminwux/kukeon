@@ -89,10 +89,14 @@ const (
 	// kuketeam.yaml is a Team document.
 	KindTeam Kind = "Team"
 	// KindTeamDefaults identifies the settings every team of a realm
-	// inherits (issue #1618): registered sources, default roles and
-	// harnesses, connectors, parameters and secret bindings. Realm-scoped,
-	// at most one per realm, named default.
+	// inherits (issue #1618): default roles and harnesses, connectors,
+	// parameters and secret bindings. Realm-scoped, at most one per realm,
+	// named default.
 	KindTeamDefaults Kind = "TeamDefaults"
+	// KindSource identifies a stored repository (issue #1643): an address,
+	// a ref and an optional git identity. Realm-scoped, owned by no team;
+	// a Team, a default role or a default harness names it.
+	KindSource Kind = "Source"
 	// KindRole identifies a role definition (role.yaml) kuke reads from a
 	// fetched team source. Not a server-side resource — `kuke apply`
 	// rejects it.

@@ -70,6 +70,82 @@ func Validate(cfg *TeamDefaults) error {
 	return validateDefaults(&cfg.Spec.Defaults)
 }
 
+// errDefaultsSources is the message a TeamDefaults that lists sources is
+// rejected with: sources are stored Source documents since #1643.
+const errDefaultsSources = "spec.defaults.sources: a TeamDefaults lists no sources; " +
+	"store each as a Source with kuke create source NAME --url ADDRESS"
+
+// ValidateStoredDefaults checks a TeamDefaults as kukeond stores it (#1643,
+// AC2): the rules of Validate, a spec.defaults.sources list rejected, and the
+// sources its default roles and harnesses name left unchecked — they name
+// stored Sources, which are checked when kuke composes (D8).
+func ValidateStoredDefaults(cfg *TeamDefaults) error {
+	if cfg == nil {
+		return errors.New("config: must not be nil")
+	}
+	if cfg.Spec.Defaults.Sources != nil {
+		return errors.New(errDefaultsSources)
+	}
+	if version.Check(cfg.APIVersion) != nil {
+		return fmt.Errorf("apiVersion: expected %q", APIVersion)
+	}
+	if cfg.Kind != KindTeamDefaults {
+		return fmt.Errorf("kind: expected %q", KindTeamDefaults)
+	}
+	if cfg.Metadata.Name != "" && cfg.Metadata.Name != DefaultsName {
+		return fmt.Errorf("metadata.name: a realm has one TeamDefaults, named %q", DefaultsName)
+	}
+	if cfg.Metadata.Realm != "" && !ValidName(cfg.Metadata.Realm) {
+		return errors.New("metadata.realm: require a valid realm name")
+	}
+	if err := validateBindings(&cfg.Spec); err != nil {
+		return err
+	}
+	return checkSelections(&cfg.Spec.Defaults, nil)
+}
+
+// ValidateSource checks a stored Source (#1643, AC1): a valid name other than
+// project, a nonblank address, exactly one of branch, tag and commit, and a
+// well-formed git block. Whether the address is one git can fetch is the
+// caller's check (kukeon's gitremote.URL), as it is for a team's sources.
+func ValidateSource(name string, spec SourceSpec) error {
+	if !ValidName(name) || name == ProjectSourceName {
+		return fmt.Errorf("metadata.name: invalid source name %q "+
+			"(lowercase letters, digits, dots, hyphens; project is reserved)", name)
+	}
+	if err := required("spec.url", spec.URL); err != nil {
+		return err
+	}
+	if err := revisionSelectors("spec", spec.Branch, spec.Tag, spec.Commit, true); err != nil {
+		return err
+	}
+	return validateSourceGit("spec.git", spec.Git)
+}
+
+// revisionSelectors checks that at most one (exactly one when exact) of
+// branch, tag and commit is set, each nonblank.
+func revisionSelectors(field, branch, tag, commit string, exact bool) error {
+	count := 0
+	for _, selector := range []struct{ name, value string }{
+		{"branch", branch}, {"tag", tag}, {"commit", commit},
+	} {
+		if selector.value == "" {
+			continue
+		}
+		if err := required(field+"."+selector.name, selector.value); err != nil {
+			return err
+		}
+		count++
+	}
+	switch {
+	case exact && count != 1:
+		return fmt.Errorf("%s: require exactly one nonblank revision selector (branch, tag, commit)", field)
+	case count > 1:
+		return fmt.Errorf("%s: set at most one revision selector (branch, tag, commit)", field)
+	}
+	return nil
+}
+
 func validateIdentities(field string, author, committer *Identity) error {
 	for _, entry := range []struct {
 		name     string
@@ -138,6 +214,11 @@ func validateSourceGit(field string, g *SourceGit) error {
 	if g == nil {
 		return nil
 	}
+	if g.IdentityRef != nil {
+		if err := validateSecretRef(field+".identityRef", *g.IdentityRef); err != nil {
+			return err
+		}
+	}
 	if err := validateIdentities(field, g.Author, g.Committer); err != nil {
 		return err
 	}
@@ -168,24 +249,63 @@ func validateSources(list []Source, sources map[string]bool) error {
 			}
 			targets[source.ClonePath] = true
 		}
-		count := 0
-		for _, selector := range []struct{ name, value string }{
-			{"branch", source.Branch}, {"tag", source.Tag}, {"commit", source.Commit},
-		} {
-			if selector.value == "" {
-				continue
-			}
-			if err := required(field+"."+selector.name, selector.value); err != nil {
-				return err
-			}
-			count++
-		}
-		if count != 1 {
-			return fmt.Errorf("%s: require exactly one nonblank revision selector (branch, tag, commit)", field)
+		if err := revisionSelectors(field, source.Branch, source.Tag, source.Commit, true); err != nil {
+			return err
 		}
 		if err := validateSourceGit(field+".git", source.Git); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// validateTeamSources checks a team's own sources and its projectSource as a
+// kuketeam.yaml or a stored Team states them (#1643, AC3): each entry has a
+// unique valid alias, an optional valid stored-Source name, at most one ref
+// and a safe, unique clone path. An entry with a url is a definition; its url
+// is checked where it is fetched.
+func validateTeamSources(spec *TeamSpec) error {
+	aliases, targets := map[string]bool{}, map[string]bool{}
+	check := func(field string, source Source) error {
+		if source.Stored != "" && (!ValidName(source.Stored) || source.Stored == ProjectSourceName) {
+			return fmt.Errorf("%s.source: invalid source name %q", field, source.Stored)
+		}
+		if source.URL != "" {
+			if err := required(field+".url", source.URL); err != nil {
+				return err
+			}
+		}
+		if err := revisionSelectors(field, source.Branch, source.Tag, source.Commit, false); err != nil {
+			return err
+		}
+		if source.ClonePath != "" {
+			if !SafePath(source.ClonePath) {
+				return fmt.Errorf("%s.clonePath: require an absolute in-cell path", field)
+			}
+			if targets[source.ClonePath] {
+				return fmt.Errorf("%s.clonePath: duplicate clone destination", field)
+			}
+			targets[source.ClonePath] = true
+		}
+		return validateSourceGit(field+".git", source.Git)
+	}
+	for i, source := range spec.Sources {
+		field := fmt.Sprintf("spec.sources[%d]", i)
+		if err := unique(field+".name", source.Name, aliases); err != nil {
+			return err
+		}
+		if !ValidName(source.Name) || source.Name == ProjectSourceName {
+			return fmt.Errorf("%s.name: invalid source name %q (project names spec.projectSource)", field, source.Name)
+		}
+		if err := check(field, source); err != nil {
+			return err
+		}
+	}
+	if project := spec.ProjectSource; project != nil {
+		if project.Name != "" && project.Name != ProjectSourceName {
+			return errors.New("spec.projectSource: name must be project")
+		}
+		return check("spec.projectSource", *project)
 	}
 	return nil
 }
@@ -195,10 +315,19 @@ func validateDefaults(d *Defaults) error {
 }
 
 func validateSelections(d *Defaults) error {
-	sources, roles, harnesses := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	sources := map[string]bool{}
 	if err := validateSources(d.Sources, sources); err != nil {
 		return err
 	}
+	return checkSelections(d, sources)
+}
+
+// checkSelections checks the connectors, roles and harnesses of d. With
+// sources nil the source each names is not checked against a list: kukeond
+// stores a document whose sources are stored Sources it does not resolve
+// (#1643, D8).
+func checkSelections(d *Defaults, sources map[string]bool) error {
+	roles, harnesses := map[string]bool{}, map[string]bool{}
 	if err := validateConnectors("spec.connectors", d.Connectors); err != nil {
 		return err
 	}
@@ -316,7 +445,7 @@ func selection(field, source, definition string, sources map[string]bool) error 
 	if err := required(field+".source", source); err != nil {
 		return err
 	}
-	if !sources[source] {
+	if sources != nil && !sources[source] {
 		return fmt.Errorf("%s.source: unknown source %q", field, source)
 	}
 	if err := required(field+".path", definition); err != nil {

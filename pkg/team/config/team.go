@@ -18,6 +18,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"slices"
@@ -150,14 +151,19 @@ func DecodeTeam(r io.Reader) (*Team, error) {
 }
 
 // ValidateTeam checks a Team document as kukeond stores it: the header, a
-// valid name and realm, and the body rules DecodeTeamDeclaration applies.
-// The selections are checked against the defaults only at composition, as a
-// role may name an inherited source.
+// valid name and realm, the body rules DecodeTeamDeclaration applies, and
+// sources that are references only (#1643, AC3): an entry carrying url or git
+// is a definition, which kuke stores as a Source before it stores the Team.
+// The selections are checked against the defaults and the stored Sources only
+// at composition, as a role may name an inherited or stored source.
 func ValidateTeam(team *Team) error {
 	if team == nil {
 		return errors.New("team: must not be nil")
 	}
 	if err := validateTeamBody(team); err != nil {
+		return err
+	}
+	if err := referencesOnly(&team.Spec); err != nil {
 		return err
 	}
 	if !ValidName(team.Metadata.Name) {
@@ -176,18 +182,38 @@ func validateTeamBody(team *Team) error {
 	if team.Metadata.Realm != "" && !ValidName(team.Metadata.Realm) {
 		return errors.New("metadata.realm: require a valid realm name")
 	}
-	if project := team.Spec.ProjectSource; project != nil {
-		if project.Name != "" && project.Name != ProjectSourceName {
-			return errors.New("spec.projectSource: name must be project")
-		}
-		if project.ClonePath != "" && !SafePath(project.ClonePath) {
-			return errors.New("spec.projectSource.clonePath: require an absolute in-cell path")
-		}
+	if err := validateTeamSources(&team.Spec); err != nil {
+		return err
 	}
 	if err := validateConnectors("spec.connectors", team.Spec.Connectors); err != nil {
 		return err
 	}
 	return ValidateSecrets("spec.secrets", team.Spec.Secrets)
+}
+
+// referencesOnly rejects a source entry, or the projectSource, that carries
+// url or git: a stored Team names its sources, the Sources hold them.
+func referencesOnly(spec *TeamSpec) error {
+	check := func(field string, source Source) error {
+		switch {
+		case source.URL != "":
+			return fmt.Errorf("%s.url: a stored Team names its sources; store the repository with "+
+				"kuke create source and name it in %s.source", field, field)
+		case source.Git != nil:
+			return fmt.Errorf("%s.git: a stored Team names its sources; set the git identity on the Source "+
+				"(kuke create source NAME --identity ID --force)", field)
+		}
+		return nil
+	}
+	for i, source := range spec.Sources {
+		if err := check(fmt.Sprintf("spec.sources[%d]", i), source); err != nil {
+			return err
+		}
+	}
+	if spec.ProjectSource != nil {
+		return check("spec.projectSource", *spec.ProjectSource)
+	}
+	return nil
 }
 
 // Declaration returns an independent copy of the authored declaration, with
@@ -263,6 +289,10 @@ func cloneSourceGit(g *SourceGit) *SourceGit {
 		return nil
 	}
 	out := *g
+	if g.IdentityRef != nil {
+		ref := *g.IdentityRef
+		out.IdentityRef = &ref
+	}
 	if g.Author != nil {
 		author := *g.Author
 		out.Author = &author

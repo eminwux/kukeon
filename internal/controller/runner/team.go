@@ -189,3 +189,96 @@ func (r *Exec) writeTeamDocument(
 	r.logger.InfoContext(r.ctx, what+" "+action, "name", md.Name, "realm", md.Realm)
 	return created, nil
 }
+
+func unsafeSourceRef(md intmodel.TeamMetadata) error {
+	return fmt.Errorf("%w: unsafe source reference %q in realm %q", errdefs.ErrInvalidSource, md.Name, md.Realm)
+}
+
+// WriteSource persists a Source's validated document to
+// <RunPath>/data/<realm>/sources/<name>.yaml atomically (issue #1643). It
+// reports whether the document was newly created. The caller has checked the
+// realm exists.
+func (r *Exec) WriteSource(source intmodel.Source) (bool, error) {
+	md := source.Metadata
+	if !filepath.IsLocal(md.Realm) || !filepath.IsLocal(md.Name) || !teamPathSafe(md.Realm) || !teamPathSafe(md.Name) {
+		return false, unsafeSourceRef(md)
+	}
+	created, err := r.writeTeamDocument(
+		fs.SourcesDir(r.opts.RunPath, md.Realm), fs.SourcePath(r.opts.RunPath, md.Realm, md.Name),
+		".source-*.tmp", source.Document, "source", md,
+	)
+	if err != nil {
+		return false, fmt.Errorf("%w: %w", errdefs.ErrWriteSource, err)
+	}
+	return created, nil
+}
+
+// GetSource reads one stored Source's document. Returns
+// errdefs.ErrSourceNotFound when none is stored.
+func (r *Exec) GetSource(source intmodel.Source) (intmodel.Source, error) {
+	md := source.Metadata
+	if !filepath.IsLocal(md.Realm) || !filepath.IsLocal(md.Name) || !teamPathSafe(md.Realm) || !teamPathSafe(md.Name) {
+		return intmodel.Source{}, unsafeSourceRef(md)
+	}
+	data, err := os.ReadFile(fs.SourcePath(r.opts.RunPath, md.Realm, md.Name))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return intmodel.Source{}, errdefs.ErrSourceNotFound
+		}
+		return intmodel.Source{}, fmt.Errorf("%w: %w", errdefs.ErrGetSource, err)
+	}
+	return intmodel.Source{Metadata: md, Document: data}, nil
+}
+
+// ListSources enumerates the stored Sources of realmName, or of every realm
+// when it is empty, with their documents.
+func (r *Exec) ListSources(realmName string) ([]intmodel.Source, error) {
+	realmDirs, err := r.resolveRealmDirs(realmName)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrListSources, err)
+	}
+	var out []intmodel.Source
+	for _, realmDir := range realmDirs {
+		realm := filepath.Base(realmDir)
+		dir := fs.SourcesDir(r.opts.RunPath, realm)
+		entries, readErr := os.ReadDir(dir)
+		if readErr != nil {
+			if os.IsNotExist(readErr) {
+				continue
+			}
+			return nil, fmt.Errorf("%w: read sources dir %q: %w", errdefs.ErrListSources, dir, readErr)
+		}
+		for _, entry := range entries {
+			name, ok := strings.CutSuffix(entry.Name(), teamExtension)
+			if entry.IsDir() || !ok || strings.HasPrefix(entry.Name(), ".") {
+				continue
+			}
+			source, getErr := r.GetSource(intmodel.Source{Metadata: intmodel.TeamMetadata{Name: name, Realm: realm}})
+			if errors.Is(getErr, errdefs.ErrSourceNotFound) {
+				continue // Deleted between the read and the get.
+			}
+			if getErr != nil {
+				return nil, fmt.Errorf("%w: %w", errdefs.ErrListSources, getErr)
+			}
+			out = append(out, source)
+		}
+	}
+	return out, nil
+}
+
+// DeleteSource removes one stored Source's document. Returns
+// errdefs.ErrSourceNotFound when none is stored.
+func (r *Exec) DeleteSource(source intmodel.Source) error {
+	md := source.Metadata
+	if !filepath.IsLocal(md.Realm) || !filepath.IsLocal(md.Name) || !teamPathSafe(md.Realm) || !teamPathSafe(md.Name) {
+		return unsafeSourceRef(md)
+	}
+	if err := os.Remove(fs.SourcePath(r.opts.RunPath, md.Realm, md.Name)); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return errdefs.ErrSourceNotFound
+		}
+		return fmt.Errorf("%w: %w", errdefs.ErrDeleteSource, err)
+	}
+	r.logger.InfoContext(r.ctx, "source deleted", "name", md.Name, "realm", md.Realm)
+	return nil
+}

@@ -839,6 +839,44 @@ func teamResult(record controller.TeamRecord) kukeonv1.GetTeamResult {
 	}
 }
 
+// ---- Sources (issue #1643) ----
+
+func (c *Client) GetSource(_ context.Context, ref kukeonv1.SourceRef) (kukeonv1.GetSourceResult, error) {
+	record, found, err := c.ctrl.GetSource(ref.Name, ref.Realm)
+	if err != nil || !found {
+		return kukeonv1.GetSourceResult{}, err
+	}
+	return sourceResult(record), nil
+}
+
+func (c *Client) ListSources(_ context.Context, realm string) ([]kukeonv1.GetSourceResult, error) {
+	records, err := c.ctrl.ListSources(realm)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]kukeonv1.GetSourceResult, 0, len(records))
+	for _, record := range records {
+		out = append(out, sourceResult(record))
+	}
+	return out, nil
+}
+
+func (c *Client) DeleteSource(_ context.Context, ref kukeonv1.SourceRef) (kukeonv1.DeleteSourceResult, error) {
+	err := c.ctrl.DeleteSource(ref.Name, ref.Realm)
+	return kukeonv1.DeleteSourceResult{Deleted: err == nil}, err
+}
+
+func sourceResult(record controller.SourceRecord) kukeonv1.GetSourceResult {
+	s := record.Summary
+	return kukeonv1.GetSourceResult{
+		Exists:   true,
+		Document: record.Source.Document,
+		Summary: kukeonv1.SourceSummary{
+			Name: s.Name, Realm: s.Realm, URL: s.URL, Ref: s.Ref, Identity: s.Identity,
+		},
+	}
+}
+
 // ---- Purge ----
 
 func (c *Client) PurgeRealm(

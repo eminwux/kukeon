@@ -1,0 +1,102 @@
+// Copyright 2026 Emiliano Spinella (eminwux)
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// SPDX-License-Identifier: Apache-2.0
+
+package daemon_test
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"testing"
+
+	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
+)
+
+// sourceCore stubs the Source methods of the in-process client.
+type sourceCore struct {
+	kukeonv1.FakeClient
+
+	gotRef   kukeonv1.SourceRef
+	gotRealm string
+	err      error
+}
+
+func agentsSource() kukeonv1.GetSourceResult {
+	return kukeonv1.GetSourceResult{
+		Exists:   true,
+		Document: []byte("apiVersion: v1beta1\nkind: Source\nmetadata:\n  name: agents\n"),
+		Summary: kukeonv1.SourceSummary{
+			Name: "agents", Realm: "default", URL: "github.com/eminwux/agents", Ref: "branch main", Identity: "git-ssh",
+		},
+	}
+}
+
+func (c *sourceCore) GetSource(_ context.Context, ref kukeonv1.SourceRef) (kukeonv1.GetSourceResult, error) {
+	c.gotRef = ref
+	if c.err != nil {
+		return kukeonv1.GetSourceResult{}, c.err
+	}
+	return agentsSource(), nil
+}
+
+func (c *sourceCore) ListSources(_ context.Context, realm string) ([]kukeonv1.GetSourceResult, error) {
+	c.gotRealm = realm
+	if c.err != nil {
+		return nil, c.err
+	}
+	return []kukeonv1.GetSourceResult{agentsSource()}, nil
+}
+
+func (c *sourceCore) DeleteSource(_ context.Context, ref kukeonv1.SourceRef) (kukeonv1.DeleteSourceResult, error) {
+	c.gotRef = ref
+	if c.err != nil {
+		return kukeonv1.DeleteSourceResult{}, c.err
+	}
+	return kukeonv1.DeleteSourceResult{Deleted: true}, nil
+}
+
+// TestSourceRPCRoundTrip drives the three Source methods over a real kukeond
+// socket (issue #1643), and their sentinels survive the wire.
+func TestSourceRPCRoundTrip(t *testing.T) {
+	core := &sourceCore{}
+	client := kukeonv1.NewUnixClient(startKukeond(t, shortTempDir(t), core))
+	t.Cleanup(func() { _ = client.Close() })
+	ctx := testCtx(t)
+
+	got, err := client.GetSource(ctx, kukeonv1.SourceRef{Name: "agents", Realm: "default"})
+	if err != nil || core.gotRef.Name != "agents" || !got.Exists || got.Summary != agentsSource().Summary {
+		t.Fatalf("GetSource = %+v, %v (ref %+v)", got, err, core.gotRef)
+	}
+	listed, err := client.ListSources(ctx, "other")
+	if err != nil || core.gotRealm != "other" || len(listed) != 1 {
+		t.Fatalf("ListSources = %+v, %v", listed, err)
+	}
+	deleted, err := client.DeleteSource(ctx, kukeonv1.SourceRef{Name: "agents"})
+	if err != nil || !deleted.Deleted {
+		t.Fatalf("DeleteSource = %+v, %v", deleted, err)
+	}
+	for _, sentinel := range []error{
+		errdefs.ErrSourceNotFound, errdefs.ErrSourceInUse, errdefs.ErrSourceExists, errdefs.ErrInvalidSource,
+	} {
+		core.err = fmt.Errorf("%w: agents", sentinel)
+		_, getErr := client.GetSource(ctx, kukeonv1.SourceRef{Name: "agents"})
+		_, deleteErr := client.DeleteSource(ctx, kukeonv1.SourceRef{Name: "agents"})
+		if !errors.Is(getErr, sentinel) || !errors.Is(deleteErr, sentinel) {
+			t.Errorf("%v: get %v, delete %v", sentinel, getErr, deleteErr)
+		}
+	}
+}

@@ -241,6 +241,17 @@ type Client interface {
 	// GetTeamDefaults reads a realm's stored TeamDefaults document. Exists is
 	// false, with no error, when the realm stores none.
 	GetTeamDefaults(ctx context.Context, realm string) (GetTeamDefaultsResult, error)
+	// GetSource reads one stored Source's document and summary (issue
+	// #1643). Exists is false, with no error, when none of the name is
+	// stored.
+	GetSource(ctx context.Context, ref SourceRef) (GetSourceResult, error)
+	// ListSources lists the stored Sources of a realm, or of every realm
+	// when realm is empty.
+	ListSources(ctx context.Context, realm string) ([]GetSourceResult, error)
+	// DeleteSource deletes a stored Source. It is refused with
+	// ErrSourceInUse while a default role or harness, or a stored team,
+	// references it.
+	DeleteSource(ctx context.Context, ref SourceRef) (DeleteSourceResult, error)
 
 	PurgeRealm(ctx context.Context, doc v1beta1.RealmDoc, force, cascade bool) (PurgeRealmResult, error)
 	PurgeSpace(ctx context.Context, doc v1beta1.SpaceDoc, force, cascade bool) (PurgeSpaceResult, error)
@@ -512,6 +523,10 @@ const (
 	MethodListTeams       = ServiceName + ".ListTeams"
 	MethodDeleteTeam      = ServiceName + ".DeleteTeam"
 	MethodGetTeamDefaults = ServiceName + ".GetTeamDefaults"
+
+	MethodGetSource    = ServiceName + ".GetSource"
+	MethodListSources  = ServiceName + ".ListSources"
+	MethodDeleteSource = ServiceName + ".DeleteSource"
 
 	MethodPurgeRealm = ServiceName + ".PurgeRealm"
 	MethodPurgeSpace = ServiceName + ".PurgeSpace"

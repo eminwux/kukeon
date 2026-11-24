@@ -268,6 +268,18 @@ func (FakeClient) GetTeamDefaults(context.Context, string) (GetTeamDefaultsResul
 	return GetTeamDefaultsResult{}, ErrUnexpectedCall
 }
 
+func (FakeClient) GetSource(context.Context, SourceRef) (GetSourceResult, error) {
+	return GetSourceResult{}, ErrUnexpectedCall
+}
+
+func (FakeClient) ListSources(context.Context, string) ([]GetSourceResult, error) {
+	return nil, ErrUnexpectedCall
+}
+
+func (FakeClient) DeleteSource(context.Context, SourceRef) (DeleteSourceResult, error) {
+	return DeleteSourceResult{}, ErrUnexpectedCall
+}
+
 func (FakeClient) PurgeRealm(context.Context, v1beta1.RealmDoc, bool, bool) (PurgeRealmResult, error) {
 	return PurgeRealmResult{}, ErrUnexpectedCall
 }

@@ -90,7 +90,11 @@ func (b *Exec) GetTeam(name, realm string) (TeamRecord, bool, error) {
 	if err != nil {
 		return TeamRecord{}, false, fmt.Errorf("%w: %w", errdefs.ErrGetTeam, err)
 	}
-	summary, err := summarizeTeam(team, configs)
+	sources, err := b.storedSourceSpecs(realm)
+	if err != nil {
+		return TeamRecord{}, false, fmt.Errorf("%w: %w", errdefs.ErrGetTeam, err)
+	}
+	summary, err := summarizeTeam(team, configs, sources[realm])
 	if err != nil {
 		return TeamRecord{}, false, err
 	}
@@ -112,9 +116,13 @@ func (b *Exec) ListTeams(realm string) ([]TeamRecord, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", errdefs.ErrListTeams, err)
 	}
+	sources, err := b.storedSourceSpecs(realm)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrListTeams, err)
+	}
 	out := make([]TeamRecord, 0, len(teams))
 	for _, team := range teams {
-		summary, sumErr := summarizeTeam(team, configs)
+		summary, sumErr := summarizeTeam(team, configs, sources[team.Metadata.Realm])
 		if sumErr != nil {
 			return nil, sumErr
 		}
@@ -258,7 +266,33 @@ func (b *Exec) stateVolumesOf(configs []intmodel.CellConfig) ([]string, error) {
 	return out, nil
 }
 
-func summarizeTeam(team intmodel.Team, configs []intmodel.CellConfig) (TeamSummary, error) {
+// storedSourceSpecs reads the stored Sources of realm (every realm when
+// empty), by realm and name.
+func (b *Exec) storedSourceSpecs(realm string) (map[string]map[string]config.SourceSpec, error) {
+	stored, err := b.runner.ListSources(realm)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]map[string]config.SourceSpec{}
+	for _, source := range stored {
+		doc, convErr := apischeme.ConvertSourceToExternal(source)
+		if convErr != nil {
+			return nil, convErr
+		}
+		if out[source.Metadata.Realm] == nil {
+			out[source.Metadata.Realm] = map[string]config.SourceSpec{}
+		}
+		out[source.Metadata.Realm][source.Metadata.Name] = doc.Spec
+	}
+	return out, nil
+}
+
+// summarizeTeam reads a stored Team for a list. The project's address comes
+// from the stored Source it resolves to (#1643), or from a legacy entry's own
+// url; its ref is the entry's, else the Source's.
+func summarizeTeam(
+	team intmodel.Team, configs []intmodel.CellConfig, sources map[string]config.SourceSpec,
+) (TeamSummary, error) {
 	doc, err := apischeme.ConvertTeamToExternal(team)
 	if err != nil {
 		return TeamSummary{}, fmt.Errorf("%w: %w", errdefs.ErrGetTeam, err)
@@ -272,6 +306,15 @@ func summarizeTeam(team intmodel.Team, configs []intmodel.CellConfig) (TeamSumma
 	if project := doc.Spec.ProjectSource; project != nil {
 		summary.ProjectURL = project.URL
 		summary.ProjectRef = firstNonEmpty(project.Branch, project.Tag, project.Commit)
+		if project.URL == "" {
+			stored := firstNonEmpty(project.Stored, team.Metadata.Name)
+			if spec, ok := sources[stored]; ok {
+				summary.ProjectURL = spec.URL
+				if summary.ProjectRef == "" {
+					summary.ProjectRef = firstNonEmpty(spec.Branch, spec.Tag, spec.Commit)
+				}
+			}
+		}
 	}
 	for _, role := range doc.Spec.Roles {
 		summary.Roles = append(summary.Roles, role.Name)

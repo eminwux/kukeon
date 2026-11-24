@@ -48,7 +48,10 @@ func reservedScopeSubdir(name string) bool {
 		consts.KukeonConfigStatusSubdir,
 		consts.KukeonVolumesSubdir,
 		consts.KukeonVolumeMetaSubdir,
-		consts.KukeonHealthReportsSubdir:
+		consts.KukeonHealthReportsSubdir,
+		consts.KukeonTeamsSubdir,
+		consts.KukeonTeamDefaultsSubdir,
+		consts.KukeonSourcesSubdir:
 		return true
 	}
 	return false

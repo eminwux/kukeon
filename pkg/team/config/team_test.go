@@ -302,22 +302,17 @@ spec:
 		!strings.Contains(err.Error(), "duplicate clone") {
 		t.Fatalf("duplicate destinations: %v", err)
 	}
-	team, err := config.DecodeTeam(strings.NewReader(`apiVersion: v1beta1
+	// A team's own sources are checked when the declaration is decoded
+	// (#1643): a bad clone path never reaches composition.
+	_, err := config.DecodeTeam(strings.NewReader(`apiVersion: v1beta1
 kind: Team
 metadata: {name: root}
 spec:
   sources:
     - {name: roles, url: https://example.test/roles, tag: v2, clonePath: relative}
 `))
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := config.DecodeDefaults(strings.NewReader(base))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = config.Resolve(cfg, team); err == nil || !strings.Contains(err.Error(), "clonePath") {
-		t.Fatalf("effective team clone path not validated: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "spec.sources[0].clonePath") {
+		t.Fatalf("team clone path not validated: %v", err)
 	}
 }
 

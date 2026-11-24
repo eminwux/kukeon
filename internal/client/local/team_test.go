@@ -40,7 +40,16 @@ metadata:
   realm: default
 spec:
   defaults:
-    sources: []
+    harnesses: []
+---
+apiVersion: v1beta1
+kind: Source
+metadata:
+  name: alpha
+  realm: default
+spec:
+  url: https://example.test/alpha
+  branch: main
 ---
 apiVersion: v1beta1
 kind: Team
@@ -50,7 +59,6 @@ metadata:
 spec:
   projectSource:
     name: project
-    url: https://example.test/alpha
     tag: v1
   roles: []
 `
@@ -109,7 +117,7 @@ func TestTeamKindsThroughTheInProcessClient(t *testing.T) {
 		}
 		actions = append(actions, r.Kind+"/"+r.Name+":"+r.Action)
 	}
-	if strings.Join(actions, " ") != "TeamDefaults/default:created Team/alpha:created" {
+	if strings.Join(actions, " ") != "Source/alpha:created TeamDefaults/default:created Team/alpha:created" {
 		t.Fatalf("actions = %v", actions)
 	}
 
@@ -130,7 +138,7 @@ func TestTeamKindsThroughTheInProcessClient(t *testing.T) {
 		}
 		defaults, defErr := c.GetTeamDefaults(ctx, "")
 		if defErr != nil || !defaults.Exists || defaults.Realm != "default" ||
-			!strings.Contains(string(defaults.Document), "sources: []") ||
+			!strings.Contains(string(defaults.Document), "harnesses: []") ||
 			strings.Contains(string(defaults.Document), "roles") {
 			t.Fatalf("GetTeamDefaults = %+v (%s), %v", defaults, defaults.Document, defErr)
 		}
@@ -145,6 +153,17 @@ func TestTeamKindsThroughTheInProcessClient(t *testing.T) {
 		t.Fatalf("ListTeams = %+v, %v", listed, err)
 	}
 
+	// The Source the team's project resolves to cannot go while the team is
+	// stored (#1643, AC7), and survives the team's deletion.
+	source, err := restarted.GetSource(ctx, kukeonv1.SourceRef{Name: "alpha"})
+	if err != nil || !source.Exists || source.Summary.URL != "https://example.test/alpha" {
+		t.Fatalf("GetSource = %+v, %v", source, err)
+	}
+	if _, err = restarted.DeleteSource(ctx, kukeonv1.SourceRef{Name: "alpha"}); !errors.Is(err, errdefs.ErrSourceInUse) ||
+		!strings.Contains(err.Error(), "team alpha") {
+		t.Fatalf("DeleteSource of a used Source err = %v", err)
+	}
+
 	if _, err = restarted.DeleteTeam(ctx, kukeonv1.TeamRef{Name: "kuke"}); !errors.Is(err, errdefs.ErrTeamReserved) {
 		t.Fatalf("DeleteTeam(kuke) err = %v, want ErrTeamReserved", err)
 	}
@@ -157,6 +176,12 @@ func TestTeamKindsThroughTheInProcessClient(t *testing.T) {
 	}
 	if _, err = restarted.DeleteTeam(ctx, kukeonv1.TeamRef{Name: "alpha"}); !errors.Is(err, errdefs.ErrTeamNotFound) {
 		t.Fatalf("second DeleteTeam err = %v, want ErrTeamNotFound", err)
+	}
+	if sources, listErr := restarted.ListSources(ctx, ""); listErr != nil || len(sources) != 1 {
+		t.Fatalf("deleting the team deleted its Source: %+v, %v", sources, listErr)
+	}
+	if _, err = restarted.DeleteSource(ctx, kukeonv1.SourceRef{Name: "alpha"}); err != nil {
+		t.Fatalf("DeleteSource after the team went: %v", err)
 	}
 }
 

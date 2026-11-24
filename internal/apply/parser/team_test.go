@@ -38,7 +38,7 @@ metadata:
 spec:
   projectSource:
     name: project
-    url: https://github.com/eminwux/kukeon
+    source: kukeon
     branch: main
     clonePath: /home/user/kukeon
   roles:
@@ -53,8 +53,6 @@ metadata:
   realm: default
 spec:
   defaults:
-    sources:
-      - {name: kukeon, url: https://github.com/eminwux/kukeon, branch: main}
     harnesses:
       - {name: claude, source: kukeon, path: team/harnesses/claude}
 `
@@ -81,7 +79,7 @@ func TestTeamKindsAccepted(t *testing.T) {
 	}
 	team := parser.TeamConfig(doc.TeamDoc)
 	if team.Metadata.Name != "kukeon" || team.Spec.ProjectSource == nil ||
-		team.Spec.ProjectSource.URL != "https://github.com/eminwux/kukeon" {
+		team.Spec.ProjectSource.Stored != "kukeon" {
 		t.Fatalf("converted team = %+v", team)
 	}
 	// An authored [] stays distinct from an omitted list.
@@ -97,7 +95,8 @@ func TestTeamKindsAccepted(t *testing.T) {
 		t.Fatalf("kind = %q, TeamDefaultsDoc = %v", doc.Kind, doc.TeamDefaultsDoc)
 	}
 	defaults := parser.TeamDefaultsConfig(doc.TeamDefaultsDoc)
-	if len(defaults.Spec.Defaults.Sources) != 1 || defaults.Spec.Defaults.Roles != nil {
+	if defaults.Spec.Defaults.Sources != nil || len(defaults.Spec.Defaults.Harnesses) != 1 ||
+		defaults.Spec.Defaults.Roles != nil {
 		t.Fatalf("converted defaults = %+v", defaults.Spec.Defaults)
 	}
 }

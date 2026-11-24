@@ -87,3 +87,15 @@ func (s Source) Revision() string {
 	}
 	return "default branch"
 }
+
+// KukeonSourceSpec is KukeonSource as the spec of the stored kukeon Source,
+// the one kuke team init stores (#1643).
+func KukeonSourceSpec() SourceSpec {
+	source := KukeonSource()
+	return SourceSpec{URL: source.URL, Branch: source.Branch, Tag: source.Tag, Commit: source.Commit}
+}
+
+// Revision renders a stored Source's revision selector like Source.Revision.
+func (s SourceSpec) Revision() string {
+	return Source{Branch: s.Branch, Tag: s.Tag, Commit: s.Commit}.Revision()
+}

@@ -1480,3 +1480,69 @@ type GetTeamDefaultsResult struct {
 	Realm    string
 	Document []byte
 }
+
+// ---- Sources (issue #1643) ----
+
+// Source documents travel as YAML bytes like Team documents. Writes go
+// through ApplyDocuments; these are the reads and the delete.
+
+// SourceRef names one stored Source. An empty Realm means realm default.
+type SourceRef struct {
+	Name  string
+	Realm string
+}
+
+// SourceSummary is what kukeond reads out of a stored Source for a list.
+type SourceSummary struct {
+	Name  string `json:"name"`
+	Realm string `json:"realm"`
+	// URL is the Source's address as written.
+	URL string `json:"url"`
+	// Ref is its revision: "branch main", "tag v1" or "commit <sha>".
+	Ref string `json:"ref"`
+	// Identity names the stored git identity the Source states, written
+	// name[@realm]; empty when it states none.
+	Identity string `json:"identity,omitempty"`
+}
+
+type GetSourceArgs struct {
+	Ref SourceRef
+}
+
+type GetSourceReply struct {
+	Result GetSourceResult
+	Err    *APIError
+}
+
+// GetSourceResult carries a stored Source's document and its summary.
+// Exists is false, with no error, when no Source of the name is stored.
+type GetSourceResult struct {
+	Exists   bool
+	Document []byte
+	Summary  SourceSummary
+}
+
+type ListSourcesArgs struct {
+	// Realm filters the list; empty lists every realm.
+	Realm string
+}
+
+type ListSourcesReply struct {
+	Sources []GetSourceResult
+	Err     *APIError
+}
+
+type DeleteSourceArgs struct {
+	Ref SourceRef
+}
+
+type DeleteSourceReply struct {
+	Result DeleteSourceResult
+	Err    *APIError
+}
+
+// DeleteSourceResult reports a deleted Source. A Source something references
+// is refused with ErrSourceInUse, naming the references.
+type DeleteSourceResult struct {
+	Deleted bool
+}

@@ -594,6 +594,29 @@ func (s *KukeonV1Service) GetTeamDefaults(
 	return nil
 }
 
+// ---- Sources (issue #1643) ----
+
+func (s *KukeonV1Service) GetSource(args *kukeonv1.GetSourceArgs, reply *kukeonv1.GetSourceReply) error {
+	result, err := s.core.GetSource(s.ctx, args.Ref)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
+func (s *KukeonV1Service) ListSources(args *kukeonv1.ListSourcesArgs, reply *kukeonv1.ListSourcesReply) error {
+	sources, err := s.core.ListSources(s.ctx, args.Realm)
+	reply.Sources = sources
+	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
+func (s *KukeonV1Service) DeleteSource(args *kukeonv1.DeleteSourceArgs, reply *kukeonv1.DeleteSourceReply) error {
+	result, err := s.core.DeleteSource(s.ctx, args.Ref)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
 // ---- Purge ----
 
 func (s *KukeonV1Service) PurgeRealm(args *kukeonv1.PurgeRealmArgs, reply *kukeonv1.PurgeRealmReply) error {

@@ -370,6 +370,23 @@ func (b *Exec) ApplyDocuments(docs []parser.Document, team string) (ApplyResult,
 			resourceResult.Name = defaults.Metadata.Name
 			reconcileResult, reconcileErr = applypkg.ReconcileTeamDefaults(b.runner, defaults)
 
+		case v1beta1.KindSource:
+			if doc.SourceDoc == nil {
+				resourceResult.Action = actionFailed
+				resourceResult.Error = errors.New("source document is nil")
+				result.Resources = append(result.Resources, resourceResult)
+				continue
+			}
+			source, err := apischeme.NormalizeSource(*doc.SourceDoc)
+			if err != nil {
+				resourceResult.Action = actionFailed
+				resourceResult.Error = fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+				result.Resources = append(result.Resources, resourceResult)
+				continue
+			}
+			resourceResult.Name = source.Metadata.Name
+			reconcileResult, reconcileErr = applypkg.ReconcileSource(b.runner, source)
+
 		case v1beta1.KindTeam:
 			// Stored after every other document and the prune, below.
 			continue

@@ -231,6 +231,18 @@ type Runner interface {
 	// GetTeamDefaults reads a realm's TeamDefaults;
 	// errdefs.ErrTeamDefaultsNotFound when the realm stores none.
 	GetTeamDefaults(defaults intmodel.TeamDefaults) (intmodel.TeamDefaults, error)
+	// WriteSource persists a `kind: Source`'s validated document under its
+	// realm (issue #1643) and reports whether it was newly created.
+	WriteSource(source intmodel.Source) (created bool, err error)
+	// GetSource reads one stored Source; errdefs.ErrSourceNotFound when
+	// absent.
+	GetSource(source intmodel.Source) (intmodel.Source, error)
+	// ListSources lists the stored Sources of a realm, or of every realm
+	// when realmName is empty, with their documents.
+	ListSources(realmName string) ([]intmodel.Source, error)
+	// DeleteSource removes one stored Source; errdefs.ErrSourceNotFound when
+	// absent.
+	DeleteSource(source intmodel.Source) error
 
 	// WriteConfig persists a `kind: CellConfig`'s serialized document to the
 	// daemon-managed, root-owned, world-readable file under the scope's metadata

@@ -88,6 +88,11 @@ var kindToSentinel = map[string]error{
 	"TeamReserved":            errdefs.ErrTeamReserved,
 	"InvalidTeam":             errdefs.ErrInvalidTeam,
 	"TeamScopeNotFound":       errdefs.ErrTeamScopeNotFound,
+	"SourceNotFound":          errdefs.ErrSourceNotFound,
+	"SourceInUse":             errdefs.ErrSourceInUse,
+	"SourceExists":            errdefs.ErrSourceExists,
+	"InvalidSource":           errdefs.ErrInvalidSource,
+	"GitFetchStaging":         errdefs.ErrGitFetchStaging,
 }
 
 // sentinelToKind is the reverse lookup, populated lazily.
