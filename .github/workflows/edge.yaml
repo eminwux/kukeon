@@ -8,6 +8,11 @@ name: Edge Build
 #
 # Harness images are not built here: they stay pinned to the last release tag
 # and reach hosts when a tag is cut (release.yaml is unchanged).
+#
+# Job layout: `test` (test.yaml), `image` and `binaries` run side by side;
+# `publish` waits for all three and is the only job that moves the channel.
+# This workflow is also where the test jobs run for a commit on main:
+# test.yaml has no push trigger of its own.
 on:
   push:
     branches:
@@ -25,6 +30,9 @@ on:
         default: true
 
 # Two merges must not interleave uploads to the one `edge` prerelease.
+# GitHub keeps one queued run per group and cancels it when a newer one
+# arrives, so during a burst of merges the commits in the middle get neither
+# their main test run nor an edge publish; the newest commit gets both.
 concurrency:
   group: edge
   cancel-in-progress: false
@@ -64,8 +72,18 @@ jobs:
           echo "short=${SHORT}" >> "$GITHUB_OUTPUT"
           echo "edge version ${VERSION} (image tag sha-${SHORT})"
 
-  # The image is pushed before the binaries, and VERSION is uploaded last, so
-  # a client that reads VERSION finds the image and binaries already there.
+  # Every test job in test.yaml: Go unit and e2e, web UI, harnesses and the
+  # installer. The publish job below runs only when they pass, so a commit that
+  # breaks one of them never reaches a host that follows edge. They run beside
+  # the two build jobs and do not delay them. The lint job runs too but cannot
+  # fail this run.
+  test:
+    name: Tests
+    uses: ./.github/workflows/test.yaml
+
+  # Pushes only the immutable sha-<short> tag. Nothing resolves that tag until
+  # the publish job uploads VERSION, so pushing it before the tests finish is
+  # safe; the moving :edge tag is set by the publish job.
   image:
     name: Build and push kukeond image
     needs: version
@@ -97,6 +115,11 @@ jobs:
       # package. The Go build is a cross-compile on the build platform; only
       # the final stage's apt layer runs emulated for arm64, and the gha cache
       # rebuilds it only when that stage changes.
+      #
+      # mode=min caches the final stage's layers only. The builder stage ends
+      # in `go build -a` over sources that change on every merge, so its layers
+      # never hit again; mode=max stored about 1.5 GB of them per run against
+      # the repository's 10 GB Actions cache limit.
       - name: Build and push kukeond image
         uses: docker/build-push-action@v6
         with:
@@ -105,7 +128,6 @@ jobs:
           push: true
           tags: |
             ${{ env.IMAGE_REPO }}:sha-${{ env.SHORT }}
-            ${{ env.IMAGE_REPO }}:edge
           labels: |
             org.opencontainers.image.title=kukeon
             org.opencontainers.image.version=${{ env.VERSION }}
@@ -115,18 +137,16 @@ jobs:
             VERSION=${{ env.VERSION }}
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=min
 
+  # Builds the binaries beside the image job and hands them to the publish job
+  # as a workflow artifact; nothing is published here.
   binaries:
-    name: Publish edge binaries
-    needs: [version, image]
+    name: Build edge binaries
+    needs: version
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     env:
       VERSION: ${{ needs.version.outputs.version }}
-      SHORT: ${{ needs.version.outputs.short }}
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Check out the repo (full history for tags)
         uses: actions/checkout@v4
@@ -152,14 +172,67 @@ jobs:
           go version -m kuke-linux-amd64 | grep -q 'vcs.modified=false'
           go version -m kuke-linux-amd64 | grep -q "vcs.revision=${GITHUB_SHA}"
 
-      - name: Generate checksums and VERSION
+      - name: Collect binaries, checksums and VERSION
         run: |
+          mkdir -p "$RUNNER_TEMP/edge"
           for f in kuke-linux-amd64 kuke-linux-arm64 \
                    kukebuild-linux-amd64 kukebuild-linux-arm64 \
                    kukepause-linux-amd64 kukepause-linux-arm64; do
-            sha256sum "$f" > "$f.sha256"
+            sha256sum "$f" > "$RUNNER_TEMP/edge/$f.sha256"
+            cp "$f" "$RUNNER_TEMP/edge/$f"
           done
-          printf '%s\n' "$VERSION" > "$RUNNER_TEMP/VERSION"
+          printf '%s\n' "$VERSION" > "$RUNNER_TEMP/edge/VERSION"
+          ls -l "$RUNNER_TEMP/edge"
+
+      - name: Hand the files to the publish job
+        uses: actions/upload-artifact@v4
+        with:
+          name: edge-assets
+          path: ${{ runner.temp }}/edge
+          if-no-files-found: error
+          retention-days: 1
+
+  # The only job that changes what an edge host sees. Order matters: the :edge
+  # image tag first, then the binaries, and VERSION last, so a client that
+  # reads VERSION finds the image and binaries already there.
+  publish:
+    name: Publish the edge build
+    needs: [version, test, image, binaries]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      SHORT: ${{ needs.version.outputs.short }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      # Only for the `edge` git tag push below; nothing is built here.
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Fetch the built files
+        uses: actions/download-artifact@v4
+        with:
+          name: edge-assets
+          path: ${{ runner.temp }}/edge
+
+      - name: Verify the checksums survived the hand-off
+        working-directory: ${{ runner.temp }}/edge
+        run: |
+          cat ./*.sha256 | sha256sum --check --strict
+          test "$(cat VERSION)" = "$VERSION"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Re-tags the manifest list the image job pushed; no layers are rebuilt.
+      - name: Point :edge at this commit's image
+        run: docker buildx imagetools create --tag "${IMAGE_REPO}:edge" "${IMAGE_REPO}:sha-${SHORT}"
 
       # The `edge` tag matches neither release.yaml's tag filter nor the
       # --match 'v[0-9]*' describe pattern, and a prerelease is not returned
@@ -170,18 +243,19 @@ jobs:
             gh release create edge --prerelease --title edge --notes "Rolling build of main."
           git tag -f edge "$GITHUB_SHA"
           git push -f origin refs/tags/edge
+          cd "$RUNNER_TEMP/edge"
           gh release upload edge --clobber \
             kuke-linux-amd64 kuke-linux-amd64.sha256 kuke-linux-arm64 kuke-linux-arm64.sha256 \
             kukebuild-linux-amd64 kukebuild-linux-amd64.sha256 kukebuild-linux-arm64 kukebuild-linux-arm64.sha256 \
             kukepause-linux-amd64 kukepause-linux-amd64.sha256 kukepause-linux-arm64 kukepause-linux-arm64.sha256
           # Last: clients read VERSION first.
-          gh release upload edge --clobber "$RUNNER_TEMP/VERSION"
+          gh release upload edge --clobber VERSION
           gh release edit edge --prerelease \
             --notes "Rolling build of main at ${GITHUB_SHA} (${VERSION}). Image: ${IMAGE_REPO}:sha-${SHORT}"
 
   smoke:
     name: Install the published edge build
-    needs: [version, binaries]
+    needs: [version, publish]
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.version.outputs.version }}
@@ -222,7 +296,7 @@ jobs:
   # delete-untagged). A workflow_dispatch run defaults to a dry run.
   cleanup:
     name: Prune old sha-* images
-    needs: [version, binaries]
+    needs: [version, publish]
     runs-on: ubuntu-latest
     permissions:
       packages: write

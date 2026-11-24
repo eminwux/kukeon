@@ -52,8 +52,9 @@ repos:
         # hook is compiled by whatever older Go is on PATH and refuses to load
         # the go 1.26 module ("the Go language version (go1.24) used to build
         # golangci-lint is lower than the targeted Go version"). Rebuilding the
-        # same release keeps the formatter output identical to the lint.yaml
-        # gate; newer releases reflow thousands of existing lines.
+        # same release keeps the formatter output identical to CI's lint job
+        # (test.yaml), which runs these hooks and reuses this binary; newer
+        # releases reflow thousands of existing lines.
         language_version: 1.26.6
         # cmd/kukebuild lives in its own Go module (#662 module split). Disable
         # workspace mode so the hook only sees the root module; cmd/kukebuild

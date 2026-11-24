@@ -1,9 +1,8 @@
 name: Deploy Docs
-permissions:
-  contents: write
-  pages: write
-  id-token: write
 
+# Builds the mkdocs site and publishes it to GitHub Pages (https://kukeon.io).
+# The Pages source is "GitHub Actions", so the built site is uploaded straight
+# to Pages as an artifact. Nothing is pushed to a gh-pages branch.
 on:
   push:
     branches:
@@ -12,49 +11,67 @@ on:
       - "docs/site/**"
       - "mkdocs.yml"
       - ".github/workflows/mkdocs.yaml"
+  # A pull request builds the site and stops there, so a page that mkdocs
+  # cannot build fails the PR instead of the deploy after merge.
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "docs/site/**"
+      - "mkdocs.yml"
+      - ".github/workflows/mkdocs.yaml"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+# A new push to a pull request cancels the run for the previous push. Runs on
+# main are keyed on their commit and are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  build_mkdocs:
+  build:
+    name: Build the site
     runs-on: ubuntu-latest
     steps:
+      # Full history: mkdocs-git-revision-date-localized-plugin reads each
+      # page's last commit date.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Configure Git Credentials
-        run: |
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
       - uses: actions/setup-python@v5
         with:
           python-version: 3.x
-      - run: echo "cache_id=$(date --utc '+%V')" >> $GITHUB_ENV
+      - run: echo "cache_id=$(date --utc '+%V')" >> "$GITHUB_ENV"
       - uses: actions/cache@v4
         with:
           key: mkdocs-material-${{ env.cache_id }}
           path: ~/.cache
           restore-keys: |
             mkdocs-material-
-      - run: pip install mkdocs-material
-      - run: pip install mkdocs-git-revision-date-localized-plugin
-      - run: mkdocs gh-deploy --force
-  deploy_mkdocs:
-    needs: build_mkdocs
+      - run: pip install mkdocs-material mkdocs-git-revision-date-localized-plugin
+      # site_dir in mkdocs.yml is `build`.
+      - run: mkdocs build
+      - name: Upload the site for Pages
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build
+
+  deploy:
+    name: Deploy to GitHub Pages
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          ref: gh-pages
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: "."
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
