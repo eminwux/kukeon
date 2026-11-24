@@ -31,12 +31,13 @@ Every document must carry `apiVersion: v1beta1`. A document without it is reject
 
 ## Teams
 
-A manifest may carry the two stored team kinds (see [Teams](../concepts/team.md)):
+A manifest may carry the three stored team kinds (see [Teams](../concepts/team.md)):
 
-- A **`TeamDefaults`** document (`metadata.name: default`, one per realm) is stored as it is and reported like any other resource. Connectors, parameters and secret bindings of the defaults are set this way. The output then names the stored teams that inherit the defaults and the `kuke team apply NAME` that recomposes each, since a defaults change recomposes nothing by itself.
-- A **`Team`** document is not sent to kukeond as it is: `kuke` composes it — fetching its sources — and applies it exactly as [`kuke team apply -f FILE`](kuke-team.md#kuke-team-apply) does, so kukeond stores it only with the Configs composed from it. Its outcome is printed as `kuke team apply` prints it; with `-o json`/`-o yaml` it is one `{kind: Team, action: applied}` entry.
+- A **`Source`** document (a stored Git repository, see [Source](../manifests/source.md)) is validated and stored as it is — `created`, `updated` or `unchanged` — like any other resource; nothing is fetched. Use [`kuke create source`](kuke-create.md#kuke-create-source) to have the address checked against the remote and the default branch discovered.
+- A **`TeamDefaults`** document (`metadata.name: default`, one per realm) is stored as it is and reported like any other resource. It holds no sources: one with `spec.defaults.sources` is rejected and names `kuke create source`. Connectors, parameters and secret bindings of the defaults are set this way. The output then names the stored teams that inherit the defaults and the `kuke team apply NAME` that recomposes each, since a defaults change recomposes nothing by itself.
+- A **`Team`** document is not sent to kukeond as it is: `kuke` composes it — fetching its sources — and applies it exactly as [`kuke team apply -f FILE`](kuke-team.md#kuke-team-apply) does, so kukeond stores it only with the Configs composed from it, and the Sources its declaration defines with an address are stored with it. Its outcome is printed as `kuke team apply` prints it; with `-o json`/`-o yaml` it is one `{kind: Team, action: applied}` entry.
 
-The manifest's other documents are applied first, in one request, so a `TeamDefaults` in the same file is what its Teams inherit. If any of them fails, the Teams are skipped (`Team "web": skipped (another document in the file failed)`, or a `failed` entry in structured output). A Team that fails composition is reported as `failed` and the file's later Teams are still composed; the command then exits non-zero. A `Team` document sent to kukeond by any other path is rejected.
+The manifest's other documents are applied first, in one request, so a `TeamDefaults` and the `Source` documents in the same file are what its Teams read. If any of them fails, the Teams are skipped (`Team "web": skipped (another document in the file failed)`, or a `failed` entry in structured output). A Team that fails composition is reported as `failed` and the file's later Teams are still composed; the command then exits non-zero. A `Team` document sent to kukeond by any other path is rejected.
 
 The source documents a team is composed from — `Role`, `Harness`, `HarnessImageCatalog`, `Component`, `Connector` — are read from a fetched source and rejected by `kuke apply`.
 

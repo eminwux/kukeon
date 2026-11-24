@@ -4,11 +4,11 @@ A cell clones, fetches, pushes and signs with **stored** git credentials. Nothin
 
 Three things make up a git setup, and each has one place:
 
-| What                      | Where it lives                                                                                              |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| The **identity**          | A [git connector](../concepts/connectors.md#git) Secret: `ssh-key`, `basic-auth`, or `opaque` (author-only) |
-| The **default** identity  | `spec.defaults.git.identityRef` on the Realm, Space or Stack — or a `git` block on a CellConfig             |
-| A **per-source** identity | `git` on one repo: a CellConfig repo fill, a container `repos[]` entry, or a `kuke team` source             |
+| What                      | Where it lives                                                                                                       |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| The **identity**          | A [git connector](../concepts/connectors.md#git) Secret: `ssh-key`, `basic-auth`, or `opaque` (author-only)          |
+| The **default** identity  | `spec.defaults.git.identityRef` on the Realm, Space or Stack — or a `git` block on a CellConfig                      |
+| A **per-source** identity | `git` on one repo: a CellConfig repo fill, a container `repos[]` entry, or a stored [Source](../manifests/source.md) |
 
 Git credentials are separate from API credentials. A GitHub token given to the [`github` connector](../concepts/blueprint-contract.md#components) reaches the cell as `GH_TOKEN` for the `gh` CLI and is never wired into git.
 
@@ -226,6 +226,37 @@ spec:
 ```
 
 The repo is cloned with its own credential, and the identity is written into that checkout's **local** git config. Commits and pushes the agent makes there later use it too — so two repos in one cell can commit as different identities and push with different keys.
+
+For a team, the identity goes on the stored [Source](../manifests/source.md) (`spec.git`), and every team cell that clones the Source gets it in that repo's fill:
+
+```bash
+kuke create source web --url github.com/acme/web --identity app-deploy
+```
+
+## Fetching a Source on the host
+
+Composing a team reads its repositories on the host before any cell exists: `kuke create team`, `kuke team apply`, `kuke apply -f` of a Team, a preview, `kuke create source` and `kuke source show` all fetch, in `kuke` or `kuke serve`. Each fetch picks its credential in this order:
+
+1. The Source's `spec.git.identityRef` (`kuke create source --identity`, or `kuke create team --identity` for the project's Source it creates).
+2. The realm's default git identity (`spec.defaults.git.identityRef`), when it has a credential for the address's host.
+3. Otherwise the caller's own git configuration, as for any `git fetch`: credential helpers for HTTPS, your OpenSSH configuration and agent for SSH. Public repositories need nothing.
+
+With a stored identity (1 or 2), kukeond renders the same credential files a cell gets into a directory beside its socket (`<socket dir>/gitfetch/<id>`), owned by the user who asked — read from the socket's peer credentials, never from the request — and readable by no one else. `kuke` fetches with those files alone: the transport follows the credential (an SSH key fetches over SSH even for an `https://` address; a token over HTTPS even for `git@host:path`), an SSH key with a passphrase is unlocked in a private `ssh-agent`, and your own SSH agent, credential helpers and git configuration are not used. The directory is removed when the fetch ends, and any left behind by a killed `kuke` after ten minutes. No reply from kukeond carries key or token bytes, and git's output never reaches an error message.
+
+Git runs non-interactively (`BatchMode=yes`, no terminal, prompts disabled) with a one-minute deadline per subprocess.
+
+### Addresses
+
+A Source's address names the repository, not how to reach it:
+
+| Form              | Example                                                                                     |
+| ----------------- | ------------------------------------------------------------------------------------------- |
+| `host/owner/repo` | `github.com/acme/app` — any host with a dot in its name; HTTPS unless a credential says SSH |
+| SCP-style SSH     | `git@github.com:acme/app.git`                                                               |
+| `ssh://`          | `ssh://git@git.example.org:2222/acme/app.git`                                               |
+| HTTPS             | `https://github.com/acme/app`                                                               |
+
+`git@github.com/acme/app` (no colon) is malformed. Local paths, `file://`, HTTP and other schemes are rejected, and so are passwords, tokens, query strings and fragments in an address; an SSH user such as `git@` is allowed. Addresses that differ only in transport, user or a `.git` suffix name the same repository: a team definition `github.com/acme/app` reuses a Source stored as `git@github.com:acme/app.git`.
 
 ## Signing
 

@@ -7,7 +7,7 @@ kuke get <resource> [NAME] [flags]
 kuke g   <resource> [NAME] [flags]      # alias
 ```
 
-Resources: `realm`, `space`, `stack`, `cell`, `container`, `image`, `blueprint`, `config`, `healthreport`, `team`, `teamdefaults`. Each subcommand also accepts its plural (`realms`, `spaces`, …, `images`, `blueprints`, `configs`, `healthreports`, `teams`) and a short alias (`r`, `sp`, `st`, `ce`, `co`, `img`, `bp`, `cfg`, `hr`); `teamdefaults` is also spelled `team-defaults`.
+Resources: `realm`, `space`, `stack`, `cell`, `container`, `image`, `blueprint`, `config`, `healthreport`, `team`, `teamdefaults`, `source`. Each subcommand also accepts its plural (`realms`, `spaces`, …, `images`, `blueprints`, `configs`, `healthreports`, `teams`, `sources`) and a short alias (`r`, `sp`, `st`, `ce`, `co`, `img`, `bp`, `cfg`, `hr`); `teamdefaults` is also spelled `team-defaults`.
 
 ## Common flags
 
@@ -35,6 +35,7 @@ Each subcommand takes the flags that scope the query:
 | `get healthreport [name\|latest]` | none (a HealthReport always lives in `kuke-system`)                                  |
 | `get team [name]`                 | `--realm` (omit to list every realm; defaults to `default` for a named team)         |
 | `get teamdefaults`                | `--realm` (default `default`)                                                        |
+| `get source [name]`               | `--realm` (omit to list every realm; defaults to `default` for a named source)       |
 
 All scope flags default to `default`. See the [realm default note](commands.md#convention-positional-arg--flags).
 
@@ -145,7 +146,9 @@ kuke    default  -                                  -     majordomo             
 web     default  git@github.com:acme/web.git        main  (defaults)            3
 ```
 
-`kuke get team NAME` prints its roles, harnesses and Configs; `-o yaml` prints the stored Team document exactly as kukeond keeps it — the file to edit and pass to [`kuke team apply -f`](kuke-team.md#kuke-team-apply); `-o json` prints the summary. `kuke get teams -o yaml` prints every stored document.
+The project's address is read from the stored [Source](../manifests/source.md) its `spec.projectSource` names, and its ref is the entry's own, else the Source's.
+
+`kuke get team NAME` prints its roles, harnesses and Configs; `-o yaml` prints the stored Team document exactly as kukeond keeps it — its entries name stored Sources and carry no address — the file to edit and pass to [`kuke team apply -f`](kuke-team.md#kuke-team-apply); `-o json` prints the summary. `kuke get teams -o yaml` prints every stored document. To get the team as a repository's `kuketeam.yaml`, with addresses, use [`kuke team export`](kuke-team.md#kuke-team-export).
 
 ```bash
 kuke get team web
@@ -162,19 +165,32 @@ Configs:
 kuke get team kuke -o yaml > kuke.yaml
 ```
 
-`kuke get teamdefaults` prints the realm's registered sources and its default roles and harnesses; `-o yaml` prints the stored `TeamDefaults` document, which also carries connectors, parameters and secret bindings. A realm with none says so and names `kuke team init`, which creates it.
+`kuke get teamdefaults` prints the realm's default roles and harnesses; `-o yaml` prints the stored `TeamDefaults` document, which also carries connectors, parameters and secret bindings. It holds no sources: the sources the defaults name are stored [Sources](#sources). A realm with none says so and names `kuke team init`, which creates it.
 
 ```bash
 kuke get teamdefaults
 TeamDefaults of realm default
 
-SOURCE  URL                            REF          CLONE PATH
-kukeon  github.com/eminwux/kukeon      branch main  -
-agents  git@github.com:eminwux/agents  branch main  /home/user/agents
-
 Default roles:     dev=agents:dev
 Default harnesses: codex=kukeon:team/harnesses/codex, claude=kukeon:team/harnesses/claude
+Sources: kuke get sources
 ```
+
+## Sources
+
+`kuke get sources` prints each stored [Source](../manifests/source.md) with its address, ref and the git identity it names; `-o json` prints the same summaries. `kuke get source NAME -o yaml` prints the stored document, and `kuke get sources -o yaml` every one, separated by `---`. A name no Source stores fails and names `kuke get sources`.
+
+```bash
+kuke get sources
+NAME    ADDRESS                    REF          IDENTITY
+agents  github.com/eminwux/agents  branch main  -
+kukeon  github.com/eminwux/kukeon  commit 3f2a9c1d…  -
+web     git@github.com:acme/web    tag v2.1.0   acme-deploy-key
+
+kuke get source agents -o yaml
+```
+
+What a Source offers is [`kuke source show NAME`](kuke-source.md); [`kuke delete source`](kuke-delete.md#sources) removes one.
 
 ## Label selector (`-l`/`--selector`)
 

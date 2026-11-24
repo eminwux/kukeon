@@ -121,7 +121,7 @@ nav:
       - cli/kuke-daemon.md
       - cli/kuke-team.md
       - cli/kuke-team-init.md
-      - cli/kuke-team-add.md
+      - cli/kuke-source.md
       - cli/kuke-connector.md
       - cli/kuke-uninstall.md
       - cli/kuke-update.md
@@ -138,6 +138,7 @@ nav:
       - manifests/secret.md
       - manifests/blueprint.md
       - manifests/config.md
+      - manifests/source.md
   - Tutorials:
       - tutorials/hello-world.md
       - tutorials/first-stack.md

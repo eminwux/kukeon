@@ -7,7 +7,7 @@ kuke create <resource> [NAME] [flags]
 kuke c      <resource> [NAME] [flags]      # alias
 ```
 
-Resources: `realm`, `space`, `stack`, `cell`, `blueprint`, `config`, `secret`, `registry-credential`. Each subcommand also has a short alias (`r`, `sp`, `st`, `ce`, `bp`, `cfg`, `secret` has none, and `registry-credential` has `registry-cred`/`regcred`).
+Resources: `realm`, `space`, `stack`, `cell`, `blueprint`, `config`, `secret`, `registry-credential`, `team`, `source`. Each subcommand also has a short alias (`r`, `sp`, `st`, `ce`, `bp`, `cfg`, `secret`, `team` and `source` have none, and `registry-credential` has `registry-cred`/`regcred`).
 
 ## kuke create realm
 
@@ -297,6 +297,385 @@ sudo kuke create registry-credential default \
     --server ghcr.io --username my-user --from-file ./ghcr-token.txt
 ```
 
+## kuke create team
+
+```
+kuke create team NAME --source ADDRESS|SOURCE [--branch B | --tag T | --commit C] [--identity ID] [OVERRIDES] [--force] [--dry-run]
+kuke create team NAME -f FILE [--branch B | --tag T | --commit C] [OVERRIDES] [--force] [--dry-run]
+kuke create team DIRECTORY [--name NAME] [--source ADDRESS] [--branch B | --tag T | --commit C] [OVERRIDES] [--force] [--dry-run]
+
+OVERRIDES: [--role R]... [--harness H]... [-f FILE | --no-repo-file]
+```
+
+Create a project [team](../concepts/team.md): compose it and apply its
+blueprints and configs to kukeond, which stores the `Team` with them. It
+creates no cells and starts nothing. Run [`kuke team init`](kuke-team-init.md)
+first. To recompose a team that is already stored, use
+[`kuke team apply NAME`](kuke-team.md#kuke-team-apply).
+
+| Flag              | Default | Description                                                                                                             |
+| ----------------- | ------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `--source`        | —       | The project: a Git address (see [addresses](../manifests/source.md#specurl-string-required)) or a stored Source's name. |
+| `--branch`        | —       | Select a branch (default: local HEAD for directories, remote HEAD for named sources).                                   |
+| `--tag`           | —       | Select a tag.                                                                                                           |
+| `--commit`        | —       | Select a full commit object ID (40 or 64 hex characters).                                                               |
+| `--identity`      | —       | The stored git identity (a Secret in realm `default`) of the project's Source, when this command creates it.            |
+| `--name`          | —       | Override the team name (default: `NAME`; in directory mode the local `metadata.name`, then basename).                   |
+| `--role`          | —       | Replace the roles: a default role's `NAME` or `[NAME=]SOURCE:PATH`. Repeatable.                                         |
+| `--harness`       | —       | Replace the harnesses: a default harness's `NAME` or `[NAME=]SOURCE:PATH`. Repeatable.                                  |
+| `-f`, `--file`    | —       | Use the Team document in FILE as the whole declaration.                                                                 |
+| `--no-repo-file`  | `false` | Ignore the repository's `kuketeam.yaml`.                                                                                |
+| `--force`         | `false` | Replace a stored team of the same name.                                                                                 |
+| `--dry-run`       | `false` | Print what would be applied; write nothing.                                                                             |
+| `--host`          | —       | kukeond Unix endpoint. Overrides `KUKEON_HOST` and `ClientConfiguration.spec.host`.                                     |
+| `--configuration` | —       | kuke `ClientConfiguration` path. Defaults to `KUKE_CONFIGURATION`, then `~/.kuke/kuke.yaml`.                            |
+
+`create team` and `create source` resolve the kukeond endpoint themselves, as
+the [`kuke team`](kuke-team.md) verbs do, with `--host` and `--configuration`.
+`--branch`, `--tag`, and `--commit` are mutually exclusive, and so are `-f` and
+`--no-repo-file`. Explicit empty `--name`, `--source`, or revision flags fail.
+
+### Creating a named team from a Git repository
+
+```sh
+kuke create team kukeon --source github.com/eminwux/kukeon
+kuke create team kukeon --source ssh://git@work-alias:2222/eminwux/kukeon.git --branch develop
+kuke create team kukeon --source https://github.com/eminwux/kukeon.git --tag v1.0.0
+kuke create team web --source web                    # a stored Source named web
+kuke create team web --source git@github.com:acme/web --identity acme-deploy-key
+```
+
+The positional argument names the team; `root` and `kuke` are
+[reserved](#reserved-team-names). When `--source` is a valid name and a Source
+of that name is stored, the project is that Source; otherwise it is an
+address. Without a selector, the remote HEAD branch is discovered and recorded.
+A detached or missing remote HEAD requires an explicit selector. Branches
+remain floating selectors; tags select `refs/tags/<name>` and commits select
+the object ID.
+
+The repository is fetched once. When it commits a `kuketeam.yaml` at the root,
+that file — read from the fetched revision, never from a local checkout — is
+the team's declaration; `NAME` wins over its `metadata.name`. Without one, the
+team inherits the [defaults](../concepts/team.md#sources-and-defaults): it
+needs at least default roles there, or `--role`.
+
+### Creating from a directory
+
+```sh
+cd /path/to/my-project
+kuke create team .
+kuke create team . --name my-team
+kuke create team ../another-project --source git@host:owner/repo.git --tag v1.0.0
+```
+
+An existing directory argument selects directory mode (including a bare
+relative name); `./name` makes that intent explicit. Directory mode reads the
+local `kuketeam.yaml` when present, as a strict `apiVersion: v1beta1`,
+`kind: Team` document. Other kinds, invalid YAML, unknown fields, multiple
+documents, and unreadable files fail. A missing file starts with an inheriting
+declaration. The directory and authored file are never modified; uncommitted
+local content is not uploaded or used for definitions.
+
+Naming precedence is `--name`, the local `metadata.name`, then the directory
+basename. Names use lowercase letters, digits, dots or hyphens, start and end
+with a letter or digit, and cannot be a [reserved name](#reserved-team-names).
+
+For example, kukeon's own `kuketeam.yaml` composes the `kukeon` team: roles
+from the agents repository, harnesses from this repository through the
+`project` source:
+
+```yaml
+apiVersion: v1beta1
+kind: Team
+metadata: { name: kukeon }
+spec:
+  projectSource: { url: github.com/eminwux/kukeon }
+  sources:
+    - name: agents
+      url: github.com/eminwux/agents
+      branch: main
+      clonePath: /home/user/agents
+  roles:
+    - { name: dev, source: agents, path: dev, needs: { image: [go, root] } }
+    - { name: pm, source: agents, path: pm }
+    - { name: pr-reviewer, source: agents, path: pr-reviewer }
+    - {
+        name: pipeline,
+        source: agents,
+        path: pipeline,
+        harness: script,
+        tasks: [{ name: tick, suspend: false }],
+      }
+  harnesses:
+    - { name: claude, source: project, path: team/harnesses/claude }
+    - { name: codex, source: project, path: team/harnesses/codex }
+    - { name: script, source: project, path: team/harnesses/script }
+```
+
+One of `--branch`, `--tag`, or `--commit` replaces the entire local revision
+selection. An omitted clone destination becomes
+`/home/user/<accepted-team-name>`; an authored one is kept.
+
+For an unspecified address, native Git reads `remote.origin.url` from the local
+Git metadata. For an unspecified revision, it records the current local branch,
+or the full current commit ID for a detached HEAD. Git worktrees are supported.
+No origin or revision is guessed: missing Git metadata or origin, an unborn
+HEAD, or an unusable source/revision reports an error naming `--source` and
+`spec.projectSource.url`. The selected revision must be available from the
+remote; push local-only commits and branches, or override them, before
+creating.
+
+### Where the project comes from
+
+The first match wins:
+
+1. `--source` (or the web form's Source field).
+2. The declaration's `spec.projectSource` — the repository's or directory's
+   `kuketeam.yaml`, or `-f FILE`. `kuke create team NAME -f FILE` with
+   `spec.projectSource.url` needs neither `--source` nor a checkout.
+3. In directory mode, the directory's `origin` remote.
+
+When the declaration names one repository and `--source` another, the plan
+carries a note naming both. The project is stored as the
+[Source](../manifests/source.md) named like the team — or the name its
+`spec.projectSource.source` gives — unless one of that name is stored; the
+stored Team refers to it (see
+[The Team document](../concepts/team.md#the-team-document)). `--identity` sets
+the git identity of that Source when this command creates it; when the Source
+is stored the flag fails and names
+`kuke create source NAME --url ADDRESS --identity ID --force`, which changes
+the stored one.
+
+### Where the declaration comes from
+
+1. `-f FILE`: the Team document in FILE replaces the whole declaration.
+2. The repository's `kuketeam.yaml` (or the directory's), unless
+   `--no-repo-file`.
+3. An empty declaration that inherits every list from the defaults.
+
+`--role` and `--harness` then replace the corresponding list of that
+declaration: a bare `NAME` picks the default role or harness of that name, and
+`[NAME=]SOURCE:PATH` names any role or harness in a source the team lists or a
+stored Source, named after the path's last element without `NAME=` (see
+[`kuke source show`](kuke-source.md)). The stored Team is what was applied,
+overrides included.
+
+```sh
+kuke create team web --source git@github.com:acme/web --no-repo-file --role dev --role reviewer=agents:pr-reviewer --harness claude
+```
+
+When the team ends up with no role × harness pair, the error names the empty
+input and suggests `--role` and `kuke create source`.
+
+Every source the declaration defines with an address (`spec.sources[].url`) is
+stored as a Source too, unless one of its name is; a stored Source of the same
+name with another repository fails before anything is written and names both
+addresses and the `source:` field that stores the definition under another
+name. The plan's notes list each Source the command stores.
+
+### `create team` creates; replacing needs `--force`
+
+When a team of that name is stored, `create team` fails in every mode before
+anything is fetched and writes nothing:
+
+```
+create team: team already exists: web; run kuke team apply web to recompose it from its stored declaration, or create it again with --force to replace the declaration
+```
+
+With `--force` the stored declaration is not consulted and is replaced; the
+secret bindings it recorded are kept (those the new composition uses). The web
+UI asks for the same confirmation. `kuke create team NAME -f FILE --force`
+with the output of
+[`kuke team export NAME --host-fields`](kuke-team.md#kuke-team-export) stores
+the same Team.
+
+### Reserved team names
+
+`create team` refuses two team names, whether given positionally, with
+`--name`, or as the directory's `metadata.name`, before anything is fetched or
+applied:
+
+- `root` — the legacy root identity.
+- `kuke` — the operator's system team that [`kuke team init`](kuke-team-init.md)
+  applies. A project team under that name would replace its declaration and
+  prune its `kuke-majordomo-*` configs, which carry the same
+  `kukeon.io/team: kuke` label.
+
+Any other name, `kukeon` included, is a project team. Team names are unique
+across realms.
+
+### Inherited defaults and the stored Team
+
+Prerequisites are Git, kukeond, and the parent `default/default/default`
+realm/space/stack metadata. `create team` uses the same endpoint and client
+configuration precedence as
+[`kuke team init`](kuke-team-init.md#daemon-endpoint-and-client-configuration).
+
+Omitted `spec.sources`, `spec.roles`, `spec.harnesses` and `spec.connectors`
+inherit the realm's `TeamDefaults` (the sources: every stored Source); authored
+lists replace them, and an explicit `[]` selects none. The `kuke` team's own
+selections do not become defaults for project teams.
+
+The project is the source `project`, with the clone destination
+`/home/user/<team-name>`. Roles and harnesses may reference `source: project`
+to load definitions from the project itself. Any other source named `project`
+is an error, and duplicate clone destinations fail rather than replacing
+another checkout.
+
+The stored Team keeps a reference to the project's Source in
+`spec.projectSource`, the secret bindings its selected pairs use in
+`spec.secrets` (see [Secrets](#secrets-of-a-team)), and the original
+omitted/explicit selections. `kuke get team web -o yaml`:
+
+```yaml
+apiVersion: v1beta1
+kind: Team
+metadata:
+  name: web
+  realm: default
+spec:
+  projectSource:
+    name: project
+    source: web
+    branch: main
+    clonePath: /home/user/web
+  secrets: # recorded when a selected role needs gh-token; edits are kept
+    - name: gh-token
+      secretRef: { name: gh-token, realm: default }
+      envName: GH_TOKEN
+```
+
+Omitted fields are not frozen into the Team, so a later
+`kuke team apply NAME` inherits the current defaults.
+
+`create team` selects published images from each harness's image catalog. It
+does not build images or create or start cells. Existing runtime secrets are
+reused; missing ones use an explicit env/file creation source or report a kuke
+provisioning command.
+
+### Fetching and credentials
+
+Every fetch `create team` makes — the project, each source the team reads —
+uses the Source's stored git identity, else the realm's default git identity
+when it has a credential for the address's host, else your own git
+configuration; see
+[Fetching a Source on the host](../guides/git-credentials.md#fetching-a-source-on-the-host).
+Git runs non-interactively (`BatchMode=yes`, no terminal, prompts disabled)
+with a one-minute deadline per subprocess. Do not put passwords, tokens, query
+parameters, or fragments in addresses. Git output and credential-helper output
+are never included in diagnostics or generated documents.
+
+The host fetch validates the sources for composition only; it provisions no
+clone credentials for future cells. Inside a cell, repositories are cloned and
+pushed with **stored** git credentials: the Source's identity, the git
+connector identity a Realm, Space or Stack default names, or the one the team
+names under `connectors.git`. Store yours with
+[`kuke connector import git --default`](kuke-connector.md#kuke-connector-import-git)
+(see the [git credentials guide](../guides/git-credentials.md)). The transport
+follows the credential, not the address. When the team clones a source over
+SSH that states no credential of its own, and nothing gives its cells a git
+identity, `create team` prints the note
+`no git identity is set; run kuke connector import git --default`.
+
+### Secrets of a team
+
+Roles declare only requirement names. `create team` binds each required secret
+for the selected role/harness pairs and records the bindings in the stored
+Team: a binding in the declaration wins, then one recorded by a previous apply,
+then a `TeamDefaults` `spec.secrets` binding, then a generated default
+(same-named secret in realm `default`, env var upper-snake cased: `gh-token` →
+`GH_TOKEN`). If a bound runtime secret does not exist and has no `source`,
+`create team` still applies and stores the team, exits 0, and prints the
+`kuke create secret …` command for each missing one; create them before
+launching cells. See
+[secret declarations](../concepts/team.md#secret-declarations).
+
+### Preview, application and recovery
+
+`--dry-run` prints the plan and writes nothing: where the declaration came from
+(the repository file at its commit, the directory file, a file, the defaults),
+the declaration as it would be stored, each source with its resolved commit,
+each role × harness with its Config name, image, tasks with schedules, and
+connectors and components, the Configs that would be created, re-rendered and
+pruned, missing secrets, and notes. It creates no Secret or Source and reads no
+secret value. See
+[Previewing a change](../concepts/team.md#previewing-a-change).
+
+Before mutating the daemon, `create team` validates source references,
+selected definitions, images, and required secret bindings and scopes. It then
+calls `ApplyDocumentsForTeam` with the team's stable ownership identity, the
+Sources it stores first; kukeond stores the `Team` last, and only when every
+other document applied. Obsolete team-owned configs are pruned, and a shared
+blueprint the team stops using is removed once no other CellConfig references
+it.
+
+Failure returns nonzero and leaves any previously stored Team unchanged. A
+partial apply or ambiguous RPC failure can leave some daemon resources changed.
+Fix the prerequisite and rerun — `kuke team apply NAME` if the team was stored,
+or the same `create team` otherwise.
+
+```
+Applied 8 resources; stored team kukeon.
+No cells created or started.
+Notes:
+  stores Source agents (github.com/eminwux/agents, branch main), defined by spec.sources[0]
+```
+
+The count is the Sources it stores, the team's shared blueprints (one per
+harness × security profile it uses), one CellConfig per role/harness pair, one
+headless task CellConfig per role/harness pair × selected role task, the `Team`
+document, and one when the Realm's secret defaults were written. A pair's
+config is named `<team>-<role>-<harness>`, and each of its task configs is
+named `<team>-<role>-<harness>-<task>`. See [Tasks](../concepts/team.md#tasks).
+
+## kuke create source
+
+```
+kuke create source NAME --url ADDRESS [--branch B | --tag T | --commit C] [--identity ID] [--force] [--dry-run]
+```
+
+Store a [Source](../manifests/source.md): a Git repository teams name for
+roles, harnesses and checkouts. `create source` checks the address, discovers
+the remote's default branch when no ref is given, fetches the repository once
+with its git identity and stores it in realm `default`. A team names it in its
+`spec.sources` or as its project, and a role or harness in it is named as
+`SOURCE:PATH`.
+
+| Flag              | Description                                                                                                        |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `--url`           | Git address: `host/owner/repo`, SCP-style SSH, `ssh://`, or HTTPS. Required.                                       |
+| `--branch`        | Select a branch (default: the remote's default branch).                                                            |
+| `--tag`           | Select a tag.                                                                                                      |
+| `--commit`        | Select a full commit object ID.                                                                                    |
+| `--identity`      | The stored git identity (a Secret in realm `default`) to fetch and clone the source with (`spec.git.identityRef`). |
+| `--force`         | Replace a stored Source of the same name.                                                                          |
+| `--dry-run`       | Fetch and check the source; store nothing.                                                                         |
+| `--host`          | kukeond Unix endpoint. Overrides `KUKEON_HOST` and `ClientConfiguration.spec.host`.                                |
+| `--configuration` | kuke `ClientConfiguration` path. Defaults to `KUKE_CONFIGURATION`, then `~/.kuke/kuke.yaml`.                       |
+
+The name uses lowercase letters, digits, dots or hyphens; `project` is
+reserved. A Source has no clone path: a team sets one per entry
+(`spec.sources[].clonePath`), and a role's source without one is cloned at
+`/home/user/<name>`.
+
+`create source` creates. When the name is stored it fails and writes nothing
+unless `--force`; replacing a Source prints every team and default that uses
+it, and the `kuke team apply` that makes each team see the change, because a
+replaced Source reaches a team only when it is recomposed:
+
+```
+$ kuke create source agents --url github.com/eminwux/agents
+Source agents created: github.com/eminwux/agents, branch main; offers 5 roles and 0 harnesses.
+
+$ kuke create source agents --url github.com/eminwux/agents --tag v2 --force
+Source agents updated: github.com/eminwux/agents, tag v2; offers 5 roles and 0 harnesses.
+Used by: default role dev, team kukeon (declared agents), team kukeon (role dev)
+  kuke team apply kukeon
+```
+
+`kuke apply -f` of a `kind: Source` document stores one without fetching (see
+[kuke apply → Teams](kuke-apply.md#teams)).
+
 ## Imperative vs. declarative
 
 `kuke create` is useful for quick experiments and one-off resources. For anything you want to commit, diff, or apply repeatedly, write a YAML manifest and use [`kuke apply`](kuke-apply.md). Manifests are the unit of version control; imperative commands are not.
@@ -306,3 +685,4 @@ sudo kuke create registry-credential default \
 - [kuke apply](kuke-apply.md) — declarative alternative
 - [kuke run](kuke-run.md) — create + start a single cell in one shot
 - [Manifest Reference](../manifests/overview.md) — the schema for each resource
+- [Teams](../concepts/team.md) — what `create team` composes and the Sources it stores

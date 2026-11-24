@@ -275,6 +275,15 @@ the defaults. A team's git identity is written on the Config
 (`spec.git.identityRef`), never on the Stack, because other teams share the
 Stack.
 
+A stored [Source](../manifests/source.md) may name a git identity of its own
+(`spec.git.identityRef`, `kuke create source --identity`). It is that
+repository's identity in every team cell that clones it, and the credential
+`kuke` fetches the Source with while composing; without one, the fetch uses the
+realm's default git identity when it covers the address's host, else the
+caller's git configuration (see
+[Fetching a Source on the host](../guides/git-credentials.md#fetching-a-source-on-the-host)).
+A team's own entries carry no `git`.
+
 Roles written before connectors existed keep rendering: a role that lists the
 old secret names (`claude-code-oauth-token`, `anthropic-api-key`,
 `openai-api-key`, `gh-token`) selects the method that delivers that secret. Two

@@ -24,7 +24,7 @@ kuke team init --force          # the kuke team
 kuke team apply <team>          # each stored team
 ```
 
-Teams are stored by kukeond. A team from a release that kept teams in per-user files under `~/.kuke` is not stored yet: add it again with `kuke team add <team> --source …` (see [Upgrading from host files](../concepts/team.md#upgrading-from-host-files)).
+Teams are stored by kukeond. A team from a release that kept teams in per-user files under `~/.kuke` is not stored yet: create it again with `kuke create team <team> --source …` (see [Upgrading from host files](../concepts/team.md#upgrading-from-host-files)).
 
 What you will see in the daemon afterwards:
 
