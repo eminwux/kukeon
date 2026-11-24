@@ -3,7 +3,8 @@ on:
   pull_request:
     branches:
       - main
-    # Formatter drift can only come from Go sources or the formatter config.
+    # Formatter drift can only come from Go sources or the formatter config;
+    # Makefile holds the `fmt-check` recipe the job runs.
     # Kept out of test.yaml so a .golangci.yml-only change runs this check
     # without paying for `make test` / `make e2e`. The workflow
     # self-reference ensures CI edits to this file still run their own job.
@@ -11,6 +12,7 @@ on:
       - "**/*.go"
       - "**/go.mod"
       - ".golangci.yml"
+      - "Makefile"
       - ".github/workflows/lint.yaml"
   push:
     branches:
@@ -19,6 +21,7 @@ on:
       - "**/*.go"
       - "**/go.mod"
       - ".golangci.yml"
+      - "Makefile"
       - ".github/workflows/lint.yaml"
 
 permissions:
@@ -56,18 +59,13 @@ jobs:
           install-only: true
 
       # Formatters only (golines, gci, gofumpt from .golangci.yml); the full
-      # `golangci-lint run` stays in the pre-commit hook (#1501). `fmt` walks
-      # files rather than loading packages, so ./... also covers the separate
-      # cmd/kukebuild module. Fail on a non-zero exit (config or parse error)
+      # `golangci-lint run` stays in the pre-commit hook (#1501). The check
+      # lives in `make fmt-check` so contributors run exactly this gate
+      # locally (#1642); it fails on a non-zero exit (config or parse error)
       # or on any diff output.
       - name: Check formatting
         run: |
-          set +e
-          out="$(golangci-lint fmt --diff ./... 2>&1)"
-          rc=$?
-          set -e
-          if [ "$rc" -ne 0 ] || [ -n "$out" ]; then
-            printf '%s\n' "$out"
+          if ! make fmt-check; then
             echo "::error::golangci-lint formatters would change the files above. Run 'GOWORK=off golangci-lint fmt ./...' (v2.6.2) and commit the result."
             exit 1
           fi

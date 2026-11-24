@@ -840,6 +840,10 @@ func TestEffectiveSourcesControlRuntimeClones(t *testing.T) {
 		if envOf(rendered)["ROLE_SOURCE_DIR"] != "/opt/roles" {
 			t.Fatalf("%s reads the role from %q", selected.Harness, envOf(rendered)["ROLE_SOURCE_DIR"])
 		}
+		// onInit installs the project's git hooks from $PROJECT_DIR (#1642).
+		if envOf(rendered)["PROJECT_DIR"] != "/opt/project" {
+			t.Fatalf("%s sees the project at %q", selected.Harness, envOf(rendered)["PROJECT_DIR"])
+		}
 	}
 	team.Spec.Sources[0].ClonePath = ""
 	if result, err = compose.Compose(cfg, team, opts); err == nil || result != nil ||

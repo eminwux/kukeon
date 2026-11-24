@@ -14,6 +14,11 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
+# `pre-commit install` installs both hook types (#1642): every hook runs at
+# commit time, and the golangci-lint hook also runs before a push.
+default_install_hook_types: [pre-commit, pre-push]
+default_stages: [pre-commit]
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -54,14 +59,22 @@ repos:
         # workspace mode so the hook only sees the root module; cmd/kukebuild
         # stays unlinted by pre-commit (#693).
         #
-        # No --fix: --new-from-rev HEAD only filters which issues are
+        # --new-from-merge-base origin/main reports issues on every line the
+        # branch changes, committed or not. The previous --new-from-rev HEAD
+        # saw only uncommitted changes, so a run after committing (`pre-commit
+        # run --files ...` before a push, or the pre-push stage) reported
+        # nothing (#1642). Fetch origin/main first so the merge base is
+        # current.
+        #
+        # No --fix: the --new-from-* flags only filter which issues are
         # reported, but --fix re-runs the formatters (golines, gofumpt, gci)
-        # over every touched file, rewriting lines outside the staged diff
+        # over every touched file, rewriting lines outside the branch's diff
         # and detaching trailing //nolint directives from the line they
         # suppress (#1455). Report-only keeps the hook scoped to the
         # contributor's own changes; fix reported lines by hand.
-        entry: env GOWORK=off golangci-lint run --new-from-rev HEAD
+        entry: env GOWORK=off golangci-lint run --new-from-merge-base origin/main
         args: ["./..."]
+        stages: [pre-commit, pre-push]
 
   - repo: https://github.com/pre-commit/mirrors-prettier
     rev: v4.0.0-alpha.8

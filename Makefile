@@ -179,6 +179,25 @@ test-race:
 test-kukebuild:
 	cd cmd/kukebuild && go test ./...
 
+# The Lint workflow's formatter gate (.github/workflows/lint.yaml), callable
+# locally so the two cannot drift (#1642). Formatters only (golines, gci,
+# gofumpt from .golangci.yml); `fmt` walks files rather than loading packages,
+# so ./... also covers the separate cmd/kukebuild module. main is kept
+# fmt-clean (#1501), so any diff comes from the branch. Use golangci-lint
+# v2.6.2, the `rev` pinned in .pre-commit-config.yaml: another release can
+# format the same source differently. Fails on a non-zero exit (config or
+# parse error) or on any diff output.
+GOLANGCI_LINT ?= golangci-lint
+
+.PHONY: fmt-check
+fmt-check:
+	@out="$$($(GOLANGCI_LINT) fmt --diff ./... 2>&1)"; rc=$$?; \
+	if [ "$$rc" -ne 0 ] || [ -n "$$out" ]; then \
+		printf '%s\n' "$$out"; \
+		echo "golangci-lint formatters would change the files above. Run 'GOWORK=off $(GOLANGCI_LINT) fmt ./...' (v2.6.2) and commit the result." >&2; \
+		exit 1; \
+	fi
+
 # Ref the e2e suite uses for the local kukeond image. `kukebuild` writes it
 # straight into the kuke-system realm's containerd namespace before `go test`
 # runs `kuke init --kukeond-image`, so the test does not depend on a published
