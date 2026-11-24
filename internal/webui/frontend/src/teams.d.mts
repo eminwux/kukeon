@@ -21,7 +21,7 @@ export type Plan = {
 };
 export type TeamResult = { team: string; resources: number; pruned: string[]; missingSecrets: string[]; notes: string[] };
 export type TeamOutcome = { plan: Plan; result?: TeamResult };
-export type Source = { name: string; url: string; branch?: string; tag?: string; commit?: string; clonePath?: string };
+export type Source = { name: string; url: string; branch?: string; tag?: string; commit?: string };
 export type Selection = { name: string; source: string; path: string };
 export type Sources = { sources: Source[]; defaultRoles: Selection[]; defaultHarnesses: Selection[] };
 export type OfferedRole = { name: string; path: string; harnesses: string[]; tasks: string[]; default: boolean };
@@ -34,7 +34,7 @@ export type AddForm = {
   name: string; source: string; refKind: string; ref: string; useRepoFile: boolean;
   roles: PickerOption[] | null; harnesses: PickerOption[] | null; declaration: string; force?: boolean;
 };
-export type SourceForm = { name: string; url: string; refKind: string; ref: string; clonePath: string };
+export type SourceForm = { name: string; url: string; refKind: string; ref: string };
 
 export function teamsLink(name?: string): string;
 export function teamsAPI(name?: string, action?: string): string;

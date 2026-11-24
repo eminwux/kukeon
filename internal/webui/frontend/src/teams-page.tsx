@@ -70,7 +70,7 @@ function RefFields({ kind, value, disabled, onChange }: { kind: string; value: s
   </label>;
 }
 
-// AddTeam is kuke team add NAME --source URL: preview first, then add. An
+// AddTeam is kuke create team NAME --source URL: preview first, then create. An
 // existing team is replaced only after the user confirms (AC8a).
 function AddTeam({ sources, inspected, onChanged }: { sources: Sources | undefined; inspected: Record<string, SourceContents | undefined>; onChanged: () => void }) {
   const [form, setForm] = useState<AddForm>(emptyAdd);
@@ -110,7 +110,7 @@ function AddTeam({ sources, inspected, onChanged }: { sources: Sources | undefin
           <label className="schema-check"><input type="checkbox" checked={form.useRepoFile} disabled={pending} onChange={event => set({ useRepoFile: event.target.checked })} />Use the repository's <code>kuketeam.yaml</code></label>
           <Picker label="Roles" options={pickerOptions(sources, inspected, "role")} value={form.roles} disabled={pending} onChange={roles => set({ roles })} />
           <Picker label="Harnesses" options={pickerOptions(sources, inspected, "harness")} value={form.harnesses} disabled={pending} onChange={harnesses => set({ harnesses })} />
-          <label className="schema-field team-yaml"><span>Declaration (optional)</span><textarea value={form.declaration} disabled={pending} spellCheck={false} placeholder={"apiVersion: v1beta1\nkind: Team\nmetadata:\n  name: …\nspec:\n  roles: […]"} onChange={event => set({ declaration: event.target.value })} /><small>A whole Team document replaces the declaration, as <code>kuke team add -f</code>. Tasks, schedules, needs, connectors and sources are edited here.</small></label>
+          <label className="schema-field team-yaml"><span>Declaration (optional)</span><textarea value={form.declaration} disabled={pending} spellCheck={false} placeholder={"apiVersion: v1beta1\nkind: Team\nmetadata:\n  name: …\nspec:\n  roles: […]"} onChange={event => set({ declaration: event.target.value })} /><small>A whole Team document replaces the declaration, as <code>kuke create team -f</code>. Tasks, schedules, needs, connectors and sources are edited here.</small></label>
         </div>
         {!!errors.length && form.source && <ul className="setup-error">{errors.map(message => <li key={message}>{message}</li>)}</ul>}
         <div className="connector-actions">
@@ -244,7 +244,7 @@ function TeamDetail({ name, revision, onChanged }: { name: string; revision: num
   </>;
 }
 
-// SourceDetail is one registered source: what it offers, with the default
+// SourceDetail is one stored Source: what it offers, with the default
 // toggles, and its removal.
 function SourceDetail({ name, sources, contents, onInspected, onChanged }: { name: string; sources: Sources; contents: SourceContents | undefined; onInspected: (contents: SourceContents) => void; onChanged: (change: DefaultsChange) => void }) {
   const [pending, setPending] = useState("");
@@ -278,10 +278,11 @@ function SourceDetail({ name, sources, contents, onInspected, onChanged }: { nam
   </div>;
 }
 
-const emptySource: SourceForm = { name: "", url: "", refKind: "branch", ref: "", clonePath: "" };
+const emptySource: SourceForm = { name: "", url: "", refKind: "branch", ref: "" };
 
-// SourcesPanel is kuke team source add|list|show|remove and the default
-// toggles of kuke team defaults set (AC17).
+// SourcesPanel is kuke create source, kuke get sources, kuke source show and
+// kuke delete source over every stored Source (#1643), and the default toggles
+// of kuke team defaults set (AC17).
 function SourcesPanel({ sources, inspected, onInspected, onChanged }: { sources: Sources; inspected: Record<string, SourceContents | undefined>; onInspected: (name: string, contents: SourceContents) => void; onChanged: () => void }) {
   const [form, setForm] = useState<SourceForm>(emptySource);
   const [open, setOpen] = useState("");
@@ -307,7 +308,7 @@ function SourcesPanel({ sources, inspected, onInspected, onChanged }: { sources:
       <p className="description">Where roles and harnesses come from. A team that declares no sources, roles or harnesses takes the defaults here; changing them reaches a team when it is reapplied.</p>
       {change && <div className="health-sweep-started" role="status"><p>Defaults {change.action}. {inheritingNote(change)}</p></div>}
       <ul className="state-list">{sources.sources.map(source => <li key={source.name} aria-label={`Source ${source.name}`}>
-        <button type="button" className="text-button" aria-expanded={open === source.name} onClick={() => setOpen(open === source.name ? "" : source.name)}><code>{source.name}</code></button> {source.url} <span className="description">{refLabel(source)}{source.clonePath ? ` · cloned at ${source.clonePath}` : ""}</span>
+        <button type="button" className="text-button" aria-expanded={open === source.name} onClick={() => setOpen(open === source.name ? "" : source.name)}><code>{source.name}</code></button> {source.url} <span className="description">{refLabel(source)}</span>
         {open === source.name && <SourceDetail name={source.name} sources={sources} contents={inspected[source.name]} onInspected={contents => onInspected(source.name, contents)} onChanged={changed} />}
       </li>)}</ul>
       {!sources.sources.length && <p className="description">No source is registered.</p>}
@@ -317,7 +318,6 @@ function SourcesPanel({ sources, inspected, onInspected, onChanged }: { sources:
           <label className="schema-field"><span>Name<b aria-label="required"> *</b></span><input value={form.name} disabled={pending} placeholder="agents" spellCheck={false} onChange={event => set({ name: event.target.value })} /></label>
           <label className="schema-field"><span>URL<b aria-label="required"> *</b></span><input value={form.url} disabled={pending} placeholder="https://github.com/owner/repo" spellCheck={false} onChange={event => set({ url: event.target.value })} /></label>
           <RefFields kind={form.refKind} value={form.ref} disabled={pending} onChange={(refKind, ref) => set({ refKind, ref })} />
-          <label className="schema-field"><span>Clone path</span><input value={form.clonePath} disabled={pending} placeholder="/home/user/<name> when the source has roles" spellCheck={false} onChange={event => set({ clonePath: event.target.value })} /></label>
         </div>
         <div className="connector-actions"><button type="submit" disabled={pending || !form.name.trim() || !form.url.trim()}>{pending ? "Registering…" : "Register source"}</button></div>
         {error && <ErrorNotice error={error} kind="Source" />}
