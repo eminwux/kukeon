@@ -698,3 +698,29 @@ test("with the majordomo panel docked at 1440×900 the Manage sidebar and a list
     expect(await page.locator("main").evaluate(el => el.scrollWidth <= el.clientWidth + 1), hash).toBe(true);
   }
 });
+
+// Issue #1649, AC9: each sweep Config says whether issue filing has a token. GitHub access is off until the
+// Config renders the github component; on, it is missing until the connector resolves; resolved, it names
+// the identity and its level. /api/connectors is the real server's catalog.
+test("the Health page says whether a sweep can file issues: GitHub access off, token missing, or the token", async ({ page }) => {
+  const sweep = (components, connectors) => config("kuke-majordomo-claude-health-sweep", sweepLabels, {
+    spec: { schedule: { cron: "@hourly", suspend: false }, components }, status: { connectors },
+  });
+  const state = await world(page, { configs: [sweep([], [])] });
+  await page.goto(`${server.url}#/health`);
+  const filing = page.getByRole("region", { name: "Sweep schedule" }).locator(".health-filing");
+  await expect(filing).toContainText("GitHub access is off.");
+  await expect(filing.getByRole("link", { name: "kuke team's Edit team screen" })).toHaveAttribute("href", "#/teams/kuke/edit");
+  await expect(filing).toContainText("kuke team connector enable kuke github --role majordomo");
+  await expect(filing).toContainText("--file-issues <owner>/<repo>");
+
+  state.configs = [sweep(["github"], [{ connector: "github", component: "github", method: "token", delivery: "env", state: "unresolved", required: true }])];
+  await page.reload();
+  await expect(filing).toContainText("Token missing.");
+  await expect(filing.getByRole("link", { name: "Add or choose a GitHub identity" })).toHaveAttribute("href", "#/connectors/github");
+
+  state.configs = [sweep(["github"], [{ connector: "github", component: "github", method: "token", delivery: "env", state: "resolved", identity: { name: "gh-token", realm: "default" }, origin: "realm" }])];
+  await page.reload();
+  await expect(filing).toContainText("Issue filing has a token: gh-token (realm).");
+  await expect(filing).not.toContainText("Token missing");
+});

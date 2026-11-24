@@ -38,6 +38,7 @@ import (
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/config"
+	"github.com/eminwux/kukeon/pkg/team/connector/connectortest"
 	"gopkg.in/yaml.v3"
 )
 
@@ -339,7 +340,7 @@ func teamFixture(t *testing.T) (*teamClient, http.Handler) {
 	api := &teamAPI{sources: map[string]fs.FS{
 		"kukeon": repo, "extra": repo,
 		"project": fstest.MapFS{"kuketeam.yaml": {Data: []byte(teamRepoFile)}},
-	}}
+	}, catalog: connectortest.Catalog(t)}
 	mux := http.NewServeMux()
 	api.register(mux, func(context.Context) (kukeonv1.Client, error) { return c, nil })
 	return c, mux

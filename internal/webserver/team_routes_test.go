@@ -246,3 +246,50 @@ func TestTeamExport(t *testing.T) {
 	w = connectorRequest(t, h, http.MethodGet, "/api/teams/missing/export", "")
 	expectError(t, w, w.Body.Bytes(), http.StatusNotFound, "not_found")
 }
+
+// TestTeamRoleConnectors is #1649 AC8 and AC6 over HTTP: the view lists what
+// each Config resolves, and the form's per-role switch enables a connector
+// through the same apply as an edit.
+func TestTeamRoleConnectors(t *testing.T) {
+	c, h := teamFixture(t)
+	c.putProj(t)
+	c.configs = []v1beta1.CellConfigDoc{{
+		Metadata: v1beta1.CellConfigMetadata{Name: "proj-old-codex", Realm: "default", Labels: map[string]string{
+			v1beta1.LabelTeam: "proj", v1beta1.LabelRole: "old",
+		}},
+		Status: &v1beta1.CellConfigStatus{Connectors: []v1beta1.ConnectorStatus{{
+			Connector: "github", Method: "token", State: v1beta1.ConnectorUnresolved, Required: true,
+		}}},
+	}}
+	w := connectorRequest(t, h, http.MethodGet, "/api/teams/proj", "")
+	got := decodeBody[teamView](t, w)
+	if w.Code != http.StatusOK || got.View == nil || got.Form == nil {
+		t.Fatalf("get: %d %s", w.Code, w.Body)
+	}
+	rows := got.View.Connectors.Roles
+	if len(rows) != 1 || rows[0].Role != "old" || rows[0].Config != "proj-old-codex" || rows[0].Fill != "MISSING" ||
+		rows[0].SetByTeam {
+		t.Fatalf("rows = %+v", rows)
+	}
+	form := *got.Form
+	for i := range form.Roles.Items[0].Connectors {
+		if item := &form.Roles.Items[0].Connectors[i]; item.Name == "github" {
+			item.Enabled = true
+		}
+	}
+	w = connectorRequest(t, h, http.MethodPost, "/api/teams", jsonBody(t, map[string]any{"name": "proj", "form": form}))
+	if w.Code != http.StatusOK {
+		t.Fatalf("edit: %d %s", w.Code, w.Body)
+	}
+	team, err := config.DecodeTeam(bytes.NewReader(c.teams["proj"]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := team.Spec.Roles[0].Connectors["github"]; !ok {
+		t.Fatalf("stored roles = %+v", team.Spec.Roles)
+	}
+	w = connectorRequest(t, h, http.MethodGet, "/api/teams/proj", "")
+	if got = decodeBody[teamView](t, w); !got.View.Connectors.Roles[0].SetByTeam {
+		t.Fatalf("after the edit the team sets github: %+v", got.View.Connectors.Roles)
+	}
+}

@@ -4,6 +4,9 @@
 kuke team init      [--force | --reapply | --upgrade]
 kuke team apply     NAME | -f FILE                         [--dry-run]
 kuke team export    NAME [--host-fields] [--explicit-defaults]
+kuke team connector enable  TEAM CONNECTOR --role ROLE... [--identity ID] [--dry-run]
+kuke team connector disable TEAM CONNECTOR --role ROLE... [--dry-run]
+kuke team connector list    TEAM
 kuke team defaults  set [--role R]... [--harness H]...
 ```
 
@@ -15,12 +18,13 @@ Composition — fetching sources, resolving roles and harnesses, rendering
 blueprints and configs — runs in `kuke`; no `kuke team` command creates or
 starts cells.
 
-| Command                                     | Does                                                                               |
-| ------------------------------------------- | ---------------------------------------------------------------------------------- |
-| [`kuke team init`](kuke-team-init.md)       | Apply the `kuke` system team (majordomo); create the realm's first `TeamDefaults`. |
-| [`kuke team apply`](#kuke-team-apply)       | Recompose a stored team, or compose and store a Team document.                     |
-| [`kuke team export`](#kuke-team-export)     | Print a stored team as a repository's `kuketeam.yaml`.                             |
-| [`kuke team defaults`](#kuke-team-defaults) | Replace the default role or harness list.                                          |
+| Command                                       | Does                                                                                   |
+| --------------------------------------------- | -------------------------------------------------------------------------------------- |
+| [`kuke team init`](kuke-team-init.md)         | Apply the `kuke` system team (majordomo); create the realm's first `TeamDefaults`.     |
+| [`kuke team apply`](#kuke-team-apply)         | Recompose a stored team, or compose and store a Team document.                         |
+| [`kuke team export`](#kuke-team-export)       | Print a stored team as a repository's `kuketeam.yaml`.                                 |
+| [`kuke team connector`](#kuke-team-connector) | Give roles of a stored team a connector, take it away, list what each Config resolves. |
+| [`kuke team defaults`](#kuke-team-defaults)   | Replace the default role or harness list.                                              |
 
 A team is created with [`kuke create team`](kuke-create.md#kuke-create-team)
 and a Source with [`kuke create source`](kuke-create.md#kuke-create-source);
@@ -132,6 +136,88 @@ spec:
           clonePath: /home/user/agents
     roles: …
 ```
+
+## kuke team connector
+
+```
+kuke team connector enable  TEAM CONNECTOR --role ROLE... [--identity ID] [--dry-run]
+kuke team connector disable TEAM CONNECTOR --role ROLE... [--dry-run]
+kuke team connector list    TEAM
+```
+
+A role's cells get a connector the role does not ask for itself — GitHub access
+for majordomo's health sweep, for example — through the role's entry in the
+stored team (`spec.roles[].connectors`, see
+[Connectors](../concepts/team.md#connectors)). `enable` and `disable` edit that
+entry of the stored Team and apply the team, exactly as `kuke team apply -f` of
+the edited declaration would; the repository's `kuketeam.yaml` is not read or
+changed (`kuke team export` writes the entry back to a file). The Edit team
+form's **Credentials → Per-role access** switches make the same change.
+
+| Flag         | Description                                                                                                                                     |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--role`     | A role the team selects. Required; repeat it for several roles.                                                                                 |
+| `--identity` | `enable` only: the stored identity that fills the connector, `name[@realm[/space[/stack]]]`. Unset keeps the entry's identity; `""` removes it. |
+| `--dry-run`  | Print what would be applied (the plan of `kuke team apply --dry-run`) and write nothing.                                                        |
+
+`enable` adds `connectors: { CONNECTOR: {} }` to each role entry that does not
+enable the connector yet; without `--identity` the entry names no identity, so
+the connector resolves through the Stack, Space and Realm defaults. Enabling
+what is already enabled changes nothing in the declaration. `enable` never
+writes the older `needs.secrets` spelling, and reads it as enabled: for
+`github`, `needs.secrets: [gh-token]`.
+
+`disable` removes the entry and every name in the role entry's `needs.secrets`
+that selects the connector (each method's secret name and aliases: for
+`github`, `github-token` and `gh-token`); a `needs` left empty is omitted. If a
+Config of the role would still render the connector — the role's definition
+lists it, or the team's harness entry asks for its secret — nothing is written
+and the error says so.
+
+```
+$ kuke team connector enable kuke github --role majordomo
+Connector github enabled for role majordomo of team kuke.
+Applied 5 resources; stored team kuke.
+No cells created or started.
+Missing secrets (cells will not start until they exist):
+  gh-token  →  kuke create secret gh-token --realm default --from-file /path/to/token
+A running cell keeps what it started with; kuke restart <cell> renders it again.
+```
+
+Refused before anything is written:
+
+- a team that is not stored (`kuke create team` creates one);
+- a role the team does not select (the error lists its roles);
+- a connector not in the catalog (the error lists the known ones);
+- a connector that authenticates a harness (`claude`, `codex`) or is a
+  registry credential: choose its method and identity in the team's
+  `spec.connectors`, with `kuke team apply -f` or the Edit team form;
+- a team whose `spec.roles` is inherited from the defaults: it has no role
+  entry to change. Declare its roles first with
+  `kuke team export TEAM --host-fields --explicit-defaults > TEAM.yaml`, then
+  `kuke team apply -f TEAM.yaml`.
+
+`list` prints one row per Config of the team and connector it resolves, read
+from the stored Team and the Configs' `status.connectors` with no fetch — the
+data of the team page's Connectors section. `IDENTITY` is what fills the
+connector and its level, as `kuke get configs -o wide` prints it (`-` for a
+login, `MISSING` for a required connector no identity fills); `SET BY` is
+`team` when the role entry enables the connector (either spelling) and
+`definition` when the role's definition or its harness asks for it.
+
+```
+$ kuke team connector list kuke
+ROLE       CONFIG                              CONNECTOR  METHOD  IDENTITY          SET BY
+---------  ----------------------------------  ---------  ------  ----------------  ----------
+majordomo  kuke-majordomo-claude               claude     login   -                 definition
+majordomo  kuke-majordomo-claude               github     token   gh-token (realm)  team
+majordomo  kuke-majordomo-claude-health-sweep  claude     login   -                 definition
+majordomo  kuke-majordomo-claude-health-sweep  github     token   gh-token (realm)  team
+```
+
+No `kuke team connector` command creates, reads or prints a secret. A running
+cell keeps the connectors it started with; `kuke restart` it to render the
+change.
 
 ## kuke team defaults
 

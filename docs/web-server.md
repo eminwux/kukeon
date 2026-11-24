@@ -400,6 +400,16 @@ kukeon file itself.
   and links the `kuke` team's page on [Teams](#teams), whose **Edit team**
   screen switches the schedule on; it does so once, above the sweep list,
   naming the suspended configs. No control on the Health page edits a schedule.
+- **Issue filing**, per sweep config (#1649): whether the sweep has a GitHub
+  token to file issues with — **GitHub access is off** (the config does not
+  render the `github` connector's component; links the `kuke` team's Edit team
+  screen, whose Credentials step switches it on for majordomo, and names
+  `kuke team connector enable kuke github --role majordomo`), **Token missing**
+  (the connector does not resolve; links the connector's page), or **Issue
+  filing has a token** with the identity and the level it comes from. It also
+  says that a sweep files only when its task arguments name
+  `--file-issues <owner>/<repo>`. The filing connector is the one constant
+  `filingConnector = "github"` in `health.tsx`: filing is GitHub-only.
 - **Latest report**: its window, summary and findings. Each finding shows its
   classification (`kukeon`, `workload` or `unclear`), whether it is recurring
   or new, its evidence and suggested commands, and a link to the issue if one
@@ -796,7 +806,15 @@ A secret binding's `source.env` / `source.file` is read by that process.
      selected, its schedule switch (the role's, on or off — `suspend`), its
      cron expression and its arguments, the role's own values as placeholders.
   5. **Credentials**: the team's connector choices (method and identity), or
-     the defaults'; and the missing secrets of the last preview.
+     the defaults'; **Per-role access** (#1649): per selected role, one row per
+     connector a team can give a role (one that authenticates no harness and
+     is not a registry credential — `github` and `git` today), with a switch,
+     an identity picker (that connector's stored identities, or **Default**)
+     and what the role's Configs resolve. A connector the role's Configs
+     resolve without the team asking shows **Required by the role** and no
+     switch; while the role list is inherited the rows are disabled. A switch
+     makes the change `kuke team connector enable` / `disable` makes; and the
+     missing secrets of the last preview.
   6. **Review**: **Preview** shows the plan — where the declaration came from,
      sources with their commits, each role × harness with Config, image, tasks
      and components, the Configs to create, re-render and prune, missing
@@ -807,7 +825,11 @@ A secret binding's `source.env` / `source.file` is read by that process.
   **Project**, **Sources** (each with its stored Source, linked to the Sources
   page, address, ref, clone path and git identity), **Roles** (source, path,
   harness, image needs, tasks), **Tasks** (each task Config with its schedule,
-  on or suspended, and its last run), **Harnesses**, **Connectors** and
+  on or suspended, and its last run), **Harnesses**, **Connectors** (the
+  team's choices, then per role and Config each connector with its method,
+  identity, the level the identity comes from, **Needs identity** when it is
+  unresolved — linked to the connector's page — and whether the team or the
+  role definition asks for it: the rows of `kuke team connector list`) and
   **Configs** (each linked to its Config page); each list is badged `declared`
   or `inherited` from the defaults. **Edit**, **Export**, **Reapply**
   (recompose from the stored declaration, `kuke team apply NAME`) and
@@ -817,9 +839,11 @@ A secret binding's `source.env` / `source.file` is read by that process.
 - **Edit team** (`#/teams/<name>/edit`) is the wizard's steps 2 to 6 filled
   from the stored team, with the project ref at the top of step 2: a task's
   schedule is switched on or off and its cron expression and arguments
-  changed without YAML. What the form does not show — `spec.secrets`, a
-  role's connectors and `needs.secrets`, a source's long-form `git` block — is
-  kept. **Edit as YAML** edits the whole declaration (`kuke team apply -f`).
+  changed without YAML, and a role's per-connector switch turned on or off.
+  What the form does not show — `spec.secrets`, a role's `needs.secrets`, a
+  source's long-form `git` block — is kept; a switch the user did not touch
+  writes nothing, so a legacy `needs.secrets: [gh-token]` opt-in keeps its
+  spelling. **Edit as YAML** edits the whole declaration (`kuke team apply -f`).
 - **Export** (`#/teams/<name>/export`, `kuke team export NAME`) shows the team
   as a repository's `kuketeam.yaml`, with **Keep host fields**
   (`--host-fields`) and **Write inherited lists out** (`--explicit-defaults`),
@@ -1160,6 +1184,10 @@ and gets the creation timeout.
   `{ "alias", "stored", "url", "ref", "clonePath", "identity", "declared" }`;
   a task is one task Config `{ "role", "task", "config", "scope",
 "schedule", "status" }` with its `spec.schedule` and `status.schedule`.
+  `connectors` also has `roles`, one row per Config of the team and connector
+  it resolves (#1649): `{ "role", "config", "task", "connector", "method",
+"state", "identity", "origin", "required", "fill", "setByTeam" }`, `fill`
+  being what `kuke team connector list` prints in its IDENTITY column.
   `unresolved` says why a team whose sources do not resolve shows what is
   stored instead. When the team cannot be read at all, `problem` says why and
   `view` and `form` are absent.
@@ -1171,11 +1199,16 @@ and gets the creation timeout.
   `sources` is `null` when the team lists none. `roles`, `harnesses` and
   `connectors` are `{ "inherit", "items" }`: `inherit` leaves the list out of
   the declaration (the defaults'). A role is `{ "name", "source", "path",
-"harness", "initialPath", "image", "tasks" }` and its `tasks` is
+"harness", "initialPath", "image", "tasks", "connectors" }` and its `tasks` is
   `{ "all", "items" }` — `all` selects every task the role declares, an
   empty `items` none; a task is `{ "name", "schedule", "suspend", "args" }`,
-  `suspend` `false` (on), `true` (off) or `null` (the role's). The form is a
-  JSON model of its own, never a JSON-encoded Team.
+  `suspend` `false` (on), `true` (off) or `null` (the role's). A role's
+  `connectors` is one switch per connector a team can give a role,
+  `{ "name", "enabled", "identity" }`: `enabled` is on when the role entry
+  enables it (a `connectors` entry or a legacy `needs.secrets` name), and
+  applying the form changes the entry only where a switch or identity differs
+  from the base, as `kuke team connector` does. The form is a JSON model of its
+  own, never a JSON-encoded Team.
 - The **draft** body is the Project step: `{ "name", "source", "branch" |
 "tag" | "commit", "identity", "useRepoFile", "declaration" }`, where
   `source` is an address or a stored Source's name and `declaration` a pasted

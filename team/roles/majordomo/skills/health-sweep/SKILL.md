@@ -148,7 +148,8 @@ By default a sweep only stores its report; it files nothing.
 
 Filing is on only when **both** hold: the task was started with arguments that
 name a repository as `--file-issues <owner/repo>`, and the `GH_TOKEN`
-environment variable is set (the install's `gh-token` opt-in). Then submit with the same flag:
+environment variable is set (the install gave majordomo the `github`
+connector: `kuke team connector enable kuke github --role majordomo`). Then submit with the same flag:
 
 ```sh
 kuke health report submit -f /tmp/health-sweep/report.yaml --file-issues <owner/repo>

@@ -5,7 +5,7 @@
 // reducers here keep them, so nothing turns an inherited list into an empty
 // one by accident. No DOM, no network — unit-tested with node --test.
 
-import { deliveryGit } from "./connectors.mjs";
+import { deliveryGit, deliveryRegistry } from "./connectors.mjs";
 import { inspectAPI, refErrors, refOf, sourcesAPI, validName, withRef } from "./teams.mjs";
 
 const list = value => Array.isArray(value) ? value : [];
@@ -177,6 +177,7 @@ function roleItem(role) {
   return {
     name: text(role?.name), source: text(role?.source), path: text(role?.path), harness: text(role?.harness),
     initialPath: text(role?.initialPath), image: list(role?.image), tasks: role?.tasks ?? { all: true, items: [] },
+    connectors: list(role?.connectors).map(item => ({ name: text(item?.name), enabled: !!item?.enabled, identity: text(item?.identity) })),
   };
 }
 
@@ -346,6 +347,50 @@ export function withConnector(form, name, patch, inherited = {}) {
   if (!trimmed(next.method) && !trimmed(next.identity)) delete items[name];
   else items[name] = { method: trimmed(next.method), identity: trimmed(next.identity) };
   return { ...form, connectors: { inherit: false, items } };
+}
+
+// togglable reports whether a team can give a role the connector (#1649,
+// D3): it authenticates no harness and is not a registry credential.
+export function togglable(connector) {
+  return !!connector && !trimmed(connector.harness) && connector.delivery !== deliveryRegistry;
+}
+
+// roleConnectorRows lists one role's per-role access rows for the
+// Credentials step: one per connector a team can give a role, with the
+// form's switch and identity. A connector the role's Configs resolve while
+// the team does not ask for it (the team view's rows, setByTeam false) is
+// required: the role's definition or harness asks for it, and it has no
+// switch.
+export function roleConnectorRows(role, connectors, viewRows = []) {
+  const items = list(role?.connectors);
+  return list(connectors).filter(togglable).map(connector => {
+    const name = text(connector.name);
+    const item = items.find(entry => entry.name === name);
+    const rows = list(viewRows).filter(row => row.role === text(role?.name) && row.connector === name);
+    return {
+      name, title: text(connector.title) || name, enabled: !!item?.enabled, identity: text(item?.identity),
+      required: !item?.enabled && rows.some(row => !row.setByTeam),
+      states: rows.map(row => ({ config: text(row.config), state: text(row.state), fill: text(row.fill) })),
+    };
+  });
+}
+
+// withRoleConnector switches a connector on or off for one selected role,
+// or sets its identity ("" is the scope defaults). The request body is the
+// form: the server changes the role entry only where an item differs from
+// the stored team.
+export function withRoleConnector(form, roleIndex, name, patch) {
+  const items = list(form?.roles?.items);
+  const role = items[roleIndex];
+  if (!role) return form;
+  const connectors = list(role.connectors).map(item => ({ ...item }));
+  const at = connectors.findIndex(item => item.name === name);
+  const current = at >= 0 ? connectors[at] : { name, enabled: false, identity: "" };
+  const next = { ...current };
+  if ("enabled" in patch) next.enabled = !!patch.enabled;
+  if ("identity" in patch) next.identity = trimmed(patch.identity);
+  if (at >= 0) connectors[at] = next; else connectors.push(next);
+  return withRolePatch(form, roleIndex, { connectors });
 }
 
 export function withConnectorsInherit(form, inherit) {

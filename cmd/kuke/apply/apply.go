@@ -129,6 +129,9 @@ func runApplyFile(cmd *cobra.Command, client kukeonv1.Client, flags applyFlags) 
 	// TeamDefaults in the same file is what its Teams inherit.
 	var result kukeonv1.ApplyDocumentsResult
 	if len(rest) > 0 {
+		if err = warnTeamConfigs(cmd.ErrOrStderr(), rest); err != nil {
+			return err
+		}
 		if result, err = client.ApplyDocuments(cmd.Context(), rest); err != nil {
 			return err
 		}
@@ -227,6 +230,42 @@ func teamName(doc []byte) string {
 	}
 	_ = yaml.Unmarshal(doc, &head)
 	return head.Metadata.Name
+}
+
+// warnTeamConfigs prints one warning per CellConfig in docs that a team owns
+// (label kukeon.io/team, issue #1649, AC11): the team's next apply renders
+// the Config whole again, so a hand edit of it does not last. The apply still
+// happens. docs are the documents sent as they are, never the Configs a Team
+// document in the same file composes.
+func warnTeamConfigs(w io.Writer, docs []byte) error {
+	parsed, err := parser.ParseDocuments(bytes.NewReader(docs))
+	if err != nil {
+		return fmt.Errorf("failed to parse YAML: %w", err)
+	}
+	for _, doc := range parsed {
+		if kind, kindErr := parser.DetectKind(doc); kindErr != nil || kind != v1beta1.KindCellConfig {
+			continue
+		}
+		var head struct {
+			Metadata struct {
+				Name   string            `yaml:"name"`
+				Labels map[string]string `yaml:"labels"`
+			} `yaml:"metadata"`
+		}
+		if yaml.Unmarshal(doc, &head) != nil {
+			continue
+		}
+		team := head.Metadata.Labels[v1beta1.LabelTeam]
+		if team == "" {
+			continue
+		}
+		if _, err = fmt.Fprintf(w, "warning: config %s belongs to team %s; the team's next apply replaces "+
+			"this edit. Change the team instead: kuke team connector, kuke team apply -f, or the Teams page.\n",
+			head.Metadata.Name, team); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // splitTeams separates a file's Team documents from the rest, and reports

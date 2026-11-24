@@ -94,5 +94,6 @@ print. Refer to a secret by its name and scope.
 
 When the cause is a **kukeon** defect and the user asks to report it, use the
 `file-kukeon-bug` skill. It checks for an
-existing issue first and needs `GH_TOKEN`; without it, it says how to opt in.
+existing issue first and needs `GH_TOKEN`; without it, it says how to opt in
+(`kuke team connector enable kuke github --role majordomo`).
 Workload and configuration problems are not filed.

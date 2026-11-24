@@ -23,7 +23,9 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/team/initialize"
 	"github.com/eminwux/kukeon/pkg/team/config"
+	"github.com/eminwux/kukeon/pkg/team/connector"
 )
 
 // The team form (#1644, D2): the parts of a Team declaration the wizard and
@@ -32,8 +34,11 @@ import (
 // the team's connectors. It is its own JSON model, never a JSON-encoded
 // config.Team: every list that can inherit carries its flag, because JSON
 // cannot tell a nil list from an empty one. What the form does not model —
-// spec.secrets, a role's connectors and needs.secrets, a source's long-form
-// git block — is kept from the base declaration by apply and edited as YAML.
+// spec.secrets, a role's needs.secrets, a source's long-form git block — is
+// kept from the base declaration by apply and edited as YAML. A role's
+// per-connector switches (#1649, D7) are modelled: apply changes a role entry
+// only where a switch or identity differs from the base, through the same
+// functions as kuke team connector.
 
 type teamForm struct {
 	Name    string      `json:"name"`
@@ -74,6 +79,18 @@ type formRole struct {
 	InitialPath string    `json:"initialPath,omitempty"`
 	Image       []string  `json:"image"`
 	Tasks       formTasks `json:"tasks"`
+	// Connectors has one item per connector a team can give a role
+	// (initialize.Togglable), whether this entry enables it or not.
+	Connectors []formRoleConnector `json:"connectors"`
+}
+
+// formRoleConnector is one per-role connector switch: Enabled says the role
+// entry enables it (a connectors entry or a legacy needs.secrets name), and
+// Identity is the entry's identity, empty for the scope defaults.
+type formRoleConnector struct {
+	Name     string `json:"name"`
+	Enabled  bool   `json:"enabled"`
+	Identity string `json:"identity,omitempty"`
 }
 
 // formTasks is a role's tasks: all selects every task the role declares.
@@ -120,8 +137,9 @@ const (
 )
 
 // formOf is the form of a Team: the stored one for an edit, a draft's
-// declaration for a new team.
-func formOf(team *config.Team) teamForm {
+// declaration for a new team. catalog gives each role its connector
+// switches; nil gives none.
+func formOf(team *config.Team, catalog *connector.Catalog) teamForm {
 	s := team.Spec
 	out := teamForm{
 		Name:       team.Metadata.Name,
@@ -146,7 +164,8 @@ func formOf(team *config.Team) teamForm {
 		item := formRole{
 			Name: role.Name, Source: role.Source, Path: role.Path, Harness: role.Harness,
 			InitialPath: role.InitialPath, Image: []string{},
-			Tasks: formTasks{All: role.Tasks == nil, Items: []formTask{}},
+			Tasks:      formTasks{All: role.Tasks == nil, Items: []formTask{}},
+			Connectors: roleConnectorsOf(&role, catalog),
 		}
 		if role.Needs != nil {
 			item.Image = append(item.Image, role.Needs.Image...)
@@ -165,6 +184,19 @@ func formOf(team *config.Team) teamForm {
 	}
 	for name, choice := range s.Connectors {
 		out.Connectors.Items[name] = formConnector{Method: choice.Method, Identity: choice.Identity}
+	}
+	return out
+}
+
+// roleConnectorsOf is a role entry's connector switches. A legacy
+// needs.secrets opt-in shows as on and is not rewritten (D7).
+func roleConnectorsOf(role *config.Role, catalog *connector.Catalog) []formRoleConnector {
+	out := []formRoleConnector{}
+	for _, conn := range initialize.TogglableConnectors(catalog) {
+		out = append(out, formRoleConnector{
+			Name: conn.Metadata.Name, Enabled: initialize.RoleConnectorSet(role, conn),
+			Identity: role.Connectors[conn.Metadata.Name].Identity,
+		})
 	}
 	return out
 }
@@ -195,9 +227,10 @@ func cloneBool(v *bool) *bool {
 
 // apply returns a copy of base with what the form models replaced and
 // everything else kept (D2): metadata.realm, spec.secrets, each role's
-// connectors and needs.secrets (matched by name, else by source and path),
-// and each source's git block besides its identity (matched by alias).
-func (f teamForm) apply(base *config.Team) (*config.Team, error) {
+// connectors and needs.secrets (matched by name, else by source and path)
+// except where a connector switch changed (#1649), and each source's git
+// block besides its identity (matched by alias).
+func (f teamForm) apply(base *config.Team, catalog *connector.Catalog) (*config.Team, error) {
 	if base == nil {
 		base = &config.Team{APIVersion: config.APIVersion, Kind: config.KindTeam}
 	}
@@ -247,6 +280,11 @@ func (f teamForm) apply(base *config.Team) (*config.Team, error) {
 		out.Spec.Roles = make([]config.Role, 0, len(f.Roles.Items))
 		for _, item := range f.Roles.Items {
 			out.Spec.Roles = append(out.Spec.Roles, item.role(base.Spec.Roles))
+		}
+		for i, item := range f.Roles.Items {
+			if err := item.applyConnectors(&out, &out.Spec.Roles[i], baseRole(item, base.Spec.Roles), catalog); err != nil {
+				return nil, err
+			}
 		}
 	}
 	out.Spec.Harnesses = nil
@@ -325,25 +363,59 @@ func (s formSource) entry(field string, base *config.Source) (config.Source, err
 	return out, nil
 }
 
+// baseRole is the base role a form role edits: the one of the same name,
+// else of the same source and path; nil for a new role.
+func baseRole(r formRole, base []config.Role) *config.Role {
+	name := strings.TrimSpace(r.Name)
+	for i := range base {
+		if base[i].Name == name {
+			return &base[i]
+		}
+	}
+	for i := range base {
+		if base[i].Source == r.Source && base[i].Path == r.Path {
+			return &base[i]
+		}
+	}
+	return nil
+}
+
+// applyConnectors changes the role entry entry of team where a switch
+// differs from have, the base entry (nil for a new role): enabled where
+// have does not enable the connector, disabled where it does, or a new
+// identity. An untouched switch writes nothing, so a legacy needs.secrets
+// opt-in keeps its spelling.
+func (r formRole) applyConnectors(
+	team *config.Team, entry, have *config.Role, catalog *connector.Catalog,
+) error {
+	for _, item := range r.Connectors {
+		name := strings.TrimSpace(item.Name)
+		conn, known := catalog.Find(name)
+		was := known && initialize.RoleConnectorSet(have, conn)
+		identity := strings.TrimSpace(item.Identity)
+		var current string
+		if have != nil {
+			current = have.Connectors[name].Identity
+		}
+		var err error
+		switch {
+		case item.Enabled && (!was || identity != current):
+			err = initialize.EnableRoleConnector(team, catalog, entry.Name, name, &identity)
+		case !item.Enabled && was:
+			err = initialize.DisableRoleConnector(team, catalog, entry.Name, name)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // role is the form's role over the base role of the same name, else of the
 // same source and path.
 func (r formRole) role(base []config.Role) config.Role {
 	name := strings.TrimSpace(r.Name)
-	var have *config.Role
-	for i := range base {
-		if base[i].Name == name {
-			have = &base[i]
-			break
-		}
-	}
-	if have == nil {
-		for i := range base {
-			if base[i].Source == r.Source && base[i].Path == r.Path {
-				have = &base[i]
-				break
-			}
-		}
-	}
+	have := baseRole(r, base)
 	var out config.Role
 	if have != nil {
 		out = *have

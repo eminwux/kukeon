@@ -14,7 +14,8 @@ export type TeamSummary = {
 };
 export type FormSource = { alias: string; stored?: string; url?: string; refKind?: string; ref?: string; clonePath?: string; identity?: string };
 export type FormTask = { name: string; schedule?: string; suspend: boolean | null; args?: string };
-export type FormRole = { name: string; source: string; path: string; harness?: string; initialPath?: string; image: string[]; tasks: { all: boolean; items: FormTask[] } };
+export type FormRoleConnector = { name: string; enabled: boolean; identity?: string };
+export type FormRole = { name: string; source: string; path: string; harness?: string; initialPath?: string; image: string[]; tasks: { all: boolean; items: FormTask[] }; connectors?: FormRoleConnector[] };
 export type FormHarness = { name: string; source: string; path: string };
 export type FormConnector = { method?: string; identity?: string };
 export type TeamForm = {
@@ -30,13 +31,18 @@ export type ViewRole = {
 export type ScheduleSpec = { cron: string; timezone?: string; concurrencyPolicy?: string; startingDeadlineSeconds?: number; suspend?: boolean };
 export type ScheduleState = { lastScheduleTime?: string; nextScheduleTime?: string; lastCell?: string; activeCells?: string[]; skippedFires?: number; lastError?: string };
 export type ViewTask = { role: string; task: string; config: string; scope: string[]; schedule?: ScheduleSpec; status?: ScheduleState };
+// RoleConnectorView is one connector a Config of the team resolves (#1649): a row of kuke team connector list.
+export type RoleConnectorView = {
+  role: string; config: string; task?: string; connector: string; method?: string; state: string;
+  identity?: string; origin?: string; required?: boolean; fill: string; setByTeam: boolean;
+};
 export type ViewConfig = { name: string; scope: string[]; role?: string; task?: string };
 export type TeamDetail = {
   project?: ViewSource;
   sources: { inherited: boolean; items: ViewSource[] };
   roles: { inherited: boolean; items: ViewRole[] };
   harnesses: { inherited: boolean; items: FormHarness[] };
-  connectors: { inherited: boolean; items: { name: string; method?: string; identity?: string }[] };
+  connectors: { inherited: boolean; items: { name: string; method?: string; identity?: string }[]; roles?: RoleConnectorView[] };
   tasks: ViewTask[]; configs: ViewConfig[]; unresolved?: string;
 };
 export type TeamView = { summary: TeamSummary; document: string; view?: TeamDetail; form?: TeamForm; problem?: string };

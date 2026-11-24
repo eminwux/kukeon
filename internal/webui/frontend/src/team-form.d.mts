@@ -1,4 +1,4 @@
-import type { Draft, DraftSource, FormSource, TeamForm } from "./teams.mjs";
+import type { Draft, DraftSource, FormRoleConnector, FormSource, RoleConnectorView, TeamForm } from "./teams.mjs";
 
 export const projectAlias: string;
 export const projectModes: string[];
@@ -39,6 +39,10 @@ export function tasksErrors(form: TeamForm | undefined): string[];
 export function stepErrors(key: string, state: WizardState): string[];
 export function withConnector(form: TeamForm, name: string, patch: { method?: string; identity?: string }, inherited?: Record<string, { method?: string; identity?: string }>): TeamForm;
 export function withConnectorsInherit(form: TeamForm, inherit: boolean): TeamForm;
+export type RoleConnectorRow = { name: string; title: string; enabled: boolean; identity: string; required: boolean; states: { config: string; state: string; fill: string }[] };
+export function togglable(connector: { harness?: string; delivery?: string } | undefined): boolean;
+export function roleConnectorRows(role: { name: string; connectors?: FormRoleConnector[] } | undefined, connectors: { name: string; title?: string; harness?: string; delivery?: string }[] | undefined, viewRows?: RoleConnectorView[]): RoleConnectorRow[];
+export function withRoleConnector(form: TeamForm, roleIndex: number, name: string, patch: { enabled?: boolean; identity?: string }): TeamForm;
 export function createBody(project: Partial<ProjectInput>, draft: Draft | undefined, form: TeamForm, force?: boolean): Record<string, unknown>;
 export function editBody(name: string, form: TeamForm): { name: string; form: TeamForm };
 export function gitIdentities(secrets: unknown, connectors: unknown): string[];

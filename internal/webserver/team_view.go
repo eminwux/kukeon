@@ -26,6 +26,7 @@ import (
 	"github.com/eminwux/kukeon/internal/team/initialize"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/config"
+	"github.com/eminwux/kukeon/pkg/team/connector"
 )
 
 // The team view (#1644, AC3): a stored team as it composes, read without a
@@ -103,9 +104,13 @@ type teamConnectorView struct {
 	Identity string `json:"identity,omitempty"`
 }
 
+// viewConnectors are the team's connector choices (spec.connectors) and,
+// in Roles, what each Config of the team resolves per connector (#1649,
+// AC8): the rows of kuke team connector list.
 type viewConnectors struct {
-	Inherited bool                `json:"inherited"`
-	Items     []teamConnectorView `json:"items"`
+	Inherited bool                       `json:"inherited"`
+	Items     []teamConnectorView        `json:"items"`
+	Roles     []initialize.RoleConnector `json:"roles"`
 }
 
 // viewTask is one task Config the team rendered: its role and task, its
@@ -150,13 +155,16 @@ func identityName(g *config.SourceGit) string {
 // teamViewOf builds the view of a resolved team.
 //
 //nolint:funlen // one pass per list the page shows, in the page's order
-func teamViewOf(r *initialize.ResolvedTeam) teamDetailView {
+func teamViewOf(r *initialize.ResolvedTeam, catalog *connector.Catalog) teamDetailView {
 	stored, defaults := r.Stored, r.Defaults.Spec.Defaults
 	out := teamDetailView{
-		Sources:    viewSources{Inherited: stored.Spec.Sources == nil, Items: []viewSource{}},
-		Roles:      viewRoles{Inherited: stored.Spec.Roles == nil, Items: []viewRole{}},
-		Harnesses:  viewHarnesses{Inherited: stored.Spec.Harnesses == nil, Items: []formHarness{}},
-		Connectors: viewConnectors{Inherited: stored.Spec.Connectors == nil, Items: []teamConnectorView{}},
+		Sources:   viewSources{Inherited: stored.Spec.Sources == nil, Items: []viewSource{}},
+		Roles:     viewRoles{Inherited: stored.Spec.Roles == nil, Items: []viewRole{}},
+		Harnesses: viewHarnesses{Inherited: stored.Spec.Harnesses == nil, Items: []formHarness{}},
+		Connectors: viewConnectors{
+			Inherited: stored.Spec.Connectors == nil, Items: []teamConnectorView{},
+			Roles: initialize.RoleConnectorsOf(stored, r.Configs, catalog),
+		},
 		Tasks:      []viewTask{},
 		Configs:    []viewConfig{},
 		Unresolved: r.Unresolved,

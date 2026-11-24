@@ -662,6 +662,8 @@ td .ask-majordomo { margin-left: 8px; vertical-align: middle; }
 .health-last-error { color: var(--status-error); overflow-wrap: anywhere; }
 .health-enable { margin-top: 12px; padding: 12px; border: 1px solid var(--status-warning-line); border-radius: 7px; background: var(--status-warning-bg); font-size: var(--font-md); }
 .health-enable p { margin: 6px 0; }
+.health-filing { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 7px; font-size: var(--font-md); }
+.health-filing p { margin: 4px 0; overflow-wrap: anywhere; }
 .health-enable pre, .health-finding pre, .health-body pre { margin: 6px 0; padding: 10px; border-radius: 6px; background: var(--code); font-family: var(--mono); font-size: var(--font-sm); min-height: 0; max-height: 360px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .health-sweep-started { margin-top: 12px; padding: 10px 12px; border-radius: 6px; background: var(--status-ok-bg); color: var(--status-ok); font-size: var(--font-sm); }
 .health-sweep-started p { margin: 0; }

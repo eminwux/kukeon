@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   availableSources, createBody, cronErrors, draftPayload, editBody, emptyProject, gitIdentities, initialPathValid, inspectRequest, projectErrors, rolesErrors, sourcesErrors, stepErrors, stepsFor,
-  suspendOf, switchOf, taskRows, tasksErrors, withAllTasks, withConnector, withConnectorsInherit, withHarness, withInherit, withProject, withRole, withRolePatch, withSource, withTask,
+  roleConnectorRows, suspendOf, switchOf, taskRows, tasksErrors, togglable, withAllTasks, withConnector, withConnectorsInherit, withHarness, withInherit, withProject, withRole,
+  withRoleConnector, withRolePatch, withSource, withTask,
 } from "./team-form.mjs";
 
 // form is a team's form as GET /api/teams/{name} returns it.
@@ -151,4 +152,48 @@ test("git identities are the Secrets of realm default of the connectors delivere
   const connectors = [{ name: "git", delivery: "git" }, { name: "claude", methods: [] }];
   assert.deepEqual(gitIdentities(secrets, connectors), ["a", "b"]);
   assert.deepEqual(gitIdentities(secrets, []), []);
+});
+
+// catalog is GET /api/connectors, as far as per-role access reads it.
+const catalog = [
+  { name: "claude", title: "Claude", harness: "claude", methods: [{ name: "login" }] },
+  { name: "git", title: "Git", delivery: "git", methods: [] },
+  { name: "github", title: "GitHub", methods: [{ name: "token", component: "github" }] },
+  { name: "registry", title: "Registry", delivery: "registry", methods: [] },
+];
+
+test("per-role access offers the connectors a team can give a role (#1649 D3)", () => {
+  assert.deepEqual(catalog.filter(togglable).map(c => c.name), ["git", "github"]);
+  const role = { name: "majordomo", connectors: [{ name: "github", enabled: true, identity: "bot-token" }] };
+  const view = [
+    { role: "majordomo", config: "kuke-majordomo-claude", connector: "github", state: "unresolved", fill: "MISSING", setByTeam: true },
+    { role: "majordomo", config: "kuke-majordomo-claude", connector: "git", state: "resolved", fill: "id (realm)", setByTeam: false },
+    { role: "other", config: "x", connector: "github", state: "resolved", fill: "-", setByTeam: false },
+  ];
+  const rows = roleConnectorRows(role, catalog, view);
+  assert.deepEqual(rows.map(row => [row.name, row.enabled, row.identity, row.required]), [["git", false, "", true], ["github", true, "bot-token", false]]);
+  assert.deepEqual(rows[1].states, [{ config: "kuke-majordomo-claude", state: "unresolved", fill: "MISSING" }]);
+  assert.deepEqual(roleConnectorRows({ name: "new" }, catalog).map(row => row.enabled), [false, false], "a new role has every switch off");
+});
+
+test("a per-role switch and identity change only that role's item", () => {
+  const start = form();
+  let next = withRoleConnector(start, 0, "github", { enabled: true });
+  assert.deepEqual(next.roles.items[0].connectors, [{ name: "github", enabled: true, identity: "" }]);
+  assert.equal(start.roles.items[0].connectors, undefined, "the reducer does not change its input");
+  next = withRoleConnector(next, 0, "github", { identity: " bot-token " });
+  assert.deepEqual(next.roles.items[0].connectors, [{ name: "github", enabled: true, identity: "bot-token" }]);
+  next = withRoleConnector(next, 0, "github", { enabled: false });
+  assert.deepEqual(next.roles.items[0].connectors, [{ name: "github", enabled: false, identity: "bot-token" }]);
+  assert.equal(withRoleConnector(start, 5, "github", { enabled: true }), start, "an unknown role changes nothing");
+  // The edit body is the form: the server applies the items that differ from the stored team.
+  assert.deepEqual(editBody("web", next).form.roles.items[0].connectors, next.roles.items[0].connectors);
+});
+
+test("a role selected again keeps its connector switches", () => {
+  const withSwitch = { ...form(), roles: { inherit: false, items: [{ ...form().roles.items[0], connectors: [{ name: "github", enabled: true }] }] } };
+  const kept = withInherit(withSwitch, "roles", false);
+  assert.deepEqual(kept.roles.items[0].connectors, [{ name: "github", enabled: true }]);
+  const fromDefaults = withInherit({ ...form(), roles: { inherit: true, items: [] } }, "roles", false, [{ name: "majordomo", source: "kukeon", path: "team/roles/majordomo", connectors: [{ name: "github", enabled: true, identity: "x" }] }]);
+  assert.deepEqual(fromDefaults.roles.items[0].connectors, [{ name: "github", enabled: true, identity: "x" }]);
 });
