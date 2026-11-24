@@ -822,11 +822,14 @@ EOF
 
 # print_web_ui_login prints how to open the web UI and log in (issue #1652).
 # The password is read back from the web-ui-admin Secret `kuke init` creates.
-# When the secret is absent or unreadable — the installer skipped `kuke init`
-# on a host whose daemon was already running — it says to run init once.
+# When the secret is absent or unreadable — KUKE_SKIP_INIT=1, or the installer
+# skipped `kuke init` on a host whose daemon was already running — it says to
+# run init once. The lookup failing is an expected outcome, not an install
+# failure: under `set -euo pipefail` its non-zero status would otherwise abort
+# the script here, after a successful install, so it is tolerated explicitly.
 print_web_ui_login() {
     _web_password="$($SUDO kuke get secret web-ui-admin --realm kuke-system -o json 2>/dev/null \
-        | sed -n 's/^.*"password": *"\([^"]*\)".*$/\1/p' | head -n 1)"
+        | sed -n 's/^.*"password": *"\([^"]*\)".*$/\1/p' | head -n 1)" || _web_password=""
     if [ -n "$_web_password" ]; then
         cat <<EOF
 
