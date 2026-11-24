@@ -34,8 +34,12 @@ func setupTestClientForNamespaces(t *testing.T) ctr.Client {
 }
 
 // TestDeleteNamespaceValidation tests DeleteNamespace input validation.
+//
+// The subtests that pass validation dial /test/socket and wait out containerd's
+// 10s dial timeout. Connect() holds a per-client lock, so each parallel subtest
+// gets its own client; a shared one would still dial one after another.
 func TestDeleteNamespaceValidation(t *testing.T) {
-	client := setupTestClientForNamespaces(t)
+	t.Parallel()
 
 	tests := []struct {
 		name       string
@@ -58,6 +62,8 @@ func TestDeleteNamespaceValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			client := setupTestClientForNamespaces(t)
 			err := client.DeleteNamespace(tt.namespace)
 
 			if tt.wantErr {
@@ -81,7 +87,7 @@ func TestDeleteNamespaceValidation(t *testing.T) {
 
 // TestCleanupNamespaceResourcesValidation tests CleanupNamespaceResources input handling.
 func TestCleanupNamespaceResourcesValidation(t *testing.T) {
-	client := setupTestClientForNamespaces(t)
+	t.Parallel()
 
 	// CleanupNamespaceResources doesn't have explicit validation for empty namespace,
 	// but we can test that it handles it appropriately
@@ -113,6 +119,8 @@ func TestCleanupNamespaceResourcesValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			client := setupTestClientForNamespaces(t)
 			err := client.CleanupNamespaceResources(tt.namespace, tt.snapshotter)
 			// CleanupNamespaceResources doesn't validate inputs, so errors are from containerd operations
 			// We just verify it doesn't panic

@@ -3,7 +3,7 @@
 ![status: active](https://img.shields.io/badge/status-active-blue)
 ![state: beta](https://img.shields.io/badge/state-beta-yellow)
 ![license: apache2](https://img.shields.io/badge/license-Apache%202.0-green)
-[![Test](https://github.com/eminwux/kukeon/actions/workflows/test.yaml/badge.svg?branch=main)](https://github.com/eminwux/kukeon/actions/workflows/test.yaml)
+[![Edge Build](https://github.com/eminwux/kukeon/actions/workflows/edge.yaml/badge.svg?branch=main)](https://github.com/eminwux/kukeon/actions/workflows/edge.yaml)
 
 _Self-hosted runtime for AI coding agents on your own Linux host._
 

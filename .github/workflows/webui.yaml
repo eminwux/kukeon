@@ -39,6 +39,12 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels the run for the previous push. Runs on
+# main are keyed on their commit and are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   web-ui:
     name: Embedded web UI

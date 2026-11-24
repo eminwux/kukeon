@@ -12,8 +12,17 @@ it, and the command that runs the same check locally.
 | `webui.yaml`     | `internal/webui/**`, `internal/webserver/**`, `Makefile`, …   | `make web-ui-check` and `make web-ui-test`                          |
 | `harnesses.yaml` | `team/harnesses/**`, `pkg/team/harness/**`, `team/team.mk`, … | `make test-harnesses`                                               |
 | `installer.yaml` | `scripts/install.sh`, `docs/site/install.sh`, `Makefile`      | `make install.sh`, then `git diff --exit-code docs/site/install.sh` |
+| `mkdocs.yaml`    | `docs/site/**`, `mkdocs.yml`                                  | `mkdocs build`                                                      |
 
 The workflow files hold the full path lists.
+
+These run on pull requests. On `main`, `test.yaml` runs as the `test` job of
+`edge.yaml`, which publishes the edge build only when it passes; the other
+workflows run again on the merged commit. A new push to a pull request cancels
+the runs still in progress for the previous push.
+
+CI runs `make web-ui-test` with four Playwright workers (it sets `CI`); a local
+run uses one. To reproduce a CI-only failure, run `CI=1 make web-ui-test`.
 
 ## `make fmt-check`
 

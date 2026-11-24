@@ -26,19 +26,16 @@ on:
       - "Makefile"
       - "Dockerfile"
       - ".github/workflows/test.yaml"
-  push:
-    branches:
-      - main
-    paths:
-      - "**/*.go"
-      - "cmd/kuke/apply/testdata/**"
-      - "**/go.mod"
-      - "**/go.sum"
-      - "go.work"
-      - "go.work.sum"
-      - "Makefile"
-      - "Dockerfile"
-      - ".github/workflows/test.yaml"
+  # There is no `push` trigger: on main these jobs run as the `test` job of
+  # edge.yaml, which publishes the edge build only when they pass. A second
+  # run from a push trigger here would test the same commit twice.
+  workflow_call:
+
+# A new push to a pull request cancels the run for the previous push. A run
+# called from edge.yaml is keyed on its commit and is never cancelled.
+concurrency:
+  group: test-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Both jobs only check out the repo and run tests — no PR comments, no
 # release artifacts, no remote pushes. The minimal read-only default

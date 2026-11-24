@@ -41,7 +41,11 @@ func TestNewClient(t *testing.T) {
 	}
 }
 
-func TestClientConnect(_ *testing.T) {
+// The tests below that call Connect() against /test/socket each wait out
+// containerd's 10s dial timeout. They run in parallel so the package pays for
+// the slowest of them instead of their sum.
+func TestClientConnect(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	client := ctr.NewClient(ctx, logger, "/test/socket")
@@ -67,6 +71,7 @@ func TestClientClose(t *testing.T) {
 }
 
 func TestClientConnectionState(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	client := ctr.NewClient(ctx, logger, "/test/socket")
