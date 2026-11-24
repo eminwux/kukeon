@@ -18,7 +18,7 @@
         <link rel="prev" href="../kuke-team/">
       
       
-        <link rel="next" href="../kuke-team-add/">
+        <link rel="next" href="../kuke-source/">
       
       
         
@@ -2545,6 +2545,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Upgrading the kuke team">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#kinds-and-compatibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kinds and compatibility
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2596,14 +2613,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../kuke-team-add/" class="md-nav__link">
+      <a href="../kuke-source/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    kuke team add
+    kuke source
   
 
     
@@ -3085,6 +3102,34 @@
     
   
     CellConfig manifest
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../manifests/source/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Source manifest
   
 
     
@@ -3714,6 +3759,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Upgrading the kuke team">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#kinds-and-compatibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kinds and compatibility
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -3777,10 +3839,11 @@ the <code>Team</code> with the Configs composed from it. <code>init</code> creat
 starts nothing; launch a composed cell explicitly with kuke afterwards (for
 example <code>kuke run --from-config kuke-majordomo-codex</code>).</p>
 <p><code>kuke</code> is the operator's system team, named after the <code>kuke-</code> system prefix
-(cf. the <code>kuke-system</code> realm). The name is reserved: <code>kuke team add</code> refuses it
+(cf. the <code>kuke-system</code> realm). The name is reserved: <code>kuke create team</code> refuses it
 and <code>kuke delete team</code> refuses to delete it, so a project team — including
 kukeon's own, which is named <code>kukeon</code> — can never take over its configs.</p>
-<p>To add a project team after <code>init</code>, use <a href="../kuke-team-add/"><code>kuke team add</code></a>.
+<p>To create a project team after <code>init</code>, use
+<a href="../kuke-create/#kuke-create-team"><code>kuke create team</code></a>.
 For the other team verbs see <a href="../kuke-team/"><code>kuke team</code></a>; for the composition
 model, see <a href="../../concepts/team/">Teams</a>.</p>
 <h2 id="flags">Flags<a class="headerlink" href="#flags" title="Permanent link">&para;</a></h2>
@@ -3806,7 +3869,7 @@ model, see <a href="../../concepts/team/">Teams</a>.</p>
 <tr>
 <td><code>--upgrade</code></td>
 <td><code>false</code></td>
-<td>Re-pin the <code>kukeon</code> source of the stored <code>kuke</code> team and of the <code>TeamDefaults</code> to this <code>kuke</code>'s revision and recompose the <code>kuke</code> team. See <a href="#upgrading-the-kuke-team">Upgrading the kuke team</a>. Excludes <code>--force</code> and <code>--reapply</code>.</td>
+<td>Re-pin the stored <code>kukeon</code> Source to this <code>kuke</code>'s revision, convert state stored before Sources were a kind, and recompose the <code>kuke</code> team. See <a href="#upgrading-the-kuke-team">Upgrading the kuke team</a>. Excludes <code>--force</code> and <code>--reapply</code>.</td>
 </tr>
 <tr>
 <td><code>--host</code></td>
@@ -3834,11 +3897,14 @@ kukeond endpoint and the <code>ClientConfiguration</code> themselves.</p>
 <p><code>kuke team init --force</code> applies the initial <code>kuke</code> team, replacing the stored
 declaration. Recorded secret bindings are not kept by <code>--force</code>: it starts
 again from the initial declaration.</p>
-<p>When the <code>default</code> realm has no <code>TeamDefaults</code>, init creates one in the same
-apply, with the <code>kukeon</code> source (at the same revision as the <code>kuke</code> team, below)
-and its <code>codex</code> and <code>claude</code> harnesses and no default roles, so a project team needs only roles. An existing <code>TeamDefaults</code>
-is never changed, with or without <code>--force</code>, except for its <code>kukeon</code> source's
-revision by <code>--upgrade</code>. See
+<p>In the same apply, init stores the <a href="../../manifests/source/">Source</a> <code>kukeon</code>
+(<code>github.com/eminwux/kukeon</code> at the revision below) unless one of that name is
+stored, and, when the <code>default</code> realm has no <code>TeamDefaults</code>, creates one with
+the <code>codex</code> and <code>claude</code> harnesses of that Source and no default roles, so a
+project team needs only roles. The <code>TeamDefaults</code> holds no sources: the sources
+its harnesses name are stored Sources (<code>kuke get sources</code>). An existing
+<code>TeamDefaults</code> is never changed, with or without <code>--force</code>, except by
+<code>--upgrade</code>. See
 <a href="../../concepts/team/#sources-and-defaults">Sources and defaults</a>.</p>
 <p>The command fetches only the sources used by the selected role/harness
 definitions into temporary Git checkouts, and composes the kuke team's
@@ -3848,8 +3914,9 @@ explicitly; no checkout in the current directory is used. Fetched definitions
 are removed after the invocation.</p>
 <p>The initial declaration contains the majordomo selections directly, so the
 <code>kuke</code> team does not depend on the defaults. The majordomo role and both
-harnesses come from the kukeon repository (<code>team/roles/</code> and <code>team/harnesses/</code>).
-<code>kuke get team kuke -o yaml</code> prints it:</p>
+harnesses come from the kukeon repository (<code>team/roles/</code> and <code>team/harnesses/</code>),
+which the team names by its stored Source: the entry carries no address and
+no ref, so it reads the Source's. <code>kuke get team kuke -o yaml</code> prints it:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Team</span>
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nt">metadata</span><span class="p">:</span>
@@ -3857,35 +3924,44 @@ harnesses come from the kukeon repository (<code>team/roles/</code> and <code>te
 <a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
 <a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="nt">spec</span><span class="p">:</span>
 <a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span><span class="nt">sources</span><span class="p">:</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kukeon</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">      </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">github.com/eminwux/kukeon</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">      </span><span class="nt">tag</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v0.10.0</span><span class="w"> </span><span class="c1"># the revision this kuke was built from</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">      </span><span class="nt">clonePath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/home/user/kukeon-src</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">  </span><span class="nt">roles</span><span class="p">:</span>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">majordomo</span>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="w">      </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kukeon</span>
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">team/roles/majordomo</span>
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="w">      </span><span class="nt">initialPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">$HOME</span>
-<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="w">      </span><span class="nt">needs</span><span class="p">:</span>
-<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="w">        </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">go</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="w">  </span><span class="nt">harnesses</span><span class="p">:</span>
-<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">codex</span>
-<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a><span class="w">      </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kukeon</span>
-<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">team/harnesses/codex</span>
-<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude</span>
-<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a><span class="w">      </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kukeon</span>
-<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">team/harnesses/claude</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kukeon</span><span class="w"> </span><span class="c1"># the stored Source kukeon, at its ref</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">      </span><span class="nt">clonePath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/home/user/kukeon-src</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">  </span><span class="nt">roles</span><span class="p">:</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">majordomo</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">      </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kukeon</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">team/roles/majordomo</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="w">      </span><span class="nt">initialPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">$HOME</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="w">      </span><span class="nt">needs</span><span class="p">:</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="w">        </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">go</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="w">  </span><span class="nt">harnesses</span><span class="p">:</span>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">codex</span>
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="w">      </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kukeon</span>
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">team/harnesses/codex</span>
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude</span>
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a><span class="w">      </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kukeon</span>
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">team/harnesses/claude</span>
 </code></pre></div>
-<p>The <code>kukeon</code> source is pinned to the revision the running <code>kuke</code> was built
+<p><code>kuke get source kukeon -o yaml</code> prints the Source it reads:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Source</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kukeon</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">  </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">github.com/eminwux/kukeon</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">  </span><span class="nt">tag</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v0.10.0</span><span class="w"> </span><span class="c1"># the revision this kuke was built from</span>
+</code></pre></div>
+<p>The <code>kukeon</code> Source is pinned to the revision the running <code>kuke</code> was built
 from, because <code>kuke</code> reads exactly one schema version of the documents it
 fetches: a release build pins its tag, a development build pins the clean
 commit it was built from, and only a build that knows neither (a dirty tree,
 or no VCS stamp) falls back to <code>branch: main</code>. When a fetched document is
 rejected anyway, the error names each fetched source with its URL and
 revision. A source revision and the binary then disagree on schema version.
-A stored <code>kuke</code> team (<code>--reapply</code>) and an existing <code>TeamDefaults</code> keep the
-revision they were stored with until <code>kuke team init --upgrade</code>, which
-<a href="../kuke-update/"><code>kuke update</code></a> and the installer run.</p>
+The stored Source keeps the revision it was stored with — for the <code>kuke</code> team
+(<code>--reapply</code>) and for every team that reads it — until
+<code>kuke team init --upgrade</code>, which <a href="../kuke-update/"><code>kuke update</code></a> and the
+installer run.</p>
 <p>This applies the shared blueprints <code>codex</code> and <code>claude</code> — one per harness ×
 security profile, realm-wide, see <a href="../../concepts/team/#shared-blueprints">Teams</a> —
 and the CellConfigs <code>kuke-majordomo-codex</code> and <code>kuke-majordomo-claude</code>, labelled
@@ -3927,16 +4003,17 @@ git configuration. It writes no <code>spec.defaults.git</code> on the team's sta
 names (<code>spec.defaults.git.identityRef</code>), unless the team names one for its
 Configs (<code>connectors.git.identity</code>). Store yours once and make it the Realm
 default:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>kuke<span class="w"> </span>connector<span class="w"> </span>import<span class="w"> </span>git<span class="w"> </span>--default
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>kuke<span class="w"> </span>connector<span class="w"> </span>import<span class="w"> </span>git<span class="w"> </span>--default
 </code></pre></div>
 <p>See <a href="../kuke-connector/#kuke-connector-import-git"><code>kuke connector import git</code></a>.
-A source may still state its own identity (<code>sources[].git</code>: author, committer,
-credential, signing), which is rendered into that repo's fill of each
-CellConfig.</p>
+A stored <a href="../../manifests/source/">Source</a> may state its own identity
+(<code>spec.git</code>: <code>identityRef</code>, author, committer, credential, signing), which is
+rendered into that repo's fill of each CellConfig; a team entry carries no
+<code>git</code> of its own.</p>
 <p>When the team clones a source over SSH that states no credential of its own,
 no Realm, Space or Stack default names a git identity, and no Config names its
 own, init prints one note:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>no git identity is set; run kuke connector import git --default
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>no git identity is set; run kuke connector import git --default
 </code></pre></div>
 <p>A role's <code>needs.mounts: [ssh]</code> mounts nothing; init prints a note for it.</p>
 <p>A <code>TeamDefaults</code> has no <code>spec.git</code>; a document that still has one fails to
@@ -3961,12 +4038,12 @@ are checked before the first create, and shared runtime identities are created
 once. Creation happens before dependent blueprints and configs are applied.
 Credentials and remote secret-error text are never printed or stored in the
 Team or the blueprint/config request.</p>
-<p>A missing secret without a creation source does not fail init or add. The
+<p>A missing secret without a creation source does not fail init or <code>kuke create team</code>. The
 blueprints/configs are still applied and the team stored (kukeond resolves
 secret references only when a cell launches), and the command exits 0 after
 listing each missing runtime secret once:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Missing secrets (cells will not start until they exist):
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>  provider-account  →  kuke create secret provider-account --realm auth --space shared --stack operators --from-file /path/to/token
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Missing secrets (cells will not start until they exist):
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>  provider-account  →  kuke create secret provider-account --realm auth --space shared --stack operators --from-file /path/to/token
 </code></pre></div>
 <p>Create them before launching cells; no rerun is needed. <code>kuke run</code> still fails
 on a cell whose secret is absent. The actual command uses the binding's
@@ -3980,10 +4057,10 @@ Secret rotation is not an init action; rotate explicitly with kuke.</p>
 <h2 id="editing-and-reapplying-the-kuke-team">Editing and reapplying the kuke team<a class="headerlink" href="#editing-and-reapplying-the-kuke-team" title="Permanent link">&para;</a></h2>
 <p>The stored <code>kuke</code> Team is the team's editable source. Edit it and apply it,
 for example to <a href="../../concepts/team/#the-majordomo-health-sweep">turn on the health sweep</a>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>kuke<span class="w"> </span>get<span class="w"> </span>team<span class="w"> </span>kuke<span class="w"> </span>-o<span class="w"> </span>yaml<span class="w"> </span>&gt;<span class="w"> </span>kuke.yaml
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nv">$EDITOR</span><span class="w"> </span>kuke.yaml
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>kuke<span class="w"> </span>team<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>kuke.yaml<span class="w"> </span>--dry-run<span class="w">   </span><span class="c1"># preview</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>kuke<span class="w"> </span>team<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>kuke.yaml
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>kuke<span class="w"> </span>get<span class="w"> </span>team<span class="w"> </span>kuke<span class="w"> </span>-o<span class="w"> </span>yaml<span class="w"> </span>&gt;<span class="w"> </span>kuke.yaml
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nv">$EDITOR</span><span class="w"> </span>kuke.yaml
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>kuke<span class="w"> </span>team<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>kuke.yaml<span class="w"> </span>--dry-run<span class="w">   </span><span class="c1"># preview</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>kuke<span class="w"> </span>team<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>kuke.yaml
 </code></pre></div>
 <p>The web UI's Teams page does the same: edit the declaration as YAML, preview,
 apply. <code>kuke team init --reapply</code> (equal to <code>kuke team apply kuke</code>) recomposes
@@ -4009,37 +4086,55 @@ Successful resources and created secrets are not rolled back: rerun
 <code>kuke team init --force</code> (or <code>--reapply</code>) after fixing the prerequisite to
 converge the same <code>kuke</code> identity.</p>
 <h2 id="upgrading-the-kuke-team">Upgrading the kuke team<a class="headerlink" href="#upgrading-the-kuke-team" title="Permanent link">&para;</a></h2>
-<p><code>kuke team init --upgrade</code> moves the stored <code>kuke</code> team to the revision the
-running <code>kuke</code> was built from: the release tag for a stable build, the build
-commit for an edge build. <a href="../kuke-update/"><code>kuke update</code></a> runs it with the new
-binary after the daemon is back, and the one-line installer runs it on a host
-that already has a daemon.</p>
+<p><code>kuke team init --upgrade</code> moves the stored <code>kukeon</code> Source to the revision
+the running <code>kuke</code> was built from — the release tag for a stable build, the
+build commit for an edge build — and recomposes the <code>kuke</code> team.
+<a href="../kuke-update/"><code>kuke update</code></a> runs it with the new binary after the daemon is
+back, and the one-line installer runs it on a host that already has a daemon.</p>
 <ul>
-<li>It reads the stored <code>kuke</code> Team and the <code>TeamDefaults</code> of realm <code>default</code>. In
-  each, the source named <code>kukeon</code> whose URL is <code>github.com/eminwux/kukeon</code> gets
-  the new <code>branch</code>, <code>tag</code> and <code>commit</code>; its <code>clonePath</code>, <code>git</code> and every other
-  field are kept. A <code>kukeon</code> source with another URL is the operator's: it is
-  left alone and named in a note.</li>
-<li>When both pins already match, it prints
-  <code>kuke team and defaults already at &lt;revision&gt;</code> and exits 0 without fetching
-  or applying anything.</li>
-<li>Otherwise the re-pinned team and, when it changed, the re-pinned
-  <code>TeamDefaults</code> land in one apply and the <code>kuke</code> team is recomposed.
-  <code>spec.secrets</code> and every other field of the stored Team are kept.</li>
-<li>It prints one line per changed document
-  (<code>kuke team: kukeon source commit &lt;old&gt; -&gt; commit &lt;new&gt;</code>) and, when the
-  defaults changed, every other stored team that inherits them, with
-  <code>kuke team apply NAME</code> to recompose it. Those teams are not recomposed.</li>
-<li>It never creates the <code>kuke</code> team. Without one, it re-pins only the
-  <code>TeamDefaults</code> (if any) and prints
+<li>It reads the stored Source <code>kukeon</code>, the stored <code>kuke</code> Team and the
+  <code>TeamDefaults</code> of realm <code>default</code>. When the Source's address is
+  <code>github.com/eminwux/kukeon</code> (over any transport), it gets the new <code>branch</code>,
+  <code>tag</code> and <code>commit</code>; its <code>git</code> is kept. A <code>kukeon</code> Source with another address
+  is the operator's: it is left alone and named in a note.</li>
+<li>It converts what was stored before Sources were a kind. A <code>TeamDefaults</code> with
+  <code>spec.defaults.sources</code> has each listed source stored as a Source (unless one
+  of the name is) and the list cleared, with the note
+  <code>converted N registered sources to Source documents</code>; a source that was
+  cloned anywhere but <code>/home/user/&lt;name&gt;</code> adds a note naming the path and
+  <code>spec.sources[].clonePath</code>, since a Source has no clone path. The <code>kuke</code>
+  team's <code>kukeon</code> entry, which carried kukeon's address and pin, becomes a
+  reference to the stored Source (note
+  <code>kuke team: its kukeon entry now reads the stored kukeon Source</code>), keeping
+  its <code>clonePath</code>.</li>
+<li>When nothing changes, it prints <code>Source kukeon already at &lt;revision&gt;</code> and
+  exits 0 without fetching or applying anything.</li>
+<li>Otherwise the Sources, the converted <code>TeamDefaults</code> and the <code>kuke</code> team land
+  in one apply and the <code>kuke</code> team is recomposed. <code>spec.secrets</code> and every
+  other field of the stored Team are kept.</li>
+<li>It prints one line per change (<code>Source kukeon: commit &lt;old&gt; -&gt; commit &lt;new&gt;</code>)
+  and every other stored team that inherits the defaults, with
+  <code>kuke team apply NAME</code> to recompose it. Those teams are not recomposed, and
+  any team that reads the <code>kukeon</code> Source sees the new revision only when it is.</li>
+<li>It never creates the <code>kuke</code> team. Without one, it re-pins and converts only
+  the Sources and the <code>TeamDefaults</code> (if any) and prints
   <code>team kuke is not stored; run kuke team init to create it</code>.</li>
 <li>It does not merge a newer majordomo declaration (a new role need, a new
   harness) into the stored team; <code>--force</code> does that.</li>
 </ul>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>kuke<span class="w"> </span>team<span class="w"> </span>init<span class="w"> </span>--upgrade
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>kuke<span class="w"> </span>get<span class="w"> </span>team<span class="w"> </span>kuke<span class="w"> </span>-o<span class="w"> </span>yaml<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-A3<span class="w"> </span><span class="s1">'name: kukeon'</span><span class="w">   </span><span class="c1"># the binary's revision</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>kuke<span class="w"> </span>team<span class="w"> </span>init<span class="w"> </span>--upgrade<span class="w">                               </span><span class="c1"># kuke team and defaults already at ...</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>kuke<span class="w"> </span>team<span class="w"> </span>init<span class="w"> </span>--upgrade
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>kuke<span class="w"> </span>get<span class="w"> </span>sources<span class="w">                    </span><span class="c1"># kukeon at the binary's revision</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>kuke<span class="w"> </span>team<span class="w"> </span>init<span class="w"> </span>--upgrade<span class="w">            </span><span class="c1"># Source kukeon already at ...</span>
 </code></pre></div>
+<h3 id="kinds-and-compatibility">Kinds and compatibility<a class="headerlink" href="#kinds-and-compatibility" title="Permanent link">&para;</a></h3>
+<p>Since Sources became a kind, <code>kuke</code> and kukeond must be upgraded together: it
+is a <strong>flag day</strong>. A <code>kuke</code> built before the change cannot write a <code>Team</code> or
+<code>TeamDefaults</code> to a kukeond built after it — kukeond rejects a Team entry that
+carries <code>url</code> or <code>git</code> and a <code>TeamDefaults</code> with <code>spec.defaults.sources</code> — and
+a <code>kuke</code> built after it cannot use a kukeond built before it, which serves no
+Source. Documents stored before the change keep reading, and the first command
+that writes each converts it (<code>kuke team init --upgrade</code>, which <code>kuke update</code>
+runs, converts the defaults and the <code>kuke</code> team).</p>
 <h2 id="upgrading-from-host-files">Upgrading from host files<a class="headerlink" href="#upgrading-from-host-files" title="Permanent link">&para;</a></h2>
 <p>Earlier releases kept the kuke team in a file under <code>~/.kuke</code> and read global
 defaults from another. Those files are no longer read: when either exists,
@@ -4048,30 +4143,30 @@ init prints one note saying so and nothing is converted. Run
 health sweep, for one — in the stored Team. See
 <a href="../../concepts/team/#upgrading-from-host-files">Upgrading from host files</a>.</p>
 <h2 id="output">Output<a class="headerlink" href="#output" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Applied 6 resources; stored team kuke.
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>No cells created or started.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>Applied 6 resources; stored team kuke.
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>No cells created or started.
 </code></pre></div>
 <p>Pruned configs, missing runtime secrets and notes follow when there are any:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>Pruned configs: kuke-majordomo-opencode
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>Missing secrets (cells will not start until they exist):
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>  git-ssh  →  kuke create secret git-ssh --realm default --type ssh-key --from-file /path/to/private-key  (git credential; or --type basic-auth)
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>  bot-key  →  kuke create secret bot-key --realm default --connector git --type ssh-key --from-file /path/to/private-key --hosts github.com --author 'Name &lt;email&gt;'  (git identity; or --type basic-auth)
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>Notes:
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>  role dev: needs.mounts ssh no longer mounts the host ~/.ssh; cells clone, push and sign with stored git credentials
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>Pruned configs: kuke-majordomo-opencode
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>Missing secrets (cells will not start until they exist):
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>  git-ssh  →  kuke create secret git-ssh --realm default --type ssh-key --from-file /path/to/private-key  (git credential; or --type basic-auth)
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>  bot-key  →  kuke create secret bot-key --realm default --connector git --type ssh-key --from-file /path/to/private-key --hosts github.com --author 'Name &lt;email&gt;'  (git identity; or --type basic-auth)
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>Notes:
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>  role dev: needs.mounts ssh no longer mounts the host ~/.ssh; cells clone, push and sign with stored git credentials
 </code></pre></div>
 <p>A Secret named as a git identity (<code>spec.connectors.git.identity</code>) is listed
 with the <code>--connector git</code> form, since a cell renders only with a Secret tagged
 for the git connector; replace the example host and author with your own. A
 credential named directly keeps the plain <code>--type ssh-key</code> form.</p>
 <p>The resource count is the shared blueprints plus the CellConfigs, plus the
-<code>Team</code> document, plus one when the Realm's secret defaults were written and one
-for a <code>TeamDefaults</code> init created.</p>
+<code>Team</code> document, plus one when the Realm's secret defaults were written, one
+for the <code>kukeon</code> Source and one for a <code>TeamDefaults</code> init created.</p>
 <h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
 <p><code>make test</code> runs the injectable-client success/failure/rerun tests and the real
 Unix JSON-RPC transport tests. A separate check verifies actual daemon storage,
 reads back blueprints and configs, repeats application, and confirms that cells
 are unchanged:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nv">KUKETEAMS_INTEGRATION_HOST</span><span class="o">=</span>unix:///path/to/disposable/kukeond.sock<span class="w"> </span>make<span class="w"> </span>test-team-integration
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nv">KUKETEAMS_INTEGRATION_HOST</span><span class="o">=</span>unix:///path/to/disposable/kukeond.sock<span class="w"> </span>make<span class="w"> </span>test-team-integration
 </code></pre></div>
 <p>Use a disposable kukeond with existing <code>default/default/default</code> scope metadata.
 The check uses a unique <code>init-check-*</code> team and deletes only its generated
@@ -4098,7 +4193,7 @@ blueprints and configs on cleanup.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 24, 2026 10:16:38 UTC">November 24, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 24, 2026 19:24:50 UTC">November 24, 2026</span>
   </span>
 
     

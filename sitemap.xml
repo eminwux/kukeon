@@ -125,11 +125,11 @@
          <lastmod>2026-11-24</lastmod>
     </url>
     <url>
-         <loc>https://kukeon.io/cli/kuke-status/</loc>
+         <loc>https://kukeon.io/cli/kuke-source/</loc>
          <lastmod>2026-11-24</lastmod>
     </url>
     <url>
-         <loc>https://kukeon.io/cli/kuke-team-add/</loc>
+         <loc>https://kukeon.io/cli/kuke-status/</loc>
          <lastmod>2026-11-24</lastmod>
     </url>
     <url>
@@ -294,6 +294,10 @@
     </url>
     <url>
          <loc>https://kukeon.io/manifests/secret/</loc>
+         <lastmod>2026-11-24</lastmod>
+    </url>
+    <url>
+         <loc>https://kukeon.io/manifests/source/</loc>
          <lastmod>2026-11-24</lastmod>
     </url>
     <url>

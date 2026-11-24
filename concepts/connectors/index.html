@@ -2691,14 +2691,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-team-add/" class="md-nav__link">
+      <a href="../../cli/kuke-source/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    kuke team add
+    kuke source
   
 
     
@@ -3180,6 +3180,34 @@
     
   
     CellConfig manifest
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../manifests/source/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Source manifest
   
 
     
@@ -4280,6 +4308,14 @@ the team chose is written as a fill on the Config; everything else stays with
 the defaults. A team's git identity is written on the Config
 (<code>spec.git.identityRef</code>), never on the Stack, because other teams share the
 Stack.</p>
+<p>A stored <a href="../../manifests/source/">Source</a> may name a git identity of its own
+(<code>spec.git.identityRef</code>, <code>kuke create source --identity</code>). It is that
+repository's identity in every team cell that clones it, and the credential
+<code>kuke</code> fetches the Source with while composing; without one, the fetch uses the
+realm's default git identity when it covers the address's host, else the
+caller's git configuration (see
+<a href="../../guides/git-credentials/#fetching-a-source-on-the-host">Fetching a Source on the host</a>).
+A team's own entries carry no <code>git</code>.</p>
 <p>Roles written before connectors existed keep rendering: a role that lists the
 old secret names (<code>claude-code-oauth-token</code>, <code>anthropic-api-key</code>,
 <code>openai-api-key</code>, <code>gh-token</code>) selects the method that delivers that secret. Two
@@ -4495,7 +4531,7 @@ daemon was built.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 23, 2026 11:25:24 UTC">November 23, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 24, 2026 19:24:50 UTC">November 24, 2026</span>
   </span>
 
     

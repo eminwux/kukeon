@@ -2454,63 +2454,13 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#kuke-team-source" class="md-nav__link">
+  <a href="#kuke-team-export" class="md-nav__link">
     <span class="md-ellipsis">
       
-        kuke team source
+        kuke team export
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="kuke team source">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#kuke-team-source-add" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        kuke team source add
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#kuke-team-source-list" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        kuke team source list
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#kuke-team-source-show" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        kuke team source show
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#kuke-team-source-remove" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        kuke team source remove
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -2586,14 +2536,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../kuke-team-add/" class="md-nav__link">
+      <a href="../kuke-source/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    kuke team add
+    kuke source
   
 
     
@@ -3075,6 +3025,34 @@
     
   
     CellConfig manifest
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../manifests/source/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Source manifest
   
 
     
@@ -3641,63 +3619,13 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#kuke-team-source" class="md-nav__link">
+  <a href="#kuke-team-export" class="md-nav__link">
     <span class="md-ellipsis">
       
-        kuke team source
+        kuke team export
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="kuke team source">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#kuke-team-source-add" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        kuke team source add
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#kuke-team-source-list" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        kuke team source list
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#kuke-team-source-show" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        kuke team source show
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#kuke-team-source-remove" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        kuke team source remove
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -3750,18 +3678,18 @@
 
 
 <h1 id="kuke-team">kuke team<a class="headerlink" href="#kuke-team" title="Permanent link">&para;</a></h1>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke team init      [--force | --reapply]
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>kuke team add       NAME --source REPOSITORY | DIRECTORY   [flags]
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>kuke team apply     NAME | -f FILE                         [--dry-run]
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>kuke team source    add NAME --url URL | list | show NAME | remove NAME
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>kuke team defaults  set [--role R]... [--harness H]...
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke team init      [--force | --reapply | --upgrade]
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>kuke team apply     NAME | -f FILE                         [--dry-run]
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>kuke team export    NAME [--host-fields] [--explicit-defaults]
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>kuke team defaults  set [--role R]... [--harness H]...
 </code></pre></div>
 <p>Compose agent teams and apply them to kukeond. kukeond stores each team as a
-realm-scoped <code>Team</code> document, and the settings every team of the realm
-inherits as its <code>TeamDefaults</code> (see <a href="../../concepts/team/">Teams</a>). Composition —
-fetching sources, resolving roles and harnesses, rendering blueprints and
-configs — runs in <code>kuke</code>, with your git configuration; no <code>kuke team</code> command
-creates or starts cells.</p>
+realm-scoped <code>Team</code> document, the settings every team of the realm inherits as
+its <code>TeamDefaults</code>, and the repositories teams read as
+<a href="../../manifests/source/"><code>Source</code></a> documents (see <a href="../../concepts/team/">Teams</a>).
+Composition — fetching sources, resolving roles and harnesses, rendering
+blueprints and configs — runs in <code>kuke</code>; no <code>kuke team</code> command creates or
+starts cells.</p>
 <table>
 <thead>
 <tr>
@@ -3775,16 +3703,12 @@ creates or starts cells.</p>
 <td>Apply the <code>kuke</code> system team (majordomo); create the realm's first <code>TeamDefaults</code>.</td>
 </tr>
 <tr>
-<td><a href="../kuke-team-add/"><code>kuke team add</code></a></td>
-<td>Create a project team from a Git repository or a local checkout.</td>
-</tr>
-<tr>
 <td><a href="#kuke-team-apply"><code>kuke team apply</code></a></td>
 <td>Recompose a stored team, or compose and store a Team document.</td>
 </tr>
 <tr>
-<td><a href="#kuke-team-source"><code>kuke team source</code></a></td>
-<td>Register, list, inspect and remove the sources teams use.</td>
+<td><a href="#kuke-team-export"><code>kuke team export</code></a></td>
+<td>Print a stored team as a repository's <code>kuketeam.yaml</code>.</td>
 </tr>
 <tr>
 <td><a href="#kuke-team-defaults"><code>kuke team defaults</code></a></td>
@@ -3792,9 +3716,14 @@ creates or starts cells.</p>
 </tr>
 </tbody>
 </table>
-<p>The generic verbs work on the same stored kinds:
+<p>A team is created with <a href="../kuke-create/#kuke-create-team"><code>kuke create team</code></a>
+and a Source with <a href="../kuke-create/#kuke-create-source"><code>kuke create source</code></a>;
+<a href="../kuke-source/"><code>kuke source show</code></a> lists what a Source offers. The generic
+verbs work on the same stored kinds:
 <a href="../kuke-get/#teams"><code>kuke get team</code></a>, <a href="../kuke-get/#teams"><code>kuke get teamdefaults</code></a>,
-<a href="../kuke-delete/#teams"><code>kuke delete team</code></a> and
+<a href="../kuke-get/#sources"><code>kuke get sources</code></a>,
+<a href="../kuke-delete/#teams"><code>kuke delete team</code></a>,
+<a href="../kuke-delete/#sources"><code>kuke delete source</code></a> and
 <a href="../kuke-apply/#teams"><code>kuke apply -f</code></a>. The web UI's Teams page calls the same
 code.</p>
 <p>Every subcommand takes the connection flags:</p>
@@ -3816,9 +3745,9 @@ code.</p>
 </tr>
 </tbody>
 </table>
-<p><code>init</code>, <code>add</code> and <code>apply</code> print one note when old team files from an earlier
-release are still under <code>~/.kuke</code>: they are no longer read, and nothing is
-converted (see <a href="../../concepts/team/#upgrading-from-host-files">Upgrading from host files</a>).</p>
+<p><code>init</code>, <code>apply</code> and <code>kuke create team</code> print one note when old team files from
+an earlier release are still under <code>~/.kuke</code>: they are no longer read, and
+nothing is converted (see <a href="../../concepts/team/#upgrading-from-host-files">Upgrading from host files</a>).</p>
 <h2 id="kuke-team-apply">kuke team apply<a class="headerlink" href="#kuke-team-apply" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>kuke team apply NAME [--dry-run]
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>kuke team apply -f FILE [--dry-run]
@@ -3861,27 +3790,26 @@ bindings are kept beneath the file's own. The name <code>root</code> is reserved
 </tbody>
 </table>
 <p>Exactly one of <code>NAME</code> and <code>-f</code> is required. A name with no stored team fails
-and names <code>kuke team add NAME --source URL</code>. <code>--dry-run</code> prints the same
-<a href="../../concepts/team/#previewing-a-change">preview</a> as <code>add --dry-run</code>. Output
-is the same as <a href="../kuke-team-add/#output"><code>kuke team add</code></a>:</p>
+and names <code>kuke create team NAME --source ADDRESS</code>. Like <code>create team</code>,
+<code>apply -f</code> stores a <a href="../../manifests/source/">Source</a> for every source the file
+defines with an address, unless one of its name is stored, and stores the Team
+with references to them. <code>--dry-run</code> prints the same
+<a href="../../concepts/team/#previewing-a-change">preview</a> as <code>create team --dry-run</code>.
+Output is the same as
+<a href="../kuke-create/#preview-application-and-recovery"><code>kuke create team</code></a>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Applied 7 resources; stored team web.
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>Pruned configs: web-old-claude
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>No cells created or started.
 </code></pre></div>
-<h2 id="kuke-team-source">kuke team source<a class="headerlink" href="#kuke-team-source" title="Permanent link">&para;</a></h2>
-<p>Sources are registered in the realm's <code>TeamDefaults</code> (<code>spec.defaults.sources</code>):
-a methodology repository such as the agents repository, for one. A team that
-omits <code>spec.sources</code> uses them, and a role or harness in one is named as
-<code>SOURCE:PATH</code>.</p>
-<h3 id="kuke-team-source-add">kuke team source add<a class="headerlink" href="#kuke-team-source-add" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>kuke team source add NAME --url URL [--branch B | --tag T | --commit C] [--clone-path PATH]
+<h2 id="kuke-team-export">kuke team export<a class="headerlink" href="#kuke-team-export" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>kuke team export NAME [--host-fields] [--explicit-defaults]
 </code></pre></div>
-<p>Check the URL, discover the remote's default branch when no ref is given, fetch
-the source once and add it to the <code>TeamDefaults</code>. An existing name is updated,
-and the output says so. A source that offers roles must be cloned into the
-cells that run them: without <code>--clone-path</code> it is cloned at <code>/home/user/NAME</code>
-when discovery finds a role, and not cloned otherwise. The name <code>project</code> is
-reserved.</p>
+<p>Print the stored Team <code>NAME</code> as a repository's <code>kuketeam.yaml</code>: its name, the
+project's address, each source with its address and ref, and the declared
+roles, harnesses and connectors. Addresses are written in the short
+<code>host/owner/repo</code> form where the address allows it. The file reads back on any
+host: commit it as the project's <code>kuketeam.yaml</code>, or pass it to
+<code>kuke create team NAME -f FILE</code>.</p>
 <table>
 <thead>
 <tr>
@@ -3891,79 +3819,63 @@ reserved.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>--url</code></td>
-<td>Git remote (SCP-style SSH, <code>ssh://</code>, or HTTPS). Required.</td>
+<td><code>--host-fields</code></td>
+<td>Keep what only means something on this host: <code>metadata.realm</code>, the stored Source names (<code>source:</code>), the project's ref and the entries' own refs, the git identities and <code>spec.secrets</code>.</td>
 </tr>
 <tr>
-<td><code>--branch</code></td>
-<td>Select a branch (default: the remote's default branch).</td>
-</tr>
-<tr>
-<td><code>--tag</code></td>
-<td>Select a tag.</td>
-</tr>
-<tr>
-<td><code>--commit</code></td>
-<td>Select a full commit object ID.</td>
-</tr>
-<tr>
-<td><code>--clone-path</code></td>
-<td>Where team cells clone the source.</td>
+<td><code>--explicit-defaults</code></td>
+<td>Write the role, harness and connector lists the team inherits from the <code>TeamDefaults</code> out, with a definition for every source they read.</td>
 </tr>
 </tbody>
 </table>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>$ kuke team source add agents --url git@github.com:eminwux/agents
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>Source agents created: git@github.com:eminwux/agents, branch main, cloned at /home/user/agents; offers 5 roles and 0 harnesses.
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>Teams inheriting the defaults (not recomposed): web
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>  kuke team apply web
+<p>Without <code>--host-fields</code> the export leaves those out: the project carries only
+its address (its ref is the checkout the team was created from), and each
+source its address and ref — the entry's own, else its Source's. With
+<code>--host-fields</code>, <code>kuke create team NAME -f &lt;export&gt; --force</code> stores the same
+Team.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>$ kuke team export kukeon
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>apiVersion: v1beta1
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>kind: Team
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>metadata:
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    name: kukeon
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>spec:
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>    projectSource:
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>        name: project
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>        url: github.com/eminwux/kukeon
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>    sources:
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>        - name: agents
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>          url: github.com/eminwux/agents
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>          branch: main
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>          clonePath: /home/user/agents
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>    roles: …
 </code></pre></div>
-<h3 id="kuke-team-source-list">kuke team source list<a class="headerlink" href="#kuke-team-source-list" title="Permanent link">&para;</a></h3>
-<p>Print each registered source's name, URL, ref and clone path:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>NAME    URL                             REF          CLONE PATH
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>kukeon  github.com/eminwux/kukeon       branch main  -
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>agents  git@github.com:eminwux/agents   branch main  /home/user/agents
-</code></pre></div>
-<h3 id="kuke-team-source-show">kuke team source show<a class="headerlink" href="#kuke-team-source-show" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>kuke team source show NAME
-</code></pre></div>
-<p>Fetch a registered source and list the roles (name, path, harnesses, tasks)
-and harnesses it offers, marking the ones the defaults select. The walk skips
-dot-directories and <code>testdata</code>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Source agents: git@github.com:eminwux/agents, branch main at 3f2a9c1d…
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>ROLE         PATH         HARNESSES      TASKS                     DEFAULT
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>dev          dev          claude, codex  pick-issue, pick-changes  yes
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>pm           pm           -              -                         no
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>HARNESS  PATH  DEFAULT
-</code></pre></div>
-<h3 id="kuke-team-source-remove">kuke team source remove<a class="headerlink" href="#kuke-team-source-remove" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>kuke team source remove NAME
-</code></pre></div>
-<p>Unregister a source. It is refused while a default role or harness, or a
-stored team that inherits the sources, references it; the error names each.
-Nothing is fetched.</p>
 <h2 id="kuke-team-defaults">kuke team defaults<a class="headerlink" href="#kuke-team-defaults" title="Permanent link">&para;</a></h2>
 <p>The defaults are the realm's <code>TeamDefaults</code> (<code>kuke get teamdefaults</code>).</p>
 <h3 id="kuke-team-defaults-set">kuke team defaults set<a class="headerlink" href="#kuke-team-defaults-set" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>kuke team defaults set [--role R]... [--harness H]...
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>kuke team defaults set [--role R]... [--harness H]...
 </code></pre></div>
 <p>Replace the default role list, the default harness list, or both; a list whose
 flag is not given is left as it is. Each <code>--role</code> and <code>--harness</code> is a current
-default's <code>NAME</code> or <code>[NAME=]SOURCE:PATH</code> in a registered source; without
+default's <code>NAME</code> or <code>[NAME=]SOURCE:PATH</code> in a stored Source; without
 <code>NAME=</code> the entry is named after the path's last element (<code>agents:dev</code> is
 <code>dev</code>).</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>kuke<span class="w"> </span>team<span class="w"> </span>defaults<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--role<span class="w"> </span>dev<span class="w"> </span>--role<span class="w"> </span><span class="nv">pm</span><span class="o">=</span>agents:pm<span class="w"> </span>--harness<span class="w"> </span>claude
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>kuke<span class="w"> </span>team<span class="w"> </span>defaults<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--role<span class="w"> </span>dev<span class="w"> </span>--role<span class="w"> </span><span class="nv">pm</span><span class="o">=</span>agents:pm<span class="w"> </span>--harness<span class="w"> </span>claude
 </code></pre></div>
 <p>Connectors, parameters and secret bindings are set by applying a whole
 <code>TeamDefaults</code> document with <a href="../kuke-apply/#teams"><code>kuke apply -f</code></a>.</p>
-<p>Every command that changes the <code>TeamDefaults</code> — <code>source add</code>, <code>source remove</code>,
-<code>defaults set</code> and <code>kuke apply -f</code> of a <code>TeamDefaults</code> — prints the stored
-teams that inherit from it and the command that recomposes each, because a
-defaults change recomposes nothing by itself:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>Defaults updated.
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>Teams inheriting the defaults (not recomposed): web, docs
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>  kuke team apply web
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>  kuke team apply docs
+<p>Every command that changes the <code>TeamDefaults</code> — <code>defaults set</code> and
+<code>kuke apply -f</code> of a <code>TeamDefaults</code> — prints the stored teams that inherit from
+it and the command that recomposes each, because a defaults change recomposes
+nothing by itself. A <code>TeamDefaults</code> stored before Sources were a kind, with a
+<code>spec.defaults.sources</code> list, is converted by the first command that writes
+it: each listed source is stored as a Source, the list is cleared, and a note
+says so (<code>converted 2 registered sources to Source documents</code>; a source cloned
+anywhere but <code>/home/user/&lt;name&gt;</code> adds a note naming the path and
+<code>spec.sources[].clonePath</code>, since a Source has no clone path):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Defaults updated.
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>Teams inheriting the defaults (not recomposed): web, docs
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>  kuke team apply web
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>  kuke team apply docs
 </code></pre></div>
 
 
@@ -3987,7 +3899,7 @@ defaults change recomposes nothing by itself:</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 23, 2026 11:25:24 UTC">November 23, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 24, 2026 19:24:50 UTC">November 24, 2026</span>
   </span>
 
     

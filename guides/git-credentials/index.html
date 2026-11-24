@@ -1793,6 +1793,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#fetching-a-source-on-the-host" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fetching a Source on the host
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Fetching a Source on the host">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#addresses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Addresses
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#signing" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2669,14 +2697,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-team-add/" class="md-nav__link">
+      <a href="../../cli/kuke-source/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    kuke team add
+    kuke source
   
 
     
@@ -3158,6 +3186,34 @@
     
   
     CellConfig manifest
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../manifests/source/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Source manifest
   
 
     
@@ -3852,6 +3908,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#fetching-a-source-on-the-host" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fetching a Source on the host
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Fetching a Source on the host">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#addresses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Addresses
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#signing" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3936,7 +4020,7 @@
 </tr>
 <tr>
 <td>A <strong>per-source</strong> identity</td>
-<td><code>git</code> on one repo: a CellConfig repo fill, a container <code>repos[]</code> entry, or a <code>kuke team</code> source</td>
+<td><code>git</code> on one repo: a CellConfig repo fill, a container <code>repos[]</code> entry, or a stored <a href="../../manifests/source/">Source</a></td>
 </tr>
 </tbody>
 </table>
@@ -4110,17 +4194,58 @@
 <a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a><span class="w">        </span><span class="nt">signing</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> secretRef</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">app-deploy</span><span class="p p-Indicator">,</span><span class="nt"> realm</span><span class="p">:</span><span class="w"> </span><span class="nv">default</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w"> </span><span class="p p-Indicator">}</span>
 </code></pre></div>
 <p>The repo is cloned with its own credential, and the identity is written into that checkout's <strong>local</strong> git config. Commits and pushes the agent makes there later use it too — so two repos in one cell can commit as different identities and push with different keys.</p>
+<p>For a team, the identity goes on the stored <a href="../../manifests/source/">Source</a> (<code>spec.git</code>), and every team cell that clones the Source gets it in that repo's fill:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>kuke<span class="w"> </span>create<span class="w"> </span><span class="nb">source</span><span class="w"> </span>web<span class="w"> </span>--url<span class="w"> </span>github.com/acme/web<span class="w"> </span>--identity<span class="w"> </span>app-deploy
+</code></pre></div>
+<h2 id="fetching-a-source-on-the-host">Fetching a Source on the host<a class="headerlink" href="#fetching-a-source-on-the-host" title="Permanent link">&para;</a></h2>
+<p>Composing a team reads its repositories on the host before any cell exists: <code>kuke create team</code>, <code>kuke team apply</code>, <code>kuke apply -f</code> of a Team, a preview, <code>kuke create source</code> and <code>kuke source show</code> all fetch, in <code>kuke</code> or <code>kuke serve</code>. Each fetch picks its credential in this order:</p>
+<ol>
+<li>The Source's <code>spec.git.identityRef</code> (<code>kuke create source --identity</code>, or <code>kuke create team --identity</code> for the project's Source it creates).</li>
+<li>The realm's default git identity (<code>spec.defaults.git.identityRef</code>), when it has a credential for the address's host.</li>
+<li>Otherwise the caller's own git configuration, as for any <code>git fetch</code>: credential helpers for HTTPS, your OpenSSH configuration and agent for SSH. Public repositories need nothing.</li>
+</ol>
+<p>With a stored identity (1 or 2), kukeond renders the same credential files a cell gets into a directory beside its socket (<code>&lt;socket dir&gt;/gitfetch/&lt;id&gt;</code>), owned by the user who asked — read from the socket's peer credentials, never from the request — and readable by no one else. <code>kuke</code> fetches with those files alone: the transport follows the credential (an SSH key fetches over SSH even for an <code>https://</code> address; a token over HTTPS even for <code>git@host:path</code>), an SSH key with a passphrase is unlocked in a private <code>ssh-agent</code>, and your own SSH agent, credential helpers and git configuration are not used. The directory is removed when the fetch ends, and any left behind by a killed <code>kuke</code> after ten minutes. No reply from kukeond carries key or token bytes, and git's output never reaches an error message.</p>
+<p>Git runs non-interactively (<code>BatchMode=yes</code>, no terminal, prompts disabled) with a one-minute deadline per subprocess.</p>
+<h3 id="addresses">Addresses<a class="headerlink" href="#addresses" title="Permanent link">&para;</a></h3>
+<p>A Source's address names the repository, not how to reach it:</p>
+<table>
+<thead>
+<tr>
+<th>Form</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>host/owner/repo</code></td>
+<td><code>github.com/acme/app</code> — any host with a dot in its name; HTTPS unless a credential says SSH</td>
+</tr>
+<tr>
+<td>SCP-style SSH</td>
+<td><code>git@github.com:acme/app.git</code></td>
+</tr>
+<tr>
+<td><code>ssh://</code></td>
+<td><code>ssh://git@git.example.org:2222/acme/app.git</code></td>
+</tr>
+<tr>
+<td>HTTPS</td>
+<td><code>https://github.com/acme/app</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>git@github.com/acme/app</code> (no colon) is malformed. Local paths, <code>file://</code>, HTTP and other schemes are rejected, and so are passwords, tokens, query strings and fragments in an address; an SSH user such as <code>git@</code> is allowed. Addresses that differ only in transport, user or a <code>.git</code> suffix name the same repository: a team definition <code>github.com/acme/app</code> reuses a Source stored as <code>git@github.com:acme/app.git</code>.</p>
 <h2 id="signing">Signing<a class="headerlink" href="#signing" title="Permanent link">&para;</a></h2>
 <p>Signing is SSH signing (<code>gpg.format=ssh</code>) with an <code>ssh-key</code> secret:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="nt">signing</span><span class="p">:</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span><span class="nt">secretRef</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">git-ssh</span><span class="p p-Indicator">,</span><span class="nt"> realm</span><span class="p">:</span><span class="w"> </span><span class="nv">default</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">  </span><span class="nt">allowedSignersRef</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">git-allowed-signers</span><span class="p p-Indicator">,</span><span class="nt"> realm</span><span class="p">:</span><span class="w"> </span><span class="nv">default</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w"> </span><span class="c1"># optional</span>
-<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="nt">sign</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">commits</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">tags</span><span class="p p-Indicator">]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="nt">signing</span><span class="p">:</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">  </span><span class="nt">secretRef</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">git-ssh</span><span class="p p-Indicator">,</span><span class="nt"> realm</span><span class="p">:</span><span class="w"> </span><span class="nv">default</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="w">  </span><span class="nt">allowedSignersRef</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">git-allowed-signers</span><span class="p p-Indicator">,</span><span class="nt"> realm</span><span class="p">:</span><span class="w"> </span><span class="nv">default</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w"> </span><span class="c1"># optional</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="nt">sign</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">commits</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">tags</span><span class="p p-Indicator">]</span>
 </code></pre></div>
 <p><code>sign</code> selects what is signed; with <code>signing</code> set and <code>sign</code> empty, both commits and tags are. <code>allowedSignersRef</code> names an opaque secret holding git's allowed-signers file, used to <em>verify</em> signatures (<code>git log --show-signature</code>); when omitted one is generated from the committer email and the signing key. GPG/OpenPGP and X.509 signing are not supported.</p>
 <h2 id="see-what-a-cell-will-use">See what a cell will use<a class="headerlink" href="#see-what-a-cell-will-use" title="Permanent link">&para;</a></h2>
 <p>Nothing has to be started to check. The render explanation lists, per repo, the identity and credential it ends up with and the level each came from:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>cell<span class="w"> </span>probe<span class="w"> </span>--from-config<span class="w"> </span>dev-claude<span class="w"> </span>--dry-run<span class="w"> </span>--explain
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>cell<span class="w"> </span>probe<span class="w"> </span>--from-config<span class="w"> </span>dev-claude<span class="w"> </span>--dry-run<span class="w"> </span>--explain
 </code></pre></div>
 <p>The web UI shows the same block in the preview of <em>New cell</em> and <em>New config</em>. Secret material is never part of it — only names, types and origins.</p>
 <h2 id="upgrading">Upgrading<a class="headerlink" href="#upgrading" title="Permanent link">&para;</a></h2>
@@ -4221,7 +4346,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 23, 2026 11:25:24 UTC">November 23, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 24, 2026 19:24:50 UTC">November 24, 2026</span>
   </span>
 
     
