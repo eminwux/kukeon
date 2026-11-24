@@ -8,6 +8,8 @@ export type Field = {
   fields?: Field[];
   itemLabel?: string;
   help?: string;
+  // sourcePicker puts a "From source" select above each item (#1644): a stored Source fills the item.
+  sourcePicker?: boolean;
 };
 export const containerFields: Field[];
 export const cellAdvanced: Field[];

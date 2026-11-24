@@ -53,7 +53,7 @@ function EnableSweep({ configs }: { configs: ConfigDoc[] }) {
   const names = configs.map(config => config.metadata.name);
   return <div className="health-enable" role="note">
     <strong>Sweeps are suspended.</strong>
-    <p>{names.length === 1 ? `${names[0]} ships` : `These ${names.length} sweep configs ship`} switched off so no install spends model credits unasked. To turn sweeps on, edit the <a href={teamsLink(systemTeam)}>kuke team</a>'s declaration on the Teams page, preview and apply it:</p>
+    <p>{names.length === 1 ? `${names[0]} ships` : `These ${names.length} sweep configs ship`} switched off so no install spends model credits unasked. To turn sweeps on, switch the schedule on in the <a href={teamsLink(systemTeam, "edit")}>kuke team</a>'s Edit team screen (Tasks and schedules), or set this task entry in its declaration, then preview and apply:</p>
     {names.length > 1 && <ul className="health-suspended" aria-label="Suspended sweeps">{names.map((name, index) => <li key={index} className="mono-id">{name}</li>)}</ul>}
     <pre tabIndex={0}>{edit}</pre>
     <p className="description">The schedule cannot be changed from this page.</p>

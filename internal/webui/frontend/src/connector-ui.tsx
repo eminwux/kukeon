@@ -373,7 +373,7 @@ export function ConfigConnectors({ doc, scope, revision, onChanged }: { doc: Con
     <div className="panel-heading"><h2>Connectors</h2>{blocking.length ? <NeedsConnectorBadge config={doc} /> : <span className="badge">All resolved</span>}</div>
     <div className="panel-body">
       <p className="description">What this Config needs access to, and the identity each connector uses for a cell created now. An identity comes from the Config's own pick, else the Stack, Space or Realm default.</p>
-      {team && <p className="connector-team" role="note">Identities are set by team <a href={teamsLink(team)}><code>{team}</code></a>. They are read-only here because applying the team re-renders this Config; change them in the team's declaration on the Teams page, or set a scope default.</p>}
+      {team && <p className="connector-team" role="note">Identities are set by team <a href={teamsLink(team)}><code>{team}</code></a>. They are read-only here because applying the team re-renders this Config; change them on the team's Edit team screen (Credentials), or set a scope default.</p>}
       {catalog.error && <p className="stale">The connector catalog could not be loaded: {catalog.error.message}</p>}
       {secrets.error && <p className="stale">Identities could not be listed: {secrets.error.message}. Name a secret by hand instead.</p>}
       <ul className="state-list connector-status-list">{statuses.map(status => <li key={`${status.connector}:${status.component}`} aria-label={`${connectorTitle(status)} connector`}>

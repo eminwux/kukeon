@@ -24,11 +24,9 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"maps"
 	"net"
 	"net/http"
 	"net/rpc"
-	"slices"
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -102,12 +100,11 @@ func (a *teamAPI) register(mux *http.ServeMux, dial Dial) {
 	}))
 	mux.HandleFunc("POST /api/teams/{name}/reapply", emptyJSONRequest(op(a.reapplyTeam)))
 	mux.HandleFunc("POST /api/teams/{name}/delete", emptyJSONRequest(read(a.deleteTeam)))
-	mux.HandleFunc("GET /api/team-sources", op(a.listSources))
-	mux.HandleFunc("POST /api/team-sources", op(a.addSource))
-	mux.HandleFunc("POST /api/team-sources/{name}/inspect", emptyJSONRequest(op(a.inspectSource)))
-	mux.HandleFunc("POST /api/team-sources/{name}/delete", emptyJSONRequest(op(a.removeSource)))
+	mux.HandleFunc("POST /api/teams/draft", op(a.draftTeam))
+	mux.HandleFunc("GET /api/teams/{name}/export", op(a.exportTeam))
 	mux.HandleFunc("GET /api/team-defaults", read(a.getDefaults))
 	mux.HandleFunc("POST /api/team-defaults", op(a.setDefaults))
+	a.registerSources(mux, read, op)
 }
 
 // emptyJSONRequest gates an action route whose request carries nothing but
@@ -161,10 +158,16 @@ type teamSummaryView struct {
 	System bool `json:"system,omitempty"`
 }
 
-// teamView is one stored team: its summary and its declaration as YAML.
+// teamView is one stored team: its summary, its declaration as YAML, its
+// view (the hydrated team, AC3) and its form (the stored team, AC4).
 type teamView struct {
 	Summary  teamSummaryView `json:"summary"`
 	Document string          `json:"document"`
+	View     *teamDetailView `json:"view,omitempty"`
+	Form     *teamForm       `json:"form,omitempty"`
+	// Problem says why the view or the form could not be built: a stored
+	// declaration that no longer decodes, or a failed read.
+	Problem string `json:"problem,omitempty"`
 }
 
 func summaryView(s kukeonv1.TeamSummary) teamSummaryView {
@@ -197,7 +200,16 @@ func (a *teamAPI) getTeam(ctx context.Context, client kukeonv1.Client, r *http.R
 	if !got.Exists {
 		return nil, fmt.Errorf("%w: %s", errdefs.ErrTeamNotFound, name)
 	}
-	return teamView{Summary: summaryView(got.Summary), Document: string(got.Document)}, nil
+	out := teamView{Summary: summaryView(got.Summary), Document: string(got.Document)}
+	resolved, err := initialize.ResolveTeam(ctx, client, name)
+	if err != nil {
+		out.Problem = err.Error()
+		return out, nil //nolint:nilerr // the summary and document still show; Problem says what is missing
+	}
+	view := teamViewOf(resolved)
+	form := formOf(resolved.Stored)
+	out.View, out.Form = &view, &form
+	return out, nil
 }
 
 // teamRequest is a create or an edit: the inputs of kuke create team, or of
@@ -224,6 +236,21 @@ type teamRequest struct {
 	Declaration string `json:"declaration"`
 	// Force replaces a stored team of the same name on add (AC8a).
 	Force bool `json:"force"`
+	// Identity is create team's --identity: the git identity the project's
+	// Source is stored with when the add creates it.
+	Identity string `json:"identity"`
+	// Form, when set, replaces Declaration as the edit (#1644, D3): the
+	// declaration is form.apply(base), where base is the stored team for
+	// an edit, and Declaration — the draft's, sent back unchanged — for a
+	// new team.
+	Form *teamForm `json:"form"`
+}
+
+func (r teamRequest) identity() *config.SecretRef {
+	if name := strings.TrimSpace(r.Identity); name != "" {
+		return &config.SecretRef{Name: name, Realm: config.DefaultRealm}
+	}
+	return nil
 }
 
 // planView is a plan as the browser sees it: the plan, and the declaration
@@ -254,6 +281,9 @@ func (a *teamAPI) applyTeam(ctx context.Context, client kukeonv1.Client, r *http
 		return nil, err
 	}
 	opts := a.options(client, dryRun)
+	if req.Form != nil {
+		return a.applyForm(ctx, opts, req)
+	}
 	var outcome initialize.Outcome
 	var err error
 	switch {
@@ -263,7 +293,7 @@ func (a *teamAPI) applyTeam(ctx context.Context, client kukeonv1.Client, r *http
 			Branch: req.Branch, Tag: req.Tag, Commit: req.Commit,
 			Roles: req.Roles, Harnesses: req.Harnesses,
 			NoRepoFile: req.UseRepoFile != nil && !*req.UseRepoFile,
-			Force:      req.Force,
+			Force:      req.Force, Identity: req.identity(),
 		}
 		if strings.TrimSpace(req.Declaration) != "" {
 			add.File, add.FileName = []byte(req.Declaration), "declaration"
@@ -284,6 +314,172 @@ func (a *teamAPI) applyTeam(ctx context.Context, client kukeonv1.Client, r *http
 		return nil, err
 	}
 	return outcomeView(outcome)
+}
+
+// formFileName names a form's declaration in plans and messages.
+const formFileName = "form"
+
+// applyForm composes the declaration a form describes and runs it through
+// the same operation as the CLI (AC8): a new team (a draft's declaration as
+// the base) is kuke create team NAME --source ... -f FILE; an edit (the
+// stored team as the base) is kuke team apply -f FILE.
+func (a *teamAPI) applyForm(ctx context.Context, opts initialize.Options, req teamRequest) (any, error) {
+	if req.Roles != nil || req.Harnesses != nil {
+		return nil, fmt.Errorf("%w: roles and harnesses are edited in the form", errdefs.ErrInvalidTeam)
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = strings.TrimSpace(req.Form.Name)
+	}
+	if formName := strings.TrimSpace(req.Form.Name); formName != "" && formName != name {
+		return nil, fmt.Errorf("%w: the form names team %s, not %s", errdefs.ErrInvalidTeam, formName, name)
+	}
+	if strings.TrimSpace(req.Declaration) != "" {
+		base, err := config.DecodeTeamDeclaration(strings.NewReader(req.Declaration))
+		if err != nil {
+			return nil, fmt.Errorf("%w: declaration: %w", errdefs.ErrInvalidTeam, err)
+		}
+		team, err := req.Form.apply(base)
+		if err != nil {
+			return nil, err
+		}
+		if name == "" {
+			name = team.Metadata.Name
+		}
+		raw, err := encodeYAML(team)
+		if err != nil {
+			return nil, err
+		}
+		outcome, err := initialize.Add(ctx, initialize.AddOptions{
+			Options: opts, Name: name, Source: strings.TrimSpace(req.Source),
+			Branch: req.Branch, Tag: req.Tag, Commit: req.Commit,
+			File: []byte(raw), FileName: formFileName, Force: req.Force, Identity: req.identity(),
+		})
+		if err != nil {
+			return nil, err
+		}
+		return outcomeView(outcome)
+	}
+	if name == "" {
+		return nil, fmt.Errorf("%w: name the team the form edits", errdefs.ErrInvalidTeam)
+	}
+	if req.Source != "" || req.Force || req.identity() != nil {
+		return nil, fmt.Errorf("%w: an edit keeps its project; give the project ref in the form",
+			errdefs.ErrInvalidTeam)
+	}
+	base, err := initialize.StoredTeam(ctx, opts.Client, name)
+	if err != nil {
+		return nil, err
+	}
+	if base == nil {
+		return nil, fmt.Errorf("%w: %s", errdefs.ErrTeamNotFound, name)
+	}
+	team, err := req.Form.apply(base)
+	if err != nil {
+		return nil, err
+	}
+	team.Metadata.Name = name
+	raw, err := encodeYAML(team)
+	if err != nil {
+		return nil, err
+	}
+	outcome, err := initialize.ApplyFile(ctx, opts, []byte(raw), formFileName)
+	if err != nil {
+		return nil, err
+	}
+	return outcomeView(outcome)
+}
+
+// draftRequest is what the wizard's Project step reads: create team's
+// inputs without composing (#1644 Step 2).
+type draftRequest struct {
+	Name        string `json:"name"`
+	Source      string `json:"source"`
+	Branch      string `json:"branch"`
+	Tag         string `json:"tag"`
+	Commit      string `json:"commit"`
+	Identity    string `json:"identity"`
+	UseRepoFile *bool  `json:"useRepoFile"`
+	// Declaration is a pasted kuketeam.yaml.
+	Declaration string `json:"declaration"`
+}
+
+// draftSourceView is one source of a draft and its state (#1643 AC6).
+type draftSourceView struct {
+	Alias    string        `json:"alias"`
+	Stored   string        `json:"stored"`
+	URL      string        `json:"url"`
+	Ref      string        `json:"ref,omitempty"`
+	Identity string        `json:"identity,omitempty"`
+	State    string        `json:"state"`
+	Have     string        `json:"have,omitempty"`
+	Contents *contentsView `json:"contents,omitempty"`
+}
+
+// draftView is a draft: the form the wizard edits and the declaration it
+// sends back unchanged (D3), which the browser never parses.
+type draftView struct {
+	Origin      initialize.Origin `json:"origin"`
+	Name        string            `json:"name"`
+	Form        teamForm          `json:"form"`
+	Declaration string            `json:"declaration"`
+	Sources     []draftSourceView `json:"sources"`
+	Notes       []string          `json:"notes"`
+}
+
+func (a *teamAPI) draftTeam(ctx context.Context, client kukeonv1.Client, r *http.Request) (any, error) {
+	var req draftRequest
+	if err := decodeJSONBody(r, maxTeamBody, &req); err != nil {
+		return nil, err
+	}
+	opts := initialize.AddOptions{
+		Options: a.options(client, true), Name: strings.TrimSpace(req.Name), Source: strings.TrimSpace(req.Source),
+		Branch: req.Branch, Tag: req.Tag, Commit: req.Commit,
+		NoRepoFile: req.UseRepoFile != nil && !*req.UseRepoFile,
+		Identity:   teamRequest{Identity: req.Identity}.identity(),
+	}
+	if strings.TrimSpace(req.Declaration) != "" {
+		opts.File, opts.FileName = []byte(req.Declaration), "declaration"
+	}
+	draft, err := initialize.DraftTeam(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	declaration, err := encodeYAML(draft.Team)
+	if err != nil {
+		return nil, err
+	}
+	view := draftView{
+		Origin: draft.Origin, Name: draft.Name, Form: formOf(draft.Team), Declaration: declaration,
+		Sources: make([]draftSourceView, 0, len(draft.Sources)), Notes: nonNil(draft.Notes),
+	}
+	for _, source := range draft.Sources {
+		view.Sources = append(view.Sources, draftSourceView{
+			Alias: source.Alias, Stored: source.Stored, URL: source.URL, Ref: source.Ref,
+			Identity: source.Identity, State: source.State, Have: source.Have,
+			Contents: toContentsView(source.Contents),
+		})
+	}
+	return view, nil
+}
+
+// exportTeam is kuke team export NAME (#1643 AC12): ?hostFields=1 is
+// --host-fields, ?explicit=1 is --explicit-defaults.
+func (a *teamAPI) exportTeam(ctx context.Context, client kukeonv1.Client, r *http.Request) (any, error) {
+	flag := func(key string) bool {
+		switch r.URL.Query().Get(key) {
+		case "1", "true":
+			return true
+		}
+		return false
+	}
+	raw, err := initialize.Export(ctx, client, r.PathValue("name"), initialize.ExportOptions{
+		HostFields: flag("hostFields"), ExplicitDefaults: flag("explicit"),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{"document": string(raw)}, nil
 }
 
 // checkDeclarationName keeps an edit of team A from storing team B.
@@ -368,136 +564,16 @@ func (a *teamAPI) deleteTeam(ctx context.Context, client kukeonv1.Client, r *htt
 	}, nil
 }
 
-// sourceView is a stored Source.
-type sourceView struct {
-	Name   string `json:"name"`
-	URL    string `json:"url"`
-	Branch string `json:"branch,omitempty"`
-	Tag    string `json:"tag,omitempty"`
-	Commit string `json:"commit,omitempty"`
-}
-
-// selectionView is a default role or harness.
-type selectionView struct {
-	Name   string `json:"name"`
-	Source string `json:"source"`
-	Path   string `json:"path"`
-}
-
-type sourcesView struct {
-	Sources          []sourceView    `json:"sources"`
-	DefaultRoles     []selectionView `json:"defaultRoles"`
-	DefaultHarnesses []selectionView `json:"defaultHarnesses"`
-}
-
-func toSourceView(s config.Source) sourceView {
-	return sourceView{Name: s.Name, URL: s.URL, Branch: s.Branch, Tag: s.Tag, Commit: s.Commit}
-}
-
-// listSources lists every stored Source (#1643) and the default roles and
-// harnesses.
-func (a *teamAPI) listSources(ctx context.Context, client kukeonv1.Client, _ *http.Request) (any, error) {
-	stored, err := initialize.Sources(ctx, client)
-	if err != nil {
-		return nil, err
-	}
-	defaults, err := initialize.Defaults(ctx, client)
-	if err != nil {
-		return nil, err
-	}
-	d := defaults.Spec.Defaults
-	view := sourcesView{
-		Sources:          make([]sourceView, 0, len(stored)),
-		DefaultRoles:     make([]selectionView, 0, len(d.Roles)),
-		DefaultHarnesses: make([]selectionView, 0, len(d.Harnesses)),
-	}
-	for _, name := range slices.Sorted(maps.Keys(stored)) {
-		spec := stored[name]
-		view.Sources = append(view.Sources, sourceView{
-			Name: name, URL: spec.URL, Branch: spec.Branch, Tag: spec.Tag, Commit: spec.Commit,
-		})
-	}
-	for _, role := range d.Roles {
-		view.DefaultRoles = append(
-			view.DefaultRoles,
-			selectionView{Name: role.Name, Source: role.Source, Path: role.Path},
-		)
-	}
-	for _, h := range d.Harnesses {
-		view.DefaultHarnesses = append(
-			view.DefaultHarnesses,
-			selectionView{Name: h.Name, Source: h.Source, Path: h.Path},
-		)
-	}
-	return view, nil
-}
-
-// sourceRequest is kuke create source's flags.
-type sourceRequest struct {
-	Name   string `json:"name"`
-	URL    string `json:"url"`
-	Branch string `json:"branch"`
-	Tag    string `json:"tag"`
-	Commit string `json:"commit"`
-}
-
-// contentsView is what a source offers.
-type contentsView struct {
-	*initialize.SourceContents
-
-	Source sourceView `json:"source"`
-}
-
-// defaultsChangeView reports an edit of the TeamDefaults or a stored Source:
-// which teams inherit from the defaults and so need a reapply to see the
-// change (AC14, G4), and what a stored Source offers.
+// defaultsChangeView reports an edit of the TeamDefaults: which teams
+// inherit from the defaults and so need a reapply to see the change (AC14,
+// G4).
 type defaultsChangeView struct {
-	Action     string        `json:"action"`
-	Inheriting []string      `json:"inheriting"`
-	Discovered *contentsView `json:"discovered,omitempty"`
+	Action     string   `json:"action"`
+	Inheriting []string `json:"inheriting"`
 }
 
 func changeView(change initialize.DefaultsChange) defaultsChangeView {
 	return defaultsChangeView{Action: change.Action, Inheriting: nonNil(change.Inheriting)}
-}
-
-func (a *teamAPI) addSource(ctx context.Context, client kukeonv1.Client, r *http.Request) (any, error) {
-	var req sourceRequest
-	if err := decodeJSONBody(r, maxConnectorBody, &req); err != nil {
-		return nil, err
-	}
-	change, err := initialize.CreateSource(ctx, initialize.SourceOptions{
-		Options: a.options(client, false), Name: req.Name, URL: req.URL,
-		Branch: req.Branch, Tag: req.Tag, Commit: req.Commit,
-	})
-	if err != nil {
-		return nil, err
-	}
-	view := defaultsChangeView{Action: change.Action, Inheriting: []string{}}
-	if change.Discovered != nil {
-		view.Discovered = &contentsView{
-			Source:         toSourceView(change.Discovered.Source),
-			SourceContents: change.Discovered,
-		}
-	}
-	return view, nil
-}
-
-func (a *teamAPI) inspectSource(ctx context.Context, client kukeonv1.Client, r *http.Request) (any, error) {
-	contents, err := initialize.ShowSource(ctx, a.options(client, false), r.PathValue("name"))
-	if err != nil {
-		return nil, err
-	}
-	return contentsView{Source: toSourceView(contents.Source), SourceContents: contents}, nil
-}
-
-// removeSource deletes a stored Source; kukeond refuses one a team or the
-// defaults reference (ErrSourceInUse, 409).
-func (a *teamAPI) removeSource(ctx context.Context, client kukeonv1.Client, r *http.Request) (any, error) {
-	if err := initialize.DeleteSource(ctx, a.options(client, false), r.PathValue("name")); err != nil {
-		return nil, err
-	}
-	return defaultsChangeView{Action: "removed", Inheriting: []string{}}, nil
 }
 
 type defaultsView struct {

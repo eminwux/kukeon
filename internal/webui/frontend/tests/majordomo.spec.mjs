@@ -616,7 +616,7 @@ test("the Health page shows the sweep schedule from the task config, runs a swee
   await expect(enable).toContainText("Sweeps are suspended.");
   await expect(enable).toContainText("kuke-majordomo-claude-health-sweep ships switched off");
   await expect(enable).toContainText("{ name: health-sweep, suspend: false }");
-  await expect(enable.getByRole("link", { name: "kuke team" })).toHaveAttribute("href", "#/teams/kuke");
+  await expect(enable.getByRole("link", { name: "kuke team" })).toHaveAttribute("href", "#/teams/kuke/edit");
   await expect(enable).not.toContainText("kuketeam");
   await expect(schedule.locator("input, select, textarea")).toHaveCount(0);
   await expect(schedule.getByRole("button")).toHaveCount(1);
@@ -687,11 +687,11 @@ test("with the majordomo panel docked at 1440×900 the Manage sidebar and a list
     await page.goto(`${server.url}${hash}`);
     await expect(panel(page), hash).toBeVisible();
     const manage = page.getByRole("navigation", { name: "Manage navigation" });
-    await expect(manage.getByRole("link"), hash).toHaveCount(13);
+    await expect(manage.getByRole("link"), hash).toHaveCount(14);
     // One vertical list: every link is on its own line and inside the sidebar.
     const boxes = await manage.getByRole("link").evaluateAll(links => links.map(link => link.getBoundingClientRect()).map(box => ({ left: Math.round(box.left), right: Math.round(box.right), top: Math.round(box.top) })));
     expect(new Set(boxes.map(box => box.left)).size, hash).toBe(1);
-    expect(new Set(boxes.map(box => box.top)).size, hash).toBe(13);
+    expect(new Set(boxes.map(box => box.top)).size, hash).toBe(14);
     const sidebar = await page.locator("#cell-sidebar").boundingBox();
     for (const box of boxes) expect(box.right, hash).toBeLessThanOrEqual(Math.round(sidebar.x + sidebar.width));
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), hash).toBe(true);

@@ -10,7 +10,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test:unit": "node --test tests/tokens-contrast.test.mjs tests/lifecycle-policy.test.mjs tests/cgroup-format.test.mjs tests/network-format.test.mjs tests/image-format.test.mjs tests/log-buffer.test.mjs tests/terminal-palette.test.mjs src/relationships.test.mjs src/creation-schema.test.mjs src/config-form.test.mjs src/catalog-url.test.mjs src/connectors.test.mjs src/teams.test.mjs src/schedule-format.test.mjs src/views.test.mjs src/cells.test.mjs",
+    "test:unit": "node --test tests/tokens-contrast.test.mjs tests/lifecycle-policy.test.mjs tests/cgroup-format.test.mjs tests/network-format.test.mjs tests/image-format.test.mjs tests/log-buffer.test.mjs tests/terminal-palette.test.mjs src/relationships.test.mjs src/creation-schema.test.mjs src/config-form.test.mjs src/catalog-url.test.mjs src/connectors.test.mjs src/teams.test.mjs src/team-form.test.mjs src/schedule-format.test.mjs src/views.test.mjs src/cells.test.mjs",
     "test": "playwright test browser.spec.mjs majordomo.spec.mjs",
     "test:smoke": "playwright test daemon.spec.mjs"
   },

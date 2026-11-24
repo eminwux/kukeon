@@ -40,7 +40,7 @@ guarantee that a terminal process survives reconnection or page reload.
 
 Manage replaces the cell list in the sidebar with one flat vertical list:
 Overview, Realms, Spaces, Stacks, Cells, Blueprints, Configs, Volumes, Secrets,
-Connectors, Teams, Images and Daemon. A new kind adds one line, never a link to
+Connectors, Teams, Sources, Images and Daemon. A new kind adds one line, never a link to
 a row that wraps. The Overview leads with the cells needing attention, then the
 summary counts and a Health card for the newest sweep report. Health is a tab
 of the Daemon page, next to Status (the connectivity check) and Logs. The
@@ -69,6 +69,24 @@ provenance points to that Config. Blueprint details show referencing Configs and
 the Cells instantiated through them. Relationship lookup uses scoped references
 and Cell lineage, not generated names; incomplete inventory and failed resource
 reads remain visible as partial or stale results.
+
+Teams are created and edited through a wizard, not a YAML box (#1644). New
+team (`#/new-team`, opened from the Teams list) steps through Project, Other
+sources, Roles and harnesses, Tasks and schedules, Credentials and Review;
+Edit team (`#/teams/<name>/edit`) is the same wizard from Other sources on,
+filled from the stored team, with an **Edit as YAML** tab for everything the
+form does not show. A step's Next is disabled while it has problems, Back
+never loses input, and what a source offers is fetched once per wizard. The
+browser never parses YAML: the server answers a draft with a JSON form and the
+declaration, which the browser sends back unchanged. A team's page shows the
+whole setup as it composes — project, sources, roles, tasks with their
+schedules, harnesses, connectors and Configs — each list badged `declared` or
+`inherited`, with Edit, Export, Reapply and Delete; Export shows the team as a
+`kuketeam.yaml` with Copy and Download. Sources have a Manage page of their
+own (`#/sources`), since a Source belongs to no team: the stored Sources with
+the teams that use them, New source, and a Source's contents with the default
+toggles. New Cell's manual form can fill a repository from a Source; it copies
+the fields and the cell does not follow the Source afterwards.
 
 ## Data and appearance
 

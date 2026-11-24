@@ -580,99 +580,6 @@ func TestTeamsReapplyAndDelete(t *testing.T) {
 	expectError(t, w, w.Body.Bytes(), http.StatusNotFound, "not_found")
 }
 
-// TestTeamSources is AC17 over HTTP, over stored Sources (#1643 Step 8).
-func TestTeamSources(t *testing.T) {
-	c, h := teamFixture(t)
-	w := connectorRequest(t, h, http.MethodGet, "/api/team-sources", "")
-	list := decodeBody[sourcesView](t, w)
-	if w.Code != http.StatusOK || len(list.Sources) != 1 || list.Sources[0].Name != "kukeon" ||
-		len(list.DefaultHarnesses) != 2 || list.DefaultRoles == nil {
-		t.Fatalf("sources: %d %s", w.Code, w.Body)
-	}
-	if strings.Contains(w.Body.String(), "clonePath") {
-		t.Fatalf("a stored Source has no clone path: %s", w.Body)
-	}
-	w = connectorRequest(t, h, http.MethodPost, "/api/team-sources",
-		jsonBody(t, map[string]any{"name": "extra", "url": "https://example.test/extra.git", "branch": "main"}))
-	added := decodeBody[defaultsChangeView](t, w)
-	if w.Code != http.StatusOK || added.Action != "created" || added.Discovered == nil ||
-		added.Discovered.Source.Name != "extra" || len(added.Discovered.Roles) == 0 || added.Inheriting == nil {
-		t.Fatalf("add source: %d %s", w.Code, w.Body)
-	}
-	if _, ok := c.sources["extra"]; !ok {
-		t.Fatal("add did not store Source extra")
-	}
-	w = connectorRequest(t, h, http.MethodPost, "/api/team-sources",
-		jsonBody(t, map[string]any{"name": "extra", "url": "https://example.test/extra.git", "branch": "main"}))
-	expectError(t, w, w.Body.Bytes(), http.StatusConflict, "already_exists")
-	w = connectorRequest(t, h, http.MethodPost, "/api/team-sources/kukeon/inspect", "")
-	contents := decodeBody[contentsView](t, w)
-	if w.Code != http.StatusOK || contents.Source.Name != "kukeon" || len(contents.Harnesses) == 0 {
-		t.Fatalf("inspect: %d %s", w.Code, w.Body)
-	}
-	defaultHarness := 0
-	for _, h := range contents.Harnesses {
-		if h.Default {
-			defaultHarness++
-		}
-	}
-	if defaultHarness != 2 {
-		t.Fatalf("default harnesses marked = %d: %s", defaultHarness, w.Body)
-	}
-	w = connectorRequest(t, h, http.MethodPost, "/api/team-sources/kukeon/delete", "")
-	expectError(t, w, w.Body.Bytes(), http.StatusConflict, "in_use")
-	if !strings.Contains(w.Body.String(), "default harness") {
-		t.Fatalf("refusal does not name the reference: %s", w.Body)
-	}
-	w = connectorRequest(t, h, http.MethodPost, "/api/team-sources/extra/delete", "")
-	if removed := decodeBody[defaultsChangeView](t, w); w.Code != http.StatusOK || removed.Action != "removed" {
-		t.Fatalf("remove: %d %s", w.Code, w.Body)
-	}
-	if _, ok := c.sources["extra"]; ok {
-		t.Fatal("Source extra still stored after delete")
-	}
-	w = connectorRequest(t, h, http.MethodPost, "/api/team-sources/nothing/inspect", "")
-	expectError(t, w, w.Body.Bytes(), http.StatusNotFound, "not_found")
-	w = connectorRequest(t, h, http.MethodPost, "/api/team-sources/nothing/delete", "")
-	expectError(t, w, w.Body.Bytes(), http.StatusNotFound, "not_found")
-}
-
-// TestTeamSourcesListsATeamsSource: a Source only a team's declaration
-// defines is stored, listed, and cannot be deleted while the team uses it.
-func TestTeamSourcesListsATeamsSource(t *testing.T) {
-	c, h := teamFixture(t)
-	c.putProj(t)
-	declaration := `apiVersion: v1beta1
-kind: Team
-metadata:
-  name: proj
-spec:
-  sources:
-    - {name: extra, url: https://example.test/extra.git, branch: main}
-  roles:
-    - {name: lead, source: extra, path: team/roles/majordomo}
-`
-	w := connectorRequest(t, h, http.MethodPost, "/api/teams",
-		jsonBody(t, map[string]any{"name": "proj", "declaration": declaration}))
-	if w.Code != http.StatusOK {
-		t.Fatalf("apply: %d %s", w.Code, w.Body)
-	}
-	w = connectorRequest(t, h, http.MethodGet, "/api/team-sources", "")
-	list := decodeBody[sourcesView](t, w)
-	names := make([]string, 0, len(list.Sources))
-	for _, source := range list.Sources {
-		names = append(names, source.Name)
-	}
-	if w.Code != http.StatusOK || strings.Join(names, ",") != "extra,kukeon,proj" {
-		t.Fatalf("sources = %v: %d %s", names, w.Code, w.Body)
-	}
-	w = connectorRequest(t, h, http.MethodPost, "/api/team-sources/extra/delete", "")
-	expectError(t, w, w.Body.Bytes(), http.StatusConflict, "in_use")
-	if !strings.Contains(w.Body.String(), "team proj") {
-		t.Fatalf("refusal does not name the team: %s", w.Body)
-	}
-}
-
 // TestTeamDefaults is AC14 over HTTP: the list mode is kuke team defaults
 // set, the document mode applies a whole TeamDefaults, and both name the
 // inheriting teams.
@@ -803,8 +710,8 @@ func TestTeamActionsRequireJSON(t *testing.T) {
 	routes := []string{
 		"/api/teams/proj/reapply",
 		"/api/teams/proj/delete",
-		"/api/team-sources/kukeon/inspect",
-		"/api/team-sources/extra/delete",
+		"/api/sources/kukeon/inspect",
+		"/api/sources/extra/delete",
 	}
 	for _, route := range routes {
 		for _, tc := range []struct{ contentType, body string }{

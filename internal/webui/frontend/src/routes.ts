@@ -42,8 +42,13 @@ export function readRoute(): Route {
       const action = parts[2] === "new-identity" || parts[2] === "rotate-identity" ? parts[2] : undefined;
       return { view: "connectors", scope: parts.slice(1, 2), parent: [], document: false, target: Array.isArray(target) && target.every(value => typeof value === "string") ? target.slice(0, 3) : undefined, action, identity: action && Array.isArray(identity) && identity.length >= 2 && identity.every(value => typeof value === "string") ? identity.slice(0, 4) : undefined };
     }
-    // #/teams lists the stored teams and the sources; #/teams/<name> opens one team.
-    if (parts[0] === "teams") return { view: "teams", scope: parts.slice(1, 2), parent: [], document: false };
+    // #/teams lists the stored teams; #/teams/<name> opens one team, #/teams/<name>/edit and
+    // #/teams/<name>/export its Edit team and Export screens (#1644).
+    if (parts[0] === "teams") return { view: "teams", scope: parts.slice(1, 2), parent: [], document: false, action: parts[1] && (parts[2] === "edit" || parts[2] === "export") ? parts[2] : undefined };
+    // #/new-team opens the New team wizard, like #/new-config: no team name is reserved.
+    if (parts[0] === "new-team") return { view: "new-team", scope: [], parent: [], document: false };
+    // #/sources lists the stored Sources; #/sources/<name> opens one.
+    if (parts[0] === "sources") return { view: "sources", scope: parts.slice(1, 2), parent: [], document: false };
     // The Daemon page's tabs: #/daemon (Status, the connectivity check), #/daemon/health (Health,
     // majordomo's sweep reports and schedule) and #/daemon/logs. #/health is the historical Health route.
     if (parts[0] === "health") return { view: "health", scope: [], parent: [], document: false };

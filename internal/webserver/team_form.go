@@ -1,0 +1,392 @@
+// Copyright 2026 Emiliano Spinella (eminwux)
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// SPDX-License-Identifier: Apache-2.0
+
+package webserver
+
+import (
+	"fmt"
+	"maps"
+	"slices"
+	"strings"
+
+	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/pkg/team/config"
+)
+
+// The team form (#1644, D2): the parts of a Team declaration the wizard and
+// the Edit team screen show as fields — the project, the sources, the roles
+// with their harness, image needs, initial path and tasks, the harnesses and
+// the team's connectors. It is its own JSON model, never a JSON-encoded
+// config.Team: every list that can inherit carries its flag, because JSON
+// cannot tell a nil list from an empty one. What the form does not model —
+// spec.secrets, a role's connectors and needs.secrets, a source's long-form
+// git block — is kept from the base declaration by apply and edited as YAML.
+
+type teamForm struct {
+	Name    string      `json:"name"`
+	Project *formSource `json:"project,omitempty"`
+	// Sources are the team's spec.sources; null declares none (the team
+	// reads every stored Source), an array (even empty) lists them.
+	Sources    []formSource   `json:"sources"`
+	Roles      formRoles      `json:"roles"`
+	Harnesses  formHarnesses  `json:"harnesses"`
+	Connectors formConnectors `json:"connectors"`
+}
+
+// formSource is one source entry or the project. Stored names the stored
+// Source the entry refers to when it is not the alias; URL makes it a
+// definition, which creating the team stores. Identity is the git identity
+// of a definition; a reference reads its stored Source's.
+type formSource struct {
+	Alias     string `json:"alias"`
+	Stored    string `json:"stored,omitempty"`
+	URL       string `json:"url,omitempty"`
+	RefKind   string `json:"refKind,omitempty"`
+	Ref       string `json:"ref,omitempty"`
+	ClonePath string `json:"clonePath,omitempty"`
+	Identity  string `json:"identity,omitempty"`
+}
+
+// formRoles is spec.roles: inherit leaves it out (the defaults' roles).
+type formRoles struct {
+	Inherit bool       `json:"inherit"`
+	Items   []formRole `json:"items"`
+}
+
+type formRole struct {
+	Name        string    `json:"name"`
+	Source      string    `json:"source"`
+	Path        string    `json:"path"`
+	Harness     string    `json:"harness,omitempty"`
+	InitialPath string    `json:"initialPath,omitempty"`
+	Image       []string  `json:"image"`
+	Tasks       formTasks `json:"tasks"`
+}
+
+// formTasks is a role's tasks: all selects every task the role declares.
+type formTasks struct {
+	All   bool       `json:"all"`
+	Items []formTask `json:"items"`
+}
+
+// formTask is one selected task. Suspend is the schedule switch: false is
+// on, true is off, null keeps the role's.
+type formTask struct {
+	Name     string `json:"name"`
+	Schedule string `json:"schedule,omitempty"`
+	Suspend  *bool  `json:"suspend"`
+	Args     string `json:"args,omitempty"`
+}
+
+type formHarnesses struct {
+	Inherit bool          `json:"inherit"`
+	Items   []formHarness `json:"items"`
+}
+
+type formHarness struct {
+	Name   string `json:"name"`
+	Source string `json:"source"`
+	Path   string `json:"path"`
+}
+
+type formConnectors struct {
+	Inherit bool                     `json:"inherit"`
+	Items   map[string]formConnector `json:"items"`
+}
+
+type formConnector struct {
+	Method   string `json:"method,omitempty"`
+	Identity string `json:"identity,omitempty"`
+}
+
+// Ref kinds of a formSource.
+const (
+	refBranch = "branch"
+	refTag    = "tag"
+	refCommit = "commit"
+)
+
+// formOf is the form of a Team: the stored one for an edit, a draft's
+// declaration for a new team.
+func formOf(team *config.Team) teamForm {
+	s := team.Spec
+	out := teamForm{
+		Name:       team.Metadata.Name,
+		Roles:      formRoles{Inherit: s.Roles == nil, Items: []formRole{}},
+		Harnesses:  formHarnesses{Inherit: s.Harnesses == nil, Items: []formHarness{}},
+		Connectors: formConnectors{Inherit: s.Connectors == nil, Items: map[string]formConnector{}},
+	}
+	if s.ProjectSource != nil {
+		project := formSourceOf(*s.ProjectSource)
+		if project.Alias == "" {
+			project.Alias = config.ProjectSourceName
+		}
+		out.Project = &project
+	}
+	if s.Sources != nil {
+		out.Sources = make([]formSource, 0, len(s.Sources))
+		for _, entry := range s.Sources {
+			out.Sources = append(out.Sources, formSourceOf(entry))
+		}
+	}
+	for _, role := range s.Roles {
+		item := formRole{
+			Name: role.Name, Source: role.Source, Path: role.Path, Harness: role.Harness,
+			InitialPath: role.InitialPath, Image: []string{},
+			Tasks: formTasks{All: role.Tasks == nil, Items: []formTask{}},
+		}
+		if role.Needs != nil {
+			item.Image = append(item.Image, role.Needs.Image...)
+		}
+		if role.Tasks != nil {
+			for _, task := range *role.Tasks {
+				item.Tasks.Items = append(item.Tasks.Items, formTask{
+					Name: task.Name, Schedule: task.Schedule, Suspend: cloneBool(task.Suspend), Args: task.Args,
+				})
+			}
+		}
+		out.Roles.Items = append(out.Roles.Items, item)
+	}
+	for _, h := range s.Harnesses {
+		out.Harnesses.Items = append(out.Harnesses.Items, formHarness{Name: h.Name, Source: h.Source, Path: h.Path})
+	}
+	for name, choice := range s.Connectors {
+		out.Connectors.Items[name] = formConnector{Method: choice.Method, Identity: choice.Identity}
+	}
+	return out
+}
+
+func formSourceOf(entry config.Source) formSource {
+	out := formSource{Alias: entry.Name, Stored: entry.Stored, URL: entry.URL, ClonePath: entry.ClonePath}
+	switch {
+	case entry.Branch != "":
+		out.RefKind, out.Ref = refBranch, entry.Branch
+	case entry.Tag != "":
+		out.RefKind, out.Ref = refTag, entry.Tag
+	case entry.Commit != "":
+		out.RefKind, out.Ref = refCommit, entry.Commit
+	}
+	if entry.Git != nil && entry.Git.IdentityRef != nil {
+		out.Identity = entry.Git.IdentityRef.Name
+	}
+	return out
+}
+
+func cloneBool(v *bool) *bool {
+	if v == nil {
+		return nil
+	}
+	out := *v
+	return &out
+}
+
+// apply returns a copy of base with what the form models replaced and
+// everything else kept (D2): metadata.realm, spec.secrets, each role's
+// connectors and needs.secrets (matched by name, else by source and path),
+// and each source's git block besides its identity (matched by alias).
+func (f teamForm) apply(base *config.Team) (*config.Team, error) {
+	if base == nil {
+		base = &config.Team{APIVersion: config.APIVersion, Kind: config.KindTeam}
+	}
+	out := *base
+	out.Spec.Secrets = slices.Clone(base.Spec.Secrets)
+	if name := strings.TrimSpace(f.Name); name != "" {
+		out.Metadata.Name = name
+	}
+	if f.Project != nil {
+		project, err := f.Project.entry("the project", base.Spec.ProjectSource)
+		if err != nil {
+			return nil, err
+		}
+		if project.Name == "" {
+			project.Name = config.ProjectSourceName
+		}
+		out.Spec.ProjectSource = &project
+	} else if base.Spec.ProjectSource != nil {
+		project := *base.Spec.ProjectSource
+		project.Git = project.Git.Clone()
+		out.Spec.ProjectSource = &project
+	}
+	if f.Sources != nil {
+		sources := make([]config.Source, 0, len(f.Sources))
+		for i, item := range f.Sources {
+			var have *config.Source
+			for j := range base.Spec.Sources {
+				if base.Spec.Sources[j].Name == strings.TrimSpace(item.Alias) {
+					have = &base.Spec.Sources[j]
+				}
+			}
+			entry, err := item.entry(fmt.Sprintf("source %d", i+1), have)
+			if err != nil {
+				return nil, err
+			}
+			if entry.Name == "" {
+				return nil, fmt.Errorf("%w: source %d has no name", errdefs.ErrInvalidTeam, i+1)
+			}
+			sources = append(sources, entry)
+		}
+		out.Spec.Sources = sources
+	} else {
+		out.Spec.Sources = slices.Clone(base.Spec.Sources)
+	}
+	out.Spec.Roles = nil
+	if !f.Roles.Inherit {
+		out.Spec.Roles = make([]config.Role, 0, len(f.Roles.Items))
+		for _, item := range f.Roles.Items {
+			out.Spec.Roles = append(out.Spec.Roles, item.role(base.Spec.Roles))
+		}
+	}
+	out.Spec.Harnesses = nil
+	if !f.Harnesses.Inherit {
+		out.Spec.Harnesses = make([]config.Harness, 0, len(f.Harnesses.Items))
+		for _, item := range f.Harnesses.Items {
+			out.Spec.Harnesses = append(out.Spec.Harnesses, config.Harness{
+				Name: strings.TrimSpace(item.Name), Source: strings.TrimSpace(item.Source),
+				Path: strings.TrimSpace(item.Path),
+			})
+		}
+	}
+	out.Spec.Connectors = nil
+	if !f.Connectors.Inherit {
+		out.Spec.Connectors = make(map[string]config.ConnectorChoice, len(f.Connectors.Items))
+		for name, choice := range f.Connectors.Items {
+			out.Spec.Connectors[name] = config.ConnectorChoice{
+				Method: strings.TrimSpace(choice.Method), Identity: strings.TrimSpace(choice.Identity),
+			}
+		}
+	}
+	return &out, nil
+}
+
+// entry is the form's source over base, the entry of the same alias.
+func (s formSource) entry(field string, base *config.Source) (config.Source, error) {
+	var out config.Source
+	if base != nil {
+		out = *base
+		out.Git = base.Git.Clone()
+	}
+	out.Name, out.Stored = strings.TrimSpace(s.Alias), strings.TrimSpace(s.Stored)
+	out.URL, out.ClonePath = strings.TrimSpace(s.URL), strings.TrimSpace(s.ClonePath)
+	out.Branch, out.Tag, out.Commit = "", "", ""
+	ref := strings.TrimSpace(s.Ref)
+	switch s.RefKind {
+	case refBranch:
+		out.Branch = ref
+	case refTag:
+		out.Tag = ref
+	case refCommit:
+		out.Commit = ref
+	case "":
+		if ref != "" {
+			return config.Source{}, fmt.Errorf("%w: %s: a ref needs its kind (branch, tag or commit)",
+				errdefs.ErrInvalidTeam, field)
+		}
+	default:
+		return config.Source{}, fmt.Errorf("%w: %s: ref kind %q is not branch, tag or commit",
+			errdefs.ErrInvalidTeam, field, s.RefKind)
+	}
+	identity := strings.TrimSpace(s.Identity)
+	current := ""
+	if out.Git != nil && out.Git.IdentityRef != nil {
+		current = out.Git.IdentityRef.Name
+	}
+	if identity == current {
+		return out, nil
+	}
+	if out.URL == "" {
+		return config.Source{}, fmt.Errorf("%w: %s: the git identity belongs to the stored Source; "+
+			"change it on the Sources page", errdefs.ErrInvalidTeam, field)
+	}
+	if identity == "" {
+		out.Git.IdentityRef = nil
+		if g := out.Git; g.Author == nil && g.Committer == nil && g.Credential == nil && g.Signing == nil &&
+			len(g.Sign) == 0 {
+			out.Git = nil
+		}
+		return out, nil
+	}
+	if out.Git == nil {
+		out.Git = &config.SourceGit{}
+	}
+	out.Git.IdentityRef = &config.SecretRef{Name: identity, Realm: config.DefaultRealm}
+	return out, nil
+}
+
+// role is the form's role over the base role of the same name, else of the
+// same source and path.
+func (r formRole) role(base []config.Role) config.Role {
+	name := strings.TrimSpace(r.Name)
+	var have *config.Role
+	for i := range base {
+		if base[i].Name == name {
+			have = &base[i]
+			break
+		}
+	}
+	if have == nil {
+		for i := range base {
+			if base[i].Source == r.Source && base[i].Path == r.Path {
+				have = &base[i]
+				break
+			}
+		}
+	}
+	var out config.Role
+	if have != nil {
+		out = *have
+		out.Connectors = maps.Clone(have.Connectors)
+	}
+	out.Name, out.Source, out.Path = name, strings.TrimSpace(r.Source), strings.TrimSpace(r.Path)
+	out.Harness, out.InitialPath = strings.TrimSpace(r.Harness), strings.TrimSpace(r.InitialPath)
+	var image []string
+	for _, capability := range r.Image {
+		if capability = strings.TrimSpace(capability); capability != "" {
+			image = append(image, capability)
+		}
+	}
+	var needs *config.Needs
+	if have != nil && have.Needs != nil {
+		kept := *have.Needs
+		kept.Secrets = slices.Clone(have.Needs.Secrets)
+		needs = &kept
+	}
+	switch {
+	case len(image) > 0:
+		if needs == nil {
+			needs = &config.Needs{}
+		}
+		needs.Image = image
+	case needs != nil && len(needs.Image) > 0:
+		// The form cleared the image needs.
+		needs.Image = nil
+		if len(needs.Secrets) == 0 {
+			needs = nil
+		}
+	}
+	out.Needs = needs
+	out.Tasks = nil
+	if !r.Tasks.All {
+		tasks := make([]config.TaskSelection, 0, len(r.Tasks.Items))
+		for _, task := range r.Tasks.Items {
+			tasks = append(tasks, config.TaskSelection{
+				Name: strings.TrimSpace(task.Name), Schedule: strings.TrimSpace(task.Schedule),
+				Suspend: cloneBool(task.Suspend), Args: task.Args,
+			})
+		}
+		out.Tasks = &tasks
+	}
+	return out
+}

@@ -1,6 +1,6 @@
 import { catalogTitles, daemonLink, imagesLink, listLink, overviewLink, titles, type Route } from "./routes";
 import { connectorsLink } from "./connector-ui";
-import { teamsLink } from "./teams.mjs";
+import { sourcesLink, teamsLink } from "./teams.mjs";
 
 // The Manage sidebar (#1635): one flat list of the resource and administration pages, in place of the
 // horizontal row and its OPERATE and CONFIGURE groups. Every new kind adds one line here, not one link
@@ -13,7 +13,8 @@ export function ManageNav({ route }: { route: Route }) {
     scoped(0), scoped(1), scoped(2), scoped(3),
     ...Object.entries(catalogTitles).map(([kind, title]) => ({ title, href: `#/${kind}`, active: route.view === kind || (kind === "configs" && route.view === "new-config") || (kind === "secrets" && route.view === "new-secret") })),
     { title: "Connectors", href: connectorsLink(), active: route.view === "connectors" },
-    { title: "Teams", href: teamsLink(), active: route.view === "teams" },
+    { title: "Teams", href: teamsLink(), active: route.view === "teams" || route.view === "new-team" },
+    { title: "Sources", href: sourcesLink(), active: route.view === "sources" },
     { title: "Images", href: imagesLink(), active: route.view === "images" },
     { title: "Daemon", href: daemonLink(), active: route.view === "daemon" || route.view === "daemon-logs" || route.view === "health" },
   ];
