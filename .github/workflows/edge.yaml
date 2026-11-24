@@ -30,6 +30,9 @@ on:
         default: true
 
 # Two merges must not interleave uploads to the one `edge` prerelease.
+# GitHub keeps one queued run per group and cancels it when a newer one
+# arrives, so during a burst of merges the commits in the middle get neither
+# their main test run nor an edge publish; the newest commit gets both.
 concurrency:
   group: edge
   cancel-in-progress: false

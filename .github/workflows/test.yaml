@@ -95,11 +95,10 @@ jobs:
                 internal/webui/*|internal/webserver/*)
                   webui=true go=true e2e=true ;;
                 # Harness definitions, build contexts, catalogs and scripts.
-                # Go files in there are also unit-tested.
-                team/harnesses/*.go)
-                  harnesses=true go=true e2e=true ;;
+                # The Go unit tests also read the harness YAML, and the Go
+                # files in there are unit-tested.
                 team/harnesses/*|team/team.mk)
-                  harnesses=true ;;
+                  harnesses=true go=true e2e=true ;;
                 internal/team/harnessassets/*|internal/team/harnessbuild/*|pkg/team/harness/*)
                   harnesses=true go=true e2e=true ;;
                 scripts/install.sh|docs/site/install.sh)
@@ -107,8 +106,9 @@ jobs:
                 # Go sources, and every other file in a Go source tree: test
                 # data and files that Go code embeds or reads in tests.
                 # team/components and team/connectors are embedded with
-                # go:embed.
-                *.go|*/go.mod|*/go.sum|go.work|go.work.sum|cmd/*|internal/*|pkg/*|e2e/*|team/components/*|team/connectors/*)
+                # go:embed; the unit tests read the rest of team/ (roles,
+                # scripts) and compose kuketeam.yaml.
+                *.go|*/go.mod|*/go.sum|go.work|go.work.sum|cmd/*|internal/*|pkg/*|e2e/*|team/*|kuketeam.yaml)
                   go=true e2e=true ;;
               esac
             done < <(git diff --name-only HEAD^1 HEAD)

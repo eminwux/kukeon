@@ -4,14 +4,14 @@ Run the local equivalent of every CI gate your change triggers before pushing.
 All of them are jobs of one workflow, `.github/workflows/test.yaml`. Each job
 runs only when the files it covers changed; the rest show as skipped.
 
-| Job                 | Runs when these change                                                                                                              | Run locally                                                                              |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `Lint (pre-commit)` | anything outside `docs/` and `mkdocs.yml`                                                                                           | `pre-commit run --files $(git diff --name-only origin/main...HEAD)` and `make fmt-check` |
-| `Go unit tests`     | Go sources, other files under `cmd/` `internal/` `pkg/` `e2e/` `team/components/` `team/connectors/`, `go.mod`/`go.sum`, `Makefile` | `make test` and `make test-race`                                                         |
-| `Go e2e tests`      | the same, plus `Dockerfile` (root required)                                                                                         | `make e2e`                                                                               |
-| `Web UI tests`      | `internal/webui/**`, `internal/webserver/**`, `go.mod`/`go.sum`, `Makefile`                                                         | `make web-ui-check` and `make web-ui-test`                                               |
-| `Harness tests`     | `team/harnesses/**`, `pkg/team/harness/**`, `team/team.mk`, …                                                                       | `make test-harnesses`                                                                    |
-| `Installer tests`   | `scripts/install.sh`, `docs/site/install.sh`, `Makefile`                                                                            | `make install.sh`, then `git diff --exit-code docs/site/install.sh`                      |
+| Job                 | Runs when these change                                                                                                 | Run locally                                                                              |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `Lint (pre-commit)` | anything outside `docs/` and `mkdocs.yml`                                                                              | `pre-commit run --files $(git diff --name-only origin/main...HEAD)` and `make fmt-check` |
+| `Go unit tests`     | Go sources, other files under `cmd/` `internal/` `pkg/` `e2e/` `team/`, `kuketeam.yaml`, `go.mod`/`go.sum`, `Makefile` | `make test` and `make test-race`                                                         |
+| `Go e2e tests`      | the same, plus `Dockerfile` (root required)                                                                            | `make e2e`                                                                               |
+| `Web UI tests`      | `internal/webui/**`, `internal/webserver/**`, `go.mod`/`go.sum`, `Makefile`                                            | `make web-ui-check` and `make web-ui-test`                                               |
+| `Harness tests`     | `team/harnesses/**`, `pkg/team/harness/**`, `team/team.mk`, …                                                          | `make test-harnesses`                                                                    |
+| `Installer tests`   | `scripts/install.sh`, `docs/site/install.sh`, `Makefile`                                                               | `make install.sh`, then `git diff --exit-code docs/site/install.sh`                      |
 
 A change under `internal/webui/frontend/` or `internal/webui/dist/` runs the
 web UI job and not the Go jobs. The `Detect changed areas` job at the top of
