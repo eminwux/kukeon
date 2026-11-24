@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -835,6 +836,66 @@ func teamResult(record controller.TeamRecord) kukeonv1.GetTeamResult {
 			Roles: s.Roles, RolesInherited: s.RolesInherited,
 			Harnesses: s.Harnesses, HarnessesInherited: s.HarnessesInherited,
 			Configs: s.Configs,
+		},
+	}
+}
+
+// ---- Sources (issue #1643) ----
+
+func (c *Client) GetSource(_ context.Context, ref kukeonv1.SourceRef) (kukeonv1.GetSourceResult, error) {
+	record, found, err := c.ctrl.GetSource(ref.Name, ref.Realm)
+	if err != nil || !found {
+		return kukeonv1.GetSourceResult{}, err
+	}
+	return sourceResult(record), nil
+}
+
+func (c *Client) ListSources(_ context.Context, realm string) ([]kukeonv1.GetSourceResult, error) {
+	records, err := c.ctrl.ListSources(realm)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]kukeonv1.GetSourceResult, 0, len(records))
+	for _, record := range records {
+		out = append(out, sourceResult(record))
+	}
+	return out, nil
+}
+
+func (c *Client) DeleteSource(_ context.Context, ref kukeonv1.SourceRef) (kukeonv1.DeleteSourceResult, error) {
+	err := c.ctrl.DeleteSource(ref.Name, ref.Realm)
+	return kukeonv1.DeleteSourceResult{Deleted: err == nil}, err
+}
+
+// StageGitFetch stages a host fetch's stored credential (issue #1643) for the
+// caller: behind kukeond the socket's SO_PEERCRED uid, which the daemon
+// service puts in ctx; in process (--no-daemon) this process's own uid.
+func (c *Client) StageGitFetch(
+	ctx context.Context, req kukeonv1.GitFetchRequest,
+) (kukeonv1.StageGitFetchResult, error) {
+	stage, err := c.ctrl.StageGitFetch(req.Realm, req.Address, req.IdentityRef, callerUID(ctx))
+	return kukeonv1.StageGitFetchResult{Staged: stage.Staged, ID: stage.ID, Dir: stage.Dir}, err
+}
+
+// ReleaseGitFetch removes a staging StageGitFetch made.
+func (c *Client) ReleaseGitFetch(ctx context.Context, id string) error {
+	return c.ctrl.ReleaseGitFetch(id, callerUID(ctx))
+}
+
+func callerUID(ctx context.Context) int {
+	if uid, ok := kukeonv1.PeerUIDFrom(ctx); ok {
+		return uid
+	}
+	return os.Getuid()
+}
+
+func sourceResult(record controller.SourceRecord) kukeonv1.GetSourceResult {
+	s := record.Summary
+	return kukeonv1.GetSourceResult{
+		Exists:   true,
+		Document: record.Source.Document,
+		Summary: kukeonv1.SourceSummary{
+			Name: s.Name, Realm: s.Realm, URL: s.URL, Ref: s.Ref, Identity: s.Identity,
 		},
 	}
 }

@@ -2,9 +2,12 @@ apiVersion: v1beta1
 kind: Team
 metadata: { name: kukeon }
 spec:
+  # The project is this repository: the Source named like the team, kukeon,
+  # which kuke team init stores already.
+  projectSource: { url: github.com/eminwux/kukeon }
   sources:
     - name: agents
-      url: git@github.com:eminwux/agents
+      url: github.com/eminwux/agents
       branch: main
       clonePath: /home/user/agents
   roles:
@@ -19,7 +22,7 @@ spec:
         tasks: [{ name: tick, suspend: false }],
       }
   # Harness definitions, contexts and image catalogs live in this repository
-  # (team/harnesses/); `project` is the source `kuke team add` adds for it.
+  # (team/harnesses/); `project` names spec.projectSource above.
   harnesses:
     - { name: claude, source: project, path: team/harnesses/claude }
     - { name: codex, source: project, path: team/harnesses/codex }

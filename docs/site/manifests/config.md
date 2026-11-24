@@ -120,7 +120,7 @@ spec:
 
 ### `spec.autoDelete` (bool, optional)
 
-When `true`, every cell materialized from this Config gets `Spec.AutoDelete`, so it is deleted once its run ends. This is the same deletion `kuke run --rm` asks for, without the flag. The value is OR'd with the blueprint's own `spec.cell.autoDelete`. It is set on the Config, not the blueprint, because a blueprint is shared across modes and roles. A re-render of an existing cell (OutOfSync, `kuke restart`) keeps it. `kuke team add` sets it on every [task config](../concepts/team.md#tasks).
+When `true`, every cell materialized from this Config gets `Spec.AutoDelete`, so it is deleted once its run ends. This is the same deletion `kuke run --rm` asks for, without the flag. The value is OR'd with the blueprint's own `spec.cell.autoDelete`. It is set on the Config, not the blueprint, because a blueprint is shared across modes and roles. A re-render of an existing cell (OutOfSync, `kuke restart`) keeps it. `kuke create team` sets it on every [task config](../concepts/team.md#tasks).
 
 ### `spec.schedule` (object, optional)
 

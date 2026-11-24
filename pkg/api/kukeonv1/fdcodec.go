@@ -65,7 +65,54 @@ func NewServerCodec(conn io.ReadWriteCloser) rpc.ServerCodec {
 		return jsonrpc.NewServerCodec(conn)
 	}
 	w := &rightsWriter{UnixConn: uc}
-	return &fdServerCodec{ServerCodec: jsonrpc.NewServerCodec(w), w: w}
+	codec := &fdServerCodec{ServerCodec: jsonrpc.NewServerCodec(w), w: w}
+	if uid, err := peerUID(uc); err == nil {
+		codec.peerUID = &uid
+	}
+	return codec
+}
+
+// peerUID reads the uid of the process on the other end of conn
+// (SO_PEERCRED): who the kernel says is calling, not what the request says.
+func peerUID(conn *net.UnixConn) (int, error) {
+	raw, err := conn.SyscallConn()
+	if err != nil {
+		return 0, err
+	}
+	var cred *unix.Ucred
+	var credErr error
+	if err = raw.Control(func(fd uintptr) {
+		cred, credErr = unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED)
+	}); err != nil {
+		return 0, err
+	}
+	if credErr != nil {
+		return 0, credErr
+	}
+	return int(cred.Uid), nil
+}
+
+// peerArgs is implemented by the argument types of methods that act for the
+// calling user (issue #1643): the codec sets their uid from the socket.
+type peerArgs interface {
+	setPeerUID(uid int)
+}
+
+func (a *StageGitFetchArgs) setPeerUID(uid int)   { a.PeerUID = &uid }
+func (a *ReleaseGitFetchArgs) setPeerUID(uid int) { a.PeerUID = &uid }
+
+// ReadRequestBody decodes the body, then overwrites the caller uid of an
+// argument that carries one with the connection's SO_PEERCRED uid. A
+// connection whose peer could not be read leaves it nil, which those methods
+// refuse.
+func (c *fdServerCodec) ReadRequestBody(body any) error {
+	if err := c.ServerCodec.ReadRequestBody(body); err != nil {
+		return err
+	}
+	if args, ok := body.(peerArgs); ok && c.peerUID != nil {
+		args.setPeerUID(*c.peerUID)
+	}
+	return nil
 }
 
 // fdServerCodec wraps the jsonrpc server codec. WriteResponse arms the
@@ -75,6 +122,9 @@ type fdServerCodec struct {
 	rpc.ServerCodec
 
 	w *rightsWriter
+	// peerUID is the connection's SO_PEERCRED uid, read once at accept; nil
+	// when the kernel would not say.
+	peerUID *int
 	// mu serializes replies so an armed descriptor can only attach to the
 	// reply it belongs to. net/rpc already serializes WriteResponse; this
 	// keeps the codec correct on its own.

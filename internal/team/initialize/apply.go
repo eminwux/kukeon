@@ -39,7 +39,8 @@ import (
 // Client deliberately has no cell lifecycle methods. A team command can only
 // read scope, the stored teams and defaults, create explicitly sourced
 // secrets, and apply documents (blueprints, configs, the Team itself, the
-// team realm's secret defaults and the TeamDefaults).
+// team realm's secret defaults and the TeamDefaults), and stage the git
+// identity a source fetch on the host uses (#1643).
 type Client interface {
 	Close() error
 	Ping(context.Context) error
@@ -57,6 +58,11 @@ type Client interface {
 	GetTeamDefaults(context.Context, string) (kukeonv1.GetTeamDefaultsResult, error)
 	ApplyDocuments(context.Context, []byte) (kukeonv1.ApplyDocumentsResult, error)
 	ApplyDocumentsForTeam(context.Context, []byte, string) (kukeonv1.ApplyDocumentsResult, error)
+	GetSource(context.Context, kukeonv1.SourceRef) (kukeonv1.GetSourceResult, error)
+	ListSources(context.Context, string) ([]kukeonv1.GetSourceResult, error)
+	DeleteSource(context.Context, kukeonv1.SourceRef) (kukeonv1.DeleteSourceResult, error)
+	StageGitFetch(context.Context, kukeonv1.GitFetchRequest) (kukeonv1.StageGitFetchResult, error)
+	ReleaseGitFetch(context.Context, string) error
 }
 
 // Apply actions, as kukeond reports them and as a TeamDefaults change is
@@ -144,7 +150,11 @@ func commit(ctx context.Context, client Client, plan *Plan) (Result, error) {
 		prefix = append(prefix, plan.defaultsDoc)
 		expected++
 	}
-	teamDoc, err := yaml.Marshal(plan.composed.Team)
+	// The Sources the team defines go in the same call, before the Configs
+	// (#1643, D7).
+	prefix = append(prefix, plan.sourceDocs...)
+	expected += len(plan.sourceDocs)
+	teamDoc, err := yaml.Marshal(plan.Team)
 	if err != nil {
 		return result, fmt.Errorf("encode Team: %w", err)
 	}
@@ -494,7 +504,7 @@ func (c *configRefs) users(ctx context.Context, realm, name string, teams ...str
 	return out, nil
 }
 
-// noGitIdentityNote is the hint `kuke team init` and `kuke team add` print
+// noGitIdentityNote is the hint `kuke team init` and `kuke create team` print
 // when a team clones over SSH and nothing gives its cells a git identity
 // (issue #1591).
 const noGitIdentityNote = "no git identity is set; run kuke connector import git --default"

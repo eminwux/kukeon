@@ -18,7 +18,6 @@ package cli_test
 
 import (
 	"os"
-	"slices"
 	"strings"
 	"testing"
 
@@ -38,37 +37,47 @@ func sourceHarness(t *testing.T) *harness {
 	return h
 }
 
-// TestSourceAddListShowRemove is AC13.
-func TestSourceAddListShowRemove(t *testing.T) {
+// TestCreateSourceAndShow is kuke create source and kuke source show (#1643
+// Step 6): create stores a Source document, refuses a stored name without
+// --force, and a replacement names the teams that use it.
+func TestCreateSourceAndShow(t *testing.T) {
 	h := sourceHarness(t)
-	out, err := h.run(t, "source", "add", "extra", "--url", extraURL, "--branch", "main")
+	out, err := h.run(t, "create", "source", "extra", "--url", extraURL, "--branch", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Source extra created: example.test/extra.git, branch main; offers") {
+		t.Errorf("create output:\n%s", out)
+	}
+	if raw := string(h.store.sources["extra"]); !strings.Contains(raw, "kind: Source") ||
+		!strings.Contains(raw, "url: "+extraURL) || strings.Contains(raw, "clonePath") {
+		t.Fatalf("stored Source:\n%s", raw)
+	}
+	if d := h.store.storedDefaults(t); d.Spec.Defaults.Sources != nil {
+		t.Fatalf("create source wrote the defaults: %+v", d.Spec.Defaults.Sources)
+	}
+	writes := h.store.writes
+	if _, err = h.run(t, "create", "source", "extra", "--url", extraURL, "--tag", "v1"); err == nil ||
+		!strings.Contains(err.Error(), "--force") || h.store.writes != writes {
+		t.Fatalf("create of a stored Source: %v", err)
+	}
+	h.store.putTeam(t, &config.Team{
+		APIVersion: config.APIVersion, Kind: config.KindTeam,
+		Metadata: config.Metadata{Name: "proj", Realm: "default"},
+		Spec: config.TeamSpec{Defaults: config.Defaults{
+			Roles: []config.Role{{Name: "lead", Source: "extra", Path: "team/roles/majordomo"}},
+		}},
+	})
+	out, err = h.run(t, "create", "source", "extra", "--url", extraURL, "--tag", "v1", "--force")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"Source extra created: " + extraURL + ", branch main, cloned at /home/user/extra; offers",
-		"No stored team inherits the defaults.",
+		"Source extra updated: example.test/extra.git, tag v1", "Used by: team proj (role lead)",
+		"kuke team apply proj",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("add output lacks %q:\n%s", want, out)
-		}
-	}
-	defaults := h.store.storedDefaults(t)
-	i := slices.IndexFunc(defaults.Spec.Defaults.Sources, func(s config.Source) bool { return s.Name == "extra" })
-	if i < 0 || defaults.Spec.Defaults.Sources[i].ClonePath != "/home/user/extra" {
-		t.Fatalf("sources = %+v", defaults.Spec.Defaults.Sources)
-	}
-	if out, err = h.run(t, "source", "add", "extra", "--url", extraURL, "--tag", "v1"); err != nil ||
-		!strings.Contains(out, "Source extra updated") {
-		t.Fatalf("update: %v\n%s", err, out)
-	}
-	out, err = h.run(t, "source", "list")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{"NAME", "CLONE PATH", "kukeon", "branch main", "extra", extraURL, "tag v1", "/home/user/extra"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("list lacks %q:\n%s", want, out)
+			t.Errorf("replace output lacks %q:\n%s", want, out)
 		}
 	}
 	out, err = h.run(t, "source", "show", "kukeon")
@@ -83,51 +92,38 @@ func TestSourceAddListShowRemove(t *testing.T) {
 	if strings.Contains(out, "testdata") {
 		t.Errorf("show lists a testdata role (G3):\n%s", out)
 	}
-	if out, err = h.run(t, "source", "remove", "extra"); err != nil || !strings.Contains(out, "Source extra removed") {
-		t.Fatalf("remove: %v\n%s", err, out)
-	}
-	if _, err = h.run(t, "source", "show", "extra"); err == nil || !strings.Contains(err.Error(), "not registered") {
-		t.Fatalf("show removed: %v", err)
+	if _, err = h.run(t, "source", "show", "nothing"); err == nil ||
+		!strings.Contains(err.Error(), "kuke create source nothing") {
+		t.Fatalf("show of no Source: %v", err)
 	}
 }
 
-// TestSourceRemoveIsRefusedWhileReferenced is AC13: a default or a stored
-// Team that inherits the sources names the source.
-func TestSourceRemoveIsRefusedWhileReferenced(t *testing.T) {
+// TestCreateSourceDryRunAndIdentity: --dry-run stores nothing; --identity is
+// the Source's spec.git.identityRef.
+func TestCreateSourceDryRunAndIdentity(t *testing.T) {
 	h := sourceHarness(t)
-	if _, err := h.run(t, "source", "remove", "kukeon"); err == nil ||
-		!strings.Contains(err.Error(), "default harness codex") {
-		t.Fatalf("error = %v", err)
+	h.sources["other"] = h.sources["extra"]
+	out, err := h.run(t, "create", "source", "other", "--url", extraURL, "--branch", "main", "--dry-run")
+	if err != nil || !strings.Contains(out, "dry run, nothing stored") || h.store.writes != 0 {
+		t.Fatalf("dry run: %v writes=%d\n%s", err, h.store.writes, out)
 	}
-	if _, err := h.run(t, "source", "add", "extra", "--url", extraURL, "--branch", "main"); err != nil {
-		t.Fatal(err)
+	out, err = h.run(t, "create", "source", "other", "--url", extraURL, "--branch", "main", "--identity", "gh")
+	if err != nil || !strings.Contains(out, "identity gh") {
+		t.Fatalf("identity: %v\n%s", err, out)
 	}
-	h.store.putTeam(t, &config.Team{
-		APIVersion: config.APIVersion, Kind: config.KindTeam,
-		Metadata: config.Metadata{Name: "proj", Realm: "default"},
-		Spec: config.TeamSpec{Defaults: config.Defaults{
-			Roles: []config.Role{{Name: "lead", Source: "extra", Path: "team/roles/majordomo"}},
-		}},
-	})
-	writes := h.store.writes
-	if _, err := h.run(t, "source", "remove", "extra"); err == nil || !strings.Contains(err.Error(), "team proj") {
-		t.Fatalf("error = %v", err)
-	}
-	if h.store.writes != writes {
-		t.Fatal("a refused remove wrote")
-	}
-	if _, err := h.run(t, "source", "remove", "nothing"); err == nil ||
-		!strings.Contains(err.Error(), "not registered") {
-		t.Fatalf("error = %v", err)
+	if raw := string(h.store.sources["other"]); !strings.Contains(raw, "identityRef") ||
+		!strings.Contains(raw, "name: gh") {
+		t.Fatalf("stored Source:\n%s", raw)
 	}
 }
 
-func TestSourceAddValidates(t *testing.T) {
+func TestCreateSourceValidates(t *testing.T) {
 	for _, args := range [][]string{
-		{"source", "add", "project", "--url", extraURL, "--branch", "main"},
-		{"source", "add", "Bad_Name", "--url", extraURL, "--branch", "main"},
-		{"source", "add", "extra", "--url", "not a url", "--branch", "main"},
-		{"source", "add", "extra", "--url", extraURL, "--branch", "main", "--clone-path", "relative"},
+		{"create", "source", "project", "--url", extraURL, "--branch", "main"},
+		{"create", "source", "Bad_Name", "--url", extraURL, "--branch", "main"},
+		{"create", "source", "extra", "--url", "not a url", "--branch", "main"},
+		{"create", "source", "extra", "--url", extraURL, "--branch", "main", "--clone-path", "/opt/x"},
+		{"create", "source", "extra", "--branch", "main"},
 	} {
 		h := sourceHarness(t)
 		if _, err := h.run(t, args...); err == nil || h.store.writes != 0 {
@@ -140,7 +136,7 @@ func TestSourceAddValidates(t *testing.T) {
 // output names the inheriting teams and how to recompose them.
 func TestDefaultsSet(t *testing.T) {
 	h := sourceHarness(t)
-	h.store.putTeam(t, storedProject())
+	h.store.putProject(t)
 	out, err := h.run(t, "defaults", "set", "--role", "lead=kukeon:team/roles/majordomo")
 	if err != nil {
 		t.Fatal(err)

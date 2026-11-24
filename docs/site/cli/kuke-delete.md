@@ -87,6 +87,24 @@ Still running from a deleted config: cell default/default/default/web-dev-claude
 Kept state volume default/default/default/web-dev-claude-state (kuke delete volume to remove it)
 ```
 
+Deleting a team deletes no [Source](../manifests/source.md): the project and the sources it stored stay for other teams; delete them with `kuke delete source`.
+
+### kuke delete source
+
+```
+kuke delete source <name> [--realm <r>]
+```
+
+<a id="sources"></a>
+Deletes a stored [Source](../manifests/source.md). kukeond refuses it while a default role or harness of the realm's `TeamDefaults`, or a stored team — its project, a `spec.sources` entry, or a role or harness of its own — references it, and names each; nothing is deleted. `--realm` defaults to `default`. A name no Source stores fails with `source not found`.
+
+```bash
+$ kuke delete source agents
+Error: source is in use: source agents is referenced by default role dev, team kukeon
+$ kuke delete source old-fork
+Deleted source old-fork
+```
+
 ## Behavior
 
 1. **Without `--cascade`**, delete fails if the resource has children. It refuses to leave orphaned subtrees behind.

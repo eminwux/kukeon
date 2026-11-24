@@ -34,10 +34,27 @@ func kukeonAt(commit, tag string) config.Source {
 	return config.Source{Name: config.KukeonSourceName, URL: config.KukeonSourceURL, Commit: commit, Tag: tag}
 }
 
-// setupUpgrade stores a kuke team and a TeamDefaults whose kukeon sources are
-// at teamPin and defaultsPin (nil: not stored) and returns --upgrade options
-// pinned to commit B.
-func setupUpgrade(t *testing.T, teamPin, defaultsPin *config.Source) (InitOptions, *fakeClient) {
+// setupUpgrade stores the state --upgrade starts from, in the shape kukeond
+// stores since #1643: the kuke team (when withTeam) refers to the kukeon
+// Source, stored at sourcePin (nil: not stored), and the TeamDefaults lists
+// no sources. It returns --upgrade options pinned to commit B.
+func setupUpgrade(t *testing.T, withTeam bool, sourcePin *config.Source) (InitOptions, *fakeClient) {
+	t.Helper()
+	opts, f := setupInit(t)
+	if sourcePin != nil {
+		f.storeSource(config.KukeonSourceName, specOf(*sourcePin))
+	}
+	storeLegacyDefaults(t, f, InitialDefaults(config.DefaultRealm))
+	if withTeam {
+		storeLegacyTeam(t, f, config.Majordomo())
+	}
+	return upgradeTo(opts), f
+}
+
+// setupLegacyUpgrade stores the state a kukeon release before #1643 left:
+// the kuke team's kukeon entry at teamPin and the TeamDefaults' kukeon
+// source at defaultsPin (nil: not stored), and no Source.
+func setupLegacyUpgrade(t *testing.T, teamPin, defaultsPin *config.Source) (InitOptions, *fakeClient) {
 	t.Helper()
 	opts, f := setupInit(t)
 	if teamPin != nil {
@@ -45,26 +62,33 @@ func setupUpgrade(t *testing.T, teamPin, defaultsPin *config.Source) (InitOption
 		clonePath := team.Spec.Sources[0].ClonePath
 		team.Spec.Sources[0] = *teamPin
 		team.Spec.Sources[0].ClonePath = clonePath
-		storeTeam(t, f, team)
+		storeLegacyTeam(t, f, team)
 	}
 	if defaultsPin != nil {
 		defaults := InitialDefaults(config.DefaultRealm)
-		defaults.Spec.Defaults.Sources[0] = *defaultsPin
-		storeDefaults(t, f, defaults)
+		defaults.Spec.Defaults.Sources = []config.Source{*defaultsPin}
+		storeLegacyDefaults(t, f, defaults)
 	}
+	return upgradeTo(opts), f
+}
+
+func upgradeTo(opts InitOptions) InitOptions {
 	pin := kukeonAt(commitB, "")
 	opts.Upgrade = true
 	opts.Pin = &pin
-	return opts, f
+	return opts
 }
 
 func hasNote(notes []string, sub string) bool {
 	return slices.ContainsFunc(notes, func(n string) bool { return strings.Contains(n, sub) })
 }
 
-func TestUpgradeRepinsTeamAndDefaultsInOneApply(t *testing.T) {
+// TestUpgradeRepinsTheKukeonSource: --upgrade moves the stored kukeon Source
+// to the build's revision and recomposes the kuke team in the same apply;
+// the kuke team reads the Source, so the Team document keeps its shape.
+func TestUpgradeRepinsTheKukeonSource(t *testing.T) {
 	a := kukeonAt(commitA, "")
-	opts, f := setupUpgrade(t, &a, &a)
+	opts, f := setupUpgrade(t, true, &a)
 	// The opencode harness consumes the binding, so composition keeps it.
 	editTeam(t, f, "kuke", func(team *config.Team) {
 		team.Spec.Harnesses = append(team.Spec.Harnesses,
@@ -72,6 +96,7 @@ func TestUpgradeRepinsTeamAndDefaultsInOneApply(t *testing.T) {
 		team.Spec.Secrets = []config.SecretBinding{binding(nil)}
 	})
 	before := storedTeam(t, f, "kuke")
+	defaults := slices.Clone(f.defaults)
 
 	out, err := Init(t.Context(), opts)
 	if err != nil {
@@ -81,13 +106,15 @@ func TestUpgradeRepinsTeamAndDefaultsInOneApply(t *testing.T) {
 		t.Fatalf("writes = %v, want one team apply", f.writes)
 	}
 	kinds, _ := appliedDocs(t, f.raw)
-	if kinds[0] != "TeamDefaults" || kinds[len(kinds)-1] != "Team" {
+	if kinds[0] != "Source" || kinds[len(kinds)-1] != "Team" || slices.Contains(kinds, "TeamDefaults") {
 		t.Fatalf("apply stream kinds = %v", kinds)
 	}
+	if got := storedSource(t, f, config.KukeonSourceName); got.Commit != commitB || got.Tag != "" || got.Branch != "" {
+		t.Fatalf("kukeon Source = %+v", got)
+	}
 	after := storedTeam(t, f, "kuke")
-	if got := after.Spec.Sources[0]; got.Commit != commitB || got.Tag != "" || got.Branch != "" ||
-		got.ClonePath != before.Spec.Sources[0].ClonePath {
-		t.Fatalf("team kukeon source = %+v", got)
+	if after.Spec.Sources[0] != before.Spec.Sources[0] {
+		t.Fatalf("team kukeon entry = %+v, want it unchanged", after.Spec.Sources[0])
 	}
 	if !slices.Equal(after.Spec.Secrets, before.Spec.Secrets) || len(after.Spec.Secrets) != 1 {
 		t.Fatalf("spec.secrets = %+v, want %+v", after.Spec.Secrets, before.Spec.Secrets)
@@ -97,41 +124,74 @@ func TestUpgradeRepinsTeamAndDefaultsInOneApply(t *testing.T) {
 	}) || !slices.Equal(after.Spec.Harnesses, before.Spec.Harnesses) {
 		t.Fatalf("roles or harnesses changed: %+v", after.Spec)
 	}
-	if got := storedDefaults(t, f).Spec.Defaults.Sources[0]; got.Commit != commitB {
-		t.Fatalf("defaults kukeon source = %+v", got)
+	if !bytes.Equal(defaults, f.defaults) {
+		t.Fatal("the TeamDefaults changed")
 	}
-	notes := out.Result.Notes
-	if !hasNote(notes, "kuke team: kukeon source commit "+commitA+" -> commit "+commitB) ||
-		!hasNote(notes, "team defaults: kukeon source commit "+commitA+" -> commit "+commitB) {
-		t.Fatalf("notes = %v", notes)
+	if !hasNote(out.Result.Notes, "Source kukeon: commit "+commitA+" -> commit "+commitB) {
+		t.Fatalf("notes = %v", out.Result.Notes)
 	}
 	if out.Plan.Command != "kuke team init --upgrade" || out.Plan.Origin.Kind != OriginStored {
 		t.Fatalf("plan = %+v", out.Plan)
 	}
 }
 
-func TestUpgradeTagPinBecomesCommit(t *testing.T) {
-	tag := kukeonAt("", "v0.10.0")
-	b := kukeonAt(commitB, "")
-	opts, f := setupUpgrade(t, &tag, &b)
+// TestUpgradeConvertsLegacyState is AC13 for --upgrade: the TeamDefaults'
+// sources become Sources, the kuke team's kukeon entry becomes a reference,
+// and the kukeon Source is stored at the build's revision, in one apply.
+func TestUpgradeConvertsLegacyState(t *testing.T) {
+	a := kukeonAt(commitA, "")
+	opts, f := setupLegacyUpgrade(t, &a, &a)
 	out, err := Init(t.Context(), opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := storedTeam(t, f, "kuke").Spec.Sources[0]; got.Tag != "" || got.Commit != commitB {
-		t.Fatalf("team kukeon source = %+v", got)
+	if !slices.Equal(f.writes, []string{"apply-team kuke"}) {
+		t.Fatalf("writes = %v, want one team apply", f.writes)
 	}
-	if kinds, _ := appliedDocs(t, f.raw); slices.Contains(kinds, "TeamDefaults") {
-		t.Fatal("unchanged TeamDefaults re-sent")
+	kinds, _ := appliedDocs(t, f.raw)
+	if kinds[0] != "TeamDefaults" || !slices.Contains(kinds, "Source") || kinds[len(kinds)-1] != "Team" {
+		t.Fatalf("apply stream kinds = %v", kinds)
 	}
-	if !hasNote(out.Result.Notes, "kuke team: kukeon source tag v0.10.0 -> commit "+commitB) {
+	if got := storedDefaults(t, f).Spec.Defaults; got.Sources != nil ||
+		!slices.Equal(got.Harnesses, config.MajordomoHarnesses()) {
+		t.Fatalf("converted defaults = %+v", got)
+	}
+	if got := storedSource(t, f, config.KukeonSourceName); got.URL != config.KukeonSourceURL || got.Commit != commitB {
+		t.Fatalf("kukeon Source = %+v", got)
+	}
+	want := config.Source{Name: config.KukeonSourceName, ClonePath: "/home/user/kukeon-src"}
+	if got := storedTeam(t, f, "kuke").Spec.Sources[0]; got != want {
+		t.Fatalf("team kukeon entry = %+v, want %+v", got, want)
+	}
+	for _, note := range []string{
+		"converted 1 registered sources to Source documents",
+		"kuke team: its kukeon entry now reads the stored kukeon Source",
+		"Source kukeon: commit " + commitA + " -> commit " + commitB,
+	} {
+		if !hasNote(out.Result.Notes, note) {
+			t.Fatalf("notes = %v, want %q", out.Result.Notes, note)
+		}
+	}
+}
+
+func TestUpgradeTagPinBecomesCommit(t *testing.T) {
+	tag := kukeonAt("", "v0.10.0")
+	opts, f := setupUpgrade(t, true, &tag)
+	out, err := Init(t.Context(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := storedSource(t, f, config.KukeonSourceName); got.Tag != "" || got.Commit != commitB {
+		t.Fatalf("kukeon Source = %+v", got)
+	}
+	if !hasNote(out.Result.Notes, "Source kukeon: tag v0.10.0 -> commit "+commitB) {
 		t.Fatalf("notes = %v", out.Result.Notes)
 	}
 }
 
 func TestUpgradeAlreadyAtPinChangesNothing(t *testing.T) {
 	b := kukeonAt(commitB, "")
-	opts, f := setupUpgrade(t, &b, &b)
+	opts, f := setupUpgrade(t, true, &b)
 	out, err := Init(t.Context(), opts)
 	if err != nil {
 		t.Fatal(err)
@@ -139,15 +199,15 @@ func TestUpgradeAlreadyAtPinChangesNothing(t *testing.T) {
 	if len(f.writes) != 0 || out.Plan != nil || out.Result != nil {
 		t.Fatalf("writes=%v plan=%v result=%v", f.writes, out.Plan, out.Result)
 	}
-	if want := []string{"kuke team and defaults already at commit " + commitB}; !slices.Equal(out.Notes, want) {
+	if want := []string{"Source kukeon already at commit " + commitB}; !slices.Equal(out.Notes, want) {
 		t.Fatalf("notes = %v, want %v", out.Notes, want)
 	}
 }
 
 func TestUpgradeNeverCreatesTheKukeTeam(t *testing.T) {
-	t.Run("defaults behind", func(t *testing.T) {
+	t.Run("source behind", func(t *testing.T) {
 		a := kukeonAt(commitA, "")
-		opts, f := setupUpgrade(t, nil, &a)
+		opts, f := setupUpgrade(t, false, &a)
 		out, err := Init(t.Context(), opts)
 		if err != nil {
 			t.Fatal(err)
@@ -156,59 +216,67 @@ func TestUpgradeNeverCreatesTheKukeTeam(t *testing.T) {
 			t.Fatalf("a Team was applied: writes=%v", f.writes)
 		}
 		if !slices.Equal(f.writes, []string{"apply"}) {
-			t.Fatalf("writes = %v, want the TeamDefaults write", f.writes)
+			t.Fatalf("writes = %v, want the Source write", f.writes)
 		}
-		if got := storedDefaults(t, f).Spec.Defaults.Sources[0]; got.Commit != commitB {
-			t.Fatalf("defaults kukeon source = %+v", got)
+		if got := storedSource(t, f, config.KukeonSourceName); got.Commit != commitB {
+			t.Fatalf("kukeon Source = %+v", got)
 		}
 		if !hasNote(out.Notes, "team kuke is not stored; run kuke team init to create it") {
 			t.Fatalf("notes = %v", out.Notes)
 		}
 	})
-	t.Run("no defaults", func(t *testing.T) {
-		opts, f := setupUpgrade(t, nil, nil)
+	t.Run("legacy defaults behind", func(t *testing.T) {
+		a := kukeonAt(commitA, "")
+		opts, f := setupLegacyUpgrade(t, nil, &a)
+		if _, err := Init(t.Context(), opts); err != nil {
+			t.Fatal(err)
+		}
+		if _, stored := f.teams["kuke"]; stored || !slices.Equal(f.writes, []string{"apply"}) {
+			t.Fatalf("writes = %v, want one plain apply", f.writes)
+		}
+		if got := storedSource(t, f, config.KukeonSourceName); got.Commit != commitB {
+			t.Fatalf("kukeon Source = %+v", got)
+		}
+		if storedDefaults(t, f).Spec.Defaults.Sources != nil {
+			t.Fatal("the legacy defaults were not converted")
+		}
+	})
+	t.Run("nothing stored", func(t *testing.T) {
+		opts, f := setupLegacyUpgrade(t, nil, nil)
 		out, err := Init(t.Context(), opts)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(f.writes) != 0 || f.defaults != nil {
+		if len(f.writes) != 0 || f.defaults != nil || f.sources != nil {
 			t.Fatalf("writes = %v", f.writes)
 		}
-		if want := []string{"team kuke is not stored; run kuke team init to create it"}; !slices.Equal(
-			out.Notes,
-			want,
-		) {
+		if want := []string{
+			"Source kukeon already at commit " + commitB, "team kuke is not stored; run kuke team init to create it",
+		}; !slices.Equal(out.Notes, want) {
 			t.Fatalf("notes = %v", out.Notes)
 		}
 	})
 }
 
 func TestUpgradeLeavesAForeignKukeonSource(t *testing.T) {
-	a := kukeonAt(commitA, "")
 	foreign := config.Source{Name: config.KukeonSourceName, URL: "github.com/someone/kukeon-fork", Commit: commitA}
-	opts, f := setupUpgrade(t, &a, &foreign)
-	original := slices.Clone(f.defaults)
+	opts, f := setupUpgrade(t, true, &foreign)
+	original := slices.Clone(f.sources[config.KukeonSourceName])
 	out, err := Init(t.Context(), opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(original, f.defaults) {
-		t.Fatal("foreign defaults source was changed")
+	if !bytes.Equal(original, f.sources[config.KukeonSourceName]) {
+		t.Fatal("the foreign kukeon Source was changed")
 	}
-	if kinds, _ := appliedDocs(t, f.raw); slices.Contains(kinds, "TeamDefaults") {
-		t.Fatal("unchanged TeamDefaults re-sent")
-	}
-	if got := storedTeam(t, f, "kuke").Spec.Sources[0]; got.Commit != commitB {
-		t.Fatalf("team kukeon source = %+v", got)
-	}
-	if !hasNote(out.Result.Notes, "github.com/someone/kukeon-fork") {
-		t.Fatalf("notes = %v", out.Result.Notes)
+	if len(f.writes) != 0 || !hasNote(out.Notes, "github.com/someone/kukeon-fork") {
+		t.Fatalf("writes = %v notes = %v", f.writes, out.Notes)
 	}
 }
 
 func TestUpgradeNamesInheritingTeamsWithoutRecomposingThem(t *testing.T) {
 	a := kukeonAt(commitA, "")
-	opts, f := setupUpgrade(t, &a, &a)
+	opts, f := setupUpgrade(t, true, &a)
 	project := inheritingTeam("project")
 	storeTeam(t, f, project)
 	out, err := Init(t.Context(), opts)
@@ -232,7 +300,7 @@ func TestUpgradeNamesInheritingTeamsWithoutRecomposingThem(t *testing.T) {
 func TestUpgradeExcludesForceAndReapply(t *testing.T) {
 	for _, mode := range []string{"force", "reapply"} {
 		a := kukeonAt(commitA, "")
-		opts, f := setupUpgrade(t, &a, &a)
+		opts, f := setupUpgrade(t, true, &a)
 		opts.Force, opts.Reapply = mode == "force", mode == "reapply"
 		if _, err := Init(t.Context(), opts); err == nil || !strings.Contains(err.Error(), "--upgrade") {
 			t.Fatalf("%s: err = %v", mode, err)

@@ -35,14 +35,6 @@ metadata:
   realm: default
 spec:
   defaults:
-    sources:
-      - name: kukeon
-        url: https://github.com/eminwux/kukeon
-        branch: main
-      - name: agents
-        url: https://github.com/eminwux/agents
-        tag: v2
-        clonePath: /home/user/agents
     roles:
       - {name: dev, source: agents, path: dev}
     harnesses: []
@@ -79,8 +71,8 @@ func run(t *testing.T, fake *fakeClient, args ...string) (string, error) {
 	return buf.String(), err
 }
 
-// TestGetTeamDefaults pins AC5: the registered sources and the default roles
-// and harnesses.
+// TestGetTeamDefaults pins AC5: the default roles and harnesses. The sources
+// they name are stored Sources (#1643), listed by kuke get sources.
 func TestGetTeamDefaults(t *testing.T) {
 	fake := stored()
 	out, err := run(t, fake)
@@ -91,13 +83,27 @@ func TestGetTeamDefaults(t *testing.T) {
 		t.Errorf("realm = %q, want default", fake.gotRealm)
 	}
 	for _, want := range []string{
-		"SOURCE", "URL", "REF", "CLONE PATH",
-		"kukeon", "branch main", "agents", "tag v2", "/home/user/agents",
-		"Default roles:     dev=agents:dev", "Default harnesses: none",
+		"Default roles:     dev=agents:dev", "Default harnesses: none", "Sources: kuke get sources",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "CLONE PATH") {
+		t.Errorf("output prints a source table:\n%s", out)
+	}
+}
+
+// TestGetTeamDefaultsLegacy: a TeamDefaults stored before #1643, with its
+// sources list, still prints.
+func TestGetTeamDefaultsLegacy(t *testing.T) {
+	legacy := strings.Replace(defaultsDoc, "  defaults:\n", "  defaults:\n    sources:\n"+
+		"      - {name: agents, url: https://github.com/eminwux/agents, tag: v2, clonePath: /home/user/agents}\n", 1)
+	out, err := run(t, &fakeClient{result: kukeonv1.GetTeamDefaultsResult{
+		Exists: true, Realm: "default", Document: []byte(legacy),
+	}})
+	if err != nil || !strings.Contains(out, "Default roles:     dev=agents:dev") {
+		t.Fatalf("out = %q, err = %v", out, err)
 	}
 }
 
@@ -113,20 +119,12 @@ func TestGetTeamDefaultsJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var got struct {
-		Sources []struct {
-			Name string `json:"name"`
-			Ref  string `json:"ref"`
-		} `json:"sources"`
-		Roles     []string `json:"roles"`
-		Harnesses []string `json:"harnesses"`
-	}
+	var got map[string][]string
 	if err = json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("decode %q: %v", out, err)
 	}
-	if len(got.Sources) != 2 || got.Sources[1].Ref != "tag v2" || len(got.Roles) != 1 ||
-		got.Harnesses == nil || len(got.Harnesses) != 0 {
-		t.Fatalf("json = %+v", got)
+	if _, ok := got["sources"]; ok || len(got["roles"]) != 1 || got["harnesses"] == nil || len(got["harnesses"]) != 0 {
+		t.Fatalf("json = %s", out)
 	}
 }
 

@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"maps"
 	"slices"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -84,8 +85,9 @@ type PlannedPair struct {
 type Plan struct {
 	Command string `json:"command"`
 	Origin  Origin `json:"origin"`
-	// Team is the declaration as it will be stored: the authored one with
-	// the secret bindings composition used.
+	// Team is the declaration as it will be stored: the authored one, its
+	// source definitions turned into references (#1643), with the secret
+	// bindings composition used.
 	Team    *config.Team    `json:"-"`
 	Sources []PlannedSource `json:"sources"`
 	Pairs   []PlannedPair   `json:"pairs"`
@@ -105,8 +107,10 @@ type Plan struct {
 	composed    *compose.Result
 	realmDoc    []byte
 	defaultsDoc []byte
-	pending     []pendingSecret
-	superseded  []supersededCopy
+	// sourceDocs are the Sources the team's definitions create (D7).
+	sourceDocs [][]byte
+	pending    []pendingSecret
+	superseded []supersededCopy
 }
 
 // Result reports a committed application.
@@ -142,6 +146,12 @@ type request struct {
 	// defaultsDoc, when set, is a TeamDefaults document applied with the team
 	// (init's first defaults).
 	defaultsDoc []byte
+	// notes are the command's own remarks, printed with the plan's.
+	notes []string
+	// sources are Sources the command stores with the team, replacing a
+	// stored one of the same name (init's kukeon Source, upgrade's re-pinned
+	// one and the Sources it converts).
+	sources map[string]config.SourceSpec
 }
 
 // plan composes req and runs the read-only preflight.
@@ -150,7 +160,28 @@ func plan(ctx context.Context, client Client, req request) (*Plan, error) {
 	if team.Metadata.Realm == "" {
 		team.Metadata.Realm = config.DefaultRealm
 	}
-	effective, err := config.Resolve(req.defaults, team)
+	stored, err := Sources(ctx, client)
+	if err != nil {
+		return nil, err
+	}
+	var created []newSource
+	for _, name := range slices.Sorted(maps.Keys(req.sources)) {
+		stored[name] = req.sources[name]
+		created = append(created, newSource{name: name, spec: req.sources[name]})
+	}
+	// The stored shape is settled first, so a name clash (AC6) fails before
+	// anything is fetched or written.
+	all, _ := withLegacy(req.defaults, stored)
+	normalized, defined, sourceNotes, err := normalize(team, all)
+	if err != nil {
+		return nil, err
+	}
+	created = append(created, defined...)
+	defaults, team, err := hydrate(req.defaults, team, stored)
+	if err != nil {
+		return nil, err
+	}
+	effective, err := config.Resolve(defaults, team)
 	if err != nil {
 		return nil, err
 	}
@@ -167,6 +198,7 @@ func plan(ctx context.Context, client Client, req request) (*Plan, error) {
 		var fetchedSources *fetched
 		fetchedSources, err = fetchSources(
 			ctx,
+			identityOf(client, team.Metadata.Realm),
 			effective,
 			neededSources(effective, team.Spec.ProjectSource != nil),
 			trees,
@@ -177,7 +209,12 @@ func plan(ctx context.Context, client Client, req request) (*Plan, error) {
 		defer fetchedSources.cleanup()
 		trees = fetchedSources
 	}
-	composed, err := compose.Compose(req.defaults, team, compose.Options{
+	if trees == nil || !trees.injected {
+		if err = discoverCreatedRefs(ctx, identityOf(client, team.Metadata.Realm), created); err != nil {
+			return nil, err
+		}
+	}
+	composed, err := compose.Compose(defaults, team, compose.Options{
 		Sources: trees.trees,
 		Secrets: req.recorded,
 		Scope:   compose.Scope{Realm: team.Metadata.Realm},
@@ -188,13 +225,23 @@ func plan(ctx context.Context, client Client, req request) (*Plan, error) {
 	if len(composed.Pairs) == 0 {
 		return nil, emptySelection(req)
 	}
+	// The Team is stored as declared, its definitions turned into
+	// references, with the secret bindings composition used.
+	normalized.Spec.Secrets = composed.Team.Spec.Secrets
 	out := &Plan{
 		Command:     req.command,
 		Origin:      req.origin,
-		Team:        composed.Team,
-		Notes:       slices.Clone(composed.Notes),
+		Team:        normalized,
+		Notes:       slices.Concat(req.notes, composed.Notes, sourceNotes),
 		composed:    composed,
 		defaultsDoc: req.defaultsDoc,
+	}
+	for _, source := range created {
+		doc, docErr := sourceDocument(source)
+		if docErr != nil {
+			return nil, docErr
+		}
+		out.sourceDocs = append(out.sourceDocs, doc)
 	}
 	for _, source := range effective.Sources {
 		if _, read := trees.trees[source.Name]; !read {
@@ -244,7 +291,7 @@ func emptySelection(req request) error {
 	}
 	return fmt.Errorf(
 		"preflight: team %s selects no role × harness pair: %s; name roles with --role "+
-			"(a default role, or SOURCE:PATH in a source registered with kuke team source add)",
+			"(a default role, or SOURCE:PATH in a Source stored with kuke create source)",
 		req.team.Metadata.Name, cause,
 	)
 }
@@ -326,6 +373,6 @@ func injectedSources(trees map[string]fs.FS) *fetched {
 var errNotStored = errdefs.ErrTeamNotFound
 
 func notStored(name, realm string) error {
-	return fmt.Errorf("%w: no team %s in realm %s; add it with kuke team add %s --source URL",
+	return fmt.Errorf("%w: no team %s in realm %s; create it with kuke create team %s --source ADDRESS",
 		errNotStored, name, realm, name)
 }

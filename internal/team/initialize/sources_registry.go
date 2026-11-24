@@ -27,17 +27,16 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/eminwux/kukeon/internal/team/gitremote"
 	model "github.com/eminwux/kukeon/pkg/api/model/kuketeams"
 	"github.com/eminwux/kukeon/pkg/api/version"
 	"github.com/eminwux/kukeon/pkg/team/config"
 	"gopkg.in/yaml.v3"
 )
 
-// Sources are registered in the realm's TeamDefaults (issue #1618, D8): its
-// spec.defaults.sources are the sources every team may use, and its default
-// roles and harnesses are what a team that omits a list inherits. Every edit
-// here is a read of the TeamDefaults, an edit, and an apply of the result.
+// The realm's TeamDefaults (issue #1618, D8) holds the default roles and
+// harnesses, what a team that omits a list inherits; the sources they name
+// are stored Sources (#1643). Every edit here is a read of the TeamDefaults,
+// an edit, and an apply of the result.
 
 // DefaultsChange reports an edit of the TeamDefaults.
 type DefaultsChange struct {
@@ -47,18 +46,8 @@ type DefaultsChange struct {
 	// change reaches them only when each is recomposed with
 	// kuke team apply NAME.
 	Inheriting []string
-	// Discovered is what a source add found in the source.
-	Discovered *SourceContents
-}
-
-// SourceOptions register a source.
-type SourceOptions struct {
-	Options
-
-	Name, URL, Branch, Tag, Commit string
-	// ClonePath is where team cells clone the source. Empty sets
-	// /home/user/<name> when the source offers roles, and none otherwise.
-	ClonePath string
+	// Notes are remarks on the write: a conversion of the stored defaults.
+	Notes []string
 }
 
 // SourceContents is what a source offers: its roles and harnesses, found by
@@ -93,152 +82,9 @@ func Defaults(ctx context.Context, client Client) (*config.TeamDefaults, error) 
 	return defaults, err
 }
 
-// AddSource registers a source (AC13): it checks the URL, discovers the
-// default branch when no ref is given, fetches the source once, and adds it
-// to the TeamDefaults. An existing name is updated.
-func AddSource(ctx context.Context, opts SourceOptions) (DefaultsChange, error) {
-	if err := opts.check(); err != nil {
-		return DefaultsChange{}, err
-	}
-	if !config.ValidName(opts.Name) || opts.Name == config.ProjectSourceName {
-		return DefaultsChange{}, fmt.Errorf(
-			"source add: invalid source name %q (lowercase letters, digits, dots, hyphens; project is reserved)",
-			opts.Name)
-	}
-	if _, err := gitremote.URL(opts.URL); err != nil {
-		return DefaultsChange{}, err
-	}
-	if err := validateRevision(AddOptions{Branch: opts.Branch, Tag: opts.Tag, Commit: opts.Commit}); err != nil {
-		return DefaultsChange{}, err
-	}
-	if opts.ClonePath != "" && !config.SafePath(opts.ClonePath) {
-		return DefaultsChange{}, errors.New("source add: --clone-path must be a clean absolute path")
-	}
-	source := config.Source{
-		Name: opts.Name, URL: opts.URL, Branch: opts.Branch, Tag: opts.Tag, Commit: opts.Commit,
-		ClonePath: opts.ClonePath,
-	}
-	if source.Branch == "" && source.Tag == "" && source.Commit == "" {
-		branch, err := gitremote.DefaultBranch(ctx, opts.URL)
-		if err != nil {
-			return DefaultsChange{}, err
-		}
-		source.Branch = branch
-	}
-	defaults, err := Defaults(ctx, opts.Client)
-	if err != nil {
-		return DefaultsChange{}, err
-	}
-	contents, err := inspect(ctx, opts.Options, source, defaults)
-	if err != nil {
-		return DefaultsChange{}, err
-	}
-	if source.ClonePath == "" && len(contents.Roles) > 0 {
-		// A role source must be cloned into the cells that run its roles;
-		// any other source would be cloned into every cell for nothing.
-		source.ClonePath = "/home/user/" + source.Name
-	}
-	contents.Source = source
-	action := actionCreated
-	list := defaults.Spec.Defaults.Sources
-	if i := slices.IndexFunc(list, func(s config.Source) bool { return s.Name == source.Name }); i >= 0 {
-		list = slices.Clone(list)
-		source.Git = list[i].Git
-		list[i] = source
-		action = actionUpdated
-	} else {
-		list = append(slices.Clone(list), source)
-	}
-	defaults.Spec.Defaults.Sources = list
-	change, err := writeDefaults(ctx, opts.Client, defaults)
-	if err != nil {
-		return change, err
-	}
-	change.Action, change.Discovered = action, contents
-	return change, nil
-}
-
-// ShowSource fetches a registered source and lists the roles and harnesses it
-// offers, marking the defaults (AC13).
-func ShowSource(ctx context.Context, opts Options, name string) (*SourceContents, error) {
-	if err := opts.check(); err != nil {
-		return nil, err
-	}
-	defaults, err := Defaults(ctx, opts.Client)
-	if err != nil {
-		return nil, err
-	}
-	i := slices.IndexFunc(defaults.Spec.Defaults.Sources, func(s config.Source) bool { return s.Name == name })
-	if i < 0 {
-		return nil, fmt.Errorf("source %s is not registered; add it with kuke team source add %s --url URL", name, name)
-	}
-	source := defaults.Spec.Defaults.Sources[i]
-	contents, err := inspect(ctx, opts, source, defaults)
-	if err != nil {
-		return nil, err
-	}
-	contents.Source = source
-	return contents, nil
-}
-
-// RemoveSource unregisters a source. It is refused while a default role or
-// harness, or a stored team that inherits the sources, references it; the
-// error names them. Nothing is fetched.
-func RemoveSource(ctx context.Context, opts Options, name string) (DefaultsChange, error) {
-	if err := opts.check(); err != nil {
-		return DefaultsChange{}, err
-	}
-	defaults, err := Defaults(ctx, opts.Client)
-	if err != nil {
-		return DefaultsChange{}, err
-	}
-	list := defaults.Spec.Defaults.Sources
-	i := slices.IndexFunc(list, func(s config.Source) bool { return s.Name == name })
-	if i < 0 {
-		return DefaultsChange{}, fmt.Errorf("source %s is not registered", name)
-	}
-	var users []string
-	for _, role := range defaults.Spec.Defaults.Roles {
-		if role.Source == name {
-			users = append(users, "default role "+role.Name)
-		}
-	}
-	for _, h := range defaults.Spec.Defaults.Harnesses {
-		if h.Source == name {
-			users = append(users, "default harness "+h.Name)
-		}
-	}
-	teams, err := storedTeams(ctx, opts.Client)
-	if err != nil {
-		return DefaultsChange{}, err
-	}
-	for _, team := range teams {
-		if team.Spec.Sources != nil {
-			continue // The team declares its own sources.
-		}
-		effective, resolveErr := config.Resolve(defaults, team)
-		if resolveErr != nil {
-			users = append(users, "team "+team.Metadata.Name+" (does not resolve: "+resolveErr.Error()+")")
-			continue
-		}
-		if slices.ContainsFunc(effective.Roles, func(r config.Role) bool { return r.Source == name }) ||
-			slices.ContainsFunc(effective.Harnesses, func(h config.Harness) bool { return h.Source == name }) {
-			users = append(users, "team "+team.Metadata.Name)
-		}
-	}
-	if len(users) > 0 {
-		return DefaultsChange{}, fmt.Errorf("source remove: source %s is referenced by %s",
-			name, strings.Join(users, ", "))
-	}
-	defaults.Spec.Defaults.Sources = slices.Delete(slices.Clone(list), i, i+1)
-	change, err := writeDefaults(ctx, opts.Client, defaults)
-	change.Action = "removed"
-	return change, err
-}
-
 // SetDefaults replaces the default role list, the default harness list, or
 // both (AC14); a nil list is left as it is. Each entry is a current
-// default's name or [NAME=]SOURCE:PATH in a registered source.
+// default's name or [NAME=]SOURCE:PATH in a stored Source.
 func SetDefaults(ctx context.Context, opts Options, roles, harnesses []string) (DefaultsChange, error) {
 	if err := opts.check(); err != nil {
 		return DefaultsChange{}, err
@@ -260,6 +106,16 @@ func SetDefaults(ctx context.Context, opts Options, roles, harnesses []string) (
 	if harnesses != nil {
 		defaults.Spec.Defaults.Harnesses = scratch.Spec.Harnesses
 	}
+	// kukeond stores a default naming any Source (D8); the command checks
+	// the ones it sets against the stored Sources.
+	stored, err := Sources(ctx, opts.Client)
+	if err != nil {
+		return DefaultsChange{}, err
+	}
+	all, _ := withLegacy(defaults, stored)
+	if err = checkDefaultsSources(defaults, all); err != nil {
+		return DefaultsChange{}, fmt.Errorf("defaults set: %w", err)
+	}
 	change, err := writeDefaults(ctx, opts.Client, defaults)
 	change.Action = actionUpdated
 	return change, err
@@ -274,8 +130,11 @@ func InheritingTeams(ctx context.Context, client Client) ([]string, error) {
 	}
 	var out []string
 	for _, team := range teams {
+		// Sources are stored apart from the defaults (#1643): a team reads
+		// every stored Source whatever it lists, so its sources inherit
+		// nothing.
 		s := team.Spec
-		if s.Sources == nil || s.Roles == nil || s.Harnesses == nil || s.Connectors == nil {
+		if s.Roles == nil || s.Harnesses == nil || s.Connectors == nil {
 			out = append(out, team.Metadata.Name)
 		}
 	}
@@ -299,24 +158,24 @@ func storedTeams(ctx context.Context, client Client) ([]*config.Team, error) {
 	return out, nil
 }
 
-// writeDefaults validates and applies a TeamDefaults document.
+// writeDefaults validates and applies a TeamDefaults document. A document
+// written before #1643 is converted first (AC13): its sources are stored as
+// Sources in the same apply, and the notes say so.
 func writeDefaults(ctx context.Context, client Client, defaults *config.TeamDefaults) (DefaultsChange, error) {
-	if err := config.Validate(defaults); err != nil {
-		return DefaultsChange{}, err
+	var writes map[string]config.SourceSpec
+	var notes []string
+	if defaults.Spec.Defaults.Sources != nil {
+		stored, err := Sources(ctx, client)
+		if err != nil {
+			return DefaultsChange{}, err
+		}
+		defaults, writes, notes = convertDefaults(defaults, stored)
 	}
-	raw, err := yaml.Marshal(defaults)
-	if err != nil {
-		return DefaultsChange{}, fmt.Errorf("encode TeamDefaults: %w", err)
-	}
-	response, err := client.ApplyDocuments(ctx, raw)
-	if err != nil {
-		return DefaultsChange{}, fmt.Errorf("apply TeamDefaults: %w", err)
-	}
-	if err = checkResults(response, 1, "the command"); err != nil {
+	if err := applySources(ctx, client, writes, defaults, true); err != nil {
 		return DefaultsChange{}, err
 	}
 	inheriting, err := InheritingTeams(ctx, client)
-	return DefaultsChange{Inheriting: inheriting}, err
+	return DefaultsChange{Inheriting: inheriting, Notes: notes}, err
 }
 
 // inspect fetches a source, unless trees were injected, and walks it.
@@ -328,7 +187,8 @@ func inspect(
 	if injected := opts.Sources[source.Name]; injected != nil {
 		tree = injected
 	} else {
-		got, err := fetchSources(ctx, config.Defaults{Sources: []config.Source{source}},
+		got, err := fetchSources(ctx, identityOf(opts.Client, config.DefaultRealm),
+			config.Defaults{Sources: []config.Source{source}},
 			map[string]bool{source.Name: true}, nil)
 		if err != nil {
 			return nil, err
@@ -426,7 +286,11 @@ func ApplyDefaults(ctx context.Context, opts Options, raw []byte) (DefaultsChang
 	if err := opts.check(); err != nil {
 		return DefaultsChange{}, err
 	}
-	defaults, err := config.DecodeDefaults(bytes.NewReader(raw))
+	// A TeamDefaults lists no sources (AC2): they are stored as Sources.
+	defaults, err := config.DecodeStoredDefaults(bytes.NewReader(raw))
+	if err == nil {
+		err = config.ValidateStoredDefaults(defaults)
+	}
 	if err != nil {
 		return DefaultsChange{}, fmt.Errorf("TeamDefaults: %w", err)
 	}

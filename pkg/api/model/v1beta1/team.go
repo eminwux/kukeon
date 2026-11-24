@@ -32,8 +32,8 @@ type TeamDoc struct {
 	Spec       config.TeamSpec `yaml:"spec"`
 }
 
-// TeamMetadata names a Team, or the TeamDefaults, and the realm it lives in.
-// Both kinds are realm-scoped only.
+// TeamMetadata names a Team, the TeamDefaults or a Source, and the realm it
+// lives in. The three kinds are realm-scoped only.
 type TeamMetadata struct {
 	Name  string `yaml:"name,omitempty"`
 	Realm string `yaml:"realm,omitempty"`
@@ -47,6 +47,16 @@ type TeamDefaultsDoc struct {
 	Kind       Kind         `yaml:"kind"`
 	Metadata   TeamMetadata `yaml:"metadata"`
 	Spec       config.Spec  `yaml:"spec"`
+}
+
+// SourceDoc is a stored repository (kind: Source, issue #1643): an address,
+// a ref and an optional git identity, named in its realm. Like TeamDoc it is
+// exchanged as YAML bytes only.
+type SourceDoc struct {
+	APIVersion Version           `yaml:"apiVersion"`
+	Kind       Kind              `yaml:"kind"`
+	Metadata   TeamMetadata      `yaml:"metadata"`
+	Spec       config.SourceSpec `yaml:"spec"`
 }
 
 // TeamDefaultsName is the name of a realm's only TeamDefaults.

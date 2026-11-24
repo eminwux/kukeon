@@ -42,6 +42,11 @@ type fakeRunner struct {
 	DeleteTeamFn        func(team intmodel.Team) error
 	WriteTeamDefaultsFn func(defaults intmodel.TeamDefaults) (bool, error)
 	GetTeamDefaultsFn   func(defaults intmodel.TeamDefaults) (intmodel.TeamDefaults, error)
+	// Source methods (issue #1643)
+	WriteSourceFn  func(source intmodel.Source) (bool, error)
+	GetSourceFn    func(source intmodel.Source) (intmodel.Source, error)
+	ListSourcesFn  func(realmName string) ([]intmodel.Source, error)
+	DeleteSourceFn func(source intmodel.Source) error
 
 	// Realm methods
 	GetRealmFn                       func(realm intmodel.Realm) (intmodel.Realm, error)
@@ -489,6 +494,34 @@ func (f *fakeRunner) GetTeamDefaults(defaults intmodel.TeamDefaults) (intmodel.T
 		return f.GetTeamDefaultsFn(defaults)
 	}
 	return intmodel.TeamDefaults{}, errors.New("unexpected call to GetTeamDefaults")
+}
+
+func (f *fakeRunner) WriteSource(source intmodel.Source) (bool, error) {
+	if f.WriteSourceFn != nil {
+		return f.WriteSourceFn(source)
+	}
+	return false, errors.New("unexpected call to WriteSource")
+}
+
+func (f *fakeRunner) GetSource(source intmodel.Source) (intmodel.Source, error) {
+	if f.GetSourceFn != nil {
+		return f.GetSourceFn(source)
+	}
+	return intmodel.Source{}, errors.New("unexpected call to GetSource")
+}
+
+func (f *fakeRunner) ListSources(realmName string) ([]intmodel.Source, error) {
+	if f.ListSourcesFn != nil {
+		return f.ListSourcesFn(realmName)
+	}
+	return nil, errors.New("unexpected call to ListSources")
+}
+
+func (f *fakeRunner) DeleteSource(source intmodel.Source) error {
+	if f.DeleteSourceFn != nil {
+		return f.DeleteSourceFn(source)
+	}
+	return errors.New("unexpected call to DeleteSource")
 }
 
 // GetConfigScheduleStatus defaults to "none stored" so tests of unscheduled

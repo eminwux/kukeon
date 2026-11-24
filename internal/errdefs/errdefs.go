@@ -754,8 +754,8 @@ var (
 	// ErrTeamNameInUse is returned when a Team's name is already used by a
 	// team in another realm: team names are unique per host.
 	ErrTeamNameInUse = errors.New("team name is already used in another realm")
-	// ErrTeamExists is returned by kuke team add when a team of the name is
-	// stored already: add creates, replacing needs --force.
+	// ErrTeamExists is returned by kuke create team when a team of the name
+	// is stored already: create creates, replacing needs --force.
 	ErrTeamExists = errors.New("team already exists")
 	// ErrTeamReserved is returned by a delete of the kuke system team.
 	ErrTeamReserved = errors.New("team kuke is the system team; reset it with kuke team init --force")
@@ -765,6 +765,29 @@ var (
 	// ErrInvalidTeam wraps a Team or TeamDefaults document that does not
 	// decode or validate.
 	ErrInvalidTeam = errors.New("invalid team document")
+
+	// Source kind errors (issue #1643). A Source is realm-scoped like a Team.
+
+	// ErrSourceNotFound is returned when no Source of the name is stored.
+	ErrSourceNotFound = errors.New("source not found")
+	// ErrSourceInUse is returned by a delete of a Source a default role or
+	// harness, or a stored team, references.
+	ErrSourceInUse = errors.New("source is in use")
+	// ErrSourceExists is returned by kuke create source when a Source of the
+	// name is stored already: create creates, replacing needs --force.
+	ErrSourceExists = errors.New("source already exists")
+	// ErrInvalidSource wraps a Source document that does not decode or
+	// validate.
+	ErrInvalidSource = errors.New("invalid source document")
+	// ErrWriteSource, ErrGetSource, ErrListSources and ErrDeleteSource wrap a
+	// failure to persist, read, enumerate or remove a stored Source.
+	ErrWriteSource  = errors.New("failed to write source document")
+	ErrGetSource    = errors.New("failed to get source")
+	ErrListSources  = errors.New("failed to list sources")
+	ErrDeleteSource = errors.New("failed to delete source")
+	// ErrGitFetchStaging wraps a failure to stage, or release, the git
+	// credentials of a fetch kuke makes on the host (issue #1643, D10).
+	ErrGitFetchStaging = errors.New("failed to stage git credentials for a fetch")
 
 	// ErrRenderDigestMismatch is returned by CreateCellFromConfig when the
 	// caller pinned the digest of an earlier PreviewCellFromConfig and the

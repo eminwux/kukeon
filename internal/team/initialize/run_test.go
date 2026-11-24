@@ -22,6 +22,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -53,8 +54,9 @@ func TestInitAppliesTheKukeTeamAndCreatesDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Two blueprints, two configs, the TeamDefaults and the Team.
-	if out.Result == nil || out.Result.Resources != 6 || out.Result.Team != "kuke" {
+	// Two blueprints, two configs, the TeamDefaults, the kukeon Source and
+	// the Team.
+	if out.Result == nil || out.Result.Resources != 7 || out.Result.Team != "kuke" {
 		t.Fatalf("result = %+v", out.Result)
 	}
 	if !slices.Equal(f.writes, []string{"apply-team kuke"}) {
@@ -71,9 +73,16 @@ func TestInitAppliesTheKukeTeamAndCreatesDefaults(t *testing.T) {
 	}
 	defaults := storedDefaults(t, f)
 	d := defaults.Spec.Defaults
-	if len(d.Sources) != 1 || d.Sources[0] != config.MajordomoSource() || d.Roles != nil ||
-		!slices.Equal(d.Harnesses, config.MajordomoHarnesses()) {
+	if d.Sources != nil || d.Roles != nil || !slices.Equal(d.Harnesses, config.MajordomoHarnesses()) {
 		t.Fatalf("initial defaults = %+v", d)
+	}
+	// The kukeon Source is stored beside them, at the build's revision
+	// (#1643).
+	if got := storedSource(t, f, config.KukeonSourceName); !reflect.DeepEqual(got, config.KukeonSourceSpec()) {
+		t.Fatalf("kukeon Source = %+v, want %+v", got, config.KukeonSourceSpec())
+	}
+	if team.Spec.Sources[0] != (config.Source{Name: config.KukeonSourceName, ClonePath: "/home/user/kukeon-src"}) {
+		t.Fatalf("kuke team kukeon entry = %+v, want a reference", team.Spec.Sources[0])
 	}
 	for _, note := range out.Result.Notes {
 		if strings.Contains(strings.ToLower(note), "git") {

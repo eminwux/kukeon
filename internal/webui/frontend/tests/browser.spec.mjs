@@ -4547,7 +4547,7 @@ test("the cell title row stays on one line at 1024 and 768, truncating the name"
 function teamsWorld() {
   const summary = (name, extra = {}) => ({ name, realm: "default", roles: [], rolesInherited: true, harnesses: [], harnessesInherited: true, configs: [], ...extra });
   const plan = (team, origin) => ({
-    command: `kuke team add ${team}`, origin, declaration: `apiVersion: v1beta1\nkind: Team\nmetadata:\n  name: ${team}\n`,
+    command: `kuke create team ${team}`, origin, declaration: `apiVersion: v1beta1\nkind: Team\nmetadata:\n  name: ${team}\n`,
     sources: [{ name: "project", url: "https://example.test/web", ref: "main", commit: "0123456789abcdef0123456789abcdef01234567" }],
     pairs: [{ role: "dev", harness: "claude", config: `${team}-dev-claude`, image: "kukeon.internal/claude:1", components: ["github"], tasks: [{ name: "pick-issue", config: `${team}-dev-claude-pick-issue`, schedule: "@hourly" }] }],
     create: [`${team}-dev-claude`], rerender: [], prune: [], missingSecrets: ["gh-token"], createSecrets: [], notes: [],
@@ -4555,7 +4555,7 @@ function teamsWorld() {
   return {
     requests: [],
     teams: [summary("kuke", { system: true, roles: ["majordomo"], rolesInherited: false, configs: ["kuke-majordomo-claude"] }), summary("web", { projectUrl: "https://example.test/web", projectRef: "main", configs: ["web-dev-claude"] })],
-    sources: { sources: [{ name: "agents", url: "https://example.test/agents", branch: "main", clonePath: "/home/user/agents" }], defaultRoles: [{ name: "dev", source: "agents", path: "dev" }], defaultHarnesses: [{ name: "claude", source: "kukeon", path: "team/harnesses/claude" }] },
+    sources: { sources: [{ name: "agents", url: "https://example.test/agents", branch: "main" }], defaultRoles: [{ name: "dev", source: "agents", path: "dev" }], defaultHarnesses: [{ name: "claude", source: "kukeon", path: "team/harnesses/claude" }] },
     plan,
     exists: true,
   };
@@ -4577,7 +4577,7 @@ async function mockTeams(page) {
     }
     if (path === "/api/teams/preview") return route.fulfill({ json: { plan: world.plan(body.name || "web", body.source ? { kind: "repository file", detail: "kuketeam.yaml at 0123456789ab" } : { kind: "file", detail: "declaration" }) } });
     if (path === "/api/teams") {
-      if (body.source && world.exists && !body.force) return route.fulfill({ status: 409, json: { error: { code: "already_exists", message: "add: team already exists: web; run kuke team apply web to recompose it from its stored declaration, or add it again with --force to replace the declaration" } } });
+      if (body.source && world.exists && !body.force) return route.fulfill({ status: 409, json: { error: { code: "already_exists", message: "create team: team already exists: web; run kuke team apply web to recompose it from its stored declaration, or create it again with --force to replace the declaration" } } });
       return route.fulfill({ json: { plan: world.plan(body.name || "web", { kind: "file" }), result: { team: body.name || "web", resources: 4, pruned: [], missingSecrets: [], notes: [] } } });
     }
     if (path.endsWith("/delete") && path.startsWith("/api/teams/")) return route.fulfill({ json: { deleted: true, removed: [{ kind: "CellConfig", name: "web-dev-claude", action: "deleted" }], liveCells: ["default/web/default/web-dev-claude-1"], keptVolumes: ["default/web/default/web-dev-claude-state"] } });
@@ -4659,7 +4659,8 @@ test("Teams page shows what a source offers and toggles a default role", async (
   await page.goto(`${server.url}#/teams`);
   const sources = page.getByRole("region", { name: "Team sources" });
   const source = sources.getByRole("listitem", { name: "Source agents" });
-  await expect(source).toContainText("cloned at /home/user/agents");
+  await expect(source).toContainText("https://example.test/agents");
+  await expect(source).not.toContainText("cloned at");
   await source.getByRole("button", { name: "agents" }).click();
   await source.getByRole("button", { name: "Show contents" }).click();
   await expect(source.getByRole("table", { name: "Roles in agents" })).toContainText("pick-issue");

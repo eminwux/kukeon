@@ -34,6 +34,19 @@ func newTeam(out, stderr *bytes.Buffer) *cobra.Command {
 	return cmd
 }
 
+// newKuke is `kuke` with this package's verbs: team, create team, create
+// source and source.
+func newKuke(out, stderr *bytes.Buffer) *cobra.Command {
+	root := &cobra.Command{Use: "kuke", SilenceUsage: true}
+	create := &cobra.Command{Use: "create"}
+	create.AddCommand(cli.NewCreateTeamCommand(), cli.NewCreateSourceCommand())
+	root.AddCommand(newTeam(out, stderr), create, cli.NewSourceCommand())
+	root.SetOut(out)
+	root.SetErr(stderr)
+	root.SilenceErrors = true
+	return root
+}
+
 func TestCommands(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
@@ -48,19 +61,28 @@ func TestCommands(t *testing.T) {
 		{"init help", []string{"init", "--help"}, "No cells are created or started", ""},
 		{"init build unsupported", []string{"init", "--build"}, "", "unknown flag"},
 		{"init argument", []string{"init", "extra"}, "", "unknown command"},
-		{"add help", []string{"add", "--help"}, "add NAME --source REPOSITORY | DIRECTORY", ""},
-		{"add requires argument", []string{"add"}, "", "accepts 1 arg(s)"},
-		{"add exclusive revisions", []string{"add", "x", "--source", "s", "--tag", "t", "--commit", "c"}, "", "none of the others can be"},
+		{"no add", []string{"add", "x"}, "", "unknown command"},
+		{"no source", []string{"source", "list"}, "", "unknown command"},
+		{"create team help", []string{"create", "team", "--help"}, "team NAME --source ADDRESS|SOURCE | DIRECTORY", ""},
+		{"create team requires argument", []string{"create", "team"}, "", "accepts 1 arg(s)"},
+		{"create team exclusive revisions", []string{"create", "team", "x", "--source", "s", "--tag", "t", "--commit", "c"}, "", "none of the others can be"},
 		{"apply help", []string{"apply", "--help"}, "apply NAME | -f FILE", ""},
-		{"source help", []string{"source", "--help"}, "TeamDefaults", ""},
+		{"export help", []string{"export", "--help"}, "kuketeam.yaml", ""},
 		{"defaults help", []string{"defaults", "--help"}, "kuke apply -f", ""},
-		{"source add requires url", []string{"source", "add", "x"}, "", `"url" not set`},
+		{"create source help", []string{"create", "source", "--help"}, "kind: Source", ""},
+		{"create source requires url", []string{"create", "source", "x"}, "", `"url" not set`},
+		{"create source has no clone path", []string{"create", "source", "x", "--url", "u", "--clone-path", "/p"}, "", "unknown flag"},
+		{"source show requires argument", []string{"source", "show"}, "", "accepts 1 arg(s)"},
 		{"no placeholder update", []string{"update"}, "", "unknown command"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out, stderr bytes.Buffer
-			cmd := newTeam(&out, &stderr)
-			cmd.SetArgs(append([]string{}, tc.args...))
+			cmd := newKuke(&out, &stderr)
+			args := tc.args
+			if len(args) == 0 || (args[0] != "create" && args[0] != "source") {
+				args = append([]string{"team"}, args...)
+			}
+			cmd.SetArgs(args)
 			err := cmd.Execute()
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {

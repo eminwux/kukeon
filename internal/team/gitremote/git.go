@@ -28,6 +28,8 @@ import (
 	"syscall"
 	"time"
 	"unicode"
+
+	"github.com/eminwux/kukeon/internal/gitcred"
 )
 
 const (
@@ -36,7 +38,7 @@ const (
 )
 
 var errURL = errors.New(
-	"source: require SCP-style [user@]host:path (colon after host), ssh://[user@]host[:port]/path, or https://host/path; embedded credentials, queries and fragments are forbidden",
+	"source: require host/owner/repo, SCP-style [user@]host:path (colon after host), ssh://[user@]host[:port]/path, or https://host/path; embedded credentials, queries and fragments are forbidden",
 )
 
 // URL validates remote-only input without exposing it in diagnostics. HTTPS
@@ -45,9 +47,8 @@ func URL(raw string) (string, error) {
 	if raw == "" || strings.ContainsFunc(raw, invalidURLRune) || strings.ContainsAny(raw, "\\\"'`?#") {
 		return "", errURL
 	}
-	if strings.HasPrefix(raw, "github.com/") {
-		raw = "https://" + raw
-	}
+	// The short form host.tld/owner/repo is an HTTPS address (#1643, D9).
+	raw = gitcred.CloneURL(raw)
 	if strings.Contains(raw, "://") {
 		return networkURL(raw)
 	}
@@ -109,10 +110,18 @@ func scpURL(raw string) (string, error) {
 func Run(ctx context.Context, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	env := transportEnv(ctx)
-	ssh, err := sshCommand(ctx, env)
-	if err != nil {
-		return nil, err
+	var env []string
+	var ssh string
+	if staged, ok := stagedFrom(ctx); ok {
+		// A stored identity (#1643): its gitconfig, ssh command and agent
+		// replace the caller's, so the caller's keys are never used.
+		env, ssh = stagedEnv(staged)
+	} else {
+		env = transportEnv(ctx)
+		var err error
+		if ssh, err = sshCommand(ctx, env); err != nil {
+			return nil, err
+		}
 	}
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.WaitDelay = time.Second
@@ -170,12 +179,13 @@ func sshCommand(ctx context.Context, env []string) (string, error) {
 }
 
 // DefaultBranch discovers the symbolic remote HEAD rather than assuming main.
+// Under a staged identity it asks the URL whose transport follows the stored
+// credential.
 func DefaultBranch(ctx context.Context, source string) (string, error) {
-	remote, err := URL(source)
-	if err != nil {
+	if _, err := URL(source); err != nil {
 		return "", err
 	}
-	output, err := Run(ctx, "ls-remote", "--symref", "--", remote, "HEAD")
+	output, err := Run(ctx, "ls-remote", "--symref", "--", Remote(ctx, source), "HEAD")
 	if err != nil {
 		return "", err
 	}

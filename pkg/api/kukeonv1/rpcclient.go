@@ -1095,6 +1095,63 @@ func (c *UnixClient) DeleteTeam(ctx context.Context, ref TeamRef) (DeleteTeamRes
 	return reply.Result, nil
 }
 
+// ---- Sources (issue #1643) ----
+
+func (c *UnixClient) GetSource(ctx context.Context, ref SourceRef) (GetSourceResult, error) {
+	reply := &GetSourceReply{}
+	if err := c.call(ctx, MethodGetSource, &GetSourceArgs{Ref: ref}, reply); err != nil {
+		return GetSourceResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
+func (c *UnixClient) ListSources(ctx context.Context, realm string) ([]GetSourceResult, error) {
+	reply := &ListSourcesReply{}
+	if err := c.call(ctx, MethodListSources, &ListSourcesArgs{Realm: realm}, reply); err != nil {
+		return nil, err
+	}
+	if reply.Err != nil {
+		return nil, FromAPIError(reply.Err)
+	}
+	return reply.Sources, nil
+}
+
+func (c *UnixClient) DeleteSource(ctx context.Context, ref SourceRef) (DeleteSourceResult, error) {
+	reply := &DeleteSourceReply{}
+	if err := c.call(ctx, MethodDeleteSource, &DeleteSourceArgs{Ref: ref}, reply); err != nil {
+		return DeleteSourceResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
+func (c *UnixClient) StageGitFetch(ctx context.Context, req GitFetchRequest) (StageGitFetchResult, error) {
+	reply := &StageGitFetchReply{}
+	if err := c.call(ctx, MethodStageGitFetch, &StageGitFetchArgs{Request: req}, reply); err != nil {
+		return StageGitFetchResult{}, err
+	}
+	if reply.Err != nil {
+		return StageGitFetchResult{}, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
+func (c *UnixClient) ReleaseGitFetch(ctx context.Context, id string) error {
+	reply := &ReleaseGitFetchReply{}
+	if err := c.call(ctx, MethodReleaseGitFetch, &ReleaseGitFetchArgs{ID: id}, reply); err != nil {
+		return err
+	}
+	if reply.Err != nil {
+		return FromAPIError(reply.Err)
+	}
+	return nil
+}
+
 func (c *UnixClient) GetTeamDefaults(ctx context.Context, realm string) (GetTeamDefaultsResult, error) {
 	reply := &GetTeamDefaultsReply{}
 	if err := c.call(ctx, MethodGetTeamDefaults, &GetTeamDefaultsArgs{Realm: realm}, reply); err != nil {

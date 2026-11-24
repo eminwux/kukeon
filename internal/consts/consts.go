@@ -123,6 +123,18 @@ const (
 	// modes as KukeonTeamsSubdir.
 	KukeonTeamDefaultsSubdir = "team-defaults"
 
+	// KukeonSourcesSubdir is the basename of the per-realm subdirectory that
+	// owns the realm's stored `kind: Source` documents (issue #1643): one
+	// `<name>.yaml` per Source. Same placement and modes as
+	// KukeonTeamsSubdir.
+	KukeonSourcesSubdir = "sources"
+
+	// KukeonGitFetchSubdir is the basename of the directory, beside the
+	// kukeond socket, where the daemon stages the git credentials of a
+	// fetch kuke makes on the host (issue #1643, D10): one directory per
+	// fetch, owned by the calling user and removed when kuke releases it.
+	KukeonGitFetchSubdir = "gitfetch"
+
 	// KukeonContainerTTYDir is the basename of the per-container directory
 	// that owns the sbsh terminal socket plus its capture and log siblings.
 	// kukeon bind-mounts this directory (not a single file) into the
@@ -319,7 +331,7 @@ func RunDirEntry(name string) bool {
 	switch name {
 	case "kukeond.sock", "kukeond.pid",
 		KukeonSocketSymlinkSubdir, KukeonContainerTTYDir,
-		KukeondSocketShareSubdir, KukeonSecretsStagingSubdir:
+		KukeondSocketShareSubdir, KukeonSecretsStagingSubdir, KukeonGitFetchSubdir:
 		return true
 	}
 	return false

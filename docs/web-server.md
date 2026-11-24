@@ -759,15 +759,20 @@ Elsewhere in the UI:
 **Manage → Teams** (`#/teams`) manages the [teams](site/concepts/team.md)
 kukeond stores, through the same code as `kuke team` (`internal/team/initialize`):
 a preview here is `--dry-run`, an apply is the CLI's apply. Composition runs in
-`kuke serve` as the account running it: sources are fetched with that
-account's git configuration and SSH agent, and a secret binding's
-`source.env` / `source.file` is read by that process.
+`kuke serve` as the account running it: a source is fetched with the git
+identity its stored Source names (or the realm's default git identity for its
+host), staged by kukeond for that account only, and otherwise with that
+account's git configuration and SSH agent — so a private repository can be
+added from the browser once its identity is stored (see
+[Fetching a Source on the host](site/guides/git-credentials.md#fetching-a-source-on-the-host)).
+A secret binding's `source.env` / `source.file` is read by that process.
 
 - **Teams list**: every stored team with its project URL and ref, roles,
   harnesses (or "defaults" when inherited) and number of Configs. The `kuke`
   system team is badged; when it is not stored the page says to run
   `kuke team init`.
-- **Add team**: repository URL, optional name, ref (branch, tag or commit; an
+- **Add team** (`kuke create team`): repository address or a stored Source's
+  name, optional name, ref (branch, tag or commit; an
   empty branch discovers the remote's default), **Use the repository's
   `kuketeam.yaml`**, role and harness pickers (the defaults plus what any
   inspected source offers; **Keep the declaration's list** leaves the list
@@ -785,12 +790,15 @@ account's git configuration and SSH agent, and a secret binding's
   still running and the state volumes kept. The `kuke` team cannot be deleted.
   Tasks and schedules, `needs`, connectors and sources are edited in the YAML;
   the preview checks them.
-- **Sources**: the registered sources with their ref and clone path.
-  **Register a source** is `kuke team source add`; opening one and **Show
-  contents** fetches it and lists the roles and harnesses it offers, each with
-  a **Default** toggle (`kuke team defaults set`); **Remove** is
-  `kuke team source remove`. After a defaults change the page names the teams
-  that inherit them — they change only when reapplied.
+- **Sources**: every stored [Source](site/manifests/source.md) — those
+  `kuke create source` stored and those a team's declaration defined — with
+  its address and ref; a Source has no clone path, so the form has none.
+  **Register a source** is `kuke create source`; opening one and **Show
+  contents** (`kuke source show`) fetches it and lists the roles and harnesses
+  it offers, each with a **Default** toggle (`kuke team defaults set`);
+  **Remove** is `kuke delete source`, refused while a default or a stored team
+  references the Source. After a defaults change the page names the teams that
+  inherit them — they change only when reapplied.
 
 Preview and apply are separate requests and each composes from scratch, so a
 branch may move between them; the apply result is authoritative.
@@ -1095,10 +1103,10 @@ and gets the creation timeout.
 | `POST` | `/api/teams`                       | Apply an add or an edit. Response `{ "plan", "result" }`.                                                |
 | `POST` | `/api/teams/{name}/reapply`        | Recompose a stored team (`kuke team apply NAME`). Response `{ "plan", "result" }`.                       |
 | `POST` | `/api/teams/{name}/delete`         | `kuke delete team`. Response `{ "deleted", "removed", "liveCells", "keptVolumes" }`.                     |
-| `GET`  | `/api/team-sources`                | `{ "sources", "defaultRoles", "defaultHarnesses" }` from the `TeamDefaults`.                             |
-| `POST` | `/api/team-sources`                | Register or update a source. Body `{ "name", "url", "branch"/"tag"/"commit", "clonePath" }`.             |
+| `GET`  | `/api/team-sources`                | `{ "sources", "defaultRoles", "defaultHarnesses" }`: every stored Source, and the `TeamDefaults`' lists. |
+| `POST` | `/api/team-sources`                | Create a Source (`kuke create source`). Body `{ "name", "url", "branch"/"tag"/"commit" }`.               |
 | `POST` | `/api/team-sources/{name}/inspect` | Fetch a source: `{ "source", "commit", "roles", "harnesses" }`, each item marked `default`.              |
-| `POST` | `/api/team-sources/{name}/delete`  | Unregister a source; refused while referenced.                                                           |
+| `POST` | `/api/team-sources/{name}/delete`  | `kuke delete source`; `in_use` (409) while referenced.                                                   |
 | `GET`  | `/api/team-defaults`               | `{ "exists", "document" }`: the stored `TeamDefaults` as YAML.                                           |
 | `POST` | `/api/team-defaults`               | Body `{ "roles", "harnesses" }` (`kuke team defaults set`) or `{ "document" }` (a whole `TeamDefaults`). |
 
@@ -1107,7 +1115,7 @@ and gets the creation timeout.
 "system" }`.
 - The add/edit body is the CLI's inputs: `{ "name", "source", "branch" |
 "tag" | "commit", "useRepoFile", "roles", "harnesses", "declaration",
-"force" }`. With `source` it is `kuke team add NAME --source`
+"force" }`. With `source` it is `kuke create team NAME --source`
   (`useRepoFile: false` is `--no-repo-file`, `declaration` is `-f`); with only
   `declaration` it is `kuke team apply -f`, and `name`, when given, must match
   the declaration's `metadata.name`. `roles` and `harnesses` are `null` to keep
@@ -1117,14 +1125,18 @@ and gets the creation timeout.
 "sources", "pairs", "create", "rerender", "prune", "missingSecrets",
 "createSecrets", "notes" }`; a **result** is `{ "team", "resources",
 "pruned", "missingSecrets", "notes" }`.
-- A defaults change answers `{ "action", "inheriting" }` (plus `"discovered"`
-  for a source add): the teams that need a reapply to see it.
+- A defaults change answers `{ "action", "inheriting" }`: the teams that need
+  a reapply to see it. A source create answers the same shape with `action`
+  `created`, an empty `inheriting` and `"discovered"` (what the Source offers);
+  a source delete answers `action: removed`.
+- A source is `{ "name", "url", "branch" | "tag" | "commit" }`.
 
-Errors are `{ "error": { "code", "message" } }`: `not_found` (404) for a team
-or TeamDefaults that is not stored; `already_exists` (409) for an add of a
-stored team without `force`; `in_use` (409) for a team name stored in another
-realm; `reserved` (409) for deleting the `kuke` team; `invalid_request` (400)
-for invalid JSON or an invalid declaration; `team_failed` (422) for a
+Errors are `{ "error": { "code", "message" } }`: `not_found` (404) for a team,
+TeamDefaults or Source that is not stored; `already_exists` (409) for an add of
+a stored team without `force`, or a create of a stored Source; `in_use` (409)
+for a team name stored in another realm, or a delete of a Source a default or a
+team references; `reserved` (409) for deleting the `kuke` team; `invalid_request` (400)
+for invalid JSON, an invalid declaration or an invalid Source; `team_failed` (422) for a
 composition or source that does not resolve, with the operation's message; and
 `unavailable` (503) when kukeond cannot be reached. Messages never carry git
 output, a URL's credentials or a secret value. The POST endpoints require the

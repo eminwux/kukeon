@@ -34,10 +34,10 @@ func legacyPaths(home string) []string {
 	}
 }
 
-// legacyNote is printed once by kuke team init, add and apply when either
-// old path exists.
+// legacyNote is printed once by kuke team init, kuke create team and kuke
+// team apply when either old path exists.
 const legacyNote = "Note: ~/.kuke/kuketeams.yaml and ~/.kuke/kuketeam.d/ are no longer read: kukeond stores " +
-	"teams now. Add each team again with kuke team add; nothing is converted or imported.\n"
+	"teams now. Create each team again with kuke create team; nothing is converted or imported.\n"
 
 func printLegacyNote(w io.Writer, home string) error {
 	for _, path := range legacyPaths(home) {

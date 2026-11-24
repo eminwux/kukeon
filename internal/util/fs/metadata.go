@@ -384,6 +384,18 @@ func TeamDefaultsDir(baseRunPath, realmName string) string {
 	return filepath.Join(RealmMetadataDir(baseRunPath, realmName), consts.KukeonTeamDefaultsSubdir)
 }
 
+// SourcesDir returns the realm's sources directory, which owns its stored
+// `kind: Source` documents (issue #1643).
+func SourcesDir(baseRunPath, realmName string) string {
+	return filepath.Join(RealmMetadataDir(baseRunPath, realmName), consts.KukeonSourcesSubdir)
+}
+
+// SourcePath returns the host-side path of one stored Source document:
+// <RunPath>/data/<realm>/sources/<name>.yaml.
+func SourcePath(baseRunPath, realmName, sourceName string) string {
+	return filepath.Join(SourcesDir(baseRunPath, realmName), sourceName+".yaml")
+}
+
 // TeamDefaultsPath returns the host-side path of a realm's TeamDefaults
 // document: <realm>/team-defaults/<name>.yaml (the name is always default).
 func TeamDefaultsPath(baseRunPath, realmName, name string) string {

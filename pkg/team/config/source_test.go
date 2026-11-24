@@ -49,18 +49,24 @@ func TestKukeonSourcePinsTheBuildRevision(t *testing.T) {
 	}
 }
 
-func TestMajordomoReadsTheKukeonSourceAtTheBuildRevision(t *testing.T) {
+// TestMajordomoReferencesTheKukeonSource: the kuke team names the stored
+// kukeon Source without an address or ref (#1643), so it reads the revision
+// the stored Source is pinned to; KukeonSourceSpec pins that one to the build.
+func TestMajordomoReferencesTheKukeonSource(t *testing.T) {
 	source := Majordomo().Spec.Sources[0]
-	want := KukeonSource()
-	want.ClonePath = "/home/user/kukeon-src"
-	if source != want {
+	if want := (Source{Name: KukeonSourceName, ClonePath: "/home/user/kukeon-src"}); source != want {
 		t.Errorf("majordomo source = %+v, want %+v", source, want)
 	}
 	if got := MajordomoSource(); got != KukeonSource() {
 		t.Errorf("MajordomoSource() = %+v, want the pinned %+v", got, KukeonSource())
 	}
-	if err := validateSources([]Source{source}, map[string]bool{}); err != nil {
-		t.Errorf("pinned source must validate: %v", err)
+	pinned, spec := KukeonSource(), KukeonSourceSpec()
+	if spec.URL != pinned.URL || spec.Branch != pinned.Branch || spec.Tag != pinned.Tag ||
+		spec.Commit != pinned.Commit {
+		t.Errorf("KukeonSourceSpec() = %+v, want the pinned %+v", spec, pinned)
+	}
+	if err := ValidateSource(KukeonSourceName, spec); err != nil {
+		t.Errorf("the pinned kukeon Source must validate: %v", err)
 	}
 }
 

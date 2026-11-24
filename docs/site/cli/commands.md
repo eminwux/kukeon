@@ -34,6 +34,7 @@ Both are hard-linked to the same binary on install. Running `kuke` enters the cl
 | `kuke image`                   | Manage container images in a realm's containerd namespace                |
 | `kuke daemon`                  | Manage the `kukeond` daemon cell lifecycle                               |
 | `kuke team`                    | Compose agent teams and apply them to `kukeond`, which stores them       |
+| `kuke source`                  | Inspect a stored Source: the roles and harnesses it offers               |
 | `kuke connector`               | List connector identities, import a git identity, set Realm defaults     |
 | `kuke uninstall`               | Remove all kukeon runtime state from this host                           |
 | `kuke update`                  | Update kuke and kukeond to the newest build of the host's channel        |
@@ -96,9 +97,9 @@ The positional argument is the resource's own name; the flags specify where in t
 - [kuke build](kuke-build.md)
 - [kuke image](kuke-image.md)
 - [kuke daemon](kuke-daemon.md)
-- [kuke team](kuke-team.md) — `apply`, `source`, `defaults`
+- [kuke team](kuke-team.md) — `apply`, `export`, `defaults`
 - [kuke team init](kuke-team-init.md)
-- [kuke team add](kuke-team-add.md)
+- [kuke source](kuke-source.md) — `show`
 - [kuke connector](kuke-connector.md)
 - [kuke uninstall](kuke-uninstall.md)
 - [kuke update](kuke-update.md)

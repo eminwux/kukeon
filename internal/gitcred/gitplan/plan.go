@@ -47,13 +47,23 @@ const (
 	// AskpassFileEnv makes kuketty act as an SSH_ASKPASS helper when set: it
 	// prints the named file and exits.
 	AskpassFileEnv = "KUKETTY_ASKPASS_FILE" //nolint:gosec // an environment variable name, not a credential
+	// HostFetchRepo is the name of the one repo the bundle of a host fetch
+	// plans (issue #1643): kukeond renders it, kuke reads it.
+	HostFetchRepo = "source"
 )
 
 // ConfigPath is the in-container path of the cell-global gitconfig.
-func ConfigPath() string { return path.Join(MountPath, ConfigFile) }
+func ConfigPath() string { return ConfigPathAt(MountPath) }
 
 // PlanPath is the in-container path of the kuketty plan.
-func PlanPath() string { return path.Join(MountPath, PlanFile) }
+func PlanPath() string { return PlanPathAt(MountPath) }
+
+// ConfigPathAt is the path of the gitconfig of a bundle staged at root: a
+// cell's at MountPath, a host fetch's at its staging directory (#1643).
+func ConfigPathAt(root string) string { return path.Join(root, ConfigFile) }
+
+// PlanPathAt is the path of the plan of a bundle staged at root.
+func PlanPathAt(root string) string { return path.Join(root, PlanFile) }
 
 // Plan is what kuketty does before the workload starts: load passphrase-
 // protected keys into an ssh-agent, then clone each repo with the URL and the

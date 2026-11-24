@@ -6,7 +6,7 @@ import {
 } from "./teams.mjs";
 
 const defaults = {
-  sources: [{ name: "kukeon", url: "https://github.com/eminwux/kukeon", branch: "main" }, { name: "agents", url: "https://example.test/agents", branch: "main", clonePath: "/home/user/agents" }],
+  sources: [{ name: "kukeon", url: "https://github.com/eminwux/kukeon", branch: "main" }, { name: "agents", url: "https://example.test/agents", branch: "main" }],
   defaultRoles: [{ name: "dev", source: "agents", path: "dev" }],
   defaultHarnesses: [{ name: "claude", source: "kukeon", path: "team/harnesses/claude" }, { name: "codex", source: "kukeon", path: "team/harnesses/codex" }],
 };
@@ -104,11 +104,11 @@ test("offered items default their flags and lists", () => {
   assert.equal(items.harnesses[0].default, true);
 });
 
-test("a source add sends kuke team source add's flags", () => {
-  assert.deepEqual(sourcePayload({ name: "agents", url: "https://example.test/agents", refKind: "commit", ref: "0123456789abcdef0123456789abcdef01234567", clonePath: "" }), {
+test("a source create sends kuke create source's flags", () => {
+  assert.deepEqual(sourcePayload({ name: "agents", url: "https://example.test/agents", refKind: "commit", ref: "0123456789abcdef0123456789abcdef01234567" }), {
     name: "agents", url: "https://example.test/agents", commit: "0123456789abcdef0123456789abcdef01234567",
   });
-  assert.equal(sourcePayload({ name: "a", url: "u", clonePath: " /opt/a " }).clonePath, "/opt/a");
+  assert.equal("clonePath" in sourcePayload({ name: "a", url: "u", clonePath: " /opt/a " }), false);
 });
 
 test("a defaults change names the teams that need a reapply", () => {

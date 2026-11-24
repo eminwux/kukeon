@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/team/teamtest"
+	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/compose"
 	"github.com/eminwux/kukeon/pkg/team/config"
 	"gopkg.in/yaml.v3"
@@ -76,15 +77,40 @@ func materialize(ctx context.Context, d config.Defaults) (map[string]fs.FS, func
 }
 
 func materializeSources(ctx context.Context, d config.Defaults, project bool) (map[string]fs.FS, func(), error) {
-	got, err := fetchSources(ctx, d, neededSources(d, project), nil)
+	got, err := fetchSources(ctx, noIdentity, d, neededSources(d, project), nil)
 	if err != nil {
 		return nil, nil, err
 	}
 	return got.trees, got.cleanup, nil
 }
 
-// storeDefaults stores cfg as the realm default's TeamDefaults in f.
+// storeDefaults stores cfg as the realm default's TeamDefaults in f, in the
+// shape kukeond stores since #1643: the sources it lists are stored as
+// Sources (unless one of the name is) and the list is cleared.
 func storeDefaults(t *testing.T, f *fakeClient, cfg *config.TeamDefaults) {
+	t.Helper()
+	if cfg.Spec.Defaults.Sources != nil {
+		converted := *cfg
+		for _, source := range cfg.Spec.Defaults.Sources {
+			if _, ok := f.sources[source.Name]; ok {
+				continue
+			}
+			switch {
+			case source.URL != "":
+				f.storeSource(source.Name, specOf(source))
+			case source.Name == config.KukeonSourceName:
+				f.storeSource(source.Name, config.KukeonSourceSpec())
+			}
+		}
+		converted.Spec.Defaults.Sources = nil
+		cfg = &converted
+	}
+	storeLegacyDefaults(t, f, cfg)
+}
+
+// storeLegacyDefaults stores cfg as it is, sources included: a TeamDefaults
+// written before #1643.
+func storeLegacyDefaults(t *testing.T, f *fakeClient, cfg *config.TeamDefaults) {
 	t.Helper()
 	if cfg.Metadata.Name == "" {
 		cfg.Metadata = config.Metadata{Name: config.DefaultsName, Realm: config.DefaultRealm}
@@ -99,15 +125,87 @@ func storeDefaults(t *testing.T, f *fakeClient, cfg *config.TeamDefaults) {
 // storedDefaults decodes f's TeamDefaults.
 func storedDefaults(t *testing.T, f *fakeClient) *config.TeamDefaults {
 	t.Helper()
-	cfg, err := config.DecodeDefaults(bytes.NewReader(f.defaults))
+	cfg, err := config.DecodeStoredDefaults(bytes.NewReader(f.defaults))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return cfg
 }
 
-// storeTeam stores team in f as kukeond would after a team apply.
+// storedSource decodes f's stored Source name, failing when none is stored.
+func storedSource(t *testing.T, f *fakeClient, name string) config.SourceSpec {
+	t.Helper()
+	raw, ok := f.sources[name]
+	if !ok {
+		t.Fatalf("Source %s is not stored", name)
+	}
+	var doc api.SourceDoc
+	if err := config.DecodeStrict(bytes.NewReader(raw), &doc); err != nil {
+		t.Fatal(err)
+	}
+	return doc.Spec
+}
+
+// storedSources decodes every Source stored in f.
+func storedSources(t *testing.T, f *fakeClient) map[string]config.SourceSpec {
+	t.Helper()
+	out := map[string]config.SourceSpec{}
+	for name := range f.sources {
+		out[name] = storedSource(t, f, name)
+	}
+	return out
+}
+
+// projectURL is the address a stored team's project resolves to.
+func projectURL(t *testing.T, f *fakeClient, team *config.Team) string {
+	t.Helper()
+	project := team.Spec.ProjectSource
+	if project == nil {
+		t.Fatalf("team %s has no project", team.Metadata.Name)
+	}
+	if project.URL != "" {
+		return project.URL
+	}
+	return storedSource(t, f, storedName(*project, team.Metadata.Name, true)).URL
+}
+
+// resolveStored resolves a stored team as composition does: hydrated from
+// the stored Sources over the stored defaults.
+func resolveStored(t *testing.T, f *fakeClient, team *config.Team) (config.Defaults, error) {
+	t.Helper()
+	defaults, hydrated, err := hydrate(storedDefaults(t, f), team, storedSources(t, f))
+	if err != nil {
+		return config.Defaults{}, err
+	}
+	return config.Resolve(defaults, hydrated)
+}
+
+// storeTeam stores team in f as kukeond would after a team apply: its
+// source definitions stored as Sources and its entries as references. A
+// kukeon entry that names no address reads the built-in kukeon Source,
+// which is stored when it is not.
 func storeTeam(t *testing.T, f *fakeClient, team *config.Team) {
+	t.Helper()
+	normalized, created, _, err := normalize(team, storedSources(t, f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, source := range created {
+		f.storeSource(source.name, source.spec)
+	}
+	for _, entry := range normalized.Spec.Sources {
+		if storedName(entry, team.Metadata.Name, false) == config.KukeonSourceName {
+			if _, ok := f.sources[config.KukeonSourceName]; !ok {
+				f.storeSource(config.KukeonSourceName, config.KukeonSourceSpec())
+			}
+		}
+	}
+	storeLegacyTeam(t, f, normalized)
+}
+
+// storeLegacyTeam stores team as it is: a Team written before #1643, whose
+// entries may carry their address.
+func storeLegacyTeam(t *testing.T, f *fakeClient, team *config.Team) {
 	t.Helper()
 	raw, err := yaml.Marshal(team)
 	if err != nil {
@@ -136,4 +234,10 @@ func editTeam(t *testing.T, f *fakeClient, name string, edit func(*config.Team))
 	team := storedTeam(t, f, name)
 	edit(team)
 	storeTeam(t, f, team)
+}
+
+// sourceURL is the address of f's stored Source name.
+func (f *fakeClient) sourceURL(t *testing.T, name string) string {
+	t.Helper()
+	return storedSource(t, f, name).URL
 }

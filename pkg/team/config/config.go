@@ -15,7 +15,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package config defines and validates the team documents: Team, one team's
-// declaration, and TeamDefaults, the settings every team in a realm inherits.
+// declaration, TeamDefaults, the settings every team in a realm inherits, and
+// Source, a repository any team, role or harness may name (#1643).
 // It performs no filesystem, environment, Git, daemon, or network discovery.
 package config
 
@@ -32,6 +33,9 @@ const (
 	APIVersion = version.V1Beta1
 	// KindTeamDefaults is the settings every team of a realm inherits.
 	KindTeamDefaults = "TeamDefaults"
+	// KindSource is a stored repository: an address, a ref and an optional
+	// git identity (#1643). It belongs to no team.
+	KindSource = "Source"
 	// DefaultsName is the only name a TeamDefaults may have: a realm holds at
 	// most one.
 	DefaultsName = "default"
@@ -58,9 +62,10 @@ func EmptyDefaults(realm string) *TeamDefaults {
 // with `kuke connector import git` (issue #1591). A leftover `spec.git` fails
 // to decode with an error that says so.
 type Spec struct {
-	// Defaults are the sources every team may use and the selections a
-	// team that omits a list inherits. Its sources are the registered
-	// sources (`kuke team source`).
+	// Defaults are the selections a team that omits a list inherits. Its
+	// sources list is a legacy field (#1643): sources are stored Source
+	// documents (`kuke create source`), and a stored TeamDefaults that still
+	// lists them is converted by the first command that writes it.
 	Defaults   Defaults          `yaml:"defaults"`
 	Secrets    []SecretBinding   `yaml:"secrets,omitempty"`
 	Parameters map[string]string `yaml:"parameters,omitempty"`
@@ -94,11 +99,17 @@ type GitSigning struct {
 // SourceGit is the git identity one source states for itself. Unset fields
 // fall back to the identity the git connector's scope default names.
 type SourceGit struct {
-	Author     *Identity         `yaml:"author,omitempty"`
-	Committer  *Identity         `yaml:"committer,omitempty"`
-	Credential *SourceCredential `yaml:"credential,omitempty"`
-	Signing    *GitSigning       `yaml:"signing,omitempty"`
-	Sign       []string          `yaml:"sign,omitempty"`
+	// IdentityRef names a stored git identity (an ssh-key, basic-auth or
+	// author-only Secret, `kuke connector import git`): the source's author,
+	// committer, credential and signing key, as a Config's repo fill names
+	// one. The fields below override what it expands to. It also picks the
+	// credential kuke fetches the source with (#1643, AC9).
+	IdentityRef *SecretRef        `yaml:"identityRef,omitempty"`
+	Author      *Identity         `yaml:"author,omitempty"`
+	Committer   *Identity         `yaml:"committer,omitempty"`
+	Credential  *SourceCredential `yaml:"credential,omitempty"`
+	Signing     *GitSigning       `yaml:"signing,omitempty"`
+	Sign        []string          `yaml:"sign,omitempty"`
 }
 
 // SourceCredential is the credential one source clones and pushes with.
@@ -166,9 +177,21 @@ func (d Defaults) MarshalYAML() (any, error) {
 	return out, nil
 }
 
+// Source is one entry of a team's sources, or its projectSource (#1643). In a
+// stored Team it is a reference: Name is the alias the team's roles and
+// harnesses use, Stored the stored Source behind it (default: the alias; for
+// the project: the team name), an optional ref of the team's own and the
+// clone path. An entry that also has URL — in a kuketeam.yaml — is a
+// definition: creating or applying the team stores a Source for it.
+//
+// Composition (pkg/team/compose) reads the same type in its resolved form:
+// every entry with its address, ref and git identity filled in.
 type Source struct {
-	Name   string `yaml:"name"`
-	URL    string `yaml:"url"`
+	Name string `yaml:"name"`
+	// Stored names the stored Source the alias resolves to, when it is not
+	// the alias itself.
+	Stored string `yaml:"source,omitempty"`
+	URL    string `yaml:"url,omitempty"`
 	Branch string `yaml:"branch,omitempty"`
 	Tag    string `yaml:"tag,omitempty"`
 	Commit string `yaml:"commit,omitempty"`
@@ -378,6 +401,17 @@ func (s TeamSpec) MarshalYAML() (any, error) {
 		out.Harnesses = &s.Harnesses
 	}
 	return out, nil
+}
+
+// SourceSpec is the body of a stored Source (kind: Source, #1643): an
+// address, exactly one ref and an optional git identity. It belongs to no
+// team, and has no clone path: that is the team's.
+type SourceSpec struct {
+	URL    string     `yaml:"url"`
+	Branch string     `yaml:"branch,omitempty"`
+	Tag    string     `yaml:"tag,omitempty"`
+	Commit string     `yaml:"commit,omitempty"`
+	Git    *SourceGit `yaml:"git,omitempty"`
 }
 
 // Metadata names a Team or a TeamDefaults and the realm it lives in. A

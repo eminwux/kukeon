@@ -97,6 +97,10 @@ type Options struct {
 	// KukeondSocket is the unix socket path kukeond serves on. Used by bootstrap
 	// to build the bind-mount for the system cell.
 	KukeondSocket string
+	// GitFetchDir overrides where the git credentials of a host fetch are
+	// staged (issue #1643); empty is the gitfetch directory beside
+	// KukeondSocket. Tests set it.
+	GitFetchDir string
 	// KukeondSocketGID, when non-zero, is passed to the kukeond cell as
 	// --socket-gid <gid> so the daemon can chown its listener socket on every
 	// restart. Set by `kuke init` to the kukeon group's numeric GID.

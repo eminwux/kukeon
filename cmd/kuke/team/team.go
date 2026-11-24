@@ -15,7 +15,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package team mounts the `kuke team` command. The implementation lives in
-// internal/team/cli (init and add) over pkg/team/compose, pkg/team/config
+// internal/team/cli (init, apply, export and defaults) over pkg/team/compose, pkg/team/config
 // and internal/team/initialize, imported from the kuketeams repository.
 package team
 
@@ -24,8 +24,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewTeamCmd builds the `kuke team` parent command with its init and add
-// subcommands.
+// NewTeamCmd builds the `kuke team` parent command with its init, apply,
+// export and defaults subcommands.
 func NewTeamCmd() *cobra.Command {
 	return cli.NewTeamCommand()
 }

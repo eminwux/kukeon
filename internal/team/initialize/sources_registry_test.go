@@ -17,12 +17,15 @@
 package initialize
 
 import (
+	"errors"
+	"fmt"
 	"io/fs"
 	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
 
+	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/team/config"
 )
 
@@ -44,7 +47,7 @@ func roleSource() fstest.MapFS {
 }
 
 // setupSources is a fake daemon with the add defaults and injected trees for
-// the sources the tests register.
+// the sources the tests store.
 func setupSources(t *testing.T) (Options, *fakeClient) {
 	t.Helper()
 	f := newFake()
@@ -57,36 +60,19 @@ func setupSources(t *testing.T) (Options, *fakeClient) {
 	}}, f
 }
 
-func registered(t *testing.T, f *fakeClient, name string) (config.Source, bool) {
-	t.Helper()
-	for _, s := range storedDefaults(t, f).Spec.Defaults.Sources {
-		if s.Name == name {
-			return s, true
-		}
-	}
-	return config.Source{}, false
-}
-
-// TestAddSourceDiscoversAndRegisters is AC13: source add discovers what the
-// source offers, registers it in the TeamDefaults (created, then updated),
-// and gives a role source a clone path.
-func TestAddSourceDiscoversAndRegisters(t *testing.T) {
+// TestCreateSourceDiscoversAndStores is #1643 Step 6: create source reads
+// what the source offers and stores a Source document; a stored name needs
+// --force, and the replacement names the teams that use it.
+func TestCreateSourceDiscoversAndStores(t *testing.T) {
 	opts, f := setupSources(t)
-	storeTeam(t, f, inheritingTeam("inherits"))
-	owns := inheritingTeam("owns")
-	owns.Spec.Sources, owns.Spec.Roles = []config.Source{}, []config.Role{}
-	// An explicit empty connectors map does not survive the stored document
-	// (omitempty), so the team states one choice to own the list.
-	owns.Spec.Harnesses, owns.Spec.Connectors = []config.Harness{}, map[string]config.ConnectorChoice{"git": {}}
-	storeTeam(t, f, owns)
-
-	change, err := AddSource(t.Context(), SourceOptions{
+	change, err := CreateSource(t.Context(), SourceOptions{
 		Options: opts, Name: "roles-src", URL: "https://example.test/roles.git", Branch: "main",
+		Identity: &config.SecretRef{Name: "git-ssh"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if change.Action != "created" || !slices.Equal(change.Inheriting, []string{"inherits"}) {
+	if change.Action != "created" || change.Users != nil {
 		t.Fatalf("change = %+v", change)
 	}
 	got := change.Discovered
@@ -98,54 +84,49 @@ func TestAddSourceDiscoversAndRegisters(t *testing.T) {
 	if len(got.Harnesses) != 1 || got.Harnesses[0] != (SourceItem{Name: "codex", Path: "harnesses/codex"}) {
 		t.Fatalf("discovered harnesses = %+v", got.Harnesses)
 	}
-	source, ok := registered(t, f, "roles-src")
-	if !ok || source.ClonePath != "/home/user/roles-src" || source.Branch != "main" || got.Source != source {
-		t.Fatalf("registered = %+v", source)
+	spec := storedSource(t, f, "roles-src")
+	if spec.URL != "https://example.test/roles.git" || spec.Branch != "main" || spec.Git == nil ||
+		*spec.Git.IdentityRef != (config.SecretRef{Name: "git-ssh", Realm: "default"}) {
+		t.Fatalf("stored = %+v", spec)
 	}
 	if !slices.Equal(f.writes, []string{"apply"}) {
-		t.Fatalf("writes = %v, want one plain apply of the TeamDefaults", f.writes)
+		t.Fatalf("writes = %v, want one plain apply of the Source", f.writes)
+	}
+	if defaults := storedDefaults(t, f); defaults.Spec.Defaults.Sources != nil {
+		t.Fatal("create source wrote the TeamDefaults' sources")
 	}
 
-	// A source without roles is cloned nowhere; an explicit path is kept.
-	if _, err = AddSource(t.Context(), SourceOptions{
-		Options: opts, Name: "harn-src", URL: "https://example.test/h.git", Branch: "main",
-	}); err != nil {
-		t.Fatal(err)
+	// A stored name is refused without --force.
+	again := SourceOptions{Options: opts, Name: "roles-src", URL: "https://example.test/roles.git", Tag: "v2"}
+	if _, err = CreateSource(t.Context(), again); !errors.Is(err, errdefs.ErrSourceExists) ||
+		!strings.Contains(err.Error(), "--force") {
+		t.Fatalf("err = %v", err)
 	}
-	if source, _ = registered(t, f, "harn-src"); source.ClonePath != "" {
-		t.Fatalf("harness-only source cloned at %q", source.ClonePath)
-	}
-
-	// The same name again updates it in place.
-	change, err = AddSource(t.Context(), SourceOptions{
-		Options: opts, Name: "roles-src", URL: "https://example.test/roles.git", Tag: "v2", ClonePath: "/opt/roles",
-	})
-	if err != nil || change.Action != "updated" {
+	user := inheritingTeam("user")
+	user.Spec.Roles = []config.Role{{Name: "dev", Source: "roles-src", Path: "roles/dev"}}
+	storeTeam(t, f, user)
+	again.Force = true
+	if change, err = CreateSource(t.Context(), again); err != nil || change.Action != "updated" {
 		t.Fatalf("change=%+v err=%v", change, err)
 	}
-	count := 0
-	for _, s := range storedDefaults(t, f).Spec.Defaults.Sources {
-		if s.Name == "roles-src" {
-			count++
-			source = s
-		}
+	if want := []SourceUse{{Team: "user", How: UseRole, Name: "dev"}}; !slices.Equal(change.Users, want) {
+		t.Fatalf("users = %+v, want %+v", change.Users, want)
 	}
-	if count != 1 || source.Tag != "v2" || source.Branch != "" || source.ClonePath != "/opt/roles" {
-		t.Fatalf("count=%d source=%+v", count, source)
+	if spec = storedSource(t, f, "roles-src"); spec.Tag != "v2" || spec.Branch != "" || spec.Git != nil {
+		t.Fatalf("replaced = %+v", spec)
 	}
 }
 
-func TestAddSourceRejectsBadInput(t *testing.T) {
-	for _, tc := range []struct{ name, source, url, clonePath, want string }{
-		{"reserved", "project", "https://example.test/r.git", "", "project is reserved"},
-		{"invalid name", "Bad_Name", "https://example.test/r.git", "", "invalid source name"},
-		{"credential url", "creds", "https://user:unsafe-canary@example.test/r.git", "", ""},
-		{"relative clone path", "rel", "https://example.test/r.git", "relative/path", "--clone-path"},
+func TestCreateSourceRejectsBadInput(t *testing.T) {
+	for _, tc := range []struct{ name, source, url, want string }{
+		{"reserved", "project", "https://example.test/r.git", "project is reserved"},
+		{"invalid name", "Bad_Name", "https://example.test/r.git", "invalid source name"},
+		{"credential url", "creds", "https://user:unsafe-canary@example.test/r.git", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			opts, f := setupSources(t)
-			_, err := AddSource(t.Context(), SourceOptions{
-				Options: opts, Name: tc.source, URL: tc.url, Branch: "main", ClonePath: tc.clonePath,
+			_, err := CreateSource(t.Context(), SourceOptions{
+				Options: opts, Name: tc.source, URL: tc.url, Branch: "main",
 			})
 			if err == nil || !strings.Contains(err.Error(), tc.want) || strings.Contains(err.Error(), "unsafe-canary") {
 				t.Fatalf("err = %v, want %q", err, tc.want)
@@ -157,20 +138,12 @@ func TestAddSourceRejectsBadInput(t *testing.T) {
 	}
 }
 
-// TestShowSourceMarksDefaults is AC13: show lists what a registered source
-// offers and marks the ones the defaults select. It writes nothing.
+// TestShowSourceMarksDefaults: show lists what a stored Source offers and
+// marks the ones the defaults select. It writes nothing.
 func TestShowSourceMarksDefaults(t *testing.T) {
 	opts, f := setupSources(t)
+	f.storeSource("roles-src", config.SourceSpec{URL: "https://example.test/roles.git", Branch: "main"})
 	changeAddConfig(t, AddOptions{Options: opts}, func(cfg *config.TeamDefaults) {
-		cfg.Spec.Defaults.Sources = append(
-			cfg.Spec.Defaults.Sources,
-			config.Source{
-				Name:      "roles-src",
-				URL:       "https://example.test/roles.git",
-				Branch:    "main",
-				ClonePath: "/home/user/roles-src",
-			},
-		)
 		cfg.Spec.Defaults.Roles = append(cfg.Spec.Defaults.Roles,
 			config.Role{Name: "dev", Source: "roles-src", Path: "roles/dev/"})
 		cfg.Spec.Defaults.Harnesses = append(cfg.Spec.Defaults.Harnesses,
@@ -180,64 +153,68 @@ func TestShowSourceMarksDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if contents.Source.Name != "roles-src" || len(contents.Roles) != 1 || !contents.Roles[0].Default ||
+	if contents.Source.Name != "roles-src" || contents.Source.URL != "https://example.test/roles.git" ||
+		len(contents.Roles) != 1 || !contents.Roles[0].Default ||
 		len(contents.Harnesses) != 1 || !contents.Harnesses[0].Default {
 		t.Fatalf("contents = %+v", contents)
 	}
 	if len(f.writes) != 0 {
 		t.Fatalf("writes = %v", f.writes)
 	}
-	if _, err = ShowSource(t.Context(), opts, "absent"); err == nil ||
-		!strings.Contains(err.Error(), "kuke team source add absent") {
+	if _, err = ShowSource(t.Context(), opts, "absent"); !errors.Is(err, errdefs.ErrSourceNotFound) ||
+		!strings.Contains(err.Error(), "kuke create source absent") {
 		t.Fatalf("err = %v", err)
 	}
 }
 
-// TestRemoveSourceRefusedWhileReferenced is AC13: remove is refused while a
-// default or a stored Team that inherits the sources references the source,
-// and the error names each; nothing is fetched.
-func TestRemoveSourceRefusedWhileReferenced(t *testing.T) {
+// TestDeleteSource: the delete is kukeond's, which refuses a referenced
+// Source (AC7, tested in internal/controller); a missing one is not found.
+func TestDeleteSource(t *testing.T) {
 	opts, f := setupSources(t)
-	opts.Sources = nil // Nothing may be fetched.
-	changeAddConfig(t, AddOptions{Options: opts}, func(cfg *config.TeamDefaults) {
-		cfg.Spec.Defaults.Sources = append(cfg.Spec.Defaults.Sources,
-			config.Source{Name: "roles-src", URL: "https://example.test/roles.git", Branch: "main"})
-		cfg.Spec.Defaults.Roles = append(cfg.Spec.Defaults.Roles,
-			config.Role{Name: "dev", Source: "roles-src", Path: "roles/dev"})
-	})
-	user := inheritingTeam("user")
-	user.Spec.Roles = []config.Role{{Name: "dev", Source: "roles-src", Path: "roles/dev"}}
-	storeTeam(t, f, user)
-	own := inheritingTeam("own")
-	own.Spec.Sources = []config.Source{{Name: "roles-src", URL: "https://example.test/fork.git", Branch: "main"}}
-	own.Spec.Roles = []config.Role{{Name: "dev", Source: "roles-src", Path: "roles/dev"}}
-	storeTeam(t, f, own)
-	storeTeam(t, f, inheritingTeam("inherits"))
+	f.storeSource("roles-src", config.SourceSpec{URL: "https://example.test/roles.git", Branch: "main"})
+	f.deleteSourceErr = fmt.Errorf("%w: source roles-src is used by team user", errdefs.ErrSourceInUse)
+	if err := DeleteSource(t.Context(), opts, "roles-src"); !errors.Is(err, errdefs.ErrSourceInUse) {
+		t.Fatalf("err = %v", err)
+	}
+	f.deleteSourceErr = nil
+	if err := DeleteSource(t.Context(), opts, "roles-src"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := f.sources["roles-src"]; ok {
+		t.Fatal("the Source is still stored")
+	}
+	if err := DeleteSource(t.Context(), opts, "roles-src"); !errors.Is(err, errdefs.ErrSourceNotFound) {
+		t.Fatalf("err = %v", err)
+	}
+}
 
-	_, err := RemoveSource(t.Context(), opts, "roles-src")
-	if err == nil || !strings.Contains(err.Error(), "default role dev") ||
-		!strings.Contains(err.Error(), "team inherits") ||
-		!strings.Contains(err.Error(), "team user") ||
-		strings.Contains(err.Error(), "team own") {
-		t.Fatalf("err = %v", err)
+// TestSourceUsers lists, per Source, the teams and defaults that use it.
+func TestSourceUsers(t *testing.T) {
+	opts, f := setupSources(t)
+	team := inheritingTeam("app")
+	team.Spec.ProjectSource = &config.Source{Name: "project", Stored: "app-repo"}
+	team.Spec.Sources = []config.Source{{Name: "roles", Stored: "roles-src"}}
+	team.Spec.Roles = []config.Role{{Name: "dev", Source: "roles", Path: "roles/dev"}}
+	storeTeam(t, f, team)
+	storeTeam(t, f, inheritingTeam("inherits"))
+	users, err := SourceUsers(t.Context(), opts.Client)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(f.writes) != 0 {
-		t.Fatalf("writes = %v", f.writes)
-	}
-	changeAddConfig(t, AddOptions{Options: opts}, func(cfg *config.TeamDefaults) {
-		cfg.Spec.Defaults.Roles = cfg.Spec.Defaults.Roles[:1]
-	})
-	delete(f.teams, "user")
-	change, err := RemoveSource(t.Context(), opts, "roles-src")
-	if err != nil || change.Action != "removed" || !slices.Equal(change.Inheriting, []string{"inherits", "own"}) {
-		t.Fatalf("change=%+v err=%v", change, err)
-	}
-	if _, ok := registered(t, f, "roles-src"); ok {
-		t.Fatal("source still registered")
-	}
-	if _, err = RemoveSource(t.Context(), opts, "roles-src"); err == nil ||
-		!strings.Contains(err.Error(), "not registered") {
-		t.Fatalf("err = %v", err)
+	for source, want := range map[string][]SourceUse{
+		"app-repo":  {{Team: "app", How: UseProject, Name: "project"}},
+		"roles-src": {{Team: "app", How: UseDeclared, Name: "roles"}, {Team: "app", How: UseRole, Name: "dev"}},
+		"kukeon": {
+			{How: UseDefaultRole, Name: "majordomo"},
+			{How: UseDefaultHarness, Name: "codex"},
+			{Team: "app", How: UseHarness, Name: "codex"},
+			{Team: "inherits", How: UseRole, Name: "majordomo"},
+			{Team: "inherits", How: UseHarness, Name: "codex"},
+		},
+	} {
+		if !slices.Equal(users[source], want) {
+			t.Errorf("users[%s] = %+v, want %+v", source, users[source], want)
+		}
 	}
 }
 
@@ -245,10 +222,7 @@ func TestRemoveSourceRefusedWhileReferenced(t *testing.T) {
 // list and reports the teams that inherit from the defaults.
 func TestSetDefaults(t *testing.T) {
 	opts, f := setupSources(t)
-	changeAddConfig(t, AddOptions{Options: opts}, func(cfg *config.TeamDefaults) {
-		cfg.Spec.Defaults.Sources = append(cfg.Spec.Defaults.Sources,
-			config.Source{Name: "roles-src", URL: "https://example.test/roles.git", Branch: "main"})
-	})
+	f.storeSource("roles-src", config.SourceSpec{URL: "https://example.test/roles.git", Branch: "main"})
 	storeTeam(t, f, inheritingTeam("inherits"))
 	before := storedDefaults(t, f).Spec.Defaults.Harnesses
 	change, err := SetDefaults(t.Context(), opts, []string{"majordomo", "dev=roles-src:roles/dev"}, nil)
@@ -289,8 +263,8 @@ func TestApplyDefaults(t *testing.T) {
 	f := newFake()
 	opts := Options{Client: f}
 	storeTeam(t, f, inheritingTeam("inherits"))
-	doc := "apiVersion: v1beta1\nkind: TeamDefaults\nspec:\n  defaults:\n    sources:\n" +
-		"      - {name: kukeon, url: github.com/eminwux/kukeon, branch: main}\n" +
+	doc := "apiVersion: v1beta1\nkind: TeamDefaults\nspec:\n  defaults:\n    harnesses:\n" +
+		"      - {name: codex, source: kukeon, path: team/harnesses/codex}\n" +
 		"  parameters: {REGION: eu}\n"
 	change, err := ApplyDefaults(t.Context(), opts, []byte(doc))
 	if err != nil || change.Action != "created" || !slices.Equal(change.Inheriting, []string{"inherits"}) {
@@ -309,6 +283,9 @@ func TestApplyDefaults(t *testing.T) {
 		strings.Replace(doc, "kind: TeamDefaults\n", "kind: TeamDefaults\nmetadata: {realm: other}\n", 1),
 		strings.Replace(doc, "parameters:", "unknown:", 1),
 		strings.Replace(doc, "v1beta1", oldTeamHeader, 1),
+		// AC2: a TeamDefaults lists no sources.
+		strings.Replace(doc, "    harnesses:\n", "    sources: [{name: kukeon, url: github.com/eminwux/kukeon, branch: main}]\n"+
+			"    harnesses:\n", 1),
 	} {
 		if _, err = ApplyDefaults(t.Context(), opts, []byte(bad)); err == nil {
 			t.Fatalf("accepted %s", bad)
@@ -316,5 +293,44 @@ func TestApplyDefaults(t *testing.T) {
 	}
 	if len(f.writes) != writes {
 		t.Fatal("a refused document was applied")
+	}
+}
+
+// TestDefaultsSetConvertsLegacySources is AC13: a TeamDefaults written before
+// #1643 keeps reading, and the first write converts it: its sources become
+// Sources in the same apply, the list is cleared and a note says so.
+func TestDefaultsSetConvertsLegacySources(t *testing.T) {
+	f := newFake()
+	opts := Options{Client: f}
+	legacy := config.EmptyDefaults(config.DefaultRealm)
+	legacy.Spec.Defaults = config.Defaults{
+		Sources: []config.Source{
+			config.KukeonSource(),
+			{Name: "agents", URL: "git@github.com:eminwux/agents", Branch: "main", ClonePath: "/opt/agents"},
+		},
+		Roles:     []config.Role{{Name: "dev", Source: "agents", Path: "dev"}},
+		Harnesses: config.MajordomoHarnesses(),
+	}
+	storeLegacyDefaults(t, f, legacy)
+	change, err := SetDefaults(t.Context(), opts, nil, []string{"codex"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(f.writes, []string{"apply"}) {
+		t.Fatalf("writes = %v, want one plain apply", f.writes)
+	}
+	if got := storedDefaults(t, f).Spec.Defaults; got.Sources != nil || len(got.Harnesses) != 1 ||
+		len(got.Roles) != 1 {
+		t.Fatalf("defaults = %+v", got)
+	}
+	if got := storedSource(t, f, "agents"); got.URL != "git@github.com:eminwux/agents" || got.Branch != "main" {
+		t.Fatalf("agents Source = %+v", got)
+	}
+	if got := storedSource(t, f, config.KukeonSourceName); got.URL != config.KukeonSourceURL {
+		t.Fatalf("kukeon Source = %+v", got)
+	}
+	if !hasNote(change.Notes, "converted 2 registered sources to Source documents") ||
+		!hasNote(change.Notes, "/opt/agents") || !hasNote(change.Notes, "spec.sources[].clonePath") {
+		t.Fatalf("notes = %v", change.Notes)
 	}
 }

@@ -109,7 +109,7 @@ export function originLabel(origin, team = "") {
   if (level === "cell") return "picked for this cell";
   return level;
 }
-// teamOf names the team that owns a Config; `kuke team add` re-renders such a
+// teamOf names the team that owns a Config; `kuke create team` re-renders such a
 // Config, so its identities are shown read-only.
 export function teamOf(config) { return text(config?.metadata?.labels?.[teamLabel]); }
 

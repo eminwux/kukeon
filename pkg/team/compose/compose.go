@@ -547,7 +547,8 @@ func planPair(
 	}
 	repo, ok := runtimeSource(sources, selection.Source)
 	if !ok {
-		return nil, fmt.Errorf("sources: missing clonePath for required role source %q", selection.Source)
+		return nil, fmt.Errorf("sources: missing clonePath for required role source %q; "+
+			"set it with spec.sources[].clonePath", selection.Source)
 	}
 	if err = checkSettings(hsel.Name, settings); err != nil {
 		return nil, err
@@ -578,7 +579,8 @@ func planPair(
 	}
 	for _, name := range union(role.Spec.Needs.Repos, []string{selection.Source}) {
 		if _, found := runtimeSource(sources, name); !found {
-			return nil, fmt.Errorf("sources: missing clonePath for required repository %q", name)
+			return nil, fmt.Errorf("sources: missing clonePath for required repository %q (a role's "+
+				"needs.repos); set it with spec.sources[].clonePath", name)
 		}
 	}
 	if err = planSecrets(plan, lib, connectorCatalog, secrets); err != nil {

@@ -39,7 +39,7 @@ pkg/api/model/v1beta1/
 ├── cellconfig.go               (CellConfigDoc, ...)
 ├── volume.go                   (VolumeDoc, ...)
 ├── healthreport.go             (HealthReport document types)
-├── team.go                     (TeamDoc, TeamDefaultsDoc)
+├── team.go                     (TeamDoc, TeamDefaultsDoc, SourceDoc)
 ├── serverconfiguration.go      (ServerConfigurationDoc)
 ├── clientconfiguration.go      (ClientConfigurationDoc)
 ├── connector.go                (connector catalog types)

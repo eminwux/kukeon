@@ -73,3 +73,26 @@ func ConvertTeamDefaultsToExternal(in intmodel.TeamDefaults) (ext.TeamDefaultsDo
 	}
 	return doc, nil
 }
+
+// NormalizeSource converts a parsed Source document to the carrier kukeond
+// stores, like NormalizeTeam.
+func NormalizeSource(doc ext.SourceDoc) (intmodel.Source, error) {
+	doc.APIVersion = DefaultVersion(doc.APIVersion)
+	raw, err := yaml.Marshal(doc)
+	if err != nil {
+		return intmodel.Source{}, fmt.Errorf("encode source %q: %w", doc.Metadata.Name, err)
+	}
+	return intmodel.Source{
+		Metadata: intmodel.TeamMetadata{Name: doc.Metadata.Name, Realm: doc.Metadata.Realm},
+		Document: raw,
+	}, nil
+}
+
+// ConvertSourceToExternal decodes a stored Source document.
+func ConvertSourceToExternal(in intmodel.Source) (ext.SourceDoc, error) {
+	var doc ext.SourceDoc
+	if err := config.DecodeStrict(bytes.NewReader(in.Document), &doc); err != nil {
+		return ext.SourceDoc{}, fmt.Errorf("decode stored source %q: %w", in.Metadata.Name, err)
+	}
+	return doc, nil
+}

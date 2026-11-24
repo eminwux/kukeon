@@ -34,14 +34,10 @@ var repoSegment = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 
 // sourceRepo reduces a clone URL to `<owner>/<repo>`: scp-like
 // (`git@host:owner/repo`), ssh:// and http(s):// URLs, and the
-// `github.com/owner/repo` shorthand, each with or without a trailing `.git`.
+// `host.tld/owner/repo` short form, each with or without a trailing `.git`.
 // A URL of any other shape (a local path, a nested group path) reduces to "".
 func sourceRepo(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if strings.HasPrefix(raw, "github.com/") {
-		raw = "https://" + raw
-	}
-	remote := gitcred.ParseRemote(raw)
+	remote := gitcred.ParseRemote(gitcred.CloneURL(strings.TrimSpace(raw)))
 	if remote.Transport == gitcred.TransportOther || remote.Host == "" {
 		return ""
 	}

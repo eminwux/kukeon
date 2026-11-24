@@ -19,102 +19,125 @@ package cli
 import (
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"strings"
 	"text/tabwriter"
 
+	"github.com/eminwux/kukeon/internal/gitcred"
 	"github.com/eminwux/kukeon/internal/team/initialize"
+	"github.com/eminwux/kukeon/pkg/team/config"
 	"github.com/spf13/cobra"
 )
 
 // tablePadding is the space between table columns.
 const tablePadding = 2
 
-func newSourceCommand(deps Deps) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "source",
-		Short: "Register the sources every team can use",
-		Long: "Sources are registered in the realm's TeamDefaults (kuke get teamdefaults): a methodology " +
-			"repository, for one. Its roles are named in a team as SOURCE:PATH.",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
-	}
-	cmd.AddCommand(newSourceAddCommand(deps), newSourceListCommand(deps), newSourceShowCommand(deps),
-		newSourceRemoveCommand(deps))
-	return cmd
-}
+// NewCreateSourceCommand returns `kuke create source` (#1643, D12).
+func NewCreateSourceCommand() *cobra.Command { return NewCreateSourceCommandWith(defaultDeps()) }
 
-func newSourceAddCommand(deps Deps) *cobra.Command {
+// NewCreateSourceCommandWith returns `kuke create source` with deps.
+func NewCreateSourceCommandWith(deps Deps) *cobra.Command {
 	var conn connection
 	var opts initialize.SourceOptions
+	var identity string
 	cmd := &cobra.Command{
-		Use:   "add NAME --url URL",
-		Short: "Register a source, or update a registered one",
-		Long: "Check the URL, discover the default branch when no ref is given, fetch the source and add it " +
-			"to the TeamDefaults. A source that offers roles is cloned into its role cells at --clone-path " +
-			"(default /home/user/NAME).",
-		Args: cobra.ExactArgs(1),
+		Use:   "source NAME --url ADDRESS",
+		Short: "Store a Source: a Git repository teams name for roles, harnesses and checkouts",
+		Long: "Check the address, discover the default branch when no ref is given, fetch the source with its " +
+			"git identity and store it as a kind: Source in realm default. A team names it in its sources " +
+			"(or as its project) and roles name it as SOURCE:PATH.\n" +
+			"create fails when the Source is stored unless --force; replacing one lists the teams that use it, " +
+			"which see the change when each is recomposed.",
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			opts.Identity = nil
+			if identity != "" {
+				opts.Identity = &config.SecretRef{Name: identity, Realm: config.DefaultRealm}
+			}
 			s, err := conn.open(cmd, deps, false)
 			if err != nil {
 				return err
 			}
 			defer s.close()
-			opts.Name, opts.Options = args[0], s.options(false)
-			change, err := initialize.AddSource(cmd.Context(), opts)
+			dryRun := opts.DryRun
+			opts.Name, opts.Options = args[0], s.options(dryRun)
+			change, err := initialize.CreateSource(cmd.Context(), opts)
 			if err != nil {
 				return err
 			}
-			c := change.Discovered
-			what := fmt.Sprintf("Source %s %s: %s, %s", opts.Name, change.Action, c.Source.URL,
-				strings.TrimPrefix(sourceRef(c.Source.Branch, c.Source.Tag, c.Source.Commit), " "))
-			if c.Source.ClonePath != "" {
-				what += ", cloned at " + c.Source.ClonePath
-			}
-			what += fmt.Sprintf("; offers %d roles and %d harnesses", len(c.Roles), len(c.Harnesses))
-			return PrintDefaultsChange(cmd.OutOrStdout(), what, change)
+			return printSourceChange(cmd.OutOrStdout(), opts.Name, change, dryRun)
 		},
 	}
 	conn.register(cmd)
-	cmd.Flags().StringVar(&opts.URL, "url", "", "Git remote (SCP-style SSH, ssh://, or HTTPS)")
+	cmd.Flags().StringVar(&opts.URL, "url", "",
+		"Git address (host/owner/repo, SCP-style SSH, ssh://, or HTTPS)")
 	cmd.Flags().StringVar(&opts.Branch, "branch", "", "Select a branch (default: the remote's default branch)")
 	cmd.Flags().StringVar(&opts.Tag, "tag", "", "Select a tag")
 	cmd.Flags().StringVar(&opts.Commit, "commit", "", "Select a full commit object ID")
-	cmd.Flags().StringVar(&opts.ClonePath, "clone-path", "", "Where team cells clone the source")
+	cmd.Flags().StringVar(&identity, "identity", "",
+		"The stored git identity (a Secret in realm default) to fetch and clone the source with")
+	cmd.Flags().BoolVar(&opts.Force, "force", false, "Replace a stored Source of the same name")
+	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "Fetch and check the source; store nothing")
 	cmd.MarkFlagsMutuallyExclusive("branch", "tag", "commit")
 	_ = cmd.MarkFlagRequired("url")
 	return cmd
 }
 
-func newSourceListCommand(deps Deps) *cobra.Command {
-	var conn connection
-	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "List the registered sources",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			s, err := conn.open(cmd, deps, false)
-			if err != nil {
-				return err
-			}
-			defer s.close()
-			defaults, err := initialize.Defaults(cmd.Context(), s.client)
-			if err != nil {
-				return err
-			}
-			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, tablePadding, ' ', 0)
-			fmt.Fprintln(w, "NAME\tURL\tREF\tCLONE PATH")
-			for _, src := range defaults.Spec.Defaults.Sources {
-				clone := src.ClonePath
-				if clone == "" {
-					clone = "-"
-				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", src.Name, src.URL,
-					strings.TrimPrefix(sourceRef(src.Branch, src.Tag, src.Commit), " "), clone)
-			}
-			return w.Flush()
-		},
+func printSourceChange(out io.Writer, name string, change initialize.SourceChange, dryRun bool) error {
+	c := change.Discovered
+	action := change.Action
+	if dryRun {
+		action = "checked (dry run, nothing stored)"
 	}
-	conn.register(cmd)
+	what := fmt.Sprintf("Source %s %s: %s, %s", name, action, gitcred.ShortForm(change.Source.URL),
+		change.Source.Revision())
+	if git := change.Source.Git; git != nil && git.IdentityRef != nil {
+		what += ", identity " + git.IdentityRef.Name
+	}
+	if _, err := fmt.Fprintf(out, "%s; offers %d roles and %d harnesses.\n", what, len(c.Roles),
+		len(c.Harnesses)); err != nil {
+		return err
+	}
+	if len(change.Users) == 0 {
+		return nil
+	}
+	users := make([]string, 0, len(change.Users))
+	teams := map[string]bool{}
+	for _, use := range change.Users {
+		users = append(users, use.String())
+		if use.Team != "" {
+			teams[use.Team] = true
+		}
+	}
+	if _, err := fmt.Fprintf(out, "Used by: %s\n", strings.Join(users, ", ")); err != nil {
+		return err
+	}
+	for _, team := range slices.Sorted(maps.Keys(teams)) {
+		if _, err := fmt.Fprintf(out, "  kuke team apply %s\n", team); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// NewSourceCommand returns `kuke source`, the verbs that read a stored
+// Source's repository (#1643).
+func NewSourceCommand() *cobra.Command { return NewSourceCommandWith(defaultDeps()) }
+
+// NewSourceCommandWith returns `kuke source` with deps.
+func NewSourceCommandWith(deps Deps) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:          "source",
+		Short:        "Inspect stored Sources (kuke create source, kuke get sources)",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		RunE:         func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
+	}
+	show := newSourceShowCommand(deps)
+	silence(show)
+	cmd.AddCommand(show)
 	return cmd
 }
 
@@ -122,7 +145,7 @@ func newSourceShowCommand(deps Deps) *cobra.Command {
 	var conn connection
 	cmd := &cobra.Command{
 		Use:   "show NAME",
-		Short: "Fetch a registered source and list the roles and harnesses it offers",
+		Short: "Fetch a stored Source and list the roles and harnesses it offers",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := conn.open(cmd, deps, false)
@@ -146,7 +169,7 @@ func printSourceContents(out io.Writer, name string, c *initialize.SourceContent
 	if commit == "" {
 		commit = "unresolved"
 	}
-	if _, err := fmt.Fprintf(out, "Source %s: %s, %s at %s\n", name, c.Source.URL,
+	if _, err := fmt.Fprintf(out, "Source %s: %s, %s at %s\n", name, gitcred.ShortForm(c.Source.URL),
 		strings.TrimPrefix(sourceRef(c.Source.Branch, c.Source.Tag, c.Source.Commit), " "), commit); err != nil {
 		return err
 	}
@@ -161,29 +184,6 @@ func printSourceContents(out io.Writer, name string, c *initialize.SourceContent
 		fmt.Fprintf(w, "%s\t%s\t%s\n", h.Name, h.Path, yesNo(h.Default))
 	}
 	return w.Flush()
-}
-
-func newSourceRemoveCommand(deps Deps) *cobra.Command {
-	var conn connection
-	cmd := &cobra.Command{
-		Use:   "remove NAME",
-		Short: "Unregister a source no default and no stored team references",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			s, err := conn.open(cmd, deps, false)
-			if err != nil {
-				return err
-			}
-			defer s.close()
-			change, err := initialize.RemoveSource(cmd.Context(), s.options(false), args[0])
-			if err != nil {
-				return err
-			}
-			return PrintDefaultsChange(cmd.OutOrStdout(), "Source "+args[0]+" removed", change)
-		},
-	}
-	conn.register(cmd)
-	return cmd
 }
 
 func sourceRef(branch, tag, commit string) string {

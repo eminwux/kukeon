@@ -10,23 +10,24 @@ starts nothing; launch a composed cell explicitly with kuke afterwards (for
 example `kuke run --from-config kuke-majordomo-codex`).
 
 `kuke` is the operator's system team, named after the `kuke-` system prefix
-(cf. the `kuke-system` realm). The name is reserved: `kuke team add` refuses it
+(cf. the `kuke-system` realm). The name is reserved: `kuke create team` refuses it
 and `kuke delete team` refuses to delete it, so a project team — including
 kukeon's own, which is named `kukeon` — can never take over its configs.
 
-To add a project team after `init`, use [`kuke team add`](kuke-team-add.md).
+To create a project team after `init`, use
+[`kuke create team`](kuke-create.md#kuke-create-team).
 For the other team verbs see [`kuke team`](kuke-team.md); for the composition
 model, see [Teams](../concepts/team.md).
 
 ## Flags
 
-| Flag              | Default | Description                                                                                                                                                                                                                          |
-| ----------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--force`         | `false` | Replace the stored `kuke` team with the initial majordomo declaration and apply it. Picks up a newer majordomo declaration (a new role need, a new harness); drops `spec.secrets`.                                                   |
-| `--reapply`       | `false` | Recompose and apply the `kuke` team from its stored Team. Excludes `--force`.                                                                                                                                                        |
-| `--upgrade`       | `false` | Re-pin the `kukeon` source of the stored `kuke` team and of the `TeamDefaults` to this `kuke`'s revision and recompose the `kuke` team. See [Upgrading the kuke team](#upgrading-the-kuke-team). Excludes `--force` and `--reapply`. |
-| `--host`          | —       | kukeond Unix endpoint. Overrides `KUKEON_HOST` and `ClientConfiguration.spec.host`.                                                                                                                                                  |
-| `--configuration` | —       | kuke `ClientConfiguration` path. Defaults to `KUKE_CONFIGURATION`, then `~/.kuke/kuke.yaml`.                                                                                                                                         |
+| Flag              | Default | Description                                                                                                                                                                                                                               |
+| ----------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--force`         | `false` | Replace the stored `kuke` team with the initial majordomo declaration and apply it. Picks up a newer majordomo declaration (a new role need, a new harness); drops `spec.secrets`.                                                        |
+| `--reapply`       | `false` | Recompose and apply the `kuke` team from its stored Team. Excludes `--force`.                                                                                                                                                             |
+| `--upgrade`       | `false` | Re-pin the stored `kukeon` Source to this `kuke`'s revision, convert state stored before Sources were a kind, and recompose the `kuke` team. See [Upgrading the kuke team](#upgrading-the-kuke-team). Excludes `--force` and `--reapply`. |
+| `--host`          | —       | kukeond Unix endpoint. Overrides `KUKEON_HOST` and `ClientConfiguration.spec.host`.                                                                                                                                                       |
+| `--configuration` | —       | kuke `ClientConfiguration` path. Defaults to `KUKE_CONFIGURATION`, then `~/.kuke/kuke.yaml`.                                                                                                                                              |
 
 Init does not read or store a git identity; use
 [`kuke connector import git --default`](kuke-connector.md#kuke-connector-import-git)
@@ -49,11 +50,14 @@ init: already initialized (team kuke is stored); use --force to reset or --reapp
 declaration. Recorded secret bindings are not kept by `--force`: it starts
 again from the initial declaration.
 
-When the `default` realm has no `TeamDefaults`, init creates one in the same
-apply, with the `kukeon` source (at the same revision as the `kuke` team, below)
-and its `codex` and `claude` harnesses and no default roles, so a project team needs only roles. An existing `TeamDefaults`
-is never changed, with or without `--force`, except for its `kukeon` source's
-revision by `--upgrade`. See
+In the same apply, init stores the [Source](../manifests/source.md) `kukeon`
+(`github.com/eminwux/kukeon` at the revision below) unless one of that name is
+stored, and, when the `default` realm has no `TeamDefaults`, creates one with
+the `codex` and `claude` harnesses of that Source and no default roles, so a
+project team needs only roles. The `TeamDefaults` holds no sources: the sources
+its harnesses name are stored Sources (`kuke get sources`). An existing
+`TeamDefaults` is never changed, with or without `--force`, except by
+`--upgrade`. See
 [Sources and defaults](../concepts/team.md#sources-and-defaults).
 
 The command fetches only the sources used by the selected role/harness
@@ -65,8 +69,9 @@ are removed after the invocation.
 
 The initial declaration contains the majordomo selections directly, so the
 `kuke` team does not depend on the defaults. The majordomo role and both
-harnesses come from the kukeon repository (`team/roles/` and `team/harnesses/`).
-`kuke get team kuke -o yaml` prints it:
+harnesses come from the kukeon repository (`team/roles/` and `team/harnesses/`),
+which the team names by its stored Source: the entry carries no address and
+no ref, so it reads the Source's. `kuke get team kuke -o yaml` prints it:
 
 ```yaml
 apiVersion: v1beta1
@@ -76,9 +81,7 @@ metadata:
   realm: default
 spec:
   sources:
-    - name: kukeon
-      url: github.com/eminwux/kukeon
-      tag: v0.10.0 # the revision this kuke was built from
+    - name: kukeon # the stored Source kukeon, at its ref
       clonePath: /home/user/kukeon-src
   roles:
     - name: majordomo
@@ -96,16 +99,30 @@ spec:
       path: team/harnesses/claude
 ```
 
-The `kukeon` source is pinned to the revision the running `kuke` was built
+`kuke get source kukeon -o yaml` prints the Source it reads:
+
+```yaml
+apiVersion: v1beta1
+kind: Source
+metadata:
+  name: kukeon
+  realm: default
+spec:
+  url: github.com/eminwux/kukeon
+  tag: v0.10.0 # the revision this kuke was built from
+```
+
+The `kukeon` Source is pinned to the revision the running `kuke` was built
 from, because `kuke` reads exactly one schema version of the documents it
 fetches: a release build pins its tag, a development build pins the clean
 commit it was built from, and only a build that knows neither (a dirty tree,
 or no VCS stamp) falls back to `branch: main`. When a fetched document is
 rejected anyway, the error names each fetched source with its URL and
 revision. A source revision and the binary then disagree on schema version.
-A stored `kuke` team (`--reapply`) and an existing `TeamDefaults` keep the
-revision they were stored with until `kuke team init --upgrade`, which
-[`kuke update`](kuke-update.md) and the installer run.
+The stored Source keeps the revision it was stored with — for the `kuke` team
+(`--reapply`) and for every team that reads it — until
+`kuke team init --upgrade`, which [`kuke update`](kuke-update.md) and the
+installer run.
 
 This applies the shared blueprints `codex` and `claude` — one per harness ×
 security profile, realm-wide, see [Teams](../concepts/team.md#shared-blueprints) —
@@ -160,9 +177,10 @@ kuke connector import git --default
 ```
 
 See [`kuke connector import git`](kuke-connector.md#kuke-connector-import-git).
-A source may still state its own identity (`sources[].git`: author, committer,
-credential, signing), which is rendered into that repo's fill of each
-CellConfig.
+A stored [Source](../manifests/source.md) may state its own identity
+(`spec.git`: `identityRef`, author, committer, credential, signing), which is
+rendered into that repo's fill of each CellConfig; a team entry carries no
+`git` of its own.
 
 When the team clones a source over SSH that states no credential of its own,
 no Realm, Space or Stack default names a git identity, and no Config names its
@@ -202,7 +220,7 @@ once. Creation happens before dependent blueprints and configs are applied.
 Credentials and remote secret-error text are never printed or stored in the
 Team or the blueprint/config request.
 
-A missing secret without a creation source does not fail init or add. The
+A missing secret without a creation source does not fail init or `kuke create team`. The
 blueprints/configs are still applied and the team stored (kukeond resolves
 secret references only when a cell launches), and the command exits 0 after
 listing each missing runtime secret once:
@@ -261,38 +279,58 @@ converge the same `kuke` identity.
 
 ## Upgrading the kuke team
 
-`kuke team init --upgrade` moves the stored `kuke` team to the revision the
-running `kuke` was built from: the release tag for a stable build, the build
-commit for an edge build. [`kuke update`](kuke-update.md) runs it with the new
-binary after the daemon is back, and the one-line installer runs it on a host
-that already has a daemon.
+`kuke team init --upgrade` moves the stored `kukeon` Source to the revision
+the running `kuke` was built from — the release tag for a stable build, the
+build commit for an edge build — and recomposes the `kuke` team.
+[`kuke update`](kuke-update.md) runs it with the new binary after the daemon is
+back, and the one-line installer runs it on a host that already has a daemon.
 
-- It reads the stored `kuke` Team and the `TeamDefaults` of realm `default`. In
-  each, the source named `kukeon` whose URL is `github.com/eminwux/kukeon` gets
-  the new `branch`, `tag` and `commit`; its `clonePath`, `git` and every other
-  field are kept. A `kukeon` source with another URL is the operator's: it is
-  left alone and named in a note.
-- When both pins already match, it prints
-  `kuke team and defaults already at <revision>` and exits 0 without fetching
-  or applying anything.
-- Otherwise the re-pinned team and, when it changed, the re-pinned
-  `TeamDefaults` land in one apply and the `kuke` team is recomposed.
-  `spec.secrets` and every other field of the stored Team are kept.
-- It prints one line per changed document
-  (`kuke team: kukeon source commit <old> -> commit <new>`) and, when the
-  defaults changed, every other stored team that inherits them, with
-  `kuke team apply NAME` to recompose it. Those teams are not recomposed.
-- It never creates the `kuke` team. Without one, it re-pins only the
-  `TeamDefaults` (if any) and prints
+- It reads the stored Source `kukeon`, the stored `kuke` Team and the
+  `TeamDefaults` of realm `default`. When the Source's address is
+  `github.com/eminwux/kukeon` (over any transport), it gets the new `branch`,
+  `tag` and `commit`; its `git` is kept. A `kukeon` Source with another address
+  is the operator's: it is left alone and named in a note.
+- It converts what was stored before Sources were a kind. A `TeamDefaults` with
+  `spec.defaults.sources` has each listed source stored as a Source (unless one
+  of the name is) and the list cleared, with the note
+  `converted N registered sources to Source documents`; a source that was
+  cloned anywhere but `/home/user/<name>` adds a note naming the path and
+  `spec.sources[].clonePath`, since a Source has no clone path. The `kuke`
+  team's `kukeon` entry, which carried kukeon's address and pin, becomes a
+  reference to the stored Source (note
+  `kuke team: its kukeon entry now reads the stored kukeon Source`), keeping
+  its `clonePath`.
+- When nothing changes, it prints `Source kukeon already at <revision>` and
+  exits 0 without fetching or applying anything.
+- Otherwise the Sources, the converted `TeamDefaults` and the `kuke` team land
+  in one apply and the `kuke` team is recomposed. `spec.secrets` and every
+  other field of the stored Team are kept.
+- It prints one line per change (`Source kukeon: commit <old> -> commit <new>`)
+  and every other stored team that inherits the defaults, with
+  `kuke team apply NAME` to recompose it. Those teams are not recomposed, and
+  any team that reads the `kukeon` Source sees the new revision only when it is.
+- It never creates the `kuke` team. Without one, it re-pins and converts only
+  the Sources and the `TeamDefaults` (if any) and prints
   `team kuke is not stored; run kuke team init to create it`.
 - It does not merge a newer majordomo declaration (a new role need, a new
   harness) into the stored team; `--force` does that.
 
 ```bash
 kuke team init --upgrade
-kuke get team kuke -o yaml | grep -A3 'name: kukeon'   # the binary's revision
-kuke team init --upgrade                               # kuke team and defaults already at ...
+kuke get sources                    # kukeon at the binary's revision
+kuke team init --upgrade            # Source kukeon already at ...
 ```
+
+### Kinds and compatibility
+
+Since Sources became a kind, `kuke` and kukeond must be upgraded together: it
+is a **flag day**. A `kuke` built before the change cannot write a `Team` or
+`TeamDefaults` to a kukeond built after it — kukeond rejects a Team entry that
+carries `url` or `git` and a `TeamDefaults` with `spec.defaults.sources` — and
+a `kuke` built after it cannot use a kukeond built before it, which serves no
+Source. Documents stored before the change keep reading, and the first command
+that writes each converts it (`kuke team init --upgrade`, which `kuke update`
+runs, converts the defaults and the `kuke` team).
 
 ## Upgrading from host files
 
@@ -327,8 +365,8 @@ for the git connector; replace the example host and author with your own. A
 credential named directly keeps the plain `--type ssh-key` form.
 
 The resource count is the shared blueprints plus the CellConfigs, plus the
-`Team` document, plus one when the Realm's secret defaults were written and one
-for a `TeamDefaults` init created.
+`Team` document, plus one when the Realm's secret defaults were written, one
+for the `kukeon` Source and one for a `TeamDefaults` init created.
 
 ## Validation
 

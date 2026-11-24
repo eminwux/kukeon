@@ -1,0 +1,36 @@
+apiVersion: v1beta1
+kind: Team
+metadata: { name: agents }
+spec:
+  # Self-referential team: the project source IS this repo. Clone the writable
+  # work copy (project) to agents0 so it does not collide with the read-only
+  # roles clone (agents -> /home/user/agents). Without this, the create verb
+  # defaults the project clone to /home/user/<team-name> = /home/user/agents.
+  projectSource: { name: project, clonePath: /home/user/agents0 }
+  sources:
+    - name: agents
+      url: git@github.com:eminwux/agents
+      branch: main
+      clonePath: /home/user/agents
+    # Harness definitions moved to kukeon (agents#893); no runtime clone needed.
+    - name: kukeon
+      url: github.com/eminwux/kukeon
+      branch: main
+  roles:
+    - { name: pm, source: agents, path: pm }
+    - { name: dev, source: agents, path: dev }
+    - { name: pr-reviewer, source: agents, path: pr-reviewer }
+    - { name: meta-dev, source: agents, path: meta-dev }
+    - { name: meta-reviewer, source: agents, path: meta-reviewer }
+    - { name: meta-pm, source: agents, path: meta-pm }
+    - {
+        name: pipeline,
+        source: agents,
+        path: pipeline,
+        harness: script,
+        tasks: [{ name: tick, suspend: true }],
+      }
+  harnesses:
+    - { name: claude, source: kukeon, path: team/harnesses/claude }
+    - { name: codex, source: kukeon, path: team/harnesses/codex }
+    - { name: script, source: kukeon, path: team/harnesses/script }

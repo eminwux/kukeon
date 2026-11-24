@@ -25,8 +25,10 @@ import (
 	realmcmd "github.com/eminwux/kukeon/cmd/kuke/create/realm"
 	registrycredentialcmd "github.com/eminwux/kukeon/cmd/kuke/create/registrycredential"
 	secretcmd "github.com/eminwux/kukeon/cmd/kuke/create/secret"
+	sourcecmd "github.com/eminwux/kukeon/cmd/kuke/create/source"
 	spacecmd "github.com/eminwux/kukeon/cmd/kuke/create/space"
 	stackcmd "github.com/eminwux/kukeon/cmd/kuke/create/stack"
+	teamcmd "github.com/eminwux/kukeon/cmd/kuke/create/team"
 	volumecmd "github.com/eminwux/kukeon/cmd/kuke/create/volume"
 	"github.com/spf13/cobra"
 )
@@ -38,7 +40,8 @@ func NewCreateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "create",
 		Aliases: []string{"c"},
-		Short:   "Create Kukeon resources (realm, space, stack, cell, config, blueprint, secret, volume, registry-credential)",
+		Short: "Create Kukeon resources (realm, space, stack, cell, config, blueprint, secret, volume, " +
+			"registry-credential, team, source)",
 		Run: func(cmd *cobra.Command, _ []string) {
 			_ = cmd.Help()
 		},
@@ -56,6 +59,8 @@ func NewCreateCmd() *cobra.Command {
 		secretcmd.NewSecretCmd(),
 		volumecmd.NewVolumeCmd(),
 		registrycredentialcmd.NewRegistryCredentialCmd(),
+		teamcmd.NewTeamCmd(),
+		sourcecmd.NewSourceCmd(),
 	)
 
 	return cmd
@@ -65,6 +70,7 @@ func NewCreateCmd() *cobra.Command {
 func completeCreateSubcommands(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	subcommands := []string{
 		"realm", "space", "stack", "cell", "config", "blueprint", "secret", "volume", "registry-credential",
+		"team", "source",
 	}
 
 	if toComplete == "" {

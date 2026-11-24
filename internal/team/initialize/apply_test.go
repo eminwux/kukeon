@@ -76,11 +76,36 @@ type fakeClient struct {
 	teams    map[string][]byte
 	defaults []byte
 	teamErr  error
+	// sources are the stored Source documents by name (#1643);
+	// deleteSourceErr is kukeond's refusal of a delete.
+	sources         map[string][]byte
+	deleteSourceErr error
 	// writes records every write in order ("secret NAME", "apply",
 	// "apply-team NAME", "delete-config NAME"); a dry run must leave it empty.
 	writes []string
 	// plain records the document stream of each ApplyDocuments call.
 	plain [][]byte
+
+	// stage answers StageGitFetch (nil: nothing to stage, as for a public
+	// source); staged records each request and released each released id.
+	stage    func(kukeonv1.GitFetchRequest) (kukeonv1.StageGitFetchResult, error)
+	staged   []kukeonv1.GitFetchRequest
+	released []string
+}
+
+func (f *fakeClient) StageGitFetch(
+	_ context.Context, req kukeonv1.GitFetchRequest,
+) (kukeonv1.StageGitFetchResult, error) {
+	f.staged = append(f.staged, req)
+	if f.stage == nil {
+		return kukeonv1.StageGitFetchResult{}, nil
+	}
+	return f.stage(req)
+}
+
+func (f *fakeClient) ReleaseGitFetch(_ context.Context, id string) error {
+	f.released = append(f.released, id)
+	return nil
 }
 
 func newFake() *fakeClient {
@@ -158,6 +183,16 @@ func (f *fakeClient) persist(kind string, node *yaml.Node, team string) {
 			panic(err)
 		}
 		f.realmDefaults, f.realmCreds = doc.Spec.Defaults, doc.Spec.RegistryCredentials
+	case "Source":
+		raw, err := yaml.Marshal(node)
+		if err != nil {
+			panic(err)
+		}
+		_, name := docHeader(node)
+		if f.sources == nil {
+			f.sources = map[string][]byte{}
+		}
+		f.sources[name] = raw
 	case "TeamDefaults":
 		raw, err := yaml.Marshal(node)
 		if err != nil {
@@ -272,6 +307,9 @@ func (f *fakeClient) ApplyDocumentsForTeam(
 			teamDoc = &nodes[i]
 		}
 	}
+	if err := storedShapes(nodes); err != nil {
+		return kukeonv1.ApplyDocumentsResult{}, err
+	}
 	resources := f.resources
 	if resources == nil {
 		previous := f.teamBlueprintRefs(team)
@@ -326,6 +364,9 @@ func (f *fakeClient) ApplyDocuments(_ context.Context, raw []byte) (kukeonv1.App
 			return kukeonv1.ApplyDocumentsResult{}, errTeamApplyOnly
 		}
 	}
+	if err := storedShapes(nodes); err != nil {
+		return kukeonv1.ApplyDocumentsResult{}, err
+	}
 	for i := range nodes {
 		kind, name := docHeader(&nodes[i])
 		if f.applyErr == nil {
@@ -334,6 +375,92 @@ func (f *fakeClient) ApplyDocuments(_ context.Context, raw []byte) (kukeonv1.App
 		resources = append(resources, kukeonv1.ApplyResourceResult{Kind: kind, Name: name, Action: "created"})
 	}
 	return kukeonv1.ApplyDocumentsResult{Resources: resources}, f.applyErr
+}
+
+// storedShapes is kukeond's check of what it stores (#1643): a Team whose
+// entries are references, a TeamDefaults with no sources, a valid Source.
+func storedShapes(nodes []yaml.Node) error {
+	for i := range nodes {
+		raw, err := yaml.Marshal(&nodes[i])
+		if err != nil {
+			panic(err)
+		}
+		switch kind, name := docHeader(&nodes[i]); kind {
+		case "Team":
+			team, decodeErr := config.DecodeTeam(bytes.NewReader(raw))
+			if decodeErr != nil {
+				return decodeErr
+			}
+			if err = config.ValidateTeam(team); err != nil {
+				return err
+			}
+		case "TeamDefaults":
+			var defaults config.TeamDefaults
+			if err = config.DecodeStrict(bytes.NewReader(raw), &defaults); err != nil {
+				return err
+			}
+			if err = config.ValidateStoredDefaults(&defaults); err != nil {
+				return err
+			}
+		case "Source":
+			var doc api.SourceDoc
+			if err = config.DecodeStrict(bytes.NewReader(raw), &doc); err != nil {
+				return err
+			}
+			if err = config.ValidateSource(name, doc.Spec); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// storeSource stores a Source document as kukeond would.
+func (f *fakeClient) storeSource(name string, spec config.SourceSpec) {
+	raw, err := yaml.Marshal(api.SourceDoc{
+		APIVersion: api.APIVersionV1Beta1, Kind: api.KindSource,
+		Metadata: api.TeamMetadata{Name: name, Realm: config.DefaultRealm}, Spec: spec,
+	})
+	if err != nil {
+		panic(err)
+	}
+	if f.sources == nil {
+		f.sources = map[string][]byte{}
+	}
+	f.sources[name] = raw
+}
+
+func (f *fakeClient) ListSources(context.Context, string) ([]kukeonv1.GetSourceResult, error) {
+	names := slices.Sorted(maps.Keys(f.sources))
+	out := make([]kukeonv1.GetSourceResult, 0, len(names))
+	for _, name := range names {
+		out = append(out, kukeonv1.GetSourceResult{
+			Exists: true, Document: f.sources[name], Summary: kukeonv1.SourceSummary{Name: name, Realm: "default"},
+		})
+	}
+	return out, nil
+}
+
+func (f *fakeClient) GetSource(_ context.Context, ref kukeonv1.SourceRef) (kukeonv1.GetSourceResult, error) {
+	raw, ok := f.sources[ref.Name]
+	if !ok {
+		return kukeonv1.GetSourceResult{}, nil
+	}
+	return kukeonv1.GetSourceResult{
+		Exists: true, Document: raw, Summary: kukeonv1.SourceSummary{Name: ref.Name, Realm: "default"},
+	}, nil
+}
+
+func (f *fakeClient) DeleteSource(_ context.Context, ref kukeonv1.SourceRef) (kukeonv1.DeleteSourceResult, error) {
+	f.writes = append(f.writes, "delete-source "+ref.Name)
+	if f.deleteSourceErr != nil {
+		return kukeonv1.DeleteSourceResult{}, f.deleteSourceErr
+	}
+	if _, ok := f.sources[ref.Name]; !ok {
+		return kukeonv1.DeleteSourceResult{}, nil
+	}
+	delete(f.sources, ref.Name)
+	return kukeonv1.DeleteSourceResult{Deleted: true}, nil
 }
 
 func decodeStream(raw []byte) []yaml.Node {

@@ -79,6 +79,31 @@ func ReconcileTeamDefaults(r runner.Runner, desired intmodel.TeamDefaults) (Reco
 	return result, nil
 }
 
+// ReconcileSource stores a Source document (issue #1643): created, updated or
+// unchanged. Nothing is fetched and no team is recomposed.
+func ReconcileSource(r runner.Runner, desired intmodel.Source) (ReconcileResult, error) {
+	result := ReconcileResult{Action: actionUnchanged, Kind: "Source", Name: desired.Metadata.Name}
+	if err := ensureTeamRealm(r, desired.Metadata.Realm); err != nil {
+		return result, err
+	}
+	existing, err := r.GetSource(desired)
+	switch {
+	case err == nil && bytes.Equal(existing.Document, desired.Document):
+		return result, nil
+	case err != nil && !errors.Is(err, errdefs.ErrSourceNotFound):
+		return result, err
+	}
+	created, err := r.WriteSource(desired)
+	if err != nil {
+		return result, err
+	}
+	result.Action = actionUpdated
+	if created {
+		result.Action = actionCreated
+	}
+	return result, nil
+}
+
 func ensureTeamRealm(r runner.Runner, realm string) error {
 	if _, err := r.GetRealm(intmodel.Realm{Metadata: intmodel.RealmMetadata{Name: realm}}); err != nil {
 		if errors.Is(err, errdefs.ErrRealmNotFound) {

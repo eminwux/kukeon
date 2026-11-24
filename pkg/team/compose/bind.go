@@ -452,10 +452,7 @@ func bindRepos(plan *pairPlan, cc *api.CellConfigDoc, team *config.Team) error {
 		if source.Name == projectSlot && team.Spec.ProjectSource != nil && team.Spec.ProjectSource.Tag != "" {
 			ref = "refs/tags/" + team.Spec.ProjectSource.Tag
 		}
-		url := source.URL
-		if strings.HasPrefix(url, "github.com/") {
-			url = "https://" + url
-		}
+		url := gitcred.CloneURL(source.URL)
 		cc.Spec.Repos[slot] = api.CellConfigRepoFill{
 			URL: url, Branch: source.Branch, Ref: ref, Git: repoGit(source.Git),
 		}
@@ -498,6 +495,11 @@ func repoGit(in *config.SourceGit) *api.RepoGit {
 		Author: identity(in.Author), Committer: identity(in.Committer),
 		Signing: signing(in.Signing), Sign: slices.Clone(in.Sign),
 	}
+	// A stored Source's git identity (#1643, D2) is the repo fill's: kukeond
+	// expands it into the source's author, credential and signing key.
+	if in.IdentityRef != nil {
+		out.IdentityRef = secretRef(*in.IdentityRef)
+	}
 	if c := in.Credential; c != nil {
 		out.Credential = &api.GitCredential{
 			SecretRef: secretRef(c.SecretRef), User: c.User, Port: c.Port, HostKeyPolicy: c.HostKeyPolicy,
@@ -512,14 +514,11 @@ func repoGit(in *config.SourceGit) *api.RepoGit {
 func sshSources(sources []config.Source) []string {
 	var names []string
 	for _, source := range sources {
-		if source.ClonePath == "" || (source.Git != nil && source.Git.Credential != nil) {
+		if source.ClonePath == "" ||
+			(source.Git != nil && (source.Git.Credential != nil || source.Git.IdentityRef != nil)) {
 			continue
 		}
-		url := source.URL
-		if strings.HasPrefix(url, "github.com/") {
-			url = "https://" + url
-		}
-		if gitcred.ParseRemote(url).Transport == gitcred.TransportSSH {
+		if gitcred.ParseRemote(gitcred.CloneURL(source.URL)).Transport == gitcred.TransportSSH {
 			names = append(names, source.Name)
 		}
 	}

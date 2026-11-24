@@ -135,7 +135,7 @@ func TestReapplyRefusals(t *testing.T) {
 			t.Fatalf("err = %v writes=%v", err, fake.writes)
 		}
 		if _, err = ApplyStored(t.Context(), opts.Options, "other", ""); !errors.Is(err, errdefs.ErrTeamNotFound) ||
-			!strings.Contains(err.Error(), "kuke team add other") {
+			!strings.Contains(err.Error(), "kuke create team other") {
 			t.Fatalf("apply of an unstored team: %v", err)
 		}
 	})

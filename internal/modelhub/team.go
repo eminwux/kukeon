@@ -32,6 +32,13 @@ type TeamMetadata struct {
 	Realm string
 }
 
+// Source is the internal carrier of a stored repository (kind: Source, issue
+// #1643), stored like a Team.
+type Source struct {
+	Metadata TeamMetadata
+	Document []byte
+}
+
 // TeamDefaults is the internal carrier of a realm's stored team defaults
 // (kind: TeamDefaults, issue #1618), stored like a Team.
 type TeamDefaults struct {

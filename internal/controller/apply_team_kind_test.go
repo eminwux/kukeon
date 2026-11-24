@@ -31,11 +31,15 @@ import (
 type teamStoreFake struct {
 	teams    map[string]intmodel.Team // "realm/name"
 	defaults map[string]intmodel.TeamDefaults
+	sources  map[string]intmodel.Source
 	events   []string
 }
 
 func newTeamStoreFake() *teamStoreFake {
-	return &teamStoreFake{teams: map[string]intmodel.Team{}, defaults: map[string]intmodel.TeamDefaults{}}
+	return &teamStoreFake{
+		teams: map[string]intmodel.Team{}, defaults: map[string]intmodel.TeamDefaults{},
+		sources: map[string]intmodel.Source{},
+	}
 }
 
 func teamKey(md intmodel.TeamMetadata) string { return md.Realm + "/" + md.Name }
@@ -86,6 +90,36 @@ func (s *teamStoreFake) install(f *fakeRunner) {
 			return intmodel.TeamDefaults{}, errdefs.ErrTeamDefaultsNotFound
 		}
 		return got, nil
+	}
+	f.WriteSourceFn = func(source intmodel.Source) (bool, error) {
+		_, exists := s.sources[teamKey(source.Metadata)]
+		s.sources[teamKey(source.Metadata)] = source
+		s.events = append(s.events, "write Source/"+source.Metadata.Name)
+		return !exists, nil
+	}
+	f.GetSourceFn = func(source intmodel.Source) (intmodel.Source, error) {
+		got, ok := s.sources[teamKey(source.Metadata)]
+		if !ok {
+			return intmodel.Source{}, errdefs.ErrSourceNotFound
+		}
+		return got, nil
+	}
+	f.ListSourcesFn = func(realm string) ([]intmodel.Source, error) {
+		var out []intmodel.Source
+		for _, source := range s.sources {
+			if realm == "" || source.Metadata.Realm == realm {
+				out = append(out, source)
+			}
+		}
+		return out, nil
+	}
+	f.DeleteSourceFn = func(source intmodel.Source) error {
+		if _, ok := s.sources[teamKey(source.Metadata)]; !ok {
+			return errdefs.ErrSourceNotFound
+		}
+		delete(s.sources, teamKey(source.Metadata))
+		s.events = append(s.events, "delete Source/"+source.Metadata.Name)
+		return nil
 	}
 }
 

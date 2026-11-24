@@ -767,6 +767,37 @@ func CompleteConfigNames(cmd *cobra.Command, args []string, toComplete string) (
 // CompleteTeamNames provides shell completion for stored team names (issue
 // #1618), in the realm named by --realm or in every realm.
 func CompleteTeamNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return completeStoredNames(cmd, args, toComplete,
+		func(ctx context.Context, client kukeonv1.Client, realm string) ([]string, error) {
+			teams, err := client.ListTeams(ctx, realm)
+			names := make([]string, 0, len(teams))
+			for _, team := range teams {
+				names = append(names, team.Summary.Name)
+			}
+			return names, err
+		})
+}
+
+// CompleteSourceNames provides shell completion for stored Source names
+// (issue #1643), in the --realm flag's realm or every realm.
+func CompleteSourceNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return completeStoredNames(cmd, args, toComplete,
+		func(ctx context.Context, client kukeonv1.Client, realm string) ([]string, error) {
+			sources, err := client.ListSources(ctx, realm)
+			names := make([]string, 0, len(sources))
+			for _, source := range sources {
+				names = append(names, source.Summary.Name)
+			}
+			return names, err
+		})
+}
+
+// completeStoredNames completes the first argument from the names list
+// returns for the --realm flag's realm (every realm when unset), each once.
+func completeStoredNames(
+	cmd *cobra.Command, args []string, toComplete string,
+	list func(ctx context.Context, client kukeonv1.Client, realm string) ([]string, error),
+) ([]string, cobra.ShellCompDirective) {
 	if len(args) >= 1 {
 		return []string{}, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -779,13 +810,12 @@ func CompleteTeamNames(cmd *cobra.Command, args []string, toComplete string) ([]
 	ctx, cancel := context.WithTimeout(cmd.Context(), completionTimeout)
 	defer cancel()
 
-	teams, err := client.ListTeams(ctx, getFlagValueWithDefault(cmd, "realm", ""))
+	all, err := list(ctx, client, getFlagValueWithDefault(cmd, "realm", ""))
 	if err != nil {
 		return []string{}, cobra.ShellCompDirectiveNoFileComp
 	}
-	names := make([]string, 0, len(teams))
-	for _, team := range teams {
-		name := team.Summary.Name
+	names := make([]string, 0, len(all))
+	for _, name := range all {
 		if (toComplete == "" || strings.HasPrefix(name, toComplete)) && !slices.Contains(names, name) {
 			names = append(names, name)
 		}

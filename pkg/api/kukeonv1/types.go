@@ -1480,3 +1480,122 @@ type GetTeamDefaultsResult struct {
 	Realm    string
 	Document []byte
 }
+
+// ---- Sources (issue #1643) ----
+
+// Source documents travel as YAML bytes like Team documents. Writes go
+// through ApplyDocuments; these are the reads and the delete.
+
+// SourceRef names one stored Source. An empty Realm means realm default.
+type SourceRef struct {
+	Name  string
+	Realm string
+}
+
+// SourceSummary is what kukeond reads out of a stored Source for a list.
+type SourceSummary struct {
+	Name  string `json:"name"`
+	Realm string `json:"realm"`
+	// URL is the Source's address as written.
+	URL string `json:"url"`
+	// Ref is its revision: "branch main", "tag v1" or "commit <sha>".
+	Ref string `json:"ref"`
+	// Identity names the stored git identity the Source states, written
+	// name[@realm]; empty when it states none.
+	Identity string `json:"identity,omitempty"`
+}
+
+type GetSourceArgs struct {
+	Ref SourceRef
+}
+
+type GetSourceReply struct {
+	Result GetSourceResult
+	Err    *APIError
+}
+
+// GetSourceResult carries a stored Source's document and its summary.
+// Exists is false, with no error, when no Source of the name is stored.
+type GetSourceResult struct {
+	Exists   bool
+	Document []byte
+	Summary  SourceSummary
+}
+
+type ListSourcesArgs struct {
+	// Realm filters the list; empty lists every realm.
+	Realm string
+}
+
+type ListSourcesReply struct {
+	Sources []GetSourceResult
+	Err     *APIError
+}
+
+type DeleteSourceArgs struct {
+	Ref SourceRef
+}
+
+type DeleteSourceReply struct {
+	Result DeleteSourceResult
+	Err    *APIError
+}
+
+// DeleteSourceResult reports a deleted Source. A Source something references
+// is refused with ErrSourceInUse, naming the references.
+type DeleteSourceResult struct {
+	Deleted bool
+}
+
+// ---- Git fetch staging (issue #1643, D10) ----
+
+// GitFetchRequest asks kukeond to stage the stored git credential a fetch kuke
+// makes on the host uses for Address: IdentityRef's when set, else the
+// realm's default git identity when it has a credential for the address's
+// host.
+type GitFetchRequest struct {
+	// Realm is the realm whose default git identity applies; empty means
+	// default.
+	Realm string
+	// Address is the repository address, in any form a Source accepts.
+	Address string
+	// IdentityRef is the Source's own git identity, when it states one.
+	IdentityRef *v1beta1.ContainerSecretRef
+}
+
+type StageGitFetchArgs struct {
+	Request GitFetchRequest
+	// PeerUID is the uid of the process on the other end of the socket. The
+	// server codec fills it from SO_PEERCRED; it never travels on the wire,
+	// so a caller cannot name another user's uid.
+	PeerUID *int `json:"-"`
+}
+
+type StageGitFetchReply struct {
+	Result StageGitFetchResult
+	Err    *APIError
+}
+
+// StageGitFetchResult says where the staged credential files are. The reply
+// never carries their content (#619). Staged is false, with no error, when
+// neither the Source nor the realm default names a credential for the
+// address: kuke then fetches with the caller's own git configuration.
+type StageGitFetchResult struct {
+	Staged bool
+	// ID names the staging for ReleaseGitFetch.
+	ID string
+	// Dir is the staged directory, owned by the calling user and readable by
+	// it only. It holds the bundle a cell's git directory holds, with every
+	// path pointing inside Dir.
+	Dir string
+}
+
+type ReleaseGitFetchArgs struct {
+	ID string
+	// PeerUID is filled by the server codec, as for StageGitFetchArgs.
+	PeerUID *int `json:"-"`
+}
+
+type ReleaseGitFetchReply struct {
+	Err *APIError
+}

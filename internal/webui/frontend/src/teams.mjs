@@ -57,7 +57,7 @@ function withRef(out, kind, value) {
 }
 
 // selectionEntry is one --role or --harness value: a default's bare name, or
-// NAME=SOURCE:PATH for anything a registered source offers.
+// NAME=SOURCE:PATH for anything a stored Source offers.
 export function selectionEntry(item) {
   const name = trimmed(item?.name);
   if (item?.default || !trimmed(item?.source)) return name;
@@ -65,7 +65,7 @@ export function selectionEntry(item) {
   return name ? `${name}=${target}` : target;
 }
 
-// addPayload is the POST /api/teams{,/preview} body of an add: kuke team add
+// addPayload is the POST /api/teams{,/preview} body of a create: kuke create team
 // NAME --source URL with its flags. A picker that was not touched sends null,
 // which keeps the declaration's list; a touched one replaces it, even empty.
 export function addPayload(form) {
@@ -175,11 +175,10 @@ export function optionKey(option) {
   return `${text(option?.source)}:${text(option?.path)}:${text(option?.name)}`;
 }
 
-// sourcePayload is the POST /api/team-sources body: kuke team source add.
+// sourcePayload is the POST /api/team-sources body: kuke create source. A
+// Source has no clone path; a team's entry for it does (#1643).
 export function sourcePayload(form) {
-  const out = withRef({ name: trimmed(form?.name), url: trimmed(form?.url) }, form?.refKind, form?.ref);
-  if (trimmed(form?.clonePath)) out.clonePath = trimmed(form.clonePath);
-  return out;
+  return withRef({ name: trimmed(form?.name), url: trimmed(form?.url) }, form?.refKind, form?.ref);
 }
 
 // inheritingNote tells the user which teams a defaults change reaches only

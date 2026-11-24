@@ -29,7 +29,9 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/gitcred"
 	"github.com/eminwux/kukeon/internal/team/gitremote"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	"github.com/eminwux/kukeon/pkg/team/config"
 )
 
@@ -54,6 +56,9 @@ type AddOptions struct {
 	NoRepoFile bool
 	// Force replaces a stored team of the same name.
 	Force bool
+	// Identity names the stored git identity of the project's Source when
+	// this command creates it (spec.git.identityRef, #1643).
+	Identity *config.SecretRef
 }
 
 // Add creates a team (AC8, AC8a). In NAME mode it fetches the repository and
@@ -100,8 +105,8 @@ func Add(ctx context.Context, opts AddOptions) (Outcome, error) {
 	if stored != nil {
 		if !opts.Force {
 			return Outcome{}, fmt.Errorf(
-				"add: %w: %s; run kuke team apply %s to recompose it from its stored declaration, "+
-					"or add it again with --force to replace the declaration", errdefs.ErrTeamExists, name, name)
+				"create team: %w: %s; run kuke team apply %s to recompose it from its stored declaration, "+
+					"or create it again with --force to replace the declaration", errdefs.ErrTeamExists, name, name)
 		}
 		recorded = stored.Spec.Secrets
 	}
@@ -116,28 +121,55 @@ func Add(ctx context.Context, opts AddOptions) (Outcome, error) {
 }
 
 // addRemote is NAME mode: the project is fetched once, its kuketeam.yaml read
-// from that revision, and the fetched tree reused by composition.
+// from that revision, and the fetched tree reused by composition. The project
+// is --source, else the -f FILE's spec.projectSource (AC10).
 func addRemote(
 	ctx context.Context, opts AddOptions, name string, defaults *config.TeamDefaults, recorded []config.SecretBinding,
 ) (Outcome, error) {
-	if _, err := gitremote.URL(opts.Source); err != nil {
-		return Outcome{}, err
+	var file *config.Team
+	if opts.File != nil {
+		decoded, err := config.DecodeTeamDeclaration(bytes.NewReader(opts.File))
+		if err != nil {
+			return Outcome{}, fmt.Errorf("add %s: %w", opts.FileName, err)
+		}
+		file = decoded
 	}
 	project := &config.Source{
 		Name: config.ProjectSourceName, URL: opts.Source, Branch: opts.Branch, Tag: opts.Tag, Commit: opts.Commit,
 		ClonePath: "/home/user/" + name,
 	}
-	if project.Branch == "" && project.Tag == "" && project.Commit == "" {
-		branch, err := gitremote.DefaultBranch(ctx, opts.Source)
-		if err != nil {
-			return Outcome{}, err
+	if opts.Source == "" {
+		declared := (*config.Source)(nil)
+		if file != nil {
+			declared = file.Spec.ProjectSource
 		}
-		project.Branch = branch
+		if declared == nil || (declared.URL == "" && declared.Stored == "") {
+			return Outcome{}, errors.New("create team: name the project with --source ADDRESS|SOURCE, " +
+				"or spec.projectSource.url in the -f file")
+		}
+		project.URL, project.Stored, project.Git = declared.URL, declared.Stored, declared.Git.Clone()
+		if declared.ClonePath != "" {
+			project.ClonePath = declared.ClonePath
+		}
+		if !hasRef(*project) {
+			project.Branch, project.Tag, project.Commit = declared.Branch, declared.Tag, declared.Commit
+		}
+	}
+	fetch, err := projectSource(ctx, opts, name, project)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if !hasRef(fetch) {
+		branch, branchErr := defaultBranch(ctx, identityOf(opts.Client, config.DefaultRealm), fetch)
+		if branchErr != nil {
+			return Outcome{}, branchErr
+		}
 		if err = validateRevision(AddOptions{Branch: branch}); err != nil {
 			return Outcome{}, err
 		}
+		project.Branch, fetch.Branch = branch, branch
 	}
-	have, cleanup, err := withProject(ctx, opts.Sources, *project)
+	have, cleanup, err := withProject(ctx, opts.Client, opts.Sources, fetch)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -159,8 +191,68 @@ func addRemote(
 	if err != nil {
 		return Outcome{}, err
 	}
-	team.Spec.ProjectSource = mergeProject(team.Spec.ProjectSource, project)
-	return addRun(ctx, opts, name, team, origin, defaults, recorded, have, repo == nil)
+	var notes []string
+	team.Spec.ProjectSource, notes = mergeProject(team.Spec.ProjectSource, project, fetch.URL)
+	return addRun(ctx, opts, name, team, origin, defaults, recorded, have, repo == nil, notes)
+}
+
+// projectSource checks the project an add names and returns it as fetched:
+// a stored Source's address and git when the project names one (--source
+// NAME, or a declaration's source:), else its own address. --identity sets
+// the git identity of the project's Source when the add creates it; a stored
+// one keeps its own.
+func projectSource(ctx context.Context, opts AddOptions, team string, project *config.Source) (config.Source, error) {
+	if project.URL != "" && project.Stored == "" && config.ValidName(project.URL) {
+		// --source NAME names a stored Source (#1643 Step 5).
+		got, err := opts.Client.GetSource(ctx, kukeonv1.SourceRef{Name: project.URL, Realm: config.DefaultRealm})
+		if err != nil {
+			return config.Source{}, requestError("lookup", "source "+project.URL, err)
+		}
+		if got.Exists {
+			project.Stored, project.URL = project.URL, ""
+		}
+	}
+	target := storedName(*project, team, true)
+	if project.URL == "" {
+		spec, err := storedSourceSpec(ctx, opts.Client, target)
+		if err != nil {
+			return config.Source{}, err
+		}
+		if opts.Identity != nil {
+			return config.Source{}, identityOnStored(target)
+		}
+		return fill(*project, spec), nil
+	}
+	if _, err := gitremote.URL(project.URL); err != nil {
+		if config.ValidName(project.URL) {
+			return config.Source{}, fmt.Errorf("%w: --source %s: no Source of that name is stored and it is "+
+				"not an address; store it with kuke create source %s --url ADDRESS",
+				errdefs.ErrSourceNotFound, project.URL, project.URL)
+		}
+		return config.Source{}, err
+	}
+	if opts.Identity != nil {
+		got, err := opts.Client.GetSource(ctx, kukeonv1.SourceRef{Name: target, Realm: config.DefaultRealm})
+		if err != nil {
+			return config.Source{}, requestError("lookup", "source "+target, err)
+		}
+		if got.Exists {
+			return config.Source{}, identityOnStored(target)
+		}
+		ref := *opts.Identity
+		if ref.Realm == "" {
+			ref.Realm = config.DefaultRealm
+		}
+		project.Git = &config.SourceGit{IdentityRef: &ref}
+	}
+	out := *project
+	out.Git = project.Git.Clone()
+	return out, nil
+}
+
+func identityOnStored(name string) error {
+	return fmt.Errorf("create team: --identity: Source %s is stored and keeps its own identity; set it with "+
+		"kuke create source %s --url ADDRESS --identity ID --force", name, name)
 }
 
 // addDirectory is directory mode: the local kuketeam.yaml, the origin URL
@@ -205,24 +297,27 @@ func addDirectory(
 	if err != nil {
 		return Outcome{}, err
 	}
-	have, cleanup, err := withProject(ctx, opts.Sources, *source)
+	have, cleanup, err := withProject(ctx, opts.Client, opts.Sources, *source)
 	if err != nil {
 		return Outcome{}, err
 	}
 	defer cleanup()
-	return addRun(ctx, opts, name, team, origin, defaults, recorded, have, local == nil)
+	return addRun(ctx, opts, name, team, origin, defaults, recorded, have, local == nil, nil)
 }
 
 // withProject fetches an add's project once, unless a tree was injected under
 // its name: injected definition trees replace fetching only for the sources
 // they name, so an add checks the revision it pins, and NAME mode reads the
 // repository's kuketeam.yaml from it, even when the definitions are supplied.
-func withProject(ctx context.Context, injected map[string]fs.FS, project config.Source) (*fetched, func(), error) {
+func withProject(
+	ctx context.Context, client Client, injected map[string]fs.FS, project config.Source,
+) (*fetched, func(), error) {
 	have := injectedSources(injected)
 	if have != nil && have.trees[config.ProjectSourceName] != nil {
 		return have, func() {}, nil
 	}
-	got, err := fetchSources(ctx, config.Defaults{Sources: []config.Source{project}},
+	got, err := fetchSources(ctx, identityOf(client, config.DefaultRealm),
+		config.Defaults{Sources: []config.Source{project}},
 		map[string]bool{config.ProjectSourceName: true}, nil)
 	if err != nil {
 		return nil, nil, err
@@ -237,17 +332,18 @@ func withProject(ctx context.Context, injected map[string]fs.FS, project config.
 
 func addRun(
 	ctx context.Context, opts AddOptions, name string, team *config.Team, origin Origin,
-	defaults *config.TeamDefaults, recorded []config.SecretBinding, have *fetched, noFile bool,
+	defaults *config.TeamDefaults, recorded []config.SecretBinding, have *fetched, noFile bool, notes []string,
 ) (Outcome, error) {
-	command := "kuke team add " + name + " --source <repository>"
+	command := "kuke create team " + name + " --source <repository>"
 	if opts.Directory != "" {
-		command = "kuke team add <directory> --name " + name
+		command = "kuke create team <directory> --name " + name
 	}
 	if err := applyOverrides(team, defaults, opts.Roles, opts.Harnesses); err != nil {
 		return Outcome{}, err
 	}
 	req := request{
 		command: command, origin: origin, defaults: defaults, team: team, recorded: recorded, have: have,
+		notes: notes,
 	}
 	if noFile && opts.File == nil && team.Spec.Roles == nil && len(defaults.Spec.Defaults.Roles) == 0 {
 		req.emptyCause = "the repository has no " + teamFileName + " and the defaults have no default roles"
@@ -277,30 +373,38 @@ func declaration(opts AddOptions, name string, repo *config.Team, origin Origin)
 		team.Metadata.Realm = config.DefaultRealm
 	}
 	if team.Metadata.Realm != config.DefaultRealm {
-		return nil, origin, fmt.Errorf("add: teams live in realm %s; remove metadata.realm %q",
+		return nil, origin, fmt.Errorf("create team: teams live in realm %s; remove metadata.realm %q",
 			config.DefaultRealm, team.Metadata.Realm)
 	}
 	return team, origin, nil
 }
 
-// mergeProject sets the project source to the repository named on the command
-// line, keeping what the declaration states besides its URL and revision.
-func mergeProject(declared, project *config.Source) *config.Source {
+// mergeProject sets the project source to the one the add resolved (the
+// command line's, else the declaration's), keeping what the declaration
+// states besides its address and revision. When the declaration names
+// another repository than the command line, a note names both (AC10).
+func mergeProject(declared, project *config.Source, address string) (*config.Source, []string) {
 	if declared == nil {
-		return project
+		return project, nil
+	}
+	var notes []string
+	if declared.URL != "" && address != "" && !gitcred.SameRepository(declared.URL, address) {
+		notes = append(notes, fmt.Sprintf("the project is %s (--source); the declaration's "+
+			"spec.projectSource.url names %s", gitcred.ShortForm(address), gitcred.ShortForm(declared.URL)))
 	}
 	out := *declared
-	out.Name, out.URL = config.ProjectSourceName, project.URL
+	out.Name, out.URL, out.Stored, out.Git = config.ProjectSourceName, project.URL, project.Stored, project.Git.Clone()
 	out.Branch, out.Tag, out.Commit = project.Branch, project.Tag, project.Commit
 	if out.ClonePath == "" {
 		out.ClonePath = project.ClonePath
 	}
-	return &out
+	return &out, notes
 }
 
 // applyOverrides replaces the declaration's role and harness lists with the
 // command line's (AC9). A bare NAME picks the default of that name;
-// [NAME=]SOURCE:PATH names any role or harness in a registered source.
+// [NAME=]SOURCE:PATH names any role or harness in a source the team lists or
+// a stored Source.
 func applyOverrides(team *config.Team, defaults *config.TeamDefaults, roles, harnesses []string) error {
 	if roles != nil {
 		list := []config.Role{}
@@ -372,8 +476,8 @@ func parseRole(spec string, defaults []config.Role) (config.Role, error) {
 			}
 		}
 		return config.Role{}, fmt.Errorf(
-			"--role %s: no default role of that name; name it as SOURCE:PATH in a source registered with "+
-				"kuke team source add", name)
+			"--role %s: no default role of that name; name it as SOURCE:PATH in a source the team lists "+
+				"or one stored with kuke create source", name)
 	}
 	return config.Role{Name: name, Source: sel.source, Path: sel.dir}, nil
 }
@@ -391,7 +495,8 @@ func parseHarness(spec string, defaults []config.Harness) (config.Harness, error
 			}
 		}
 		return config.Harness{}, fmt.Errorf(
-			"--harness %s: no default harness of that name; name it as SOURCE:PATH in a registered source", name)
+			"--harness %s: no default harness of that name; name it as SOURCE:PATH in a source the team "+
+				"lists or one stored with kuke create source", name)
 	}
 	return config.Harness{Name: name, Source: sel.source, Path: sel.dir}, nil
 }
@@ -404,11 +509,11 @@ func readTreeTeam(tree fs.FS) (*config.Team, error) {
 		return nil, nil //nolint:nilnil // a repository without kuketeam.yaml inherits the defaults
 	}
 	if err != nil {
-		return nil, fmt.Errorf("add: cannot read the repository's %s: %w", teamFileName, err)
+		return nil, fmt.Errorf("create team: cannot read the repository's %s: %w", teamFileName, err)
 	}
 	team, err := config.DecodeTeamDeclaration(bytes.NewReader(raw))
 	if err != nil {
-		return nil, fmt.Errorf("add: the repository's %s: %w", teamFileName, err)
+		return nil, fmt.Errorf("create team: the repository's %s: %w", teamFileName, err)
 	}
 	return team, nil
 }
@@ -434,7 +539,7 @@ func checkDirectory(raw string) (string, error) {
 		return "", fmt.Errorf("add directory: %w", err)
 	}
 	if !info.IsDir() {
-		return "", errors.New("add: directory input must be a directory")
+		return "", errors.New("create team: directory input must be a directory")
 	}
 	return dir, nil
 }
@@ -450,19 +555,21 @@ func validateRevision(opts AddOptions) error {
 			strings.Contains(ref, "@{") ||
 			strings.HasSuffix(ref, ".lock") ||
 			strings.ContainsAny(ref, " ~^:?*[\\\t\r\n\x00") {
-			return errors.New("add: invalid revision selector; use a branch/tag name or a full commit object ID")
+			return errors.New(
+				"create team: invalid revision selector; use a branch/tag name or a full commit object ID",
+			)
 		}
 	}
 	if count > 1 {
-		return errors.New("add: --branch, --tag, and --commit are mutually exclusive")
+		return errors.New("create team: --branch, --tag, and --commit are mutually exclusive")
 	}
 	if opts.Commit != "" {
 		if len(opts.Commit) != 40 && len(opts.Commit) != 64 {
-			return errors.New("add: --commit requires a full hexadecimal object ID")
+			return errors.New("create team: --commit requires a full hexadecimal object ID")
 		}
 		for _, c := range opts.Commit {
 			if !strings.ContainsRune("0123456789abcdefABCDEF", c) {
-				return errors.New("add: --commit requires a full hexadecimal object ID")
+				return errors.New("create team: --commit requires a full hexadecimal object ID")
 			}
 		}
 	}

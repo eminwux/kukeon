@@ -53,6 +53,7 @@ var reservedScopeSubdirs = map[string]struct{}{
 	consts.KukeonHealthReportsSubdir: {},
 	consts.KukeonTeamsSubdir:         {},
 	consts.KukeonTeamDefaultsSubdir:  {},
+	consts.KukeonSourcesSubdir:       {},
 }
 
 // isReservedScopeSubdir reports whether name is one of the per-scope resource

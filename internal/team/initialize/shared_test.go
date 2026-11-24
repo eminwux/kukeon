@@ -431,7 +431,7 @@ func TestInitReportsReplacedSharedBlueprint(t *testing.T) {
 	const replaced = "blueprint claude in realm default replaced in place (content 0000000000000000 → "
 	if len(result.Notes) != 1 || !strings.HasPrefix(result.Notes[0], replaced) ||
 		!strings.Contains(result.Notes[0], "also used by team other (other-dev-claude)") ||
-		result.Resources != 6 {
+		result.Resources != 7 {
 		t.Fatalf("notes=%v resources=%d", result.Notes, result.Resources)
 	}
 	// The plan carried the same note before anything was written.
@@ -503,7 +503,7 @@ func TestMissingGitSecretsAreReported(t *testing.T) {
 	}
 }
 
-// TestAddHintsAtAMissingGitIdentity is AC13 through `kuke team add`: the
+// TestAddHintsAtAMissingGitIdentity is AC13 through `kuke create team`: the
 // project clones over SSH and nothing names a git identity, so the result says
 // once how to store one; with a Realm default it says nothing.
 func TestAddHintsAtAMissingGitIdentity(t *testing.T) {
