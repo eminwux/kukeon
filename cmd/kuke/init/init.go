@@ -669,7 +669,7 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	}
 	// Stage this kuke for cells' `kuke-binary` directory mount (issue #1483),
 	// so re-running init after a rebuild reaches running cells.
-	clientPaths, stageErr := stageKukeClient(runPath)
+	clientPaths, stageErr := lifecycle.StageKukeClient(runPath)
 	if stageErr != nil {
 		return fmt.Errorf("stage kuke client: %w", stageErr)
 	}
@@ -706,7 +706,7 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("restore kukepause exec bit %q: %w", kukepausePath, chmodErr)
 	}
 	for _, path := range []string{clientPaths.Dir, clientPaths.Binary, clientPaths.Shim} {
-		if chmodErr := sysuser.ChownAndChmod(path, 0, ensure.GID, kukeClientStagedMode); chmodErr != nil {
+		if chmodErr := sysuser.ChownAndChmod(path, 0, ensure.GID, lifecycle.KukeClientStagedMode); chmodErr != nil {
 			return fmt.Errorf("restore kuke client mode %q: %w", path, chmodErr)
 		}
 	}

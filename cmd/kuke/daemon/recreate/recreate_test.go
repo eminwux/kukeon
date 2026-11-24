@@ -231,6 +231,7 @@ func TestDaemonRecreate(t *testing.T) {
 			ctx = context.WithValue(ctx, lifecycle.EnsureSocketDirKey{}, func() error { return nil })
 			ctx = context.WithValue(ctx, recreate.MockPullImageKey{}, func(string) error { return nil })
 			ctx = context.WithValue(ctx, recreate.MockStageKukepauseKey{}, func() error { return nil })
+			ctx = context.WithValue(ctx, recreate.MockStageKukeClientKey{}, func() error { return nil })
 			ctx = context.WithValue(ctx, recreate.MockProvisionKukeondCellKey{}, func() error { return nil })
 			ctx = context.WithValue(ctx, recreate.MockWaitForReadyKey{}, func() error { return nil })
 			ctx = context.WithValue(ctx, recreate.MockApplySocketOwnershipKey{}, func() error { return nil })
@@ -300,6 +301,7 @@ func TestDaemonRecreate_RemovesSocketAndPidFiles(t *testing.T) {
 	ctx = context.WithValue(ctx, lifecycle.EnsureSocketDirKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockPullImageKey{}, func(string) error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockStageKukepauseKey{}, func() error { return nil })
+	ctx = context.WithValue(ctx, recreate.MockStageKukeClientKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockProvisionKukeondCellKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockWaitForReadyKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockApplySocketOwnershipKey{}, func() error { return nil })
@@ -348,6 +350,7 @@ func TestDaemonRecreate_AppliesSocketOwnership(t *testing.T) {
 	ctx = context.WithValue(ctx, lifecycle.EnsureSocketDirKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockPullImageKey{}, func(string) error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockStageKukepauseKey{}, func() error { return nil })
+	ctx = context.WithValue(ctx, recreate.MockStageKukeClientKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockProvisionKukeondCellKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockWaitForReadyKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockApplySocketOwnershipKey{}, func() error {
@@ -399,6 +402,7 @@ func TestDaemonRecreate_SocketOwnershipFailureIsWrapped(t *testing.T) {
 	ctx = context.WithValue(ctx, lifecycle.EnsureSocketDirKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockPullImageKey{}, func(string) error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockStageKukepauseKey{}, func() error { return nil })
+	ctx = context.WithValue(ctx, recreate.MockStageKukeClientKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockProvisionKukeondCellKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockWaitForReadyKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockApplySocketOwnershipKey{}, func() error {
@@ -465,6 +469,7 @@ func TestDaemonRecreate_GracefulTimeoutEscalatesToKill(t *testing.T) {
 	ctx = context.WithValue(ctx, lifecycle.EnsureSocketDirKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockPullImageKey{}, func(string) error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockStageKukepauseKey{}, func() error { return nil })
+	ctx = context.WithValue(ctx, recreate.MockStageKukeClientKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockProvisionKukeondCellKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockWaitForReadyKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockApplySocketOwnershipKey{}, func() error { return nil })
@@ -642,6 +647,10 @@ func recreateOrderCtx(t *testing.T, fake *fakeClient, calls *[]string, pullErr e
 		*calls = append(*calls, "stage")
 		return nil
 	})
+	ctx = context.WithValue(ctx, recreate.MockStageKukeClientKey{}, func() error {
+		*calls = append(*calls, "stage-client")
+		return nil
+	})
 	ctx = context.WithValue(ctx, recreate.MockProvisionKukeondCellKey{}, func() error {
 		*calls = append(*calls, "provision")
 		return nil
@@ -708,7 +717,10 @@ func TestDaemonRecreate_PullFailureLeavesDaemonRunning(t *testing.T) {
 	}
 }
 
-// TestDaemonRecreate_PhaseOrder pins pull → stop → delete → stage → provision.
+// TestDaemonRecreate_PhaseOrder pins pull → stop → delete → stage →
+// stage-client → provision. stage-client is the kuke client restage that
+// creates team cells' `kuke-binary` mount source on upgraded hosts (issue
+// #1647).
 func TestDaemonRecreate_PhaseOrder(t *testing.T) {
 	withFreshViper(t)
 
@@ -723,8 +735,39 @@ func TestDaemonRecreate_PhaseOrder(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("unexpected error: %v\n%s", err, buf.String())
 	}
-	want := "pull test-img:dev,stop,delete,stage,provision"
+	want := "pull test-img:dev,stop,delete,stage,stage-client,provision"
 	if got := strings.Join(calls, ","); got != want {
 		t.Fatalf("calls = %q, want %q", got, want)
+	}
+}
+
+// TestDaemonRecreate_StageKukeClientFailureAbortsBeforeProvision pins that a
+// failed kuke client restage is surfaced and stops recreate before the
+// kukeond cell is provisioned (issue #1647).
+func TestDaemonRecreate_StageKukeClientFailureAbortsBeforeProvision(t *testing.T) {
+	withFreshViper(t)
+
+	var calls []string
+	ctx := recreateOrderCtx(t, orderFake(&calls), &calls, nil)
+	ctx = context.WithValue(ctx, recreate.MockStageKukeClientKey{}, func() error {
+		calls = append(calls, "stage-client")
+		return errors.New("read only file system")
+	})
+	cmd := recreate.NewRecreateCmd()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetContext(ctx)
+	cmd.SetArgs([]string{"--kukeond-image", "test-img:dev"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected an error from a failing kuke client stage")
+	}
+	if want := "stage kuke client: read only file system"; !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %q, want it to contain %q", err, want)
+	}
+	if got, want := strings.Join(calls, ","), "pull test-img:dev,stop,delete,stage,stage-client"; got != want {
+		t.Fatalf("calls = %q, want %q (no provision)", got, want)
 	}
 }
