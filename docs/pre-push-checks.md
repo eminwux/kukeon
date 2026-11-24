@@ -1,32 +1,39 @@
 # Pre-push checks
 
 Run the local equivalent of every CI gate your change triggers before pushing.
-Each row names the workflow under `.github/workflows/`, the paths that trigger
-it, and the command that runs the same check locally.
+All of them are jobs of one workflow, `.github/workflows/test.yaml`. Each job
+runs only when the files it covers changed; the rest show as skipped.
 
-| Workflow         | Triggered by                                                  | Run locally                                                         |
-| ---------------- | ------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `test.yaml`      | Go sources, `go.mod`/`go.sum`, `go.work`, `Makefile`, …       | `make test` and `make test-race`                                    |
-| `test.yaml`      | (same, root required)                                         | `make e2e`                                                          |
-| `lint.yaml`      | Go sources, `go.mod`, `.golangci.yml`, `Makefile`             | `make fmt-check`                                                    |
-| `webui.yaml`     | `internal/webui/**`, `internal/webserver/**`, `Makefile`, …   | `make web-ui-check` and `make web-ui-test`                          |
-| `harnesses.yaml` | `team/harnesses/**`, `pkg/team/harness/**`, `team/team.mk`, … | `make test-harnesses`                                               |
-| `installer.yaml` | `scripts/install.sh`, `docs/site/install.sh`, `Makefile`      | `make install.sh`, then `git diff --exit-code docs/site/install.sh` |
-| `mkdocs.yaml`    | `docs/site/**`, `mkdocs.yml`                                  | `mkdocs build`                                                      |
+| Job                 | Runs when these change                                                                                                              | Run locally                                                                              |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `Lint (pre-commit)` | anything outside `docs/` and `mkdocs.yml`                                                                                           | `pre-commit run --files $(git diff --name-only origin/main...HEAD)` and `make fmt-check` |
+| `Go unit tests`     | Go sources, other files under `cmd/` `internal/` `pkg/` `e2e/` `team/components/` `team/connectors/`, `go.mod`/`go.sum`, `Makefile` | `make test` and `make test-race`                                                         |
+| `Go e2e tests`      | the same, plus `Dockerfile` (root required)                                                                                         | `make e2e`                                                                               |
+| `Web UI tests`      | `internal/webui/**`, `internal/webserver/**`, `go.mod`/`go.sum`, `Makefile`                                                         | `make web-ui-check` and `make web-ui-test`                                               |
+| `Harness tests`     | `team/harnesses/**`, `pkg/team/harness/**`, `team/team.mk`, …                                                                       | `make test-harnesses`                                                                    |
+| `Installer tests`   | `scripts/install.sh`, `docs/site/install.sh`, `Makefile`                                                                            | `make install.sh`, then `git diff --exit-code docs/site/install.sh`                      |
 
-The workflow files hold the full path lists.
+A change under `internal/webui/frontend/` or `internal/webui/dist/` runs the
+web UI job and not the Go jobs. The `Detect changed areas` job at the top of
+`test.yaml` holds the full path list. `mkdocs.yaml` builds the docs site on
+pull requests that touch `docs/site/**` or `mkdocs.yml` (`mkdocs build`).
 
-These run on pull requests. On `main`, `test.yaml` runs as the `test` job of
-`edge.yaml`, which publishes the edge build only when it passes; the other
-workflows run again on the merged commit. A new push to a pull request cancels
-the runs still in progress for the previous push.
+On `main` the same workflow runs as the `test` job of `edge.yaml`, with every
+job enabled, and the edge build is published only when the test jobs pass. A
+new push to a pull request cancels the runs still in progress for the previous
+push.
+
+The lint job runs the hooks from `.pre-commit-config.yaml`, the ones
+`pre-commit install` puts on your host, over the files your branch changes,
+then `make fmt-check` over the whole tree. If the hooks pass locally they pass
+in CI.
 
 CI runs `make web-ui-test` with four Playwright workers (it sets `CI`); a local
 run uses one. To reproduce a CI-only failure, run `CI=1 make web-ui-test`.
 
 ## `make fmt-check`
 
-`make fmt-check` runs the Lint workflow's formatter gate, and `lint.yaml` calls
+`make fmt-check` runs the lint job's formatter gate, and `test.yaml` calls
 the same target, so the two can't drift. It runs
 `GOWORK=off golangci-lint fmt --diff ./...` over the whole tree, including the
 separate `cmd/kukebuild` module, and fails on a non-zero exit or on any diff.

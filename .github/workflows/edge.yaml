@@ -11,8 +11,8 @@ name: Edge Build
 #
 # Job layout: `test` (test.yaml), `image` and `binaries` run side by side;
 # `publish` waits for all three and is the only job that moves the channel.
-# This workflow is also where `make test` and `make e2e` run for a commit on
-# main: test.yaml has no push trigger of its own.
+# This workflow is also where the test jobs run for a commit on main:
+# test.yaml has no push trigger of its own.
 on:
   push:
     branches:
@@ -69,9 +69,11 @@ jobs:
           echo "short=${SHORT}" >> "$GITHUB_OUTPUT"
           echo "edge version ${VERSION} (image tag sha-${SHORT})"
 
-  # The publish job below runs only when these pass, so a commit that breaks
-  # `make test` or `make e2e` never reaches a host that follows edge. They run
-  # beside the two build jobs and do not delay them.
+  # Every test job in test.yaml: Go unit and e2e, web UI, harnesses and the
+  # installer. The publish job below runs only when they pass, so a commit that
+  # breaks one of them never reaches a host that follows edge. They run beside
+  # the two build jobs and do not delay them. The lint job runs too but cannot
+  # fail this run.
   test:
     name: Tests
     uses: ./.github/workflows/test.yaml

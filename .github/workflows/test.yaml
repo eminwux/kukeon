@@ -1,49 +1,31 @@
 name: Test
+
+# Every test and lint job for the repository. Each job runs only when the files
+# it covers changed: the `changes` job works that out and the other jobs read
+# its outputs. A job that has nothing to check shows as skipped.
+#
+# On a pull request the comparison is against main. On main these jobs run as
+# the `test` job of edge.yaml, which publishes the edge build only when they
+# pass; there every job runs, because the edge build must not depend on an
+# earlier commit having been green. There is no `push` trigger here: a second
+# run would test the same commit twice.
 on:
   pull_request:
     branches:
       - main
-    # Skip on changes that can't affect Go build/test/e2e outcomes (docs-only
-    # PRs, mkdocs site edits, release tooling, etc.). `make e2e` builds the
-    # repo root Dockerfile with kukebuild and runs Go binaries produced from
-    # the Makefile, so both stay in the trigger set alongside `**/*.go` and
-    # the module files. The workflow self-reference ensures CI
-    # edits to this file still run their own job.
-    #
-    # `internal/webui/**` is deliberately absent: frontend source and the
-    # generated dist/ bundle are covered by the `Embedded web UI` job in
-    # webui.yaml. No Go test outside internal/webui imports the package and
-    # the e2e suite never asserts on embedded asset bytes, so a frontend-only
-    # PR has nothing for these jobs to catch. Go files under internal/webui/
-    # still trigger this workflow through `**/*.go`.
-    paths:
-      - "**/*.go"
-      - "cmd/kuke/apply/testdata/**"
-      - "**/go.mod"
-      - "**/go.sum"
-      - "go.work"
-      - "go.work.sum"
-      - "Makefile"
-      - "Dockerfile"
-      - ".github/workflows/test.yaml"
-  # There is no `push` trigger: on main these jobs run as the `test` job of
-  # edge.yaml, which publishes the edge build only when they pass. A second
-  # run from a push trigger here would test the same commit twice.
   workflow_call:
+
+# No job comments on the PR, publishes an artifact or pushes anything. The
+# minimal read-only default scopes the GITHUB_TOKEN to what `actions/checkout`
+# needs (CodeQL `actions/missing-workflow-permissions`).
+permissions:
+  contents: read
 
 # A new push to a pull request cancels the run for the previous push. A run
 # called from edge.yaml is keyed on its commit and is never cancelled.
 concurrency:
   group: test-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
-# Both jobs only check out the repo and run tests — no PR comments, no
-# release artifacts, no remote pushes. The minimal read-only default
-# scopes the GITHUB_TOKEN to what `actions/checkout` needs and silences
-# the CodeQL `actions/missing-workflow-permissions` finding raised on
-# this PR's introduction of the e2e job.
-permissions:
-  contents: read
 
 # GOWORK=off matches the Makefile's `export GOWORK := off`. It also has to be
 # visible to actions/setup-go: the action runs `go env` in the repo root before
@@ -57,8 +39,164 @@ env:
   GOWORK: "off"
 
 jobs:
-  test:
-    name: make test
+  # Decides which jobs below have something to check. To change what triggers
+  # a job, edit the patterns in the `case` statement; each pattern is matched
+  # against the path of every changed file.
+  changes:
+    name: Detect changed areas
+    runs-on: ubuntu-latest
+    outputs:
+      lint: ${{ steps.areas.outputs.lint }}
+      go: ${{ steps.areas.outputs.go }}
+      e2e: ${{ steps.areas.outputs.e2e }}
+      webui: ${{ steps.areas.outputs.webui }}
+      harnesses: ${{ steps.areas.outputs.harnesses }}
+      installer: ${{ steps.areas.outputs.installer }}
+    steps:
+      # On a pull request the checkout is the merge of the PR into main, so its
+      # first parent is main and `HEAD^1..HEAD` is exactly what the PR changes.
+      - name: Check out the repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Map changed files to areas
+        id: areas
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          lint=false go=false e2e=false webui=false harnesses=false installer=false
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "Not a pull request: every job runs."
+            lint=true go=true e2e=true webui=true harnesses=true installer=true
+          else
+            while IFS= read -r f; do
+              # Anything outside the docs site is linted.
+              case "$f" in
+                docs/*|mkdocs.yml) ;;
+                *) lint=true ;;
+              esac
+              case "$f" in
+                # This workflow and its caller: run everything.
+                .github/workflows/test.yaml|.github/workflows/edge.yaml)
+                  lint=true go=true e2e=true webui=true harnesses=true installer=true ;;
+                # Makefile holds the recipes of the Go, web UI and installer jobs.
+                Makefile)
+                  go=true e2e=true webui=true installer=true ;;
+                # `make e2e` builds the kukeond image from the root Dockerfile.
+                Dockerfile|scripts/e2e-preflight.sh)
+                  e2e=true ;;
+                go.mod|go.sum)
+                  go=true e2e=true webui=true ;;
+                # Frontend source and the generated bundle: web UI job only
+                # (#1437). Go files under internal/webui also run the Go jobs.
+                internal/webui/frontend/*|internal/webui/dist/*)
+                  webui=true ;;
+                internal/webui/*|internal/webserver/*)
+                  webui=true go=true e2e=true ;;
+                # Harness definitions, build contexts, catalogs and scripts.
+                # Go files in there are also unit-tested.
+                team/harnesses/*.go)
+                  harnesses=true go=true e2e=true ;;
+                team/harnesses/*|team/team.mk)
+                  harnesses=true ;;
+                internal/team/harnessassets/*|internal/team/harnessbuild/*|pkg/team/harness/*)
+                  harnesses=true go=true e2e=true ;;
+                scripts/install.sh|docs/site/install.sh)
+                  installer=true ;;
+                # Go sources, and every other file in a Go source tree: test
+                # data and files that Go code embeds or reads in tests.
+                # team/components and team/connectors are embedded with
+                # go:embed.
+                *.go|*/go.mod|*/go.sum|go.work|go.work.sum|cmd/*|internal/*|pkg/*|e2e/*|team/components/*|team/connectors/*)
+                  go=true e2e=true ;;
+              esac
+            done < <(git diff --name-only HEAD^1 HEAD)
+          fi
+          for area in lint go e2e webui harnesses installer; do
+            echo "${area}=${!area}" | tee -a "$GITHUB_OUTPUT"
+          done
+
+  # Runs the hooks in .pre-commit-config.yaml, the same ones `pre-commit
+  # install` puts on a development host, over the files the change touches.
+  # golangci-lint reports only on lines new since main
+  # (`--new-from-merge-base origin/main` in the hook). gitlint is a commit-msg
+  # hook and does not run here.
+  #
+  # On main the job cannot fail the run (continue-on-error): a formatting slip
+  # must not hold back the edge build. It still runs there so that the
+  # pre-commit environments are cached on main, where every pull request can
+  # restore them; a cache saved by a pull request is visible to that pull
+  # request only.
+  lint:
+    name: Lint (pre-commit)
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ github.event_name != 'pull_request' }}
+    steps:
+      # Full history: the golangci-lint hook needs origin/main and the merge
+      # base, and pre-commit needs both ends of the commit range.
+      - name: Check out the repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install pre-commit
+        run: pipx install pre-commit==4.2.0
+
+      # Holds every hook environment, including the golangci-lint binary that
+      # pre-commit builds from source with Go 1.26.6 (about a minute). The key
+      # changes only when a hook is added or its `rev` moves.
+      - name: Restore the pre-commit environments
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      - name: Run the pre-commit hooks on the changed files
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            from=origin/main
+          elif git cat-file -e "${PUSH_BEFORE}^{commit}" 2>/dev/null; then
+            from="$PUSH_BEFORE"
+          else
+            from=HEAD^1
+          fi
+          echo "pre-commit over ${from}..HEAD"
+          if ! pre-commit run --from-ref "$from" --to-ref HEAD --show-diff-on-failure; then
+            echo "::error::pre-commit hooks failed. Run 'pre-commit run --files \$(git diff --name-only origin/main...HEAD)' locally, fix what it reports and commit the result."
+            exit 1
+          fi
+
+      # The hooks above look only at what the change touches. This checks the
+      # formatters (golines, gci, gofumpt from .golangci.yml) across the whole
+      # tree, so main stays fmt-clean (#1501). It uses the golangci-lint binary
+      # pre-commit just built or restored, so the release is the `rev` pinned in
+      # .pre-commit-config.yaml and the two checks cannot disagree. Contributors
+      # run the same gate with `make fmt-check` (#1642).
+      - name: Check formatting across the tree
+        run: |
+          bin="$(ls "$HOME"/.cache/pre-commit/repo*/golangenv-*/bin/golangci-lint | head -n 1)"
+          "$bin" version
+          if ! make fmt-check GOLANGCI_LINT="$bin"; then
+            echo "::error::golangci-lint formatters would change the files above. Run 'GOWORK=off golangci-lint fmt ./...' and commit the result."
+            exit 1
+          fi
+
+  unit:
+    name: Go unit tests
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repo
@@ -93,7 +231,9 @@ jobs:
   # docs/site/install/build-from-source.md. Runs in parallel with the unit
   # job above (no shared resources).
   e2e:
-    name: make e2e
+    name: Go e2e tests
+    needs: changes
+    if: needs.changes.outputs.e2e == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repo
@@ -213,3 +353,216 @@ jobs:
       - name: Return Go caches to the runner user
         if: always()
         run: sudo chown -R "$(id -u):$(id -g)" "$(go env GOCACHE)" "$(go env GOMODCACHE)"
+
+  # Frontend source and the generated dist/ bundle are tested here and not by
+  # the Go jobs: no Go test outside internal/webui imports the package, and the
+  # e2e suite never asserts on the embedded asset bytes (#1437). The Playwright
+  # suite drives the packaged kuke binary, so internal/webserver and go.mod /
+  # go.sum changes run it too.
+  web-ui:
+    name: Web UI tests
+    needs: changes
+    if: needs.changes.outputs.webui == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: internal/webui/frontend/package-lock.json
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Check generated assets match source
+        run: make web-ui-check
+      - name: Install browser
+        run: cd internal/webui/frontend && npx playwright install --with-deps chromium
+      - name: Test browser states against the packaged binary
+        run: make web-ui-test
+      - name: Test packaged assets outside the checkout
+        run: |
+          go test -c -o /tmp/webui.test ./internal/webui
+          cd /tmp
+          ./webui.test
+
+  # `make test-harnesses` checks the kuke team harness definitions, image build
+  # contexts, release catalogs and the Bake plan (MODE=check: nothing is built
+  # or pushed). Root-module Go tests for the same packages run in the unit job.
+  harnesses:
+    name: Harness tests
+    needs: changes
+    if: needs.changes.outputs.harnesses == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # build-images.sh prints the resolved Bake plan with
+      # `docker buildx bake --print`; nothing is built or pushed.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Run harness checks
+        run: make test-harnesses
+
+  # Every check that runs on the hosted runner itself is a step of this one
+  # job: each takes a few seconds, and one job per check spent more time
+  # starting runners than checking. The steps are ordered so the ones that
+  # must leave /usr/local/bin untouched run before the one that installs.
+  # `if: ${{ !cancelled() }}` keeps the later steps running after an earlier
+  # one fails, so one run still reports every broken check.
+  installer:
+    name: Installer tests
+    needs: changes
+    if: needs.changes.outputs.installer == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The canonical script lives at scripts/install.sh; docs/site/install.sh
+      # is the copy mkdocs publishes at https://kukeon.io/install.sh.
+      # `make install.sh` re-renders the copy; this catches contributors who
+      # edited one and forgot to rerun the make target.
+      - name: scripts/install.sh and docs/site/install.sh are in sync
+        run: |
+          make install.sh
+          if ! git diff --exit-code docs/site/install.sh; then
+            echo "::error::docs/site/install.sh is stale. Run 'make install.sh' and commit the result."
+            exit 1
+          fi
+
+      # Positive path: the GitHub-hosted ubuntu-latest runner already runs
+      # containerd (Docker is preinstalled and live), which is the only daemon
+      # the installer checks for. Validates AC: "`bash install.sh --check` runs
+      # prereq checks only and exits without touching the system."
+      - name: --check passes with prereqs installed
+        if: ${{ !cancelled() }}
+        run: |
+          if [ ! -S /run/containerd/containerd.sock ]; then
+            echo "::error::containerd socket missing on the runner — runner image changed?"
+            exit 1
+          fi
+          bash scripts/install.sh --check
+          if [ -e /usr/local/bin/kuke ]; then
+            echo "::error::installer --check touched /usr/local/bin/kuke"
+            exit 1
+          fi
+
+      # Negative path: an unknown KUKE_CHANNEL is rejected with exit 2 before
+      # the prerequisite checks touch anything (issue #1638). The edge install
+      # itself is smoked by edge.yaml after each publish: nothing in a PR can
+      # exercise the `edge` prerelease before the edge workflow has run on main.
+      - name: an unknown KUKE_CHANNEL exits 2 and installs nothing
+        if: ${{ !cancelled() }}
+        run: |
+          set +e
+          out="$(KUKE_CHANNEL=nightly bash scripts/install.sh 2>&1)"
+          rc=$?
+          echo "$out"
+          if [ "$rc" -ne 2 ]; then
+            echo "::error::expected exit 2 for KUKE_CHANNEL=nightly, got ${rc}"
+            exit 1
+          fi
+          if ! echo "$out" | grep -q 'KUKE_CHANNEL'; then
+            echo "::error::expected the failure message to name KUKE_CHANNEL"
+            exit 1
+          fi
+          if [ -e /usr/local/bin/kuke ]; then
+            echo "::error::installer touched /usr/local/bin/kuke despite an invalid channel"
+            exit 1
+          fi
+
+      # Negative path: a temporary directory too small for the release assets
+      # (#1343). The installer must fail before or during the download with a
+      # message that names TMPDIR, not one that sends the operator looking for
+      # a missing release. The runner has sudo and a running containerd.
+      - name: a full TMPDIR is reported as that, not as a missing release
+        if: ${{ !cancelled() }}
+        run: |
+          sudo mkdir -p /mnt/kuke-small
+          sudo mount -t tmpfs -o size=1m,mode=1777 tmpfs /mnt/kuke-small
+          set +e
+          out="$(TMPDIR=/mnt/kuke-small KUKE_VERSION=v0.6.1 KUKE_SKIP_INIT=1 bash scripts/install.sh 2>&1)"
+          rc=$?
+          echo "$out"
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::expected non-zero exit with a full TMPDIR"
+            exit 1
+          fi
+          if ! echo "$out" | grep -q 'TMPDIR'; then
+            echo "::error::expected the failure message to name TMPDIR"
+            exit 1
+          fi
+          if echo "$out" | grep -q 'Confirm KUKE_VERSION'; then
+            echo "::error::a local write failure must not suggest a missing release"
+            exit 1
+          fi
+
+      # End-to-end smoke, last because it is the one step that installs:
+      # download real release binaries, install them to /usr/local/bin, and
+      # skip the kuke-init step (which would need root, cgroup writes, and a
+      # healthy containerd). Pinned to a known-good tag so the test doesn't
+      # drift with future releases. v0.6.1 ships kuke, kukebuild, and kukepause
+      # assets plus their .sha256 sums, so this exercises the full multi-binary
+      # download + checksum-verify + install path (no KUKE_SKIP_CHECKSUM, no
+      # KUKE_SKIP_KUKEBUILD). kukepause is fetched unconditionally because
+      # `kuke init` cannot bootstrap without it (issue #1241).
+      - name: full install (KUKE_SKIP_INIT=1) against a real release
+        if: ${{ !cancelled() }}
+        env:
+          KUKE_VERSION: v0.6.1
+          KUKE_SKIP_INIT: "1"
+        run: |
+          bash scripts/install.sh
+          test -x /usr/local/bin/kuke
+          test -x /usr/local/bin/kukeond
+          test -x /usr/local/bin/kukebuild
+          test -x /usr/local/bin/kukepause
+          /usr/local/bin/kuke version
+
+  # Negative path: minimal container with no containerd installed, which is
+  # why this check keeps a job of its own. The script
+  # must report which prereq is missing, print a distro-aware hint, and exit
+  # non-zero. Validates AC: "On a fresh host without containerd, the script
+  # exits with a distro-aware install hint and non-zero status."
+  installer-no-containerd:
+    name: Installer tests (host without containerd)
+    needs: changes
+    if: needs.changes.outputs.installer == 'true'
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install bash + curl (script dependencies)
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends bash curl ca-certificates
+      - name: Run installer --check on an unprepared host
+        run: |
+          set +e
+          out="$(bash scripts/install.sh --check 2>&1)"
+          rc=$?
+          echo "$out"
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::expected non-zero exit on a host without prereqs"
+            exit 1
+          fi
+          # The hint must name containerd specifically — generic "something
+          # missing" output would defeat the AC.
+          if ! echo "$out" | grep -q 'containerd'; then
+            echo "::error::expected the failure message to reference containerd"
+            exit 1
+          fi
+          # No files should be touched on the prereq-failure path.
+          if [ -e /usr/local/bin/kuke ]; then
+            echo "::error::installer touched /usr/local/bin/kuke despite prereq failure"
+            exit 1
+          fi
