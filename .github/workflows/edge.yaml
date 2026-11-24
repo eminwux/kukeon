@@ -206,6 +206,9 @@ jobs:
       VERSION: ${{ needs.version.outputs.version }}
       SHORT: ${{ needs.version.outputs.short }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # The upload step cds into $RUNNER_TEMP/edge, outside the checkout, where
+      # gh cannot infer the repository from a git remote.
+      GH_REPO: ${{ github.repository }}
     steps:
       # Only for the `edge` git tag push below; nothing is built here.
       - name: Check out the repo
