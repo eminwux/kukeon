@@ -5,26 +5,24 @@ installed CLI wins when they differ.
 
 ## The opt-in
 
-GitHub access is off by default. One binding in the kuke team's stored
-declaration turns it on for the interactive majordomo cell and the
-`health-sweep` task cell together. Read the declaration with
-`kuke get team kuke -o yaml > kuke.yaml` (or open the kuke team on the web UI's
-Teams page) and add:
+GitHub access is off by default. Giving the majordomo role the `github`
+connector turns it on for the interactive majordomo cell and the
+`health-sweep` task cell together:
 
-```yaml
-# kuke.yaml: the stored kuke Team
-spec:
-  roles:
-    - name: majordomo
-      needs:
-        image: [go]
-        secrets: [gh-token] # enables the github connector: GH_TOKEN + gh
+```sh
+kuke create secret gh-token --realm default --from-file <path>
+kuke team connector enable kuke github --role majordomo
 ```
 
-The secret is created with `kuke create secret gh-token --realm default
---from-file <path>`, and the team is applied again with
-`kuke team apply -f kuke.yaml` (or Apply on the Teams page). The token arrives as `GH_TOKEN` only. It is not a
-git credential.
+or, on the web UI's Teams page, the kuke team's **Edit team** screen:
+Credentials → Per-role access, switch GitHub on for majordomo, then Preview
+and Apply. The command writes `connectors: { github: {} }` in the majordomo
+role's entry of the stored kuke Team and applies the team;
+`kuke team connector list kuke` shows whether each majordomo Config resolves
+the token. An install that opted in earlier with `needs.secrets: [gh-token]`
+under the role entry, the older spelling, is still read as on. A running cell
+keeps what it started with: start a new session to get the token. The token
+arrives as `GH_TOKEN` only. It is not a git credential.
 
 ## Draft fields (`kuke health issue -f <file>`)
 

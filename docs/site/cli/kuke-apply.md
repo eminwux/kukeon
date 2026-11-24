@@ -39,6 +39,14 @@ A manifest may carry the three stored team kinds (see [Teams](../concepts/team.m
 
 The manifest's other documents are applied first, in one request, so a `TeamDefaults` and the `Source` documents in the same file are what its Teams read. If any of them fails, the Teams are skipped (`Team "web": skipped (another document in the file failed)`, or a `failed` entry in structured output). A Team that fails composition is reported as `failed` and the file's later Teams are still composed; the command then exits non-zero. A `Team` document sent to kukeond by any other path is rejected.
 
+A **`CellConfig`** a team renders — one whose `metadata.labels` carry `kukeon.io/team`, as `kuke get config NAME -o yaml` prints it — is applied as it is, but the team's next apply renders it whole again, so the edit does not last. `kuke apply` prints one warning per such Config on stderr and still applies it, with the exit status unchanged; `-o json` and `-o yaml` output on stdout is unchanged:
+
+```
+warning: config kuke-majordomo-claude belongs to team kuke; the team's next apply replaces this edit. Change the team instead: kuke team connector, kuke team apply -f, or the Teams page.
+```
+
+A Config without the label prints nothing new. The Configs a `Team` document in the same file composes are not warned about.
+
 The source documents a team is composed from — `Role`, `Harness`, `HarnessImageCatalog`, `Component`, `Connector` — are read from a fetched source and rejected by `kuke apply`.
 
 ## Per-resource outcome

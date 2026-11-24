@@ -700,34 +700,53 @@ it on for both the interactive cell and the sweep:
    kuke create secret gh-token --realm default --from-file /path/to/token
    ```
 
-2. In the kuke team's declaration (`kuke get team kuke -o yaml > kuke.yaml`,
-   or the kuke team's **Edit as YAML** tab), give the role that secret, and tell the sweep where to
-   file if it should:
+2. Give the majordomo role the [`github` connector](#connectors):
+
+   ```bash
+   kuke team connector enable kuke github --role majordomo
+   ```
+
+   or, in the web UI, open the kuke team's **Edit team** screen, switch
+   **GitHub** on for majordomo under **Credentials → Per-role access**, then
+   Preview and Apply. Either way the command edits the role's entry in the
+   stored kuke Team (`connectors: { github: {} }`) and applies the team, and
+   prints any secret still missing with its `kuke create secret` command.
+   `kuke team connector list kuke` shows what each majordomo Config resolves,
+   and the Health page says whether issue filing has a token.
+
+3. Tell the sweep where to file, a separate setting: the `health-sweep` task's
+   arguments name the repository. In the Edit team screen's **Tasks and
+   schedules** step, set the task's arguments to
+   `--file-issues <owner>/<repo>` (and switch its schedule on); in YAML, the
+   role entry's task:
 
    ```yaml
-   # kuke.yaml: the stored kuke Team
+   # kuke get team kuke -o yaml: the stored kuke Team
    spec:
      roles:
        - name: majordomo
          # ...
-         needs:
-           image: [go]
-           secrets: [gh-token] # enables the github connector: GH_TOKEN + gh
+         connectors:
+           github: {} # written by kuke team connector enable
          tasks:
            - name: health-sweep
              suspend: false
              args: "--file-issues <owner>/<repo>"
    ```
 
-3. Run `kuke team apply -f kuke.yaml` (or Preview, then Apply, on the Edit as
-   YAML tab).
+   then `kuke team apply -f kuke.yaml`.
 
-`needs.secrets` in a team's role entry adds runtime secrets to a role for that team
-only; the role itself still requires none. `gh-token` enables the
-[`github` connector](#connectors), so the interactive `kuke-majordomo-<harness>`
-cell and its `health-sweep` task cell both get the token as `GH_TOKEN` and an
-image with `gh`. The token is never a git credential: clone and push keep using
-the git identity.
+A role entry's `connectors` gives a role a connector for that team only; the
+role itself still requires none. With `github` enabled, the interactive
+`kuke-majordomo-<harness>` cell and its `health-sweep` task cell both get the
+token as `GH_TOKEN` and an image with `gh`. The token is never a git
+credential: clone and push keep using the git identity. A running cell keeps
+what it started with; `kuke restart` it to get the token.
+
+The older spelling — `needs.secrets: [gh-token]` under the role entry — is
+still read and enables the same connector, and
+`kuke team connector disable kuke github --role majordomo` removes either
+spelling.
 
 With the token, the sweep submits its report with
 `kuke health report submit --file-issues <owner>/<repo>`, and `kuke` does the
@@ -744,7 +763,7 @@ which uses the sweep's redaction and signature marker, so the two paths dedupe
 against each other. Without the opt-in it says filing is unavailable and how to
 turn it on.
 
-Do step 1 before step 3, so the secret exists when the cells first start.
+Do step 1 before step 2, so the secret exists when the cells first start.
 
 ### Connectors
 
@@ -787,6 +806,18 @@ spec:
       connectors:
         github: { identity: review-github }
 ```
+
+A stored team's role entry is changed with one command, which edits the stored
+Team and applies it, or with the per-role switches in the Edit team form's
+Credentials step:
+
+```bash
+kuke team connector enable kuke github --role majordomo [--identity work-github]
+kuke team connector disable kuke github --role majordomo
+kuke team connector list kuke
+```
+
+See [`kuke team connector`](../cli/kuke-team.md#kuke-team-connector).
 
 `identity` names a stored Secret, `name[@realm[/space[/stack]]]`. A connector
 left out — or an entry with no identity — uses the default method and inherits

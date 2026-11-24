@@ -152,3 +152,30 @@ type ConnectorStatus struct {
 	// Message says why the connector is unresolved.
 	Message string `json:"message,omitempty"   yaml:"message,omitempty"`
 }
+
+// Fill says what fills the connector, as kuke get configs -o wide prints it
+// in its CONNECTORS column: the identity and the level it comes from
+// (`gh-token (realm)`), the method for a connector that keeps a login in the
+// state volume (`login`), `MISSING` for a required connector nothing
+// resolves — a cell cannot be created until one does — and `none` for one
+// the cell starts without.
+func (s ConnectorStatus) Fill() string {
+	switch {
+	case s.State == ConnectorResolved && s.Identity != nil:
+		if s.Origin != "" {
+			return s.Identity.Name + " (" + s.Origin + ")"
+		}
+		return s.Identity.Name
+	case s.State == ConnectorResolved && s.Method != "":
+		return s.Method
+	case s.State == ConnectorResolved:
+		if s.Origin != "" {
+			return "set (" + s.Origin + ")"
+		}
+		return "set"
+	case s.Required || s.Identity != nil:
+		return "MISSING"
+	default:
+		return "none"
+	}
+}

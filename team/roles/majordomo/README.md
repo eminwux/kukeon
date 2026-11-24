@@ -13,7 +13,8 @@ requested operations with verified outcomes. It has five skills:
 - [`file-kukeon-bug`](skills/file-kukeon-bug/SKILL.md) files a diagnosed
   kukeon defect in the configured GitHub repository: it checks for an existing
   issue first (sweep-filed ones included), then comments on it or opens one.
-  It needs the `gh-token` opt-in and never files workload problems.
+  It needs the GitHub opt-in (see the skill) and never files workload
+  problems.
 - [`health-sweep`](skills/health-sweep/SKILL.md) is the read-only unattended
   run: it reads kukeond's health digest and, if there are findings, stores one
   triaged report in kukeond.
@@ -86,7 +87,7 @@ kuke team selection; it does not dynamically install runtime prerequisites.
   never role files. The installer neither checks nor modifies authentication.
 - `kukeon` is the initial team's name. This role requests no `root` capability,
   privileged runtime, sudo, or SSH mount, and needs no GitHub token unless the
-  install opts in with `gh-token` (see `file-kukeon-bug`); its only host mounts
+  install gives it the `github` connector (see `file-kukeon-bug`); its only host mounts
   are the three read-only ones above. The daemon connection can mutate runtime
   resources: target and operation authorization come from the user's request,
   and the `health-sweep` task is restricted to reads by its skill.

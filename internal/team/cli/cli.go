@@ -68,6 +68,7 @@ func NewTeamCommandWith(deps Deps) *cobra.Command {
 	// set it on each subcommand: a failed verb reports its error alone.
 	for _, sub := range []*cobra.Command{
 		newInitCommand(deps), newApplyCommand(deps), newExportCommand(deps), newDefaultsCommand(deps),
+		newConnectorCommand(deps),
 	} {
 		silence(sub)
 		cmd.AddCommand(sub)

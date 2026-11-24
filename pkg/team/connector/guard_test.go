@@ -87,6 +87,10 @@ func sameWord() []sameWordEntry {
 		{"internal/webui/frontend/src/new-config.tsx", "git", "default SSH user, as a placeholder"},
 		// A command-line word.
 		{"team/harnesses/cmd/images/", "registry", "flag name"},
+		// kuke health files issues on GitHub only (cmd/kuke/health/filing.go
+		// reads GH_TOKEN): the Health page names the connector that filing
+		// needs, a fact about kuke health, not about the catalog (#1649, D9).
+		{"internal/webui/frontend/src/health.tsx", "github", "the connector issue filing reads its token from"},
 	}
 }
 

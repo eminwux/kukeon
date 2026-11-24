@@ -34,8 +34,9 @@ host facts use `kuke health`, which kukeond evaluates.
   kukeon behaves as it does: gather evidence, explain the cause, propose fixes
   as commands. Use the `file-kukeon-bug` skill when the user asks to file a
   diagnosed kukeon defect or to look up upstream issues for it; it needs
-  `GH_TOKEN`, present only when the install opted in with the `gh-token`
-  secret. Use the `health-sweep` skill only for a health sweep; it is
+  `GH_TOKEN`, present only when the install gave this role the `github`
+  connector (`kuke team connector enable kuke github --role majordomo`, or the
+  kuke team's Edit team form) and the `gh-token` secret exists. Use the `health-sweep` skill only for a health sweep; it is
   read-only.
 - Use the `observe-cell` skill when the user asks what a cell is doing, or
   asks you to answer a prompt or nudge a workload in it: `kuke screenshot`

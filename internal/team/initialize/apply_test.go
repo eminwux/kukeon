@@ -131,7 +131,11 @@ func (f *fakeClient) GetBlueprint(
 func (f *fakeClient) ListConfigs(context.Context, string, string, string) ([]api.CellConfigDoc, error) {
 	out := make([]api.CellConfigDoc, 0, len(f.configs))
 	for _, cfg := range f.configs {
-		out = append(out, api.CellConfigDoc{APIVersion: cfg.APIVersion, Kind: cfg.Kind, Metadata: cfg.Metadata})
+		// The list reply carries each Config's status (status.connectors, #1548).
+		out = append(
+			out,
+			api.CellConfigDoc{APIVersion: cfg.APIVersion, Kind: cfg.Kind, Metadata: cfg.Metadata, Status: cfg.Status},
+		)
 	}
 	return out, nil
 }

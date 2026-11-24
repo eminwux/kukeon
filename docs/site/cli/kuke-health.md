@@ -245,8 +245,11 @@ formats, `key=value` pairs whose key names a credential, private key blocks and
 URL userinfo.
 
 Filing needs a GitHub token in the `GH_TOKEN` environment variable, which the
-`github` connector sets once the install binds the `gh-token` secret to the
-majordomo role. Without it, `--file-issues` fails naming `GH_TOKEN` and the
+`github` connector sets once the install enables it for the majordomo role —
+`kuke team connector enable kuke github --role majordomo`, or the kuke team's
+Edit team form (Credentials → Per-role access) — and the `gh-token` secret
+exists. The web UI's Health page says, per sweep Config, whether filing has a
+token. Without it, `--file-issues` fails naming `GH_TOKEN` and the
 opt-in, and the report is still stored. If filing fails, the report is still stored and the command exits `1`. If the
 report cannot be stored after filing ran, the command prints the issues it
 opened or commented on to stderr and exits `1`. See

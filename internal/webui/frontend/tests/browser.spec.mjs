@@ -5540,3 +5540,73 @@ test("at 390×844 the switch shows named icons, the grid is one column and nothi
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), hash).toBe(true);
   }
 });
+
+// Issue #1649: per-role connectors. The catalog the wizard reads offers GitHub, which a team can give a role.
+const roleAccessConnectors = [
+  { name: "git", title: "Git", delivery: "git", scopes: ["realm"], secretTypes: ["ssh-key"], fields: [], methods: [] },
+  { name: "github", title: "GitHub", scopes: ["realm"], secretTypes: ["opaque"], fields: [], methods: [{ name: "token", component: "github", delivery: "env", default: true }] },
+  { name: "claude", title: "Claude", harness: "claude", scopes: ["realm"], secretTypes: ["opaque"], fields: [], methods: [{ name: "subscription", component: "claude-sub", delivery: "stateVolume" }] },
+];
+const roleAccessRows = [
+  { role: "dev", config: "web-dev-claude", connector: "git", state: "resolved", identity: "git-ssh", origin: "realm", fill: "git-ssh (realm)", setByTeam: false },
+  { role: "dev", config: "web-dev-claude", connector: "github", state: "unresolved", method: "token", required: true, fill: "MISSING", setByTeam: true },
+];
+
+test("Edit team switches GitHub on for a role, picks its identity, and shows a connector the role requires (#1649)", async ({ page }) => {
+  const world = await mockTeams(page);
+  world.webView.connectors = { inherited: true, items: [], roles: roleAccessRows.filter(row => row.connector === "git") };
+  world.secrets = [...world.secrets, { metadata: { name: "bot-token", realm: "default" }, spec: { connector: "github", type: "opaque" } }];
+  await page.route(url => url.pathname === "/api/connectors", route => route.fulfill({ json: roleAccessConnectors }));
+  await page.goto(`${server.url}#/teams/web/edit`);
+  const steps = wizard(page);
+  for (let i = 0; i < 3; i++) await steps.getByRole("button", { name: "Next" }).click();
+  await expect(steps.getByRole("heading", { name: "Credentials" })).toBeVisible();
+  const access = steps.getByRole("group", { name: "Per-role access" });
+  const rows = access.getByRole("table", { name: "Per-role connectors" }).locator("tbody tr");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toContainText("Required by the role");
+  await expect(rows.nth(0).getByRole("checkbox")).toHaveCount(0);
+  await expect(rows.nth(0)).toContainText("git-ssh (realm)");
+  await expect(access).not.toContainText("Claude");
+  const github = access.getByRole("checkbox", { name: "GitHub for dev" });
+  await expect(github).not.toBeChecked();
+  await expect(access.getByLabel("Identity of github for dev")).toBeDisabled();
+  await github.check();
+  await access.getByLabel("Identity of github for dev").selectOption("bot-token");
+  await steps.getByRole("button", { name: "Next" }).click();
+  await steps.getByRole("button", { name: "Preview" }).click();
+  await expect(steps.getByRole("region", { name: "Preview" })).toBeVisible();
+  const sent = lastPost(world, "/api/teams/preview");
+  expect(sent.form.roles.items[0].connectors).toEqual([{ name: "github", enabled: true, identity: "bot-token" }]);
+  expect(sent.form.connectors).toEqual({ inherit: true, items: {} });
+});
+
+test("Edit team disables per-role access while the team inherits its roles (#1649)", async ({ page }) => {
+  const world = await mockTeams(page);
+  const inheriting = world.webForm();
+  inheriting.roles = { inherit: true, items: [] };
+  world.webForm = () => inheriting;
+  world.webView.roles = { ...world.webView.roles, inherited: true };
+  await page.route(url => url.pathname === "/api/connectors", route => route.fulfill({ json: roleAccessConnectors }));
+  await page.goto(`${server.url}#/teams/web/edit`);
+  const steps = wizard(page);
+  for (let i = 0; i < 3; i++) await steps.getByRole("button", { name: "Next" }).click();
+  const access = steps.getByRole("group", { name: "Per-role access" });
+  await expect(access).toContainText("Declare the team's roles to change per-role access.");
+  await expect(access.getByRole("checkbox", { name: "GitHub for dev" })).toBeDisabled();
+});
+
+test("a team page lists each Config's connectors with identity, level and who asks for it (#1649)", async ({ page }) => {
+  const world = await mockTeams(page);
+  world.webView.connectors = { inherited: true, items: [], roles: roleAccessRows };
+  await page.goto(`${server.url}#/teams/web`);
+  const table = page.getByRole("region", { name: "Connectors" }).getByRole("table", { name: "Connectors per role" });
+  const rows = table.locator("tbody tr");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toContainText("git-ssh");
+  await expect(rows.nth(0)).toContainText("realm");
+  await expect(rows.nth(0)).toContainText("Role definition");
+  await expect(rows.nth(0).getByRole("link", { name: "web-dev-claude" })).toHaveAttribute("href", "#/configs/default/web/default/web-dev-claude");
+  await expect(rows.nth(1).getByRole("link", { name: "Needs identity" })).toHaveAttribute("href", "#/connectors/github");
+  await expect(rows.nth(1)).toContainText("Team");
+});

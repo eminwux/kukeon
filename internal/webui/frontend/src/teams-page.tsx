@@ -2,18 +2,38 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ErrorNotice, useResource, type Failure } from "./request";
 import { useNotify } from "./notifications";
 import { useModalDialog } from "./focus";
-import { sendJSON, toFailure } from "./connector-ui";
+import { connectorsLink, sendJSON, toFailure } from "./connector-ui";
+import { stateResolved } from "./connectors.mjs";
 import { ScheduleDetails, when } from "./schedule";
 import { OutcomeNotice, PlanView } from "./team-plan";
 import { TeamWizard } from "./team-wizard";
 import { configLink, deleteSummary, exportAPI, listOrigin, newTeamLink, sourcesLink, systemTeam, taskLabel, teamsAPI, teamsLink } from "./teams.mjs";
-import type { DeleteResult, TeamDetail, TeamOutcome, TeamSummary, TeamView, ViewSource } from "./teams.mjs";
+import type { DeleteResult, RoleConnectorView, TeamDetail, TeamOutcome, TeamSummary, TeamView, ViewSource } from "./teams.mjs";
 
 // The Teams pages (#1618, #1644). The list opens the New team wizard; a
 // team's page shows the whole setup as it composes, with Edit, Export,
 // Reapply and Delete. Every action posts to the teams API, which runs the
 // same code as `kuke team`: the server fetches, composes and applies, as the
 // account running `kuke serve`.
+
+// RoleConnectors is what each Config of the team resolves per connector (#1649, AC8), the rows of kuke team
+// connector list: the method, the identity and the level it comes from, and whether the team's role entry or
+// the role's definition asks for it.
+function RoleConnectors({ rows, configs }: { rows: RoleConnectorView[]; configs: TeamDetail["configs"] }) {
+  if (!rows.length) return <p className="description">No Config of the team reports its connectors yet.</p>;
+  const scopeOf = (name: string) => configs.find(config => config.name === name)?.scope;
+  return <div className="table-scroll"><table aria-label="Connectors per role"><thead><tr><th>Role</th><th>Config</th><th>Connector</th><th>Method</th><th>Identity</th><th>From</th><th>Asked by</th></tr></thead><tbody>
+    {rows.map(row => { const scope = scopeOf(row.config); const unresolved = row.state !== stateResolved; return <tr key={`${row.config}/${row.connector}`}>
+      <td><code>{row.role}</code></td>
+      <td>{scope ? <a className="resource-name mono-id" href={configLink(scope, row.config)}>{row.config}</a> : <span className="mono-id">{row.config}</span>}</td>
+      <td><a className="resource-name" href={connectorsLink(row.connector)}>{row.connector}</a></td>
+      <td>{row.method || "—"}</td>
+      <td>{unresolved ? <a className="badge needs-connector" href={connectorsLink(row.connector)}>Needs identity</a> : <span className="mono-id">{row.identity || "—"}</span>}</td>
+      <td>{row.origin || "—"}</td>
+      <td>{row.setByTeam ? "Team" : "Role definition"}</td>
+    </tr>; })}
+  </tbody></table></div>;
+}
 
 function TeamList({ teams }: { teams: TeamSummary[] }) {
   return <section className="panel" aria-label="Teams list">
@@ -167,7 +187,9 @@ function TeamOverview({ name, data, onChanged }: { name: string; data: TeamView;
       </section>
       <section className="panel" aria-label="Connectors">
         <div className="panel-heading"><h2>Connectors</h2><Origin list={view.connectors} /></div>
-        <div className="panel-body">{view.connectors.items.length ? <ul className="state-list">{view.connectors.items.map(c => <li key={c.name}><code>{c.name}</code> <span className="description">{c.method || "default method"}, {c.identity || "identity from the scope defaults"}</span></li>)}</ul> : <p className="description">No connector choice: every connector uses its default method and the scope defaults' identity.</p>}</div>
+        <div className="panel-body">{view.connectors.items.length ? <ul className="state-list">{view.connectors.items.map(c => <li key={c.name}><code>{c.name}</code> <span className="description">{c.method || "default method"}, {c.identity || "identity from the scope defaults"}</span></li>)}</ul> : <p className="description">No connector choice: every connector uses its default method and the scope defaults' identity.</p>}
+          <RoleConnectors rows={view.connectors.roles ?? []} configs={view.configs} />
+        </div>
       </section>
     </>}
     <section className="panel" aria-label="Configs">

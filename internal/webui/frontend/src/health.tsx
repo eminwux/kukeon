@@ -5,6 +5,12 @@ import { AskMajordomo, configScope, oneLine, sweepTask, type ConfigDoc, type Maj
 import { ScheduleDetails, cellLinker, when } from "./schedule";
 import type { InventoryResource } from "./inventory";
 import { DaemonNav } from "./daemon";
+import { connectorsLink } from "./connector-ui";
+import { connectorStatuses, stateResolved, type Connector } from "./connectors.mjs";
+
+// The connector issue filing uses (#1649, D9): kuke health report submit --file-issues reads GH_TOKEN, so
+// filing is GitHub-only. This is a fact about kuke health, not about the connector catalog.
+export const filingConnector = "github";
 
 // The id of the last health report shown on the Health tab in this browser (#1635): the Manage side of
 // the view switch shows a dot for a newer report with findings.
@@ -60,7 +66,35 @@ function EnableSweep({ configs }: { configs: ConfigDoc[] }) {
   </div>;
 }
 
-function SweepSchedule({ config, onRun, running, inventory }: { config: ConfigDoc; onRun: (config: ConfigDoc) => void; running: boolean; inventory: InventoryResource }) {
+// filingComponents are the blueprint components that deliver the filing connector: one per method, or its
+// own name for a connector without methods.
+function filingComponents(connector: Connector | undefined): string[] {
+  if (!connector) return [filingConnector];
+  return connector.methods.length ? connector.methods.map(method => method.component) : [connector.name];
+}
+
+// FilingAccess says whether a sweep Config can file issues (#1649, AC9): GitHub access off (the component is
+// not on the Config), its token missing (the connector does not resolve), or the token it files with.
+function FilingAccess({ config, connector }: { config: ConfigDoc; connector: Connector | undefined }) {
+  const title = connector?.title || "GitHub";
+  const components = Array.isArray(config.spec?.components) ? (config.spec.components as string[]) : [];
+  const enabled = filingComponents(connector).some(name => components.includes(name));
+  const status = connectorStatuses(config).find(item => item.connector === filingConnector);
+  let body;
+  if (!enabled) {
+    body = <><strong>{title} access is off.</strong> This sweep cannot file issues. Turn it on for the majordomo role in the <a href={teamsLink(systemTeam, "edit")}>kuke team's Edit team screen</a> (Credentials, Per-role access), or run <code>kuke team connector enable {systemTeam} {filingConnector} --role majordomo</code>.</>;
+  } else if (!status || status.state !== stateResolved) {
+    body = <><strong>Token missing.</strong> {title} access is on, but no identity fills it. <a href={connectorsLink(filingConnector)}>Add or choose a {title} identity</a>.</>;
+  } else {
+    body = <><strong>Issue filing has a token:</strong> <code>{status.identity?.name ?? "set"}</code>{status.origin ? ` (${status.origin})` : ""}.</>;
+  }
+  return <div className="health-filing" data-config={config.metadata.name}>
+    <p>{body}</p>
+    <p className="description">A sweep files issues only when its task arguments name <code>--file-issues &lt;owner&gt;/&lt;repo&gt;</code>; set them in the Edit team screen's Tasks and schedules step.</p>
+  </div>;
+}
+
+function SweepSchedule({ config, connector, onRun, running, inventory }: { config: ConfigDoc; connector: Connector | undefined; onRun: (config: ConfigDoc) => void; running: boolean; inventory: InventoryResource }) {
   const schedule = config.spec?.schedule;
   const status = config.status?.schedule;
   const scope = [...configScope(config), config.metadata.name];
@@ -71,6 +105,7 @@ function SweepSchedule({ config, onRun, running, inventory }: { config: ConfigDo
       <button type="button" disabled={running} aria-busy={running || undefined} aria-label={`Run sweep now with ${config.metadata.name}`} onClick={() => onRun(config)}>{running ? "Starting sweep…" : "Run sweep now"}</button>
     </div>
     {schedule ? <ScheduleDetails schedule={schedule} status={status} state={false} cellLink={cellLinker(inventory.data, config)} /> : <p className="description">This Config has no schedule.</p>}
+    <FilingAccess config={config} connector={connector} />
   </li>;
 }
 
@@ -80,6 +115,8 @@ export function HealthPage({ revision, major, inventory, onChanged, onSeen }: { 
   const [running, setRunning] = useState("");
   const [sweepResult, setSweepResult] = useState<{ tone: "success" | "error"; message: string } | null>(null);
   const list = useResource<Summary[]>("/api/health/reports", revision + reads);
+  const connectors = useResource<Connector[]>("/api/connectors", 0);
+  const filing = connectors.data?.find(connector => connector.name === filingConnector);
   const hasReports = !!list.data?.length;
   const report = useResource<Report>(hasReports ? `/api/health/reports/${encodeURIComponent(selected)}` : null, revision + reads);
   // A report dropped by retention falls back to the newest one.
@@ -123,7 +160,7 @@ export function HealthPage({ revision, major, inventory, onChanged, onSeen }: { 
         {major.configs.error && <ErrorNotice error={major.configs.error} kind="Configs" />}
         {major.configs.data && !major.sweeps.length && <p className="description" role="status">No health-sweep config found. Run <code>kuke team init</code> on the host to apply majordomo and its sweep task.</p>}
         {suspended.length > 0 && <EnableSweep configs={suspended} />}
-        <ul className="health-sweeps">{major.sweeps.map(config => <SweepSchedule key={JSON.stringify([...configScope(config), config.metadata.name])} config={config} onRun={runSweep} running={running === config.metadata.name} inventory={inventory} />)}</ul>
+        <ul className="health-sweeps">{major.sweeps.map(config => <SweepSchedule key={JSON.stringify([...configScope(config), config.metadata.name])} config={config} connector={filing} onRun={runSweep} running={running === config.metadata.name} inventory={inventory} />)}</ul>
         {sweepResult && <div className={sweepResult.tone === "error" ? "error" : "health-sweep-started"} role={sweepResult.tone === "error" ? "alert" : "status"}>{sweepResult.tone === "error" && <strong>Sweep did not start</strong>}<p>{sweepResult.message}</p></div>}
       </div>
     </section>

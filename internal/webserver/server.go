@@ -147,7 +147,7 @@ func newHandlerWithCatalog(
 	mux.HandleFunc("GET /api/realms/{name}/images", realmImagesHandler(dial))
 	registerResourceRoutes(mux, dial)
 	registerConnectorRoutes(mux, dial, catalog)
-	registerTeamRoutes(mux, dial)
+	registerTeamRoutes(mux, dial, catalog)
 	registerDaemonRoutes(mux, endpoint, dial)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")

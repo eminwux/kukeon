@@ -286,26 +286,7 @@ func connectorsColumn(c *v1beta1.CellConfigDoc) string {
 	}
 	parts := make([]string, 0, len(c.Status.Connectors))
 	for _, status := range c.Status.Connectors {
-		var value string
-		switch {
-		case status.State == v1beta1.ConnectorResolved && status.Identity != nil:
-			value = status.Identity.Name
-			if status.Origin != "" {
-				value += " (" + status.Origin + ")"
-			}
-		case status.State == v1beta1.ConnectorResolved && status.Method != "":
-			value = status.Method
-		case status.State == v1beta1.ConnectorResolved:
-			value = "set"
-			if status.Origin != "" {
-				value += " (" + status.Origin + ")"
-			}
-		case status.Required || status.Identity != nil:
-			value = "MISSING"
-		default:
-			value = "none"
-		}
-		parts = append(parts, status.Connector+"="+value)
+		parts = append(parts, status.Connector+"="+status.Fill())
 	}
 	return strings.Join(parts, ", ")
 }

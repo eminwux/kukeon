@@ -33,6 +33,7 @@ import (
 	"github.com/eminwux/kukeon/internal/team/initialize"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	"github.com/eminwux/kukeon/pkg/team/config"
+	"github.com/eminwux/kukeon/pkg/team/connector"
 	"gopkg.in/yaml.v3"
 )
 
@@ -63,13 +64,15 @@ const (
 )
 
 // teamAPI serves the teams routes. sources, when set, replaces fetching
-// (tests).
+// (tests); catalog is the connector catalog the form offers per-role
+// connectors from (#1649).
 type teamAPI struct {
 	sources map[string]fs.FS
+	catalog *connector.Catalog
 }
 
-func registerTeamRoutes(mux *http.ServeMux, dial Dial) {
-	(&teamAPI{}).register(mux, dial)
+func registerTeamRoutes(mux *http.ServeMux, dial Dial, catalog *connector.Catalog) {
+	(&teamAPI{catalog: catalog}).register(mux, dial)
 }
 
 func (a *teamAPI) register(mux *http.ServeMux, dial Dial) {
@@ -206,8 +209,8 @@ func (a *teamAPI) getTeam(ctx context.Context, client kukeonv1.Client, r *http.R
 		out.Problem = err.Error()
 		return out, nil //nolint:nilerr // the summary and document still show; Problem says what is missing
 	}
-	view := teamViewOf(resolved)
-	form := formOf(resolved.Stored)
+	view := teamViewOf(resolved, a.catalog)
+	form := formOf(resolved.Stored, a.catalog)
 	out.View, out.Form = &view, &form
 	return out, nil
 }
@@ -339,7 +342,7 @@ func (a *teamAPI) applyForm(ctx context.Context, opts initialize.Options, req te
 		if err != nil {
 			return nil, fmt.Errorf("%w: declaration: %w", errdefs.ErrInvalidTeam, err)
 		}
-		team, err := req.Form.apply(base)
+		team, err := req.Form.apply(base, a.catalog)
 		if err != nil {
 			return nil, err
 		}
@@ -374,7 +377,7 @@ func (a *teamAPI) applyForm(ctx context.Context, opts initialize.Options, req te
 	if base == nil {
 		return nil, fmt.Errorf("%w: %s", errdefs.ErrTeamNotFound, name)
 	}
-	team, err := req.Form.apply(base)
+	team, err := req.Form.apply(base, a.catalog)
 	if err != nil {
 		return nil, err
 	}
@@ -450,7 +453,7 @@ func (a *teamAPI) draftTeam(ctx context.Context, client kukeonv1.Client, r *http
 		return nil, err
 	}
 	view := draftView{
-		Origin: draft.Origin, Name: draft.Name, Form: formOf(draft.Team), Declaration: declaration,
+		Origin: draft.Origin, Name: draft.Name, Form: formOf(draft.Team, a.catalog), Declaration: declaration,
 		Sources: make([]draftSourceView, 0, len(draft.Sources)), Notes: nonNil(draft.Notes),
 	}
 	for _, source := range draft.Sources {

@@ -7,11 +7,11 @@ import type { Connector } from "./connectors.mjs";
 import { GitIdentitySelect, OutcomeNotice, PlanView, RefFields } from "./team-plan";
 import {
   availableSources, createBody, draftPayload, editBody, emptyProject, emptySource, imageList, inspectRequest, projectAlias, projectErrors, selectedIndex, stateLabel, stepErrors,
-  stepsFor, taskRows, withAllTasks, withConnector, withConnectorsInherit, withHarness, withInherit, withProject, withRole, withRolePatch, withSource, withTask,
+  roleConnectorRows, stepsFor, taskRows, withAllTasks, withConnector, withConnectorsInherit, withHarness, withInherit, withProject, withRole, withRoleConnector, withRolePatch, withSource, withTask,
 } from "./team-form.mjs";
 import type { Available, ProjectInput } from "./team-form.mjs";
 import { editPayload, needsForce, originLabel, refLabel, sourcesLink, teamsAPI, teamsLink } from "./teams.mjs";
-import type { Draft, FormRole, Selection, SourceContents, Sources, TeamForm, TeamOutcome, TeamView, ViewTask } from "./teams.mjs";
+import type { Draft, FormRole, RoleConnectorView, Selection, SourceContents, Sources, TeamForm, TeamOutcome, TeamView, ViewTask } from "./teams.mjs";
 
 // The team wizard (#1644, AC2 and AC4): one component for New team
 // (#/new-team) and Edit team (#/teams/<name>/edit). Its state is the server's
@@ -174,7 +174,40 @@ function TasksStep({ form, available, inspected, configured, disabled, onInspect
   })}</div>;
 }
 
-function CredentialsStep({ form, missing, disabled, onForm }: { form: TeamForm; missing: string[]; disabled: boolean; onForm: (form: TeamForm) => void }) {
+// identityNames are the stored identities of a connector a team can name (realm default, no space), plus the
+// current choice when it names another.
+function identityNames(secrets: unknown[] | undefined, connector: string, current: string): string[] {
+  const identities = identitiesFor(secrets, connector).filter(identity => identity.realm === "default" && !identity.space);
+  return [...new Set([...identities.map(identity => identity.name), ...(current ? [current] : [])])];
+}
+
+// RoleAccess is the Credentials step's per-role connector switches (#1649, AC6): one row per selected role and
+// connector a team can give a role. While the role list is inherited the rows show the inherited roles, disabled.
+function RoleAccess({ form, connectors, secrets, inheritedRoles, viewRows, disabled, onForm }: {
+  form: TeamForm; connectors: Connector[] | undefined; secrets: unknown[] | undefined; inheritedRoles: Selection[]; viewRows: RoleConnectorView[]; disabled: boolean; onForm: (form: TeamForm) => void;
+}) {
+  const inherited = form.roles.inherit;
+  const roles: { name: string; connectors?: FormRole["connectors"] }[] = inherited ? inheritedRoles.map(role => ({ name: role.name })) : form.roles.items;
+  return <fieldset className="schema-object" aria-label="Per-role access">
+    <legend>Per-role access</legend>
+    <p className="description">A connector a role's cells get although the role does not ask for it, such as GitHub access for majordomo's health sweep. Turning one on adds it to the role's entry in the team; a running cell keeps what it started with until it is restarted.</p>
+    {inherited && <p className="description" role="note">Declare the team's roles to change per-role access.</p>}
+    {!roles.length ? <p className="description">No role is selected.</p> : <div className="table-scroll"><table aria-label="Per-role connectors"><thead><tr><th>Role</th><th>Connector</th><th>Enabled</th><th>Identity</th><th>Resolves to</th></tr></thead><tbody>
+      {roles.flatMap((role, index) => roleConnectorRows(role, connectors, viewRows).map(row => {
+        const off = disabled || inherited;
+        return <tr key={`${role.name}/${row.name}`}>
+          <td><code>{role.name}</code></td>
+          <td>{row.title}</td>
+          <td>{row.required ? <span className="description">Required by the role</span> : <label className="schema-check"><input type="checkbox" aria-label={`${row.title} for ${role.name}`} checked={row.enabled} disabled={off} onChange={event => onForm(withRoleConnector(form, index, row.name, { enabled: event.target.checked }))} />{row.enabled ? "On" : "Off"}</label>}</td>
+          <td>{row.required ? "—" : <select aria-label={`Identity of ${row.name} for ${role.name}`} value={row.identity} disabled={off || !row.enabled} onChange={event => onForm(withRoleConnector(form, index, row.name, { identity: event.target.value }))}><option value="">Default</option>{identityNames(secrets, row.name, row.identity).map(name => <option key={name} value={name}>{name}</option>)}</select>}</td>
+          <td>{row.states.length ? <ul className="state-list">{row.states.map(state => <li key={state.config}><span className="mono-id">{state.config}</span>: {state.fill}</li>)}</ul> : <span className="description">Not rendered</span>}</td>
+        </tr>;
+      }))}
+    </tbody></table></div>}
+  </fieldset>;
+}
+
+function CredentialsStep({ form, missing, inheritedRoles, viewRows, disabled, onForm }: { form: TeamForm; missing: string[]; inheritedRoles: Selection[]; viewRows: RoleConnectorView[]; disabled: boolean; onForm: (form: TeamForm) => void }) {
   const connectors = useResource<Connector[]>("/api/connectors", 0);
   const secrets = useResource<unknown[]>("/api/catalog/secrets", 0);
   return <div className="wizard-step">
@@ -193,7 +226,8 @@ function CredentialsStep({ form, missing, disabled, onForm }: { form: TeamForm; 
         })}
       </tbody></table></div>
     </>}
-    <p className="description">Secret bindings (<code>spec.secrets</code>) and a role's own connectors are kept as they are; edit them as YAML.</p>
+    <RoleAccess form={form} connectors={connectors.data} secrets={secrets.data} inheritedRoles={inheritedRoles} viewRows={viewRows} disabled={disabled} onForm={onForm} />
+    <p className="description">Secret bindings (<code>spec.secrets</code>) and a role's <code>needs.secrets</code> are kept as they are; edit them as YAML.</p>
     {!!missing.length && <><h3>Missing secrets in the last preview</h3><ul className="state-list" aria-label="Missing secrets">{missing.map(item => <li key={item} className="mono-id">{item}</li>)}</ul></>}
   </div>;
 }
@@ -308,7 +342,7 @@ export function TeamWizard({ mode, team, onChanged }: { mode: Mode; team?: TeamV
         {form && key === "sources" && <SourcesStep mode={mode} form={form} draft={draft} sources={sources.data} disabled={disabled} onForm={changeForm} />}
         {form && key === "roles" && <RolesStep form={form} available={available} inspected={inspected} inheritedRoles={inheritedRoles} inheritedHarnesses={inheritedHarnesses} disabled={disabled} onInspect={source => void inspect(source)} onForm={changeForm} />}
         {form && key === "tasks" && <TasksStep form={form} available={available} inspected={inspected} configured={configured} disabled={disabled} onInspect={source => void inspect(source)} onForm={changeForm} />}
-        {form && key === "credentials" && <CredentialsStep form={form} missing={preview?.plan.missingSecrets ?? []} disabled={disabled} onForm={changeForm} />}
+        {form && key === "credentials" && <CredentialsStep form={form} missing={preview?.plan.missingSecrets ?? []} inheritedRoles={inheritedRoles} viewRows={team?.view?.connectors.roles ?? []} disabled={disabled} onForm={changeForm} />}
         {form && key === "review" && <div className="wizard-step">
           <p className="description">{mode === "new" ? <>Adds team <code>{form.name || draft?.name}</code> from <code>{form.project?.url || form.project?.stored}</code> ({refLabel({ [form.project?.refKind ?? "branch"]: form.project?.ref })}).</> : <>Applies the form to team <code>{name}</code>.</>} The apply composes from scratch again: a branch may have moved since the preview, and the apply result is authoritative.</p>
           <div className="connector-actions">

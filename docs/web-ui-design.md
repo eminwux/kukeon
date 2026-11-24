@@ -75,7 +75,10 @@ team (`#/new-team`, opened from the Teams list) steps through Project, Other
 sources, Roles and harnesses, Tasks and schedules, Credentials and Review;
 Edit team (`#/teams/<name>/edit`) is the same wizard from Other sources on,
 filled from the stored team, with an **Edit as YAML** tab for everything the
-form does not show. A step's Next is disabled while it has problems, Back
+form does not show. The Credentials step has per-role connector switches
+(#1649): one row per selected role and connector a team can give a role, with
+an identity picker and what the role's Configs resolve; a connector the role
+requires itself is shown as such, without a switch. A step's Next is disabled while it has problems, Back
 never loses input, and what a source offers is fetched once per wizard. The
 browser never parses YAML: the server answers a draft with a JSON form and the
 declaration, which the browser sends back unchanged. A team's page shows the

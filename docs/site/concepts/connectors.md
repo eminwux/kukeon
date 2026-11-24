@@ -267,6 +267,22 @@ spec:
 - A role entry also gives the role's cells a connector the role does not ask
   for itself.
 
+A stored team's role entry is switched with
+[`kuke team connector`](../cli/kuke-team.md#kuke-team-connector), which edits
+the stored Team and applies it in one command, or with the per-role switches
+of the Edit team form (Teams page → Edit → Credentials → Per-role access):
+
+```bash
+kuke team connector enable backend github --role reviewer --identity review-github
+kuke team connector list backend
+kuke team connector disable backend github --role reviewer
+```
+
+The older spelling of the same opt-in — a secret name the connector's methods
+answer to, in the role entry's `needs.secrets` (`needs: { secrets: [gh-token] }`
+for `github`) — is still read and still enables the connector; `enable` never
+writes it, and `disable` removes it along with the `connectors` entry.
+
 Every rendered Config lists all its connector components under
 `spec.components` — the harness's auth method, `git` when the role works on
 repositories, and each connector the role or the team asks for. Only an identity
@@ -289,6 +305,69 @@ old secret names (`claude-code-oauth-token`, `anthropic-api-key`,
 `openai-api-key`, `gh-token`) selects the method that delivers that secret. Two
 such names of one connector are alternatives — the first method wins and
 `kuke team` says so; set `connectors.<name>.method` to choose.
+
+### Enable a connector on a Config
+
+A Config no team owns enables a connector itself: list the method's component
+in `spec.components` (the blueprint must declare it; a blueprint `kuke team`
+renders declares every connector component), optionally fill its secret slot,
+apply, and restart the cells that should get it:
+
+```yaml
+apiVersion: v1beta1
+kind: CellConfig
+metadata:
+  name: dev
+  realm: default
+spec:
+  blueprint:
+    name: dev-claude
+    realm: default
+  components: [github] # the github connector's token method
+  secrets: # optional: without it the Stack, Space and Realm defaults fill the slot
+    github-token:
+      secretRef: { name: work-github, realm: default }
+```
+
+```bash
+kuke apply -f dev.yaml
+kuke get config dev -o yaml   # status.connectors
+kuke restart <cell>           # a running cell keeps what it started with
+```
+
+`status.connectors` says how the connector resolves right now — resolved, with
+the identity and the level it came from, or unresolved while no fill or
+default names an identity:
+
+```yaml
+status:
+  connectors:
+    - connector: github
+      component: github
+      method: token
+      delivery: env
+      slot: github-token
+      state: resolved
+      required: true
+      identity: { name: work-github, realm: default }
+      origin: config
+---
+status:
+  connectors:
+    - connector: github
+      component: github
+      method: token
+      delivery: env
+      slot: github-token
+      state: unresolved
+      required: true
+```
+
+A Config a team renders (label `kukeon.io/team`) is changed through its team,
+with `kuke team connector` or the Teams page: the team's next apply renders the
+Config whole again, so a hand edit of it does not last.
+[`kuke apply -f`](../cli/kuke-apply.md) of such a Config still applies it, and
+prints a warning naming the team.
 
 ## Per-cell overrides
 

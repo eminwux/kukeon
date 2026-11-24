@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/eminwux/kukeon/pkg/team/config"
+	"github.com/eminwux/kukeon/pkg/team/connector/connectortest"
 	"gopkg.in/yaml.v3"
 )
 
@@ -74,6 +75,30 @@ spec:
     - {name: claude, source: kukeon, path: team/harnesses/claude}
 `
 
+const legacyOptIn = `apiVersion: v1beta1
+kind: Team
+metadata:
+  name: kuke
+spec:
+  roles:
+    - name: majordomo
+      source: kukeon
+      path: team/roles/majordomo
+      needs: {image: [go], secrets: [gh-token]}
+`
+
+const roleConnector = `apiVersion: v1beta1
+kind: Team
+metadata:
+  name: kuke
+spec:
+  roles:
+    - name: majordomo
+      source: kukeon
+      path: team/roles/majordomo
+      connectors: {github: {}}
+`
+
 // formFixtures are the Teams the round trip covers: the two repository
 // files of #1643 AC5, the kuke team, everyField, and the defaults of every
 // TeamDefaults fixture of pkg/team/config/testdata as a team's lists.
@@ -88,6 +113,10 @@ func formFixtures(t *testing.T) map[string]*config.Team {
 		out[name] = team
 	}
 	decode("every-field", []byte(everyField))
+	// #1649 AC7: a legacy needs.secrets opt-in and a role-entry connector
+	// round-trip unchanged.
+	decode("legacy-opt-in", []byte(legacyOptIn))
+	decode("role-connector", []byte(roleConnector))
 	for _, file := range []string{"kukeon.kuketeam.yaml", "agents.kuketeam.yaml"} {
 		raw, err := os.ReadFile(filepath.Join("..", "team", "initialize", "testdata", "fixtures", file))
 		if err != nil {
@@ -144,7 +173,7 @@ func marshalTeam(t *testing.T, team *config.Team) string {
 // sends it back, applied to that Team gives the same bytes.
 func TestFormRoundTrip(t *testing.T) {
 	for name, team := range formFixtures(t) {
-		raw, err := json.Marshal(formOf(team))
+		raw, err := json.Marshal(formOf(team, connectortest.Catalog(t)))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -152,7 +181,7 @@ func TestFormRoundTrip(t *testing.T) {
 		if err = json.Unmarshal(raw, &form); err != nil {
 			t.Fatal(err)
 		}
-		got, err := form.apply(team)
+		got, err := form.apply(team, connectortest.Catalog(t))
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
@@ -169,7 +198,7 @@ func TestFormMapsInheritanceAndTasks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	form := formOf(base)
+	form := formOf(base, connectortest.Catalog(t))
 	off := true
 	form.Roles.Items[0].Tasks.Items[1].Suspend = &off
 	form.Roles.Items[0].Tasks.Items[1].Schedule = "@daily"
@@ -177,7 +206,7 @@ func TestFormMapsInheritanceAndTasks(t *testing.T) {
 	form.Roles.Items[1].Image = []string{" rust "}
 	form.Harnesses.Inherit = true
 	form.Connectors = formConnectors{Items: map[string]formConnector{"claude": {Method: "api-key"}}}
-	got, err := form.apply(base)
+	got, err := form.apply(base, connectortest.Catalog(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,25 +233,123 @@ func TestFormMapsInheritanceAndTasks(t *testing.T) {
 
 	// A definition's identity is the form's; a reference's belongs to its
 	// stored Source.
-	form = formOf(base)
+	form = formOf(base, connectortest.Catalog(t))
 	form.Sources[0].Identity = ""
-	if got, err = form.apply(base); err != nil || got.Spec.Sources[0].Git.IdentityRef != nil ||
+	if got, err = form.apply(base, connectortest.Catalog(t)); err != nil ||
+		got.Spec.Sources[0].Git.IdentityRef != nil ||
 		got.Spec.Sources[0].Git.Author == nil {
 		t.Fatalf("clear identity: %v %+v", err, got.Spec.Sources[0].Git)
 	}
 	form.Sources[1].Identity = "other"
-	if _, err = form.apply(base); err == nil || !strings.Contains(err.Error(), "stored Source") {
+	if _, err = form.apply(base, connectortest.Catalog(t)); err == nil ||
+		!strings.Contains(err.Error(), "stored Source") {
 		t.Fatalf("identity on a reference: %v", err)
 	}
-	form = formOf(base)
+	form = formOf(base, connectortest.Catalog(t))
 	form.Project.RefKind, form.Project.Ref = "", "main"
-	if _, err = form.apply(base); err == nil {
+	if _, err = form.apply(base, connectortest.Catalog(t)); err == nil {
 		t.Fatal("a ref without a kind was accepted")
 	}
-	form = formOf(base)
+	form = formOf(base, connectortest.Catalog(t))
 	form.Project.RefKind, form.Project.Ref = "tag", "v2"
-	if got, err = form.apply(base); err != nil || got.Spec.ProjectSource.Tag != "v2" ||
+	if got, err = form.apply(base, connectortest.Catalog(t)); err != nil || got.Spec.ProjectSource.Tag != "v2" ||
 		got.Spec.ProjectSource.Branch != "" || got.Spec.ProjectSource.Stored != "web" {
 		t.Fatalf("project ref: %v %+v", err, got.Spec.ProjectSource)
 	}
+}
+
+// roleSwitch is the form item of connector name on the form's first role.
+func roleSwitch(t *testing.T, form *teamForm, name string) *formRoleConnector {
+	t.Helper()
+	role := &form.Roles.Items[0]
+	for j := range role.Connectors {
+		if item := &role.Connectors[j]; item.Name == name {
+			return item
+		}
+	}
+	t.Fatalf("role %s has no %s switch: %+v", role.Name, name, role.Connectors)
+	return nil
+}
+
+// TestFormRoleConnectors is #1649 AC6: a switch sends the same change as kuke
+// team connector enable and disable; an untouched one writes nothing.
+func TestFormRoleConnectors(t *testing.T) {
+	catalog := connectortest.Catalog(t)
+	decode := func(raw string) *config.Team {
+		team, err := config.DecodeTeamDeclaration(strings.NewReader(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return team
+	}
+	t.Run("switches", func(t *testing.T) {
+		form := formOf(decode(legacyOptIn), catalog)
+		var names []string
+		for _, item := range form.Roles.Items[0].Connectors {
+			names = append(names, item.Name)
+		}
+		if strings.Join(names, ",") != "example-token,git,github" {
+			t.Fatalf("switches = %v, want the togglable connectors only", names)
+		}
+		if !roleSwitch(t, &form, "github").Enabled || roleSwitch(t, &form, "git").Enabled {
+			t.Fatalf("a legacy opt-in must show as on: %+v", form.Roles.Items[0].Connectors)
+		}
+	})
+	t.Run("enable", func(t *testing.T) {
+		base := config.Majordomo()
+		form := formOf(base, catalog)
+		roleSwitch(t, &form, "github").Enabled = true
+		got, err := form.apply(base, catalog)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := config.Majordomo()
+		want.Spec.Roles[0].Connectors = map[string]config.ConnectorChoice{"github": {}}
+		if marshalTeam(t, got) != marshalTeam(t, want) {
+			t.Fatalf("got:\n%s", marshalTeam(t, got))
+		}
+		if base.Spec.Roles[0].Connectors != nil {
+			t.Fatal("apply changed its base")
+		}
+	})
+	t.Run("identity", func(t *testing.T) {
+		base := decode(roleConnector)
+		form := formOf(base, catalog)
+		roleSwitch(t, &form, "github").Identity = "bot-token"
+		got, err := form.apply(base, catalog)
+		if err != nil || got.Spec.Roles[0].Connectors["github"].Identity != "bot-token" {
+			t.Fatalf("%v %+v", err, got.Spec.Roles[0].Connectors)
+		}
+	})
+	t.Run("disable clears both spellings", func(t *testing.T) {
+		base := decode(legacyOptIn)
+		base.Spec.Roles[0].Connectors = map[string]config.ConnectorChoice{"github": {}}
+		form := formOf(base, catalog)
+		roleSwitch(t, &form, "github").Enabled = false
+		got, err := form.apply(base, catalog)
+		if err != nil {
+			t.Fatal(err)
+		}
+		role := got.Spec.Roles[0]
+		if role.Connectors != nil || role.Needs == nil || len(role.Needs.Secrets) != 0 || role.Needs.Image[0] != "go" {
+			t.Fatalf("role = %+v needs = %+v", role, role.Needs)
+		}
+	})
+	t.Run("an inherited role list changes nothing", func(t *testing.T) {
+		base := decode(roleConnector)
+		form := formOf(base, catalog)
+		form.Roles.Inherit = true
+		if got, err := form.apply(base, catalog); err != nil || got.Spec.Roles != nil {
+			t.Fatalf("%v %+v", err, got.Spec.Roles)
+		}
+	})
+	t.Run("a harness connector is refused", func(t *testing.T) {
+		base := decode(roleConnector)
+		form := formOf(base, catalog)
+		form.Roles.Items[0].Connectors = append(form.Roles.Items[0].Connectors,
+			formRoleConnector{Name: "claude", Enabled: true})
+		if _, err := form.apply(base, catalog); err == nil || !strings.Contains(err.Error(), "spec.connectors") {
+			t.Fatalf("err = %v", err)
+		}
+	})
 }
