@@ -21,6 +21,7 @@ import (
 	"io/fs"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/gitcred"
 	"github.com/eminwux/kukeon/internal/team/gitremote"
 	"github.com/eminwux/kukeon/internal/util/buildinfo"
 	"github.com/eminwux/kukeon/pkg/team/config"
@@ -35,7 +36,7 @@ func (e *sourceSkewError) Unwrap() error { return e.err }
 
 // compositionError wraps a failed composition with the sources it read.
 func compositionError(err error, declared []config.Source, trees map[string]fs.FS) error {
-	hint := sourceSkewHint(declared, trees)
+	hint := sourceSkewHint(declared, trees, config.KukeonSource())
 	wrapped := fmt.Errorf("preflight composition: %w%s", err, hint)
 	if hint == "" {
 		return wrapped
@@ -47,8 +48,12 @@ func compositionError(err error, declared []config.Source, trees map[string]fs.F
 // document the binary rejects points at the revision it came from rather than
 // at a local prerequisite (#1631). kuke reads exactly one schema version, so a
 // rejected apiVersion means that revision and this binary disagree on it.
-func sourceSkewHint(declared []config.Source, trees map[string]fs.FS) string {
+// When the fetched kukeon source is the stored one at a revision other than
+// pin (the revision this binary pins), the hint names kuke team init
+// --upgrade: --force and --reapply keep the stored Source's revision.
+func sourceSkewHint(declared []config.Source, trees map[string]fs.FS, pin config.Source) string {
 	var names []string
+	stale := false
 	for _, source := range declared {
 		if _, ok := trees[source.Name]; !ok {
 			continue
@@ -58,6 +63,11 @@ func sourceSkewHint(declared []config.Source, trees map[string]fs.FS) string {
 			location = source.URL
 		}
 		names = append(names, fmt.Sprintf("%s (%s, %s)", source.Name, location, source.Revision()))
+		if source.Name == config.KukeonSourceName &&
+			gitcred.SameRepository(source.URL, config.KukeonSourceURL) &&
+			source.Revision() != pin.Revision() {
+			stale = true
+		}
 	}
 	if len(names) == 0 {
 		return ""
@@ -66,10 +76,14 @@ func sourceSkewHint(declared []config.Source, trees map[string]fs.FS) string {
 	if version == "" {
 		version = "version unknown"
 	}
+	remedy := "so pin that source to a revision that matches this binary"
+	if stale {
+		remedy = fmt.Sprintf("so run %s to re-pin Source %s to this binary's %s",
+			upgradeCommand, config.KukeonSourceName, pin.Revision())
+	}
 	return fmt.Sprintf(
 		"; composed from fetched sources %s, and this kuke (%s) reads only %s documents: "+
-			"a rejected apiVersion means a source revision and this binary disagree on schema version, "+
-			"so pin that source to a revision that matches this binary",
-		strings.Join(names, ", "), version, config.APIVersion,
+			"a rejected apiVersion means a source revision and this binary disagree on schema version, %s",
+		strings.Join(names, ", "), version, config.APIVersion, remedy,
 	)
 }
