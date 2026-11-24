@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  availableSources, createBody, cronErrors, draftPayload, editBody, emptyProject, gitIdentities, inspectRequest, projectErrors, rolesErrors, sourcesErrors, stepErrors, stepsFor,
+  availableSources, createBody, cronErrors, draftPayload, editBody, emptyProject, gitIdentities, initialPathValid, inspectRequest, projectErrors, rolesErrors, sourcesErrors, stepErrors, stepsFor,
   suspendOf, switchOf, taskRows, tasksErrors, withAllTasks, withConnector, withConnectorsInherit, withHarness, withInherit, withProject, withRole, withRolePatch, withSource, withTask,
 } from "./team-form.mjs";
 
@@ -73,6 +73,14 @@ test("roles: selecting from an inherited list starts from the defaults; dropping
   next = withHarness(form(), { name: "claude", source: "kukeon", path: "h/claude" }, true, [{ name: "codex", source: "kukeon", path: "h/codex" }]);
   assert.deepEqual(next.harnesses.items.map(h => h.name), ["codex", "claude"]);
   assert.deepEqual(rolesErrors({ ...form(), roles: { inherit: false, items: [] } }), ["Select at least one role, or use the default roles."]);
+});
+
+test("a role's initial path follows config.validateInitialPath: $HOME, $HOME/<dir>, / or a clean absolute path", () => {
+  for (const ok of ["", "$HOME", "$HOME/work", "$HOME/a/b-c_d.e", "/", "/workspace", "/home/user/web"]) assert.equal(initialPathValid(ok), true, ok);
+  for (const bad of ["work", "~/work", "$HOME/", "$HOMEwork", "$HOME/../etc", "$HOME//a", "/a//b", "/a/./b", "/a/../b", "/a/", "/a b", "/a:b", "${HOME}"]) assert.equal(initialPathValid(bad), false, bad);
+  const withPath = initialPath => ({ ...form(), roles: { inherit: false, items: [{ ...form().roles.items[0], name: "majordomo", initialPath }] } });
+  assert.deepEqual(rolesErrors(withPath(" $HOME ")), []);
+  assert.deepEqual(rolesErrors(withPath("work")), ["Role majordomo: the initial path is $HOME, $HOME/<directory> or a clean absolute path (letters, digits, _, ., / and -)."]);
 });
 
 test("a schedule switch is suspend: on false, off true, the role's null", () => {
