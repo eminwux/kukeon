@@ -2,33 +2,52 @@
 
 ## Navigation model
 
-The Resources dashboard is the default landing page; there is no separate
-Workspace welcome screen. The persistent sidebar lists cells from
-all accessible realms, spaces, and stacks. Each entry shows its full parent
-scope and daemon-reported state; full scoped coordinates identify the selected
-cell even when names repeat. Search matches names and scope. Grouping defaults
-to **None** and can use any label key present in the current cell inventory.
-Cells missing that label appear under **Ungrouped**. Group selection and collapsed
-groups are browser preferences, not cell metadata. The sidebar initially shows
-25 groups and 100 cells per group, with controls to reveal more. It remains available in Administration;
-on narrow screens it opens from the menu button and closes after selection.
+The UI has two views that share one top bar (#1635). **Workbench** is for the
+day-to-day job, working in cell terminals: the terminal grid, the cell screen,
+a cell's container pages and New Cell. **Manage** is for the occasional job,
+configuring resources: the Overview and every resource and administration page.
+The view is a function of the URL (`viewOf(route)`), never stored; the top
+bar's **Workbench | Manage** switch is two links, to the grid (`#/`) and to the
+Overview (`#/resources`), and does not remember the last page of a view. The
+logo always opens the grid.
+
+The Workbench home (`#/`) is a grid with one tile per active cell: name,
+scope, state, drift and a plain-text thumbnail of the terminal's last rows,
+read through the server's screenshot route only for tiles on screen and only
+while the grid is the visible page. Attention comes first inside each group.
+The Workbench sidebar lists active cells (every state except Stopped and
+Exited, plus the open cell); a **Stopped · N** link opens the rest in the Cells
+table. Each entry shows its full parent scope and daemon-reported state; full
+scoped coordinates identify the selected cell even when names repeat. Search
+matches names and scope, and the search and grouping are shared by the sidebar
+and the grid. Grouping defaults to **None** and can use any label key present
+in the current cell inventory. Cells missing that label appear under
+**Ungrouped**. Group selection and collapsed groups are browser preferences,
+not cell metadata. The sidebar initially shows 25 groups and 100 cells per
+group, with controls to reveal more. On narrow screens it opens from the menu
+button and closes after selection.
 
 The cell terminal (`#/workspace/<realm>/<space>/<stack>/<cell>`) shows the selected cell's terminal first, followed by status,
 overview, references, and containers. The toolbar's **New Cell** opens a global workflow with
 Config-based and manual specification creation. Both create, start and attach
 in one click, with an optional preview in its own panel; creating stopped or
 without a terminal are opt-outs. Terminal sessions belong to the app
-shell: switching cells or container tabs keeps inactive attachments mounted,
+shell: switching cells, container tabs or views keeps inactive attachments mounted,
 and **Detach** explicitly releases one without stopping the workload. Four
 connections and eight retained terminal surfaces can coexist in one browser tab.
 The server attach protocol cannot replay bytes lost during a disconnect or
 guarantee that a terminal process survives reconnection or page reload.
 
-Administration contains the resource dashboard, with summary counts for realms,
-spaces, stacks, and cells, and the resource-kind navigation for realms, spaces,
-stacks, cells, blueprints, configs, volumes, and secrets. Containers remain
-accessible from their cell details. Historical resource and catalog URLs still
-open Administration views, and browser Back/Forward retains scope and document
+Manage replaces the cell list in the sidebar with one flat vertical list:
+Overview, Realms, Spaces, Stacks, Cells, Blueprints, Configs, Volumes, Secrets,
+Connectors, Teams, Images and Daemon. A new kind adds one line, never a link to
+a row that wraps. The Overview leads with the cells needing attention, then the
+summary counts and a Health card for the newest sweep report. Health is a tab
+of the Daemon page, next to Status (the connectivity check) and Logs. The
+Manage side of the switch shows a dot when the daemon, the version pair or an
+unseen report with findings needs a look. Containers remain accessible from
+their cell details. Historical resource, catalog and `#/health` URLs still
+open their pages, and browser Back/Forward retains the view, scope and document
 mode. Connection success does not imply workload health.
 
 ## Lists and details

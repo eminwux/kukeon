@@ -1,22 +1,15 @@
 import { useMemo, useState } from "react";
-import type { InventoryResource, Row } from "./inventory";
-import { workspaceLink } from "./routes";
+import type { InventoryResource } from "./inventory";
+import { listLink, workspaceLink } from "./routes";
 import { DriftBadge, ScopePath, StateBadge } from "./status";
 import type { TerminalState } from "./terminal";
+import type { CellFilter } from "./cell-filter";
+import { activeCells, cellMatches, groupCells, groupingKeys } from "./cells.mjs";
 
-const groupingKey = "kukeon-cell-grouping";
 const collapsedKey = "kukeon-cell-collapsed-groups";
 const pageSize = 100;
 const groupPageSize = 25;
-const ungrouped = "Ungrouped";
-// Controller-managed identity labels (realm.kukeon.io, cell.kukeon.io, …) repeat the scope or are unique per
-// cell, so Group by leaves them out. Same ".kukeon.io" suffix as managedLabelSuffix in
-// internal/controller/runner/labels.go.
-const managedLabelKey = /^[^/]*\.kukeon\.io(\/|$)/;
 
-function storedGrouping(): string {
-  try { return localStorage.getItem(groupingKey) ?? ""; } catch { return ""; }
-}
 function storedCollapsed(): string[] {
   try {
     const value: unknown = JSON.parse(localStorage.getItem(collapsedKey) ?? "[]");
@@ -26,38 +19,34 @@ function storedCollapsed(): string[] {
 function save(key: string, value: string) {
   try { localStorage.setItem(key, value); } catch { /* Preferences are optional. */ }
 }
-function groupId(key: string, value: string | null) { return JSON.stringify([key, value]); }
 
-export function CellSidebar({ inventory, selectedScope, terminalStates }: {
+// StoppedCellsLink names the cells the Workbench hides and opens them in Manage → Cells (#1635).
+export function StoppedCellsLink({ hidden }: { hidden: number }) {
+  return hidden > 0 ? <a className="cell-stopped-link" href={listLink(3, [], "inactive")}>Stopped · {hidden}</a> : null;
+}
+
+// The Workbench sidebar lists active cells only (#1635); the open cell stays listed whatever its state.
+export function CellSidebar({ inventory, selectedScope, terminalStates, filter }: {
   inventory: InventoryResource;
   selectedScope: string[];
   terminalStates: Record<string, TerminalState>;
+  filter: CellFilter;
 }) {
-  const [search, setSearch] = useState("");
-  const [groupBy, setGroupBy] = useState(storedGrouping);
+  const { search, setSearch, groupBy, setGroupBy } = filter;
   const [collapsed, setCollapsed] = useState(storedCollapsed);
   const [limits, setLimits] = useState<Record<string, number>>({});
   const [groupLimit, setGroupLimit] = useState(groupPageSize);
-  const cells = inventory.data?.rows[3] ?? [];
-  const keys = useMemo(() => [...new Set(cells.flatMap(row => Object.keys(row.doc.metadata.labels ?? {})))].filter(key => key === groupBy || !managedLabelKey.test(key)).sort(), [cells, groupBy]);
-  const query = search.trim().toLocaleLowerCase();
-  const filtered = useMemo(() => cells.filter(row => !query || row.scope.join(" / ").toLocaleLowerCase().includes(query)), [cells, query]);
-  const groups = useMemo(() => {
-    if (!groupBy) return [{ id: groupId("", "All cells"), label: "All cells", rows: filtered }];
-    const found = new Map<string | null, Row[]>();
-    for (const row of filtered) {
-      const value = row.doc.metadata.labels?.[groupBy]?.trim() || null;
-      const rows = found.get(value) ?? [];
-      rows.push(row);
-      found.set(value, rows);
-    }
-    return [...found].sort(([a], [b]) => a === null ? 1 : b === null ? -1 : a.localeCompare(b)).map(([value, rows]) => ({ id: groupId(groupBy, value), label: value === null ? ungrouped : value === ungrouped ? `${ungrouped} (label value)` : value, rows }));
-  }, [filtered, groupBy]);
+  const all = inventory.data?.rows[3] ?? [];
+  const cells = useMemo(() => activeCells(all, selectedScope), [all, selectedScope]);
+  const hidden = all.length - cells.length;
+  const keys = useMemo(() => groupingKeys(cells, groupBy), [cells, groupBy]);
+  const filtered = useMemo(() => cells.filter(row => cellMatches(row, search)), [cells, search]);
+  const groups = useMemo(() => groupCells(filtered, groupBy), [filtered, groupBy]);
   // When every listed cell shares one realm / space / stack, show it once instead of on every row.
   const sharedScope = filtered.length && filtered.every(row => row.scope.slice(0, 3).join(" / ") === filtered[0].scope.slice(0, 3).join(" / ")) ? filtered[0].scope.slice(0, 3).join(" / ") : "";
   const incomplete = !!inventory.error || !!inventory.data?.failures.length;
   function changeGrouping(value: string) {
-    setGroupBy(value); setLimits({}); setGroupLimit(groupPageSize); save(groupingKey, value);
+    setGroupBy(value); setLimits({}); setGroupLimit(groupPageSize);
   }
   function toggleGroup(id: string) {
     const next = collapsed.includes(id) ? collapsed.filter(item => item !== id) : [...collapsed, id];
@@ -72,7 +61,7 @@ export function CellSidebar({ inventory, selectedScope, terminalStates }: {
     <div className="cell-navigation-results" aria-live="polite">
       {inventory.loading && !inventory.data && <p role="status">Loading cells…</p>}
       {incomplete && <p className="cell-inventory-warning">{inventory.data ? "Inventory incomplete or stale. Refresh to retry." : "Cells unavailable. Refresh to retry."}</p>}
-      {!inventory.loading && !incomplete && !cells.length && <p>No cells found.</p>}
+      {!inventory.loading && !incomplete && !cells.length && <p>{hidden ? "No active cells." : "No cells found."}</p>}
       {!!cells.length && !filtered.length && <p>No matching cells.</p>}
       {!!filtered.length && <p className="cell-result-count">{filtered.length} {filtered.length === 1 ? "cell" : "cells"}{incomplete ? " in retained inventory" : ""}</p>}
     </div>
@@ -94,5 +83,6 @@ export function CellSidebar({ inventory, selectedScope, terminalStates }: {
       })}
       {groups.length > groupLimit && <button className="cell-more" onClick={() => setGroupLimit(value => value + groupPageSize)}>Show {Math.min(groupPageSize, groups.length - groupLimit)} more groups</button>}
     </nav>
+    <StoppedCellsLink hidden={hidden} />
   </section>;
 }

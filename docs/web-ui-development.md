@@ -2,12 +2,12 @@
 
 The frontend foundation lives in `internal/webui/frontend`: a client-rendered
 React and TypeScript application built with Vite. The CLI serves the embedded
-Workspace and a same-origin HTTP API backed by kukeond.
+web UI and a same-origin HTTP API backed by kukeond.
 See [local server usage](web-server.md).
 
 ## Cell lifecycle actions
 
-The Workspace exposes Start, Stop, and Restart for each fully scoped cell.
+The web UI exposes Start, Stop, and Restart for each fully scoped cell.
 `POST /api/realms/{realm}/spaces/{space}/stacks/{stack}/cells/{cell}/{start|stop|restart}`
 accepts no request body and delegates Start and Stop directly to the existing
 daemon RPCs. Restart uses the same state-aware orchestration as `kuke restart`:
@@ -21,9 +21,9 @@ scoped cell and returns HTTP 409; kukeond still owns lifecycle locking and
 state validation across all clients. Permission errors return 403, invalid
 states and conflicts return 409, missing cells return 404, and daemon failures
 return 503. Restart errors include a `phase` (`lookup`, `validation`,
-`stopping`, or `starting`) so the Workspace can distinguish stop and start
+`stopping`, or `starting`) so the web UI can distinguish stop and start
 failures; `stoppedFirst` identifies a start failure after a successful stop.
-The Workspace refreshes the cell after partial completion. These state-changing
+The web UI refreshes the cell after partial completion. These state-changing
 requests use the same Host and Origin protections as the rest of the local API.
 
 Terminal connection state is independent from cell runtime state. After a
