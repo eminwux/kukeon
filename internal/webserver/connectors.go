@@ -550,7 +550,7 @@ type configConnectorRequest struct {
 // Config"): the identity goes into the Config's own secret fill — or its git
 // block, for the git connector — and wins over every scope default. Clearing
 // it returns the Config to the defaults. A Config a team owns is refused:
-// `kuke team add` re-renders it from the team definition, so the choice
+// `kuke create team` re-renders it from the team definition, so the choice
 // belongs there (or in a scope default).
 func (a connectorAPI) pickForConfig(ctx context.Context, c kukeonv1.Client, r *http.Request) (any, error) {
 	var input configConnectorRequest

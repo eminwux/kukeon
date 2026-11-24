@@ -72,7 +72,7 @@ func NewTeamDefaultsCmd() *cobra.Command {
 				_, err = cmd.OutOrStdout().Write(got.Document)
 				return err
 			}
-			defaults, err := teamconfig.DecodeDefaults(bytes.NewReader(got.Document))
+			defaults, err := teamconfig.DecodeStoredDefaults(bytes.NewReader(got.Document))
 			if err != nil {
 				return fmt.Errorf("stored TeamDefaults: %w", err)
 			}
@@ -98,25 +98,15 @@ func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
 }
 
 // summary is the JSON form: a summary, never the declaration types, whose
-// omitted-versus-empty distinction only YAML keeps.
+// omitted-versus-empty distinction only YAML keeps. The sources roles name
+// are stored Sources (#1643; kuke get sources).
 type summary struct {
-	Sources   []source `json:"sources"`
 	Roles     []string `json:"roles"`
 	Harnesses []string `json:"harnesses"`
 }
 
-type source struct {
-	Name      string `json:"name"`
-	URL       string `json:"url"`
-	Ref       string `json:"ref"`
-	ClonePath string `json:"clonePath,omitempty"`
-}
-
 func summarize(d *teamconfig.TeamDefaults) summary {
-	out := summary{Sources: []source{}, Roles: []string{}, Harnesses: []string{}}
-	for _, s := range d.Spec.Defaults.Sources {
-		out.Sources = append(out.Sources, source{Name: s.Name, URL: s.URL, Ref: ref(s), ClonePath: s.ClonePath})
-	}
+	out := summary{Roles: []string{}, Harnesses: []string{}}
 	for _, r := range d.Spec.Defaults.Roles {
 		out.Roles = append(out.Roles, r.Name+"="+r.Source+":"+r.Path)
 	}
@@ -129,35 +119,9 @@ func summarize(d *teamconfig.TeamDefaults) summary {
 func printDefaults(cmd *cobra.Command, realm string, d *teamconfig.TeamDefaults) {
 	s := summarize(d)
 	cmd.Printf("TeamDefaults of realm %s\n\n", realm)
-	if len(s.Sources) == 0 {
-		cmd.Println("Sources: none")
-	} else {
-		rows := make([][]string, 0, len(s.Sources))
-		for _, src := range s.Sources {
-			clone := src.ClonePath
-			if clone == "" {
-				clone = "-"
-			}
-			rows = append(rows, []string{src.Name, src.URL, src.Ref, clone})
-		}
-		shared.PrintTable(cmd, []string{"SOURCE", "URL", "REF", "CLONE PATH"}, rows)
-	}
-	cmd.Println()
 	cmd.Printf("Default roles:     %s\n", list(s.Roles))
 	cmd.Printf("Default harnesses: %s\n", list(s.Harnesses))
-}
-
-func ref(s teamconfig.Source) string {
-	switch {
-	case s.Branch != "":
-		return "branch " + s.Branch
-	case s.Tag != "":
-		return "tag " + s.Tag
-	case s.Commit != "":
-		return "commit " + s.Commit
-	default:
-		return "default branch"
-	}
+	cmd.Println("Sources: kuke get sources")
 }
 
 func list(items []string) string {

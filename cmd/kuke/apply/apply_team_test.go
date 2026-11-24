@@ -52,6 +52,11 @@ func (f *teamFake) ListTeams(context.Context, string) ([]kukeonv1.GetTeamResult,
 	return nil, nil
 }
 
+// ListSources: no Source is stored (#1643).
+func (f *teamFake) ListSources(context.Context, string) ([]kukeonv1.GetSourceResult, error) {
+	return nil, nil
+}
+
 // TestApplyFileSendsTeamsThroughComposition pins D7 and AC5: the file's
 // other documents are applied first, in one ApplyDocuments without the Team,
 // and the Team is then composed as kuke team apply -f composes it. A Team

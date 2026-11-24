@@ -54,7 +54,7 @@ type RoleSpec struct {
 	// renders onto the right runtime type.
 	Needs RoleNeeds `json:"needs,omitempty"      yaml:"needs,omitempty"`
 	// Tasks are the named, argument-free unattended runs of the role. `kuke
-	// team add` renders each one a team selects as its own headless-only,
+	// create team` renders each one a team selects as its own headless-only,
 	// self-deleting CellConfig (`<team>-<role>-<harness>-<task>`).
 	Tasks []RoleTask `json:"tasks,omitempty"      yaml:"tasks,omitempty"`
 }

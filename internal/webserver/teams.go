@@ -24,9 +24,11 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"net"
 	"net/http"
 	"net/rpc"
+	"slices"
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -37,12 +39,13 @@ import (
 )
 
 // The teams API (issue #1618, AC15 to AC17). Every route calls
-// internal/team/initialize, the package `kuke team` and `kuke apply -f` call,
-// so a preview, an apply, a source registration and a defaults edit are the
-// same code from the browser as from the CLI. Composition runs here, in kuke
-// serve, as the account running it: sources are fetched with its git
-// configuration and a secret binding's source.env / source.file is read by
-// this process (D1, G5).
+// internal/team/initialize, the package `kuke team`, `kuke create team`,
+// `kuke create source` and `kuke apply -f` call, so a preview, an apply, a
+// stored Source and a defaults edit are the same code from the browser as
+// from the CLI (#1643, AC15). Composition runs here, in kuke serve, as the
+// account running it: a Source is fetched with its stored git identity when
+// it names one, else with this account's git configuration, and a secret
+// binding's source.env / source.file is read by this process (D1, G5).
 //
 // A declaration travels as a YAML string in both directions (G1): only plans,
 // summaries and results are JSON. Every route that fetches from git is a
@@ -197,13 +200,14 @@ func (a *teamAPI) getTeam(ctx context.Context, client kukeonv1.Client, r *http.R
 	return teamView{Summary: summaryView(got.Summary), Document: string(got.Document)}, nil
 }
 
-// teamRequest is an add or an edit: the inputs of kuke team add, or of kuke
-// team apply -f when it carries a declaration and no source.
+// teamRequest is a create or an edit: the inputs of kuke create team, or of
+// kuke team apply -f when it carries a declaration and no source.
 type teamRequest struct {
-	// Name is the team. With Source it is add's NAME; with only a
+	// Name is the team. With Source it is create team's NAME; with only a
 	// Declaration it must match the declaration's metadata.name when set.
 	Name string `json:"name"`
-	// Source, Branch, Tag and Commit are add's --source and ref flags.
+	// Source, Branch, Tag and Commit are create team's --source and ref
+	// flags.
 	Source string `json:"source"`
 	Branch string `json:"branch"`
 	Tag    string `json:"tag"`
@@ -364,14 +368,13 @@ func (a *teamAPI) deleteTeam(ctx context.Context, client kukeonv1.Client, r *htt
 	}, nil
 }
 
-// sourceView is a registered source.
+// sourceView is a stored Source.
 type sourceView struct {
-	Name      string `json:"name"`
-	URL       string `json:"url"`
-	Branch    string `json:"branch,omitempty"`
-	Tag       string `json:"tag,omitempty"`
-	Commit    string `json:"commit,omitempty"`
-	ClonePath string `json:"clonePath,omitempty"`
+	Name   string `json:"name"`
+	URL    string `json:"url"`
+	Branch string `json:"branch,omitempty"`
+	Tag    string `json:"tag,omitempty"`
+	Commit string `json:"commit,omitempty"`
 }
 
 // selectionView is a default role or harness.
@@ -388,24 +391,31 @@ type sourcesView struct {
 }
 
 func toSourceView(s config.Source) sourceView {
-	return sourceView{
-		Name: s.Name, URL: s.URL, Branch: s.Branch, Tag: s.Tag, Commit: s.Commit, ClonePath: s.ClonePath,
-	}
+	return sourceView{Name: s.Name, URL: s.URL, Branch: s.Branch, Tag: s.Tag, Commit: s.Commit}
 }
 
+// listSources lists every stored Source (#1643) and the default roles and
+// harnesses.
 func (a *teamAPI) listSources(ctx context.Context, client kukeonv1.Client, _ *http.Request) (any, error) {
+	stored, err := initialize.Sources(ctx, client)
+	if err != nil {
+		return nil, err
+	}
 	defaults, err := initialize.Defaults(ctx, client)
 	if err != nil {
 		return nil, err
 	}
 	d := defaults.Spec.Defaults
 	view := sourcesView{
-		Sources:          make([]sourceView, 0, len(d.Sources)),
+		Sources:          make([]sourceView, 0, len(stored)),
 		DefaultRoles:     make([]selectionView, 0, len(d.Roles)),
 		DefaultHarnesses: make([]selectionView, 0, len(d.Harnesses)),
 	}
-	for _, s := range d.Sources {
-		view.Sources = append(view.Sources, toSourceView(s))
+	for _, name := range slices.Sorted(maps.Keys(stored)) {
+		spec := stored[name]
+		view.Sources = append(view.Sources, sourceView{
+			Name: name, URL: spec.URL, Branch: spec.Branch, Tag: spec.Tag, Commit: spec.Commit,
+		})
 	}
 	for _, role := range d.Roles {
 		view.DefaultRoles = append(
@@ -422,14 +432,13 @@ func (a *teamAPI) listSources(ctx context.Context, client kukeonv1.Client, _ *ht
 	return view, nil
 }
 
-// sourceRequest is kuke team source add's flags.
+// sourceRequest is kuke create source's flags.
 type sourceRequest struct {
-	Name      string `json:"name"`
-	URL       string `json:"url"`
-	Branch    string `json:"branch"`
-	Tag       string `json:"tag"`
-	Commit    string `json:"commit"`
-	ClonePath string `json:"clonePath"`
+	Name   string `json:"name"`
+	URL    string `json:"url"`
+	Branch string `json:"branch"`
+	Tag    string `json:"tag"`
+	Commit string `json:"commit"`
 }
 
 // contentsView is what a source offers.
@@ -439,8 +448,9 @@ type contentsView struct {
 	Source sourceView `json:"source"`
 }
 
-// defaultsChangeView reports an edit of the TeamDefaults: which teams
-// inherit from it and so need a reapply to see the change (AC14, G4).
+// defaultsChangeView reports an edit of the TeamDefaults or a stored Source:
+// which teams inherit from the defaults and so need a reapply to see the
+// change (AC14, G4), and what a stored Source offers.
 type defaultsChangeView struct {
 	Action     string        `json:"action"`
 	Inheriting []string      `json:"inheriting"`
@@ -448,14 +458,7 @@ type defaultsChangeView struct {
 }
 
 func changeView(change initialize.DefaultsChange) defaultsChangeView {
-	view := defaultsChangeView{Action: change.Action, Inheriting: nonNil(change.Inheriting)}
-	if change.Discovered != nil {
-		view.Discovered = &contentsView{
-			Source:         toSourceView(change.Discovered.Source),
-			SourceContents: change.Discovered,
-		}
-	}
-	return view
+	return defaultsChangeView{Action: change.Action, Inheriting: nonNil(change.Inheriting)}
 }
 
 func (a *teamAPI) addSource(ctx context.Context, client kukeonv1.Client, r *http.Request) (any, error) {
@@ -463,14 +466,21 @@ func (a *teamAPI) addSource(ctx context.Context, client kukeonv1.Client, r *http
 	if err := decodeJSONBody(r, maxConnectorBody, &req); err != nil {
 		return nil, err
 	}
-	change, err := initialize.AddSource(ctx, initialize.SourceOptions{
+	change, err := initialize.CreateSource(ctx, initialize.SourceOptions{
 		Options: a.options(client, false), Name: req.Name, URL: req.URL,
-		Branch: req.Branch, Tag: req.Tag, Commit: req.Commit, ClonePath: req.ClonePath,
+		Branch: req.Branch, Tag: req.Tag, Commit: req.Commit,
 	})
 	if err != nil {
 		return nil, err
 	}
-	return changeView(change), nil
+	view := defaultsChangeView{Action: change.Action, Inheriting: []string{}}
+	if change.Discovered != nil {
+		view.Discovered = &contentsView{
+			Source:         toSourceView(change.Discovered.Source),
+			SourceContents: change.Discovered,
+		}
+	}
+	return view, nil
 }
 
 func (a *teamAPI) inspectSource(ctx context.Context, client kukeonv1.Client, r *http.Request) (any, error) {
@@ -481,12 +491,13 @@ func (a *teamAPI) inspectSource(ctx context.Context, client kukeonv1.Client, r *
 	return contentsView{Source: toSourceView(contents.Source), SourceContents: contents}, nil
 }
 
+// removeSource deletes a stored Source; kukeond refuses one a team or the
+// defaults reference (ErrSourceInUse, 409).
 func (a *teamAPI) removeSource(ctx context.Context, client kukeonv1.Client, r *http.Request) (any, error) {
-	change, err := initialize.RemoveSource(ctx, a.options(client, false), r.PathValue("name"))
-	if err != nil {
+	if err := initialize.DeleteSource(ctx, a.options(client, false), r.PathValue("name")); err != nil {
 		return nil, err
 	}
-	return changeView(change), nil
+	return defaultsChangeView{Action: "removed", Inheriting: []string{}}, nil
 }
 
 type defaultsView struct {
@@ -570,15 +581,19 @@ func teamErrorStatus(err error) (int, string, bool) {
 	switch {
 	case errors.Is(err, errdefs.ErrTeamNotFound),
 		errors.Is(err, errdefs.ErrTeamDefaultsNotFound),
-		errors.Is(err, errdefs.ErrTeamScopeNotFound):
+		errors.Is(err, errdefs.ErrTeamScopeNotFound),
+		errors.Is(err, errdefs.ErrSourceNotFound):
 		return http.StatusNotFound, "not_found", true
-	case errors.Is(err, errdefs.ErrTeamExists):
+	case errors.Is(err, errdefs.ErrTeamExists),
+		errors.Is(err, errdefs.ErrSourceExists):
 		return http.StatusConflict, "already_exists", true
-	case errors.Is(err, errdefs.ErrTeamNameInUse):
+	case errors.Is(err, errdefs.ErrTeamNameInUse),
+		errors.Is(err, errdefs.ErrSourceInUse):
 		return http.StatusConflict, "in_use", true
 	case errors.Is(err, errdefs.ErrTeamReserved):
 		return http.StatusConflict, "reserved", true
 	case errors.Is(err, errdefs.ErrInvalidTeam),
+		errors.Is(err, errdefs.ErrInvalidSource),
 		errors.Is(err, errdefs.ErrTeamApplyOnly):
 		return http.StatusBadRequest, "invalid_request", true
 	case errors.Is(err, errTeamOperation):

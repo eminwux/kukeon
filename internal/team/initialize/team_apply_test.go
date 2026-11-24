@@ -82,7 +82,7 @@ func TestAddReadsTheRepositoryTeamFile(t *testing.T) {
 		t.Fatalf("stored team = %+v", team.Spec)
 	}
 	project := team.Spec.ProjectSource
-	if project == nil || project.URL != opts.Source || project.Branch != "main" ||
+	if project == nil || projectURL(t, f, team) != opts.Source || project.Branch != "main" ||
 		project.ClonePath != "/home/user/chosen" {
 		t.Fatalf("project = %+v", project)
 	}
@@ -360,7 +360,7 @@ func TestEmptySelectionExplainsItself(t *testing.T) {
 			}
 			_, err := Add(t.Context(), opts)
 			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "--role") ||
-				!strings.Contains(err.Error(), "kuke team source add") {
+				!strings.Contains(err.Error(), "kuke create source") {
 				t.Fatalf("err = %v, want %q", err, tc.want)
 			}
 			if len(f.writes) != 0 {
@@ -411,7 +411,8 @@ func TestApplyFile(t *testing.T) {
 	}
 	team := storedTeam(t, f, "filed")
 	if team.Metadata.Realm != "default" || team.Spec.ProjectSource == nil ||
-		team.Spec.ProjectSource.Name != "project" || team.Spec.ProjectSource.URL != "https://example.test/owner/filed.git" {
+		team.Spec.ProjectSource.Name != "project" || team.Spec.ProjectSource.URL != "" ||
+		projectURL(t, f, team) != "https://example.test/owner/filed.git" {
 		t.Fatalf("stored team = %+v", team)
 	}
 	editTeam(t, f, "filed", func(team *config.Team) {
@@ -429,7 +430,7 @@ func TestApplyFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	team = storedTeam(t, f, "filed")
-	if team.Spec.ProjectSource == nil || team.Spec.ProjectSource.URL != "https://example.test/owner/filed.git" {
+	if team.Spec.ProjectSource == nil || projectURL(t, f, team) != "https://example.test/owner/filed.git" {
 		t.Fatalf("stored projectSource not kept: %+v", team.Spec.ProjectSource)
 	}
 	if len(team.Spec.Secrets) != 1 || team.Spec.Secrets[0].SecretRef.Name != "kept-key" ||

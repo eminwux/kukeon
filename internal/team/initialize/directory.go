@@ -37,11 +37,11 @@ func readDirectoryTeam(dir string) (*config.Team, error) {
 		return nil, nil //nolint:nilnil // a directory without kuketeam.yaml inherits the defaults
 	}
 	if err != nil {
-		return nil, fmt.Errorf("add: cannot read local kuketeam.yaml: %w", err)
+		return nil, fmt.Errorf("create team: cannot read local kuketeam.yaml: %w", err)
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("add: cannot read local kuketeam.yaml: %w", err)
+		return nil, fmt.Errorf("create team: cannot read local kuketeam.yaml: %w", err)
 	}
 	defer func() { _ = f.Close() }()
 	team, err := config.DecodeTeamDeclaration(f)
@@ -57,7 +57,8 @@ func discoverDirectorySource(ctx context.Context, dir string, source *config.Sou
 		output, runErr := gitremote.Run(ctx, "-C", dir, "config", "--local", "--get", "remote.origin.url")
 		if runErr != nil || strings.TrimSpace(string(output)) == "" {
 			return errors.New(
-				"add: cannot discover Git origin; check the directory's Git metadata and origin or supply --source",
+				"create team: cannot discover Git origin; check the directory's Git metadata and origin, " +
+					"or name the project with --source or spec.projectSource.url",
 			)
 		}
 		source.URL = strings.TrimSpace(string(output))
@@ -66,12 +67,12 @@ func discoverDirectorySource(ctx context.Context, dir string, source *config.Sou
 		commit, runErr := gitremote.Run(ctx, "-C", dir, "rev-parse", "--verify", "HEAD^{commit}")
 		if runErr != nil {
 			return errors.New(
-				"add: cannot discover a checked-out Git commit; check Git metadata/HEAD or supply --branch, --tag, or --commit",
+				"create team: cannot discover a checked-out Git commit; check Git metadata/HEAD or supply --branch, --tag, or --commit",
 			)
 		}
 		branch, branchErr := gitremote.Run(ctx, "-C", dir, "rev-parse", "--symbolic-full-name", "HEAD")
 		if branchErr != nil {
-			return errors.New("add: cannot read Git HEAD; supply --branch, --tag, or --commit")
+			return errors.New("create team: cannot read Git HEAD; supply --branch, --tag, or --commit")
 		}
 		ref := strings.TrimSpace(string(branch))
 		if ref == "HEAD" {
@@ -79,7 +80,7 @@ func discoverDirectorySource(ctx context.Context, dir string, source *config.Sou
 		} else if branchName, ok := strings.CutPrefix(ref, "refs/heads/"); ok && branchName != "" {
 			source.Branch = branchName
 		} else {
-			return errors.New("add: HEAD is not a local branch; supply --branch, --tag, or --commit")
+			return errors.New("create team: HEAD is not a local branch; supply --branch, --tag, or --commit")
 		}
 	}
 	return nil
@@ -88,11 +89,11 @@ func discoverDirectorySource(ctx context.Context, dir string, source *config.Sou
 func validateAddName(name string) error {
 	if !config.ValidName(name) {
 		return errors.New(
-			"add: require a lowercase team name containing letters, digits, dots or hyphens, starting and ending with a letter/digit; root and kuke are reserved; use --name",
+			"create team: require a lowercase team name containing letters, digits, dots or hyphens, starting and ending with a letter/digit; root and kuke are reserved; use --name",
 		)
 	}
 	if name == rootName || name == majordomoName {
-		return fmt.Errorf("add: team name %q is reserved (root and kuke are reserved); use --name", name)
+		return fmt.Errorf("create team: team name %q is reserved (root and kuke are reserved); use --name", name)
 	}
 	return nil
 }

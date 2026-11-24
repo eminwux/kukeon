@@ -64,8 +64,9 @@ func MajordomoHarnesses() []Harness {
 // Majordomo returns the self-contained initial declaration of the kuke team:
 // the majordomo role on both shipped harnesses.
 func Majordomo() *Team {
-	source := MajordomoSource()
-	source.ClonePath = "/home/user/kukeon-src"
+	// A reference to the stored kukeon Source (#1643), cloned where the
+	// majordomo role works on kukeon.
+	source := Source{Name: KukeonSourceName, ClonePath: "/home/user/kukeon-src"}
 	return &Team{
 		APIVersion: APIVersion, Kind: KindTeam,
 		Metadata: Metadata{Name: SystemTeamName, Realm: DefaultRealm},
@@ -283,6 +284,9 @@ func cloneSource(source *Source) *Source {
 	copySource.Git = cloneSourceGit(source.Git)
 	return &copySource
 }
+
+// Clone returns a deep copy of g (nil for nil).
+func (g *SourceGit) Clone() *SourceGit { return cloneSourceGit(g) }
 
 func cloneSourceGit(g *SourceGit) *SourceGit {
 	if g == nil {

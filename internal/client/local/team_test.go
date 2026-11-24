@@ -159,7 +159,10 @@ func TestTeamKindsThroughTheInProcessClient(t *testing.T) {
 	if err != nil || !source.Exists || source.Summary.URL != "https://example.test/alpha" {
 		t.Fatalf("GetSource = %+v, %v", source, err)
 	}
-	if _, err = restarted.DeleteSource(ctx, kukeonv1.SourceRef{Name: "alpha"}); !errors.Is(err, errdefs.ErrSourceInUse) ||
+	if _, err = restarted.DeleteSource(ctx, kukeonv1.SourceRef{Name: "alpha"}); !errors.Is(
+		err,
+		errdefs.ErrSourceInUse,
+	) ||
 		!strings.Contains(err.Error(), "team alpha") {
 		t.Fatalf("DeleteSource of a used Source err = %v", err)
 	}

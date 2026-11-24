@@ -70,11 +70,22 @@ func emptyConfig() *config.TeamDefaults {
 func fixture(t *testing.T) (*config.TeamDefaults, compose.Options) {
 	t.Helper()
 	base := emptyConfig()
-	base.Spec.Defaults = config.Majordomo().Spec.Defaults
+	base.Spec.Defaults = majordomo().Spec.Defaults
 	base.Spec.Defaults.Harnesses = base.Spec.Defaults.Harnesses[:1]
 	return base, compose.Options{
 		Sources: map[string]fs.FS{"kukeon": copiedSource(t)},
 	}
+}
+
+// majordomo is the kuke team in the shape compose reads: kuke stores its
+// kukeon entry as a reference to the stored kukeon Source (#1643) and fills
+// in the Source's address and ref before composing.
+func majordomo() *config.Team {
+	team := config.Majordomo()
+	source := config.KukeonSource()
+	source.ClonePath = team.Spec.Sources[0].ClonePath
+	team.Spec.Sources[0] = source
+	return team
 }
 
 // shippedSource is the repository as it is, majordomo's extras included.
@@ -1302,7 +1313,7 @@ func TestInitialPathLaunchAcrossHarnesses(t *testing.T) {
 // rendered hourly but suspended, with no secret required.
 func TestFreshMajordomoComposition(t *testing.T) {
 	base := emptyConfig()
-	result, err := compose.Compose(base, config.Majordomo(), compose.Options{Sources: shippedSource()})
+	result, err := compose.Compose(base, majordomo(), compose.Options{Sources: shippedSource()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1375,7 +1386,7 @@ func TestFreshMajordomoComposition(t *testing.T) {
 // interactive cell and the sweep cell both get GH_TOKEN and a gh image.
 func TestMajordomoSweepOptIn(t *testing.T) {
 	base := emptyConfig()
-	team := config.Majordomo()
+	team := majordomo()
 	on := false
 	role := &team.Spec.Roles[0]
 	role.Needs.Secrets = []string{"gh-token"}

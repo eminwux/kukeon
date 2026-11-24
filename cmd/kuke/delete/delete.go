@@ -29,6 +29,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/kuke/delete/realm"
 	secretdelete "github.com/eminwux/kukeon/cmd/kuke/delete/secret"
 	"github.com/eminwux/kukeon/cmd/kuke/delete/shared"
+	sourcedelete "github.com/eminwux/kukeon/cmd/kuke/delete/source"
 	"github.com/eminwux/kukeon/cmd/kuke/delete/space"
 	"github.com/eminwux/kukeon/cmd/kuke/delete/stack"
 	teamdelete "github.com/eminwux/kukeon/cmd/kuke/delete/team"
@@ -52,7 +53,7 @@ func NewDeleteCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "delete [name]",
 		Aliases: []string{"d"},
-		Short:   "Delete Kukeon resources (realm, space, stack, cell, secret, blueprint, volume, config, healthreport, team)",
+		Short:   "Delete Kukeon resources (realm, space, stack, cell, secret, blueprint, volume, config, healthreport, team, source)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			// Check if -f flag is provided
 			file, err := cmd.Flags().GetString("file")
@@ -99,6 +100,7 @@ func NewDeleteCmd() *cobra.Command {
 		configdelete.NewConfigCmd(),
 		healthreportdelete.NewHealthReportCmd(),
 		teamdelete.NewTeamCmd(),
+		sourcedelete.NewSourceCmd(),
 	)
 
 	return cmd
@@ -108,6 +110,7 @@ func NewDeleteCmd() *cobra.Command {
 func completeDeleteSubcommands(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	subcommands := []string{
 		"realm", "space", "stack", "cell", "secret", "blueprint", "volume", "config", "healthreport", "team",
+		"source",
 	}
 
 	if toComplete == "" {

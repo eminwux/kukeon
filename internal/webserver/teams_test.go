@@ -47,6 +47,7 @@ type teamClient struct {
 	kukeonv1.FakeClient
 
 	teams    map[string][]byte
+	sources  map[string][]byte
 	defaults []byte
 	configs  []v1beta1.CellConfigDoc
 	writes   int
@@ -56,7 +57,69 @@ type teamClient struct {
 	listErr error
 }
 
-func newTeamClient() *teamClient { return &teamClient{teams: map[string][]byte{}} }
+func newTeamClient() *teamClient {
+	return &teamClient{teams: map[string][]byte{}, sources: map[string][]byte{}}
+}
+
+func (c *teamClient) storeSource(t *testing.T, name string, spec config.SourceSpec) {
+	t.Helper()
+	raw, err := yaml.Marshal(v1beta1.SourceDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1, Kind: v1beta1.KindSource,
+		Metadata: v1beta1.TeamMetadata{Name: name, Realm: "default"}, Spec: spec,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.sources[name] = raw
+}
+
+func (c *teamClient) sourceResult(name string) kukeonv1.GetSourceResult {
+	return kukeonv1.GetSourceResult{
+		Exists: true, Document: c.sources[name], Summary: kukeonv1.SourceSummary{Name: name, Realm: "default"},
+	}
+}
+
+func (c *teamClient) GetSource(_ context.Context, ref kukeonv1.SourceRef) (kukeonv1.GetSourceResult, error) {
+	if _, ok := c.sources[ref.Name]; !ok {
+		return kukeonv1.GetSourceResult{}, nil
+	}
+	return c.sourceResult(ref.Name), nil
+}
+
+func (c *teamClient) ListSources(context.Context, string) ([]kukeonv1.GetSourceResult, error) {
+	names := make([]string, 0, len(c.sources))
+	for name := range c.sources {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]kukeonv1.GetSourceResult, 0, len(names))
+	for _, name := range names {
+		out = append(out, c.sourceResult(name))
+	}
+	return out, nil
+}
+
+// DeleteSource refuses a referenced Source as kukeond does (AC7).
+func (c *teamClient) DeleteSource(ctx context.Context, ref kukeonv1.SourceRef) (kukeonv1.DeleteSourceResult, error) {
+	if _, ok := c.sources[ref.Name]; !ok {
+		return kukeonv1.DeleteSourceResult{}, nil
+	}
+	users, err := initialize.SourceUsers(ctx, c)
+	if err != nil {
+		return kukeonv1.DeleteSourceResult{}, err
+	}
+	if uses := users[ref.Name]; len(uses) > 0 {
+		names := make([]string, 0, len(uses))
+		for _, use := range uses {
+			names = append(names, use.String())
+		}
+		return kukeonv1.DeleteSourceResult{}, fmt.Errorf("%w: source %s is referenced by %s",
+			errdefs.ErrSourceInUse, ref.Name, strings.Join(names, ", "))
+	}
+	c.writes++
+	delete(c.sources, ref.Name)
+	return kukeonv1.DeleteSourceResult{Deleted: true}, nil
+}
 
 func (c *teamClient) Close() error               { return nil }
 func (c *teamClient) Ping(context.Context) error { return nil }
@@ -107,6 +170,17 @@ func (c *teamClient) result(name string, raw []byte) kukeonv1.GetTeamResult {
 		}
 		if p := team.Spec.ProjectSource; p != nil {
 			summary.ProjectURL, summary.ProjectRef = p.URL, "branch "+p.Branch
+			if p.URL == "" {
+				// kukeond reads the project's address from its stored Source.
+				stored := p.Stored
+				if stored == "" {
+					stored = name
+				}
+				var doc v1beta1.SourceDoc
+				if yaml.Unmarshal(c.sources[stored], &doc) == nil {
+					summary.ProjectURL = doc.Spec.URL
+				}
+			}
 		}
 	}
 	for _, cfg := range c.configs {
@@ -207,6 +281,8 @@ func (c *teamClient) apply(raw []byte, team string) (kukeonv1.ApplyDocumentsResu
 			c.teams[head.Metadata.Name] = doc
 		case string(v1beta1.KindTeamDefaults):
 			c.defaults = doc
+		case string(v1beta1.KindSource):
+			c.sources[head.Metadata.Name] = doc
 		}
 		result.Resources = append(result.Resources, kukeonv1.ApplyResourceResult{
 			Index: len(result.Resources), Kind: head.Kind, Name: head.Metadata.Name, Action: "created",
@@ -226,7 +302,7 @@ func (c *teamClient) putTeam(t *testing.T, team *config.Team) {
 
 func (c *teamClient) storedDefaults(t *testing.T) *config.TeamDefaults {
 	t.Helper()
-	got, err := config.DecodeDefaults(bytes.NewReader(c.defaults))
+	got, err := config.DecodeStoredDefaults(bytes.NewReader(c.defaults))
 	if err != nil {
 		t.Fatalf("stored TeamDefaults: %v", err)
 	}
@@ -245,15 +321,15 @@ spec:
 `
 )
 
-// teamFixture is a daemon with the initial TeamDefaults (the kukeon source
-// cloned, so its roles can run) and the definition trees composition reads
+// teamFixture is a daemon with the initial TeamDefaults, the stored kukeon
+// Source, and the definition trees composition reads
 // in place of git: this repository as kukeon and extra, and a project whose
 // kuketeam.yaml is teamRepoFile.
 func teamFixture(t *testing.T) (*teamClient, http.Handler) {
 	t.Helper()
 	c := newTeamClient()
 	defaults := initialize.InitialDefaults("default")
-	defaults.Spec.Defaults.Sources[0].ClonePath = "/home/user/kukeon-src"
+	c.storeSource(t, config.KukeonSourceName, config.KukeonSourceSpec())
 	raw, err := yaml.Marshal(defaults)
 	if err != nil {
 		t.Fatal(err)
@@ -269,6 +345,14 @@ func teamFixture(t *testing.T) (*teamClient, http.Handler) {
 	return c, mux
 }
 
+// putProj stores team proj as kukeond stores it since #1643: its project a
+// reference to the Source proj, which is stored too.
+func (c *teamClient) putProj(t *testing.T) {
+	t.Helper()
+	c.storeSource(t, "proj", config.SourceSpec{URL: teamProjectURL, Branch: "main"})
+	c.putTeam(t, storedProj())
+}
+
 func storedProj() *config.Team {
 	return &config.Team{
 		APIVersion: config.APIVersion, Kind: config.KindTeam,
@@ -276,7 +360,7 @@ func storedProj() *config.Team {
 		Spec: config.TeamSpec{
 			ProjectSource: &config.Source{
 				Name:      "project",
-				URL:       teamProjectURL,
+				Stored:    "proj",
 				Branch:    "main",
 				ClonePath: "/home/user/proj",
 			},
@@ -320,7 +404,7 @@ func expectError(t *testing.T, w interface {
 func TestTeamsListAndGet(t *testing.T) {
 	c, h := teamFixture(t)
 	c.putTeam(t, config.Majordomo())
-	c.putTeam(t, storedProj())
+	c.putProj(t)
 	c.configs = []v1beta1.CellConfigDoc{{Metadata: v1beta1.CellConfigMetadata{
 		Name: "proj-old-codex", Labels: map[string]string{v1beta1.LabelTeam: "proj"},
 	}}}
@@ -339,7 +423,7 @@ func TestTeamsListAndGet(t *testing.T) {
 	w = connectorRequest(t, h, http.MethodGet, "/api/teams/proj", "")
 	got := decodeBody[teamView](t, w)
 	if w.Code != http.StatusOK || got.Summary.Name != "proj" ||
-		!strings.Contains(got.Document, "url: "+teamProjectURL) {
+		!strings.Contains(got.Document, "source: proj") {
 		t.Fatalf("get: %d %+v", w.Code, got)
 	}
 	w = connectorRequest(t, h, http.MethodGet, "/api/teams/missing", "")
@@ -378,7 +462,8 @@ func TestTeamsPreviewWritesNothing(t *testing.T) {
 		t.Fatalf("preview = %+v", got)
 	}
 	team, err := config.DecodeTeam(strings.NewReader(got.Plan.Declaration))
-	if err != nil || team.Metadata.Name != "proj" || team.Spec.ProjectSource.URL != teamProjectURL {
+	if err != nil || team.Metadata.Name != "proj" || team.Spec.ProjectSource.Stored != "proj" ||
+		team.Spec.ProjectSource.URL != "" {
 		t.Fatalf("declaration %v:\n%s", err, got.Plan.Declaration)
 	}
 	// The overrides and the repository-file toggle reach the same code as
@@ -440,7 +525,7 @@ func TestTeamsApplyAddAndEdit(t *testing.T) {
 	}
 	team, err := config.DecodeTeam(bytes.NewReader(c.teams["proj"]))
 	if err != nil || len(team.Spec.Roles) != 1 || team.Spec.Roles[0].Name != "chief" ||
-		team.Spec.ProjectSource == nil || team.Spec.ProjectSource.URL != teamProjectURL {
+		team.Spec.ProjectSource == nil || team.Spec.ProjectSource.Stored != "proj" || c.sources["proj"] == nil {
 		t.Fatalf("edited team %v: %+v", err, team)
 	}
 	writes := c.writes
@@ -474,7 +559,7 @@ func TestTeamsApplyAddAndEdit(t *testing.T) {
 
 func TestTeamsReapplyAndDelete(t *testing.T) {
 	c, h := teamFixture(t)
-	c.putTeam(t, storedProj())
+	c.putProj(t)
 	w := connectorRequest(t, h, http.MethodPost, "/api/teams/proj/reapply", "")
 	if got := decodeBody[teamOutcomeView](t, w); w.Code != http.StatusOK || got.Result == nil ||
 		got.Result.Team != "proj" ||
@@ -495,7 +580,7 @@ func TestTeamsReapplyAndDelete(t *testing.T) {
 	expectError(t, w, w.Body.Bytes(), http.StatusNotFound, "not_found")
 }
 
-// TestTeamSources is AC17 over HTTP.
+// TestTeamSources is AC17 over HTTP, over stored Sources (#1643 Step 8).
 func TestTeamSources(t *testing.T) {
 	c, h := teamFixture(t)
 	w := connectorRequest(t, h, http.MethodGet, "/api/team-sources", "")
@@ -504,13 +589,22 @@ func TestTeamSources(t *testing.T) {
 		len(list.DefaultHarnesses) != 2 || list.DefaultRoles == nil {
 		t.Fatalf("sources: %d %s", w.Code, w.Body)
 	}
+	if strings.Contains(w.Body.String(), "clonePath") {
+		t.Fatalf("a stored Source has no clone path: %s", w.Body)
+	}
 	w = connectorRequest(t, h, http.MethodPost, "/api/team-sources",
 		jsonBody(t, map[string]any{"name": "extra", "url": "https://example.test/extra.git", "branch": "main"}))
 	added := decodeBody[defaultsChangeView](t, w)
 	if w.Code != http.StatusOK || added.Action != "created" || added.Discovered == nil ||
-		added.Discovered.Source.ClonePath != "/home/user/extra" || len(added.Discovered.Roles) == 0 || added.Inheriting == nil {
+		added.Discovered.Source.Name != "extra" || len(added.Discovered.Roles) == 0 || added.Inheriting == nil {
 		t.Fatalf("add source: %d %s", w.Code, w.Body)
 	}
+	if _, ok := c.sources["extra"]; !ok {
+		t.Fatal("add did not store Source extra")
+	}
+	w = connectorRequest(t, h, http.MethodPost, "/api/team-sources",
+		jsonBody(t, map[string]any{"name": "extra", "url": "https://example.test/extra.git", "branch": "main"}))
+	expectError(t, w, w.Body.Bytes(), http.StatusConflict, "already_exists")
 	w = connectorRequest(t, h, http.MethodPost, "/api/team-sources/kukeon/inspect", "")
 	contents := decodeBody[contentsView](t, w)
 	if w.Code != http.StatusOK || contents.Source.Name != "kukeon" || len(contents.Harnesses) == 0 {
@@ -526,7 +620,7 @@ func TestTeamSources(t *testing.T) {
 		t.Fatalf("default harnesses marked = %d: %s", defaultHarness, w.Body)
 	}
 	w = connectorRequest(t, h, http.MethodPost, "/api/team-sources/kukeon/delete", "")
-	expectError(t, w, w.Body.Bytes(), http.StatusUnprocessableEntity, "team_failed")
+	expectError(t, w, w.Body.Bytes(), http.StatusConflict, "in_use")
 	if !strings.Contains(w.Body.String(), "default harness") {
 		t.Fatalf("refusal does not name the reference: %s", w.Body)
 	}
@@ -534,11 +628,49 @@ func TestTeamSources(t *testing.T) {
 	if removed := decodeBody[defaultsChangeView](t, w); w.Code != http.StatusOK || removed.Action != "removed" {
 		t.Fatalf("remove: %d %s", w.Code, w.Body)
 	}
-	if len(c.storedDefaults(t).Spec.Defaults.Sources) != 1 {
-		t.Fatalf("defaults after remove: %s", c.defaults)
+	if _, ok := c.sources["extra"]; ok {
+		t.Fatal("Source extra still stored after delete")
 	}
 	w = connectorRequest(t, h, http.MethodPost, "/api/team-sources/nothing/inspect", "")
-	expectError(t, w, w.Body.Bytes(), http.StatusUnprocessableEntity, "team_failed")
+	expectError(t, w, w.Body.Bytes(), http.StatusNotFound, "not_found")
+	w = connectorRequest(t, h, http.MethodPost, "/api/team-sources/nothing/delete", "")
+	expectError(t, w, w.Body.Bytes(), http.StatusNotFound, "not_found")
+}
+
+// TestTeamSourcesListsATeamsSource: a Source only a team's declaration
+// defines is stored, listed, and cannot be deleted while the team uses it.
+func TestTeamSourcesListsATeamsSource(t *testing.T) {
+	c, h := teamFixture(t)
+	c.putProj(t)
+	declaration := `apiVersion: v1beta1
+kind: Team
+metadata:
+  name: proj
+spec:
+  sources:
+    - {name: extra, url: https://example.test/extra.git, branch: main}
+  roles:
+    - {name: lead, source: extra, path: team/roles/majordomo}
+`
+	w := connectorRequest(t, h, http.MethodPost, "/api/teams",
+		jsonBody(t, map[string]any{"name": "proj", "declaration": declaration}))
+	if w.Code != http.StatusOK {
+		t.Fatalf("apply: %d %s", w.Code, w.Body)
+	}
+	w = connectorRequest(t, h, http.MethodGet, "/api/team-sources", "")
+	list := decodeBody[sourcesView](t, w)
+	names := make([]string, 0, len(list.Sources))
+	for _, source := range list.Sources {
+		names = append(names, source.Name)
+	}
+	if w.Code != http.StatusOK || strings.Join(names, ",") != "extra,kukeon,proj" {
+		t.Fatalf("sources = %v: %d %s", names, w.Code, w.Body)
+	}
+	w = connectorRequest(t, h, http.MethodPost, "/api/team-sources/extra/delete", "")
+	expectError(t, w, w.Body.Bytes(), http.StatusConflict, "in_use")
+	if !strings.Contains(w.Body.String(), "team proj") {
+		t.Fatalf("refusal does not name the team: %s", w.Body)
+	}
 }
 
 // TestTeamDefaults is AC14 over HTTP: the list mode is kuke team defaults
@@ -546,7 +678,7 @@ func TestTeamSources(t *testing.T) {
 // inheriting teams.
 func TestTeamDefaults(t *testing.T) {
 	c, h := teamFixture(t)
-	c.putTeam(t, storedProj())
+	c.putProj(t)
 	w := connectorRequest(t, h, http.MethodGet, "/api/team-defaults", "")
 	got := decodeBody[defaultsView](t, w)
 	if w.Code != http.StatusOK || !got.Exists || !strings.Contains(got.Document, "kind: TeamDefaults") {
@@ -637,7 +769,7 @@ func TestTeamErrorClassification(t *testing.T) {
 // its access policy.
 func TestTeamRoutesAreRegistered(t *testing.T) {
 	c := newTeamClient()
-	c.putTeam(t, storedProj())
+	c.putProj(t)
 	policy, err := parseAccessPolicy("http://localhost:5129")
 	if err != nil {
 		t.Fatal(err)
@@ -666,7 +798,7 @@ func TestTeamRoutesAreRegistered(t *testing.T) {
 // kukeond; the web UI's {} body is accepted.
 func TestTeamActionsRequireJSON(t *testing.T) {
 	c, h := teamFixture(t)
-	c.putTeam(t, storedProj())
+	c.putProj(t)
 	writes, defaults := c.writes, string(c.defaults)
 	routes := []string{
 		"/api/teams/proj/reapply",

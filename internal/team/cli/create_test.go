@@ -50,15 +50,12 @@ func projectHarness(t *testing.T, file string) *harness {
 		project["kuketeam.yaml"] = &fstest.MapFile{Data: []byte(file)}
 	}
 	h.sources["project"] = project
-	// A role from the kukeon source needs it cloned into the cell.
-	defaults := initialize.InitialDefaults("default")
-	defaults.Spec.Defaults.Sources[0].ClonePath = "/home/user/kukeon-src"
-	h.store.putDefaults(t, defaults)
+	h.store.putDefaults(t, initialize.InitialDefaults("default"))
 	return h
 }
 
 func addArgs(extra ...string) []string {
-	return append([]string{"add", "proj", "--source", projectURL, "--branch", "main"}, extra...)
+	return append([]string{"create", "team", "proj", "--source", projectURL, "--branch", "main"}, extra...)
 }
 
 func (s *store) storedTeam(t *testing.T, name string) *config.Team {
@@ -84,8 +81,9 @@ func roleNames(team *config.Team) []string {
 
 // TestAddReadsTheRepositoryFile is AC8: the repository's kuketeam.yaml is
 // read from the fetched tree, NAME wins over its metadata.name, and the
-// stored Team carries the project source.
-func TestAddReadsTheRepositoryFile(t *testing.T) {
+// stored Team refers to the project's Source, stored under the team's name
+// (#1643).
+func TestCreateTeamReadsTheRepositoryFile(t *testing.T) {
 	h := projectHarness(t, repoTeam)
 	out, err := h.run(t, addArgs()...)
 	if err != nil {
@@ -96,9 +94,12 @@ func TestAddReadsTheRepositoryFile(t *testing.T) {
 		t.Fatalf("stored %+v via team apply %q", team, h.store.team)
 	}
 	project := team.Spec.ProjectSource
-	if project == nil || project.URL != projectURL || project.Branch != "main" ||
+	if project == nil || project.URL != "" || project.Stored != "proj" || project.Branch != "main" ||
 		project.ClonePath != "/home/user/proj" {
 		t.Fatalf("project source = %+v", project)
+	}
+	if raw := string(h.store.sources["proj"]); !strings.Contains(raw, "url: "+projectURL) {
+		t.Fatalf("Source proj:\n%s", raw)
 	}
 	if _, ok := h.store.teams["other"]; ok {
 		t.Fatal("the file's metadata.name was stored")
@@ -106,7 +107,7 @@ func TestAddReadsTheRepositoryFile(t *testing.T) {
 }
 
 // TestAddDryRunWritesNothing is AC10.
-func TestAddDryRunWritesNothing(t *testing.T) {
+func TestCreateTeamDryRunWritesNothing(t *testing.T) {
 	h := projectHarness(t, repoTeam)
 	out, err := h.run(t, addArgs("--dry-run")...)
 	if err != nil {
@@ -126,7 +127,7 @@ func TestAddDryRunWritesNothing(t *testing.T) {
 }
 
 // TestAddWithoutFileInheritsAndExplainsAnEmptySelection is AC8 and AC11.
-func TestAddWithoutFileInheritsAndExplainsAnEmptySelection(t *testing.T) {
+func TestCreateTeamWithoutFileInheritsAndExplainsAnEmptySelection(t *testing.T) {
 	for name, args := range map[string][]string{
 		"no file":      addArgs(),
 		"no-repo-file": addArgs("--no-repo-file"),
@@ -139,7 +140,7 @@ func TestAddWithoutFileInheritsAndExplainsAnEmptySelection(t *testing.T) {
 			h := projectHarness(t, file)
 			_, err := h.run(t, args...)
 			if err == nil || !strings.Contains(err.Error(), "no kuketeam.yaml") ||
-				!strings.Contains(err.Error(), "--role") || !strings.Contains(err.Error(), "kuke team source add") {
+				!strings.Contains(err.Error(), "--role") || !strings.Contains(err.Error(), "kuke create source") {
 				t.Fatalf("error = %v", err)
 			}
 			if h.store.writes != 0 {
@@ -151,7 +152,7 @@ func TestAddWithoutFileInheritsAndExplainsAnEmptySelection(t *testing.T) {
 
 // TestAddOverrides is AC9: --role replaces the declaration's list, -f
 // replaces the whole declaration, and the stored Team is what was applied.
-func TestAddOverrides(t *testing.T) {
+func TestCreateTeamOverrides(t *testing.T) {
 	t.Run("role", func(t *testing.T) {
 		h := projectHarness(t, repoTeam)
 		if _, err := h.run(t, addArgs("--role", "boss=kukeon:team/roles/majordomo")...); err != nil {
@@ -183,7 +184,7 @@ func TestAddOverrides(t *testing.T) {
 // add before anything is fetched; --force replaces the declaration. (That the
 // recorded secret bindings a composition uses are kept is pinned in
 // internal/team/initialize.)
-func TestAddCreatesReplacingNeedsForce(t *testing.T) {
+func TestCreateTeamCreatesReplacingNeedsForce(t *testing.T) {
 	h := projectHarness(t, repoTeam)
 	binding, err := config.DefaultSecretBinding("gh-token", "default")
 	if err != nil {
@@ -202,7 +203,7 @@ func TestAddCreatesReplacingNeedsForce(t *testing.T) {
 	h.store.putTeam(t, stored)
 	// No project tree: a fetch would fail, so the error proves none ran.
 	delete(h.sources, "project")
-	_, err = h.run(t, "add", "proj", "--source", "https://example.invalid/none.git", "--branch", "main")
+	_, err = h.run(t, "create", "team", "proj", "--source", "https://example.invalid/none.git", "--branch", "main")
 	if !errors.Is(err, errdefs.ErrTeamExists) || !strings.Contains(err.Error(), "kuke team apply proj") ||
 		!strings.Contains(err.Error(), "--force") {
 		t.Fatalf("error = %v", err)
@@ -220,17 +221,17 @@ func TestAddCreatesReplacingNeedsForce(t *testing.T) {
 	}
 }
 
-func TestAddRejectsInvalidArgumentsWithoutEffects(t *testing.T) {
+func TestCreateTeamRejectsInvalidArgumentsWithoutEffects(t *testing.T) {
 	for _, tc := range []struct {
 		args []string
 		want string
 	}{
-		{[]string{"add", "proj"}, "NAME --source REPOSITORY"},
-		{[]string{"add", "proj", "--source", " "}, "must not be empty"},
-		{[]string{"add", "./missing"}, "unavailable or is not a directory"},
-		{[]string{"add", "proj", "--source", projectURL, "--tag", "t", "--commit", "c"}, "none of the others can be"},
-		{[]string{"add", "proj", "--source", projectURL, "-f", "x", "--no-repo-file"}, "none of the others can be"},
-		{[]string{"add", "proj", "--source", projectURL, "-f", "/does/not/exist"}, "read /does/not/exist"},
+		{[]string{"create", "team", "proj"}, "NAME --source ADDRESS|SOURCE"},
+		{[]string{"create", "team", "proj", "--source", " "}, "must not be empty"},
+		{[]string{"create", "team", "./missing"}, "unavailable or is not a directory"},
+		{[]string{"create", "team", "proj", "--source", projectURL, "--tag", "t", "--commit", "c"}, "none of the others can be"},
+		{[]string{"create", "team", "proj", "--source", projectURL, "-f", "x", "--no-repo-file"}, "none of the others can be"},
+		{[]string{"create", "team", "proj", "--source", projectURL, "-f", "/does/not/exist"}, "read /does/not/exist"},
 	} {
 		h := newHarness(t)
 		if _, err := h.run(t, tc.args...); err == nil || !strings.Contains(err.Error(), tc.want) {

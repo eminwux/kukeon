@@ -40,6 +40,26 @@ func DecodeDefaults(r io.Reader) (*TeamDefaults, error) {
 	return &cfg, nil
 }
 
+// DecodeStoredDefaults decodes a TeamDefaults as kukeond stores it (#1643):
+// its default roles and harnesses name stored Sources, which it does not
+// list, so their sources are not checked here but at composition. A
+// document written before #1643 still lists its sources and is validated as
+// it was then, so it keeps reading until a write converts it.
+func DecodeStoredDefaults(r io.Reader) (*TeamDefaults, error) {
+	var cfg TeamDefaults
+	if err := decodeDocument(r, &cfg); err != nil {
+		return nil, err
+	}
+	validate := ValidateStoredDefaults
+	if cfg.Spec.Defaults.Sources != nil {
+		validate = Validate
+	}
+	if err := validate(&cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
 // DecodeStrict decodes exactly one YAML document into out, rejecting unknown
 // and duplicate fields and scalars of the wrong type, with the same messages
 // the team decoders give. It validates no field values.

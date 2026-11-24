@@ -24,19 +24,21 @@ import (
 
 	"github.com/eminwux/kukeon/internal/gitcred"
 	"github.com/eminwux/kukeon/pkg/team/config"
-	"gopkg.in/yaml.v3"
 )
 
 const upgradeCommand = "kuke team init --upgrade"
 
-// upgrade is `kuke team init --upgrade` (issue #1638): it moves the kukeon
-// source of the stored kuke Team and of realm default's TeamDefaults to the
-// revision the running kuke was built from, and recomposes the kuke team. Only
-// the source's branch, tag and commit change; every other field of both
-// documents, spec.secrets included, is kept. A kukeon source with another URL
-// is the operator's and is left alone. It never creates the kuke team, and
-// recomposes no other team: the teams that inherit the defaults are named in
-// the notes.
+// upgrade is `kuke team init --upgrade` (issues #1638, #1643): it moves the
+// stored kukeon Source to the revision the running kuke was built from and
+// recomposes the kuke team. Only the Source's branch, tag and commit change.
+// A kukeon Source with another URL is the operator's and is left alone.
+// State written before #1643 is converted on the way: the TeamDefaults'
+// sources become Sources, and the kuke team's kukeon entry becomes a
+// reference to the stored Source, so the Source's revision is the one it
+// reads. It never creates the kuke team, and recomposes no other team: the
+// teams that inherit the defaults are named in the notes.
+//
+//nolint:gocyclo,cyclop,funlen // one decision per stored document
 func upgrade(ctx context.Context, opts InitOptions) (Outcome, error) {
 	if opts.Force || opts.Reapply {
 		return Outcome{}, errors.New("init: --upgrade excludes --force and --reapply: " +
@@ -56,51 +58,102 @@ func upgrade(ctx context.Context, opts InitOptions) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, fmt.Errorf("init: %w", err)
 	}
+	sources, err := Sources(ctx, opts.Client)
+	if err != nil {
+		return Outcome{}, fmt.Errorf("init: %w", err)
+	}
 
 	var notes []string
-	var teamChanged, defaultsChanged bool
-	if stored != nil {
-		var note []string
-		teamChanged, note = repinKukeon(stored.Spec.Sources, pin, "kuke team")
-		notes = append(notes, note...)
-	}
+	// writes are the Sources this upgrade stores: the converted legacy
+	// ones and the re-pinned kukeon Source.
+	writes := map[string]config.SourceSpec{}
+	defaultsChanged := false
 	if found {
-		var note []string
-		defaultsChanged, note = repinKukeon(defaults.Spec.Defaults.Sources, pin, "team defaults")
-		notes = append(notes, note...)
+		converted, created, convertNotes := convertDefaults(defaults, sources)
+		if converted != nil {
+			defaults, defaultsChanged = converted, true
+			notes = append(notes, convertNotes...)
+			for name, spec := range created {
+				writes[name] = spec
+			}
+		}
 	}
 
+	teamChanged := false
+	if stored != nil {
+		for i := range stored.Spec.Sources {
+			entry := &stored.Spec.Sources[i]
+			if entry.Name != config.KukeonSourceName || entry.URL == "" ||
+				!gitcred.SameRepository(entry.URL, config.KukeonSourceURL) {
+				continue
+			}
+			if _, ok := sources[config.KukeonSourceName]; !ok {
+				if _, ok = writes[config.KukeonSourceName]; !ok {
+					writes[config.KukeonSourceName] = specOf(*entry)
+				}
+			}
+			*entry = config.Source{Name: entry.Name, ClonePath: entry.ClonePath}
+			teamChanged = true
+			notes = append(notes, "kuke team: its kukeon entry now reads the stored kukeon Source")
+		}
+	}
+
+	kukeon, have := writes[config.KukeonSourceName]
+	if !have {
+		kukeon, have = sources[config.KukeonSourceName]
+	}
+	sourceChanged := false
+	switch {
+	case !have && stored == nil:
+		// Nothing to upgrade: kuke team init creates both.
+	case !have:
+		// The kuke team reads a kukeon Source that is not stored.
+		kukeon = config.SourceSpec{URL: config.KukeonSourceURL, Branch: pin.Branch, Tag: pin.Tag, Commit: pin.Commit}
+		sourceChanged = true
+		notes = append(notes, "Source kukeon: stored at "+kukeon.Revision())
+	case !gitcred.SameRepository(kukeon.URL, config.KukeonSourceURL):
+		notes = append(notes, fmt.Sprintf("Source kukeon points at %s, not %s; left at %s",
+			kukeon.URL, config.KukeonSourceURL, kukeon.Revision()))
+	case kukeon.Branch != pin.Branch || kukeon.Tag != pin.Tag || kukeon.Commit != pin.Commit:
+		old := kukeon.Revision()
+		kukeon.Branch, kukeon.Tag, kukeon.Commit = pin.Branch, pin.Tag, pin.Commit
+		sourceChanged = true
+		notes = append(notes, fmt.Sprintf("Source kukeon: %s -> %s", old, kukeon.Revision()))
+	}
+	if sourceChanged {
+		writes[config.KukeonSourceName] = kukeon
+	}
+	changed := teamChanged || defaultsChanged || sourceChanged || len(writes) > 0
+
 	if stored == nil {
-		if defaultsChanged && !opts.DryRun {
-			if _, err = writeDefaults(ctx, opts.Client, defaults); err != nil {
+		if changed && !opts.DryRun {
+			if err = applySources(ctx, opts.Client, writes, defaults, defaultsChanged); err != nil {
 				return Outcome{}, fmt.Errorf("init: %w", err)
 			}
 		}
-		if defaultsChanged {
+		if defaultsChanged || sourceChanged {
 			inheriting, inhErr := inheritingNotes(ctx, opts.Client)
 			if inhErr != nil {
 				return Outcome{}, fmt.Errorf("init: %w", inhErr)
 			}
 			notes = append(notes, inheriting...)
-		} else if found {
-			notes = append(notes, "team defaults already at "+pin.Revision())
+		}
+		if !changed {
+			notes = append(notes, "Source kukeon already at "+pin.Revision())
 		}
 		notes = append(notes, "team kuke is not stored; run kuke team init to create it")
 		return Outcome{Notes: notes}, nil
 	}
 
-	if !teamChanged && !defaultsChanged {
-		notes = append(notes, "kuke team and defaults already at "+pin.Revision())
+	if !changed {
+		notes = append(notes, "Source kukeon already at "+pin.Revision())
 		return Outcome{Notes: notes}, nil
 	}
 
 	var defaultsDoc []byte
 	if defaultsChanged {
-		if err = config.Validate(defaults); err != nil {
-			return Outcome{}, fmt.Errorf("init: TeamDefaults: %w", err)
-		}
-		if defaultsDoc, err = yaml.Marshal(defaults); err != nil {
-			return Outcome{}, fmt.Errorf("init: encode TeamDefaults: %w", err)
+		if defaultsDoc, err = defaultsDocument(defaults); err != nil {
+			return Outcome{}, fmt.Errorf("init: %w", err)
 		}
 	}
 	out, err := run(ctx, opts.Options, request{
@@ -110,11 +163,12 @@ func upgrade(ctx context.Context, opts InitOptions) (Outcome, error) {
 		team:        stored,
 		have:        injectedSources(opts.Sources),
 		defaultsDoc: defaultsDoc,
+		sources:     writes,
 	})
 	if err != nil {
 		return out, err
 	}
-	if defaultsChanged {
+	if defaultsChanged || sourceChanged {
 		inheriting, inhErr := inheritingNotes(ctx, opts.Client)
 		if inhErr != nil {
 			return out, fmt.Errorf("init: %w", inhErr)
@@ -128,34 +182,6 @@ func upgrade(ctx context.Context, opts InitOptions) (Outcome, error) {
 		out.Result.Notes = append(slices.Clone(notes), out.Result.Notes...)
 	}
 	return out, nil
-}
-
-// repinKukeon moves the built-in kukeon source in sources to pin's revision,
-// in place. It reports whether a source changed and one note per change or
-// per kukeon source it leaves alone because its URL is not the built-in one.
-func repinKukeon(sources []config.Source, pin config.Source, what string) (bool, []string) {
-	var changed bool
-	var notes []string
-	for i := range sources {
-		s := &sources[i]
-		if s.Name != config.KukeonSourceName {
-			continue
-		}
-		if !gitcred.SameRepository(s.URL, config.KukeonSourceURL) {
-			notes = append(notes, fmt.Sprintf(
-				"%s: source kukeon points at %s, not %s; left at %s",
-				what, s.URL, config.KukeonSourceURL, s.Revision()))
-			continue
-		}
-		if s.Branch == pin.Branch && s.Tag == pin.Tag && s.Commit == pin.Commit {
-			continue
-		}
-		old := s.Revision()
-		s.Branch, s.Tag, s.Commit = pin.Branch, pin.Tag, pin.Commit
-		notes = append(notes, fmt.Sprintf("%s: kukeon source %s -> %s", what, old, s.Revision()))
-		changed = true
-	}
-	return changed, notes
 }
 
 // inheritingNotes names the stored teams other than kuke that inherit the

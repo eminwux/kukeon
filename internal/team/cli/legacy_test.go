@@ -49,13 +49,13 @@ func legacyHome(t *testing.T, home string, file, dir bool) {
 	}
 }
 
-// TestLegacyFilesGetOneNote is AC2: when either old path exists, init, add
-// and apply print one note and nothing reads, converts or imports the files.
+// TestLegacyFilesGetOneNote is AC2: when either old path exists, init,
+// create team and apply print one note and nothing reads, converts or imports the files.
 func TestLegacyFilesGetOneNote(t *testing.T) {
 	verbs := map[string][]string{
-		"init":  {"init"},
-		"add":   {"add", "proj", "--source", projectURL, "--branch", "main", "--dry-run"},
-		"apply": {"apply", "kuke"},
+		"init":   {"init"},
+		"create": {"create", "team", "proj", "--source", projectURL, "--branch", "main", "--dry-run"},
+		"apply":  {"apply", "kuke"},
 	}
 	for name, args := range verbs {
 		for _, layout := range []struct {
@@ -73,7 +73,7 @@ func TestLegacyFilesGetOneNote(t *testing.T) {
 				if err != nil {
 					t.Fatalf("%v\n%s", err, out)
 				}
-				if strings.Count(out, legacyNote) != 1 || !strings.Contains(out, "kuke team add") ||
+				if strings.Count(out, legacyNote) != 1 || !strings.Contains(out, "kuke create team") ||
 					!strings.HasPrefix(out, legacyNote) {
 					t.Fatalf("output:\n%s", out)
 				}
@@ -93,7 +93,7 @@ func TestNoLegacyNote(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	legacyHome(t, h.home, true, true)
-	for _, args := range [][]string{{"source", "list"}, {"defaults", "set", "--harness", "codex"}} {
+	for _, args := range [][]string{{"source", "show", "kukeon"}, {"defaults", "set", "--harness", "codex"}} {
 		if out, err := h.run(t, args...); err != nil || strings.Contains(out, "Note:") {
 			t.Fatalf("%v: %v\n%s", args, err, out)
 		}

@@ -24,14 +24,22 @@ import (
 	"github.com/eminwux/kukeon/pkg/team/config"
 )
 
-// storedProject is a stored team with a project source and role "old".
+// putProject stores storedProject and the Source proj its project names.
+func (s *store) putProject(t *testing.T) {
+	t.Helper()
+	s.storeSource(t, "proj", config.SourceSpec{URL: projectURL, Branch: "main"})
+	s.putTeam(t, storedProject())
+}
+
+// storedProject is a stored team with a project source and role "old", as
+// kukeond stores it since #1643: the project refers to the Source proj.
 func storedProject() *config.Team {
 	return &config.Team{
 		APIVersion: config.APIVersion, Kind: config.KindTeam,
 		Metadata: config.Metadata{Name: "proj", Realm: "default"},
 		Spec: config.TeamSpec{
 			ProjectSource: &config.Source{
-				Name: "project", URL: projectURL, Branch: "main", ClonePath: "/home/user/proj",
+				Name: "project", Stored: "proj", Branch: "main", ClonePath: "/home/user/proj",
 			},
 			Defaults: config.Defaults{
 				Roles: []config.Role{{Name: "old", Source: "kukeon", Path: "team/roles/majordomo"}},
@@ -44,7 +52,7 @@ func storedProject() *config.Team {
 // stored Team, never from the repository's file.
 func TestApplyNameUsesTheStoredTeam(t *testing.T) {
 	h := projectHarness(t, repoTeam)
-	h.store.putTeam(t, storedProject())
+	h.store.putProject(t)
 	out, err := h.run(t, "apply", "proj")
 	if err != nil || !strings.Contains(out, "stored team proj") {
 		t.Fatalf("%v\n%s", err, out)
@@ -57,7 +65,7 @@ func TestApplyNameUsesTheStoredTeam(t *testing.T) {
 func TestApplyNameNotStored(t *testing.T) {
 	h := projectHarness(t, "")
 	_, err := h.run(t, "apply", "proj")
-	if err == nil || !strings.Contains(err.Error(), "kuke team add proj") || h.store.writes != 0 {
+	if err == nil || !strings.Contains(err.Error(), "kuke create team proj") || h.store.writes != 0 {
 		t.Fatalf("err=%v writes=%d", err, h.store.writes)
 	}
 }
@@ -65,6 +73,7 @@ func TestApplyNameNotStored(t *testing.T) {
 // TestApplyKukeIsInitReapply is AC12.
 func TestApplyKukeIsInitReapply(t *testing.T) {
 	h := newHarness(t)
+	h.store.storeSource(t, config.KukeonSourceName, config.KukeonSourceSpec())
 	h.store.putTeam(t, config.Majordomo())
 	out, err := h.run(t, "apply", "kuke")
 	if err != nil || !strings.Contains(out, "stored team kuke") || h.store.team != "kuke" {
@@ -83,14 +92,14 @@ func TestApplyFileCreatesAndKeepsTheStoredProject(t *testing.T) {
 	if team := h.store.storedTeam(t, "fresh"); team.Spec.ProjectSource != nil || h.store.team != "fresh" {
 		t.Fatalf("fresh = %+v", team)
 	}
-	h.store.putTeam(t, storedProject())
+	h.store.putProject(t)
 	edited := strings.Replace(repoTeam, "name: other", "name: proj", 1)
 	if _, err := h.run(t, "apply", "-f", writeFile(t, "proj.yaml", edited)); err != nil {
 		t.Fatal(err)
 	}
 	team := h.store.storedTeam(t, "proj")
 	if strings.Join(roleNames(team), ",") != "lead" || team.Spec.ProjectSource == nil ||
-		team.Spec.ProjectSource.URL != projectURL {
+		team.Spec.ProjectSource.Stored != "proj" {
 		t.Fatalf("proj = %+v", team.Spec)
 	}
 }
@@ -99,7 +108,7 @@ func TestApplyFileCreatesAndKeepsTheStoredProject(t *testing.T) {
 // Configs the team would prune.
 func TestApplyDryRunWritesNothing(t *testing.T) {
 	h := projectHarness(t, "")
-	h.store.putTeam(t, storedProject())
+	h.store.putProject(t)
 	h.store.configs = []api.CellConfigDoc{{Metadata: api.CellConfigMetadata{
 		Name: "proj-gone-codex", Labels: map[string]string{api.LabelTeam: "proj"},
 	}}}

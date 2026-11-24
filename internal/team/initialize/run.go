@@ -128,6 +128,16 @@ func Init(ctx context.Context, opts InitOptions) (Outcome, error) {
 			return Outcome{}, fmt.Errorf("init: encode TeamDefaults: %w", err)
 		}
 	}
+	// The kukeon Source the kuke team reads is stored with it, unless one
+	// is stored (or a legacy TeamDefaults still lists it).
+	stored, err := Sources(ctx, opts.Client)
+	if err != nil {
+		return Outcome{}, fmt.Errorf("init: %w", err)
+	}
+	var sources map[string]config.SourceSpec
+	if all, _ := withLegacy(defaults, stored); !hasSource(all, config.KukeonSourceName) {
+		sources = map[string]config.SourceSpec{config.KukeonSourceName: config.KukeonSourceSpec()}
+	}
 	return run(ctx, opts.Options, request{
 		command:     "kuke team init",
 		origin:      Origin{Kind: OriginInitial},
@@ -135,19 +145,18 @@ func Init(ctx context.Context, opts InitOptions) (Outcome, error) {
 		team:        config.Majordomo(),
 		have:        injectedSources(opts.Sources),
 		defaultsDoc: defaultsDoc,
+		sources:     sources,
 	})
 }
 
 // InitialDefaults is the TeamDefaults init creates in a realm that has none:
-// the kukeon source, at the ref the kuke team reads it from and with no
-// clonePath, and its codex and claude harnesses. It has no default roles:
-// those come from sources the operator registers.
+// the codex and claude harnesses of the kukeon source. It has no sources
+// (#1643: init stores the kukeon Source, at the ref the kuke team reads it
+// from, beside it) and no default roles: those come from the Sources the
+// operator stores.
 func InitialDefaults(realm string) *config.TeamDefaults {
 	defaults := config.EmptyDefaults(realm)
-	defaults.Spec.Defaults = config.Defaults{
-		Sources:   []config.Source{config.MajordomoSource()},
-		Harnesses: config.MajordomoHarnesses(),
-	}
+	defaults.Spec.Defaults = config.Defaults{Harnesses: config.MajordomoHarnesses()}
 	return defaults
 }
 
@@ -291,7 +300,7 @@ func readDefaults(ctx context.Context, client Client, realm string) (*config.Tea
 	if !got.Exists {
 		return config.EmptyDefaults(realm), false, nil
 	}
-	defaults, err := config.DecodeDefaults(bytes.NewReader(got.Document))
+	defaults, err := config.DecodeStoredDefaults(bytes.NewReader(got.Document))
 	if err != nil {
 		return nil, false, fmt.Errorf("stored team defaults of realm %s: %w", realm, err)
 	}

@@ -18,6 +18,7 @@ package initialize
 
 import (
 	"bytes"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -63,7 +64,9 @@ func TestDirectoryAddDiscoveryAndRepeat(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if out.Result.Resources != 3 || out.Result.Team != expectedName {
+				// One blueprint, one config, the Team and, the first time,
+				// the project's Source (#1643).
+				if out.Result.Resources != 4-attempt || out.Result.Team != expectedName {
 					t.Fatalf("result=%+v", out.Result)
 				}
 				assertDirectoryEntry(t, opts, expectedName, mode, commit)
@@ -93,7 +96,9 @@ func assertDirectoryEntry(t *testing.T, opts AddOptions, expectedName, mode, com
 		t.Fatal("inheritance frozen")
 	}
 	source := team.Spec.ProjectSource
-	if source.URL != "git@work-alias:owner/project.git" || source.ClonePath != "/home/user/"+expectedName {
+	f := opts.Client.(*fakeClient)
+	if projectURL(t, f, team) != "git@work-alias:owner/project.git" || source.URL != "" ||
+		source.ClonePath != "/home/user/"+expectedName {
 		t.Fatalf("source=%+v", source)
 	}
 	if mode == "branch" && (source.Branch != "trunk" || source.Commit != "") {
@@ -103,8 +108,10 @@ func assertDirectoryEntry(t *testing.T, opts AddOptions, expectedName, mode, com
 		t.Fatal("detached commit lost")
 	}
 	// A stored team is self-contained; Resolve never consults the directory.
-	effective, err := config.Resolve(storedDefaults(t, opts.Client.(*fakeClient)), team)
-	if err != nil || len(effective.Sources) != 2 {
+	effective, err := resolveStored(t, f, team)
+	if err != nil ||
+		!slices.ContainsFunc(effective.Sources, func(s config.Source) bool { return s.Name == "kukeon" }) ||
+		!slices.ContainsFunc(effective.Sources, func(s config.Source) bool { return s.Name == "project" }) {
 		t.Fatalf("inherited definitions lost: %v", err)
 	}
 	if bytes.Contains(raw, []byte(opts.Directory)) {
@@ -152,7 +159,7 @@ func TestDirectoryDeclarationPrecedence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if out.Result.Team != expectedName || out.Result.Resources != 3 {
+			if out.Result.Team != expectedName || out.Result.Resources != 4 {
 				t.Fatalf("result = %+v", out.Result)
 			}
 			if out.Plan.Origin.Kind != OriginDirectory || !strings.HasSuffix(out.Plan.Origin.Detail, "kuketeam.yaml") {
@@ -162,11 +169,12 @@ func TestDirectoryDeclarationPrecedence(t *testing.T) {
 			accepted.Name = expectedName
 			_, entry := readAdded(t, accepted)
 			project := entry.Spec.ProjectSource
+			url := projectURL(t, opts.Client.(*fakeClient), entry)
 			if mode == "local-source" &&
-				(project.URL != team.Spec.ProjectSource.URL || project.Tag != "v1" || project.ClonePath != "/workspace/code") {
+				(url != team.Spec.ProjectSource.URL || project.Tag != "v1" || project.ClonePath != "/workspace/code") {
 				t.Fatal("authored source overwritten")
 			}
-			if mode == "source-override" && (project.URL != opts.Source || project.Tag != "v1") {
+			if mode == "source-override" && (url != opts.Source || project.Tag != "v1") {
 				t.Fatal("source override lost local revision")
 			}
 			if mode == "revision-override" && (project.Commit != commit || project.Tag != "") {
@@ -282,7 +290,7 @@ func TestDirectoryPartialApplyPreservesTheStoredTeam(t *testing.T) {
 	configureAddFailure(t, &opts, fake, "partial")
 	opts.Force = true
 	_, err := Add(t.Context(), opts)
-	if err == nil || !strings.Contains(err.Error(), "rerun kuke team add <directory> --name chosen") ||
+	if err == nil || !strings.Contains(err.Error(), "rerun kuke create team <directory> --name chosen") ||
 		!strings.Contains(err.Error(), "team not stored") {
 		t.Fatalf("error=%v", err)
 	}
@@ -483,8 +491,15 @@ func TestAddKukeonProjectKeepsTheInitTeam(t *testing.T) {
 		t.Fatalf("init did not apply the majordomo configs: %v", majordomo)
 	}
 
+	// The majordomo role reads the kukeon Source, which is the project of
+	// team kukeon: the team clones it beside the project.
 	writeFixture(t, filepath.Join(opts.Directory, "kuketeam.yaml"),
-		"apiVersion: v1beta1\nkind: Team\nmetadata: {name: kukeon}\n")
+		"apiVersion: v1beta1\nkind: Team\nmetadata: {name: kukeon}\n"+
+			"spec:\n  sources: [{name: kukeon, clonePath: /home/user/kukeon-src}]\n")
+	// The checkout is kukeon's: its project is the kukeon Source init stored
+	// (#1643), at the checkout's revision.
+	opts.Source = "git@github.com:eminwux/kukeon.git"
+	sources := maps.Clone(fake.sources)
 	out, err := Add(t.Context(), opts)
 	if err != nil {
 		t.Fatal(err)
@@ -494,6 +509,9 @@ func TestAddKukeonProjectKeepsTheInitTeam(t *testing.T) {
 	}
 	if !bytes.Equal(kukeBefore, fake.teams["kuke"]) {
 		t.Fatal("the kuke Team changed by add")
+	}
+	if !maps.EqualFunc(sources, fake.sources, bytes.Equal) {
+		t.Fatal("the add of kukeon's checkout changed the stored Sources")
 	}
 	kept := map[string]bool{}
 	for _, cfg := range fake.configs {

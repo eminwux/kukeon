@@ -54,6 +54,11 @@ func addDefaults() *config.TeamDefaults {
 	cfg := config.EmptyDefaults(config.DefaultRealm)
 	cfg.Spec.Defaults = config.Majordomo().Spec.Defaults
 	cfg.Spec.Defaults.Harnesses = cfg.Spec.Defaults.Harnesses[:1]
+	// The sources as a TeamDefaults listed them before #1643; storeDefaults
+	// stores them as Sources.
+	kukeon := config.KukeonSource()
+	kukeon.ClonePath = cfg.Spec.Defaults.Sources[0].ClonePath
+	cfg.Spec.Defaults.Sources = []config.Source{kukeon}
 	return cfg
 }
 
@@ -113,7 +118,7 @@ exec git-upload-pack "$ADD_FIXTURE_REPO"
 	t.Setenv("ADD_FIXTURE_REPO", repo)
 	t.Setenv("SSH_AUTH_SOCK", "/fixture/agent")
 	t.Setenv("GIT_SSH_COMMAND", "'"+strings.ReplaceAll(shim, "'", "'\\''")+"'")
-	opts := AddOptions{Options: setupAddRun(t), Name: "kukeon", Source: "git@work-alias:owner/project.git"}
+	opts := AddOptions{Options: setupAddRun(t), Name: "acme", Source: "git@work-alias:owner/project.git"}
 	return opts, commit
 }
 
@@ -166,8 +171,9 @@ func TestAddNativeSSHRevisionsAndRepeat(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				// One blueprint, one config and the Team.
-				if out.Result.Resources != 3 {
+				// One blueprint, one config and the Team, and the first time
+				// the project's Source.
+				if want := 3 + 1 - attempt; out.Result.Resources != want {
 					t.Fatalf("resources = %d", out.Result.Resources)
 				}
 				if out.Plan.Origin.Kind != OriginDefaults {
@@ -456,7 +462,7 @@ func TestAddReusesScopedSecretsAndNewDefaults(t *testing.T) {
 	}
 	raw, team := readAdded(t, opts)
 	if team.Spec.Roles != nil || team.Spec.Harnesses != nil || fake.creates != 0 || fake.lookups != lookups+1 ||
-		!bytes.Contains(fake.raw, []byte("kukeon-updated-opencode")) ||
+		!bytes.Contains(fake.raw, []byte("acme-updated-opencode")) ||
 		bytes.Contains(raw, []byte("unsafe-canary")) ||
 		bytes.Contains(fake.raw, []byte("unsafe-canary")) {
 		t.Fatal("new defaults or secret reuse failed")
@@ -569,9 +575,9 @@ func TestAddFetchesDefinitionsAndProjectWithoutLocalSources(t *testing.T) {
 		"-m",
 		"definitions",
 	)
-	changeAddConfig(t, opts, func(cfg *config.TeamDefaults) {
-		cfg.Spec.Defaults.Sources[0].URL = "git@work-alias:owner/definitions.git"
-		cfg.Spec.Defaults.Sources[0].Branch = "trunk"
+	// The kukeon definitions are the stored kukeon Source (#1643).
+	opts.Client.(*fakeClient).storeSource(config.KukeonSourceName, config.SourceSpec{
+		URL: "git@work-alias:owner/definitions.git", Branch: "trunk",
 	})
 	opts.Sources = nil
 	out, err := Add(t.Context(), opts)
@@ -608,10 +614,16 @@ func TestAddRejectsCredentialURLBeforeAnyGitInvocation(t *testing.T) {
 func assertAcceptedAdd(t *testing.T, opts AddOptions, mode, commit string) {
 	t.Helper()
 	raw, team := readAdded(t, opts)
-	if team.Spec.ProjectSource == nil || team.Spec.ProjectSource.URL != opts.Source || team.Spec.Sources != nil ||
+	// The project is stored as a Source of the team's name, and the Team
+	// refers to it (#1643).
+	if team.Spec.ProjectSource == nil || team.Spec.ProjectSource.URL != "" ||
+		team.Spec.ProjectSource.Stored != opts.Name || team.Spec.Sources != nil ||
 		team.Spec.Roles != nil ||
 		team.Spec.Harnesses != nil {
 		t.Fatalf("inheritance lost: %s", raw)
+	}
+	if source := storedSource(t, opts.Client.(*fakeClient), opts.Name); source.URL != opts.Source {
+		t.Fatalf("project Source = %+v, want %s", source, opts.Source)
 	}
 	project := team.Spec.ProjectSource
 	switch mode {
@@ -630,9 +642,9 @@ func assertAcceptedAdd(t *testing.T, opts AddOptions, mode, commit string) {
 		}
 	}
 	fake := opts.Client.(*fakeClient)
-	if fake.team != "kukeon" || !bytes.Contains(fake.raw, []byte("kukeon-majordomo-codex")) ||
+	if fake.team != "acme" || !bytes.Contains(fake.raw, []byte("acme-majordomo-codex")) ||
 		!bytes.Contains(fake.raw, []byte(opts.Source)) ||
-		!bytes.Contains(fake.raw, []byte("/home/user/kukeon")) ||
+		!bytes.Contains(fake.raw, []byte("/home/user/acme")) ||
 		!bytes.Contains(fake.raw, []byte("https://github.com/eminwux/kukeon")) {
 		t.Fatal("named ownership/project/default binding missing")
 	}
@@ -671,13 +683,12 @@ func configureAddFailure(t *testing.T, opts *AddOptions, fake *fakeClient, mode 
 	case "definition":
 		opts.Sources = map[string]fs.FS{}
 	case "collision":
-		changeAddConfig(t, *opts, func(cfg *config.TeamDefaults) {
-			cfg.Spec.Defaults.Sources = append(
-				cfg.Spec.Defaults.Sources,
-				config.Source{Name: "project", URL: "https://example.test/repo", Branch: "main"},
-			)
-		})
+		// The project's Source is stored with another repository (AC6).
+		fake.storeSource(opts.Name, config.SourceSpec{URL: "https://example.test/repo", Branch: "main"})
 	case "clone-collision":
+		// A TeamDefaults written before #1643 clones kukeon at
+		// /home/user/kukeon-src, where the project of team kukeon-src goes.
+		storeLegacyDefaults(t, fake, addDefaults())
 		opts.Name = "kukeon-src"
 	case "credentials":
 		opts.Source = "https://user:unsafe-canary@host/repo"

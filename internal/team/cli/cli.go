@@ -14,9 +14,11 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-// Package cli is the `kuke team` command tree: the verbs that fetch sources
-// and compose teams. Reading and deleting teams use the generic verbs
-// (`kuke get team`, `kuke delete team`).
+// Package cli is the `kuke team` command tree, the verbs that fetch sources
+// and compose teams, and the team and source verbs mounted elsewhere:
+// `kuke create team`, `kuke create source` and `kuke source show` (#1643).
+// Reading and deleting teams and Sources use the generic verbs (`kuke get
+// team`, `kuke delete source`).
 package cli
 
 import (
@@ -65,8 +67,7 @@ func NewTeamCommandWith(deps Deps) *cobra.Command {
 	// Cobra honors SilenceUsage only on the executing command or the root, so
 	// set it on each subcommand: a failed verb reports its error alone.
 	for _, sub := range []*cobra.Command{
-		newInitCommand(deps), newAddCommand(deps), newApplyCommand(deps),
-		newSourceCommand(deps), newDefaultsCommand(deps),
+		newInitCommand(deps), newApplyCommand(deps), newExportCommand(deps), newDefaultsCommand(deps),
 	} {
 		silence(sub)
 		cmd.AddCommand(sub)

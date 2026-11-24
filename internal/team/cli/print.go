@@ -55,6 +55,9 @@ func PrintOutcome(w io.Writer, out initialize.Outcome) error {
 func PrintDefaultsChange(w io.Writer, what string, change initialize.DefaultsChange) error {
 	p := &printer{w: w}
 	p.linef("%s.", what)
+	for _, note := range change.Notes {
+		p.linef("Note: %s", note)
+	}
 	printInheriting(p, change.Inheriting)
 	return p.err
 }

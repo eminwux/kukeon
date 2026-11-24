@@ -139,6 +139,11 @@ func (s *WireService) ListTeams(a *kukeonv1.ListTeamsArgs, r *kukeonv1.ListTeams
 	return nil
 }
 
+func (s *WireService) ListSources(a *kukeonv1.ListSourcesArgs, r *kukeonv1.ListSourcesReply) error {
+	r.Sources, _ = s.Client.ListSources(context.Background(), a.Realm)
+	return nil
+}
+
 func (s *WireService) GetTeamDefaults(a *kukeonv1.GetTeamDefaultsArgs, r *kukeonv1.GetTeamDefaultsReply) error {
 	r.Result, _ = s.Client.GetTeamDefaults(context.Background(), a.Realm)
 	return nil

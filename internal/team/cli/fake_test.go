@@ -22,7 +22,9 @@ import (
 	"errors"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
+	"slices"
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/team/cli"
@@ -40,6 +42,7 @@ type store struct {
 	kukeonv1.FakeClient
 
 	teams    map[string][]byte
+	sources  map[string][]byte
 	defaults []byte
 	configs  []api.CellConfigDoc
 	// writes counts every call that changes daemon state.
@@ -50,7 +53,48 @@ type store struct {
 	closed  bool
 }
 
-func newStore() *store { return &store{teams: map[string][]byte{}} }
+func newStore() *store { return &store{teams: map[string][]byte{}, sources: map[string][]byte{}} }
+
+// storeSource stores a Source document as kukeond would.
+func (s *store) storeSource(t *testing.T, name string, spec config.SourceSpec) {
+	t.Helper()
+	raw, err := yaml.Marshal(api.SourceDoc{
+		APIVersion: api.APIVersionV1Beta1, Kind: api.KindSource,
+		Metadata: api.TeamMetadata{Name: name, Realm: "default"}, Spec: spec,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.sources[name] = raw
+}
+
+func (s *store) sourceResult(name string) kukeonv1.GetSourceResult {
+	return kukeonv1.GetSourceResult{
+		Exists: true, Document: s.sources[name], Summary: kukeonv1.SourceSummary{Name: name, Realm: "default"},
+	}
+}
+
+func (s *store) GetSource(_ context.Context, ref kukeonv1.SourceRef) (kukeonv1.GetSourceResult, error) {
+	if _, ok := s.sources[ref.Name]; !ok {
+		return kukeonv1.GetSourceResult{}, nil
+	}
+	return s.sourceResult(ref.Name), nil
+}
+
+func (s *store) ListSources(context.Context, string) ([]kukeonv1.GetSourceResult, error) {
+	out := make([]kukeonv1.GetSourceResult, 0, len(s.sources))
+	for _, name := range slices.Sorted(maps.Keys(s.sources)) {
+		out = append(out, s.sourceResult(name))
+	}
+	return out, nil
+}
+
+// StageGitFetch stages nothing: no Source of these tests names an identity.
+func (s *store) StageGitFetch(context.Context, kukeonv1.GitFetchRequest) (kukeonv1.StageGitFetchResult, error) {
+	return kukeonv1.StageGitFetchResult{}, nil
+}
+
+func (s *store) ReleaseGitFetch(context.Context, string) error { return nil }
 
 func (s *store) Close() error               { s.closed = true; return nil }
 func (s *store) Ping(context.Context) error { return nil }
@@ -167,6 +211,8 @@ func (s *store) apply(raw []byte, team string) (kukeonv1.ApplyDocumentsResult, e
 			s.teams[head.Metadata.Name] = doc
 		case string(api.KindTeamDefaults):
 			s.defaults = doc
+		case string(api.KindSource):
+			s.sources[head.Metadata.Name] = doc
 		case "CellConfig":
 			var cfg api.CellConfigDoc
 			if err = node.Decode(&cfg); err != nil {
@@ -191,9 +237,13 @@ func (s *store) putTeam(t *testing.T, team *config.Team) {
 	s.teams[team.Metadata.Name] = raw
 }
 
-// putDefaults stores a TeamDefaults document as kukeond would.
+// putDefaults stores a TeamDefaults document as kukeond would, with the
+// kukeon Source kuke team init stores beside it (#1643).
 func (s *store) putDefaults(t *testing.T, defaults *config.TeamDefaults) {
 	t.Helper()
+	if _, ok := s.sources[config.KukeonSourceName]; !ok {
+		s.storeSource(t, config.KukeonSourceName, config.KukeonSourceSpec())
+	}
 	raw, err := yaml.Marshal(defaults)
 	if err != nil {
 		t.Fatal(err)
@@ -204,7 +254,7 @@ func (s *store) putDefaults(t *testing.T, defaults *config.TeamDefaults) {
 // storedDefaults decodes the stored TeamDefaults.
 func (s *store) storedDefaults(t *testing.T) *config.TeamDefaults {
 	t.Helper()
-	got, err := config.DecodeDefaults(bytes.NewReader(s.defaults))
+	got, err := config.DecodeStoredDefaults(bytes.NewReader(s.defaults))
 	if err != nil {
 		t.Fatalf("stored TeamDefaults: %v\n%s", err, s.defaults)
 	}
@@ -229,20 +279,34 @@ func newHarness(t *testing.T) *harness {
 	return &harness{home: t.TempDir(), store: newStore(), sources: kukeonTree()}
 }
 
-func (h *harness) command() *cobra.Command {
-	return cli.NewTeamCommandWith(cli.Deps{
+func (h *harness) deps() cli.Deps {
+	return cli.Deps{
 		HomeDir: func() (string, error) { return h.home, h.homeErr },
 		Connect: func(_ context.Context, opts initialize.ConnectOptions) (initialize.Client, error) {
 			h.connect = append(h.connect, opts)
 			return h.store, nil
 		},
 		Sources: h.sources,
-	})
+	}
 }
 
-// run executes `kuke team args...` and returns stdout and the error.
+// command is `kuke` with the verbs this package builds: team, create team,
+// create source and source show.
+func (h *harness) command() *cobra.Command {
+	root := &cobra.Command{Use: "kuke", SilenceUsage: true}
+	create := &cobra.Command{Use: "create", SilenceUsage: true}
+	create.AddCommand(cli.NewCreateTeamCommandWith(h.deps()), cli.NewCreateSourceCommandWith(h.deps()))
+	root.AddCommand(cli.NewTeamCommandWith(h.deps()), create, cli.NewSourceCommandWith(h.deps()))
+	return root
+}
+
+// run executes `kuke args...` and returns stdout and the error. Arguments
+// that do not start with create or source are `kuke team`'s.
 func (h *harness) run(t *testing.T, args ...string) (string, error) {
 	t.Helper()
+	if len(args) == 0 || (args[0] != "create" && args[0] != "source") {
+		args = append([]string{"team"}, args...)
+	}
 	cmd := h.command()
 	var out, stderr bytes.Buffer
 	cmd.SetOut(&out)
