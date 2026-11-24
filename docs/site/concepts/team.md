@@ -295,7 +295,7 @@ two roles lives in the pair's CellConfig:
 | Role fact                                                                             | In the CellConfig                                                        |
 | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | Image picked for the role's `needs.image`                                             | `values.IMAGE`, plus `requires` for the capabilities                     |
-| Role source checkout, role path, start dir                                            | `values.ROLE_SOURCE_DIR`, `ROLE_PATH`, `INITIAL_PATH`                    |
+| Role source checkout, role path, start dir, project checkout                          | `values.ROLE_SOURCE_DIR`, `ROLE_PATH`, `INITIAL_PATH`, `PROJECT_DIR`     |
 | Harness settings (claude settings file, codex sandbox/approval, opencode permissions) | `values.HARNESS_SETTINGS`, `SANDBOX`, `APPROVAL`, `PERMISSIONS`          |
 | Repositories                                                                          | `repos.role-source`, `repos.project`, one slot per further cloned source |
 | Secrets                                                                               | `secrets.<slot>` → a stored Secret                                       |

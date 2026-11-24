@@ -161,6 +161,7 @@ never shell source substitutions:
 | `ROLE_PATH`                       | Safe source-relative selected role directory.                                                                       |
 | `INITIAL_PATH`                    | Absolute launch directory; omitted or `$HOME` resolves to `/home/user`.                                             |
 | `HARNESS_SETTINGS`                | Selected role-relative settings path, empty when unused.                                                            |
+| `PROJECT_DIR`                     | Absolute in-cell project checkout (`projectSource.clonePath`); the directory is absent when the team has none.      |
 | `PROMPT`                          | The headless mode's parameter. In a Harness without `spec.modes`: a blueprint parameter, empty selects interactive. |
 | `AGENT_NAME`                      | Bound resource identity unless explicitly supplied as a parameter.                                                  |
 | `CODEX_SANDBOX`, `CODEX_APPROVAL` | Codex's declared environment mapping; role values, overridden to `danger-full-access` / `never` in root profiles.   |
@@ -208,6 +209,13 @@ preflights managed destinations, preserving credentials and unrelated files.
 External role installers retain responsibility for their own rerun/conflict
 behavior. Setup runs before agent launch even when INITIAL_PATH is outside the
 role checkout; instruction discovery is not dependent on that working directory.
+
+Each packaged mode's first onInit entry runs `pre-commit install` in
+`$PROJECT_DIR` when the project checkout has a `.pre-commit-config.yaml` and
+`pre-commit` is on PATH, so an agent's commits (and pushes, for hook types the
+project's `default_install_hook_types` lists) run the project's hooks (#1642).
+A project opts in by committing that file. The entry is idempotent and never
+fatal: a failed install prints a warning and startup continues.
 
 Kukeon runs default onInit entries in order in the wrapped shell on **every
 boot**, not exactly once per cell. These scripts depend on repositories and

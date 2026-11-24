@@ -17,6 +17,15 @@ spec:
     interactive:
       description: Attachable session; the login persists in the state volume.
       onInit:
+        # Install the project's git hooks so commits run them (#1642). A
+        # project opts in with a .pre-commit-config.yaml; never fatal.
+        - script: |
+            project_dir=${PROJECT_DIR:-}
+            if [ -n "$project_dir" ] && [ -f "$project_dir/.pre-commit-config.yaml" ] &&
+              command -v pre-commit >/dev/null 2>&1; then
+              (cd "$project_dir" && pre-commit install >/dev/null) ||
+                echo "warning: pre-commit install failed in $project_dir" >&2
+            fi
         - script: |
             set -euo pipefail
             make -f /opt/kuketeams/harness/Makefile.start setup
@@ -35,6 +44,15 @@ spec:
           required: true
           description: Prompt the run starts from.
       onInit:
+        # Install the project's git hooks so commits run them (#1642). A
+        # project opts in with a .pre-commit-config.yaml; never fatal.
+        - script: |
+            project_dir=${PROJECT_DIR:-}
+            if [ -n "$project_dir" ] && [ -f "$project_dir/.pre-commit-config.yaml" ] &&
+              command -v pre-commit >/dev/null 2>&1; then
+              (cd "$project_dir" && pre-commit install >/dev/null) ||
+                echo "warning: pre-commit install failed in $project_dir" >&2
+            fi
         - script: |
             set -euo pipefail
             make -f /opt/kuketeams/harness/Makefile.start setup

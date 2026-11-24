@@ -426,7 +426,7 @@ func blueprintInputs(
 	}
 	environment := []string{
 		"ROLE_SOURCE_DIR=${ROLE_SOURCE_DIR}", "ROLE_PATH=${ROLE_PATH}", "INITIAL_PATH=${INITIAL_PATH}",
-		"HARNESS_SETTINGS=${HARNESS_SETTINGS}", "AGENT_NAME=${AGENT_NAME}",
+		"PROJECT_DIR=${PROJECT_DIR}", "HARNESS_SETTINGS=${HARNESS_SETTINGS}", "AGENT_NAME=${AGENT_NAME}",
 	}
 	if slices.Contains(prof.Mounts, "kukeond-socket") {
 		// The socket is reached through its directory mount (issue #1483).
