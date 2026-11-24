@@ -2537,6 +2537,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#upgrading-the-kuke-team" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading the kuke team
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#upgrading-from-host-files" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2649,6 +2660,34 @@
     
   
     kuke uninstall
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-update/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke update
   
 
     
@@ -3667,6 +3706,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#upgrading-the-kuke-team" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading the kuke team
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#upgrading-from-host-files" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3720,7 +3770,7 @@
 
 
 <h1 id="kuke-team-init">kuke team init<a class="headerlink" href="#kuke-team-init" title="Permanent link">&para;</a></h1>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke team init [--force | --reapply] [--host ENDPOINT] [--configuration PATH]
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke team init [--force | --reapply | --upgrade] [--host ENDPOINT] [--configuration PATH]
 </code></pre></div>
 <p>Apply the <code>kuke</code> team, whose one role is <code>majordomo</code>, to kukeond, which stores
 the <code>Team</code> with the Configs composed from it. <code>init</code> creates no cells and
@@ -3746,12 +3796,17 @@ model, see <a href="../../concepts/team/">Teams</a>.</p>
 <tr>
 <td><code>--force</code></td>
 <td><code>false</code></td>
-<td>Replace the stored <code>kuke</code> team with the initial majordomo declaration and apply it.</td>
+<td>Replace the stored <code>kuke</code> team with the initial majordomo declaration and apply it. Picks up a newer majordomo declaration (a new role need, a new harness); drops <code>spec.secrets</code>.</td>
 </tr>
 <tr>
 <td><code>--reapply</code></td>
 <td><code>false</code></td>
 <td>Recompose and apply the <code>kuke</code> team from its stored Team. Excludes <code>--force</code>.</td>
+</tr>
+<tr>
+<td><code>--upgrade</code></td>
+<td><code>false</code></td>
+<td>Re-pin the <code>kukeon</code> source of the stored <code>kuke</code> team and of the <code>TeamDefaults</code> to this <code>kuke</code>'s revision and recompose the <code>kuke</code> team. See <a href="#upgrading-the-kuke-team">Upgrading the kuke team</a>. Excludes <code>--force</code> and <code>--reapply</code>.</td>
 </tr>
 <tr>
 <td><code>--host</code></td>
@@ -3782,7 +3837,8 @@ again from the initial declaration.</p>
 <p>When the <code>default</code> realm has no <code>TeamDefaults</code>, init creates one in the same
 apply, with the <code>kukeon</code> source (at the same revision as the <code>kuke</code> team, below)
 and its <code>codex</code> and <code>claude</code> harnesses and no default roles, so a project team needs only roles. An existing <code>TeamDefaults</code>
-is never changed, with or without <code>--force</code>. See
+is never changed, with or without <code>--force</code>, except for its <code>kukeon</code> source's
+revision by <code>--upgrade</code>. See
 <a href="../../concepts/team/#sources-and-defaults">Sources and defaults</a>.</p>
 <p>The command fetches only the sources used by the selected role/harness
 definitions into temporary Git checkouts, and composes the kuke team's
@@ -3828,7 +3884,8 @@ or no VCS stamp) falls back to <code>branch: main</code>. When a fetched documen
 rejected anyway, the error names each fetched source with its URL and
 revision. A source revision and the binary then disagree on schema version.
 A stored <code>kuke</code> team (<code>--reapply</code>) and an existing <code>TeamDefaults</code> keep the
-revision they were stored with.</p>
+revision they were stored with until <code>kuke team init --upgrade</code>, which
+<a href="../kuke-update/"><code>kuke update</code></a> and the installer run.</p>
 <p>This applies the shared blueprints <code>codex</code> and <code>claude</code> — one per harness ×
 security profile, realm-wide, see <a href="../../concepts/team/#shared-blueprints">Teams</a> —
 and the CellConfigs <code>kuke-majordomo-codex</code> and <code>kuke-majordomo-claude</code>, labelled
@@ -3951,6 +4008,38 @@ previously stored Team unchanged; a first-time failure stores no Team.
 Successful resources and created secrets are not rolled back: rerun
 <code>kuke team init --force</code> (or <code>--reapply</code>) after fixing the prerequisite to
 converge the same <code>kuke</code> identity.</p>
+<h2 id="upgrading-the-kuke-team">Upgrading the kuke team<a class="headerlink" href="#upgrading-the-kuke-team" title="Permanent link">&para;</a></h2>
+<p><code>kuke team init --upgrade</code> moves the stored <code>kuke</code> team to the revision the
+running <code>kuke</code> was built from: the release tag for a stable build, the build
+commit for an edge build. <a href="../kuke-update/"><code>kuke update</code></a> runs it with the new
+binary after the daemon is back, and the one-line installer runs it on a host
+that already has a daemon.</p>
+<ul>
+<li>It reads the stored <code>kuke</code> Team and the <code>TeamDefaults</code> of realm <code>default</code>. In
+  each, the source named <code>kukeon</code> whose URL is <code>github.com/eminwux/kukeon</code> gets
+  the new <code>branch</code>, <code>tag</code> and <code>commit</code>; its <code>clonePath</code>, <code>git</code> and every other
+  field are kept. A <code>kukeon</code> source with another URL is the operator's: it is
+  left alone and named in a note.</li>
+<li>When both pins already match, it prints
+  <code>kuke team and defaults already at &lt;revision&gt;</code> and exits 0 without fetching
+  or applying anything.</li>
+<li>Otherwise the re-pinned team and, when it changed, the re-pinned
+  <code>TeamDefaults</code> land in one apply and the <code>kuke</code> team is recomposed.
+  <code>spec.secrets</code> and every other field of the stored Team are kept.</li>
+<li>It prints one line per changed document
+  (<code>kuke team: kukeon source commit &lt;old&gt; -&gt; commit &lt;new&gt;</code>) and, when the
+  defaults changed, every other stored team that inherits them, with
+  <code>kuke team apply NAME</code> to recompose it. Those teams are not recomposed.</li>
+<li>It never creates the <code>kuke</code> team. Without one, it re-pins only the
+  <code>TeamDefaults</code> (if any) and prints
+  <code>team kuke is not stored; run kuke team init to create it</code>.</li>
+<li>It does not merge a newer majordomo declaration (a new role need, a new
+  harness) into the stored team; <code>--force</code> does that.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>kuke<span class="w"> </span>team<span class="w"> </span>init<span class="w"> </span>--upgrade
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>kuke<span class="w"> </span>get<span class="w"> </span>team<span class="w"> </span>kuke<span class="w"> </span>-o<span class="w"> </span>yaml<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-A3<span class="w"> </span><span class="s1">'name: kukeon'</span><span class="w">   </span><span class="c1"># the binary's revision</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>kuke<span class="w"> </span>team<span class="w"> </span>init<span class="w"> </span>--upgrade<span class="w">                               </span><span class="c1"># kuke team and defaults already at ...</span>
+</code></pre></div>
 <h2 id="upgrading-from-host-files">Upgrading from host files<a class="headerlink" href="#upgrading-from-host-files" title="Permanent link">&para;</a></h2>
 <p>Earlier releases kept the kuke team in a file under <code>~/.kuke</code> and read global
 defaults from another. Those files are no longer read: when either exists,
@@ -3959,16 +4048,16 @@ init prints one note saying so and nothing is converted. Run
 health sweep, for one — in the stored Team. See
 <a href="../../concepts/team/#upgrading-from-host-files">Upgrading from host files</a>.</p>
 <h2 id="output">Output<a class="headerlink" href="#output" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>Applied 6 resources; stored team kuke.
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>No cells created or started.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Applied 6 resources; stored team kuke.
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>No cells created or started.
 </code></pre></div>
 <p>Pruned configs, missing runtime secrets and notes follow when there are any:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Pruned configs: kuke-majordomo-opencode
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>Missing secrets (cells will not start until they exist):
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>  git-ssh  →  kuke create secret git-ssh --realm default --type ssh-key --from-file /path/to/private-key  (git credential; or --type basic-auth)
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>  bot-key  →  kuke create secret bot-key --realm default --connector git --type ssh-key --from-file /path/to/private-key --hosts github.com --author 'Name &lt;email&gt;'  (git identity; or --type basic-auth)
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>Notes:
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>  role dev: needs.mounts ssh no longer mounts the host ~/.ssh; cells clone, push and sign with stored git credentials
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>Pruned configs: kuke-majordomo-opencode
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>Missing secrets (cells will not start until they exist):
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>  git-ssh  →  kuke create secret git-ssh --realm default --type ssh-key --from-file /path/to/private-key  (git credential; or --type basic-auth)
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>  bot-key  →  kuke create secret bot-key --realm default --connector git --type ssh-key --from-file /path/to/private-key --hosts github.com --author 'Name &lt;email&gt;'  (git identity; or --type basic-auth)
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>Notes:
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>  role dev: needs.mounts ssh no longer mounts the host ~/.ssh; cells clone, push and sign with stored git credentials
 </code></pre></div>
 <p>A Secret named as a git identity (<code>spec.connectors.git.identity</code>) is listed
 with the <code>--connector git</code> form, since a cell renders only with a Secret tagged
@@ -3982,7 +4071,7 @@ for a <code>TeamDefaults</code> init created.</p>
 Unix JSON-RPC transport tests. A separate check verifies actual daemon storage,
 reads back blueprints and configs, repeats application, and confirms that cells
 are unchanged:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nv">KUKETEAMS_INTEGRATION_HOST</span><span class="o">=</span>unix:///path/to/disposable/kukeond.sock<span class="w"> </span>make<span class="w"> </span>test-team-integration
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nv">KUKETEAMS_INTEGRATION_HOST</span><span class="o">=</span>unix:///path/to/disposable/kukeond.sock<span class="w"> </span>make<span class="w"> </span>test-team-integration
 </code></pre></div>
 <p>Use a disposable kukeond with existing <code>default/default/default</code> scope metadata.
 The check uses a unique <code>init-check-*</code> team and deletes only its generated
@@ -4009,7 +4098,7 @@ blueprints and configs on cleanup.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 23, 2026 12:00:30 UTC">November 23, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 24, 2026 10:16:38 UTC">November 24, 2026</span>
   </span>
 
     

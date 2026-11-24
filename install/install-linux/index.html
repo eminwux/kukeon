@@ -2658,6 +2658,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../cli/kuke-update/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke update
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../cli/kuke-autocomplete/" class="md-nav__link">
         
   
@@ -3698,7 +3726,7 @@
 
 
 <h1 id="install-on-linux">Install on Linux<a class="headerlink" href="#install-on-linux" title="Permanent link">&para;</a></h1>
-<p>Kukeon (v0.6.0 beta) ships a single static binary per platform. The same binary behaves as <code>kuke</code> (the CLI) or <code>kukeond</code> (the daemon) depending on the name it is invoked under: you install the binary once and create a hard link for the second name. The one-line installer below does both for you.</p>
+<p>Kukeon (beta) ships a single static binary per platform. The same binary behaves as <code>kuke</code> (the CLI) or <code>kukeond</code> (the daemon) depending on the name it is invoked under: you install the binary once and create a hard link for the second name. The one-line installer below does both for you.</p>
 <p>Before installing, confirm cgroups v2 and containerd are in place — see <a href="../prerequisites/">Prerequisites</a>. The installer also checks them and exits with a distro-aware hint on any miss.</p>
 <h2 id="one-line-install-recommended">One-line install (recommended)<a class="headerlink" href="#one-line-install-recommended" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://kukeon.io/install.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span>bash
@@ -3707,8 +3735,9 @@
 <ol>
 <li>Detects your platform (<code>linux/amd64</code> or <code>linux/arm64</code>) and refuses anything else.</li>
 <li>Verifies cgroups v2 is mounted and <code>/run/containerd/containerd.sock</code> is responsive. On any miss it prints a distro-aware hint and exits non-zero without touching the system.</li>
-<li>Downloads the latest release binary from GitHub, verifies its <code>.sha256</code> checksum, installs it to <code>/usr/local/bin/kuke</code>, and hard-links <code>kukeond</code> next to it.</li>
-<li>Runs <code>sudo kuke init</code> to bring up the daemon. On a host that already has a <code>kukeond</code> listening on <code>/run/kukeon/kukeond.sock</code>, init is skipped — but the installer first compares the running daemon's version against the binaries it just installed. A version-matched daemon is skipped silently as before; an <strong>older</strong> daemon prints the exact <code>kuke daemon recreate</code> command to finish the upgrade and exits non-zero rather than declaring an unqualified success over a client/daemon skew (see <a href="#upgrade">Upgrade</a>). Set <code>KUKE_SKIP_DAEMON_UPGRADE=1</code> to keep an intentionally pinned older daemon.</li>
+<li>Resolves the version of its channel — <strong>edge</strong> by default, the newest build of <code>main</code> read from the <code>VERSION</code> asset of the rolling <a href="https://github.com/eminwux/kukeon/releases/tag/edge"><code>edge</code> prerelease</a>; <strong>stable</strong> with <code>KUKE_CHANNEL=stable</code>, the latest release tag. It downloads <code>kuke</code>, <code>kukebuild</code> and <code>kukepause</code> for the platform, verifies each <code>.sha256</code> checksum, and on edge checks that the downloaded <code>kuke</code> reports the version it read (a merge that lands mid-download fails the install before anything is placed: run it again). It then installs the binaries to <code>/usr/local/bin</code> and hard-links <code>kukeond</code> to <code>kuke</code>.</li>
+<li>Runs <code>sudo kuke init</code> on a fresh host, which creates the daemon from the image matching the binaries: <code>ghcr.io/eminwux/kukeon:sha-&lt;short&gt;</code> on edge, <code>ghcr.io/eminwux/kukeon:vX.Y.Z</code> on stable. On a host that already has a <code>kukeond</code> listening on <code>/run/kukeon/kukeond.sock</code>, init is skipped and the installer compares the running daemon's version with the binaries it just installed: a version-matched daemon is left alone; a <strong>different</strong> daemon is recreated with <code>kuke daemon recreate --kukeond-image &lt;that image&gt;</code> (only the <code>kuke-system</code> kukeond cell is cycled; workload cells are untouched), and the installer checks that <code>kuke version</code> then reports the same <code>Client:</code> and <code>Daemon:</code>. When the recreate fails it prints the command, leaves the skew, and exits non-zero. Set <code>KUKE_SKIP_DAEMON_UPGRADE=1</code> to keep an intentionally pinned older daemon.</li>
+<li>Stores the <code>kuke</code> team (the majordomo role): <code>sudo kuke team init</code> on a fresh host, <code>sudo kuke team init --upgrade</code> on a live one (only when the installed <code>kuke</code> has <code>--upgrade</code>), so the team is pinned to the revision of the installed binaries. Team init fetches <code>github.com/eminwux/kukeon</code>, so it needs <code>git</code>: without it, or when the step fails, the installer prints a warning naming the command to run later and still succeeds. <code>KUKE_SKIP_TEAM_INIT=1</code> (or <code>KUKE_SKIP_INIT=1</code>) skips the step.</li>
 <li>Installs <code>/etc/systemd/system/kukeond.service</code> and runs <code>systemctl enable --now kukeond.service</code> so the daemon comes back automatically after a host or containerd restart. Skipped with a notice on systemd-less hosts — bring kukeond up manually with <code>sudo kuke daemon start</code> after each reboot in that case.</li>
 </ol>
 <p>Pass <code>--check</code> to run the prereq checks only without touching the system:</p>
@@ -3724,8 +3753,12 @@
 </thead>
 <tbody>
 <tr>
+<td><code>KUKE_CHANNEL</code></td>
+<td><code>edge</code> (default: the newest build of <code>main</code>) or <code>stable</code> (the latest release tag). Any other value exits 2 before anything is touched.</td>
+</tr>
+<tr>
 <td><code>KUKE_VERSION</code></td>
-<td>Pin a specific release tag (default: resolve latest via GitHub).</td>
+<td>Pin a specific release tag. Alone it implies <code>KUKE_CHANNEL=stable</code>; with <code>KUKE_CHANNEL=edge</code> it is an error (exit 2): edge builds cannot be pinned.</td>
 </tr>
 <tr>
 <td><code>KUKE_REPO</code></td>
@@ -3737,15 +3770,23 @@
 </tr>
 <tr>
 <td><code>KUKE_SKIP_INIT=1</code></td>
-<td>Skip the post-install <code>kuke init</code> step.</td>
+<td>Skip the post-install <code>kuke init</code> step (and the team step).</td>
+</tr>
+<tr>
+<td><code>KUKE_SKIP_TEAM_INIT=1</code></td>
+<td>Skip <code>kuke team init</code> (fresh host) or <code>kuke team init --upgrade</code> (live host).</td>
 </tr>
 <tr>
 <td><code>KUKE_SKIP_CHECKSUM=1</code></td>
 <td>Skip <code>.sha256</code> verification (not recommended).</td>
 </tr>
 <tr>
+<td><code>KUKE_SKIP_KUKEBUILD=1</code></td>
+<td>Skip downloading and installing <code>kukebuild</code> (disables <code>kuke build</code>; for release tags predating its asset).</td>
+</tr>
+<tr>
 <td><code>KUKE_SKIP_DAEMON_UPGRADE=1</code></td>
-<td>On a live host, skip the running-daemon version check and keep an intentionally pinned older daemon (preserves the historical silent-skip on an already-running socket).</td>
+<td>On a live host, skip the running-daemon version check and the recreate, and keep an intentionally pinned older daemon (the team step is skipped too).</td>
 </tr>
 </tbody>
 </table>
@@ -3754,7 +3795,7 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Pick your platform</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OS</span><span class="o">=</span>linux<span class="w">             </span><span class="c1"># Options: linux</span>
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">ARCH</span><span class="o">=</span>amd64<span class="w">           </span><span class="c1"># Options: amd64, arm64</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="nb">export</span><span class="w"> </span><span class="nv">KUKE_VERSION</span><span class="o">=</span>v0.6.0<span class="w">  </span><span class="c1"># Or the release you want to pin</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="nb">export</span><span class="w"> </span><span class="nv">KUKE_VERSION</span><span class="o">=</span>v0.10.0<span class="w"> </span><span class="c1"># Or the release you want to pin</span>
 <a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
 <a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="c1"># Download, install, and hard-link</span>
 <a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>curl<span class="w"> </span>-L<span class="w"> </span>-o<span class="w"> </span>kuke<span class="w"> </span><span class="s2">"https://github.com/eminwux/kukeon/releases/download/</span><span class="si">${</span><span class="nv">KUKE_VERSION</span><span class="si">}</span><span class="s2">/kuke-</span><span class="si">${</span><span class="nv">OS</span><span class="si">}</span><span class="s2">-</span><span class="si">${</span><span class="nv">ARCH</span><span class="si">}</span><span class="s2">"</span>
@@ -3768,11 +3809,12 @@
 <p>The hard link is required: <code>main.go</code> dispatches to <code>kuke</code> or <code>kukeond</code> by looking at <code>argv[0]</code> (see <a href="../../architecture/process-model/">Architecture → Process Model</a>). Running <code>kuke kukeond …</code> does <strong>not</strong> enter the daemon tree.</p>
 <h2 id="verify-the-install">Verify the install<a class="headerlink" href="#verify-the-install" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>$<span class="w"> </span>kuke<span class="w"> </span>version
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>v0.6.0
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>$<span class="w"> </span>kukeond<span class="w"> </span>--help
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>Kukeon<span class="w"> </span>daemon:<span class="w"> </span>hosts<span class="w"> </span>the<span class="w"> </span>kukeonv1<span class="w"> </span>API<span class="w"> </span>over<span class="w"> </span>a<span class="w"> </span>unix<span class="w"> </span>socket
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>...
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>Client:<span class="w"> </span>v0.10.0-77-gabc1234
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>Daemon:<span class="w"> </span>v0.10.0-77-gabc1234
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>$<span class="w"> </span>kukeond<span class="w"> </span>--help
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>Kukeon<span class="w"> </span>daemon:<span class="w"> </span>hosts<span class="w"> </span>the<span class="w"> </span>kukeonv1<span class="w"> </span>API<span class="w"> </span>over<span class="w"> </span>a<span class="w"> </span>unix<span class="w"> </span>socket
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>...
 </code></pre></div>
 <p><code>kuke init</code> should have left the daemon listening on <code>/run/kukeon/kukeond.sock</code> and the canonical two-realm hierarchy provisioned:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>$<span class="w"> </span>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>realms
@@ -3795,25 +3837,63 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>daemon<span class="w"> </span>start
 </code></pre></div>
 <h2 id="upgrade">Upgrade<a class="headerlink" href="#upgrade" title="Permanent link">&para;</a></h2>
-<p>The canonical upgrade procedure is <strong>re-run the installer, then recreate the daemon</strong> so the running <code>kukeond</code> matches the new binaries:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://kukeon.io/install.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span>bash
+<p>Update a host with:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>update
 </code></pre></div>
-<p>Re-running the one-liner installs the latest <code>kuke</code> / <code>kukeond</code> / <code>kukebuild</code> / <code>kukepause</code> binaries. Because <code>kuke init</code> already ran on this host, the installer skips it — but it now checks the <strong>running</strong> daemon's version against the binaries it just installed:</p>
+<p><code>kuke update</code> moves the host to the newest build of its channel: it downloads and verifies the binaries, swaps them in, recreates the kukeond daemon from the matching image, checks that <code>kuke version</code> reports the same <code>Client:</code> and <code>Daemon:</code>, removes the previous kukeond image from the <code>kuke-system</code> realm, and re-pins the <code>kuke</code> team with <code>kuke team init --upgrade</code>. Cells in other realms and <code>/opt/kukeon/data/default</code> are not touched. When the daemon recreate or the version check fails, it restores the previous binaries and daemon image and exits non-zero. See <a href="../../cli/kuke-update/"><code>kuke update</code></a> for the flags and every case.</p>
+<p>The channel is read from the installed version and is never stored:</p>
 <ul>
-<li><strong>Version-matched daemon</strong> — skipped silently, no daemon churn.</li>
-<li><strong>Older daemon</strong> — the installer does <strong>not</strong> auto-cycle it (a recreate tears down and re-provisions the daemon cell, too aggressive to do unprompted from a piped <code>curl | bash</code>). Instead it prints the exact command and exits non-zero:</li>
+<li><code>v0.10.0</code> (exactly a release tag) is <strong>stable</strong>.</li>
+<li><code>v0.10.0-77-gabc1234</code> (the <code>git describe --long</code> form of a <code>main</code> commit) is <strong>edge</strong>.</li>
+<li>Anything else (<code>-dirty</code>, <code>0.1.0</code>, <code>v0.0.0-dev</code>, a prerelease tag), or binaries that are symlinks into a checkout (<code>make install-dev</code>), has no channel: <code>kuke update</code> refuses to run unless <code>--channel</code> is given, so a development build is never overwritten silently.</li>
 </ul>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>daemon<span class="w"> </span>recreate<span class="w"> </span>--kukeond-image<span class="w"> </span>ghcr.io/eminwux/kukeon:&lt;installed-version&gt;
-</code></pre></div>
-<p>Run it to finish the upgrade. <code>kuke daemon recreate</code> cycles <strong>only</strong> the <code>kuke-system</code> kukeond cell — your workload cells in the <code>default</code> realm are untouched. Confirm the result with <code>kuke version</code> (the <code>Client:</code> and <code>Daemon:</code> lines should match).</p>
-<p>To keep an intentionally pinned older daemon while still upgrading the CLI binaries, set <code>KUKE_SKIP_DAEMON_UPGRADE=1</code> — the installer then preserves the historical silent-skip on an already-running socket.</p>
-<blockquote>
-<p>Pin a specific target version with <code>KUKE_VERSION=vX.Y.Z</code> (see the <a href="#one-line-install-recommended">environment overrides</a> table). The <code>--kukeond-image</code> tag the installer prints always matches the binaries it installed.</p>
-</blockquote>
+<table>
+<thead>
+<tr>
+<th>Flow</th>
+<th>Commands</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Install</td>
+<td><code>curl -fsSL https://kukeon.io/install.sh \| bash</code></td>
+<td>Newest edge binaries; daemon runs <code>ghcr.io/eminwux/kukeon:sha-&lt;short&gt;</code>; the <code>kuke</code> team (majordomo) is stored</td>
+</tr>
+<tr>
+<td>Update</td>
+<td><code>sudo kuke update</code></td>
+<td>Newest edge build, daemon recreated, previous kukeond image removed, <code>kuke</code> team and <code>TeamDefaults</code> pinned to the new build; cells untouched</td>
+</tr>
+<tr>
+<td>Stay on stable</td>
+<td>install with <code>KUKE_CHANNEL=stable</code>; after the next release, <code>sudo kuke update</code></td>
+<td>The new release's binaries and <code>ghcr.io/eminwux/kukeon:vX.Y.Z</code>; never offered an edge build</td>
+</tr>
+<tr>
+<td>Stable to edge</td>
+<td><code>sudo kuke update --channel edge</code></td>
+<td>Newest edge build; later plain <code>kuke update</code> stays on edge</td>
+</tr>
+<tr>
+<td>Edge to stable</td>
+<td><code>sudo kuke update --channel stable</code></td>
+<td>Moves only when a tag newer than the installed build exists; otherwise prints that and changes nothing</td>
+</tr>
+<tr>
+<td>Test a branch</td>
+<td><code>git checkout &lt;branch&gt; &amp;&amp; make dev-init</code>, then <code>sudo kuke update --channel edge</code> to return</td>
+<td>Dev build while testing; edge afterwards</td>
+</tr>
+</tbody>
+</table>
+<p>Re-running the one-line installer also upgrades a host: it installs the newest build of its channel and recreates a daemon whose version differs (see step 4 above).</p>
+<p>Harness images (the <code>kuke</code> team's claude, codex and opencode images) are not built on edge: they stay pinned to the last release tag and reach hosts when a tag is cut.</p>
 <h2 id="uninstall">Uninstall<a class="headerlink" href="#uninstall" title="Permanent link">&para;</a></h2>
 <p><code>kuke uninstall</code> removes all kukeon runtime state from the host — stops, disables, and removes the <code>kukeond</code> systemd unit (if installed), then stops and deletes the <code>kukeond</code> cell, clears <code>/run/kukeon</code>, and wipes <code>/opt/kukeon</code> and the kukeon-generated CNI conflists. It prompts for interactive confirmation by default; pass <code>-y</code> to skip the prompt in scripts:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>uninstall<span class="w"> </span>-y
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>sudo<span class="w"> </span>rm<span class="w"> </span>-f<span class="w"> </span>/usr/local/bin/kuke<span class="w"> </span>/usr/local/bin/kukeond
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>uninstall<span class="w"> </span>-y
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>sudo<span class="w"> </span>rm<span class="w"> </span>-f<span class="w"> </span>/usr/local/bin/kuke<span class="w"> </span>/usr/local/bin/kukeond
 </code></pre></div>
 <p><code>uninstall</code> only touches CNI conflists Kukeon itself generated; other files under <code>/etc/cni/net.d</code> are left alone. If you want to remove the <code>kukeon</code> system group too, finish with <code>sudo groupdel kukeon</code>.</p>
 <h2 id="next">Next<a class="headerlink" href="#next" title="Permanent link">&para;</a></h2>
@@ -3843,7 +3923,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 12, 2026 17:35:48 UTC">June 12, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 24, 2026 10:16:38 UTC">November 24, 2026</span>
   </span>
 
     
