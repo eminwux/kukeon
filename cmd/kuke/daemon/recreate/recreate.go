@@ -25,8 +25,10 @@
 // before anything is stopped: a ref that cannot be pulled fails the verb with
 // the running daemon untouched (issue #1638). kukeon.internal/... refs are
 // never pulled; they must already be built into the realm with `kuke build`.
-// The staged kukepause under <RunPath>/bin is refreshed right before the cell
-// is re-provisioned, so an upgraded kukepause reaches the host.
+// The staged kukepause and kuke client under <RunPath>/bin are refreshed right
+// before the cell is re-provisioned, so an upgraded kukepause reaches the host
+// and team cells' `kuke-binary` mount source exists and tracks the installed
+// kuke (issue #1647).
 package recreate
 
 import (
@@ -70,6 +72,12 @@ type MockPullImageKey struct{}
 // tests need neither a kukepause binary nor root. Production copies
 // kukepause into <RunPath>/bin and re-asserts root:kukeon 0o750 on it.
 type MockStageKukepauseKey struct{}
+
+// MockStageKukeClientKey injects a stub for the kuke client restage step so
+// unit tests need neither root nor a kukeon group. Production copies the
+// running kuke into <RunPath>/bin/client, writes the kuke-shim beside it, and
+// re-asserts root:kukeon 0o755 on all three paths.
+type MockStageKukeClientKey struct{}
 
 // MockWaitForReadyKey injects a stub for the wait-for-ready step so unit
 // tests can verify the teardown phase without a real listening socket.
@@ -162,6 +170,34 @@ func resolveStageKukepause(cmd *cobra.Command) error {
 	return nil
 }
 
+// resolveStageKukeClient stages the running kuke for team cells' `kuke-binary`
+// directory mount. Tests inject a stub via MockStageKukeClientKey. Production
+// mirrors `kuke init`: stage, then root:kukeon 0o755 on the dir, binary and
+// shim. The installer's live-host upgrade and `kuke update` skip `kuke init`
+// and run recreate with the newly installed kuke, so this is the only step
+// that creates the mount source on a host initialized before it existed, and
+// that refreshes the in-cell client after an upgrade (issue #1647).
+func resolveStageKukeClient(cmd *cobra.Command) error {
+	if stub, ok := cmd.Context().Value(MockStageKukeClientKey{}).(func() error); ok && stub != nil {
+		return stub()
+	}
+	paths, err := lifecycle.StageKukeClient(resolveRunPath())
+	if err != nil {
+		return err
+	}
+	gid, err := lifecycle.LookupKukeonGID()
+	if err != nil {
+		return fmt.Errorf("resolve kukeon group gid: %w", err)
+	}
+	for _, path := range []string{paths.Dir, paths.Binary, paths.Shim} {
+		if err = sysuser.ChownAndChmod(path, 0, gid, lifecycle.KukeClientStagedMode); err != nil {
+			return fmt.Errorf("restore kuke client mode %q: %w", path, err)
+		}
+	}
+	cmd.Printf("kuke client staged: %s\n", paths.Binary)
+	return nil
+}
+
 func resolveRunPath() string {
 	runPath := viper.GetString(config.KUKEON_ROOT_RUN_PATH.ViperKey)
 	if runPath == "" {
@@ -212,7 +248,8 @@ func NewRecreateCmd() *cobra.Command {
 			"there, before the running daemon is stopped: a ref that cannot be pulled " +
 			"fails the command and leaves the daemon running. kukeon.internal/... refs " +
 			"are never pulled and must already be built with `kuke build --realm kuke-system`. " +
-			"The staged kukepause binary is refreshed before the cell is re-provisioned.",
+			"The staged kukepause binary and kuke client (the `kuke-binary` mount source) are refreshed " +
+			"before the cell is re-provisioned.",
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: false,
@@ -337,6 +374,9 @@ func runRecreate(cmd *cobra.Command, _ []string) error {
 	// one, so without this an upgraded kukepause would never reach the host.
 	if stageErr := resolveStageKukepause(cmd); stageErr != nil {
 		return fmt.Errorf("stage kukepause: %w", stageErr)
+	}
+	if stageErr := resolveStageKukeClient(cmd); stageErr != nil {
+		return fmt.Errorf("stage kuke client: %w", stageErr)
 	}
 
 	if err = resolveProvisionKukeondCell(cmd, logger, image, serverConfigPath); err != nil {

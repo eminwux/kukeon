@@ -14,7 +14,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-package init
+package lifecycle
 
 import (
 	"bytes"
@@ -38,7 +38,7 @@ func inode(t *testing.T, path string) uint64 {
 // keeps its inode across re-stages so it never goes stale.
 func TestStageKukeClient(t *testing.T) {
 	runPath := t.TempDir()
-	paths, err := stageKukeClient(runPath)
+	paths, err := StageKukeClient(runPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,13 +64,13 @@ func TestStageKukeClient(t *testing.T) {
 		t.Fatalf("shim = %q (err %v)", shim, err)
 	}
 	for _, path := range []string{paths.Binary, paths.Shim} {
-		if info, _ := os.Stat(path); info.Mode().Perm() != kukeClientStagedMode {
+		if info, _ := os.Stat(path); info.Mode().Perm() != KukeClientStagedMode {
 			t.Fatalf("%s mode = %#o", path, info.Mode().Perm())
 		}
 	}
 
 	shimIno, binIno := inode(t, paths.Shim), inode(t, paths.Binary)
-	if _, err = stageKukeClient(runPath); err != nil {
+	if _, err = StageKukeClient(runPath); err != nil {
 		t.Fatal(err)
 	}
 	if inode(t, paths.Shim) != shimIno || inode(t, paths.Binary) != binIno {
@@ -78,11 +78,11 @@ func TestStageKukeClient(t *testing.T) {
 	}
 
 	// A rebuilt kuke is re-staged under a new inode; the shim is untouched.
-	if err = os.WriteFile(paths.Binary, []byte("old build"), kukeClientStagedMode); err != nil {
+	if err = os.WriteFile(paths.Binary, []byte("old build"), KukeClientStagedMode); err != nil {
 		t.Fatal(err)
 	}
 	binIno = inode(t, paths.Binary)
-	if _, err = stageKukeClient(runPath); err != nil {
+	if _, err = StageKukeClient(runPath); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ = os.ReadFile(paths.Binary); !bytes.Equal(got, want) || inode(t, paths.Binary) == binIno {

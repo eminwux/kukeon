@@ -73,7 +73,7 @@ Requires `--kukeond-image` and errors with `ErrHostNotInitialized` when the host
 
 Before it stops anything, recreate makes the image present in the `kuke-system` realm: an image already there is used as is, otherwise it is pulled anonymously. A ref that cannot be pulled fails the command with `pull kukeond image <ref>: …` and leaves the running daemon untouched. `kukeon.internal/...` refs are never pulled; they must already be built into the realm with `kuke build --realm kuke-system`.
 
-Right before re-provisioning, recreate also restages `kukepause` under `<run-path>/bin` from the `kukepause` on `PATH` (or next to `kuke`), so an upgraded `kukepause` reaches the host without a full `kuke init`. [`kuke update`](kuke-update.md) runs this verb with the image of the build it installs.
+Right before re-provisioning, recreate also restages `kukepause` under `<run-path>/bin` from the `kukepause` on `PATH` (or next to `kuke`), so an upgraded `kukepause` reaches the host without a full `kuke init`. It also stages the running `kuke` under `<run-path>/bin/client/` plus the `<run-path>/bin/kuke-shim` exec shim — the source of team cells' `kuke-binary` mount — so a host initialized before that mount existed gets it, and the in-cell `kuke` tracks the installed one. [`kuke update`](kuke-update.md) runs this verb with the image of the build it installs.
 
 | Flag                     | Default                            | Description                                                                                                                              |
 | ------------------------ | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |

@@ -14,7 +14,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-package init
+package lifecycle
 
 import (
 	"fmt"
@@ -26,9 +26,10 @@ import (
 
 const (
 	// kukeClientStagedSubdir is the <RunPath>/bin subdirectory `kuke init`
-	// stages its own binary into (issue #1483). Cells with the `kuke-binary`
-	// host-mount selector bind-mount this directory, not the file, so a
-	// re-stage (tmp + rename, a new inode) reaches running cells.
+	// and `kuke daemon recreate` stage the kuke client into (issue #1483).
+	// Cells with the `kuke-binary` host-mount selector bind-mount this
+	// directory, not the file, so a re-stage (tmp + rename, a new inode)
+	// reaches running cells.
 	kukeClientStagedSubdir = "client"
 
 	// kukeClientShimName is the <RunPath>/bin file cells bind-mount at
@@ -41,47 +42,55 @@ const (
 	// `kuke-binary` directory mount (pkg/team/compose partials.tmpl.yaml).
 	kukeClientShim = "#!/bin/sh\nexec /.kukeon/client/kuke \"$@\"\n"
 
-	// kukeClientStagedMode lets any cell user run the client: the old file
+	// KukeClientStagedMode lets any cell user run the client: the old file
 	// mount of the host's /usr/local/bin/kuke was world-executable.
-	kukeClientStagedMode os.FileMode = 0o755
+	KukeClientStagedMode os.FileMode = 0o755
 )
 
-// kukeClientPaths are the staged client artifacts `kuke init` re-asserts the
-// mode of after applyKukeonOwnership's recursive chown.
-type kukeClientPaths struct {
+// KukeClientPaths are the staged client artifacts the caller re-asserts
+// root:kukeon KukeClientStagedMode on (`kuke init` after
+// applyKukeonOwnership's recursive chown, `kuke daemon recreate` right after
+// staging).
+type KukeClientPaths struct {
 	Dir    string
 	Binary string
 	Shim   string
 }
 
-// stageKukeClient copies the running kuke binary into
+// StageKukeClient copies the running kuke binary into
 // <runPath>/bin/client/kuke and writes the exec shim beside it. Both are
 // content-idempotent: an unchanged binary and the constant shim are left
-// untouched, so their inodes survive repeated `kuke init` runs.
-func stageKukeClient(runPath string) (kukeClientPaths, error) {
+// untouched, so their inodes survive repeated runs.
+//
+// `kuke init` calls it on every run, and `kuke daemon recreate` calls it
+// alongside StageKukepause: the installer's live-host path and `kuke update`
+// skip `kuke init`, so without the recreate call a host initialized before
+// the client was staged never gets the `kuke-binary` mount source, and an
+// upgraded client never reaches running cells (issue #1647).
+func StageKukeClient(runPath string) (KukeClientPaths, error) {
 	binDir := filepath.Join(runPath, "bin")
-	paths := kukeClientPaths{
+	paths := KukeClientPaths{
 		Dir:  filepath.Join(binDir, kukeClientStagedSubdir),
 		Shim: filepath.Join(binDir, kukeClientShimName),
 	}
 	paths.Binary = filepath.Join(paths.Dir, "kuke")
-	if err := os.MkdirAll(paths.Dir, kukeClientStagedMode); err != nil {
-		return kukeClientPaths{}, fmt.Errorf("create kuke client stage dir %q: %w", paths.Dir, err)
+	if err := os.MkdirAll(paths.Dir, KukeClientStagedMode); err != nil {
+		return KukeClientPaths{}, fmt.Errorf("create kuke client stage dir %q: %w", paths.Dir, err)
 	}
 	self, err := os.Executable()
 	if err != nil {
-		return kukeClientPaths{}, fmt.Errorf("resolve kuke executable: %w", err)
+		return KukeClientPaths{}, fmt.Errorf("resolve kuke executable: %w", err)
 	}
 	content, err := os.ReadFile(self)
 	if err != nil {
-		return kukeClientPaths{}, fmt.Errorf("read kuke executable %q: %w", self, err)
+		return KukeClientPaths{}, fmt.Errorf("read kuke executable %q: %w", self, err)
 	}
-	if _, err = fs.WriteFileIfChanged(paths.Binary, content, kukeClientStagedMode, "kuke client"); err != nil {
-		return kukeClientPaths{}, err
+	if _, err = fs.WriteFileIfChanged(paths.Binary, content, KukeClientStagedMode, "kuke client"); err != nil {
+		return KukeClientPaths{}, err
 	}
 	shim := []byte(kukeClientShim)
-	if _, err = fs.WriteFileIfChanged(paths.Shim, shim, kukeClientStagedMode, "kuke client shim"); err != nil {
-		return kukeClientPaths{}, err
+	if _, err = fs.WriteFileIfChanged(paths.Shim, shim, KukeClientStagedMode, "kuke client shim"); err != nil {
+		return KukeClientPaths{}, err
 	}
 	return paths, nil
 }
