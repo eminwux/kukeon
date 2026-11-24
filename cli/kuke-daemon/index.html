@@ -3893,7 +3893,7 @@
 <p>Tears down the existing kukeond cell (stop, delete, clear socket+pid) and re-provisions it from scratch using the specified <code>--kukeond-image</code>. The cell-creation path is shared with <code>kuke init</code>, so the two cannot drift.</p>
 <p>Requires <code>--kukeond-image</code> and errors with <code>ErrHostNotInitialized</code> when the host has not been bootstrapped by <code>kuke init</code> yet.</p>
 <p>Before it stops anything, recreate makes the image present in the <code>kuke-system</code> realm: an image already there is used as is, otherwise it is pulled anonymously. A ref that cannot be pulled fails the command with <code>pull kukeond image &lt;ref&gt;: …</code> and leaves the running daemon untouched. <code>kukeon.internal/...</code> refs are never pulled; they must already be built into the realm with <code>kuke build --realm kuke-system</code>.</p>
-<p>Right before re-provisioning, recreate also restages <code>kukepause</code> under <code>&lt;run-path&gt;/bin</code> from the <code>kukepause</code> on <code>PATH</code> (or next to <code>kuke</code>), so an upgraded <code>kukepause</code> reaches the host without a full <code>kuke init</code>. <a href="../kuke-update/"><code>kuke update</code></a> runs this verb with the image of the build it installs.</p>
+<p>Right before re-provisioning, recreate also restages <code>kukepause</code> under <code>&lt;run-path&gt;/bin</code> from the <code>kukepause</code> on <code>PATH</code> (or next to <code>kuke</code>), so an upgraded <code>kukepause</code> reaches the host without a full <code>kuke init</code>. It also stages the running <code>kuke</code> under <code>&lt;run-path&gt;/bin/client/</code> plus the <code>&lt;run-path&gt;/bin/kuke-shim</code> exec shim — the source of team cells' <code>kuke-binary</code> mount — so a host initialized before that mount existed gets it, and the in-cell <code>kuke</code> tracks the installed one. <a href="../kuke-update/"><code>kuke update</code></a> runs this verb with the image of the build it installs.</p>
 <table>
 <thead>
 <tr>
@@ -4019,7 +4019,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 24, 2026 10:16:38 UTC">November 24, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 24, 2026 19:01:12 UTC">November 24, 2026</span>
   </span>
 
     
