@@ -1207,6 +1207,15 @@ func (c *Client) DeleteImage(_ context.Context, realm, ref string) (kukeonv1.Del
 	}, nil
 }
 
+// PullImage ensures ref is present in the realm's containerd namespace,
+// pulling it anonymously when absent. It is an in-process-only operation
+// (there is no daemon RPC): `kuke daemon recreate` and `kuke update` call it
+// while the daemon is about to be replaced.
+func (c *Client) PullImage(_ context.Context, realm, ref string) error {
+	_, err := c.ctrl.PullImage(realm, ref)
+	return err
+}
+
 // PruneImages reclaims dangling image layers and the orphaned leases pinning
 // them in the realm's containerd namespace. The realm is validated by the
 // controller layer; this wrapper only re-encodes the controller result onto

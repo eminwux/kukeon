@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -67,22 +66,6 @@ const (
 	// truth shared with `kuke daemon recreate` so the init and recreate socket
 	// permissions cannot drift.
 	kukeonSocketMode os.FileMode = consts.KukeonSocketMode
-
-	// kukepauseBinaryName is the binary `kuke init` stages under <RunPath>/bin
-	// so every cell's root container — including kukeond's own — can bind-mount
-	// it at /.kukeon/bin/kukepause as PID 1 (issue #931). It is pre-staged on the host because
-	// root containers are created before kukeond is up, so it cannot be copied
-	// out of the daemon image the way kuketty is. Sourced from the ctr package
-	// so the staged name matches the root-container builder's bind source.
-	kukepauseBinaryName = ctr.RootContainerPauseBinaryName
-
-	// kukepauseStagedMode is the on-disk mode kukepause is staged with. It must
-	// carry an execute bit so the kernel can exec the bind-mounted kukepause through the root
-	// container's read-only bind mount. The recursive RunPath chown in
-	// applyKukeonOwnership otherwise drops every file to kukeonRunPathFileMode
-	// (0o640, no exec), so runInit re-asserts this mode on the staged binary
-	// afterward.
-	kukepauseStagedMode os.FileMode = 0o750
 )
 
 func NewInitCmd() *cobra.Command {
@@ -274,8 +257,10 @@ func envSet(v config.Var) bool {
 // resolveKukeondImage returns the kukeond container image to provision.
 // If the user passed --kukeond-image, that wins. Otherwise compose
 // config.KukeondImageRepo (e.g. ghcr.io/eminwux/kukeon, injected via ldflags
-// by the release pipeline) with a tag matching config.Version. Dev builds
-// whose version isn't a release tag fall back to :latest.
+// by the release pipeline) with the immutable tag of config.Version's channel:
+// the release tag on stable, sha-<short> on edge (issue #1638). Versions with
+// no channel keep the historical fallbacks: a v-prefixed version is used as
+// the tag as-is, anything else falls back to :latest.
 func resolveKukeondImage() string {
 	if override := viper.GetString(config.KUKE_INIT_KUKEOND_IMAGE.ViperKey); override != "" {
 		return override
@@ -286,7 +271,12 @@ func resolveKukeondImage() string {
 		repo = "ghcr.io/eminwux/kukeon"
 	}
 
-	tag := strings.TrimSpace(config.Version)
+	version := strings.TrimSpace(config.Version)
+	if tag := config.ParseVersion(version).ImageTag(version); tag != "" {
+		return fmt.Sprintf("%s:%s", repo, tag)
+	}
+
+	tag := version
 	if tag == "" || !strings.HasPrefix(tag, "v") {
 		tag = "latest"
 	}
@@ -602,48 +592,6 @@ func skipLiveCellState(_ string, info os.FileInfo) bool {
 	return info.Name() == ctr.AttachableMetadataFile
 }
 
-// stageKukepause copies the kukepause binary into <runPath>/bin/kukepause and
-// returns the staged path. The staged copy is what every cell's root container
-// bind-mounts at /.kukeon/bin/kukepause (issue #931). Mirrors the runner's stageKukettyBinary
-// contract: <RunPath>/bin destination, atomic tmp+rename copy, executable mode.
-func stageKukepause(runPath string) (string, error) {
-	src, err := resolveKukepauseSource()
-	if err != nil {
-		return "", err
-	}
-	binDir := filepath.Join(runPath, "bin")
-	if err = os.MkdirAll(binDir, 0o750); err != nil {
-		return "", fmt.Errorf("create kukepause stage dir %q: %w", binDir, err)
-	}
-	dst := filepath.Join(binDir, kukepauseBinaryName)
-	if err = fs.CopyFileAtomic(src, dst, kukepauseStagedMode, kukepauseBinaryName); err != nil {
-		return "", err
-	}
-	return dst, nil
-}
-
-// resolveKukepauseSource locates a kukepause binary on the host. Lookup order:
-// $PATH first (the installed / `make install-dev` layout, kukepause alongside
-// kuke), then a sibling of the running executable (dev runs of `./kuke` from the
-// repo root next to a freshly built `./kukepause`, and the e2e harness which
-// execs the repo-root kuke). The error names the install path so a "not found"
-// is actionable.
-func resolveKukepauseSource() (string, error) {
-	if p, err := exec.LookPath(kukepauseBinaryName); err == nil {
-		return p, nil
-	}
-	if self, err := os.Executable(); err == nil {
-		sibling := filepath.Join(filepath.Dir(self), kukepauseBinaryName)
-		if info, statErr := os.Stat(sibling); statErr == nil && !info.IsDir() {
-			return sibling, nil
-		}
-	}
-	return "", fmt.Errorf(
-		"%s not found on $PATH or alongside kuke; build it with `make kukepause` and install it (`make install-dev`)",
-		kukepauseBinaryName,
-	)
-}
-
 func runInit(cmd *cobra.Command, _ []string) error {
 	logger, ok := cmd.Context().Value(types.CtxLogger).(*slog.Logger)
 	if !ok || logger == nil {
@@ -715,7 +663,7 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	// kukeond cell: that cell's root container bind-mounts the staged binary at
 	// /.kukeon/bin/kukepause and execs it as PID 1, so it must exist on the host first (issue
 	// #931). All later user cells reuse the same staged copy.
-	kukepausePath, stageErr := stageKukepause(runPath)
+	kukepausePath, stageErr := lifecycle.StageKukepause(runPath)
 	if stageErr != nil {
 		return fmt.Errorf("stage kukepause: %w", stageErr)
 	}
@@ -754,7 +702,7 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	// containers created after init can exec the bind-mounted kukepause (issue
 	// #931). The kukeond cell created during Bootstrap already exec'd the
 	// pre-chown copy, so this only matters for subsequent cells.
-	if chmodErr := sysuser.ChownAndChmod(kukepausePath, 0, ensure.GID, kukepauseStagedMode); chmodErr != nil {
+	if chmodErr := sysuser.ChownAndChmod(kukepausePath, 0, ensure.GID, lifecycle.KukepauseStagedMode); chmodErr != nil {
 		return fmt.Errorf("restore kukepause exec bit %q: %w", kukepausePath, chmodErr)
 	}
 	for _, path := range []string{clientPaths.Dir, clientPaths.Binary, clientPaths.Shim} {

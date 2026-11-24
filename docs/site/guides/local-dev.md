@@ -21,6 +21,8 @@ make dev-init
 
 `scripts/dev-init.sh` composes the full re-bootstrap: `make kuke` (and the `kukeond` symlink), `make install-dev` (host symlinks under `$(INSTALL_PREFIX)`, default `/usr/local/bin`), the cgroup pre-flight, `docker build` of `kukeon-local:dev`, `kuke daemon reset` of the prior cell, `kuke image load --from-docker` of the freshly built image into the `kuke-system` realm, `kuke init --kukeond-image docker.io/library/kukeon-local:dev`, and a daemon-parity check at the end. It's idempotent — re-running on a healthy host produces a clean re-bootstrap.
 
+`make dev-init` is for testing a branch that is not merged yet. A host that follows `main` installs from the [one-line installer](../install/install-linux.md) and stays current with `sudo kuke update`; to try a branch on such a host, check it out and run `make dev-init` (which leaves a development build: symlinked binaries and a `kukeon.internal/...` daemon image, so a plain `kuke update` refuses to overwrite it), then return the host to the edge channel with `sudo kuke update --channel edge`, which replaces the symlinks with the newest edge binaries and recreates the daemon from its published image.
+
 The parity tail must read:
 
 ```

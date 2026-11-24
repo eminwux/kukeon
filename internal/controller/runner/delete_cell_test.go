@@ -225,6 +225,7 @@ func (c *deleteCellFakeClient) ContainerRootChainID(string, string) (string, err
 	return "", nil
 }
 
+func (c *deleteCellFakeClient) PullImage(string, string) error   { return nil }
 func (c *deleteCellFakeClient) DeleteImage(string, string) error { return nil }
 func (c *deleteCellFakeClient) PruneImages(string) (ctr.PruneResult, error) {
 	return ctr.PruneResult{}, nil

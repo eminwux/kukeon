@@ -1,6 +1,6 @@
 # Install on Linux
 
-Kukeon (v0.6.0 beta) ships a single static binary per platform. The same binary behaves as `kuke` (the CLI) or `kukeond` (the daemon) depending on the name it is invoked under: you install the binary once and create a hard link for the second name. The one-line installer below does both for you.
+Kukeon (beta) ships a single static binary per platform. The same binary behaves as `kuke` (the CLI) or `kukeond` (the daemon) depending on the name it is invoked under: you install the binary once and create a hard link for the second name. The one-line installer below does both for you.
 
 Before installing, confirm cgroups v2 and containerd are in place — see [Prerequisites](prerequisites.md). The installer also checks them and exits with a distro-aware hint on any miss.
 
@@ -14,9 +14,10 @@ The installer:
 
 1. Detects your platform (`linux/amd64` or `linux/arm64`) and refuses anything else.
 2. Verifies cgroups v2 is mounted and `/run/containerd/containerd.sock` is responsive. On any miss it prints a distro-aware hint and exits non-zero without touching the system.
-3. Downloads the latest release binary from GitHub, verifies its `.sha256` checksum, installs it to `/usr/local/bin/kuke`, and hard-links `kukeond` next to it.
-4. Runs `sudo kuke init` to bring up the daemon. On a host that already has a `kukeond` listening on `/run/kukeon/kukeond.sock`, init is skipped — but the installer first compares the running daemon's version against the binaries it just installed. A version-matched daemon is skipped silently as before; an **older** daemon prints the exact `kuke daemon recreate` command to finish the upgrade and exits non-zero rather than declaring an unqualified success over a client/daemon skew (see [Upgrade](#upgrade)). Set `KUKE_SKIP_DAEMON_UPGRADE=1` to keep an intentionally pinned older daemon.
-5. Installs `/etc/systemd/system/kukeond.service` and runs `systemctl enable --now kukeond.service` so the daemon comes back automatically after a host or containerd restart. Skipped with a notice on systemd-less hosts — bring kukeond up manually with `sudo kuke daemon start` after each reboot in that case.
+3. Resolves the version of its channel — **edge** by default, the newest build of `main` read from the `VERSION` asset of the rolling [`edge` prerelease](https://github.com/eminwux/kukeon/releases/tag/edge); **stable** with `KUKE_CHANNEL=stable`, the latest release tag. It downloads `kuke`, `kukebuild` and `kukepause` for the platform, verifies each `.sha256` checksum, and on edge checks that the downloaded `kuke` reports the version it read (a merge that lands mid-download fails the install before anything is placed: run it again). It then installs the binaries to `/usr/local/bin` and hard-links `kukeond` to `kuke`.
+4. Runs `sudo kuke init` on a fresh host, which creates the daemon from the image matching the binaries: `ghcr.io/eminwux/kukeon:sha-<short>` on edge, `ghcr.io/eminwux/kukeon:vX.Y.Z` on stable. On a host that already has a `kukeond` listening on `/run/kukeon/kukeond.sock`, init is skipped and the installer compares the running daemon's version with the binaries it just installed: a version-matched daemon is left alone; a **different** daemon is recreated with `kuke daemon recreate --kukeond-image <that image>` (only the `kuke-system` kukeond cell is cycled; workload cells are untouched), and the installer checks that `kuke version` then reports the same `Client:` and `Daemon:`. When the recreate fails it prints the command, leaves the skew, and exits non-zero. Set `KUKE_SKIP_DAEMON_UPGRADE=1` to keep an intentionally pinned older daemon.
+5. Stores the `kuke` team (the majordomo role): `sudo kuke team init` on a fresh host, `sudo kuke team init --upgrade` on a live one (only when the installed `kuke` has `--upgrade`), so the team is pinned to the revision of the installed binaries. Team init fetches `github.com/eminwux/kukeon`, so it needs `git`: without it, or when the step fails, the installer prints a warning naming the command to run later and still succeeds. `KUKE_SKIP_TEAM_INIT=1` (or `KUKE_SKIP_INIT=1`) skips the step.
+6. Installs `/etc/systemd/system/kukeond.service` and runs `systemctl enable --now kukeond.service` so the daemon comes back automatically after a host or containerd restart. Skipped with a notice on systemd-less hosts — bring kukeond up manually with `sudo kuke daemon start` after each reboot in that case.
 
 Pass `--check` to run the prereq checks only without touching the system:
 
@@ -26,14 +27,17 @@ curl -fsSL https://kukeon.io/install.sh | bash -s -- --check
 
 Environment overrides the installer honors:
 
-| Variable               | Purpose                                                          |
-| ---------------------- | ---------------------------------------------------------------- |
-| `KUKE_VERSION`         | Pin a specific release tag (default: resolve latest via GitHub). |
-| `KUKE_REPO`            | GitHub repo path for forks (default: `eminwux/kukeon`).          |
-| `KUKE_INSTALL_PREFIX`  | Install dir (default: `/usr/local/bin`).                         |
-| `KUKE_SKIP_INIT=1`     | Skip the post-install `kuke init` step.                          |
-| `KUKE_SKIP_CHECKSUM=1` | Skip `.sha256` verification (not recommended).                   |
-| `KUKE_SKIP_DAEMON_UPGRADE=1` | On a live host, skip the running-daemon version check and keep an intentionally pinned older daemon (preserves the historical silent-skip on an already-running socket). |
+| Variable                     | Purpose                                                                                                                                               |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `KUKE_CHANNEL`               | `edge` (default: the newest build of `main`) or `stable` (the latest release tag). Any other value exits 2 before anything is touched.                |
+| `KUKE_VERSION`               | Pin a specific release tag. Alone it implies `KUKE_CHANNEL=stable`; with `KUKE_CHANNEL=edge` it is an error (exit 2): edge builds cannot be pinned.   |
+| `KUKE_REPO`                  | GitHub repo path for forks (default: `eminwux/kukeon`).                                                                                               |
+| `KUKE_INSTALL_PREFIX`        | Install dir (default: `/usr/local/bin`).                                                                                                              |
+| `KUKE_SKIP_INIT=1`           | Skip the post-install `kuke init` step (and the team step).                                                                                           |
+| `KUKE_SKIP_TEAM_INIT=1`      | Skip `kuke team init` (fresh host) or `kuke team init --upgrade` (live host).                                                                         |
+| `KUKE_SKIP_CHECKSUM=1`       | Skip `.sha256` verification (not recommended).                                                                                                        |
+| `KUKE_SKIP_KUKEBUILD=1`      | Skip downloading and installing `kukebuild` (disables `kuke build`; for release tags predating its asset).                                            |
+| `KUKE_SKIP_DAEMON_UPGRADE=1` | On a live host, skip the running-daemon version check and the recreate, and keep an intentionally pinned older daemon (the team step is skipped too). |
 
 ## Manual install (fallback)
 
@@ -43,7 +47,7 @@ If you would rather drive each step yourself — e.g. installing onto an air-gap
 # Pick your platform
 export OS=linux             # Options: linux
 export ARCH=amd64           # Options: amd64, arm64
-export KUKE_VERSION=v0.6.0  # Or the release you want to pin
+export KUKE_VERSION=v0.10.0 # Or the release you want to pin
 
 # Download, install, and hard-link
 curl -L -o kuke "https://github.com/eminwux/kukeon/releases/download/${KUKE_VERSION}/kuke-${OS}-${ARCH}"
@@ -61,7 +65,8 @@ The hard link is required: `main.go` dispatches to `kuke` or `kukeond` by lookin
 
 ```bash
 $ kuke version
-v0.6.0
+Client: v0.10.0-77-gabc1234
+Daemon: v0.10.0-77-gabc1234
 
 $ kukeond --help
 Kukeon daemon: hosts the kukeonv1 API over a unix socket
@@ -105,26 +110,32 @@ sudo kuke daemon start
 
 ## Upgrade
 
-The canonical upgrade procedure is **re-run the installer, then recreate the daemon** so the running `kukeond` matches the new binaries:
+Update a host with:
 
 ```bash
-curl -fsSL https://kukeon.io/install.sh | bash
+sudo kuke update
 ```
 
-Re-running the one-liner installs the latest `kuke` / `kukeond` / `kukebuild` / `kukepause` binaries. Because `kuke init` already ran on this host, the installer skips it — but it now checks the **running** daemon's version against the binaries it just installed:
+`kuke update` moves the host to the newest build of its channel: it downloads and verifies the binaries, swaps them in, recreates the kukeond daemon from the matching image, checks that `kuke version` reports the same `Client:` and `Daemon:`, removes the previous kukeond image from the `kuke-system` realm, and re-pins the `kuke` team with `kuke team init --upgrade`. Cells in other realms and `/opt/kukeon/data/default` are not touched. When the daemon recreate or the version check fails, it restores the previous binaries and daemon image and exits non-zero. See [`kuke update`](../cli/kuke-update.md) for the flags and every case.
 
-- **Version-matched daemon** — skipped silently, no daemon churn.
-- **Older daemon** — the installer does **not** auto-cycle it (a recreate tears down and re-provisions the daemon cell, too aggressive to do unprompted from a piped `curl | bash`). Instead it prints the exact command and exits non-zero:
+The channel is read from the installed version and is never stored:
 
-  ```bash
-  sudo kuke daemon recreate --kukeond-image ghcr.io/eminwux/kukeon:<installed-version>
-  ```
+- `v0.10.0` (exactly a release tag) is **stable**.
+- `v0.10.0-77-gabc1234` (the `git describe --long` form of a `main` commit) is **edge**.
+- Anything else (`-dirty`, `0.1.0`, `v0.0.0-dev`, a prerelease tag), or binaries that are symlinks into a checkout (`make install-dev`), has no channel: `kuke update` refuses to run unless `--channel` is given, so a development build is never overwritten silently.
 
-  Run it to finish the upgrade. `kuke daemon recreate` cycles **only** the `kuke-system` kukeond cell — your workload cells in the `default` realm are untouched. Confirm the result with `kuke version` (the `Client:` and `Daemon:` lines should match).
+| Flow           | Commands                                                                                   | Result                                                                                                                                       |
+| -------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Install        | `curl -fsSL https://kukeon.io/install.sh \| bash`                                          | Newest edge binaries; daemon runs `ghcr.io/eminwux/kukeon:sha-<short>`; the `kuke` team (majordomo) is stored                                |
+| Update         | `sudo kuke update`                                                                         | Newest edge build, daemon recreated, previous kukeond image removed, `kuke` team and `TeamDefaults` pinned to the new build; cells untouched |
+| Stay on stable | install with `KUKE_CHANNEL=stable`; after the next release, `sudo kuke update`             | The new release's binaries and `ghcr.io/eminwux/kukeon:vX.Y.Z`; never offered an edge build                                                  |
+| Stable to edge | `sudo kuke update --channel edge`                                                          | Newest edge build; later plain `kuke update` stays on edge                                                                                   |
+| Edge to stable | `sudo kuke update --channel stable`                                                        | Moves only when a tag newer than the installed build exists; otherwise prints that and changes nothing                                       |
+| Test a branch  | `git checkout <branch> && make dev-init`, then `sudo kuke update --channel edge` to return | Dev build while testing; edge afterwards                                                                                                     |
 
-To keep an intentionally pinned older daemon while still upgrading the CLI binaries, set `KUKE_SKIP_DAEMON_UPGRADE=1` — the installer then preserves the historical silent-skip on an already-running socket.
+Re-running the one-line installer also upgrades a host: it installs the newest build of its channel and recreates a daemon whose version differs (see step 4 above).
 
-> Pin a specific target version with `KUKE_VERSION=vX.Y.Z` (see the [environment overrides](#one-line-install-recommended) table). The `--kukeond-image` tag the installer prints always matches the binaries it installed.
+Harness images (the `kuke` team's claude, codex and opencode images) are not built on edge: they stay pinned to the last release tag and reach hosts when a tag is cut.
 
 ## Uninstall
 

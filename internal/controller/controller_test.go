@@ -168,6 +168,7 @@ type fakeRunner struct {
 	ImageChainIDFn         func(namespace, ref string) (string, error)
 	ContainerRootChainIDFn func(namespace, containerID string) (string, error)
 	DeleteImageFn          func(namespace, ref string) error
+	PullImageFn            func(namespace, ref string) error
 	PruneImagesFn          func(namespace string) (ctr.PruneResult, error)
 }
 
@@ -891,6 +892,13 @@ func (f *fakeRunner) DeleteImage(namespace, ref string) error {
 		return f.DeleteImageFn(namespace, ref)
 	}
 	return errors.New("unexpected call to DeleteImage")
+}
+
+func (f *fakeRunner) PullImage(namespace, ref string) error {
+	if f.PullImageFn != nil {
+		return f.PullImageFn(namespace, ref)
+	}
+	return errors.New("unexpected call to PullImage")
 }
 
 func (f *fakeRunner) PruneImages(namespace string) (ctr.PruneResult, error) {

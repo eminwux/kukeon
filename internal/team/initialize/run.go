@@ -54,6 +54,10 @@ type Options struct {
 type Outcome struct {
 	Plan   *Plan
 	Result *Result
+	// Notes are the remarks of an operation that planned no team
+	// application (kuke team init --upgrade with nothing to recompose);
+	// Plan and Result are nil then.
+	Notes []string
 }
 
 func (o Options) check() error {
@@ -72,6 +76,13 @@ type InitOptions struct {
 	// Reapply recomposes the kuke team from its stored Team: kuke team apply
 	// kuke. It excludes Force.
 	Reapply bool
+	// Upgrade re-pins the kukeon source of the stored kuke Team and of the
+	// realm's TeamDefaults to the running binary's revision and recomposes
+	// the kuke team (issue #1638). It excludes Force and Reapply.
+	Upgrade bool
+	// Pin replaces config.KukeonSource() as Upgrade's target revision
+	// (tests).
+	Pin *config.Source
 }
 
 // Init applies the kuke team (issue #1618, AC7). "Already initialized" is the
@@ -83,6 +94,9 @@ type InitOptions struct {
 func Init(ctx context.Context, opts InitOptions) (Outcome, error) {
 	if err := opts.check(); err != nil {
 		return Outcome{}, err
+	}
+	if opts.Upgrade {
+		return upgrade(ctx, opts)
 	}
 	if opts.Reapply {
 		if opts.Force {

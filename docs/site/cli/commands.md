@@ -36,6 +36,7 @@ Both are hard-linked to the same binary on install. Running `kuke` enters the cl
 | `kuke team`                    | Compose agent teams and apply them to `kukeond`, which stores them       |
 | `kuke connector`               | List connector identities, import a git identity, set Realm defaults     |
 | `kuke uninstall`               | Remove all kukeon runtime state from this host                           |
+| `kuke update`                  | Update kuke and kukeond to the newest build of the host's channel        |
 | `kuke autocomplete`            | Emit a shell completion script                                           |
 | `kuke version`                 | Print the version                                                        |
 
@@ -100,6 +101,7 @@ The positional argument is the resource's own name; the flags specify where in t
 - [kuke team add](kuke-team-add.md)
 - [kuke connector](kuke-connector.md)
 - [kuke uninstall](kuke-uninstall.md)
+- [kuke update](kuke-update.md)
 - [kuke autocomplete](kuke-autocomplete.md)
 - [kuke version](kuke-version.md)
 - [kukeond](kukeond.md)

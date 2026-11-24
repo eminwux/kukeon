@@ -229,6 +229,8 @@ func TestDaemonRecreate(t *testing.T) {
 			ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 			ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(tt.fake))
 			ctx = context.WithValue(ctx, lifecycle.EnsureSocketDirKey{}, func() error { return nil })
+			ctx = context.WithValue(ctx, recreate.MockPullImageKey{}, func(string) error { return nil })
+			ctx = context.WithValue(ctx, recreate.MockStageKukepauseKey{}, func() error { return nil })
 			ctx = context.WithValue(ctx, recreate.MockProvisionKukeondCellKey{}, func() error { return nil })
 			ctx = context.WithValue(ctx, recreate.MockWaitForReadyKey{}, func() error { return nil })
 			ctx = context.WithValue(ctx, recreate.MockApplySocketOwnershipKey{}, func() error { return nil })
@@ -296,6 +298,8 @@ func TestDaemonRecreate_RemovesSocketAndPidFiles(t *testing.T) {
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 	ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(fake))
 	ctx = context.WithValue(ctx, lifecycle.EnsureSocketDirKey{}, func() error { return nil })
+	ctx = context.WithValue(ctx, recreate.MockPullImageKey{}, func(string) error { return nil })
+	ctx = context.WithValue(ctx, recreate.MockStageKukepauseKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockProvisionKukeondCellKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockWaitForReadyKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockApplySocketOwnershipKey{}, func() error { return nil })
@@ -342,6 +346,8 @@ func TestDaemonRecreate_AppliesSocketOwnership(t *testing.T) {
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 	ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(fake))
 	ctx = context.WithValue(ctx, lifecycle.EnsureSocketDirKey{}, func() error { return nil })
+	ctx = context.WithValue(ctx, recreate.MockPullImageKey{}, func(string) error { return nil })
+	ctx = context.WithValue(ctx, recreate.MockStageKukepauseKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockProvisionKukeondCellKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockWaitForReadyKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockApplySocketOwnershipKey{}, func() error {
@@ -391,6 +397,8 @@ func TestDaemonRecreate_SocketOwnershipFailureIsWrapped(t *testing.T) {
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 	ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(fake))
 	ctx = context.WithValue(ctx, lifecycle.EnsureSocketDirKey{}, func() error { return nil })
+	ctx = context.WithValue(ctx, recreate.MockPullImageKey{}, func(string) error { return nil })
+	ctx = context.WithValue(ctx, recreate.MockStageKukepauseKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockProvisionKukeondCellKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockWaitForReadyKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockApplySocketOwnershipKey{}, func() error {
@@ -455,6 +463,8 @@ func TestDaemonRecreate_GracefulTimeoutEscalatesToKill(t *testing.T) {
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 	ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(fake))
 	ctx = context.WithValue(ctx, lifecycle.EnsureSocketDirKey{}, func() error { return nil })
+	ctx = context.WithValue(ctx, recreate.MockPullImageKey{}, func(string) error { return nil })
+	ctx = context.WithValue(ctx, recreate.MockStageKukepauseKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockProvisionKukeondCellKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockWaitForReadyKey{}, func() error { return nil })
 	ctx = context.WithValue(ctx, recreate.MockApplySocketOwnershipKey{}, func() error { return nil })
@@ -613,4 +623,108 @@ func (f *fakeClient) DeleteCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv
 		return kukeonv1.DeleteCellResult{}, errors.New("unexpected DeleteCell call")
 	}
 	return f.deleteCellFn(doc)
+}
+
+// recreateOrderCtx wires every recreate phase stub to append its name to
+// calls, so a test can assert the pull → stop/delete → stage → provision order
+// (issue #1638).
+func recreateOrderCtx(t *testing.T, fake *fakeClient, calls *[]string, pullErr error) context.Context {
+	t.Helper()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+	ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(fake))
+	ctx = context.WithValue(ctx, lifecycle.EnsureSocketDirKey{}, func() error { return nil })
+	ctx = context.WithValue(ctx, recreate.MockPullImageKey{}, func(ref string) error {
+		*calls = append(*calls, "pull "+ref)
+		return pullErr
+	})
+	ctx = context.WithValue(ctx, recreate.MockStageKukepauseKey{}, func() error {
+		*calls = append(*calls, "stage")
+		return nil
+	})
+	ctx = context.WithValue(ctx, recreate.MockProvisionKukeondCellKey{}, func() error {
+		*calls = append(*calls, "provision")
+		return nil
+	})
+	ctx = context.WithValue(ctx, recreate.MockWaitForReadyKey{}, func() error { return nil })
+	ctx = context.WithValue(ctx, recreate.MockApplySocketOwnershipKey{}, func() error { return nil })
+	ctx = context.WithValue(ctx, recreate.MockSocketDirKey{}, t.TempDir())
+	return ctx
+}
+
+func orderFake(calls *[]string) *fakeClient {
+	var getCalls int
+	return &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			getCalls++
+			state := v1beta1.CellStateReady
+			containers := []v1beta1.ContainerStatus{{State: v1beta1.ContainerStateReady}}
+			if getCalls > 1 {
+				state = v1beta1.CellStateStopped
+				containers = nil
+			}
+			return kukeonv1.GetCellResult{
+				Cell:           v1beta1.CellDoc{Status: v1beta1.CellStatus{State: state, Containers: containers}},
+				MetadataExists: true,
+			}, nil
+		},
+		stopCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
+			*calls = append(*calls, "stop")
+			return kukeonv1.StopCellResult{Cell: doc, Stopped: true}, nil
+		},
+		deleteCellFn: func(doc v1beta1.CellDoc) (kukeonv1.DeleteCellResult, error) {
+			*calls = append(*calls, "delete")
+			return kukeonv1.DeleteCellResult{Cell: doc, MetadataDeleted: true}, nil
+		},
+	}
+}
+
+// TestDaemonRecreate_PullFailureLeavesDaemonRunning pins the pull-first
+// contract: a ref that cannot be pulled returns the error before the running
+// cell is stopped or deleted.
+func TestDaemonRecreate_PullFailureLeavesDaemonRunning(t *testing.T) {
+	withFreshViper(t)
+
+	var calls []string
+	cmd := recreate.NewRecreateCmd()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetContext(recreateOrderCtx(t, orderFake(&calls), &calls, errors.New("not found")))
+	cmd.SetArgs([]string{"--kukeond-image", "ghcr.io/eminwux/kukeon:does-not-exist"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected an error from a failing pull")
+	}
+	if want := "pull kukeond image ghcr.io/eminwux/kukeon:does-not-exist: not found"; !strings.Contains(
+		err.Error(),
+		want,
+	) {
+		t.Fatalf("error = %q, want it to contain %q", err, want)
+	}
+	if got := strings.Join(calls, ","); got != "pull ghcr.io/eminwux/kukeon:does-not-exist" {
+		t.Fatalf("calls = %q, want only the pull (no stop, no delete)", got)
+	}
+}
+
+// TestDaemonRecreate_PhaseOrder pins pull → stop → delete → stage → provision.
+func TestDaemonRecreate_PhaseOrder(t *testing.T) {
+	withFreshViper(t)
+
+	var calls []string
+	cmd := recreate.NewRecreateCmd()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetContext(recreateOrderCtx(t, orderFake(&calls), &calls, nil))
+	cmd.SetArgs([]string{"--kukeond-image", "test-img:dev"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v\n%s", err, buf.String())
+	}
+	want := "pull test-img:dev,stop,delete,stage,provision"
+	if got := strings.Join(calls, ","); got != want {
+		t.Fatalf("calls = %q, want %q", got, want)
+	}
 }

@@ -34,6 +34,33 @@ sudo kuke init --kukeond-image docker.io/library/<img>:<tag>
 - Second invocation on a healthy host is idempotent: each provisioning phase reports "already existed" and the container-start phase reports "already running" (no bare "started" — that wording is reserved for a phase that actually created or transitioned something), exit code 0, the daemon stays up.
 - `kuke doctor cgroups` on the same host exits 0 once cgroup controllers are delegated; non-zero output names which controller is missing and whether the kernel lacks support or the parent didn't delegate.
 
+### Update
+
+**Intent.** Move the host to the newest build of its channel — edge (every merge to `main`) or stable (release tags) — and keep the daemon and the `kuke` team in step with the binaries. Reference: [`docs/site/cli/kuke-update.md`](site/cli/kuke-update.md).
+
+**Sequence.**
+
+```bash
+curl -fsSL https://kukeon.io/install.sh | bash   # first install: newest edge build, kuke init, kuke team init
+sudo kuke update                                 # later: newest build of the installed channel
+sudo kuke update --channel stable                # edge → stable, at the next release
+sudo kuke update --channel edge                  # stable or a dev build → edge
+kuke version                                     # Client: and Daemon: report the same version
+```
+
+**Invariants.**
+
+- The channel is read from the installed version and never stored: `vX.Y.Z` is stable, `vX.Y.Z-N-g<sha>` is edge. Any other version, or binaries in the install prefix that are symlinks (`make install-dev`), is a development build: `kuke update` without `--channel` exits non-zero with a message naming `--channel`, and changes nothing.
+- The daemon is created from an immutable image: `ghcr.io/eminwux/kukeon:sha-<short>` on edge, `:vX.Y.Z` on stable. Nothing pulls `:edge`.
+- Already current (binaries and daemon at the target): prints `already up to date (<version>)`, exits 0, the daemon is not touched and the team step does not run.
+- On success: `kuke`, `kukebuild`, `kukepause` replaced, `kukeond` a hard link to the new `kuke`; the kukeond cell recreated; `kuke version --strict` reports the target for `Client:` and `Daemon:`; the previous kukeond image removed from the `kuke-system` realm; cells in other realms keep running and `/opt/kukeon/data/default/**` is untouched.
+- A stable host never moves to an edge build without `--channel edge`. `--channel stable` on an edge build ahead of the latest tag changes nothing, says it will move at the next release, and exits 0; the request is not remembered.
+- `--version vX.Y.Z` older than the installed build warns and asks for confirmation; it proceeds only on `yes` or `--yes`, otherwise exits non-zero with nothing changed. `--version` takes release tags only and conflicts with `--channel edge`.
+- A download, checksum or downloaded-version failure exits non-zero with the prefix unchanged. A failed daemon recreate or version check restores the previous binaries and recreates the daemon from the previous image (still in the realm), exits non-zero, and does not remove that image.
+- `kuke daemon recreate --kukeond-image <ref that cannot be pulled>` fails before it stops the running daemon.
+- Team step: after the version check, `kuke update` runs the new `kuke team init --upgrade`. A failure is a warning naming `kuke team init --upgrade`; the new binaries and daemon stay and the exit code is 0. The installer runs `kuke team init` on a fresh host (`kuke team init --upgrade` on a live one); without git it warns naming the command and still exits 0; `KUKE_SKIP_TEAM_INIT=1` skips it.
+- The installer on a host whose daemon version differs from the installed binaries recreates the daemon and exits 0 with matching versions; `KUKE_SKIP_DAEMON_UPGRADE=1` leaves the daemon alone. `KUKE_CHANNEL` other than `edge`/`stable`, or `KUKE_VERSION` with `KUKE_CHANNEL=edge`, exits 2 before anything is touched.
+
 ### Lightweight teardown (dev loop)
 
 **Intent.** Stop the running daemon and clear its socket/pidfile so the next `kuke init` produces a clean re-bootstrap, **without** touching user-realm data under `/opt/kukeon/data/default`.
@@ -509,7 +536,8 @@ kuke delete team web
 - kukeond stores a `Team` only in the team apply that carries the documents composed from it, and only when every one of them applied. A `Team` document sent on its own exits non-zero with a message naming `kuke apply -f`. An invalid document is rejected with the decoder's message and nothing is written.
 - `kuke apply -f FILE` stores a `TeamDefaults` and composes each `Team` document as `kuke team apply -f FILE` does, after the file's other documents; if one of those fails, the Teams are skipped. `Role`, `Harness`, `HarnessImageCatalog`, `Component` and `Connector` documents are rejected.
 - Every team document is `apiVersion: v1beta1`; the old group-qualified header is rejected with the normal decode error.
-- `kuke team init` stops with `already initialized (team kuke is stored)` when the `kuke` Team is stored; `--force` replaces it, `--reapply` (= `kuke team apply kuke`) recomposes it, and both together exit non-zero. Init creates a `TeamDefaults` (the `kukeon` source with its `claude` and `codex` harnesses) only when the realm has none, and never changes an existing one.
+- `kuke team init` stops with `already initialized (team kuke is stored)` when the `kuke` Team is stored; `--force` replaces it, `--reapply` (= `kuke team apply kuke`) recomposes it, and both together exit non-zero. Init creates a `TeamDefaults` (the `kukeon` source with its `claude` and `codex` harnesses) only when the realm has none, and never changes an existing one, except `--upgrade`.
+- `kuke team init --upgrade` (excludes `--force` and `--reapply`) re-pins the `github.com/eminwux/kukeon` source named `kukeon` in the stored `kuke` Team and in the `TeamDefaults` to the running binary's revision and recomposes the `kuke` team in one apply, keeping `spec.secrets` and every other field; it prints the old and new revision and the other teams that inherit the defaults, and recomposes none of them. When both pins already match it prints `already at <revision>`, fetches and applies nothing, and exits 0. It never creates the `kuke` team, and leaves a `kukeon` source with another URL alone.
 - `kuke team add NAME --source URL` reads the repository's `kuketeam.yaml` from the fetched revision; `NAME` wins over its `metadata.name`; without a file the team inherits the defaults. Directory mode reads the local file. `-f FILE` replaces the whole declaration, `--no-repo-file` ignores the repository's, and `--role` / `--harness` replace their list (a default's `NAME` or `[NAME=]SOURCE:PATH`). The stored Team is what was applied, overrides included.
 - `add` of a stored name exits non-zero before fetching and writes nothing; the error names `kuke team apply NAME` and `--force`. With `--force` the stored declaration is replaced and its recorded secret bindings are kept. `root` and `kuke` are refused.
 - `--dry-run` (add, apply) prints the declaration's origin, the declaration, each source with its resolved commit, each role × harness with Config, image, tasks and components, the Configs to create, re-render and prune, missing secrets and notes; it creates no Secret, applies no document and reads no secret value.

@@ -189,6 +189,54 @@ func (b *Exec) DeleteImage(realm, ref string) (DeleteImageResult, error) {
 	return res, nil
 }
 
+// PullImageResult reports the outcome of a PullImage call.
+type PullImageResult struct {
+	Realm     string
+	Namespace string
+	Ref       string
+}
+
+// PullImage ensures ref is present in the realm's containerd namespace,
+// pulling it anonymously when absent. The realm is validated up-front and the
+// namespace mapping mirrors DeleteImage. kukeon.internal refs are never
+// pulled: a local miss on one surfaces errdefs.ErrInternalImageNotBuilt
+// unchanged.
+func (b *Exec) PullImage(realm, ref string) (PullImageResult, error) {
+	var res PullImageResult
+
+	realmName := strings.TrimSpace(realm)
+	if realmName == "" {
+		return res, errdefs.ErrRealmNameRequired
+	}
+	imageRef := strings.TrimSpace(ref)
+	if imageRef == "" {
+		return res, errdefs.ErrImageNotFound
+	}
+
+	lookup := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{Name: realmName},
+	}
+	if _, err := b.runner.GetRealm(lookup); err != nil {
+		if errors.Is(err, errdefs.ErrRealmNotFound) {
+			return res, fmt.Errorf("%w: %s", errdefs.ErrRealmNotFound, realmName)
+		}
+		return res, fmt.Errorf("%w: %w", errdefs.ErrGetRealm, err)
+	}
+
+	namespace := consts.RealmNamespace(realmName)
+	if err := b.runner.PullImage(namespace, imageRef); err != nil {
+		if errors.Is(err, errdefs.ErrInternalImageNotBuilt) {
+			return res, err
+		}
+		return res, fmt.Errorf("%w: %w", errdefs.ErrPullImage, err)
+	}
+
+	res.Realm = realmName
+	res.Namespace = namespace
+	res.Ref = imageRef
+	return res, nil
+}
+
 // PruneImages reclaims dangling image layers and the orphaned leases pinning
 // them in the realm's containerd namespace. The realm is validated up-front
 // so callers see ErrRealmNotFound before any containerd round-trip; the

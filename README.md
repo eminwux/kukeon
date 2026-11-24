@@ -28,11 +28,19 @@ Release binaries are published for `amd64` and `arm64`.
 curl -fsSL https://kukeon.io/install.sh | bash
 ```
 
-The installer detects your platform, verifies the prerequisites above (and prints a distro-aware hint on any miss), downloads the latest release, verifies its `sha256` checksum, installs `kuke` + `kukeond` to `/usr/local/bin`, runs `sudo kuke init` to bring the daemon up, and (on systemd hosts) installs `/etc/systemd/system/kukeond.service` so kukeond comes back automatically after a host or containerd restart. On systemd-less hosts the unit step is skipped with a notice — bring kukeond up manually after each reboot with `sudo kuke daemon start`. Pass `--check` to run the prereq checks only without touching the system:
+The installer detects your platform, verifies the prerequisites above (and prints a distro-aware hint on any miss), downloads the newest **edge** build (a rolling build of `main`), verifies its `sha256` checksums, installs `kuke` + `kukeond` + `kukebuild` + `kukepause` to `/usr/local/bin`, runs `sudo kuke init` to bring the daemon up, runs `sudo kuke team init` to store the `kuke` team (the majordomo; skipped with a warning when `git` is missing), and (on systemd hosts) installs `/etc/systemd/system/kukeond.service` so kukeond comes back automatically after a host or containerd restart. On systemd-less hosts the unit step is skipped with a notice — bring kukeond up manually after each reboot with `sudo kuke daemon start`. Pass `--check` to run the prereq checks only without touching the system:
 
 ```bash
 curl -fsSL https://kukeon.io/install.sh | bash -s -- --check
 ```
+
+To install the latest release tag instead of edge, set `KUKE_CHANNEL=stable`:
+
+```bash
+curl -fsSL https://kukeon.io/install.sh | KUKE_CHANNEL=stable bash
+```
+
+Keep the host current with `sudo kuke update`, which moves it to the newest build of its channel and recreates the daemon. → See [docs/site/cli/kuke-update.md](docs/site/cli/kuke-update.md).
 
 After install completes you should see the daemon's realm/space/stack hierarchy provisioned and `kukeond` listening on its unix socket:
 

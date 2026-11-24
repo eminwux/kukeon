@@ -117,6 +117,20 @@ func TestInitReapplyExcludesForce(t *testing.T) {
 	}
 }
 
+func TestInitUpgradeExcludesForceAndReapply(t *testing.T) {
+	for _, other := range []string{"--force", "--reapply"} {
+		h := newHarness(t)
+		_, err := h.run(t, "init", "--upgrade", other)
+		if err == nil || !strings.Contains(err.Error(), "mutually exclusive") ||
+			!strings.Contains(err.Error(), "--upgrade") {
+			t.Fatalf("%s: error = %v", other, err)
+		}
+		if len(h.connect) != 0 {
+			t.Fatalf("%s: dialled kukeond for invalid flags", other)
+		}
+	}
+}
+
 // TestInitHasNoGitFlags: init reads no git identity, so it takes no flag to
 // import one, and its help points at the git connector.
 func TestInitHasNoGitFlags(t *testing.T) {

@@ -969,6 +969,18 @@ func TestResolveKukeondImage(t *testing.T) {
 			want:    "ghcr.io/eminwux/kukeon:v1.2.3",
 		},
 		{
+			name:    "edge-version-uses-sha-tag",
+			version: "v1.2.3-4-gabcdef0",
+			repo:    "ghcr.io/eminwux/kukeon",
+			want:    "ghcr.io/eminwux/kukeon:sha-abcdef0",
+		},
+		{
+			name:    "dirty-edge-version-keeps-raw-tag",
+			version: "v1.2.3-4-gabcdef0-dirty",
+			repo:    "ghcr.io/eminwux/kukeon",
+			want:    "ghcr.io/eminwux/kukeon:v1.2.3-4-gabcdef0-dirty",
+		},
+		{
 			name:    "dev-version-falls-back-to-latest",
 			version: "0.1.0",
 			repo:    "ghcr.io/eminwux/kukeon",

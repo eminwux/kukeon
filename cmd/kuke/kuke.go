@@ -50,6 +50,7 @@ import (
 	stopcmd "github.com/eminwux/kukeon/cmd/kuke/stop"
 	teamcmd "github.com/eminwux/kukeon/cmd/kuke/team"
 	uninstallcmd "github.com/eminwux/kukeon/cmd/kuke/uninstall"
+	updatecmd "github.com/eminwux/kukeon/cmd/kuke/update"
 	"github.com/eminwux/kukeon/cmd/kuke/version"
 	writecmd "github.com/eminwux/kukeon/cmd/kuke/write"
 	"github.com/eminwux/kukeon/cmd/types"
@@ -178,6 +179,7 @@ func SetupKukeCmd(rootCmd *cobra.Command) error {
 	rootCmd.AddCommand(imagecmd.NewImageCmd())
 	rootCmd.AddCommand(connectorcmd.NewConnectorCmd())
 	rootCmd.AddCommand(uninstallcmd.NewUninstallCmd())
+	rootCmd.AddCommand(updatecmd.NewUpdateCmd())
 	rootCmd.AddCommand(version.NewVersionCmd())
 
 	// Persistent flags

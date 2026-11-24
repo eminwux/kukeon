@@ -392,3 +392,65 @@ func TestPruneImages_RunnerErrorIsWrapped(t *testing.T) {
 		t.Errorf("inner error should be preserved; got %q", err.Error())
 	}
 }
+
+func TestPullImage_UsesRealmNamespace(t *testing.T) {
+	wantNS := consts.RealmNamespace(consts.KukeSystemRealmName)
+	var gotNS, gotRef string
+	mock := &fakeRunner{
+		GetRealmFn: func(_ intmodel.Realm) (intmodel.Realm, error) {
+			return buildTestRealm(consts.KukeSystemRealmName, wantNS), nil
+		},
+		PullImageFn: func(ns, ref string) error {
+			gotNS, gotRef = ns, ref
+			return nil
+		},
+	}
+	ctrl := setupTestController(t, mock)
+	res, err := ctrl.PullImage(consts.KukeSystemRealmName, "ghcr.io/eminwux/kukeon:sha-abc1234")
+	if err != nil {
+		t.Fatalf("PullImage returned error: %v", err)
+	}
+	if gotNS != wantNS || res.Namespace != wantNS {
+		t.Errorf("namespace: runner %q, result %q, want %q", gotNS, res.Namespace, wantNS)
+	}
+	if gotRef != "ghcr.io/eminwux/kukeon:sha-abc1234" {
+		t.Errorf("runner saw ref %q", gotRef)
+	}
+}
+
+func TestPullImage_ErrorsAreClassified(t *testing.T) {
+	cases := []struct {
+		name   string
+		runErr error
+		want   error
+	}{
+		{"internal-not-built-passes-through", errdefs.ErrInternalImageNotBuilt, errdefs.ErrInternalImageNotBuilt},
+		{"other-errors-wrap-pull", errors.New("401 unauthorized"), errdefs.ErrPullImage},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := &fakeRunner{
+				GetRealmFn: func(_ intmodel.Realm) (intmodel.Realm, error) {
+					return buildTestRealm("default", ""), nil
+				},
+				PullImageFn: func(string, string) error { return tc.runErr },
+			}
+			ctrl := setupTestController(t, mock)
+			if _, err := ctrl.PullImage("default", "x:1"); !errors.Is(err, tc.want) {
+				t.Fatalf("err = %v, want %v", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestPullImage_RealmNotFound(t *testing.T) {
+	mock := &fakeRunner{
+		GetRealmFn: func(_ intmodel.Realm) (intmodel.Realm, error) {
+			return intmodel.Realm{}, errdefs.ErrRealmNotFound
+		},
+	}
+	ctrl := setupTestController(t, mock)
+	if _, err := ctrl.PullImage("ghost", "alpine"); !errors.Is(err, errdefs.ErrRealmNotFound) {
+		t.Fatalf("expected ErrRealmNotFound, got %v", err)
+	}
+}

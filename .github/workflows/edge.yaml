@@ -1,0 +1,238 @@
+name: Edge Build
+
+# Every merge to main is published as the rolling `edge` channel (issue #1638):
+# the binaries replace the assets of one GitHub prerelease named `edge`, and
+# the kukeond image is pushed as the immutable ghcr.io/eminwux/kukeon:sha-<short>
+# plus a moving :edge tag for people to read. Nothing in kukeon pulls :edge;
+# `kuke init`, the installer and `kuke update` always use :sha-<short>.
+#
+# Harness images are not built here: they stay pinned to the last release tag
+# and reach hosts when a tag is cut (release.yaml is unchanged).
+on:
+  push:
+    branches:
+      - main
+    # Nothing under docs/ is embedded in a binary. team/** keeps triggering:
+    # team sources are read at the binary's commit.
+    paths-ignore:
+      - "docs/**"
+      - "mkdocs.yml"
+  workflow_dispatch:
+    inputs:
+      cleanup_dry_run:
+        description: "Only log what the sha-* image cleanup would delete"
+        type: boolean
+        default: true
+
+# Two merges must not interleave uploads to the one `edge` prerelease.
+concurrency:
+  group: edge
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_REPO: ghcr.io/${{ github.repository_owner }}/kukeon
+
+jobs:
+  version:
+    name: Resolve edge version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.describe.outputs.version }}
+      short: ${{ steps.describe.outputs.short }}
+    steps:
+      - name: Check out the repo (full history for tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # --long keeps a tagged commit in the edge form (v0.11.0-0-g<sha>);
+      # plain describe prints v0.11.0 there, and a host that installed it
+      # would read as stable and stop following edge.
+      - name: git describe --long
+        id: describe
+        run: |
+          VERSION=$(git describe --tags --long --match 'v[0-9]*')
+          if ! printf '%s\n' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-g[0-9a-f]+$'; then
+            echo "::error::unexpected edge version '${VERSION}' (want vX.Y.Z-N-g<sha>)"
+            exit 1
+          fi
+          SHORT=${VERSION##*-g}
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "short=${SHORT}" >> "$GITHUB_OUTPUT"
+          echo "edge version ${VERSION} (image tag sha-${SHORT})"
+
+  # The image is pushed before the binaries, and VERSION is uploaded last, so
+  # a client that reads VERSION finds the image and binaries already there.
+  image:
+    name: Build and push kukeond image
+    needs: version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      SHORT: ${{ needs.version.outputs.short }}
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # No attestation step: each attestation adds a sha256-* tag to the
+      # package. The Go build is a cross-compile on the build platform; only
+      # the final stage's apt layer runs emulated for arm64, and the gha cache
+      # rebuilds it only when that stage changes.
+      - name: Build and push kukeond image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_REPO }}:sha-${{ env.SHORT }}
+            ${{ env.IMAGE_REPO }}:edge
+          labels: |
+            org.opencontainers.image.title=kukeon
+            org.opencontainers.image.version=${{ env.VERSION }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          build-args: |
+            VERSION=${{ env.VERSION }}
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  binaries:
+    name: Publish edge binaries
+    needs: [version, image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      SHORT: ${{ needs.version.outputs.short }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Check out the repo (full history for tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # kukebuild lives in its own Go module pinned to a newer Go; setup-go
+      # gives a known base Go for the GOTOOLCHAIN auto-fetch (as release.yaml).
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Nothing may be written into the tree before the builds: a new
+      # untracked file sets vcs.modified=true, and the binary would then pin
+      # team sources to branch main instead of this commit (#1632). The
+      # outputs match /kuke* in .gitignore.
+      - name: Build artifacts
+        run: |
+          make release-build KUKEON_VERSION="$VERSION" KUKEON_IMAGE_REPO="$IMAGE_REPO"
+          make release-build-kukebuild
+          go version -m kuke-linux-amd64 | grep -q 'vcs.modified=false'
+          go version -m kuke-linux-amd64 | grep -q "vcs.revision=${GITHUB_SHA}"
+
+      - name: Generate checksums and VERSION
+        run: |
+          for f in kuke-linux-amd64 kuke-linux-arm64 \
+                   kukebuild-linux-amd64 kukebuild-linux-arm64 \
+                   kukepause-linux-amd64 kukepause-linux-arm64; do
+            sha256sum "$f" > "$f.sha256"
+          done
+          printf '%s\n' "$VERSION" > "$RUNNER_TEMP/VERSION"
+
+      # The `edge` tag matches neither release.yaml's tag filter nor the
+      # --match 'v[0-9]*' describe pattern, and a prerelease is not returned
+      # by releases/latest, so stable resolution is unaffected.
+      - name: Publish to the edge prerelease
+        run: |
+          gh release view edge >/dev/null 2>&1 || \
+            gh release create edge --prerelease --title edge --notes "Rolling build of main."
+          git tag -f edge "$GITHUB_SHA"
+          git push -f origin refs/tags/edge
+          gh release upload edge --clobber \
+            kuke-linux-amd64 kuke-linux-amd64.sha256 kuke-linux-arm64 kuke-linux-arm64.sha256 \
+            kukebuild-linux-amd64 kukebuild-linux-amd64.sha256 kukebuild-linux-arm64 kukebuild-linux-arm64.sha256 \
+            kukepause-linux-amd64 kukepause-linux-amd64.sha256 kukepause-linux-arm64 kukepause-linux-arm64.sha256
+          # Last: clients read VERSION first.
+          gh release upload edge --clobber "$RUNNER_TEMP/VERSION"
+          gh release edit edge --prerelease \
+            --notes "Rolling build of main at ${GITHUB_SHA} (${VERSION}). Image: ${IMAGE_REPO}:sha-${SHORT}"
+
+  smoke:
+    name: Install the published edge build
+    needs: [version, binaries]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      SHORT: ${{ needs.version.outputs.short }}
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Run the installer on the edge channel (skip init)
+        env:
+          KUKE_CHANNEL: edge
+          KUKE_SKIP_INIT: "1"
+        run: bash scripts/install.sh
+
+      - name: Installed client reports the published version
+        run: |
+          out="$(/usr/local/bin/kuke version --no-daemon)"
+          echo "$out"
+          if ! printf '%s\n' "$out" | grep -qxF "Client: ${VERSION}"; then
+            echo "::error::expected 'Client: ${VERSION}'"
+            exit 1
+          fi
+
+      - name: The immutable image lists both platforms
+        run: |
+          out="$(docker buildx imagetools inspect "${IMAGE_REPO}:sha-${SHORT}")"
+          echo "$out"
+          for platform in linux/amd64 linux/arm64; do
+            if ! printf '%s\n' "$out" | grep -q "Platform: *${platform}"; then
+              echo "::error::${IMAGE_REPO}:sha-${SHORT} has no ${platform} manifest"
+              exit 1
+            fi
+          done
+
+  # Keep the newest 20 sha-* images. exclude-tags wins over every other rule,
+  # so v*, latest and edge are never deleted; deleting a multi-arch image also
+  # deletes its platform children. Untagged versions are out of scope (no
+  # delete-untagged). A workflow_dispatch run defaults to a dry run.
+  cleanup:
+    name: Prune old sha-* images
+    needs: [version, binaries]
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - name: Delete all but the newest 20 sha-* images
+        uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          package: kukeon
+          delete-tags: "sha-*"
+          keep-n-tagged: 20
+          exclude-tags: "edge,latest,v*"
+          dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.cleanup_dry_run }}
