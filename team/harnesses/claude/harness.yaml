@@ -87,36 +87,38 @@ spec:
             # restores the re-invocation contract but does NOT keep an
             # in-flight backgrounded build alive across the yield — long
             # work must be foregrounded or shell-owned (follow-up to #772).
+            #
+            # Each turn writes claude's stdout straight to its turn log and
+            # streams it with `tail --pid`, which stops when claude exits.
+            # Piping claude into tee would make the turn wait for every
+            # process still holding the pipe: a child claude leaves behind
+            # with its stdout keeps tee, and so the cell, alive after the
+            # final result. `set +m` keeps the background claude in the
+            # shell's process group, so it stays in the terminal's
+            # foreground process group and never stops on terminal access.
             SID=$(cat /proc/sys/kernel/random/uuid)
             MAX_TURNS=50
             turn=1
-            resume=0
+            session_flag=--session-id
             next_prompt="$PROMPT"
+            set +m
             while :; do
               turnlog="/tmp/claude-turn-$turn.jsonl"
-              if [ "$resume" -eq 0 ]; then
-                claude \
-                  --settings "$ROLE_SOURCE_DIR/$ROLE_PATH/$HARNESS_SETTINGS" \
-                  --add-dir "$ROLE_SOURCE_DIR/$ROLE_PATH" \
-                  --session-id "$SID" \
-                  --verbose \
-                  --output-format stream-json \
-                  --include-partial-messages \
-                  --print "$next_prompt" </dev/null | tee "$turnlog"
-              else
-                claude \
-                  --settings "$ROLE_SOURCE_DIR/$ROLE_PATH/$HARNESS_SETTINGS" \
-                  --add-dir "$ROLE_SOURCE_DIR/$ROLE_PATH" \
-                  --resume "$SID" \
-                  --verbose \
-                  --output-format stream-json \
-                  --include-partial-messages \
-                  --print "$next_prompt" </dev/null | tee "$turnlog"
-              fi
-              # tee masks claude's exit code under POSIX sh, so read the
-              # turn outcome and the yield signal from claude's own
-              # stream-json result rather than $?. Every branch below uses
-              # if/then/fi rather than `cond && action` lists so the loop is
+              : > "$turnlog"
+              claude \
+                --settings "$ROLE_SOURCE_DIR/$ROLE_PATH/$HARNESS_SETTINGS" \
+                --add-dir "$ROLE_SOURCE_DIR/$ROLE_PATH" \
+                "$session_flag" "$SID" \
+                --verbose \
+                --output-format stream-json \
+                --include-partial-messages \
+                --print "$next_prompt" </dev/null >> "$turnlog" &
+              cpid=$!
+              tail -n +1 -f --pid="$cpid" "$turnlog" || :
+              wait "$cpid" || :
+              # Read the turn outcome and the yield signal from claude's own
+              # stream-json result rather than its exit code. Every branch
+              # below uses if/then/fi rather than `cond && action` lists so the loop is
               # safe even if onInit runs under `set -e` (a `cond && action`
               # whose cond is false returns non-zero and would abort the
               # script — fatal on the normal non-error turn).
@@ -142,7 +144,7 @@ spec:
               np=$(printf '%s' "$wake" | jq -r '.prompt // empty' 2>/dev/null)
               case "$np" in ''|'<<autonomous-loop-dynamic>>'|'<<autonomous-loop>>') np="Resume your task." ;; esac
               next_prompt="$np"
-              resume=1
+              session_flag=--resume
               sleep "$delay"
               turn=$((turn + 1))
             done
