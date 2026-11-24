@@ -20,8 +20,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"path"
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/gitcred"
@@ -201,6 +203,56 @@ func ShowSource(ctx context.Context, opts Options, name string) (*SourceContents
 	}
 	contents.Source = source
 	return contents, nil
+}
+
+// InspectSource fetches a Source that is not stored — an address, an optional
+// ref and an optional git identity — with the same fetch and the same
+// identity order as ShowSource, and lists the roles and harnesses it offers
+// (#1644 Step 1). Nothing is stored. No role or harness is marked a default:
+// the defaults name stored Sources only. A source given no ref is read at its
+// remote's default branch, which the result's Source carries.
+func InspectSource(ctx context.Context, opts Options, spec config.SourceSpec) (*SourceContents, error) {
+	if err := opts.check(); err != nil {
+		return nil, err
+	}
+	if _, err := gitremote.URL(spec.URL); err != nil {
+		return nil, err
+	}
+	if err := validateRevision(AddOptions{Branch: spec.Branch, Tag: spec.Tag, Commit: spec.Commit}); err != nil {
+		return nil, err
+	}
+	if spec.Git != nil && spec.Git.IdentityRef != nil && spec.Git.IdentityRef.Realm == "" {
+		ref := *spec.Git.IdentityRef
+		ref.Realm = config.DefaultRealm
+		spec.Git = &config.SourceGit{IdentityRef: &ref}
+	}
+	source := sourceOf(inspectName(spec.URL), spec)
+	if !hasRef(source) && opts.Sources[source.Name] == nil {
+		branch, err := defaultBranch(ctx, identityOf(opts.Client, config.DefaultRealm), source)
+		if err != nil {
+			return nil, err
+		}
+		source.Branch = branch
+	}
+	if err := config.ValidateSource(source.Name, specOf(source)); err != nil {
+		return nil, fmt.Errorf("inspect source: %w", err)
+	}
+	contents, err := inspect(ctx, opts, source, config.EmptyDefaults(config.DefaultRealm))
+	if err != nil {
+		return nil, err
+	}
+	contents.Source = source
+	return contents, nil
+}
+
+// inspectName names an unstored source in messages: its repository's base
+// name when that is a valid Source name, else "source".
+func inspectName(address string) string {
+	base := strings.ToLower(strings.TrimSuffix(path.Base(gitcred.ShortForm(address)), ".git"))
+	if config.ValidName(base) && base != config.ProjectSourceName {
+		return base
+	}
+	return "source"
 }
 
 // DeleteSource deletes a stored Source. kukeond refuses it while a default

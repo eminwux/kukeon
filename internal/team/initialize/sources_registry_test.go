@@ -33,7 +33,7 @@ import (
 // definitions discovery must skip (D9, G3) or ignore.
 func roleSource() fstest.MapFS {
 	role := "apiVersion: v1beta1\nkind: Role\nmetadata: {name: %s}\nspec:\n" +
-		"  harnesses: {codex: {}, claude: {}}\n  tasks:\n    - {name: nightly}\n"
+		"  harnesses: {codex: {}, claude: {}}\n  tasks:\n    - {name: nightly, schedule: \"@daily\", suspend: true}\n"
 	return fstest.MapFS{
 		"roles/dev/role.yaml":          {Data: []byte(strings.ReplaceAll(role, "%s", "dev"))},
 		"harnesses/codex/harness.yaml": {Data: []byte("apiVersion: v1beta1\nkind: Harness\nmetadata: {name: codex}\n")},
@@ -78,7 +78,10 @@ func TestCreateSourceDiscoversAndStores(t *testing.T) {
 	got := change.Discovered
 	if len(got.Roles) != 1 || got.Roles[0].Name != "dev" || got.Roles[0].Path != "roles/dev" ||
 		!slices.Equal(got.Roles[0].Harnesses, []string{"claude", "codex"}) ||
-		!slices.Equal(got.Roles[0].Tasks, []string{"nightly"}) || got.Roles[0].Default {
+		!slices.Equal(
+			got.Roles[0].Tasks,
+			[]SourceTask{{Name: "nightly", Schedule: "@daily", Suspend: true}},
+		) || got.Roles[0].Default {
 		t.Fatalf("discovered roles = %+v", got.Roles)
 	}
 	if len(got.Harnesses) != 1 || got.Harnesses[0] != (SourceItem{Name: "codex", Path: "harnesses/codex"}) {

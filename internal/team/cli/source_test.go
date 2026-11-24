@@ -84,7 +84,10 @@ func TestCreateSourceAndShow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Source kukeon:", "ROLE", "majordomo", "team/roles/majordomo", "HARNESS", "codex"} {
+	for _, want := range []string{
+		"Source kukeon:", "ROLE", "majordomo", "team/roles/majordomo", "HARNESS", "codex",
+		"health-sweep (@hourly, suspended)",
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("show lacks %q:\n%s", want, out)
 		}

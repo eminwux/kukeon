@@ -61,12 +61,24 @@ type SourceContents struct {
 
 // SourceRole is one role a source offers.
 type SourceRole struct {
-	Name      string   `json:"name"`
-	Path      string   `json:"path"`
-	Harnesses []string `json:"harnesses"`
-	Tasks     []string `json:"tasks"`
+	Name      string       `json:"name"`
+	Path      string       `json:"path"`
+	Harnesses []string     `json:"harnesses"`
+	Tasks     []SourceTask `json:"tasks"`
 	// Default reports that the TeamDefaults' default roles select it.
 	Default bool `json:"default"`
+}
+
+// SourceTask is one task a role declares (role.yaml spec.tasks), with the
+// defaults a team's task entry overrides (#1644 Step 1).
+type SourceTask struct {
+	Name string `json:"name"`
+	// Schedule is the role's default cadence; empty runs the task by hand.
+	Schedule string `json:"schedule,omitempty"`
+	// Suspend ships the schedule switched off.
+	Suspend bool `json:"suspend,omitempty"`
+	// Args is the role's argument text for the task.
+	Args string `json:"args,omitempty"`
 }
 
 // SourceItem is one harness a source offers.
@@ -231,13 +243,15 @@ func Discover(tree fs.FS, sourceName string, defaults *config.TeamDefaults) (*So
 			if role.Metadata.Name == "" {
 				return nil
 			}
-			entry := SourceRole{Name: role.Metadata.Name, Path: dir, Harnesses: []string{}, Tasks: []string{}}
+			entry := SourceRole{Name: role.Metadata.Name, Path: dir, Harnesses: []string{}, Tasks: []SourceTask{}}
 			for name := range role.Spec.Harnesses {
 				entry.Harnesses = append(entry.Harnesses, name)
 			}
 			sort.Strings(entry.Harnesses)
 			for _, task := range role.Spec.Tasks {
-				entry.Tasks = append(entry.Tasks, task.Name)
+				entry.Tasks = append(entry.Tasks, SourceTask{
+					Name: task.Name, Schedule: task.Schedule, Suspend: task.Suspend, Args: task.Args,
+				})
 			}
 			entry.Default = slices.ContainsFunc(defaults.Spec.Defaults.Roles, func(r config.Role) bool {
 				return r.Source == sourceName && path.Clean(r.Path) == dir

@@ -176,7 +176,7 @@ func printSourceContents(out io.Writer, name string, c *initialize.SourceContent
 	w := tabwriter.NewWriter(out, 0, 0, tablePadding, ' ', 0)
 	fmt.Fprintln(w, "ROLE\tPATH\tHARNESSES\tTASKS\tDEFAULT")
 	for _, role := range c.Roles {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", role.Name, role.Path, dash(role.Harnesses), dash(role.Tasks),
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", role.Name, role.Path, dash(role.Harnesses), taskList(role.Tasks),
 			yesNo(role.Default))
 	}
 	fmt.Fprintln(w, "\nHARNESS\tPATH\tDEFAULT")
@@ -195,6 +195,26 @@ func sourceRef(branch, tag, commit string) string {
 	default:
 		return " commit " + commit
 	}
+}
+
+// taskList prints a role's tasks by name, each with the schedule the role
+// gives it: "nightly (@daily)", "sweep (0 3 * * *, suspended)".
+func taskList(tasks []initialize.SourceTask) string {
+	if len(tasks) == 0 {
+		return "-"
+	}
+	out := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		switch {
+		case task.Schedule == "":
+			out = append(out, task.Name)
+		case task.Suspend:
+			out = append(out, task.Name+" ("+task.Schedule+", suspended)")
+		default:
+			out = append(out, task.Name+" ("+task.Schedule+")")
+		}
+	}
+	return strings.Join(out, ", ")
 }
 
 func dash(values []string) string {
