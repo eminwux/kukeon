@@ -38,7 +38,7 @@ const (
 )
 
 var errURL = errors.New(
-	"source: require SCP-style [user@]host:path (colon after host), ssh://[user@]host[:port]/path, or https://host/path; embedded credentials, queries and fragments are forbidden",
+	"source: require host/owner/repo, SCP-style [user@]host:path (colon after host), ssh://[user@]host[:port]/path, or https://host/path; embedded credentials, queries and fragments are forbidden",
 )
 
 // URL validates remote-only input without exposing it in diagnostics. HTTPS

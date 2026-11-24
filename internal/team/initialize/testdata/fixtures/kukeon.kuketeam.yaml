@@ -19,7 +19,7 @@ spec:
         tasks: [{ name: tick, suspend: false }],
       }
   # Harness definitions, contexts and image catalogs live in this repository
-  # (team/harnesses/); `project` is the source `kuke team add` adds for it.
+  # (team/harnesses/); `project` is the source the create verb adds for it.
   harnesses:
     - { name: claude, source: project, path: team/harnesses/claude }
     - { name: codex, source: project, path: team/harnesses/codex }

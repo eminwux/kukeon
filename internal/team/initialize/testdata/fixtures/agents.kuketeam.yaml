@@ -4,7 +4,7 @@ metadata: { name: agents }
 spec:
   # Self-referential team: the project source IS this repo. Clone the writable
   # work copy (project) to agents0 so it does not collide with the read-only
-  # roles clone (agents -> /home/user/agents). Without this, `kuke team add`
+  # roles clone (agents -> /home/user/agents). Without this, the create verb
   # defaults the project clone to /home/user/<team-name> = /home/user/agents.
   projectSource: { name: project, clonePath: /home/user/agents0 }
   sources:
