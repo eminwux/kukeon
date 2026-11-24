@@ -367,6 +367,9 @@ func checkSelections(d *Defaults, sources map[string]bool) error {
 				if !ValidName(task.Name) {
 					return fmt.Errorf("%s: invalid task name %q", taskField, task.Name)
 				}
+				if err := checkTaskHarnesses(taskField+".harnesses", task.Harnesses); err != nil {
+					return err
+				}
 			}
 		}
 		if role.Needs != nil {
@@ -380,6 +383,21 @@ func checkSelections(d *Defaults, sources map[string]bool) error {
 					return fmt.Errorf("%s.needs.secrets[%d]: invalid secret name %q", field, j, secret)
 				}
 			}
+		}
+	}
+	return nil
+}
+
+// checkTaskHarnesses checks the shape of a task entry's per-harness
+// overrides: each key is a valid name and each override sets a schedule or a
+// suspend. Whether a key is a harness of the team is composition's to say.
+func checkTaskHarnesses(field string, overrides map[string]TaskHarness) error {
+	for _, name := range slices.Sorted(maps.Keys(overrides)) {
+		if !ValidName(name) {
+			return fmt.Errorf("%s: invalid harness name %q", field, name)
+		}
+		if override := overrides[name]; override.Schedule == "" && override.Suspend == nil {
+			return fmt.Errorf("%s.%s: set schedule or suspend", field, name)
 		}
 	}
 	return nil

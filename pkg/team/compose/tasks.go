@@ -21,6 +21,7 @@ import (
 	"maps"
 	"path"
 	"slices"
+	"strings"
 
 	"github.com/eminwux/kukeon/internal/cronspec"
 	model "github.com/eminwux/kukeon/pkg/api/model/kuketeams"
@@ -91,7 +92,7 @@ func selectTasks(role *model.Role, selection config.Role, harnessName string) ([
 		if !selection.SelectsTask(task.Name) {
 			continue
 		}
-		resolved, err := resolveTaskSchedule(role.Metadata.Name, selection, task)
+		resolved, err := resolveTaskSchedule(role.Metadata.Name, selection, task, harnessName)
 		if err != nil {
 			return nil, err
 		}
@@ -100,19 +101,36 @@ func selectTasks(role *model.Role, selection config.Role, harnessName string) ([
 	return out, nil
 }
 
-// resolveTaskSchedule applies the team's task entry over the role's defaults:
-// a team `args` replaces the role's argument text, a team `schedule` replaces the role's, a team `suspend` — true or
-// false — replaces the role's. A `suspend` on a task that ends up with no
-// schedule is refused: there is nothing for it to switch.
-func resolveTaskSchedule(roleName string, selection config.Role, task model.RoleTask) (model.RoleTask, error) {
-	entry, _ := selection.TaskSelection(task.Name)
+// resolveTaskSchedule applies the team's task entry over the role's defaults,
+// and the entry's override for the harness over the entry (issue #1668): a
+// team `args` replaces the role's argument text, a team `schedule` replaces
+// the role's, a team `suspend` — true or false — replaces the role's, and a
+// value in `harnesses.<harness>` replaces the entry's for that harness's
+// Config. A `suspend` on a task that ends up with no schedule is refused:
+// there is nothing for it to switch.
+func resolveTaskSchedule(
+	roleName string, selection config.Role, task model.RoleTask, harnessName string,
+) (model.RoleTask, error) {
+	declared, _ := selection.TaskSelection(task.Name)
+	override, overridden := declared.Harnesses[harnessName]
+	entry := declared.ForHarness(harnessName)
+	// at names the harness in an error once the entry overrides per harness:
+	// the pairs of the role then resolve differently.
+	at := ""
+	if len(declared.Harnesses) > 0 {
+		at = "harness " + harnessName + ": "
+	}
 	suspendSet := task.Suspend
 	if entry.Args != "" {
 		task.Args = entry.Args
 	}
 	if entry.Schedule != "" {
 		if _, err := cronspec.Parse(entry.Schedule); err != nil {
-			return task, fmt.Errorf("roles %s: tasks: %s: schedule: %w", selection.Name, task.Name, err)
+			field := "schedule"
+			if overridden && override.Schedule != "" {
+				field = "harnesses: " + harnessName + ": schedule"
+			}
+			return task, fmt.Errorf("roles %s: tasks: %s: %s: %w", selection.Name, task.Name, field, err)
 		}
 		task.Schedule = entry.Schedule
 	}
@@ -122,11 +140,40 @@ func resolveTaskSchedule(roleName string, selection config.Role, task model.Role
 	}
 	if suspendSet && task.Schedule == "" {
 		return task, fmt.Errorf(
-			"roles %s: tasks: %s: suspend is set but the task has no schedule (role %s declares none)",
-			selection.Name, task.Name, roleName,
+			"roles %s: tasks: %s: %ssuspend is set but the task has no schedule (role %s declares none)",
+			selection.Name, task.Name, at, roleName,
 		)
 	}
 	return task, nil
+}
+
+// checkTaskHarnesses refuses a task entry override keyed by a name that is
+// not a harness of the team, or — on a role pinned to one harness — by any
+// other harness (issue #1668). It runs against the effective harness list, as
+// a team may inherit it from the TeamDefaults.
+func checkTaskHarnesses(role config.Role, harnesses []config.Harness) error {
+	if role.Tasks == nil {
+		return nil
+	}
+	names := make([]string, 0, len(harnesses))
+	known := map[string]bool{}
+	for _, h := range harnesses {
+		names = append(names, h.Name)
+		known[h.Name] = true
+	}
+	for _, entry := range *role.Tasks {
+		for _, name := range slices.Sorted(maps.Keys(entry.Harnesses)) {
+			switch {
+			case !known[name]:
+				return fmt.Errorf("roles %s: tasks: %s: harnesses: the team has no harness %q; its harnesses: %s",
+					role.Name, entry.Name, name, strings.Join(names, ", "))
+			case role.Harness != "" && name != role.Harness:
+				return fmt.Errorf("roles %s: tasks: %s: harnesses: %s: role is pinned to harness %q",
+					role.Name, entry.Name, name, role.Harness)
+			}
+		}
+	}
+	return nil
 }
 
 // taskPrompt is the harness-neutral prompt a task config runs headless with.

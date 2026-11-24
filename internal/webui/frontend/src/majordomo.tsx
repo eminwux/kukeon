@@ -13,8 +13,11 @@ import { configForCell, sameScopedReference } from "./relationships.mjs";
 const teamLabel = "kukeon.io/team";
 const roleLabel = "kukeon.io/role";
 const taskLabel = "kukeon.io/task";
+// The harness a team Config runs on (#1668); a Config rendered before the label existed has none.
+export const harnessLabel = "kukeon.io/harness";
 const team = "kuke";
-const role = "majordomo";
+export const majordomoRole = "majordomo";
+const role = majordomoRole;
 export const sweepTask = "health-sweep";
 // The first interactive cell the web UI creates; a further one is named after its Config (#1630).
 const cellName = "majordomo";

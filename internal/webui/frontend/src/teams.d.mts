@@ -13,7 +13,8 @@ export type TeamSummary = {
   configs: string[]; system?: boolean;
 };
 export type FormSource = { alias: string; stored?: string; url?: string; refKind?: string; ref?: string; clonePath?: string; identity?: string };
-export type FormTask = { name: string; schedule?: string; suspend: boolean | null; args?: string };
+export type FormTaskHarness = { schedule?: string; suspend: boolean | null };
+export type FormTask = { name: string; schedule?: string; suspend: boolean | null; args?: string; harnesses?: Record<string, FormTaskHarness> };
 export type FormRoleConnector = { name: string; enabled: boolean; identity?: string };
 export type FormRole = { name: string; source: string; path: string; harness?: string; initialPath?: string; image: string[]; tasks: { all: boolean; items: FormTask[] }; connectors?: FormRoleConnector[] };
 export type FormHarness = { name: string; source: string; path: string };
@@ -26,11 +27,11 @@ export type TeamForm = {
 export type ViewSource = { alias: string; stored?: string; url: string; ref?: string; clonePath?: string; identity?: string; declared: boolean };
 export type ViewRole = {
   name: string; source: string; path: string; harness?: string; initialPath?: string; image: string[]; secrets: string[];
-  allTasks: boolean; selected: { name: string; schedule?: string; suspend?: boolean; args?: string }[];
+  allTasks: boolean; selected: { name: string; schedule?: string; suspend?: boolean; args?: string; harnesses?: Record<string, FormTaskHarness> }[];
 };
 export type ScheduleSpec = { cron: string; timezone?: string; concurrencyPolicy?: string; startingDeadlineSeconds?: number; suspend?: boolean };
 export type ScheduleState = { lastScheduleTime?: string; nextScheduleTime?: string; lastCell?: string; activeCells?: string[]; skippedFires?: number; lastError?: string };
-export type ViewTask = { role: string; task: string; config: string; scope: string[]; schedule?: ScheduleSpec; status?: ScheduleState };
+export type ViewTask = { role: string; task: string; harness?: string; config: string; scope: string[]; schedule?: ScheduleSpec; status?: ScheduleState };
 // RoleConnectorView is one connector a Config of the team resolves (#1649): a row of kuke team connector list.
 export type RoleConnectorView = {
   role: string; config: string; task?: string; connector: string; method?: string; state: string;

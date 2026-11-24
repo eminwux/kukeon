@@ -470,3 +470,163 @@ func TestRoleTaskScheduleRejections(t *testing.T) {
 		})
 	}
 }
+
+// twoHarnessTasks is the fixture team on codex and claude, its role declaring
+// health-sweep with the given role-side default (`schedule`/`suspend` keys of
+// the role.yaml entry, or "").
+func twoHarnessTasks(
+	t *testing.T, roleDefault string, tasks *[]config.TaskSelection,
+) (*config.TeamDefaults, *config.Team, compose.Options) {
+	t.Helper()
+	cfg, opts := fixture(t)
+	cfg.Spec.Defaults.Harnesses = config.MajordomoHarnesses() // codex, claude
+	entry := "{ name: health-sweep, skill: create-cell-config" + roleDefault + " }"
+	opts.Sources["kukeon"] = taskSource(t, "  tasks:\n    - "+entry+"\n  needs:\n")
+	cfg.Spec.Defaults.Roles[0].Tasks = tasks
+	return cfg, selectedTeam(cfg), opts
+}
+
+// TestRoleTaskHarnessSchedules pins issue #1668 AC2: per role × harness pair, a
+// value in the task entry's `harnesses.<harness>` replaces the entry's value,
+// which replaces the role's default.
+func TestRoleTaskHarnessSchedules(t *testing.T) {
+	yes, no := true, false
+	type schedule = api.CellConfigSchedule
+	for _, tc := range []struct {
+		name          string
+		roleDefault   string
+		entry         config.TaskSelection
+		claude, codex *schedule
+	}{
+		{
+			name:        "override turns one harness on",
+			roleDefault: `, schedule: "@hourly", suspend: true`,
+			entry: config.TaskSelection{
+				Harnesses: map[string]config.TaskHarness{"claude": {Suspend: &no}},
+			},
+			claude: &schedule{Cron: "@hourly"},
+			codex:  &schedule{Cron: "@hourly", Suspend: true},
+		},
+		{
+			name:        "override wins over the entry",
+			roleDefault: `, schedule: "@hourly"`,
+			entry: config.TaskSelection{
+				Suspend:   &yes,
+				Harnesses: map[string]config.TaskHarness{"codex": {Suspend: &no}},
+			},
+			claude: &schedule{Cron: "@hourly", Suspend: true},
+			codex:  &schedule{Cron: "@hourly"},
+		},
+		{
+			name:        "override schedule for one harness",
+			roleDefault: `, schedule: "@hourly"`,
+			entry: config.TaskSelection{
+				Harnesses: map[string]config.TaskHarness{"claude": {Schedule: "@daily"}},
+			},
+			claude: &schedule{Cron: "@daily"},
+			codex:  &schedule{Cron: "@hourly"},
+		},
+		{
+			name: "override schedules a task the role leaves unscheduled",
+			entry: config.TaskSelection{
+				Harnesses: map[string]config.TaskHarness{"claude": {Schedule: "@daily"}},
+			},
+			claude: &schedule{Cron: "@daily"},
+			codex:  nil,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.entry.Name = "health-sweep"
+			cfg, team, opts := twoHarnessTasks(t, tc.roleDefault, &[]config.TaskSelection{tc.entry})
+			result, err := compose.Compose(cfg, team, opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for harness, want := range map[string]*schedule{"claude": tc.claude, "codex": tc.codex} {
+				pair := pairOf(t, result, harness)
+				if len(pair.Tasks) != 1 {
+					t.Fatalf("%s: task configs = %v", harness, taskNames(pair))
+				}
+				task := pair.Tasks[0]
+				if got := task.Spec.Schedule; !reflect.DeepEqual(got, want) {
+					t.Errorf("%s: schedule = %+v, want %+v", harness, got, want)
+				}
+				// AC4: both the pair Config and its task Config name the harness.
+				if got := pair.Config.Metadata.Labels[api.LabelHarness]; got != harness {
+					t.Errorf("%s: pair Config %s = %q", harness, api.LabelHarness, got)
+				}
+				if got := task.Metadata.Labels[api.LabelHarness]; got != harness {
+					t.Errorf("%s: task Config %s = %q", harness, api.LabelHarness, got)
+				}
+			}
+		})
+	}
+}
+
+// TestRoleTaskHarnessRejections pins issue #1668 AC3: composition names the
+// role, the task and the harness when an override cannot apply.
+func TestRoleTaskHarnessRejections(t *testing.T) {
+	yes := true
+	for _, tc := range []struct {
+		name        string
+		roleDefault string
+		pin         string
+		entry       config.TaskSelection
+		err         []string
+	}{
+		{
+			name: "suspend set and no schedule on the other harness",
+			entry: config.TaskSelection{
+				Suspend:   &yes,
+				Harnesses: map[string]config.TaskHarness{"claude": {Schedule: "@daily"}},
+			},
+			err: []string{
+				"compose majordomo/codex:", "roles majordomo: tasks: health-sweep: harness codex: " +
+					"suspend is set but the task has no schedule",
+			},
+		},
+		{
+			name: "key is not a harness of the team",
+			entry: config.TaskSelection{
+				Harnesses: map[string]config.TaskHarness{"gemini": {Suspend: &yes}},
+			},
+			roleDefault: `, schedule: "@hourly"`,
+			err: []string{
+				`roles majordomo: tasks: health-sweep: harnesses: the team has no harness "gemini"; ` +
+					"its harnesses: codex, claude",
+			},
+		},
+		{
+			name:        "role is pinned to another harness",
+			pin:         "claude",
+			roleDefault: `, schedule: "@hourly"`,
+			entry: config.TaskSelection{
+				Harnesses: map[string]config.TaskHarness{"codex": {Suspend: &yes}},
+			},
+			err: []string{`roles majordomo: tasks: health-sweep: harnesses: codex: role is pinned to harness "claude"`},
+		},
+		{
+			name:        "override schedule does not parse",
+			roleDefault: `, schedule: "@hourly"`,
+			entry: config.TaskSelection{
+				Harnesses: map[string]config.TaskHarness{"claude": {Schedule: "nope"}},
+			},
+			err: []string{"roles majordomo: tasks: health-sweep: harnesses: claude: schedule:"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.entry.Name = "health-sweep"
+			cfg, team, opts := twoHarnessTasks(t, tc.roleDefault, &[]config.TaskSelection{tc.entry})
+			cfg.Spec.Defaults.Roles[0].Harness = tc.pin
+			_, err := compose.Compose(cfg, team, opts)
+			if err == nil {
+				t.Fatal("Compose() succeeded")
+			}
+			for _, want := range tc.err {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("err = %v, want it to contain %q", err, want)
+				}
+			}
+		})
+	}
+}

@@ -571,6 +571,47 @@ A team's entry can also replace a task's argument text with `args`, for example
 `{ name: pick-bug, args: "--label regression" }`. Like `schedule` and
 `suspend`, it overrides only that value.
 
+A team renders one task config per role × harness
+(`<team>-<role>-<harness>-<task>`), and an entry's `harnesses` map sets
+`schedule` and `suspend` for one harness only. Each key is a harness of the
+team. A value is resolved in three layers, for each of the role's harnesses:
+the role's default, then the task entry, then the entry's
+`harnesses.<harness>`. The kuke team can switch its sweep on for claude and
+keep it off on codex:
+
+```yaml
+# the stored kuke Team: sweeps on for claude only
+spec:
+  roles:
+    - name: majordomo
+      source: kukeon
+      path: team/roles/majordomo
+      tasks:
+        - name: health-sweep
+          harnesses:
+            claude: { suspend: false } # codex keeps the role's suspend: true
+```
+
+An override has no `args`, and sets at least one of `schedule` and `suspend`.
+The apply fails, naming the role, the task and the harness, when:
+
+- a key is not a harness of the team;
+- the role is pinned to another harness (`harness:` on the role entry);
+- an override's `schedule` does not parse;
+- a harness ends up with `suspend` set and no schedule.
+
+Every config a team renders carries the label `kukeon.io/harness` with the
+harness's name, beside `kukeon.io/role` and, on a task config,
+`kukeon.io/task`. A config rendered before the label existed gets it at the
+team's next apply.
+
+`kuke team task enable` and `kuke team task disable` switch a schedule from the
+CLI without editing YAML: they set `suspend` in the task entry of the stored
+team (with `--harness`, in its `harnesses.<harness>`) and apply the team in one
+command. `kuke team task list` shows every task config of a team with its
+harness, schedule, state and next fire. See
+[`kuke team task`](../cli/kuke-team.md#kuke-team-task).
+
 ### Program roles: the script harness
 
 A role that is a plain program, such as a reactor or a poller, runs on the
@@ -645,10 +686,30 @@ otherwise triages each finding and stores one report in kukeond. It never
 restarts, deletes or changes anything; fixes appear in the report as suggested
 commands.
 
-To turn sweeps on, edit the kuke team's stored declaration and apply it — on
-the web UI's **Edit team** screen of the kuke team (its page is linked from the
-Health page), where step Tasks and schedules switches the sweep on, or from the
-CLI:
+Each sweep spends model credits, and the kuke team renders one per harness.
+Turn sweeps on for one harness with one command, which edits the kuke team's
+stored declaration and applies it:
+
+```bash
+kuke team task enable kuke health-sweep --role majordomo --harness claude --dry-run   # preview
+kuke team task enable kuke health-sweep --role majordomo --harness claude
+kuke team task list kuke
+```
+
+```console
+$ kuke team task list kuke
+ROLE       TASK          HARNESS  CONFIG                              SCHEDULE  STATE      NEXT
+majordomo  health-sweep  claude   kuke-majordomo-claude-health-sweep  @hourly   on         2026-11-25T10:00:00Z
+majordomo  health-sweep  codex    kuke-majordomo-codex-health-sweep   @hourly   suspended  -
+```
+
+Leave out `--harness` to switch every harness, and switch sweeps off again with
+`kuke team task disable kuke health-sweep --role majordomo`. The web UI's
+**Edit team** screen of the kuke team (its page is linked from the Health page)
+does the same: step Tasks and schedules has one switch per harness.
+
+The command writes this task entry, which you can also set by hand: export the
+stored Team, edit it and apply it.
 
 ```bash
 kuke get team kuke -o yaml > kuke.yaml
@@ -665,7 +726,9 @@ spec:
       needs:
         image: [go]
       tasks:
-        - { name: health-sweep, suspend: false }
+        - name: health-sweep
+          harnesses:
+            claude: { suspend: false }
 ```
 
 ```bash
@@ -674,8 +737,9 @@ kuke team apply -f kuke.yaml
 kuke get config kuke-majordomo-claude-health-sweep -o yaml   # spec.schedule, status.schedule
 ```
 
-Change the cadence the same way, with `schedule: "*/30 * * * *"` in the task
-entry. Run one sweep by hand at any time, suspended or not:
+Change the cadence with `--schedule "*/30 * * * *"` on `kuke team task enable`,
+or with `schedule: "*/30 * * * *"` in the task entry (or in its
+`harnesses.<harness>`). Run one sweep by hand at any time, suspended or not:
 
 ```bash
 kuke run -d kuke-majordomo-claude-health-sweep

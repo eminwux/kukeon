@@ -293,7 +293,11 @@ func bind(
 		APIVersion: api.APIVersionV1Beta1, Kind: api.KindCellConfig,
 		Metadata: api.CellConfigMetadata{
 			Name: name, Realm: opts.Scope.Realm, Space: opts.Scope.Space, Stack: opts.Scope.Stack,
-			Labels: map[string]string{api.LabelTeam: plan.team, api.LabelRole: plan.selection.Name},
+			Labels: map[string]string{
+				api.LabelTeam:    plan.team,
+				api.LabelRole:    plan.selection.Name,
+				api.LabelHarness: plan.hsel.Name,
+			},
 		},
 		Spec: api.CellConfigSpec{
 			Blueprint:  api.CellConfigBlueprintRef{Name: bp.Metadata.Name, Realm: bp.Metadata.Realm},

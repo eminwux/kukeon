@@ -226,11 +226,42 @@ export function suspendOf(state) {
   return null;
 }
 
+// roleHarnesses are the harnesses a role's tasks render a Config on, for the
+// per-harness schedule switches (#1668): the pinned harness when the role
+// names one; else the team's harnesses (the form's, or the inherited ones),
+// narrowed to the harnesses the offered role declares when that list is known,
+// or else to the harnesses of the role's task Configs (configured, by label). A harness that already
+// has an override on one of the role's tasks is always listed, so an override
+// is never hidden.
+export function roleHarnesses(form, role, offeredRole, inherited = [], configured = []) {
+  let names;
+  if (text(role?.harness)) names = [text(role.harness)];
+  else {
+    const items = form?.harnesses?.inherit ? list(inherited) : list(form?.harnesses?.items);
+    names = items.map(item => text(item?.name)).filter(Boolean);
+    const offered = list(offeredRole?.harnesses).map(text).filter(Boolean);
+    const rendered = list(configured).filter(task => !task?.role || task.role === role?.name).map(task => text(task?.harness)).filter(Boolean);
+    const narrow = offered.length ? offered : rendered;
+    if (narrow.length) names = names.filter(name => narrow.includes(name));
+  }
+  for (const task of list(role?.tasks?.items)) {
+    for (const name of Object.keys(task?.harnesses ?? {})) if (!names.includes(name)) names.push(name);
+  }
+  return [...new Set(names)];
+}
+
+// harnessSwitchOf is a per-harness switch: same (the task's), on or off.
+function harnessSwitchOf(override) {
+  const state = switchOf(override);
+  return state === "role" ? "same" : state;
+}
+
 // taskRows lists a role's tasks for the Tasks step: every task the role
 // declares (from an inspected source, else the team's task Configs), and any
 // the form selects that neither names. Each row carries the role's defaults
-// as placeholders.
-export function taskRows(role, offered, configured) {
+// as placeholders, and one entry per harness (roleHarnesses) with that
+// harness's switch and override schedule.
+export function taskRows(role, offered, configured, harnesses = []) {
   const names = [];
   const add = name => { if (name && !names.includes(name)) names.push(name); };
   list(offered).forEach(task => add(text(task?.name)));
@@ -247,13 +278,17 @@ export function taskRows(role, offered, configured) {
       schedule: text(item?.schedule), switch: switchOf(item), args: text(item?.args),
       roleSchedule: text(defaults.schedule) || text(configuredTask?.schedule?.cron), roleSuspend: defaults.schedule ? !!defaults.suspend : !!configuredTask?.schedule?.suspend,
       roleArgs: text(defaults.args),
+      harnesses: list(harnesses).map(harness => ({ name: harness, switch: harnessSwitchOf(item?.harnesses?.[harness]), schedule: text(item?.harnesses?.[harness]?.schedule) })),
     };
   });
 }
 
 // withTask changes one task of a role: patch.selected selects or drops it,
-// other fields set its overrides. A role that selected every task lists
-// them all first (known), so changing one keeps the others selected.
+// other fields set its overrides. patch.harness with patch.switch (same, on
+// or off) sets that harness's override instead (#1668): its schedule is
+// kept, and an override left with neither is removed. A role that selected
+// every task lists them all first (known), so changing one keeps the others
+// selected.
 export function withTask(form, roleIndex, name, patch, known) {
   return withRolePatch(form, roleIndex, { tasks: taskSelection(form.roles.items[roleIndex].tasks, name, patch, known) });
 }
@@ -269,9 +304,21 @@ function taskSelection(tasks, name, patch, known) {
   const next = { ...current };
   if ("schedule" in patch) next.schedule = text(patch.schedule);
   if ("args" in patch) next.args = text(patch.args);
-  if ("switch" in patch) next.suspend = suspendOf(patch.switch);
+  if ("harness" in patch) Object.assign(next, harnessOverride(next.harnesses, patch.harness, patch.switch));
+  else if ("switch" in patch) next.suspend = suspendOf(patch.switch);
   if (at >= 0) items[at] = next; else items.push(next);
   return { all: false, items };
+}
+
+// harnessOverride is a task's harnesses map with one harness's switch set;
+// harnesses is undefined when no override is left.
+function harnessOverride(overrides, harness, state) {
+  const out = { ...(overrides ?? {}) };
+  const schedule = text(out[harness]?.schedule);
+  const suspend = suspendOf(state === "same" ? "role" : state);
+  if (suspend === null && !schedule) delete out[harness];
+  else out[harness] = schedule ? { schedule, suspend } : { suspend };
+  return { harnesses: Object.keys(out).length ? out : undefined };
 }
 
 // withAllTasks selects every task the role declares again.
@@ -322,7 +369,10 @@ export function initialPathValid(value) {
 export function tasksErrors(form) {
   const errors = [];
   for (const role of list(form?.roles?.items)) {
-    for (const task of list(role.tasks?.items)) errors.push(...cronErrors(task.schedule).map(message => `${role.name} / ${task.name}: ${message}`));
+    for (const task of list(role.tasks?.items)) {
+      errors.push(...cronErrors(task.schedule).map(message => `${role.name} / ${task.name}: ${message}`));
+      for (const [harness, override] of Object.entries(task.harnesses ?? {})) errors.push(...cronErrors(override?.schedule).map(message => `${role.name} / ${task.name} on ${harness}: ${message}`));
+    }
   }
   return errors;
 }

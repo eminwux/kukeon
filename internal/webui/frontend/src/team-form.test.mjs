@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   availableSources, createBody, cronErrors, draftPayload, editBody, emptyProject, gitIdentities, initialPathValid, inspectRequest, projectErrors, rolesErrors, sourcesErrors, stepErrors, stepsFor,
-  roleConnectorRows, suspendOf, switchOf, taskRows, tasksErrors, togglable, withAllTasks, withConnector, withConnectorsInherit, withHarness, withInherit, withProject, withRole,
+  roleConnectorRows, roleHarnesses, suspendOf, switchOf, taskRows, tasksErrors, togglable, withAllTasks, withConnector, withConnectorsInherit, withHarness, withInherit, withProject, withRole,
   withRoleConnector, withRolePatch, withSource, withTask,
 } from "./team-form.mjs";
 
@@ -112,6 +112,37 @@ test("switching one task of an all-tasks role lists every task, so the others st
   assert.deepEqual(none.roles.items[0].tasks, { all: false, items: [] }, "dropping every task is tasks: []");
 });
 
+test("a role's harnesses: the pin, else the team's, narrowed to what the role declares, plus every override", () => {
+  const team = { ...form(), harnesses: { inherit: false, items: [{ name: "codex" }, { name: "claude" }, { name: "script" }] } };
+  const role = team.roles.items[0];
+  assert.deepEqual(roleHarnesses(team, role, undefined), ["codex", "claude", "script"]);
+  assert.deepEqual(roleHarnesses(team, role, { harnesses: ["claude", "codex"] }), ["codex", "claude"]);
+  assert.deepEqual(roleHarnesses(team, role, { harnesses: [] }, [], [{ role: "dev", harness: "claude" }, { role: "pm", harness: "codex" }]), ["claude"], "task Configs narrow when the role's list is unknown");
+  assert.deepEqual(roleHarnesses(team, { ...role, harness: "claude" }, { harnesses: ["claude", "codex"] }), ["claude"]);
+  assert.deepEqual(roleHarnesses(form(), role, undefined, [{ name: "codex" }, { name: "claude" }]), ["codex", "claude"], "inherited harnesses");
+  const overridden = { ...role, harness: "claude", tasks: { all: false, items: [{ name: "sweep", suspend: null, harnesses: { codex: { suspend: false } } }] } };
+  assert.deepEqual(roleHarnesses(team, overridden, undefined), ["claude", "codex"], "an override is never hidden");
+});
+
+test("per-harness switches: rows carry them, withTask sets and clears an override", () => {
+  const role = { ...form().roles.items[0], tasks: { all: false, items: [{ name: "sweep", suspend: true, harnesses: { codex: { schedule: "@daily", suspend: null } } }] } };
+  const rows = taskRows(role, [], [], ["claude", "codex"]);
+  assert.deepEqual(rows[0].harnesses, [{ name: "claude", switch: "same", schedule: "" }, { name: "codex", switch: "same", schedule: "@daily" }]);
+  const base = { ...form(), roles: { inherit: false, items: [role] } };
+  let next = withTask(base, 0, "sweep", { harness: "claude", switch: "on" }, ["sweep"]);
+  assert.deepEqual(next.roles.items[0].tasks.items[0], { name: "sweep", suspend: true, harnesses: { claude: { suspend: false }, codex: { schedule: "@daily", suspend: null } } }, "the entry's switch is untouched");
+  next = withTask(next, 0, "sweep", { harness: "codex", switch: "off" }, ["sweep"]);
+  assert.deepEqual(next.roles.items[0].tasks.items[0].harnesses.codex, { schedule: "@daily", suspend: true }, "a schedule-only override keeps its schedule");
+  next = withTask(next, 0, "sweep", { harness: "codex", switch: "same" }, ["sweep"]);
+  assert.deepEqual(next.roles.items[0].tasks.items[0].harnesses.codex, { schedule: "@daily", suspend: null });
+  next = withTask(next, 0, "sweep", { harness: "claude", switch: "same" }, ["sweep"]);
+  assert.deepEqual(Object.keys(next.roles.items[0].tasks.items[0].harnesses), ["codex"], "an override left with neither is removed");
+  const plain = withTask(withTask(form(), 0, "pick", { harness: "claude", switch: "on" }, ["pick"]), 0, "pick", { harness: "claude", switch: "same" }, ["pick"]);
+  assert.deepEqual(plain.roles.items[0].tasks.items[0], { name: "pick", suspend: null, harnesses: undefined });
+  assert.deepEqual(JSON.parse(JSON.stringify(plain.roles.items[0].tasks.items[0])), { name: "pick", suspend: null }, "no harnesses key is sent");
+  assert.equal(base.roles.items[0].tasks.items[0].harnesses.claude, undefined, "withTask does not change its input");
+});
+
 test("cron text is five fields or a named schedule", () => {
   assert.deepEqual(cronErrors(""), []);
   assert.deepEqual(cronErrors("@daily"), []);
@@ -120,6 +151,8 @@ test("cron text is five fields or a named schedule", () => {
   assert.equal(cronErrors("* * *").length, 1);
   const next = withTask(form(), 0, "pick", { schedule: "nope" }, ["pick"]);
   assert.match(tasksErrors(next)[0], /^dev \/ pick:/);
+  const role = { ...form().roles.items[0], tasks: { all: false, items: [{ name: "pick", suspend: null, harnesses: { claude: { schedule: "nope", suspend: null } } }] } };
+  assert.match(tasksErrors({ ...form(), roles: { inherit: false, items: [role] } })[0], /^dev \/ pick on claude:/);
 });
 
 test("connectors: the first choice declares the list; clearing a choice drops it", () => {

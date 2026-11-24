@@ -99,6 +99,28 @@ spec:
       connectors: {github: {}}
 `
 
+// taskHarnesses is a Team whose task entries override their schedule per
+// harness (issue #1668, AC7): Apply of an unchanged form keeps every override.
+const taskHarnesses = `apiVersion: v1beta1
+kind: Team
+metadata:
+  name: kuke
+spec:
+  roles:
+    - name: majordomo
+      source: kukeon
+      path: team/roles/majordomo
+      tasks:
+        - name: health-sweep
+          harnesses:
+            claude: {suspend: false}
+            codex: {schedule: "@daily", suspend: true}
+        - {name: pick-bug, suspend: true, harnesses: {codex: {schedule: "@weekly"}}}
+  harnesses:
+    - {name: claude, source: kukeon, path: team/harnesses/claude}
+    - {name: codex, source: kukeon, path: team/harnesses/codex}
+`
+
 // formFixtures are the Teams the round trip covers: the two repository
 // files of #1643 AC5, the kuke team, everyField, and the defaults of every
 // TeamDefaults fixture of pkg/team/config/testdata as a team's lists.
@@ -117,6 +139,7 @@ func formFixtures(t *testing.T) map[string]*config.Team {
 	// round-trip unchanged.
 	decode("legacy-opt-in", []byte(legacyOptIn))
 	decode("role-connector", []byte(roleConnector))
+	decode("task-harnesses", []byte(taskHarnesses))
 	for _, file := range []string{"kukeon.kuketeam.yaml", "agents.kuketeam.yaml"} {
 		raw, err := os.ReadFile(filepath.Join("..", "team", "initialize", "testdata", "fixtures", file))
 		if err != nil {
@@ -352,4 +375,52 @@ func TestFormRoleConnectors(t *testing.T) {
 			t.Fatalf("err = %v", err)
 		}
 	})
+}
+
+// TestFormTaskHarnesses: the form carries a task entry's per-harness
+// overrides (issue #1668, AC7). A switch set in the form is an override's
+// suspend; an override left with neither a schedule nor a switch is dropped,
+// and an entry left with none is written as before.
+func TestFormTaskHarnesses(t *testing.T) {
+	base, err := config.DecodeTeamDeclaration(strings.NewReader(taskHarnesses))
+	if err != nil {
+		t.Fatal(err)
+	}
+	form := formOf(base, connectortest.Catalog(t))
+	sweep := form.Roles.Items[0].Tasks.Items[0]
+	if len(sweep.Harnesses) != 2 || sweep.Harnesses["codex"].Schedule != "@daily" {
+		t.Fatalf("form overrides = %+v", sweep.Harnesses)
+	}
+	// Switch codex on, keeping its schedule; clear claude's switch.
+	on := false
+	sweep.Harnesses["codex"] = formTaskHarness{Schedule: "@daily", Suspend: &on}
+	sweep.Harnesses["claude"] = formTaskHarness{}
+	form.Roles.Items[0].Tasks.Items[0] = sweep
+	got, err := form.apply(base, connectortest.Catalog(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, _ := got.Spec.Roles[0].TaskSelection("health-sweep")
+	if _, ok := entry.Harnesses["claude"]; ok || len(entry.Harnesses) != 1 {
+		t.Fatalf("overrides = %+v", entry.Harnesses)
+	}
+	if codex := entry.Harnesses["codex"]; codex.Schedule != "@daily" || codex.Suspend == nil || *codex.Suspend {
+		t.Fatalf("codex override = %+v", codex)
+	}
+	// Clearing every override writes a nil map.
+	form.Roles.Items[0].Tasks.Items[0].Harnesses = map[string]formTaskHarness{"codex": {}}
+	if got, err = form.apply(base, connectortest.Catalog(t)); err != nil {
+		t.Fatal(err)
+	}
+	if entry, _ = got.Spec.Roles[0].TaskSelection("health-sweep"); entry.Harnesses != nil {
+		t.Fatalf("overrides = %+v, want nil", entry.Harnesses)
+	}
+	if !strings.Contains(marshalTeam(t, got), "        - health-sweep\n") {
+		t.Fatalf("an entry left with no override is not the bare name:\n%s", marshalTeam(t, got))
+	}
+	// apply did not change its base.
+	if before, _ := base.Spec.Roles[0].TaskSelection("health-sweep"); len(before.Harnesses) != 2 ||
+		*before.Harnesses["codex"].Suspend != true {
+		t.Fatalf("base changed: %+v", before.Harnesses)
+	}
 }

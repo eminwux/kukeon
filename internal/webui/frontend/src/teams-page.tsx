@@ -176,8 +176,8 @@ function TeamOverview({ name, data, onChanged }: { name: string; data: TeamView;
       </section>
       <section className="panel" aria-label="Tasks">
         <div className="panel-heading"><h2>Tasks</h2><span className="badge">{view.tasks.length}</span></div>
-        <div className="panel-body">{view.tasks.length ? <div className="team-tasks">{view.tasks.map(task => <section key={task.config} className="team-task" aria-label={`Task ${task.role} ${task.task}`}>
-          <h3>{task.role} / {task.task} <a className="resource-name mono-id" href={configLink(task.scope, task.config)}>{task.config}</a></h3>
+        <div className="panel-body">{view.tasks.length ? <div className="team-tasks">{view.tasks.map(task => <section key={task.config} className="team-task" aria-label={`Task ${task.role} ${task.task}${task.harness ? ` on ${task.harness}` : ""}`}>
+          <h3>{task.role} / {task.task}{task.harness ? ` on ${task.harness}` : ""} <a className="resource-name mono-id" href={configLink(task.scope, task.config)}>{task.config}</a></h3>
           {task.schedule ? <ScheduleDetails schedule={task.schedule} status={task.status} cellLink={() => undefined} /> : <p className="description">No schedule: the task runs when started by hand.{task.status?.lastScheduleTime ? <> Last run {when(task.status.lastScheduleTime)}.</> : null}</p>}
         </section>)}</div> : <p className="description">The team renders no task Config.</p>}</div>
       </section>

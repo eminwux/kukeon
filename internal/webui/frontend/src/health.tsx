@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { systemTeam, teamsLink } from "./teams.mjs";
 import { useResource, ErrorNotice } from "./request";
-import { AskMajordomo, configScope, oneLine, sweepTask, type ConfigDoc, type Majordomo } from "./majordomo";
+import { AskMajordomo, configScope, harnessLabel, majordomoRole, oneLine, sweepTask, type ConfigDoc, type Majordomo } from "./majordomo";
 import { ScheduleDetails, cellLinker, when } from "./schedule";
 import type { InventoryResource } from "./inventory";
 import { DaemonNav } from "./daemon";
@@ -52,16 +52,21 @@ function reportQuestion(report: Report): string {
   return oneLine(`About health report ${report.id} (created ${report.createdAt}, window ${report.since} to ${report.until}, ${report.findings.length} findings, ${kukeon} classified kukeon): read it with "kuke health report ${report.id}" and walk me through what needs attention first.`);
 }
 
-// Suspended sweeps are turned on in the kuke team's stored declaration (#1568, #1618): the Teams page
-// edits and reapplies it. Schedules are never edited from this page.
+// Suspended sweeps are turned on in the kuke team's stored declaration (#1568, #1618): kuke team task enable
+// (#1668) edits and reapplies it, one harness at a time, as does the Teams page's Edit team screen. Schedules are
+// never edited from this page. The notice shows only while every sweep is suspended: a sweep spends model credits on
+// each harness it is on, so switching one on is the usual setup.
 function EnableSweep({ configs }: { configs: ConfigDoc[] }) {
-  const edit = `# under spec.roles[] for the majordomo role\ntasks:\n  - { name: ${sweepTask}, suspend: false }`;
   const names = configs.map(config => config.metadata.name);
+  const all = `kuke team task enable ${systemTeam} ${sweepTask} --role ${majordomoRole}`;
+  const harnesses = configs.map(config => config.metadata.labels?.[harnessLabel] ?? "");
+  // A Config rendered before the harness label existed falls back to the all-harness command.
+  const commands = harnesses.includes("") ? [all] : [...new Set(harnesses)].map(harness => `${all} --harness ${harness}`);
   return <div className="health-enable" role="note">
     <strong>Sweeps are suspended.</strong>
-    <p>{names.length === 1 ? `${names[0]} ships` : `These ${names.length} sweep configs ship`} switched off so no install spends model credits unasked. To turn sweeps on, switch the schedule on in the <a href={teamsLink(systemTeam, "edit")}>kuke team</a>'s Edit team screen (Tasks and schedules), or set this task entry in its declaration, then preview and apply:</p>
+    <p>{names.length === 1 ? `${names[0]} ships` : `These ${names.length} sweep configs ship`} switched off so no install spends model credits unasked. To turn the sweep on for one harness, run {commands.length === 1 ? "this" : "one of these"} on the host, or switch the schedule on for that harness in the <a href={teamsLink(systemTeam, "edit")}>kuke team</a>'s Edit team screen (Tasks and schedules):</p>
     {names.length > 1 && <ul className="health-suspended" aria-label="Suspended sweeps">{names.map((name, index) => <li key={index} className="mono-id">{name}</li>)}</ul>}
-    <pre tabIndex={0}>{edit}</pre>
+    <pre tabIndex={0}>{commands.join("\n")}</pre>
     <p className="description">The schedule cannot be changed from this page.</p>
   </div>;
 }
@@ -159,7 +164,7 @@ export function HealthPage({ revision, major, inventory, onChanged, onSeen }: { 
         {major.configs.loading && !major.configs.data && <p role="status">Loading sweep configs…</p>}
         {major.configs.error && <ErrorNotice error={major.configs.error} kind="Configs" />}
         {major.configs.data && !major.sweeps.length && <p className="description" role="status">No health-sweep config found. Run <code>kuke team init</code> on the host to apply majordomo and its sweep task.</p>}
-        {suspended.length > 0 && <EnableSweep configs={suspended} />}
+        {suspended.length > 0 && suspended.length === major.sweeps.length && <EnableSweep configs={suspended} />}
         <ul className="health-sweeps">{major.sweeps.map(config => <SweepSchedule key={JSON.stringify([...configScope(config), config.metadata.name])} config={config} connector={filing} onRun={runSweep} running={running === config.metadata.name} inventory={inventory} />)}</ul>
         {sweepResult && <div className={sweepResult.tone === "error" ? "error" : "health-sweep-started"} role={sweepResult.tone === "error" ? "alert" : "status"}>{sweepResult.tone === "error" && <strong>Sweep did not start</strong>}<p>{sweepResult.message}</p></div>}
       </div>

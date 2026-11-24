@@ -7,6 +7,9 @@ kuke team export    NAME [--host-fields] [--explicit-defaults]
 kuke team connector enable  TEAM CONNECTOR --role ROLE... [--identity ID] [--dry-run]
 kuke team connector disable TEAM CONNECTOR --role ROLE... [--dry-run]
 kuke team connector list    TEAM
+kuke team task enable  TEAM TASK --role ROLE [--harness HARNESS]... [--schedule CRON] [--dry-run]
+kuke team task disable TEAM TASK --role ROLE [--harness HARNESS]... [--dry-run]
+kuke team task list    TEAM
 kuke team defaults  set [--role R]... [--harness H]...
 ```
 
@@ -24,6 +27,7 @@ starts cells.
 | [`kuke team apply`](#kuke-team-apply)         | Recompose a stored team, or compose and store a Team document.                         |
 | [`kuke team export`](#kuke-team-export)       | Print a stored team as a repository's `kuketeam.yaml`.                                 |
 | [`kuke team connector`](#kuke-team-connector) | Give roles of a stored team a connector, take it away, list what each Config resolves. |
+| [`kuke team task`](#kuke-team-task)           | Switch a task's schedule on or off, for every harness or one; list the task Configs.   |
 | [`kuke team defaults`](#kuke-team-defaults)   | Replace the default role or harness list.                                              |
 
 A team is created with [`kuke create team`](kuke-create.md#kuke-create-team)
@@ -218,6 +222,74 @@ majordomo  kuke-majordomo-claude-health-sweep  github     token   gh-token (real
 No `kuke team connector` command creates, reads or prints a secret. A running
 cell keeps the connectors it started with; `kuke restart` it to render the
 change.
+
+## kuke team task
+
+```
+kuke team task enable  TEAM TASK --role ROLE [--harness HARNESS]... [--schedule CRON] [--dry-run]
+kuke team task disable TEAM TASK --role ROLE [--harness HARNESS]... [--dry-run]
+kuke team task list    TEAM
+```
+
+A team renders one task Config per role × harness, and the role's entry in the
+stored team sets each task's schedule (see
+[Scheduling a task](../concepts/team.md#scheduling-a-task)). `enable` and
+`disable` switch that schedule on (`suspend: false`) or off (`suspend: true`)
+in the task entry and apply the team, exactly as `kuke team apply -f` of the
+edited declaration would. They do not select or deselect the task: a task
+switched off keeps its Config and still runs with `kuke run`. The Edit team
+form's **Tasks and schedules** step makes the same change.
+
+| Flag         | Description                                                                                                       |
+| ------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `--role`     | The role whose task to switch. Required; several roles can declare a task of the same name.                       |
+| `--harness`  | Switch the task on this harness of the team only. Repeatable; without it the switch covers every harness.         |
+| `--schedule` | `enable` only: also set the task's schedule (five-field cron or `@hourly`, `@daily`, `@weekly`, `@monthly`, UTC). |
+| `--dry-run`  | Print what would be applied (the plan of `kuke team apply --dry-run`) and write nothing.                          |
+
+With `--harness` the command sets `suspend` (and `schedule`, when given) in the
+task entry's `harnesses.<harness>` and leaves the entry's own values alone.
+Without it, it sets the entry's `suspend` (and `schedule`) and removes
+`suspend` from every override of that entry, so the switch covers every
+harness; an override left with no value is removed. A role entry that omits
+`tasks` selects every task the role declares; the command first lists each of
+them by name, so they all stay selected.
+
+```
+$ kuke team task enable kuke health-sweep --role majordomo --harness claude
+Schedule of task health-sweep switched on for role majordomo on harness claude of team kuke.
+Applied 5 resources; stored team kuke.
+No cells created or started.
+```
+
+Refused before anything is written:
+
+- a team that is not stored (`kuke create team` creates one);
+- a role the team does not select (the error lists its roles);
+- a task the role entry does not list, or the role does not render (the error
+  lists its tasks);
+- a harness that is not one of the team's, or on which the role does not
+  render the task (the error lists the harnesses it does);
+- a switch that leaves a harness with `suspend` set and no schedule: give one
+  with `--schedule`;
+- a team whose `spec.roles` is inherited from the defaults: it has no role
+  entry to change. Declare its roles first with
+  `kuke team export TEAM --host-fields --explicit-defaults > TEAM.yaml`, then
+  `kuke team apply -f TEAM.yaml`.
+
+`list` prints one row per task Config of the team, read from the stored
+Configs with no fetch. `HARNESS` is the Config's `kukeon.io/harness` label (`-`
+on a Config rendered before the label existed, until the team's next apply).
+`STATE` is `on`, `suspended`, or `manual` for a task with no schedule. `NEXT`
+is the next fire time kukeond's scheduler reports, `-` while suspended.
+
+```
+$ kuke team task list kuke
+ROLE       TASK          HARNESS  CONFIG                              SCHEDULE  STATE      NEXT
+---------  ------------  -------  ----------------------------------  --------  ---------  --------------------
+majordomo  health-sweep  claude   kuke-majordomo-claude-health-sweep  @hourly   on         2026-11-25T10:00:00Z
+majordomo  health-sweep  codex    kuke-majordomo-codex-health-sweep   @hourly   suspended  -
+```
 
 ## kuke team defaults
 

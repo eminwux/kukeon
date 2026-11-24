@@ -7,7 +7,7 @@ import type { Connector } from "./connectors.mjs";
 import { GitIdentitySelect, OutcomeNotice, PlanView, RefFields } from "./team-plan";
 import {
   availableSources, createBody, draftPayload, editBody, emptyProject, emptySource, imageList, inspectRequest, projectAlias, projectErrors, selectedIndex, stateLabel, stepErrors,
-  roleConnectorRows, stepsFor, taskRows, withAllTasks, withConnector, withConnectorsInherit, withHarness, withInherit, withProject, withRole, withRoleConnector, withRolePatch, withSource, withTask,
+  roleConnectorRows, roleHarnesses, stepsFor, taskRows, withAllTasks, withConnector, withConnectorsInherit, withHarness, withInherit, withProject, withRole, withRoleConnector, withRolePatch, withSource, withTask,
 } from "./team-form.mjs";
 import type { Available, ProjectInput } from "./team-form.mjs";
 import { editPayload, needsForce, originLabel, refLabel, sourcesLink, teamsAPI, teamsLink } from "./teams.mjs";
@@ -145,15 +145,18 @@ function RolesStep({ form, available, inspected, inheritedRoles, inheritedHarnes
   </div>;
 }
 
-function TasksStep({ form, available, inspected, configured, disabled, onInspect, onForm }: {
-  form: TeamForm; available: Available[]; inspected: Inspected; configured: ViewTask[]; disabled: boolean;
+function TasksStep({ form, available, inspected, configured, inheritedHarnesses, disabled, onInspect, onForm }: {
+  form: TeamForm; available: Available[]; inspected: Inspected; configured: ViewTask[]; inheritedHarnesses: Selection[]; disabled: boolean;
   onInspect: (source: Available) => void; onForm: (form: TeamForm) => void;
 }) {
   if (form.roles.inherit) return <div className="wizard-step"><p className="description">The team uses the default roles, with every task each declares. To choose tasks and schedules, select the roles in Roles and harnesses.</p></div>;
   return <div className="wizard-step">{form.roles.items.map((role, index) => {
-    const offered = inspected[role.source]?.contents?.roles.find(item => item.path === role.path)?.tasks;
+    const offeredRole = inspected[role.source]?.contents?.roles.find(item => item.path === role.path);
+    const offered = offeredRole?.tasks;
     const mine = configured.filter(task => task.role === role.name);
-    const rows = taskRows(role, offered, mine);
+    // One switch per harness only when the role's tasks render on two or more (#1668).
+    const harnesses = roleHarnesses(form, role, offeredRole, inheritedHarnesses, mine);
+    const rows = taskRows(role, offered, mine, harnesses.length > 1 ? harnesses : []);
     const known = rows.map(row => row.name);
     const source = available.find(item => item.alias === role.source);
     return <fieldset key={`${role.source}:${role.path}`} className="schema-object" aria-label={`Tasks of ${role.name}`}><legend>{role.name}</legend>
@@ -165,7 +168,11 @@ function TasksStep({ form, available, inspected, configured, disabled, onInspect
           <td><input type="checkbox" aria-label={`Select ${role.name} task ${row.name}`} checked={row.selected} disabled={disabled} onChange={event => onForm(withTask(form, index, row.name, { selected: event.target.checked }, known))} /></td>
           <td><select aria-label={`Schedule of ${role.name} task ${row.name}`} value={row.switch} disabled={disabled || !row.selected} onChange={event => onForm(withTask(form, index, row.name, { switch: event.target.value }, known))}>
             <option value="role">The role's ({row.roleSchedule ? row.roleSuspend ? "off" : "on" : "none"})</option><option value="on">On</option><option value="off">Off</option>
-          </select></td>
+          </select>
+          {row.harnesses.length > 0 && <ul className="state-list" aria-label={`Schedule of ${role.name} task ${row.name} per harness`}>{row.harnesses.map(h => <li key={h.name}><label>{h.name}{" "}
+            <select aria-label={`Schedule of ${role.name} task ${row.name} on ${h.name}`} value={h.switch} disabled={disabled || !row.selected} onChange={event => onForm(withTask(form, index, row.name, { harness: h.name, switch: event.target.value }, known))}>
+              <option value="same">Same as the task</option><option value="on">On</option><option value="off">Off</option>
+            </select></label>{h.schedule && <span className="description"> {h.schedule}</span>}</li>)}</ul>}</td>
           <td><input aria-label={`Cron of ${role.name} task ${row.name}`} value={row.schedule} disabled={disabled || !row.selected} placeholder={row.roleSchedule || "@daily"} spellCheck={false} onChange={event => onForm(withTask(form, index, row.name, { schedule: event.target.value }, known))} /></td>
           <td><input aria-label={`Arguments of ${role.name} task ${row.name}`} value={row.args} disabled={disabled || !row.selected} placeholder={row.roleArgs} spellCheck={false} onChange={event => onForm(withTask(form, index, row.name, { args: event.target.value }, known))} /></td>
         </tr>)}
@@ -341,7 +348,7 @@ export function TeamWizard({ mode, team, onChanged }: { mode: Mode; team?: TeamV
         {key === "project" && <ProjectStep project={project} sources={sources.data} draft={draft} pending={pending === "draft"} error={pending ? undefined : error} onChange={next => { setProject(old => ({ ...old, ...next })); setDraft(undefined); setForm(undefined); setError(undefined); }} onRead={() => void readRepository()} />}
         {form && key === "sources" && <SourcesStep mode={mode} form={form} draft={draft} sources={sources.data} disabled={disabled} onForm={changeForm} />}
         {form && key === "roles" && <RolesStep form={form} available={available} inspected={inspected} inheritedRoles={inheritedRoles} inheritedHarnesses={inheritedHarnesses} disabled={disabled} onInspect={source => void inspect(source)} onForm={changeForm} />}
-        {form && key === "tasks" && <TasksStep form={form} available={available} inspected={inspected} configured={configured} disabled={disabled} onInspect={source => void inspect(source)} onForm={changeForm} />}
+        {form && key === "tasks" && <TasksStep form={form} available={available} inspected={inspected} configured={configured} inheritedHarnesses={inheritedHarnesses} disabled={disabled} onInspect={source => void inspect(source)} onForm={changeForm} />}
         {form && key === "credentials" && <CredentialsStep form={form} missing={preview?.plan.missingSecrets ?? []} inheritedRoles={inheritedRoles} viewRows={team?.view?.connectors.roles ?? []} disabled={disabled} onForm={changeForm} />}
         {form && key === "review" && <div className="wizard-step">
           <p className="description">{mode === "new" ? <>Adds team <code>{form.name || draft?.name}</code> from <code>{form.project?.url || form.project?.stored}</code> ({refLabel({ [form.project?.refKind ?? "branch"]: form.project?.ref })}).</> : <>Applies the form to team <code>{name}</code>.</>} The apply composes from scratch again: a branch may have moved since the preview, and the apply result is authoritative.</p>

@@ -189,7 +189,29 @@ func validateTeamBody(team *Team) error {
 	if err := validateConnectors("spec.connectors", team.Spec.Connectors); err != nil {
 		return err
 	}
+	if err := validateTaskOverrides(team.Spec.Roles); err != nil {
+		return err
+	}
 	return ValidateSecrets("spec.secrets", team.Spec.Secrets)
+}
+
+// validateTaskOverrides checks the shape of every task entry's per-harness
+// overrides as the document is decoded (issue #1668), so a Team with an empty
+// override is refused before it is stored. The rest of a role entry is
+// checked when the team composes.
+func validateTaskOverrides(roles []Role) error {
+	for i, role := range roles {
+		if role.Tasks == nil {
+			continue
+		}
+		for j, task := range *role.Tasks {
+			field := fmt.Sprintf("spec.roles[%d].tasks[%d].harnesses", i, j)
+			if err := checkTaskHarnesses(field, task.Harnesses); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // referencesOnly rejects a source entry, or the projectSource, that carries
@@ -269,11 +291,28 @@ func cloneSelections(d Defaults) Defaults {
 					suspend := *tasks[j].Suspend
 					tasks[j].Suspend = &suspend
 				}
+				tasks[j].Harnesses = cloneTaskHarnesses(tasks[j].Harnesses)
 			}
 			d.Roles[i].Tasks = &tasks
 		}
 	}
 	return d
+}
+
+// cloneTaskHarnesses deep-copies a task entry's per-harness overrides.
+func cloneTaskHarnesses(in map[string]TaskHarness) map[string]TaskHarness {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]TaskHarness, len(in))
+	for name, override := range in {
+		if override.Suspend != nil {
+			suspend := *override.Suspend
+			override.Suspend = &suspend
+		}
+		out[name] = override
+	}
+	return out
 }
 
 func cloneSource(source *Source) *Source {
