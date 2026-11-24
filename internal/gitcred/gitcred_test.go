@@ -614,3 +614,82 @@ func TestStage_ReplacesContentsAndKeepsDirectory(t *testing.T) {
 		t.Error("bundle must always carry the plan and the built-in host keys")
 	}
 }
+
+// TestBuildAtHostRoot is #1643 Step 3.1: a bundle built for a host
+// directory points every path at that directory and reads nothing of the
+// caller's: no /etc/gitconfig include, no ~/.ssh/known_hosts.
+func TestBuildAtHostRoot(t *testing.T) {
+	private, _ := genKey(t, "ed25519", "")
+	read := secrets{
+		"key": sshKeySecret(private), "basic": basicSecret("bot", "s3cret"),
+	}.read
+	spec := intmodel.ContainerSpec{
+		Git: &intmodel.ContainerGit{Credentials: []intmodel.GitCredential{
+			{Host: "github.com", SecretRef: ref("key"), HostKeyPolicy: intmodel.GitHostKeyPolicyAcceptNew},
+			{Host: "git.example.org", SecretRef: ref("basic")},
+		}},
+		Repos: []intmodel.ContainerRepo{
+			{Name: "agents", URL: "https://github.com/eminwux/agents"},
+			{Name: "other", URL: "git@git.example.org:team/app"},
+			{Name: "own", URL: "git@gitlab.com:team/own", Git: &intmodel.RepoGit{
+				Credential: &intmodel.GitCredential{SecretRef: ref("key")},
+			}},
+		},
+	}
+	cell, err := gitcred.Build(spec, read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := "/run/kukeon/gitfetch/0123456789abcdef"
+	host, err := gitcred.BuildAt(spec, read, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(fileOf(t, cell, gitplan.ConfigFile), "/etc/gitconfig") {
+		t.Fatal("the cell bundle lost its /etc/gitconfig include")
+	}
+	for _, f := range host.Files {
+		data := string(f.Data)
+		for _, leak := range []string{gitplan.MountPath, "/etc/gitconfig", "~/.ssh"} {
+			if strings.Contains(data, leak) {
+				t.Errorf("host bundle file %s mentions %s:\n%s", f.Path, leak, data)
+			}
+		}
+	}
+	if got := fileOf(t, host, gitplan.SSHConfigFile); !strings.Contains(got, root+"/known_hosts.d/") {
+		t.Errorf("host ssh_config does not use the staged known_hosts:\n%s", got)
+	}
+	if !strings.Contains(fileOf(t, host, gitplan.ConfigFile), "ssh -F "+root+"/"+gitplan.SSHConfigFile) {
+		t.Error("host gitconfig does not point ssh at the staged config")
+	}
+	if host.Plan.Repos["agents"].URL != "git@github.com:eminwux/agents" ||
+		host.Plan.Repos["other"].URL != "https://git.example.org/team/app" {
+		t.Errorf("host plan repos = %+v; the transport must follow the credential", host.Plan.Repos)
+	}
+	if gitplan.ConfigPathAt(root) != root+"/gitconfig" || gitplan.PlanPathAt(root) != root+"/plan.json" {
+		t.Error("gitplan path helpers ignore the root")
+	}
+}
+
+func TestHasCredential(t *testing.T) {
+	git := &intmodel.ContainerGit{Credentials: []intmodel.GitCredential{
+		{Host: "github.com", SecretRef: ref("key")},
+		{Host: "git.example.org/team", SecretRef: ref("basic")},
+		{Host: "gitlab.com"}, // no secret: not a credential
+	}}
+	for url, want := range map[string]bool{
+		"https://github.com/eminwux/agents": true,
+		"git@git.example.org:team/app":      true,
+		"https://git.example.org/other/app": false,
+		"git@gitlab.com:team/app":           false,
+		"https://bitbucket.org/team/app":    false,
+		"/srv/git/app":                      false,
+	} {
+		if got := gitcred.HasCredential(git, url); got != want {
+			t.Errorf("HasCredential(%s) = %v, want %v", url, got, want)
+		}
+	}
+	if gitcred.HasCredential(nil, "https://github.com/a/b") {
+		t.Error("nil git has a credential")
+	}
+}

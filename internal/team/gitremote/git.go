@@ -110,10 +110,18 @@ func scpURL(raw string) (string, error) {
 func Run(ctx context.Context, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	env := transportEnv(ctx)
-	ssh, err := sshCommand(ctx, env)
-	if err != nil {
-		return nil, err
+	var env []string
+	var ssh string
+	if staged, ok := stagedFrom(ctx); ok {
+		// A stored identity (#1643): its gitconfig, ssh command and agent
+		// replace the caller's, so the caller's keys are never used.
+		env, ssh = stagedEnv(staged)
+	} else {
+		env = transportEnv(ctx)
+		var err error
+		if ssh, err = sshCommand(ctx, env); err != nil {
+			return nil, err
+		}
 	}
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.WaitDelay = time.Second
@@ -171,12 +179,13 @@ func sshCommand(ctx context.Context, env []string) (string, error) {
 }
 
 // DefaultBranch discovers the symbolic remote HEAD rather than assuming main.
+// Under a staged identity it asks the URL whose transport follows the stored
+// credential.
 func DefaultBranch(ctx context.Context, source string) (string, error) {
-	remote, err := URL(source)
-	if err != nil {
+	if _, err := URL(source); err != nil {
 		return "", err
 	}
-	output, err := Run(ctx, "ls-remote", "--symref", "--", remote, "HEAD")
+	output, err := Run(ctx, "ls-remote", "--symref", "--", Remote(ctx, source), "HEAD")
 	if err != nil {
 		return "", err
 	}

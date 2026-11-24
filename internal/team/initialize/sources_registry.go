@@ -119,7 +119,7 @@ func AddSource(ctx context.Context, opts SourceOptions) (DefaultsChange, error) 
 		ClonePath: opts.ClonePath,
 	}
 	if source.Branch == "" && source.Tag == "" && source.Commit == "" {
-		branch, err := gitremote.DefaultBranch(ctx, opts.URL)
+		branch, err := defaultBranch(ctx, identityOf(opts.Client, config.DefaultRealm), source)
 		if err != nil {
 			return DefaultsChange{}, err
 		}
@@ -328,7 +328,8 @@ func inspect(
 	if injected := opts.Sources[source.Name]; injected != nil {
 		tree = injected
 	} else {
-		got, err := fetchSources(ctx, config.Defaults{Sources: []config.Source{source}},
+		got, err := fetchSources(ctx, identityOf(opts.Client, config.DefaultRealm),
+			config.Defaults{Sources: []config.Source{source}},
 			map[string]bool{source.Name: true}, nil)
 		if err != nil {
 			return nil, err

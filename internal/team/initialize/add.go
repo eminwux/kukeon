@@ -128,7 +128,7 @@ func addRemote(
 		ClonePath: "/home/user/" + name,
 	}
 	if project.Branch == "" && project.Tag == "" && project.Commit == "" {
-		branch, err := gitremote.DefaultBranch(ctx, opts.Source)
+		branch, err := defaultBranch(ctx, identityOf(opts.Client, config.DefaultRealm), *project)
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -137,7 +137,7 @@ func addRemote(
 			return Outcome{}, err
 		}
 	}
-	have, cleanup, err := withProject(ctx, opts.Sources, *project)
+	have, cleanup, err := withProject(ctx, opts.Client, opts.Sources, *project)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -205,7 +205,7 @@ func addDirectory(
 	if err != nil {
 		return Outcome{}, err
 	}
-	have, cleanup, err := withProject(ctx, opts.Sources, *source)
+	have, cleanup, err := withProject(ctx, opts.Client, opts.Sources, *source)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -217,12 +217,15 @@ func addDirectory(
 // its name: injected definition trees replace fetching only for the sources
 // they name, so an add checks the revision it pins, and NAME mode reads the
 // repository's kuketeam.yaml from it, even when the definitions are supplied.
-func withProject(ctx context.Context, injected map[string]fs.FS, project config.Source) (*fetched, func(), error) {
+func withProject(
+	ctx context.Context, client Client, injected map[string]fs.FS, project config.Source,
+) (*fetched, func(), error) {
 	have := injectedSources(injected)
 	if have != nil && have.trees[config.ProjectSourceName] != nil {
 		return have, func() {}, nil
 	}
-	got, err := fetchSources(ctx, config.Defaults{Sources: []config.Source{project}},
+	got, err := fetchSources(ctx, identityOf(client, config.DefaultRealm),
+		config.Defaults{Sources: []config.Source{project}},
 		map[string]bool{config.ProjectSourceName: true}, nil)
 	if err != nil {
 		return nil, nil, err

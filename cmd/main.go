@@ -27,6 +27,7 @@ import (
 	healthcmd "github.com/eminwux/kukeon/cmd/kuke/health"
 	"github.com/eminwux/kukeon/cmd/kukeond"
 	"github.com/eminwux/kukeon/cmd/types"
+	"github.com/eminwux/kukeon/internal/gitcred/gitagent"
 	"github.com/eminwux/kukeon/internal/logging"
 	"github.com/spf13/cobra"
 )
@@ -74,6 +75,16 @@ func runWithFactory(ctx context.Context, factory rootFactory) int {
 }
 
 func main() {
+	// SSH_ASKPASS mode: ssh-add runs this binary to read the passphrase of a
+	// stored git key kukeond staged for a fetch (issue #1643). Print the
+	// staged passphrase file and exit before anything else.
+	if file := os.Getenv(gitagent.HostAskpassFileEnv); file != "" {
+		prompt := ""
+		if len(os.Args) > 1 {
+			prompt = os.Args[1]
+		}
+		os.Exit(gitagent.Askpass(file, prompt, os.Stdout))
+	}
 	logger := logging.NewNoopLogger()
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 

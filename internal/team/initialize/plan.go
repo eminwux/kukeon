@@ -167,6 +167,7 @@ func plan(ctx context.Context, client Client, req request) (*Plan, error) {
 		var fetchedSources *fetched
 		fetchedSources, err = fetchSources(
 			ctx,
+			identityOf(client, team.Metadata.Realm),
 			effective,
 			neededSources(effective, team.Spec.ProjectSource != nil),
 			trees,

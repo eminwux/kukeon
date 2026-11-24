@@ -39,7 +39,8 @@ import (
 // Client deliberately has no cell lifecycle methods. A team command can only
 // read scope, the stored teams and defaults, create explicitly sourced
 // secrets, and apply documents (blueprints, configs, the Team itself, the
-// team realm's secret defaults and the TeamDefaults).
+// team realm's secret defaults and the TeamDefaults), and stage the git
+// identity a source fetch on the host uses (#1643).
 type Client interface {
 	Close() error
 	Ping(context.Context) error
@@ -57,6 +58,8 @@ type Client interface {
 	GetTeamDefaults(context.Context, string) (kukeonv1.GetTeamDefaultsResult, error)
 	ApplyDocuments(context.Context, []byte) (kukeonv1.ApplyDocumentsResult, error)
 	ApplyDocumentsForTeam(context.Context, []byte, string) (kukeonv1.ApplyDocumentsResult, error)
+	StageGitFetch(context.Context, kukeonv1.GitFetchRequest) (kukeonv1.StageGitFetchResult, error)
+	ReleaseGitFetch(context.Context, string) error
 }
 
 // Apply actions, as kukeond reports them and as a TeamDefaults change is

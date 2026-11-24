@@ -18,8 +18,11 @@ package daemon_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -98,5 +101,77 @@ func TestSourceRPCRoundTrip(t *testing.T) {
 		if !errors.Is(getErr, sentinel) || !errors.Is(deleteErr, sentinel) {
 			t.Errorf("%v: get %v, delete %v", sentinel, getErr, deleteErr)
 		}
+	}
+}
+
+// gitFetchCore records the caller uid the daemon hands StageGitFetch and
+// ReleaseGitFetch.
+type gitFetchCore struct {
+	kukeonv1.FakeClient
+
+	stageUID, releaseUID int
+	stageOK, releaseOK   bool
+	req                  kukeonv1.GitFetchRequest
+	id                   string
+}
+
+func (c *gitFetchCore) StageGitFetch(
+	ctx context.Context, req kukeonv1.GitFetchRequest,
+) (kukeonv1.StageGitFetchResult, error) {
+	c.stageUID, c.stageOK = kukeonv1.PeerUIDFrom(ctx)
+	c.req = req
+	return kukeonv1.StageGitFetchResult{Staged: true, ID: "0123456789abcdef", Dir: "/run/kukeon/gitfetch/x"}, nil
+}
+
+func (c *gitFetchCore) ReleaseGitFetch(ctx context.Context, id string) error {
+	c.releaseUID, c.releaseOK = kukeonv1.PeerUIDFrom(ctx)
+	c.id = id
+	return nil
+}
+
+// TestGitFetchRPCPeerUID is #1643 D10: the uid a staging is owned to is the
+// socket peer's, read by the server codec, not anything the request carries.
+func TestGitFetchRPCPeerUID(t *testing.T) {
+	core := &gitFetchCore{}
+	client := kukeonv1.NewUnixClient(startKukeond(t, shortTempDir(t), core))
+	t.Cleanup(func() { _ = client.Close() })
+	ctx := testCtx(t)
+
+	req := kukeonv1.GitFetchRequest{Realm: "default", Address: "github.com/acme/app"}
+	got, err := client.StageGitFetch(ctx, req)
+	if err != nil || !got.Staged || got.ID != "0123456789abcdef" {
+		t.Fatalf("StageGitFetch = %+v, %v", got, err)
+	}
+	if !core.stageOK || core.stageUID != os.Getuid() || core.req != req {
+		t.Errorf("core saw uid %d (known %v), request %+v; want uid %d",
+			core.stageUID, core.stageOK, core.req, os.Getuid())
+	}
+	if err = client.ReleaseGitFetch(ctx, "0123456789abcdef"); err != nil {
+		t.Fatal(err)
+	}
+	if !core.releaseOK || core.releaseUID != os.Getuid() || core.id != "0123456789abcdef" {
+		t.Errorf("release saw uid %d (known %v), id %q", core.releaseUID, core.releaseOK, core.id)
+	}
+}
+
+// TestGitFetchArgsCarryNoUID: the uid field never travels on the wire, so a
+// client cannot name the owner of a staging.
+func TestGitFetchArgsCarryNoUID(t *testing.T) {
+	uid := 0
+	for _, args := range []any{
+		kukeonv1.StageGitFetchArgs{PeerUID: &uid}, kukeonv1.ReleaseGitFetchArgs{ID: "x", PeerUID: &uid},
+	} {
+		raw, err := json.Marshal(args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(strings.ToLower(string(raw)), "uid") {
+			t.Errorf("%T encodes its uid: %s", args, raw)
+		}
+	}
+	var decoded kukeonv1.StageGitFetchArgs
+	//nolint:musttag // the field is tagged json:"-"; the test checks that a client cannot set it
+	if err := json.Unmarshal([]byte(`{"PeerUID":0,"peerUID":0}`), &decoded); err != nil || decoded.PeerUID != nil {
+		t.Errorf("a uid in the request was decoded: %v, %v", decoded.PeerUID, err)
 	}
 }

@@ -27,8 +27,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/eminwux/kukeon/internal/gitcred"
 	"github.com/eminwux/kukeon/internal/team/gitremote"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
+	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/config"
 )
 
@@ -79,10 +80,70 @@ func neededSources(d config.Defaults, project bool) map[string]bool {
 	return needed
 }
 
-// fetchSources fetches the needed sources of d at their declared revision. A
-// source already in have is reused, not fetched again.
+// identity prepares the context one source is fetched under (issue #1643,
+// D10): the git identity kukeond staged for it, or ctx as it is. release
+// undoes it.
+type identity func(ctx context.Context, source config.Source) (context.Context, func(), error)
+
+// noIdentity fetches with the caller's own git transport.
+func noIdentity(ctx context.Context, _ config.Source) (context.Context, func(), error) {
+	return ctx, func() {}, nil
+}
+
+// withIdentity asks kukeond to stage the git identity a fetch of source
+// needs: the one the source names, else the realm's git default for its
+// host. Staged, the returned context fetches with it alone; not staged (no
+// identity applies), it is ctx and the fetch uses the caller's transport.
+// release stops the private agent and releases the staging.
+func withIdentity(
+	ctx context.Context, client Client, realm string, source config.Source,
+) (context.Context, func(), error) {
+	req := kukeonv1.GitFetchRequest{Realm: realm, Address: source.URL}
+	if source.Git != nil && source.Git.IdentityRef != nil {
+		ref := source.Git.IdentityRef
+		req.IdentityRef = &api.ContainerSecretRef{
+			Name: ref.Name, Realm: ref.Realm, Space: ref.Space, Stack: ref.Stack, Cell: ref.Cell,
+		}
+	}
+	staged, err := client.StageGitFetch(ctx, req)
+	if err != nil {
+		return nil, nil, fmt.Errorf("source %q: stage its git identity: %w", source.Name, err)
+	}
+	if !staged.Staged {
+		return ctx, func() {}, nil
+	}
+	releaseStaging := func() {
+		_ = client.ReleaseGitFetch(context.WithoutCancel(ctx), staged.ID)
+	}
+	out, stop, err := gitremote.WithStagedIdentity(ctx, staged.Dir)
+	if err != nil {
+		releaseStaging()
+		return nil, nil, fmt.Errorf("source %q: %w", source.Name, err)
+	}
+	return out, func() {
+		stop()
+		releaseStaging()
+	}, nil
+}
+
+// identityOf is withIdentity bound to a client and realm.
+func identityOf(client Client, realm string) identity {
+	if client == nil {
+		return noIdentity
+	}
+	if realm == "" {
+		realm = config.DefaultRealm
+	}
+	return func(ctx context.Context, source config.Source) (context.Context, func(), error) {
+		return withIdentity(ctx, client, realm, source)
+	}
+}
+
+// fetchSources fetches the needed sources of d at their declared revision,
+// each under the identity stage prepares. A source already in have is
+// reused, not fetched again.
 func fetchSources(
-	ctx context.Context, d config.Defaults, needed map[string]bool, have *fetched,
+	ctx context.Context, stage identity, d config.Defaults, needed map[string]bool, have *fetched,
 ) (*fetched, error) {
 	root, err := os.MkdirTemp("", "kuke-team-sources-*")
 	if err != nil {
@@ -100,7 +161,7 @@ func fetchSources(
 			continue
 		}
 		dir := filepath.Join(root, strconv.Itoa(i))
-		commit, fetchErr := fetchSource(ctx, source, dir)
+		commit, fetchErr := fetchStaged(ctx, stage, source, dir)
 		if fetchErr != nil {
 			out.cleanup()
 			return nil, fetchErr
@@ -111,10 +172,38 @@ func fetchSources(
 	return out, nil
 }
 
+// defaultBranch discovers a source's default branch under the identity stage
+// prepares.
+func defaultBranch(ctx context.Context, stage identity, source config.Source) (string, error) {
+	if _, err := gitremote.URL(source.URL); err != nil {
+		return "", err
+	}
+	ctx, release, err := stage(ctx, source)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+	return gitremote.DefaultBranch(ctx, source.URL)
+}
+
+// fetchStaged fetches one source under the identity stage prepares.
+func fetchStaged(ctx context.Context, stage identity, source config.Source, dir string) (string, error) {
+	if stage == nil {
+		stage = noIdentity
+	}
+	ctx, release, err := stage(ctx, source)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+	return fetchSource(ctx, source, dir)
+}
+
 // fetchSource shallow-fetches one source into dir and returns the commit it
-// checked out.
+// checked out. The remote is the one a staged identity rewrote the address
+// to, else the address expanded.
 func fetchSource(ctx context.Context, source config.Source, dir string) (string, error) {
-	url := gitcred.CloneURL(source.URL)
+	url := gitremote.Remote(ctx, source.URL)
 	ref := source.Commit
 	if source.Branch != "" {
 		ref = "refs/heads/" + source.Branch

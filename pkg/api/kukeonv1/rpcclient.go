@@ -1130,6 +1130,28 @@ func (c *UnixClient) DeleteSource(ctx context.Context, ref SourceRef) (DeleteSou
 	return reply.Result, nil
 }
 
+func (c *UnixClient) StageGitFetch(ctx context.Context, req GitFetchRequest) (StageGitFetchResult, error) {
+	reply := &StageGitFetchReply{}
+	if err := c.call(ctx, MethodStageGitFetch, &StageGitFetchArgs{Request: req}, reply); err != nil {
+		return StageGitFetchResult{}, err
+	}
+	if reply.Err != nil {
+		return StageGitFetchResult{}, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
+func (c *UnixClient) ReleaseGitFetch(ctx context.Context, id string) error {
+	reply := &ReleaseGitFetchReply{}
+	if err := c.call(ctx, MethodReleaseGitFetch, &ReleaseGitFetchArgs{ID: id}, reply); err != nil {
+		return err
+	}
+	if reply.Err != nil {
+		return FromAPIError(reply.Err)
+	}
+	return nil
+}
+
 func (c *UnixClient) GetTeamDefaults(ctx context.Context, realm string) (GetTeamDefaultsResult, error) {
 	reply := &GetTeamDefaultsReply{}
 	if err := c.call(ctx, MethodGetTeamDefaults, &GetTeamDefaultsArgs{Realm: realm}, reply); err != nil {

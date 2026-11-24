@@ -76,7 +76,7 @@ func materialize(ctx context.Context, d config.Defaults) (map[string]fs.FS, func
 }
 
 func materializeSources(ctx context.Context, d config.Defaults, project bool) (map[string]fs.FS, func(), error) {
-	got, err := fetchSources(ctx, d, neededSources(d, project), nil)
+	got, err := fetchSources(ctx, noIdentity, d, neededSources(d, project), nil)
 	if err != nil {
 		return nil, nil, err
 	}

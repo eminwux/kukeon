@@ -112,6 +112,10 @@ type resolvedCredential struct {
 }
 
 type builder struct {
+	// root is where every path inside the rendered files points:
+	// gitplan.MountPath for a cell, the staging directory itself for a fetch
+	// kuke makes on the host (#1643, D10).
+	root   string
 	read   SecretReader
 	files  map[string]File
 	keys   map[string]*stagedKey
@@ -123,7 +127,17 @@ type builder struct {
 // through read and fails — naming the secret, never its material — when one is
 // missing, of the wrong type, or unusable.
 func Build(spec intmodel.ContainerSpec, read SecretReader) (*Bundle, error) {
+	return BuildAt(spec, read, gitplan.MountPath)
+}
+
+// BuildAt renders the bundle with every path inside its files under root, the
+// directory it will be read from. A bundle for root other than
+// gitplan.MountPath is one git on the host uses (#1643, D10): its gitconfig
+// does not include the host's /etc/gitconfig and its ssh config reads no
+// ~/.ssh/known_hosts, so the staged files are all the fetch trusts.
+func BuildAt(spec intmodel.ContainerSpec, read SecretReader, root string) (*Bundle, error) {
 	b := &builder{
+		root:   root,
 		read:   read,
 		files:  map[string]File{},
 		keys:   map[string]*stagedKey{},
@@ -134,7 +148,10 @@ func Build(spec intmodel.ContainerSpec, read SecretReader) (*Bundle, error) {
 		git = &intmodel.ContainerGit{}
 	}
 
-	entries := []configEntry{{Key: "include.path", Value: "/etc/gitconfig"}}
+	var entries []configEntry
+	if !b.onHost() {
+		entries = append(entries, configEntry{Key: "include.path", Value: "/etc/gitconfig"})
+	}
 	entries = append(entries, identityEntries(git.Author, git.Committer)...)
 
 	signing, err := b.defaultSigningEntries(git)
@@ -157,7 +174,7 @@ func Build(spec intmodel.ContainerSpec, read SecretReader) (*Bundle, error) {
 	if len(hostCreds) > 0 {
 		b.addFile(gitplan.SSHConfigFile, b.sshConfig(hostCreds))
 		entries = append(entries, configEntry{
-			Key: "core.sshCommand", Value: "ssh -F " + path.Join(gitplan.MountPath, gitplan.SSHConfigFile),
+			Key: "core.sshCommand", Value: "ssh -F " + path.Join(b.root, gitplan.SSHConfigFile),
 		})
 		b.plan.SSHCommand = true
 	}
@@ -190,6 +207,9 @@ func Build(spec intmodel.ContainerSpec, read SecretReader) (*Bundle, error) {
 	sort.Slice(out.Files, func(i, j int) bool { return out.Files[i].Path < out.Files[j].Path })
 	return out, nil
 }
+
+// onHost reports a bundle git reads outside a cell.
+func (b *builder) onHost() bool { return b.root != gitplan.MountPath }
 
 func (b *builder) addFile(name string, content string) {
 	b.files[name] = File{Path: name, Mode: secretMode, Data: []byte(content)}
@@ -325,7 +345,7 @@ func (b *builder) signingEntries(id string, signing *intmodel.GitSigning, email 
 		name := path.Join("allowed_signers.d", id)
 		b.addFile(name, allowed)
 		out = append(out, configEntry{
-			Key: "gpg.ssh.allowedSignersFile", Value: path.Join(gitplan.MountPath, name),
+			Key: "gpg.ssh.allowedSignersFile", Value: path.Join(b.root, name),
 		})
 	}
 	return out, nil
@@ -348,7 +368,7 @@ func (b *builder) addKey(ref intmodel.ContainerSecretRef) (*stagedKey, error) {
 	material := spec.SSHKey
 	rel := path.Join("keys", id)
 	key := &stagedKey{
-		dir:        path.Join(gitplan.MountPath, rel),
+		dir:        path.Join(b.root, rel),
 		encrypted:  privateKeyEncrypted(material.PrivateKey),
 		publicKey:  strings.TrimSpace(material.PublicKey),
 		knownHosts: material.KnownHosts,
@@ -396,7 +416,7 @@ func (b *builder) addBasic(ref intmodel.ContainerSecretRef) (string, error) {
 			errdefs.ErrSecretTypeMismatch, ref.Name, spec.EffectiveType(), intmodel.SecretTypeBasicAuth)
 	}
 	rel := path.Join("basic", id)
-	dir := path.Join(gitplan.MountPath, rel)
+	dir := path.Join(b.root, rel)
 	password := spec.BasicAuth.Password
 	if password == "" {
 		password = spec.BasicAuth.Token
@@ -502,7 +522,7 @@ func globalSSHCredentials(defaults []resolvedCredential) []resolvedCredential {
 	return out
 }
 
-func sshHostBlock(rc resolvedCredential, user string, port int) string {
+func (b *builder) sshHostBlock(rc resolvedCredential, user string, port int) string {
 	if user == "" {
 		user = defaultSSHUser
 	}
@@ -519,12 +539,18 @@ func sshHostBlock(rc resolvedCredential, user string, port int) string {
 	}
 	s.WriteString("    IdentitiesOnly yes\n")
 	s.WriteString("    BatchMode yes\n")
-	hostKeys := path.Join(gitplan.MountPath, "known_hosts.d", rc.id)
-	if rc.cred.HostKeyPolicy == intmodel.GitHostKeyPolicyAcceptNew {
+	hostKeys := path.Join(b.root, "known_hosts.d", rc.id)
+	switch {
+	case rc.cred.HostKeyPolicy == intmodel.GitHostKeyPolicyAcceptNew && b.onHost():
+		// On the host the caller's own known_hosts stays out of it; a newly
+		// accepted key is recorded in the staged file, removed on release.
+		s.WriteString("    StrictHostKeyChecking accept-new\n")
+		s.WriteString("    UserKnownHostsFile " + hostKeys + "\n")
+	case rc.cred.HostKeyPolicy == intmodel.GitHostKeyPolicyAcceptNew:
 		s.WriteString("    StrictHostKeyChecking accept-new\n")
 		// The first file is the one ssh records a newly accepted key in.
 		s.WriteString("    UserKnownHostsFile ~/.ssh/known_hosts " + hostKeys + "\n")
-	} else {
+	default:
 		s.WriteString("    StrictHostKeyChecking yes\n")
 		s.WriteString("    UserKnownHostsFile " + hostKeys + "\n")
 	}
@@ -536,19 +562,23 @@ func sshHostBlock(rc resolvedCredential, user string, port int) string {
 // generated file is deliberately self-contained — it does not include
 // ~/.ssh/config, whose ownership or syntax problems would otherwise break git
 // for every credentialed host as well.
-func sshConfigTail() string {
+func (b *builder) sshConfigTail() string {
+	if b.onHost() {
+		return "Host *\n" +
+			"    UserKnownHostsFile " + path.Join(b.root, gitplan.KnownHostsFile) + "\n"
+	}
 	return "Host *\n" +
 		"    UserKnownHostsFile ~/.ssh/known_hosts ~/.ssh/known_hosts2 " +
-		path.Join(gitplan.MountPath, gitplan.KnownHostsFile) + "\n"
+		path.Join(b.root, gitplan.KnownHostsFile) + "\n"
 }
 
 func (b *builder) sshConfig(creds []resolvedCredential) string {
 	var s strings.Builder
 	s.WriteString("# Generated by kukeon from git.credentials[]; do not edit.\n")
 	for _, rc := range creds {
-		s.WriteString(sshHostBlock(rc, rc.cred.User, rc.sshPort()))
+		s.WriteString(b.sshHostBlock(rc, rc.cred.User, rc.sshPort()))
 	}
-	s.WriteString(sshConfigTail())
+	s.WriteString(b.sshConfigTail())
 	return s.String()
 }
 
@@ -594,6 +624,27 @@ func matchCredential(defaults []resolvedCredential, remote Remote) (resolvedCred
 		}
 	}
 	return best, found
+}
+
+// HasCredential reports whether git — a container's default git block, with
+// its identity references expanded — holds a credential that covers the
+// remote at url: the one Build would authenticate a repo of that URL with
+// (#1643, AC9's realm default "when it has a credential for the address's
+// host").
+func HasCredential(git *intmodel.ContainerGit, url string) bool {
+	if git == nil {
+		return false
+	}
+	remote := ParseRemote(url)
+	for _, cred := range git.Credentials {
+		if cred.SecretRef == nil {
+			continue
+		}
+		if _, ok := parseCredentialTarget(cred.Host).matches(remote); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // planRepo resolves one source: the credential that authenticates it, the URL
@@ -646,9 +697,9 @@ func (b *builder) planRepo(
 				name := path.Join("repos", repoID, gitplan.SSHConfigFile)
 				b.addFile(name,
 					"# Generated by kukeon for repo "+strconv.Quote(repo.Name)+"; do not edit.\n"+
-						sshHostBlock(rc, user, port)+sshConfigTail())
+						b.sshHostBlock(rc, user, port)+b.sshConfigTail())
 				entry.Config = append(entry.Config, configEntry{
-					Key: "core.sshCommand", Value: "ssh -F " + path.Join(gitplan.MountPath, name),
+					Key: "core.sshCommand", Value: "ssh -F " + path.Join(b.root, name),
 				})
 			}
 		case rc.basic != "":

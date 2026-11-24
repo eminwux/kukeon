@@ -252,6 +252,12 @@ type Client interface {
 	// ErrSourceInUse while a default role or harness, or a stored team,
 	// references it.
 	DeleteSource(ctx context.Context, ref SourceRef) (DeleteSourceResult, error)
+	// StageGitFetch stages the stored git credential a fetch on the host
+	// uses (issue #1643, D10) in a directory only the calling user can read,
+	// and says where; it never returns the credential's bytes.
+	// ReleaseGitFetch removes the staging.
+	StageGitFetch(ctx context.Context, req GitFetchRequest) (StageGitFetchResult, error)
+	ReleaseGitFetch(ctx context.Context, id string) error
 
 	PurgeRealm(ctx context.Context, doc v1beta1.RealmDoc, force, cascade bool) (PurgeRealmResult, error)
 	PurgeSpace(ctx context.Context, doc v1beta1.SpaceDoc, force, cascade bool) (PurgeSpaceResult, error)
@@ -527,6 +533,9 @@ const (
 	MethodGetSource    = ServiceName + ".GetSource"
 	MethodListSources  = ServiceName + ".ListSources"
 	MethodDeleteSource = ServiceName + ".DeleteSource"
+
+	MethodStageGitFetch   = ServiceName + ".StageGitFetch"
+	MethodReleaseGitFetch = ServiceName + ".ReleaseGitFetch"
 
 	MethodPurgeRealm = ServiceName + ".PurgeRealm"
 	MethodPurgeSpace = ServiceName + ".PurgeSpace"

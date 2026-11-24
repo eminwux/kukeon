@@ -1546,3 +1546,56 @@ type DeleteSourceReply struct {
 type DeleteSourceResult struct {
 	Deleted bool
 }
+
+// ---- Git fetch staging (issue #1643, D10) ----
+
+// GitFetchRequest asks kukeond to stage the stored git credential a fetch kuke
+// makes on the host uses for Address: IdentityRef's when set, else the
+// realm's default git identity when it has a credential for the address's
+// host.
+type GitFetchRequest struct {
+	// Realm is the realm whose default git identity applies; empty means
+	// default.
+	Realm string
+	// Address is the repository address, in any form a Source accepts.
+	Address string
+	// IdentityRef is the Source's own git identity, when it states one.
+	IdentityRef *v1beta1.ContainerSecretRef
+}
+
+type StageGitFetchArgs struct {
+	Request GitFetchRequest
+	// PeerUID is the uid of the process on the other end of the socket. The
+	// server codec fills it from SO_PEERCRED; it never travels on the wire,
+	// so a caller cannot name another user's uid.
+	PeerUID *int `json:"-"`
+}
+
+type StageGitFetchReply struct {
+	Result StageGitFetchResult
+	Err    *APIError
+}
+
+// StageGitFetchResult says where the staged credential files are. The reply
+// never carries their content (#619). Staged is false, with no error, when
+// neither the Source nor the realm default names a credential for the
+// address: kuke then fetches with the caller's own git configuration.
+type StageGitFetchResult struct {
+	Staged bool
+	// ID names the staging for ReleaseGitFetch.
+	ID string
+	// Dir is the staged directory, owned by the calling user and readable by
+	// it only. It holds the bundle a cell's git directory holds, with every
+	// path pointing inside Dir.
+	Dir string
+}
+
+type ReleaseGitFetchArgs struct {
+	ID string
+	// PeerUID is filled by the server codec, as for StageGitFetchArgs.
+	PeerUID *int `json:"-"`
+}
+
+type ReleaseGitFetchReply struct {
+	Err *APIError
+}

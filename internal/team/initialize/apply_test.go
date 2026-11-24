@@ -81,6 +81,27 @@ type fakeClient struct {
 	writes []string
 	// plain records the document stream of each ApplyDocuments call.
 	plain [][]byte
+
+	// stage answers StageGitFetch (nil: nothing to stage, as for a public
+	// source); staged records each request and released each released id.
+	stage    func(kukeonv1.GitFetchRequest) (kukeonv1.StageGitFetchResult, error)
+	staged   []kukeonv1.GitFetchRequest
+	released []string
+}
+
+func (f *fakeClient) StageGitFetch(
+	_ context.Context, req kukeonv1.GitFetchRequest,
+) (kukeonv1.StageGitFetchResult, error) {
+	f.staged = append(f.staged, req)
+	if f.stage == nil {
+		return kukeonv1.StageGitFetchResult{}, nil
+	}
+	return f.stage(req)
+}
+
+func (f *fakeClient) ReleaseGitFetch(_ context.Context, id string) error {
+	f.released = append(f.released, id)
+	return nil
 }
 
 func newFake() *fakeClient {

@@ -18,9 +18,11 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"github.com/eminwux/kukeon/cmd/config"
+	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 )
 
@@ -614,6 +616,36 @@ func (s *KukeonV1Service) DeleteSource(args *kukeonv1.DeleteSourceArgs, reply *k
 	result, err := s.core.DeleteSource(s.ctx, args.Ref)
 	reply.Result = result
 	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
+// ---- Git fetch staging (issue #1643, D10) ----
+
+// errPeerUnknown refuses a staging call on a connection whose peer uid the
+// kernel did not report: the staged files are owned by the caller, so the
+// caller must be known, never taken from the request.
+var errPeerUnknown = fmt.Errorf("%w: cannot identify the calling user on this connection",
+	errdefs.ErrGitFetchStaging)
+
+func (s *KukeonV1Service) StageGitFetch(args *kukeonv1.StageGitFetchArgs, reply *kukeonv1.StageGitFetchReply) error {
+	if args.PeerUID == nil {
+		reply.Err = kukeonv1.ToAPIError(errPeerUnknown)
+		return nil
+	}
+	result, err := s.core.StageGitFetch(kukeonv1.WithPeerUID(s.ctx, *args.PeerUID), args.Request)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
+func (s *KukeonV1Service) ReleaseGitFetch(
+	args *kukeonv1.ReleaseGitFetchArgs, reply *kukeonv1.ReleaseGitFetchReply,
+) error {
+	if args.PeerUID == nil {
+		reply.Err = kukeonv1.ToAPIError(errPeerUnknown)
+		return nil
+	}
+	reply.Err = kukeonv1.ToAPIError(s.core.ReleaseGitFetch(kukeonv1.WithPeerUID(s.ctx, *args.PeerUID), args.ID))
 	return nil
 }
 

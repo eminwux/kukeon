@@ -280,6 +280,14 @@ func (FakeClient) DeleteSource(context.Context, SourceRef) (DeleteSourceResult, 
 	return DeleteSourceResult{}, ErrUnexpectedCall
 }
 
+func (FakeClient) StageGitFetch(context.Context, GitFetchRequest) (StageGitFetchResult, error) {
+	return StageGitFetchResult{}, ErrUnexpectedCall
+}
+
+func (FakeClient) ReleaseGitFetch(context.Context, string) error {
+	return ErrUnexpectedCall
+}
+
 func (FakeClient) PurgeRealm(context.Context, v1beta1.RealmDoc, bool, bool) (PurgeRealmResult, error) {
 	return PurgeRealmResult{}, ErrUnexpectedCall
 }
