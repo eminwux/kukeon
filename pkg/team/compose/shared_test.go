@@ -760,6 +760,10 @@ func TestSSHSourcesAreReported(t *testing.T) {
 		{"source-credential", func(c *config.TeamDefaults) {
 			c.Spec.Defaults.Sources[1].Git = &config.SourceGit{Credential: &config.SourceCredential{SecretRef: ref}}
 		}, nil},
+		// A stored Source's identity (#1643, D2) authenticates the clone.
+		{"source-identity", func(c *config.TeamDefaults) {
+			c.Spec.Defaults.Sources[1].Git = &config.SourceGit{IdentityRef: &ref}
+		}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, opts := fixture(t)
@@ -778,8 +782,13 @@ func TestSSHSourcesAreReported(t *testing.T) {
 				}
 			}
 			// The SSH URL is kept: the transport follows the credential.
-			if got := result.Pairs[0].Config.Spec.Repos["agents"].URL; got != "git@github.com:eminwux/agents" {
+			fill := result.Pairs[0].Config.Spec.Repos["agents"]
+			if got := fill.URL; got != "git@github.com:eminwux/agents" {
 				t.Fatalf("agents url = %q", got)
+			}
+			if tc.name == "source-identity" &&
+				(fill.Git == nil || fill.Git.IdentityRef == nil || fill.Git.IdentityRef.Name != "git-ssh") {
+				t.Fatalf("agents repo fill git = %+v, want the Source's identityRef", fill.Git)
 			}
 		})
 	}
