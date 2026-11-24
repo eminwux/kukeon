@@ -120,9 +120,12 @@ or no VCS stamp) falls back to `branch: main`. When a fetched document is
 rejected anyway, the error names each fetched source with its URL and
 revision. A source revision and the binary then disagree on schema version.
 The stored Source keeps the revision it was stored with — for the `kuke` team
-(`--reapply`) and for every team that reads it — until
+(`--reapply` and `--force`) and for every team that reads it — until
 `kuke team init --upgrade`, which [`kuke update`](kuke-update.md) and the
-installer run.
+installer run. When the rejected document came from the stored `kukeon`
+Source at a revision other than the binary's, the error says so and names the
+fix: `run kuke team init --upgrade to re-pin Source kukeon to this binary's
+<revision>, then rerun kuke team init`.
 
 This applies the shared blueprints `codex` and `claude` — one per harness ×
 security profile, realm-wide, see [Teams](../concepts/team.md#shared-blueprints) —
