@@ -6,12 +6,12 @@
 
 _Agent-native orchestration. Self-hosted. No walled garden._
 
-Your agent's context, state, and workspace live on **your** machines — not behind a SaaS login. Kukeon is a containerd-native runtime for AI agents on any Linux host: your cloud VM, your homelab, your laptop. Declarative sessions with bounded lifetime, PTY-attached workloads, and clean teardown — all on infrastructure you control.
+Your agent's context, state, and workspace live on **your** machines — not behind a SaaS login. Kukeon is a containerd-native runtime for AI agents on any Linux host: your cloud VM, your homelab, your laptop. Attachable containers, scoped secrets, default-deny networking, and declarative `CellBlueprint`/`CellConfig` cells — all on infrastructure you control.
 
 !!! info "v0.6.0 beta — core primitives stable; API not yet frozen"
 The Realm / Space / Stack / Cell / Container hierarchy, `kuke apply`, attach/log, the `kukeond` daemon, and the manifest schema are stable enough for daily homelab and single-host use. Production use is not recommended. Some kinds and flags are still moving — see [Release notes](https://github.com/eminwux/kukeon/releases) and the [v1.0 roadmap](faq.md#when-is-v10).
 
-`kukeond` is a small daemon over containerd + CNI + cgroups. `kuke` is the CLI. Agent-native primitives — `Session`, `Interactive` containers, scoped secrets, default-deny networking — are declared in YAML and reconciled on a single host.
+`kukeond` is a small daemon over containerd + CNI + cgroups. `kuke` is the CLI. Agent-native primitives — attachable containers, scoped secrets, default-deny networking, `CellBlueprint`/`CellConfig` — are declared in YAML and reconciled on a single host.
 
 See the full **["Kukeon for AI Agents" proposal](vision.md)** for background and sequencing.
 
@@ -20,9 +20,9 @@ See the full **["Kukeon for AI Agents" proposal](vision.md)** for background and
 **Your agents, your machines, your rules.** SaaS agent sandboxes (E2B, Daytona, Modal) force your agents to run on their cloud. Kukeon runs them on yours — a cloud VM, a homelab, a single Linux box with containerd. No vendor lock-in, no data leaving your infrastructure, no credit card.
 
 - **Sovereign** — every byte of agent state lives on hosts you own
-- **Declarative** — Session + Interactive + onEnd.persist as first-class YAML
+- **Declarative** — `CellBlueprint`/`CellConfig`, `Team`, and the realm-to-container manifests as first-class YAML
 - **Isolated** — realm/space/cell backed by real Linux primitives (containerd namespaces, CNI networks, cgroups)
-- **Self-hosted** — no cluster, no etcd, no scheduler, no SaaS
+- **Self-hosted** — no cluster, no etcd, no Kubernetes-style scheduler placing workloads across nodes, no SaaS
 - **Transparent** — inspect what the daemon did with `ctr`, `ip link`, `ls /sys/fs/cgroup`
 
 ### Also a great container orchestrator for single Linux hosts

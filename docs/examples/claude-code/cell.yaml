@@ -22,4 +22,4 @@ spec:
       command: /bin/bash
       workingDir: /home/claude
       tty:
-        prompt: "claude> "
+        prompt: "'claude> '"

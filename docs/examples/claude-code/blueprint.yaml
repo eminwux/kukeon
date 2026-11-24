@@ -51,7 +51,7 @@ spec:
         command: /bin/bash
         workingDir: /home/claude
         tty:
-          prompt: "claude> "
+          prompt: "'claude> '"
           onInit:
             - script: |
                 claude --print "${PROMPT}" && exit

@@ -36,6 +36,7 @@ Both are hard-linked to the same binary on install. Running `kuke` enters the cl
 | `kuke team`                    | Compose agent teams and apply them to `kukeond`, which stores them       |
 | `kuke source`                  | Inspect a stored Source: the roles and harnesses it offers               |
 | `kuke connector`               | List connector identities, import a git identity, set Realm defaults     |
+| `kuke serve`                   | Serve the local browser UI in the foreground                             |
 | `kuke uninstall`               | Remove all kukeon runtime state from this host                           |
 | `kuke update`                  | Update kuke and kukeond to the newest build of the host's channel        |
 | `kuke autocomplete`            | Emit a shell completion script                                           |
@@ -101,6 +102,7 @@ The positional argument is the resource's own name; the flags specify where in t
 - [kuke team init](kuke-team-init.md)
 - [kuke source](kuke-source.md) — `show`
 - [kuke connector](kuke-connector.md)
+- [kuke serve](kuke-serve.md)
 - [kuke uninstall](kuke-uninstall.md)
 - [kuke update](kuke-update.md)
 - [kuke autocomplete](kuke-autocomplete.md)

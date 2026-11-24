@@ -83,7 +83,7 @@ The smoke path above keeps Claude Code's per-user state inside the cell's overla
     - source: /var/lib/claude-code/state
       target: /home/claude/.claude
   tty:
-    prompt: "claude> "
+    prompt: "'claude> '"
 ```
 
 This is optional — the smoke flow above does not need it.

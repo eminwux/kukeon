@@ -1,13 +1,14 @@
 # Public harness assets
 
-Kuketeams owns these Dockerfiles, catalogs, harness definitions, blueprint
+Kukeon owns these Dockerfiles, catalogs, harness definitions, blueprint
 templates, shared partials, and Codex policy/hooks. They were copied from
-[eminwux/agents at a5dbb59c3942621c5d52ba321b1d81e5987a5f3a](https://github.com/eminwux/agents/tree/a5dbb59c3942621c5d52ba321b1d81e5987a5f3a).
+[eminwux/agents at a5dbb59c3942621c5d52ba321b1d81e5987a5f3a](https://github.com/eminwux/agents/tree/a5dbb59c3942621c5d52ba321b1d81e5987a5f3a),
+which has since removed its `harnesses/` directory (eminwux/agents#893).
 The source checkout was re-inventoried at that revision before copying; every
 tracked `harnesses/` file is included. [UPSTREAM.tsv](UPSTREAM.tsv) records the
 original paths, modes, and Git blob IDs, including the source publication
 workflow. Original license notices are retained under the repository's
-[Apache 2.0 license](../LICENSE). Agents originals are unchanged.
+[Apache 2.0 license](../../LICENSE).
 
 The packaging adaptations are the `ghcr.io/eminwux/kukeon` image namespace, versioned base
 references, a generated Buildx Bake graph and shared entrypoint, release checks, and kukeon release

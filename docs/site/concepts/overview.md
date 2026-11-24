@@ -7,6 +7,8 @@ flowchart LR
     Realm --> Space --> Stack --> Cell --> Container
 ```
 
+A cell is the thing you run. Everything else organizes cells.
+
 Each layer maps to a concrete Linux primitive. There are no hidden layers and no "virtual" concepts that only exist inside the daemon.
 
 | Layer                     | Linux primitive                                | What it gives you               |
