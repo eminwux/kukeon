@@ -174,7 +174,10 @@ func TestUpgradeNeverCreatesTheKukeTeam(t *testing.T) {
 		if len(f.writes) != 0 || f.defaults != nil {
 			t.Fatalf("writes = %v", f.writes)
 		}
-		if want := []string{"team kuke is not stored; run kuke team init to create it"}; !slices.Equal(out.Notes, want) {
+		if want := []string{"team kuke is not stored; run kuke team init to create it"}; !slices.Equal(
+			out.Notes,
+			want,
+		) {
 			t.Fatalf("notes = %v", out.Notes)
 		}
 	})

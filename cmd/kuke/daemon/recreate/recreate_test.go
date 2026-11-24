@@ -697,7 +697,10 @@ func TestDaemonRecreate_PullFailureLeavesDaemonRunning(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error from a failing pull")
 	}
-	if want := "pull kukeond image ghcr.io/eminwux/kukeon:does-not-exist: not found"; !strings.Contains(err.Error(), want) {
+	if want := "pull kukeond image ghcr.io/eminwux/kukeon:does-not-exist: not found"; !strings.Contains(
+		err.Error(),
+		want,
+	) {
 		t.Fatalf("error = %q, want it to contain %q", err, want)
 	}
 	if got := strings.Join(calls, ","); got != "pull ghcr.io/eminwux/kukeon:does-not-exist" {
