@@ -99,6 +99,7 @@ type world struct {
 	recreates    []string
 	recreateFail map[string]bool // image -> recreate fails
 	strictFail   bool
+	versionFail  bool // the downloaded kuke's version check fails
 	deleted      []string
 	deleteErr    error
 	teamRuns     int
@@ -176,13 +177,23 @@ func assetContent(name string, rel release) string {
 	return "content of " + name + " " + rel.kuke
 }
 
-func (w *world) exec(_ context.Context, out, _ io.Writer, path string, args ...string) error {
+func (w *world) exec(_ context.Context, out, errOut io.Writer, path string, args ...string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	// The real binary picks its entry point from its file name (cmd/main.go),
+	// so a kuke saved under any other name exits 1 before running a command.
+	if name := filepath.Base(path); name != "kuke" {
+		_, _ = fmt.Fprintf(errOut, "unknown entry command: %s\n", name)
+		return errors.New("exit status 1")
+	}
 	version, upgrade := binaryVersion(w.t, path)
 	joined := strings.Join(args, " ")
 	switch {
 	case joined == "version --no-daemon":
+		if w.versionFail {
+			_, _ = fmt.Fprintln(errOut, "child error for the version check")
+			return errors.New("exit status 1")
+		}
 		_, _ = fmt.Fprintf(out, "Client: %s\n", version)
 		return nil
 	case strings.HasPrefix(joined, "daemon recreate --kukeond-image "):
@@ -563,6 +574,7 @@ func TestDownloadFailuresChangeNothing(t *testing.T) {
 		"checksum mismatch":   func(w *world) { w.edgeRel.badSum = true },
 		"binary reports else": func(w *world) { w.edgeRel.kuke = edgeNewer },
 		"missing asset":       func(w *world) { w.edgeRel.noAsset = true },
+		"version check fails": func(w *world) { w.versionFail = true },
 	}
 	for name, breakIt := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -579,6 +591,20 @@ func TestDownloadFailuresChangeNothing(t *testing.T) {
 				t.Fatal("prefix or daemon changed")
 			}
 		})
+	}
+}
+
+// The downloaded kuke's own error output reaches the operator, so a failed
+// version check says why instead of only "exit status 1" (#1658).
+func TestVersionCheckFailureShowsChildError(t *testing.T) {
+	w, prefix := edgeHost(t)
+	w.versionFail = true
+	r := w.run(t, edgeOld, prefix, "")
+	if r.err == nil || !strings.Contains(r.err.Error(), "run the downloaded kuke") {
+		t.Fatalf("err = %v\n%s", r.err, r.out)
+	}
+	if !strings.Contains(r.out, "child error for the version check") {
+		t.Fatalf("child stderr missing from output:\n%s", r.out)
 	}
 }
 

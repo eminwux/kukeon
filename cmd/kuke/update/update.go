@@ -492,10 +492,13 @@ func (u *updater) download(ctx context.Context, url, dest string) error {
 }
 
 // fetch downloads name and its .sha256 into dir and verifies the digest.
+// The file keeps its plain name: kuke picks its entry point from its file
+// name, so the version check would fail on any other name (#1658). dir is a
+// fresh temporary directory, so the name cannot clash.
 func (u *updater) fetch(ctx context.Context, dir, name string) (string, error) {
 	asset := fmt.Sprintf("%s-linux-%s", name, u.deps.Arch)
 	base := fmt.Sprintf("%s/%s/releases/download/%s/%s", u.deps.DownloadBase, u.repo, u.releaseTag(), asset)
-	dest := filepath.Join(dir, name+".new")
+	dest := filepath.Join(dir, name)
 	u.printf("downloading %s\n", base)
 	if err := u.download(ctx, base, dest); err != nil {
 		return "", fmt.Errorf("download %s: %w", asset, err)
@@ -553,7 +556,7 @@ func (u *updater) install(ctx context.Context) error {
 		downloaded[name] = path
 	}
 	var vout strings.Builder
-	if err = u.deps.Exec(ctx, &vout, io.Discard, downloaded["kuke"], "version", "--no-daemon"); err != nil {
+	if err = u.deps.Exec(ctx, &vout, u.errOut, downloaded["kuke"], "version", "--no-daemon"); err != nil {
 		return fmt.Errorf("run the downloaded kuke: %w; nothing changed", err)
 	}
 	if got := firstLine(vout.String()); got != "Client: "+u.target {
