@@ -67,7 +67,11 @@ type fakeShooter struct {
 	err    error
 }
 
-func (f *fakeShooter) shoot(_ context.Context, _ kukeonv1.Client, doc v1beta1.ContainerDoc) (api.ScreenshotResult, error) {
+func (f *fakeShooter) shoot(
+	_ context.Context,
+	_ kukeonv1.Client,
+	doc v1beta1.ContainerDoc,
+) (api.ScreenshotResult, error) {
 	f.called, f.doc = true, doc
 	return f.res, f.err
 }
@@ -267,7 +271,10 @@ func TestScreenshotGateErrors(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			c := &screenshotClient{cell: liveCell(nil), containers: []v1beta1.ContainerSpec{container("shell", true, false)}}
+			c := &screenshotClient{
+				cell:       liveCell(nil),
+				containers: []v1beta1.ContainerSpec{container("shell", true, false)},
+			}
 			f := &fakeShooter{err: fmt.Errorf("screenshot: %w", tc.err)}
 			assertScreenError(t, serveScreenshot(t, c, f, screenshotURL), tc.status, tc.code)
 		})
