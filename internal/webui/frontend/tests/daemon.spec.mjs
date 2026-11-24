@@ -1,13 +1,33 @@
-import { test, expect } from "@playwright/test";
+import { execFileSync } from "node:child_process";
+import { resolve } from "node:path";
+import { test, expect, request as playwrightRequest } from "@playwright/test";
 import { startServer } from "./server.mjs";
 
 // Explicit smoke command must fail, not silently skip, without its prerequisite.
 const endpoint = process.env.KUKE_WEB_SMOKE_HOST;
 if (!endpoint) throw new Error("Set KUKE_WEB_SMOKE_HOST to a running kukeond Unix endpoint (see docs/web-ui-development.md).");
 
-test("packaged browser reads real daemon documents and unavailable socket", async ({ page, request }) => {
+// The web UI login (#1652): KUKE_WEB_SMOKE_PASSWORD, or read back from the web-ui-admin secret.
+function loginPassword() {
+  if (process.env.KUKE_WEB_SMOKE_PASSWORD) return process.env.KUKE_WEB_SMOKE_PASSWORD;
+  const binary = resolve(process.env.KUKE_WEB_BINARY ?? "../../../kuke");
+  const out = execFileSync(binary, ["--configuration", "/dev/null", "--host", endpoint, "get", "secret", "web-ui-admin", "--realm", "kuke-system", "-o", "json"], { encoding: "utf8" });
+  const password = JSON.parse(out).spec?.basicAuth?.password;
+  if (!password) throw new Error("web-ui-admin has no password; run `sudo kuke init` once (see docs/web-ui-development.md).");
+  return password;
+}
+
+test("packaged browser reads real daemon documents and unavailable socket", async ({ page }) => {
+  const password = loginPassword();
+  const request = await playwrightRequest.newContext({ extraHTTPHeaders: { Authorization: `Bearer ${password}` } });
   const server = await startServer(endpoint);
   try {
+    // Every API route needs the login; the bearer header carries it for direct requests.
+    expect((await request.get(`${server.url}/api/realms`, { headers: { Authorization: "" } })).status()).toBe(401);
+    await page.goto(server.url);
+    const login = page.getByRole("form", { name: "Sign in" });
+    await login.getByLabel("Password").fill(password);
+    await login.getByRole("button", { name: "Sign in" }).click();
     const response = await request.get(`${server.url}/api/realms`);
     expect(response.ok()).toBeTruthy();
     const realms = await response.json();
@@ -80,12 +100,14 @@ test("packaged browser reads real daemon documents and unavailable socket", asyn
     if (chunk.data) await expect(page.getByLabel("kukeond log output")).toBeVisible();
     else await expect(page.getByRole("heading", { name: "No log output yet" })).toBeVisible();
   } finally { await server.stop(); }
-  // Never stop the operator's daemon to induce the failure case.
+  // Never stop the operator's daemon to induce the failure case. The session check cannot reach
+  // kukeond, so the login screen shows the daemon notice with a Retry.
   const unavailable = await startServer();
   try {
     await page.goto(unavailable.url);
-    await expect(page.locator(".workspace-content").getByRole("alert")).toContainText("Daemon unavailable");
-    await page.getByRole("button", { name: "Refresh" }).click();
-    await expect(page.locator(".workspace-content").getByRole("alert")).toContainText("Daemon unavailable");
-  } finally { await unavailable.stop(); }
+    const login = page.getByRole("form", { name: "Sign in" });
+    await expect(login.getByRole("alert")).toContainText("Daemon unavailable");
+    await login.getByRole("button", { name: "Retry" }).click();
+    await expect(login.getByRole("alert")).toContainText("Daemon unavailable");
+  } finally { await unavailable.stop(); await request.dispose(); }
 });

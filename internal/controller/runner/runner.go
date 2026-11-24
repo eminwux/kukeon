@@ -154,6 +154,11 @@ type Runner interface {
 	// are never read — a stat confirms existence. Returns
 	// errdefs.ErrSecretNotFound when absent.
 	GetSecret(secret intmodel.Secret) (intmodel.Secret, error)
+	// ReadSecret returns a single named, scoped Secret with its material
+	// (issue #1652). Only a named `kuke get secret -o yaml|json` and the
+	// `kuke serve` login check call it; GetSecret and ListSecrets stay
+	// material-free. Returns errdefs.ErrSecretNotFound when absent.
+	ReadSecret(secret intmodel.Secret) (intmodel.Secret, error)
 	// ListSecrets enumerates the metadata of every Secret bound to the
 	// filter scope or any scope nested within it (issue #622). An empty
 	// realmName lists across all realms; the filter is a subtree prefix.

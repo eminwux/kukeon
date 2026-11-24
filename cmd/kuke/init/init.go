@@ -692,6 +692,13 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		return bootstrapErr
 	}
 
+	// The web UI login secret (issue #1652) is written before the ownership
+	// pass so the heal step re-asserts its root-only modes like any secret's.
+	webLogin, loginErr := ensureWebUILogin(ctrl)
+	if loginErr != nil {
+		return loginErr
+	}
+
 	permsReport, ownErr := applyKukeonOwnership(socketPath, runPath, ensure)
 	if ownErr != nil {
 		return ownErr
@@ -714,6 +721,7 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	printBootstrapReport(cmd, report, permsReport)
 	cmd.Printf("  - kukepause staged: %s\n", kukepausePath)
 	cmd.Printf("  - kuke client staged: %s\n", clientPaths.Binary)
+	printWebUILogin(cmd, webLogin)
 
 	if viper.GetBool(config.KUKE_INIT_NO_WAIT.ViperKey) {
 		return nil

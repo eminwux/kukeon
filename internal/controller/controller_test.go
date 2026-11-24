@@ -76,6 +76,7 @@ type fakeRunner struct {
 	// Secret methods
 	WriteSecretFn  func(secret intmodel.Secret) (bool, error)
 	GetSecretFn    func(secret intmodel.Secret) (intmodel.Secret, error)
+	ReadSecretFn   func(secret intmodel.Secret) (intmodel.Secret, error)
 	ListSecretsFn  func(realmName, spaceName, stackName, cellName string) ([]intmodel.Secret, error)
 	DeleteSecretFn func(secret intmodel.Secret) error
 
@@ -332,6 +333,13 @@ func (f *fakeRunner) GetSecret(secret intmodel.Secret) (intmodel.Secret, error) 
 		return f.GetSecretFn(secret)
 	}
 	return intmodel.Secret{}, errors.New("unexpected call to GetSecret")
+}
+
+func (f *fakeRunner) ReadSecret(secret intmodel.Secret) (intmodel.Secret, error) {
+	if f.ReadSecretFn != nil {
+		return f.ReadSecretFn(secret)
+	}
+	return intmodel.Secret{}, errors.New("unexpected call to ReadSecret")
 }
 
 func (f *fakeRunner) ListSecrets(realmName, spaceName, stackName, cellName string) ([]intmodel.Secret, error) {

@@ -152,6 +152,30 @@ func (r *Exec) GetSecret(secret intmodel.Secret) (intmodel.Secret, error) {
 	return intmodel.Secret{Metadata: md, Spec: spec}, nil
 }
 
+// ReadSecret returns a single named, scoped Secret with its material (issue
+// #1652): the type and readable identity facts GetSecret reports, plus the
+// bytes from secretstore.Read. It backs a named `kuke get secret -o yaml|json`
+// and the `kuke serve` login check; get and list stay metadata-only. Returns
+// errdefs.ErrSecretNotFound when the file is absent. The material never
+// appears in an error or a log line.
+func (r *Exec) ReadSecret(secret intmodel.Secret) (intmodel.Secret, error) {
+	got, err := r.GetSecret(secret)
+	if err != nil {
+		return intmodel.Secret{}, err
+	}
+	spec, err := secretstore.Read(r.opts.RunPath, intmodel.ContainerSecretRef(got.Metadata))
+	if err != nil {
+		if errors.Is(err, errdefs.ErrSecretRefNotFound) {
+			// Deleted between the stat and the read.
+			return intmodel.Secret{}, errdefs.ErrSecretNotFound
+		}
+		return intmodel.Secret{}, fmt.Errorf("%w: %w", errdefs.ErrGetSecret, err)
+	}
+	spec.Connector = got.Spec.Connector
+	spec.Identity = got.Spec.Identity
+	return intmodel.Secret{Metadata: got.Metadata, Spec: spec}, nil
+}
+
 // readableSecretSpec loads the part of a secret a get or list may report: its
 // type and its readable identity facts. The material is never read.
 func readableSecretSpec(runPath string, md intmodel.SecretMetadata) (intmodel.SecretSpec, error) {

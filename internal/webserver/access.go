@@ -136,6 +136,11 @@ func parseAccessPolicy(raw string) (accessPolicy, error) {
 	return accessPolicy{authority: authority, origin: scheme + "://" + authority}, nil
 }
 
+// secure reports whether --url is https, so the session cookie is Secure.
+func (p accessPolicy) secure() bool {
+	return strings.HasPrefix(p.origin, "https://")
+}
+
 // String names the accepted browser origin for the startup banner.
 func (p accessPolicy) String() string {
 	if p.origin == "" {

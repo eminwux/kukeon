@@ -69,7 +69,7 @@ Per-kind column contracts. The default table is what `kuke get <kind>` (no `-o w
 
 `-o wide` on `config` adds `CONNECTORS`: one `<connector>=<what fills it>` entry per [connector](../concepts/connectors.md) the Config requires — the identity and the level it comes from (`github=work-github (realm)`), the method of a connector that keeps a login in the state volume (`claude=login`), `MISSING` for a required connector nothing resolves (a cell cannot be created from the Config until one does), and `none` for a connector the cell starts without. The same resolution is in `status.connectors` of `-o yaml` / `-o json`.
 
-`secret` lists each secret's `TYPE` and the `CONNECTOR` it is an identity of; `-o wide` adds its readable `IDENTITY` fields. No output format carries secret material.
+`secret` lists each secret's `TYPE` and the `CONNECTOR` it is an identity of; `-o wide` adds its readable `IDENTITY` fields. A named `kuke get secret <name> -o yaml` or `-o json` prints the whole document, material included, so it re-applies with `kuke apply -f -`; the table and wide rows and every list carry no material. A kukeond older than `kuke` refuses the named read with an error saying it must be upgraded.
 
 `kuke get realm -o yaml` and `-o json` never print a registry password: an inline `spec.registryCredentials[].password` is omitted from every output, and a Secret-backed entry shows only its `secretRef`.
 

@@ -31,6 +31,14 @@ export async function startServer(endpoint) {
   } catch (error) { await stop(); throw error; }
 }
 
+// signIn gives the page a signed-in session (#1652): a dummy session cookie, so requests the tests do not
+// mock still reach the server's daemon path (503 unavailable from the missing socket) rather than the
+// login gate's 401, and a mocked GET /api/session that accepts it.
+export async function signIn(page, user = "root") {
+  await page.context().addCookies([{ name: "kukeon_session", value: "test-session", domain: "127.0.0.1", path: "/" }]);
+  await page.route("**/api/session", route => route.fulfill({ json: { user } }));
+}
+
 // ---------------------------------------------------------------------------
 // Mock connectors API (#1548). The browser tests run the packaged kuke binary
 // against a missing daemon socket and answer the API with page.route; this is

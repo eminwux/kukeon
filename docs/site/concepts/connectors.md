@@ -18,11 +18,13 @@ So a token is stored once, picked by name, and replaced in one place.
 
 !!! warning "Trusted network only"
 
-    `kuke serve` — the web UI and its `/api/connectors` endpoints — has no
-    authentication, and it can be bound to any address. Anyone who reaches it
-    can create identities, change defaults and start cells that use them. Run
-    it on a trusted network or loopback only. Secret material is write-only
-    everywhere: no CLI verb, API response or error prints it.
+    `kuke serve` — the web UI and its `/api/connectors` endpoints — asks for
+    the `root` login ([Sign in](https://github.com/eminwux/kukeon/blob/main/docs/web-server.md#sign-in)) but serves plain
+    HTTP, and it can be bound to any address. Anyone signed in can create
+    identities, change defaults and start cells that use them. Run it on a
+    trusted network or loopback, or behind a TLS proxy. No API response or
+    error prints secret material; only a named
+    `kuke get secret <name> -o yaml|json` does.
 
 ## The connectors kuke ships
 

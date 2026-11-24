@@ -343,6 +343,35 @@ func TestRunLifecycle(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatal(resp.StatusCode)
 	}
+	// Run always gates the API (issue #1652): no credentials is 401
+	// unauthenticated, and with credentials the missing daemon is 503.
+	resp, err = http.Get(url + "/api/realms")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized || body.Error.Code != "unauthenticated" {
+		t.Fatalf("ungated /api/realms = %d %q, want 401 unauthenticated", resp.StatusCode, body.Error.Code)
+	}
+	request, err := http.NewRequest(http.MethodGet, url+"/api/realms", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer guess")
+	resp, err = http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("credentials with the daemon down = %d, want 503", resp.StatusCode)
+	}
 	// An occupied address fails before printing a successful URL.
 	_, port, err := net.SplitHostPort(strings.TrimPrefix(url, "http://"))
 	if err != nil {

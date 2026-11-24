@@ -59,7 +59,7 @@ export function DaemonHealthPage({ revision, inventory }: { revision: number; in
       <div className="panel-heading"><h2>Connectivity</h2><div className="health-report-actions">{data && <AskMajordomo prominent={!!data.error} question={daemonQuestion(data)} subject="the kukeond daemon" />}<button type="button" onClick={() => setChecks(n => n + 1)} disabled={health.loading}>{health.loading ? "Checking…" : "Check again"}</button></div></div>
       <div className="panel-body">
         <div className="status-grid">
-          <div className="status-card"><span>Connectivity</span><HealthBadge status={health.loading && !data ? undefined : data?.status} /></div>
+          <div className="status-card"><span>Connectivity</span><HealthBadge status={health.loading && !data ? undefined : data?.status ?? (health.error?.code === "unavailable" ? "unavailable" : undefined)} /></div>
           <div className="status-card"><span>kukeond version</span><strong className="mono-id">{data?.status === "reachable" ? displayVersion(data.daemonVersion) : "Unknown"}</strong>{versionsDiffer && <small>Differs from kuke serve</small>}</div>
           <div className="status-card"><span>kuke serve version</span><strong className="mono-id">{displayVersion(data?.serverVersion)}</strong></div>
           <div className="status-card"><span>Response time</span><strong>{data ? `${data.latencyMs} ms` : "—"}</strong></div>

@@ -35,16 +35,29 @@ import (
 // MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
 
-// NewSecretCmd builds `kuke get secret(s)` (issue #622). Secrets are
-// metadata-only here: a Secret's bytes are never echoed by get — only its
-// scope coordinates and name. With a name it shows one secret's metadata;
-// without one it lists every secret bound to the filter scope or any scope
-// nested within it (subtree-filter semantics, matching `kuke get cells`).
+// NewSecretCmd builds `kuke get secret(s)` (issue #622). With a name and
+// `-o yaml|json` it prints the whole document, material included, through
+// ReadSecret (issue #1652), so the output re-applies with `kuke apply -f -`.
+// Every other shape is metadata-only: a named table or wide row, and every
+// list in any format, carry the scope coordinates, name, type and readable
+// identity facts but never the material. Without a name it lists every secret
+// bound to the filter scope or any scope nested within it (subtree-filter
+// semantics, matching `kuke get cells`).
 func NewSecretCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:           "secret [name]",
-		Aliases:       []string{"secrets", "sec"},
-		Short:         "Get or list kind: Secret metadata (spec.data is never echoed)",
+		Use:     "secret [name]",
+		Aliases: []string{"secrets", "sec"},
+		Short:   "Get or list kind: Secret (a named -o yaml|json prints the material)",
+		Long: `Get or list kind: Secret.
+
+A named secret with -o yaml or -o json prints the whole document, material
+included (spec.data, spec.basicAuth or spec.sshKey), and re-applies unchanged
+with "kuke apply -f -". A named table or wide row and every list, in any
+format, show metadata only: name, type, connector, scope and, with -o wide,
+the readable identity fields.
+
+Anyone who can reach kukeond (root and the kukeon group) can read every
+secret's material this way.`,
 		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: false,
@@ -95,8 +108,18 @@ func NewSecretCmd() *cobra.Command {
 						Cell:  cell,
 					},
 				}
-				result, getErr := client.GetSecret(cmd.Context(), doc)
+				read := client.GetSecret
+				if outputFormat == shared.OutputFormatYAML || outputFormat == shared.OutputFormatJSON {
+					read = client.ReadSecret
+				}
+				result, getErr := read(cmd.Context(), doc)
 				if getErr != nil {
+					if errors.Is(getErr, errdefs.ErrDaemonMethodUnsupported) {
+						return fmt.Errorf(
+							"%w: printing a secret's material needs a newer kukeond (run `sudo kuke init`)",
+							errdefs.ErrDaemonMethodUnsupported,
+						)
+					}
 					if errors.Is(getErr, errdefs.ErrSecretNotFound) {
 						return fmt.Errorf("secret %q not found", name)
 					}

@@ -193,11 +193,25 @@ type GetSecretReply struct {
 	Err    *APIError
 }
 
-// GetSecretResult carries the metadata-only view of a Secret. Secret.Spec.Data
-// is never populated — the bytes do not traverse this RPC (issue #619/#622).
+// GetSecretResult carries one Secret. From GetSecret it is the metadata-only
+// view: the material is never populated (issue #619/#622). From ReadSecret it
+// carries the material too (issue #1652).
 type GetSecretResult struct {
 	Secret         v1beta1.SecretDoc
 	MetadataExists bool
+}
+
+// ReadSecretArgs is the wire request for ReadSecret (issue #1652): the name
+// and scope coordinates of the secret; the spec is ignored.
+type ReadSecretArgs struct {
+	Doc v1beta1.SecretDoc
+}
+
+// ReadSecretReply is the wire reply for ReadSecret. Result.Secret carries the
+// material.
+type ReadSecretReply struct {
+	Result GetSecretResult
+	Err    *APIError
 }
 
 type GetBlueprintArgs struct {

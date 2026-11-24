@@ -102,6 +102,10 @@ func (FakeClient) GetSecret(context.Context, v1beta1.SecretDoc) (GetSecretResult
 	return GetSecretResult{}, ErrUnexpectedCall
 }
 
+func (FakeClient) ReadSecret(context.Context, v1beta1.SecretDoc) (GetSecretResult, error) {
+	return GetSecretResult{}, ErrUnexpectedCall
+}
+
 func (FakeClient) GetBlueprint(context.Context, v1beta1.CellBlueprintDoc) (GetBlueprintResult, error) {
 	return GetBlueprintResult{}, ErrUnexpectedCall
 }

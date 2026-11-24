@@ -645,3 +645,73 @@ func TestSecretIdentity_RoundTrip(t *testing.T) {
 		t.Fatal("a rejected secret was stored")
 	}
 }
+
+// TestReadSecret_ReturnsMaterial pins issue #1652: ReadSecret carries the
+// material of opaque and typed secrets plus the readable identity facts,
+// while GetSecret on the same secret stays material-free.
+func TestReadSecret_ReturnsMaterial(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+
+	opaque := intmodel.Secret{
+		Metadata: intmodel.SecretMetadata{Name: "tok", Realm: "default", Space: "team-a"},
+		Spec:     intmodel.SecretSpec{Data: "opaque-bytes"},
+	}
+	login := intmodel.Secret{
+		Metadata: intmodel.SecretMetadata{Name: "login", Realm: "kuke-system"},
+		Spec: intmodel.SecretSpec{
+			Type:      intmodel.SecretTypeBasicAuth,
+			Connector: "git",
+			Identity:  map[string]string{"author": "Root <root@example.com>"},
+			BasicAuth: &intmodel.SecretBasicAuth{Username: "root", Password: "pw"},
+		},
+	}
+	for _, s := range []intmodel.Secret{opaque, login} {
+		if _, err := r.WriteSecret(s); err != nil {
+			t.Fatalf("WriteSecret(%s) error = %v", s.Metadata.Name, err)
+		}
+	}
+
+	got, err := r.ReadSecret(intmodel.Secret{Metadata: opaque.Metadata})
+	if err != nil {
+		t.Fatalf("ReadSecret(tok) error = %v", err)
+	}
+	if got.Spec.Data != "opaque-bytes" || got.Spec.EffectiveType() != intmodel.SecretTypeOpaque {
+		t.Errorf("ReadSecret(tok) spec = %+v, want opaque data", got.Spec)
+	}
+
+	got, err = r.ReadSecret(intmodel.Secret{Metadata: login.Metadata})
+	if err != nil {
+		t.Fatalf("ReadSecret(login) error = %v", err)
+	}
+	if got.Spec.BasicAuth == nil || got.Spec.BasicAuth.Username != "root" || got.Spec.BasicAuth.Password != "pw" {
+		t.Errorf("ReadSecret(login) basicAuth = %+v, want root/pw", got.Spec.BasicAuth)
+	}
+	if got.Spec.Connector != "git" || got.Spec.Identity["author"] == "" {
+		t.Errorf(
+			"ReadSecret(login) identity = %q %v, want connector and identity",
+			got.Spec.Connector,
+			got.Spec.Identity,
+		)
+	}
+
+	meta, err := r.GetSecret(intmodel.Secret{Metadata: login.Metadata})
+	if err != nil {
+		t.Fatalf("GetSecret(login) error = %v", err)
+	}
+	if meta.Spec.BasicAuth != nil {
+		t.Errorf("GetSecret(login) basicAuth = %+v, want nil", meta.Spec.BasicAuth)
+	}
+}
+
+func TestReadSecret_NotFound(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+
+	_, err := r.ReadSecret(intmodel.Secret{
+		Metadata: intmodel.SecretMetadata{Name: "ghost", Realm: "default"},
+	})
+	if !errors.Is(err, errdefs.ErrSecretNotFound) {
+		t.Errorf("ReadSecret() error = %v, want ErrSecretNotFound", err)
+	}
+}

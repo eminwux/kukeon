@@ -165,6 +165,18 @@ var (
 	ErrDaemonMethodUnsupported = errors.New(
 		"kukeond does not support this request; upgrade kukeond to match the client",
 	)
+	// ErrUnauthenticated marks a `kuke serve` API request without a valid
+	// session cookie or bearer token (issue #1652).
+	ErrUnauthenticated = errors.New("sign in to use the kukeon web UI")
+	// ErrInvalidCredentials marks a `kuke serve` login whose user or password
+	// does not match the web-ui-admin secret. One message covers both so a
+	// wrong user cannot be told apart from a wrong password.
+	ErrInvalidCredentials = errors.New("invalid user or password")
+	// ErrLoginNotInitialized marks a `kuke serve` login on a host without the
+	// web-ui-admin secret: `sudo kuke init` creates it.
+	ErrLoginNotInitialized = errors.New(
+		"the web UI login is not set up on this host; run `sudo kuke init` once to create it",
+	)
 	// ErrDaemonTransport marks a request that never got a daemon answer: the
 	// connection failed, closed or timed out. It carries no remote text.
 	ErrDaemonTransport = errors.New("kukeond transport/connection failed")

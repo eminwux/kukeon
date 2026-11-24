@@ -110,7 +110,12 @@ an empty temporary directory, on an ephemeral loopback port. Tests exercise
 complete documents, loading, empty lists, permission errors, stale retention,
 retry, deleted selections, and overlapping detail requests. HTTP interception
 makes these UI states deterministic; the unavailable-socket test uses the real
-HTTP/Unix-socket failure path. These tests do not substitute for the live-daemon
+HTTP/Unix-socket failure path. Every test starts signed in: a shared
+`beforeEach` (`signIn` in `tests/server.mjs`) sets a dummy `kukeon_session`
+cookie and answers `GET /api/session` with `{"user":"root"}`. With a cookie
+present, routes a test does not mock reach the real server's daemon path and
+answer `503 unavailable` from the missing socket, as before the login existed;
+the sign-in tests override `/api/session` themselves. These tests do not substitute for the live-daemon
 smoke below. Failed tests retain a Playwright trace in the ignored
 `internal/webui/frontend/test-results` directory.
 
@@ -122,10 +127,16 @@ KUKE_WEB_SMOKE_HOST=unix:///run/kukeon-dev/kukeond.sock make web-ui-smoke
 ```
 
 Set the endpoint to your actual daemon socket. The invoking user needs socket
-access. This smoke launches the packaged web server outside the checkout,
+access. The smoke signs in with the web UI password: set
+`KUKE_WEB_SMOKE_PASSWORD`, or leave it unset and the smoke reads it with
+`kuke get secret web-ui-admin --realm kuke-system -o json` against the same
+endpoint (the `web-ui-admin` secret exists once `kuke init` has run; see
+[Sign in](web-server.md#sign-in)). Direct API requests send it as
+`Authorization: Bearer <password>`; the browser signs in through the login form.
+This smoke launches the packaged web server outside the checkout,
 compares every listed realm's displayed document with its live HTTP API result,
 refreshes, and then launches a separate server pointing at a nonexistent socket
-to verify the unavailable/retry UI. It fails if the configured daemon is absent,
+to verify the login screen's daemon-unavailable notice and Retry. It fails if the configured daemon is absent,
 returns no realms, or a realm cannot be retrieved. It never stops the existing
 daemon or changes workloads. Only the web server processes it creates are stopped.
 Do not run during concurrent realm mutations, since the API/document comparison

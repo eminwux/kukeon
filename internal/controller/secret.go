@@ -34,9 +34,9 @@ type CreateSecretResult struct {
 	Created bool
 }
 
-// GetSecretResult reports the metadata-only view of a single `kind: Secret`
-// (issue #622). The bytes are never carried — Secret.Spec is left zero so the
-// never-round-tripped contract from #619 holds end to end.
+// GetSecretResult reports a single `kind: Secret`. From GetSecret it is the
+// metadata-only view (issue #622): the material is left zero. From ReadSecret
+// (issue #1652) it carries the material too.
 type GetSecretResult struct {
 	Secret         intmodel.Secret
 	MetadataExists bool
@@ -91,6 +91,31 @@ func (b *Exec) GetSecret(secret intmodel.Secret) (GetSecretResult, error) {
 	if err != nil {
 		if errors.Is(err, errdefs.ErrSecretNotFound) {
 			res.MetadataExists = false
+			return res, nil
+		}
+		return res, fmt.Errorf("%w: %w", errdefs.ErrGetSecret, err)
+	}
+
+	res.MetadataExists = true
+	res.Secret = got
+	return res, nil
+}
+
+// ReadSecret retrieves one named, scoped Secret with its material (issue
+// #1652). It validates the lookup like GetSecret and, like it, reports an
+// absent secret as MetadataExists=false with no error. Only a named
+// `kuke get secret -o yaml|json` and the `kuke serve` login check call it;
+// GetSecret and ListSecrets stay material-free.
+func (b *Exec) ReadSecret(secret intmodel.Secret) (GetSecretResult, error) {
+	var res GetSecretResult
+
+	if err := validateSecretLookup(secret.Metadata); err != nil {
+		return res, err
+	}
+
+	got, err := b.runner.ReadSecret(secret)
+	if err != nil {
+		if errors.Is(err, errdefs.ErrSecretNotFound) {
 			return res, nil
 		}
 		return res, fmt.Errorf("%w: %w", errdefs.ErrGetSecret, err)

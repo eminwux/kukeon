@@ -179,7 +179,7 @@ kuke create secret [NAME] [--type opaque|basic-auth|ssh-key] <source flags>
                           [--realm <r>] [--space <s>] [--stack <t>]
 ```
 
-Create a `kind: Secret` within a scope. `--type` selects what it holds ([Secret manifest](../manifests/secret.md)); every value is write-only.
+Create a `kind: Secret` within a scope. `--type` selects what it holds ([Secret manifest](../manifests/secret.md)); a value is printed back only by a named `kuke get secret <name> -o yaml|json`.
 
 **`--type opaque`** (default) — an arbitrary value, referenceable via `ContainerSecret.secretRef` from a `CellConfig`'s slot fill:
 
@@ -250,7 +250,7 @@ sudo kuke create secret bot-key --connector git --type ssh-key --from-file ~/.ss
 sudo kuke create secret me --connector git --author 'Me <me@example.com>'
 ```
 
-`kuke get secrets` lists each secret's `TYPE` and `CONNECTOR` (`-o wide` adds its readable `IDENTITY` fields); no verb prints a value.
+`kuke get secrets` lists each secret's `TYPE` and `CONNECTOR` (`-o wide` adds its readable `IDENTITY` fields); only a named `kuke get secret <name> -o yaml|json` prints a value.
 
 ## kuke create registry-credential
 

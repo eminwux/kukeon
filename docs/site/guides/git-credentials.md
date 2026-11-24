@@ -54,7 +54,7 @@ A dry run stores nothing, makes no daemon call and never prints key material. Al
 
 ### From the web UI
 
-On the Connectors page, the `git` connector's Identities panel has an **Import from host** action: a realm, the hosts, an optional identity name, an optional key and passphrase file, and _Make it the Realm default_ (on by default). It runs the same import **as the user running `kuke serve`** — that account's `~/.ssh` and global git configuration, which under a service manager may not be your shell account. The result shows the home directory and the key path that were read. Key and passphrase file are paths inside that home directory (`.ssh/id_ed25519`); absolute paths and `..` are refused. `kuke serve` has no authentication: run it on a trusted network or loopback only.
+On the Connectors page, the `git` connector's Identities panel has an **Import from host** action: a realm, the hosts, an optional identity name, an optional key and passphrase file, and _Make it the Realm default_ (on by default). It runs the same import **as the user running `kuke serve`** — that account's `~/.ssh` and global git configuration, which under a service manager may not be your shell account. The result shows the home directory and the key path that were read. Key and passphrase file are paths inside that home directory (`.ssh/id_ed25519`); absolute paths and `..` are refused. `kuke serve` asks for the `root` login but serves plain HTTP: run it on a trusted network or loopback, or behind a TLS proxy.
 
 ## 2. Set or clear the default
 

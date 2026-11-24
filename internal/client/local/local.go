@@ -323,6 +323,22 @@ func (c *Client) GetSecret(_ context.Context, doc v1beta1.SecretDoc) (kukeonv1.G
 	}, nil
 }
 
+// ReadSecret returns one Secret with its material (issue #1652).
+func (c *Client) ReadSecret(_ context.Context, doc v1beta1.SecretDoc) (kukeonv1.GetSecretResult, error) {
+	internal, _, err := apischeme.NormalizeSecret(doc)
+	if err != nil {
+		return kukeonv1.GetSecretResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+	res, err := c.ctrl.ReadSecret(internal)
+	if err != nil {
+		return kukeonv1.GetSecretResult{}, err
+	}
+	return kukeonv1.GetSecretResult{
+		Secret:         apischeme.ConvertSecretToExternalWithMaterial(res.Secret),
+		MetadataExists: res.MetadataExists,
+	}, nil
+}
+
 func (c *Client) GetVolume(_ context.Context, doc v1beta1.VolumeDoc) (kukeonv1.GetVolumeResult, error) {
 	internal, _, err := apischeme.NormalizeVolume(doc)
 	if err != nil {
