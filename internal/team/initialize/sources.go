@@ -145,7 +145,7 @@ func identityOf(client Client, realm string) identity {
 func fetchSources(
 	ctx context.Context, stage identity, d config.Defaults, needed map[string]bool, have *fetched,
 ) (*fetched, error) {
-	root, err := os.MkdirTemp("", "kuke-team-sources-*")
+	root, err := os.MkdirTemp("", "kuke-source-trees-*")
 	if err != nil {
 		return nil, err
 	}

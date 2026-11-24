@@ -63,7 +63,7 @@ export const containerFields = [
       { key: "space", label: "Space", kind: "text" }, { key: "stack", label: "Stack", kind: "text" }, { key: "cell", label: "Cell", kind: "text" },
     ] },
   ] },
-  { key: "repos", label: "Repository configuration", kind: "objects", advanced: true, itemLabel: "Repository", fields: [
+  { key: "repos", label: "Repository configuration", kind: "objects", advanced: true, itemLabel: "Repository", sourcePicker: true, fields: [
     { key: "name", label: "Name", kind: "text", required: true }, { key: "target", label: "Target path", kind: "text", required: true },
     { key: "url", label: "Repository URL", kind: "text", required: true }, { key: "branch", label: "Branch", kind: "text" },
     { key: "ref", label: "Tag or commit ref", kind: "text" }, { key: "required", label: "Fail if setup fails", kind: "boolean" },

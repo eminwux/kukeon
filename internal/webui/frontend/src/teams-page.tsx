@@ -1,132 +1,23 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ErrorNotice, useResource, type Failure } from "./request";
 import { useNotify } from "./notifications";
 import { useModalDialog } from "./focus";
 import { sendJSON, toFailure } from "./connector-ui";
-import {
-  addErrors, addPayload, defaultsAPI, deleteSummary, editPayload, inheritingNote, needsForce, optionKey, originLabel, pairRows, pickerOptions, planSections, refKinds, refLabel,
-  sourceItems, sourcePayload, sourcesAPI, systemTeam, teamConfigs, teamsAPI, teamsLink, toggledDefaults,
-} from "./teams.mjs";
-import type { AddForm, DefaultsChange, DeleteResult, PickerOption, Plan, SourceContents, SourceForm, Sources, TeamOutcome, TeamSummary, TeamView } from "./teams.mjs";
+import { ScheduleDetails, when } from "./schedule";
+import { OutcomeNotice, PlanView } from "./team-plan";
+import { TeamWizard } from "./team-wizard";
+import { configLink, deleteSummary, exportAPI, listOrigin, newTeamLink, sourcesLink, systemTeam, taskLabel, teamsAPI, teamsLink } from "./teams.mjs";
+import type { DeleteResult, TeamDetail, TeamOutcome, TeamSummary, TeamView, ViewSource } from "./teams.mjs";
 
-// The Teams page (#1618, AC16 and AC17). Every action posts to the teams API,
-// which runs the same code as `kuke team`: the server fetches the sources,
-// composes and applies, as the account running `kuke serve`. A declaration is
-// edited as YAML and checked by the preview endpoint; only roles and harnesses
-// have pickers.
-
-type CatalogConfig = { metadata: { name: string; realm?: string; space?: string; stack?: string; labels?: Record<string, string> } };
-
-function configLink(scope: string[], name: string): string {
-  return "#/configs/" + [...scope, name].map(encodeURIComponent).join("/");
-}
-
-function PlanView({ plan, title }: { plan: Plan; title: string }) {
-  const rows = pairRows(plan);
-  return <section className="panel team-plan" aria-label={title}>
-    <div className="panel-heading"><h2>{title}</h2><span className="badge">{originLabel(plan.origin)}</span></div>
-    <div className="panel-body">
-      {!!plan.sources?.length && <><h3>Sources</h3><ul className="state-list">{plan.sources.map(source => <li key={source.name}><code>{source.name}</code> {source.url} <span className="description">{source.ref}{source.commit ? ` at ${source.commit.slice(0, 12)}` : ""}</span></li>)}</ul></>}
-      <h3>Role × harness</h3>
-      {rows.length ? <div className="table-scroll"><table aria-label="Role and harness pairs"><thead><tr><th>Role</th><th>Harness</th><th>Config</th><th>Image</th><th>Tasks</th><th>Connectors and components</th></tr></thead><tbody>
-        {rows.map(row => <tr key={row.key}><td>{row.role}</td><td>{row.harness}</td><td className="mono-id">{row.config}</td><td className="mono-id">{row.image}</td><td>{row.tasks.join(", ") || "—"}</td><td>{row.components.join(", ") || "—"}</td></tr>)}
-      </tbody></table></div> : <p className="description">No role × harness pair.</p>}
-      {planSections(plan).map(section => <div key={section.key}><h3>{section.title}</h3><ul className="state-list" aria-label={section.title}>{section.items.map(item => <li key={item} className="mono-id">{item}</li>)}</ul></div>)}
-      {plan.declaration && <details className="health-body"><summary>Declaration</summary><pre tabIndex={0} aria-label="Composed declaration">{plan.declaration}</pre></details>}
-    </div>
-  </section>;
-}
-
-function OutcomeNotice({ outcome }: { outcome: TeamOutcome }) {
-  const result = outcome.result;
-  if (!result) return null;
-  return <div className="health-sweep-started" role="status">
-    <p>Team <code>{result.team}</code> applied: {result.resources} resources{result.pruned.length ? `; pruned ${result.pruned.join(", ")}` : ""}.</p>
-    {!!result.missingSecrets.length && <p>Missing secrets: {result.missingSecrets.join(", ")}.</p>}
-    {!!result.notes.length && <ul className="description">{result.notes.map(note => <li key={note}>{note}</li>)}</ul>}
-  </div>;
-}
-
-function Picker({ label, options, value, disabled, onChange }: { label: string; options: PickerOption[]; value: PickerOption[] | null; disabled: boolean; onChange: (value: PickerOption[] | null) => void }) {
-  const selected = new Set((value ?? []).map(optionKey));
-  return <fieldset className="schema-field team-picker" disabled={disabled}>
-    <legend>{label}</legend>
-    <label className="schema-check"><input type="checkbox" checked={value === null} onChange={event => onChange(event.target.checked ? null : options.filter(option => option.default))} />Keep the declaration's list</label>
-    {value !== null && <>
-      {options.map(option => <label className="schema-check" key={optionKey(option)}><input type="checkbox" checked={selected.has(optionKey(option))} onChange={event => onChange(event.target.checked ? [...(value ?? []), option] : (value ?? []).filter(item => optionKey(item) !== optionKey(option)))} />{option.name} <span className="description">{option.source}:{option.path}{option.default ? " — default" : ""}</span></label>)}
-      {!options.length && <small>No default and no inspected source offers one. Register a source below and show it.</small>}
-    </>}
-  </fieldset>;
-}
-
-const emptyAdd: AddForm = { name: "", source: "", refKind: "branch", ref: "", useRepoFile: true, roles: null, harnesses: null, declaration: "" };
-
-function RefFields({ kind, value, disabled, onChange }: { kind: string; value: string; disabled: boolean; onChange: (kind: string, value: string) => void }) {
-  return <label className="schema-field"><span>Ref</span>
-    <span className="team-ref">
-      <select value={kind} disabled={disabled} aria-label="Ref kind" onChange={event => onChange(event.target.value, value)}>{refKinds.map(item => <option key={item} value={item}>{item}</option>)}</select>
-      <input value={value} disabled={disabled} placeholder={kind === "branch" ? "default branch" : kind === "tag" ? "v1.2.3" : "full commit SHA"} spellCheck={false} autoComplete="off" aria-label="Ref" onChange={event => onChange(kind, event.target.value)} />
-    </span>
-  </label>;
-}
-
-// AddTeam is kuke create team NAME --source URL: preview first, then create. An
-// existing team is replaced only after the user confirms (AC8a).
-function AddTeam({ sources, inspected, onChanged }: { sources: Sources | undefined; inspected: Record<string, SourceContents | undefined>; onChanged: () => void }) {
-  const [form, setForm] = useState<AddForm>(emptyAdd);
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<Failure>();
-  const [preview, setPreview] = useState<TeamOutcome>();
-  const [replace, setReplace] = useState(false);
-  const { notify } = useNotify();
-  const set = (next: Partial<AddForm>) => { setForm(old => ({ ...old, ...next })); setError(undefined); setPreview(undefined); setReplace(false); };
-  const errors = addErrors(form);
-  async function send(dryRun: boolean, force = false) {
-    if (pending) return;
-    setPending(true); setError(undefined);
-    try {
-      const outcome = await sendJSON<TeamOutcome>(dryRun ? teamsAPI("preview") : teamsAPI(), addPayload({ ...form, force }));
-      if (dryRun) { setPreview(outcome); return; }
-      notify({ key: `team-add:${outcome.result?.team}`, tone: "success", message: `Team ${outcome.result?.team} added.` });
-      setForm(emptyAdd); setPreview(undefined); setReplace(false);
-      onChanged();
-      if (outcome.result?.team) window.location.hash = teamsLink(outcome.result.team);
-    } catch (caught) {
-      const failure = toFailure(caught);
-      if (needsForce(failure)) setReplace(true);
-      setError(failure);
-    } finally { setPending(false); }
-  }
-  function submit(event: FormEvent) { event.preventDefault(); void send(true); }
-  return <section className="panel" aria-label="Add team">
-    <div className="panel-heading"><h2>Add team</h2></div>
-    <div className="panel-body">
-      <form className="creation-form" aria-label="Add team form" method="post" autoComplete="off" onSubmit={submit}>
-        <p className="description">Fetches the repository as the account running <code>kuke serve</code>. Without a <code>kuketeam.yaml</code> in it, the team takes the default roles and harnesses.</p>
-        <div className="schema-fields">
-          <label className="schema-field"><span>Repository URL<b aria-label="required"> *</b></span><input value={form.source} disabled={pending} placeholder="https://github.com/owner/repo" spellCheck={false} onChange={event => set({ source: event.target.value })} /></label>
-          <label className="schema-field"><span>Name</span><input value={form.name} disabled={pending} placeholder="the repository file's name" spellCheck={false} onChange={event => set({ name: event.target.value })} /></label>
-          <RefFields kind={form.refKind} value={form.ref} disabled={pending} onChange={(refKind, ref) => set({ refKind, ref })} />
-          <label className="schema-check"><input type="checkbox" checked={form.useRepoFile} disabled={pending} onChange={event => set({ useRepoFile: event.target.checked })} />Use the repository's <code>kuketeam.yaml</code></label>
-          <Picker label="Roles" options={pickerOptions(sources, inspected, "role")} value={form.roles} disabled={pending} onChange={roles => set({ roles })} />
-          <Picker label="Harnesses" options={pickerOptions(sources, inspected, "harness")} value={form.harnesses} disabled={pending} onChange={harnesses => set({ harnesses })} />
-          <label className="schema-field team-yaml"><span>Declaration (optional)</span><textarea value={form.declaration} disabled={pending} spellCheck={false} placeholder={"apiVersion: v1beta1\nkind: Team\nmetadata:\n  name: …\nspec:\n  roles: […]"} onChange={event => set({ declaration: event.target.value })} /><small>A whole Team document replaces the declaration, as <code>kuke create team -f</code>. Tasks, schedules, needs, connectors and sources are edited here.</small></label>
-        </div>
-        {!!errors.length && form.source && <ul className="setup-error">{errors.map(message => <li key={message}>{message}</li>)}</ul>}
-        <div className="connector-actions">
-          <button type="submit" disabled={pending || !!errors.length}>{pending && !preview ? "Previewing…" : "Preview"}</button>
-          <button type="button" disabled={pending || !!errors.length || !preview} onClick={() => void send(false)}>{pending && preview ? "Adding…" : "Add team"}</button>
-        </div>
-        {error && <ErrorNotice error={error} kind="Team" />}
-        {replace && <div className="error" role="alert"><p>A team of this name is stored. Reapply it from its team page to recompose it with its stored declaration, or replace the declaration with this one.</p><button type="button" className="danger-action" disabled={pending} onClick={() => void send(false, true)}>Replace the stored declaration</button></div>}
-      </form>
-      {preview && <PlanView plan={preview.plan} title="Preview" />}
-    </div>
-  </section>;
-}
+// The Teams pages (#1618, #1644). The list opens the New team wizard; a
+// team's page shows the whole setup as it composes, with Edit, Export,
+// Reapply and Delete. Every action posts to the teams API, which runs the
+// same code as `kuke team`: the server fetches, composes and applies, as the
+// account running `kuke serve`.
 
 function TeamList({ teams }: { teams: TeamSummary[] }) {
   return <section className="panel" aria-label="Teams list">
+    <div className="panel-heading"><h2>Teams</h2><a className="document-action" href={newTeamLink}>New team</a></div>
     <div className="table-scroll"><table><thead><tr><th>Team</th><th>Project</th><th>Roles</th><th>Harnesses</th><th>Configs</th></tr></thead><tbody>
       {teams.map(team => <tr key={team.name}>
         <td><a className="resource-name" href={teamsLink(team.name)}>{team.name}</a>{team.system && <> <span className="badge">system</span></>}</td>
@@ -136,7 +27,7 @@ function TeamList({ teams }: { teams: TeamSummary[] }) {
         <td>{team.configs.length}</td>
       </tr>)}
     </tbody></table></div>
-    {!teams.length && <div className="empty-state"><h3>No team is stored</h3><p>Run <code>kuke team init</code> for the kuke team, or add one below.</p></div>}
+    {!teams.length && <div className="empty-state"><h3>No team is stored</h3><p>Run <code>kuke team init</code> for the kuke team, or add one with New team.</p></div>}
   </section>;
 }
 
@@ -158,32 +49,47 @@ function DeleteTeamDialog({ team, pending, onCancel, onConfirm }: { team: TeamSu
   </dialog>;
 }
 
-// TeamDetail is one stored team: its summary and Configs, its declaration
-// edited as YAML with a preview before apply, reapply and delete.
-function TeamDetail({ name, revision, onChanged }: { name: string; revision: number; onChanged: () => void }) {
-  const team = useResource<TeamView>(teamsAPI(name), revision);
-  const configs = useResource<CatalogConfig[]>("/api/catalog/configs", revision);
-  const [draft, setDraft] = useState<string>();
+// Origin is a list's badge: the team declares it, or inherits it from the
+// defaults.
+function Origin({ list }: { list: { inherited: boolean } }) {
+  const origin = listOrigin(list);
+  return <span className={`badge team-origin team-origin-${origin}`}>{origin}</span>;
+}
+
+function SourceLink({ source }: { source: ViewSource }) {
+  return source.stored ? <a className="resource-name" href={sourcesLink(source.stored)}>{source.stored}</a> : <span className="description">defined by the team</span>;
+}
+
+function SourcesTable({ items, label }: { items: ViewSource[]; label: string }) {
+  return <div className="table-scroll"><table aria-label={label}><thead><tr><th>Name</th><th>Stored Source</th><th>Address</th><th>Ref</th><th>Clone path</th><th>Git identity</th></tr></thead><tbody>
+    {items.map(source => <tr key={source.alias}>
+      <td><code>{source.alias}</code>{!source.declared && <> <span className="description">(stored, not listed)</span></>}</td>
+      <td><SourceLink source={source} /></td>
+      <td className="mono-id">{source.url || "—"}</td><td>{source.ref || "the Source's"}</td>
+      <td className="mono-id">{source.clonePath || "—"}</td><td>{source.identity || "Default"}</td>
+    </tr>)}
+  </tbody></table></div>;
+}
+
+// TeamOverview is the team page (AC3): the project, the sources, the roles,
+// the tasks with their schedules, the harnesses, the connectors and the
+// Configs, each list marked declared or inherited.
+function TeamOverview({ name, data, onChanged }: { name: string; data: TeamView; onChanged: () => void }) {
   const [pending, setPending] = useState("");
   const [error, setError] = useState<Failure>();
-  const [preview, setPreview] = useState<TeamOutcome>();
   const [applied, setApplied] = useState<TeamOutcome>();
   const [confirming, setConfirming] = useState(false);
   const [deleted, setDeleted] = useState<DeleteResult>();
   const { notify } = useNotify();
-  if (team.error) return <ErrorNotice error={team.error} kind="Team" />;
-  if (!team.data) return <p role="status">Loading team…</p>;
-  const summary = team.data.summary;
-  const declaration = draft ?? team.data.document;
-  const located = teamConfigs(configs.data, name);
-  async function run(action: string, path: string, body: unknown) {
+  const summary = data.summary;
+  const view: TeamDetail | undefined = data.view;
+  async function reapply() {
     if (pending) return;
-    setPending(action); setError(undefined);
+    setPending("reapply"); setError(undefined);
     try {
-      const outcome = await sendJSON<TeamOutcome>(path, body);
-      if (action === "preview") { setPreview(outcome); return; }
-      setApplied(outcome); setPreview(undefined); setDraft(undefined);
-      notify({ key: `team-${action}:${name}`, tone: "success", message: `Team ${name} ${action === "reapply" ? "reapplied" : "applied"}.` });
+      const outcome = await sendJSON<TeamOutcome>(teamsAPI(name, "reapply"), {});
+      setApplied(outcome);
+      notify({ key: `team-reapply:${name}`, tone: "success", message: `Team ${name} reapplied.` });
       onChanged();
     } catch (caught) { setError(toFailure(caught)); }
     finally { setPending(""); }
@@ -208,138 +114,125 @@ function TeamDetail({ name, revision, onChanged }: { name: string; revision: num
       <a href={teamsLink()}>Back to teams</a>
     </div></section>;
   }
+  const configScope = (config: string) => view?.configs.find(item => item.name === config)?.scope;
   return <>
     <section className="panel" aria-label="Team overview">
       <div className="panel-heading"><h2>Overview</h2><div className="connector-actions">
-        <button type="button" disabled={!!pending} onClick={() => void run("reapply", teamsAPI(name, "reapply"), {})}>{pending === "reapply" ? "Reapplying…" : "Reapply"}</button>
+        <a className="document-action" href={teamsLink(name, "edit")}>Edit</a>
+        <a className="document-action" href={teamsLink(name, "export")}>Export</a>
+        <button type="button" disabled={!!pending} onClick={() => void reapply()}>{pending === "reapply" ? "Reapplying…" : "Reapply"}</button>
         {!summary.system && <button type="button" className="danger-action" disabled={!!pending} onClick={() => setConfirming(true)}>Delete</button>}
       </div></div>
-      <div className="panel-body"><dl className="details-grid">
-        <dt>Realm</dt><dd>{summary.realm}</dd>
-        <dt>Project</dt><dd>{summary.projectUrl ? <>{summary.projectUrl} <span className="description">{summary.projectRef}</span></> : "—"}</dd>
-        <dt>Roles</dt><dd>{summary.roles.join(", ") || "none"}{summary.rolesInherited && <span className="description"> (the defaults)</span>}</dd>
-        <dt>Harnesses</dt><dd>{summary.harnesses.join(", ") || "none"}{summary.harnessesInherited && <span className="description"> (the defaults)</span>}</dd>
-        <dt>Configs</dt><dd>{summary.configs.length ? summary.configs.map(config => { const found = located.find(item => item.name === config); return <div key={config}>{found ? <a className="resource-name" href={configLink(found.scope, config)}>{config}</a> : <span className="mono-id">{config}</span>}</div>; }) : "none"}</dd>
-      </dl>
-      {summary.system && <p className="description">The kuke system team cannot be deleted; reset it with <code>kuke team init --force</code>.</p>}
+      <div className="panel-body">
+        <dl className="details-grid">
+          <dt>Realm</dt><dd>{summary.realm}</dd>
+          <dt>Configs</dt><dd>{summary.configs.length}</dd>
+        </dl>
+        {summary.system && <p className="description">The kuke system team cannot be deleted; reset it with <code>kuke team init --force</code>.</p>}
+        {view?.unresolved && <div className="error" role="alert"><strong>The team does not resolve</strong><p>{view.unresolved}</p></div>}
+        {data.problem && <div className="error" role="alert"><strong>The team's setup could not be read</strong><p>{data.problem}</p></div>}
       </div>
     </section>
     {error && <ErrorNotice error={error} kind="Team" />}
     {applied && <OutcomeNotice outcome={applied} />}
-    <section className="panel" aria-label="Team declaration">
-      <div className="panel-heading"><h2>Declaration</h2>{draft !== undefined && <span className="badge">Edited</span>}</div>
-      <div className="panel-body creation-form">
-        <label className="schema-field team-yaml"><span>Team document</span><textarea aria-label="Team declaration YAML" value={declaration} spellCheck={false} disabled={!!pending} onChange={event => { setDraft(event.target.value); setPreview(undefined); }} /></label>
-        <div className="connector-actions">
-          <button type="button" disabled={!!pending} onClick={() => void run("preview", teamsAPI("preview"), editPayload(name, declaration))}>{pending === "preview" ? "Previewing…" : "Preview"}</button>
-          <button type="button" disabled={!!pending || !preview} onClick={() => void run("apply", teamsAPI(), editPayload(name, declaration))}>{pending === "apply" ? "Applying…" : "Apply"}</button>
-          {draft !== undefined && <button type="button" className="subtle-button" disabled={!!pending} onClick={() => { setDraft(undefined); setPreview(undefined); }}>Discard edits</button>}
-        </div>
-        <p className="description">Apply composes from scratch again: a branch may have moved since the preview, and the apply result is authoritative.</p>
-      </div>
+    {view && <>
+      <section className="panel" aria-label="Project">
+        <div className="panel-heading"><h2>Project</h2></div>
+        <div className="panel-body">{view.project ? <SourcesTable items={[view.project]} label="Project source" /> : <p className="description">The team has no project.</p>}</div>
+      </section>
+      <section className="panel" aria-label="Sources">
+        <div className="panel-heading"><h2>Sources</h2><Origin list={view.sources} /></div>
+        <div className="panel-body">{view.sources.items.length ? <SourcesTable items={view.sources.items} label="Team sources" /> : <p className="description">No source besides the project.</p>}
+          {view.sources.inherited && <p className="description">The team lists no sources: its roles and harnesses read stored Sources by name.</p>}</div>
+      </section>
+      <section className="panel" aria-label="Roles">
+        <div className="panel-heading"><h2>Roles</h2><Origin list={view.roles} /></div>
+        <div className="panel-body">{view.roles.items.length ? <div className="table-scroll"><table aria-label="Team roles"><thead><tr><th>Role</th><th>Source</th><th>Path</th><th>Harness</th><th>Image needs</th><th>Tasks</th></tr></thead><tbody>
+          {view.roles.items.map(role => <tr key={role.name}>
+            <td>{role.name}</td><td><code>{role.source}</code></td><td className="mono-id">{role.path}</td><td>{role.harness || "any"}</td>
+            <td>{role.image.join(", ") || "—"}</td><td>{role.allTasks ? <span className="description">all it declares</span> : role.selected.map(taskLabel).join(", ") || "none"}</td>
+          </tr>)}
+        </tbody></table></div> : <p className="description">No role.</p>}</div>
+      </section>
+      <section className="panel" aria-label="Tasks">
+        <div className="panel-heading"><h2>Tasks</h2><span className="badge">{view.tasks.length}</span></div>
+        <div className="panel-body">{view.tasks.length ? <div className="team-tasks">{view.tasks.map(task => <section key={task.config} className="team-task" aria-label={`Task ${task.role} ${task.task}`}>
+          <h3>{task.role} / {task.task} <a className="resource-name mono-id" href={configLink(task.scope, task.config)}>{task.config}</a></h3>
+          {task.schedule ? <ScheduleDetails schedule={task.schedule} status={task.status} cellLink={() => undefined} /> : <p className="description">No schedule: the task runs when started by hand.{task.status?.lastScheduleTime ? <> Last run {when(task.status.lastScheduleTime)}.</> : null}</p>}
+        </section>)}</div> : <p className="description">The team renders no task Config.</p>}</div>
+      </section>
+      <section className="panel" aria-label="Harnesses">
+        <div className="panel-heading"><h2>Harnesses</h2><Origin list={view.harnesses} /></div>
+        <div className="panel-body">{view.harnesses.items.length ? <ul className="state-list">{view.harnesses.items.map(h => <li key={h.name}>{h.name} <span className="description"><code>{h.source}</code>:{h.path}</span></li>)}</ul> : <p className="description">No harness.</p>}</div>
+      </section>
+      <section className="panel" aria-label="Connectors">
+        <div className="panel-heading"><h2>Connectors</h2><Origin list={view.connectors} /></div>
+        <div className="panel-body">{view.connectors.items.length ? <ul className="state-list">{view.connectors.items.map(c => <li key={c.name}><code>{c.name}</code> <span className="description">{c.method || "default method"}, {c.identity || "identity from the scope defaults"}</span></li>)}</ul> : <p className="description">No connector choice: every connector uses its default method and the scope defaults' identity.</p>}</div>
+      </section>
+    </>}
+    <section className="panel" aria-label="Configs">
+      <div className="panel-heading"><h2>Configs</h2><span className="badge">{summary.configs.length}</span></div>
+      <div className="panel-body">{summary.configs.length ? <ul className="state-list">{summary.configs.map(config => { const scope = configScope(config); return <li key={config}>{scope ? <a className="resource-name" href={configLink(scope, config)}>{config}</a> : <span className="mono-id">{config}</span>}</li>; })}</ul> : <p className="description">none</p>}</div>
     </section>
-    {preview && <PlanView plan={preview.plan} title="Preview" />}
     {applied && <PlanView plan={applied.plan} title="Applied" />}
     {confirming && <DeleteTeamDialog team={summary} pending={pending === "delete"} onCancel={() => setConfirming(false)} onConfirm={() => void remove()} />}
   </>;
 }
 
-// SourceDetail is one stored Source: what it offers, with the default
-// toggles, and its removal.
-function SourceDetail({ name, sources, contents, onInspected, onChanged }: { name: string; sources: Sources; contents: SourceContents | undefined; onInspected: (contents: SourceContents) => void; onChanged: (change: DefaultsChange) => void }) {
-  const [pending, setPending] = useState("");
-  const [error, setError] = useState<Failure>();
-  async function act<T>(action: string, path: string, body: unknown, done: (value: T) => void) {
-    if (pending) return;
-    setPending(action); setError(undefined);
-    try { done(await sendJSON<T>(path, body)); } catch (caught) { setError(toFailure(caught)); } finally { setPending(""); }
+// ExportPage is kuke team export NAME (AC5): the team as a kuketeam.yaml,
+// with the command's two options, Copy and Download.
+function ExportPage({ name, revision }: { name: string; revision: number }) {
+  const [hostFields, setHostFields] = useState(false);
+  const [explicit, setExplicit] = useState(false);
+  const exported = useResource<{ document: string }>(exportAPI(name, { hostFields, explicit }), revision);
+  const [copied, setCopied] = useState(false);
+  const document = exported.data?.document ?? "";
+  const href = useMemo(() => document ? URL.createObjectURL(new Blob([document], { type: "application/yaml" })) : "", [document]);
+  useEffect(() => () => { if (href) URL.revokeObjectURL(href); }, [href]);
+  async function copy() {
+    try { await navigator.clipboard.writeText(document); setCopied(true); } catch { setCopied(false); }
   }
-  const items = sourceItems(contents);
-  const isDefault = (kind: "role" | "harness", path: string) => (kind === "role" ? sources.defaultRoles : sources.defaultHarnesses).some(item => item.source === name && item.path === path);
-  return <div className="team-source">
-    <div className="connector-actions">
-      <button type="button" disabled={!!pending} onClick={() => void act<SourceContents>("inspect", sourcesAPI(name, "inspect"), {}, onInspected)}>{pending === "inspect" ? "Fetching…" : contents ? "Refresh" : "Show contents"}</button>
-      <button type="button" className="danger-action" disabled={!!pending} onClick={() => void act<DefaultsChange>("remove", sourcesAPI(name, "delete"), {}, onChanged)}>{pending === "remove" ? "Removing…" : "Remove"}</button>
-    </div>
-    {error && <ErrorNotice error={error} kind="Source" />}
-    {contents && <>
-      {contents.commit && <p className="description">At commit <code>{contents.commit.slice(0, 12)}</code>.</p>}
-      <table aria-label={`Roles in ${name}`}><thead><tr><th>Role</th><th>Path</th><th>Harnesses</th><th>Tasks</th><th>Default</th></tr></thead><tbody>
-        {items.roles.map(role => <tr key={role.path}><td>{role.name}</td><td className="mono-id">{role.path}</td><td>{role.harnesses.join(", ") || "any"}</td><td>{role.tasks.join(", ") || "—"}</td>
-          <td><input type="checkbox" aria-label={`Default role ${role.name}`} checked={isDefault("role", role.path)} disabled={!!pending} onChange={event => void act<DefaultsChange>("toggle", defaultsAPI, toggledDefaults(sources, "role", { name: role.name, source: name, path: role.path }, event.target.checked), onChanged)} /></td></tr>)}
-      </tbody></table>
-      {!items.roles.length && <p className="description">No role.</p>}
-      <table aria-label={`Harnesses in ${name}`}><thead><tr><th>Harness</th><th>Path</th><th>Default</th></tr></thead><tbody>
-        {items.harnesses.map(harness => <tr key={harness.path}><td>{harness.name}</td><td className="mono-id">{harness.path}</td>
-          <td><input type="checkbox" aria-label={`Default harness ${harness.name}`} checked={isDefault("harness", harness.path)} disabled={!!pending} onChange={event => void act<DefaultsChange>("toggle", defaultsAPI, toggledDefaults(sources, "harness", { name: harness.name, source: name, path: harness.path }, event.target.checked), onChanged)} /></td></tr>)}
-      </tbody></table>
-      {!items.harnesses.length && <p className="description">No harness.</p>}
-    </>}
-  </div>;
-}
-
-const emptySource: SourceForm = { name: "", url: "", refKind: "branch", ref: "" };
-
-// SourcesPanel is kuke create source, kuke get sources, kuke source show and
-// kuke delete source over every stored Source (#1643), and the default toggles
-// of kuke team defaults set (AC17).
-function SourcesPanel({ sources, inspected, onInspected, onChanged }: { sources: Sources; inspected: Record<string, SourceContents | undefined>; onInspected: (name: string, contents: SourceContents) => void; onChanged: () => void }) {
-  const [form, setForm] = useState<SourceForm>(emptySource);
-  const [open, setOpen] = useState("");
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<Failure>();
-  const [change, setChange] = useState<DefaultsChange>();
-  const set = (next: Partial<SourceForm>) => { setForm(old => ({ ...old, ...next })); setError(undefined); };
-  const changed = (next: DefaultsChange) => { setChange(next); onChanged(); };
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    if (pending) return;
-    setPending(true); setError(undefined);
-    try {
-      const result = await sendJSON<DefaultsChange>(sourcesAPI(), sourcePayload(form));
-      if (result.discovered) onInspected(form.name.trim(), result.discovered);
-      setForm(emptySource); changed(result);
-    } catch (caught) { setError(toFailure(caught)); }
-    finally { setPending(false); }
-  }
-  return <section className="panel" aria-label="Team sources">
-    <div className="panel-heading"><h2>Sources</h2><span className="badge">{sources.sources.length} registered</span></div>
+  return <section className="panel" aria-label="Export">
+    <div className="panel-heading"><h2>kuketeam.yaml</h2><div className="connector-actions">
+      <button type="button" disabled={!document} onClick={() => void copy()}>{copied ? "Copied" : "Copy"}</button>
+      {href ? <a className="document-action" href={href} download="kuketeam.yaml">Download</a> : <span className="document-action" aria-disabled="true">Download</span>}
+    </div></div>
     <div className="panel-body">
-      <p className="description">Where roles and harnesses come from. A team that declares no sources, roles or harnesses takes the defaults here; changing them reaches a team when it is reapplied.</p>
-      {change && <div className="health-sweep-started" role="status"><p>Defaults {change.action}. {inheritingNote(change)}</p></div>}
-      <ul className="state-list">{sources.sources.map(source => <li key={source.name} aria-label={`Source ${source.name}`}>
-        <button type="button" className="text-button" aria-expanded={open === source.name} onClick={() => setOpen(open === source.name ? "" : source.name)}><code>{source.name}</code></button> {source.url} <span className="description">{refLabel(source)}</span>
-        {open === source.name && <SourceDetail name={source.name} sources={sources} contents={inspected[source.name]} onInspected={contents => onInspected(source.name, contents)} onChanged={changed} />}
-      </li>)}</ul>
-      {!sources.sources.length && <p className="description">No source is registered.</p>}
-      <form className="creation-form" aria-label="Register source" method="post" autoComplete="off" onSubmit={submit}>
-        <h3>Register a source</h3>
-        <div className="schema-fields">
-          <label className="schema-field"><span>Name<b aria-label="required"> *</b></span><input value={form.name} disabled={pending} placeholder="agents" spellCheck={false} onChange={event => set({ name: event.target.value })} /></label>
-          <label className="schema-field"><span>URL<b aria-label="required"> *</b></span><input value={form.url} disabled={pending} placeholder="https://github.com/owner/repo" spellCheck={false} onChange={event => set({ url: event.target.value })} /></label>
-          <RefFields kind={form.refKind} value={form.ref} disabled={pending} onChange={(refKind, ref) => set({ refKind, ref })} />
-        </div>
-        <div className="connector-actions"><button type="submit" disabled={pending || !form.name.trim() || !form.url.trim()}>{pending ? "Registering…" : "Register source"}</button></div>
-        {error && <ErrorNotice error={error} kind="Source" />}
-      </form>
+      <p className="description">The team as a repository's <code>kuketeam.yaml</code>, the output of <code>kuke team export {name}</code>. Commit it to the project repository to create the team from it again.</p>
+      <div className="connector-actions">
+        <label className="schema-check"><input type="checkbox" checked={hostFields} onChange={event => { setHostFields(event.target.checked); setCopied(false); }} />Keep host fields (<code>--host-fields</code>): realm, stored Source names, refs, git identities and secret bindings</label>
+        <label className="schema-check"><input type="checkbox" checked={explicit} onChange={event => { setExplicit(event.target.checked); setCopied(false); }} />Write inherited lists out (<code>--explicit-defaults</code>)</label>
+      </div>
+      {exported.error && <ErrorNotice error={exported.error} kind="Team" />}
+      {exported.loading && !exported.data && <p role="status">Exporting…</p>}
+      {document && <pre className="team-export" tabIndex={0} aria-label="Exported kuketeam.yaml">{document}</pre>}
     </div>
   </section>;
 }
 
-export function TeamsPage({ name, revision, onChanged }: { name?: string; revision: number; onChanged: () => void }) {
+function TeamPage({ name, section, revision, onChanged }: { name: string; section?: string; revision: number; onChanged: () => void }) {
+  const team = useResource<TeamView>(teamsAPI(name), revision);
+  if (section === "export") return <ExportPage name={name} revision={revision} />;
+  if (team.error) return <ErrorNotice error={team.error} kind="Team" />;
+  if (!team.data) return <p role="status">Loading team…</p>;
+  if (section === "edit") return <TeamWizard mode="edit" team={team.data} onChanged={onChanged} />;
+  return <TeamOverview name={name} data={team.data} onChanged={onChanged} />;
+}
+
+export function TeamsPage({ name, section, revision, onChanged }: { name?: string; section?: string; revision: number; onChanged: () => void }) {
   const [reads, setReads] = useState(0);
-  const [inspected, setInspected] = useState<Record<string, SourceContents | undefined>>({});
   const refresh = () => { setReads(value => value + 1); onChanged(); };
   const teams = useResource<{ teams: TeamSummary[] }>(name ? null : teamsAPI(), revision + reads);
-  const sources = useResource<Sources>(name ? null : sourcesAPI(), revision + reads);
-  if (name) return <TeamDetail key={name} name={name} revision={revision + reads} onChanged={refresh} />;
+  if (name) return <TeamPage key={`${name}/${section ?? ""}`} name={name} section={section} revision={revision + reads} onChanged={refresh} />;
   return <>
     {teams.error && <ErrorNotice error={teams.error} kind="Teams" />}
     {teams.loading && !teams.data && <p role="status">Loading teams…</p>}
     {teams.data && <TeamList teams={teams.data.teams} />}
     {teams.data && !teams.data.teams.some(team => team.name === systemTeam) && <p className="description" role="note">The kuke team is not stored. Run <code>kuke team init</code> on the host to create it and the initial defaults.</p>}
-    <AddTeam sources={sources.data} inspected={inspected} onChanged={refresh} />
-    {sources.error && <ErrorNotice error={sources.error} kind="Sources" />}
-    {sources.data && <SourcesPanel sources={sources.data} inspected={inspected} onInspected={(source, contents) => setInspected(old => ({ ...old, [source]: contents }))} onChanged={refresh} />}
+    <p className="description">Where roles and harnesses come from is on the <a href={sourcesLink()}>Sources</a> page.</p>
   </>;
+}
+
+export function NewTeamPage({ onChanged }: { onChanged: () => void }) {
+  return <TeamWizard mode="new" onChanged={onChanged} />;
 }

@@ -10,6 +10,8 @@ import { catalogAPI, referenceScope } from "./catalog-url.mjs";
 import { ConnectorFixes, ConnectorStateBadge, IdentitySelect, StatusIdentity } from "./connector-ui";
 import { blocksCells, changedMethods, changedPicks, connectorStatuses, connectorTitle, identitiesFor, methodChoices, methodStatuses, stateResolved, takesIdentity, teamOf, unresolvedConnectors } from "./connectors.mjs";
 import type { Connector, ConnectorStatus, SecretRef } from "./connectors.mjs";
+import { repositoryFromSource, sourcesAPI } from "./teams.mjs";
+import type { StoredSource } from "./teams.mjs";
 
 type ScopeMetadata = { name: string; realm?: string; space?: string; stack?: string; labels?: Record<string, string> };
 type CatalogDoc = { metadata: ScopeMetadata; spec?: Record<string, unknown>; kind?: string; status?: unknown };
@@ -103,6 +105,23 @@ function initialTarget(own: string | undefined, options: string[]): string {
   return options.includes("default") || !options.length ? "default" : options[0];
 }
 
+// RepositorySourcePicker fills a repository entry from a stored Source (#1644, AC7): its name, address and
+// ref. It copies: the cell does not follow the Source afterwards. The Source's git identity is shown by
+// name; the cell's identity comes from its own git settings.
+function RepositorySourcePicker({ label, disabled, onPick }: { label: string; disabled: boolean; onPick: (patch: FormValue) => void }) {
+  const sources = useResource<{ sources: StoredSource[] }>(sourcesAPI(), 0);
+  const [picked, setPicked] = useState("");
+  const source = sources.data?.sources.find(item => item.name === picked);
+  return <div className="schema-field repository-source"><label><span>From source</span>
+    <select aria-label={`From source for ${label}`} value={picked} disabled={disabled || !sources.data?.sources.length} onChange={event => {
+      setPicked(event.target.value);
+      const chosen = sources.data?.sources.find(item => item.name === event.target.value);
+      if (chosen) onPick(repositoryFromSource(chosen));
+    }}><option value="">{sources.data?.sources.length ? "Choose a stored Source…" : "No Source is stored"}</option>{sources.data?.sources.map(item => <option key={item.name} value={item.name}>{item.name} — {item.url}</option>)}</select></label>
+    {source && <small>Identity: {source.identity || "Default"}. The fields are copied; the cell does not follow the Source afterwards.</small>}
+  </div>;
+}
+
 function FieldEditor({ field, value, onChange, path, errors, disabled = false }: { field: Field; value: unknown; onChange: (value: unknown) => void; path: string; errors: Record<string, string>; disabled?: boolean }) {
   const error = errors[path];
   const id = `field-${path.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
@@ -116,7 +135,7 @@ function FieldEditor({ field, value, onChange, path, errors, disabled = false }:
   }
   if (field.kind === "objects") {
     const items = Array.isArray(value) ? value as FormValue[] : [];
-    return <fieldset className="schema-array"><legend>{field.label}</legend>{field.help && <p className="description">{field.help}</p>}{items.map((item, index) => <section className="schema-array-item" key={`${path}.${index}`}><div className="schema-array-heading"><h4>{field.itemLabel ?? field.label.slice(0, -1)} {index + 1}</h4><button type="button" className="subtle-button" disabled={disabled} onClick={() => onChange(items.filter((_, current) => current !== index))}>Remove</button></div><div className="schema-fields">{(field.fields ?? []).map(child => <FieldEditor key={`${path}.${index}.${child.key}`} field={child} value={item[child.key]} path={`${path}.${index}.${child.key}`} errors={errors} disabled={disabled} onChange={next => onChange(items.map((current, n) => n === index ? setAt(current, child.key, next) : current))} />)}</div></section>)}<button type="button" disabled={disabled} onClick={() => onChange([...items, emptyObject(field.fields ?? [])])}>Add {field.itemLabel?.toLowerCase() ?? "item"}</button></fieldset>;
+    return <fieldset className="schema-array"><legend>{field.label}</legend>{field.help && <p className="description">{field.help}</p>}{items.map((item, index) => <section className="schema-array-item" key={`${path}.${index}`}><div className="schema-array-heading"><h4>{field.itemLabel ?? field.label.slice(0, -1)} {index + 1}</h4><button type="button" className="subtle-button" disabled={disabled} onClick={() => onChange(items.filter((_, current) => current !== index))}>Remove</button></div>{field.sourcePicker && <RepositorySourcePicker label={`${field.itemLabel ?? "Item"} ${index + 1}`} disabled={disabled} onPick={patch => onChange(items.map((current, n) => n === index ? { ...current, ...patch } : current))} />}<div className="schema-fields">{(field.fields ?? []).map(child => <FieldEditor key={`${path}.${index}.${child.key}`} field={child} value={item[child.key]} path={`${path}.${index}.${child.key}`} errors={errors} disabled={disabled} onChange={next => onChange(items.map((current, n) => n === index ? setAt(current, child.key, next) : current))} />)}</div></section>)}<button type="button" disabled={disabled} onClick={() => onChange([...items, emptyObject(field.fields ?? [])])}>Add {field.itemLabel?.toLowerCase() ?? "item"}</button></fieldset>;
   }
   if (field.kind === "map") {
     const entries = Object.entries((value && typeof value === "object" ? value : {}) as Record<string, string>);

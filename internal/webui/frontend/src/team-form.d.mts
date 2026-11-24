@@ -1,0 +1,44 @@
+import type { Draft, DraftSource, FormSource, TeamForm } from "./teams.mjs";
+
+export const projectAlias: string;
+export const projectModes: string[];
+
+export type Step = { key: string; title: string };
+export type ProjectInput = { mode: string; address: string; stored: string; file: string; refKind: string; ref: string; identity: string; name: string; useRepoFile: boolean };
+export type Available = { alias: string; stored: string; url: string; refKind: string; ref: string; identity: string; declared: boolean };
+export type TaskRow = { name: string; selected: boolean; schedule: string; switch: string; args: string; roleSchedule: string; roleSuspend: boolean; roleArgs: string };
+export type WizardState = { project?: ProjectInput; draft?: Draft; form?: TeamForm };
+
+export function stepsFor(mode: "new" | "edit"): Step[];
+export function emptyProject(): ProjectInput;
+export function draftPayload(project: Partial<ProjectInput>): Record<string, unknown>;
+export function projectErrors(project: Partial<ProjectInput>): string[];
+export function sourceRef(source: Partial<FormSource> | undefined): string;
+export function sourcesErrors(form: TeamForm | undefined, draftSources: DraftSource[] | undefined): string[];
+export function storedName(source: Partial<FormSource> | undefined): string;
+export function emptySource(stored?: { name: string }): FormSource;
+export function withSource(form: TeamForm, index: number | undefined, patch: Partial<FormSource> | null): TeamForm;
+export function withProject(form: TeamForm, patch: Partial<FormSource>): TeamForm;
+export function availableSources(form: TeamForm | undefined, stored: { name: string; url: string; identity?: string; branch?: string; tag?: string; commit?: string }[] | undefined): Available[];
+export function inspectRequest(source: Partial<Available>): { path: string; body: Record<string, unknown> };
+export function selectedIndex(items: { source: string; path: string }[] | undefined, source: string, path: string): number;
+export function withInherit(form: TeamForm, field: "roles" | "harnesses", inherit: boolean, inherited?: unknown[]): TeamForm;
+export function withRole(form: TeamForm, role: { name: string; source: string; path: string }, on: boolean, inherited?: unknown[]): TeamForm;
+export function withRolePatch(form: TeamForm, index: number, patch: Record<string, unknown>): TeamForm;
+export function withHarness(form: TeamForm, harness: { name: string; source: string; path: string }, on: boolean, inherited?: unknown[]): TeamForm;
+export function imageList(value: string): string[];
+export function switchOf(task: { suspend?: boolean | null } | undefined): string;
+export function suspendOf(state: string): boolean | null;
+export function taskRows(role: TeamForm["roles"]["items"][number], offered: unknown[] | undefined, configured: unknown[] | undefined): TaskRow[];
+export function withTask(form: TeamForm, roleIndex: number, name: string, patch: { selected?: boolean; schedule?: string; args?: string; switch?: string }, known: string[]): TeamForm;
+export function withAllTasks(form: TeamForm, roleIndex: number): TeamForm;
+export function cronErrors(value: string | undefined): string[];
+export function rolesErrors(form: TeamForm | undefined): string[];
+export function tasksErrors(form: TeamForm | undefined): string[];
+export function stepErrors(key: string, state: WizardState): string[];
+export function withConnector(form: TeamForm, name: string, patch: { method?: string; identity?: string }, inherited?: Record<string, { method?: string; identity?: string }>): TeamForm;
+export function withConnectorsInherit(form: TeamForm, inherit: boolean): TeamForm;
+export function createBody(project: Partial<ProjectInput>, draft: Draft | undefined, form: TeamForm, force?: boolean): Record<string, unknown>;
+export function editBody(name: string, form: TeamForm): { name: string; form: TeamForm };
+export function gitIdentities(secrets: unknown, connectors: unknown): string[];
+export function stateLabel(state: string): string;

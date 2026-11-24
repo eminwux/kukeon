@@ -65,9 +65,10 @@ the sidebar of the current view, and selection closes it.
 
 On a Manage page the sidebar is one flat list, the **Manage navigation**:
 Overview, Realms, Spaces, Stacks, Cells, Blueprints, Configs, Volumes, Secrets,
-Connectors, Teams, Images and Daemon. The current page's link is marked: the
+Connectors, Teams, Sources, Images and Daemon. The current page's link is marked: the
 kind's link on its list and detail pages, Configs on New Config, Secrets on New
-Secret, Daemon on its Status, Health and Logs tabs. No page has a horizontal
+Secret, Teams on New team and on a team's Edit team and Export screens, Daemon
+on its Status, Health and Logs tabs. No page has a horizontal
 navigation row. The breadcrumb root is **Overview** on Manage pages and
 **Workbench** on Workbench pages.
 
@@ -396,8 +397,8 @@ kukeon file itself.
 - **Run sweep now** starts one sweep cell from that config, the same as
   `kuke run -d <config>`. A sweep submits a report only if it finds something.
 - While sweeps are suspended, the page shows the task entry that turns them on
-  and links the `kuke` team on the [Teams](#teams) page, where the declaration
-  is edited, previewed and applied; it does so once, above the sweep list,
+  and links the `kuke` team's page on [Teams](#teams), whose **Edit team**
+  screen switches the schedule on; it does so once, above the sweep list,
   naming the suspended configs. No control on the Health page edits a schedule.
 - **Latest report**: its window, summary and findings. Each finding shows its
   classification (`kukeon`, `workload` or `unclear`), whether it is recurring
@@ -481,8 +482,8 @@ schedule shows **Schedule: None** in its overview. The **Configs** table has
 **Schedule** and **Next fire** columns with the content of `kuke get config`'s
 `SCHEDULE` and `NEXT` columns (the next fire in UTC, or `suspended`). The Health
 page renders its sweep schedules through the same component. No control edits a
-schedule: it is edited in the Config document (for the kuke team, in the team's
-declaration on the [Teams](#teams) page).
+schedule: it is edited in the Config document (for a team's task Config, on the
+team's **Edit team** screen on the [Teams](#teams) page).
 
 Config overviews link to their referenced Blueprint and list Cells whose stored
 provenance points to that exact scoped Config. Blueprint overviews list
@@ -770,35 +771,71 @@ A secret binding's `source.env` / `source.file` is read by that process.
 - **Teams list**: every stored team with its project URL and ref, roles,
   harnesses (or "defaults" when inherited) and number of Configs. The `kuke`
   system team is badged; when it is not stored the page says to run
-  `kuke team init`.
-- **Add team** (`kuke create team`): repository address or a stored Source's
-  name, optional name, ref (branch, tag or commit; an
-  empty branch discovers the remote's default), **Use the repository's
-  `kuketeam.yaml`**, role and harness pickers (the defaults plus what any
-  inspected source offers; **Keep the declaration's list** leaves the list
-  alone), and an optional whole declaration as YAML. **Preview** shows the plan
-  — where the declaration came from, sources with their commits, each role ×
-  harness with Config, image, tasks and components, the Configs to create,
-  re-render and prune, missing secrets and notes — and **Add team** applies it.
-  Adding a name that is stored asks before replacing its declaration (the
-  CLI's `--force`).
-- **A team's page** (`#/teams/<name>`): its realm, project, roles, harnesses
-  and Configs (each linked to its Config page); the declaration as YAML, which
-  is edited, previewed again and applied; **Reapply** (recompose from the
-  stored declaration, `kuke team apply NAME`); and **Delete** after a
-  confirmation, which reports the Configs and blueprints removed, the cells
-  still running and the state volumes kept. The `kuke` team cannot be deleted.
-  Tasks and schedules, `needs`, connectors and sources are edited in the YAML;
-  the preview checks them.
-- **Sources**: every stored [Source](site/manifests/source.md) — those
-  `kuke create source` stored and those a team's declaration defined — with
-  its address and ref; a Source has no clone path, so the form has none.
-  **Register a source** is `kuke create source`; opening one and **Show
-  contents** (`kuke source show`) fetches it and lists the roles and harnesses
-  it offers, each with a **Default** toggle (`kuke team defaults set`);
-  **Remove** is `kuke delete source`, refused while a default or a stored team
-  references the Source. After a defaults change the page names the teams that
-  inherit them — they change only when reapplied.
+  `kuke team init`. **New team** opens the wizard.
+- **New team** (`#/new-team`, `kuke create team`) is a wizard of six steps;
+  **Next** stays disabled while a step has problems and **Back** keeps every
+  input:
+  1. **Project**: a repository address, a stored Source, or a pasted
+     `kuketeam.yaml` whose `spec.projectSource.url` names the project; the ref
+     (an empty branch discovers the remote's default); the git identity the
+     project's Source is stored with (`--identity`: the stored git identities
+     of realm default, by name, or **Default**); the team name; and **Use the
+     repository's `kuketeam.yaml`** (`--no-repo-file` when off). **Read
+     repository** fetches the project and reports what its file declares, or
+     that the defaults apply. Nothing is written.
+  2. **Other sources**: the declaration's `spec.sources`, each badged
+     `stored`, `new Source` (the add stores it), `conflict` (a stored Source of
+     that name holds another repository: **Stored as** gives it another name)
+     or `not stored`; add a stored Source or one by address, with its ref,
+     clone path and, for an address, its git identity.
+  3. **Roles and harnesses**: **Use the default roles** / **Use the default
+     harnesses**, or the roles and harnesses each source offers (fetched on
+     **Show contents**, once per wizard), and per selected role its harness,
+     image needs and initial path.
+  4. **Tasks and schedules**: per selected role, each task it declares:
+     selected, its schedule switch (the role's, on or off — `suspend`), its
+     cron expression and its arguments, the role's own values as placeholders.
+  5. **Credentials**: the team's connector choices (method and identity), or
+     the defaults'; and the missing secrets of the last preview.
+  6. **Review**: **Preview** shows the plan — where the declaration came from,
+     sources with their commits, each role × harness with Config, image, tasks
+     and components, the Configs to create, re-render and prune, missing
+     secrets and notes, and the composed YAML — and **Add team** applies it.
+     Adding a name that is stored asks before replacing its declaration (the
+     CLI's `--force`).
+- **A team's page** (`#/teams/<name>`) shows the whole setup as it composes:
+  **Project**, **Sources** (each with its stored Source, linked to the Sources
+  page, address, ref, clone path and git identity), **Roles** (source, path,
+  harness, image needs, tasks), **Tasks** (each task Config with its schedule,
+  on or suspended, and its last run), **Harnesses**, **Connectors** and
+  **Configs** (each linked to its Config page); each list is badged `declared`
+  or `inherited` from the defaults. **Edit**, **Export**, **Reapply**
+  (recompose from the stored declaration, `kuke team apply NAME`) and
+  **Delete** after a confirmation, which reports the Configs and blueprints
+  removed, the cells still running and the state volumes kept. The `kuke`
+  team cannot be deleted.
+- **Edit team** (`#/teams/<name>/edit`) is the wizard's steps 2 to 6 filled
+  from the stored team, with the project ref at the top of step 2: a task's
+  schedule is switched on or off and its cron expression and arguments
+  changed without YAML. What the form does not show — `spec.secrets`, a
+  role's connectors and `needs.secrets`, a source's long-form `git` block — is
+  kept. **Edit as YAML** edits the whole declaration (`kuke team apply -f`).
+- **Export** (`#/teams/<name>/export`, `kuke team export NAME`) shows the team
+  as a repository's `kuketeam.yaml`, with **Keep host fields**
+  (`--host-fields`) and **Write inherited lists out** (`--explicit-defaults`),
+  **Copy** and **Download**.
+
+**Manage → Sources** (`#/sources`) lists every stored
+[Source](site/manifests/source.md) — those `kuke create source` stored and
+those a team's declaration defined — with its address, ref, git identity and
+the teams (and defaults) that use it. A Source belongs to no team and has no
+clone path. **New source** is `kuke create source` (name, address, ref, git
+identity). A Source's page (`#/sources/<name>`) lists its uses; **Show
+contents** (`kuke source show`) fetches it and lists the roles and harnesses it
+offers, each with a **Default** toggle (`kuke team defaults set`), after which
+the page names the teams that inherit the defaults — they change only when
+reapplied; **Delete** is `kuke delete source`, refused while a default or a
+stored team uses the Source, with the uses named.
 
 Preview and apply are separate requests and each composes from scratch, so a
 branch may move between them; the apply result is authoritative.
@@ -1095,41 +1132,88 @@ A declaration travels as a YAML string in both directions; only plans,
 summaries and results are JSON. Every route that fetches from git is a `POST`
 and gets the creation timeout.
 
-| Method | Path                               | Purpose                                                                                                  |
-| ------ | ---------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `GET`  | `/api/teams`                       | `{ "teams": [summary] }`: the teams of realm `default`.                                                  |
-| `GET`  | `/api/teams/{name}`                | `{ "summary", "document" }`: one team; `document` is the stored Team as YAML.                            |
-| `POST` | `/api/teams/preview`               | The plan of an add or an edit; writes nothing. Response `{ "plan" }`.                                    |
-| `POST` | `/api/teams`                       | Apply an add or an edit. Response `{ "plan", "result" }`.                                                |
-| `POST` | `/api/teams/{name}/reapply`        | Recompose a stored team (`kuke team apply NAME`). Response `{ "plan", "result" }`.                       |
-| `POST` | `/api/teams/{name}/delete`         | `kuke delete team`. Response `{ "deleted", "removed", "liveCells", "keptVolumes" }`.                     |
-| `GET`  | `/api/team-sources`                | `{ "sources", "defaultRoles", "defaultHarnesses" }`: every stored Source, and the `TeamDefaults`' lists. |
-| `POST` | `/api/team-sources`                | Create a Source (`kuke create source`). Body `{ "name", "url", "branch"/"tag"/"commit" }`.               |
-| `POST` | `/api/team-sources/{name}/inspect` | Fetch a source: `{ "source", "commit", "roles", "harnesses" }`, each item marked `default`.              |
-| `POST` | `/api/team-sources/{name}/delete`  | `kuke delete source`; `in_use` (409) while referenced.                                                   |
-| `GET`  | `/api/team-defaults`               | `{ "exists", "document" }`: the stored `TeamDefaults` as YAML.                                           |
-| `POST` | `/api/team-defaults`               | Body `{ "roles", "harnesses" }` (`kuke team defaults set`) or `{ "document" }` (a whole `TeamDefaults`). |
+| Method | Path                          | Purpose                                                                                                  |
+| ------ | ----------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/api/teams`                  | `{ "teams": [summary] }`: the teams of realm `default`.                                                  |
+| `GET`  | `/api/teams/{name}`           | `{ "summary", "document", "view", "form" }`: one team; `document` is the stored Team as YAML.            |
+| `POST` | `/api/teams/draft`            | What an add would start from, read without composing; writes nothing. See below.                         |
+| `POST` | `/api/teams/preview`          | The plan of an add or an edit; writes nothing. Response `{ "plan" }`.                                    |
+| `POST` | `/api/teams`                  | Apply an add or an edit. Response `{ "plan", "result" }`.                                                |
+| `GET`  | `/api/teams/{name}/export`    | `kuke team export NAME`: `{ "document" }`. `?hostFields=1` and `?explicit=1` are its two options.        |
+| `POST` | `/api/teams/{name}/reapply`   | Recompose a stored team (`kuke team apply NAME`). Response `{ "plan", "result" }`.                       |
+| `POST` | `/api/teams/{name}/delete`    | `kuke delete team`. Response `{ "deleted", "removed", "liveCells", "keptVolumes" }`.                     |
+| `GET`  | `/api/sources`                | `{ "sources", "defaultRoles", "defaultHarnesses" }`: every stored Source and the `TeamDefaults`' lists.  |
+| `POST` | `/api/sources`                | `kuke create source`. Body `{ "name", "url", "branch"/"tag"/"commit", "identity", "force" }`.            |
+| `POST` | `/api/sources/inspect`        | Fetch a Source that is not stored. Body `{ "url", "branch"/"tag"/"commit", "identity" }`.                |
+| `POST` | `/api/sources/{name}/inspect` | `kuke source show`: fetch a stored Source.                                                               |
+| `POST` | `/api/sources/{name}/delete`  | `kuke delete source`: `{ "deleted" }`; `in_use` (409) while referenced.                                  |
+| `GET`  | `/api/team-defaults`          | `{ "exists", "document" }`: the stored `TeamDefaults` as YAML.                                           |
+| `POST` | `/api/team-defaults`          | Body `{ "roles", "harnesses" }` (`kuke team defaults set`) or `{ "document" }` (a whole `TeamDefaults`). |
 
 - A team **summary** is `{ "name", "realm", "projectUrl", "projectRef",
 "roles", "rolesInherited", "harnesses", "harnessesInherited", "configs",
 "system" }`.
+- A team's **view** is the team as it composes, read without a fetch (the
+  stored team hydrated: every source with its address): `{ "project",
+"sources", "roles", "harnesses", "connectors", "tasks", "configs",
+"unresolved" }`. Each list is `{ "inherited", "items" }`; a source is
+  `{ "alias", "stored", "url", "ref", "clonePath", "identity", "declared" }`;
+  a task is one task Config `{ "role", "task", "config", "scope",
+"schedule", "status" }` with its `spec.schedule` and `status.schedule`.
+  `unresolved` says why a team whose sources do not resolve shows what is
+  stored instead. When the team cannot be read at all, `problem` says why and
+  `view` and `form` are absent.
+- A team's **form** is the part of the declaration the wizard edits, built
+  from the stored team: `{ "name", "project", "sources", "roles",
+"harnesses", "connectors" }`. `project` and each `sources` item are
+  `{ "alias", "stored", "url", "refKind", "ref", "clonePath", "identity" }`
+  (`url` makes it a definition, `identity` is a definition's git identity);
+  `sources` is `null` when the team lists none. `roles`, `harnesses` and
+  `connectors` are `{ "inherit", "items" }`: `inherit` leaves the list out of
+  the declaration (the defaults'). A role is `{ "name", "source", "path",
+"harness", "initialPath", "image", "tasks" }` and its `tasks` is
+  `{ "all", "items" }` — `all` selects every task the role declares, an
+  empty `items` none; a task is `{ "name", "schedule", "suspend", "args" }`,
+  `suspend` `false` (on), `true` (off) or `null` (the role's). The form is a
+  JSON model of its own, never a JSON-encoded Team.
+- The **draft** body is the Project step: `{ "name", "source", "branch" |
+"tag" | "commit", "identity", "useRepoFile", "declaration" }`, where
+  `source` is an address or a stored Source's name and `declaration` a pasted
+  `kuketeam.yaml`. It answers `{ "origin", "name", "form", "declaration",
+"sources", "notes" }`: `declaration` is the Team the add would compose as
+  YAML, which the browser sends back unchanged; each source is
+  `{ "alias", "stored", "url", "ref", "identity", "state", "have",
+"contents" }`, `state` being `stored`, `new`, `conflict` (`have` is the
+  stored address) or `missing`, and `contents` what the project offers.
 - The add/edit body is the CLI's inputs: `{ "name", "source", "branch" |
-"tag" | "commit", "useRepoFile", "roles", "harnesses", "declaration",
-"force" }`. With `source` it is `kuke create team NAME --source`
-  (`useRepoFile: false` is `--no-repo-file`, `declaration` is `-f`); with only
-  `declaration` it is `kuke team apply -f`, and `name`, when given, must match
-  the declaration's `metadata.name`. `roles` and `harnesses` are `null` to keep
-  the declaration's list or an array of `NAME` / `[NAME=]SOURCE:PATH` entries
-  that replaces it.
+"tag" | "commit", "identity", "useRepoFile", "roles", "harnesses",
+"declaration", "force", "form" }`. With `form`, the declaration is the form
+  applied to a base, keeping what the form does not model: for a new team the
+  base is the draft's `declaration` and the request is `kuke create team NAME
+--source … -f`; with no `declaration` the base is the stored team named
+  `name` and the request is `kuke team apply -f` (an edit keeps its project
+  and takes no `source`, `identity` or `force`). Without `form`, with
+  `source` it is `kuke create team NAME --source` (`useRepoFile: false` is
+  `--no-repo-file`, `declaration` is `-f`, `identity` is `--identity`); with
+  only `declaration` it is `kuke team apply -f`, and `name`, when given, must
+  match the declaration's `metadata.name`. `roles` and `harnesses` are `null`
+  to keep the declaration's list or an array of `NAME` /
+  `[NAME=]SOURCE:PATH` entries that replaces it.
 - A **plan** is `{ "command", "origin": {"kind","detail"}, "declaration",
 "sources", "pairs", "create", "rerender", "prune", "missingSecrets",
 "createSecrets", "notes" }`; a **result** is `{ "team", "resources",
 "pruned", "missingSecrets", "notes" }`.
 - A defaults change answers `{ "action", "inheriting" }`: the teams that need
-  a reapply to see it. A source create answers the same shape with `action`
-  `created`, an empty `inheriting` and `"discovered"` (what the Source offers);
-  a source delete answers `action: removed`.
-- A source is `{ "name", "url", "branch" | "tag" | "commit" }`.
+  a reapply to see it.
+- A stored Source in the list is `{ "name", "url", "branch" | "tag" |
+"commit", "identity", "usedBy", "defaultRoles", "defaultHarnesses" }`;
+  `usedBy` is `[{ "team", "as", "name" }]` (no `team` for the defaults), and
+  the two default lists are the ones this Source serves. A Source create
+  answers `{ "action", "source", "usedBy", "discovered" }`; an inspect answers
+  `{ "source", "commit", "roles", "harnesses" }`, each role with its
+  `tasks` (`{ "name", "schedule", "suspend", "args" }`) and each item marked
+  `default`. Git identities are named, never read: no route returns secret
+  data.
 
 Errors are `{ "error": { "code", "message" } }`: `not_found` (404) for a team,
 TeamDefaults or Source that is not stored; `already_exists` (409) for an add of

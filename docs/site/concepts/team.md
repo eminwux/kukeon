@@ -31,7 +31,13 @@ The commands that drive it:
   [`kuke delete team`](../cli/kuke-delete.md#teams) and
   [`kuke delete source`](../cli/kuke-delete.md#sources) are the generic verbs.
 
-The web UI's **Teams** page does the same through the same code: see
+The web UI does the same through the same code: **New team** is a wizard over
+`kuke create team` (project, other sources, roles and harnesses, tasks and
+schedules, credentials, review); a team's page shows its whole setup, each
+list marked declared or inherited; **Edit team** changes it — a task's
+schedule is switched on or off without YAML — with an **Edit as YAML** tab for
+the rest; **Export** is `kuke team export`; and the **Sources** page is
+`kuke create source`, `kuke source show` and `kuke delete source`. See
 [web server → Teams](https://github.com/eminwux/kukeon/blob/main/docs/web-server.md#teams).
 
 ## Where teams live
@@ -640,7 +646,9 @@ restarts, deletes or changes anything; fixes appear in the report as suggested
 commands.
 
 To turn sweeps on, edit the kuke team's stored declaration and apply it — on
-the web UI's Teams page (the Health page links it), or from the CLI:
+the web UI's **Edit team** screen of the kuke team (its page is linked from the
+Health page), where step Tasks and schedules switches the sweep on, or from the
+CLI:
 
 ```bash
 kuke get team kuke -o yaml > kuke.yaml
@@ -693,7 +701,7 @@ it on for both the interactive cell and the sweep:
    ```
 
 2. In the kuke team's declaration (`kuke get team kuke -o yaml > kuke.yaml`,
-   or the Teams page), give the role that secret, and tell the sweep where to
+   or the kuke team's **Edit as YAML** tab), give the role that secret, and tell the sweep where to
    file if it should:
 
    ```yaml
@@ -711,7 +719,8 @@ it on for both the interactive cell and the sweep:
              args: "--file-issues <owner>/<repo>"
    ```
 
-3. Run `kuke team apply -f kuke.yaml` (or Apply on the Teams page).
+3. Run `kuke team apply -f kuke.yaml` (or Preview, then Apply, on the Edit as
+   YAML tab).
 
 `needs.secrets` in a team's role entry adds runtime secrets to a role for that team
 only; the role itself still requires none. `gh-token` enables the

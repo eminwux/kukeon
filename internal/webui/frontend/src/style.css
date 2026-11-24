@@ -722,6 +722,21 @@ a.subtle-button { display: inline-flex; align-items: center; min-height: var(--t
 .team-picker legend { padding: 0 4px; }
 .team-source { margin: 8px 0 12px; display: grid; gap: 8px; }
 .team-plan h3 { margin: 12px 0 4px; }
+/* The team wizard, the team page and the export screen (#1644). */
+.wizard-steps { display: flex; flex-wrap: wrap; gap: 4px 12px; list-style: none; margin: 0 0 12px; padding: 0 0 8px; border-bottom: 1px solid var(--line); }
+.wizard-steps .text-button { text-decoration: none; color: var(--muted); }
+.wizard-steps .text-button[aria-current="step"] { color: var(--accent); font-weight: 600; text-decoration: underline; }
+.wizard-step { display: grid; gap: 12px; }
+.wizard-choice { border: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.wizard-choice legend { padding: 0 0 4px; }
+.wizard-group, .wizard-role { border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; display: grid; gap: 8px; }
+.wizard-source legend .badge, .team-origin { margin-left: 6px; }
+.team-state-conflict, .team-state-missing { color: var(--status-warning); background: var(--status-warning-bg); border-color: var(--status-warning-line); }
+.team-origin-declared { color: var(--accent); border-color: var(--accent); }
+.team-tasks { display: grid; gap: 12px; }
+.team-task h3 { margin: 0 0 6px; font-size: var(--font-md); display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.team-export { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 60vh; overflow: auto; border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; font-size: var(--font-sm); }
+.repository-source { grid-column: 1 / -1; margin-bottom: 8px; }
 .cidr-error { color: var(--status-error); }
 /* Workbench | Manage switch (#1635): two links in a segmented pair; the current side uses the selection tokens. */
 .toolbar .view-switch { flex: none; flex-wrap: nowrap; gap: 0; padding: 2px; border: 1px solid var(--line); border-radius: 7px; background: var(--code); }

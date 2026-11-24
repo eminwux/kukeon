@@ -15,7 +15,7 @@ test("viewOf puts terminals, cell pages and New Cell in Workbench", () => {
 });
 
 test("viewOf puts every other route in Manage", () => {
-  for (const view of ["dashboard", "realms", "spaces", "stacks", "cells", "blueprints", "configs", "volumes", "secrets", "connectors", "teams", "images", "daemon", "daemon-logs", "health", "new-config", "new-secret"]) {
+  for (const view of ["dashboard", "realms", "spaces", "stacks", "cells", "blueprints", "configs", "volumes", "secrets", "connectors", "teams", "new-team", "sources", "images", "daemon", "daemon-logs", "health", "new-config", "new-secret"]) {
     assert.equal(viewOf(route(view)), "manage", view);
   }
   assert.equal(viewOf(route("resource", ["r"])), "manage");

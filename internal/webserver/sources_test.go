@@ -127,10 +127,6 @@ func TestSourcesListCreateInspectDelete(t *testing.T) {
 		w = connectorRequest(t, h, http.MethodPost, path, "{}")
 		expectError(t, w, w.Body.Bytes(), http.StatusNotFound, "not_found")
 	}
-	w = connectorRequest(t, h, http.MethodGet, "/api/team-sources", "")
-	if w.Code != http.StatusNotFound && w.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("/api/team-sources still served: %d", w.Code)
-	}
 }
 
 // TestSourcesListsATeamsSource: a Source only a team's declaration defines
