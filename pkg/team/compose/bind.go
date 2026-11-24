@@ -452,10 +452,7 @@ func bindRepos(plan *pairPlan, cc *api.CellConfigDoc, team *config.Team) error {
 		if source.Name == projectSlot && team.Spec.ProjectSource != nil && team.Spec.ProjectSource.Tag != "" {
 			ref = "refs/tags/" + team.Spec.ProjectSource.Tag
 		}
-		url := source.URL
-		if strings.HasPrefix(url, "github.com/") {
-			url = "https://" + url
-		}
+		url := gitcred.CloneURL(source.URL)
 		cc.Spec.Repos[slot] = api.CellConfigRepoFill{
 			URL: url, Branch: source.Branch, Ref: ref, Git: repoGit(source.Git),
 		}
@@ -515,11 +512,7 @@ func sshSources(sources []config.Source) []string {
 		if source.ClonePath == "" || (source.Git != nil && source.Git.Credential != nil) {
 			continue
 		}
-		url := source.URL
-		if strings.HasPrefix(url, "github.com/") {
-			url = "https://" + url
-		}
-		if gitcred.ParseRemote(url).Transport == gitcred.TransportSSH {
+		if gitcred.ParseRemote(gitcred.CloneURL(source.URL)).Transport == gitcred.TransportSSH {
 			names = append(names, source.Name)
 		}
 	}

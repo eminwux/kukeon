@@ -27,6 +27,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/gitcred"
 	"github.com/eminwux/kukeon/internal/team/gitremote"
 	"github.com/eminwux/kukeon/pkg/team/config"
 )
@@ -113,10 +114,7 @@ func fetchSources(
 // fetchSource shallow-fetches one source into dir and returns the commit it
 // checked out.
 func fetchSource(ctx context.Context, source config.Source, dir string) (string, error) {
-	url := source.URL
-	if strings.HasPrefix(url, "github.com/") {
-		url = "https://" + url
-	}
+	url := gitcred.CloneURL(source.URL)
 	ref := source.Commit
 	if source.Branch != "" {
 		ref = "refs/heads/" + source.Branch

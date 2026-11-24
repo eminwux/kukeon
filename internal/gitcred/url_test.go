@@ -76,3 +76,64 @@ func TestRemoteURLs(t *testing.T) {
 		t.Errorf("HTTPURL = %q", got)
 	}
 }
+
+func TestCloneURL(t *testing.T) {
+	tests := []struct{ raw, want string }{
+		{"github.com/acme/app", "https://github.com/acme/app"},
+		{"git.example.org/team/app", "https://git.example.org/team/app"},
+		{"https://GitHub.com/acme/app/", "https://GitHub.com/acme/app/"},
+		{"ssh://git@host:2222/acme/app.git", "ssh://git@host:2222/acme/app.git"},
+		{"git@github.com:acme/app.git", "git@github.com:acme/app.git"},
+		{"acme/app", "acme/app"},
+		{"./local.dir/app", "./local.dir/app"},
+		{"github.com/", "github.com/"},
+		{"/srv/git/app.git", "/srv/git/app.git"},
+	}
+	for _, tt := range tests {
+		if got := gitcred.CloneURL(tt.raw); got != tt.want {
+			t.Errorf("CloneURL(%q) = %q, want %q", tt.raw, got, tt.want)
+		}
+	}
+}
+
+func TestSameRepository(t *testing.T) {
+	const scp = "git@github.com:acme/app.git"
+	tests := []struct {
+		raw  string
+		want bool
+	}{
+		{"github.com/acme/app", true},
+		{"git.example.org/team/app", false},
+		{"https://GitHub.com/acme/app/", true},
+		{"ssh://git@host:2222/acme/app.git", false},
+		{"acme/app", false},
+		{"ssh://deploy@github.com:22/acme/app", true},
+		{"https://github.com/acme/other", false},
+	}
+	for _, tt := range tests {
+		if got := gitcred.SameRepository(tt.raw, scp); got != tt.want {
+			t.Errorf("SameRepository(%q, %q) = %v, want %v", tt.raw, scp, got, tt.want)
+		}
+	}
+	if !gitcred.SameRepository("/srv/git/app", "/srv/git/app") || gitcred.SameRepository("/srv/a", "/srv/b") {
+		t.Error("local paths compare as written")
+	}
+}
+
+func TestShortForm(t *testing.T) {
+	tests := []struct{ raw, want string }{
+		{"git@github.com:eminwux/agents", "github.com/eminwux/agents"},
+		{"https://github.com/eminwux/kukeon", "github.com/eminwux/kukeon"},
+		{"github.com/eminwux/kukeon", "github.com/eminwux/kukeon"},
+		{"https://git.example.org/team/app.git/", "git.example.org/team/app.git"},
+		{"ssh://git@host.example:2222/acme/app.git", "ssh://git@host.example:2222/acme/app.git"},
+		{"deploy@github.com:acme/app", "deploy@github.com:acme/app"},
+		{"http://git.local/r.git", "http://git.local/r.git"},
+		{"/srv/git/app", "/srv/git/app"},
+	}
+	for _, tt := range tests {
+		if got := gitcred.ShortForm(tt.raw); got != tt.want {
+			t.Errorf("ShortForm(%q) = %q, want %q", tt.raw, got, tt.want)
+		}
+	}
+}

@@ -71,3 +71,22 @@ func TestGitCancellationDoesNotWaitForTransport(t *testing.T) {
 		t.Fatal("Git/transport ignored cancellation")
 	}
 }
+
+// TestURLShortForm is #1643 AC8: host/owner/repo is an address for any host
+// whose name has a dot; what URL rejected before stays rejected.
+func TestURLShortForm(t *testing.T) {
+	for raw, want := range map[string]string{
+		"github.com/acme/app":      "https://github.com/acme/app",
+		"git.example.org/team/app": "https://git.example.org/team/app",
+	} {
+		got, err := URL(raw)
+		if err != nil || got != want {
+			t.Errorf("URL(%q) = %q, %v; want %q", raw, got, err, want)
+		}
+	}
+	for _, raw := range []string{"acme/app", "github.com/", "localhost/acme/app", "./a.b/c"} {
+		if _, err := URL(raw); err == nil {
+			t.Errorf("URL(%q) accepted", raw)
+		}
+	}
+}

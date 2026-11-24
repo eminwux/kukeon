@@ -190,3 +190,60 @@ func (t credentialTarget) matches(r Remote) (int, bool) {
 	}
 	return 0, false
 }
+
+// CloneURL expands the short form of an address, `host.tld/owner/repo` (a
+// first path segment that names a host: it contains a dot and no colon or
+// user), to `https://host.tld/owner/repo`, the URL git clones. Any other
+// address — scp-like, ssh://, http(s)://, a local path — is returned as it is
+// (#1643, D9). The transport of a clone that has a stored credential follows
+// the credential, not this URL.
+func CloneURL(raw string) string {
+	if shortHost(raw) == "" {
+		return raw
+	}
+	return "https://" + raw
+}
+
+// shortHost returns the host of a short-form address, or "" when raw is not
+// one.
+func shortHost(raw string) string {
+	if raw == "" || strings.Contains(raw, "://") || strings.HasPrefix(raw, ".") {
+		return ""
+	}
+	host, rest, ok := strings.Cut(raw, "/")
+	if !ok || strings.Trim(rest, "/") == "" || !strings.Contains(host, ".") ||
+		strings.ContainsAny(host, ":@") || strings.ContainsFunc(raw, unsafeHostRune) {
+		return ""
+	}
+	return host
+}
+
+// SameRepository reports whether two addresses name the same repository: the
+// same host (case-insensitive) and path, whatever the transport, user or port,
+// with a `.git` suffix and a trailing slash ignored. An address that is not a
+// remote (a local path) is only the same as an identical one.
+func SameRepository(a, b string) bool {
+	ra, rb := ParseRemote(CloneURL(a)), ParseRemote(CloneURL(b))
+	if ra.Transport == TransportOther || rb.Transport == TransportOther {
+		return strings.TrimSpace(a) == strings.TrimSpace(b)
+	}
+	return ra.Host == rb.Host && repositoryPath(ra.Path) == repositoryPath(rb.Path)
+}
+
+func repositoryPath(p string) string {
+	return strings.TrimSuffix(strings.Trim(p, "/"), ".git")
+}
+
+// ShortForm writes an address as `host/path` — the form a kuketeam.yaml uses
+// for any host — when that loses nothing: an ssh or https remote with no port
+// and no user other than git. Any other address is returned as it is.
+func ShortForm(raw string) string {
+	remote := ParseRemote(CloneURL(raw))
+	switch {
+	case remote.Transport != TransportSSH && remote.Transport != TransportHTTPS,
+		remote.Port != 0, remote.User != "" && remote.User != defaultSSHUser,
+		!strings.Contains(remote.Host, "."), strings.Trim(remote.Path, "/") == "":
+		return raw
+	}
+	return remote.Host + "/" + strings.Trim(remote.Path, "/")
+}

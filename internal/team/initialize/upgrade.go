@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/eminwux/kukeon/internal/gitcred"
 	"github.com/eminwux/kukeon/pkg/team/config"
 	"gopkg.in/yaml.v3"
 )
@@ -140,7 +141,7 @@ func repinKukeon(sources []config.Source, pin config.Source, what string) (bool,
 		if s.Name != config.KukeonSourceName {
 			continue
 		}
-		if s.URL != config.KukeonSourceURL {
+		if !gitcred.SameRepository(s.URL, config.KukeonSourceURL) {
 			notes = append(notes, fmt.Sprintf(
 				"%s: source kukeon points at %s, not %s; left at %s",
 				what, s.URL, config.KukeonSourceURL, s.Revision()))

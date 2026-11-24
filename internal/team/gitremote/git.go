@@ -28,6 +28,8 @@ import (
 	"syscall"
 	"time"
 	"unicode"
+
+	"github.com/eminwux/kukeon/internal/gitcred"
 )
 
 const (
@@ -45,9 +47,8 @@ func URL(raw string) (string, error) {
 	if raw == "" || strings.ContainsFunc(raw, invalidURLRune) || strings.ContainsAny(raw, "\\\"'`?#") {
 		return "", errURL
 	}
-	if strings.HasPrefix(raw, "github.com/") {
-		raw = "https://" + raw
-	}
+	// The short form host.tld/owner/repo is an HTTPS address (#1643, D9).
+	raw = gitcred.CloneURL(raw)
 	if strings.Contains(raw, "://") {
 		return networkURL(raw)
 	}
