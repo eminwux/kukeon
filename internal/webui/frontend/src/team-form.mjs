@@ -299,9 +299,22 @@ export function rolesErrors(form) {
     if (!validName(role.name)) errors.push(`Role ${role.name || role.path}: a name is lowercase letters, digits, dots and hyphens.`);
     else if (names.has(role.name)) errors.push(`Role ${role.name} is selected twice; rename one.`);
     names.add(role.name);
-    if (trimmed(role.initialPath) && !trimmed(role.initialPath).startsWith("/")) errors.push(`Role ${role.name}: the initial path is absolute.`);
+    if (!initialPathValid(trimmed(role.initialPath))) errors.push(`Role ${role.name}: the initial path is $HOME, $HOME/<directory> or a clean absolute path (letters, digits, _, ., / and -).`);
   }
   return errors;
+}
+
+// safePath mirrors config.SafePath: a clean absolute Unix path of letters,
+// digits, _, ., / and -.
+function safePath(value) {
+  return /^\/[A-Za-z0-9_./-]+$/.test(value) && value.slice(1).split("/").every(part => part && part !== "." && part !== "..");
+}
+
+// initialPathValid mirrors config.validateInitialPath: empty, $HOME,
+// $HOME/<subdirectory>, / or a clean absolute path. kukeond expands $HOME.
+export function initialPathValid(value) {
+  if (value === "" || value === "$HOME" || value === "/") return true;
+  return safePath(value.startsWith("$HOME/") ? value.slice("$HOME".length) : value);
 }
 
 // tasksErrors lists the problems of the Tasks step.

@@ -34,6 +34,7 @@ export function withTask(form: TeamForm, roleIndex: number, name: string, patch:
 export function withAllTasks(form: TeamForm, roleIndex: number): TeamForm;
 export function cronErrors(value: string | undefined): string[];
 export function rolesErrors(form: TeamForm | undefined): string[];
+export function initialPathValid(value: string): boolean;
 export function tasksErrors(form: TeamForm | undefined): string[];
 export function stepErrors(key: string, state: WizardState): string[];
 export function withConnector(form: TeamForm, name: string, patch: { method?: string; identity?: string }, inherited?: Record<string, { method?: string; identity?: string }>): TeamForm;
