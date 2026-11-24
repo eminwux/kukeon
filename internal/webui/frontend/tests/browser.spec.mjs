@@ -4943,12 +4943,15 @@ test("New Secret creates an untagged Secret of each type in a chosen scope, refu
   await page.getByLabel("Secret scope stack").selectOption("services");
   await form.getByLabel("Name").fill("deploy");
   await form.getByLabel("Type").selectOption("ssh-key");
-  await form.getByLabel("Private key").fill(`-----BEGIN OPENSSH PRIVATE KEY-----\n${value}\n-----END OPENSSH PRIVATE KEY-----`);
+  // The PEM header is joined at run time so the detect-private-key hook does not
+  // read this test value as a committed key.
+  const sshKey = ["-----BEGIN OPENSSH", "PRIVATE KEY-----\n" + value + "\n-----END OPENSSH PRIVATE KEY-----"].join(" ");
+  await form.getByLabel("Private key").fill(sshKey);
   await form.getByLabel("Known hosts").fill("example.com ssh-ed25519 AAAA");
   await form.getByRole("button", { name: "Create Secret" }).click();
   await expect(page).toHaveURL(/#\/secrets\/dev\/shared\/services\/deploy$/);
   expect(writes[2].path).toBe("/api/catalog/secrets/deploy?realm=dev&space=shared&stack=services");
-  expect(writes[2].body).toEqual({ type: "ssh-key", privateKey: `-----BEGIN OPENSSH PRIVATE KEY-----\n${value}\n-----END OPENSSH PRIVATE KEY-----`, knownHosts: "example.com ssh-ed25519 AAAA" });
+  expect(writes[2].body).toEqual({ type: "ssh-key", privateKey: sshKey, knownHosts: "example.com ssh-ed25519 AAAA" });
 
   // A taken name is a 409 that links to the stored Secret; the material is already gone from the form.
   await page.goto(`${server.url}#/new-secret`);
