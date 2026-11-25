@@ -70,7 +70,7 @@ See [Concepts → Container](../concepts/container.md) for what a container is.
 | `spaceId`               | string                     | yes      | Space that owns the container                                                                                                                                                                                                       |
 | `stackId`               | string                     | yes      | Stack that owns the container                                                                                                                                                                                                       |
 | `cellId`                | string                     | yes      | Cell that owns the container                                                                                                                                                                                                        |
-| `root`                  | bool                       | no       | Mark this as the cell's root container (owns the network namespace)                                                                                                                                                                 |
+| `root`                  | bool                       | no       | Mark this as the cell's root container (owns the network namespace). The root's process starts **before** the CNI network attach and must stay alive for the cell's lifetime — see [Root container](#root-container).               |
 | `image`                 | string                     | yes      | OCI image reference. Kukeon passes this to containerd's image pull.                                                                                                                                                                 |
 | `command`               | string                     | no       | Command to run. If omitted, the image's `ENTRYPOINT` is used.                                                                                                                                                                       |
 | `args`                  | array of string            | no       | Arguments. Combined with `command`.                                                                                                                                                                                                 |
@@ -93,6 +93,21 @@ See [Concepts → Container](../concepts/container.md) for what a container is.
 
 !!! warning "Fields marked reserved"
 `ports` is accepted by the schema today but its semantics are still being designed. Values round-trip (you can read back what you applied), but the controller does not act on them. See [GitHub Issues](https://github.com/eminwux/kukeon/issues) for the backlog.
+
+### Root container
+
+A container with `root: true` (or the one named by the cell's `spec.rootContainerId`) is the cell's namespace anchor. Its task starts first, and the CNI attach then targets the network namespace of its PID. Two consequences:
+
+- The root has **no network at startup**. Anything that needs the network when it starts must not be the root.
+- If the root exits, the cell's network namespace goes with it. A root that exits before the attach fails the cell start with:
+
+  ```
+  failed to attach root container <id> to network: plugin type="bridge" failed (add): failed to open netns "/proc/<pid>/ns/net": no such file or directory
+  ```
+
+So the root must be a long-lived pause-style process (`sleep infinity`, kukepause). Workloads — anything that needs the network at startup, or that can exit — belong in non-root containers, which start after the attach and join the root's namespaces.
+
+The easy default is to mark no container `root: true`: the daemon then builds the root itself, a kukepause process on `docker.io/library/busybox:latest` with the `kukepause` binary bind-mounted in. [`docs/examples/hello-world.yaml`](https://github.com/eminwux/kukeon/blob/main/docs/examples/hello-world.yaml) is written that way.
 
 ### Restart policy
 
@@ -243,15 +258,17 @@ A `devices:` entry whose host node does not exist fails container create with a 
 
 Each entry in `spec.secrets` references a credential the daemon resolves at apply time. Only the reference is persisted — the resolved value never appears in `kuke get -o yaml`, in object status, or in daemon logs.
 
-| Field       | Type                 | Required        | Description                                                                                                                                                                                        |
-| ----------- | -------------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`      | string               | yes             | Environment-variable name (default mode) or basename of the mounted secret file when `mountPath` is set                                                                                            |
-| `fromFile`  | string               | one of required | Absolute host path the daemon reads at apply time. Missing files produce a clear error.                                                                                                            |
-| `fromEnv`   | string               | one of required | Name of an environment variable set on the daemon host. Missing env vars produce a clear error.                                                                                                    |
-| `secretRef` | `ContainerSecretRef` | one of required | Reference to a daemon-managed `kind: Secret` by name and scope. Resolved from the scope's secrets tree at container start; a missing Secret produces a clear error naming the expected scope path. |
-| `mountPath` | string               | no              | Absolute path inside the container. When set, the secret is staged with mode `0400` and bind-mounted read-only instead of being injected as an env var.                                            |
+| Field       | Type                 | Required        | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ----------- | -------------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`      | string               | yes             | Environment-variable name (default mode) or basename of the mounted secret file when `mountPath` is set                                                                                                                                                                                                                                                                                                                                                    |
+| `fromFile`  | string               | one of required | Absolute path the daemon reads at apply time. It resolves in the **kukeond process's mount namespace**, not the operator's shell: only host paths bind-mounted into the `kukeond` cell are visible there. On a standard install the operator-relevant ones are `/opt/kukeon` (run path), `/run/kukeon` (socket directory) and `/etc/kukeon` (configuration directory); the rest are containerd, CNI and cgroup paths. Missing files produce a clear error. |
+| `fromEnv`   | string               | one of required | Name of an environment variable in the **kukeond process environment** (set when the daemon cell is created). An `export` in the operator's shell does not reach it. Missing env vars produce a clear error.                                                                                                                                                                                                                                               |
+| `secretRef` | `ContainerSecretRef` | one of required | Reference to a daemon-managed `kind: Secret` by name and scope. Resolved from the scope's secrets tree at container start; a missing Secret produces a clear error naming the expected scope path.                                                                                                                                                                                                                                                         |
+| `mountPath` | string               | no              | Absolute path inside the container. When set, the secret is staged with mode `0400` and bind-mounted read-only instead of being injected as an env var.                                                                                                                                                                                                                                                                                                    |
 
 Exactly one of `fromFile` / `fromEnv` / `secretRef` must be set.
+
+`fromFile` and `fromEnv` are resolved inside kukeond, which runs in the `kuke-system` realm's `kukeond` cell. To supply a value from the operator's side, store it as a daemon-managed [`kind: Secret`](secret.md) and reference it with `secretRef`.
 
 `secretRef` carries the referenced Secret's `name` plus its scope coordinates, following the same contract as `kind: Secret` metadata: `realm` is always required, and a deeper coordinate (`space` → `stack` → `cell`) may only be set when every shallower one is. A container may reference a Secret owned by a different scope — e.g. a workload in `default` reading a `kuke-system`-scoped token. Example:
 
@@ -392,12 +409,12 @@ repos:
 
 `spec.tty` configures shell-UX for the kuketty wrapper. Has no effect unless `spec.attachable` is `true` — setting any `tty` field with `attachable: false` is rejected at apply time.
 
-| Field      | Type                | Required | Description                                                                                                                                                                         |
-| ---------- | ------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `prompt`   | string              | no       | Literal prompt expression stamped onto the wrapped shell's prompt. Empty leaves the shell's own prompt untouched.                                                                   |
-| `onInit`   | array of `TtyStage` | no       | Init script stages, run in declaration order (see [TtyStage](#ttystage)).                                                                                                           |
-| `logFile`  | string              | no       | Operator override for the in-container path the kuketty wrapper writes its log output to. Empty (default) lands at `/run/kukeon/tty/kuketty.log` inside the bind mount.             |
-| `logLevel` | string              | no       | Verbosity of the kuketty wrapper's own log output: `debug`, `info`, `warn`, or `error`. Empty inherits the daemon-wide default (`info`). Unknown values are rejected at apply time. |
+| Field      | Type                | Required | Description                                                                                                                                                                                                                                                                                      |
+| ---------- | ------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `prompt`   | string              | no       | Literal prompt expression stamped onto the wrapped shell's prompt. The value is exported verbatim as `PS1` (`export PS1=<prompt>`), so it must be shell-quoted when it contains spaces or shell metacharacters: `"'claude> '"`, not `"claude> "`. Empty leaves the shell's own prompt untouched. |
+| `onInit`   | array of `TtyStage` | no       | Init script stages, run in declaration order (see [TtyStage](#ttystage)).                                                                                                                                                                                                                        |
+| `logFile`  | string              | no       | Operator override for the in-container path the kuketty wrapper writes its log output to. Empty (default) lands at `/run/kukeon/tty/kuketty.log` inside the bind mount.                                                                                                                          |
+| `logLevel` | string              | no       | Verbosity of the kuketty wrapper's own log output: `debug`, `info`, `warn`, or `error`. Empty inherits the daemon-wide default (`info`). Unknown values are rejected at apply time.                                                                                                              |
 
 #### TtyStage
 
@@ -416,7 +433,7 @@ volumes:
     # runOn: create stages below require a persistent writable mount so
     # their side effects survive container recreate.
 tty:
-  prompt: "claude> "
+  prompt: "'claude> '"
   onInit:
     - script: echo "ready" # runOn defaults to start — runs on every boot
     - script: ./bootstrap.sh

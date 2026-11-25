@@ -1,6 +1,6 @@
 # Kukeon for AI Agents: A Proposal for Agent-Native Orchestration
 
-**Status:** Proposal / discussion draft
+**Status:** Historical. Written before `v0.4.0` and kept for reference; it is not a roadmap. [Section 9](#9-status-as-of-v050) records what shipped and what was dropped.
 **Target:** `kukeon` project, post-`v0.1.0`
 **Audience:** project maintainer, contributors, early adopters running agentic workloads
 
@@ -406,19 +406,19 @@ Whether to take the bet is the maintainer's call. This document is written to ma
 
 ## 9. Status as of v0.5.0
 
-The proposal above was written before v0.4.0. Most of P0 and P1 has since shipped; P2 has not been started. This section reconciles each section-4 promise with what's in the tree today so the proposal can be read as a status document rather than a forecast.
+The proposal above was written before v0.4.0. Most of P0 and P1 has since shipped; P2 was dropped. This section reconciles each section-4 promise with what's in the tree today so the proposal can be read as a status document rather than a forecast.
 
-| §   | Item                                              | Priority | Status                                    |
-| --- | ------------------------------------------------- | -------- | ----------------------------------------- |
-| 4.1 | Volume mounts on Container                        | P0       | **Shipped** — `v0.4.0`                    |
-| 4.2 | Security fields on Container                      | P0       | **Shipped** — `v0.4.0`                    |
-| 4.3 | Isolation-envelope inheritance from Space         | P1       | **Shipped** — `v0.4.0`                    |
-| 4.4 | Network policy on Space                           | P1       | **Shipped** — `v0.4.0`                    |
-| 4.5 | `Session` kind                                    | P1       | **Deferred** — closed wontfix             |
-| 4.6 | Scoped credential injection                       | P1       | **Shipped** — `v0.4.0`                    |
-| 4.7 | Capability budgets on Session                     | P2       | **Not started**                           |
-| 4.8 | Causal audit trail                                | P2       | **Not started**                           |
-| 4.9 | Approval gates                                    | P2       | **Not started**                           |
+| §   | Item                                      | Priority | Status                                       |
+| --- | ----------------------------------------- | -------- | -------------------------------------------- |
+| 4.1 | Volume mounts on Container                | P0       | **Shipped** — `v0.4.0`                       |
+| 4.2 | Security fields on Container              | P0       | **Shipped** — `v0.4.0`                       |
+| 4.3 | Isolation-envelope inheritance from Space | P1       | **Shipped** — `v0.4.0`                       |
+| 4.4 | Network policy on Space                   | P1       | **Shipped** — `v0.4.0`                       |
+| 4.5 | `Session` kind                            | P1       | **Deferred** — closed wontfix                |
+| 4.6 | Scoped credential injection               | P1       | **Shipped** — `v0.4.0`; stored secrets since |
+| 4.7 | Capability budgets on Session             | P2       | **Dropped** — closed as not planned          |
+| 4.8 | Causal audit trail                        | P2       | **Dropped** — closed as not planned          |
+| 4.9 | Approval gates                            | P2       | **Dropped** — closed as not planned          |
 
 ### Per-item detail
 
@@ -432,9 +432,9 @@ The proposal above was written before v0.4.0. Most of P0 and P1 has since shippe
 
 **4.5 — `Session` kind (P1).** [Issue #46](https://github.com/eminwux/kukeon/issues/46) closed as `wontfix`. The original proposal had `Session` carry lifetime, `onEnd.persist`, and budget enforcement in one kind. In practice, lifetime and persist semantics ended up better served by `kuke apply` + explicit teardown plus parameterized cell profiles ([#358](https://github.com/eminwux/kukeon/issues/358), shipped), and the budget/audit/approval pieces (4.7–4.9) are large enough to deserve their own kinds rather than overloading one. A dedicated lifetime/budget primitive may return in a later milestone if demand justifies it.
 
-**4.6 — Scoped credential injection (P1).** Container spec has `secrets: [{name, fromFile|fromEnv, mountPath?}]`. Values are mounted as env vars or files at runtime and never written into status or audit logs. The external-broker integration outlined as the extended (P2-ish) variant is not built; secrets are sourced from the host filesystem or host env today.
+**4.6 — Scoped credential injection (P1).** Container spec has `secrets: [{name, fromFile|fromEnv|secretRef, mountPath?}]`. Values are mounted as env vars or files at runtime and never written into status or audit logs. Since `v0.4.0`, daemon-stored secrets (`kind: Secret`, referenced with `secretRef`) and stored git credentials have shipped — see [Manifest Reference → Secret](../manifests/secret.md) and the [git credentials guide](../guides/git-credentials.md) — next to the original `fromFile` / `fromEnv` sources. The external-broker integration outlined as the extended (P2-ish) variant is not built.
 
-**4.7–4.9 — P2 items.** Capability budgets, causal audit trail, and approval gates have no tracking issues open and no code on disk. They were deferred at proposal time as "the agent-native category bet" — opt-in, ambitious, and explicitly optional for kukeon's homelab/VPS user base. Reopening this work is gated on demand from real agent operators using the v0.5.0 substrate.
+**4.7–4.9 — P2 items (dropped).** Capability budgets, causal audit trail, and approval gates were planned as the AgentRun epic ([#503](https://github.com/eminwux/kukeon/issues/503)), which was closed as not planned. There is no code for them on disk.
 
 ### What this means for v1.0
 

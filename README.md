@@ -100,7 +100,10 @@ Kukeon is useful right now as a single-host runtime for AI coding agents:
 - **Run Claude Code in an isolated cell** — the canonical first workflow, from zero to a live prompt. → See [docs/site/guides/run-claude-code.md](docs/site/guides/run-claude-code.md).
 - **Run one-shot agent jobs from a `CellBlueprint`** — parametrized prompts driven with `kuke run --from-blueprint`.
 - **Define repeatable agent environments** with `CellBlueprint` + `CellConfig`.
-- **Compose agent teams** once one cell isn't enough: `kuke team init` applies the kukeon operator team, and `kuke create team .` composes a project's team from its committed `kuketeam.yaml` (or `kuke create team NAME --source ADDRESS` from a Git remote). Each role × harness pair becomes a `CellConfig` against a shared `CellBlueprint` in kukeond, which stores the team itself as a `Team` document and the repositories it reads as `Source` documents (`kuke create source`) — manage them with `kuke team apply`, `kuke team export`, `kuke get team`, `kuke get sources` and `kuke delete team`, or from the web UI's Teams and Sources pages; nothing starts until you launch it. → See [docs/site/concepts/team.md](docs/site/concepts/team.md), [`kuke team`](docs/site/cli/kuke-team.md), [`kuke team init`](docs/site/cli/kuke-team-init.md), and [`kuke create team`](docs/site/cli/kuke-create.md#kuke-create-team).
+- **Compose agent teams** once one cell isn't enough: `kuke team init` applies the `kuke` team (the operator's reserved system team, whose one role is `majordomo`), and `kuke create team .` composes a project's team from its committed `kuketeam.yaml` (or `kuke create team NAME --source ADDRESS` from a Git remote). Each role × harness pair becomes a `CellConfig` against a shared `CellBlueprint` in kukeond, which stores the team itself as a `Team` document and the repositories it reads as `Source` documents (`kuke create source`) — manage them with `kuke team apply`, `kuke team export`, `kuke get team`, `kuke get sources` and `kuke delete team`, or from the web UI's Teams and Sources pages; nothing starts until you launch it. → See [docs/site/concepts/team.md](docs/site/concepts/team.md), [`kuke team`](docs/site/cli/kuke-team.md), [`kuke team init`](docs/site/cli/kuke-team-init.md), and [`kuke create team`](docs/site/cli/kuke-create.md#kuke-create-team).
+- **Use the web UI** — `kuke serve` runs a local browser UI for the hierarchy, cell lifecycle, cell terminals, daemon logs, and the Teams and Sources pages. → See [`kuke serve`](docs/site/cli/kuke-serve.md).
+- **Run a `CellConfig` on a schedule** — a Config with `spec.schedule` makes kukeond start a fresh cell from it on a cron schedule. → See [`spec.schedule`](docs/site/manifests/config.md#specschedule-object-optional).
+- **Ask majordomo** — the `kuke` team's agent that knows kukeon: it diagnoses problems, and its read-only health sweep (suspended until you turn it on) triages kukeond's health digest into a stored report. → See [The majordomo health sweep](docs/site/concepts/team.md#the-majordomo-health-sweep).
 - **Operate a lightweight single-host agent runtime** without Kubernetes.
 
 It is also a good fit beyond agents: if you have outgrown `docker compose` but don't want to stand up a Kubernetes cluster, kukeon gives a single Linux host an explicit `Realm → Space → Stack → Cell → Container` hierarchy — one CNI network per space, one cgroup subtree per layer, no distributed control plane. Homelab and VPS users, and systems engineers who prefer containerd over Docker, are first-class audiences.
@@ -110,9 +113,9 @@ It is also a good fit beyond agents: if you have outgrown `docker compose` but d
 **Your agents, your machines, your rules.** SaaS agent sandboxes (E2B, Daytona, Modal) force your agents to run on their cloud. Kukeon runs them on yours — a cloud VM, a homelab, a single Linux box with containerd. No vendor lock-in, no data leaving your infrastructure, no credit card.
 
 - **Sovereign** — every byte of agent state lives on hosts you own
-- **Declarative** — Session + Interactive + onEnd.persist as first-class YAML
+- **Declarative** — `CellBlueprint`/`CellConfig`, `Team`, and the realm-to-container manifests as first-class YAML
 - **Isolated** — realm/space/cell backed by real Linux primitives (containerd namespaces, CNI networks, cgroups)
-- **Self-hosted** — no cluster, no etcd, no scheduler, no SaaS
+- **Self-hosted** — no cluster, no etcd, no Kubernetes-style scheduler placing workloads across nodes, no SaaS
 - **Transparent** — inspect what the daemon did with `ctr`, `ip link`, `ls /sys/fs/cgroup`
 - **Coexists with Docker** — kukeon drives the system containerd under its own `*.kukeon.io` namespaces; an existing Docker install on the same host is untouched. → See the [FAQ](docs/site/faq.md).
 
@@ -125,6 +128,7 @@ Setting expectations before you install:
 - **Not yet a fully autonomous software company** — the human merge gate is a deliberate stage-0, not a missing feature (see [vision.md](docs/site/vision.md)).
 - **Not its own audit-trail database** — every action is a Git object in your forge.
 - **Not a layer that hides low-level primitives** behind opaque abstractions.
+- **No spend or budget control** on agent cells today.
 - **Pre-v1** — manifests, CLI verbs, and daemon semantics can still change between minor releases.
 
 ## Core Concepts

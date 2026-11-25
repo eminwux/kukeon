@@ -2,7 +2,7 @@
 
 A **cell** is a pod-like unit: a group of containers that share a network namespace. Exactly one container in each cell is the **root container** — it owns the network namespace, and every other container in the cell joins it.
 
-If you've worked with Kubernetes pods, the mental model is the same. One `pause`-like container would have held the network namespace; in Kukeon, one of your actual containers is marked as the root.
+If you've worked with Kubernetes pods, the mental model is the same: a `pause`-like container holds the network namespace. By default the daemon builds that root itself, a kukepause container. You can instead mark one of your own containers as the root with `root: true`.
 
 ## What a cell is
 
@@ -12,6 +12,25 @@ Creating a cell materializes:
 2. **A Linux network namespace**, entered by the root container and shared by the rest.
 3. **A veth pair** between the cell's network namespace and the space's bridge, configured by the CNI bridge plugin and `host-local` IPAM.
 4. **Metadata** at `/opt/kukeon/<realm>/<space>/<stack>/<cell>/cell.yaml`.
+
+## What runs in a cell
+
+A cell is a workload boundary. An agent is one thing that runs in a cell; it is not what a cell is. Cells that exist today:
+
+- a team agent cell: a harness container running an agent CLI (see [Teams](team.md));
+- the pipeline reactor: a `script` harness cell that runs a program with no model (see [Teams → Program roles](team.md#program-roles-the-script-harness));
+- kukeond itself: the `kukeond` cell in the `kuke-system` realm (see [System realm](system-realm.md));
+- a GitHub Actions runner.
+
+```text
+Cell: github-runner
+└── Container: runner
+
+Cell: kukeon-dev-claude
+└── Container: work
+```
+
+Each of these cells also has its [root container](#the-root-container).
 
 ## Cell spec
 
@@ -47,7 +66,8 @@ A cell's **identity is its own document** — the `CellDoc`. The CellDoc owns th
 
 ## The root container
 
-- One container in a cell must be the root. If none is set explicitly, the first container declared is chosen.
+- One container in a cell is the root. If no container is marked `root: true` and `spec.rootContainerId` is unset, the daemon builds a default kukepause root (`docker.io/library/busybox:latest` with the `kukepause` binary bind-mounted in). It never picks one of your containers.
+- A root you mark yourself starts before the CNI network attach, so it has no network at startup and must be a long-lived process. See [Manifest Reference → Container → Root container](../manifests/container.md#root-container).
 - The root container is created first. Its network namespace is the cell's network namespace.
 - Non-root containers join the same network namespace at creation time.
 - The root anchors the cell: workloads join its network, IPC and UTS namespaces, kukeon reaches the cell's network through the root's PID, and the cell's CNI/IPAM lease is keyed to the root container. It must stay alive for as long as any workload runs.

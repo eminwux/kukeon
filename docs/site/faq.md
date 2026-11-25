@@ -43,7 +43,7 @@ On systemd hosts the installer installs `/etc/systemd/system/kukeond.service`, s
 
 ## Does Kukeon have a web UI?
 
-Not yet. One is on the roadmap. The `kukeonv1` API that the CLI uses is stable enough that a read-only UI would be straightforward to build.
+Yes. [`kuke serve`](cli/kuke-serve.md) runs a local web server, in the foreground as your user, and prints the URL to open (`http://localhost:5129` by default). The UI lets you browse the hierarchy, run cell lifecycle actions, attach to cell terminals in the browser, read the daemon logs, talk to majordomo in its panel, and manage teams and sources on the Teams and Sources pages.
 
 ## Where does Kukeon write files on the host?
 
