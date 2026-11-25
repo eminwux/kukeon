@@ -1045,7 +1045,8 @@ func gitEqual(a, b *intmodel.ContainerGit) bool {
 		a.AllowedSigners == b.AllowedSigners &&
 		slicesEqual(a.Sign, b.Sign) &&
 		gitCredentialsEqual(a.Credentials, b.Credentials) &&
-		reflect.DeepEqual(a.Signing, b.Signing)
+		reflect.DeepEqual(a.Signing, b.Signing) &&
+		reflect.DeepEqual(a.IdentityRef, b.IdentityRef)
 }
 
 // gitCredentialsEqual compares two credential lists in declaration order,
@@ -1072,7 +1073,8 @@ func gitIsZero(g *intmodel.ContainerGit) bool {
 		g.AllowedSigners == "" &&
 		len(g.Sign) == 0 &&
 		len(g.Credentials) == 0 &&
-		g.Signing == nil
+		g.Signing == nil &&
+		g.IdentityRef == nil
 }
 
 func gitIdentityEqual(a, b *intmodel.GitIdentity) bool {

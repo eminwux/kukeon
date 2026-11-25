@@ -70,3 +70,65 @@ func TestDiff_ScopeDefaultsAreCompatible(t *testing.T) {
 		t.Errorf("stack diff = %+v, want compatible", d)
 	}
 }
+
+// identityRefOnlyGit is the block scopedefaults.Set writes for a git
+// connector default: nothing but the identity Secret ref (#1683).
+func identityRefOnlyGit() *intmodel.ContainerGit {
+	return &intmodel.ContainerGit{IdentityRef: diffGitRef("git-ssh")}
+}
+
+// TestDiff_ScopeDefaultsGitIdentityRefOnly pins #1683: a spec.defaults.git
+// block holding only identityRef is a real default on a Realm, Space and
+// Stack, so adding or removing it is a change and re-applying it is not,
+// while an explicitly empty `git: {}` still equals none.
+func TestDiff_ScopeDefaultsGitIdentityRefOnly(t *testing.T) {
+	realm := intmodel.Realm{Metadata: intmodel.RealmMetadata{Name: "default"}}
+	withGit := realm
+	withGit.Spec.Defaults = &intmodel.ScopeDefaults{Git: identityRefOnlyGit()}
+
+	if d := apply.DiffRealm(withGit, realm); !d.HasChanges || d.ChangeType != apply.ChangeTypeCompatible ||
+		!hasChangedField(d, "spec.defaults") {
+		t.Errorf("realm add identityRef-only git default: diff = %+v, want compatible spec.defaults", d)
+	}
+	if d := apply.DiffRealm(realm, withGit); !d.HasChanges || !hasChangedField(d, "spec.defaults") {
+		t.Errorf("realm remove identityRef-only git default: diff = %+v, want spec.defaults", d)
+	}
+	again := realm
+	again.Spec.Defaults = &intmodel.ScopeDefaults{Git: identityRefOnlyGit()}
+	if d := apply.DiffRealm(again, withGit); d.HasChanges {
+		t.Errorf("realm re-apply identityRef-only git default: diff = %+v, want none", d)
+	}
+	other := realm
+	other.Spec.Defaults = &intmodel.ScopeDefaults{Git: &intmodel.ContainerGit{IdentityRef: diffGitRef("git-other")}}
+	if d := apply.DiffRealm(other, withGit); !d.HasChanges {
+		t.Errorf("realm switch git identity: diff = %+v, want spec.defaults", d)
+	}
+	emptyGit := realm
+	emptyGit.Spec.Defaults = &intmodel.ScopeDefaults{Git: &intmodel.ContainerGit{}}
+	if d := apply.DiffRealm(emptyGit, realm); d.HasChanges {
+		t.Errorf("realm empty git block must equal none, got %+v", d)
+	}
+
+	space := intmodel.Space{Metadata: intmodel.SpaceMetadata{Name: "s"}, Spec: intmodel.SpaceSpec{RealmName: "default"}}
+	spaceWith := space
+	spaceWith.Spec.Defaults = &intmodel.SpaceDefaults{Git: identityRefOnlyGit()}
+	if d := apply.DiffSpace(spaceWith, space); !d.HasChanges || !hasChangedField(d, "spec.defaults") {
+		t.Errorf("space add identityRef-only git default: diff = %+v, want spec.defaults", d)
+	}
+	if d := apply.DiffSpace(space, spaceWith); !d.HasChanges || !hasChangedField(d, "spec.defaults") {
+		t.Errorf("space remove identityRef-only git default: diff = %+v, want spec.defaults", d)
+	}
+
+	stack := intmodel.Stack{
+		Metadata: intmodel.StackMetadata{Name: "st"},
+		Spec:     intmodel.StackSpec{RealmName: "default", SpaceName: "s"},
+	}
+	stackWith := stack
+	stackWith.Spec.Defaults = &intmodel.ScopeDefaults{Git: identityRefOnlyGit()}
+	if d := apply.DiffStack(stackWith, stack); !d.HasChanges || !hasChangedField(d, "spec.defaults") {
+		t.Errorf("stack add identityRef-only git default: diff = %+v, want spec.defaults", d)
+	}
+	if d := apply.DiffStack(stack, stackWith); !d.HasChanges || !hasChangedField(d, "spec.defaults") {
+		t.Errorf("stack remove identityRef-only git default: diff = %+v, want spec.defaults", d)
+	}
+}
