@@ -4,11 +4,11 @@ Kukeon doesn't run its own container runtime. It drives [containerd](https://con
 
 ## The mapping
 
-| Realm           | containerd namespace                                  |
-| --------------- | ----------------------------------------------------- |
-| `main`          | `kukeon-main`                                         |
-| `kukeon-system` | `kukeon-system`                                       |
-| `mytenant`      | `kukeon-mytenant` (or whatever `spec.namespace` says) |
+| Realm         | containerd namespace                                  |
+| ------------- | ----------------------------------------------------- |
+| `main`        | `kukeon-main`                                         |
+| `kuke-system` | `kuke-system.kukeon.io`                               |
+| `mytenant`    | `kukeon-mytenant` (or whatever `spec.namespace` says) |
 
 By default, each realm's namespace is `kukeon-<realm-name>`. The realm manifest can override this via `spec.namespace`.
 
@@ -45,7 +45,7 @@ If `ctr -n <ns> images ls` returns empty, the image was never imported into that
 
 ## The system namespace
 
-`kuke init` creates a second realm, `kukeon-system`, with containerd namespace `kukeon-system` (or `kuke-system.kukeon.io` in older layouts). That's where the `kukeond` image lives. See [System realm](system-realm.md).
+`kuke init` creates a second realm, `kuke-system`, with containerd namespace `kuke-system.kukeon.io`. That's where the `kukeond` image lives. See [System realm](system-realm.md).
 
 ## Related concepts
 

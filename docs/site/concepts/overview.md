@@ -54,7 +54,7 @@ The blog stack and the monitoring stack are on different CNI bridges, different 
 
 ## System realm
 
-In addition to the realm you create, `kuke init` creates a second realm called `kukeon-system`. It is where the `kukeond` daemon itself runs, and it's managed by `kuke` the same way any other realm is. See [System realm](system-realm.md).
+In addition to the realm you create, `kuke init` creates a second realm called `kuke-system`. It is where the `kukeond` daemon itself runs, and it's managed by `kuke` the same way any other realm is. See [System realm](system-realm.md).
 
 ## The default hierarchy
 
@@ -63,7 +63,7 @@ When you run `kuke init` with no arguments, Kukeon creates:
 - A user realm `default` (containerd namespace `kukeon-default`)
 - A space `default` inside the `default` realm (CNI network `default-default`, bridge `kuke-default-de…` truncated to fit the 15-char kernel limit)
 - A stack `default` inside `default/default`
-- The system realm `kukeon-system` with the `kukeond` cell
+- The system realm `kuke-system` with the `kukeond` cell
 
 Everything is idempotent. Re-running `init` reports `already existed` for the parts it finds on disk.
 

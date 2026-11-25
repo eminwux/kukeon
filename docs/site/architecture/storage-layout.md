@@ -17,7 +17,7 @@ Kukeon keeps its own authoritative state on disk, rooted at a single **run path*
 │               ├── cell.yaml                   (Cell manifest + status)
 │               └── containers/
 │                   └── <container>.yaml        (Container manifest + status)
-├── kukeon-system/                              (system realm; structure identical to above)
+├── kuke-system/                                (system realm; structure identical to above)
 │   └── kukeon/
 │       └── kukeon/
 │           └── kukeond/
@@ -71,7 +71,7 @@ Kukeon roots its cgroup tree at `/sys/fs/cgroup/kukeon`:
 │           └── <cell>/
 │               ├── <cell>_root/    (root container)
 │               └── <container>/    (non-root containers)
-└── kukeon-system/
+└── kuke-system/
     └── ...
 ```
 
@@ -115,4 +115,4 @@ In-process runs of the same commands do exactly the same thing on disk — they 
 ## Read next
 
 - [Process model](process-model.md) — how the daemon and client processes live
-- [System realm](../concepts/system-realm.md) — what lives under `kukeon-system/`
+- [System realm](../concepts/system-realm.md) — what lives under `kuke-system/`

@@ -15,7 +15,7 @@ Everything Kukeon creates is rooted at `/sys/fs/cgroup/kukeon`:
 │   │           ├── hello-world_root/   <- root container
 │   │           └── web/                <- non-root container
 │   └── monitoring/                     <- another space
-└── kukeon-system/                      <- system realm
+└── kuke-system/                        <- system realm
     └── kukeon/
         └── kukeon/
             └── kukeond/
