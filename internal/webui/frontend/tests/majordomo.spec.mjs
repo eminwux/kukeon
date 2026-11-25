@@ -650,6 +650,7 @@ test("the suspended notice names every suspended sweep with a command per harnes
 
   // One sweep on and one suspended: no notice.
   await page.unrouteAll({ behavior: "ignoreErrors" });
+  await signIn(page);
   await world(page, { configs: [...teamConfigs({ suspend: true }), sweep("kuke-majordomo-codex-health-sweep", "codex", false)] });
   await page.reload();
   schedule = page.getByRole("region", { name: "Sweep schedule" });
@@ -658,6 +659,7 @@ test("the suspended notice names every suspended sweep with a command per harnes
 
   // A sweep Config rendered before the harness label existed: the all-harness command.
   await page.unrouteAll({ behavior: "ignoreErrors" });
+  await signIn(page);
   await world(page, { configs: [...teamConfigs({ suspend: true }), sweep("kuke-majordomo-codex-health-sweep", "", true)] });
   await page.reload();
   schedule = page.getByRole("region", { name: "Sweep schedule" });
