@@ -613,6 +613,18 @@ func TestRoleTaskHarnessRejections(t *testing.T) {
 			},
 			err: []string{"roles majordomo: tasks: health-sweep: harnesses: claude: schedule:"},
 		},
+		{
+			name:        "entry schedule does not parse though every harness overrides it",
+			roleDefault: `, schedule: "@hourly"`,
+			entry: config.TaskSelection{
+				Schedule: "nope",
+				Harnesses: map[string]config.TaskHarness{
+					"claude": {Schedule: "@daily"},
+					"codex":  {Schedule: "@daily"},
+				},
+			},
+			err: []string{"roles majordomo: tasks: health-sweep: schedule:"},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.entry.Name = "health-sweep"

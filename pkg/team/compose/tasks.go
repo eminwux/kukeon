@@ -112,6 +112,14 @@ func resolveTaskSchedule(
 	roleName string, selection config.Role, task model.RoleTask, harnessName string,
 ) (model.RoleTask, error) {
 	declared, _ := selection.TaskSelection(task.Name)
+	// The entry's own schedule is parsed before any override replaces it: when
+	// every harness overrides it, a bad one would otherwise be stored and only
+	// fail once a harness is added or an override is dropped.
+	if declared.Schedule != "" {
+		if _, err := cronspec.Parse(declared.Schedule); err != nil {
+			return task, fmt.Errorf("roles %s: tasks: %s: schedule: %w", selection.Name, task.Name, err)
+		}
+	}
 	override, overridden := declared.Harnesses[harnessName]
 	entry := declared.ForHarness(harnessName)
 	// at names the harness in an error once the entry overrides per harness:
