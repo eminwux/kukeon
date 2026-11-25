@@ -8,11 +8,16 @@ RELEASE_DIR := release
 # and fails with an ambiguous import — the exact coupling this split removes. So
 # every build / test here runs per-module (GOWORK=off), matching the
 # single-module resolution CI and the Docker builder (no go.work) use. Exported
-# so it reaches every recipe and the $(shell) below.
+# so it reaches every recipe.
 export GOWORK := off
 
 # ----- Version sourcing -----
-MODULE := $(shell GOWORK=off go list -m)
+# Read the module path straight from go.mod instead of `go list -m`: a
+# parse-time `go` call runs on every make invocation (even targets that never
+# touch Go, e.g. `make claude`), and when the installed Go is older than
+# go.mod's `go` line, GOTOOLCHAIN=auto downloads the newer toolchain just to
+# print this path (#1667).
+MODULE := $(shell sed -n 's/^module //p' go.mod)
 
 # CI can pass KUKEON_VERSION (e.g., github.ref_name). If not, derive from git.
 ifndef KUKEON_VERSION
