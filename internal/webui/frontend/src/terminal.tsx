@@ -57,7 +57,15 @@ export function useTerminalSessions(inventory: InventoryResource) {
       return next;
     });
   }, []);
+  // The latest selection, written in step with the state: an effect scheduled by an earlier render
+  // reads it to see a choice made since that render (#1675).
+  const picked = useRef<Record<string, string>>({});
+  const forget = (keep: (key: string) => boolean) => {
+    const next = Object.fromEntries(Object.entries(picked.current).filter(([key]) => keep(key)));
+    if (Object.keys(next).length !== Object.keys(picked.current).length) picked.current = next;
+  };
   const select = useCallback((scope: string[], container: string) => {
+    picked.current = { ...picked.current, [cellId(scope)]: container };
     setSelection(old => ({ ...old, [cellId(scope)]: container }));
   }, []);
   const attach = useCallback((scope: string[], container: string) => {
@@ -72,11 +80,19 @@ export function useTerminalSessions(inventory: InventoryResource) {
     });
     select(scope, container);
   }, [select]);
+  // The effect-driven attach. `seen` is the selection of the render that scheduled the effect; a
+  // different one now means a container was chosen since, so the effect neither opens a session for
+  // its stale container nor undoes the choice. User actions call attach.
+  const autoAttach = useCallback((scope: string[], container: string, seen: string | undefined) => {
+    if (picked.current[cellId(scope)] !== seen) return;
+    attach(scope, container);
+  }, [attach]);
   const detach = useCallback((id: string) => setSessions(old => old.filter(item => item.id !== id)), []);
   const removeCell = useCallback((scope: string[]) => {
     const key = cellId(scope);
     retainedCells.current.delete(key);
     setSessions(old => old.filter(item => cellId(item.scope) !== key));
+    forget(id => id !== key);
     setSelection(old => {
       if (!(key in old)) return old;
       const next = { ...old };
@@ -113,6 +129,7 @@ export function useTerminalSessions(inventory: InventoryResource) {
       if (retainedCells.current.has(key)) return true;
       return !unavailableStates.has(state) || item.state === "interrupted";
     }));
+    forget(key => states.has(key));
     setSelection(old => {
       let changed = false;
       const next = { ...old };
@@ -134,7 +151,7 @@ export function useTerminalSessions(inventory: InventoryResource) {
     }
     return result;
   }, [sessions]);
-  return { sessions, selection, select, attach, detach, removeCell, interruptCell, dropInterrupted, holdCell, releaseCell, update, cellStates, pastes, paste, pasteDelivered };
+  return { sessions, selection, select, attach, autoAttach, detach, removeCell, interruptCell, dropInterrupted, holdCell, releaseCell, update, cellStates, pastes, paste, pasteDelivered };
 }
 
 export type TerminalManager = ReturnType<typeof useTerminalSessions>;
@@ -382,8 +399,8 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
     // Only cellTerminal attaches: cellRead keeps this workspace mounted so existing sessions
     // survive, but inspecting a cell must not open a new terminal session (#1566).
     if (!visible || !scope || docked || logs || !inventory.data || containers.loading || containers.error || !selected || !selectedEligible || unavailable || atLimit || current || skipAutoAttachFor === currentId) return;
-    manager.attach(scope, selected);
-  }, [visible, key, docked, !inventory.data, selected, selectedEligible, containers.loading, containers.error, unavailable, atLimit, current, currentId, skipAutoAttachFor, logs, manager.attach]);
+    manager.autoAttach(scope, selected, manager.selection[key]);
+  }, [visible, key, docked, !inventory.data, selected, selectedEligible, containers.loading, containers.error, unavailable, atLimit, current, currentId, skipAutoAttachFor, logs, manager.autoAttach]);
   const headerState = logs ? "Logs" : current?.state === "attached" ? "Attached"
     : current?.message || (skipAutoAttachFor === currentId && currentId ? "Detached" : atLimit ? "Connection limit reached" : unavailable ? `Unavailable: ${cellState}` : containers.loading ? "Loading containers…" : containers.error ? "Container list unavailable" : !eligible.length ? "No attachable containers" : !selectedEligible ? "Container unavailable" : "Connecting…");
   // With nothing to attach to, the terminal area carries the only (neutral) message.

@@ -347,6 +347,11 @@ web-ui-check: web-ui
 web-ui-test: kuke
 	cd internal/webui/frontend && npm test
 
+# Node unit tests of the frontend; needs node_modules (make web-ui or npm ci).
+.PHONY: web-ui-unit
+web-ui-unit:
+	cd internal/webui/frontend && npm run test:unit
+
 # Requires KUKE_WEB_SMOKE_HOST=unix:///path/to/a/running/kukeond.sock.
 web-ui-smoke: kuke
 	cd internal/webui/frontend && npm run test:smoke

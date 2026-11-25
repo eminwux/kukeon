@@ -777,7 +777,7 @@ button.cell-tile { border: 1px solid var(--line); background: var(--panel); }
 .cell-tile-name { flex: 1 1 auto; min-width: 0; font-size: var(--font-md); overflow-wrap: anywhere; }
 .cell-tile-head .state-badge { font-size: var(--font-sm); padding: 0 5px; }
 .cell-tile-scope { min-width: 0; color: var(--muted); font-size: var(--font-sm); overflow-wrap: anywhere; }
-.cell-tile-screen { display: block; box-sizing: border-box; height: calc(12 * 1.4em + 16px); margin: 0; padding: 8px; overflow: hidden; border: 1px solid var(--line); border-radius: 6px; background: var(--terminal-bg); color: var(--text); font-family: var(--mono); font-size: var(--font-xs); line-height: 1.4; white-space: pre; max-height: none; }
+.cell-tile-screen { display: block; box-sizing: border-box; height: calc(12 * 1.4em + 16px); margin: 0; padding: 8px; overflow: hidden; border: 1px solid var(--line); border-radius: 6px; background: var(--terminal-bg); color: var(--text); font-family: var(--mono); font-size: var(--font-sm); line-height: 1.4; white-space: pre; max-height: none; }
 .cell-tile-empty { display: grid; place-items: center; color: var(--muted); font-family: inherit; font-size: var(--font-sm); white-space: normal; }
 .cell-tile-foot { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: var(--font-sm); }
 .workbench .cell-stopped-link { margin: 14px 0 0; }
