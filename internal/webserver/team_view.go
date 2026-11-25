@@ -86,6 +86,8 @@ type viewTaskSelection struct {
 	Schedule string `json:"schedule,omitempty"`
 	Suspend  *bool  `json:"suspend,omitempty"`
 	Args     string `json:"args,omitempty"`
+	// Harnesses are the entry's per-harness overrides (issue #1668).
+	Harnesses map[string]formTaskHarness `json:"harnesses,omitempty"`
 }
 
 type viewRoles struct {
@@ -117,8 +119,11 @@ type viewConnectors struct {
 // schedule (spec.schedule) and what kukeond's scheduler last did
 // (status.schedule).
 type viewTask struct {
-	Role     string                            `json:"role"`
-	Task     string                            `json:"task"`
+	Role string `json:"role"`
+	Task string `json:"task"`
+	// Harness is the Config's kukeon.io/harness label (issue #1668); empty
+	// on a Config rendered before the label existed.
+	Harness  string                            `json:"harness,omitempty"`
 	Config   string                            `json:"config"`
 	Scope    []string                          `json:"scope"`
 	Schedule *v1beta1.CellConfigSchedule       `json:"schedule,omitempty"`
@@ -193,6 +198,7 @@ func teamViewOf(r *initialize.ResolvedTeam, catalog *connector.Catalog) teamDeta
 			for _, task := range *role.Tasks {
 				item.Selected = append(item.Selected, viewTaskSelection{
 					Name: task.Name, Schedule: task.Schedule, Suspend: task.Suspend, Args: task.Args,
+					Harnesses: formTaskHarnessesOf(task.Harnesses),
 				})
 			}
 		}
@@ -284,7 +290,10 @@ func teamViewOf(r *initialize.ResolvedTeam, catalog *connector.Catalog) teamDeta
 		if task == "" {
 			continue
 		}
-		item := viewTask{Role: role, Task: task, Config: m.Name, Scope: scope, Schedule: doc.Spec.Schedule}
+		item := viewTask{
+			Role: role, Task: task, Harness: m.Labels[v1beta1.LabelHarness], Config: m.Name, Scope: scope,
+			Schedule: doc.Spec.Schedule,
+		}
 		if doc.Status != nil {
 			item.Status = doc.Status.Schedule
 		}

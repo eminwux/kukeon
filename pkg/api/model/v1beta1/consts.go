@@ -147,6 +147,11 @@ const (
 	// both carry it, so a role's configs are selected by label, not by parsing
 	// the config name.
 	LabelRole = "kukeon.io/role"
+	// LabelHarness names the team harness a `kuke team` CellConfig runs on
+	// (issue #1668): the harness's name in the team declaration. Pair and
+	// task configs both carry it beside LabelRole, so a task's per-harness
+	// Configs are told apart by label, not by parsing the config name.
+	LabelHarness = "kukeon.io/harness"
 	// LabelSchedule names the CellConfig whose spec.schedule fired the cell
 	// (issue #1503). Only cells kukeond's scheduler creates carry it: a cell
 	// started by hand from the same Config does not, so it neither blocks a

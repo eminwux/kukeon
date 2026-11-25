@@ -425,10 +425,15 @@ kukeon file itself.
   error. These are the values `kuke get config <name> -o yaml` prints.
 - **Run sweep now** starts one sweep cell from that config, the same as
   `kuke run -d <config>`. A sweep submits a report only if it finds something.
-- While sweeps are suspended, the page shows the task entry that turns them on
-  and links the `kuke` team's page on [Teams](#teams), whose **Edit team**
-  screen switches the schedule on; it does so once, above the sweep list,
-  naming the suspended configs. No control on the Health page edits a schedule.
+- While every sweep is suspended, the page shows the command that turns the
+  sweep on for one harness —
+  `kuke team task enable kuke health-sweep --role majordomo --harness <harness>`,
+  one line per suspended config's harness (from its `kukeon.io/harness` label;
+  a config without the label gets the command without `--harness`) — and
+  links the `kuke` team's page on [Teams](#teams), whose **Edit team** screen
+  switches the schedule on per harness; it does so once, above the sweep list,
+  naming the suspended configs. Once one sweep is on, the note is gone. No
+  control on the Health page edits a schedule.
 - **Issue filing**, per sweep config (#1649): whether the sweep has a GitHub
   token to file issues with — **GitHub access is off** (the config does not
   render the `github` connector's component; links the `kuke` team's Edit team
@@ -834,6 +839,13 @@ A secret binding's `source.env` / `source.file` is read by that process.
   4. **Tasks and schedules**: per selected role, each task it declares:
      selected, its schedule switch (the role's, on or off — `suspend`), its
      cron expression and its arguments, the role's own values as placeholders.
+     A role whose tasks render on two or more harnesses (its pin, else the
+     team's harnesses the role declares) also gets one switch per harness under
+     the task's schedule: **Same as the task**, **On** or **Off** — the task
+     entry's `harnesses.<harness>.suspend` (#1668), the change
+     `kuke team task enable` / `disable --harness` makes. A per-harness cron is
+     edited in **Edit as YAML**; the form keeps it. A role on one harness shows
+     no per-harness switch.
   5. **Credentials**: the team's connector choices (method and identity), or
      the defaults'; **Per-role access** (#1649): per selected role, one row per
      connector a team can give a role (one that authenticates no harness and
@@ -853,8 +865,9 @@ A secret binding's `source.env` / `source.file` is read by that process.
 - **A team's page** (`#/teams/<name>`) shows the whole setup as it composes:
   **Project**, **Sources** (each with its stored Source, linked to the Sources
   page, address, ref, clone path and git identity), **Roles** (source, path,
-  harness, image needs, tasks), **Tasks** (each task Config with its schedule,
-  on or suspended, and its last run), **Harnesses**, **Connectors** (the
+  harness, image needs, tasks), **Tasks** (each task Config, headed
+  `<role> / <task> on <harness>`, with its schedule, on or suspended, and its
+  last run), **Harnesses**, **Connectors** (the
   team's choices, then per role and Config each connector with its method,
   identity, the level the identity comes from, **Needs identity** when it is
   unresolved — linked to the connector's page — and whether the team or the
@@ -1245,8 +1258,9 @@ and gets the creation timeout.
 "sources", "roles", "harnesses", "connectors", "tasks", "configs",
 "unresolved" }`. Each list is `{ "inherited", "items" }`; a source is
   `{ "alias", "stored", "url", "ref", "clonePath", "identity", "declared" }`;
-  a task is one task Config `{ "role", "task", "config", "scope",
-"schedule", "status" }` with its `spec.schedule` and `status.schedule`.
+  a task is one task Config `{ "role", "task", "harness", "config", "scope",
+"schedule", "status" }` with its `spec.schedule` and `status.schedule`,
+  `harness` being its `kukeon.io/harness` label.
   `connectors` also has `roles`, one row per Config of the team and connector
   it resolves (#1649): `{ "role", "config", "task", "connector", "method",
 "state", "identity", "origin", "required", "fill", "setByTeam" }`, `fill`
@@ -1264,8 +1278,12 @@ and gets the creation timeout.
   the declaration (the defaults'). A role is `{ "name", "source", "path",
 "harness", "initialPath", "image", "tasks", "connectors" }` and its `tasks` is
   `{ "all", "items" }` — `all` selects every task the role declares, an
-  empty `items` none; a task is `{ "name", "schedule", "suspend", "args" }`,
-  `suspend` `false` (on), `true` (off) or `null` (the role's). A role's
+  empty `items` none; a task is
+  `{ "name", "schedule", "suspend", "args", "harnesses" }`, `suspend` `false`
+  (on), `true` (off) or `null` (the role's). `harnesses` maps a harness name
+  to that harness's override `{ "schedule", "suspend" }` (#1668), `suspend`
+  `null` keeping the task's; applying the form drops an override with neither,
+  and keeps every override an unchanged form carries. A role's
   `connectors` is one switch per connector a team can give a role,
   `{ "name", "enabled", "identity" }`: `enabled` is on when the role entry
   enables it (a `connectors` entry or a legacy `needs.secrets` name), and

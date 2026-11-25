@@ -293,3 +293,63 @@ func TestTeamRoleConnectors(t *testing.T) {
 		t.Fatalf("after the edit the team sets github: %+v", got.View.Connectors.Roles)
 	}
 }
+
+// TestTeamTaskHarnessOverrides is issue #1668 AC7 over the routes: the form
+// posted with a per-harness override is previewed and stored, GET returns it
+// in the form, and the view names each task Config's harness.
+func TestTeamTaskHarnessOverrides(t *testing.T) {
+	c, h := teamFixture(t)
+	c.putProj(t)
+	w := connectorRequest(t, h, http.MethodGet, "/api/teams/proj", "")
+	got := decodeBody[teamView](t, w)
+	if w.Code != http.StatusOK || got.Form == nil {
+		t.Fatalf("get: %d %s", w.Code, w.Body)
+	}
+	form := *got.Form
+	on := false
+	form.Roles.Items[0].Tasks = formTasks{Items: []formTask{{
+		Name: "health-sweep", Harnesses: map[string]formTaskHarness{"claude": {Suspend: &on}},
+	}}}
+	body := map[string]any{"name": "proj", "form": form}
+	w = connectorRequest(t, h, http.MethodPost, "/api/teams/preview", jsonBody(t, body))
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "proj-old-claude-health-sweep") {
+		t.Fatalf("preview: %d %s", w.Code, w.Body)
+	}
+	writes := c.writes
+	w = connectorRequest(t, h, http.MethodPost, "/api/teams", jsonBody(t, body))
+	if w.Code != http.StatusOK || c.writes == writes {
+		t.Fatalf("edit: %d %s", w.Code, w.Body)
+	}
+	team, err := config.DecodeTeam(bytes.NewReader(c.teams["proj"]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, ok := team.Spec.Roles[0].TaskSelection("health-sweep")
+	if override := task.Harnesses["claude"]; !ok || override.Suspend == nil || *override.Suspend ||
+		len(task.Harnesses) != 1 || task.Suspend != nil {
+		t.Fatalf("stored entry = %+v", task)
+	}
+
+	c.configs = []v1beta1.CellConfigDoc{{
+		Metadata: v1beta1.CellConfigMetadata{
+			Name: "proj-old-claude-health-sweep", Realm: "default",
+			Labels: map[string]string{
+				v1beta1.LabelTeam: "proj", v1beta1.LabelRole: "old", v1beta1.LabelTask: "health-sweep",
+				v1beta1.LabelHarness: "claude",
+			},
+		},
+		Spec: v1beta1.CellConfigSpec{Schedule: &v1beta1.CellConfigSchedule{Cron: "@hourly"}},
+	}}
+	w = connectorRequest(t, h, http.MethodGet, "/api/teams/proj", "")
+	got = decodeBody[teamView](t, w)
+	if w.Code != http.StatusOK || got.Form == nil || got.View == nil {
+		t.Fatalf("get: %d %s", w.Code, w.Body)
+	}
+	items := got.Form.Roles.Items[0].Tasks.Items
+	if len(items) != 1 || items[0].Harnesses["claude"].Suspend == nil || *items[0].Harnesses["claude"].Suspend {
+		t.Fatalf("form tasks = %+v", items)
+	}
+	if len(got.View.Tasks) != 1 || got.View.Tasks[0].Harness != "claude" {
+		t.Fatalf("view tasks = %+v", got.View.Tasks)
+	}
+}

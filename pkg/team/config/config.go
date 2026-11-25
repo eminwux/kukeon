@@ -251,6 +251,39 @@ type TaskSelection struct {
 	// Args replaces the role's argument text for the task: the free text the
 	// rendered prompt appends after the skill name. Empty keeps the role's.
 	Args string `yaml:"args,omitempty"`
+	// Harnesses overrides Schedule and Suspend per harness, keyed by the
+	// harness's name in the team (issue #1668): a value set here replaces the
+	// entry's own for that harness's Config only. Which keys name a harness
+	// of the team is checked at composition, as a team may inherit its
+	// harness list.
+	Harnesses map[string]TaskHarness `yaml:"harnesses,omitempty"`
+}
+
+// TaskHarness overrides a task entry's cadence for one harness of the team.
+// It sets at least one of its fields; there is no per-harness Args.
+type TaskHarness struct {
+	// Schedule replaces the entry's schedule for the harness. Empty keeps it.
+	Schedule string `yaml:"schedule,omitempty"`
+	// Suspend replaces the entry's suspend for the harness. Nil keeps it.
+	Suspend *bool `yaml:"suspend,omitempty"`
+}
+
+// ForHarness returns the entry as it applies to the named harness: the
+// override's set values in place of the entry's, and Harnesses cleared.
+func (t TaskSelection) ForHarness(name string) TaskSelection {
+	override, ok := t.Harnesses[name]
+	t.Harnesses = nil
+	if !ok {
+		return t
+	}
+	if override.Schedule != "" {
+		t.Schedule = override.Schedule
+	}
+	if override.Suspend != nil {
+		suspend := *override.Suspend
+		t.Suspend = &suspend
+	}
+	return t
 }
 
 // taskSelectionFields is TaskSelection without its YAML methods, for the
@@ -271,10 +304,11 @@ func (t *TaskSelection) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-// MarshalYAML writes a selection that sets no schedule as the bare task name,
+// MarshalYAML writes a selection that sets no schedule and no per-harness
+// override as the bare task name,
 // so an entry authored as a name is recorded as one.
 func (t TaskSelection) MarshalYAML() (any, error) {
-	if t.Schedule == "" && t.Suspend == nil && t.Args == "" {
+	if t.Schedule == "" && t.Suspend == nil && t.Args == "" && len(t.Harnesses) == 0 {
 		return t.Name, nil
 	}
 	return taskSelectionFields(t), nil

@@ -106,6 +106,48 @@ type formTask struct {
 	Schedule string `json:"schedule,omitempty"`
 	Suspend  *bool  `json:"suspend"`
 	Args     string `json:"args,omitempty"`
+	// Harnesses are the task entry's per-harness overrides (issue #1668),
+	// keyed by harness name. The form edits only their switch (D6), but
+	// carries their schedule so Apply does not erase it.
+	Harnesses map[string]formTaskHarness `json:"harnesses,omitempty"`
+}
+
+// formTaskHarness is one per-harness override of a task entry. Suspend is
+// the switch for that harness: false is on, true is off, null keeps the
+// entry's.
+type formTaskHarness struct {
+	Schedule string `json:"schedule,omitempty"`
+	Suspend  *bool  `json:"suspend"`
+}
+
+// formTaskHarnessesOf copies a task entry's overrides into the form.
+func formTaskHarnessesOf(in map[string]config.TaskHarness) map[string]formTaskHarness {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]formTaskHarness, len(in))
+	for name, override := range in {
+		out[name] = formTaskHarness{Schedule: override.Schedule, Suspend: cloneBool(override.Suspend)}
+	}
+	return out
+}
+
+// taskHarnessesOf writes the form's overrides back into a task entry,
+// dropping an override that sets neither a schedule nor a switch, and
+// returning nil when none is left.
+func taskHarnessesOf(in map[string]formTaskHarness) map[string]config.TaskHarness {
+	var out map[string]config.TaskHarness
+	for name, override := range in {
+		schedule := strings.TrimSpace(override.Schedule)
+		if schedule == "" && override.Suspend == nil {
+			continue
+		}
+		if out == nil {
+			out = map[string]config.TaskHarness{}
+		}
+		out[strings.TrimSpace(name)] = config.TaskHarness{Schedule: schedule, Suspend: cloneBool(override.Suspend)}
+	}
+	return out
 }
 
 type formHarnesses struct {
@@ -174,6 +216,7 @@ func formOf(team *config.Team, catalog *connector.Catalog) teamForm {
 			for _, task := range *role.Tasks {
 				item.Tasks.Items = append(item.Tasks.Items, formTask{
 					Name: task.Name, Schedule: task.Schedule, Suspend: cloneBool(task.Suspend), Args: task.Args,
+					Harnesses: formTaskHarnessesOf(task.Harnesses),
 				})
 			}
 		}
@@ -455,7 +498,7 @@ func (r formRole) role(base []config.Role) config.Role {
 		for _, task := range r.Tasks.Items {
 			tasks = append(tasks, config.TaskSelection{
 				Name: strings.TrimSpace(task.Name), Schedule: strings.TrimSpace(task.Schedule),
-				Suspend: cloneBool(task.Suspend), Args: task.Args,
+				Suspend: cloneBool(task.Suspend), Args: task.Args, Harnesses: taskHarnessesOf(task.Harnesses),
 			})
 		}
 		out.Tasks = &tasks

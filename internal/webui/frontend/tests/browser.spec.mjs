@@ -4937,6 +4937,8 @@ test("Edit team switches one schedule off and moves the project ref without YAML
   await steps.getByRole("button", { name: "Next" }).click();
   await expect(steps.getByLabel("Schedule of dev task health-sweep")).toHaveValue("role");
   await expect(steps.getByLabel("Schedule of dev task health-sweep").locator("option").first()).toHaveText("The role's (off)");
+  // A role on one harness has no per-harness switch (#1668).
+  await expect(steps.getByLabel(/^Schedule of dev task health-sweep on /)).toHaveCount(0);
   await steps.getByLabel("Schedule of dev task health-sweep").selectOption("on");
   await steps.getByRole("button", { name: "Next" }).click();
   await steps.getByRole("button", { name: "Next" }).click();
@@ -4947,6 +4949,49 @@ test("Edit team switches one schedule off and moves the project ref without YAML
   expect(sent.form.project).toEqual({ alias: "project", stored: "web", refKind: "branch", ref: "release", clonePath: "/home/user/web" });
   expect(sent.form.roles.items[0].tasks).toEqual({ all: false, items: [{ name: "health-sweep", suspend: false }] });
   expect(sent.form.sources).toBeNull();
+  await steps.getByRole("button", { name: "Apply" }).click();
+  await expect(page).toHaveURL(/#\/teams\/web$/);
+  expect(lastPost(world, "/api/teams")).toEqual(sent);
+});
+
+// #1668, AC8 and AC9: a task of a role on two harnesses gets one schedule switch per harness, and the team page
+// names the harness of each task Config.
+test("Edit team switches a task's schedule on for one harness of a two-harness role", async ({ page }) => {
+  const world = await mockTeams(page);
+  world.webView.harnesses.items.push({ name: "codex", source: "kukeon", path: "team/harnesses/codex" });
+  const sweep = harness => ({ role: "dev", task: "health-sweep", harness, config: `web-dev-${harness}-health-sweep`, scope: ["default", "web", "default"], schedule: { cron: "@hourly", suspend: true } });
+  world.webView.tasks = [sweep("claude"), sweep("codex")];
+
+  await page.goto(`${server.url}#/teams/web`);
+  for (const harness of ["claude", "codex"]) {
+    const task = page.getByRole("region", { name: `Task dev health-sweep on ${harness}` });
+    await expect(task.getByRole("heading")).toHaveText(`dev / health-sweep on ${harness} web-dev-${harness}-health-sweep`);
+  }
+
+  await page.goto(`${server.url}#/teams/web/edit`);
+  const steps = wizard(page);
+  await expect(steps.getByRole("heading", { name: "Other sources" })).toBeVisible();
+  await steps.getByRole("button", { name: "Next" }).click();
+  await steps.getByRole("button", { name: "Next" }).click();
+  await expect(steps.getByRole("heading", { name: "Tasks and schedules" })).toBeVisible();
+  const claude = steps.getByLabel("Schedule of dev task health-sweep on claude");
+  const codex = steps.getByLabel("Schedule of dev task health-sweep on codex");
+  await expect(claude).toHaveValue("same");
+  await expect(codex).toHaveValue("same");
+  await expect(claude.locator("option")).toHaveText(["Same as the task", "On", "Off"]);
+  await claude.selectOption("on");
+  await expect(codex).toHaveValue("same");
+  // Deselecting the task disables its switches.
+  await steps.getByLabel("Select dev task health-sweep").uncheck();
+  await expect(codex).toBeDisabled();
+  await steps.getByLabel("Select dev task health-sweep").check();
+  await steps.getByLabel("Schedule of dev task health-sweep on claude").selectOption("on");
+  await steps.getByRole("button", { name: "Next" }).click();
+  await steps.getByRole("button", { name: "Next" }).click();
+  await steps.getByRole("button", { name: "Preview" }).click();
+  await expect(steps.getByRole("region", { name: "Preview" })).toBeVisible();
+  const sent = lastPost(world, "/api/teams/preview");
+  expect(sent.form.roles.items[0].tasks).toEqual({ all: false, items: [{ name: "health-sweep", suspend: null, harnesses: { claude: { suspend: false } } }] });
   await steps.getByRole("button", { name: "Apply" }).click();
   await expect(page).toHaveURL(/#\/teams\/web$/);
   expect(lastPost(world, "/api/teams")).toEqual(sent);

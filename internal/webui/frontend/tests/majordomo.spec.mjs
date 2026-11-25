@@ -32,7 +32,7 @@ function teamConfigs({ suspend = true, status } = {}) {
     config("assistant-b", majordomoLabels),
     config("kuke-majordomo-lookalike", { "kukeon.io/team": "other" }),
     config("kukeon-majordomo-claude", { "kukeon.io/team": "kukeon", "kukeon.io/role": "majordomo" }),
-    config("kuke-majordomo-claude-health-sweep", sweepLabels, { spec: { schedule: { cron: "@hourly", suspend } }, status }),
+    config("kuke-majordomo-claude-health-sweep", { ...sweepLabels, "kukeon.io/harness": "claude" }, { spec: { schedule: { cron: "@hourly", suspend } }, status }),
   ];
 }
 
@@ -615,7 +615,7 @@ test("the Health page shows the sweep schedule from the task config, runs a swee
   await expect(enable).toHaveCount(1);
   await expect(enable).toContainText("Sweeps are suspended.");
   await expect(enable).toContainText("kuke-majordomo-claude-health-sweep ships switched off");
-  await expect(enable).toContainText("{ name: health-sweep, suspend: false }");
+  await expect(enable.locator("pre")).toHaveText("kuke team task enable kuke health-sweep --role majordomo --harness claude");
   await expect(enable.getByRole("link", { name: "kuke team" })).toHaveAttribute("href", "#/teams/kuke/edit");
   await expect(enable).not.toContainText("kuketeam");
   await expect(schedule.locator("input, select, textarea")).toHaveCount(0);
@@ -628,24 +628,42 @@ test("the Health page shows the sweep schedule from the task config, runs a swee
   await expect(page.getByRole("region", { name: "Health report" })).toContainText("No health report is stored.");
 });
 
-// Issue #1568, item F: the suspended notice is shown once, however many sweep configs are suspended.
-test("two suspended sweep configs share one suspended notice that names both, and an enabled one is left out", async ({ page }) => {
-  const sweep = (name, suspend) => config(name, sweepLabels, { spec: { schedule: { cron: "@hourly", suspend } } });
-  await world(page, { configs: [...teamConfigs({ suspend: true }), sweep("kuke-majordomo-codex-health-sweep", true), sweep("kuke-majordomo-enabled-health-sweep", false)] });
+// Issue #1568, item F: the suspended notice is shown once, however many sweep configs are suspended. Since #1668
+// it shows only while every sweep is suspended, with one kuke team task enable line per harness.
+test("the suspended notice names every suspended sweep with a command per harness, and hides once one sweep is on", async ({ page }) => {
+  const sweep = (name, harness, suspend) => config(name, harness ? { ...sweepLabels, "kukeon.io/harness": harness } : sweepLabels, { spec: { schedule: { cron: "@hourly", suspend } } });
+  await world(page, { configs: [...teamConfigs({ suspend: true }), sweep("kuke-majordomo-codex-health-sweep", "codex", true)] });
   await page.goto(`${server.url}#/health`);
-  const schedule = page.getByRole("region", { name: "Sweep schedule" });
-  await expect(schedule.locator(".health-sweep")).toHaveCount(3);
-  await expect(schedule.locator(".health-sweep .state-badge")).toHaveText(["Suspended", "Suspended", "Scheduled"]);
+  let schedule = page.getByRole("region", { name: "Sweep schedule" });
+  await expect(schedule.locator(".health-sweep")).toHaveCount(2);
+  await expect(schedule.locator(".health-sweep .state-badge")).toHaveText(["Suspended", "Suspended"]);
   const notice = schedule.getByRole("note");
   await expect(notice).toHaveCount(1);
   await expect(notice).toContainText("Sweeps are suspended.");
   await expect(notice.getByRole("list", { name: "Suspended sweeps" }).getByRole("listitem")).toHaveText(["kuke-majordomo-claude-health-sweep", "kuke-majordomo-codex-health-sweep"]);
-  await expect(notice).not.toContainText("kuke-majordomo-enabled-health-sweep");
-  await expect(notice.locator("pre")).toHaveText([/\{ name: health-sweep, suspend: false \}/]);
+  await expect(notice.locator("pre")).toHaveText("kuke team task enable kuke health-sweep --role majordomo --harness claude\nkuke team task enable kuke health-sweep --role majordomo --harness codex");
+  await expect(notice).not.toContainText("suspend: false");
   // The notice sits above the sweep list instead of inside every suspended entry.
   await expect(schedule.locator(".health-sweep").getByRole("note")).toHaveCount(0);
   expect(await notice.evaluate(el => el.compareDocumentPosition(document.querySelector(".health-sweeps")) & Node.DOCUMENT_POSITION_FOLLOWING)).toBeTruthy();
-  await expect(schedule.getByRole("button", { name: /^Run sweep now with / })).toHaveCount(3);
+  await expect(schedule.getByRole("button", { name: /^Run sweep now with / })).toHaveCount(2);
+
+  // One sweep on and one suspended: no notice.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await signIn(page);
+  await world(page, { configs: [...teamConfigs({ suspend: true }), sweep("kuke-majordomo-codex-health-sweep", "codex", false)] });
+  await page.reload();
+  schedule = page.getByRole("region", { name: "Sweep schedule" });
+  await expect(schedule.locator(".health-sweep .state-badge")).toHaveText(["Suspended", "Scheduled"]);
+  await expect(schedule.getByRole("note")).toHaveCount(0);
+
+  // A sweep Config rendered before the harness label existed: the all-harness command.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await signIn(page);
+  await world(page, { configs: [...teamConfigs({ suspend: true }), sweep("kuke-majordomo-codex-health-sweep", "", true)] });
+  await page.reload();
+  schedule = page.getByRole("region", { name: "Sweep schedule" });
+  await expect(schedule.getByRole("note").locator("pre")).toHaveText("kuke team task enable kuke health-sweep --role majordomo");
 });
 
 test("an enabled sweep shows no reapply instructions, and a host without majordomo says so", async ({ page }) => {

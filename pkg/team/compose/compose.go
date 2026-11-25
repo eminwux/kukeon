@@ -196,6 +196,11 @@ func Compose(cfg *config.TeamDefaults, team *config.Team, opts Options) (*Result
 	groups := map[string]*group{}
 	var order []string
 	for _, role := range effective.Roles {
+		if err = checkTaskHarnesses(role, effective.Harnesses); err != nil {
+			return nil, err
+		}
+	}
+	for _, role := range effective.Roles {
 		if !config.ValidName(role.Name) {
 			return nil, errors.New("role: invalid selection name")
 		}

@@ -6,7 +6,8 @@ export const projectModes: string[];
 export type Step = { key: string; title: string };
 export type ProjectInput = { mode: string; address: string; stored: string; file: string; refKind: string; ref: string; identity: string; name: string; useRepoFile: boolean };
 export type Available = { alias: string; stored: string; url: string; refKind: string; ref: string; identity: string; declared: boolean };
-export type TaskRow = { name: string; selected: boolean; schedule: string; switch: string; args: string; roleSchedule: string; roleSuspend: boolean; roleArgs: string };
+export type TaskHarnessRow = { name: string; switch: string; schedule: string };
+export type TaskRow = { name: string; selected: boolean; schedule: string; switch: string; args: string; roleSchedule: string; roleSuspend: boolean; roleArgs: string; harnesses: TaskHarnessRow[] };
 export type WizardState = { project?: ProjectInput; draft?: Draft; form?: TeamForm };
 
 export function stepsFor(mode: "new" | "edit"): Step[];
@@ -29,8 +30,9 @@ export function withHarness(form: TeamForm, harness: { name: string; source: str
 export function imageList(value: string): string[];
 export function switchOf(task: { suspend?: boolean | null } | undefined): string;
 export function suspendOf(state: string): boolean | null;
-export function taskRows(role: TeamForm["roles"]["items"][number], offered: unknown[] | undefined, configured: unknown[] | undefined): TaskRow[];
-export function withTask(form: TeamForm, roleIndex: number, name: string, patch: { selected?: boolean; schedule?: string; args?: string; switch?: string }, known: string[]): TeamForm;
+export function roleHarnesses(form: TeamForm, role: TeamForm["roles"]["items"][number], offeredRole: { harnesses?: string[] } | undefined, inherited?: { name: string }[], configured?: { role?: string; harness?: string }[]): string[];
+export function taskRows(role: TeamForm["roles"]["items"][number], offered: unknown[] | undefined, configured: unknown[] | undefined, harnesses?: string[]): TaskRow[];
+export function withTask(form: TeamForm, roleIndex: number, name: string, patch: { selected?: boolean; schedule?: string; args?: string; switch?: string; harness?: string }, known: string[]): TeamForm;
 export function withAllTasks(form: TeamForm, roleIndex: number): TeamForm;
 export function cronErrors(value: string | undefined): string[];
 export function rolesErrors(form: TeamForm | undefined): string[];

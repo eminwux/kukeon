@@ -33,9 +33,11 @@ It runs two ways:
 | Authority | Diagnoses freely; changes things only on explicit request         | Read-only: detects and reports, never remediates                                      |
 | Lifetime  | Long-lived                                                        | Deletes itself when it ends; shares the interactive config's state volume             |
 
-The sweep ships **suspended**. See
+The sweep ships **suspended**, on every harness. Turn it on for one harness with
+`kuke team task enable kuke health-sweep --role majordomo --harness claude`;
+see
 [Teams → The majordomo health sweep](../../../docs/site/concepts/team.md#the-majordomo-health-sweep)
-for turning it on.
+for the rest.
 
 [`AGENTS.md`](AGENTS.md) is the canonical role policy. [`CLAUDE.md`](CLAUDE.md) is
 a relative symlink adapter for harnesses expecting that filename. The role data is

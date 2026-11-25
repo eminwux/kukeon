@@ -480,6 +480,14 @@ spec:
 			{Name: "pick-nits", Schedule: "@daily", Suspend: &off},
 			{Name: "health-sweep", Suspend: &on},
 		},
+		// ... and override the schedule per harness (#1668).
+		{
+			{Name: "pick-bug"},
+			{Name: "health-sweep", Suspend: &off, Harnesses: map[string]config.TaskHarness{
+				"claude": {Suspend: &on},
+				"codex":  {Schedule: "@daily"},
+			}},
+		},
 	} {
 		team := inheritingTeam()
 		team.Spec.Roles = []config.Role{{Name: "dev", Source: "defs", Path: "dev", Tasks: tasks}}
@@ -508,6 +516,8 @@ spec:
 		{{Name: "a"}, {Name: "a"}},
 		{{Name: "a"}, {Name: "a", Schedule: "@daily"}},
 		{{Name: ""}},
+		{{Name: "a", Harnesses: map[string]config.TaskHarness{"claude": {}}}},
+		{{Name: "a", Harnesses: map[string]config.TaskHarness{"Bad_Name": {Schedule: "@daily"}}}},
 	} {
 		team := inheritingTeam()
 		team.Spec.Roles = []config.Role{{Name: "dev", Source: "defs", Path: "dev", Tasks: &bad}}
@@ -544,7 +554,7 @@ spec:
 	if len(tasks) != 4 {
 		t.Fatalf("tasks = %+v, want 4 entries", tasks)
 	}
-	if tasks[0] != (config.TaskSelection{Name: "pick-issue"}) {
+	if !reflect.DeepEqual(tasks[0], config.TaskSelection{Name: "pick-issue"}) {
 		t.Errorf("bare name entry = %+v", tasks[0])
 	}
 	if tasks[1].Name != "pick-bug" || tasks[1].Schedule != "*/15 * * * *" || tasks[1].Suspend != nil {
@@ -594,6 +604,113 @@ spec:
 		if _, err = config.DecodeTeam(strings.NewReader(bad)); err == nil {
 			t.Errorf("%s: task entry %s accepted", name, entry)
 		}
+	}
+}
+
+// TestRoleTaskHarnessOverrides pins issue #1668 AC1: a task entry's
+// `harnesses` map round-trips byte for byte, an empty map is written as the
+// bare task name, and an override's shape is decoded strictly.
+func TestRoleTaskHarnessOverrides(t *testing.T) {
+	const teamYAML = `apiVersion: v1beta1
+kind: Team
+metadata:
+    name: kuke
+    realm: default
+spec:
+    roles:
+        - name: majordomo
+          source: kukeon
+          path: team/roles/majordomo
+          tasks:
+            - name: health-sweep
+              harnesses:
+                claude:
+                    suspend: false
+                codex:
+                    schedule: '@daily'
+            - pick-issue
+`
+	team, err := config.DecodeTeam(strings.NewReader(teamYAML))
+	if err != nil {
+		t.Fatalf("DecodeTeam() error = %v", err)
+	}
+	if err = config.ValidateTeam(team); err != nil {
+		t.Fatalf("ValidateTeam() error = %v", err)
+	}
+	entry, err := config.Declaration(team)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(4)
+	if err = enc.Encode(entry); err != nil {
+		t.Fatal(err)
+	}
+	if buf.String() != teamYAML {
+		t.Errorf("round trip changed the document:\n%s\nwant:\n%s", buf.String(), teamYAML)
+	}
+	// Declaration deep-copies the overrides.
+	*(*entry.Spec.Roles[0].Tasks)[0].Harnesses["claude"].Suspend = true
+	if *(*team.Spec.Roles[0].Tasks)[0].Harnesses["claude"].Suspend {
+		t.Error("Declaration shares the override's suspend with the input")
+	}
+
+	off := false
+	empty := config.TaskSelection{Name: "x", Harnesses: map[string]config.TaskHarness{}}
+	raw, err := yaml.Marshal(empty)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "x\n" {
+		t.Errorf("entry with an empty harnesses map = %q, want the bare name", raw)
+	}
+
+	for name, tc := range map[string]struct{ entry, want string }{
+		"unknown field": {
+			`{name: health-sweep, harnesses: {claude: {args: "a"}}}`,
+			"spec.roles[0].tasks[0].harnesses.claude.args: unknown field",
+		},
+		"empty override": {
+			`{name: health-sweep, harnesses: {claude: {}}}`,
+			"spec.roles[0].tasks[0].harnesses.claude: set schedule or suspend",
+		},
+		"invalid harness name": {
+			`{name: health-sweep, harnesses: {"Bad Name": {suspend: true}}}`,
+			`invalid harness name "Bad Name"`,
+		},
+		"non-boolean suspend": {
+			`{name: health-sweep, harnesses: {claude: {suspend: "yes"}}}`,
+			"harnesses.claude.suspend",
+		},
+	} {
+		bad := "apiVersion: v1beta1\nkind: Team\nmetadata: {name: kuke}\nspec:\n  roles:\n" +
+			"    - name: majordomo\n      source: kukeon\n      path: p\n      tasks:\n        - " + tc.entry + "\n"
+		_, decodeErr := config.DecodeTeam(strings.NewReader(bad))
+		if decodeErr == nil || !strings.Contains(decodeErr.Error(), tc.want) {
+			t.Errorf("%s: DecodeTeam() error = %v, want it to contain %q", name, decodeErr, tc.want)
+		}
+	}
+
+	both := config.TaskSelection{
+		Name: "health-sweep", Schedule: "@hourly", Args: "a",
+		Harnesses: map[string]config.TaskHarness{"claude": {Suspend: &off}, "codex": {Schedule: "@daily"}},
+	}
+	claude := both.ForHarness("claude")
+	if claude.Suspend == nil || *claude.Suspend || claude.Schedule != "@hourly" || claude.Args != "a" ||
+		claude.Harnesses != nil {
+		t.Errorf("ForHarness(claude) = %+v", claude)
+	}
+	codex := both.ForHarness("codex")
+	if codex.Suspend != nil || codex.Schedule != "@daily" {
+		t.Errorf("ForHarness(codex) = %+v", codex)
+	}
+	other := both.ForHarness("gemini")
+	if other.Suspend != nil || other.Schedule != "@hourly" || other.Harnesses != nil {
+		t.Errorf("ForHarness(gemini) = %+v", other)
+	}
+	if both.Harnesses == nil {
+		t.Error("ForHarness changed its receiver's map")
 	}
 }
 
