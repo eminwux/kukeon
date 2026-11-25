@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -134,12 +135,17 @@ func (r *Exec) VolumeLoginStatus(volume intmodel.Volume) *intmodel.LoginStatus {
 // never opens it. A volume that is not a login identity, or whose connector
 // declares no marker, has no login status.
 func (r *Exec) volumeLoginStatus(md intmodel.VolumeMetadata, spec intmodel.VolumeSpec) *intmodel.LoginStatus {
-	if spec.Connector == "" || spec.LoginMarker == "" || !filepath.IsLocal(spec.LoginMarker) {
+	if spec.Connector == "" || spec.LoginMarker == "" || !filepath.IsLocal(spec.LoginMarker) ||
+		strings.Contains(spec.LoginMarker, "..") {
 		return nil
 	}
-	root := fs.VolumePath(r.opts.RunPath, md.Realm, md.Space, md.Stack, md.Name)
+	root := filepath.Clean(fs.VolumePath(r.opts.RunPath, md.Realm, md.Space, md.Stack, md.Name))
+	marker := filepath.Clean(filepath.Join(root, spec.LoginMarker))
+	if !strings.HasPrefix(marker, root+string(filepath.Separator)) {
+		return nil
+	}
 	// Lstat: a marker that is a symlink is not followed out of the volume.
-	info, err := os.Lstat(filepath.Join(root, spec.LoginMarker))
+	info, err := os.Lstat(marker)
 	if err != nil || info.IsDir() {
 		return &intmodel.LoginStatus{State: v1beta1.LoginStateEmpty}
 	}
