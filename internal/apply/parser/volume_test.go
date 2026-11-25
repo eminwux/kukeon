@@ -139,3 +139,33 @@ func TestValidateDocument_Volume_ReclaimPolicy(t *testing.T) {
 	bad := parseVolume(t, base+"spec:\n  reclaimPolicy: retainn\n")
 	requireValidationErr(t, parser.ValidateDocument(bad), errdefs.ErrVolumeReclaimPolicyInvalid)
 }
+
+// TestValidateDocument_Volume_ConnectorTag: a Volume may be tagged as a login
+// identity (#1685). A method or marker needs a connector, and the marker must
+// stay inside the volume.
+func TestValidateDocument_Volume_ConnectorTag(t *testing.T) {
+	base := "apiVersion: v1beta1\nkind: Volume\nmetadata:\n  name: data\n  realm: default\n"
+
+	doc := parseVolume(t, base+"spec:\n  connector: claude\n  method: login\n  loginMarker: .credentials.json\n")
+	if err := parser.ValidateDocument(doc); err != nil {
+		t.Fatalf("tagged volume should be valid, got: %v", err)
+	}
+	if spec := doc.VolumeDoc.Spec; spec.Connector != "claude" || spec.Method != "login" || !spec.IsLoginIdentity() {
+		t.Errorf("parsed spec = %+v, want the claude login tag", spec)
+	}
+
+	for name, spec := range map[string]string{
+		"method without connector":  "spec:\n  method: login\n",
+		"marker without connector":  "spec:\n  loginMarker: auth.json\n",
+		"marker escapes the volume": "spec:\n  connector: claude\n  loginMarker: ../../secrets/x\n",
+		"absolute marker":           "spec:\n  connector: claude\n  loginMarker: /etc/passwd\n",
+		"connector is a path":       "spec:\n  connector: a/b\n",
+	} {
+		bad := parseVolume(t, base+spec)
+		if err := parser.ValidateDocument(bad); err == nil {
+			t.Errorf("%s: expected a validation error", name)
+		} else {
+			requireValidationErr(t, err, errdefs.ErrVolumeConnectorInvalid)
+		}
+	}
+}

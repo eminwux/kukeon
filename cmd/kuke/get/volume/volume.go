@@ -173,15 +173,28 @@ func printVolumes(cmd *cobra.Command, volumes []v1beta1.VolumeDoc, format shared
 			return nil
 		}
 		headers := []string{"NAME", "REALM", "SPACE", "STACK"}
+		wide := format == shared.OutputFormatWide
+		if wide {
+			// A login identity names its connector and login state (#1685).
+			headers = append(headers, "CONNECTOR", "METHOD", "LOGIN")
+		}
 		rows := make([][]string, 0, len(volumes))
 		for i := range volumes {
 			v := &volumes[i]
-			rows = append(rows, []string{
+			row := []string{
 				v.Metadata.Name,
 				dashIfEmpty(v.Metadata.Realm),
 				dashIfEmpty(v.Metadata.Space),
 				dashIfEmpty(v.Metadata.Stack),
-			})
+			}
+			if wide {
+				login := ""
+				if v.Status.Login != nil {
+					login = v.Status.Login.State
+				}
+				row = append(row, dashIfEmpty(v.Spec.Connector), dashIfEmpty(v.Spec.Method), dashIfEmpty(login))
+			}
+			rows = append(rows, row)
 		}
 		shared.PrintTable(cmd, headers, rows)
 		return nil

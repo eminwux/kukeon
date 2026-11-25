@@ -24,6 +24,7 @@ package connector
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
@@ -362,4 +363,27 @@ func ParseMethods(args []string) (map[string]string, error) {
 		out[name] = method
 	}
 	return out, nil
+}
+
+// ValidateVolumeTag checks the login-identity tag of a Volume (issue #1685):
+// a method or a login marker needs a connector, the connector and method are
+// plain names, and the marker is a path inside the volume — so the daemon
+// never stats a path outside it.
+func ValidateVolumeTag(connector, method, marker string) error {
+	connector, method, marker = strings.TrimSpace(connector), strings.TrimSpace(method), strings.TrimSpace(marker)
+	if connector == "" {
+		if method != "" || marker != "" {
+			return fmt.Errorf("%w: spec.method and spec.loginMarker require spec.connector",
+				errdefs.ErrVolumeConnectorInvalid)
+		}
+		return nil
+	}
+	if strings.ContainsAny(connector, "/\\\x00 ") || strings.ContainsAny(method, "/\\\x00 ") {
+		return fmt.Errorf("%w: spec.connector and spec.method are plain names", errdefs.ErrVolumeConnectorInvalid)
+	}
+	if marker != "" && !filepath.IsLocal(marker) {
+		return fmt.Errorf("%w: spec.loginMarker %q must be a path inside the volume",
+			errdefs.ErrVolumeConnectorInvalid, marker)
+	}
+	return nil
 }

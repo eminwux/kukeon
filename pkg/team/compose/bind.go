@@ -388,6 +388,9 @@ func bindValues(plan *pairPlan, bp *api.CellBlueprintDoc, cfg *config.TeamDefaul
 		"STATE_VOLUME_SPACE": cc.Metadata.Space,
 		"STATE_VOLUME_STACK": cc.Metadata.Stack,
 	}
+	if err := bindHarnessState(plan, cc, facts); err != nil {
+		return err
+	}
 	if project, ok := runtimeSource(plan.sources, projectSlot); ok {
 		facts["PROJECT_DIR"] = project.ClonePath
 	}
@@ -434,6 +437,36 @@ func bindValues(plan *pairPlan, bp *api.CellBlueprintDoc, cfg *config.TeamDefaul
 // sweep cell share it, so one harness login covers every cell of the role ×
 // harness. Compose rejects two pairs whose names join to the same string, so
 // two pairs never share a state volume by accident.
+// bindHarnessState applies the team's choices for the connector that
+// authenticates the pair's harness to where the harness keeps its state (issue
+// #1685): a login identity named for a login method replaces the team's own
+// state volume, scope included, and `state` is carried to the Config. Without
+// either the Config keeps `<team>-<role>-<harness>-state` and persistent
+// state, exactly as before.
+func bindHarnessState(plan *pairPlan, cc *api.CellConfigDoc, facts map[string]string) error {
+	if plan.harnessConnector == "" {
+		return nil
+	}
+	choice, ok := plan.choice(plan.harnessConnector)
+	if !ok {
+		return nil
+	}
+	if choice.Identity != "" && plan.harnessMethod.Delivery == api.ConnectorDeliveryStateVolume {
+		ref, err := config.ParseIdentity(choice.Identity, plan.realm)
+		if err != nil {
+			return fmt.Errorf("connector %s: identity: %w", plan.harnessConnector, err)
+		}
+		facts["STATE_VOLUME"] = ref.Name
+		facts["STATE_VOLUME_REALM"] = ref.Realm
+		facts["STATE_VOLUME_SPACE"] = ref.Space
+		facts["STATE_VOLUME_STACK"] = ref.Stack
+	}
+	if choice.State != "" && choice.State != config.StatePersistent {
+		cc.Spec.State = choice.State
+	}
+	return nil
+}
+
 func (p *pairPlan) stateVolume() string {
 	return p.configName() + stateVolumeSuffix
 }

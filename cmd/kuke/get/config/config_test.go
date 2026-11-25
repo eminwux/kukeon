@@ -606,4 +606,31 @@ func TestNewConfigCmd_ConnectorsColumn(t *testing.T) {
 			}
 		}
 	}
+
+	// A harness connector also says where the harness keeps its state: the
+	// login identity with its login state, or a token method's state volume.
+	cfg.Status.Connectors = []v1beta1.ConnectorStatus{
+		{
+			Connector: "agent", Method: "login", Delivery: v1beta1.ConnectorDeliveryStateVolume,
+			State: v1beta1.ConnectorResolved, Volume: "dev-state", HarnessState: v1beta1.HarnessStatePersistent,
+			Login: &v1beta1.LoginStatus{State: v1beta1.LoginStateLoggedIn},
+		},
+		{
+			Connector: "other", Method: "token", Delivery: v1beta1.ConnectorDeliveryEnv,
+			State: v1beta1.ConnectorResolved, Origin: v1beta1.RenderOriginRealm,
+			Identity: &v1beta1.ContainerSecretRef{Name: "tok", Realm: "default"},
+			Volume:   "other-state", HarnessState: v1beta1.HarnessStatePersistent,
+		},
+		{
+			Connector: "third", Method: "token", Delivery: v1beta1.ConnectorDeliveryEnv,
+			State:        v1beta1.ConnectorResolved,
+			Identity:     &v1beta1.ContainerSecretRef{Name: "tok", Realm: "default"},
+			HarnessState: v1beta1.HarnessStateEphemeral,
+		},
+	}
+	wide = run(t, "--realm", "default", "-o", "wide")
+	want = "agent=login [dev-state, logged in], other=tok (realm) [state other-state], third=tok [state ephemeral]"
+	if !strings.Contains(wide, want) {
+		t.Errorf("-o wide = \n%s\nwant the CONNECTORS column to read %q", wide, want)
+	}
 }

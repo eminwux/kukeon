@@ -32,6 +32,14 @@ export const statePending = "pending";
 export const teamLabel = "kukeon.io/team";
 // An open Config coordinate lands in the scope of this name.
 export const defaultScopeName = "default";
+// Login states of a login identity (#1685): whether its Volume holds a login.
+export const loginLoggedIn = "logged in";
+export const loginEmpty = "empty";
+// Where a harness keeps its state: in the state volume, or nowhere that
+// outlives the cell.
+export const harnessPersistent = "persistent";
+export const harnessEphemeral = "ephemeral";
+export const harnessStates = [harnessPersistent, harnessEphemeral];
 
 const list = value => Array.isArray(value) ? value : [];
 const text = value => typeof value === "string" ? value : "";
@@ -203,15 +211,67 @@ export function defaultGroupChoices(components, connectors) {
   return out;
 }
 
-// pickableStatuses are the connectors of a Config whose identity can be chosen.
-export function pickableStatuses(statuses) { return list(statuses).filter(status => takesIdentity(status?.delivery)); }
+// Login identities (#1685). A method that keeps its login in the harness state
+// volume has identities too: Volumes tagged with the connector. They come from
+// GET /api/connectors/logins; a status names the one a Config uses in
+// volumeRef. Like a Secret identity, a login identity is named by coordinates
+// only — nothing of the login is ever read.
+
+// keepsLogin reports a connector status whose identity is a login identity.
+export function keepsLogin(status) { return status?.delivery === deliveryStateVolume; }
+// picksIdentity reports a status whose identity a Config or a cell can choose:
+// a stored Secret, or a login identity.
+export function picksIdentity(status) { return takesIdentity(status?.delivery) || keepsLogin(status); }
+// statusIdentity is the identity a status resolves to, whatever its kind: the
+// Secret, or the Volume of a login method.
+export function statusIdentity(status) { return keepsLogin(status) ? secretRef(status?.volumeRef) : secretRef(status?.identity); }
+// loginIdentitiesFor lists the login identities of one connector, normalized.
+export function loginIdentitiesFor(logins, connector) {
+  return list(logins).filter(item => item?.connector === connector && secretRef(item.volume)).map(item => {
+    const out = { connector, method: text(item.method), volume: secretRef(item.volume), exists: item.exists === true, tagged: item.tagged === true, state: text(item.login?.state), since: text(item.login?.since), usedBy: list(item.usedBy).filter(config => text(config?.name)) };
+    const session = item.session;
+    if (text(session?.cell) && text(session.realm) && text(session.space) && text(session.stack)) out.session = { realm: session.realm, space: session.space, stack: session.stack, cell: session.cell, container: text(session.container) };
+    return out;
+  });
+}
+// loginStateText words a login state for a row: Logged in, Empty, or Unknown
+// when the connector declares no marker to look for.
+export function loginStateText(state) { return state === loginLoggedIn ? "Logged in" : state === loginEmpty ? "Empty" : "Unknown"; }
+// loginTone is the badge tone of a login state.
+export function loginTone(state) { return state === loginLoggedIn ? "ok" : state === loginEmpty ? "stopped" : "unknown"; }
+// sessionScope is the cell scope of a running login session: where its
+// terminal opens.
+export function sessionScope(session) { return session ? [session.realm, session.space, session.stack, session.cell] : []; }
+// loginBody is the body of a login-identity request: its name and scope, and
+// the method when the connector has more than one that keeps a login.
+export function loginBody(name, scope, method) {
+  const body = { name: trimmed(name), scope: scopeAt(scope, scopeLevel(scope)) };
+  if (trimmed(method)) body.method = trimmed(method);
+  return body;
+}
+// loginNameError says why a name cannot be a login identity's, or "".
+export function loginNameError(name) {
+  const value = trimmed(name);
+  if (!value) return "Name the login identity.";
+  return /^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$/.test(value) ? "" : "Use lowercase letters, digits, dots, dashes and underscores.";
+}
+// stateText says where a connector's harness keeps its state: the state volume
+// of a token method, "ephemeral", or "" for a connector that keeps none.
+export function stateText(status) {
+  if (keepsLogin(status) || !text(status?.harnessState)) return "";
+  return status.harnessState === harnessEphemeral ? harnessEphemeral : text(status.volume);
+}
+
+// pickableStatuses are the connectors of a Config whose identity can be chosen:
+// a stored Secret, or the login identity of a method that keeps a login.
+export function pickableStatuses(statuses) { return list(statuses).filter(picksIdentity); }
 // changedPicks keeps only the picks that differ from the identity the Config
 // resolves on its own: those are the per-cell overrides a create sends.
 export function changedPicks(statuses, picks) {
   const out = {};
   for (const status of pickableStatuses(statuses)) {
     const ref = secretRef(picks?.[status.connector]);
-    if (ref && !sameRef(ref, status.identity)) out[status.connector] = ref;
+    if (ref && !sameRef(ref, statusIdentity(status))) out[status.connector] = ref;
   }
   return out;
 }

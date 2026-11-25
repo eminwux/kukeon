@@ -4,6 +4,7 @@ import {
   allowedLevels, blockingConnectors, blocksCells, changedMethods, changedPicks, clearMaterial, connectorLevels, defaultGroupChoices, defaultRow, defaultTargets, emptyIdentityForm, formatSecretReference,
   groupComponents, identitiesFor, listedConnectors, identityErrors, identityFields, identityPayload, importPayload, importsFromHost, isRegistry, loginMethods, methodChoices, methodStatuses, originLabel, refKey, refLabel,
   emptySecretForm, registryEntries, sameRef, scopeAt, scopeFromParts, scopeLevel, scopeQuery, secretErrors, secretPayload, secretRef, secretTypeOf, storesNoValue, takesIdentity, targetScope, teamOf, unresolvedConnectors, usageFor,
+  harnessEphemeral, harnessPersistent, keepsLogin, loginBody, loginEmpty, loginIdentitiesFor, loginLoggedIn, loginNameError, loginStateText, loginTone, picksIdentity, sessionScope, stateText, statusIdentity,
 } from "./connectors.mjs";
 import { blueprintForm, buildSpec, componentsWithoutIdentity, connectorsWithoutIdentity, emptyAnswers, formSections, groupChoice, missingAnswers } from "./config-form.mjs";
 
@@ -252,7 +253,11 @@ test("only the picks that differ from the effective identity are sent as overrid
   assert.deepEqual(changedPicks(statuses, { "example-token": { name: "example-default", realm: "dev" }, repo: { name: "repo-key", realm: "dev", space: "" } }), {}, "re-picking the effective identity is no override");
   assert.deepEqual(changedPicks(statuses, { "example-token": { name: "example-other", realm: "dev", space: "shared", stack: "services" }, repo: undefined }), { "example-token": { name: "example-other", realm: "dev", space: "shared", stack: "services" } });
   assert.deepEqual(changedPicks(statuses, { "example-token": { name: "", realm: "dev" } }), {}, "a half-typed name is not sent");
-  assert.deepEqual(changedPicks(statuses, { demo: { name: "x", realm: "dev" }, other: { name: "y", realm: "dev" } }), {}, "a login and an unknown connector take no identity");
+  assert.deepEqual(changedPicks(statuses, { other: { name: "y", realm: "dev" } }), {}, "an unknown connector takes no identity");
+  // A login method takes a login identity — a Volume — sent like any other pick (#1685).
+  const login = statuses.map(item => item.connector === "demo" ? { ...item, volumeRef: { name: "demo-state", realm: "dev", space: "teams", stack: "core" } } : item);
+  assert.deepEqual(changedPicks(login, { demo: { name: "personal", realm: "dev" } }), { demo: { name: "personal", realm: "dev" } });
+  assert.deepEqual(changedPicks(login, { demo: { name: "demo-state", realm: "dev", space: "teams", stack: "core" } }), {}, "re-picking the Config's login identity is no override");
   assert.deepEqual(changedPicks(undefined, { a: { name: "x", realm: "dev" } }), {});
 });
 
@@ -398,4 +403,60 @@ test("listedConnectors leaves out registry-delivered connectors, whatever they a
   const withMethods = { ...pulls, name: "methods-win", methods: [{ name: "token", component: "x", delivery: "env", slot: "x" }] };
   assert.deepEqual(listedConnectors([example, pulls, repo, renamed, withMethods]).map(connector => connector.name), ["example-token", repo.name, "methods-win"]);
   assert.deepEqual(listedConnectors(undefined), []);
+});
+
+test("a login identity is the identity of a method that keeps a login", () => {
+  const login = { connector: "demo", component: "demo-login", method: "login", delivery: "stateVolume", state: "resolved", volume: "demo-state", volumeRef: { name: "demo-state", realm: "dev", space: "teams" }, harnessState: harnessPersistent };
+  const token = { connector: "demo", component: "demo-token", method: "token", delivery: "env", state: "resolved", identity: { name: "tok", realm: "dev" } };
+  assert.equal(keepsLogin(login), true);
+  assert.equal(keepsLogin(token), false);
+  assert.equal(picksIdentity(login), true);
+  assert.equal(picksIdentity(token), true);
+  assert.equal(picksIdentity({ delivery: "registry" }), false);
+  assert.deepEqual(statusIdentity(login), { name: "demo-state", realm: "dev", space: "teams" });
+  assert.deepEqual(statusIdentity(token), { name: "tok", realm: "dev" });
+  assert.equal(statusIdentity({ ...login, volumeRef: undefined }), undefined, "a state volume without a scope names no identity");
+});
+
+test("login identities are read from the list by connector", () => {
+  const logins = [
+    { connector: "demo", method: "login", volume: { name: "personal", realm: "dev" }, exists: true, tagged: true, login: { state: loginEmpty }, usedBy: [] },
+    { connector: "demo", method: "login", volume: { name: "team-state", realm: "dev", space: "teams", stack: "core" }, exists: true, tagged: false, login: { state: loginLoggedIn, since: "2026-11-25T10:00:00Z" }, usedBy: [{ name: "team-dev", realm: "dev" }, { nope: true }], session: { realm: "dev", space: "teams", stack: "core", cell: "login-team-state", container: "login" } },
+    { connector: "other", volume: { name: "x", realm: "dev" } },
+    { connector: "demo", volume: { name: "", realm: "dev" } },
+    null,
+  ];
+  const got = loginIdentitiesFor(logins, "demo");
+  assert.deepEqual(got.map(item => item.volume.name), ["personal", "team-state"]);
+  assert.deepEqual(got[0], { connector: "demo", method: "login", volume: { name: "personal", realm: "dev" }, exists: true, tagged: true, state: loginEmpty, since: "", usedBy: [] });
+  assert.equal(got[1].tagged, false);
+  assert.deepEqual(got[1].usedBy, [{ name: "team-dev", realm: "dev" }]);
+  assert.deepEqual(sessionScope(got[1].session), ["dev", "teams", "core", "login-team-state"]);
+  assert.deepEqual(sessionScope(undefined), []);
+  assert.deepEqual(loginIdentitiesFor(undefined, "demo"), []);
+  // A session without full coordinates is not a session the UI can open.
+  assert.equal(loginIdentitiesFor([{ connector: "demo", volume: { name: "a", realm: "dev" }, session: { cell: "c" } }], "demo")[0].session, undefined);
+});
+
+test("a login state is worded and toned", () => {
+  assert.equal(loginStateText(loginLoggedIn), "Logged in");
+  assert.equal(loginStateText(loginEmpty), "Empty");
+  assert.equal(loginStateText(undefined), "Unknown");
+  assert.deepEqual([loginTone(loginLoggedIn), loginTone(loginEmpty), loginTone("")], ["ok", "stopped", "unknown"]);
+});
+
+test("a login request names the identity, its scope and an optional method", () => {
+  assert.deepEqual(loginBody(" personal ", { realm: "dev" }), { name: "personal", scope: { realm: "dev" } });
+  assert.deepEqual(loginBody("team", { realm: "dev", space: "teams", stack: "core" }, "login"), { name: "team", scope: { realm: "dev", space: "teams", stack: "core" }, method: "login" });
+  assert.equal(loginNameError(""), "Name the login identity.");
+  assert.equal(loginNameError("personal-max"), "");
+  assert.notEqual(loginNameError("../x"), "");
+  assert.notEqual(loginNameError("Has Space"), "");
+});
+
+test("a token method says where its harness keeps state", () => {
+  assert.equal(stateText({ delivery: "env", harnessState: harnessPersistent, volume: "demo-state" }), "demo-state");
+  assert.equal(stateText({ delivery: "env", harnessState: harnessEphemeral }), harnessEphemeral);
+  assert.equal(stateText({ delivery: "env" }), "", "a connector that authenticates no harness keeps no state");
+  assert.equal(stateText({ delivery: "stateVolume", harnessState: harnessPersistent, volume: "demo-state" }), "", "a login method names its identity instead");
 });

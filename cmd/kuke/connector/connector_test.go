@@ -31,6 +31,7 @@ import (
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/connector/connectortest"
+	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
 
@@ -40,6 +41,82 @@ type fakeDaemon struct {
 	secrets map[string]v1beta1.SecretDoc // "realm/name"
 	created []v1beta1.SecretDoc
 	applied int
+	// volumes and cells are keyed "realm/space/stack/name"; configs are what
+	// ListConfigs serves, status included.
+	volumes map[string]v1beta1.VolumeDoc
+	cells   map[string]v1beta1.CellDoc
+	configs []v1beta1.CellConfigDoc
+	// createdCells and deletedCells record the identity cells started and
+	// removed.
+	createdCells []v1beta1.CellDoc
+	deletedCells []string
+	// createCellErr fails the start of every identity cell.
+	createCellErr error
+}
+
+func volumeKey(md v1beta1.VolumeMetadata) string {
+	return md.Realm + "/" + md.Space + "/" + md.Stack + "/" + md.Name
+}
+
+func cellKey(doc v1beta1.CellDoc) string {
+	return doc.Spec.RealmID + "/" + doc.Spec.SpaceID + "/" + doc.Spec.StackID + "/" + doc.Metadata.Name
+}
+
+func (f *fakeDaemon) GetVolume(_ context.Context, doc v1beta1.VolumeDoc) (kukeonv1.GetVolumeResult, error) {
+	volume, ok := f.volumes[volumeKey(doc.Metadata)]
+	return kukeonv1.GetVolumeResult{Volume: volume, MetadataExists: ok}, nil
+}
+
+func (f *fakeDaemon) CreateVolume(_ context.Context, doc v1beta1.VolumeDoc) (kukeonv1.CreateVolumeResult, error) {
+	if f.volumes == nil {
+		f.volumes = map[string]v1beta1.VolumeDoc{}
+	}
+	_, existed := f.volumes[volumeKey(doc.Metadata)]
+	if doc.Spec.LoginMarker != "" {
+		doc.Status.Login = &v1beta1.LoginStatus{State: v1beta1.LoginStateEmpty}
+	}
+	f.volumes[volumeKey(doc.Metadata)] = doc
+	return kukeonv1.CreateVolumeResult{Volume: doc, Created: !existed}, nil
+}
+
+func (f *fakeDaemon) ListVolumes(context.Context, string, string, string) ([]v1beta1.VolumeDoc, error) {
+	out := make([]v1beta1.VolumeDoc, 0, len(f.volumes))
+	for _, volume := range f.volumes {
+		out = append(out, volume)
+	}
+	return out, nil
+}
+
+func (f *fakeDaemon) ListConfigs(context.Context, string, string, string) ([]v1beta1.CellConfigDoc, error) {
+	return f.configs, nil
+}
+
+func (f *fakeDaemon) GetCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+	cell, ok := f.cells[cellKey(doc)]
+	if !ok {
+		return kukeonv1.GetCellResult{}, errdefs.ErrCellNotFound
+	}
+	return kukeonv1.GetCellResult{Cell: cell, MetadataExists: true, RootContainerTaskRunning: true}, nil
+}
+
+func (f *fakeDaemon) CreateCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+	if f.cells == nil {
+		f.cells = map[string]v1beta1.CellDoc{}
+	}
+	f.cells[cellKey(doc)] = doc
+	f.createdCells = append(f.createdCells, doc)
+	// Like the daemon, a cell whose start fails is stored and left behind.
+	return kukeonv1.CreateCellResult{Cell: doc}, f.createCellErr
+}
+
+func (f *fakeDaemon) KillCell(context.Context, v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
+	return kukeonv1.KillCellResult{}, nil
+}
+
+func (f *fakeDaemon) DeleteCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.DeleteCellResult, error) {
+	delete(f.cells, cellKey(doc))
+	f.deletedCells = append(f.deletedCells, doc.Metadata.Name)
+	return kukeonv1.DeleteCellResult{}, nil
 }
 
 func newFakeDaemon() *fakeDaemon {
@@ -149,6 +226,20 @@ func run(t *testing.T, daemon *fakeDaemon, home string, git fakeGit, args ...str
 		client = daemon
 	}
 	cmd.SetContext(context.WithValue(ctx, connector.MockControllerKey{}, client))
+	cmd.SetArgs(args)
+	err := cmd.Execute()
+	return out.String(), err
+}
+
+// runWith is run with the attach step of `kuke connector login` replaced.
+func runWith(t *testing.T, daemon *fakeDaemon, attach connector.AttachFunc, args ...string) (string, error) {
+	t.Helper()
+	cmd := connector.NewConnectorCmdWithCatalog(connectortest.Catalog(t))
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	ctx := context.WithValue(context.Background(), connector.MockControllerKey{}, connector.Client(daemon))
+	cmd.SetContext(context.WithValue(ctx, connector.MockAttachKey{}, attach))
 	cmd.SetArgs(args)
 	err := cmd.Execute()
 	return out.String(), err
@@ -402,9 +493,9 @@ func TestConnectorList(t *testing.T) {
 		t.Fatalf("no realm defaults section:\n%s", out)
 	}
 	for _, want := range [][]string{
-		{"git", "git-ssh", "default", "ssh-key"},
-		{"git", "me", "default/dev", "opaque"},
-		{connectortest.Name, "-", "-", "-"},
+		{"git", "git-ssh", "default", "ssh-key", "-", "-"},
+		{"git", "me", "default/dev", "opaque", "-", "-"},
+		{connectortest.Name, "-", "-", "-", "-", "-"},
 	} {
 		if !hasRow(identities, want) {
 			t.Errorf("identities lack row %v:\n%s", want, identities)
@@ -426,4 +517,258 @@ func hasRow(table string, cells []string) bool {
 		}
 	}
 	return false
+}
+
+// loginConfig is a Config whose status says it keeps a login of connector in
+// the named state volume.
+func loginConfig(name, connectorName string, volume v1beta1.VolumeRef) v1beta1.CellConfigDoc {
+	return v1beta1.CellConfigDoc{
+		Metadata: v1beta1.CellConfigMetadata{Name: name, Realm: volume.Realm, Space: volume.Space, Stack: volume.Stack},
+		Spec:     v1beta1.CellConfigSpec{Values: map[string]string{"IMAGE": "kukeon.internal/role:dev"}},
+		Status: &v1beta1.CellConfigStatus{Connectors: []v1beta1.ConnectorStatus{{
+			Connector: connectorName, Method: "login", Delivery: v1beta1.ConnectorDeliveryStateVolume,
+			State: v1beta1.ConnectorResolved, Volume: volume.Name, VolumeRef: &volume,
+			Login: &v1beta1.LoginStatus{State: v1beta1.LoginStateLoggedIn},
+		}}},
+	}
+}
+
+// loginConnector is a shipped connector with a method that keeps a login in
+// the harness state volume.
+func loginConnector(t *testing.T) string {
+	t.Helper()
+	for _, conn := range connectortest.Catalog(t).Connectors {
+		if _, ok := conn.LoginMethod(""); ok {
+			return conn.Metadata.Name
+		}
+	}
+	t.Fatal("the catalog has no connector with a login method")
+	return ""
+}
+
+// TestConnectorListLoginIdentities: login identities list beside Secrets, with
+// their scope, TYPE login, login status and the Configs using them — a tagged
+// Volume, and a team state volume no cell has tagged yet (#1685).
+func TestConnectorListLoginIdentities(t *testing.T) {
+	name := loginConnector(t)
+	daemon := newFakeDaemon()
+	team := v1beta1.VolumeRef{Name: "kukeon-dev-state", Realm: "default", Space: "teams", Stack: "kukeon"}
+	daemon.volumes = map[string]v1beta1.VolumeDoc{
+		"default///personal": {
+			Metadata: v1beta1.VolumeMetadata{Name: "personal", Realm: "default"},
+			Spec:     v1beta1.VolumeSpec{Connector: name, Method: "login", LoginMarker: "marker"},
+			Status:   v1beta1.VolumeStatus{Login: &v1beta1.LoginStatus{State: v1beta1.LoginStateEmpty}},
+		},
+		// An untagged volume a Config's status names, and one nothing names.
+		"default/teams/kukeon/kukeon-dev-state": {
+			Metadata: v1beta1.VolumeMetadata{Name: team.Name, Realm: "default", Space: "teams", Stack: "kukeon"},
+		},
+		"default///scratch": {Metadata: v1beta1.VolumeMetadata{Name: "scratch", Realm: "default"}},
+	}
+	daemon.configs = []v1beta1.CellConfigDoc{
+		loginConfig("kukeon-dev", name, team),
+		loginConfig("kukeon-dev-triage", name, team),
+	}
+
+	out, err := run(t, daemon, "", nil, "list")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	identities, _, _ := strings.Cut(out, "REALM DEFAULTS")
+	if !strings.Contains(identities, "STATUS") || !strings.Contains(identities, "USED BY") {
+		t.Fatalf("identities table lacks the STATUS and USED BY columns:\n%s", identities)
+	}
+	for _, want := range [][]string{
+		{name, "personal", "default", "login", "empty", "-"},
+		{name, "kukeon-dev-state", "default/teams/kukeon", "login", "logged", "in", "kukeon-dev", "(+1)"},
+	} {
+		if !hasRow(identities, want) {
+			t.Errorf("identities lack row %v:\n%s", want, identities)
+		}
+	}
+	if strings.Contains(identities, "scratch") {
+		t.Errorf("a volume that is no identity is listed:\n%s", identities)
+	}
+}
+
+// TestConnectorLogin: `kuke connector login` creates the tagged, retained
+// Volume, starts an identity cell that mounts only that Volume and runs the
+// connector's login command, attaches, and removes the cell when the session
+// ends (#1685).
+func TestConnectorLogin(t *testing.T) {
+	name := loginConnector(t)
+	daemon := newFakeDaemon()
+	var attached []string
+	attach := connector.AttachFunc(func(_ *cobra.Command, doc v1beta1.CellDoc, container string) (bool, error) {
+		attached = append(attached, doc.Metadata.Name+"/"+container)
+		// The login writes its marker while the session runs.
+		volume := daemon.volumes["default///personal-max"]
+		volume.Status.Login = &v1beta1.LoginStatus{State: v1beta1.LoginStateLoggedIn}
+		daemon.volumes["default///personal-max"] = volume
+		return false, nil
+	})
+
+	out, err := runWith(t, daemon, attach, "login", name, "personal-max")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	volume, ok := daemon.volumes["default///personal-max"]
+	if !ok {
+		t.Fatalf("no volume created: %+v", daemon.volumes)
+	}
+	if volume.Spec.Connector != name || volume.Spec.Method == "" || volume.Spec.LoginMarker == "" ||
+		volume.Spec.ReclaimPolicy != v1beta1.ReclaimRetain {
+		t.Errorf("volume spec = %+v, want the connector tag, its marker and Retain", volume.Spec)
+	}
+	if len(daemon.createdCells) != 1 {
+		t.Fatalf("created cells = %d, want 1", len(daemon.createdCells))
+	}
+	cell := daemon.createdCells[0]
+	if !cell.Spec.AutoDelete || cell.Metadata.Labels[v1beta1.LabelIdentityCell] != "personal-max" {
+		t.Errorf("cell = %+v, want a self-deleting cell labelled with the identity", cell.Metadata)
+	}
+	if cell.Spec.Provenance != nil || len(cell.Spec.Containers) != 1 {
+		t.Fatalf("cell spec = %+v, want one container and no Config lineage", cell.Spec)
+	}
+	c := cell.Spec.Containers[0]
+	want := v1beta1.VolumeRef{Name: "personal-max", Realm: "default"}
+	if len(c.Volumes) != 1 || c.Volumes[0].VolumeRef == nil || *c.Volumes[0].VolumeRef != want {
+		t.Errorf("mounts = %+v, want only the identity volume", c.Volumes)
+	}
+	if len(c.Secrets) != 0 || len(c.Repos) != 0 || c.Git != nil || len(c.Env) != 0 {
+		t.Errorf("container carries more than the volume: secrets=%v repos=%v git=%v env=%v",
+			c.Secrets, c.Repos, c.Git, c.Env)
+	}
+	if !c.Attachable || c.Command == "" || c.Image == "" {
+		t.Errorf("container = %+v, want an attachable container running the login command", c)
+	}
+	if len(attached) != 1 || len(daemon.deletedCells) != 1 || len(daemon.cells) != 0 {
+		t.Errorf("attached = %v, deleted = %v, left = %d; want one session, removed when it ended",
+			attached, daemon.deletedCells, len(daemon.cells))
+	}
+	if !strings.Contains(out, "personal-max@default: logged in") {
+		t.Errorf("output does not report the login state:\n%s", out)
+	}
+}
+
+// TestConnectorLoginAttachesToRunningSession: a second login on an identity
+// whose cell is still running attaches to it instead of starting another, and
+// a detach leaves the cell in place.
+func TestConnectorLoginAttachesToRunningSession(t *testing.T) {
+	name := loginConnector(t)
+	daemon := newFakeDaemon()
+	detach := connector.AttachFunc(func(*cobra.Command, v1beta1.CellDoc, string) (bool, error) { return true, nil })
+
+	if out, err := runWith(t, daemon, detach, "login", name, "personal-max"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	out, err := runWith(t, daemon, detach, "login", name, "personal-max")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if len(daemon.createdCells) != 1 || len(daemon.deletedCells) != 0 || len(daemon.cells) != 1 {
+		t.Errorf("created = %d, deleted = %v, running = %d; want one cell, still running",
+			len(daemon.createdCells), daemon.deletedCells, len(daemon.cells))
+	}
+	if !strings.Contains(out, "already running") {
+		t.Errorf("output does not say a session was already running:\n%s", out)
+	}
+}
+
+// TestConnectorLoginRejected: a connector without a login method, an unknown
+// connector, a Volume of another connector and a Volume that is no identity
+// are refused before any cell is created.
+func TestConnectorLoginRejected(t *testing.T) {
+	name := loginConnector(t)
+	daemon := newFakeDaemon()
+	daemon.volumes = map[string]v1beta1.VolumeDoc{
+		"default///other": {
+			Metadata: v1beta1.VolumeMetadata{Name: "other", Realm: "default"},
+			Spec:     v1beta1.VolumeSpec{Connector: "something-else", Method: "login"},
+		},
+		"default///data": {Metadata: v1beta1.VolumeMetadata{Name: "data", Realm: "default"}},
+	}
+	never := connector.AttachFunc(func(*cobra.Command, v1beta1.CellDoc, string) (bool, error) {
+		t.Error("attach reached")
+		return false, nil
+	})
+	for label, tc := range map[string]struct {
+		args []string
+		want string
+	}{
+		"no login method":      {[]string{"login", connectortest.Name}, "no method that keeps a login"},
+		"unknown connector":    {[]string{"login", "nope"}, "unknown connector"},
+		"another connector":    {[]string{"login", name, "other"}, "something-else"},
+		"not an identity":      {[]string{"login", name, "data"}, "is not a login identity"},
+		"stack without space":  {[]string{"login", name, "x", "--stack", "s"}, "names its space"},
+		"unknown login method": {[]string{"login", name, "x", "--method", "nope"}, "no login method"},
+	} {
+		t.Run(label, func(t *testing.T) {
+			out, err := runWith(t, daemon, never, tc.args...)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want one mentioning %q\n%s", err, tc.want, out)
+			}
+			if len(daemon.createdCells) != 0 {
+				t.Errorf("a cell was created: %+v", daemon.createdCells)
+			}
+		})
+	}
+}
+
+// TestConnectorLoginTeamVolume: an untagged state volume a Config logs in
+// through is an identity too — the login runs on it, on the Config's image,
+// without creating or re-tagging the Volume.
+func TestConnectorLoginTeamVolume(t *testing.T) {
+	name := loginConnector(t)
+	daemon := newFakeDaemon()
+	team := v1beta1.VolumeRef{Name: "kukeon-dev-state", Realm: "default", Space: "teams", Stack: "kukeon"}
+	stored := v1beta1.VolumeDoc{
+		Metadata: v1beta1.VolumeMetadata{Name: team.Name, Realm: "default", Space: "teams", Stack: "kukeon"},
+	}
+	daemon.volumes = map[string]v1beta1.VolumeDoc{"default/teams/kukeon/kukeon-dev-state": stored}
+	daemon.configs = []v1beta1.CellConfigDoc{loginConfig("kukeon-dev", name, team)}
+	done := connector.AttachFunc(func(*cobra.Command, v1beta1.CellDoc, string) (bool, error) { return false, nil })
+
+	out, err := runWith(t, daemon, done, "login", name, team.Name, "--space", "teams", "--stack", "kukeon")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if got := daemon.volumes["default/teams/kukeon/kukeon-dev-state"]; got.Spec != stored.Spec {
+		t.Errorf("volume spec changed to %+v", got.Spec)
+	}
+	if len(daemon.createdCells) != 1 {
+		t.Fatalf("created cells = %d, want 1", len(daemon.createdCells))
+	}
+	cell := daemon.createdCells[0]
+	if cell.Spec.SpaceID != "teams" || cell.Spec.StackID != "kukeon" {
+		t.Errorf("cell scope = %s/%s, want the volume's", cell.Spec.SpaceID, cell.Spec.StackID)
+	}
+	if image := cell.Spec.Containers[0].Image; image != "kukeon.internal/role:dev" {
+		t.Errorf("image = %q, want the Config's", image)
+	}
+}
+
+// TestConnectorLoginCleansUpAFailedStart: when the identity cell fails to
+// start, the command reports the failure and removes the cell it created, so
+// the identity is free for the next attempt.
+func TestConnectorLoginCleansUpAFailedStart(t *testing.T) {
+	name := loginConnector(t)
+	daemon := newFakeDaemon()
+	daemon.createCellErr = errors.New("image is not present")
+	never := connector.AttachFunc(func(*cobra.Command, v1beta1.CellDoc, string) (bool, error) {
+		t.Error("attach reached")
+		return false, nil
+	})
+	out, err := runWith(t, daemon, never, "login", name, "personal-max")
+	if err == nil || !strings.Contains(err.Error(), "image is not present") {
+		t.Fatalf("error = %v, want the start failure\n%s", err, out)
+	}
+	if len(daemon.createdCells) != 1 || len(daemon.deletedCells) != 1 || len(daemon.cells) != 0 {
+		t.Errorf("created = %d, deleted = %v, left = %d; want the failed cell removed",
+			len(daemon.createdCells), daemon.deletedCells, len(daemon.cells))
+	}
+	// The identity itself stays: the Volume was created and is not rolled back.
+	if _, ok := daemon.volumes["default///personal-max"]; !ok {
+		t.Errorf("the login identity was removed: %+v", daemon.volumes)
+	}
 }

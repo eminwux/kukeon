@@ -23,6 +23,10 @@ spec:
       description: >-
         The login kept in the harness state volume. Log in once from an
         interactive cell; every cell of the same role reuses it.
+      login:
+        # Claude Code writes its OAuth credentials here on Linux.
+        marker: .credentials.json
+        command: [claude, auth, login]
     - name: subscription
       delivery: env
       description: >-

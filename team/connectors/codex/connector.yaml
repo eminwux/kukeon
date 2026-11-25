@@ -23,6 +23,11 @@ spec:
       description: >-
         The `codex login` kept in the harness state volume. Its refresh token
         is single-use, so the login cannot be copied between roles.
+      login:
+        marker: auth.json
+        # Device-code flow: a cell has no browser, and the callback of the
+        # default flow listens on the cell's own localhost.
+        command: [codex, login, --device-auth]
     - name: api-key
       delivery: env
       description: An OpenAI API key, billed per token.

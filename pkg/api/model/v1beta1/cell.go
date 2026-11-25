@@ -170,6 +170,17 @@ type CellProvenance struct {
 	// enables, keyed by connector name. Persisted so a restart and a
 	// reconcile-driven recreate keep the method. Issue #1551.
 	ConnectorMethods map[string]string `json:"connectorMethods,omitempty"   yaml:"connectorMethods,omitempty"`
+	// ConnectorVolumes are the `--connector <connector>=<volume>` entries
+	// that name a login identity: the Volume this one cell keeps its harness
+	// state — and so its login — in, instead of the one its Config names,
+	// keyed by connector name. An override lands here, not in
+	// ConnectorOverrides, when the cell uses the connector through a method
+	// that keeps a login in the state volume. Issue #1685.
+	ConnectorVolumes map[string]VolumeRef `json:"connectorVolumes,omitempty"   yaml:"connectorVolumes,omitempty"`
+	// State is the `--state` choice supplied when the cell was created from
+	// a Config: `persistent` or `ephemeral` harness state for this one cell,
+	// instead of what its Config says. Issue #1685.
+	State string `json:"state,omitempty"              yaml:"state,omitempty"`
 }
 
 // CellBindingRef is a scoped reference to the Config or Blueprint a cell was
@@ -195,6 +206,14 @@ func CloneCellProvenance(in *CellProvenance) *CellProvenance {
 		BindingRef:   in.BindingRef,
 		EnvOverrides: cloneSlice(in.EnvOverrides),
 		Mode:         in.Mode,
+		State:        in.State,
+	}
+	if in.ConnectorVolumes != nil {
+		volumes := make(map[string]VolumeRef, len(in.ConnectorVolumes))
+		for k, v := range in.ConnectorVolumes {
+			volumes[k] = v
+		}
+		out.ConnectorVolumes = volumes
 	}
 	if in.Params != nil {
 		params := make(map[string]string, len(in.Params))

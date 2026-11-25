@@ -79,6 +79,9 @@ func mergeChoice(team, role config.ConnectorChoice) config.ConnectorChoice {
 	if role.Identity == "" {
 		role.Identity = team.Identity
 	}
+	if role.State == "" {
+		role.State = team.State
+	}
 	return role
 }
 
@@ -102,9 +105,16 @@ func checkChoice(catalog *connector.Catalog, field, name string, choice config.C
 		return fmt.Errorf("%s.method: connector %q has no method %q (methods: %s)",
 			field, name, choice.Method, strings.Join(conn.MethodNames(), ", "))
 	}
-	if choice.Identity != "" && method.Secret == nil {
+	// With a method that keeps its login in the state volume the identity
+	// names a login identity — a Volume (#1685) — so any method takes one.
+	if choice.State != "" && conn.Spec.Harness == "" {
+		return fmt.Errorf("%s.state: connector %q authenticates no harness, so it keeps no harness state",
+			field, name)
+	}
+	if choice.State == config.StateEphemeral && method.Delivery == api.ConnectorDeliveryStateVolume {
 		return fmt.Errorf(
-			"%s.identity: method %q of connector %q keeps its login in the state volume and takes no identity",
+			"%s.state: ephemeral cannot be used with method %q of connector %q: "+
+				"the login is kept in the state volume and would not survive the cell",
 			field, method.Name, name)
 	}
 	return nil
@@ -223,6 +233,11 @@ func planConnectors(
 		if err != nil {
 			return err
 		}
+		if conn.Spec.Harness != "" {
+			// The connector that authenticates this pair's harness, and the
+			// method it uses: what decides the state volume (#1685).
+			plan.harnessConnector, plan.harnessMethod = conn.Metadata.Name, method
+		}
 		return enable(conn.ComponentName(method))
 	}
 	for _, name := range plan.role.Spec.Connectors {
@@ -281,7 +296,8 @@ func identityChoice(plan *pairPlan, c component.Component) (config.SecretRef, bo
 		return config.SecretRef{}, false, nil
 	}
 	choice, ok := plan.choice(c.Spec.Connector.Name)
-	if !ok || choice.Identity == "" {
+	// The identity of a login method is a Volume, not a slot fill (#1685).
+	if !ok || choice.Identity == "" || c.Spec.Connector.Delivery == api.ConnectorDeliveryStateVolume {
 		return config.SecretRef{}, false, nil
 	}
 	ref, err := config.ParseIdentity(choice.Identity, plan.realm)

@@ -665,11 +665,19 @@ var (
 	// real directory, so an unguarded name is a path-traversal risk.
 	ErrVolumeCoordUnsafe   = errors.New("volume name or scope coordinate is unsafe")
 	ErrVolumeScopeNotFound = errors.New("volume scope does not exist")
-	ErrWriteVolume         = errors.New("failed to write volume")
-	ErrVolumeNotFound      = errors.New("volume not found")
-	ErrGetVolume           = errors.New("failed to get volume")
-	ErrListVolumes         = errors.New("failed to list volumes")
-	ErrDeleteVolume        = errors.New("failed to delete volume")
+	// ErrVolumeConnectorInvalid rejects a Volume whose login-identity tag is
+	// malformed: a method or login marker without a connector, or a marker
+	// that is not a clean path relative to the volume (issue #1685).
+	ErrVolumeConnectorInvalid = errors.New("volume connector tag is invalid")
+	// ErrVolumeIdentity is returned when a Volume cannot be the login
+	// identity a cell asks for: it does not exist, it is tagged for another
+	// connector, or Configs of another role already use it (issue #1685).
+	ErrVolumeIdentity = errors.New("volume is not a login identity of the connector")
+	ErrWriteVolume    = errors.New("failed to write volume")
+	ErrVolumeNotFound = errors.New("volume not found")
+	ErrGetVolume      = errors.New("failed to get volume")
+	ErrListVolumes    = errors.New("failed to list volumes")
+	ErrDeleteVolume   = errors.New("failed to delete volume")
 	// ErrVolumeReclaimPolicyInvalid rejects a spec.reclaimPolicy that is neither
 	// "Retain" nor "Delete" (an empty value is allowed and means Delete). The
 	// selective cascade reclaim lands in step 3 (#1237).

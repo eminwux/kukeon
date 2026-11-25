@@ -38,14 +38,16 @@ How a Claude Code cell authenticates. The three methods exclude each other;
 
 | Method         | Component             | Delivery                  | Identity                                              |
 | -------------- | --------------------- | ------------------------- | ----------------------------------------------------- |
-| `login`        | `claude-login`        | the harness state volume  | none — log in once from an interactive cell           |
+| `login`        | `claude-login`        | the harness state volume  | a login identity: a Volume holding the login          |
 | `subscription` | `claude-subscription` | `CLAUDE_CODE_OAUTH_TOKEN` | opaque Secret: a token from `claude setup-token`      |
 | `api-key`      | `claude-api-key`      | `ANTHROPIC_API_KEY`       | opaque Secret: an Anthropic API key, billed per token |
 
-`login` is the default: it is what a cell did before connectors existed. A
-`subscription` token is valid for a year and serves every role, so it is the
-method to choose when cells of several roles — or a headless task with an empty
-state volume — must start authenticated.
+`login` is the default: it is what a cell did before connectors existed. Its
+identity is a [login identity](#login-identities), created and logged in to
+with `kuke connector login claude`. A `subscription` token is valid for a year
+and serves every role, so it is the method to choose when cells of several
+roles — or a headless task with an empty state volume — must start
+authenticated.
 
 ### `codex`
 
@@ -53,7 +55,7 @@ How a Codex cell authenticates. Same shape: one method per codex Config.
 
 | Method         | Component            | Delivery                 | Identity                                                            |
 | -------------- | -------------------- | ------------------------ | ------------------------------------------------------------------- |
-| `login`        | `codex-login`        | the harness state volume | none — `codex login` from an interactive cell                       |
+| `login`        | `codex-login`        | the harness state volume | a login identity: a Volume holding the `codex login`                |
 | `api-key`      | `codex-api-key`      | `OPENAI_API_KEY`         | opaque Secret: an OpenAI API key                                    |
 | `access-token` | `codex-access-token` | `CODEX_ACCESS_TOKEN`     | opaque Secret: a Codex access token (Business and Enterprise plans) |
 
@@ -186,6 +188,145 @@ tag still works wherever it is named by hand — one created before connectors
 existed needs no migration — but a Secret tagged for one connector is refused
 for another.
 
+### Login identities
+
+A method that keeps its login in the harness state volume (`login`) has
+identities too. A **login identity** is a Volume tagged with its connector —
+the counterpart of `Secret.spec.connector`: the harness keeps its login in its
+state directory, and that directory is the Volume.
+
+```yaml
+apiVersion: v1beta1
+kind: Volume
+metadata:
+  name: personal-max
+  realm: default
+spec:
+  reclaimPolicy: Retain
+  connector: claude
+  method: login
+  loginMarker: .credentials.json
+```
+
+`spec.connector` and `spec.method` are the tag. `spec.loginMarker` is the path,
+relative to the Volume, whose presence means the Volume holds a login; it is
+copied from the connector's definition when the Volume is tagged, because the
+daemon keeps no connector catalog. A Volume tagged for one connector is refused
+as the state volume of another.
+
+```console
+$ sudo kuke connector list
+IDENTITIES
+CONNECTOR  IDENTITY                 SCOPE                    TYPE    STATUS     USED BY
+claude     kukeon-dev-claude-state  default/default/default  login   logged in  kukeon-dev-claude (+4)
+claude     personal-max             default                  login   empty      -
+codex      codex-token              default                  opaque  -          -
+```
+
+`STATUS` is `logged in` when the marker exists and `empty` when it does not. The
+daemon only checks that the marker exists: it never opens it, and no login
+content appears in any output or error. `USED BY` lists the Configs whose
+status names the Volume. The same facts are on the Volume itself
+(`kuke get volume <name> -o yaml` shows `spec.connector`, `spec.method` and
+`status.login`; `kuke get volumes -o wide` adds `CONNECTOR`, `METHOD` and
+`LOGIN` columns) and in a Config's `status.connectors[].login`.
+
+**Existing state volumes need no migration.** The state volume of a Config
+that uses a `login` method is tagged the next time one of its cells starts,
+whether that start creates the Volume or it already existed. Before that, a
+state volume a Config's status names is still listed — untagged — so nothing is
+hidden.
+
+#### Logging in: the identity cell
+
+```bash
+sudo kuke connector login claude personal-max
+```
+
+`kuke connector login CONNECTOR [NAME]` creates the tagged Volume when it does
+not exist (`reclaimPolicy: Retain`), starts an **identity cell**, attaches your
+terminal to it, and deletes the cell when the login ends. Run it again on an
+existing identity to log in again. Without `--space` and `--stack` the identity
+is scoped to the realm; `NAME` defaults to the connector's name.
+
+An identity cell is a session, not a stored object — the Volume is the
+identity. It is one container on the harness image with the Volume mounted at
+the harness state directory, running the login command the connector declares
+(`login.command`), and `spec.autoDelete: true`. It has no role, no repos, no
+secrets and no other connector, so it needs no team: a login identity can be
+created on a realm with nothing else in it. The cell carries the label
+`kukeon.io/identity-cell: <volume>`; a second `kuke connector login` — or a
+second click in the web UI — while a session runs attaches to it instead of
+starting another.
+
+A team's own state volumes (`<team>-<role>-<harness>-state`) are login
+identities too and take the same command; their names do not change. The login
+then runs on the image of a Config that uses the Volume, so a locally built
+harness image is used as is. `--image` picks another.
+
+`kuke create volume <name> --connector <connector>` creates a login identity
+without logging in, and tags an existing untagged Volume.
+
+In the web UI the connector's page lists its login identities with their status
+and the Configs using them. **New login identity** creates one; **Log in** (or
+**Log in again**) starts the identity cell and opens its terminal in the
+browser, and the row's status follows when the session ends.
+
+#### One role per login identity
+
+A login identity serves one role. The state directory also holds role content
+— Claude Code skills under `$HOME/.claude/skills`, Codex's
+`$CODEX_HOME/AGENTS.md` — which the role rewrites on every start, so two roles
+on one Volume would overwrite each other. kukeon enforces it where the
+identity is bound: a Config that names, as its state volume, a login identity
+Configs of another `kukeon.io/role` already use is refused when it is applied —
+so the role already using it is not affected — and so is a cell that picks one
+with `--connector`. The error names both roles. Configs of the same role (a
+role's task Configs) share its identity, and Configs without a role label may
+share with each other. For one subscription across roles use a
+token method — see
+[Why login volumes are not shared across roles](#why-login-volumes-are-not-shared-across-roles).
+
+### Harness state: persistent or ephemeral
+
+A harness cell keeps a state directory whatever its auth method. With a `login`
+method that directory holds the login, so it is always a Volume. With a token
+method (`subscription`, `api-key`, `access-token`) the credential is the
+Secret, and where the harness keeps the rest of its state is a choice:
+
+| Method                                    | Identity (credential) | Harness state                            |
+| ----------------------------------------- | --------------------- | ---------------------------------------- |
+| `login`                                   | tagged Volume         | the same Volume, always persistent       |
+| `subscription`, `api-key`, `access-token` | tagged Secret         | persistent Volume (default) or ephemeral |
+
+`persistent` — the default, and what every existing Config does — mounts the
+state volume the Config names (`STATE_VOLUME`). `ephemeral` mounts no state
+volume: the state directory is part of the container and goes away with the
+cell, which starts authenticated from its Secret.
+
+```yaml
+kind: CellConfig
+spec:
+  state: ephemeral
+```
+
+Set it on the Config (`spec.state`), in a team declaration
+(`connectors.<name>.state`), or for one cell with `--state`. `ephemeral` with a
+`login` method is rejected with an error saying why: the login would not
+survive the cell.
+
+```console
+$ sudo kuke get configs -o wide
+NAME                 ...  CONNECTORS
+team-dev-claude      ...  claude=login [team-dev-claude-state, logged in]
+team-pm-claude       ...  claude=claude-sub (realm) [state team-pm-claude-state]
+team-triage-claude   ...  claude=claude-sub (realm) [state ephemeral]
+```
+
+A Config's `status.connectors[]` carries the same: `volume` / `volumeRef` for
+any method that mounts a state volume, `login` for a login method, and
+`harnessState` (`persistent` or `ephemeral`).
+
 ## Defaults and precedence
 
 The identity of a connector is resolved when a cell is rendered, most specific
@@ -263,6 +404,13 @@ spec:
 - `method` picks one of the connector's methods; empty selects its default.
 - `identity` names the Secret, `name[@realm[/space[/stack]]]`; without a scope it
   is looked up in the team's realm. Empty leaves the identity to the defaults.
+  With `method: login` it names a [login identity](#login-identities) — the
+  Volume the role keeps its harness state in — in the same notation; empty
+  keeps the team's own `<team>-<role>-<harness>-state`.
+- `state` is `persistent` (the default) or `ephemeral`, for the connector that
+  authenticates a harness: see
+  [Harness state](#harness-state-persistent-or-ephemeral). `ephemeral` with a
+  `login` method is rejected.
 - A role entry that names no method keeps the team's method, and the team's
   identity unless it names its own. One that names a method states the whole
   choice.
@@ -387,6 +535,27 @@ reconcile-driven recreate render the cell with the same identity, and
 `--from-config` only. An unknown connector, a missing Secret, or a Secret
 tagged for another connector is rejected before anything is created.
 
+When the cell uses the connector through a method that keeps a login, the value
+names a [login identity](#login-identities) instead:
+
+```bash
+sudo kuke create cell --from-config team-dev-claude --connector claude=personal-max
+sudo kuke run -c team-dev-claude --connector claude=shared-login@default/teams/core
+```
+
+`--connector <connector>=<volume>[@realm[/space[/stack]]]` makes that Volume the
+cell's state volume. A name without a scope is a realm-scoped Volume of the
+Config's realm. It is recorded in `spec.provenance.connectorVolumes` — a
+separate map from `connectorOverrides`, so the entry says it names a Volume —
+and kept by `kuke restart`, a reconcile-driven recreate and `--clone`. A Volume
+that does not exist, one tagged for another connector, and one Configs of
+another role already use are rejected before anything is created.
+
+`--state persistent|ephemeral` picks the
+[harness state](#harness-state-persistent-or-ephemeral) of this one cell. It is
+recorded in `spec.provenance.state` and kept the same way. Valid with
+`--from-config` only.
+
 `--connector-method <connector>=<method>` uses another method of a connector
 for this one cell — for example a codex Config on `login` started once with
 `api-key`. The blueprint already carries every method of the connector as one
@@ -404,27 +573,41 @@ Valid with `--from-config` only.
 In the web UI's New Cell flow every required connector is pre-selected with its
 effective method and identity. A connector with several methods offers a method
 picker; choosing another identity or method sends the same overrides, and the
-preview shows the methods and identities the cell will use. A per-cell pick is
+preview shows the methods and identities the cell will use. A login method
+offers a login identity picker, and a token method of a harness connector a
+harness state choice; New Config offers both too, writing the Config's
+`values.STATE_VOLUME*` and `spec.state`. A per-cell pick is
 allowed on a team-owned Config too: only the Config's own page shows its
 identities read-only, because applying the team re-renders it; that page links
 the team, whose declaration is edited on the Teams page.
 
 ## Why login volumes are not shared across roles
 
-The `login` methods keep the session in the harness state volume, and that
-volume is per role — `kuke-majordomo-claude` and `team-dev-claude` each log in
-once. Sharing one volume across roles is deliberately not supported:
+The `login` methods keep the session in a [login identity](#login-identities),
+and a login identity serves one role — `kuke-majordomo-claude` and
+`team-dev-claude` each have their own and each log in once
+(`kuke connector login`). Sharing one across roles is not supported, and kukeon
+refuses it: binding a login identity that Configs of another role already use
+— applying a Config that names it, or picking it for a cell — fails with an
+error naming both roles.
 
 - The state directory also holds the role itself — settings, skills and
   instructions the role's launch installs there — so a shared volume would let
-  one role's content overwrite another's.
+  one role's content overwrite another's. Lifting the rule needs that content
+  moved out of the state directory first.
 - A Codex login's refresh token is single-use. Two cells refreshing one copied
   login invalidate each other.
 
+A team may still point a role at a login identity of its choosing —
+`connectors.<name>.identity` with `method: login` names the Volume, and leaving
+it empty keeps `<team>-<role>-<harness>-state` — as long as no other role uses
+it.
+
 When several roles must start authenticated without an interactive login each,
 use a token method instead: a Realm-default `claude-subscription` identity
-authenticates every claude cell, interactive or headless, with an empty state
-volume.
+authenticates every claude cell, interactive or headless. Such a cell can keep
+its harness state in the role's state volume or, with `state: ephemeral`, in no
+volume at all.
 
 ## Adding a connector
 
@@ -462,21 +645,22 @@ With that file the connector appears in `kuke create secret --connector`, team
 `connectors`, `kuke create cell --connector`, and the web UI's Connectors page
 and pickers.
 
-| Field                     | Meaning                                                                                                                    |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `title`, `description`    | Display name and what the access is for                                                                                    |
-| `identity.secretTypes`    | Secret types accepted: `opaque`, `basic-auth`, `ssh-key`                                                                   |
-| `identity.fields[]`       | Readable identity fields: `name`, `type` (`string`, `list`, `person`, `secret`), `required`, `enum`, `secretTypes`, `help` |
-| `scopes`                  | Where a default may be set: `realm`, `space`, `stack` (empty allows all)                                                   |
-| `harness`                 | The harness this connector authenticates; `kuke team` enables exactly one method on each of its Configs                    |
-| `group`                   | Exclusion group of the method components (defaults to the connector's name)                                                |
-| `optional`                | A cell may start without an identity                                                                                       |
-| `methods[]`               | The ways to deliver the connector; exactly one is `default: true`                                                          |
-| `methods[].component`     | Blueprint component name; `<connector>-<method>` when empty                                                                |
-| `methods[].delivery`      | `env`, `file` or `stateVolume`                                                                                             |
-| `methods[].requires`      | Image capabilities the method needs                                                                                        |
-| `methods[].secret`        | The slot: `name`, and `envName` (`env`) or an absolute `mountPath` (`file`); `secretName` and `aliases` for older roles    |
-| `delivery` (no `methods`) | `git` or `registry`: a connector delivered by a handler                                                                    |
+| Field                     | Meaning                                                                                                                                                  |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `title`, `description`    | Display name and what the access is for                                                                                                                  |
+| `identity.secretTypes`    | Secret types accepted: `opaque`, `basic-auth`, `ssh-key`                                                                                                 |
+| `identity.fields[]`       | Readable identity fields: `name`, `type` (`string`, `list`, `person`, `secret`), `required`, `enum`, `secretTypes`, `help`                               |
+| `scopes`                  | Where a default may be set: `realm`, `space`, `stack` (empty allows all)                                                                                 |
+| `harness`                 | The harness this connector authenticates; `kuke team` enables exactly one method on each of its Configs                                                  |
+| `group`                   | Exclusion group of the method components (defaults to the connector's name)                                                                              |
+| `optional`                | A cell may start without an identity                                                                                                                     |
+| `methods[]`               | The ways to deliver the connector; exactly one is `default: true`                                                                                        |
+| `methods[].component`     | Blueprint component name; `<connector>-<method>` when empty                                                                                              |
+| `methods[].delivery`      | `env`, `file` or `stateVolume`                                                                                                                           |
+| `methods[].requires`      | Image capabilities the method needs                                                                                                                      |
+| `methods[].secret`        | The slot: `name`, and `envName` (`env`) or an absolute `mountPath` (`file`); `secretName` and `aliases` for older roles                                  |
+| `methods[].login`         | `stateVolume` only. `marker`: path relative to the state directory whose presence means "logged in"; `command`: the argv an identity cell runs to log in |
+| `delivery` (no `methods`) | `git` or `registry`: a connector delivered by a handler                                                                                                  |
 
 Component names and slot names are unique across the catalog.
 
@@ -488,7 +672,7 @@ The delivery says how an identity reaches a cell:
 | ------------- | ----------------------------------------------------------------------------- |
 | `env`         | The Secret's value is set as the environment variable of the method's slot    |
 | `file`        | The Secret's value is mounted read-only at the slot's path                    |
-| `stateVolume` | Nothing is delivered: the login lives in the harness state volume             |
+| `stateVolume` | The login lives in the harness state volume: the Volume is the identity       |
 | `git`         | `git.identityRef` is expanded into author, committer, credentials and signing |
 | `registry`    | The Secret is the pull credential of a Realm's `registryCredentials[]` entry  |
 

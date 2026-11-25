@@ -20,10 +20,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // volumeMetaDirMode is the mode of the per-scope volume-meta/ directory: root-
@@ -37,13 +40,16 @@ const volumeMetaDirMode os.FileMode = 0o700
 // volumeMetaFileMode is the mode of a single reclaim manifest (0o600, root-only).
 const volumeMetaFileMode os.FileMode = 0o600
 
-// volumeReclaimManifest is the on-disk shape of a volume's reclaim manifest.
-// Only a Retain volume has one (a Delete/omitted policy writes nothing and
-// removes any stale manifest), so its mere presence already implies Retain; the
-// explicit field future-proofs the format and lets GetVolume echo the exact
-// value back.
+// volumeReclaimManifest is the on-disk shape of a volume's manifest: the part
+// of its spec that is not the directory itself. A volume has one when it is
+// retained or tagged as a login identity (issue #1685); a volume with neither
+// writes nothing and removes any stale manifest. Presence alone therefore does
+// not imply Retain — cascade purge reads the ReclaimPolicy field.
 type volumeReclaimManifest struct {
-	ReclaimPolicy string `json:"reclaimPolicy"`
+	ReclaimPolicy string `json:"reclaimPolicy,omitempty"`
+	Connector     string `json:"connector,omitempty"`
+	Method        string `json:"method,omitempty"`
+	LoginMarker   string `json:"loginMarker,omitempty"`
 }
 
 // persistVolumeReclaimPolicy reconciles the on-disk reclaim manifest for a
@@ -56,7 +62,7 @@ func (r *Exec) persistVolumeReclaimPolicy(volume intmodel.Volume) error {
 	md := volume.Metadata
 	metaPath := fs.VolumeMetaPath(r.opts.RunPath, md.Realm, md.Space, md.Stack, md.Name)
 
-	if volume.Spec.ReclaimPolicy != intmodel.ReclaimRetain {
+	if volume.Spec.ReclaimPolicy != intmodel.ReclaimRetain && volume.Spec.Connector == "" {
 		if err := os.Remove(metaPath); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("%w: remove stale reclaim manifest: %w", errdefs.ErrWriteVolume, err)
 		}
@@ -74,7 +80,15 @@ func (r *Exec) persistVolumeReclaimPolicy(volume intmodel.Volume) error {
 		return fmt.Errorf("%w: chmod volume-meta dir: %w", errdefs.ErrWriteVolume, err)
 	}
 
-	data, err := json.Marshal(volumeReclaimManifest{ReclaimPolicy: string(intmodel.ReclaimRetain)})
+	manifest := volumeReclaimManifest{
+		Connector:   volume.Spec.Connector,
+		Method:      volume.Spec.Method,
+		LoginMarker: volume.Spec.LoginMarker,
+	}
+	if volume.Spec.ReclaimPolicy == intmodel.ReclaimRetain {
+		manifest.ReclaimPolicy = string(intmodel.ReclaimRetain)
+	}
+	data, err := json.Marshal(manifest)
 	if err != nil {
 		return fmt.Errorf("%w: marshal reclaim manifest: %w", errdefs.ErrWriteVolume, err)
 	}
@@ -84,24 +98,55 @@ func (r *Exec) persistVolumeReclaimPolicy(volume intmodel.Volume) error {
 	return nil
 }
 
-// readVolumeReclaimPolicy returns the reclaim policy persisted for a volume, or
-// the empty policy (Delete semantics) when no manifest exists. A manifest that
-// fails to parse is reported as an error so a corrupt marker surfaces rather
-// than silently downgrading a Retain volume to Delete.
-func (r *Exec) readVolumeReclaimPolicy(md intmodel.VolumeMetadata) (intmodel.ReclaimPolicy, error) {
+// readVolumeSpec returns the spec persisted in a volume's manifest: its
+// reclaim policy and its login-identity tag. A volume without a manifest has
+// the zero spec.
+func (r *Exec) readVolumeSpec(md intmodel.VolumeMetadata) (intmodel.VolumeSpec, error) {
 	metaPath := fs.VolumeMetaPath(r.opts.RunPath, md.Realm, md.Space, md.Stack, md.Name)
 	data, err := os.ReadFile(metaPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", nil
+			return intmodel.VolumeSpec{}, nil
 		}
-		return "", err
+		return intmodel.VolumeSpec{}, err
 	}
 	var manifest volumeReclaimManifest
-	if err := json.Unmarshal(data, &manifest); err != nil {
-		return "", fmt.Errorf("parse reclaim manifest %q: %w", metaPath, err)
+	if err = json.Unmarshal(data, &manifest); err != nil {
+		return intmodel.VolumeSpec{}, fmt.Errorf("parse reclaim manifest %q: %w", metaPath, err)
 	}
-	return intmodel.ReclaimPolicy(manifest.ReclaimPolicy), nil
+	return intmodel.VolumeSpec{
+		ReclaimPolicy: intmodel.ReclaimPolicy(manifest.ReclaimPolicy),
+		Connector:     manifest.Connector,
+		Method:        manifest.Method,
+		LoginMarker:   manifest.LoginMarker,
+	}, nil
+}
+
+// VolumeLoginStatus reports the login state of a Volume from the tag the
+// carrier states, whether or not that tag is stored: a caller probes a Volume
+// that predates tagging with the marker its connector declares.
+func (r *Exec) VolumeLoginStatus(volume intmodel.Volume) *intmodel.LoginStatus {
+	return r.volumeLoginStatus(volume.Metadata, volume.Spec)
+}
+
+// volumeLoginStatus reports whether a login identity holds a login: whether
+// the marker its spec names exists in the volume. It stats the marker and
+// never opens it. A volume that is not a login identity, or whose connector
+// declares no marker, has no login status.
+func (r *Exec) volumeLoginStatus(md intmodel.VolumeMetadata, spec intmodel.VolumeSpec) *intmodel.LoginStatus {
+	if spec.Connector == "" || spec.LoginMarker == "" || !filepath.IsLocal(spec.LoginMarker) {
+		return nil
+	}
+	root := fs.VolumePath(r.opts.RunPath, md.Realm, md.Space, md.Stack, md.Name)
+	// Lstat: a marker that is a symlink is not followed out of the volume.
+	info, err := os.Lstat(filepath.Join(root, spec.LoginMarker))
+	if err != nil || info.IsDir() {
+		return &intmodel.LoginStatus{State: v1beta1.LoginStateEmpty}
+	}
+	return &intmodel.LoginStatus{
+		State: v1beta1.LoginStateLoggedIn,
+		Since: info.ModTime().UTC().Format(time.RFC3339),
+	}
 }
 
 // removeVolumeReclaimManifest deletes a volume's reclaim manifest, ignoring a

@@ -11,7 +11,7 @@ import { catalogAPI, catalogDeleteAPI } from "./catalog-url.mjs";
 import { useNotify } from "./notifications";
 import { useModalDialog } from "./focus";
 import { AskMajordomo, catalogQuestion } from "./majordomo";
-import { ConfigConnectors, NeedsConnectorBadge, connectorsLink } from "./connector-ui";
+import { ConfigConnectors, LoginButton, LoginStateBadge, NeedsConnectorBadge, connectorsLink } from "./connector-ui";
 import { SecretForm } from "./secret-form";
 import { ScheduleDetails, cellLinker } from "./schedule";
 import { nextColumn, scheduleColumn, validTime, type Schedule, type ScheduleStatus } from "./schedule-format.mjs";
@@ -107,17 +107,26 @@ function VolumeRelationships({ doc, revision, inventory }: { doc: CatalogDoc; re
   const configs = useResource<RelatedCatalogDoc[]>("/api/catalog/configs", revision);
   const mounts = inventory.data && volumes.data ? volumeMounts(inventory.data.rows[3], volumes.data, doc) : [];
   const logins = configsForStateVolume(configs.data, doc);
+  // A Volume tagged with a connector is a login identity (#1685).
+  const spec = doc.spec as { connector?: unknown; method?: unknown } | undefined;
+  const tag = { connector: typeof spec?.connector === "string" ? spec.connector : "", method: typeof spec?.method === "string" ? spec.method : "" };
+  const login = (doc.status as { login?: { state?: string; since?: string } } | undefined)?.login;
   return <div className="relationship-grid">
     <section className="panel related-resources volume-mounted-by" aria-label="Mounted by"><div className="panel-heading"><h2>Mounted by</h2><span className="badge">{inventory.data && volumes.data ? `${mounts.length} mount${mounts.length === 1 ? "" : "s"}` : "Resolving…"}</span></div><div className="panel-body">
       <p className="description">Every cell in the inventory whose spec mounts this Volume, whatever its state. A mount by name resolves like kukeond does: the Volume of that name in the cell's Stack, else its Space, else its Realm.</p>
       {volumes.error && <ErrorNotice error={volumes.error} kind="Volume" />}
       <VolumeMountTable mounts={mounts} inventory={inventory} />
     </div></section>
-    <section className="panel related-resources" aria-label="Login state for"><div className="panel-heading"><h2>Login state for</h2></div><div className="panel-body">
-      <p className="description">Configs whose connector keeps a harness login in this Volume.</p>
+    {tag.connector && <section className="panel related-resources volume-login-identity" aria-label="Login identity"><div className="panel-heading"><h2>Login identity</h2><span className="badge">{tag.connector}</span></div><div className="panel-body">
+      <p className="description">This Volume is a login identity of the <a href={connectorsLink(tag.connector)}><code>{tag.connector}</code></a> connector{tag.method && <> (<code>{tag.method}</code> method)</>}: the harness keeps its login here. Only whether a login is present is shown — never the login itself.</p>
+      <dl className="details-grid"><dt>Login</dt><dd><LoginStateBadge state={login?.state} />{login?.since && <span className="description"> since {new Date(login.since).toLocaleString()}</span>}</dd></dl>
+      <div className="connector-actions"><LoginButton connector={tag.connector} title={tag.connector} volume={{ name: doc.metadata.name, realm: doc.metadata.realm ?? "", space: doc.metadata.space, stack: doc.metadata.stack }} state={login?.state} method={tag.method || undefined} /></div>
+    </div></section>}
+    <section className="panel related-resources" aria-label="Harness state for"><div className="panel-heading"><h2>Harness state for</h2></div><div className="panel-body">
+      <p className="description">Configs whose harness keeps its state in this Volume: the login of a connector's login method, or the sessions and settings of a token method.</p>
       {configs.loading && !configs.data && <p role="status">Loading CellConfigs…</p>}{configs.error && <ErrorNotice error={configs.error} kind="CellConfig" />}
       {logins.length > 0 && <ul className="state-list">{logins.map(({ config, connectors }) => { const scope = [...scopeOf(config.metadata), config.metadata.name]; return <li key={JSON.stringify(scope)}><div><a className="resource-name" href={catalogLink("configs", scope)}>{config.metadata.name}</a><p className="description">{scopeLabel(scope.slice(0, -1))} · {connectors.join(", ")}</p></div></li>; })}</ul>}
-      {configs.data && !logins.length && !configs.error && <p className="description">No Config keeps a login in this Volume.</p>}
+      {configs.data && !logins.length && !configs.error && <p className="description">No Config keeps harness state in this Volume.</p>}
     </div></section>
   </div>;
 }

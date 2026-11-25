@@ -96,8 +96,9 @@ export function volumeMounts(cells, volumes, volume) {
   return result;
 }
 
-// configsForStateVolume lists the Configs whose connector status keeps a harness login in `volume`
-// (status.connectors[].volumeRef), with the connectors that do.
+// configsForStateVolume lists the Configs whose connector status names `volume` as its state volume
+// (status.connectors[].volumeRef) — the login identity of a login method, or the harness state of a
+// token method (#1685) — with the connectors that do.
 export function configsForStateVolume(configs, volume) {
   const target = volume?.metadata ?? volume;
   const result = [];

@@ -30,6 +30,7 @@ import (
 	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/cellblueprint"
 	"github.com/eminwux/kukeon/internal/cellconfig"
+	applypkg "github.com/eminwux/kukeon/internal/controller/apply"
 	"github.com/eminwux/kukeon/internal/controller/runner"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -80,6 +81,9 @@ type cellBinding struct {
 	// Methods are the per-cell `--connector-method <connector>=<method>`
 	// choices, keyed by connector name (#1551).
 	Methods map[string]string
+	// State is the per-cell `--state` choice: persistent or ephemeral
+	// harness state; empty keeps the Config's (#1685).
+	State string
 	// TargetSpace and TargetStack are the space and stack the cell lands in
 	// when its Config leaves them open (#1603); see cellTargetScope. Empty
 	// keeps the Config's scope, defaulted.
@@ -102,8 +106,9 @@ func bindingFromCell(cell intmodel.Cell) cellBinding {
 		binding.EnvOverrides = prov.EnvOverrides
 		binding.Mode = prov.Mode
 		binding.Params = prov.ParamOverrides
-		binding.Connectors = connectorOverridesFromProvenance(prov.ConnectorOverrides)
+		binding.Connectors = connectorOverridesFromProvenance(prov.ConnectorOverrides, prov.ConnectorVolumes)
 		binding.Methods = prov.ConnectorMethods
+		binding.State = prov.State
 	}
 	return binding
 }
@@ -166,6 +171,10 @@ func renderCellFromConfig(r runner.Runner, cfg intmodel.CellConfig, binding cell
 	// MaterializeWithName places the cell in the Config's scope; move it to
 	// the target. The Config's metadata stays as is: provenance reads it.
 	cellDoc.Spec.SpaceID, cellDoc.Spec.StackID = resolved.spaceName, resolved.stackName
+	// Ephemeral harness state mounts no state volume (#1685).
+	if resolved.state == v1beta1.HarnessStateEphemeral {
+		dropStateVolumeMounts(&cellDoc, merged.Spec.Values)
+	}
 	// Re-apply the cell's per-cell --env overrides last (P3 precedence, #1023).
 	cellconfig.ApplyEnvOverrides(&cellDoc, binding.EnvOverrides)
 
@@ -194,6 +203,13 @@ func renderCellFromConfig(r runner.Runner, cfg intmodel.CellConfig, binding cell
 				prov.ConnectorMethods[name] = method
 			}
 		}
+		if len(resolved.volumes) > 0 {
+			prov.ConnectorVolumes = make(map[string]v1beta1.VolumeRef, len(resolved.volumes))
+			for name, ref := range resolved.volumes {
+				prov.ConnectorVolumes[name] = ref
+			}
+		}
+		prov.State = strings.TrimSpace(binding.State)
 	}
 	if flat.Mode != "" {
 		if cellDoc.Metadata.Labels == nil {
@@ -289,6 +305,14 @@ type configResolution struct {
 
 	connectors []v1beta1.ConnectorStatus
 	git        *gitIdentityExpander
+	// requirements are the connectors the cell requires, with the descriptor
+	// each component carries.
+	requirements []connectorRequirement
+	// volumes are the login identities the cell itself picked
+	// (`--connector <connector>=<volume>`), by connector (#1685).
+	volumes map[string]v1beta1.VolumeRef
+	// state is the harness state in effect: persistent or ephemeral.
+	state string
 }
 
 // resolveConfig runs the first half of the render: everything up to the merged
@@ -353,11 +377,27 @@ func resolveConfig(r runner.Runner, cfg intmodel.CellConfig, binding cellBinding
 
 	// The identity a single cell picked for a connector (#1548) is one more
 	// level, applied over the Config.
-	cellLayer, overrides, err := cellConnectorLayer(cfgDoc.Metadata.Name, realmName, requirements, binding.Connectors)
+	cellLayer, overrides, volumes, err := cellConnectorLayer(
+		cfgDoc.Metadata.Name, realmName, requirements, binding.Connectors)
 	if err != nil {
 		return configResolution{}, err
 	}
 	binding.Connectors = overrides
+	state, err := effectiveHarnessState(cfgDoc.Metadata.Name, cfgDoc.Spec.State, binding.State)
+	if err != nil {
+		return configResolution{}, err
+	}
+	if state == v1beta1.HarnessStateEphemeral {
+		for _, req := range requirements {
+			if req.Connector.Delivery == v1beta1.ConnectorDeliveryStateVolume {
+				return configResolution{}, fmt.Errorf(
+					"%w: config %q: ephemeral harness state cannot be used with the %q method of connector %q: "+
+						"the login is kept in the state volume and would not survive the cell; "+
+						"use a token method or persistent state",
+					errdefs.ErrConfig, cfgDoc.Metadata.Name, req.Connector.Method, req.Connector.Name)
+			}
+		}
+	}
 
 	// Expand every git.identityRef into the identity it names, level by
 	// level, so the merge below sees ordinary git blocks.
@@ -388,6 +428,18 @@ func resolveConfig(r runner.Runner, cfg intmodel.CellConfig, binding cellBinding
 		},
 	}, cellLayer)
 	merged, values = applyParamOverrides(merged, values, binding.Params)
+	// A login identity the cell picked replaces the state volume the Config
+	// names, scope included.
+	cellVolume := map[string]bool{}
+	for name, ref := range volumes {
+		cellVolume[name] = true
+		merged, values = applyParamOverrides(merged, values, map[string]string{
+			applypkg.StateVolumeValue:          ref.Name,
+			applypkg.StateVolumeScopeValues[0]: ref.Realm,
+			applypkg.StateVolumeScopeValues[1]: ref.Space,
+			applypkg.StateVolumeScopeValues[2]: ref.Stack,
+		})
+	}
 	values = append(values, contract...)
 	git.settle(values)
 
@@ -403,8 +455,13 @@ func resolveConfig(r runner.Runner, cfg intmodel.CellConfig, binding cellBinding
 		merged:      merged,
 		values:      values,
 		binding:     binding,
-		connectors:  connectorStatuses(r, requirements, merged, values, git),
-		git:         git,
+		connectors: connectorStatuses(r, requirements, merged, values, git, harnessState{
+			state: state, cfg: cfgDoc.Metadata, cellVolume: cellVolume,
+		}),
+		git:          git,
+		requirements: requirements,
+		volumes:      volumes,
+		state:        state,
 	}, nil
 }
 

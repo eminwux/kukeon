@@ -69,6 +69,7 @@ func ConfigRenderRequest(
 		Params:             params,
 		ConnectorOverrides: overrides,
 		ConnectorMethods:   methods,
+		State:              flags.State,
 		Config: v1beta1.CellConfigMetadata{
 			Name:  flags.ConfigName,
 			Realm: realm,

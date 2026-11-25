@@ -221,3 +221,37 @@ func TestCreateCell_ConnectorMethodFlagRejections(t *testing.T) {
 		})
 	}
 }
+
+// TestCreateCell_FromConfig_State: `--state` reaches the daemon as the cell's
+// harness state choice (issue #1685); the CLI does not interpret it beyond
+// requiring --from-config.
+func TestCreateCell_FromConfig_State(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	cmd, _ := newTestExecCmd(t, dryRunClient(t))
+	setFlag(t, cmd, "realm", "cfg-realm")
+	setFlag(t, cmd, "from-config", "prod")
+	setFlag(t, cmd, "dry-run", "true")
+	setFlag(t, cmd, "state", "ephemeral")
+	cmd.SetArgs([]string{"prod-1"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := lastConfigRequest.State; got != "ephemeral" {
+		t.Errorf("request state = %q, want ephemeral", got)
+	}
+
+	for _, source := range [][2]string{{"from-blueprint", "web"}, {"clone", "src"}, {"image", "busybox"}} {
+		t.Run("with "+source[0], func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+			rejected, _ := newTestExecCmd(t, &fakeClient{})
+			setFlag(t, rejected, "realm", "cfg-realm")
+			setFlag(t, rejected, source[0], source[1])
+			setFlag(t, rejected, "state", "ephemeral")
+			rejected.SetArgs([]string{"prod-1"})
+			err := rejected.Execute()
+			if err == nil || !strings.Contains(err.Error(), "--state is only valid with --from-config") {
+				t.Fatalf("Execute error = %v, want --state refused without --from-config", err)
+			}
+		})
+	}
+}

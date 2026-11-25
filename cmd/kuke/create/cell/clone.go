@@ -233,8 +233,11 @@ func cloneFromConfig(
 		EnvOverrides: mergedEnv,
 		Mode:         mode,
 		Params:       params,
-		// The clone keeps the identities the source cell picked (#1548).
-		ConnectorOverrides: srcProv.ConnectorOverrides,
+		// The clone keeps the identities the source cell picked (#1548),
+		// login identities — Volumes — included (#1685).
+		ConnectorOverrides: cloneConnectorOverrides(srcProv),
+		// ...and its harness state choice (#1685).
+		State: srcProv.State,
 		// ...and the methods it picked (#1551).
 		ConnectorMethods: srcProv.ConnectorMethods,
 		// ...and renders where the source cell lives (#1603).
@@ -266,8 +269,28 @@ func cloneFromConfig(
 		cellDoc.Spec.Provenance.ParamOverrides = rendered.ParamOverrides
 		cellDoc.Spec.Provenance.ConnectorOverrides = rendered.ConnectorOverrides
 		cellDoc.Spec.Provenance.ConnectorMethods = rendered.ConnectorMethods
+		cellDoc.Spec.Provenance.ConnectorVolumes = rendered.ConnectorVolumes
+		cellDoc.Spec.Provenance.State = rendered.State
 	}
 	return cellDoc, nil
+}
+
+// cloneConnectorOverrides rebuilds the `--connector` overrides a source cell
+// was created with from its provenance: the Secrets and the login-identity
+// Volumes. The daemon tells them apart again by the method each connector
+// uses.
+func cloneConnectorOverrides(prov *v1beta1.CellProvenance) map[string]v1beta1.ContainerSecretRef {
+	if len(prov.ConnectorOverrides) == 0 && len(prov.ConnectorVolumes) == 0 {
+		return nil
+	}
+	out := make(map[string]v1beta1.ContainerSecretRef, len(prov.ConnectorOverrides)+len(prov.ConnectorVolumes))
+	for name, ref := range prov.ConnectorOverrides {
+		out[name] = ref
+	}
+	for name, ref := range prov.ConnectorVolumes {
+		out[name] = v1beta1.ContainerSecretRef{Name: ref.Name, Realm: ref.Realm, Space: ref.Space, Stack: ref.Stack}
+	}
+	return out
 }
 
 // cloneFromBlueprint re-materialises a blueprint-lineage clone from the

@@ -27,10 +27,13 @@ package v1beta1
 // imperative `kuke create/get/delete volume` verbs (#1236) and `reclaimPolicy:
 // Retain` + selective cascade (#1237) build on this foundation.
 type VolumeDoc struct {
-	APIVersion Version        `json:"apiVersion"     yaml:"apiVersion"`
-	Kind       Kind           `json:"kind"           yaml:"kind"`
-	Metadata   VolumeMetadata `json:"metadata"       yaml:"metadata"`
-	Spec       VolumeSpec     `json:"spec,omitempty" yaml:"spec,omitempty"`
+	APIVersion Version        `json:"apiVersion"      yaml:"apiVersion"`
+	Kind       Kind           `json:"kind"            yaml:"kind"`
+	Metadata   VolumeMetadata `json:"metadata"        yaml:"metadata"`
+	Spec       VolumeSpec     `json:"spec,omitempty"  yaml:"spec,omitempty"`
+	// Status is what the daemon observes about the volume. It is read-only:
+	// an applied document's status is ignored.
+	Status VolumeStatus `json:"status,omitzero" yaml:"status,omitempty"`
 }
 
 // VolumeMetadata identifies a Volume by name and the scope it is bound to. Like
@@ -64,6 +67,47 @@ type VolumeSpec struct {
 	// the step-1 behavior. "Retain" ⇒ the volume survives the cascade and stays
 	// discoverable and deletable at its original scope coordinates.
 	ReclaimPolicy ReclaimPolicy `json:"reclaimPolicy,omitempty" yaml:"reclaimPolicy,omitempty"`
+	// Connector tags the volume as a login identity of that connector: the
+	// volume holds the login a harness keeps in its state directory (issue
+	// #1685). It is the counterpart of Secret.spec.connector and, like it, an
+	// open string. Empty for a volume that is not an identity.
+	Connector string `json:"connector,omitempty"     yaml:"connector,omitempty"`
+	// Method is the connector method the login belongs to (`login`). Set only
+	// together with Connector.
+	Method string `json:"method,omitempty"        yaml:"method,omitempty"`
+	// LoginMarker is the path, relative to the volume's root, whose presence
+	// means the volume holds a login. It is copied from the connector's
+	// definition when the volume is tagged, because the daemon keeps no
+	// connector catalog. Set only together with Connector.
+	LoginMarker string `json:"loginMarker,omitempty"   yaml:"loginMarker,omitempty"`
+}
+
+// IsLoginIdentity reports whether the volume is tagged as a login identity.
+func (s VolumeSpec) IsLoginIdentity() bool { return s.Connector != "" }
+
+// Login states of a login identity.
+const (
+	// LoginStateLoggedIn means the login marker exists in the volume.
+	LoginStateLoggedIn = "logged in"
+	// LoginStateEmpty means the volume holds no login marker.
+	LoginStateEmpty = "empty"
+)
+
+// VolumeStatus is what the daemon observes about a Volume.
+type VolumeStatus struct {
+	// Login is the login state of a login identity; nil for a volume that is
+	// not one, or whose connector declares no login marker.
+	Login *LoginStatus `json:"login,omitempty" yaml:"login,omitempty"`
+}
+
+// LoginStatus says whether a login identity holds a login. The daemon checks
+// only that the marker exists; it never reads it.
+type LoginStatus struct {
+	// State is `logged in` or `empty`.
+	State string `json:"state"           yaml:"state"`
+	// Since is the marker's modification time, in RFC 3339; empty when the
+	// state is `empty`.
+	Since string `json:"since,omitempty" yaml:"since,omitempty"`
 }
 
 // ReclaimPolicy is the per-Volume policy a stack/space/realm cascade purge

@@ -87,6 +87,9 @@ type connectorMethodView struct {
 	Slot      string `json:"slot,omitempty"`
 	EnvName   string `json:"envName,omitempty"`
 	MountPath string `json:"mountPath,omitempty"`
+	// Login reports a method whose identities are login identities —
+	// Volumes — that the browser can log in to (issue #1685).
+	Login bool `json:"login,omitempty"`
 }
 
 func viewConnector(conn *connector.Connector) connectorView {
@@ -126,6 +129,8 @@ func viewConnector(conn *connector.Connector) connectorView {
 		if s := method.Secret; s != nil {
 			m.Slot, m.EnvName, m.MountPath = s.Name, s.EnvName, s.MountPath
 		}
+		m.Login = method.Delivery == v1beta1.ConnectorDeliveryStateVolume &&
+			method.Login != nil && len(method.Login.Command) > 0
 		view.Methods = append(view.Methods, m)
 	}
 	return view
@@ -177,6 +182,7 @@ func registerConnectorRoutes(mux *http.ServeMux, dial Dial, catalog *connector.C
 	mux.HandleFunc("POST /api/connectors/{connector}/identities", resourceRoute(dial, api.createIdentity))
 	mux.HandleFunc(gitImportPath, resourceRoute(dial, api.importGit))
 	mux.HandleFunc("POST /api/configs/connector", resourceRoute(dial, api.pickForConfig))
+	registerLoginIdentityRoutes(mux, dial, api)
 }
 
 func (a connectorAPI) list() []connectorView {
@@ -222,7 +228,8 @@ type connectorMissing struct {
 // created: a required connector nothing fills, or a named identity that
 // cannot be used.
 func blocksCells(status v1beta1.ConnectorStatus) bool {
-	return status.State != v1beta1.ConnectorResolved && (status.Required || status.Identity != nil)
+	return status.State != v1beta1.ConnectorResolved &&
+		(status.Required || status.Identity != nil || status.Delivery == v1beta1.ConnectorDeliveryStateVolume)
 }
 
 // status aggregates the connector status of every stored Config, per
@@ -596,7 +603,12 @@ func (a connectorAPI) pickForConfig(ctx context.Context, c kukeonv1.Client, r *h
 		// a wrong pick fail here with the same message the CLI gives.
 		if conn, known := a.catalog.Find(status.Connector); known {
 			method, _ := conn.Method(status.Method)
-			if err = scopedefaults.CheckIdentity(ctx, c, conn.Descriptor(method), *identity); err != nil {
+			if status.Delivery == v1beta1.ConnectorDeliveryStateVolume {
+				err = checkLoginIdentity(ctx, c, conn.Metadata.Name, *identity)
+			} else {
+				err = scopedefaults.CheckIdentity(ctx, c, conn.Descriptor(method), *identity)
+			}
+			if err != nil {
 				return nil, err
 			}
 		}
@@ -617,6 +629,31 @@ func (a connectorAPI) pickForConfig(ctx context.Context, c kukeonv1.Client, r *h
 		return nil, errdefs.ErrConfigNotFound
 	}
 	return updated.Config, nil
+}
+
+// checkLoginIdentity checks that a Volume picked as the login identity of a
+// Config exists and is not another connector's. The daemon checks the same,
+// and the one-role rule, when it renders a cell.
+func checkLoginIdentity(
+	ctx context.Context, c kukeonv1.Client, connectorName string, ref v1beta1.ContainerSecretRef,
+) error {
+	if ref.Cell != "" {
+		return fmt.Errorf("%w: a login identity is a Volume, never cell-scoped", errdefs.ErrVolumeIdentity)
+	}
+	got, err := c.GetVolume(ctx, v1beta1.VolumeDoc{Metadata: v1beta1.VolumeMetadata{
+		Name: ref.Name, Realm: ref.Realm, Space: ref.Space, Stack: ref.Stack,
+	}})
+	if err != nil && !errors.Is(err, errdefs.ErrVolumeNotFound) {
+		return err
+	}
+	if err != nil || !got.MetadataExists {
+		return fmt.Errorf("%w: volume %q does not exist", errdefs.ErrVolumeIdentity, ref.Name)
+	}
+	if tag := got.Volume.Spec.Connector; tag != "" && tag != connectorName {
+		return fmt.Errorf("%w: volume %q is a login identity of connector %q, not %q",
+			errdefs.ErrVolumeIdentity, ref.Name, tag, connectorName)
+	}
+	return nil
 }
 
 // writeConfigIdentity sets (or, for a nil identity, clears) the identity a
@@ -651,6 +688,23 @@ func writeConfigIdentity(
 		if len(secrets) == 0 {
 			cfg.Spec.Secrets = nil
 		}
+	case v1beta1.ConnectorDeliveryStateVolume:
+		// The identity of a login method is a Volume: the Config names it as
+		// its state volume (issue #1685). There is no default to return to,
+		// so clearing it is refused.
+		if identity == nil {
+			return fmt.Errorf("%w: connector %q keeps its login in the state volume; pick another login identity "+
+				"instead of clearing it", errdefs.ErrConfig, status.Connector)
+		}
+		values := make(map[string]string, len(cfg.Spec.Values)+4) //nolint:mnd // the four state-volume values
+		for key, value := range cfg.Spec.Values {
+			values[key] = value
+		}
+		values["STATE_VOLUME"] = identity.Name
+		values["STATE_VOLUME_REALM"] = identity.Realm
+		values["STATE_VOLUME_SPACE"] = identity.Space
+		values["STATE_VOLUME_STACK"] = identity.Stack
+		cfg.Spec.Values = values
 	default:
 		return fmt.Errorf("%w: connector %q uses its %q method, which takes no identity",
 			errdefs.ErrConfig, status.Connector, status.Method)
@@ -721,6 +775,7 @@ func connectorErrorStatus(err error) (int, string, bool) {
 	case errors.Is(err, errdefs.ErrConnectorUnresolved):
 		return http.StatusConflict, "connector_unresolved", true
 	case errors.Is(err, errdefs.ErrConnectorIdentity),
+		errors.Is(err, errdefs.ErrVolumeIdentity),
 		errors.Is(err, errdefs.ErrConnectorUnknown),
 		errors.Is(err, errdefs.ErrConnectorMethod),
 		errors.Is(err, errdefs.ErrConnectorInvalid):

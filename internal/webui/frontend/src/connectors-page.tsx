@@ -5,13 +5,13 @@ import type { InventoryResource } from "./inventory";
 import { imagesLink } from "./routes";
 import { CatalogDeleteConfirmation } from "./catalog";
 import { catalogDeleteAPI } from "./catalog-url.mjs";
-import { IdentityForm, IdentitySelect, ScopeGroup, ScopePicker, connectorAPI, connectorsLink, levelLabel, newIdentityLink, rotateIdentityLink, sendJSON, toFailure } from "./connector-ui";
+import { IdentityForm, IdentitySelect, LoginButton, LoginStateBadge, ScopeGroup, ScopePicker, connectorAPI, connectorsLink, levelLabel, newIdentityLink, rotateIdentityLink, sendJSON, startLogin, toFailure, volumeLink } from "./connector-ui";
 import { Disclosure } from "./disclosure";
 import {
   allowedLevels, connectorLevels, defaultRow, defaultScopeName, defaultTargets, deliveryEnv, deliveryFile, deliveryGit, deliveryRegistry, deliveryStateVolume, identitiesFor, importPayload, importsFromHost,
-  isRegistry, listedConnectors, loginMethods, refKey, refLabel, refScope, scopeAt, scopeFromParts, scopeLevel, scopeLevels, scopeParts, scopeQuery, secretRef, targetScope, usageFor,
+  isRegistry, listedConnectors, loginBody, loginIdentitiesFor, loginMethods, loginNameError, refKey, refLabel, refScope, scopeAt, scopeFromParts, scopeLevel, scopeLevels, scopeParts, scopeQuery, secretRef, targetScope, usageFor,
 } from "./connectors.mjs";
-import type { Connector, ConnectorDefault, ConnectorUsage, DefaultTarget, Identity, ImportForm, ImportResult, Scope, SecretRef } from "./connectors.mjs";
+import type { Connector, ConnectorDefault, ConnectorUsage, DefaultTarget, Identity, ImportForm, ImportResult, LoginIdentity, Scope, SecretRef } from "./connectors.mjs";
 
 // The Connectors page (#1548, §7). It iterates GET /api/connectors: a
 // connector added as one connector.yaml is listed, given identities and
@@ -22,7 +22,7 @@ type Delivered = { delivery: string; envName?: string; mountPath?: string };
 function deliveryText(item: Delivered): string {
   return item.delivery === deliveryEnv ? `environment variable ${item.envName ?? ""}`.trim()
     : item.delivery === deliveryFile ? `file ${item.mountPath ?? ""}`.trim()
-    : item.delivery === deliveryStateVolume ? "login kept in the harness state volume (no identity)"
+    : item.delivery === deliveryStateVolume ? "login kept in a login identity (a Volume mounted as the harness state directory)"
     : item.delivery === deliveryGit ? "the cell's git identity (author, committer, credentials, signing)"
     : item.delivery === deliveryRegistry ? "image pulls of a Realm"
     : item.delivery;
@@ -44,7 +44,7 @@ function useScope(inventory: InventoryResource, initial: Scope | undefined): [Sc
   return [scope, setScope];
 }
 
-function ConnectorList({ connectors, usage, secrets }: { connectors: Connector[]; usage: ConnectorUsage[] | undefined; secrets: unknown[] | undefined }) {
+function ConnectorList({ connectors, usage, secrets, logins }: { connectors: Connector[]; usage: ConnectorUsage[] | undefined; secrets: unknown[] | undefined; logins: unknown[] | undefined }) {
   return <section className="panel" aria-label="Connectors list">
     <div className="table-scroll"><table><thead><tr><th>Connector</th><th>Delivered as</th><th>Identities</th><th>Configs requiring it</th><th>Configs without an identity</th></tr></thead><tbody>
       {connectors.map(connector => {
@@ -52,7 +52,7 @@ function ConnectorList({ connectors, usage, secrets }: { connectors: Connector[]
         return <tr key={connector.name}>
           <td><a className="resource-name" href={connectorsLink(connector.name)}>{connector.title || connector.name}</a> <span className="badge">{connector.name}</span>{connector.description && <p className="description">{connector.description}</p>}</td>
           <td>{connector.methods.length ? connector.methods.map(method => <div key={method.name}><code>{method.name}</code> — {deliveryText(method)}</div>) : deliveryText({ delivery: connector.delivery ?? "" })}</td>
-          <td>{secrets ? identitiesFor(secrets, connector.name).length : "—"}</td>
+          <td>{secrets ? identitiesFor(secrets, connector.name).length + loginIdentitiesFor(logins, connector.name).length : "—"}</td>
           <td>{usage ? configs : "—"}</td>
           <td>{!usage ? "—" : missing.length ? <><strong>{missing.length}</strong> <span className="badge needs-connector">Needs a default</span> <a className="document-action" href={connectorsLink(connector.name, targetScope(missing[0].config))} aria-label={`Set a default for ${connector.title || connector.name}`}>Set a default</a></> : "0"}</td>
         </tr>;
@@ -168,6 +168,78 @@ function IdentitiesPanel({ connector, identities, secretsError, revision, invent
       </tbody></table></div> : <p>No {title} identities are stored.{!registry && <> <a href={newIdentityLink(connector.name, target)}>Create one</a>.</>}</p>}
     </div>
     {confirming && <CatalogDeleteConfirmation kind="secrets" doc={{ metadata: { name: confirming.name, realm: confirming.realm, ...(confirming.space ? { space: confirming.space } : {}), ...(confirming.stack ? { stack: confirming.stack } : {}) } }} revision={revision} inventory={inventory} onCancel={() => setConfirming(undefined)} onConfirm={() => { const identity = confirming; setConfirming(undefined); void remove(identity); }} />}
+  </section>;
+}
+
+// LoginIdentitiesPanel lists a connector's login identities (#1685) — the
+// Volumes that hold a harness login — with whether each holds one and the
+// Configs using it, creates one, and logs in to one: "Log in" starts an
+// identity cell that mounts only that Volume and opens its terminal. A team's
+// state volume is listed with the same action. Nothing of a login is shown.
+function LoginIdentitiesPanel({ connector, logins, loginsError, inventory, target, onChanged }: {
+  connector: Connector;
+  logins: LoginIdentity[];
+  loginsError: Failure | undefined;
+  inventory: InventoryResource;
+  target: Scope | undefined;
+  onChanged: () => void;
+}) {
+  const title = connector.title || connector.name;
+  const methods = loginMethods(connector);
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState("");
+  const [method, setMethod] = useState("");
+  const [scope, setScope] = useScope(inventory, target && scopeAt(target, scopeLevels[0]));
+  const [pending, setPending] = useState("");
+  const [error, setError] = useState<Failure>();
+  const { notify } = useNotify();
+  const problem = loginNameError(name);
+  const taken = logins.some(item => refKey(item.volume) === refKey({ name: name.trim(), ...scope }));
+  async function create(event: FormEvent, login: boolean) {
+    event.preventDefault();
+    if (pending) return;
+    if (problem || !scope.realm) { setError({ code: "invalid_request", message: problem || "Choose where the login identity is stored." }); return; }
+    setPending(login ? "login" : "create"); setError(undefined);
+    try {
+      if (login) await startLogin(connector.name, { name: name.trim(), ...scope }, method || undefined);
+      else {
+        await sendJSON(connectorAPI(connector.name, "logins"), loginBody(name, scope, method || undefined));
+        notify({ key: `login-identity:${connector.name}:${name.trim()}`, tone: "success", message: `${title} login identity ${name.trim()} created in ${scopeParts(scope).join(" / ")}.` });
+        setName(""); setCreating(false);
+      }
+      onChanged();
+    } catch (caught) { setError(toFailure(caught)); }
+    finally { setPending(""); }
+  }
+  return <section className="panel connector-logins" aria-label={`${title} login identities`}>
+    <div className="panel-heading"><h2>Login identities</h2><span className="badge">{logins.length} stored</span><button type="button" className="document-action" aria-expanded={creating} onClick={() => { setCreating(value => !value); setError(undefined); }}>{creating ? "Hide new login identity" : "New login identity"}</button></div>
+    <div className="panel-body">
+      <p className="description">A login identity is a Volume tagged <code>{connector.name}</code>: the harness keeps its login in its state directory, and that directory is the Volume. <strong>Log in</strong> opens a short-lived identity cell that mounts only that Volume and runs the {title} login; the cell is deleted when the login ends. Only whether a login is present is shown — never the login itself. One login identity serves one role.</p>
+      {loginsError && <p className="stale">Login identities could not be listed: {loginsError.message}</p>}
+      {creating && <form className="creation-form identity-form" aria-label={`New ${title} login identity`} method="post" autoComplete="off" onSubmit={event => void create(event, false)}>
+        <h3>New {title} login identity</h3>
+        <ScopeGroup title="Login identity scope" description={<>Where the Volume is stored: a Realm, or a Space or Stack of it.</>}><ScopePicker label="Login identity" inventory={inventory} levels={scopeLevels} value={scope} disabled={!!pending} onChange={setScope} /></ScopeGroup>
+        <div className="schema-fields">
+          <label className="schema-field"><span>Login identity name<b aria-label="required"> *</b></span><input value={name} placeholder="personal" disabled={!!pending} autoComplete="off" spellCheck={false} aria-invalid={(!!name && !!problem) || undefined} onChange={event => { setName(event.target.value); setError(undefined); }} /><small>{taken ? "A login identity of this name already exists here: logging in logs in to it again." : "The Volume's name. It is created retained, so it outlives a purge of its scope."}</small></label>
+          {methods.length > 1 && <label className="schema-field"><span>Login method</span><select aria-label={`${title} login method`} value={method} disabled={!!pending} onChange={event => setMethod(event.target.value)}><option value="">Default</option>{methods.map(item => <option key={item.name} value={item.name}>{item.name}</option>)}</select></label>}
+        </div>
+        <div className="connector-actions">
+          <button type="button" disabled={!!pending || !scope.realm || !name.trim()} onClick={event => void create(event, true)}>{pending === "login" ? "Starting…" : "Create and log in"}</button>
+          <button type="submit" className="subtle-button" disabled={!!pending || !scope.realm || !name.trim()}>{pending === "create" ? "Creating…" : "Create without logging in"}</button>
+          <button type="button" className="subtle-button" disabled={!!pending} onClick={() => setCreating(false)}>Cancel</button>
+        </div>
+        {error && <ErrorNotice error={error} kind="Identity" />}
+      </form>}
+      {logins.length ? <div className="table-scroll"><table aria-label={`${title} login identities`}><thead><tr><th scope="col">Name</th><th scope="col">Scope</th><th scope="col">Status</th><th scope="col">Used by</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead><tbody>
+        {logins.map(login => <tr key={refKey(login.volume)}>
+          <td>{login.exists ? <a className="resource-name" href={volumeLink(login.volume)}>{login.volume.name}</a> : <span className="resource-name">{login.volume.name}</span>}{!login.exists && <> <span className="badge">Not created yet</span></>}{login.session && <> <span className="badge">Login running</span></>}</td>
+          <td className="scope-cell">{refScope(login.volume).join(" / ")}</td>
+          <td><LoginStateBadge state={login.state} />{login.since && <span className="description"> since {new Date(login.since).toLocaleString()}</span>}</td>
+          <td>{login.usedBy.length ? login.usedBy.map(config => <a className="badge label-badge" key={configLink(config)} href={configLink(config)}>{config.name}</a>) : <span className="description">—</span>}</td>
+          <td className="connector-row-actions"><LoginButton connector={connector.name} title={title} volume={login.volume} state={login.state} running={!!login.session} method={login.method || undefined} onStarted={onChanged} /></td>
+        </tr>)}
+      </tbody></table></div> : <p>No {title} login identities are stored.{!creating && <> <button type="button" className="subtle-button" onClick={() => setCreating(true)}>Create one</button>.</>}</p>}
+    </div>
   </section>;
 }
 
@@ -293,10 +365,12 @@ function DefaultsPanel({ connector, identities, revision, inventory, initialScop
   </section>;
 }
 
-function ConnectorDetail({ connector, usage, secrets, secretsError, secretsLoading, target, action, identity, revision, inventory, onChanged }: {
+function ConnectorDetail({ connector, usage, secrets, logins, loginsError, secretsError, secretsLoading, target, action, identity, revision, inventory, onChanged }: {
   connector: Connector;
   usage: ConnectorUsage[] | undefined;
   secrets: unknown[] | undefined;
+  logins: unknown[] | undefined;
+  loginsError: Failure | undefined;
   secretsError: Failure | undefined;
   secretsLoading: boolean;
   action?: string;
@@ -311,7 +385,8 @@ function ConnectorDetail({ connector, usage, secrets, secretsError, secretsLoadi
   const identities = identitiesFor(secrets, connector.name);
   const registry = isRegistry(connector);
   const storesIdentity = registry || defaultTargets(connector).length > 0;
-  const logins = loginMethods(connector);
+  const keepsLogins = loginMethods(connector).length > 0;
+  const loginIdentities = loginIdentitiesFor(logins, connector.name);
   if (action && storesIdentity && !registry) return <IdentityPage connector={connector} action={action} identity={identity} target={target} identities={identities} secrets={secrets} secretsLoading={secretsLoading} inventory={inventory} onChanged={onChanged} />;
   return <>
     <div className="detail-actions"><a href={connectorsLink()}>← Back to connectors</a></div>
@@ -322,13 +397,13 @@ function ConnectorDetail({ connector, usage, secrets, secretsError, secretsLoadi
         <dl className="details-grid">
           <dt>Name</dt><dd><code>{connector.name}</code></dd>
           <dt>Delivered as</dt><dd>{connector.methods.length ? <ul className="connector-methods">{connector.methods.map(method => <li key={method.name}><code>{method.name}</code>{method.default && <> <span className="badge">default method</span></>} — {deliveryText(method)}{method.description && <span className="description"> {method.description}</span>}</li>)}</ul> : deliveryText({ delivery: connector.delivery ?? "" })}</dd>
-          <dt>Identity</dt><dd>{storesIdentity ? <>{connector.secretTypes.join(" or ")} Secret{connector.fields.length > 0 && <> with {connector.fields.map(field => field.name).join(", ")}</>}</> : "None — the login is kept in the harness state volume"}</dd>
+          <dt>Identity</dt><dd>{storesIdentity ? <>{connector.secretTypes.join(" or ")} Secret{connector.fields.length > 0 && <> with {connector.fields.map(field => field.name).join(", ")}</>}{keepsLogins && <>, or a login identity (a Volume) for the {loginMethods(connector).map(method => method.name).join(", ")} method</>}</> : keepsLogins ? "A login identity — a Volume holding the harness login" : "None"}</dd>
           <dt>Default scopes</dt><dd>{connectorLevels(connector).join(", ")}</dd>
           {connector.harness && <><dt>Harness</dt><dd>{connector.harness}</dd></>}
           {connector.group && <><dt>Method group</dt><dd>{connector.group} — a Config enables exactly one method</dd></>}
           <dt>Configs</dt><dd>{usage ? <>{configs} require it{connector.optional && " (a cell starts without it)"}</> : "Not loaded"}</dd>
         </dl>
-        {logins.length > 0 && <p className="description">The {logins.map(method => method.name).join(", ")} method has no identity: log in once from an interactive cell and the login stays in that role's state volume.</p>}
+        {keepsLogins && <p className="description">The {loginMethods(connector).map(method => method.name).join(", ")} method keeps its login in a login identity. Create one and log in below; every cell of the role that uses it then starts logged in.</p>}
       </div>
     </section>
     {missing.length > 0 && <section className="panel connector-missing" aria-label={`Configs without a ${title} identity`}>
@@ -340,6 +415,7 @@ function ConnectorDetail({ connector, usage, secrets, secretsError, secretsLoadi
     </section>}
     <DefaultsPanel key={`defaults:${scopeParts(target).join("/")}`} connector={connector} identities={identities} revision={revision} inventory={inventory} initialScope={target} onChanged={onChanged} />
     {registry && <section className="panel connector-registry-notice" aria-label={`${title} on the Images page`}><div className="panel-body"><p role="note">A registry credential authenticates a Realm's image pulls; nothing of it is injected into a cell. Registry credentials are listed and added on the <a href={imagesLink(target?.realm)}>Images</a> page, per Realm.</p></div></section>}
+    {keepsLogins && <LoginIdentitiesPanel connector={connector} logins={loginIdentities} loginsError={loginsError} inventory={inventory} target={target} onChanged={onChanged} />}
     {storesIdentity && !registry && <IdentitiesPanel connector={connector} identities={identities} secretsError={secretsError} revision={revision} inventory={inventory} target={target} onChanged={onChanged} />}
   </>;
 }
@@ -348,6 +424,16 @@ export function ConnectorsPage({ name, target, action, identity, revision, inven
   const catalog = useResource<Connector[]>("/api/connectors", revision);
   const usage = useResource<ConnectorUsage[]>("/api/connectors/status", revision);
   const secrets = useResource<unknown[]>("/api/catalog/secrets", revision);
+  // Login identities (#1685). While a login session runs the list is re-read
+  // every few seconds, so a row's status follows the login as it ends.
+  const [tick, setTick] = useState(0);
+  const logins = useResource<unknown[]>("/api/connectors/logins", revision + tick);
+  const running = (logins.data ?? []).some(item => !!(item as { session?: unknown } | null)?.session);
+  useEffect(() => {
+    if (!running) return undefined;
+    const timer = window.setInterval(() => setTick(value => value + 1), 3000);
+    return () => window.clearInterval(timer);
+  }, [running]);
   const connector = name ? catalog.data?.find(item => item.name === name) : undefined;
   const scope: Scope | undefined = target?.length ? scopeFromParts(target) : undefined;
   // The page heading shows the connector's title, which only the catalog knows (#1568).
@@ -360,8 +446,8 @@ export function ConnectorsPage({ name, target, action, identity, revision, inven
     {usage.error && <p className="stale">Config usage could not be loaded: {usage.error.message}</p>}
     {!name && secrets.error && <p className="stale">Identities could not be listed: {secrets.error.message}</p>}
     {!name && <p className="description connectors-intro">A connector is a kind of access a cell needs. An identity is the stored credential that fills it — chosen per cell or per Config, or inherited from a Realm, Space or Stack default.</p>}
-    {catalog.data && !name && <ConnectorList connectors={listedConnectors(catalog.data)} usage={usage.data} secrets={secrets.data} />}
+    {catalog.data && !name && <ConnectorList connectors={listedConnectors(catalog.data)} usage={usage.data} secrets={secrets.data} logins={logins.data} />}
     {catalog.data && name && !connector && <div className="error" role="alert"><strong>Unknown connector</strong><p>No connector named {name} is defined. <a href={connectorsLink()}>Back to connectors</a></p></div>}
-    {connector && <ConnectorDetail key={connector.name} connector={connector} usage={usage.data} secrets={secrets.data} secretsError={secrets.error} secretsLoading={secrets.loading && !secrets.data} target={scope} action={action} identity={identity} revision={revision} inventory={inventory} onChanged={onChanged} />}
+    {connector && <ConnectorDetail key={connector.name} connector={connector} usage={usage.data} secrets={secrets.data} logins={logins.data} loginsError={logins.error} secretsError={secrets.error} secretsLoading={secrets.loading && !secrets.data} target={scope} action={action} identity={identity} revision={revision} inventory={inventory} onChanged={onChanged} />}
   </>;
 }

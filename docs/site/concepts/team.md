@@ -1083,6 +1083,26 @@ harness without a `statePath` gets no state volume. The pair config, its task
 configs and the sweep cell all mount the same one, so one harness login covers
 every cell of that role × harness.
 
+That Volume is the role's [login identity](connectors.md#login-identities)
+when the pair uses a `login` method. Its name does not change, and nothing has
+to be migrated: the next cell start tags it with its connector, and until then
+`kuke connector list` and the web UI list it anyway. Log in to it with
+`kuke connector login <connector> <team>-<role>-<harness>-state --space <space>
+--stack <stack>`, or from the connector's page in the web UI — without starting
+a role cell.
+
+Two choices in the team declaration change where a pair keeps its state, both
+under `connectors.<name>` of the connector that authenticates the harness (team
+or role entry):
+
+- `identity` with `method: login` names another login identity for the pair
+  instead of the team's own Volume. A login identity serves one role, so one
+  that Configs of another role use is refused.
+- `state: ephemeral` with a token method mounts no state volume at all: the
+  state directory lives and dies with each cell. `persistent` is the default.
+
+A declaration that sets neither renders exactly as before.
+
 The Config passes the name to the shared blueprint as `STATE_VOLUME`, and the
 Volume's scope as `STATE_VOLUME_REALM`, `STATE_VOLUME_SPACE` and
 `STATE_VOLUME_STACK` (the Config's own realm, space and stack). The blueprint

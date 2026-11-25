@@ -18,7 +18,7 @@ export type FormTask = { name: string; schedule?: string; suspend: boolean | nul
 export type FormRoleConnector = { name: string; enabled: boolean; identity?: string };
 export type FormRole = { name: string; source: string; path: string; harness?: string; initialPath?: string; image: string[]; tasks: { all: boolean; items: FormTask[] }; connectors?: FormRoleConnector[] };
 export type FormHarness = { name: string; source: string; path: string };
-export type FormConnector = { method?: string; identity?: string };
+export type FormConnector = { method?: string; identity?: string; state?: string };
 export type TeamForm = {
   name: string; project?: FormSource; sources: FormSource[] | null;
   roles: { inherit: boolean; items: FormRole[] }; harnesses: { inherit: boolean; items: FormHarness[] };

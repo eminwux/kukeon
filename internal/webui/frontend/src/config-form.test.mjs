@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { blueprintForm, buildSpec, emptyAnswers, formSections, groupGitValues, groupValuesBySource, imageChoices, imageStatus, missingAnswers, previewMode, requiredCapabilities, secretChoices } from "./config-form.mjs";
+import { blueprintForm, buildSpec, emptyAnswers, formSections, groupGitValues, groupValuesBySource, imageChoices, imageStatus, keepsLoginState, missingAnswers, offersState, previewMode, requiredCapabilities, secretChoices, stateChoice } from "./config-form.mjs";
 
 // The shape `kuke team` renders: one shared blueprint per harness × profile.
 const blueprint = {
@@ -283,4 +283,63 @@ test("groupValuesBySource keeps git values in their origin group and an unknown 
   const listed = groups.flatMap(group => group.rows);
   assert.equal(listed.length, values.length);
   for (const value of values) assert.equal(listed.filter(row => row === value).length, 1);
+});
+
+// A harness blueprint with what login identities and the state choice read
+// (#1685): the connector authenticates a harness, by a login or a token.
+const stateBlueprint = {
+  metadata: { name: "agent", realm: "default" },
+  spec: {
+    parameters: [
+      { name: "STATE_VOLUME", required: true, group: "state" },
+      { name: "STATE_VOLUME_REALM", required: true, group: "state" },
+      { name: "STATE_VOLUME_SPACE", required: true, group: "state" },
+      { name: "STATE_VOLUME_STACK", required: true, group: "state" },
+    ],
+    components: [
+      { kind: "connector", name: "agent-login", optional: true, group: "agent-auth", connector: { name: "agent", method: "login", delivery: "stateVolume", harness: "agent" } },
+      { kind: "connector", name: "agent-token", optional: true, group: "agent-auth", connector: { name: "agent", method: "token", delivery: "env", harness: "agent" }, secrets: [{ name: "agent-token", envName: "AGENT_TOKEN", required: true }] },
+      { kind: "connector", name: "forge", optional: true, connector: { name: "forge", method: "token", delivery: "env" }, secrets: [{ name: "forge-token", envName: "FORGE_TOKEN" }] },
+    ],
+    cell: { containers: [{ id: "work", image: "busybox" }] },
+  },
+};
+
+test("a picked login identity becomes the Config's state volume, scope included", () => {
+  const form = blueprintForm(stateBlueprint);
+  const ref = { name: "agent", realm: "default" };
+  const answers = { ...emptyAnswers(form), groups: { "agent-auth": "agent-login" } };
+  assert.deepEqual(missingAnswers(form, answers), ["STATE_VOLUME", "STATE_VOLUME_REALM", "STATE_VOLUME_SPACE", "STATE_VOLUME_STACK"]);
+
+  answers.connectors = { "agent-login": { name: "personal", realm: "default" } };
+  assert.deepEqual(missingAnswers(form, answers), [], "the login identity answers the state volume values");
+  assert.deepEqual(buildSpec(ref, form, answers).values, { STATE_VOLUME: "personal", STATE_VOLUME_REALM: "default", STATE_VOLUME_SPACE: "", STATE_VOLUME_STACK: "" });
+  assert.equal(buildSpec(ref, form, answers).secrets, undefined, "a login identity is not a secret fill");
+
+  answers.connectors = { "agent-login": { name: "shared", realm: "auth", space: "teams", stack: "core" } };
+  answers.values = { STATE_VOLUME: "typed-by-hand", STATE_VOLUME_REALM: "default", STATE_VOLUME_SPACE: "a", STATE_VOLUME_STACK: "b" };
+  assert.deepEqual(buildSpec(ref, form, answers).values, { STATE_VOLUME: "shared", STATE_VOLUME_REALM: "auth", STATE_VOLUME_SPACE: "teams", STATE_VOLUME_STACK: "core" }, "the pick wins over typed values");
+
+  // The pick of a method that is not enabled is not carried.
+  answers.groups = { "agent-auth": "agent-token" };
+  assert.equal(buildSpec(ref, form, answers).values.STATE_VOLUME, "typed-by-hand");
+});
+
+test("harness state is a choice of a token method only", () => {
+  const form = blueprintForm(stateBlueprint);
+  const ref = { name: "agent", realm: "default" };
+  const token = { ...emptyAnswers(form), groups: { "agent-auth": "agent-token" } };
+  assert.equal(offersState(form, token), true);
+  assert.equal(keepsLoginState(form, token), false);
+  assert.equal(stateChoice(form, token), "");
+  assert.equal(buildSpec(ref, form, token).state, undefined, "persistent is the default and writes nothing");
+  token.state = "ephemeral";
+  assert.equal(stateChoice(form, token), "ephemeral");
+  assert.equal(buildSpec(ref, form, token).state, "ephemeral");
+
+  // Switching to the login method drops the choice: a login needs its volume.
+  const login = { ...token, groups: { "agent-auth": "agent-login" } };
+  assert.equal(offersState(form, login), false);
+  assert.equal(keepsLoginState(form, login), true);
+  assert.equal(buildSpec(ref, form, login).state, undefined);
 });

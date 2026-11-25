@@ -357,9 +357,14 @@ func TestConnectorChoiceRejections(t *testing.T) {
 			want: `has no method "magic" (methods: login, subscription, api-key)`,
 		},
 		{
-			name: "identity for a login",
-			team: map[string]config.ConnectorChoice{"codex": {Identity: "some-secret"}},
-			want: "keeps its login in the state volume and takes no identity",
+			name: "ephemeral state with a login",
+			team: map[string]config.ConnectorChoice{"codex": {State: "ephemeral"}},
+			want: "the login is kept in the state volume and would not survive the cell",
+		},
+		{
+			name: "state on a connector without a harness",
+			team: map[string]config.ConnectorChoice{"github": {State: "ephemeral"}},
+			want: "authenticates no harness",
 		},
 		{
 			name: "method on a connector without methods",
@@ -384,6 +389,98 @@ func TestConnectorChoiceRejections(t *testing.T) {
 			result, err := compose.Compose(cfg, selectedTeam(cfg), opts)
 			if err == nil || result != nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("result=%v err=%v, want %q", result, err, tc.want)
+			}
+		})
+	}
+}
+
+// A team's choices for the connector that authenticates a harness decide where
+// the harness keeps its state (issue #1685): nothing chosen keeps the team's
+// own state volume and persistent state, unchanged; a login identity named for
+// the login method replaces the state volume, scope included; `state:
+// ephemeral` with a token method is carried to the Config.
+func TestTeamHarnessState(t *testing.T) {
+	const auth = "claude"
+	for _, tc := range []struct {
+		name       string
+		team, role map[string]config.ConnectorChoice
+		volume     [4]string // name, realm, space, stack; empty name: the team's own
+		state      string
+	}{
+		{name: "nothing chosen"},
+		{
+			name:   "team names a login identity",
+			team:   map[string]config.ConnectorChoice{auth: {Identity: "personal-max"}},
+			volume: [4]string{"personal-max", "default", "", ""},
+		},
+		{
+			name:   "role names a scoped login identity",
+			team:   map[string]config.ConnectorChoice{auth: {Method: "login"}},
+			role:   map[string]config.ConnectorChoice{auth: {Identity: "shared-login@auth/teams/core"}},
+			volume: [4]string{"shared-login", "auth", "teams", "core"},
+		},
+		{
+			name:  "ephemeral state with a token method",
+			team:  map[string]config.ConnectorChoice{auth: {Method: "api-key", State: "ephemeral"}},
+			state: "ephemeral",
+		},
+		{
+			name: "explicit persistent state is the default",
+			team: map[string]config.ConnectorChoice{auth: {Method: "api-key", State: "persistent"}},
+		},
+		{
+			name:  "role inherits the team's state",
+			team:  map[string]config.ConnectorChoice{auth: {Method: "api-key", State: "ephemeral"}},
+			role:  map[string]config.ConnectorChoice{auth: {Identity: "role-key"}},
+			state: "ephemeral",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base, baseOpts := fixture(t)
+			allHarnesses(base)
+			base.Spec.Defaults.Harnesses = base.Spec.Defaults.Harnesses[:2] // codex, claude
+			plain, err := compose.Compose(base, selectedTeam(base), baseOpts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			own := pairOf(t, plain, "claude").Config.Spec.Values
+
+			cfg, opts := fixture(t)
+			allHarnesses(cfg)
+			cfg.Spec.Defaults.Harnesses = cfg.Spec.Defaults.Harnesses[:2]
+			cfg.Spec.Defaults.Connectors = tc.team
+			cfg.Spec.Defaults.Roles[0].Connectors = tc.role
+			result, err := compose.Compose(cfg, selectedTeam(cfg), opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pair := pairOf(t, result, "claude")
+			want := [4]string{
+				own["STATE_VOLUME"], own["STATE_VOLUME_REALM"], own["STATE_VOLUME_SPACE"], own["STATE_VOLUME_STACK"],
+			}
+			if tc.volume[0] != "" {
+				want = tc.volume
+			}
+			values := pair.Config.Spec.Values
+			got := [4]string{
+				values["STATE_VOLUME"], values["STATE_VOLUME_REALM"],
+				values["STATE_VOLUME_SPACE"], values["STATE_VOLUME_STACK"],
+			}
+			if got != want {
+				t.Fatalf("state volume = %v, want %v", got, want)
+			}
+			if pair.Config.Spec.State != tc.state {
+				t.Fatalf("spec.state = %q, want %q", pair.Config.Spec.State, tc.state)
+			}
+			// A login identity is never a secret fill.
+			if tc.volume[0] != "" && len(pair.Config.Spec.Secrets) != 0 {
+				t.Fatalf("secret fills = %+v, want none", pair.Config.Spec.Secrets)
+			}
+			// The other harness keeps its own state volume.
+			other := pairOf(t, result, "codex").Config
+			if other.Spec.Values["STATE_VOLUME"] == values["STATE_VOLUME"] || other.Spec.State != "" {
+				t.Fatalf("codex state = %q / %q, want its own volume and no state choice",
+					other.Spec.Values["STATE_VOLUME"], other.Spec.State)
 			}
 		})
 	}

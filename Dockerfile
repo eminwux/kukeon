@@ -14,6 +14,10 @@ COPY pkg/ pkg/
 COPY internal internal/
 COPY team/components team/components/
 COPY team/connectors team/connectors/
+# harness.yaml and images.yaml of every harness are embedded too
+# (team/harnesses/harnesses.go): an identity cell reads its state path and
+# image from them.
+COPY team/harnesses team/harnesses/
 COPY Makefile Makefile
 
 RUN make release-build KUKEON_VERSION=${VERSION} OS=${TARGETOS} ARCHS=${TARGETARCH}

@@ -78,6 +78,9 @@ type CellFromConfigRequest struct {
 	// blueprint component of that method is enabled in place of the one the
 	// Config enables. Recorded in the cell's provenance.
 	ConnectorMethods map[string]string
+	// State picks, for this cell only, persistent or ephemeral harness state
+	// (issue #1685); empty keeps the Config's. Recorded in provenance.
+	State string
 	// TargetSpace and TargetStack place the cell below the Config's scope
 	// (issue #1603); see cellTargetScope. Empty keeps the Config's scope.
 	TargetSpace string
@@ -135,7 +138,7 @@ func (b *Exec) PreviewCellFromConfig(req CellFromConfigRequest) (CellFromConfigP
 	rendered, err := renderCellFromConfig(b.runner, cfg, cellBinding{
 		Name: name, EnvOverrides: req.EnvOverrides, Mode: strings.TrimSpace(req.Mode), Params: req.Params,
 		Schedule: strings.TrimSpace(req.Schedule), Connectors: req.ConnectorOverrides,
-		Methods: req.ConnectorMethods, TargetSpace: req.TargetSpace, TargetStack: req.TargetStack,
+		Methods: req.ConnectorMethods, State: req.State, TargetSpace: req.TargetSpace, TargetStack: req.TargetStack,
 	})
 	if err != nil {
 		return CellFromConfigPreview{}, err

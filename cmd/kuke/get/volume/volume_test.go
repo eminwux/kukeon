@@ -333,3 +333,53 @@ func TestNewVolumeCmd_ListOutputShape(t *testing.T) {
 		}
 	})
 }
+
+// TestNewVolumeCmd_WideShowsConnector: `-o wide` adds the login-identity
+// columns — the connector and method a Volume is tagged with and its login
+// state — and `-o yaml` carries them in spec and status (#1685).
+func TestNewVolumeCmd_WideShowsConnector(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fake := &fakeClient{
+		getVolumeFn: func(doc v1beta1.VolumeDoc) (kukeonv1.GetVolumeResult, error) {
+			return kukeonv1.GetVolumeResult{
+				Volume: v1beta1.VolumeDoc{
+					Metadata: doc.Metadata,
+					Spec:     v1beta1.VolumeSpec{Connector: "agent", Method: "login", LoginMarker: "auth.json"},
+					Status:   v1beta1.VolumeStatus{Login: &v1beta1.LoginStatus{State: v1beta1.LoginStateLoggedIn}},
+				},
+				MetadataExists: true,
+			}, nil
+		},
+	}
+	run := func(t *testing.T, args ...string) string {
+		t.Helper()
+		t.Cleanup(viper.Reset)
+		cmd := volume.NewVolumeCmd()
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+		cmd.SetContext(context.WithValue(context.Background(), volume.MockControllerKey{}, kukeonv1.Client(fake)))
+		cmd.SetArgs(append([]string{"vol1", "--realm", "r1"}, args...))
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		return buf.String()
+	}
+
+	wide := run(t, "-o", "wide")
+	for _, want := range []string{"CONNECTOR", "METHOD", "LOGIN", "agent", "login", "logged in"} {
+		if !strings.Contains(wide, want) {
+			t.Errorf("-o wide lacks %q; got:\n%s", want, wide)
+		}
+	}
+	if table := run(t); strings.Contains(table, "CONNECTOR") {
+		t.Errorf("the default table must not grow the wide columns; got:\n%s", table)
+	}
+	yamlOut := run(t, "-o", "yaml")
+	for _, want := range []string{"connector: agent", "method: login", "state: logged in"} {
+		if !strings.Contains(yamlOut, want) {
+			t.Errorf("-o yaml lacks %q; got:\n%s", want, yamlOut)
+		}
+	}
+}

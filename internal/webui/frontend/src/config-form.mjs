@@ -3,7 +3,11 @@
 // form from the CellBlueprint document alone and turns the operator's answers
 // into a CellConfig spec. No DOM, no network — unit-tested with node --test.
 
-import { deliveryEnv, deliveryFile, deliveryGit } from "./connectors.mjs";
+import { deliveryEnv, deliveryFile, deliveryGit, deliveryStateVolume, harnessEphemeral } from "./connectors.mjs";
+
+// The values a Config names its harness state volume with. A login identity
+// picked for a method that keeps a login is written to them (#1685).
+export const stateVolumeValues = ["STATE_VOLUME", "STATE_VOLUME_REALM", "STATE_VOLUME_SPACE", "STATE_VOLUME_STACK"];
 
 const list = value => Array.isArray(value) ? value : [];
 const text = value => typeof value === "string" ? value : "";
@@ -31,7 +35,7 @@ function secretSlots(raw) {
 function connectorOf(raw) {
   if (!raw || typeof raw !== "object" || !text(raw.name)) return null;
   return {
-    name: raw.name, title: text(raw.title), method: text(raw.method), delivery: text(raw.delivery), optional: raw.optional === true,
+    name: raw.name, title: text(raw.title), method: text(raw.method), delivery: text(raw.delivery), optional: raw.optional === true, harness: text(raw.harness),
     secretTypes: list(raw.secretTypes).filter(value => typeof value === "string"),
     scopes: list(raw.scopes).filter(value => typeof value === "string"),
   };
@@ -89,7 +93,7 @@ export function blueprintForm(blueprint) {
 // mode allowed, every group on its first member and every connector on its
 // default identity.
 export function emptyAnswers(form) {
-  return { values: {}, components: [], groups: {}, connectors: {}, requires: "", prefix: "", modes: { enabled: [...form.modes], default: "" }, repos: {}, secrets: {}, git: null };
+  return { values: {}, components: [], groups: {}, connectors: {}, requires: "", prefix: "", modes: { enabled: [...form.modes], default: "" }, repos: {}, secrets: {}, git: null, state: "" };
 }
 
 // groupChoice is the member of a mutually exclusive group the answers enable:
@@ -123,6 +127,32 @@ function activeComponents(form, answers) {
   return form.components.filter(component => !component.optional
     || (component.group ? groupChoice(form, answers, component.group) === component.name : enabled.includes(component.name)));
 }
+// loginPick is the login identity the answers pick for the enabled component
+// that keeps a login in the state volume, if any.
+function loginPick(components, answers) {
+  for (const component of components) {
+    if (component.connector?.delivery !== deliveryStateVolume) continue;
+    const ref = secretRef(answers?.connectors?.[component.name]);
+    if (ref) return ref;
+  }
+  return undefined;
+}
+// keepsLoginState reports whether the answers enable a method that keeps its
+// login in the state volume: such a Config always has persistent state.
+export function keepsLoginState(form, answers) {
+  return activeComponents(form, answers).some(component => component.connector?.delivery === deliveryStateVolume);
+}
+// offersState reports whether the Config has a harness state to choose: it
+// enables a connector that authenticates a harness through a token method.
+export function offersState(form, answers) {
+  return !keepsLoginState(form, answers) && activeComponents(form, answers).some(component => !!component.connector?.harness);
+}
+// stateChoice is the harness state the answers choose, "" for the default
+// (persistent) and whenever no choice is offered.
+export function stateChoice(form, answers) {
+  return offersState(form, answers) && answers?.state === harnessEphemeral ? harnessEphemeral : "";
+}
+
 // slotDelivery reports a connector whose identity fills a secret slot. The
 // handler names are spelled once, in connectors.mjs.
 function slotDelivery(connector) { return connector?.delivery === deliveryEnv || connector?.delivery === deliveryFile; }
@@ -271,7 +301,18 @@ export function buildSpec(blueprintRef, form, answers) {
     if (item.type === "bool") { if (value === true || value === false) values[item.name] = String(value); continue; }
     if (typeof value === "string" && value !== "") values[item.name] = value;
   }
+  // A login identity picked for a method that keeps a login is the Config's
+  // state volume, scope included: an empty space or stack is written as such,
+  // so a Realm-scoped identity is not read as an unanswered value.
+  const login = loginPick(components, answers);
+  if (login) {
+    const [nameKey, realmKey, spaceKey, stackKey] = stateVolumeValues;
+    Object.assign(values, { [nameKey]: login.name, [realmKey]: login.realm, [spaceKey]: login.space ?? "", [stackKey]: login.stack ?? "" });
+  }
   if (Object.keys(values).length) spec.values = values;
+  // Ephemeral harness state needs a token method: with a login method the
+  // answer is dropped rather than sent to be refused.
+  if (stateChoice(form, answers) === harnessEphemeral) spec.state = harnessEphemeral;
 
   const repos = {};
   for (const slot of form.repoSlots) {
@@ -324,9 +365,12 @@ export function buildSpec(blueprintRef, form, answers) {
 // what blocks a preview before asking the daemon.
 export function missingAnswers(form, answers, mode = "") {
   const missing = [];
+  // A picked login identity answers the state volume values by itself.
+  const login = loginPick(activeComponents(form, answers), answers);
   for (const section of formSections(form, answers, mode)) {
     for (const item of section.parameters) {
       const value = answers.values?.[item.name];
+      if (login && stateVolumeValues.includes(item.name)) continue;
       if (item.required && !item.hasDefault && item.type !== "bool" && !(typeof value === "string" && value !== "")) missing.push(item.name);
     }
     // A connector's slot may resolve from a scope default; connectorsWithoutIdentity reports those.
