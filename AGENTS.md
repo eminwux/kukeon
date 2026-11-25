@@ -23,6 +23,10 @@ The `kukeond` daemon runs inside the **`kuke-system`** realm — specifically as
 
 The full set of operator workflows the `kuke` CLI must support — each with its command sequence and behavioral invariants (exit codes, side effects, idempotency, error paths) — lives in [`docs/cli-use-cases.md`](docs/cli-use-cases.md). That document is workflow-oriented (not alphabetical by command) and is the source of truth for UX expectations the smoke test below does **not** cover, including image management, cell teardown verbs (`stop`/`kill`/`delete`/`purge`), and the cascade-purge / divergent-spec edge paths.
 
+## Before pushing
+
+Run the local equivalent of every CI gate your change triggers, including `make fmt-check` (the Lint workflow's formatter gate), before pushing; [`docs/pre-push-checks.md`](docs/pre-push-checks.md) maps each workflow to its local command.
+
 ## Local smoke test: rebuild and re-run `kuke init`
 
 When a change touches the build path, the daemon, or anything under `/opt/kukeon`, run this end-to-end before opening a PR.

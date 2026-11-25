@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 
 	"github.com/eminwux/kukeon/internal/gitcred"
@@ -386,12 +387,15 @@ type newSource struct {
 // alias, ref, clonePath and the source field when the stored name differs
 // from the alias (always, for the project). A definition whose stored
 // Source holds another repository is AC6's error; one that holds the same
-// repository over another transport is a reference to it.
+// repository over another transport is a reference to it. A definition that
+// becomes a reference drops its git block; when that block differs from the
+// one used, a note says so (#1654).
 func normalize(
 	team *config.Team, stored map[string]config.SourceSpec,
 ) (*config.Team, []newSource, []string, error) {
 	out := cloneTeam(team)
 	var created []newSource
+	var unused []string
 	byName := map[string]int{}
 	define := func(entry *config.Source, field string, project bool) error {
 		name := storedName(*entry, team.Metadata.Name, project)
@@ -406,9 +410,18 @@ func normalize(
 				if !gitcred.SameRepository(have.URL, spec.URL) {
 					return clash(field, entry.Name, name, spec.URL, have.URL)
 				}
+				if entry.Git != nil && !reflect.DeepEqual(entry.Git, have.Git) {
+					unused = append(unused, fmt.Sprintf("%s (%s): Source %s is already stored; its git "+
+						"identity is used, not this entry's git block. Change it with kuke create source %s "+
+						"--url ADDRESS --identity ID --force", field, entry.Name, name, name))
+				}
 			} else if i, seen := byName[name]; seen {
 				if !gitcred.SameRepository(created[i].spec.URL, spec.URL) {
 					return clash(field, entry.Name, name, spec.URL, created[i].spec.URL)
+				}
+				if entry.Git != nil && !reflect.DeepEqual(entry.Git, created[i].spec.Git) {
+					unused = append(unused, fmt.Sprintf("%s (%s): Source %s is defined by %s; its git "+
+						"identity is used, not this entry's git block", field, entry.Name, name, created[i].field))
 				}
 			} else {
 				byName[name] = len(created)
@@ -434,11 +447,12 @@ func normalize(
 			return nil, nil, nil, err
 		}
 	}
-	notes := make([]string, 0, len(created))
+	notes := make([]string, 0, len(created)+len(unused))
 	for _, source := range created {
 		notes = append(notes, fmt.Sprintf("stores Source %s (%s, %s), defined by %s",
 			source.name, gitcred.ShortForm(source.spec.URL), source.spec.Revision(), source.field))
 	}
+	notes = append(notes, unused...)
 	return out, created, notes, nil
 }
 

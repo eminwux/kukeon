@@ -153,6 +153,93 @@ func TestNormalize(t *testing.T) {
 			t.Fatalf("err = %v", err)
 		}
 	})
+
+	// A definition that becomes a reference drops its git block; a note says so when the
+	// dropped block differs from the one used (#1654).
+	identity := func(name string) *config.SourceGit {
+		return &config.SourceGit{IdentityRef: &config.SecretRef{Name: name}}
+	}
+	gitNotes := func(notes []string) []string {
+		var out []string
+		for _, note := range notes {
+			if strings.Contains(note, "git block") {
+				out = append(out, note)
+			}
+		}
+		return out
+	}
+
+	t.Run("a stored Source's git is used, not another one in the entry", func(t *testing.T) {
+		stored := storedKukeon()
+		stored["agents"] = config.SourceSpec{URL: agentsURL, Branch: "main"}
+		entry := definition
+		entry.Git = identity("x")
+		team, created, notes, err := normalize(resolveTeam("app", "agents", entry), stored)
+		if err != nil || len(created) != 0 {
+			t.Fatalf("created = %+v, err = %v", created, err)
+		}
+		if team.Spec.Sources[0].Git != nil {
+			t.Fatalf("stored entry git = %+v, want none", team.Spec.Sources[0].Git)
+		}
+		got := gitNotes(notes)
+		if len(got) != 1 || !strings.Contains(got[0], "spec.sources[0]") ||
+			!strings.Contains(got[0], "Source agents is already stored") ||
+			!strings.Contains(got[0], "kuke create source agents") {
+			t.Fatalf("notes = %v", notes)
+		}
+	})
+
+	t.Run("the same git as the stored Source adds no note", func(t *testing.T) {
+		stored := storedKukeon()
+		stored["agents"] = config.SourceSpec{URL: agentsURL, Branch: "main", Git: identity("x")}
+		entry := definition
+		entry.Git = identity("x")
+		_, _, notes, err := normalize(resolveTeam("app", "agents", entry), stored)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := gitNotes(notes); len(got) != 0 {
+			t.Fatalf("git notes = %v, want none", got)
+		}
+	})
+
+	t.Run("an entry without git adds no note", func(t *testing.T) {
+		stored := storedKukeon()
+		stored["agents"] = config.SourceSpec{URL: agentsURL, Branch: "main", Git: identity("x")}
+		_, _, notes, err := normalize(resolveTeam("app", "agents", definition), stored)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := gitNotes(notes); len(got) != 0 {
+			t.Fatalf("git notes = %v, want none", got)
+		}
+	})
+
+	t.Run("the first definition's git is used, not a later one's", func(t *testing.T) {
+		first := definition
+		first.Git = identity("x")
+		team := resolveTeam("agents", "agents", first)
+		team.Spec.ProjectSource = &config.Source{
+			Name: "project", URL: "github.com/eminwux/agents", Branch: "main", ClonePath: "/home/user/agents0",
+			Git: identity("y"),
+		}
+		_, created, notes, err := normalize(team, storedKukeon())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(created) != 1 || created[0].name != "agents" || !reflect.DeepEqual(created[0].spec.Git, identity("x")) {
+			t.Fatalf("created = %+v", created)
+		}
+		got := gitNotes(notes)
+		if len(got) != 1 || !strings.Contains(got[0], "spec.projectSource") ||
+			!strings.Contains(got[0], "is defined by spec.sources[0]") ||
+			strings.Contains(got[0], "kuke create source") {
+			t.Fatalf("notes = %v", notes)
+		}
+		if !strings.HasPrefix(notes[0], "stores Source agents") {
+			t.Fatalf("notes = %v, want the stores note first", notes)
+		}
+	})
 }
 
 // TestHydrate is the resolution half of #1643 Step 4's table.

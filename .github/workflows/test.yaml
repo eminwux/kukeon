@@ -70,7 +70,12 @@ jobs:
             echo "Not a pull request: every job runs."
             lint=true go=true e2e=true webui=true harnesses=true installer=true
           else
+            # A plain assignment, so `bash -e` stops the step when git fails;
+            # a failure inside `< <(…)` would skip every job and pass (#1656).
+            files="$(git diff --name-only HEAD^1 HEAD)"
             while IFS= read -r f; do
+              # A here-string of an empty list still yields one empty line.
+              [ -n "$f" ] || continue
               # Anything outside the docs site is linted.
               case "$f" in
                 docs/*|mkdocs.yml) ;;
@@ -111,7 +116,7 @@ jobs:
                 *.go|*/go.mod|*/go.sum|go.work|go.work.sum|cmd/*|internal/*|pkg/*|e2e/*|team/*|kuketeam.yaml)
                   go=true e2e=true ;;
               esac
-            done < <(git diff --name-only HEAD^1 HEAD)
+            done <<< "$files"
           fi
           for area in lint go e2e webui harnesses installer; do
             echo "${area}=${!area}" | tee -a "$GITHUB_OUTPUT"
@@ -376,6 +381,8 @@ jobs:
           go-version-file: go.mod
       - name: Check generated assets match source
         run: make web-ui-check
+      - name: Run frontend unit tests
+        run: make web-ui-unit
       - name: Install browser
         run: cd internal/webui/frontend && npx playwright install --with-deps chromium
       - name: Test browser states against the packaged binary

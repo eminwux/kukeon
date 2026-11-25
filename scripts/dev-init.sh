@@ -811,3 +811,12 @@ if [ -n "${PARENT_ATTACH_METADATA_PRE_SHA:-}" ]; then
     fi
     echo "parent attach socket ${PARENT_ATTACH_SOCKET} still a socket; metadata still readable"
 fi
+
+# Issue #1676: the KUKEON_HOST export above applies to this script and its
+# children only. The caller's shell keeps the cell's own KUKEON_HOST, which
+# points at the parent host's daemon, so say how to reach the nested one.
+if [ -e "${NESTED_PROBE}" ]; then
+    step "Nested: point this shell at the nested daemon"
+    echo "kuke in this shell still talks to the parent host's daemon. Before running kuke against this build:"
+    echo "    export KUKEON_HOST=${NESTED_HOST_URI}"
+fi

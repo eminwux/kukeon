@@ -62,12 +62,13 @@ test("terminal selects eligible containers, forwards input and resize, and detac
     { id: "pause", root: true, attachable: true }, { id: "no-tty" },
   ] } : undefined);
   const messages = [];
-  let selected = "";
+  // Every attach path in order: the automatic attach may open worker before the pick opens shell.
+  const paths = [];
   let closed = false;
   let sendReady = () => {};
   let sendOutput = () => {};
   await page.routeWebSocket("**/attach", socket => {
-    selected = new URL(socket.url()).pathname;
+    paths.push(new URL(socket.url()).pathname);
     socket.onMessage(message => { messages.push(message); });
     socket.onClose(() => { closed = true; });
     sendReady = () => socket.send(JSON.stringify({ type: "ready" }));
@@ -78,7 +79,7 @@ test("terminal selects eligible containers, forwards input and resize, and detac
   // Every non-root container is listed; one without a terminal is marked as a log view.
   await expect(terminalTools(page).locator("option")).toHaveText(["worker", "shell", "no-tty (logs)"]);
   await terminalTools(page).getByLabel("Container").selectOption("shell");
-  await expect.poll(() => selected).toContain("/containers/shell/attach");
+  await expect.poll(() => paths.at(-1) ?? "").toContain("/containers/shell/attach");
   await expect(terminalTools(page).locator(".terminal-connection-state")).toHaveText("Connecting…");
   sendReady();
   await expect(terminalTools(page).locator(".terminal-connection-state")).toHaveAttribute("title", /waiting for container output/);
@@ -94,6 +95,39 @@ test("terminal selects eligible containers, forwards input and resize, and detac
   await expect.poll(() => messages.some(message => Buffer.isBuffer(message) && message.toString() === "a")).toBe(true);
   await terminalTools(page).getByRole("button", { name: "Detach" }).click();
   await expect.poll(() => closed).toBe(true);
+});
+
+// A choice made after the options render but before the automatic-attach effect has run (#1675):
+// the effect still holds the first container, and must neither open it nor undo the choice.
+test("a container picked before the automatic attach stays selected", async ({ page }) => {
+  // The container list is held until the inventory is on screen, so the render that shows the
+  // options is also the one whose effect attaches the first container.
+  let releaseContainers = () => {};
+  const containersHeld = new Promise(resolve => { releaseContainers = resolve; });
+  await mock(page, async path => {
+    if (!path.endsWith("/containers")) return undefined;
+    await containersHeld;
+    return { json: [{ id: "worker", attachable: true }, { id: "shell", attachable: true }] };
+  });
+  const paths = [];
+  await page.routeWebSocket("**/attach", socket => { paths.push(new URL(socket.url()).pathname); });
+  // A MutationObserver callback is a microtask: it runs right after React commits the options,
+  // before React runs the passive effect that attaches the first container.
+  await page.addInitScript(() => {
+    new MutationObserver(() => {
+      const select = document.querySelector("#terminal-container");
+      if (!select || select.dataset.picked || !select.querySelector('option[value="shell"]')) return;
+      select.dataset.picked = "1";
+      select.value = "shell";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    }).observe(document, { childList: true, subtree: true });
+  });
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  await expect(page.getByRole("link", { name: "Open dev / shared / services / api" })).toBeVisible();
+  releaseContainers();
+  await expect.poll(() => paths.at(-1) ?? "").toContain("/containers/shell/attach");
+  await expect(terminalTools(page).getByLabel("Container")).toHaveValue("shell");
+  expect(paths.filter(path => path.includes("/containers/worker/attach"))).toEqual([]);
 });
 
 test("refreshing keeps the cell terminal size and sends no resize", async ({ page }) => {

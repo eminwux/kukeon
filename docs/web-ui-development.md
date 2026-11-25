@@ -71,6 +71,10 @@ bundle after `make web-ui`. These are development tools, separate from the
 `kuke serve` command, and do not connect to kukeond. Use `make web-ui && make kuke` followed by
 `./kuke serve` to exercise the same-origin API.
 
+`make web-ui-unit` runs `npm run test:unit`, the frontend's Node unit tests,
+which launch no browser or daemon; the `web-ui` CI job runs it after
+`make web-ui-check`. It needs `node_modules` (`make web-ui` or `npm ci`).
+
 The scoped relationship, manual specification and blueprint-form schemas have
 focused Node unit tests that do not launch a browser or daemon (`npm run
 test:unit` runs them with the other unit tests):
