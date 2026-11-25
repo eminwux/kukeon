@@ -74,4 +74,4 @@ See [CLI Reference → create](../cli/kuke-create.md), [get](../cli/kuke-get.md)
 
 - [containerd namespaces](containerd-namespaces.md) — how the realm/namespace mapping works
 - [cgroups](cgroups.md) — the realm's cgroup subtree
-- [System realm](system-realm.md) — the special `kukeon-system` realm
+- [System realm](system-realm.md) — the special `kuke-system` realm
