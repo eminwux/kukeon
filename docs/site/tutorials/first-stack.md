@@ -94,7 +94,7 @@ $ ip -4 addr show type bridge | grep kuke
 The client's busybox is in a loop. Attach to its task:
 
 ```bash
-sudo ctr -n kukeon-default tasks attach client_wget
+sudo ctr -n default.kukeon.io tasks attach tutorial_demo_client_wget
 ```
 
 You should see nginx's default HTML stream by every 5 seconds. Press `Ctrl-C` to detach from the task without killing it.

@@ -6,29 +6,43 @@ Kukeon keeps its own authoritative state on disk, rooted at a single **run path*
 
 ```
 /opt/kukeon/
-├── <realm>/
-│   ├── realm.yaml                              (Realm manifest + status)
-│   └── <space>/
-│       ├── space.yaml                          (Space manifest + status)
-│       ├── network.conflist                    (space CNI conflist cache)
-│       └── <stack>/
-│           ├── stack.yaml                      (Stack manifest + status)
-│           └── <cell>/
-│               ├── cell.yaml                   (Cell manifest + status)
-│               └── containers/
-│                   └── <container>.yaml        (Container manifest + status)
-├── kuke-system/                                (system realm; structure identical to above)
-│   └── kukeon/
+├── data/                                       (metadata root)
+│   ├── <realm>/
+│   │   ├── metadata.json                       (Realm manifest + status)
+│   │   ├── secrets/                            (also under a space, stack or cell)
+│   │   ├── blueprints/                         (also under a space or stack)
+│   │   ├── configs/                            (also under a space or stack)
+│   │   ├── config-status/                      (also under a space or stack)
+│   │   ├── volumes/                            (also under a space or stack)
+│   │   ├── volume-meta/                        (also under a space or stack)
+│   │   ├── teams/                              (realm only)
+│   │   ├── team-defaults/                      (realm only)
+│   │   ├── sources/                            (realm only)
+│   │   └── <space>/
+│   │       ├── metadata.json                   (Space manifest + status)
+│   │       ├── network.conflist                (space CNI conflist cache)
+│   │       └── <stack>/
+│   │           ├── metadata.json               (Stack manifest + status)
+│   │           └── <cell>/
+│   │               ├── metadata.json           (Cell manifest + status, containers included)
+│   │               ├── etc-hosts               (the cell's /etc/hosts)
+│   │               ├── etc-hostname            (the cell's /etc/hostname)
+│   │               └── <container>/
+│   │                   ├── log                 (stdout/stderr of a non-attachable container)
+│   │                   └── tty/                (socket, capture and kuketty.log of an attachable container)
+│   └── kuke-system/                            (system realm; structure identical to above)
+│       ├── healthreports/                      (system realm only)
 │       └── kukeon/
-│           └── kukeond/
-│               ├── cell.yaml
-│               └── containers/
-│                   └── kukeond.yaml
-└── run/
-    └── (reserved)
+│           └── kukeon/
+│               └── kukeond/
+│                   ├── metadata.json
+│                   └── kukeond/
+│                       └── log
+├── locks/                                      (space network lock files)
+└── s/                                          (short symlinks to container tty sockets)
 ```
 
-Every file is YAML. The combined doc (spec + status) is what the controller reconciles against containerd, CNI, and cgroups.
+Every `metadata.json` is JSON. The combined doc (spec + status) is what the controller reconciles against containerd, CNI, and cgroups.
 
 ## The socket path
 
@@ -57,7 +71,7 @@ Each space writes a conflist into the system CNI config directory:
 
 The path is `<realm>-<space>.conflist` by default. It can be overridden with `spec.cniConfigPath` on the space manifest.
 
-Kukeon keeps a **copy** of the active conflist under `/opt/kukeon/<realm>/<space>/network.conflist` so the state is self-contained per realm. The authoritative one for CNI plugin invocation is still the file in `/etc/cni/net.d`.
+Kukeon keeps a **copy** of the active conflist under `/opt/kukeon/data/<realm>/<space>/network.conflist` so the state is self-contained per realm. The authoritative one for CNI plugin invocation is still the file in `/etc/cni/net.d`.
 
 ## cgroup tree
 
@@ -69,8 +83,8 @@ Kukeon roots its cgroup tree at `/sys/fs/cgroup/kukeon`:
 │   └── <space>/
 │       └── <stack>/
 │           └── <cell>/
-│               ├── <cell>_root/    (root container)
-│               └── <container>/    (non-root containers)
+│               ├── <space>_<stack>_<cell>_root/           (root container)
+│               └── <space>_<stack>_<cell>_<container>/    (non-root containers)
 └── kuke-system/
     └── ...
 ```
@@ -85,7 +99,7 @@ Kukeon does **not** mirror containerd state into its own layout. Images, snapsho
 /var/lib/containerd/         (containerd's own layout; not Kukeon's business)
 ```
 
-If you want to inspect what Kukeon pushed into containerd, use `ctr -n kukeon-<realm>` — see [containerd namespaces](../concepts/containerd-namespaces.md).
+If you want to inspect what Kukeon pushed into containerd, use `ctr -n <realm>.kukeon.io` — see [containerd namespaces](../concepts/containerd-namespaces.md).
 
 ## Build cache
 
@@ -101,14 +115,14 @@ The cache is namespace-scoped because it holds references into that namespace's 
 
 ## What gets cleaned up, and when
 
-| Operation                     | Removes                                                          |
-| ----------------------------- | ---------------------------------------------------------------- |
-| `kuke delete realm --cascade` | The realm subtree under the run path, cgroups, CNI conflists     |
-| `kuke delete space --cascade` | The space subtree, cgroups, CNI conflist                         |
-| `kuke delete cell --cascade`  | The cell subtree, cgroups, containerd containers                 |
-| `kuke purge <resource>`       | Same as delete but more aggressive: force-removes residual state |
+| Operation                     | Removes                                                                                                         |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `kuke delete realm --cascade` | The realm subtree under the run path, cgroups, CNI conflists                                                    |
+| `kuke delete space --cascade` | The space subtree, cgroups, CNI conflist                                                                        |
+| `kuke delete cell --cascade`  | The cell subtree, cgroups, containerd containers                                                                |
+| `kuke purge <resource>`       | Same as delete but more aggressive: force-removes residual state                                                |
 | `kuke uninstall`              | Everything above, plus `/var/lib/kukebuild/<namespace>/` for every realm whose containerd namespace was removed |
-| Reboot                        | `/run/kukeon/*` disappears (tmpfs). `/opt/kukeon/*` and `/var/lib/kukebuild/*` persist. |
+| Reboot                        | `/run/kukeon/*` disappears (tmpfs). `/opt/kukeon/*` and `/var/lib/kukebuild/*` persist.                         |
 
 In-process runs of the same commands do exactly the same thing on disk — they just skip the socket and execute the controller in-process (reach in-process mode via `--run-path`, `KUKEON_NO_DAEMON=true`, or `--no-daemon` on the commands that still ship it: `init`, `uninstall`, `purge`, every `get <kind>`).
 

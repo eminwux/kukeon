@@ -7,7 +7,7 @@ A **stack** is a logical grouping of related cells. Stacks don't add a network b
 Creating a stack materializes:
 
 1. **A cgroup subtree** — `/sys/fs/cgroup/kukeon/<realm>/<space>/<stack>` — parent of every cell in the stack.
-2. **Metadata** at `/opt/kukeon/<realm>/<space>/<stack>/stack.yaml`.
+2. **Metadata** at `/opt/kukeon/data/<realm>/<space>/<stack>/metadata.json`.
 
 That's it. A stack has no network configuration of its own.
 

@@ -9,7 +9,7 @@ Creating a space materializes:
 1. **A CNI configuration file** at `/etc/cni/net.d/<realm>-<space>.conflist` (by default). The conflist points at the bridge and host-local plugins and owns the space's IP range.
 2. **A Linux bridge** on the host, named `kuke-<realm>-<space>` (truncated if needed — see [Networking](networking.md)). Every cell in the space gets a veth pair into this bridge.
 3. **A cgroup subtree** — `/sys/fs/cgroup/kukeon/<realm>/<space>` — parent of every stack and cell cgroup in the space.
-4. **Metadata** at `/opt/kukeon/<realm>/<space>/space.yaml`.
+4. **Metadata** at `/opt/kukeon/data/<realm>/<space>/metadata.json`.
 
 ## Space spec
 
@@ -39,7 +39,7 @@ The space cgroup is the parent of every stack cgroup in the space, which in turn
 /sys/fs/cgroup/kukeon/main/default/         <- space cgroup
 ├── stackA/
 │   ├── cell1/
-│   │   └── cell1_root/                      <- root container
+│   │   └── default_stackA_cell1_root/       <- root container
 │   └── cell2/
 └── stackB/
 ```

@@ -11,7 +11,7 @@ Creating a cell materializes:
 1. **A cgroup subtree** — `/sys/fs/cgroup/kukeon/<realm>/<space>/<stack>/<cell>` — parent of every container in the cell.
 2. **A Linux network namespace**, entered by the root container and shared by the rest.
 3. **A veth pair** between the cell's network namespace and the space's bridge, configured by the CNI bridge plugin and `host-local` IPAM.
-4. **Metadata** at `/opt/kukeon/<realm>/<space>/<stack>/<cell>/cell.yaml`.
+4. **Metadata** at `/opt/kukeon/data/<realm>/<space>/<stack>/<cell>/metadata.json`.
 
 ## What runs in a cell
 
@@ -72,7 +72,7 @@ A cell's **identity is its own document** — the `CellDoc`. The CellDoc owns th
 - Non-root containers join the same network namespace at creation time.
 - The root anchors the cell: workloads join its network, IPC and UTS namespaces, kukeon reaches the cell's network through the root's PID, and the cell's CNI/IPAM lease is keyed to the root container. It must stay alive for as long as any workload runs.
 - When every workload has finished, the reconciler stops the root (see [Lifecycle](#lifecycle)), whatever the workloads' `restartPolicy`.
-- When the root container exits while a workload is still running, the reconciler kills the remaining workloads, releases the cell's network, and settles the cell in `Error` with reason `RootContainerExited`. Cells with only a root container (kukeond-style) are different: there the root is the workload, and the cell's state follows the root.
+- When the root container exits while a workload is still running, the reconciler kills the remaining workloads, releases the cell's network, and settles the cell in `Error` with reason `RootContainerExited`. Cells with only a root container are different: there the root is the workload, and the cell's state follows the root.
 
 ## Cell networking
 

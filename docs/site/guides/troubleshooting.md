@@ -76,7 +76,7 @@ That rewrites every space's conflist with the current naming scheme. The daemon 
 If that still doesn't clear it, the file on disk wasn't regenerated for some reason — delete it explicitly:
 
 ```bash
-sudo rm /opt/kukeon/<realm>/<space>/network.conflist
+sudo rm /opt/kukeon/data/<realm>/<space>/network.conflist
 sudo rm /etc/cni/net.d/<realm>-<space>.conflist
 sudo kuke init
 ```
