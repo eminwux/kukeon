@@ -117,12 +117,14 @@ func TestDiffContainer_GitCredentialsAndSigning(t *testing.T) {
 }
 
 // TestDiffContainer_GitOnlyCredentialsIsNotZero guards gitIsZero: a block that
-// declares nothing but a credential (or nothing but a stored signing key) is
-// real configuration, not an empty `git:` equal to none.
+// declares nothing but a credential (or nothing but a stored signing key, or
+// nothing but an identity Secret ref, #1683) is real configuration, not an
+// empty `git:` equal to none.
 func TestDiffContainer_GitOnlyCredentialsIsNotZero(t *testing.T) {
 	blocks := map[string]*intmodel.ContainerGit{
 		"credentials only": {Credentials: []intmodel.GitCredential{{Host: "github.com", SecretRef: diffGitRef("k")}}},
 		"signing only":     {Signing: &intmodel.GitSigning{SecretRef: diffGitRef("k")}},
+		"identityRef only": {IdentityRef: diffGitRef("git-ssh")},
 	}
 	for name, git := range blocks {
 		t.Run(name, func(t *testing.T) {
