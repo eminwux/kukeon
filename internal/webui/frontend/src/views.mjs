@@ -1,5 +1,6 @@
-// The two views of the web UI (#1635): Workbench (the terminal grid, the cell screen, a cell's container
-// pages and New Cell) and Manage (every other page). The view is derived from the route, never stored.
+// The views of the web UI: Workbench (the terminal grid, the cell screen, a cell's container pages and
+// New Cell), Settings (#/settings, #1686) and Manage (every other page) (#1635). The view is derived from
+// the route, never stored.
 // No DOM, no network — unit-tested with node --test.
 
 const workbenchViews = ["workbench", "workspace", "new-cell"];
@@ -8,6 +9,7 @@ const workbenchViews = ["workbench", "workspace", "new-cell"];
 // its containers, with or without ?document=1; shorter ones are realm, space and stack pages in Manage.
 export function viewOf(route) {
   if (workbenchViews.includes(route.view)) return "workbench";
+  if (route.view === "settings") return "settings";
   return route.view === "resource" && route.scope.length >= 4 ? "workbench" : "manage";
 }
 

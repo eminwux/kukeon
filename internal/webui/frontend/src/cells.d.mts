@@ -12,3 +12,7 @@ export const ungrouped: string;
 export function groupingKeys(rows: Row[], groupBy: string): string[];
 export function groupId(key: string, value: string | null): string;
 export function groupCells(rows: Row[], groupBy: string): CellGroup[];
+export const configLabel: string;
+export type Agent = { id: string; name: string; realm: string; scope: string[]; showRealm: boolean; context: string; rows: Row[] };
+export function agentGroups(rows: Row[]): { agents: Agent[]; others: Row[] };
+export function rollupState(rows: Row[]): string | undefined;

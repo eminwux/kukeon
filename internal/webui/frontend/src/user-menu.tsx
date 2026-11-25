@@ -1,13 +1,11 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { useModalDialog } from "./focus";
-import { settingDefinitions, switchSettings, themeLabels, themes, useSettings } from "./settings";
+import { settingsLink } from "./routes";
 
 // UserMenu is the top-bar avatar button (#1652): its menu names the signed-in
-// user and opens Settings or signs out. Escape closes the menu and returns
-// focus to the button; the Settings dialog does the same when it closes.
+// user, links to the Settings page (#1686) and signs out. Escape closes the
+// menu and returns focus to the button.
 export function UserMenu({ user, onSignOut }: { user: string; onSignOut: () => void }) {
   const [open, setOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const close = (refocus: boolean) => { setOpen(false); if (refocus) button.current?.focus(); };
@@ -28,6 +26,8 @@ export function UserMenu({ user, onSignOut }: { user: string; onSignOut: () => v
     else if (event.key === "Tab") setOpen(false);
     else if (event.key === "ArrowDown") { event.preventDefault(); items[(index + 1) % items.length]?.focus(); }
     else if (event.key === "ArrowUp") { event.preventDefault(); items[(index - 1 + items.length) % items.length]?.focus(); }
+    // A menu item activates on Space; a link does so natively only on Enter.
+    else if (event.key === " " && event.target instanceof HTMLAnchorElement) { event.preventDefault(); event.target.click(); }
   }
   const initial = user.slice(0, 1).toUpperCase() || "?";
   return <div className="user-menu">
@@ -37,46 +37,8 @@ export function UserMenu({ user, onSignOut }: { user: string; onSignOut: () => v
     </button>
     {open && <div className="user-menu-popup" id="user-menu-list" role="menu" aria-label="User" ref={menu} onKeyDown={menuKey}>
       <p className="user-menu-identity">Signed in as <strong>{user}</strong></p>
-      <button type="button" role="menuitem" onClick={() => { setOpen(false); setSettingsOpen(true); }}>Settings</button>
+      <a role="menuitem" href={settingsLink()} onClick={() => setOpen(false)}>Settings</a>
       <button type="button" role="menuitem" onClick={() => { setOpen(false); onSignOut(); }}>Sign out</button>
     </div>}
-    {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} returnFocus={() => button.current} />}
   </div>;
-}
-
-// SettingsDialog edits the per-browser preferences. Changes apply at once and
-// persist in this browser only.
-function SettingsDialog({ onClose, returnFocus }: { onClose: () => void; returnFocus: () => HTMLElement | null }) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  useModalDialog(dialog, returnFocus);
-  const [settings, set] = useSettings();
-  return <dialog className="cell-action-dialog settings-dialog" ref={dialog} aria-labelledby="settings-title"
-    onCancel={event => { event.preventDefault(); onClose(); }}
-    onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
-    <form method="dialog" onSubmit={event => { event.preventDefault(); onClose(); }}>
-      <h2 id="settings-title">Settings</h2>
-      <p>Stored in this browser only.</p>
-      <fieldset className="settings-appearance">
-        <legend>{settingDefinitions.theme.label}</legend>
-        {themes.map(theme => <label key={theme}>
-          <input type="radio" name="appearance" value={theme} checked={settings.theme === theme} onChange={() => set("theme", theme)} />
-          {themeLabels[theme]}
-        </label>)}
-      </fieldset>
-      {switchSettings.map(name => {
-        const label = settingDefinitions[name].label;
-        const on = settings[name];
-        return <div className="settings-switch" key={name}>
-          <span id={`setting-${name}`}>{label}</span>
-          <button type="button" role="switch" aria-checked={on} aria-labelledby={`setting-${name}`} onClick={() => set(name, !on)}>
-            <span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span>
-            <span className="switch-text" aria-hidden="true">{on ? "On" : "Off"}</span>
-          </button>
-        </div>;
-      })}
-      <div className="cell-action-dialog-buttons">
-        <button type="submit">Done</button>
-      </div>
-    </form>
-  </dialog>;
 }

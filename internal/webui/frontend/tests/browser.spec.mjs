@@ -39,20 +39,51 @@ const toasts = page => page.getByRole("region", { name: "Notifications" }).locat
 const content = page => page.locator(".workspace-content");
 // Cell and container pages keep Network and Cgroup collapsed (#1568); a test opens one by its region name.
 const expand = (page, name) => page.getByRole("region", { name }).locator("summary").click();
-// Appearance lives in Settings, under the user menu (#1652).
+// Appearance and the Profile settings live on the Settings page, linked from the user menu (#1686).
 const userButton = page => page.locator(".toolbar").getByRole("button", { name: /^User menu/ });
-async function openSettings(page) {
+const settingsPage = page => content(page).locator(".settings-page");
+const settingsNav = page => page.getByRole("navigation", { name: "Settings navigation" });
+async function openSettings(page, section = "General") {
   await userButton(page).click();
   await page.getByRole("menuitem", { name: "Settings" }).click();
-  const dialog = page.getByRole("dialog", { name: "Settings" });
-  await expect(dialog).toBeVisible();
-  return dialog;
+  await expect(page).toHaveURL(/#\/settings$/);
+  if (section !== "General") await settingsNav(page).getByRole("link", { name: section }).click();
+  await expect(settingsPage(page).getByRole("heading", { name: section, level: 2 })).toBeVisible();
+  return settingsPage(page);
 }
+// Sets the appearance on the Settings page and returns to the page the test was on. From a URL with a
+// hash both moves change only the hash, so the app and its terminals stay mounted.
 async function setAppearance(page, label) {
-  const dialog = await openSettings(page);
-  await dialog.getByRole("radio", { name: label }).check();
-  await dialog.getByRole("button", { name: "Done" }).click();
-  await expect(dialog).toHaveCount(0);
+  const from = page.url();
+  const settings = await openSettings(page);
+  await settings.getByRole("radio", { name: label }).check();
+  await page.goto(from);
+}
+// seed stores preferences before the app first loads. It writes once per tab, so a later reload keeps
+// whatever the test changed.
+async function seed(page, values) {
+  await page.addInitScript(entries => {
+    try {
+      if (sessionStorage.getItem("kukeon-test-seeded")) return;
+      for (const [key, value] of Object.entries(entries)) localStorage.setItem(key, value);
+      sessionStorage.setItem("kukeon-test-seeded", "1");
+    } catch { /* about:blank has no storage. */ }
+  }, values);
+}
+// The lists of #1635: Default cell list style, no default grouping, and the sidebar's Search and Group by
+// shown. Tests of the flat and label-grouped lists start from here; every other test runs on the
+// defaults of #1686 (agent style, sidebar controls hidden).
+const defaultStyle = (page, extra = {}) => seed(page, { "kukeon-cell-list-style": "default", "kukeon-default-group-by": "", "kukeon-sidebar-show-search": "true", "kukeon-sidebar-show-group-by": "true", ...extra });
+// An inventory for the agent style: in dev two instances of the Config claude (one by its provenance
+// binding, one by its label alone, Failed), one instance of pm and one cell created from no Config; in
+// prod one instance of another Config named claude.
+const agentCell = (scope, name, { config, binding, state = "Ready" } = {}) => ({ ...doc([...scope, name]), metadata: { name, labels: config ? { "kukeon.io/config": config, team: "platform" } : { team: "platform" } }, spec: binding ? { provenance: { bindingKind: "config", bindingRef: binding } } : {}, status: { state } });
+function agentInventory(path) {
+  if (!path.endsWith("/cells")) return;
+  const scope = [path.split("/")[3], "shared", "services"];
+  return { json: scope[0] === "dev"
+    ? [agentCell(scope, "dev-0", { config: "claude", binding: { realm: "dev", name: "claude" } }), agentCell(scope, "dev-1", { config: "claude", state: "Failed" }), agentCell(scope, "pm-0", { config: "pm" }), agentCell(scope, "scratch")]
+    : [agentCell(scope, "dev-9", { config: "claude" })] };
 }
 const inventoryIndicator = (page, state) => page.locator(".toolbar").getByRole("button", { name: `Inventory ${state}: show details` });
 
@@ -209,7 +240,10 @@ test("expanded terminal keeps its session, resizes, and follows the appearance s
   await expect.poll(async () => (await screen.boundingBox())?.height).toBeGreaterThan(initial.height);
   await expect.poll(() => messages.filter(message => typeof message === "string" && JSON.parse(message).type === "resize").length).toBeGreaterThan(initialResizeCount);
   expect(connections).toBe(1);
+  // Appearance is set on the Settings page (#1686); leaving the cell screen ends the expansion, not the session.
   await setAppearance(page, "Dark");
+  await terminalTools(page).getByRole("button", { name: "Expand terminal" }).click();
+  await expect(panel).toHaveClass(/is-expanded/);
   await expect.poll(() => screen.evaluate(el => getComputedStyle(el).backgroundColor)).toBe("rgb(13, 20, 33)");
   await expect.poll(() => ansiColor(7)).toBe("rgb(229, 229, 229)");
   await expect.poll(() => ansiColor(11)).toBe("rgb(255, 255, 0)");
@@ -855,6 +889,7 @@ test("sidebar grouping, missing labels, search, collapse, and preference persist
     const prod = path.includes("/prod/");
     return { json: fixture(path).map(cell => ({ ...cell, metadata: { ...cell.metadata, labels: prod ? {} : { team: "platform" } }, status: { state: prod ? "Degraded" : "Failed" } })) };
   });
+  await defaultStyle(page);
   await page.goto(server.url);
   const sidebar = page.getByRole("region", { name: "All cells" });
   const cells = page.getByRole("navigation", { name: "Cell navigation" });
@@ -889,6 +924,7 @@ test("a literal Ungrouped label stays separate from missing labels", async ({ pa
     const prod = path.includes("/prod/");
     return { json: fixture(path).map(cell => ({ ...cell, metadata: { ...cell.metadata, labels: prod ? {} : { team: "Ungrouped" } } })) };
   });
+  await defaultStyle(page);
   await page.goto(server.url);
   await page.getByRole("region", { name: "All cells" }).getByLabel("Group by").selectOption("team");
   const cells = page.getByRole("navigation", { name: "Cell navigation" });
@@ -901,6 +937,7 @@ test("large inventories limit initial sidebar DOM and reveal more cells on deman
     const result = fixture(path, 61);
     return { json: path.endsWith("/cells") ? result.map(cell => ({ ...cell, metadata: { ...cell.metadata, labels: { team: cell.metadata.name } } })) : result };
   });
+  await defaultStyle(page);
   await page.goto(server.url);
   const cells = page.getByRole("navigation", { name: "Cell navigation" });
   await expect(cells.getByRole("link")).toHaveCount(100);
@@ -1112,19 +1149,21 @@ test("Settings switches the appearance between system, light, and dark preferenc
   await expect.poll(scheme).toBe("dark");
   // The appearance control moved out of the top bar.
   await expect(page.locator(".toolbar").getByRole("button", { name: /Appearance/ })).toHaveCount(0);
-  let dialog = await openSettings(page);
-  await expect(dialog.getByRole("radio", { name: "System" })).toBeChecked();
-  await dialog.getByRole("radio", { name: "Light" }).check();
+  // Settings is a page, not a dialog (#1686).
+  const settings = await openSettings(page);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.locator(".page-heading h1")).toHaveText("Settings");
+  await expect(settings).toContainText("Stored in this browser only.");
+  await expect(settings.getByRole("radio", { name: "System" })).toBeChecked();
+  await settings.getByRole("radio", { name: "Light" }).check();
   await expect.poll(scheme).toBe("light");
-  await dialog.getByRole("button", { name: "Done" }).click();
   await page.reload();
   await expect.poll(scheme).toBe("light");
-  dialog = await openSettings(page);
-  await expect(dialog.getByRole("radio", { name: "Light" })).toBeChecked();
-  await dialog.getByRole("radio", { name: "Dark" }).check();
+  await expect(settings.getByRole("radio", { name: "Light" })).toBeChecked();
+  await settings.getByRole("radio", { name: "Dark" }).check();
   await expect.poll(scheme).toBe("dark");
   await page.emulateMedia({ colorScheme: "light" });
-  await dialog.getByRole("radio", { name: "System" }).check();
+  await settings.getByRole("radio", { name: "System" }).check();
   await expect.poll(scheme).toBe("light");
   expect(await page.evaluate(() => localStorage.getItem("kukeon-theme"))).toBe("system");
 });
@@ -1225,12 +1264,20 @@ test("the user menu names the user, opens Settings and signs out from the keyboa
   await expect(button).toBeFocused();
   await page.keyboard.press("Space");
   await expect(menu).toBeVisible();
+  // Settings is a link to the Settings page; Enter and Space both follow it and no dialog opens.
+  const settingsItem = menu.getByRole("menuitem", { name: "Settings" });
+  await expect(settingsItem).toHaveAttribute("href", "#/settings");
   await page.keyboard.press("Enter");
-  const dialog = page.getByRole("dialog", { name: "Settings" });
-  await expect(dialog).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(dialog).toHaveCount(0);
-  await expect(button).toBeFocused();
+  await expect(page).toHaveURL(/#\/settings$/);
+  await expect(menu).toHaveCount(0);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.locator(".page-heading h1")).toBeFocused();
+  await page.goBack();
+  await button.focus();
+  await page.keyboard.press("Enter");
+  await expect(settingsItem).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(page).toHaveURL(/#\/settings$/);
   await button.click();
   await menu.getByRole("menuitem", { name: "Sign out" }).click();
   await expect(page.getByRole("form", { name: "Sign in" })).toBeVisible();
@@ -1240,23 +1287,26 @@ test("the user menu names the user, opens Settings and signs out from the keyboa
 test("Settings sidebar switches hide the cell scope and terminal status and persist", async ({ page }) => {
   await mock(page, path => path.endsWith("/containers") ? { json: [{ id: "shell", attachable: true }] } : undefined);
   await page.routeWebSocket("**/attach", socket => { socket.send(JSON.stringify({ type: "ready" })); socket.send(Buffer.from("output")); });
+  await seed(page, { "kukeon-sidebar-show-search": "true" });
   await page.goto(server.url);
   const cells = page.getByRole("navigation", { name: "Cell navigation" });
   const link = cells.getByRole("link", { name: "Open dev / shared / services / api" });
   await link.click();
   await expect(link).toContainText("Terminal attached");
   await expect(cells.locator(".cell-link-scope").first()).toBeVisible();
-  const dialog = await openSettings(page);
-  const scopeSwitch = dialog.getByRole("switch", { name: "Show cell scope in sidebar" });
-  const statusSwitch = dialog.getByRole("switch", { name: "Show terminal status in sidebar" });
+  const cell = page.url();
+  const settings = await openSettings(page, "Profile");
+  const scopeSwitch = settings.getByRole("switch", { name: "Show cell scope in sidebar" });
+  const statusSwitch = settings.getByRole("switch", { name: "Show terminal status in sidebar" });
   await expect(scopeSwitch).toHaveAttribute("aria-checked", "true");
   await expect(statusSwitch).toHaveAttribute("aria-checked", "true");
   await scopeSwitch.click();
   await statusSwitch.click();
   await expect(scopeSwitch).toHaveAttribute("aria-checked", "false");
+  await page.goto(cell);
+  await expect(link).toBeVisible();
   await expect(cells.locator(".cell-link-scope, .cell-group-scope")).toHaveCount(0);
   await expect(cells.locator(".cell-terminal-state")).toHaveCount(0);
-  await dialog.getByRole("button", { name: "Done" }).click();
   // The link keeps its full scope for the tooltip, the accessible name and search; badges stay.
   await expect(link).toHaveAttribute("title", "dev / shared / services / api");
   await expect(link.locator(".state-badge")).toHaveCount(1);
@@ -1266,7 +1316,7 @@ test("Settings sidebar switches hide the cell scope and terminal status and pers
   await page.reload();
   await expect(cells.getByRole("link").first()).toBeVisible();
   await expect(cells.locator(".cell-link-scope, .cell-group-scope")).toHaveCount(0);
-  const reopened = await openSettings(page);
+  const reopened = await openSettings(page, "Profile");
   await expect(reopened.getByRole("switch", { name: "Show cell scope in sidebar" })).toHaveAttribute("aria-checked", "false");
   expect(await page.evaluate(() => [localStorage.getItem("kukeon-sidebar-show-scope"), localStorage.getItem("kukeon-sidebar-show-terminal-status")])).toEqual(["false", "false"]);
 });
@@ -3318,6 +3368,7 @@ test("config drift shows in Needs attention, the Cells table and the sidebar, an
 
 test("Group by leaves out controller-managed label keys unless one is the stored selection", async ({ page }) => {
   await mock(page, path => /\/cells$/.test(path) ? { json: fixture(path).map(cell => ({ ...cell, metadata: { ...cell.metadata, labels: { team: "platform", "kukeon.io/config": "app", "cell.kukeon.io": cell.metadata.name, "realm.kukeon.io/name": "x" } } })) } : undefined);
+  await defaultStyle(page);
   await page.goto(server.url);
   const groupBy = page.getByRole("region", { name: "All cells" }).getByLabel("Group by");
   await expect(page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link")).toHaveCount(2);
@@ -3327,6 +3378,15 @@ test("Group by leaves out controller-managed label keys unless one is the stored
   await expect(groupBy).toHaveValue("cell.kukeon.io");
   await expect(groupBy.locator("option")).toHaveText(["None", "cell.kukeon.io", "kukeon.io/config", "team"]);
   await expect(page.getByRole("navigation", { name: "Cell navigation" }).getByRole("region", { name: "api group" })).toBeVisible();
+  // Default Group by in Profile lists None and the same keys, and always kukeon.io/config and its value.
+  await page.goto(`${server.url}#/settings/profile`);
+  const defaultGroupBy = settingsPage(page).getByLabel("Default Group by");
+  await expect(defaultGroupBy).toHaveValue("");
+  await expect(defaultGroupBy.locator("option")).toHaveText(["None", "kukeon.io/config", "team"]);
+  await page.evaluate(() => localStorage.setItem("kukeon-default-group-by", "cell.kukeon.io"));
+  await page.reload();
+  await expect(defaultGroupBy).toHaveValue("cell.kukeon.io");
+  await expect(defaultGroupBy.locator("option")).toHaveText(["None", "cell.kukeon.io", "kukeon.io/config", "team"]);
 });
 
 // Administration → Daemon (issue #1386, steps 6 and 8).
@@ -3537,6 +3597,7 @@ test("an empty daemon log is distinct from a failed read", async ({ page }) => {
 
 test("sidebar collapses to a persisted icon rail with accessible cell dots", async ({ page }) => {
   await mock(page);
+  await defaultStyle(page);
   await page.goto(server.url);
   const sidebar = page.getByRole("complementary", { name: "Cell sidebar" });
   await expect(sidebar.getByRole("navigation", { name: "Cell navigation" })).toBeVisible();
@@ -5466,13 +5527,27 @@ test("each route family shows its view's sidebar and side of the switch", async 
   await mockCatalog(page);
   const workbench = ["#/", "#/workspace/dev/shared/services/api", "#/new-cell", "#/resource/dev/shared/services/api", "#/resource/dev/shared/services/api?document=1", "#/resource/dev/shared/services/api/web"];
   const manage = ["#/resources", "#/realms", "#/cells", "#/resource/dev", "#/resource/dev/shared/services", "#/configs", "#/new-config", "#/secrets", "#/connectors", "#/teams", "#/new-team", "#/sources", "#/images", "#/daemon", "#/daemon/logs", "#/health", "#/daemon/health"];
-  for (const hash of [...workbench, ...manage]) {
+  // The settings routes; an unknown section shows General.
+  const settings = ["#/settings", "#/settings/profile", "#/settings/nothing"];
+  for (const hash of [...workbench, ...manage, ...settings]) {
     const isWorkbench = workbench.includes(hash);
+    const isSettings = settings.includes(hash);
     await page.goto(`${server.url}${hash}`);
-    await expect(page.locator("#cell-sidebar"), hash).toHaveAttribute("aria-label", isWorkbench ? "Cell sidebar" : "Manage sidebar");
-    await expect(switchSide(page), hash).toHaveText(isWorkbench ? "Workbench" : "Manage");
-    await expect(page.getByRole("navigation", { name: "Manage navigation" }), hash).toHaveCount(isWorkbench ? 0 : 1);
+    await expect(page.locator("#cell-sidebar"), hash).toHaveAttribute("aria-label", isWorkbench ? "Cell sidebar" : isSettings ? "Settings sidebar" : "Manage sidebar");
+    // On a settings route neither side of the switch is current.
+    if (isSettings) await expect(switchSide(page), hash).toHaveCount(0);
+    else await expect(switchSide(page), hash).toHaveText(isWorkbench ? "Workbench" : "Manage");
+    await expect(page.getByRole("navigation", { name: "Manage navigation" }), hash).toHaveCount(isWorkbench || isSettings ? 0 : 1);
     await expect(page.getByRole("navigation", { name: "Cell navigation" }), hash).toHaveCount(isWorkbench ? 1 : 0);
+    await expect(settingsNav(page), hash).toHaveCount(isSettings ? 1 : 0);
+    if (isSettings) {
+      const section = hash.endsWith("/profile") ? "Profile" : "General";
+      await expect(page.locator(".page-heading h1"), hash).toHaveText("Settings");
+      await expect(settingsPage(page).getByRole("heading", { level: 2 }), hash).toHaveText(section);
+      await expect(settingsNav(page).getByRole("link"), hash).toHaveText(["General", "Profile"]);
+      await expect(settingsNav(page).locator('[aria-current="page"]'), hash).toHaveText(section);
+      await expect(page.locator(".breadcrumbs"), hash).toHaveText(section === "Profile" ? "SettingsProfile" : "Settings");
+    }
     // No page renders a horizontal navigation row.
     await expect(page.locator(".resources-nav, .nav-more"), hash).toHaveCount(0);
     // New Cell, Majordomo, refresh and the user menu stay in the top bar.
@@ -5481,7 +5556,12 @@ test("each route family shows its view's sidebar and side of the switch", async 
   // The switch links home and to the Overview, and the breadcrumb root follows the view.
   await expect(page.locator(".view-switch").getByRole("link", { name: "Workbench" })).toHaveAttribute("href", "#/");
   await expect(page.locator(".view-switch").getByRole("link", { name: "Manage" })).toHaveAttribute("href", "#/resources");
+  // Both sides of the switch still navigate from a settings route.
+  await page.locator(".view-switch").getByRole("link", { name: "Manage" }).click();
   await expect(page.locator(".breadcrumbs a").first()).toHaveText("Overview");
+  await page.goto(`${server.url}#/settings`);
+  await page.locator(".view-switch").getByRole("link", { name: "Workbench" }).click();
+  await expect(page.locator(".page-heading h1")).toHaveText("Workbench");
   await page.goto(`${server.url}#/resource/dev/shared/services/api`);
   await expect(page.locator(".breadcrumbs a").first()).toHaveText("Workbench");
 });
@@ -5503,6 +5583,11 @@ test("switching to Manage and back keeps an attached terminal", async ({ page })
     await page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link", { name: "Open dev / shared / services / api" }).click();
     await expect(state).toHaveText("Attached");
   }
+  // Opening the settings routes closes no session either; the open cell's terminal is still attached.
+  const cell = page.url();
+  await openSettings(page, "Profile");
+  await page.goto(cell);
+  await expect(state).toHaveText("Attached");
   expect(attaches).toBe(1);
   expect(closed).toEqual([]);
 });
@@ -5523,6 +5608,24 @@ test("Back and Forward across a view switch restore the page and its sidebar", a
   await expect(page.locator(".page-heading h1")).toHaveText("Workbench");
   await expect(page.getByRole("complementary", { name: "Cell sidebar" })).toBeVisible();
   await expect(switchSide(page)).toHaveText("Workbench");
+  // A settings page is one more history entry: Back and Forward restore it, its sidebar and the focus.
+  await openSettings(page, "Profile");
+  await expect(page.locator(".page-heading h1")).toBeFocused();
+  await page.goBack();
+  await expect(page).toHaveURL(/#\/settings$/);
+  await expect(settingsNav(page).locator('[aria-current="page"]')).toHaveText("General");
+  await expect(page.locator(".page-heading h1")).toBeFocused();
+  await page.goBack();
+  await expect(page.locator(".page-heading h1")).toHaveText("Workbench");
+  await expect(page.getByRole("complementary", { name: "Cell sidebar" })).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole("complementary", { name: "Manage sidebar" })).toBeVisible();
+  await page.goForward();
+  await page.goForward();
+  await page.goForward();
+  await expect(page).toHaveURL(/#\/settings\/profile$/);
+  await expect(page.getByRole("complementary", { name: "Settings sidebar" })).toBeVisible();
+  await expect(settingsPage(page).getByRole("heading", { name: "Profile", level: 2 })).toBeVisible();
 });
 
 test("grid tiles show the terminal's last rows, attention first, and a state-only tile without a screen", async ({ page }) => {
@@ -5652,27 +5755,392 @@ test("the open cell stays in the sidebar whatever its state", async ({ page }) =
   await expect(page.getByRole("region", { name: "All cells" }).getByRole("link", { name: "Stopped · 1" })).toBeVisible();
 });
 
-test("the sidebar search and group-by filter and group the grid", async ({ page }) => {
+test("the grid and the sidebar search and group independently", async ({ page }) => {
+  await mock(page, path => {
+    if (!path.endsWith("/cells")) return;
+    const prod = path.includes("/prod/");
+    return { json: fixture(path).map(cell => ({ ...cell, metadata: { ...cell.metadata, labels: { team: prod ? "ops" : "platform", tier: "one" } } })) };
+  });
+  await defaultStyle(page);
+  await page.goto(server.url);
+  const sidebar = page.getByRole("region", { name: "All cells" });
+  const cells = page.getByRole("navigation", { name: "Cell navigation" });
+  const gridSearch = grid(page).getByRole("searchbox", { name: "Search grid" });
+  const gridGroupBy = grid(page).getByLabel("Group grid by");
+  await expect(grid(page).locator(".cell-tile")).toHaveCount(2);
+  // The grid's controls sit above its tiles.
+  expect((await gridSearch.boundingBox()).y).toBeLessThan((await grid(page).locator(".cell-tile").first().boundingBox()).y);
+  // Search: each field filters its own list only.
+  await sidebar.getByRole("searchbox").fill("prod /");
+  await expect(cells.getByRole("link")).toHaveCount(1);
+  await expect(grid(page).locator(".cell-tile")).toHaveCount(2);
+  await sidebar.getByRole("searchbox").fill("");
+  await gridSearch.fill("prod /");
+  await expect(grid(page).locator(".cell-tile")).toHaveCount(1);
+  await expect(tile(page, "prod / shared / services / api")).toBeVisible();
+  await expect(cells.getByRole("link")).toHaveCount(2);
+  await gridSearch.fill("");
+  // Group by: each select groups and stores its own list only.
+  await sidebar.getByLabel("Group by").selectOption("team");
+  await expect(cells.getByRole("region", { name: "ops group" })).toBeVisible();
+  await expect(grid(page).getByRole("region", { name: /group$/ })).toHaveCount(0);
+  await expect(gridGroupBy).toHaveValue("");
+  expect(await page.evaluate(() => [localStorage.getItem("kukeon-cell-grouping"), localStorage.getItem("kukeon-grid-grouping")])).toEqual(["team", null]);
+  await gridGroupBy.selectOption("tier");
+  await expect(grid(page).getByRole("region", { name: "one group" }).locator(".cell-tile")).toHaveCount(2);
+  await expect(cells.getByRole("region", { name: "ops group" })).toBeVisible();
+  await expect(cells.getByRole("region", { name: "one group" })).toHaveCount(0);
+  await page.reload();
+  await expect(sidebar.getByLabel("Group by")).toHaveValue("team");
+  await expect(gridGroupBy).toHaveValue("tier");
+  expect(await page.evaluate(() => [localStorage.getItem("kukeon-cell-grouping"), localStorage.getItem("kukeon-grid-grouping")])).toEqual(["team", "tier"]);
+  await expect(grid(page).getByRole("region", { name: "one group" })).toBeVisible();
+  await expect(cells.getByRole("region", { name: "platform group" })).toBeVisible();
+});
+
+test("the Show search and Show Group by switches hide each list's controls, clear a typed query and keep the grouping", async ({ page }) => {
   await mock(page, path => {
     if (!path.endsWith("/cells")) return;
     const prod = path.includes("/prod/");
     return { json: fixture(path).map(cell => ({ ...cell, metadata: { ...cell.metadata, labels: { team: prod ? "ops" : "platform" } } })) };
   });
+  // Default style on the Profile defaults: the sidebar's controls hidden, the grid's shown.
+  await seed(page, { "kukeon-cell-list-style": "default", "kukeon-default-group-by": "team" });
   await page.goto(server.url);
   const sidebar = page.getByRole("region", { name: "All cells" });
-  await expect(grid(page).locator(".cell-tile")).toHaveCount(2);
-  await sidebar.getByRole("searchbox").fill("prod /");
+  const cells = page.getByRole("navigation", { name: "Cell navigation" });
+  const gridSearch = grid(page).getByRole("searchbox", { name: "Search grid" });
+  await expect(cells.getByRole("link")).toHaveCount(2);
+  await expect(sidebar.getByRole("searchbox")).toHaveCount(0);
+  await expect(sidebar.getByRole("combobox")).toHaveCount(0);
+  await expect(sidebar.locator(".cell-navigation-controls")).toHaveCount(0);
+  // With no Group by select the sidebar is still grouped by its effective grouping.
+  await expect(cells.getByRole("region", { name: "ops group" })).toBeVisible();
+  await expect(gridSearch).toBeVisible();
+  await expect(grid(page).getByLabel("Group grid by")).toHaveValue("team");
+  await gridSearch.fill("prod /");
   await expect(grid(page).locator(".cell-tile")).toHaveCount(1);
-  await expect(tile(page, "prod / shared / services / api")).toBeVisible();
-  await sidebar.getByRole("searchbox").fill("");
-  await sidebar.getByLabel("Group by").selectOption("team");
+
+  const profile = `${server.url}#/settings/profile`;
+  const toggle = async (name, on) => {
+    const control = settingsPage(page).getByRole("switch", { name });
+    await control.click();
+    await expect(control).toHaveAttribute("aria-checked", String(on));
+  };
+  await page.goto(profile);
+  await toggle("Show search in grid", false);
+  await toggle("Show search in sidebar", true);
+  await page.goto(`${server.url}#/`);
+  // Hiding the grid's search cleared its query; no search applies to the grid.
+  await expect(gridSearch).toHaveCount(0);
+  await expect(grid(page).locator(".cell-tile")).toHaveCount(2);
+  await expect(grid(page).getByLabel("Group grid by")).toBeVisible();
+  await sidebar.getByRole("searchbox", { name: "Search cells" }).fill("prod /");
+  await expect(cells.getByRole("link")).toHaveCount(1);
+  await page.goto(profile);
+  await toggle("Show search in sidebar", false);
+  await toggle("Show search in grid", true);
+  await toggle("Show Group by in grid", false);
+  await page.goto(`${server.url}#/`);
+  await expect(sidebar.getByRole("searchbox")).toHaveCount(0);
+  await expect(cells.getByRole("link")).toHaveCount(2);
+  await expect(gridSearch).toHaveValue("");
+  await expect(grid(page).getByLabel("Group grid by")).toHaveCount(0);
   await expect(grid(page).getByRole("region", { name: "ops group" }).locator(".cell-tile")).toHaveCount(1);
-  await expect(grid(page).getByRole("region", { name: "platform group" }).locator(".cell-tile")).toHaveCount(1);
-  await expect(page.getByRole("navigation", { name: "Cell navigation" }).getByRole("region", { name: "ops group" })).toBeVisible();
+  // With both of its controls hidden the grid renders no controls row.
+  await page.goto(profile);
+  await toggle("Show search in grid", false);
+  await page.goto(`${server.url}#/`);
+  await expect(grid(page).locator(".cell-tile")).toHaveCount(2);
+  await expect(grid(page).locator(".grid-controls")).toHaveCount(0);
+  await expect(grid(page).getByRole("region", { name: "platform group" })).toBeVisible();
+});
+
+test("Default Group by groups both lists until one picks its own, and changing it clears both choices", async ({ page }) => {
+  await mock(page, path => /\/cells$/.test(path) ? { json: fixture(path).map(cell => ({ ...cell, metadata: { ...cell.metadata, labels: { team: "platform", "kukeon.io/config": "app" } } })) } : undefined);
+  // No stored grouping and no stored default: both lists are grouped by kukeon.io/config.
+  await seed(page, { "kukeon-cell-list-style": "default", "kukeon-sidebar-show-group-by": "true" });
+  await page.goto(server.url);
+  const sidebar = page.getByRole("region", { name: "All cells" });
+  const cells = page.getByRole("navigation", { name: "Cell navigation" });
+  await expect(sidebar.getByLabel("Group by")).toHaveValue("kukeon.io/config");
+  await expect(grid(page).getByLabel("Group grid by")).toHaveValue("kukeon.io/config");
+  await expect(cells.getByRole("region", { name: "app group" }).getByRole("link")).toHaveCount(2);
+  await expect(grid(page).getByRole("region", { name: "app group" }).locator(".cell-tile")).toHaveCount(2);
+  expect(await page.evaluate(() => [localStorage.getItem("kukeon-cell-grouping"), localStorage.getItem("kukeon-grid-grouping")])).toEqual([null, null]);
+  // A grouping stored before the upgrade keeps applying to the sidebar, an explicit None included.
+  await page.evaluate(() => localStorage.setItem("kukeon-cell-grouping", ""));
   await page.reload();
+  await expect(sidebar.getByLabel("Group by")).toHaveValue("");
+  await expect(cells.getByRole("link")).toHaveCount(2);
+  await expect(cells.getByRole("region", { name: /group$/ })).toHaveCount(0);
+  await expect(grid(page).getByRole("region", { name: "app group" })).toBeVisible();
+  await grid(page).getByLabel("Group grid by").selectOption("team");
+  await expect(grid(page).getByRole("region", { name: "platform group" })).toBeVisible();
+  // Changing the default removes both per-list keys, and both lists show the new default at once.
+  await page.goto(`${server.url}#/settings/profile`);
+  const defaultGroupBy = settingsPage(page).getByLabel("Default Group by");
+  await expect(defaultGroupBy).toHaveValue("kukeon.io/config");
+  await defaultGroupBy.selectOption("team");
+  expect(await page.evaluate(() => [localStorage.getItem("kukeon-default-group-by"), localStorage.getItem("kukeon-cell-grouping"), localStorage.getItem("kukeon-grid-grouping")])).toEqual(["team", null, null]);
+  await page.goto(`${server.url}#/`);
   await expect(sidebar.getByLabel("Group by")).toHaveValue("team");
-  expect(await page.evaluate(() => localStorage.getItem("kukeon-cell-grouping"))).toBe("team");
-  await expect(grid(page).getByRole("region", { name: "ops group" })).toBeVisible();
+  await expect(grid(page).getByLabel("Group grid by")).toHaveValue("team");
+  await expect(cells.getByRole("region", { name: "platform group" })).toBeVisible();
+  await expect(grid(page).getByRole("region", { name: "platform group" })).toBeVisible();
+  await page.reload();
+  await expect(cells.getByRole("region", { name: "platform group" })).toBeVisible();
+});
+
+test("Profile shows its eight settings in three groups with their defaults; each applies at once, works from the keyboard and survives a reload", async ({ page }) => {
+  await mock(page);
+  await page.goto(`${server.url}#/settings/profile`);
+  const settings = settingsPage(page);
+  await expect(settings).toContainText("Stored in this browser only.");
+  await expect(settings.getByRole("heading", { level: 3 })).toHaveText(["Cell list", "Sidebar", "Workbench grid"]);
+  const switches = { "Show cell scope in sidebar": true, "Show terminal status in sidebar": true, "Show search in sidebar": false, "Show Group by in sidebar": false, "Show search in grid": true, "Show Group by in grid": true };
+  const keys = { "Show cell scope in sidebar": "kukeon-sidebar-show-scope", "Show terminal status in sidebar": "kukeon-sidebar-show-terminal-status", "Show search in sidebar": "kukeon-sidebar-show-search", "Show Group by in sidebar": "kukeon-sidebar-show-group-by", "Show search in grid": "kukeon-grid-show-search", "Show Group by in grid": "kukeon-grid-show-group-by" };
+  await expect(settings.getByRole("region", { name: "Cell list" }).getByRole("radio")).toHaveCount(2);
+  await expect(settings.getByRole("region", { name: "Sidebar" }).getByRole("switch")).toHaveCount(4);
+  await expect(settings.getByRole("region", { name: "Workbench grid" }).getByRole("switch")).toHaveCount(2);
+  await expect(settings.getByRole("radio", { name: "Agent" })).toBeChecked();
+  await expect(settings.getByLabel("Default Group by")).toHaveValue("kukeon.io/config");
+  for (const [name, on] of Object.entries(switches)) {
+    const control = settings.getByRole("switch", { name });
+    await expect(control, name).toHaveAttribute("aria-checked", String(on));
+    expect(await control.evaluate(element => element.tagName), name).toBe("BUTTON");
+  }
+  // Default Group by and the two Group by switches say they apply to the Default style.
+  for (const control of [settings.getByLabel("Default Group by"), settings.getByRole("switch", { name: "Show Group by in sidebar" }), settings.getByRole("switch", { name: "Show Group by in grid" })]) {
+    await expect(control).toHaveAccessibleDescription("Applies to the Default cell list style.");
+  }
+  await expect(settings.getByText("Applies to the Default cell list style.")).toHaveCount(3);
+  // An unreadable stored value reads as the default.
+  await page.evaluate(() => { localStorage.setItem("kukeon-cell-list-style", "tree"); localStorage.setItem("kukeon-grid-show-search", "maybe"); });
+  await page.reload();
+  await expect(settings.getByRole("radio", { name: "Agent" })).toBeChecked();
+  await expect(settings.getByRole("switch", { name: "Show search in grid" })).toHaveAttribute("aria-checked", "true");
+  // Keyboard only: arrow keys move the radio, Space and Enter flip a switch.
+  await settings.getByRole("radio", { name: "Agent" }).focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(settings.getByRole("radio", { name: "Default", exact: true })).toBeChecked();
+  await settings.getByLabel("Default Group by").selectOption("team");
+  for (const [index, name] of Object.keys(switches).entries()) {
+    await settings.getByRole("switch", { name }).focus();
+    await page.keyboard.press(index % 2 ? "Enter" : "Space");
+    await expect(settings.getByRole("switch", { name }), name).toHaveAttribute("aria-checked", String(!switches[name]));
+  }
+  await page.reload();
+  await expect(settings.getByRole("radio", { name: "Default", exact: true })).toBeChecked();
+  await expect(settings.getByLabel("Default Group by")).toHaveValue("team");
+  for (const [name, on] of Object.entries(switches)) await expect(settings.getByRole("switch", { name }), name).toHaveAttribute("aria-checked", String(!on));
+  expect(await page.evaluate(() => [localStorage.getItem("kukeon-cell-list-style"), localStorage.getItem("kukeon-default-group-by")])).toEqual(["default", "team"]);
+  expect(await page.evaluate(stored => stored.map(key => localStorage.getItem(key)), Object.values(keys))).toEqual(Object.keys(keys).map(name => String(!switches[name])));
+});
+
+test("at 390×844 the drawer shows the Settings navigation, and its collapsed rail has no cell dots", async ({ page }) => {
+  await mock(page);
+  await page.goto(`${server.url}#/settings`);
+  const sidebar = page.getByRole("complementary", { name: "Settings sidebar" });
+  await sidebar.getByRole("button", { name: "Collapse sidebar" }).click();
+  await expect(sidebar.getByRole("button", { name: "Expand sidebar" })).toBeVisible();
+  await expect(sidebar.getByRole("navigation", { name: "Cell shortcuts" })).toHaveCount(0);
+  await expect(sidebar.locator(".rail-cell, .rail-agent-glyph")).toHaveCount(0);
+  await expect(settingsNav(page)).toBeHidden();
+  await sidebar.getByRole("button", { name: "Expand sidebar" }).click();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const fits = async () => expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await fits();
+  await page.getByRole("button", { name: "Toggle sidebar" }).click();
+  await expect(sidebar).toBeVisible();
+  await expect(settingsNav(page).getByRole("link")).toHaveText(["General", "Profile"]);
+  await expect(sidebar.getByRole("navigation", { name: "Cell navigation" })).toHaveCount(0);
+  await expect(sidebar.getByRole("navigation", { name: "Manage navigation" })).toHaveCount(0);
+  await settingsNav(page).getByRole("link", { name: "Profile" }).click();
+  await expect(sidebar).toBeHidden();
+  await expect(settingsPage(page).getByRole("heading", { name: "Profile", level: 2 })).toBeVisible();
+  await fits();
+});
+
+test("agent style lists agents and their instances in the sidebar, with Other cells last", async ({ page }) => {
+  await mock(page, agentInventory);
+  await page.goto(server.url);
+  const sidebar = page.getByRole("region", { name: "All cells" });
+  const cells = page.getByRole("navigation", { name: "Cell navigation" });
+  // No stored style: agent style. The hierarchy is the grouping, so neither list has a Group by.
+  await expect(cells.getByRole("heading", { level: 3 })).toHaveText(["Agents", "Other cells"]);
+  await expect(sidebar.getByRole("combobox")).toHaveCount(0);
+  await expect(grid(page).getByRole("combobox")).toHaveCount(0);
+  await expect(grid(page).getByRole("searchbox", { name: "Search grid" })).toBeVisible();
+  // Agents by name, then realm; two Configs of one name in two realms are two agents showing their realm.
+  const agents = cells.getByRole("region", { name: /agent$/ });
+  await expect(agents).toHaveCount(3);
+  await expect(agents.locator(".agent-name")).toHaveText(["claudedev", "claudeprod", "pm"]);
+  // The provenance-bound cell and the label-only cell of one Config are one agent; its dot is the failed instance.
+  const claude = agents.nth(0);
+  const toggle = claude.getByRole("button", { name: /^claude/ });
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect(toggle).toContainText("2 instances");
+  await expect(toggle.locator(".rollup-dot")).toHaveClass(/tone-error/);
+  await expect(toggle.locator(".rollup-dot")).toHaveText("Failed");
+  await expect(claude.getByRole("link")).toHaveCount(2);
+  await expect(claude.getByRole("link", { name: "Open dev / shared / services / dev-0" })).toContainText("Ready");
+  await expect(claude.getByRole("link", { name: "Open dev / shared / services / dev-1" })).toContainText("Failed");
+  // A single-instance agent is one link that opens its cell, with no toggle.
+  for (const [index, scope] of [[1, "prod / shared / services / dev-9"], [2, "dev / shared / services / pm-0"]]) {
+    await expect(agents.nth(index).getByRole("button")).toHaveCount(0);
+    await expect(agents.nth(index).getByRole("link")).toHaveCount(1);
+    await expect(agents.nth(index).getByRole("link", { name: `open ${scope}` })).toContainText("1 instance");
+  }
+  // Cells created from no Config come after every agent.
+  const others = cells.getByRole("region", { name: "Other cells" });
+  await expect(others.getByRole("link")).toHaveCount(1);
+  await expect(others.getByRole("link", { name: "Open dev / shared / services / scratch" })).toBeVisible();
+  expect(await cells.locator("section").last().getAttribute("aria-label")).toBe("Other cells");
+
+  // Collapse and expand from the keyboard and the mouse; the collapsed state survives a reload.
+  await toggle.focus();
+  await page.keyboard.press("Enter");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(claude.getByRole("link")).toHaveCount(0);
+  await page.reload();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(claude.getByRole("link")).toHaveCount(0);
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+  // The open cell's instance row is current; collapsed, its agent row says it holds the open cell.
+  await claude.getByRole("link", { name: "Open dev / shared / services / dev-1" }).click();
+  await expect(page).toHaveURL(/#\/workspace\/dev\/shared\/services\/dev-1$/);
+  await expect(claude.getByRole("link", { name: "Open dev / shared / services / dev-1" })).toHaveAttribute("aria-current", "page");
+  await expect(toggle).not.toHaveClass(/has-current/);
+  await toggle.click();
+  await expect(toggle).toHaveClass(/has-current/);
+  await expect(toggle).toContainText("contains the open cell");
+  await toggle.click();
+  await agents.nth(2).getByRole("link").click();
+  await expect(page).toHaveURL(/#\/workspace\/dev\/shared\/services\/pm-0$/);
+  await expect(agents.nth(2).getByRole("link")).toHaveAttribute("aria-current", "page");
+});
+
+test("agent style keeps the sidebar's stopped link, search, empty states and paging, and drops Other cells when every cell has a Config", async ({ page }) => {
+  let labelled = false;
+  let many = false;
+  await mock(page, path => {
+    if (!path.endsWith("/cells")) return;
+    if (many) return { json: fixture(path, 61).map((cell, i) => ({ ...cell, metadata: { ...cell.metadata, labels: { "kukeon.io/config": i < 30 ? `config-${String(i).padStart(2, "0")}` : "" } } })) };
+    const result = agentInventory(path).json;
+    const dev = path.includes("/dev/");
+    return { json: (labelled ? result.filter(cell => cell.metadata.name !== "scratch") : result).map(cell => dev && cell.metadata.name === "dev-0" ? { ...cell, status: { state: "Stopped" } } : cell) };
+  });
+  await seed(page, { "kukeon-sidebar-show-search": "true" });
+  await page.goto(server.url);
+  const sidebar = page.getByRole("region", { name: "All cells" });
+  const cells = page.getByRole("navigation", { name: "Cell navigation" });
+  const agents = cells.getByRole("region", { name: /agent$/ });
+  // The stopped instance leaves the list: its agent is down to one instance and becomes a link.
+  await expect(sidebar.getByRole("link", { name: "Stopped · 1" })).toHaveAttribute("href", "#/cells?state=inactive");
+  await expect(agents).toHaveCount(3);
+  await expect(agents.nth(0).getByRole("button")).toHaveCount(0);
+  await expect(agents.nth(0).getByRole("link", { name: "open dev / shared / services / dev-1" })).toBeVisible();
+  // Search lists only the agents with a matching instance, and only those instances.
+  await sidebar.getByRole("searchbox", { name: "Search cells" }).fill("prod /");
+  await expect(agents).toHaveCount(1);
+  await expect(agents.getByRole("link", { name: "open prod / shared / services / dev-9" })).toBeVisible();
+  await expect(cells.getByRole("region", { name: "Other cells" })).toHaveCount(0);
+  await expect(sidebar.locator(".cell-result-count")).toHaveText("1 cell");
+  await sidebar.getByRole("searchbox", { name: "Search cells" }).fill("nothing");
+  await expect(sidebar.getByText("No matching cells.")).toBeVisible();
+  await expect(cells.getByRole("heading", { level: 3 })).toHaveCount(0);
+  await sidebar.getByRole("searchbox", { name: "Search cells" }).fill("");
+  // With no cell outside a Config the Other cells heading is absent.
+  labelled = true;
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(cells.getByRole("heading", { level: 3 })).toHaveText(["Agents"]);
+  await expect(cells.getByRole("region", { name: "Other cells" })).toHaveCount(0);
+  // Agents page like groups, 25 at a time, and Other cells 100 cells at a time.
+  many = true;
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(agents).toHaveCount(25);
+  await cells.getByRole("button", { name: "Show 25 more groups" }).click();
+  await expect(agents).toHaveCount(50);
+  await cells.getByRole("button", { name: "Show 11 more groups" }).click();
+  await expect(agents).toHaveCount(60);
+  await expect(cells.getByRole("region", { name: "Other cells" }).getByRole("link")).toHaveCount(62);
+});
+
+test("agent style shows each agent's glyph and instance dots on the collapsed rail", async ({ page }) => {
+  await mock(page, agentInventory);
+  await page.goto(server.url);
+  const sidebar = page.getByRole("complementary", { name: "Cell sidebar" });
+  await sidebar.getByRole("button", { name: "Collapse sidebar" }).click();
+  const rail = sidebar.getByRole("navigation", { name: "Cell shortcuts" });
+  const agents = rail.locator(".rail-agent");
+  await expect(agents).toHaveCount(3);
+  // A multi-instance agent: its glyph, toned by the roll-up state, then one dot per instance.
+  const glyph = agents.nth(0).getByRole("img", { name: "Agent claude (dev), 2 instances" });
+  await expect(glyph).toHaveClass(/tone-error/);
+  await expect(glyph).toHaveAttribute("title", "Agent claude (dev), 2 instances");
+  await expect(agents.nth(0).locator(".rail-cell")).toHaveCount(2);
+  await expect(agents.nth(0).getByRole("link", { name: "Open dev / shared / services / dev-0 (Ready)" })).toBeVisible();
+  await expect(agents.nth(0).getByRole("link", { name: "Open dev / shared / services / dev-1 (Failed)" })).toHaveClass(/tone-error/);
+  // A single-instance agent is only its glyph, which links to the cell.
+  for (const [index, name] of [[1, "Agent claude (prod), 1 instance: open prod / shared / services / dev-9 (Ready)"], [2, "Agent pm, 1 instance: open dev / shared / services / pm-0 (Ready)"]]) {
+    await expect(agents.nth(index).locator(".rail-cell")).toHaveCount(0);
+    await expect(agents.nth(index).getByRole("link", { name, exact: true })).toHaveClass(/rail-agent-glyph/);
+  }
+  // The dots of the other cells come last; a divider separates each agent and the other cells.
+  expect(await rail.locator(":scope > ul > li").evaluateAll(items => items.map(item => item.className))).toEqual(["rail-agent", "rail-agent", "rail-agent", "rail-others"]);
+  await expect(rail.locator(".rail-others").getByRole("link", { name: "Open dev / shared / services / scratch (Ready)" })).toBeVisible();
+  expect(await rail.locator(":scope > ul > li").evaluateAll(items => items.map(item => parseFloat(getComputedStyle(item).borderTopWidth) > 0))).toEqual([false, true, true, true]);
+  // Every glyph and dot has an accessible name.
+  for (const item of await rail.locator(".rail-cell, .rail-agent-glyph").all()) expect(await item.getAttribute("aria-label")).toBeTruthy();
+  expect((await sidebar.boundingBox()).width).toBeLessThan(80);
+  await agents.nth(2).getByRole("link").click();
+  await expect(page).toHaveURL(/#\/workspace\/dev\/shared\/services\/pm-0$/);
+  await expect(agents.nth(2).getByRole("link")).toHaveAttribute("aria-current", "page");
+});
+
+test("agent style sections the grid by agent, searches by instance, and Default style restores the lists without a reload", async ({ page }) => {
+  await mock(page, agentInventory);
+  let loads = 0;
+  page.on("load", () => { loads += 1; });
+  await page.goto(server.url);
+  const sections = grid(page).locator(".cell-grid-group");
+  await expect(sections).toHaveCount(4);
+  expect(await sections.evaluateAll(items => items.map(item => item.getAttribute("aria-label")))).toEqual(["claude agent", "claude agent", "pm agent", "Other cells"]);
+  await expect(sections.locator(".cell-grid-heading")).toHaveText([/^claudedev\s*2 instancesFailed$/, /^claudeprod\s*1 instanceReady$/, /^pm\s*1 instanceReady$/, /^Other cells\s*1$/]);
+  await expect(sections.nth(0).locator(".cell-grid-heading svg")).toHaveCount(1);
+  await expect(sections.nth(0).locator(".cell-grid-heading .rollup-dot")).toHaveClass(/tone-error/);
+  // Tiles are unchanged; inside an agent the instance that needs attention comes first.
+  expect(await sections.nth(0).locator(".cell-tile").evaluateAll(tiles => tiles.map(item => item.getAttribute("aria-label")))).toEqual(["Open dev / shared / services / dev-1", "Open dev / shared / services / dev-0"]);
+  await expect(tile(page, "dev / shared / services / scratch")).toContainText("scratch");
+  await grid(page).getByRole("searchbox", { name: "Search grid" }).fill("dev-0");
+  await expect(sections).toHaveCount(1);
+  await expect(sections.locator(".cell-tile")).toHaveCount(1);
+  await expect(sections.locator(".cell-grid-heading")).toContainText("1 instance");
+  await grid(page).getByRole("searchbox", { name: "Search grid" }).fill("");
+
+  // Default style: the flat or grouped lists come back in the sidebar, the rail and the grid at once.
+  await page.goto(`${server.url}#/settings/profile`);
+  await settingsPage(page).getByRole("radio", { name: "Default", exact: true }).check();
+  await settingsPage(page).getByRole("switch", { name: "Show Group by in sidebar" }).click();
+  await page.goto(`${server.url}#/`);
+  const cells = page.getByRole("navigation", { name: "Cell navigation" });
+  await expect(cells.getByRole("heading", { level: 3 })).toHaveCount(0);
+  await expect(cells.getByRole("region", { name: /agent$/ })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "All cells" }).getByLabel("Group by")).toHaveValue("kukeon.io/config");
+  await expect(grid(page).getByLabel("Group grid by")).toHaveValue("kukeon.io/config");
+  await expect(cells.getByRole("region", { name: /group$/ })).toHaveCount(3);
+  await expect(cells.getByRole("region", { name: "claude group" }).getByRole("link")).toHaveCount(3);
+  await expect(grid(page).getByRole("region", { name: "claude group" }).locator(".cell-tile")).toHaveCount(3);
+  await expect(grid(page).getByRole("region", { name: "Ungrouped group" }).locator(".cell-tile")).toHaveCount(1);
+  const sidebar = page.getByRole("complementary", { name: "Cell sidebar" });
+  await sidebar.getByRole("button", { name: "Collapse sidebar" }).click();
+  await expect(sidebar.locator(".rail-agent, .rail-others, .rail-agent-glyph")).toHaveCount(0);
+  await expect(sidebar.getByRole("navigation", { name: "Cell shortcuts" }).locator(".rail-cell")).toHaveCount(5);
+  expect(loads).toBe(1);
 });
 
 test("the Manage navigation marks the current kind on list, detail and form pages", async ({ page }) => {

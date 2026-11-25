@@ -7,6 +7,7 @@ import { Icon } from "./icons";
 import type { Schedule, ScheduleStatus } from "./schedule-format.mjs";
 import { TerminalSession, cellId, sessionId, unavailableStates, type TerminalManager, type Theme } from "./terminal";
 import { configForCell, sameScopedReference } from "./relationships.mjs";
+import { configLabel } from "./cells.mjs";
 
 // Majordomo is found by label, never by name: its configs and cells carry the kuke team and the
 // majordomo role, and a task config additionally names its task.
@@ -68,7 +69,6 @@ function configRef(doc: ConfigDoc) {
   return { name: doc.metadata.name, realm: doc.metadata.realm, space: doc.metadata.space, stack: doc.metadata.stack };
 }
 // The lineage label kukeond stamps on a cell created from a Config.
-const configLabel = "kukeon.io/config";
 // fromConfig reports whether a cell was created from a Config: by its spec.provenance, else by its lineage
 // label within the Config's Realm.
 function fromConfig(row: Row, doc: ConfigDoc): boolean {

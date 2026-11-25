@@ -4,7 +4,9 @@ import { homeLink, workspaceLink } from "./routes";
 import { stateTone } from "./status";
 import { Icon } from "./icons";
 import type { View } from "./views.mjs";
-import { activeCells } from "./cells.mjs";
+import { activeCells, agentGroups, rollupState } from "./cells.mjs";
+import type { Row } from "./inventory";
+import type { CellListStyle } from "./settings";
 
 const collapsedKey = "kukeon-sidebar-collapsed";
 const widthKey = "kukeon-sidebar-width";
@@ -108,10 +110,13 @@ export function VersionRows({ info }: { info: ReturnType<typeof versionInfo> }) 
 }
 
 // Collapsed icon rail: brand mark, expand button, majordomo, then in Workbench one state dot per cell,
-// then the connection dot. In Manage the rail carries no per-kind icons (#1635): collapsing there is only a
-// way to get the width back.
-export function SidebarRail({ view, inventory, selectedScope, connection, onExpand, majordomo }: {
+// then the connection dot. In Manage and Settings the rail carries no per-kind icons (#1635): collapsing
+// there is only a way to get the width back. In agent style (#1686) each agent is its glyph, toned by the
+// roll-up state, followed by one dot per instance; a single-instance agent is only its glyph, which links
+// to that cell. Dividers separate the agents, and the dots of the other cells come last.
+export function SidebarRail({ view, inventory, selectedScope, connection, onExpand, majordomo, listStyle = "default" }: {
   view: View;
+  listStyle?: CellListStyle;
   majordomo?: ReactNode;
   inventory: InventoryResource;
   selectedScope: string[];
@@ -120,19 +125,33 @@ export function SidebarRail({ view, inventory, selectedScope, connection, onExpa
 }): ReactNode {
   // Like the Workbench sidebar, the rail lists active cells and the open one (#1635).
   const cells = activeCells(inventory.data?.rows[3] ?? [], selectedScope);
+  const { agents, others } = agentGroups(cells);
   const tooltip = `Daemon: ${connection.status} · ${connection.info.summary}`;
+  const isCurrent = (row: Row) => selectedScope.length === 4 && row.scope.every((part, i) => part === selectedScope[i]);
+  const dot = (row: Row) => {
+    const state = row.doc.status?.state;
+    const label = `Open ${row.scope.join(" / ")} (${state || "state not reported"})`;
+    return <li key={JSON.stringify(row.scope)}><a className={`rail-cell tone-${stateTone(state)}`} href={workspaceLink(row.scope)} aria-label={label} title={label} aria-current={isCurrent(row) ? "page" : undefined}><span className="state-dot" aria-hidden="true" /></a></li>;
+  };
   return <div className="sidebar-rail">
     <a className="rail-brand" href={homeLink} aria-label="kukeon home" title="kukeon"><BrandMark /></a>
     <SidebarToggle collapsed onToggle={onExpand} />
     {majordomo}
-    {view === "manage" ? <div className="rail-spacer" /> : <nav className="rail-cells" aria-label="Cell shortcuts">
-      <ul>{cells.map(row => {
-        const fullName = row.scope.join(" / ");
-        const state = row.doc.status?.state;
-        const current = selectedScope.length === 4 && row.scope.every((part, i) => part === selectedScope[i]);
-        const label = `Open ${fullName} (${state || "state not reported"})`;
-        return <li key={JSON.stringify(row.scope)}><a className={`rail-cell tone-${stateTone(state)}`} href={workspaceLink(row.scope)} aria-label={label} title={label} aria-current={current ? "page" : undefined}><span className="state-dot" aria-hidden="true" /></a></li>;
-      })}</ul>
+    {view !== "workbench" ? <div className="rail-spacer" /> : <nav className="rail-cells" aria-label="Cell shortcuts">
+      {listStyle === "agent" ? <ul>
+        {agents.map(agent => {
+          const count = `${agent.rows.length} ${agent.rows.length === 1 ? "instance" : "instances"}`;
+          const named = `Agent ${agent.name}${agent.context ? ` (${agent.context})` : ""}, ${count}`;
+          const tone = `rail-agent-glyph tone-${stateTone(rollupState(agent.rows))}`;
+          if (agent.rows.length === 1) {
+            const row = agent.rows[0];
+            const label = `${named}: open ${row.scope.join(" / ")} (${row.doc.status?.state || "state not reported"})`;
+            return <li className="rail-agent" key={agent.id}><a className={tone} href={workspaceLink(row.scope)} aria-label={label} title={label} aria-current={isCurrent(row) ? "page" : undefined}><Icon name="agent" /></a></li>;
+          }
+          return <li className="rail-agent" key={agent.id}><span className={tone} role="img" aria-label={named} title={named}><Icon name="agent" /></span><ul>{agent.rows.map(dot)}</ul></li>;
+        })}
+        {others.length > 0 && <li className="rail-others"><ul aria-label="Other cells">{others.map(dot)}</ul></li>}
+      </ul> : <ul>{cells.map(dot)}</ul>}
     </nav>}
     <div className="rail-connection">
       <span className="rail-connection-dot" role="status" aria-label={tooltip} title={tooltip}><span className={`dot ${connection.tone}`} aria-hidden="true" /></span>

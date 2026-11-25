@@ -1,4 +1,4 @@
-export type View = "workbench" | "manage";
+export type View = "workbench" | "manage" | "settings";
 export function viewOf(route: { view: string; scope: string[] }): View;
 export function manageAttention(input: {
   daemonError?: { code: string; message?: string };
