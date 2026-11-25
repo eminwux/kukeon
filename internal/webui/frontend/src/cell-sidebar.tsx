@@ -1,14 +1,18 @@
 import { useMemo, useState } from "react";
-import type { InventoryResource } from "./inventory";
+import type { InventoryResource, Row } from "./inventory";
 import { listLink, workspaceLink } from "./routes";
-import { DriftBadge, ScopePath, StateBadge } from "./status";
+import { DriftBadge, RollupDot, ScopePath, StateBadge } from "./status";
 import type { TerminalState } from "./terminal";
 import type { CellFilter } from "./cell-filter";
-import { activeCells, cellMatches, groupCells, groupingKeys } from "./cells.mjs";
+import type { CellListStyle } from "./settings";
+import { Icon } from "./icons";
+import { activeCells, agentGroups, cellMatches, groupCells, groupingKeys, rollupState } from "./cells.mjs";
 
 const collapsedKey = "kukeon-cell-collapsed-groups";
 const pageSize = 100;
 const groupPageSize = 25;
+// The paging id of the Other cells list, beside the group and agent ids.
+const othersId = "others";
 
 function storedCollapsed(): string[] {
   try {
@@ -19,24 +23,40 @@ function storedCollapsed(): string[] {
 function save(key: string, value: string) {
   try { localStorage.setItem(key, value); } catch { /* Preferences are optional. */ }
 }
+const sameScope = (a: string[], b: string[]) => b.length === 4 && a.every((part, i) => part === b[i]);
 
 // StoppedCellsLink names the cells the Workbench hides and opens them in Manage → Cells (#1635).
 export function StoppedCellsLink({ hidden }: { hidden: number }) {
   return hidden > 0 ? <a className="cell-stopped-link" href={listLink(3, [], "inactive")}>Stopped · {hidden}</a> : null;
 }
 
+type RowOptions = { selectedScope: string[]; terminalStates: Record<string, TerminalState>; showScope: boolean; showTerminalStatus: boolean };
+
+// One cell of the list: a group's row in default style, an agent's instance in agent style.
+function CellRow({ row, selectedScope, terminalStates, showScope, showTerminalStatus }: { row: Row } & RowOptions) {
+  const fullName = row.scope.join(" / ");
+  const terminalState = terminalStates[JSON.stringify(row.scope)];
+  return <li><a className="cell-link" href={workspaceLink(row.scope)} aria-current={sameScope(row.scope, selectedScope) ? "page" : undefined} aria-label={`Open ${fullName}`} title={fullName}><span className="cell-link-name">{row.doc.metadata.name}</span>{showScope && <span className="cell-link-scope"><ScopePath parts={row.scope.slice(0, 3)} /></span>}<StateBadge state={row.doc.status?.state} /><DriftBadge status={row.doc.status} />{showTerminalStatus && terminalState && <span className={`cell-terminal-state ${terminalState}`}>Terminal {terminalState}</span>}</a></li>;
+}
+
 // The Workbench sidebar lists active cells only (#1635); the open cell stays listed whatever its state.
-// showScope and showTerminalStatus are the Settings switches (#1652); the link's title, accessible
-// name and search keep the full scope either way.
-export function CellSidebar({ inventory, selectedScope, terminalStates, filter, showScope = true, showTerminalStatus = true }: {
+// listStyle, showSearch, showGroupBy, showScope and showTerminalStatus are the Profile settings (#1652,
+// #1686). In agent style the cells are listed as agents (Configs) and their instances, and the hierarchy
+// is the grouping, so no Group by is offered. A link's title, accessible name and search keep the full
+// scope whatever is shown.
+export function CellSidebar({ inventory, selectedScope, terminalStates, filter, listStyle = "default", showSearch = true, showGroupBy = true, showScope = true, showTerminalStatus = true }: {
   inventory: InventoryResource;
   selectedScope: string[];
   terminalStates: Record<string, TerminalState>;
   filter: CellFilter;
+  listStyle?: CellListStyle;
+  showSearch?: boolean;
+  showGroupBy?: boolean;
   showScope?: boolean;
   showTerminalStatus?: boolean;
 }) {
   const { search, setSearch, groupBy, setGroupBy } = filter;
+  const agentStyle = listStyle === "agent";
   const [collapsed, setCollapsed] = useState(storedCollapsed);
   const [limits, setLimits] = useState<Record<string, number>>({});
   const [groupLimit, setGroupLimit] = useState(groupPageSize);
@@ -46,22 +66,34 @@ export function CellSidebar({ inventory, selectedScope, terminalStates, filter, 
   const keys = useMemo(() => groupingKeys(cells, groupBy), [cells, groupBy]);
   const filtered = useMemo(() => cells.filter(row => cellMatches(row, search)), [cells, search]);
   const groups = useMemo(() => groupCells(filtered, groupBy), [filtered, groupBy]);
+  const { agents, others } = useMemo(() => agentGroups(filtered), [filtered]);
+  // An agent is a single link or a toggle by its listed instances, not by how many match the search.
+  const instanceCounts = useMemo(() => new Map(agentGroups(cells).agents.map(agent => [agent.id, agent.rows.length])), [cells]);
   // When every listed cell shares one realm / space / stack, show it once instead of on every row.
   const sharedScope = filtered.length && filtered.every(row => row.scope.slice(0, 3).join(" / ") === filtered[0].scope.slice(0, 3).join(" / ")) ? filtered[0].scope.slice(0, 3).join(" / ") : "";
   const incomplete = !!inventory.error || !!inventory.data?.failures.length;
-  function changeGrouping(value: string) {
-    setGroupBy(value); setLimits({}); setGroupLimit(groupPageSize);
-  }
+  const rowOptions: RowOptions = { selectedScope, terminalStates, showScope: showScope && !sharedScope, showTerminalStatus };
+  const groupByShown = showGroupBy && !agentStyle;
+  function resetPaging() { setLimits({}); setGroupLimit(groupPageSize); }
   function toggleGroup(id: string) {
     const next = collapsed.includes(id) ? collapsed.filter(item => item !== id) : [...collapsed, id];
     setCollapsed(next); save(collapsedKey, JSON.stringify(next));
   }
+  // The rows of one group, agent or Other cells list, 100 at a time.
+  function rowList(id: string, rows: Row[], className?: string) {
+    const limit = limits[id] ?? pageSize;
+    return <><ul className={className}>{rows.slice(0, limit).map(row => <CellRow key={JSON.stringify(row.scope)} row={row} {...rowOptions} />)}</ul>{rows.length > limit && <button className="cell-more" onClick={() => setLimits(old => ({ ...old, [id]: limit + pageSize }))}>Show {Math.min(pageSize, rows.length - limit)} more cells</button>}</>;
+  }
+  // Agents count as groups for the 25-group paging; Other cells is the last one.
+  const agentSections = [...agents.map(agent => ({ id: agent.id, agent })), ...(others.length ? [{ id: othersId, agent: undefined }] : [])];
+  const shownSections = agentSections.slice(0, groupLimit);
+  const sectionCount = agentStyle ? agentSections.length : groups.length;
   return <section className="cell-navigation" aria-label="All cells">
     <div className="cell-navigation-heading"><h2>Cells</h2><span>{cells.length}</span></div>
-    <div className="cell-navigation-controls">
-      <label>Search cells<input type="search" value={search} placeholder="Name or scope" onChange={event => { setSearch(event.target.value); setLimits({}); setGroupLimit(groupPageSize); }} /></label>
-      <label>Group by<select value={groupBy} onChange={event => changeGrouping(event.target.value)}><option value="">None</option>{keys.map(key => <option key={key} value={key}>{key}</option>)}{groupBy && !keys.includes(groupBy) && <option value={groupBy}>{groupBy} (not in current inventory)</option>}</select></label>
-    </div>
+    {(showSearch || groupByShown) && <div className="cell-navigation-controls">
+      {showSearch && <label>Search cells<input type="search" value={search} placeholder="Name or scope" onChange={event => { setSearch(event.target.value); resetPaging(); }} /></label>}
+      {groupByShown && <label>Group by<select value={groupBy} onChange={event => { setGroupBy(event.target.value); resetPaging(); }}><option value="">None</option>{keys.map(key => <option key={key} value={key}>{key}</option>)}{groupBy && !keys.includes(groupBy) && <option value={groupBy}>{groupBy} (not in current inventory)</option>}</select></label>}
+    </div>}
     <div className="cell-navigation-results" aria-live="polite">
       {inventory.loading && !inventory.data && <p role="status">Loading cells…</p>}
       {incomplete && <p className="cell-inventory-warning">{inventory.data ? "Inventory incomplete or stale. Refresh to retry." : "Cells unavailable. Refresh to retry."}</p>}
@@ -71,21 +103,37 @@ export function CellSidebar({ inventory, selectedScope, terminalStates, filter, 
     </div>
     <nav className="cell-navigation-list" aria-label="Cell navigation">
       {showScope && sharedScope && <p className="cell-group-scope" title="Scope shared by every listed cell"><ScopePath parts={filtered[0].scope.slice(0, 3)} /></p>}
-      {groups.slice(0, groupLimit).map(({ id, label, rows }) => {
-        const isCollapsed = !!groupBy && collapsed.includes(id);
-        const limit = limits[id] ?? pageSize;
-        return <section className="cell-group" key={id} aria-label={groupBy ? `${label} group` : undefined}>
-          {groupBy && <button className="cell-group-toggle" aria-expanded={!isCollapsed} onClick={() => toggleGroup(id)}><span aria-hidden="true">{isCollapsed ? "▸" : "▾"}</span><span>{label}</span><small>{rows.length}</small></button>}
-          {!isCollapsed && <><ul>{rows.slice(0, limit).map(row => {
-            const current = selectedScope.length === 4 && row.scope.every((part, i) => part === selectedScope[i]);
+      {agentStyle ? <>
+        {agents.length > 0 && <h3 className="cell-list-heading">Agents</h3>}
+        {shownSections.map(({ id, agent }) => {
+          if (!agent) return <section className="cell-group" key={id} aria-label="Other cells"><h3 className="cell-list-heading">Other cells</h3>{rowList(id, others)}</section>;
+          const name = <span className="agent-name"><Icon name="agent" /><span>{agent.name}</span>{agent.context && <span className="agent-context">{agent.context}</span>}</span>;
+          const count = <small>{agent.rows.length}<span className="sr-only"> {agent.rows.length === 1 ? "instance" : "instances"}</span></small>;
+          const state = rollupState(agent.rows);
+          if (instanceCounts.get(id) === 1) {
+            // One instance: the agent row is the link to that cell.
+            const row = agent.rows[0];
             const fullName = row.scope.join(" / ");
             const terminalState = terminalStates[JSON.stringify(row.scope)];
-            const state = row.doc.status?.state;
-            return <li key={JSON.stringify(row.scope)}><a className="cell-link" href={workspaceLink(row.scope)} aria-current={current ? "page" : undefined} aria-label={`Open ${fullName}`} title={fullName}><span className="cell-link-name">{row.doc.metadata.name}</span>{showScope && !sharedScope && <span className="cell-link-scope"><ScopePath parts={row.scope.slice(0, 3)} /></span>}<StateBadge state={state} /><DriftBadge status={row.doc.status} />{showTerminalStatus && terminalState && <span className={`cell-terminal-state ${terminalState}`}>Terminal {terminalState}</span>}</a></li>;
-          })}</ul>{rows.length > limit && <button className="cell-more" onClick={() => setLimits(old => ({ ...old, [id]: limit + pageSize }))}>Show {Math.min(pageSize, rows.length - limit)} more cells</button>}</>}
+            return <section className="cell-group cell-agent" key={id} aria-label={`${agent.name} agent`}>
+              <a className="agent-row agent-link" href={workspaceLink(row.scope)} aria-current={sameScope(row.scope, selectedScope) ? "page" : undefined} aria-label={`${agent.name}: open ${fullName} (${state || "state not reported"})`} title={fullName}>{name}{count}<RollupDot state={state} /><DriftBadge status={row.doc.status} />{showTerminalStatus && terminalState && <span className={`cell-terminal-state ${terminalState}`}>Terminal {terminalState}</span>}</a>
+            </section>;
+          }
+          const isCollapsed = collapsed.includes(id);
+          const holdsCurrent = isCollapsed && agent.rows.some(row => sameScope(row.scope, selectedScope));
+          return <section className="cell-group cell-agent" key={id} aria-label={`${agent.name} agent`}>
+            <button className={`cell-group-toggle agent-row${holdsCurrent ? " has-current" : ""}`} aria-expanded={!isCollapsed} onClick={() => toggleGroup(id)}><span aria-hidden="true">{isCollapsed ? "▸" : "▾"}</span>{name}{holdsCurrent && <span className="sr-only">, contains the open cell</span>}{count}<RollupDot state={state} /></button>
+            {!isCollapsed && rowList(id, agent.rows, "agent-instances")}
+          </section>;
+        })}
+      </> : groups.slice(0, groupLimit).map(({ id, label, rows }) => {
+        const isCollapsed = !!groupBy && collapsed.includes(id);
+        return <section className="cell-group" key={id} aria-label={groupBy ? `${label} group` : undefined}>
+          {groupBy && <button className="cell-group-toggle" aria-expanded={!isCollapsed} onClick={() => toggleGroup(id)}><span aria-hidden="true">{isCollapsed ? "▸" : "▾"}</span><span>{label}</span><small>{rows.length}</small></button>}
+          {!isCollapsed && rowList(id, rows)}
         </section>;
       })}
-      {groups.length > groupLimit && <button className="cell-more" onClick={() => setGroupLimit(value => value + groupPageSize)}>Show {Math.min(groupPageSize, groups.length - groupLimit)} more groups</button>}
+      {sectionCount > groupLimit && <button className="cell-more" onClick={() => setGroupLimit(value => value + groupPageSize)}>Show {Math.min(groupPageSize, sectionCount - groupLimit)} more groups</button>}
     </nav>
     <StoppedCellsLink hidden={hidden} />
   </section>;

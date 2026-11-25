@@ -798,11 +798,23 @@ button.cell-tile { border: 1px solid var(--line); background: var(--panel); }
 .user-menu-identity { margin: 4px 8px 8px; color: var(--muted); font-size: var(--font-sm); overflow-wrap: anywhere; }
 .user-menu-identity strong { color: var(--text); }
 .user-menu-popup [role="menuitem"] { border-color: transparent; background: transparent; text-align: left; font-size: var(--font-md); }
+.user-menu-popup a[role="menuitem"] { border: 1px solid transparent; border-radius: 7px; padding: 6px 12px; }
 .user-menu-popup [role="menuitem"]:hover, .user-menu-popup [role="menuitem"]:focus-visible { background: var(--hover); }
-.settings-dialog fieldset { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0; padding: 0; border: 0; font-size: var(--font-md); }
-.settings-dialog legend { width: 100%; margin-bottom: 6px; font-weight: 600; }
-.settings-dialog fieldset label { display: inline-flex; align-items: center; gap: 6px; }
-.settings-dialog fieldset input { width: auto; }
+/* The Settings page (#1686): General and Profile sections, each a panel of labelled controls. */
+.settings-page { display: grid; gap: 12px; max-width: 720px; }
+.settings-storage { margin: 0; color: var(--muted); font-size: var(--font-sm); }
+.settings-section { display: grid; gap: 16px; padding: 16px 18px; }
+.settings-section h2 { margin: 0; font-size: var(--font-lg); }
+.settings-group { display: grid; gap: 10px; padding-top: 14px; border-top: 1px solid var(--line); }
+.settings-group h3 { margin: 0; color: var(--muted); font-size: var(--font-xs); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.settings-choice { display: flex; flex-wrap: wrap; gap: 6px 16px; min-width: 0; margin: 0; padding: 0; border: 0; font-size: var(--font-md); }
+.settings-choice legend { width: 100%; margin-bottom: 6px; padding: 0; font-weight: 600; }
+.settings-choice label { display: inline-flex; align-items: center; gap: 6px; }
+.settings-choice input { width: auto; }
+.settings-select { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; font-size: var(--font-md); }
+.settings-select select { min-width: 0; max-width: 100%; padding: 6px 9px; }
+.settings-label { display: grid; gap: 2px; min-width: 0; }
+.settings-note { color: var(--muted); font-size: var(--font-sm); }
 .settings-switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: var(--font-md); }
 .settings-switch [role="switch"] { display: inline-flex; align-items: center; gap: 8px; padding: 4px 8px; }
 .switch-track { position: relative; width: 30px; height: 16px; border-radius: 8px; background: var(--line); transition: background .15s; }
@@ -811,3 +823,32 @@ button.cell-tile { border: 1px solid var(--line); background: var(--panel); }
 [role="switch"][aria-checked="true"] .switch-thumb { transform: translateX(14px); }
 .switch-text { min-width: 2.2em; font-size: var(--font-sm); color: var(--muted); }
 @media (prefers-reduced-motion: reduce) { .switch-track, .switch-thumb { transition: none; } }
+/* Agent cell list style (#1686): a Config is an agent, its cells are its instances. */
+.rollup-dot { display: inline-flex; align-items: center; flex: none; color: var(--muted); }
+.rollup-dot .state-dot { width: 8px; height: 8px; margin: 0; }
+.rollup-dot.tone-ok, .rail-agent-glyph.tone-ok { color: var(--status-ok); }
+.rollup-dot.tone-stopped, .rail-agent-glyph.tone-stopped { color: var(--status-stopped); }
+.rollup-dot.tone-warning, .rail-agent-glyph.tone-warning { color: var(--status-warning); }
+.rollup-dot.tone-error, .rail-agent-glyph.tone-error { color: var(--status-error); }
+.rollup-dot.tone-pending, .rail-agent-glyph.tone-pending { color: var(--status-pending); }
+.cell-list-heading { margin: 8px 0 4px; padding: 0 8px; color: var(--muted); font-size: var(--font-xs); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.agent-name { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 0 7px; min-width: 0; flex: 1; overflow-wrap: anywhere; }
+/* The realm or scope that tells two agents of one name apart sits under the name. */
+.agent-name .agent-context { grid-column: 2; }
+.agent-name svg, .cell-grid-heading svg, .rail-agent-glyph svg { flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.agent-context { color: var(--muted); font-family: var(--mono); font-size: var(--font-sm); font-weight: 400; }
+.agent-row { color: var(--text); font-size: var(--font-md); font-weight: 600; border-radius: 6px; }
+.agent-row small { margin-left: auto; color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+.agent-row:hover, .agent-link[aria-current="page"], .agent-row.has-current { background: var(--selected); }
+.agent-link[aria-current="page"] .agent-name, .agent-row.has-current .agent-name { color: var(--accent); }
+.agent-link { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; padding: 6px 7px 6px 23px; }
+.agent-link .state-badge, .agent-link .cell-terminal-state { font-size: var(--font-sm); }
+.agent-instances { padding-left: 22px; }
+.rail-agent, .rail-others { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 100%; }
+.rail-cells .rail-agent > ul, .rail-cells .rail-others > ul { padding: 0; }
+.rail-cells li + .rail-agent, .rail-cells li + .rail-others { margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--line); }
+.rail-agent-glyph { display: grid; place-items: center; width: 32px; height: 26px; border-radius: 6px; color: var(--muted); }
+a.rail-agent-glyph:hover, a.rail-agent-glyph[aria-current="page"] { background: var(--selected); }
+.cell-grid-heading { align-items: center; }
+.cell-grid-heading .rollup-dot { align-self: center; }
+.grid-controls { grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 280px)); padding: 0 0 12px; }

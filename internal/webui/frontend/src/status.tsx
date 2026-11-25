@@ -11,6 +11,12 @@ export function stateTone(state?: string): StatusTone {
 export function StateBadge({ state }: { state?: string }) {
   return <span className={`state-badge tone-${stateTone(state)}`}><span className="state-dot" aria-hidden="true" />{state || "Not reported"}</span>;
 }
+// The one state dot of an agent row or heading (#1686): the roll-up state as a toned dot, named for
+// assistive technology and in its tooltip, never colour alone.
+export function RollupDot({ state }: { state?: string }) {
+  const label = state || "State not reported";
+  return <span className={`rollup-dot tone-${stateTone(state)}`} title={label}><span className="state-dot" aria-hidden="true" /><span className="sr-only">{label}</span></span>;
+}
 
 // Config drift (#1568). A Ready cell can still be out of sync with its Config, or the daemon may have failed
 // to compare them. The badge carries a text label, never colour alone; the reason is in its tooltip and,

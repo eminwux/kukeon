@@ -23,6 +23,11 @@ test("viewOf puts every other route in Manage", () => {
   assert.equal(viewOf(route("resource", ["r", "s", "k"])), "manage");
 });
 
+test("viewOf puts the settings routes in Settings", () => {
+  assert.equal(viewOf(route("settings")), "settings");
+  assert.equal(viewOf(route("settings", ["profile"])), "settings");
+});
+
 const reports = findings => [{ id: "r2", findings }, { id: "r1", findings: 5 }];
 
 test("manageAttention is empty when nothing needs a look", () => {

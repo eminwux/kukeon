@@ -1,3 +1,5 @@
+import { configForCell } from "./relationships.mjs";
+
 // Pure cell-list logic shared by the Workbench sidebar, rail and grid and by the Cells table (#1635).
 // Rows are inventory rows: { doc, scope } with scope [realm, space, stack, cell]. No DOM, no network —
 // unit-tested with node --test.
@@ -38,7 +40,7 @@ export function screenTail(text, rows = 12) {
   return lines.slice(-rows).join("\n");
 }
 
-// cellMatches applies the shared search: a case-insensitive substring of "realm / space / stack / cell".
+// cellMatches applies a list's search: a case-insensitive substring of "realm / space / stack / cell".
 export function cellMatches(row, search) {
   const query = (search ?? "").trim().toLocaleLowerCase();
   return !query || row.scope.join(" / ").toLocaleLowerCase().includes(query);
@@ -70,4 +72,54 @@ export function groupCells(rows, groupBy) {
   }
   return [...found].sort(([a], [b]) => a === null ? 1 : b === null ? -1 : a.localeCompare(b))
     .map(([value, items]) => ({ id: groupId(groupBy, value), label: value === null ? ungrouped : value === ungrouped ? `${ungrouped} (label value)` : value, rows: items }));
+}
+
+// The label kukeond stamps on every cell created from a Config, holding the Config's name only
+// (lookupLineageConfig in internal/controller/reconcile_outofsync.go).
+export const configLabel = "kukeon.io/config";
+
+// agentGroups lists cells as agents and their instances (#1686). An agent is one Config: the cell's
+// spec.provenance binding when it has one, otherwise its realm plus its kukeon.io/config label value (the
+// label stores only the Config name). A label-only cell joins the provenance agent of the same realm and
+// name when there is one, so both ways of naming one Config land in one agent. Cells with neither go to
+// `others`. Agents are sorted by name, then realm; rows keep inventory order. `context` is what tells two
+// agents of one name apart: the realm, or the full Config scope when the realm is the same too.
+export function agentGroups(rows) {
+  const keyOf = (realm, space, stack, name) => JSON.stringify([realm, space, stack, name]);
+  const bound = new Map();
+  for (const row of rows) {
+    const ref = configForCell(row.doc);
+    if (!ref) continue;
+    const parts = [ref.realm || row.scope[0], ref.space ?? "", ref.stack ?? "", ref.name];
+    const key = keyOf(...parts);
+    const pair = JSON.stringify([parts[0], parts[3]]);
+    if (!bound.has(pair) || key < bound.get(pair)) bound.set(pair, key);
+  }
+  const found = new Map();
+  const others = [];
+  for (const row of rows) {
+    const ref = configForCell(row.doc);
+    const label = row.doc.metadata.labels?.[configLabel]?.trim();
+    let parts;
+    if (ref) parts = [ref.realm || row.scope[0], ref.space ?? "", ref.stack ?? "", ref.name];
+    else if (label) parts = JSON.parse(bound.get(JSON.stringify([row.scope[0], label])) ?? keyOf(row.scope[0], "", "", label));
+    else { others.push(row); continue; }
+    const key = keyOf(...parts);
+    const agent = found.get(key) ?? { id: groupId("agent", key), name: parts[3], realm: parts[0], scope: parts.slice(0, 3).filter(Boolean), rows: [] };
+    agent.rows.push(row);
+    found.set(key, agent);
+  }
+  const agents = [...found.values()].sort((a, b) => a.name.localeCompare(b.name) || a.realm.localeCompare(b.realm) || a.id.localeCompare(b.id));
+  for (const agent of agents) {
+    const sameName = agents.filter(other => other.name === agent.name);
+    agent.showRealm = sameName.some(other => other.realm !== agent.realm);
+    agent.context = sameName.some(other => other !== agent && other.realm === agent.realm) ? agent.scope.join(" / ") : agent.showRealm ? agent.realm : "";
+  }
+  return { agents, others };
+}
+
+// rollupState is the one state an agent row shows: the state of the first instance that needs
+// attention, otherwise the state of the first instance.
+export function rollupState(rows) {
+  return (rows.find(row => needsAttention(row.doc.status)) ?? rows[0])?.doc.status?.state;
 }

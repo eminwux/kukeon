@@ -28,6 +28,8 @@ const glyphs = {
   create: <path d="M12 5v14M5 12h14" />,
   // Majordomo: a bell on its base.
   majordomo: <><path d="M5.5 16.5a6.5 6.5 0 0 1 13 0Z" /><path d="M12 10V7.5" /><path d="M10 7.5h4" /><path d="M3.5 19.5h17" /></>,
+  // An agent, a Config whose cells are its instances (#1686): a robot head with an antenna.
+  agent: <><rect x="4.5" y="8.5" width="15" height="11" rx="2.5" /><path d="M12 8.5V5" /><circle cx="12" cy="4" r="1" /><path d="M9.5 13v1.5M14.5 13v1.5" /></>,
   pending: <path d="M12 3.5a8.5 8.5 0 1 0 8.5 8.5" />,
 } satisfies Record<string, ReactNode>;
 export type IconName = keyof typeof glyphs;

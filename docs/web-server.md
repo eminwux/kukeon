@@ -34,7 +34,7 @@ so and offers **Retry**.
 
 ## Workbench and Manage
 
-The UI has two views that share one top bar. **Workbench** is where the
+The UI has two main views that share one top bar. **Workbench** is where the
 operator works in cell terminals: the terminal grid, a cell's screen (terminal
 and details), its container pages and **New Cell**. **Manage** is everything
 else: the Overview and every resource and administration page. The view
@@ -48,6 +48,9 @@ the collapsed rail, always opens the grid. **New Cell**, **Majordomo**,
 Switching views never detaches a terminal: every attached session stays
 mounted while a Manage page is open.
 
+The [Settings page](#settings) (`#/settings`) is a third view with its own
+sidebar. On it neither side of the switch is current, and both still navigate.
+
 `#/`, the empty hash, `#/workspace` without a cell scope and unparsable URLs
 open the Workbench grid. `#/resources`, `#/administration` and `#/dashboard`
 open the Overview. No earlier URL changed shape.
@@ -59,9 +62,17 @@ badge and the last 12 non-blank rows of its terminal screen as plain text,
 clipped on the right and never wrapped (no colours, no terminal instance per
 tile). A tile opens the cell's terminal; a tile for a cell docked in the
 [majordomo panel](#docked-panel) opens the panel instead and does not
-navigate. Tiles are grouped by the sidebar's **Group by**; inside a group, cells
-that need attention (a state other than Ready, or drift) come first, then
-scope order. A cell whose state has no live terminal, or whose screen cannot be
+navigate. Above the tiles the grid has its own **Search grid** field and
+**Group grid by** select, separate from the sidebar's: text typed in one list
+never filters the other, and each list keeps its own grouping. Settings →
+Profile → **Show search in grid** and **Show Group by in grid** (both on by
+default) hide them; the row is not rendered when both are hidden. In the
+default **Agent** [cell list style](#agents-and-instances) the grid has one
+section per agent, headed by the agent glyph, the Config name, the instance
+count and the roll-up state dot, with **Other cells** as the last section, and
+no **Group grid by**. In **Default** style tiles are grouped by the grid's
+[Group by](#group-by). Inside a section, cells that need attention (a state
+other than Ready, or drift) come first, then scope order. A cell whose state has no live terminal, or whose screen cannot be
 read (`screen_unavailable`), shows a state-only tile reading **No terminal
 screen**. With no active cell the grid shows an empty state with **New Cell**.
 
@@ -80,14 +91,44 @@ The Workbench sidebar lists **active** cells: every cell whose state is not
 listed because they need a look, and the open cell is always listed whatever
 its state. When cells are hidden, **Stopped · N** under the list (and under the
 grid) opens `#/cells?state=inactive`, the Cells table filtered to stopped or
-exited cells. The search and **Group by** typed in the sidebar also filter and
-group the grid. Search by cell name or any part of its realm, space, and stack
-scope. Each link shows the parent scope and reported state, so duplicate names
-remain distinct; the link's tooltip and accessible name always carry the full
-scope. **Settings** → **Show cell scope in sidebar** hides the scope line, and
-**Show terminal status in sidebar** hides each cell's terminal connection text;
-state and drift badges stay. Select a cell to open its terminal, status, overview, and
-containers. On narrow screens, open the sidebar with the menu button; it shows
+exited cells. Each link shows the parent scope and reported state, so duplicate
+names remain distinct; the link's tooltip and accessible name always carry the
+full scope. Settings → Profile → **Show cell scope in sidebar** hides the scope
+line, and **Show terminal status in sidebar** hides each cell's terminal
+connection text; state and drift badges stay. Select a cell to open its
+terminal, status, overview, and containers.
+
+The sidebar's **Search cells** field and **Group by** select are hidden until
+**Show search in sidebar** and **Show Group by in sidebar** are switched on in
+Settings → Profile. Search matches the cell name or any part of its realm,
+space, and stack scope, and filters the sidebar only; the grid has its own.
+While a search field is hidden no search applies to that list, and hiding it
+clears the typed query.
+
+#### Agents and instances
+
+An **agent** is one Config, and an **instance** is one cell created from it. A
+cell's Config is its `spec.provenance` binding when it has one, otherwise its
+realm plus the value of its `kukeon.io/config` label; the realm is part of that
+identity because the label stores only the Config name. Both ways of naming one
+Config in one realm are the same agent. Two Configs of the same name in
+different realms are two agents, each showing its realm.
+
+Settings → Profile → **Cell list style** chooses how the sidebar, the collapsed
+rail and the grid list cells. **Agent**, the default, lists agents and their
+instances; **Default** lists the cells flat or by [Group by](#group-by). Which
+cells are listed is the same in both: active cells plus the open cell.
+
+In agent style the sidebar shows, under **Agents**, one row per agent with the
+agent glyph, the Config name, the instance count and one roll-up state dot: the
+state of the first instance that needs attention, otherwise of the first
+instance. A row with two or more instances expands and collapses, and the
+collapsed state is stored in this browser; its instances are the indented rows
+below it. A row with exactly one instance is a link that opens that cell. A
+collapsed row is marked when it holds the open cell. Cells created from no
+Config come last under **Other cells**. Search lists the agents with a matching
+instance and only their matching instances. The hierarchy is the grouping, so
+neither list offers a Group by in this style. On narrow screens, open the sidebar with the menu button; it shows
 the sidebar of the current view, and selection closes it.
 
 ### Manage sidebar
@@ -117,8 +158,13 @@ last report id shown is stored under `kukeon-health-seen`, in this browser only.
 Both sidebars carry the majordomo entry and the **Connected** section. On
 wider screens, the sidebar's collapse button reduces it to an icon rail with
 the kukeon mark, an expand button, the majordomo button, in Workbench one state
-dot per active cell (named by its full scope), and the connection dot. The
-Manage rail has no per-kind icons; collapsing there only gives the width back.
+dot per active cell (named by its full scope and state), and the connection
+dot. In [agent style](#agents-and-instances) each agent is its glyph, coloured
+by the roll-up state and named by the agent and its instance count, followed by
+its instance dots; an agent with one instance is only its glyph, which opens
+that cell. A divider separates the agents, and the dots of the other cells come
+last. The Manage and Settings rails have no per-kind icons; collapsing there
+only gives the width back.
 Drag the sidebar's right edge, or focus it and use the arrow keys, Home, or
 End, to resize it within fixed bounds. The collapsed state and width are shared
 by both views and stored only in this browser. The **Connected** section shows
@@ -127,12 +173,22 @@ when both are known and differ. An unreachable daemon shows `daemon unknown`.
 `GET /api/connection` returns `endpoint`, `version`, and, when kukeond answers
 its version ping, `daemonVersion`.
 
-**Group by** defaults to **None**. Choose a label key found in cell metadata
-to organize the sidebar; cells without a value appear under **Ungrouped**. The
+#### Group by
+
+In **Default** cell list style the sidebar and the grid are each grouped by a
+label key found in cell metadata; cells without a value appear under
+**Ungrouped**. Both use Settings → Profile → **Default Group by**, which starts
+at `kukeon.io/config`, until a grouping is picked in that list's own select:
+the sidebar's choice is stored under `kukeon-cell-grouping` and the grid's
+under `kukeon-grid-grouping`, **None** included, and a hidden select keeps its
+list grouped. Changing **Default Group by** clears both choices, so the new
+default shows in both lists at once. The
 controller-managed identity keys (`realm.kukeon.io`, `space.kukeon.io`,
 `stack.kukeon.io`, `cell.kukeon.io`, …) are left out, because they repeat the
 scope or are unique per cell; a key of that kind stays listed only while it is
-the stored selection. A cell that is out of sync with its Config, or whose
+the stored selection. **Default Group by** offers **None** and the same keys
+over every cell in the inventory, stopped ones included, and always
+`kukeon.io/config` and its current value. A cell that is out of sync with its Config, or whose
 comparison failed, shows a **Drift** or **Drift unknown** badge after its state. Group
 headers expand and collapse. The sidebar initially shows 25 groups and 100 cells
 per group, with controls to reveal more. The selected key and collapsed groups are stored only in
@@ -1113,26 +1169,55 @@ curl -H "Authorization: Bearer $PASSWORD" http://127.0.0.1:5129/api/realms
 
 The sidebar holds the kukeon brand (a link to the Workbench grid), the
 majordomo entry, the view's own list (active cells in Workbench, the Manage
-navigation in Manage), and daemon connection and version information. The
+navigation in Manage, the Settings navigation on the Settings page), and daemon connection and version information. The
 toolbar holds the **Workbench | Manage** switch, **New Cell**, **Majordomo**,
 **Refresh**, and the user menu; its breadcrumb starts at **Workbench** or
 **Overview** for the current view. Existing `#/dashboard`, `#/health`,
 resource, catalog, and hierarchy bookmarks still open their pages; browser
 history keeps working across both views.
 
-The user menu (the avatar after **Refresh**) shows the signed-in user and opens
-**Settings** or **Sign out**. Enter or Space opens the menu and Escape closes it;
-focus returns to the avatar, also when the Settings dialog closes.
+The user menu (the avatar after **Refresh**) shows the signed-in user, links to
+**Settings** and has **Sign out**. Enter or Space opens the menu and Escape
+closes it; focus returns to the avatar.
 
-**Settings** holds per-browser preferences, applied at once and stored in this
-browser only (they survive a reload when local storage is available):
+### Settings
 
-- **Appearance**: **System**, **Light**, or **Dark**. System follows the device
-  preference, including changes while the page is open.
-- **Show cell scope in sidebar** (on by default): the Workbench sidebar's
+**Settings** is a page, not a dialog: `#/settings` is its **General** section
+and `#/settings/profile` its **Profile** section; an unknown section shows
+General. On it the sidebar shows the **Settings navigation** with one link per
+section, and the collapsed rail carries no cell dots. Opening it closes no
+terminal session, and Back and Forward restore it like any other page.
+
+Settings are per-browser preferences, applied at once and stored in this
+browser only (they survive a reload when local storage is available); a missing
+or unreadable value reads as the default. Nothing is stored in kukeond.
+
+**General**
+
+- **Appearance** (`kukeon-theme`): **System**, **Light**, or **Dark**. System
+  follows the device preference, including changes while the page is open.
+
+**Profile**
+
+| Group          | Setting                         | Default            | Storage key                           |
+| -------------- | ------------------------------- | ------------------ | ------------------------------------- |
+| Cell list      | Cell list style                 | Agent              | `kukeon-cell-list-style`              |
+| Cell list      | Default Group by                | `kukeon.io/config` | `kukeon-default-group-by`             |
+| Sidebar        | Show cell scope in sidebar      | on                 | `kukeon-sidebar-show-scope`           |
+| Sidebar        | Show terminal status in sidebar | on                 | `kukeon-sidebar-show-terminal-status` |
+| Sidebar        | Show search in sidebar          | off                | `kukeon-sidebar-show-search`          |
+| Sidebar        | Show Group by in sidebar        | off                | `kukeon-sidebar-show-group-by`        |
+| Workbench grid | Show search in grid             | on                 | `kukeon-grid-show-search`             |
+| Workbench grid | Show Group by in grid           | on                 | `kukeon-grid-show-group-by`           |
+
+- **Cell list style**: **Agent** or **Default**; see
+  [Agents and instances](#agents-and-instances).
+- **Default Group by** and the two **Show Group by** switches apply to the
+  Default style only; see [Group by](#group-by).
+- **Show cell scope in sidebar**: the Workbench sidebar's
   `realm / space / stack` line and per-cell scope. Search by scope and the
   Workbench grid tiles are unaffected.
-- **Show terminal status in sidebar** (on by default): the `Terminal attached /
+- **Show terminal status in sidebar**: the `Terminal attached /
 connecting / disconnected / interrupted` text on sidebar cells.
 
 ### Catalog HTTP API
