@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { checkSessionAfterSocketFailure } from "./auth";
 import { createPortal } from "react-dom";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -229,7 +230,9 @@ export function TerminalSession({ session, active, expanded, theme, update, pend
     let failure = "";
     let ready = false;
     let receivedOutput = false;
+    let opened = false;
     connection.onopen = () => {
+      opened = true;
       sentSize.current = "";
       fitNow.current();
     };
@@ -259,8 +262,10 @@ export function TerminalSession({ session, active, expanded, theme, update, pend
         if (failure) { update(session.id, session.generation, "disconnected", failure); connection.close(); }
       }
     };
-    connection.onerror = () => { failure ||= "Terminal connection failed. Check the server and retry."; update(session.id, session.generation, "disconnected", failure); connection.close(); };
-    connection.onclose = () => update(session.id, session.generation, "disconnected", failure || "Terminal connection closed. Reconnect to attach again.");
+    // A refused upgrade hides its status code; ask the session route so a 401 signs the UI out (#1652).
+    const checkSession = () => { if (!opened) { opened = true; checkSessionAfterSocketFailure(); } };
+    connection.onerror = () => { checkSession(); failure ||= "Terminal connection failed. Check the server and retry."; update(session.id, session.generation, "disconnected", failure); connection.close(); };
+    connection.onclose = () => { checkSession(); update(session.id, session.generation, "disconnected", failure || "Terminal connection closed. Reconnect to attach again."); };
     return () => {
       connection.onopen = connection.onmessage = connection.onerror = connection.onclose = null;
       connection.close();

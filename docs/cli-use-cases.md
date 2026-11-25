@@ -32,6 +32,7 @@ sudo kuke init --kukeond-image docker.io/library/<img>:<tag>
 - Side effect: `/opt/kukeon/data/{default,kuke-system}/...` populated; `/run/kukeon/{kukeond.sock,kukeond.pid}` created; containerd namespaces `default.kukeon.io` and `kuke-system.kukeon.io` exist; cgroup subtree `/kukeon/...` populated.
 - After success, `kuke get realms` and `kuke get realms --no-daemon` both list **at least** `default` and `kuke-system` in `Ready` state with their canonical namespaces. The two outputs must agree — divergence indicates the daemon's view of `/opt/kukeon` is stale (the bind-mount regression AGENTS.md guards against).
 - Second invocation on a healthy host is idempotent: each provisioning phase reports "already existed" and the container-start phase reports "already running" (no bare "started" — that wording is reserved for a phase that actually created or transitioned something), exit code 0, the daemon stays up.
+- Web UI login (#1652): when realm `kuke-system` has no Secret `web-ui-admin`, init creates it — realm-scoped, `basic-auth`, `username: root`, `password:` 32 hex characters from `crypto/rand`, files `0600` in a `0700` directory — and prints a `Web UI login (kuke serve):` block with the user, the password and the read-back command `kuke get secret web-ui-admin --realm kuke-system -o yaml`. `kukeond is ready (...)` stays the last line. kukeond never creates the secret.
 - `kuke doctor cgroups` on the same host exits 0 once cgroup controllers are delegated; non-zero output names which controller is missing and whether the kernel lacks support or the parent didn't delegate.
 
 ### Update
@@ -355,12 +356,14 @@ sudo kuke apply -f manifest.yaml -o json
 
 ### Secrets (`kind: Secret`)
 
-**Intent.** Store a named, scoped, daemon-managed credential. Phase 3a (issue #619) ships the storage primitive and the `apply` verb only — there is **no** `get` / `delete` verb (tracked in #622) and **no** way to reference a stored secret from a container yet (`ContainerSecret.secretRef`, tracked in #623). The existing `containers[].secrets[].fromFile` / `fromEnv` sources are unaffected and stay supported.
+**Intent.** Store a named, scoped, daemon-managed credential, read it back, and reference it from a container (`ContainerSecret.secretRef`). The existing `containers[].secrets[].fromFile` / `fromEnv` sources are unaffected and stay supported.
 
 **Sequence.**
 
 ```bash
 sudo kuke apply -f secret.yaml
+kuke get secret anthropic-token --realm kuke-system -o yaml     # the whole document, material included
+kuke get secret anthropic-token --realm kuke-system -o yaml | sudo kuke apply -f -   # re-applies unchanged
 ```
 
 ```yaml
@@ -373,7 +376,7 @@ metadata:
   # stack: web                  # optional — stack-scoped (requires space)
   # cell: api                   # optional — cell-scoped (requires stack)
 spec:
-  data: <bytes> # write-only; never echoed back
+  data: <bytes> # printed only by a named `kuke get secret <name> -o yaml|json`
 ```
 
 **Storage layout.** The daemon writes the bytes to a root-owned file under the scope's metadata tree:
@@ -393,7 +396,9 @@ The `secrets/` directory is `0700` and each secret file is `0600`, both owned by
 - `metadata.name` and `metadata.realm` are required. A deeper scope coordinate requires every shallower one (a `cell`-scoped secret must also name its `stack` and `space`); a gap exits non-zero.
 - `spec.data` is required and must be non-empty; an empty `data` exits non-zero.
 - The scope must already exist — apply does **not** auto-create a missing realm/space/stack/cell for a secret (unlike the hierarchy reconcilers). An unreachable scope exits non-zero with a `scope does not exist` message.
-- `spec.data` is never echoed back in any apply output, daemon log, or audit trail.
+- `kuke get secret <name> -o yaml` and `-o json` print the full document including `spec.data` (or `spec.basicAuth` / `spec.sshKey`), through the daemon and with `--no-daemon`; the output re-applies unchanged with `kuke apply -f -` (#1652). Every member of the `kukeon` group can therefore read every secret through the daemon, although the files stay root-only.
+- A named table or wide row, every `kuke get secrets` list in any format, and every web API response carry no material. Neither does any apply output, daemon log, or audit trail.
+- Against a kukeond that predates the read, a named `-o yaml|json` exits non-zero with an error saying kukeond must be upgraded, not a raw RPC error.
 
 ### Git credentials (typed secrets)
 
@@ -418,7 +423,7 @@ sudo kuke create cell probe --from-config dev-claude --dry-run --explain
 **Invariants.**
 
 - `--type` is `opaque` (default), `basic-auth` or `ssh-key`. `basic-auth` needs `--username` and exactly one of `--password-stdin` / `--token-stdin` / `--from-file` / `--token-file`; `ssh-key` needs `--from-file <private key>`. A flag belonging to another type exits non-zero.
-- `kuke get secrets` shows `TYPE` and `CONNECTOR` columns. No verb, log line, apply result or web UI response ever prints a secret's material — for any type.
+- `kuke get secrets` shows `TYPE` and `CONNECTOR` columns. No log line, apply result, list, table row or web UI response prints a secret's material — for any type; only a named `kuke get secret <name> -o yaml|json` does.
 - A typed secret is consumed only through a `git` block. Referencing one from `containers[].secrets[]` fails the cell create; referencing an `opaque` secret as a git credential fails it too. Both errors name the secret and the expected type, never its content.
 - A secret referenced by a cell's git credentials or signing config cannot be deleted while that cell exists (same in-use guard as `secrets[]`).
 - The git identity is rendered as a container-global gitconfig (`GIT_CONFIG_SYSTEM`), not as `GIT_AUTHOR_*` / `GIT_CONFIG_*` env, so a repository's local config and a per-repo `git` block override it. Cells created before this change keep their env rendering until recreated.
@@ -456,7 +461,7 @@ sudo kuke create cell --from-config team-dev-codex --connector-method codex=api-
 **Invariants.**
 
 - `--connector <name>` on `kuke create secret` validates the secret against that connector: an unknown connector, a type the connector does not accept, an unknown identity field, a missing required field or a value that does not read as its declared type exits non-zero and stores nothing. An identity field without `--connector` exits non-zero.
-- `kuke get secrets` shows `TYPE` and `CONNECTOR`; `-o wide` adds the readable `IDENTITY` fields. No output, log line or error carries secret material.
+- `kuke get secrets` shows `TYPE` and `CONNECTOR`; `-o wide` adds the readable `IDENTITY` fields. No list, table row, log line or error carries secret material; a named `kuke get secret <name> -o yaml|json` prints it.
 - The identity of a connector resolves per cell as: `--connector` override > the Config's fill > Stack default > Space default > Realm default. A Config that chose no identity has no fill, so changing a default changes its next cell with no re-apply of the Config.
 - `kuke get configs -o wide` prints a `CONNECTORS` column (`github=work-github (realm)`, `claude=login`, `github=MISSING`); `-o yaml` carries the same resolution in `status.connectors`.
 - A Config whose required connector resolves to no identity cannot be previewed (`--dry-run`) or created: the command exits non-zero with an error naming the connector. A named identity that is missing, tagged for another connector or of a type the connector does not accept exits non-zero too, also for an optional connector.
@@ -783,6 +788,7 @@ These are the negative paths most likely to surface a UX regression. Each is ver
 **Invariants.**
 
 - Idempotent. Each provisioning phase reports `already existed` and the container-start phase reports `already running` (never a bare `started` on a healthy re-run); exit code 0; daemon stays up.
+- An existing `web-ui-admin` secret is left untouched (same password); the `Web UI login` block prints the user and the read-back command but no `password:` line.
 
 ### Image references
 

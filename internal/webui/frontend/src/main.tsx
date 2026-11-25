@@ -9,6 +9,9 @@ import { scheduleText, type Schedule, type ScheduleStatus } from "./schedule-for
 import { when } from "./schedule";
 import { TerminalWorkspace, useTerminalSessions, type TerminalManager } from "./terminal";
 import { CellSidebar } from "./cell-sidebar";
+import { Login, useSession } from "./auth";
+import { useSettings, type Theme } from "./settings";
+import { UserMenu } from "./user-menu";
 import { useCellFilter } from "./cell-filter";
 import { matchesState } from "./cells.mjs";
 import { useInventory, type Inventory, type InventoryResource, type Doc, type RuntimeStatus } from "./inventory";
@@ -326,12 +329,7 @@ function CellDetailsScreen({ title, view, scope, revision, inventory, manager, t
   </div>;
 }
 
-type Theme = "system" | "light" | "dark";
-function initialTheme(): Theme {
-  try { const value = localStorage.getItem("kukeon-theme"); return value === "light" || value === "dark" ? value : "system"; }
-  catch { return "system"; }
-}
-function App() {
+function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
   const [revision, setRevision] = useState(0);
   const [operations, setOperations] = useState<Record<string, LifecycleFeedback>>({});
   const { notify } = useNotify();
@@ -339,8 +337,8 @@ function App() {
   const screenCell = useRef("");
   const pendingOperations = useRef(new Set<string>());
   const [route, setRoute] = useState(readRoute);
-  const [theme, setTheme] = useState<Theme>(initialTheme);
-  const nextTheme: Theme = theme === "system" ? "light" : theme === "light" ? "dark" : "system";
+  const [settings] = useSettings();
+  const theme = settings.theme;
   const [menuOpen, setMenuOpen] = useState(false);
   // The open connector's display title, reported by the Connectors page once its catalog has loaded.
   const [connectorTitle, setConnectorTitle] = useState<{ name: string; title: string }>();
@@ -368,10 +366,6 @@ function App() {
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
   }, [menuOpen]);
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    try { localStorage.setItem("kukeon-theme", theme); } catch { /* Preferences are optional. */ }
-  }, [theme]);
   const connection = useResource<{ endpoint: string; version: string; daemonVersion?: string }>("/api/connection", revision);
   const inventory = useInventory(revision);
   // The newest health report feeds the Overview's Health card and the Manage dot (#1635).
@@ -711,7 +705,7 @@ function App() {
           <SidebarToggle collapsed={false} onToggle={() => sidebar.setCollapsed(true)} />
         </div>
         <MajordomoSidebarEntry major={major} dock={dock} />
-        {view === "workbench" ? <CellSidebar inventory={inventory} selectedScope={cellScreenScope ?? []} terminalStates={terminals.cellStates} filter={cellFilter} /> : <ManageNav route={route} />}
+        {view === "workbench" ? <CellSidebar inventory={inventory} selectedScope={cellScreenScope ?? []} terminalStates={terminals.cellStates} filter={cellFilter} showScope={settings.showCellScope} showTerminalStatus={settings.showTerminalStatus} /> : <ManageNav route={route} />}
         <section className="connection" aria-label="Daemon connection">
           <div className="connection-heading">
             <p className="status" role="status"><span className={`dot ${daemonTone}`} aria-hidden="true" />{daemonStatus}</p>
@@ -743,11 +737,7 @@ function App() {
           <button className="icon-button refresh-button" type="button" aria-label="Refresh" title={inventory.loading ? "Refreshing…" : "Refresh"} aria-busy={inventory.loading} onClick={() => setRevision(value => value + 1)}>
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 11a8.1 8.1 0 0 0-14.9-4L3 10" /><path d="M3 4v6h6" /><path d="M4 13a8.1 8.1 0 0 0 14.9 4L21 14" /><path d="M21 20v-6h-6" /></svg>
           </button>
-          <button className="icon-button" type="button" aria-label={`Appearance: ${theme}; switch to ${nextTheme}`} title={`Appearance: ${theme} (switch to ${nextTheme})`} onClick={() => setTheme(nextTheme)}>
-            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              {theme === "system" ? <><rect x="3.5" y="4.5" width="17" height="12" rx="2" /><path d="M8 20h8m-4-3.5V20" /></> : theme === "light" ? <><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" /></> : <path d="M20.1 15.7A8 8 0 0 1 8.3 3.9 8.2 8.2 0 1 0 20.1 15.7Z" />}
-            </svg>
-          </button>
+          <UserMenu user={user} onSignOut={onSignOut} />
         </div>
       </header>
       <div className={`workspace-content ${isWorkspace ? "cell-workspace-content" : ""}${cellTerminalActive ? " cell-screen-content" : ""}`}>
@@ -763,4 +753,17 @@ function App() {
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing application root");
-createRoot(root).render(<StrictMode><NotificationProvider><App /></NotificationProvider></StrictMode>);
+// Root shows the login screen until the session is known and valid (#1652), so no inventory,
+// screenshot or terminal request runs before sign-in; signing out unmounts the app and with it
+// every terminal connection. The theme applies to the login screen too.
+function Root() {
+  const [settings] = useSettings();
+  const { session, retry, signedIn, signOut } = useSession();
+  useEffect(() => { document.documentElement.dataset.theme = settings.theme; }, [settings.theme]);
+  if (session.phase !== "signed-in") {
+    return <Login checking={session.phase === "checking"} notice={session.phase === "unavailable" ? session.error : undefined} onRetry={() => void retry()} onSignedIn={signedIn} />;
+  }
+  return <NotificationProvider><App user={session.user} onSignOut={() => void signOut()} /></NotificationProvider>;
+}
+
+createRoot(root).render(<StrictMode><Root /></StrictMode>);

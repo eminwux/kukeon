@@ -324,6 +324,19 @@ func (c *UnixClient) GetSecret(ctx context.Context, doc v1beta1.SecretDoc) (GetS
 	return reply.Result, nil
 }
 
+// ReadSecret implements Client (#1652).
+func (c *UnixClient) ReadSecret(ctx context.Context, doc v1beta1.SecretDoc) (GetSecretResult, error) {
+	args := &ReadSecretArgs{Doc: doc}
+	reply := &ReadSecretReply{}
+	if err := c.call(ctx, MethodReadSecret, args, reply); err != nil {
+		return GetSecretResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
 // GetVolume implements Client (#1236).
 func (c *UnixClient) GetVolume(ctx context.Context, doc v1beta1.VolumeDoc) (GetVolumeResult, error) {
 	args := &GetVolumeArgs{Doc: doc}

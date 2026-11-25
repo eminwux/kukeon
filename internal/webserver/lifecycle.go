@@ -240,5 +240,13 @@ func lifecycleErrorStatus(err error) (int, string) {
 	if errors.Is(err, errdefs.ErrResourceHasDependencies) {
 		return http.StatusConflict, "has_dependencies"
 	}
+	switch {
+	case errors.Is(err, errdefs.ErrUnauthenticated):
+		return http.StatusUnauthorized, codeUnauthenticated
+	case errors.Is(err, errdefs.ErrInvalidCredentials):
+		return http.StatusUnauthorized, codeInvalidCredentials
+	case errors.Is(err, errdefs.ErrLoginNotInitialized):
+		return http.StatusServiceUnavailable, codeLoginNotInitialized
+	}
 	return apiErrorStatus(err)
 }

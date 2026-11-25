@@ -520,7 +520,26 @@ jobs:
           KUKE_VERSION: v0.6.1
           KUKE_SKIP_INIT: "1"
         run: |
-          bash scripts/install.sh
+          set +e
+          out="$(bash scripts/install.sh 2>&1)"
+          rc=$?
+          set -e
+          echo "$out"
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::installer exited ${rc} on a KUKE_SKIP_INIT=1 install"
+            exit 1
+          fi
+          # With init skipped there is no web-ui-admin Secret to read back
+          # (issue #1652): the installer must say to run init once, print no
+          # password, and still exit 0.
+          if ! echo "$out" | grep -q 'needs a login this host does not have yet'; then
+            echo "::error::expected the web UI login hint when kuke init was skipped"
+            exit 1
+          fi
+          if echo "$out" | grep -q 'password:'; then
+            echo "::error::a KUKE_SKIP_INIT=1 install must not print a web UI password"
+            exit 1
+          fi
           test -x /usr/local/bin/kuke
           test -x /usr/local/bin/kukeond
           test -x /usr/local/bin/kukebuild

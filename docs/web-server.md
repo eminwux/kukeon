@@ -6,6 +6,32 @@ closes the HTTP listener and request-owned daemon connections; it does not stop
 kukeond or workloads. The binary embeds all frontend assets and needs no Node.js
 or external asset files at runtime.
 
+## Sign in
+
+The UI asks for a user and password before it shows anything else. There is
+one user, `root`, and its password is the `basic-auth` Secret `web-ui-admin` in
+realm `kuke-system`. `sudo kuke init` creates that secret on a host that does not
+have it yet, with a random 32-character token, and prints the login; the
+installer prints it too. Print it again at any time:
+
+```sh
+kuke get secret web-ui-admin --realm kuke-system -o yaml
+```
+
+A host installed before the login existed has no `web-ui-admin` until
+`sudo kuke init` runs once; until then a sign-in answers that it is not set up.
+There is no rotation command: edit or re-create the secret to change the
+password. Changing or deleting it (with `kuke apply`, `kuke delete secret`, or
+the Secrets page) signs every browser out within five seconds.
+
+Signing in sets a session cookie that lasts until **Sign out** or until the
+password changes, and survives a `kuke serve` restart. Nothing is stored on the
+server: **Sign out** clears the cookie in that browser only, and other browsers
+stay signed in until the password changes. If the session ends while the UI is
+open (any request answers 401), the UI returns to the sign-in screen and closes
+its terminal connections. If kukeond cannot be reached, the sign-in screen says
+so and offers **Retry**.
+
 ## Workbench and Manage
 
 The UI has two views that share one top bar. **Workbench** is where the
@@ -18,7 +44,7 @@ page. The top bar's **Workbench | Manage** switch marks the current side with
 Overview (`#/resources`). At phone width the switch shows icons, which keep
 their names for assistive technology. The kukeon logo, in the sidebar and on
 the collapsed rail, always opens the grid. **New Cell**, **Majordomo**,
-**Refresh** and the appearance toggle stay in the top bar in both views.
+**Refresh** and the user menu stay in the top bar in both views.
 Switching views never detaches a terminal: every attached session stays
 mounted while a Manage page is open.
 
@@ -57,7 +83,10 @@ grid) opens `#/cells?state=inactive`, the Cells table filtered to stopped or
 exited cells. The search and **Group by** typed in the sidebar also filter and
 group the grid. Search by cell name or any part of its realm, space, and stack
 scope. Each link shows the parent scope and reported state, so duplicate names
-remain distinct. Select a cell to open its terminal, status, overview, and
+remain distinct; the link's tooltip and accessible name always carry the full
+scope. **Settings** → **Show cell scope in sidebar** hides the scope line, and
+**Show terminal status in sidebar** hides each cell's terminal connection text;
+state and drift badges stay. Select a cell to open its terminal, status, overview, and
 containers. On narrow screens, open the sidebar with the menu button; it shows
 the sidebar of the current view, and selection closes it.
 
@@ -888,8 +917,9 @@ The server never escalates privileges. If connection fails, the shell remains
 available and API requests can be retried. A new connection is opened for each
 request, allowing recovery after the daemon restarts.
 
-At startup the server prints `Listening on http://<host:port>` and then
-`Accepted browser origin: <--url value or any>`.
+At startup the server prints `Listening on http://<host:port>`,
+`Accepted browser origin: <--url value or any>`, and the login hint: user `root`
+and the command that prints the password.
 
 Host and Origin are checked by one policy on every route: static assets, API
 GETs, JSON mutations, and the attach WebSocket.
@@ -903,8 +933,28 @@ GETs, JSON mutations, and the attach WebSocket.
   bind), any Host and any Origin are accepted. A request carrying more than one
   Origin is still rejected.
 
-No CORS allowance, accounts, sessions, or authentication tokens are provided.
-Mutations still require `Content-Type: application/json`.
+Every `/api/` route, the attach WebSocket included, needs the [sign-in](#sign-in):
+a `kukeon_session` cookie from `POST /api/login`, or the password as an
+`Authorization: Bearer <password>` header. A request without either gets
+`401 unauthenticated`; there is no flag to turn this off, and loopback binds are
+not exempt. Static assets stay public. The Host/Origin policy and the security
+headers apply to the session routes too. No CORS allowance is provided.
+Mutations, `POST /api/login` and `POST /api/logout` included, require
+`Content-Type: application/json`.
+
+- `GET /api/session` answers `200 {"user":"root"}` with a valid session (and
+  extends the cookie) and `401` without one.
+- `POST /api/login` with `{"username":"root","password":"…"}` answers `200` and
+  sets the cookie: `HttpOnly`, `SameSite=Strict`, `Path=/`, and `Secure` when
+  `--url` is `https`. A wrong user and a wrong password get the same
+  `401 invalid_credentials`. Without the `web-ui-admin` secret it answers
+  `503 login_not_initialized`, naming `sudo kuke init`.
+- `POST /api/logout` expires the cookie.
+
+A request that carries credentials while kukeond is unreachable gets
+`503 unavailable`, never a success: the server checks them against the secret
+through the daemon. The password and the cookie never appear in the server's
+output, logs, or error bodies.
 
 **Without `--url` the server has no cross-site protection, even on localhost.**
 WebSocket upgrades are not subject to CORS, so any web page open in the same
@@ -913,10 +963,10 @@ pin, a DNS-rebinding page can also read the API. Pass `--url` with the address
 you browse to (for the default bind, `--url http://localhost:5129`) to turn this
 protection on.
 
-**The UI has no authentication.** When `--listen` is not a loopback address, the
-server prints a warning on stderr: anyone who can reach the address can open
-cell terminals and run daemon actions. Expose it only on trusted networks, or
-behind a proxy that adds authentication.
+**`kuke serve` speaks plain HTTP.** When `--listen` is not a loopback address,
+the server prints a warning on stderr: the password and the session cookie cross
+the network unencrypted. Expose it only on trusted networks, or behind a proxy
+that adds TLS (and pass the `https` `--url`, so the cookie is `Secure`).
 
 ```sh
 # All interfaces, any Host/Origin.
@@ -1033,15 +1083,17 @@ filtered, and no direct resource-store reads are made.
 
 Errors use `{ "error": { "code": "...", "message": "..." } }`:
 `permission_denied` (403), `not_found` (404), `log_unavailable` (404),
-`screen_unavailable` (404), `invalid_request` (400),
-`daemon_outdated` (501), or `unavailable` (503). `daemon_outdated` means the
+`screen_unavailable` (404), `invalid_request` (400), `unauthenticated` (401),
+`invalid_credentials` (401), `daemon_outdated` (501), `login_not_initialized`
+(503), or `unavailable` (503). `daemon_outdated` means the
 running kukeond predates the request (for example the `/cgroup` route against a
 daemon built before it); redeploy kukeond with the same build as `kuke`. Requests
 time out after ten seconds. Responses are not cached.
 
 ```sh
 kuke serve --listen 127.0.0.1:5129
-curl http://127.0.0.1:5129/api/realms
+PASSWORD=$(kuke get secret web-ui-admin --realm kuke-system -o json | sed -n 's/.*"password": "\(.*\)".*/\1/p')
+curl -H "Authorization: Bearer $PASSWORD" http://127.0.0.1:5129/api/realms
 ```
 
 ## Layout and appearance
@@ -1050,14 +1102,25 @@ The sidebar holds the kukeon brand (a link to the Workbench grid), the
 majordomo entry, the view's own list (active cells in Workbench, the Manage
 navigation in Manage), and daemon connection and version information. The
 toolbar holds the **Workbench | Manage** switch, **New Cell**, **Majordomo**,
-refresh, and appearance controls; its breadcrumb starts at **Workbench** or
+**Refresh**, and the user menu; its breadcrumb starts at **Workbench** or
 **Overview** for the current view. Existing `#/dashboard`, `#/health`,
 resource, catalog, and hierarchy bookmarks still open their pages; browser
 history keeps working across both views.
 
-Use **Appearance** to choose **System**, **Light**, or **Dark**. System follows the
-device preference, including changes while the page is open. Explicit choices
-persist in this browser when local storage is available.
+The user menu (the avatar after **Refresh**) shows the signed-in user and opens
+**Settings** or **Sign out**. Enter or Space opens the menu and Escape closes it;
+focus returns to the avatar, also when the Settings dialog closes.
+
+**Settings** holds per-browser preferences, applied at once and stored in this
+browser only (they survive a reload when local storage is available):
+
+- **Appearance**: **System**, **Light**, or **Dark**. System follows the device
+  preference, including changes while the page is open.
+- **Show cell scope in sidebar** (on by default): the Workbench sidebar's
+  `realm / space / stack` line and per-cell scope. Search by scope and the
+  Workbench grid tiles are unaffected.
+- **Show terminal status in sidebar** (on by default): the `Terminal attached /
+connecting / disconnected / interrupted` text on sidebar cells.
 
 ### Catalog HTTP API
 

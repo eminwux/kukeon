@@ -244,6 +244,13 @@ const (
 	KukeSystemCellName      = "kukeond"
 	KukeSystemContainerName = "kukeond"
 
+	// WebUIAdminSecretName and WebUIAdminUser name the `kuke serve` login
+	// (issue #1652): a realm-scoped basic-auth Secret in KukeSystemRealmName
+	// whose username is WebUIAdminUser and whose password is the login token.
+	// `kuke init` creates it when absent; kukeond never does.
+	WebUIAdminSecretName = "web-ui-admin"
+	WebUIAdminUser       = "root"
+
 	// KukeonSystemUser and KukeonSystemGroup name the system identity created
 	// by `kuke init` so a non-root operator added to the kukeon group can
 	// dial the kukeond socket without sudo. Writes under /opt/kukeon still

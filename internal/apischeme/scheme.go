@@ -187,8 +187,8 @@ func NormalizeSecret(req ext.SecretDoc) (intmodel.Secret, ext.Version, error) {
 
 // ConvertSecretToExternal builds a metadata-only external SecretDoc from the
 // internal hub type (issue #622). The material fields are deliberately left
-// zero: the get/list verbs never echo the secret material, preserving the
-// never-round-tripped contract from #619. Only the readable fields — Spec.Type,
+// zero: get, list and every web API response stay metadata-only (#619); only
+// ConvertSecretToExternalWithMaterial carries the bytes (#1652). Only the readable fields — Spec.Type,
 // Spec.Connector and Spec.Identity — are reported.
 func ConvertSecretToExternal(in intmodel.Secret) ext.SecretDoc {
 	return ext.SecretDoc{
@@ -207,6 +207,32 @@ func ConvertSecretToExternal(in intmodel.Secret) ext.SecretDoc {
 			Identity:  cloneStringMap(in.Spec.Identity),
 		},
 	}
+}
+
+// ConvertSecretToExternalWithMaterial builds a full external SecretDoc,
+// material included (issue #1652). Only ReadSecret, which backs a named
+// `kuke get secret -o yaml|json` and the `kuke serve` login, uses it; every
+// other read goes through the metadata-only ConvertSecretToExternal.
+func ConvertSecretToExternalWithMaterial(in intmodel.Secret) ext.SecretDoc {
+	out := ConvertSecretToExternal(in)
+	out.Spec.Data = in.Spec.Data
+	if in.Spec.BasicAuth != nil {
+		out.Spec.BasicAuth = &ext.SecretBasicAuth{
+			Username: in.Spec.BasicAuth.Username,
+			Password: in.Spec.BasicAuth.Password,
+			Token:    in.Spec.BasicAuth.Token,
+		}
+	}
+	if in.Spec.SSHKey != nil {
+		out.Spec.SSHKey = &ext.SecretSSHKey{
+			PrivateKey:  in.Spec.SSHKey.PrivateKey,
+			Passphrase:  in.Spec.SSHKey.Passphrase,
+			PublicKey:   in.Spec.SSHKey.PublicKey,
+			Certificate: in.Spec.SSHKey.Certificate,
+			KnownHosts:  in.Spec.SSHKey.KnownHosts,
+		}
+	}
+	return out
 }
 
 // secretSpecToInternal copies a Secret's type and material into the internal

@@ -30,6 +30,7 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/internal/celllifecycle"
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/webui"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
@@ -64,7 +65,12 @@ func Run(
 	if err != nil {
 		return err
 	}
-	handler, err := newHandlerWithPolicy(policy, endpoint, dial)
+	catalog, err := connector.Default()
+	if err != nil {
+		return fmt.Errorf("load connector catalog: %w", err)
+	}
+	auth := newAuthenticator(dial, policy.secure())
+	handler, err := buildHandler(policy, endpoint, dial, catalog, auth)
 	if err != nil {
 		return err
 	}
@@ -88,9 +94,13 @@ func Run(
 	if _, err = fmt.Fprintf(out, "Accepted browser origin: %s\n", policy); err != nil {
 		return err
 	}
+	if _, err = fmt.Fprintf(out, "Login: user %s; print the password with `%s`\n",
+		consts.WebUIAdminUser, loginReadBack); err != nil {
+		return err
+	}
 	if !target.loopback {
-		_, _ = fmt.Fprintln(errOut, "WARNING: the web UI has no authentication. Anyone who can reach "+
-			"this address can open cell terminals and run daemon actions.")
+		_, _ = fmt.Fprintln(errOut, "WARNING: this address serves plain HTTP. The password and the "+
+			"session cookie cross the network unencrypted; put a TLS proxy in front of kuke serve.")
 	}
 	done := make(chan struct{})
 	go func() {
@@ -132,8 +142,21 @@ func newHandlerWithPolicy(policy accessPolicy, endpoint string, dial Dial) (http
 }
 
 // newHandlerWithCatalog builds the handler over an explicit connector catalog.
+// Like newHandler and newHandlerWithPolicy it builds no login gate: these
+// constructors are for tests of the routes behind the gate. Run, the only
+// production entry point, always builds the gated handler.
 func newHandlerWithCatalog(
 	policy accessPolicy, endpoint string, dial Dial, catalog *connector.Catalog,
+) (http.Handler, error) {
+	return buildHandler(policy, endpoint, dial, catalog, nil)
+}
+
+// buildHandler assembles the routes, the security headers, the Host/Origin
+// policy and, when auth is set, the login gate and its session routes
+// (issue #1652). The policy and headers apply to every route, the session
+// routes included.
+func buildHandler(
+	policy accessPolicy, endpoint string, dial Dial, catalog *connector.Catalog, auth *authenticator,
 ) (http.Handler, error) {
 	assets, err := webui.Assets()
 	if err != nil {
@@ -149,6 +172,11 @@ func newHandlerWithCatalog(
 	registerConnectorRoutes(mux, dial, catalog)
 	registerTeamRoutes(mux, dial, catalog)
 	registerDaemonRoutes(mux, endpoint, dial)
+	var api http.Handler = mux
+	if auth != nil {
+		auth.registerSessionRoutes(mux)
+		api = auth.gate(mux)
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -158,7 +186,7 @@ func newHandlerWithCatalog(
 			http.Error(w, "unexpected Host or Origin", http.StatusForbidden)
 			return
 		}
-		mux.ServeHTTP(w, r)
+		api.ServeHTTP(w, r)
 	}), nil
 }
 

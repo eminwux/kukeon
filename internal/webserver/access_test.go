@@ -251,7 +251,7 @@ func TestRunWarnsOnNonLoopbackBind(t *testing.T) {
 				done <- Run(ctx, tc.listen, tc.url, "", nil, stdout, &stderr)
 			}()
 			var lines []string
-			for len(lines) < 2 {
+			for len(lines) < 3 {
 				select {
 				case line := <-stdout:
 					lines = append(lines, strings.TrimSpace(line))
@@ -268,12 +268,20 @@ func TestRunWarnsOnNonLoopbackBind(t *testing.T) {
 			if lines[1] != "Accepted browser origin: "+tc.origin {
 				t.Fatalf("origin line = %q", lines[1])
 			}
+			wantHint := "Login: user root; print the password with " +
+				"`kuke get secret web-ui-admin --realm kuke-system -o yaml`"
+			if lines[2] != wantHint {
+				t.Fatalf("login hint = %q, want %q", lines[2], wantHint)
+			}
 			cancel()
 			if err := <-done; err != nil {
 				t.Fatal(err)
 			}
-			if warned := strings.Contains(stderr.String(), "no authentication"); warned != tc.warn {
+			if warned := strings.Contains(stderr.String(), "serves plain HTTP"); warned != tc.warn {
 				t.Fatalf("warning=%v want %v: %q", warned, tc.warn, stderr.String())
+			}
+			if strings.Contains(stderr.String(), "no authentication") {
+				t.Fatalf("warning still claims no authentication: %q", stderr.String())
 			}
 		})
 	}

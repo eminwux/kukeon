@@ -189,6 +189,13 @@ func (s *KukeonV1Service) GetSecret(args *kukeonv1.GetSecretArgs, reply *kukeonv
 	return nil
 }
 
+func (s *KukeonV1Service) ReadSecret(args *kukeonv1.ReadSecretArgs, reply *kukeonv1.ReadSecretReply) error {
+	result, err := s.core.ReadSecret(s.ctx, args.Doc)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
 func (s *KukeonV1Service) GetBlueprint(args *kukeonv1.GetBlueprintArgs, reply *kukeonv1.GetBlueprintReply) error {
 	result, err := s.core.GetBlueprint(s.ctx, args.Doc)
 	reply.Result = result

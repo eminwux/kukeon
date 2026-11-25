@@ -820,6 +820,35 @@ EOF
     esac
 }
 
+# print_web_ui_login prints how to open the web UI and log in (issue #1652).
+# The password is read back from the web-ui-admin Secret `kuke init` creates.
+# When the secret is absent or unreadable — KUKE_SKIP_INIT=1, or the installer
+# skipped `kuke init` on a host whose daemon was already running — it says to
+# run init once. The lookup failing is an expected outcome, not an install
+# failure: under `set -euo pipefail` its non-zero status would otherwise abort
+# the script here, after a successful install, so it is tolerated explicitly.
+print_web_ui_login() {
+    _web_password="$($SUDO kuke get secret web-ui-admin --realm kuke-system -o json 2>/dev/null \
+        | sed -n 's/^.*"password": *"\([^"]*\)".*$/\1/p' | head -n 1)" || _web_password=""
+    if [ -n "$_web_password" ]; then
+        cat <<EOF
+
+Open the web UI:
+  ${C_BOLD}kuke serve${C_RESET}   then browse to ${C_BOLD}http://localhost:5129${C_RESET}
+  user:     ${C_BOLD}root${C_RESET}
+  password: ${C_BOLD}${_web_password}${C_RESET}
+  read it again: kuke get secret web-ui-admin --realm kuke-system -o yaml
+EOF
+    else
+        cat <<EOF
+
+The web UI (${C_BOLD}kuke serve${C_RESET}) needs a login this host does not have yet. Create it once:
+  ${C_BOLD}sudo kuke init${C_RESET}
+EOF
+    fi
+    unset _web_password
+}
+
 print_next_steps() {
     print_group_note
     cat <<EOF
@@ -852,6 +881,7 @@ Stay current with the ${KUKE_CHANNEL} channel:
 Docs:    https://kukeon.io
 Issues:  https://github.com/${KUKE_REPO}/issues
 EOF
+    print_web_ui_login
 }
 
 # --- Main --------------------------------------------------------------------

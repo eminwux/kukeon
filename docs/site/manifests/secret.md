@@ -10,10 +10,10 @@ metadata:
   # stack: web        # optional — stack-scoped (requires space)
   # cell: api         # optional — cell-scoped (requires stack)
 spec:
-  data: <bytes> # write-only; never echoed back
+  data: <bytes> # printed only by a named `kuke get secret <name> -o yaml|json`
 ```
 
-A `Secret` is a named, scoped, daemon-managed credential — an opaque value, or a typed git credential (`spec.type`). Unlike the realm / space / stack / cell hierarchy resources it has no runtime and carries **no `status`** — its only state is the bytes on disk. `kuke apply` writes the bytes to a root-owned file under the scope's metadata tree; there is no `get` / `delete` verb (tracked in #622) yet.
+A `Secret` is a named, scoped, daemon-managed credential — an opaque value, or a typed git credential (`spec.type`). Unlike the realm / space / stack / cell hierarchy resources it has no runtime and carries **no `status`** — its only state is the bytes on disk. `kuke apply` writes the bytes to a root-owned file under the scope's metadata tree; `kuke get secret` reads it back and `kuke delete secret` removes it.
 
 See [`docs/cli-use-cases.md` → Secrets](https://github.com/eminwux/kukeon/blob/main/docs/cli-use-cases.md) for the full apply workflow and invariants.
 
@@ -91,7 +91,14 @@ The raw secret material supplied at apply time. Must be non-empty; an empty `dat
 | `certificate` | string | no       | An OpenSSH user certificate presented together with the key.                                                                     |
 | `knownHosts`  | string | no       | Pinned host keys in `known_hosts` format. Omitted, the built-in keys of `github.com`, `gitlab.com` and `bitbucket.org` are used. |
 
-Every material field of every type is **write-only**: it is persisted to the daemon-managed file and never echoed back in apply output, `kuke get secret`, the web UI, a daemon log or an audit trail. Only the secret's name, scope, `type`, `connector` and `identity` are readable.
+The material of every type is persisted to the daemon-managed file and is printed by exactly one command: a named `kuke get secret <name> -o yaml` or `-o json`, which prints the whole document, material included, so the output re-applies unchanged with `kuke apply -f -`. It never appears in apply output, a `kuke get secret` table or wide row, any `kuke get secrets` list (in any format), the web UI or its API, a daemon log or an audit trail; those show only the secret's name, scope, `type`, `connector` and `identity`.
+
+```sh
+kuke get secret forge-https --realm default -o yaml   # material included
+kuke get secret forge-https --realm default           # metadata row only
+```
+
+**Anyone who can reach kukeond can read every secret.** The files on disk stay root-only (below), but the daemon hands the material to any client that can dial its socket: root and every member of the `kukeon` group, through the daemon or with `--no-daemon` as root. A `kukeond` older than the `kuke` client answers the named `-o yaml|json` read with an error saying kukeond must be upgraded.
 
 ## Storage layout
 

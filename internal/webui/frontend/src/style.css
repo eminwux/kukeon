@@ -781,3 +781,33 @@ button.cell-tile { border: 1px solid var(--line); background: var(--panel); }
 .cell-tile-empty { display: grid; place-items: center; color: var(--muted); font-family: inherit; font-size: var(--font-sm); white-space: normal; }
 .cell-tile-foot { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: var(--font-sm); }
 .workbench .cell-stopped-link { margin: 14px 0 0; }
+/* Login screen, user menu and Settings (#1652). */
+.login-screen { min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px; background: var(--canvas); color: var(--text); }
+.login-card { display: grid; gap: 14px; width: min(380px, 100%); padding: clamp(20px, 5vw, 32px); border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.login-card h1 { margin: 0; font-size: 19px; font-weight: 600; }
+.login-card label { display: grid; gap: 6px; font-size: var(--font-sm); color: var(--muted); }
+.login-card .error { margin: 0; }
+.login-card .error button { margin-top: 8px; }
+.login-brand { display: flex; align-items: center; gap: 11px; font-size: 18px; font-weight: 650; letter-spacing: -.03em; }
+.login-status { margin: 0; color: var(--muted); font-size: var(--font-sm); }
+.login-hint { margin: 0; color: var(--muted); font-size: var(--font-sm); line-height: 1.6; overflow-wrap: anywhere; }
+.login-hint code { font-family: var(--mono); color: var(--text); }
+.user-menu { position: relative; }
+.user-avatar { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--selected); color: var(--accent); font-size: var(--font-sm); font-weight: 650; }
+.user-menu-popup { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; display: grid; min-width: 200px; padding: 6px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); box-shadow: 0 12px 36px #0003; }
+.user-menu-identity { margin: 4px 8px 8px; color: var(--muted); font-size: var(--font-sm); overflow-wrap: anywhere; }
+.user-menu-identity strong { color: var(--text); }
+.user-menu-popup [role="menuitem"] { border-color: transparent; background: transparent; text-align: left; font-size: var(--font-md); }
+.user-menu-popup [role="menuitem"]:hover, .user-menu-popup [role="menuitem"]:focus-visible { background: var(--hover); }
+.settings-dialog fieldset { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0; padding: 0; border: 0; font-size: var(--font-md); }
+.settings-dialog legend { width: 100%; margin-bottom: 6px; font-weight: 600; }
+.settings-dialog fieldset label { display: inline-flex; align-items: center; gap: 6px; }
+.settings-dialog fieldset input { width: auto; }
+.settings-switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: var(--font-md); }
+.settings-switch [role="switch"] { display: inline-flex; align-items: center; gap: 8px; padding: 4px 8px; }
+.switch-track { position: relative; width: 30px; height: 16px; border-radius: 8px; background: var(--line); transition: background .15s; }
+.switch-thumb { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--panel); transition: transform .15s; }
+[role="switch"][aria-checked="true"] .switch-track { background: var(--accent); }
+[role="switch"][aria-checked="true"] .switch-thumb { transform: translateX(14px); }
+.switch-text { min-width: 2.2em; font-size: var(--font-sm); color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { .switch-track, .switch-thumb { transition: none; } }

@@ -19,9 +19,10 @@ package v1beta1
 // SecretDoc is the top-level document for a named, scoped, daemon-managed
 // credential (kind: Secret, issue #619). Unlike the realm/space/stack/cell
 // hierarchy resources it carries no Status: a Secret has no runtime — its
-// bytes are written once to a daemon-owned file under the scope's metadata
-// tree and are never round-tripped back into any output, log, or audit
-// trail. Phase 3a ships only the schema + storage primitive + `kuke apply`;
+// bytes are written to a root-only, daemon-owned file under the scope's
+// metadata tree. They never appear in a log, an audit trail, a list, table
+// output or a web API response; the only read-back is a named
+// `kuke get secret <name> -o yaml|json` (issue #1652). Phase 3a ships only the schema + storage primitive + `kuke apply`;
 // the `kuke get`/`kuke delete` verbs (#622) and the `ContainerSecret.secretRef`
 // source (#623) build on this foundation.
 type SecretDoc struct {
@@ -59,8 +60,8 @@ type SecretMetadata struct {
 const (
 	// SecretTypeOpaque is the default: Spec.Data holds the raw bytes.
 	SecretTypeOpaque = "opaque"
-	// SecretTypeBasicAuth is an HTTPS git credential: a username plus a
-	// password or a token (Spec.BasicAuth).
+	// SecretTypeBasicAuth is a username plus a password or a token
+	// (Spec.BasicAuth): an HTTPS git credential, or the `kuke serve` login.
 	SecretTypeBasicAuth = "basic-auth"
 	// SecretTypeSSHKey is an SSH git credential and signing key: an OpenSSH
 	// private key with an optional passphrase, public key, certificate and
@@ -68,12 +69,11 @@ const (
 	SecretTypeSSHKey = "ssh-key"
 )
 
-// SecretSpec carries the secret material supplied at apply time. Every material
-// field is write-only from the operator's perspective: it is persisted to the
-// daemon-managed file and never echoed back. Type, Connector and Identity are
-// the readable fields `kuke get secret` reports. The omitempty tags keep a zero
-// value out of any incidental serialization, but the material itself is never
-// serialized into a result or status by design.
+// SecretSpec carries the secret material supplied at apply time. The material
+// is persisted to the daemon-managed file. Type, Connector and Identity are
+// the readable fields every `kuke get secret` reports; the material is printed
+// only by a named `kuke get secret <name> -o yaml|json` (issue #1652), never by
+// a list, table output or a web API response.
 type SecretSpec struct {
 	// Type is one of opaque (default when empty), basic-auth or ssh-key.
 	Type string `json:"type,omitempty"      yaml:"type,omitempty"`
@@ -97,8 +97,9 @@ type SecretSpec struct {
 	SSHKey *SecretSSHKey `json:"sshKey,omitempty"    yaml:"sshKey,omitempty"`
 }
 
-// SecretBasicAuth is an HTTPS git credential. Exactly one of Password or Token
-// is set; both are sent as the HTTP basic-auth password.
+// SecretBasicAuth is a username plus a password or a token: an HTTPS git
+// credential (both are sent as the HTTP basic-auth password) or the
+// `kuke serve` login (issue #1652). Exactly one of Password or Token is set.
 type SecretBasicAuth struct {
 	// Username is the HTTP basic-auth user. Required.
 	Username string `json:"username"           yaml:"username"`

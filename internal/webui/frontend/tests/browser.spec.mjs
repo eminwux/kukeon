@@ -1,8 +1,8 @@
 import { test, expect } from "@playwright/test";
-import { startServer, connectorWorld, mockConnectorAPI } from "./server.mjs";
+import { startServer, connectorWorld, mockConnectorAPI, signIn } from "./server.mjs";
 
 let server;
-test.beforeEach(async () => { server = await startServer(); });
+test.beforeEach(async ({ page }) => { server = await startServer(); await signIn(page); });
 test.afterEach(async () => { await server?.stop(); });
 const kinds = ["Realm", "Space", "Stack", "Cell", "Container"];
 function doc(scope) {
@@ -39,6 +39,21 @@ const toasts = page => page.getByRole("region", { name: "Notifications" }).locat
 const content = page => page.locator(".workspace-content");
 // Cell and container pages keep Network and Cgroup collapsed (#1568); a test opens one by its region name.
 const expand = (page, name) => page.getByRole("region", { name }).locator("summary").click();
+// Appearance lives in Settings, under the user menu (#1652).
+const userButton = page => page.locator(".toolbar").getByRole("button", { name: /^User menu/ });
+async function openSettings(page) {
+  await userButton(page).click();
+  await page.getByRole("menuitem", { name: "Settings" }).click();
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+async function setAppearance(page, label) {
+  const dialog = await openSettings(page);
+  await dialog.getByRole("radio", { name: label }).check();
+  await dialog.getByRole("button", { name: "Done" }).click();
+  await expect(dialog).toHaveCount(0);
+}
 const inventoryIndicator = (page, state) => page.locator(".toolbar").getByRole("button", { name: `Inventory ${state}: show details` });
 
 test("terminal selects eligible containers, forwards input and resize, and detaches", async ({ page }) => {
@@ -160,9 +175,7 @@ test("expanded terminal keeps its session, resizes, and follows the appearance s
   await expect.poll(async () => (await screen.boundingBox())?.height).toBeGreaterThan(initial.height);
   await expect.poll(() => messages.filter(message => typeof message === "string" && JSON.parse(message).type === "resize").length).toBeGreaterThan(initialResizeCount);
   expect(connections).toBe(1);
-  const appearance = page.getByRole("button", { name: /Appearance:/ });
-  await appearance.click();
-  await appearance.click();
+  await setAppearance(page, "Dark");
   await expect.poll(() => screen.evaluate(el => getComputedStyle(el).backgroundColor)).toBe("rgb(13, 20, 33)");
   await expect.poll(() => ansiColor(7)).toBe("rgb(229, 229, 229)");
   await expect.poll(() => ansiColor(11)).toBe("rgb(255, 255, 0)");
@@ -1057,23 +1070,171 @@ test("old resource bookmarks work and replaced requests cannot overwrite another
   await expect(page.getByLabel("Complete space JSON")).not.toContainText('"dev"');
 });
 
-test("theme icon cycles through system, light, and dark preferences", async ({ page }) => {
+test("Settings switches the appearance between system, light, and dark preferences", async ({ page }) => {
   await mock(page);
   await page.emulateMedia({ colorScheme: "dark" });
   await page.goto(server.url);
   const scheme = () => page.evaluate(() => getComputedStyle(document.documentElement).colorScheme);
   await expect.poll(scheme).toBe("dark");
-  const appearance = page.getByRole("button", { name: /Appearance:/ });
-  await appearance.click();
-  await page.reload();
-  await expect(page.getByRole("button", { name: /Appearance: light/ })).toBeVisible();
+  // The appearance control moved out of the top bar.
+  await expect(page.locator(".toolbar").getByRole("button", { name: /Appearance/ })).toHaveCount(0);
+  let dialog = await openSettings(page);
+  await expect(dialog.getByRole("radio", { name: "System" })).toBeChecked();
+  await dialog.getByRole("radio", { name: "Light" }).check();
   await expect.poll(scheme).toBe("light");
-  await page.getByRole("button", { name: /Appearance: light/ }).click();
-  await page.getByRole("button", { name: /Appearance: dark/ }).click();
+  await dialog.getByRole("button", { name: "Done" }).click();
+  await page.reload();
+  await expect.poll(scheme).toBe("light");
+  dialog = await openSettings(page);
+  await expect(dialog.getByRole("radio", { name: "Light" })).toBeChecked();
+  await dialog.getByRole("radio", { name: "Dark" }).check();
   await expect.poll(scheme).toBe("dark");
   await page.emulateMedia({ colorScheme: "light" });
-  await page.getByRole("button", { name: /Appearance: system/ }).click();
+  await dialog.getByRole("radio", { name: "System" }).check();
   await expect.poll(scheme).toBe("light");
+  expect(await page.evaluate(() => localStorage.getItem("kukeon-theme"))).toBe("system");
+});
+
+test("without a session only the login screen renders and no inventory, screenshot or terminal request is made", async ({ page }) => {
+  await mock(page);
+  const requests = [];
+  page.on("request", request => { const path = new URL(request.url()).pathname; if (path.startsWith("/api/")) requests.push(`${request.method()} ${path}`); });
+  let signedIn = false;
+  await page.route("**/api/session", route => route.fulfill(signedIn ? { json: { user: "root" } } : { status: 401, json: { error: { code: "unauthenticated", message: "sign in to use the kukeon web UI" } } }));
+  await page.route("**/api/login", async route => {
+    const body = route.request().postDataJSON();
+    if (route.request().headers()["content-type"] !== "application/json") return route.fulfill({ status: 400, json: { error: { code: "invalid_request", message: "JSON request required" } } });
+    if (body.username === "root" && body.password === "s3cret") { signedIn = true; return route.fulfill({ json: { user: "root" } }); }
+    return route.fulfill({ status: 401, json: { error: { code: "invalid_credentials", message: "invalid user or password" } } });
+  });
+  await page.goto(`${server.url}#/realms`);
+  const login = page.getByRole("form", { name: "Sign in" });
+  await expect(login).toBeVisible();
+  await expect(page.locator(".app-shell")).toHaveCount(0);
+  await expect(login.getByLabel("User")).toHaveValue("root");
+  await expect(login).toContainText("kuke get secret web-ui-admin --realm kuke-system -o yaml");
+  await login.getByLabel("User").fill("admin");
+  await login.getByLabel("Password").fill("wrong");
+  await login.getByRole("button", { name: "Sign in" }).click();
+  await expect(login.getByRole("alert")).toHaveText("invalid user or password");
+  await expect(login.getByLabel("User")).toHaveValue("admin");
+  expect(requests.every(request => request === "GET /api/session" || request === "POST /api/login"), requests.join("\n")).toBe(true);
+  await login.getByLabel("User").fill("root");
+  await login.getByLabel("Password").fill("s3cret");
+  await login.getByRole("button", { name: "Sign in" }).click();
+  // The page the URL hash names opens.
+  await expect(page.locator(".page-heading h1")).toHaveText("Realms");
+  await expect(page).toHaveURL(/#\/realms$/);
+});
+
+test("a 401 during a session returns to the login screen and closes the terminals", async ({ page }) => {
+  let expired = false;
+  await mock(page, path => expired ? { status: 401, json: { error: { code: "unauthenticated", message: "sign in to use the kukeon web UI" } } } : path.endsWith("/containers") ? { json: [{ id: "shell", attachable: true }] } : undefined);
+  const closed = [];
+  await page.routeWebSocket("**/attach", socket => {
+    socket.onClose(() => closed.push(new URL(socket.url()).pathname));
+    socket.send(JSON.stringify({ type: "ready" }));
+    socket.send(Buffer.from("output"));
+  });
+  await page.goto(server.url);
+  await page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link", { name: "Open dev / shared / services / api" }).click();
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toHaveText("Attached");
+  expired = true;
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.getByRole("form", { name: "Sign in" })).toBeVisible();
+  await expect(page.locator(".app-shell")).toHaveCount(0);
+  await expect.poll(() => closed.length).toBe(1);
+});
+
+test("a refused terminal upgrade checks the session and signs out on 401", async ({ page }) => {
+  await mock(page, path => path.endsWith("/containers") ? { json: [{ id: "shell", attachable: true }] } : undefined);
+  let signedIn = true;
+  await page.route("**/api/session", route => route.fulfill(signedIn ? { json: { user: "root" } } : { status: 401, json: { error: { code: "unauthenticated", message: "sign in" } } }));
+  await page.routeWebSocket("**/attach", socket => { signedIn = false; socket.close(); });
+  await page.goto(server.url);
+  await page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link", { name: "Open dev / shared / services / api" }).click();
+  await expect(page.getByRole("form", { name: "Sign in" })).toBeVisible();
+});
+
+test("the daemon-unavailable session check shows the login screen with a Retry", async ({ page }) => {
+  let unavailable = true;
+  await page.route("**/api/session", route => route.fulfill(unavailable ? { status: 503, json: { error: { code: "unavailable", message: "kukeond transport/connection failed" } } } : { json: { user: "root" } }));
+  await mock(page);
+  await page.goto(server.url);
+  const login = page.getByRole("form", { name: "Sign in" });
+  await expect(login.getByRole("alert")).toContainText("Daemon unavailable");
+  unavailable = false;
+  await login.getByRole("button", { name: "Retry" }).click();
+  await expect(page.locator(".page-heading h1")).toHaveText("Workbench");
+});
+
+test("the user menu names the user, opens Settings and signs out from the keyboard", async ({ page }) => {
+  await mock(page);
+  let loggedOut = 0;
+  await page.route("**/api/logout", route => {
+    if (route.request().method() === "POST" && route.request().headers()["content-type"] === "application/json") loggedOut += 1;
+    return route.fulfill({ status: 204 });
+  });
+  await page.goto(server.url);
+  const toolbar = page.locator(".toolbar-actions");
+  const buttons = toolbar.getByRole("button");
+  const names = await buttons.evaluateAll(list => list.map(button => button.getAttribute("aria-label") ?? button.textContent));
+  expect(names.indexOf("User menu: root")).toBe(names.indexOf("Refresh") + 1);
+  const button = userButton(page);
+  await button.focus();
+  await page.keyboard.press("Enter");
+  const menu = page.getByRole("menu", { name: "User" });
+  await expect(menu).toContainText("root");
+  await expect(menu.getByRole("menuitem", { name: "Settings" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+  await expect(button).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(menu).toBeVisible();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(button).toBeFocused();
+  await button.click();
+  await menu.getByRole("menuitem", { name: "Sign out" }).click();
+  await expect(page.getByRole("form", { name: "Sign in" })).toBeVisible();
+  expect(loggedOut).toBe(1);
+});
+
+test("Settings sidebar switches hide the cell scope and terminal status and persist", async ({ page }) => {
+  await mock(page, path => path.endsWith("/containers") ? { json: [{ id: "shell", attachable: true }] } : undefined);
+  await page.routeWebSocket("**/attach", socket => { socket.send(JSON.stringify({ type: "ready" })); socket.send(Buffer.from("output")); });
+  await page.goto(server.url);
+  const cells = page.getByRole("navigation", { name: "Cell navigation" });
+  const link = cells.getByRole("link", { name: "Open dev / shared / services / api" });
+  await link.click();
+  await expect(link).toContainText("Terminal attached");
+  await expect(cells.locator(".cell-link-scope").first()).toBeVisible();
+  const dialog = await openSettings(page);
+  const scopeSwitch = dialog.getByRole("switch", { name: "Show cell scope in sidebar" });
+  const statusSwitch = dialog.getByRole("switch", { name: "Show terminal status in sidebar" });
+  await expect(scopeSwitch).toHaveAttribute("aria-checked", "true");
+  await expect(statusSwitch).toHaveAttribute("aria-checked", "true");
+  await scopeSwitch.click();
+  await statusSwitch.click();
+  await expect(scopeSwitch).toHaveAttribute("aria-checked", "false");
+  await expect(cells.locator(".cell-link-scope, .cell-group-scope")).toHaveCount(0);
+  await expect(cells.locator(".cell-terminal-state")).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Done" }).click();
+  // The link keeps its full scope for the tooltip, the accessible name and search; badges stay.
+  await expect(link).toHaveAttribute("title", "dev / shared / services / api");
+  await expect(link.locator(".state-badge")).toHaveCount(1);
+  await page.getByRole("searchbox", { name: "Search cells" }).fill("prod");
+  await expect(cells.getByRole("link", { name: "Open prod / shared / services / api" })).toBeVisible();
+  await expect(link).toHaveCount(0);
+  await page.reload();
+  await expect(cells.getByRole("link").first()).toBeVisible();
+  await expect(cells.locator(".cell-link-scope, .cell-group-scope")).toHaveCount(0);
+  const reopened = await openSettings(page);
+  await expect(reopened.getByRole("switch", { name: "Show cell scope in sidebar" })).toHaveAttribute("aria-checked", "false");
+  expect(await page.evaluate(() => [localStorage.getItem("kukeon-sidebar-show-scope"), localStorage.getItem("kukeon-sidebar-show-terminal-status")])).toEqual(["false", "false"]);
 });
 
 test("mobile cell navigation closes after selection and the Workbench fits the screen", async ({ page }) => {
@@ -3184,11 +3345,14 @@ test("Daemon health distinguishes permission-denied, unavailable, outdated and f
 });
 
 test("Daemon health against the real server reports an unavailable socket", async ({ page }) => {
+  // The real server checks the session against the web-ui-admin secret through kukeond (#1652), so with the
+  // daemon socket missing it refuses the request with 503 unavailable, naming the socket, never a success.
   await page.goto(`${server.url}#/daemon`);
   const panel = page.getByRole("region", { name: "Daemon connectivity" });
   await expect(panel.locator(".state-badge")).toHaveText("Unavailable");
-  await expect(panel).toContainText("missing.sock");
-  await expect(page.getByLabel("Daemon connection").getByRole("definition")).toHaveText([/./, "unknown"]);
+  await expect(content(page).getByRole("alert").first()).toContainText("Daemon unavailable");
+  await expect(content(page).getByRole("alert").first()).toContainText("missing.sock");
+  await expect(page.getByLabel("Daemon connection").getByRole("alert")).toContainText("Daemon unavailable");
 });
 
 test("Daemon logs read the latest bounded output, follow and pause explicitly, and copy", async ({ page, context }) => {
@@ -4855,7 +5019,7 @@ test("the Sources page lists, creates, shows contents, toggles a default and rep
   expect(lastPost(world, "/api/team-defaults")).toEqual({ roles: ["dev", "pm=agents:pm"] });
   await expect(page.getByRole("status").filter({ hasText: "Defaults updated" })).toContainText("Teams inheriting from the defaults: web.");
   await overview.getByRole("button", { name: "Delete" }).click();
-  await expect(page.locator(".error[role=alert]")).toContainText("referenced by team web (role dev)");
+  await expect(content(page).locator(".error[role=alert]")).toContainText("referenced by team web (role dev)");
   await expect(page).toHaveURL(/#\/sources\/agents$/);
 });
 
@@ -5232,8 +5396,8 @@ test("each route family shows its view's sidebar and side of the switch", async 
     await expect(page.getByRole("navigation", { name: "Cell navigation" }), hash).toHaveCount(isWorkbench ? 1 : 0);
     // No page renders a horizontal navigation row.
     await expect(page.locator(".resources-nav, .nav-more"), hash).toHaveCount(0);
-    // New Cell, Majordomo, refresh and theme stay in the top bar.
-    for (const name of [/^New Cell$/, /majordomo panel/, /^Refresh$/, /^Appearance/]) await expect(page.locator(".toolbar").getByRole(name.source.includes("New Cell") ? "link" : "button", { name }), `${hash} ${name}`).toHaveCount(1);
+    // New Cell, Majordomo, refresh and the user menu stay in the top bar.
+    for (const name of [/^New Cell$/, /majordomo panel/, /^Refresh$/, /^User menu/]) await expect(page.locator(".toolbar").getByRole(name.source.includes("New Cell") ? "link" : "button", { name }), `${hash} ${name}`).toHaveCount(1);
   }
   // The switch links home and to the Overview, and the breadcrumb root follows the view.
   await expect(page.locator(".view-switch").getByRole("link", { name: "Workbench" })).toHaveAttribute("href", "#/");

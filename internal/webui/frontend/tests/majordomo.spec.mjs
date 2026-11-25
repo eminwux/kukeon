@@ -1,12 +1,12 @@
 import { test, expect } from "@playwright/test";
-import { startServer } from "./server.mjs";
+import { startServer, signIn } from "./server.mjs";
 
 // Majordomo in the web UI (#1509): the permanent sidebar entry and enable flow, the docked panel,
 // the "Ask majordomo" actions and the Health page. kuke serve runs for real with no daemon; every
 // API call and the attach WebSocket are answered here.
 
 let server;
-test.beforeEach(async () => { server = await startServer(); });
+test.beforeEach(async ({ page }) => { server = await startServer(); await signIn(page); });
 test.afterEach(async () => { await server?.stop(); });
 
 const scope = ["default", "default", "default"];
@@ -657,6 +657,7 @@ test("an enabled sweep shows no reapply instructions, and a host without majordo
   await expect(schedule.getByRole("note")).toHaveCount(0);
 
   await page.unrouteAll({ behavior: "ignoreErrors" });
+  await signIn(page);
   await world(page, { configs: [] });
   await page.reload();
   await expect(page.getByRole("region", { name: "Sweep schedule" })).toContainText("No health-sweep config found.");

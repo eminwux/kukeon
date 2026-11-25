@@ -80,15 +80,29 @@ func TestServeConfiguration(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("startup timeout")
 			}
-			resp, err := http.Get(url + "/api/connection")
+			// The API is gated (issue #1652): with a bearer token the gate
+			// reads the login secret from the configured daemon, so the
+			// unreachable socket it names shows which host serve dials.
+			request, err := http.NewRequest(http.MethodGet, url+"/api/connection", nil)
 			if err != nil {
 				t.Fatal(err)
 			}
-			var info map[string]string
+			request.Header.Set("Authorization", "Bearer token")
+			resp, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var info struct {
+				Error struct {
+					Code    string `json:"code"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
 			err = json.NewDecoder(resp.Body).Decode(&info)
 			_ = resp.Body.Close()
-			if err != nil || info["endpoint"] != tc.want {
-				t.Fatalf("info=%v err=%v", info, err)
+			if err != nil || resp.StatusCode != http.StatusServiceUnavailable ||
+				!strings.Contains(info.Error.Message, strings.TrimPrefix(tc.want, "unix://")) {
+				t.Fatalf("status=%d info=%+v err=%v, want 503 naming %s", resp.StatusCode, info, err, tc.want)
 			}
 			cancel()
 			select {

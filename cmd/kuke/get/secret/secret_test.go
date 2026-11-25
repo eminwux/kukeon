@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -194,14 +195,13 @@ func TestNewSecretCmd(t *testing.T) {
 func TestNewSecretCmd_NamedSingleRow(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
-	fake := &fakeClient{
-		getSecretFn: func(doc v1beta1.SecretDoc) (kukeonv1.GetSecretResult, error) {
-			return kukeonv1.GetSecretResult{
-				Secret:         v1beta1.SecretDoc{Metadata: doc.Metadata},
-				MetadataExists: true,
-			}, nil
-		},
+	found := func(doc v1beta1.SecretDoc) (kukeonv1.GetSecretResult, error) {
+		return kukeonv1.GetSecretResult{
+			Secret:         v1beta1.SecretDoc{Metadata: doc.Metadata},
+			MetadataExists: true,
+		}, nil
 	}
+	fake := &fakeClient{getSecretFn: found, readSecretFn: found}
 
 	run := func(t *testing.T, args ...string) string {
 		t.Helper()
@@ -263,7 +263,17 @@ type fakeClient struct {
 	kukeonv1.FakeClient
 
 	getSecretFn   func(doc v1beta1.SecretDoc) (kukeonv1.GetSecretResult, error)
+	readSecretFn  func(doc v1beta1.SecretDoc) (kukeonv1.GetSecretResult, error)
 	listSecretsFn func(realm, space, stack, cell string) ([]v1beta1.SecretDoc, error)
+	readCalls     int
+}
+
+func (f *fakeClient) ReadSecret(_ context.Context, doc v1beta1.SecretDoc) (kukeonv1.GetSecretResult, error) {
+	f.readCalls++
+	if f.readSecretFn == nil {
+		return kukeonv1.GetSecretResult{}, errors.New("unexpected ReadSecret call")
+	}
+	return f.readSecretFn(doc)
 }
 
 func (f *fakeClient) GetSecret(_ context.Context, doc v1beta1.SecretDoc) (kukeonv1.GetSecretResult, error) {
@@ -350,7 +360,7 @@ func TestNewSecretCmd_ListOutputShape(t *testing.T) {
 // TestNewSecretCmd_TypeColumn pins the #1472 TYPE column: the table reports
 // each secret's type (an unset type reads as opaque, so secrets written before
 // typed secrets existed list correctly), on both the list and the named row,
-// and `-o yaml` carries the type and nothing else of the spec.
+// and `-o yaml` carries the type.
 func TestNewSecretCmd_TypeColumn(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
@@ -359,16 +369,18 @@ func TestNewSecretCmd_TypeColumn(t *testing.T) {
 		"forge-token": v1beta1.SecretTypeBasicAuth,
 		"legacy":      "",
 	}
+	typed := func(doc v1beta1.SecretDoc) (kukeonv1.GetSecretResult, error) {
+		return kukeonv1.GetSecretResult{
+			Secret: v1beta1.SecretDoc{
+				Metadata: doc.Metadata,
+				Spec:     v1beta1.SecretSpec{Type: secrets[doc.Metadata.Name]},
+			},
+			MetadataExists: true,
+		}, nil
+	}
 	fake := &fakeClient{
-		getSecretFn: func(doc v1beta1.SecretDoc) (kukeonv1.GetSecretResult, error) {
-			return kukeonv1.GetSecretResult{
-				Secret: v1beta1.SecretDoc{
-					Metadata: doc.Metadata,
-					Spec:     v1beta1.SecretSpec{Type: secrets[doc.Metadata.Name]},
-				},
-				MetadataExists: true,
-			}, nil
-		},
+		getSecretFn:  typed,
+		readSecretFn: typed,
 		listSecretsFn: func(_, _, _, _ string) ([]v1beta1.SecretDoc, error) {
 			out := make([]v1beta1.SecretDoc, 0, len(secrets))
 			for _, name := range []string{"deploy-key", "forge-token", "legacy"} {
@@ -450,17 +462,10 @@ func TestNewSecretCmd_TypeColumn(t *testing.T) {
 		}
 	})
 
-	t.Run("-o yaml carries the type only", func(t *testing.T) {
+	t.Run("-o yaml carries the type", func(t *testing.T) {
 		out := run(t, "deploy-key", "--realm", "r1", "-o", "yaml")
 		if !strings.Contains(out, "type: "+v1beta1.SecretTypeSSHKey) {
 			t.Errorf("-o yaml should report the type; got:\n%s", out)
-		}
-		for _, line := range strings.Split(out, "\n") {
-			key, _, _ := strings.Cut(strings.TrimSpace(line), ":")
-			switch key {
-			case "data", "sshKey", "basicAuth", "privateKey", "password", "token":
-				t.Errorf("-o yaml emits material field %q; got:\n%s", key, out)
-			}
 		}
 	})
 }
@@ -468,7 +473,7 @@ func TestNewSecretCmd_TypeColumn(t *testing.T) {
 // TestNewSecretCmd_ConnectorAndIdentity pins issue #1548: `kuke get secret`
 // shows the connector a secret is an identity of — a CONNECTOR column, "-" for
 // an untagged secret — `-o wide` adds its readable identity fields, and the
-// structured formats carry both. Nothing of the material is ever reported.
+// structured formats carry both.
 func TestNewSecretCmd_ConnectorAndIdentity(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
@@ -481,10 +486,12 @@ func TestNewSecretCmd_ConnectorAndIdentity(t *testing.T) {
 		},
 	}
 	plain := v1beta1.SecretDoc{Metadata: v1beta1.SecretMetadata{Name: "legacy", Realm: "r1"}}
+	get := func(v1beta1.SecretDoc) (kukeonv1.GetSecretResult, error) {
+		return kukeonv1.GetSecretResult{Secret: tagged, MetadataExists: true}, nil
+	}
 	fake := &fakeClient{
-		getSecretFn: func(v1beta1.SecretDoc) (kukeonv1.GetSecretResult, error) {
-			return kukeonv1.GetSecretResult{Secret: tagged, MetadataExists: true}, nil
-		},
+		getSecretFn:  get,
+		readSecretFn: get,
 		listSecretsFn: func(_, _, _, _ string) ([]v1beta1.SecretDoc, error) {
 			return []v1beta1.SecretDoc{tagged, plain}, nil
 		},
@@ -541,10 +548,151 @@ func TestNewSecretCmd_ConnectorAndIdentity(t *testing.T) {
 				t.Errorf("-o %s lost %q:\n%s", format, want, doc)
 			}
 		}
-		for _, never := range []string{"privateKey", "PRIVATE KEY", "\n  data:", `"data"`, "basicAuth", "sshKey"} {
-			if strings.Contains(doc, never) {
-				t.Errorf("-o %s carries material (%q):\n%s", format, never, doc)
-			}
+	}
+}
+
+// TestNewSecretCmd_ReadMaterial pins issue #1652: a named `-o yaml|json` reads
+// the secret through ReadSecret and prints its material; a named table or wide
+// row and every list stay metadata-only and never call ReadSecret.
+func TestNewSecretCmd_ReadMaterial(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	opaque := v1beta1.SecretDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindSecret,
+		Metadata:   v1beta1.SecretMetadata{Name: "tok", Realm: "r1"},
+		Spec:       v1beta1.SecretSpec{Data: "opaque-bytes"},
+	}
+	login := v1beta1.SecretDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindSecret,
+		Metadata:   v1beta1.SecretMetadata{Name: "login", Realm: "r1"},
+		Spec: v1beta1.SecretSpec{
+			Type:      v1beta1.SecretTypeBasicAuth,
+			BasicAuth: &v1beta1.SecretBasicAuth{Username: "root", Password: "s3cr3t-pass"},
+		},
+	}
+	byName := map[string]v1beta1.SecretDoc{"tok": opaque, "login": login}
+	metadataOnly := func(doc v1beta1.SecretDoc) v1beta1.SecretDoc {
+		doc.Spec = v1beta1.SecretSpec{Type: doc.Spec.Type}
+		return doc
+	}
+	newFake := func() *fakeClient {
+		return &fakeClient{
+			getSecretFn: func(doc v1beta1.SecretDoc) (kukeonv1.GetSecretResult, error) {
+				s, ok := byName[doc.Metadata.Name]
+				return kukeonv1.GetSecretResult{Secret: metadataOnly(s), MetadataExists: ok}, nil
+			},
+			readSecretFn: func(doc v1beta1.SecretDoc) (kukeonv1.GetSecretResult, error) {
+				s, ok := byName[doc.Metadata.Name]
+				return kukeonv1.GetSecretResult{Secret: s, MetadataExists: ok}, nil
+			},
+			listSecretsFn: func(_, _, _, _ string) ([]v1beta1.SecretDoc, error) {
+				return []v1beta1.SecretDoc{metadataOnly(opaque), metadataOnly(login)}, nil
+			},
 		}
 	}
+	run := func(t *testing.T, fake *fakeClient, args ...string) (string, error) {
+		t.Helper()
+		t.Cleanup(viper.Reset)
+		cmd := secret.NewSecretCmd()
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+		cmd.SetContext(context.WithValue(context.Background(), secret.MockControllerKey{}, kukeonv1.Client(fake)))
+		cmd.SetArgs(args)
+		err := cmd.Execute()
+		return buf.String(), err
+	}
+	material := []string{"opaque-bytes", "s3cr3t-pass"}
+
+	t.Run("named -o yaml opaque prints spec.data", func(t *testing.T) {
+		fake := newFake()
+		out, err := run(t, fake, "tok", "--realm", "r1", "-o", "yaml")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(out, "data: opaque-bytes") {
+			t.Errorf("-o yaml lost spec.data:\n%s", out)
+		}
+		if fake.readCalls != 1 {
+			t.Errorf("ReadSecret calls = %d, want 1", fake.readCalls)
+		}
+	})
+
+	t.Run("named -o json basic-auth prints username and password", func(t *testing.T) {
+		fake := newFake()
+		out, err := run(t, fake, "login", "--realm", "r1", "-o", "json")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		var doc v1beta1.SecretDoc
+		if err = json.Unmarshal([]byte(out), &doc); err != nil {
+			t.Fatalf("-o json is not a SecretDoc: %v\n%s", err, out)
+		}
+		if doc.Spec.BasicAuth == nil || doc.Spec.BasicAuth.Username != "root" ||
+			doc.Spec.BasicAuth.Password != "s3cr3t-pass" {
+			t.Errorf("-o json basicAuth = %+v, want root/s3cr3t-pass", doc.Spec.BasicAuth)
+		}
+	})
+
+	for _, format := range []string{"table", "wide"} {
+		t.Run("named -o "+format+" carries no material", func(t *testing.T) {
+			fake := newFake()
+			out, err := run(t, fake, "login", "--realm", "r1", "-o", format)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			for _, m := range material {
+				if strings.Contains(out, m) {
+					t.Errorf("-o %s carries material %q:\n%s", format, m, out)
+				}
+			}
+			if fake.readCalls != 0 {
+				t.Errorf("ReadSecret calls = %d, want 0", fake.readCalls)
+			}
+		})
+	}
+
+	for _, format := range []string{"yaml", "json", "table", "wide"} {
+		t.Run("list -o "+format+" carries no material", func(t *testing.T) {
+			fake := newFake()
+			out, err := run(t, fake, "--realm", "r1", "-o", format)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			for _, m := range material {
+				if strings.Contains(out, m) {
+					t.Errorf("list -o %s carries material %q:\n%s", format, m, out)
+				}
+			}
+			if fake.readCalls != 0 {
+				t.Errorf("ReadSecret calls = %d, want 0", fake.readCalls)
+			}
+		})
+	}
+
+	t.Run("named absent", func(t *testing.T) {
+		_, err := run(t, newFake(), "x", "--realm", "r1", "-o", "yaml")
+		if err == nil || !strings.Contains(err.Error(), `secret "x" not found`) {
+			t.Errorf("error = %v, want secret \"x\" not found", err)
+		}
+	})
+
+	t.Run("outdated daemon names the upgrade", func(t *testing.T) {
+		fake := newFake()
+		fake.readSecretFn = func(v1beta1.SecretDoc) (kukeonv1.GetSecretResult, error) {
+			return kukeonv1.GetSecretResult{}, fmt.Errorf(
+				"%w: KukeonV1.ReadSecret (rpc: can't find method KukeonV1.ReadSecret)",
+				errdefs.ErrDaemonMethodUnsupported,
+			)
+		}
+		_, err := run(t, fake, "login", "--realm", "r1", "-o", "yaml")
+		if !errors.Is(err, errdefs.ErrDaemonMethodUnsupported) {
+			t.Fatalf("error = %v, want ErrDaemonMethodUnsupported", err)
+		}
+		if strings.Contains(err.Error(), "rpc:") || !strings.Contains(err.Error(), "upgrade kukeond") {
+			t.Errorf("error = %q, want an outdated-daemon message without the raw RPC error", err)
+		}
+	})
 }

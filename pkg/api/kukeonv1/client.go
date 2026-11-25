@@ -99,9 +99,15 @@ type Client interface {
 	ListImages(ctx context.Context, realm string) (ListImagesResult, error)
 	GetImage(ctx context.Context, realm, ref string) (GetImageResult, error)
 	// GetSecret reports the metadata-only view of a single named, scoped
-	// `kind: Secret` (issue #622). Spec.data is never echoed — the bytes do
-	// not traverse this RPC by design (#619).
+	// `kind: Secret` (issue #622). The material is never set; ReadSecret is
+	// the only method that carries it.
 	GetSecret(ctx context.Context, doc v1beta1.SecretDoc) (GetSecretResult, error)
+	// ReadSecret returns a single named, scoped Secret with its material
+	// (issue #1652): the read-back behind a named `kuke get secret -o
+	// yaml|json` and the `kuke serve` login check. An absent secret reports
+	// MetadataExists=false. A daemon that predates it answers with
+	// errdefs.ErrDaemonMethodUnsupported.
+	ReadSecret(ctx context.Context, doc v1beta1.SecretDoc) (GetSecretResult, error)
 	// GetBlueprint reads one named, scoped `kind: CellBlueprint`'s full
 	// document from daemon storage (issue #620). Unlike GetSecret the whole
 	// document is returned — a blueprint carries only template references —
@@ -478,6 +484,7 @@ const (
 	MethodGetCell      = ServiceName + ".GetCell"
 	MethodGetContainer = ServiceName + ".GetContainer"
 	MethodGetSecret    = ServiceName + ".GetSecret"
+	MethodReadSecret   = ServiceName + ".ReadSecret"
 	MethodGetBlueprint = ServiceName + ".GetBlueprint"
 	MethodGetConfig    = ServiceName + ".GetConfig"
 	MethodGetVolume    = ServiceName + ".GetVolume"

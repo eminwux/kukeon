@@ -467,3 +467,30 @@ func TestDeleteSecret_RefusesWhenReferencedByGit(t *testing.T) {
 		})
 	}
 }
+
+// TestReadSecret pins issue #1652: ReadSecret returns the runner's material,
+// reports an absent secret as MetadataExists=false without an error, and
+// validates the lookup before reaching the runner.
+func TestReadSecret(t *testing.T) {
+	mockRunner := &fakeRunner{
+		ReadSecretFn: func(secret intmodel.Secret) (intmodel.Secret, error) {
+			if secret.Metadata.Name == "ghost" {
+				return intmodel.Secret{}, errdefs.ErrSecretNotFound
+			}
+			return intmodel.Secret{Metadata: secret.Metadata, Spec: intmodel.SecretSpec{Data: "bytes"}}, nil
+		},
+	}
+	ctrl := setupTestController(t, mockRunner)
+
+	res, err := ctrl.ReadSecret(intmodel.Secret{Metadata: intmodel.SecretMetadata{Name: "tok", Realm: "default"}})
+	if err != nil || !res.MetadataExists || res.Secret.Spec.Data != "bytes" {
+		t.Fatalf("ReadSecret(tok) = %+v, %v; want the material", res, err)
+	}
+	res, err = ctrl.ReadSecret(intmodel.Secret{Metadata: intmodel.SecretMetadata{Name: "ghost", Realm: "default"}})
+	if err != nil || res.MetadataExists {
+		t.Fatalf("ReadSecret(ghost) = %+v, %v; want MetadataExists=false and no error", res, err)
+	}
+	if _, err = ctrl.ReadSecret(intmodel.Secret{Metadata: intmodel.SecretMetadata{Name: "tok"}}); err == nil {
+		t.Fatal("ReadSecret without a realm succeeded, want a validation error")
+	}
+}
