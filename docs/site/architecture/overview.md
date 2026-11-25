@@ -72,19 +72,16 @@ Kukeon keeps its own authoritative state on disk, under `/opt/kukeon` by default
 
 ```
 /opt/kukeon/
-├── <realm>/
-│   ├── realm.yaml
-│   └── <space>/
-│       ├── space.yaml
-│       ├── network.conflist
-│       └── <stack>/
-│           ├── stack.yaml
-│           └── <cell>/
-│               ├── cell.yaml
-│               └── containers/
-│                   └── <container>.yaml
-└── run/
-    └── kukeond.sock
+└── data/
+    └── <realm>/
+        ├── metadata.json
+        └── <space>/
+            ├── metadata.json
+            ├── network.conflist
+            └── <stack>/
+                ├── metadata.json
+                └── <cell>/
+                    └── metadata.json
 ```
 
 See [Storage layout](storage-layout.md) for details.

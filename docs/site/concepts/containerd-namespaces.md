@@ -4,20 +4,20 @@ Kukeon doesn't run its own container runtime. It drives [containerd](https://con
 
 ## The mapping
 
-| Realm         | containerd namespace                                  |
-| ------------- | ----------------------------------------------------- |
-| `main`        | `kukeon-main`                                         |
-| `kuke-system` | `kuke-system.kukeon.io`                               |
-| `mytenant`    | `kukeon-mytenant` (or whatever `spec.namespace` says) |
+| Realm         | containerd namespace                                     |
+| ------------- | -------------------------------------------------------- |
+| `main`        | `main.kukeon.io`                                         |
+| `kuke-system` | `kuke-system.kukeon.io`                                  |
+| `mytenant`    | `mytenant.kukeon.io` (or whatever `spec.namespace` says) |
 
-By default, each realm's namespace is `kukeon-<realm-name>`. The realm manifest can override this via `spec.namespace`.
+By default, each realm's namespace is `<realm-name>.kukeon.io`. The realm manifest can override this via `spec.namespace`.
 
 ## Why this matters
 
 Containerd namespaces are the tenancy boundary. They scope:
 
-- **Images** — an image pulled into `kukeon-main` is not visible from `kukeon-mytenant`; each realm maintains its own image cache.
-- **Containers** — a container running in `kukeon-main` can only be listed, stopped, or inspected by a client scoped to `kukeon-main`.
+- **Images** — an image pulled into `main.kukeon.io` is not visible from `mytenant.kukeon.io`; each realm maintains its own image cache.
+- **Containers** — a container running in `main.kukeon.io` can only be listed, stopped, or inspected by a client scoped to `main.kukeon.io`.
 - **Tasks** — running tasks are namespaced too.
 - **Snapshots and content** — the underlying layer store is shared, but the references are namespaced.
 
@@ -29,16 +29,16 @@ Anything Kukeon does through containerd is visible to `ctr`, the low-level conta
 
 ```bash
 # Images in the main realm
-sudo ctr -n kukeon-main images ls
+sudo ctr -n main.kukeon.io images ls
 
 # Containers in the main realm
-sudo ctr -n kukeon-main containers ls
+sudo ctr -n main.kukeon.io containers ls
 
 # Running tasks (the equivalent of `docker ps`) in the main realm
-sudo ctr -n kukeon-main tasks ls
+sudo ctr -n main.kukeon.io tasks ls
 
 # Attach to a task's stdout (useful for debugging)
-sudo ctr -n kukeon-main tasks attach <container-id>
+sudo ctr -n main.kukeon.io tasks attach <space>_<stack>_<cell>_<container>
 ```
 
 If `ctr -n <ns> images ls` returns empty, the image was never imported into that namespace. A common cause is importing into `default` instead of the realm's namespace. See [Build from source](../install/build-from-source.md#rebuild-the-kukeond-container-image) for the correct way to import.

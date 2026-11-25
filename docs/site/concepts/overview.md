@@ -60,7 +60,7 @@ In addition to the realm you create, `kuke init` creates a second realm called `
 
 When you run `kuke init` with no arguments, Kukeon creates:
 
-- A user realm `default` (containerd namespace `kukeon-default`)
+- A user realm `default` (containerd namespace `default.kukeon.io`)
 - A space `default` inside the `default` realm (CNI network `default-default`, bridge `kuke-default-de…` truncated to fit the 15-char kernel limit)
 - A stack `default` inside `default/default`
 - The system realm `kuke-system` with the `kukeond` cell

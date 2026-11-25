@@ -63,7 +63,7 @@ hello-world  default  default  default  Ready
 If it's still `Pending`, give it a second and re-run. If it's `Failed`, check the container's log via `ctr`:
 
 ```bash
-sudo ctr -n kukeon-default tasks attach hello-world_web
+sudo ctr -n default.kukeon.io tasks attach default_default_hello-world_web
 ```
 
 ## 4. Find the cell IP and curl it
@@ -71,7 +71,7 @@ sudo ctr -n kukeon-default tasks attach hello-world_web
 The default-default space bridge is `10.88.0.0/16`. The cell gets one IP on that bridge. To find it, get the root container's pid from containerd, then peek into its network namespace:
 
 ```bash
-ROOT_PID=$(sudo ctr -n kukeon.io task ls | awk '/hello-world_root/ {print $2}')
+ROOT_PID=$(sudo ctr -n default.kukeon.io task ls | awk '/default_default_hello-world_root/ {print $2}')
 CELL_IP=$(sudo nsenter -t "${ROOT_PID}" -n ip -4 -o addr show eth0 | awk '{print $4}' | cut -d/ -f1)
 curl http://${CELL_IP}:8080/
 ```
@@ -79,7 +79,7 @@ curl http://${CELL_IP}:8080/
 You should see the HTML from the manifest.
 
 !!! note "Containerd namespace"
-In the default bootstrap, the containerd namespace for `realm=default` is `kukeon-default`. If your realm is named differently, replace the namespace accordingly. Older layouts used `kukeon.io` as the default namespace.
+In the default bootstrap, the containerd namespace for `realm=default` is `default.kukeon.io`. If your realm is named differently, replace the namespace accordingly. Older layouts used `kukeon.io` as the default namespace.
 
 ## 5. Tear down
 
@@ -93,7 +93,7 @@ sudo kuke delete cell hello-world \
 ## What you just did
 
 - Applied a YAML manifest — one cell, one container.
-- Watched Kukeon create a cgroup under `/sys/fs/cgroup/kukeon/default/default/default/hello-world/`, a network namespace, a veth into the default bridge, and a containerd container in the `kukeon-default` namespace.
+- Watched Kukeon create a cgroup under `/sys/fs/cgroup/kukeon/default/default/default/hello-world/`, a network namespace, a veth into the default bridge, and a containerd container in the `default.kukeon.io` namespace.
 - Reached the container's IP from the host because your host shares the same layer-2 segment as the bridge.
 
 ## Next steps

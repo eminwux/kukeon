@@ -6,15 +6,15 @@ A **container** is a plain OCI container, created and run by containerd, that be
 
 Creating a container materializes:
 
-1. **An OCI container** in containerd, in the realm's namespace (`kukeon-<realm>`).
-2. **A cgroup leaf** — `/sys/fs/cgroup/kukeon/<realm>/<space>/<stack>/<cell>/<container>_<role>` — where `<role>` is `root` for the root container or the container id otherwise.
-3. **Metadata** at `/opt/kukeon/<realm>/<space>/<stack>/<cell>/containers/<container>.yaml`.
+1. **An OCI container** in containerd, in the realm's namespace (`<realm>.kukeon.io`).
+2. **A cgroup leaf** — `/sys/fs/cgroup/kukeon/<realm>/<space>/<stack>/<cell>/<space>_<stack>_<cell>_<role>` — where `<role>` is `root` for the root container or the container id otherwise.
+3. **Metadata** in the cell's file, `/opt/kukeon/data/<realm>/<space>/<stack>/<cell>/metadata.json`. A container has no metadata file of its own.
 
 The rootfs, image layers, and image content all live in containerd — Kukeon does not re-implement any of it. You can inspect the containerd-level state at any time:
 
 ```bash
-sudo ctr -n kukeon-main containers ls
-sudo ctr -n kukeon-main tasks ls
+sudo ctr -n main.kukeon.io containers ls
+sudo ctr -n main.kukeon.io tasks ls
 ```
 
 ## Container spec
@@ -60,18 +60,18 @@ See [Manifest Reference → Container](../manifests/container.md) for the comple
 
 ## Lifecycle
 
-| State     | What it means                                                   |
-| --------- | --------------------------------------------------------------- |
-| `Pending`    | Container metadata exists; containerd container not yet created |
-| `Ready`      | Task is running                                                 |
-| `Stopped`    | Task record exists but its task is gone, with no exit info (e.g. reaped post-reboot) |
-| `Exited`     | Task exited 0 — a clean completion (#1267)                      |
-| `Error`      | Task exited non-zero — a crash (#1267)                          |
-| `Paused`     | Task is paused (cgroup-frozen)                                  |
-| `Pausing`    | Task is in the process of being paused                          |
+| State        | What it means                                                                                          |
+| ------------ | ------------------------------------------------------------------------------------------------------ |
+| `Pending`    | Container metadata exists; containerd container not yet created                                        |
+| `Ready`      | Task is running                                                                                        |
+| `Stopped`    | Task record exists but its task is gone, with no exit info (e.g. reaped post-reboot)                   |
+| `Exited`     | Task exited 0 — a clean completion (#1267)                                                             |
+| `Error`      | Task exited non-zero — a crash (#1267)                                                                 |
+| `Paused`     | Task is paused (cgroup-frozen)                                                                         |
+| `Pausing`    | Task is in the process of being paused                                                                 |
 | `Failed`     | A kukeon container bring-up fault (reserved for kukeon's own faults — a non-zero task exit is `Error`) |
-| `NotCreated` | No containerd record at all                                    |
-| `Unknown`    | Daemon can't determine state                                    |
+| `NotCreated` | No containerd record at all                                                                            |
+| `Unknown`    | Daemon can't determine state                                                                           |
 
 ## Operations
 

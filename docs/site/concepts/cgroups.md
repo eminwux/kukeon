@@ -8,21 +8,22 @@ Everything Kukeon creates is rooted at `/sys/fs/cgroup/kukeon`:
 
 ```
 /sys/fs/cgroup/kukeon/
-├── main/                               <- realm
-│   ├── default/                        <- space
-│   │   └── default/                    <- stack
-│   │       └── hello-world/            <- cell
-│   │           ├── hello-world_root/   <- root container
-│   │           └── web/                <- non-root container
-│   └── monitoring/                     <- another space
-└── kuke-system/                        <- system realm
+├── main/                                               <- realm
+│   ├── default/                                        <- space
+│   │   └── default/                                    <- stack
+│   │       └── hello-world/                            <- cell
+│   │           ├── default_default_hello-world_root/   <- root container
+│   │           └── default_default_hello-world_web/    <- non-root container
+│   └── monitoring/                                     <- another space
+└── kuke-system/                                        <- system realm
     └── kukeon/
         └── kukeon/
             └── kukeond/
-                └── kukeond_root/
+                ├── kukeon_kukeon_kukeond_root/
+                └── kukeon_kukeon_kukeond_kukeond/
 ```
 
-Each path segment is exactly the resource name (or `<cell>_root` for the root container of a cell).
+Each path segment down to the cell is exactly the resource name. A container's segment is its containerd id: `<space>_<stack>_<cell>_root` for the root container of a cell, `<space>_<stack>_<cell>_<container>` for the others.
 
 ## Why one cgroup per layer
 
@@ -43,8 +44,8 @@ cat /sys/fs/cgroup/kukeon/main/memory.current
 # CPU stats for a cell
 cat /sys/fs/cgroup/kukeon/main/default/default/hello-world/cpu.stat
 
-# List processes in a container
-cat /sys/fs/cgroup/kukeon/main/default/default/hello-world/hello-world_root/cgroup.procs
+# List processes in a container (they sit in its `_payload` leaf)
+cat /sys/fs/cgroup/kukeon/main/default/default/hello-world/default_default_hello-world_root/_payload/cgroup.procs
 ```
 
 ## Creating policies

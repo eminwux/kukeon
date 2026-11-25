@@ -6,9 +6,9 @@ A **realm** is the outermost layer of the Kukeon hierarchy. It is the tenant bou
 
 Creating a realm materializes three things on the host:
 
-1. **A containerd namespace** — all containers the realm runs live in a dedicated containerd namespace, named `kukeon-<realm>` by default. Images pulled into one realm are not visible from another.
+1. **A containerd namespace** — all containers the realm runs live in a dedicated containerd namespace, named `<realm>.kukeon.io` by default. Images pulled into one realm are not visible from another.
 2. **A cgroup subtree** — `/sys/fs/cgroup/kukeon/<realm>` — used as the root for every space and stack inside the realm. This gives you a single place to attach quotas or account usage across the realm.
-3. **Metadata** at `/opt/kukeon/<realm>/realm.yaml` (under the run path, which is configurable via `--run-path`). This is the authoritative record that the realm exists; the daemon reconciles state from it.
+3. **Metadata** at `/opt/kukeon/data/<realm>/metadata.json` (under the run path, which is configurable via `--run-path`). This is the authoritative record that the realm exists; the daemon reconciles state from it.
 
 ## Realm spec
 
@@ -19,7 +19,7 @@ metadata:
   name: main
   labels: {}
 spec:
-  namespace: kukeon-main
+  namespace: main.kukeon.io
   registryCredentials: [] # optional, per-registry
 ```
 
@@ -28,7 +28,7 @@ The full schema is in [Manifest Reference → Realm](../manifests/realm.md).
 Key fields:
 
 - `metadata.name` — the realm's name, used everywhere as the `realmId`.
-- `spec.namespace` — the containerd namespace. Defaults to the realm name (or `kukeon-<name>` when bootstrapped by `kuke init`); you can set it explicitly.
+- `spec.namespace` — the containerd namespace. Defaults to `<name>.kukeon.io`; you can set it explicitly.
 - `spec.registryCredentials` — a list of registry logins for images this realm pulls. Scoped to the realm: two realms can use the same image reference with different credentials.
 
 ## Realms and containerd namespaces
@@ -37,10 +37,10 @@ Every containerd operation Kukeon performs is scoped to a namespace. If you want
 
 ```bash
 # List images in the `main` realm
-sudo ctr -n kukeon-main images ls
+sudo ctr -n main.kukeon.io images ls
 
 # List running tasks (containers) in the `main` realm
-sudo ctr -n kukeon-main tasks ls
+sudo ctr -n main.kukeon.io tasks ls
 ```
 
 Inspecting a different namespace (or no namespace) will not show anything Kukeon created for `main`. This is the main mechanism that gives realms their tenancy guarantee.
@@ -56,7 +56,7 @@ Inspecting a different namespace (or no namespace) will not show anything Kukeon
 
 ```bash
 # Create
-sudo kuke create realm mytenant --namespace kukeon-mytenant
+sudo kuke create realm mytenant --namespace mytenant.kukeon.io
 
 # Get (list)
 sudo kuke get realms

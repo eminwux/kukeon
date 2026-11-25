@@ -64,7 +64,7 @@ ip link show type bridge | grep kuke
 cat /etc/cni/net.d/main-default.conflist
 
 # Find the pid of a cell's root container (from containerd) and peek into its netns
-ROOT_PID=$(sudo ctr -n kukeon-main tasks ls | awk '/<cell>_root/ {print $2}')
+ROOT_PID=$(sudo ctr -n main.kukeon.io tasks ls | awk '/<space>_<stack>_<cell>_root/ {print $2}')
 sudo nsenter -t "${ROOT_PID}" -n ip -4 addr
 sudo nsenter -t "${ROOT_PID}" -n ip route
 ```

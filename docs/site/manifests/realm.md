@@ -7,7 +7,7 @@ metadata:
   name: main
   labels: {}
 spec:
-  namespace: kukeon-main
+  namespace: main.kukeon.io
   registryCredentials:
     - serverAddress: registry.example.com
       secretRef: { name: registry-registry-example-com }
@@ -22,7 +22,7 @@ See [Concepts → Realm](../concepts/realm.md) for what a realm is.
 
 ### `spec.namespace` (string, optional)
 
-The containerd namespace this realm uses for its images, containers, and tasks. Defaults to the realm's name; override when you need a namespace that differs from the realm name (e.g., for historical compatibility with `kuke-system.kukeon.io`).
+The containerd namespace this realm uses for its images, containers, and tasks. Defaults to `<realm name>.kukeon.io`; override when you need a different namespace.
 
 ### `spec.registryCredentials` (array, optional)
 
