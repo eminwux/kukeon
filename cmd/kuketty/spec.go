@@ -214,7 +214,7 @@ func resolveTtyLogLevel(t *v1beta1.ContainerTty) string {
 	if t != nil && t.LogLevel != "" {
 		return t.LogLevel
 	}
-	return "info"
+	return defaultLogLevel
 }
 
 // ttyStagesToExecSteps maps the cell's inline Tty.OnInit entries into sbsh's

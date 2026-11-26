@@ -73,6 +73,10 @@ const (
 	actionUpdated = "updated"
 )
 
+// labelTrue is the value of a boolean label that is set, such as
+// api.LabelShared on a shared blueprint.
+const labelTrue = "true"
+
 var _ Client = (kukeonv1.Client)(nil)
 
 // pendingSecret is a runtime secret the plan found missing that has a
@@ -252,7 +256,7 @@ func resolveSharedNames(
 		existing := got.Blueprint.Metadata.Labels
 		digest := md.Labels[api.LabelContentDigest]
 		switch {
-		case existing[api.LabelShared] != "true":
+		case existing[api.LabelShared] != labelTrue:
 			// Hand-written: overwriting it would destroy the operator's content.
 			name := compose.DigestName(bp)
 			notes = append(notes, fmt.Sprintf(
@@ -324,7 +328,7 @@ func supersededCopies(
 		if lookupErr != nil {
 			return nil, lookupErr
 		}
-		if !got.MetadataExists || got.Blueprint.Metadata.Labels[api.LabelShared] != "true" {
+		if !got.MetadataExists || got.Blueprint.Metadata.Labels[api.LabelShared] != labelTrue {
 			continue
 		}
 		users, usersErr := refs.users(ctx, ref.Realm, ref.Name, team)

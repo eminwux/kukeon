@@ -105,10 +105,7 @@ func (r *Exec) WriteSecret(secret intmodel.Secret) (bool, error) {
 		}
 	}
 
-	action := "updated"
-	if created {
-		action = "created"
-	}
+	action := writeAction(created)
 	// Log the scope + name + type + action only — never the bytes.
 	r.logger.InfoContext(r.ctx, "secret "+action,
 		"name", md.Name,

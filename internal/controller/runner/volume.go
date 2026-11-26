@@ -138,10 +138,7 @@ func (r *Exec) WriteVolume(volume intmodel.Volume) (bool, error) {
 		return false, err
 	}
 
-	action := "updated"
-	if created {
-		action = "created"
-	}
+	action := writeAction(created)
 	r.logger.InfoContext(r.ctx, "volume "+action,
 		"name", md.Name,
 		"realm", md.Realm,

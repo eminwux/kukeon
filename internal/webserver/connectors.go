@@ -415,10 +415,7 @@ func (a connectorAPI) createIdentity(ctx context.Context, c kukeonv1.Client, r *
 	if err != nil {
 		return nil, redactCreationError(err, input.material())
 	}
-	action := "updated"
-	if created.Created {
-		action = "created"
-	}
+	action := secretWriteAction(created.Created)
 	secretType := doc.Spec.Type
 	if secretType == "" {
 		secretType = v1beta1.SecretTypeOpaque

@@ -36,6 +36,10 @@ import (
 	"github.com/eminwux/kukeon/internal/util/naming"
 )
 
+// defaultRootContainerID is the cell-spec ID of a root container whose spec
+// names none (ctr.DefaultRootContainerSpec).
+const defaultRootContainerID = "root"
+
 // ensureCgroupParams holds parameters for ensureCgroupInternal.
 type ensureCgroupParams struct {
 	spec           ctr.CgroupSpec
@@ -1432,7 +1436,7 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 
 	// Ensure root container base name is set (use "root" if empty)
 	if rootContainerSpec.ID == "" {
-		rootContainerSpec.ID = "root"
+		rootContainerSpec.ID = defaultRootContainerID
 	}
 
 	// Set containerd ID (hierarchical format)
@@ -2276,7 +2280,7 @@ func (r *Exec) ensureCellRootContainerSpec(cell intmodel.Cell) (intmodel.Contain
 	// Ensure required fields are set
 	rootSpec.Root = true
 	if rootSpec.ID == "" {
-		rootSpec.ID = "root"
+		rootSpec.ID = defaultRootContainerID
 	}
 	// Set containerd ID (hierarchical format) if not already set
 	if rootSpec.ContainerdID == "" {

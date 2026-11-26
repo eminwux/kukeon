@@ -34,6 +34,9 @@ import (
 
 const (
 	actionFailed = "failed"
+	// actionCreated is the ReconcileResult.Action of a document the apply
+	// created, as opposed to updated or left unchanged.
+	actionCreated = "created"
 )
 
 // ApplyResult represents the result of applying a set of resources.
@@ -432,7 +435,7 @@ func (b *Exec) applyHealthReport(doc v1beta1.HealthReportDoc) (applypkg.Reconcil
 		return applypkg.ReconcileResult{}, err
 	}
 	return applypkg.ReconcileResult{
-		Action: "created",
+		Action: actionCreated,
 		Kind:   string(v1beta1.KindHealthReport),
 		Name:   stored.Metadata.Name,
 		Details: map[string]string{

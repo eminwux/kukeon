@@ -64,7 +64,7 @@ func (b *Exec) CreateConfig(config intmodel.CellConfig) (CreateConfigResult, err
 	if err != nil {
 		return res, err
 	}
-	res.Created = reconcile.Action == "created"
+	res.Created = reconcile.Action == actionCreated
 	res.Config = config
 	return res, nil
 }

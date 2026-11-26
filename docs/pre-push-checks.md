@@ -25,8 +25,8 @@ push.
 
 The lint job runs the hooks from `.pre-commit-config.yaml`, the ones
 `pre-commit install` puts on your host, over the files your branch changes,
-then `make fmt-check` over the whole tree. If the hooks pass locally they pass
-in CI.
+then `make fmt-check` over the whole tree. Hooks that pass locally pass in CI,
+with one exception: [`goconst`](#goconst-and-the-new-lines-filter).
 
 CI runs `make web-ui-test` with four Playwright workers (it sets `CI`); a local
 run uses one. To reproduce a CI-only failure, run `CI=1 make web-ui-test`.
@@ -64,3 +64,25 @@ pre-commit run --files $(git diff --name-only origin/main...HEAD)
 ```
 
 The hook is report-only (no `--fix`, #1455): fix the reported lines by hand.
+
+### `goconst` and the new-lines filter
+
+`goconst` can pass on your host and fail in CI on the same commit (#1699). It
+reports a repeated string once, at one of its occurrences, and golangci-lint
+v2.6.2 picks that occurrence by goroutine timing, so the pick changes with the
+number of CPUs. The hook then keeps the report only when the picked line is one
+your branch changed, and drops it when the line is in a `_test.go` file.
+
+`main` is kept free of `goconst` findings, so a string your branch introduces
+is reported wherever the pick lands, as long as every use is on a line you
+changed. The case that still depends on the pick is a branch that adds a use of
+a string the package already has, in tests or below the three-use threshold.
+When you add such a use, give the string a constant. To see the findings
+without the new-lines filter:
+
+```sh
+GOWORK=off golangci-lint run --enable-only goconst ./...
+```
+
+Any finding it prints can fail the CI lint job, whichever line it names. It
+prints nothing on `main`.

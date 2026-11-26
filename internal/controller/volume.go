@@ -79,7 +79,7 @@ func (b *Exec) CreateVolume(volume intmodel.Volume) (CreateVolumeResult, error) 
 	if err != nil {
 		return res, err
 	}
-	res.Created = reconcile.Action == "created"
+	res.Created = reconcile.Action == actionCreated
 	res.Volume = volume
 	res.Volume.Status.Login = b.runner.VolumeLoginStatus(volume)
 	return res, nil

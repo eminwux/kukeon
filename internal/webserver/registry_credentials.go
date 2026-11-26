@@ -34,6 +34,10 @@ import (
 
 const maxRegistryCredentialBody = 16 << 10
 
+// applyActionFailed is the action kukeond reports for a document it could not
+// apply.
+const applyActionFailed = "failed"
+
 // registryCredentialRequest is the write-only browser payload. The token
 // travels only in this JSON body; it is never read back or echoed.
 type registryCredentialRequest struct {
@@ -156,7 +160,7 @@ func upsertRealmCredential(
 		if resource.Kind != string(v1beta1.KindRealm) {
 			continue
 		}
-		if resource.Action == "failed" {
+		if resource.Action == applyActionFailed {
 			if resource.Error != "" {
 				return "", fmt.Errorf("apply realm %q: %s", resource.Name, resource.Error)
 			}

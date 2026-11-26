@@ -182,10 +182,7 @@ func (r *Exec) writeTeamDocument(
 	if err := atomicWriteFileMode(dir, path, pattern, document, teamFileMode); err != nil {
 		return false, fmt.Errorf("%w: %w", errdefs.ErrWriteTeam, err)
 	}
-	action := "updated"
-	if created {
-		action = "created"
-	}
+	action := writeAction(created)
 	r.logger.InfoContext(r.ctx, what+" "+action, "name", md.Name, "realm", md.Realm)
 	return created, nil
 }

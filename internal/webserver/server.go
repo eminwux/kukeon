@@ -45,6 +45,10 @@ const (
 	creationTimeout  = 2 * time.Minute
 	lifecycleTimeout = 5 * time.Minute
 	writeTimeout     = lifecycleTimeout + headerTimeout
+
+	// codeInvalidRequest is the API error code of a request the server
+	// refuses as malformed, whichever route refuses it.
+	codeInvalidRequest = "invalid_request"
 )
 
 // Dial creates a request-owned client, closed after the RPC completes.
@@ -301,8 +305,12 @@ func writeAPIError(w http.ResponseWriter, err error) {
 	writeJSON(w, status, map[string]any{"error": fields})
 }
 
+// codeUnavailable is the API error code of a failure no route maps to a more
+// specific one: the daemon could not serve the request.
+const codeUnavailable = "unavailable"
+
 func apiErrorStatus(err error) (int, string) {
-	status, code := http.StatusServiceUnavailable, "unavailable"
+	status, code := http.StatusServiceUnavailable, codeUnavailable
 	if connectorStatus, connectorCode, ok := connectorErrorStatus(err); ok {
 		return connectorStatus, connectorCode
 	}
@@ -357,7 +365,7 @@ func apiErrorStatus(err error) (int, string) {
 		errors.Is(err, errdefs.ErrStackNameRequired),
 		errors.Is(err, errdefs.ErrCellNameRequired),
 		errors.Is(err, errdefs.ErrContainerNameRequired):
-		status, code = http.StatusBadRequest, "invalid_request"
+		status, code = http.StatusBadRequest, codeInvalidRequest
 	}
 	return status, code
 }
