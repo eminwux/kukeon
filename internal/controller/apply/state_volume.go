@@ -18,10 +18,12 @@ package apply
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/apischeme"
+	"github.com/eminwux/kukeon/internal/connector/scopedefaults"
 	"github.com/eminwux/kukeon/internal/controller/runner"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
@@ -70,16 +72,44 @@ func RoleName(labels map[string]string) string {
 	return role
 }
 
-// OtherRoleOnStateVolume returns the role of a stored Config, other than
-// own's role, that names ref as its state volume; empty when none does. One
-// login identity serves one role: the harness state directory also holds role
-// content the role rewrites on every start. Configs without a role label may
-// share a volume with each other, and a Config that cannot be read is skipped.
-func OtherRoleOnStateVolume(r runner.Runner, ref ext.VolumeRef, own ext.CellConfigMetadata) string {
+// CellKey names a cell by its scope and name.
+type CellKey struct {
+	Realm, Space, Stack, Name string
+}
+
+// OtherRoleOnStateVolume returns a role, other than own's role, that uses ref
+// as its login identity — through a stored Config naming it as its state
+// volume, or a cell that picked it (`--connector <connector>=<volume>`, kept
+// in the cell's provenance); empty when none does. One login identity serves
+// one role: the harness state directory also holds role content the role
+// rewrites on every start. Configs and cells without a role may share a
+// volume with each other, and one that cannot be read is skipped. self is the
+// cell being rendered, whose own pick does not count; zero when there is none.
+func OtherRoleOnStateVolume(r runner.Runner, ref ext.VolumeRef, own ext.CellConfigMetadata, self CellKey) string {
 	ownRole := RoleName(own.Labels)
-	if ownRole == "" {
+	if ownRole == "" || !safeVolumeRef(ref) {
 		return ""
 	}
+	if role := otherConfigRole(r, ref, own, ownRole); role != "" {
+		return role
+	}
+	return otherCellRole(r, ref, ownRole, self)
+}
+
+// safeVolumeRef reports whether every coordinate of ref is safe to join into
+// the daemon's metadata paths; an unsafe one is refused where it is rendered.
+func safeVolumeRef(ref ext.VolumeRef) bool {
+	for _, seg := range []string{ref.Name, ref.Realm, ref.Space, ref.Stack} {
+		if !scopedefaults.SafePathSegment(seg) {
+			return false
+		}
+	}
+	return true
+}
+
+// otherConfigRole is the role of a stored Config, other than own, that names
+// ref as its state volume and is not ownRole.
+func otherConfigRole(r runner.Runner, ref ext.VolumeRef, own ext.CellConfigMetadata, ownRole string) string {
 	configs, err := r.ListConfigs(ref.Realm, "", "")
 	if err != nil {
 		return ""
@@ -89,12 +119,8 @@ func OtherRoleOnStateVolume(r runner.Runner, ref ext.VolumeRef, own ext.CellConf
 			md.Metadata.Space == own.Space && md.Metadata.Stack == own.Stack {
 			continue
 		}
-		cfg, getErr := r.GetConfig(intmodel.CellConfig{Metadata: md.Metadata})
-		if getErr != nil {
-			continue
-		}
-		doc, convErr := apischeme.ConvertCellConfigToExternal(cfg)
-		if convErr != nil {
+		doc, ok := readConfig(r, md.Metadata)
+		if !ok {
 			continue
 		}
 		role := RoleName(doc.Metadata.Labels)
@@ -106,6 +132,68 @@ func OtherRoleOnStateVolume(r runner.Runner, ref ext.VolumeRef, own ext.CellConf
 		}
 	}
 	return ""
+}
+
+// otherCellRole is the role of a cell, other than self, that picked ref as
+// its login identity and whose Config is not of ownRole. A cell's role is its
+// Config's: cells carry no role label.
+func otherCellRole(r runner.Runner, ref ext.VolumeRef, ownRole string, self CellKey) string {
+	cells, err := r.ListCells(ref.Realm, "", "")
+	if err != nil {
+		return ""
+	}
+	want := intmodel.VolumeRef{Name: ref.Name, Realm: ref.Realm, Space: ref.Space, Stack: ref.Stack}
+	for _, cell := range cells {
+		key := CellKey{
+			Realm: cell.Spec.RealmName, Space: cell.Spec.SpaceName,
+			Stack: cell.Spec.StackName, Name: cell.Metadata.Name,
+		}
+		prov := cell.Spec.Provenance
+		if key == self || prov == nil || !slices.Contains(slices.Collect(maps.Values(prov.ConnectorVolumes)), want) {
+			continue
+		}
+		md, ok := cellConfigRef(cell)
+		if !ok {
+			continue
+		}
+		doc, ok := readConfig(r, md)
+		if !ok {
+			continue
+		}
+		if role := RoleName(doc.Metadata.Labels); role != "" && role != ownRole {
+			return role
+		}
+	}
+	return ""
+}
+
+// cellConfigRef is the Config a cell was rendered from, from its provenance;
+// an empty binding realm is the cell's own.
+func cellConfigRef(cell intmodel.Cell) (intmodel.CellConfigMetadata, bool) {
+	prov := cell.Spec.Provenance
+	if prov == nil || prov.BindingKind != ext.BindingKindConfig || strings.TrimSpace(prov.BindingRef.Name) == "" {
+		return intmodel.CellConfigMetadata{}, false
+	}
+	realm := strings.TrimSpace(prov.BindingRef.Realm)
+	if realm == "" {
+		realm = cell.Spec.RealmName
+	}
+	return intmodel.CellConfigMetadata{
+		Name: strings.TrimSpace(prov.BindingRef.Name), Realm: realm,
+		Space: strings.TrimSpace(prov.BindingRef.Space), Stack: strings.TrimSpace(prov.BindingRef.Stack),
+	}, true
+}
+
+func readConfig(r runner.Runner, md intmodel.CellConfigMetadata) (ext.CellConfigDoc, bool) {
+	cfg, err := r.GetConfig(intmodel.CellConfig{Metadata: md})
+	if err != nil {
+		return ext.CellConfigDoc{}, false
+	}
+	doc, err := apischeme.ConvertCellConfigToExternal(cfg)
+	if err != nil {
+		return ext.CellConfigDoc{}, false
+	}
+	return doc, true
 }
 
 // validateLoginIdentityRole refuses to store a Config that binds, through a
@@ -124,7 +212,7 @@ func validateLoginIdentityRole(r runner.Runner, cfgDoc ext.CellConfigDoc, bpDoc 
 	if !keepsLogin {
 		return nil
 	}
-	if other := OtherRoleOnStateVolume(r, *ref, cfgDoc.Metadata); other != "" {
+	if other := OtherRoleOnStateVolume(r, *ref, cfgDoc.Metadata, CellKey{}); other != "" {
 		return fmt.Errorf(
 			"%w: config %q: volume %q is the login identity of role %s; role %s cannot share it "+
 				"(the harness keeps role content in its state directory)",

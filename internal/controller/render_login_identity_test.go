@@ -22,6 +22,7 @@ package controller_test
 
 import (
 	"errors"
+	"maps"
 	"strings"
 	"testing"
 
@@ -122,6 +123,25 @@ func TestPreview_LoginStatus(t *testing.T) {
 	status = connectorStatus(t, preview.Connectors, "agent")
 	if status.Login == nil || status.Login.State != ext.LoginStateLoggedIn || status.Login.Since == "" {
 		t.Errorf("login = %+v, want logged in with a time", status.Login)
+	}
+}
+
+// TestPreview_UnsafeStateVolumeNotProbed: a state volume named by Config
+// values that would leave the volumes tree is reported, and never read.
+func TestPreview_UnsafeStateVolumeNotProbed(t *testing.T) {
+	cfg := loginConfig("agent-login")
+	cfg.Spec.Values["STATE_VOLUME"] = "../../../../root"
+	mock := newConnectorRunner(t, &connectorFixture{}, cfg)
+	mock.GetBlueprintFn = func(intmodel.CellBlueprint) (intmodel.CellBlueprint, error) {
+		return blueprintCarrier(t, loginBlueprint()), nil
+	}
+	mock.GetVolumeFn = func(v intmodel.Volume) (intmodel.Volume, error) {
+		t.Errorf("GetVolume called with %+v", v.Metadata)
+		return intmodel.Volume{}, errdefs.ErrVolumeNotFound
+	}
+	_, err := setupTestController(t, mock).PreviewCellFromConfig(previewRequest())
+	if !errors.Is(err, errdefs.ErrVolumeIdentity) || !strings.Contains(err.Error(), "unsafe") {
+		t.Fatalf("PreviewCellFromConfig: %v, want the volume refused as unsafe", err)
 	}
 }
 
@@ -258,6 +278,61 @@ func TestPreview_OneRolePerLoginIdentity(t *testing.T) {
 		req.ConnectorOverrides = map[string]ext.ContainerSecretRef{"agent": {Name: "pm-login"}}
 		_, err := newLoginController(t, fx, own).PreviewCellFromConfig(req)
 		refused(t, err)
+	})
+
+	// A cell's pick counts too: a cell of role pm picked a Volume no Config
+	// names.
+	shared := intmodel.VolumeRef{Name: "shared-login", Realm: "kuke-system"}
+	pmCell := func(scope, name string) intmodel.Cell {
+		return intmodel.Cell{
+			Metadata: intmodel.CellMetadata{Name: name},
+			Spec: intmodel.CellSpec{
+				RealmName: "kuke-system", SpaceName: scope, StackName: scope,
+				Provenance: &intmodel.CellProvenance{
+					BindingKind:      ext.BindingKindConfig,
+					BindingRef:       intmodel.CellBindingRef{Name: "kukeon-pm", Realm: "kuke-system"},
+					ConnectorVolumes: map[string]intmodel.VolumeRef{"agent": shared},
+				},
+			},
+		}
+	}
+	pickFixture := func(cells ...intmodel.Cell) *connectorFixture {
+		pm := other("kukeon-pm", "pm")
+		pm.Spec.Values["STATE_VOLUME"] = "pm-state"
+		return &connectorFixture{
+			configs: []ext.CellConfigDoc{pm},
+			cells:   cells,
+			volumes: map[string]intmodel.Volume{
+				"kuke-system///shared-login": {Spec: intmodel.VolumeSpec{Connector: "agent", Method: "login"}},
+			},
+		}
+	}
+	pickShared := func() controller.CellFromConfigRequest {
+		req := previewRequest()
+		req.ConnectorOverrides = map[string]ext.ContainerSecretRef{"agent": {Name: "shared-login"}}
+		return req
+	}
+	t.Run("a cell picking what a cell of another role picked", func(t *testing.T) {
+		_, err := newLoginController(t, pickFixture(pmCell("teams", "pm-1")), own).PreviewCellFromConfig(pickShared())
+		refused(t, err)
+	})
+	t.Run("a config binding what a cell of another role picked", func(t *testing.T) {
+		shared.Space, shared.Stack = "teams", "kukeon"
+		defer func() { shared.Space, shared.Stack = "", "" }()
+		draft := own
+		draft.Spec.Values = maps.Clone(own.Spec.Values)
+		draft.Spec.Values["STATE_VOLUME"] = "shared-login"
+		req := previewRequest()
+		req.Draft = &draft
+		_, err := newLoginController(t, pickFixture(pmCell("teams", "pm-1")), own).PreviewCellFromConfig(req)
+		refused(t, err)
+	})
+	// The cell being rendered does not conflict with its own pick.
+	t.Run("the cell's own pick", func(t *testing.T) {
+		self := pmCell("default", previewRequest().Name)
+		if _, err := newLoginController(t, pickFixture(self), own).PreviewCellFromConfig(pickShared()); err != nil {
+			t.Fatalf("PreviewCellFromConfig: %v", err)
+		}
 	})
 }
 

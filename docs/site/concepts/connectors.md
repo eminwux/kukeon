@@ -255,9 +255,13 @@ the harness state directory, running the login command the connector declares
 (`login.command`), and `spec.autoDelete: true`. It has no role, no repos, no
 secrets and no other connector, so it needs no team: a login identity can be
 created on a realm with nothing else in it. The cell carries the label
-`kukeon.io/identity-cell: <volume>`; a second `kuke connector login` — or a
-second click in the web UI — while a session runs attaches to it instead of
-starting another.
+`kukeon.io/identity-cell: <volume>@<realm>[/<space>[/<stack>]]`; a second
+`kuke connector login` — or a second click in the web UI — while a session
+runs or is still starting attaches to it instead of starting another. A
+stack-scoped Volume's cell is `login-<volume>` in that stack; a realm- or
+space-scoped one's runs in the `default` stack below it and its name ends in a
+short digest of the scope, so two Volumes of one name at different scopes never
+share a session.
 
 A team's own state volumes (`<team>-<role>-<harness>-state`) are login
 identities too and take the same command; their names do not change. The login

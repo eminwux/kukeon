@@ -645,4 +645,53 @@ func TestVolume_LoginStatus(t *testing.T) {
 	if status := r.VolumeLoginStatus(probe); status == nil || status.State != "empty" {
 		t.Errorf("probe of an untagged volume = %+v, want empty", status)
 	}
+
+	// A volume coordinate that would leave the volumes tree is not probed.
+	outside := intmodel.Volume{
+		Metadata: intmodel.VolumeMetadata{Name: "../../../../root", Realm: "default"},
+		Spec:     intmodel.VolumeSpec{Connector: "claude", LoginMarker: ".credentials.json"},
+	}
+	if status := r.VolumeLoginStatus(outside); status != nil {
+		t.Errorf("status for a volume name outside the volumes tree = %+v, want none", status)
+	}
+}
+
+// TestVolume_LoginStatusSymlink: the content of a login identity is written
+// from inside a container, so a symlink in it must not point the marker check
+// at the host. A link on a directory of a multi-component marker, or on the
+// marker itself, never reports the host file as a login.
+func TestVolume_LoginStatusSymlink(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+	host := t.TempDir()
+	if err := os.MkdirAll(host+"/.ssh", 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(host+"/.ssh/id_ed25519", []byte("key"), 0o600); err != nil {
+		t.Fatalf("write host file: %v", err)
+	}
+
+	md := intmodel.VolumeMetadata{Name: "planted", Realm: "default"}
+	if _, err := r.WriteVolume(intmodel.Volume{Metadata: md}); err != nil {
+		t.Fatalf("WriteVolume() error = %v", err)
+	}
+	dir := fs.VolumePath(runPath, "default", "", "", "planted")
+	if err := os.Symlink(host, dir+"/.claude"); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	if err := os.Symlink(host+"/.ssh/id_ed25519", dir+"/marker"); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	through := intmodel.Volume{
+		Metadata: md, Spec: intmodel.VolumeSpec{Connector: "claude", LoginMarker: ".claude/.ssh/id_ed25519"},
+	}
+	if status := r.VolumeLoginStatus(through); status == nil || status.State != "empty" {
+		t.Errorf("marker through a directory link = %+v, want empty", status)
+	}
+	// The marker itself as a link: Lstat sees the link, as before.
+	link := intmodel.Volume{Metadata: md, Spec: intmodel.VolumeSpec{Connector: "claude", LoginMarker: "marker"}}
+	if status := r.VolumeLoginStatus(link); status == nil || status.State != "logged in" {
+		t.Errorf("marker that is a link = %+v, want logged in (the link exists in the volume)", status)
+	}
 }

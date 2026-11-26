@@ -123,14 +123,12 @@ func viewLoginIdentity(id loginidentity.Identity) loginIdentityView {
 // is live. A lookup failure reads as "no session": the list is still useful.
 func runningLoginSession(ctx context.Context, c kukeonv1.Client, ref v1beta1.VolumeRef) *loginSessionCell {
 	realm, space, stack := loginidentity.CellScope(ref)
-	name := loginidentity.CellName(ref.Name)
+	name := loginidentity.CellName(ref)
 	got, err := c.GetCell(ctx, v1beta1.CellDoc{
 		Metadata: v1beta1.CellMetadata{Name: name},
 		Spec:     v1beta1.CellSpec{ID: name, RealmID: realm, SpaceID: space, StackID: stack},
 	})
-	if err != nil || !got.MetadataExists ||
-		got.Cell.Metadata.Labels[v1beta1.LabelIdentityCell] != ref.Name ||
-		(!got.RootContainerTaskRunning && got.Cell.Status.State != v1beta1.CellStateReady) {
+	if err != nil || !loginidentity.SessionLive(got) || !loginidentity.IsIdentityCellOf(got.Cell, ref) {
 		return nil
 	}
 	return sessionCell(got.Cell)

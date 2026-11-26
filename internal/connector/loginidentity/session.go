@@ -18,6 +18,8 @@ package loginidentity
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -160,9 +162,9 @@ func ensure(
 
 // Start makes sure the login identity exists and that an identity cell is
 // running the harness login on it: it creates the Volume when missing, and
-// starts the cell unless one is already running for the Volume — then it
-// returns that one, so two clients share a session instead of racing two
-// logins on one state directory.
+// starts the cell unless one is already running or starting for the Volume —
+// then it returns that one, so two clients share a session instead of racing
+// two logins on one state directory.
 func Start(ctx context.Context, client Client, catalog *connector.Catalog, req Request) (Session, error) {
 	conn, method, err := resolve(catalog, &req)
 	if err != nil {
@@ -196,9 +198,13 @@ func Start(ctx context.Context, client Client, catalog *connector.Catalog, req R
 	if image == "" {
 		image = hn.Image
 	}
+	nonce, err := sessionNonce()
+	if err != nil {
+		return Session{}, err
+	}
 	doc, err := CellDoc(CellRequest{
 		Connector: conn.Metadata.Name, Method: method.Name, Command: command,
-		Volume: req.Volume, StatePath: hn.StatePath, Image: image,
+		Volume: req.Volume, StatePath: hn.StatePath, Image: image, Session: nonce,
 	})
 	if err != nil {
 		return Session{}, err
@@ -210,12 +216,14 @@ func Start(ctx context.Context, client Client, catalog *connector.Catalog, req R
 	case err != nil && !errors.Is(err, errdefs.ErrCellNotFound):
 		return Session{}, err
 	case err == nil && live.MetadataExists:
-		if live.Cell.Metadata.Labels[v1beta1.LabelIdentityCell] != req.Volume.Name {
+		if !IsIdentityCellOf(live.Cell, req.Volume) {
 			return Session{}, fmt.Errorf(
-				"%w: cell %q exists and is not an identity cell; delete it or pick another identity name",
-				errdefs.ErrCellAlreadyExists, doc.Metadata.Name)
+				"%w: cell %q exists and is not the identity cell of %s; delete it or pick another identity name",
+				errdefs.ErrCellAlreadyExists, doc.Metadata.Name, IdentityKey(req.Volume))
 		}
-		if live.RootContainerTaskRunning || live.Cell.Status.State == v1beta1.CellStateReady {
+		// Running, or still starting — the first client may be pulling
+		// the image: join it.
+		if SessionLive(live) {
 			session.Cell, session.Attached = live.Cell, true
 			return session, nil
 		}
@@ -224,13 +232,40 @@ func Start(ctx context.Context, client Client, catalog *connector.Catalog, req R
 			return Session{}, delErr
 		}
 	}
-	if _, err = client.CreateCell(ctx, doc); err != nil {
-		// A cell that failed to start is not reaped by its autoDelete: remove
-		// it, so the identity is free for the next attempt. Best-effort.
-		_, _ = client.DeleteCell(ctx, doc)
+	return create(ctx, client, doc, nonce, session)
+}
+
+// create starts the identity cell doc for session. A cell that fails to start
+// is not reaped by its autoDelete: it is removed, so the identity is free for
+// the next attempt — but only the cell this call stored (its session label is
+// nonce), never one another client started meanwhile. Best-effort.
+func create(ctx context.Context, client Client, doc v1beta1.CellDoc, nonce string, session Session) (Session, error) {
+	started, err := client.CreateCell(ctx, doc)
+	if err != nil {
+		if got, getErr := client.GetCell(ctx, doc); getErr == nil && got.MetadataExists &&
+			got.Cell.Metadata.Labels[v1beta1.LabelIdentitySession] == nonce {
+			_, _ = client.DeleteCell(ctx, doc)
+		}
 		return Session{}, err
 	}
+	// Another client stored the cell between the lookup and this create:
+	// the daemon kept its record, so this is its session.
+	if started.MetadataExistsPre {
+		session.Attached = true
+		if started.Cell.Metadata.Name != "" {
+			session.Cell = started.Cell
+		}
+	}
 	return session, nil
+}
+
+// sessionNonce is a value of this start alone, for LabelIdentitySession.
+func sessionNonce() (string, error) {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("identity cell session: %w", err)
+	}
+	return hex.EncodeToString(b[:]), nil
 }
 
 // roleImage returns the image of a Config that uses the identity, with a

@@ -457,6 +457,7 @@ func resolveConfig(r runner.Runner, cfg intmodel.CellConfig, binding cellBinding
 		binding:     binding,
 		connectors: connectorStatuses(r, requirements, merged, values, git, harnessState{
 			state: state, cfg: cfgDoc.Metadata, cellVolume: cellVolume,
+			self: applypkg.CellKey{Realm: realmName, Space: spaceName, Stack: stackName, Name: binding.Name},
 		}),
 		git:          git,
 		requirements: requirements,

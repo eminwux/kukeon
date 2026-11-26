@@ -24,8 +24,10 @@ import (
 
 	"github.com/eminwux/kukeon/internal/connector/loginidentity"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/util/naming"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/connector"
+	"github.com/eminwux/kukeon/team/harnesses"
 )
 
 // loginCatalog is a catalog of two test-only connectors: one that
@@ -253,8 +255,8 @@ func TestCellDoc(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CellDoc: %v", err)
 	}
-	if doc.Metadata.Name != loginidentity.CellName("personal") || !doc.Spec.AutoDelete ||
-		doc.Metadata.Labels[v1beta1.LabelIdentityCell] != "personal" ||
+	if doc.Metadata.Name != loginidentity.CellName(volume) || !doc.Spec.AutoDelete ||
+		doc.Metadata.Labels[v1beta1.LabelIdentityCell] != "personal@default" ||
 		doc.Metadata.Labels[v1beta1.LabelIdentityConnector] != "agent" {
 		t.Errorf("cell = %+v, want a self-deleting cell labelled with the identity", doc.Metadata)
 	}
@@ -294,6 +296,41 @@ func TestCellDoc(t *testing.T) {
 	}
 }
 
+// TestCellNameScope: the identity cell of a Volume is told apart from the
+// cell of a Volume of the same name at another scope that runs in the same
+// stack — a realm- or space-scoped Volume's cell runs in the `default` stack
+// below it.
+func TestCellNameScope(t *testing.T) {
+	refs := []v1beta1.VolumeRef{
+		{Name: "claude", Realm: "r"},
+		{Name: "claude", Realm: "r", Space: "default"},
+		{Name: "claude", Realm: "r", Space: "default", Stack: "default"},
+	}
+	names, keys := map[string]bool{}, map[string]bool{}
+	for _, ref := range refs {
+		names[loginidentity.CellName(ref)] = true
+		keys[loginidentity.IdentityKey(ref)] = true
+		if err := naming.ValidateHierarchyName("cell", loginidentity.CellName(ref)); err != nil {
+			t.Errorf("CellName(%+v) = %q: %v", ref, loginidentity.CellName(ref), err)
+		}
+	}
+	if len(names) != len(refs) || len(keys) != len(refs) {
+		t.Errorf("names %v, keys %v: want one of each per scope", names, keys)
+	}
+	if got := loginidentity.CellName(refs[2]); got != "login-claude" {
+		t.Errorf("stack-scoped cell name = %q, want login-claude", got)
+	}
+	if got := loginidentity.IdentityKey(refs[0]); got != "claude@r" {
+		t.Errorf("realm-scoped key = %q, want claude@r", got)
+	}
+	cell := v1beta1.CellDoc{Metadata: v1beta1.CellMetadata{
+		Labels: map[string]string{v1beta1.LabelIdentityCell: loginidentity.IdentityKey(refs[2])},
+	}}
+	if loginidentity.IsIdentityCellOf(cell, refs[0]) || !loginidentity.IsIdentityCellOf(cell, refs[2]) {
+		t.Errorf("IsIdentityCellOf compares only part of the scope")
+	}
+}
+
 // TestShippedLoginConnectors: every connector kuke ships with a login method
 // declares a marker and a login command, and its harness — from the catalog
 // embedded in kuke — gives a state directory and an image, so `kuke connector
@@ -316,7 +353,7 @@ func TestShippedLoginConnectors(t *testing.T) {
 				conn.Metadata.Name, method.Name, method.Login)
 			continue
 		}
-		hn, harnessErr := loginidentity.LoadHarness(conn)
+		hn, harnessErr := loginidentity.LoadHarnessFrom(harnesses.FS, conn)
 		if harnessErr != nil {
 			t.Errorf("connector %s: %v", conn.Metadata.Name, harnessErr)
 			continue

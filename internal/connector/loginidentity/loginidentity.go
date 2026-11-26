@@ -24,6 +24,8 @@
 package loginidentity
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -32,10 +34,10 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/connector"
 	"github.com/eminwux/kukeon/pkg/team/harness"
-	"github.com/eminwux/kukeon/team/harnesses"
 )
 
 // TypeLogin is the TYPE a login identity lists with, next to a Secret
@@ -250,12 +252,6 @@ type Harness struct {
 	Image     string
 }
 
-// LoadHarness reads the harness conn authenticates from the catalog embedded
-// in kuke.
-func LoadHarness(conn *connector.Connector) (Harness, error) {
-	return LoadHarnessFrom(harnesses.FS, conn)
-}
-
 // LoadHarnessFrom reads the harness conn authenticates from source: its
 // statePath with `$HOME` resolved, and the first image of its catalog.
 func LoadHarnessFrom(source fs.FS, conn *connector.Connector) (Harness, error) {
@@ -301,11 +297,44 @@ type CellRequest struct {
 	// StatePath is where the harness keeps its state; Image runs it.
 	StatePath string
 	Image     string
+	// Session, when set, is stamped on the cell as LabelIdentitySession.
+	Session string
 }
 
+// IdentityKey names a Volume with its scope, `name@realm[/space[/stack]]`:
+// the value of the identity cell's LabelIdentityCell label.
+func IdentityKey(ref v1beta1.VolumeRef) string { return ref.Name + "@" + ScopePath(ref) }
+
 // CellName is the name of the identity cell of a Volume: one per Volume, so a
-// second login on the same identity finds the first.
-func CellName(volume string) string { return "login-" + volume }
+// second login on the same identity finds the first. A stack-scoped Volume's
+// cell runs in that stack and is `login-<volume>`. A realm- or space-scoped
+// one's runs in the `default` stack below it, beside the cells of any Volume
+// of the same name scoped there, so its name carries a digest of the full
+// scope.
+func CellName(ref v1beta1.VolumeRef) string {
+	if ref.Space != "" && ref.Stack != "" {
+		return "login-" + ref.Name
+	}
+	sum := sha256.Sum256([]byte(IdentityKey(ref)))
+	return "login-" + ref.Name + "-" + hex.EncodeToString(sum[:4])
+}
+
+// IsIdentityCellOf reports whether cell is the identity cell of the Volume ref.
+func IsIdentityCellOf(cell v1beta1.CellDoc, ref v1beta1.VolumeRef) bool {
+	return cell.Metadata.Labels[v1beta1.LabelIdentityCell] == IdentityKey(ref)
+}
+
+// SessionLive reports whether an identity cell is a session a client can
+// attach to: running, ready, or still starting — a first start can spend a
+// while pulling the image, and a second client must join it then, not replace
+// it. A cell that ended and is not reaped yet is not live.
+func SessionLive(got kukeonv1.GetCellResult) bool {
+	if !got.MetadataExists {
+		return false
+	}
+	state := got.Cell.Status.State
+	return state == v1beta1.CellStateReady || state == v1beta1.CellStatePending || got.RootContainerTaskRunning
+}
 
 // CellScope is where the identity cell of a Volume runs: the Volume's realm,
 // and its space and stack or `default` where the Volume names none.
@@ -333,18 +362,22 @@ func CellDoc(req CellRequest) (v1beta1.CellDoc, error) {
 	if strings.TrimSpace(req.Image) == "" || strings.TrimSpace(req.StatePath) == "" {
 		return v1beta1.CellDoc{}, errors.New("identity cell: image and state path are required")
 	}
-	name := CellName(req.Volume.Name)
+	name := CellName(req.Volume)
 	realm, space, stack := CellScope(req.Volume)
 	volume := req.Volume
+	labels := map[string]string{
+		v1beta1.LabelIdentityCell:      IdentityKey(req.Volume),
+		v1beta1.LabelIdentityConnector: req.Connector,
+	}
+	if req.Session != "" {
+		labels[v1beta1.LabelIdentitySession] = req.Session
+	}
 	return v1beta1.CellDoc{
 		APIVersion: v1beta1.APIVersionV1Beta1,
 		Kind:       v1beta1.KindCell,
 		Metadata: v1beta1.CellMetadata{
-			Name: name,
-			Labels: map[string]string{
-				v1beta1.LabelIdentityCell:      req.Volume.Name,
-				v1beta1.LabelIdentityConnector: req.Connector,
-			},
+			Name:   name,
+			Labels: labels,
 		},
 		Spec: v1beta1.CellSpec{
 			ID:         name,

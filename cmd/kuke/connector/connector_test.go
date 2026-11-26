@@ -624,7 +624,7 @@ func TestConnectorLogin(t *testing.T) {
 		t.Fatalf("created cells = %d, want 1", len(daemon.createdCells))
 	}
 	cell := daemon.createdCells[0]
-	if !cell.Spec.AutoDelete || cell.Metadata.Labels[v1beta1.LabelIdentityCell] != "personal-max" {
+	if !cell.Spec.AutoDelete || cell.Metadata.Labels[v1beta1.LabelIdentityCell] != "personal-max@default" {
 		t.Errorf("cell = %+v, want a self-deleting cell labelled with the identity", cell.Metadata)
 	}
 	if cell.Spec.Provenance != nil || len(cell.Spec.Containers) != 1 {

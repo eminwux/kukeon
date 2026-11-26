@@ -122,6 +122,8 @@ type connectorFixture struct {
 	// other Configs of the realm are in configs.
 	volumes map[string]intmodel.Volume
 	configs []ext.CellConfigDoc
+	// cells are the cells of the realm.
+	cells []intmodel.Cell
 }
 
 func volumeKey(md intmodel.VolumeMetadata) string {
@@ -164,6 +166,7 @@ func newConnectorRunner(t *testing.T, fx *connectorFixture, cfg ext.CellConfigDo
 		}
 		return out, nil
 	}
+	mock.ListCellsFn = func(string, string, string) ([]intmodel.Cell, error) { return fx.cells, nil }
 	getConfig := mock.GetConfigFn
 	mock.GetConfigFn = func(in intmodel.CellConfig) (intmodel.CellConfig, error) {
 		for _, doc := range fx.configs {

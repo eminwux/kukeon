@@ -136,7 +136,7 @@ func (r *Exec) VolumeLoginStatus(volume intmodel.Volume) *intmodel.LoginStatus {
 // declares no marker, has no login status.
 func (r *Exec) volumeLoginStatus(md intmodel.VolumeMetadata, spec intmodel.VolumeSpec) *intmodel.LoginStatus {
 	if spec.Connector == "" || spec.LoginMarker == "" || !filepath.IsLocal(spec.LoginMarker) ||
-		strings.Contains(spec.LoginMarker, "..") {
+		strings.Contains(spec.LoginMarker, "..") || !volumeCoordsSafe(md) {
 		return nil
 	}
 	root := filepath.Clean(fs.VolumePath(r.opts.RunPath, md.Realm, md.Space, md.Stack, md.Name))
@@ -144,8 +144,11 @@ func (r *Exec) volumeLoginStatus(md intmodel.VolumeMetadata, spec intmodel.Volum
 	if !strings.HasPrefix(marker, root+string(filepath.Separator)) {
 		return nil
 	}
-	// Lstat: a marker that is a symlink is not followed out of the volume.
-	info, err := os.Lstat(marker)
+	// The volume's content is written from inside a container: resolve the
+	// marker within the volume, so a symlink on any component of its path —
+	// `.claude -> /` included — cannot point the stat outside it. Lstat
+	// does not follow the marker itself.
+	info, err := lstatIn(root, marker[len(root)+1:])
 	if err != nil || info.IsDir() {
 		return &intmodel.LoginStatus{State: v1beta1.LoginStateEmpty}
 	}
@@ -153,6 +156,27 @@ func (r *Exec) volumeLoginStatus(md intmodel.VolumeMetadata, spec intmodel.Volum
 		State: v1beta1.LoginStateLoggedIn,
 		Since: info.ModTime().UTC().Format(time.RFC3339),
 	}
+}
+
+// lstatIn stats name, a path relative to dir, without leaving dir.
+func lstatIn(dir, name string) (os.FileInfo, error) {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	return root.Lstat(name)
+}
+
+// volumeCoordsSafe reports whether a volume's name and scope are single path
+// segments, so its path stays in the volumes tree.
+func volumeCoordsSafe(md intmodel.VolumeMetadata) bool {
+	for _, seg := range []string{md.Name, md.Realm, md.Space, md.Stack} {
+		if seg == "." || seg == ".." || strings.ContainsAny(seg, "/\\\x00") {
+			return false
+		}
+	}
+	return md.Name != "" && md.Realm != ""
 }
 
 // removeVolumeReclaimManifest deletes a volume's reclaim manifest, ignoring a

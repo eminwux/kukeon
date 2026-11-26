@@ -630,6 +630,9 @@ type harnessState struct {
 	// cellVolume reports that the cell itself named the state volume
 	// (`--connector <connector>=<volume>`), by connector.
 	cellVolume map[string]bool
+	// self is the cell being rendered: its own pick of a login identity is
+	// not another cell's. Its name is empty before the cell is named.
+	self applypkg.CellKey
 }
 
 // connectorStatuses reports how every requirement resolves against the merged
@@ -717,9 +720,14 @@ func loginVolumeStatus(
 		status.State = v1beta1.ConnectorUnresolved
 		status.Message = fmt.Sprintf(format, args...)
 	}
-	got, err := r.GetVolume(intmodel.Volume{Metadata: intmodel.VolumeMetadata{
-		Name: ref.Name, Realm: ref.Realm, Space: ref.Space, Stack: ref.Stack,
-	}})
+	md := intmodel.VolumeMetadata{Name: ref.Name, Realm: ref.Realm, Space: ref.Space, Stack: ref.Stack}
+	// The ref comes from Config values: check it is a Volume coordinate
+	// before anything reads the volumes tree with it.
+	if err := validateVolumeLookup(md); err != nil {
+		fail("volume %s: %v", where, err)
+		return
+	}
+	got, err := r.GetVolume(intmodel.Volume{Metadata: md})
 	switch {
 	case errors.Is(err, errdefs.ErrVolumeNotFound):
 		if hs.cellVolume[desc.Name] {
@@ -746,7 +754,7 @@ func loginVolumeStatus(
 	if !hs.cellVolume[desc.Name] {
 		return
 	}
-	if other := applypkg.OtherRoleOnStateVolume(r, *ref, hs.cfg); other != "" {
+	if other := applypkg.OtherRoleOnStateVolume(r, *ref, hs.cfg, hs.self); other != "" {
 		fail("volume %s is the login identity of role %s; role %s cannot share it "+
 			"(the harness keeps role content in its state directory)",
 			where, other, applypkg.RoleName(hs.cfg.Labels))

@@ -109,8 +109,12 @@ func runLogin(cmd *cobra.Command, catalog *connector.Catalog, req loginidentity.
 		return attachErr
 	}
 	// The cell deletes itself when the login exits; remove it now so the
-	// identity is free for the next login at once. Best-effort.
-	cleanupIdentityCell(cmd, client, session.Cell)
+	// identity is free for the next login at once. Best-effort. A failed
+	// attach to another client's session — one still starting, say — leaves
+	// it alone: that login is theirs.
+	if attachErr == nil || !session.Attached {
+		cleanupIdentityCell(cmd, client, session.Cell)
+	}
 	if attachErr != nil {
 		return attachErr
 	}
