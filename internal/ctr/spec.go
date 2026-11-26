@@ -184,9 +184,12 @@ type buildOpts struct {
 	// runPath is the daemon's RunPath, used to resolve scoped references off
 	// disk: a ContainerSecret.secretRef from its scope's secrets tree (#623)
 	// and a kind: volume VolumeMount from its scope's volumes tree (#1016).
-	runPath        string
-	extraLabels    map[string]string
-	kukeonGroupGID uint32
+	runPath string
+	// secretsStagingDir is where file-mounted secrets and git bundles are
+	// staged (SecretsStagingDir); empty means DefaultSecretsStagingDir.
+	secretsStagingDir string
+	extraLabels       map[string]string
+	kukeonGroupGID    uint32
 	// requiredCapabilities are the image capabilities the container's cell
 	// requires (#1472); checked against the image at create.
 	requiredCapabilities []string
@@ -307,6 +310,17 @@ func WithSecretRunPath(runPath string) BuildOption {
 	return func(o *buildOpts) {
 		if runPath != "" {
 			o.runPath = runPath
+		}
+	}
+}
+
+// WithSecretsStagingDir sets the host directory CreateContainerFromSpec stages
+// file-mounted secrets and the git bundle in (SecretsStagingDir). An empty
+// argument is a no-op and leaves DefaultSecretsStagingDir.
+func WithSecretsStagingDir(dir string) BuildOption {
+	return func(o *buildOpts) {
+		if dir != "" {
+			o.secretsStagingDir = dir
 		}
 	}
 }
@@ -1084,7 +1098,7 @@ func WithFreshProcessEnv(spec intmodel.ContainerSpec, runPath string) oci.SpecOp
 				envSecrets = append(envSecrets, secret)
 			}
 		}
-		resolved, err := resolveSecrets(spec.ContainerdID, envSecrets, DefaultSecretsStagingDir, runPath)
+		resolved, err := resolveSecrets(spec.ContainerdID, envSecrets, "", runPath)
 		if err != nil {
 			return fmt.Errorf("resolve reused container env secrets: %w", err)
 		}

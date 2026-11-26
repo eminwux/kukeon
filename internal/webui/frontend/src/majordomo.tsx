@@ -8,6 +8,9 @@ import type { Schedule, ScheduleStatus } from "./schedule-format.mjs";
 import { TerminalSession, cellId, sessionId, unavailableStates, type TerminalManager, type Theme } from "./terminal";
 import { configForCell, sameScopedReference } from "./relationships.mjs";
 import { configLabel } from "./cells.mjs";
+import { InitializePrompt } from "./initialize";
+import { startLogin } from "./connector-ui";
+import { connectorStatuses, connectorTitle, keepsLogin, loginEmpty, loginIdentitiesFor, loginLoggedIn, sameRef, type ConnectorStatus } from "./connectors.mjs";
 
 // Majordomo is found by label, never by name: its configs and cells carry the kuke team and the
 // majordomo role, and a task config additionally names its task.
@@ -29,7 +32,7 @@ export type { ScheduleStatus } from "./schedule-format.mjs";
 export type ConfigDoc = {
   metadata: { name: string; realm?: string; space?: string; stack?: string; labels?: Record<string, string> };
   spec?: { blueprint?: { name?: string }; schedule?: Schedule; [key: string]: unknown };
-  status?: { schedule?: ScheduleStatus };
+  status?: { schedule?: ScheduleStatus; connectors?: ConnectorStatus[] };
 };
 type Labels = Record<string, string> | undefined;
 
@@ -204,11 +207,15 @@ function entryState(major: Majordomo): { label: string; state?: string } {
   if (major.cell) return { label: `${major.cell.doc.status?.state || "State not reported"}${major.cells.length > 1 ? `, ${major.cells.length} cells` : ""}`, state: major.cell.doc.status?.state };
   if (major.configs.loading && !major.configs.data) return { label: "Checking…" };
   if (major.configs.error && !major.configs.data) return { label: "Unavailable" };
-  return { label: major.pairs.length ? "Not enabled" : "Needs kuke team init" };
+  return { label: major.pairs.length ? "Not enabled" : "Not initialized" };
+}
+// needsInitialize reports a host whose Config catalog has no majordomo Config: `kuke team init` has not run.
+export function needsInitialize(major: Majordomo): boolean {
+  return !major.cell && !!major.configs.data && !major.pairs.length;
 }
 
 // Permanent sidebar entry: always present, whatever state majordomo is in.
-export function MajordomoSidebarEntry({ major, dock }: { major: Majordomo; dock: MajordomoDock }) {
+export function MajordomoSidebarEntry({ major, dock, onChanged }: { major: Majordomo; dock: MajordomoDock; onChanged: () => void }) {
   const { label, state } = entryState(major);
   return <section className="majordomo-entry" aria-label="Majordomo">
     <button type="button" className="majordomo-entry-button" aria-expanded={dock.open} aria-controls="majordomo-panel" onClick={() => dock.setOpen(true)}>
@@ -216,6 +223,7 @@ export function MajordomoSidebarEntry({ major, dock }: { major: Majordomo; dock:
       {state ? <StateBadge state={state} /> : <span className="badge">{label}</span>}
       {major.cells.length > 1 && <span className="badge majordomo-count" aria-label={`${major.cells.length} majordomo cells`} title={`${major.cells.length} majordomo cells`}>{major.cells.length}</span>}
     </button>
+    {needsInitialize(major) && <InitializePrompt compact onChanged={onChanged} subject="majordomo and the agent templates" />}
   </section>;
 }
 export function MajordomoRailButton({ major, dock }: { major: Majordomo; dock: MajordomoDock }) {
@@ -271,6 +279,61 @@ function Resizer({ width, max, onResize }: { width: number; max: number; onResiz
 }
 
 type Container = { id: string; attachable?: boolean; root?: boolean };
+
+// harnessLogin is the connector status of the login a majordomo Config's harness keeps in its state volume
+// (#1685), or undefined for a Config on a token method or one that reports none.
+function harnessLogin(doc: ConfigDoc | undefined): ConnectorStatus | undefined {
+  return connectorStatuses(doc).find(status => keepsLogin(status) && !!status.login);
+}
+
+// MajordomoLogin is the panel's status line for the harness login (#1694): "logged in" or "not logged in",
+// and Log in while it is empty. Log in starts the identity cell of the majordomo state volume and opens its
+// terminal; while that session runs the login identities are polled, and the Configs are re-read when it
+// ends so the line follows the login. asking is the prompt Enable majordomo shows first while the login is
+// empty: the same line and Log in, with Continue anyway.
+function MajordomoLogin({ status, asking = false, busy = false, onContinue, onChanged }: { status: ConnectorStatus; asking?: boolean; busy?: boolean; onContinue?: () => void; onChanged: () => void }) {
+  const [pending, setPending] = useState(false);
+  const [failure, setFailure] = useState("");
+  const [watching, setWatching] = useState(false);
+  const [tick, setTick] = useState(0);
+  const logins = useResource<unknown[]>(watching ? "/api/connectors/logins" : null, tick);
+  const seen = useRef(false);
+  const misses = useRef(0);
+  useEffect(() => {
+    if (!watching) return undefined;
+    const timer = window.setInterval(() => setTick(value => value + 1), 3000);
+    return () => window.clearInterval(timer);
+  }, [watching]);
+  useEffect(() => {
+    if (!watching || logins.loading || !logins.data) return;
+    const running = loginIdentitiesFor(logins.data, status.connector).some(item => sameRef(item.volume, status.volumeRef) && !!item.session);
+    if (running) { seen.current = true; misses.current = 0; return; }
+    misses.current += 1;
+    // The session ended, or never showed up in three reads: re-read the Configs either way.
+    if (seen.current || misses.current >= 3) { setWatching(false); onChanged(); }
+  }, [watching, logins.data, logins.loading]);
+  const title = connectorTitle(status);
+  const state = status.login?.state;
+  async function logIn() {
+    if (pending || !status.volumeRef) return;
+    setPending(true); setFailure("");
+    try {
+      await startLogin(status.connector, status.volumeRef, status.method);
+      seen.current = false; misses.current = 0;
+      setWatching(true);
+    } catch (error) { setFailure((error as { message?: string } | undefined)?.message ?? "The login could not be started."); }
+    finally { setPending(false); }
+  }
+  if (state !== loginLoggedIn && state !== loginEmpty) return null;
+  const prompt = asking && state === loginEmpty;
+  return <div className={`majordomo-login${prompt ? " is-asking" : ""}`} role={prompt ? "group" : undefined} aria-label={prompt ? "Log in first" : undefined}>
+    <p role="status" aria-label={`${title} login`}><span className={`state-dot tone-${state === loginLoggedIn ? "ok" : "stopped"}`} aria-hidden="true" />{title}: {state === loginLoggedIn ? "logged in" : "not logged in"}</p>
+    {prompt && <p className="majordomo-login-ask">Majordomo starts without a login, and {title} then asks for one in its terminal. Log in first, or continue.</p>}
+    {state === loginEmpty && status.volumeRef && <button type="button" className="text-button" disabled={pending || busy} aria-label={`Log in to ${title} for majordomo`} onClick={() => void logIn()}>{pending ? "Starting…" : watching ? "Open login session" : "Log in"}</button>}
+    {prompt && <button type="button" className="text-button" disabled={busy} onClick={onContinue}>Continue anyway</button>}
+    {failure && <p className="error" role="alert">{failure}</p>}
+  </div>;
+}
 
 // MajordomoTabs switches the active docked cell (#1630): one tab per cell, labelled with the Config it came
 // from, with its state. Switching only changes which session is shown; none is detached.
@@ -333,9 +396,16 @@ export function MajordomoPanel({ major, dock, inventory, manager, theme, revisio
   const [adding, setAdding] = useState(false);
   const [pending, setPending] = useState<"" | "enable" | "start">("");
   const [failure, setFailure] = useState("");
+  // Enabling a majordomo whose harness is not logged in asks first (#1694); Continue anyway goes on.
+  const [askLogin, setAskLogin] = useState(false);
   // The setup form offers every interactive Config for the first cell, and only the unused ones after.
   const offered = major.cell ? major.unused : major.pairs;
   const config = offered.find(doc => JSON.stringify([...configScope(doc), doc.metadata.name]) === chosen) ?? offered[0];
+  // The login line follows the Config on screen: the setup form's choice, else the active cell's.
+  const formShown = !scope || adding;
+  const login = harnessLogin(formShown ? config : major.cell ? cellConfig(major.cell, major.configs.data ?? []) : undefined);
+  const notLoggedIn = formShown && login?.login?.state === loginEmpty;
+  useEffect(() => { if (!notLoggedIn) setAskLogin(false); }, [notLoggedIn]);
   const containersReady = !containers.loading && !!containers.data;
 
   // Attach when the panel shows a running cell — on the first activation of its tab — unless detached.
@@ -355,8 +425,10 @@ export function MajordomoPanel({ major, dock, inventory, manager, theme, revisio
     const started = await postJSON(`${apiPath(target)}/start`);
     if (!started.ok) throw new Error(started.body.error?.message ?? `HTTP ${started.status}`);
   }
-  async function enable() {
+  async function enable(anyway = false) {
     if (!config || pending || (major.cell && !adding)) return;
+    if (notLoggedIn && !anyway) { setAskLogin(true); return; }
+    setAskLogin(false);
     setPending("enable"); setFailure("");
     // The first cell is `majordomo`; a further one is named after its Config.
     const name = major.cells.length ? config.metadata.name : cellName;
@@ -397,13 +469,13 @@ export function MajordomoPanel({ major, dock, inventory, manager, theme, revisio
   const form = (title: string, note: string) => <>
     <p>{title}</p>
     <label>Harness<select value={config ? JSON.stringify([...configScope(config), config.metadata.name]) : ""} disabled={!!pending} onChange={event => setChosen(event.target.value)}>{offered.map(doc => { const id = JSON.stringify([...configScope(doc), doc.metadata.name]); return <option key={id} value={id}>{doc.metadata.name}</option>; })}</select></label>
-    <button type="button" className="majordomo-primary" disabled={!!pending || !config} aria-busy={pending === "enable" || undefined} onClick={enable}>{pending === "enable" ? (major.cell ? "Adding majordomo…" : "Enabling majordomo…") : major.cell ? "Add majordomo" : "Enable majordomo"}</button>
+    <button type="button" className="majordomo-primary" disabled={!!pending || !config} aria-busy={pending === "enable" || undefined} onClick={() => void enable()}>{pending === "enable" ? (major.cell ? "Adding majordomo…" : "Enabling majordomo…") : major.cell ? "Add majordomo" : "Enable majordomo"}</button>
     <small>{note}</small>
   </>;
   const setup = !scope ? <div className="majordomo-setup">
     {major.configs.loading && !major.configs.data ? <p role="status">Looking for majordomo configs…</p>
       : major.configs.error && !major.configs.data ? <ErrorNotice error={major.configs.error} kind="Configs" />
-        : !major.pairs.length ? <div className="majordomo-missing" role="status"><strong>Majordomo is not installed on this host.</strong><p>Run <code>kuke team init</code> on the host to apply its configs, then refresh.</p></div>
+        : !major.pairs.length ? <div className="majordomo-missing"><p role="status"><strong>Majordomo is not installed on this host.</strong> Initialize applies its configs.</p><InitializePrompt onChanged={onChanged} subject="majordomo and the agent templates" /></div>
           : form("Majordomo is kukeon's own assistant: ask it for help, and it changes things only when you ask.", `Creates and starts one cell named ${cellName} from the selected config.`)}
   </div> : adding ? <div className="majordomo-setup majordomo-add" role="group" aria-label="Add majordomo">
     {form("Add another majordomo with a different harness. Each runs in its own cell, in its own tab.", `Creates and starts a cell named after the selected config.`)}
@@ -427,6 +499,7 @@ export function MajordomoPanel({ major, dock, inventory, manager, theme, revisio
     </header>
     {major.cells.length > 1 && <MajordomoTabs major={major} />}
     {dock.question && <p className="majordomo-question" role="status"><strong>Waiting to paste:</strong> {dock.question} <button type="button" className="text-button" onClick={dock.clearQuestion}>Discard</button></p>}
+    {login && <MajordomoLogin key={`${login.connector}/${JSON.stringify(login.volumeRef ?? null)}`} status={login} asking={askLogin} busy={!!pending} onContinue={() => void enable(true)} onChanged={onChanged} />}
     {failure && <div className="error" role="alert"><strong>{scope && !adding ? "Majordomo did not start" : major.cell ? "Majordomo could not be added" : "Majordomo could not be enabled"}</strong><p>{failure}</p></div>}
     {setup}
     {scope && running && !adding && containers.error && !live && <ErrorNotice error={containers.error} kind="Containers" />}

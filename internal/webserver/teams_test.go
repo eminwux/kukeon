@@ -28,6 +28,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -120,6 +122,12 @@ func (c *teamClient) DeleteSource(ctx context.Context, ref kukeonv1.SourceRef) (
 	c.writes++
 	delete(c.sources, ref.Name)
 	return kukeonv1.DeleteSourceResult{Deleted: true}, nil
+}
+
+// StageGitFetch stages nothing: the fetch uses the caller's own git, as for
+// a public source with no stored identity.
+func (c *teamClient) StageGitFetch(context.Context, kukeonv1.GitFetchRequest) (kukeonv1.StageGitFetchResult, error) {
+	return kukeonv1.StageGitFetchResult{}, nil
 }
 
 func (c *teamClient) Close() error               { return nil }
@@ -738,5 +746,119 @@ func TestTeamActionsRequireJSON(t *testing.T) {
 	w := connectorRequest(t, h, http.MethodPost, "/api/teams/proj/reapply", "{}")
 	if w.Code != http.StatusOK {
 		t.Fatalf("reapply with {}: %d %s", w.Code, w.Body)
+	}
+}
+
+// initFixture is a fresh host behind the teams routes: no Team, no
+// TeamDefaults and no Source. With sources it composes from this repository
+// in place of git; without, it fetches like kuke serve does.
+func initFixture(t *testing.T, sources bool) (*teamClient, http.Handler) {
+	t.Helper()
+	c := newTeamClient()
+	api := &teamAPI{catalog: connectortest.Catalog(t)}
+	if sources {
+		api.sources = map[string]fs.FS{config.KukeonSourceName: os.DirFS("../..")}
+	}
+	mux := http.NewServeMux()
+	api.register(mux, func(context.Context) (kukeonv1.Client, error) { return c, nil })
+	return c, mux
+}
+
+func postInit(t *testing.T, h http.Handler) *httptest.ResponseRecorder {
+	t.Helper()
+	return connectorRequest(t, h, http.MethodPost, "/api/teams/init", "{}")
+}
+
+// TestTeamInit is POST /api/teams/init (issue #1694): kuke team init with the
+// server's client. It stores the kuke and default system teams and returns
+// what each applied; a second call is a 409 that names the reapply.
+func TestTeamInit(t *testing.T) {
+	c, h := initFixture(t, true)
+	w := postInit(t, h)
+	if w.Code != http.StatusOK {
+		t.Fatalf("init: %d %s", w.Code, w.Body)
+	}
+	got := decodeBody[initView](t, w)
+	if len(got.Teams) != 2 || got.Teams[0].Team != config.SystemTeamName ||
+		got.Teams[1].Team != config.DefaultTeamName {
+		t.Fatalf("teams = %+v", got.Teams)
+	}
+	for _, team := range got.Teams {
+		if team.Resources == 0 || len(team.Configs) == 0 || len(team.Blueprints) == 0 {
+			t.Fatalf("team %s summary = %+v", team.Team, team)
+		}
+	}
+	if !slices.Contains(got.Teams[0].Configs, "kuke-majordomo-claude") ||
+		!slices.Contains(got.Teams[0].Configs, "kuke-majordomo-claude-health-sweep") ||
+		!slices.Contains(got.Teams[1].Configs, "default-agent-claude") {
+		t.Fatalf("configs = %v / %v", got.Teams[0].Configs, got.Teams[1].Configs)
+	}
+	if c.teams[config.SystemTeamName] == nil || c.teams[config.DefaultTeamName] == nil || c.defaults == nil ||
+		c.sources[config.KukeonSourceName] == nil {
+		t.Fatalf("stored: teams=%d defaults=%t sources=%d", len(c.teams), c.defaults != nil, len(c.sources))
+	}
+
+	writes := c.writes
+	w = postInit(t, h)
+	expectError(t, w, w.Body.Bytes(), http.StatusConflict, "already_initialized")
+	if body := w.Body.String(); !strings.Contains(body, "reapply") || strings.Contains(body, "--force") {
+		t.Fatalf("409 message = %s", body)
+	}
+	if c.writes != writes {
+		t.Fatalf("a refused init wrote %d times", c.writes-writes)
+	}
+}
+
+// TestTeamInitRequiresJSON: like reapply and delete, the route cannot be
+// driven by a cross-site form.
+func TestTeamInitRequiresJSON(t *testing.T) {
+	c, h := initFixture(t, true)
+	req := httptest.NewRequest(http.MethodPost, "http://localhost:5129/api/teams/init", strings.NewReader(""))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	expectError(t, w, w.Body.Bytes(), http.StatusBadRequest, "invalid_request")
+	w = connectorRequest(t, h, http.MethodPost, "/api/teams/init", `{"force":true}`)
+	expectError(t, w, w.Body.Bytes(), http.StatusBadRequest, "invalid_request")
+	if c.writes != 0 || len(c.teams) != 0 {
+		t.Fatalf("a refused request stored something: writes=%d teams=%d", c.writes, len(c.teams))
+	}
+}
+
+// TestTeamInitWithoutGit: on a host with no git the fetch of the kukeon
+// source cannot start, and the reply says where to install it.
+func TestTeamInitWithoutGit(t *testing.T) {
+	c, h := initFixture(t, false)
+	t.Setenv("PATH", t.TempDir())
+	w := postInit(t, h)
+	expectError(t, w, w.Body.Bytes(), http.StatusUnprocessableEntity, "git_missing")
+	if body := w.Body.String(); !strings.Contains(body, "install git on the host running kuke serve") {
+		t.Fatalf("message = %s", body)
+	}
+	if c.writes != 0 || len(c.teams) != 0 {
+		t.Fatalf("a failed init stored something: writes=%d teams=%d", c.writes, len(c.teams))
+	}
+}
+
+// TestTeamInitSourceFetchFailure: a git that cannot reach the kukeon source
+// is a team failure with the fetch's guidance, never git's own output, and
+// nothing is stored.
+func TestTeamInitSourceFetchFailure(t *testing.T) {
+	c, h := initFixture(t, false)
+	bin := t.TempDir()
+	script := "#!/bin/sh\necho 'fatal: canary-git-output' >&2\nexit 128\n"
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	t.Setenv("GIT_SSH_COMMAND", "ssh")
+	w := postInit(t, h)
+	expectError(t, w, w.Body.Bytes(), http.StatusUnprocessableEntity, "team_failed")
+	body := w.Body.String()
+	if !strings.Contains(body, "git source access failed") || strings.Contains(body, "canary-git-output") {
+		t.Fatalf("message = %s", body)
+	}
+	if c.writes != 0 || len(c.teams) != 0 {
+		t.Fatalf("a failed init stored something: writes=%d teams=%d", c.writes, len(c.teams))
 	}
 }

@@ -101,6 +101,7 @@ func (a *teamAPI) register(mux *http.ServeMux, dial Dial) {
 	mux.HandleFunc("POST /api/teams", op(func(ctx context.Context, c kukeonv1.Client, r *http.Request) (any, error) {
 		return a.applyTeam(ctx, c, r, false)
 	}))
+	mux.HandleFunc("POST /api/teams/init", emptyJSONRequest(timedRoute(dial, lifecycleTimeout, a.initTeams)))
 	mux.HandleFunc("POST /api/teams/{name}/reapply", emptyJSONRequest(op(a.reapplyTeam)))
 	mux.HandleFunc("POST /api/teams/{name}/delete", emptyJSONRequest(read(a.deleteTeam)))
 	mux.HandleFunc("POST /api/teams/draft", op(a.draftTeam))
@@ -510,6 +511,74 @@ func (a *teamAPI) reapplyTeam(ctx context.Context, client kukeonv1.Client, r *ht
 	return outcomeView(outcome)
 }
 
+// initTeamView is one system team kuke team init applied: what was stored,
+// by kind.
+type initTeamView struct {
+	Team       string   `json:"team"`
+	Resources  int      `json:"resources"`
+	Configs    []string `json:"configs"`
+	Blueprints []string `json:"blueprints"`
+	// MissingSecrets and Notes are the apply's own remarks.
+	MissingSecrets []string `json:"missingSecrets"`
+	Notes          []string `json:"notes"`
+}
+
+// initView is what POST /api/teams/init returns: the teams it applied, in
+// order, and the remarks of a team it left alone.
+type initView struct {
+	Teams []initTeamView `json:"teams"`
+	Notes []string       `json:"notes"`
+}
+
+// initTeams is kuke team init from the browser (issue #1694): it applies the
+// kuke team and the system default team with this server's client, as the
+// account running kuke serve, which fetches the kukeon source with git. The
+// route runs under the lifecycle timeout because that fetch is network-bound.
+// A stored kuke team is a 409 the page answers with the reapply route, and a
+// host without git a 422 that says to install it. Nothing here resets a team:
+// --force stays a CLI flag.
+func (a *teamAPI) initTeams(ctx context.Context, client kukeonv1.Client, _ *http.Request) (any, error) {
+	outcome, err := initialize.Init(ctx, initialize.InitOptions{Options: a.options(client, false)})
+	switch {
+	case err == nil:
+	case errors.Is(err, errdefs.ErrTeamInitialized):
+		return nil, fmt.Errorf("%w: the kuke team is stored; reapply it to recompose it from its stored declaration",
+			errdefs.ErrTeamInitialized)
+	case errors.Is(err, errdefs.ErrGitNotFound):
+		return nil, fmt.Errorf("%w: install git on the host running kuke serve, then initialize again",
+			errGitMissing)
+	default:
+		return nil, teamError(err)
+	}
+	view := initView{Teams: []initTeamView{}, Notes: []string{}}
+	for _, applied := range append([]initialize.Outcome{outcome}, outcome.Also...) {
+		if applied.Result == nil {
+			view.Notes = append(view.Notes, applied.Notes...)
+			continue
+		}
+		view.Teams = append(view.Teams, initTeamOf(applied))
+	}
+	return view, nil
+}
+
+func initTeamOf(applied initialize.Outcome) initTeamView {
+	res := applied.Result
+	view := initTeamView{
+		Team: res.Team, Resources: res.Resources, Configs: []string{}, Blueprints: []string{},
+		MissingSecrets: nonNil(res.MissingSecrets), Notes: nonNil(res.Notes),
+	}
+	if applied.Plan != nil {
+		for _, pair := range applied.Plan.Pairs {
+			view.Configs = append(view.Configs, pair.Config)
+			for _, task := range pair.Tasks {
+				view.Configs = append(view.Configs, task.Config)
+			}
+		}
+		view.Blueprints = nonNil(applied.Plan.Blueprints())
+	}
+	return view
+}
+
 func outcomeView(outcome initialize.Outcome) (teamOutcomeView, error) {
 	var view teamOutcomeView
 	if outcome.Plan != nil {
@@ -631,6 +700,10 @@ func (a *teamAPI) setDefaults(ctx context.Context, client kukeonv1.Client, r *ht
 // which never carries git stderr, a URL's credentials or a secret value.
 var errTeamOperation = errors.New("team operation failed")
 
+// errGitMissing is a team operation that cannot fetch because the host
+// running kuke serve has no git; its message says where to install it.
+var errGitMissing = errors.New("git is not installed")
+
 // teamError keeps the sentinels apiErrorStatus maps and classifies every
 // other error as errTeamOperation, so it reaches the browser as a 422 with
 // its message rather than as an unavailable daemon.
@@ -666,6 +739,10 @@ func teamErrorStatus(err error) (int, string, bool) {
 	case errors.Is(err, errdefs.ErrTeamExists),
 		errors.Is(err, errdefs.ErrSourceExists):
 		return http.StatusConflict, "already_exists", true
+	case errors.Is(err, errdefs.ErrTeamInitialized):
+		return http.StatusConflict, "already_initialized", true
+	case errors.Is(err, errGitMissing), errors.Is(err, errdefs.ErrGitNotFound):
+		return http.StatusUnprocessableEntity, "git_missing", true
 	case errors.Is(err, errdefs.ErrTeamNameInUse),
 		errors.Is(err, errdefs.ErrSourceInUse):
 		return http.StatusConflict, "in_use", true

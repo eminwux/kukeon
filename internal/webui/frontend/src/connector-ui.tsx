@@ -94,8 +94,9 @@ export async function startLogin(connector: string, volume: Partial<SecretRef>, 
 }
 
 // LoginButton logs in to one login identity: "Log in", "Log in again" once it
-// holds a login, or "Open login session" while one is running.
-export function LoginButton({ connector, title, volume, state, running = false, method, disabled = false, onStarted }: {
+// holds a login, or "Open login session" while one is running. idle replaces
+// "Log in" where the page words the offer itself (New agent's "Log in first").
+export function LoginButton({ connector, title, volume, state, running = false, method, disabled = false, idle = "Log in", className = "subtle-button", onStarted }: {
   connector: string;
   title: string;
   volume: Partial<SecretRef>;
@@ -103,11 +104,13 @@ export function LoginButton({ connector, title, volume, state, running = false, 
   running?: boolean;
   method?: string;
   disabled?: boolean;
+  idle?: string;
+  className?: string;
   onStarted?: () => void;
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<Failure>();
-  const label = running ? "Open login session" : state === loginLoggedIn ? "Log in again" : "Log in";
+  const label = running ? "Open login session" : state === loginLoggedIn ? "Log in again" : idle;
   async function run() {
     if (pending) return;
     setPending(true); setError(undefined);
@@ -116,7 +119,7 @@ export function LoginButton({ connector, title, volume, state, running = false, 
     finally { setPending(false); }
   }
   return <>
-    <button type="button" className="subtle-button" aria-label={`${label}: ${title} identity ${refLabel(volume)}`} disabled={disabled || pending} onClick={() => void run()}>{pending ? "Starting…" : label}</button>
+    <button type="button" className={className} aria-label={`${label}: ${title} identity ${refLabel(volume)}`} disabled={disabled || pending} onClick={() => void run()}>{pending ? "Starting…" : label}</button>
     {error && <ErrorNotice error={error} kind="Identity" />}
   </>;
 }

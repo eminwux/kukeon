@@ -18,6 +18,7 @@ package initialize
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -27,6 +28,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/config"
@@ -268,6 +270,10 @@ func TestInitAlreadyInitialized(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "already initialized") ||
 		!strings.Contains(err.Error(), "--force") || !strings.Contains(err.Error(), "--reapply") {
 		t.Fatalf("expected already-initialized guidance, got %v", err)
+	}
+	// The web UI's Initialize answers this sentinel with a 409 (#1694).
+	if !errors.Is(err, errdefs.ErrTeamInitialized) {
+		t.Fatalf("err = %v, want it to wrap errdefs.ErrTeamInitialized", err)
 	}
 	if !bytes.Equal(before, f.teams["kuke"]) || len(f.writes) != writes {
 		t.Fatal("existing team or daemon changed")

@@ -232,7 +232,7 @@ func (r *Exec) volumePostCreateChown(namespace string, spec intmodel.ContainerSp
 // reboot empties while the reused container still bind-mounts it. A no-op for
 // a container that declares no git config.
 func (r *Exec) gitPostCreate(namespace string, spec intmodel.ContainerSpec) error {
-	mount, err := ctr.StageContainerGit(spec, r.opts.RunPath)
+	mount, err := ctr.StageContainerGit(spec, r.opts.RunPath, r.opts.SecretsStagingDir)
 	if err != nil {
 		return err
 	}

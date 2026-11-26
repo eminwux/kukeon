@@ -24,6 +24,7 @@ import (
 
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/controller/runner"
+	"github.com/eminwux/kukeon/internal/ctr"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/diskpressure"
 )
@@ -150,6 +151,7 @@ func NewControllerExec(ctx context.Context, logger *slog.Logger, opts Options) *
 		runner: runner.NewRunner(ctx, logger, runner.Options{
 			ContainerdSocket:         opts.ContainerdSocket,
 			RunPath:                  opts.RunPath,
+			SecretsStagingDir:        ctr.SecretsStagingDir(opts.KukeondSocket),
 			ForceRegenerateCNI:       opts.ForceRegenerateCNI,
 			KukeonGroupGID:           opts.KukeondSocketGID,
 			DefaultMemoryLimitBytes:  opts.DefaultMemoryLimitBytes,

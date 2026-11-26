@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { settingsLink } from "./routes";
+import { homeLink, settingsLink } from "./routes";
 
 // UserMenu is the top-bar avatar button (#1652): its menu names the signed-in
-// user, links to the Settings page (#1686) and signs out. Escape closes the
-// menu and returns focus to the button.
-export function UserMenu({ user, onSignOut }: { user: string; onSignOut: () => void }) {
+// user, reopens the Workbench's Get started card (#1694), links to the
+// Settings page (#1686) and signs out. Escape closes the menu and returns
+// focus to the button.
+export function UserMenu({ user, onGetStarted, onSignOut }: { user: string; onGetStarted: () => void; onSignOut: () => void }) {
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
@@ -38,6 +39,7 @@ export function UserMenu({ user, onSignOut }: { user: string; onSignOut: () => v
     {open && <div className="user-menu-popup" id="user-menu-list" role="menu" aria-label="User" ref={menu} onKeyDown={menuKey}>
       <p className="user-menu-identity">Signed in as <strong>{user}</strong></p>
       <a role="menuitem" href={settingsLink()} onClick={() => setOpen(false)}>Settings</a>
+      <a role="menuitem" href={homeLink} onClick={() => { setOpen(false); onGetStarted(); }}>Get started</a>
       <button type="button" role="menuitem" onClick={() => { setOpen(false); onSignOut(); }}>Sign out</button>
     </div>}
   </div>;

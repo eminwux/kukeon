@@ -135,8 +135,9 @@ func initKuke(ctx context.Context, opts InitOptions) (Outcome, error) {
 			return Outcome{}, fmt.Errorf("init: %w; use --force to reset it", err)
 		}
 		if stored != nil {
-			return Outcome{}, errors.New(
-				"init: already initialized (team kuke is stored); use --force to reset or --reapply to recompose")
+			return Outcome{}, fmt.Errorf(
+				"init: %w (team kuke is stored); use --force to reset or --reapply to recompose",
+				errdefs.ErrTeamInitialized)
 		}
 	}
 	defaults, found, err := readDefaults(ctx, opts.Client, config.DefaultRealm)

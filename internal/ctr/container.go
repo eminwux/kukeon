@@ -638,7 +638,7 @@ func (c *client) CreateContainerFromSpec(
 	for _, apply := range opts {
 		apply(&bo)
 	}
-	resolved, err := resolveSecrets(containerdID, containerSpec.Secrets, DefaultSecretsStagingDir, bo.runPath)
+	resolved, err := resolveSecrets(containerdID, containerSpec.Secrets, bo.secretsStagingDir, bo.runPath)
 	if err != nil {
 		c.logger.ErrorContext(
 			c.ctx,
@@ -660,7 +660,7 @@ func (c *client) CreateContainerFromSpec(
 	// config into its staged git directory and mount it read-only (issue
 	// #1472). The runner re-stages and re-owns the directory on every start
 	// (StageContainerGit), so a reused container survives a wiped /run.
-	gitMount, err := StageContainerGit(containerSpec, bo.runPath)
+	gitMount, err := StageContainerGit(containerSpec, bo.runPath, bo.secretsStagingDir)
 	if err != nil {
 		c.logger.ErrorContext(
 			c.ctx,

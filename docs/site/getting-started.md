@@ -1,6 +1,6 @@
 # Getting Started
 
-This guide walks you through installing Kukeon (v0.6.0 beta) on a Linux host, bootstrapping the runtime, and running a simple cell.
+This guide takes a Linux host from nothing to a running agent: install Kukeon, open the web UI, and follow its **Get started** checklist. Every step has a CLI equivalent, listed [below](#5-cli-equivalents). The last section runs a plain cell from a manifest, without the web UI or a team.
 
 ## 1. Check prerequisites
 
@@ -8,57 +8,89 @@ Kukeon needs:
 
 - Linux with cgroups v2
 - [containerd](https://containerd.io/) running at `/run/containerd/containerd.sock`
+- `git`, for the step that stores the `kuke` team (the installer goes on without it and tells you how to finish later)
 
 See [Installation → Prerequisites](install/prerequisites.md) for the full check (including `kuke doctor cgroups` to verify controller delegation) and quick install commands for each dependency.
 
-## 2. Install kuke
-
-The one-line installer detects your platform, verifies the prereqs above, downloads the latest release binary with checksum verification, installs `kuke` + `kukeond` to `/usr/local/bin`, and runs `sudo kuke init` to bring the daemon up:
+## 2. Install
 
 ```bash
 curl -fsSL https://kukeon.io/install.sh | bash
 ```
 
-Pass `--check` to run the prereq checks only without touching the system. See [Install on Linux](install/install-linux.md) for the manual install path and the env vars the installer honors (`KUKE_VERSION`, `KUKE_INSTALL_PREFIX`, etc.).
+The installer checks the prerequisites, downloads and verifies the binaries, and installs them to `/usr/local/bin`. It then:
 
-A single binary ships both the CLI (`kuke`) and the daemon (`kukeond`). Kukeon dispatches to one or the other based on the executable name, so the installer hard-links them next to each other. See [Architecture → Process Model](architecture/process-model.md) for the details.
+1. runs `sudo kuke init`, which provisions the two default realms and starts the `kukeond` daemon;
+2. runs `sudo kuke team init`, which stores the `kuke` team (majordomo) and the `default` team (the agent templates);
+3. installs `kukeond.service`, so the daemon comes back after a reboot;
+4. installs `kuke-serve.service`, which serves the web UI on `http://localhost:5129`.
 
-## 3. Bootstrap the runtime
+It ends with the web UI's address and login:
 
-If you used the one-line installer, `kuke init` already ran. If you installed manually, run it now:
+```text
+✓ kukeon v0.10.0-77-gabc1234 (edge) installed and initialized
+
+Open the web UI:
+  http://localhost:5129
+  user:     root
+  password: <a 32-character token>
+  read it again: kuke get secret web-ui-admin --realm kuke-system -o yaml
+Then follow Get started on its first page: initialize, log in to Claude or
+Codex, set up git and launch your first agent.
+```
+
+Pass `--check` to run the prerequisite checks only. [Install on Linux](install/install-linux.md) lists every step, the environment variables the installer honors, its exit codes, and the manual install path.
+
+!!! note "When a step is skipped"
+
+    - **No `git`, or `kuke team init` failed**: the summary has a `✗ kuke team init failed: …` line and the installer exits 3. Everything else is installed; finish with **Initialize** in the web UI (step 4) or `sudo kuke team init`.
+    - **No systemd, or `KUKE_SKIP_WEB_UI=1`**: no `kuke-serve.service`. Run `kuke serve` in a terminal and leave it running.
+
+## 3. Open the web UI
+
+Open `http://localhost:5129` on the host and sign in as `root` with the password the installer printed. The web UI listens on localhost only; from another machine, forward the port first:
 
 ```bash
-sudo kuke init
+ssh -L 5129:localhost:5129 <host>
 ```
 
-`kuke init` provisions the two default realms (`default` for user workloads, `kuke-system` for the `kukeond` daemon cell), sets up CNI dirs, pulls the `kukeond` image into the `kuke-system` realm's containerd namespace, and starts the daemon. It touches `/opt/kukeon`, cgroups, and containerd, so it needs root.
+See [Local web server](https://github.com/eminwux/kukeon/blob/main/docs/web-server.md) for the listen address and the other `kuke serve` options.
 
-Once `kuke init` returns, run [`kuke status`](cli/kuke-status.md) to confirm the daemon is healthy and both realms are Ready.
+## 4. Follow Get started
 
-Expected tail of the output:
+The first page, the **Workbench**, shows a **Get started** card until its required steps are done. Each step has a button that does it or takes you to where it is done, and turns to **Done** by itself.
 
-```
-Initialized Kukeon runtime
-Realm: default (namespace: default.kukeon.io)
-System realm: kuke-system (namespace: kuke-system.kukeon.io)
-Run path: /opt/kukeon
-Kukeond image: ghcr.io/eminwux/kukeon:v0.6.0
-Actions:
-  ...
-  System hierarchy:
-    - realm "kuke-system": created
-    - cell "kukeond": created (image ghcr.io/eminwux/kukeon:v0.6.0)
-    - cell cgroup: created
-    - cell root container: created
-    - cell containers: started
-kukeond is ready (unix:///run/kukeon/kukeond.sock)
-```
+| Step                          | What it does                                                                                                                                                                                                                                                  | Done when                                                            |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| **Initialize**                | Runs `kuke team init` from the browser: the server fetches the kukeon source and stores the `kuke` and `default` teams. The installer has normally done this already.                                                                                         | The `kuke` and `default` teams are stored.                           |
+| **Log in to Claude or Codex** | **Log in** opens a short-lived cell that runs the harness's own login in a terminal; follow its prompts, and the cell is removed when the login ends. **Use a token** opens the connector's page, where you store a subscription token or an API key instead. | A Claude or Codex login identity is logged in, or a token is stored. |
+| **Set up Git and GitHub**     | Recommended. Opens the Git connector's **New identity** page: import the SSH key and git author of the account running the web UI, use a GitHub token for both `gh` and git, or enter an identity by hand.                                                    | A git identity or a GitHub token is stored.                          |
+| **Enable majordomo**          | Optional. Opens the majordomo panel, where **Enable majordomo** creates and starts kukeon's own assistant. The panel says whether its harness is logged in; majordomo keeps a login of its own.                                                               | A majordomo cell exists.                                             |
+| **Launch your first agent**   | Opens **New agent**: pick Claude or Codex, name the agent, **Create**. Its terminal opens when the cell has started.                                                                                                                                          | A cell of an agent exists.                                           |
 
-`init` is idempotent. Re-running it reconciles on-disk state; items that already exist are reported as `already existed`, and on a healthy host the header reads `Kukeon runtime already initialized`.
+The recommended and optional steps never keep the card open. **Dismiss** hides it; **Get started** in the user menu (top right) shows it again.
 
-## 4. Daily use without sudo
+An agent has no project checkout: clone one in its terminal. See [Your first agent](guides/first-agent.md) for what an agent is and how to work with it, and [Git credentials](guides/git-credentials.md) for git identities.
 
-`kuke init` provisions a system `kukeon` group and sets the daemon socket at `/run/kukeon/kukeond.sock` to mode `0660 root:kukeon`. Add yourself to the group so daemon-routed commands don't need `sudo`:
+## 5. CLI equivalents
+
+Everything the checklist does is a `kuke` command. Add yourself to the `kukeon` group first (step 6), or prefix each command with `sudo`.
+
+| Step                 | Command                                                                                                                                                                  |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Initialize           | `sudo kuke team init`                                                                                                                                                    |
+| Log in               | `kuke connector login claude default-agent-claude-state --space default --stack default` (or `codex` and `default-agent-codex-state`): the agent template's state volume |
+| Git from this host   | `kuke connector import git --default`                                                                                                                                    |
+| GitHub token and git | `kuke connector import github --token-stdin --git --default < token.txt`                                                                                                 |
+| Majordomo            | `kuke run --from-config kuke-majordomo-claude` (or `kuke-majordomo-codex`)                                                                                               |
+| First agent          | `kuke create agent --harness claude --name "My agent" -a` (or `--harness codex`)                                                                                         |
+| Web UI by hand       | `kuke serve`                                                                                                                                                             |
+
+`kuke connector list` shows every connector, its identities and its login identities with their state.
+
+## 6. Daily use without sudo
+
+`kuke init` provisions a system `kukeon` group and sets the daemon socket at `/run/kukeon/kukeond.sock` to mode `0660 root:kukeon`. When the installer runs under `sudo`, it adds the invoking user to the group; otherwise add yourself:
 
 ```bash
 sudo usermod -aG kukeon $USER
@@ -67,9 +99,27 @@ sudo usermod -aG kukeon $USER
 
 The rest of this guide assumes you have done that. If you skip this step, prepend `sudo` to every `kuke` command below. Operations that bypass the daemon still need root: `kuke init`, `kuke daemon reset`, `kuke image load` (in-process by design — image commands run in-process regardless of flags), `kuke doctor cgroups --probe`, and any command that runs in-process (`kuke get <kind> --no-daemon`, `kuke purge ... --no-daemon`, or any command with `KUKEON_NO_DAEMON=true` / an explicit `--run-path`).
 
-## 5. Verify with `kuke get`
+## Advanced: a cell from a manifest
 
-List the realms `kuke init` just created:
+Agents are cells that a team's Configs describe. A cell can also be written by hand; this section runs one without the web UI or a team.
+
+<a id="3-bootstrap-the-runtime"></a>
+
+### What `kuke init` created
+
+`kuke init` provisions the two default realms (`default` for user workloads, `kuke-system` for the `kukeond` daemon cell), sets up CNI dirs, pulls the `kukeond` image into the `kuke-system` realm's containerd namespace, and starts the daemon. If you installed [by hand](install/install-linux.md#manual-install-fallback), run it yourself with `sudo kuke init`. A fresh bootstrap ends with:
+
+```text
+  System hierarchy:
+    - realm "kuke-system": created
+    - cell "kukeond": created (image ghcr.io/eminwux/kukeon:<version>)
+    - cell cgroup: created
+    - cell root container: created
+    - cell containers: started
+kukeond is ready (unix:///run/kukeon/kukeond.sock)
+```
+
+`init` is idempotent: items that already exist are reported as `already existed`, and on a healthy host its header reads `Kukeon runtime already initialized`. [`kuke status`](cli/kuke-status.md) confirms the daemon is healthy and both realms are Ready.
 
 ```bash
 $ kuke get realms
@@ -79,8 +129,6 @@ kuke-system  Ready  <age>
 ```
 
 `default` is your user-workload realm — `kuke create`, `kuke apply`, etc. land here when no `--realm` flag is given. `kuke-system` is reserved for Kukeon itself; the `kukeond` daemon runs as a cell inside `kuke-system / kukeon / kukeon / kukeond` (realm / space / stack / cell).
-
-Spaces and stacks are only auto-created under `kuke-system` — the user-facing `default` realm is empty so `kuke purge --cascade default` cannot take the daemon down:
 
 ```bash
 $ kuke get spaces --realm kuke-system
@@ -94,7 +142,7 @@ kukeon  kuke-system  kukeon  Ready  <age>
 
 Add `-o wide` for per-kind extra columns (e.g. realm gains `NAMESPACE`), or `-o yaml` / `-o json` for full resource details (including `cgroupPath`).
 
-## 6. Run a hello-world cell
+### Run a hello-world cell
 
 A minimal example that brings up a single container serving a static HTML page with busybox httpd ships in the repo at [`docs/examples/hello-world.yaml`](https://github.com/eminwux/kukeon/blob/main/docs/examples/hello-world.yaml):
 
@@ -151,7 +199,9 @@ sudo kuke delete cell hello-world \
     --realm default --space default --stack default --cascade
 ```
 
-## 7. Enable shell autocomplete
+The cell also shows in the web UI's Workbench while it runs.
+
+## Shell autocomplete
 
 ```bash
 cat >> ~/.bashrc <<EOF
@@ -163,7 +213,9 @@ EOF
 
 ## Where to go next
 
+- Work with agents: [Your first agent](guides/first-agent.md)
 - Understand what you just created: [Concepts → Overview](concepts/overview.md)
+- Teams, roles and harnesses: [Concepts → Team](concepts/team.md)
 - Dig into the resource model: [Manifest Reference](manifests/overview.md)
 - Learn the CLI: [CLI Reference → Commands](cli/commands.md)
 - Iterate on Kukeon from source: [Guides → Local development](guides/local-dev.md)

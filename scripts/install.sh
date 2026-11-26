@@ -9,10 +9,16 @@
 #   curl -fsSL https://kukeon.io/install.sh | bash -s -- --check
 #
 # Collapses the multi-step manual install (download → chmod → install →
-# hardlink → init → kuke team init) into a single invocation. Checks but never
-# installs host prerequisites (containerd, cgroups v2) — auto-installing those
-# has too much blast radius on arbitrary user systems; surface a distro-aware
-# hint instead. After install, `sudo kuke update` keeps the host on its channel.
+# hardlink → init → kuke team init → web UI service) into a single invocation.
+# Checks but never installs host prerequisites (containerd, cgroups v2) —
+# auto-installing those has too much blast radius on arbitrary user systems;
+# surface a distro-aware hint instead. After install, `sudo kuke update` keeps
+# the host on its channel.
+#
+# Exit status: 0 on success; 1 on a failed prerequisite, download, install or
+# daemon upgrade; 2 on a bad argument or KUKE_CHANNEL; 3 when everything was
+# installed but the kuke team could not be stored (`kuke team init` failed or
+# git is missing) — the summary names the reason and the command to retry.
 #
 # Env overrides:
 #   KUKE_CHANNEL           edge (default: the newest build of main) or stable
@@ -32,6 +38,9 @@
 #                          the historical silent-skip behavior)
 #   KUKE_SKIP_TEAM_INIT=1  skip `kuke team init` (fresh host) or
 #                          `kuke team init --upgrade` (live host)
+#   KUKE_SKIP_WEB_UI=1     do not install the kuke-serve.service systemd unit
+#                          (the web UI on localhost:5129); run `kuke serve` by
+#                          hand instead
 
 set -euo pipefail
 
@@ -44,6 +53,7 @@ KUKE_SKIP_CHECKSUM="${KUKE_SKIP_CHECKSUM:-}"
 KUKE_SKIP_KUKEBUILD="${KUKE_SKIP_KUKEBUILD:-}"
 KUKE_SKIP_DAEMON_UPGRADE="${KUKE_SKIP_DAEMON_UPGRADE:-}"
 KUKE_SKIP_TEAM_INIT="${KUKE_SKIP_TEAM_INIT:-}"
+KUKE_SKIP_WEB_UI="${KUKE_SKIP_WEB_UI:-}"
 
 # The release the assets are downloaded from: `edge` (the rolling prerelease)
 # or the stable tag. Set by resolve_channel / do_install.
@@ -51,8 +61,13 @@ KUKE_RELEASE_TAG=""
 # The immutable kukeond image matching the installed binaries: :sha-<short> on
 # edge, :<tag> on stable. Same rule as config.BuildVersion.ImageTag.
 KUKEOND_IMAGE=""
-# Outcome of the team step: skipped | ok | failed.
+# Outcome of the team step: skipped | ok | failed. On failed, the reason and
+# the command to retry are kept for the summary; finish then exits
+# EXIT_TEAM_INIT_FAILED.
 KUKE_TEAM_INIT="skipped"
+KUKE_TEAM_INIT_REASON=""
+KUKE_TEAM_INIT_CMD=""
+EXIT_TEAM_INIT_FAILED=3
 
 # Set by handle_running_daemon when a live host's daemon is older than the
 # binaries just installed; main exits non-zero on this so the installer never
@@ -84,8 +99,9 @@ usage() {
 Usage: install.sh [--check] [--help]
 
 Installs kukeon (kuke + kukeond + kukebuild + kukepause) on a Linux host,
-initializes the runtime and stores the kuke team (majordomo). Keep the host
-current afterwards with \`sudo kuke update\`.
+initializes the runtime, stores the kuke team (majordomo) and starts the web
+UI on http://localhost:5129. Keep the host current afterwards with
+\`sudo kuke update\`.
 
   --check    Run prerequisite checks only; do not touch the system.
   --help     Show this help.
@@ -104,6 +120,14 @@ Env overrides:
                          On a live host, skip the daemon version check and keep
                          an intentionally pinned older daemon.
   KUKE_SKIP_TEAM_INIT=1  Skip \`kuke team init\` (or \`--upgrade\` on a live host).
+  KUKE_SKIP_WEB_UI=1     Do not install the kuke-serve.service systemd unit.
+
+Exit status:
+  0  installed.
+  1  a prerequisite, download, install or daemon upgrade failed.
+  2  bad argument or KUKE_CHANNEL.
+  3  installed, but \`kuke team init\` failed (or git is missing); the summary
+     names the reason and the command to retry.
 EOF
 }
 
@@ -584,6 +608,7 @@ do_install() {
 
     install_systemd_unit
     grant_group_membership
+    install_web_ui_unit
 }
 
 # --- Running-daemon version gate ---------------------------------------------
@@ -640,9 +665,11 @@ handle_running_daemon() {
 # live host. `kuke init` and `kuke team init` stay two commands: team init is a
 # daemon client that fetches github.com/eminwux/kukeon at the binary's commit,
 # so it needs git and network access the runtime bootstrap does not. A missing
-# git or a failed team step is a warning; the install still succeeds. Runs
-# through $SUDO because the invoking user's kukeon group membership is not
-# active until the next login.
+# git or a failed team step does not undo the install: the rest of the script
+# still runs, the summary prints a ✗ line with the reason and the command to
+# retry, and finish exits EXIT_TEAM_INIT_FAILED (issue #1694). The web UI's
+# Initialize button runs the same step later. Runs through $SUDO because the
+# invoking user's kukeon group membership is not active until the next login.
 run_team_step() {
     local mode="$1" kuke_bin="${KUKE_INSTALL_PREFIX}/kuke"
     local -a args=(team init)
@@ -650,6 +677,7 @@ run_team_step() {
         args+=(--upgrade)
     fi
     local cmd="sudo kuke ${args[*]}"
+    KUKE_TEAM_INIT_CMD="$cmd"
     if [ -n "$KUKE_SKIP_TEAM_INIT" ]; then
         warn "KUKE_SKIP_TEAM_INIT=1 set — skipping \`kuke ${args[*]}\`. Run it later:"
         printf '      %s\n' "$cmd"
@@ -662,16 +690,31 @@ run_team_step() {
     step "Composing the kuke team (kuke ${args[*]})"
     if ! command -v git >/dev/null 2>&1; then
         KUKE_TEAM_INIT="failed"
-        warn "git is not on PATH — skipping \`kuke ${args[*]}\`, which fetches the kukeon team sources."
+        KUKE_TEAM_INIT_REASON="git is not installed (kuke team init fetches the kukeon team sources with git)"
+        fail "git is not on PATH — cannot run \`kuke ${args[*]}\`, which fetches the kukeon team sources."
         printf '    Install git, then run:\n      %s\n' "$cmd" >&2
         return 0
     fi
-    if $SUDO "$kuke_bin" "${args[@]}"; then
+    # The output is captured so the summary can quote the reason; it is
+    # printed as soon as the command returns.
+    local out rc
+    set +e
+    out="$($SUDO "$kuke_bin" "${args[@]}" 2>&1)"
+    rc="$?"
+    set -e
+    if [ "$rc" -eq 0 ]; then
+        [ -n "$out" ] && printf '%s\n' "$out"
         KUKE_TEAM_INIT="ok"
         ok "kuke team stored"
     else
+        [ -n "$out" ] && printf '%s\n' "$out" >&2
         KUKE_TEAM_INIT="failed"
-        warn "\`kuke ${args[*]}\` failed — the runtime is installed; run it later:"
+        # The last non-empty line is the command's error; without one, the status.
+        KUKE_TEAM_INIT_REASON="$(printf '%s\n' "$out" | awk 'NF {line=$0} END {print line}' | sed -E 's/^[Ee]rror:[[:space:]]*//')"
+        if [ -z "$KUKE_TEAM_INIT_REASON" ]; then
+            KUKE_TEAM_INIT_REASON="kuke ${args[*]} exited ${rc}"
+        fi
+        fail "\`kuke ${args[*]}\` failed — the runtime is installed; run it again later:"
         printf '      %s\n' "$cmd" >&2
     fi
     return 0
@@ -787,6 +830,106 @@ EOF
     ok "installed and enabled ${SYSTEMD_UNIT_PATH}"
 }
 
+# --- Web UI unit -------------------------------------------------------------
+# Drops /etc/systemd/system/kuke-serve.service so the web UI is up when the
+# installer ends and after every reboot (issue #1694). `kuke serve` is a client
+# of kukeond: it dials the daemon socket per request and keeps running while
+# the daemon is down, so the unit only orders itself after kukeond.service.
+#
+# It runs as the invoking user ($SUDO_USER) — the account whose git
+# configuration the web UI's team operations fetch with — or as root when the
+# installer was not run through sudo. SupplementaryGroups gives the process the
+# kukeon group without waiting for the user's next login, which is when the
+# membership grant_group_membership just added becomes effective.
+#
+# Skipped with KUKE_SKIP_WEB_UI=1, and on systemd-less hosts like the daemon
+# unit. KUKE_WEB_UI records the outcome for the summary.
+WEB_UI_UNIT_PATH="/etc/systemd/system/kuke-serve.service"
+WEB_UI_UNIT_NAME="kuke-serve.service"
+WEB_UI_LISTEN="localhost:5129"
+KUKE_WEB_UI="skipped" # skipped | ok | failed
+
+# web_ui_user prints the account the unit runs as.
+web_ui_user() {
+    if [ -n "${SUDO_USER:-}" ]; then
+        printf '%s\n' "$SUDO_USER"
+    else
+        printf 'root\n'
+    fi
+}
+
+# render_web_ui_unit prints the unit file.
+render_web_ui_unit() {
+    cat <<EOF
+[Unit]
+Description=kukeon web UI (kuke serve)
+Documentation=https://kukeon.io
+After=network.target kukeond.service
+Wants=kukeond.service
+
+[Service]
+# \`kuke serve\` stays in the foreground and serves the web UI on
+# ${WEB_UI_LISTEN}. It asks for the login of the web-ui-admin Secret that
+# \`kuke init\` created: kuke get secret web-ui-admin --realm kuke-system -o yaml
+User=$(web_ui_user)
+SupplementaryGroups=${KUKE_GROUP}
+ExecStart=${KUKE_INSTALL_PREFIX}/kuke serve --listen ${WEB_UI_LISTEN}
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
+install_web_ui_unit() {
+    if [ -n "$KUKE_SKIP_WEB_UI" ]; then
+        warn "KUKE_SKIP_WEB_UI=1 set — not installing ${WEB_UI_UNIT_NAME}. Run the web UI by hand:"
+        printf '      kuke serve\n'
+        return 0
+    fi
+    if ! command -v systemctl >/dev/null 2>&1; then
+        step "Configuring the web UI"
+        warn "systemd not detected — skipping ${WEB_UI_UNIT_NAME} unit install."
+        printf '    On systemd-less hosts, run the web UI by hand:\n' >&2
+        printf '      kuke serve\n' >&2
+        return 0
+    fi
+    step "Installing ${WEB_UI_UNIT_NAME} systemd unit (web UI on ${WEB_UI_LISTEN})"
+    local unit_tmp
+    unit_tmp="$(mktemp -t kuke-serve.service.XXXXXX)"
+    render_web_ui_unit >"$unit_tmp"
+    $SUDO install -m 0644 "$unit_tmp" "$WEB_UI_UNIT_PATH"
+    rm -f "$unit_tmp"
+    $SUDO systemctl daemon-reload
+    # enable, then restart rather than `enable --now`: on a re-run the unit is
+    # already active, and only a restart picks up the binary just installed.
+    # A unit that does not come up (the port is taken by a `kuke serve`
+    # started by hand, say) is a warning: the install itself is complete.
+    if $SUDO systemctl enable "$WEB_UI_UNIT_NAME" && $SUDO systemctl restart "$WEB_UI_UNIT_NAME" && web_ui_active; then
+        KUKE_WEB_UI="ok"
+        ok "installed and started ${WEB_UI_UNIT_PATH} (runs as $(web_ui_user))"
+    else
+        KUKE_WEB_UI="failed"
+        warn "${WEB_UI_UNIT_NAME} is installed but did not start. Inspect it with:"
+        printf '      sudo systemctl status %s\n' "$WEB_UI_UNIT_NAME" >&2
+        printf '      sudo journalctl -u %s -n 50\n' "$WEB_UI_UNIT_NAME" >&2
+    fi
+}
+
+# web_ui_active reports whether the unit stayed up: a `kuke serve` that cannot
+# bind exits at once, so the unit is checked a few times over three seconds.
+WEB_UI_SETTLE_SECONDS=1
+web_ui_active() {
+    for _ in 1 2 3; do
+        sleep "$WEB_UI_SETTLE_SECONDS"
+        if ! $SUDO systemctl is-active --quiet "$WEB_UI_UNIT_NAME"; then
+            return 1
+        fi
+    done
+    return 0
+}
+
 # --- Next steps --------------------------------------------------------------
 # Surface the kukeon-group requirement before the first client command. After
 # grant_group_membership, $SUDO_USER is in the group on disk, but the current
@@ -821,6 +964,9 @@ EOF
 }
 
 # print_web_ui_login prints how to open the web UI and log in (issue #1652).
+# With kuke-serve.service running it is a URL to open; otherwise the `kuke
+# serve` command to run first. Either way the next step is the Workbench's
+# Get started checklist (issue #1694).
 # The password is read back from the web-ui-admin Secret `kuke init` creates.
 # When the secret is absent or unreadable — KUKE_SKIP_INIT=1, or the installer
 # skipped `kuke init` on a host whose daemon was already running — it says to
@@ -831,13 +977,17 @@ print_web_ui_login() {
     _web_password="$($SUDO kuke get secret web-ui-admin --realm kuke-system -o json 2>/dev/null \
         | sed -n 's/^.*"password": *"\([^"]*\)".*$/\1/p' | head -n 1)" || _web_password=""
     if [ -n "$_web_password" ]; then
+        if [ "$KUKE_WEB_UI" = "ok" ]; then
+            printf '\nOpen the web UI:\n  %shttp://%s%s\n' "$C_BOLD" "$WEB_UI_LISTEN" "$C_RESET"
+        else
+            printf '\nOpen the web UI:\n  %skuke serve%s   then browse to %shttp://%s%s\n' "$C_BOLD" "$C_RESET" "$C_BOLD" "$WEB_UI_LISTEN" "$C_RESET"
+        fi
         cat <<EOF
-
-Open the web UI:
-  ${C_BOLD}kuke serve${C_RESET}   then browse to ${C_BOLD}http://localhost:5129${C_RESET}
   user:     ${C_BOLD}root${C_RESET}
   password: ${C_BOLD}${_web_password}${C_RESET}
   read it again: kuke get secret web-ui-admin --realm kuke-system -o yaml
+Then follow ${C_BOLD}Get started${C_RESET} on its first page: initialize, log in to Claude or
+Codex, set up git and launch your first agent.
 EOF
     else
         cat <<EOF
@@ -849,16 +999,30 @@ EOF
     unset _web_password
 }
 
+# print_team_init_failure is the summary's ✗ line for a failed team step: the
+# reason, the command to retry, and the web UI's Initialize as the other way.
+print_team_init_failure() {
+    printf '\n%s✗%s kuke team init failed: %s\n' "$C_RED" "$C_RESET" "${KUKE_TEAM_INIT_REASON:-unknown reason}"
+    printf '  The runtime is installed, but the kuke team (majordomo) and the agent templates are not stored.\n'
+    printf '  Retry:  %s%s%s\n' "$C_BOLD" "${KUKE_TEAM_INIT_CMD:-sudo kuke team init}" "$C_RESET"
+    printf '  or choose %sInitialize%s under Get started in the web UI.\n' "$C_BOLD" "$C_RESET"
+}
+
 print_next_steps() {
     print_group_note
     cat <<EOF
 
 ${C_GREEN}${C_BOLD}✓ kukeon ${KUKE_VERSION} (${KUKE_CHANNEL}) installed and initialized${C_RESET}
 EOF
+    if [ "$KUKE_TEAM_INIT" = "failed" ]; then
+        print_team_init_failure
+    fi
+    # The web UI comes first: it is where a new host is set up.
+    print_web_ui_login
     if [ "$KUKE_TEAM_INIT" = "ok" ]; then
         cat <<EOF
 
-Talk to the majordomo of the kuke team:
+Or stay in the terminal. Talk to the majordomo of the kuke team:
   ${C_BOLD}kuke run --from-config kuke-majordomo-codex${C_RESET}   (or kuke-majordomo-claude)
 EOF
     fi
@@ -881,28 +1045,47 @@ Stay current with the ${KUKE_CHANNEL} channel:
 Docs:    https://kukeon.io
 Issues:  https://github.com/${KUKE_REPO}/issues
 EOF
-    print_web_ui_login
 }
 
 # --- Main --------------------------------------------------------------------
-run_prereqs
+# finish prints the outcome and exits with the installer's status.
+finish() {
+    # A live host with a daemon older than the just-installed binaries is left
+    # in a version skew (handle_running_daemon already printed the recreate
+    # command). Exit non-zero with a qualified message instead of the rosy
+    # "installed and initialized" banner — the installer must never claim an
+    # unqualified success over a skew it just declared (issue #1260).
+    if [ -n "$KUKE_DAEMON_SKEW" ]; then
+        fail "binaries installed, but the running daemon is older — run the recreate command above to finish the upgrade."
+        exit 1
+    fi
 
-if [ "$MODE" = "check" ]; then
-    printf '\n'
-    ok "all prerequisites satisfied — system is ready for \`bash install.sh\`."
+    print_next_steps
+
+    # Everything was installed, but the kuke team is not stored: say so with
+    # a status of its own, so a provisioning script can tell it from a failed
+    # install (issue #1694). The ✗ line above carries the reason.
+    if [ "$KUKE_TEAM_INIT" = "failed" ]; then
+        exit "$EXIT_TEAM_INIT_FAILED"
+    fi
     exit 0
+}
+
+main() {
+    run_prereqs
+
+    if [ "$MODE" = "check" ]; then
+        printf '\n'
+        ok "all prerequisites satisfied — system is ready for \`bash install.sh\`."
+        exit 0
+    fi
+
+    do_install
+    finish
+}
+
+# KUKE_INSTALL_LIB=1 is for scripts/install-test.sh only: it defines the
+# functions above and stops here, so a test can call them one at a time.
+if [ -z "${KUKE_INSTALL_LIB:-}" ]; then
+    main
 fi
-
-do_install
-
-# A live host with a daemon older than the just-installed binaries is left in a
-# version skew (handle_running_daemon already printed the recreate command).
-# Exit non-zero with a qualified message instead of the rosy "installed and
-# initialized" banner — the installer must never claim an unqualified success
-# over a skew it just declared (issue #1260).
-if [ -n "$KUKE_DAEMON_SKEW" ]; then
-    fail "binaries installed, but the running daemon is older — run the recreate command above to finish the upgrade."
-    exit 1
-fi
-
-print_next_steps

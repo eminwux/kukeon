@@ -39,8 +39,10 @@ function teamConfigs({ suspend = true, status } = {}) {
 // One mutable host: its cells and configs, the requests the page made, and the attach sockets.
 // attach shapes the attach socket: promptDelay holds the prompt frame back that many ms after
 // "ready"; silent sends only "ready", like a program that prints nothing.
-async function world(page, { cells = [], configs = [], reports = [], createError, daemon, attach = {} } = {}) {
-  const state = { cells: [...cells], configs, reports, requests: [], sockets: [], messages: [], createError, sweeps: [] };
+// initConfigs is what Initialize (POST /api/teams/init, #1694) stores; logins answers GET
+// /api/connectors/logins and takes the login an identity cell is started for.
+async function world(page, { cells = [], configs = [], reports = [], createError, daemon, attach = {}, initConfigs, logins = [] } = {}) {
+  const state = { cells: [...cells], configs, reports, requests: [], sockets: [], messages: [], createError, sweeps: [], logins, loginPosts: [] };
   const named = name => state.cells.find(item => item.metadata.name === name);
   await page.route("**/api/realms**", async route => {
     const request = route.request();
@@ -93,6 +95,21 @@ async function world(page, { cells = [], configs = [], reports = [], createError
     return found ? route.fulfill({ json: found }) : route.fulfill({ status: 404, json: { error: { code: "not_found", message: "health report not found" } } });
   });
   if (daemon) await page.route("**/api/daemon/health", route => route.fulfill({ json: daemon }));
+  await page.route("**/api/teams/init", route => {
+    state.requests.push("POST teams/init");
+    state.configs = initConfigs ?? teamConfigs();
+    return route.fulfill({ json: { teams: [{ team: "kuke", resources: 5, configs: ["kuke-majordomo-claude"], blueprints: ["claude-host"], missingSecrets: [], notes: [] }], notes: [] } });
+  });
+  await page.route(url => url.pathname === "/api/connectors/logins", route => route.fulfill({ json: state.logins }));
+  // "Log in": the identity cell of the named state volume starts.
+  await page.route(url => /^\/api\/connectors\/[^/]+\/login$/.test(url.pathname), route => {
+    const body = route.request().postDataJSON();
+    state.loginPosts.push({ connector: new URL(route.request().url()).pathname.split("/")[3], ...body });
+    const item = state.logins.find(entry => entry.volume.name === body.name);
+    item.session = { realm: scope[0], space: scope[1], stack: scope[2], cell: `login-${body.name}`, container: "login" };
+    state.cells.push({ apiVersion: "v1beta1", kind: "Cell", metadata: { name: `login-${body.name}` }, spec: { realmId: scope[0], spaceId: scope[1], stackId: scope[2], containers: [{ id: "login", attachable: true }], tty: { default: "login" } }, status: { state: "Ready" } });
+    return route.fulfill({ json: { identity: item, created: false } });
+  });
   await page.routeWebSocket("**/attach", socket => {
     const entry = { url: new URL(socket.url()).pathname, closed: false, messages: [], send: data => socket.send(data), close: () => socket.close() };
     state.sockets.push(entry);
@@ -109,24 +126,101 @@ async function world(page, { cells = [], configs = [], reports = [], createError
 }
 
 const panel = page => page.getByRole("complementary", { name: "Majordomo panel" });
-const entry = page => page.getByRole("region", { name: "Majordomo", exact: true }).getByRole("button");
+const entryRegion = page => page.getByRole("region", { name: "Majordomo", exact: true });
+const entry = page => entryRegion(page).locator(".majordomo-entry-button");
 const connection = page => panel(page).locator(".terminal-connection-state");
 const pasted = state => state.messages.filter(message => Buffer.isBuffer(message)).map(message => message.toString());
 const runningMajordomo = () => cell("majordomo", "Ready", { ...majordomoLabels, "kukeon.io/config": "kuke-majordomo-claude" });
 
-test("the Majordomo sidebar entry is permanent and says when kuke team init is needed", async ({ page }) => {
+test("the Majordomo sidebar entry is permanent and offers Initialize when kuke team init is needed", async ({ page }) => {
   // The only config carries the name but not the labels, so majordomo is not installed.
   const state = await world(page, { configs: [config("kuke-majordomo-claude", { team: "platform" })] });
   await page.goto(`${server.url}#/resources`);
   await expect(entry(page)).toContainText("Majordomo");
-  await expect(entry(page)).toContainText("Needs kuke team init");
+  await expect(entry(page)).toContainText("Not initialized");
+  // The entry carries the button itself (#1694); the command stays in the panel as secondary text.
+  await expect(entryRegion(page).getByRole("button", { name: "Initialize", exact: true })).toBeVisible();
+  await expect(entryRegion(page)).not.toContainText("kuke team init");
   await page.goto(`${server.url}#/configs`);
   await expect(entry(page)).toBeVisible();
   await entry(page).click();
   await expect(panel(page)).toContainText("Majordomo is not installed on this host.");
-  await expect(panel(page)).toContainText("kuke team init");
+  await expect(panel(page).locator(".initialize-cli")).toHaveText("Or run kuke team init on the host.");
   await expect(panel(page).getByRole("button", { name: "Enable majordomo" })).toHaveCount(0);
   expect(state.requests).toEqual([]);
+  // Initialize from the panel applies the configs: the entry and the panel follow without a reload.
+  await panel(page).getByRole("button", { name: "Initialize", exact: true }).click();
+  await expect(entry(page)).toContainText("Not enabled");
+  await expect(entryRegion(page).getByRole("button", { name: "Initialize", exact: true })).toHaveCount(0);
+  await expect(panel(page).getByRole("button", { name: "Enable majordomo" })).toBeVisible();
+  await expect(panel(page).getByLabel("Harness").locator("option")).toHaveText(["kuke-majordomo-claude", "assistant-b"]);
+  expect(state.requests).toEqual(["POST teams/init"]);
+});
+
+// The majordomo Config as kukeond reports it since #1685: its harness keeps its login in a state volume,
+// and status.connectors says whether that volume holds one.
+const majordomoVolume = { name: "kuke-majordomo-claude", realm: scope[0], space: scope[1], stack: scope[2] };
+const loginStatus = state => ({ connectors: [{ connector: "claude", title: "Claude", component: "claude-login", method: "login", delivery: "stateVolume", state: "resolved", volume: majordomoVolume.name, volumeRef: majordomoVolume, login: { state } }] });
+const withLogin = state => [config("kuke-majordomo-claude", majordomoLabels, { status: loginStatus(state) }), config("assistant-b", majordomoLabels)];
+const majordomoLogin = (state = "empty") => ({ connector: "claude", method: "login", volume: { ...majordomoVolume }, exists: true, tagged: true, login: { state }, usedBy: [{ name: "kuke-majordomo-claude", realm: scope[0], space: scope[1], stack: scope[2] }] });
+const loginLine = page => panel(page).getByRole("status", { name: "Claude login" });
+
+test("the majordomo panel says whether its harness is logged in and logs in through the identity cell", async ({ page }) => {
+  const state = await world(page, { cells: [runningMajordomo()], configs: withLogin("empty"), logins: [majordomoLogin()] });
+  await page.goto(`${server.url}#/resources`);
+  await entry(page).click();
+  await expect(connection(page)).toHaveText("Attached");
+  await expect(loginLine(page)).toHaveText("Claude: not logged in");
+  const logIn = panel(page).getByRole("button", { name: "Log in to Claude for majordomo" });
+  await logIn.click();
+  // Log in starts the identity cell of the majordomo state volume and opens its terminal beside the panel.
+  await expect(page).toHaveURL(/#\/workspace\/default\/default\/default\/login-kuke-majordomo-claude$/);
+  expect(state.loginPosts).toEqual([{ connector: "claude", name: "kuke-majordomo-claude", scope: { realm: "default", space: "default", stack: "default" }, method: "login" }]);
+  await expect(panel(page)).toBeVisible();
+  await expect(panel(page).getByRole("button", { name: "Log in to Claude for majordomo" })).toHaveText("Open login session");
+  await expect(loginLine(page)).toHaveText("Claude: not logged in");
+  // The identity cell ends: the volume holds a login, and the line follows without a refresh.
+  delete state.logins[0].session;
+  state.logins[0].login = { state: "logged in" };
+  state.cells = state.cells.filter(item => !item.metadata.name.startsWith("login-"));
+  state.configs = withLogin("logged in");
+  await expect(loginLine(page)).toHaveText("Claude: logged in", { timeout: 10000 });
+  await expect(panel(page).getByRole("button", { name: "Log in to Claude for majordomo" })).toHaveCount(0);
+  // The majordomo session was never detached.
+  await expect(connection(page)).toHaveText("Attached");
+});
+
+test("Enable majordomo asks to log in first while its harness has no login, with Continue anyway", async ({ page }) => {
+  const state = await world(page, { configs: withLogin("empty"), logins: [majordomoLogin()] });
+  await page.goto(`${server.url}#/resources`);
+  await entry(page).click();
+  // The line shows before anything is enabled, for the harness the form selects.
+  await expect(loginLine(page)).toHaveText("Claude: not logged in");
+  const prompt = panel(page).getByRole("group", { name: "Log in first" });
+  await expect(prompt).toHaveCount(0);
+  await panel(page).getByRole("button", { name: "Enable majordomo" }).click();
+  await expect(prompt).toContainText("Majordomo starts without a login");
+  await expect(prompt.getByRole("button", { name: "Log in to Claude for majordomo" })).toBeVisible();
+  // Nothing was created yet.
+  expect(state.requests).toEqual([]);
+  await prompt.getByRole("button", { name: "Continue anyway" }).click();
+  await expect(connection(page)).toHaveText("Attached");
+  expect(state.requests).toEqual(["preview kuke-majordomo-claude as majordomo", "create kuke-majordomo-claude as majordomo", "POST cells/majordomo/start"]);
+  await expect(prompt).toHaveCount(0);
+});
+
+test("Enable majordomo does not ask when the harness is logged in or reports no login", async ({ page }) => {
+  const state = await world(page, { configs: withLogin("logged in"), logins: [majordomoLogin("logged in")] });
+  await page.goto(`${server.url}#/resources`);
+  await entry(page).click();
+  await expect(loginLine(page)).toHaveText("Claude: logged in");
+  await expect(panel(page).getByRole("button", { name: "Log in to Claude for majordomo" })).toHaveCount(0);
+  // A Config that reports no login state volume shows no line and enables at once.
+  await panel(page).getByLabel("Harness").selectOption({ label: "assistant-b" });
+  await expect(loginLine(page)).toHaveCount(0);
+  await panel(page).getByRole("button", { name: "Enable majordomo" }).click();
+  await expect(connection(page)).toHaveText("Attached");
+  expect(state.requests).toEqual(["preview assistant-b as majordomo", "create assistant-b as majordomo", "POST cells/majordomo/start"]);
 });
 
 test("Enable majordomo picks a labelled harness config, creates and starts one cell named majordomo", async ({ page }) => {

@@ -58,7 +58,11 @@ const maxIdentityValue = 1024
 
 var (
 	connectorNameRE = regexp.MustCompile(`^[a-z0-9]+(?:[._-][a-z0-9]+)*$`)
-	identityFieldRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
+	// An identity field is an identifier, or one under the prefix kukeon
+	// reserves for the keys it writes itself (kukeon.io/token-from, #1693).
+	// Which reserved keys exist is checked with the connector's schema
+	// (internal/connector), like the fields a connector declares.
+	identityFieldRE = regexp.MustCompile(`^(?:kukeon\.io/)?[A-Za-z][A-Za-z0-9_-]*$`)
 )
 
 // ValidateMeta checks the readable identity facts of a secret: the connector
