@@ -128,8 +128,12 @@ func onInitScript(t *testing.T, h *harness.Harness, name, mode string) (string, 
 			t.Fatal(err)
 		}
 	}
+	// TMPDIR keeps every scratch file the script writes (the claude headless
+	// turn logs) inside the test's temp dir, never in the container's shared
+	// /tmp where a live supervisor keeps its own (#1695).
 	env := []string{
 		"PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"TMPDIR=" + t.TempDir(),
 		"HOME=" + home, "INITIAL_PATH=" + home,
 		"ROLE_SOURCE_DIR=" + home, "ROLE_PATH=role", "HARNESS_SETTINGS=settings.json",
 	}
