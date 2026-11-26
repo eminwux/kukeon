@@ -348,13 +348,99 @@ export function importPayload(form) {
   return body;
 }
 // emptyIdentityForm is a blank create form; given an existing identity it is
-// the rotate form: same name, type and readable fields, material blank.
+// the rotate form: same name, type and readable fields, material blank. A
+// connector whose token can serve git (#1693) starts on its default name.
 export function emptyIdentityForm(connector, existing) {
   const types = secretTypesOf(connector);
   return {
-    name: text(existing?.name), type: types.includes(existing?.type) ? existing.type : types[0], fields: { ...(existing?.identity ?? {}) },
+    name: text(existing?.name) || (existing ? "" : tokenForGit(connector)?.tokenName ?? ""), type: types.includes(existing?.type) ? existing.type : types[0], fields: { ...(existing?.identity ?? {}) },
     value: "", username: "", password: "", privateKey: "", passphrase: "", publicKey: "", certificate: "", knownHosts: "",
   };
+}
+
+// Identity keys kukeon reserves (#1693): written by kukeon, accepted on every
+// connector without a field declaration, kept when an identity is rotated.
+export const reservedIdentityPrefix = "kukeon.io/";
+export const identityTokenFrom = `${reservedIdentityPrefix}token-from`;
+
+// The GitHub token for git (#1693). A connector that advertises tokenForGit
+// can store its token, from the same request, as a git identity limited to
+// the advertised hosts. Only the catalog says which connector does.
+export function tokenForGit(connector) {
+  const offer = connector?.tokenForGit;
+  if (!offer || typeof offer !== "object") return undefined;
+  return { connector: text(offer.connector), hosts: list(offer.hosts).filter(host => typeof host === "string"), username: text(offer.username), name: text(offer.name), tokenName: text(offer.tokenName) };
+}
+// tokenConnectors are the connectors whose token can serve git: the git
+// connector's New identity page offers them as "Use a GitHub token".
+export function tokenConnectors(connectors) { return list(connectors).filter(connector => !!tokenForGit(connector)); }
+// linkedGitIdentity is the git identity whose token-from key names the given
+// identity: the one rotating it rotates too.
+export function linkedGitIdentity(secrets, connector, identity) {
+  const offer = tokenForGit(connector);
+  const ref = secretRef(identity);
+  if (!offer || !ref) return undefined;
+  return identitiesFor(secrets, offer.connector).find(item => item.identity[identityTokenFrom] === formatSecretReference(ref));
+}
+// emptyGitForm is the "Also use this token for git" part of a form: on by
+// default for a new identity, and for a rotation when a git identity is
+// linked to it.
+export function emptyGitForm(on) { return { git: on === true, gitAuthor: "", gitUsername: "" }; }
+// tokenGitPayload is the git block of an identity request: only what the
+// user typed — the server applies the defaults it advertises.
+export function tokenGitPayload(form) {
+  const git = {};
+  if (trimmed(form?.gitAuthor)) git.author = trimmed(form.gitAuthor);
+  if (trimmed(form?.gitUsername)) git.username = trimmed(form.gitUsername);
+  return git;
+}
+export function tokenGitErrors(form) {
+  return form?.git && trimmed(form.gitAuthor) && !personPattern.test(trimmed(form.gitAuthor)) ? ["Commit author must be written Name <email>."] : [];
+}
+
+// Secret types as a described choice (#1693). A git-delivered connector says
+// what each type gives a cell; any other connector names the material.
+const gitTypeText = {
+  [secretSSHKey]: { label: "SSH key", description: "clone, push and sign" },
+  [secretBasicAuth]: { label: "Username and password or token", description: "HTTPS" },
+  [secretOpaque]: { label: "Author only", description: "commits without push" },
+};
+const typeText = {
+  [secretSSHKey]: { label: "SSH key", description: "a private key" },
+  [secretBasicAuth]: { label: "Username and password or token", description: "basic auth" },
+  [secretOpaque]: { label: "Value", description: "a single secret value" },
+};
+export function secretTypeChoices(connector) {
+  const words = importsFromHost(connector) ? gitTypeText : typeText;
+  return secretTypesOf(connector).map(type => ({ type, ...words[type] }));
+}
+
+// Scope as a plain-language choice (#1693): "Where can cells use it?". Each
+// level the connector accepts is one choice; the realm itself is picked only
+// when there is more than one.
+export function scopeChoices(connector, realm) {
+  const words = { [scopeLevels[0]]: `Everywhere in realm ${trimmed(realm) || defaultScopeName}`, [scopeLevels[1]]: "Only in one space…", [scopeLevels[2]]: "Only in one stack…" };
+  return connectorLevels(connector).map(level => ({ level, label: words[level], recommended: level === scopeLevels[0] }));
+}
+// scopeAtLevel moves a scope to a level, filling the coordinates it needs from
+// the inventory's names: the `default` Space or Stack when there is one, else
+// the first. It returns undefined when the realm has none to offer.
+export function scopeAtLevel(scope, level, spaces, stacks) {
+  const realm = trimmed(scope?.realm);
+  if (!realm) return undefined;
+  if (level === scopeLevels[0]) return { realm };
+  const pick = (names, current) => { const all = list(names); return all.includes(current) ? current : all.includes(defaultScopeName) ? defaultScopeName : all[0]; };
+  const space = pick(spaces?.(realm), trimmed(scope?.space));
+  if (!space) return undefined;
+  if (level === scopeLevels[1]) return { realm, space };
+  const stack = pick(stacks?.(realm, space), trimmed(scope?.stack));
+  return stack ? { realm, space, stack } : undefined;
+}
+// identityDefaultOn is the initial state of "Make this the default": on when
+// no default resolves for the target at the scope.
+export function identityDefaultOn(defaults, connector, target) {
+  if (!target) return false;
+  return !defaultRow(defaults, { connector: connector?.name, component: target.component, method: target.method })?.effective;
 }
 // parseList reads a comma-separated list field.
 export function parseList(value) { return text(value).split(",").map(item => item.trim()).filter(Boolean); }
@@ -379,7 +465,10 @@ export function identityErrors(connector, form) {
 }
 // identityPayload builds the body of POST /api/connectors/{name}/identities.
 // Material is only ever placed here — never in a URL, a log or the page.
-export function identityPayload(connector, scope, form) {
+// options.makeDefault and options.method make it the connector's default at
+// its scope; options.git (#1693) also stores the token for git. A reserved
+// identity key the identity already carries is kept.
+export function identityPayload(connector, scope, form, options = {}) {
   const type = secretTypesOf(connector).includes(form?.type) ? form.type : secretTypesOf(connector)[0];
   const body = { scope: scopeAt(scope, scopeLevel(scope)), name: trimmed(form?.name), type };
   const identity = {};
@@ -387,12 +476,18 @@ export function identityPayload(connector, scope, form) {
     const value = field.type === fieldList ? parseList(form?.fields?.[field.name]).join(",") : trimmed(form?.fields?.[field.name]);
     if (value) identity[field.name] = value;
   }
+  for (const [key, value] of Object.entries(form?.fields ?? {})) if (key.startsWith(reservedIdentityPrefix) && trimmed(value)) identity[key] = trimmed(value);
   if (Object.keys(identity).length) body.identity = identity;
   if (type === secretBasicAuth) { body.username = trimmed(form.username); body.password = text(form.password); }
   else if (type === secretSSHKey) {
     body.privateKey = text(form.privateKey);
     for (const key of ["passphrase", "publicKey", "certificate", "knownHosts"]) if (text(form[key])) body[key] = text(form[key]);
   } else if (!storesNoValue(connector, type)) body.value = text(form?.value);
+  if (options.git && tokenForGit(connector) && type === secretOpaque) body.git = options.git;
+  if (options.makeDefault) {
+    body.makeDefault = true;
+    if (trimmed(options.method)) body.method = trimmed(options.method);
+  }
   return body;
 }
 // clearMaterial blanks every write-only input of a form once it was sent.

@@ -177,6 +177,12 @@ func ValidateIdentity(desc v1beta1.BlueprintConnector, secretType string, identi
 	}
 	sort.Strings(names)
 	for _, name := range names {
+		if strings.HasPrefix(name, ReservedIdentityPrefix) {
+			if err := validateReserved(name, identity[name]); err != nil {
+				return err
+			}
+			continue
+		}
 		field, ok := fields[name]
 		if !ok {
 			return fmt.Errorf(
@@ -207,6 +213,25 @@ func ValidateIdentity(desc v1beta1.BlueprintConnector, secretType string, identi
 	return nil
 }
 
+// refCheckRealm is the realm a scope-less Secret reference is checked
+// against: only its syntax is checked, so any realm would do.
+const refCheckRealm = "default"
+
+// validateReserved checks one reserved identity key: only the keys kukeon
+// defines are accepted, each as its own type.
+func validateReserved(name, value string) error {
+	if name != IdentityTokenFrom {
+		return fmt.Errorf("%w: identity key %q is reserved", errdefs.ErrConnectorIdentity, name)
+	}
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	if _, err := ParseSecretRef(value, v1beta1.ContainerSecretRef{Realm: refCheckRealm}); err != nil {
+		return fmt.Errorf("%w: identity key %q: %w", errdefs.ErrConnectorIdentity, name, err)
+	}
+	return nil
+}
+
 func validateField(field v1beta1.ConnectorField, value string) error {
 	checkEnum := func(entry string) error {
 		if len(field.Enum) > 0 && !slices.Contains(field.Enum, entry) {
@@ -229,7 +254,7 @@ func validateField(field v1beta1.ConnectorField, value string) error {
 			return err
 		}
 	case v1beta1.ConnectorFieldSecret:
-		if _, err := ParseSecretRef(value, v1beta1.ContainerSecretRef{Realm: "default"}); err != nil {
+		if _, err := ParseSecretRef(value, v1beta1.ContainerSecretRef{Realm: refCheckRealm}); err != nil {
 			return err
 		}
 	default:

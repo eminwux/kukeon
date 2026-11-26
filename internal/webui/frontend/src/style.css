@@ -713,6 +713,19 @@ a.subtle-button { display: inline-flex; align-items: center; min-height: var(--t
 .identity-form .error, .connector-fix .error, .connector-default .error { margin: 0; }
 .connector-identities-preview .setup-error { margin: 4px 0 0; }
 .connector-login { margin: 0; }
+/* New identity: the three ways to add a git identity, the scope radio and the described secret type (#1693). */
+.identity-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.identity-choice { display: grid; gap: 4px; align-content: start; min-height: var(--target-min); padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font: inherit; text-align: left; text-decoration: none; cursor: pointer; }
+.identity-choice:hover { background: var(--hover); }
+.identity-choice.is-selected { border-color: var(--accent); background: var(--selected); }
+.identity-choice .description { font-size: var(--font-sm); }
+fieldset.connector-store, fieldset.secret-type-choice { min-width: 0; margin-inline: 0; }
+fieldset.connector-store legend { padding: 0 4px; font-weight: 600; font-size: var(--font-md); }
+fieldset.secret-type-choice { display: grid; gap: 6px; margin-block: 0; padding: 0; border: 0; grid-column: 1 / -1; }
+fieldset.secret-type-choice legend { margin-bottom: 4px; padding: 0; font-size: var(--font-sm); }
+.scope-radio .scope-picker { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.token-for-git, .identity-default { grid-column: 1 / -1; }
+.token-for-git > .description, .identity-default > .description { margin: 0; grid-column: 1 / -1; }
 
 /* Teams page (#1618). */
 .team-ref { display: flex; gap: 8px; }

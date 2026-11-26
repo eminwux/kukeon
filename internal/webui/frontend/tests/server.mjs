@@ -74,6 +74,15 @@ export const testConnectors = [
   { name: "pulls", title: "Pulls", description: "The credential a Realm pulls private images with.", delivery: "registry", scopes: ["realm"], secretTypes: ["basic-auth"], fields: [], methods: [] },
 ];
 
+// testTokenConnector is a test-only API connector whose token can also serve
+// git (#1693): the catalog says so with tokenForGit, naming the git-delivered
+// `repo` connector. Tests that need it add it to their world's connectors.
+export const testTokenConnector = {
+  name: "forge", title: "Forge", description: "A test-only API connector whose token can also serve git.", scopes: ["realm", "space", "stack"], secretTypes: ["opaque"], fields: [],
+  methods: [{ name: "token", component: "forge", default: true, delivery: "env", slot: "forge-token", envName: "FORGE_TOKEN", description: "A token, delivered as FORGE_TOKEN." }],
+  tokenForGit: { connector: "repo", hosts: ["forge.example.com"], username: "x-access-token", name: "forge-git", tokenName: "forge-token" },
+};
+
 // The blueprint `kuke team` would render for the demo harness: every connector
 // component is optional, the demo methods share a group, and each carries a
 // copy of its connector definition.
@@ -353,10 +362,43 @@ export async function mockConnectorAPI(page, world) {
     const type = body.type || connector.secretTypes[0];
     const missing = connector.fields.find(field => field.required && (!field.secretTypes || field.secretTypes.includes(type)) && !body.identity?.[field.name]);
     if (missing) return route.fulfill(fail(400, "invalid_request", `identity field "${missing.name}" is required`));
-    const secret = { name: body.name, ...body.scope, ...(type !== "opaque" ? { type } : {}), connector: connector.name, ...(body.identity ? { identity: body.identity } : {}) };
-    const index = world.secrets.findIndex(item => refPath(item) === refPath(secret));
-    if (index >= 0) world.secrets[index] = secret; else world.secrets.push(secret);
-    return route.fulfill({ json: { name: body.name, scope: body.scope, connector: connector.name, type, identity: body.identity, action: index >= 0 ? "updated" : "created" } });
+    // A token stored for git too (#1693): only a connector that advertises tokenForGit takes it; the git
+    // identity is the one already linked to this token, else the advertised name.
+    const offer = connector.tokenForGit;
+    if (body.git && !offer) return route.fulfill(fail(400, "invalid_request", `config error: a ${connector.name} identity cannot also be stored for git`));
+    const name = body.name || offer?.tokenName;
+    const link = `${name}@${scopePath(body.scope)}`;
+    const store = secret => {
+      const index = world.secrets.findIndex(item => refPath(item) === refPath(secret));
+      if (index >= 0) world.secrets[index] = secret; else world.secrets.push(secret);
+      return index >= 0 ? "updated" : "created";
+    };
+    const secret = { name, ...body.scope, ...(type !== "opaque" ? { type } : {}), connector: connector.name, ...(body.identity ? { identity: body.identity } : {}) };
+    const linked = body.git ? world.secrets.find(item => item.connector === offer.connector && item.identity?.["kukeon.io/token-from"] === link && scopePath(item) === scopePath(body.scope)) : undefined;
+    const gitSecret = body.git ? {
+      name: body.git.name || linked?.name || offer.name, ...body.scope, type: "basic-auth", connector: offer.connector,
+      identity: { hosts: (body.git.hosts ?? (linked ? [linked.identity.hosts] : offer.hosts)).join(","), ...(body.git.author || linked?.identity?.author ? { author: body.git.author || linked.identity.author } : {}), "kukeon.io/token-from": link },
+    } : undefined;
+    if (gitSecret && !linked && world.secrets.some(item => refPath(item) === refPath(gitSecret))) return route.fulfill(fail(400, "invalid_request", `config error: store GitHub token: a secret "${gitSecret.name}" already exists in ${scopePath(body.scope)} and is not linked to github identity "${name}"; name the git identity`));
+    const action = store(secret);
+    const result = { name, scope: body.scope, connector: connector.name, type, identity: body.identity, action };
+    if (gitSecret) {
+      const gitAction = store(gitSecret);
+      result.git = { name: gitSecret.name, scope: body.scope, connector: offer.connector, type: "basic-auth", identity: gitSecret.identity, action: gitAction };
+    }
+    if (body.makeDefault) {
+      const fills = world.defaults[scopePath(body.scope)] ??= {};
+      const method = connector.methods.find(item => item.name === body.method) ?? (connector.methods.filter(item => item.slot).length === 1 ? connector.methods.find(item => item.slot) : undefined);
+      const set = (owner, ownerMethod, made) => {
+        const key = targetKey(owner, ownerMethod);
+        const previous = fills[key];
+        fills[key] = refOf({ name: made.name, ...body.scope });
+        return { connector: owner.name, ...(ownerMethod ? { method: ownerMethod.name } : {}), scope: body.scope, level, identity: fills[key], ...(previous ? { previous } : {}), action: "updated" };
+      };
+      result.defaults = [set(connector, method, secret)];
+      if (gitSecret) result.defaults.push(set(world.connectors.find(item => item.name === offer.connector), undefined, gitSecret));
+    }
+    return route.fulfill({ json: result });
   });
 
   await page.route("**/api/catalog/**", async route => {

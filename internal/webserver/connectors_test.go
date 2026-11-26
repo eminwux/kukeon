@@ -47,6 +47,11 @@ type connectorClient struct {
 	created  []v1beta1.SecretDoc
 	applied  [][]byte
 	previews []kukeonv1.CellFromConfigRequest
+
+	// createErr fails the write of the Secret of that name; applyErr fails
+	// the apply of a document of that kind.
+	createErr map[string]error
+	applyErr  map[string]error
 }
 
 func (c *connectorClient) Close() error { return nil }
@@ -88,6 +93,9 @@ func (c *connectorClient) ListSecrets(context.Context, string, string, string, s
 func (c *connectorClient) CreateSecret(
 	_ context.Context, doc v1beta1.SecretDoc,
 ) (kukeonv1.CreateSecretResult, error) {
+	if err := c.createErr[doc.Metadata.Name]; err != nil {
+		return kukeonv1.CreateSecretResult{}, err
+	}
 	_, existed := c.secrets[secretKey(doc.Metadata)]
 	c.created = append(c.created, doc)
 	if c.secrets == nil {
@@ -121,6 +129,15 @@ func (c *connectorClient) ApplyDocuments(_ context.Context, raw []byte) (kukeonv
 		} `yaml:"metadata"`
 	}
 	_ = yaml.Unmarshal(raw, &head)
+	if err := c.applyErr[head.Kind]; err != nil {
+		return kukeonv1.ApplyDocumentsResult{}, err
+	}
+	// A re-applied Realm is what the next read returns, like the daemon.
+	if head.Kind == string(v1beta1.KindRealm) {
+		var realm v1beta1.RealmDoc
+		_ = yaml.Unmarshal(raw, &realm)
+		c.realm = realm
+	}
 	// A re-applied Config replaces the stored one, like the daemon.
 	if head.Kind == string(v1beta1.KindCellConfig) {
 		var doc v1beta1.CellConfigDoc

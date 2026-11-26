@@ -814,11 +814,20 @@ A connector's page (`#/connectors/<name>`) has:
   says so on the others.
 - **Identities** — the Secrets tagged with the connector: name, scope, type and
   the readable identity fields. Values are write-only and never returned to the
-  browser. **New identity** opens `#/connectors/<name>/new-identity`: where the
-  identity is stored (a Realm, Space or Stack), the identity form — its fields
-  come from the connector's descriptor (a token, a username and password, or an
-  SSH key with its optional parts) — and, for a connector that imports from the
-  host, the **Import from host** form, open. **Rotate** opens
+  browser. **New identity** opens `#/connectors/<name>/new-identity`. For a
+  connector that imports from the host (git) it starts with three cards:
+  **Import from this machine** (the import form), **Use a … token** (shown when
+  a connector advertises `tokenForGit`; it opens that connector's form) and
+  **Enter a key or password**. The form asks _Where can cells use it?_ —
+  **Everywhere in realm `<realm>`** (preselected), **Only in one space…** or
+  **Only in one stack…**, only the levels the connector accepts, with a realm
+  select only when there is more than one — then shows the identity fields from
+  the connector's descriptor (a token, a username and password, or an SSH key
+  with its optional parts; several secret types are a described choice) and
+  **Make this the default**, on when no default resolves at that scope. On a
+  connector that advertises `tokenForGit` (GitHub) the form also has **Also use
+  this token for git on github.com**, on by default, with an optional **Commit
+  author** and **Username**. **Rotate** opens
   `#/connectors/<name>/rotate-identity?identity=[realm, space?, stack?, name]`,
   which replaces the value stored under that name. Both return to the connector
   page on success or Cancel. **Delete** uses the same confirmation as the
@@ -1327,9 +1336,19 @@ submitted material.
 - `POST /api/connectors/{connector}/identities` creates or rotates an identity.
   Body `{ "scope", "name", "type", "identity" }` plus the material for the
   type: `value`, or `username` and `password`, or `privateKey` with optional
-  `passphrase`, `publicKey`, `certificate` and `knownHosts`. Response
-  `{ "name", "scope", "connector", "type", "identity", "action" }`: the
-  material is never echoed.
+  `passphrase`, `publicKey`, `certificate` and `knownHosts`. `makeDefault`
+  (with `method` for a connector with several) also makes the identity the
+  connector's default at its own scope. On a connector whose view carries
+  `tokenForGit` (`{connector, hosts, username, name, tokenName}`), `git:
+{name?, hosts?, author?, username?}` also stores the same `value` as a
+  basic-auth identity of the git connector, linked to it by the identity key
+  `kukeon.io/token-from`; storing the identity again with `git` rotates the
+  linked one. Both Secrets are checked before either is written. Response
+  `{ "name", "scope", "connector", "type", "identity", "action" }`, plus `git`
+  (the git identity, same shape) and `defaults` (each default set: `connector`,
+  `method`, `scope`, `level`, `identity`, `previous`, `action`): the material
+  is never echoed. A failure after the first write says what was stored and
+  what was not.
 - `POST /api/configs/connector` picks an identity for one Config, or clears the
   pick with a `null` identity. Body `{ "config", "connector", "identity" }`. A
   team-owned Config is refused.

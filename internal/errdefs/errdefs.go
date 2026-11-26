@@ -675,6 +675,11 @@ var (
 	// and no author, an unreadable or passphrase-protected key, a malformed
 	// option (issue #1591).
 	ErrGitImport = errors.New("import git identity")
+	// ErrGitHubToken is returned when a GitHub token identity — and, with git
+	// on, its git identity — cannot be built from a request: no token, an
+	// unsafe name, a git identity of that name that is not linked to it
+	// (issue #1693).
+	ErrGitHubToken = errors.New("store GitHub token")
 	// ErrBlueprintComponentGroup is returned when a CellConfig enables two
 	// components of one group.
 	ErrBlueprintComponentGroup = errors.New("components of one group are mutually exclusive")

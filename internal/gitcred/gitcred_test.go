@@ -254,6 +254,49 @@ func TestBuild_BasicAuthHelperServesCredential(t *testing.T) {
 	}
 }
 
+// A GitHub token stored for git (issue #1693) is a basic-auth identity with
+// username x-access-token limited to github.com: `git credential fill` returns
+// the token there and nothing for any other host.
+func TestBuild_GitHubTokenServesOnlyGitHub(t *testing.T) {
+	spec := intmodel.ContainerSpec{
+		Git: &intmodel.ContainerGit{Credentials: []intmodel.GitCredential{
+			{Host: "github.com", SecretRef: ref("github-git")},
+		}},
+	}
+	store := secrets{"github-git": {
+		Type:      intmodel.SecretTypeBasicAuth,
+		BasicAuth: &intmodel.SecretBasicAuth{Username: "x-access-token", Token: "ghp-canary"},
+	}}
+	b, err := gitcred.Build(spec, store.read)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	dir := stageRelocated(t, b)
+	fill := func(host string) (string, error) {
+		cmd := exec.Command("git", "credential", "fill")
+		cmd.Stdin = strings.NewReader("protocol=https\nhost=" + host + "\npath=org/repo.git\n\n")
+		cmd.Env = []string{
+			"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir(), "GIT_TERMINAL_PROMPT=0",
+			"GIT_ASKPASS=", "SSH_ASKPASS=",
+			gitplan.ConfigEnv + "=" + filepath.Join(dir, gitplan.ConfigFile),
+		}
+		out, runErr := cmd.CombinedOutput()
+		return string(out), runErr
+	}
+	got, err := fill("github.com")
+	if err != nil {
+		t.Fatalf("git credential fill github.com: %v: %s", err, got)
+	}
+	if !strings.Contains(got, "username=x-access-token\n") || !strings.Contains(got, "password=ghp-canary\n") {
+		t.Errorf("github.com credential = %q", got)
+	}
+	// No helper answers for another host, and prompts are off: fill fails
+	// without a password.
+	if got, err = fill("gitlab.com"); err == nil || strings.Contains(got, "ghp-canary") {
+		t.Errorf("gitlab.com credential = %q (err %v), want none", got, err)
+	}
+}
+
 // A remote on a non-default port (or plain http) keeps that port and scheme in
 // its clone URL, which the cell-global helper section — scoped to the
 // credential's own `https://host` — does not cover. The checkout then carries

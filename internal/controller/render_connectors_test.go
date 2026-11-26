@@ -676,6 +676,44 @@ func TestPreviewCellFromConfig_GitIdentityLevels(t *testing.T) {
 	}
 }
 
+// TestPreviewCellFromConfig_GitHubTokenGitIdentity: the git identity a GitHub
+// token is stored as (issue #1693) — basic-auth, hosts github.com, and the
+// reserved kukeon.io/token-from key the blueprint's git descriptor does not
+// declare — resolves from a Realm default into one github.com credential and
+// no signing.
+func TestPreviewCellFromConfig_GitHubTokenGitIdentity(t *testing.T) {
+	fx := &connectorFixture{
+		scope: renderScope{realmDefaults: &intmodel.ScopeDefaults{
+			Git: &intmodel.ContainerGit{
+				IdentityRef: &intmodel.ContainerSecretRef{Name: "github-git", Realm: "kuke-system"},
+			},
+		}},
+		secrets: map[string]intmodel.SecretSpec{
+			"kuke-system/github-git": {
+				Type: ext.SecretTypeBasicAuth, Connector: "git",
+				Identity: map[string]string{
+					"hosts": "github.com", "kukeon.io/token-from": "github-token@kuke-system",
+				},
+			},
+		},
+	}
+	cfg := connectorConfig("git")
+	preview, err := setupTestController(t, newConnectorRunner(t, fx, cfg)).PreviewCellFromConfig(previewRequest())
+	if err != nil {
+		t.Fatalf("PreviewCellFromConfig: %v", err)
+	}
+	git := preview.Cell.Spec.Containers[0].Git
+	if git == nil || len(git.Credentials) != 1 || git.Credentials[0].Host != "github.com" ||
+		git.Credentials[0].SecretRef == nil || git.Credentials[0].SecretRef.Name != "github-git" ||
+		git.Signing != nil || len(git.Sign) != 0 {
+		t.Fatalf("git = %+v, want one github.com credential and no signing", git)
+	}
+	if status := connectorStatus(t, preview.Connectors, "git"); status.State != ext.ConnectorResolved ||
+		status.Origin != ext.RenderOriginRealm || status.Identity.Name != "github-git" {
+		t.Errorf("git status = %+v, want github-git resolved from the realm", status)
+	}
+}
+
 // TestPreviewCellFromConfig_AuthorOnlyGitIdentity: an opaque git identity
 // (issue #1591) gives a cell its author and committer and nothing else — no
 // credential, no signing — whether a Realm default names it, with or without a

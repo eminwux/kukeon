@@ -148,6 +148,17 @@ func TestCheckSecret(t *testing.T) {
 		{"blank optional field", tagged(v1beta1.SecretTypeBasicAuth, map[string]string{
 			"hosts": "github.com", "sign": " ",
 		}), ""},
+		// A reserved key (issue #1693) needs no field declaration, so a
+		// descriptor copied into a Blueprint before it existed still accepts it.
+		{"token-from link", tagged(v1beta1.SecretTypeBasicAuth, map[string]string{
+			"hosts": "github.com", connector.IdentityTokenFrom: "github-token@default",
+		}), ""},
+		{"token-from that is not a reference", tagged(v1beta1.SecretTypeBasicAuth, map[string]string{
+			"hosts": "github.com", connector.IdentityTokenFrom: "a@b/c/d/e",
+		}), `identity key "kukeon.io/token-from"`},
+		{"unknown reserved key", tagged(v1beta1.SecretTypeBasicAuth, map[string]string{
+			"hosts": "github.com", "kukeon.io/other": "x",
+		}), `identity key "kukeon.io/other" is reserved`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := connector.CheckSecret(desc, tc.secret)
@@ -360,6 +371,10 @@ func TestGitIdentityTypes(t *testing.T) {
 			`requires identity field "hosts"`,
 		},
 		{"basic-auth without hosts", v1beta1.SecretTypeBasicAuth, nil, `requires identity field "hosts"`},
+		// The git identity a GitHub token is stored as (issue #1693).
+		{"basic-auth from a GitHub token", v1beta1.SecretTypeBasicAuth, map[string]string{
+			"hosts": connector.GitHubTokenHost, "author": author, connector.IdentityTokenFrom: "github-token@default",
+		}, ""},
 		{"author-only", v1beta1.SecretTypeOpaque, map[string]string{"author": author, "committer": author}, ""},
 		{
 			"author-only with hosts", v1beta1.SecretTypeOpaque,

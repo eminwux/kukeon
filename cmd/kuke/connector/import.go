@@ -39,6 +39,7 @@ func newImportCmd(catalog *connector.Catalog) *cobra.Command {
 		},
 	}
 	cmd.AddCommand(newImportGitCmd(catalog))
+	cmd.AddCommand(newImportGitHubCmd(catalog))
 	return cmd
 }
 

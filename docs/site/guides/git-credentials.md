@@ -10,9 +10,34 @@ Three things make up a git setup, and each has one place:
 | The **default** identity  | `spec.defaults.git.identityRef` on the Realm, Space or Stack — or a `git` block on a CellConfig                      |
 | A **per-source** identity | `git` on one repo: a CellConfig repo fill, a container `repos[]` entry, or a stored [Source](../manifests/source.md) |
 
-Git credentials are separate from API credentials. A GitHub token given to the [`github` connector](../concepts/blueprint-contract.md#components) reaches the cell as `GH_TOKEN` for the `gh` CLI and is never wired into git.
+Git credentials are separate from API credentials. A GitHub token given to the [`github` connector](../concepts/blueprint-contract.md#components) reaches the cell as `GH_TOKEN` for the `gh` CLI and is never wired into git **implicitly**: git uses it only when you also store it as a git identity, which section 1 does on request.
 
-## 1. Import your git identity
+## 1. Use your GitHub token
+
+If you already have a GitHub personal access token, one step gives cells both the `gh` CLI and git over HTTPS:
+
+```bash
+kuke connector import github --token-stdin --git --default < token.txt
+```
+
+The token is read once, from `--token-stdin` or `--token-file`, and stored as two identities in realm `default`:
+
+| Identity       | Connector | Secret                                                                       | Cells get                                      |
+| -------------- | --------- | ---------------------------------------------------------------------------- | ---------------------------------------------- |
+| `github-token` | `github`  | `opaque`, the token                                                          | `GH_TOKEN` for `gh`                            |
+| `github-git`   | `git`     | `basic-auth`: username `x-access-token`, the same token; `hosts: github.com` | clone, fetch and push over HTTPS on github.com |
+
+`--default` makes each one its connector's realm default. `--author 'Name <email>'` gives the git identity a commit author, `--username` replaces `x-access-token` (GitHub accepts any non-empty username with a token), `--hosts` replaces `github.com`, and `--name` / `--git-name` / `--realm` rename or move them. `--dry-run` prints both Secrets and stores nothing; the token is never printed.
+
+The git identity is limited to its hosts: `git credential fill` for `https://github.com` returns the token, and for `https://gitlab.com` it returns nothing. An SSH remote on github.com follows the credential onto HTTPS (see [Which credential a remote uses](#5-which-credential-a-remote-uses)).
+
+The git identity records where its token came from, in the identity key `kukeon.io/token-from: github-token@default`. Rerunning the command with `--git` therefore **rotates both**: the github identity and the git identity linked to it, which keeps its name, hosts and author. A Secret of the git identity's name that is not linked to this token is never overwritten: the command fails and asks for `--git-name`. Without `--git`, only the github identity is stored and git is unchanged.
+
+A token cannot sign. To sign commits, import an SSH key as well ([section 2](#2-import-your-git-identity)) and make it the git default instead.
+
+In the web UI, open the `github` connector's **New identity** page, or **Use a GitHub token** on the `git` connector's. Paste the token and leave **Also use this token for git on github.com** and **Make this the default** checked. **Commit author** and **Username** are optional. Saving stores the same two identities and defaults. If the second write or a default fails, the error says what was stored and what was not, and never contains the token.
+
+## 2. Import your git identity
 
 The quickest path stores the key and author you already use and makes them the default of the `default` realm:
 
@@ -54,9 +79,9 @@ A dry run stores nothing, makes no daemon call and never prints key material. Al
 
 ### From the web UI
 
-On the Connectors page, the `git` connector's Identities panel has an **Import from host** action: a realm, the hosts, an optional identity name, an optional key and passphrase file, and _Make it the Realm default_ (on by default). It runs the same import **as the user running `kuke serve`** — that account's `~/.ssh` and global git configuration, which under a service manager may not be your shell account. The result shows the home directory and the key path that were read. Key and passphrase file are paths inside that home directory (`.ssh/id_ed25519`); absolute paths and `..` are refused. `kuke serve` asks for the `root` login but serves plain HTTP: run it on a trusted network or loopback, or behind a TLS proxy.
+On the Connectors page, the `git` connector's **New identity** page starts with three choices: **Import from this machine**, **Use a GitHub token** and **Enter a key or password**. **Import from this machine** is this import: a realm, the hosts, an optional identity name, an optional key and passphrase file, and _Make it the Realm default_ (on by default). It runs the same import **as the user running `kuke serve`** — that account's `~/.ssh` and global git configuration, which under a service manager may not be your shell account. The result shows the home directory and the key path that were read. Key and passphrase file are paths inside that home directory (`.ssh/id_ed25519`); absolute paths and `..` are refused. `kuke serve` asks for the `root` login but serves plain HTTP: run it on a trusted network or loopback, or behind a TLS proxy.
 
-## 2. Set or clear the default
+## 3. Set or clear the default
 
 `--default` on the import sets the Realm default, replacing any existing one, and prints the old and the new:
 
@@ -109,7 +134,7 @@ The levels merge **Realm → Space → Stack → CellConfig**, deeper winning: `
 
 Inside the cell the result is one container-global gitconfig. It is git's lowest-precedence scope, so a repository's local config still overrides it.
 
-## 3. Store an identity by hand
+## 4. Store an identity by hand
 
 Use this for a dedicated deploy key, a bot account or an HTTPS token.
 
@@ -155,7 +180,7 @@ kuke create secret me --connector git --type opaque --author 'Me <me@example.com
 
 `hosts` is required on an `ssh-key` or `basic-auth` identity. Without `--connector`, the same commands store a plain credential, which you name in `credentials[]` and `signing` by hand.
 
-## 4. Which credential a remote uses
+## 5. Which credential a remote uses
 
 An identity expands into one credential per entry of its `hosts`. Written out, that is:
 
@@ -189,7 +214,7 @@ A host key is checked, in this order:
 
 A self-hosted forge therefore needs either its key pinned in the secret (`--known-hosts` on the import, `--known-hosts-file` on `kuke create secret`) or an explicit `accept-new`.
 
-## 5. Give one source its own identity
+## 6. Give one source its own identity
 
 Any repo can state its own identity; the fields it leaves out fall back to the default. The short form names a stored identity:
 

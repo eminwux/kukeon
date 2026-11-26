@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { startServer, connectorWorld, mockConnectorAPI, signIn } from "./server.mjs";
+import { startServer, connectorWorld, mockConnectorAPI, signIn, testTokenConnector } from "./server.mjs";
 
 let server;
 test.beforeEach(async ({ page }) => { server = await startServer(); await signIn(page); });
@@ -3789,6 +3789,8 @@ test("Connectors page lists the catalog with the Configs missing an identity, an
   await expect(create.getByRole("alert")).toContainText("account is required.");
   expect(identityPosts()).toHaveLength(0);
   await create.getByLabel("account").fill("gamma");
+  // No Example default resolves in dev yet: Make this the default starts on (#1693).
+  await expect(create.getByRole("checkbox", { name: "Make this the default in dev" })).toBeChecked();
   await create.getByRole("button", { name: "Create identity" }).click();
   await expect(toasts(page).filter({ hasText: "Example identity example-new created in dev." })).toBeVisible();
   // Saving returns to the connector page.
@@ -3796,7 +3798,8 @@ test("Connectors page lists the catalog with the Configs missing an identity, an
   await expect(table.getByRole("row")).toHaveCount(5);
   await expect(table.getByRole("row", { name: /example-new/ })).toContainText("account: gamma");
   expect(identityPosts()).toHaveLength(1);
-  expect(identityPosts()[0].body).toEqual({ scope: { realm: "dev" }, name: "example-new", type: "opaque", identity: { account: "gamma" }, value });
+  expect(identityPosts()[0].body).toEqual({ scope: { realm: "dev" }, name: "example-new", type: "opaque", identity: { account: "gamma" }, value, makeDefault: true, method: "token" });
+  expect(world.defaults.dev["example-token:token"]).toEqual({ name: "example-new", realm: "dev" });
   // The value is write-only: absent from the page, the URL, storage and the console.
   await expect(create).toHaveCount(0);
   expect(await page.content()).not.toContain(value);
@@ -3814,6 +3817,8 @@ test("Connectors page lists the catalog with the Configs missing an identity, an
   await expect(rotate.getByLabel("Identity name")).toHaveValue("example-default");
   await expect(rotate.getByLabel("account")).toHaveValue("acme");
   await expect(rotate.getByLabel("Value")).toHaveValue("");
+  // dev has a default now, so the rotation does not make one.
+  await expect(rotate.getByRole("checkbox", { name: "Make this the default in dev" })).not.toBeChecked();
   await rotate.getByLabel("Value").fill(rotated);
   await rotate.getByRole("button", { name: "Rotate identity" }).click();
   await expect(toasts(page).filter({ hasText: "Example identity example-default rotated in dev." })).toBeVisible();
@@ -3846,45 +3851,52 @@ test("an identity form follows the connector's secret types and field types", as
   const world = await mockConnectors(page);
   const key = "-----BEGIN OPENSSH " + "PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA-test-only\n-----END OPENSSH PRIVATE KEY-----";
   await page.goto(`${server.url}#/connectors/repo/new-identity`);
+  await page.getByRole("button", { name: /^Enter a key or password/ }).click();
   const create = page.getByRole("form", { name: "New Repo identity" });
-  // Two accepted types: a type picker; ssh-key shows every field, including the ones limited to it.
-  await expect(create.getByLabel("Secret type").getByRole("option")).toHaveText(["ssh-key", "basic-auth", "opaque"]);
-  await expect(create.getByLabel("author")).toHaveAttribute("placeholder", "Name <email>");
+  const author = create.getByRole("textbox", { name: /^author/ });
+  // Several accepted types: a described choice (#1693); ssh-key shows every field, including the ones limited to it.
+  const types = create.getByRole("group", { name: "Secret type" });
+  await expect(types.getByRole("radio")).toHaveCount(3);
+  await expect(types.locator("label")).toHaveText(["SSH key — clone, push and sign", "Username and password or token — HTTPS", "Author only — commits without push"]);
+  await expect(types.getByRole("radio", { name: /^SSH key/ })).toBeChecked();
+  await expect(author).toHaveAttribute("placeholder", "Name <email>");
   await expect(create.getByRole("group", { name: "sign" }).getByRole("checkbox")).toHaveCount(2);
   await expect(create.getByLabel("allowedSignersRef")).toHaveAttribute("placeholder", "name@realm[/space[/stack]]");
   await expect(create.locator("textarea")).toHaveCount(2);
-  await create.getByLabel("Secret type").selectOption("basic-auth");
+  await types.getByRole("radio", { name: /^Username and password/ }).check();
   await expect(create.getByRole("group", { name: "sign" })).toHaveCount(0);
   await expect(create.getByLabel("allowedSignersRef")).toHaveCount(0);
-  await expect(create.getByLabel("Password or token")).toHaveAttribute("type", "password");
-  await create.getByLabel("Secret type").selectOption("ssh-key");
+  await expect(create.getByRole("textbox", { name: /^Password or token/ })).toHaveAttribute("type", "password");
+  await types.getByRole("radio", { name: /^SSH key/ }).check();
 
   await create.getByLabel("Identity name").fill("repo-new");
-  await create.getByLabel("author").fill("not-a-person");
+  await author.fill("not-a-person");
   await create.getByRole("textbox", { name: /^hosts/ }).fill("example.com, example.org/group");
   await create.getByRole("group", { name: "sign" }).getByLabel("commits").check();
   await create.getByLabel("Private key").fill(key);
   await create.getByRole("button", { name: "Create identity" }).click();
   await expect(create.getByRole("alert")).toContainText("author must be written Name <email>.");
-  await create.getByLabel("author").fill("Dev <dev@example.com>");
+  await author.fill("Dev <dev@example.com>");
+  await expect(create.getByRole("checkbox", { name: "Make this the default in dev" })).toBeChecked();
   await create.getByRole("button", { name: "Create identity" }).click();
   await expect(page.getByRole("table", { name: "Repo identities" }).getByRole("row", { name: /repo-new/ })).toContainText("hosts: example.com,example.org/group");
   expect(world.posts("/api/connectors/repo/identities")[0].body).toEqual({
     scope: { realm: "dev" }, name: "repo-new", type: "ssh-key",
-    identity: { author: "Dev <dev@example.com>", hosts: "example.com,example.org/group", sign: "commits" }, privateKey: key,
+    identity: { author: "Dev <dev@example.com>", hosts: "example.com,example.org/group", sign: "commits" }, privateKey: key, makeDefault: true,
   });
   await expect(create).toHaveCount(0);
   expect(await page.content()).not.toContain("b3BlbnNzaC1rZXktdjEAAAAA-test-only");
 
   // An opaque identity of a git-delivered connector is author-only (#1591): no value, no hosts, no signing.
   await page.goto(`${server.url}#/connectors/repo/new-identity`);
-  await create.getByLabel("Secret type").selectOption("opaque");
+  await page.getByRole("button", { name: /^Enter a key or password/ }).click();
+  await types.getByRole("radio", { name: /^Author only/ }).check();
   await expect(create.getByText("An author-only identity: it stores no value")).toBeVisible();
   await expect(create.getByLabel("Value")).toHaveCount(0);
   await expect(create.getByRole("textbox", { name: /^hosts/ })).toHaveCount(0);
   await expect(create.getByRole("group", { name: "sign" })).toHaveCount(0);
   await create.getByLabel("Identity name").fill("repo-author");
-  await create.getByLabel("author").fill("Dev <dev@example.com>");
+  await author.fill("Dev <dev@example.com>");
   await create.getByRole("button", { name: "Create identity" }).click();
   await expect(page.getByRole("table", { name: "Repo identities" }).getByRole("row", { name: /repo-author/ })).toContainText("opaque");
   expect(world.posts("/api/connectors/repo/identities")[1].body).toEqual({
@@ -3912,8 +3924,8 @@ test("a connector page shows its title with the slug as context, and its scope p
   const defaults = page.getByRole("region", { name: "Example default identity" });
   expect(await defaults.evaluate(el => el.compareDocumentPosition(document.querySelector(".connector-identities")) & Node.DOCUMENT_POSITION_FOLLOWING)).toBeTruthy();
   await expect(page.getByRole("region", { name: "Example identities" }).getByRole("group")).toHaveCount(0);
-  const scope = defaults.getByRole("group", { name: "Default scope" });
-  await expect(scope).toContainText("The scope whose default is shown and set");
+  const scope = defaults.getByRole("group", { name: "Which cells?" });
+  await expect(scope).toContainText("to see the identity its cells get when they pick none");
   await expect(scope.getByLabel("Default realm")).toHaveValue("dev");
   await expect(scope.getByRole("combobox")).toHaveCount(3);
   const method = defaults.getByRole("group", { name: "Example token default" });
@@ -3927,9 +3939,11 @@ test("a connector page shows its title with the slug as context, and its scope p
   expect(world.posts("/api/connectors/example-token/defaults")[0].body).toEqual({ scope: { realm: "dev", space: "shared" }, method: "token", identity: { name: "example-default", realm: "dev" } });
   // Where a new identity is stored is picked on the New identity page.
   await page.goto(`${server.url}#/connectors/example-token/new-identity`);
-  const stored = page.getByRole("group", { name: "Stored identity scope" });
-  await expect(stored).toContainText("Where the new Example identity is stored");
-  await expect(stored.getByRole("combobox")).toHaveCount(3);
+  const stored = page.getByRole("group", { name: "Where can cells use it?" });
+  await expect(stored.getByRole("radio")).toHaveCount(3);
+  await expect(stored.getByRole("radio", { name: /^Everywhere in realm dev/ })).toBeChecked();
+  // Two realms in the inventory: the realm is a choice too; the Space and Stack selects wait for a narrower choice.
+  await expect(stored.getByRole("combobox")).toHaveCount(1);
   await expect(stored.getByLabel("Identity realm")).toHaveValue("dev");
   // A connector the catalog does not define keeps its slug as the heading, with no context line.
   await page.goto(`${server.url}#/connectors/nope`);
@@ -3946,6 +3960,14 @@ test("a git-delivered connector imports its identity from the server's host", as
   // Only a git-delivered connector offers the import, opened on its New identity page.
   await expect(panel.getByRole("button", { name: "Import from host" })).toHaveCount(0);
   await panel.getByRole("link", { name: "New identity" }).click();
+  // The git New identity page starts with the ways to add one (#1693); with no token connector in the
+  // catalog there is no "Use a … token" card.
+  const choices = page.getByRole("group", { name: "How to add a Repo identity" });
+  await expect(choices.getByRole("button")).toHaveText([/^Import from this machine/, /^Enter a key or password/]);
+  await expect(choices.getByRole("link")).toHaveCount(0);
+  await expect(page.getByRole("form", { name: "New Repo identity" })).toHaveCount(0);
+  await choices.getByRole("button", { name: /^Import from this machine/ }).click();
+  await expect(choices.getByRole("button", { name: /^Import from this machine/ })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("button", { name: "Hide import" })).toHaveAttribute("aria-expanded", "true");
   const form = page.getByRole("form", { name: "Import Repo identity from host" });
   await form.getByLabel("Import realm").selectOption("dev");
@@ -3976,6 +3998,125 @@ test("a git-delivered connector imports its identity from the server's host", as
   await page.goto(`${server.url}#/connectors/example-token/new-identity`);
   await expect(page.getByRole("form", { name: "New Example identity" })).toBeVisible();
   await expect(page.getByRole("button", { name: /import/i })).toHaveCount(0);
+});
+
+// The GitHub token for git (#1693), with a test-only connector the catalog marks with tokenForGit: one token,
+// sent once, stored as its own identity and as a git identity for the advertised hosts, both made defaults.
+test("a token connector stores its token for git too, and makes both the defaults", async ({ page }) => {
+  const world = await mockConnectors(page);
+  world.connectors.push(structuredClone(testTokenConnector));
+  const token = "f0rge-token-canary";
+  const posts = () => world.posts("/api/connectors/forge/identities");
+  await page.goto(`${server.url}#/connectors/forge/new-identity`);
+  const create = page.getByRole("form", { name: "New Forge identity" });
+  await expect(create.getByLabel("Identity name")).toHaveValue("forge-token");
+  const git = create.getByRole("checkbox", { name: "Also use this token for git on forge.example.com" });
+  const makeDefault = create.getByRole("checkbox", { name: "Make this the default in dev" });
+  await expect(git).toBeChecked();
+  await expect(makeDefault).toBeChecked();
+  await expect(create).toContainText("Also stored as the git identity forge-git");
+  await expect(create.getByRole("link", { name: "Import from this machine" })).toHaveAttribute("href", /#\/connectors\/repo\/new-identity/);
+  await expect(create.getByLabel("Username")).toHaveAttribute("placeholder", "x-access-token");
+  await expect(create.getByText("Forge accepts any non-empty username")).toBeVisible();
+  await create.getByRole("textbox", { name: /^Token/ }).fill(token);
+  await create.getByLabel("Commit author").fill("nobody");
+  await create.getByRole("button", { name: "Create identity" }).click();
+  await expect(create.getByRole("alert")).toContainText("Commit author must be written Name <email>.");
+  expect(posts()).toHaveLength(0);
+  await create.getByRole("textbox", { name: /^Token/ }).fill(token);
+  await create.getByLabel("Commit author").fill("Dev <dev@example.com>");
+  await create.getByRole("button", { name: "Create identity" }).click();
+  await expect(toasts(page).filter({ hasText: "Forge identity forge-token created in dev. Git identity forge-git created for forge.example.com. Both are now the defaults in dev." })).toBeVisible();
+  expect(posts().map(request => request.body)).toEqual([{
+    scope: { realm: "dev" }, name: "forge-token", type: "opaque", value: token, git: { author: "Dev <dev@example.com>" }, makeDefault: true, method: "token",
+  }]);
+  // Two identities, both defaults of dev.
+  expect(world.secrets.find(item => item.name === "forge-git")).toEqual({
+    name: "forge-git", realm: "dev", type: "basic-auth", connector: "repo", identity: { hosts: "forge.example.com", author: "Dev <dev@example.com>", "kukeon.io/token-from": "forge-token@dev" },
+  });
+  expect(world.defaults.dev).toEqual({ "forge:token": { name: "forge-token", realm: "dev" }, "repo:": { name: "forge-git", realm: "dev" } });
+  await expect(page).toHaveURL(/#\/connectors\/forge(\?|$)/);
+  await expect(page.getByRole("table", { name: "Forge identities" }).getByRole("row", { name: /forge-token/ })).toBeVisible();
+  expect(await page.content()).not.toContain(token);
+  expect(world.requests.map(request => request.path).join(" ")).not.toContain(token);
+
+  // Git unchecked: only the token identity, and nothing about git changes.
+  await page.goto(`${server.url}#/connectors/forge/new-identity`);
+  await create.getByLabel("Identity name").fill("forge-api");
+  await git.uncheck();
+  await expect(create).toContainText("Git is unchanged");
+  await expect(create.getByLabel("Commit author")).toHaveCount(0);
+  await expect(makeDefault).not.toBeChecked();
+  await create.getByRole("textbox", { name: /^Token/ }).fill(token + "-2");
+  await create.getByRole("button", { name: "Create identity" }).click();
+  await expect(toasts(page).filter({ hasText: "Forge identity forge-api created in dev." })).toBeVisible();
+  expect(posts()[1].body).toEqual({ scope: { realm: "dev" }, name: "forge-api", type: "opaque", value: token + "-2" });
+  expect(world.secrets.filter(item => item.connector === "repo" && item.identity?.["kukeon.io/token-from"])).toHaveLength(1);
+
+  // Rotating the identity a git identity is linked to rotates that one too: the box starts on.
+  await page.getByRole("table", { name: "Forge identities" }).getByRole("link", { name: "Rotate Forge identity forge-token — dev", exact: true }).click();
+  const rotate = page.getByRole("form", { name: "Rotate Forge identity forge-token" });
+  await expect(rotate.getByRole("checkbox", { name: "Also use this token for git on forge.example.com" })).toBeChecked();
+  await expect(rotate).toContainText("Rotates the linked git identity forge-git too.");
+  await rotate.getByRole("textbox", { name: /^Token/ }).fill(token + "-3");
+  await rotate.getByRole("button", { name: "Rotate identity" }).click();
+  await expect(toasts(page).filter({ hasText: "Forge identity forge-token rotated in dev. Git identity forge-git rotated for forge.example.com." })).toBeVisible();
+  expect(posts()[2].body).toEqual({ scope: { realm: "dev" }, name: "forge-token", type: "opaque", value: token + "-3", git: {} });
+  // The rotated git identity keeps its link and its author.
+  expect(world.secrets.filter(item => item.name === "forge-git")).toEqual([expect.objectContaining({ identity: { hosts: "forge.example.com", author: "Dev <dev@example.com>", "kukeon.io/token-from": "forge-token@dev" } })]);
+  expect(await page.content()).not.toContain(token);
+});
+
+test("the git New identity page offers three ways to add one, and identities are scoped by where cells can use them", async ({ page }) => {
+  const world = await mockConnectors(page);
+  world.connectors.push(structuredClone(testTokenConnector));
+  await page.goto(`${server.url}#/connectors/repo/new-identity`);
+  const choices = page.getByRole("group", { name: "How to add a Repo identity" });
+  await expect(choices.locator(".identity-choice strong")).toHaveText(["Import from this machine", "Use a Forge token", "Enter a key or password"]);
+  // Import from this machine: the server's import; Enter a key or password: the form.
+  await choices.getByRole("button", { name: /^Import from this machine/ }).click();
+  await expect(page.getByRole("form", { name: "Import Repo identity from host" })).toBeVisible();
+  await expect(page.getByRole("form", { name: "New Repo identity" })).toHaveCount(0);
+  await choices.getByRole("button", { name: /^Enter a key or password/ }).click();
+  await expect(page.getByRole("form", { name: "New Repo identity" })).toBeVisible();
+  await expect(page.getByRole("form", { name: "Import Repo identity from host" })).toHaveCount(0);
+  // Use a token: the token connector's form, with git checked.
+  await choices.getByRole("link", { name: /^Use a Forge token/ }).click();
+  await expect(page).toHaveURL(/#\/connectors\/forge\/new-identity/);
+  await expect(page.getByRole("form", { name: "New Forge identity" }).getByRole("checkbox", { name: /^Also use this token for git/ })).toBeChecked();
+
+  // Where can cells use it: everywhere in the realm by default; a narrower choice reveals its selects and
+  // stores — and defaults — the identity there.
+  await page.goto(`${server.url}#/connectors/example-token/new-identity`);
+  const where = page.getByRole("group", { name: "Where can cells use it?" });
+  await expect(where.getByRole("radio", { name: /^Everywhere in realm dev/ })).toBeChecked();
+  await expect(where).toContainText("(recommended)");
+  await expect(where.getByLabel("Identity space")).toHaveCount(0);
+  await where.getByRole("radio", { name: "Only in one space…" }).check();
+  await expect(where.getByLabel("Identity space")).toHaveValue("shared");
+  await expect(where.getByLabel("Identity stack")).toHaveCount(0);
+  await where.getByRole("radio", { name: "Only in one stack…" }).check();
+  await expect(where.getByLabel("Identity stack")).toHaveValue("services");
+  await where.getByRole("radio", { name: "Only in one space…" }).check();
+  const create = page.getByRole("form", { name: "New Example identity" });
+  await expect(create).toContainText("in dev / shared");
+  await create.getByLabel("Identity name").fill("example-space");
+  await create.getByLabel("account").fill("space");
+  await create.getByLabel("Value").fill("space-value");
+  await expect(create.getByRole("checkbox", { name: "Make this the default in dev / shared" })).toBeChecked();
+  await create.getByRole("button", { name: "Create identity" }).click();
+  await expect(toasts(page).filter({ hasText: "Example identity example-space created in dev / shared. It is now the default in dev / shared." })).toBeVisible();
+  expect(world.posts("/api/connectors/example-token/identities").at(-1).body).toEqual({
+    scope: { realm: "dev", space: "shared" }, name: "example-space", type: "opaque", identity: { account: "space" }, value: "space-value", makeDefault: true, method: "token",
+  });
+  expect(world.defaults["dev/shared"]).toEqual({ "example-token:token": { name: "example-space", realm: "dev", space: "shared" } });
+
+  // Levels the connector does not accept are not offered.
+  world.connectors.find(item => item.name === "example-token").scopes = ["realm"];
+  await page.goto(`${server.url}#/connectors/example-token/new-identity`);
+  await page.reload();
+  await expect(where.getByRole("radio")).toHaveCount(1);
+  await expect(where.getByRole("radio", { name: /^Everywhere in realm dev/ })).toBeChecked();
 });
 
 test("setting a Realm default clears the Needs connector badge of the Configs that inherit it, without re-rendering them", async ({ page }) => {
