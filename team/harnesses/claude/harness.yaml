@@ -96,6 +96,13 @@ spec:
             # final result. `set +m` keeps the background claude in the
             # shell's process group, so it stays in the terminal's
             # foreground process group and never stops on terminal access.
+            #
+            # The turn logs live in a directory private to this run (under
+            # TMPDIR, default /tmp), never a fixed shared path: anything else
+            # in the container that writes the same name — a test running
+            # this script with a stub claude, a second loop — would truncate
+            # the live log, and the loop would read the wrong result (#1695).
+            rundir=$(mktemp -d "${TMPDIR:-/tmp}/claude-run.XXXXXXXX")
             SID=$(cat /proc/sys/kernel/random/uuid)
             MAX_TURNS=50
             turn=1
@@ -103,7 +110,7 @@ spec:
             next_prompt="$PROMPT"
             set +m
             while :; do
-              turnlog="/tmp/claude-turn-$turn.jsonl"
+              turnlog="$rundir/turn-$turn.jsonl"
               : > "$turnlog"
               claude \
                 --settings "$ROLE_SOURCE_DIR/$ROLE_PATH/$HARNESS_SETTINGS" \

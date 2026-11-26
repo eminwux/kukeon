@@ -378,6 +378,8 @@ func startupCommand(
 	cmd.Env = append(
 		cmd.Env,
 		"HOME="+home,
+		// Keep the headless turn logs out of the shared /tmp (#1695).
+		"TMPDIR="+t.TempDir(),
 		"PATH="+bin+":"+os.Getenv("PATH"),
 		"OPENROUTER_MODEL=test",
 		"LAUNCH_STATE="+state,
