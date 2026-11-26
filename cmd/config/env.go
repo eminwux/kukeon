@@ -500,6 +500,17 @@ var (
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_ATTACH_CONTAINER = DefineKV("KUKE_ATTACH_CONTAINER", "kuke/attach/container")
 
+	// Exec command variables.
+
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_EXEC_REALM = DefineKV("KUKE_EXEC_REALM", "kuke/exec/realm", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_EXEC_SPACE = DefineKV("KUKE_EXEC_SPACE", "kuke/exec/space", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_EXEC_STACK = DefineKV("KUKE_EXEC_STACK", "kuke/exec/stack", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_EXEC_CONTAINER = DefineKV("KUKE_EXEC_CONTAINER", "kuke/exec/container")
+
 	// Log command variables.
 
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable

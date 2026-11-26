@@ -115,6 +115,7 @@ nav:
       - cli/kuke-restart.md
       - cli/kuke-log.md
       - cli/kuke-attach.md
+      - cli/kuke-exec.md
       - cli/kuke-screenshot.md
       - cli/kuke-write.md
       - cli/kuke-image.md

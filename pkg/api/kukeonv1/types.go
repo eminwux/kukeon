@@ -756,6 +756,62 @@ func (r *ConnectContainerTerminalReply) takePassedConn() *net.UnixConn {
 	return c
 }
 
+// ---- Exec ----
+
+// ExecRequest describes the process ExecContainer runs (issue #1432).
+type ExecRequest struct {
+	// Command is the argv, at least one element.
+	Command []string
+	// Root runs the process as uid 0 / gid 0. Mutually exclusive with User.
+	Root bool
+	// User is "uid", "uid:gid" or a name looked up in the container's
+	// rootfs. Empty runs the process as the container's own user.
+	User string
+	// Env is KEY=VAL entries layered over the container's environment.
+	Env []string
+	// Workdir overrides the container's working directory when non-empty.
+	Workdir string
+	// Stdin attaches the caller's stdin frames to the process. Without it
+	// the process reads an already-ended stdin.
+	Stdin bool
+	// TTY allocates a PTY inside the container.
+	TTY bool
+	// Cols and Rows are the initial terminal size; TTY only.
+	Cols uint16
+	Rows uint16
+}
+
+// ExecContainerArgs is the wire request of ExecContainer.
+type ExecContainerArgs struct {
+	Doc     v1beta1.ContainerDoc
+	Request ExecRequest
+	// PeerUID is the uid of the process on the other end of the socket. The
+	// server codec fills it from SO_PEERCRED; it never travels on the wire.
+	// It is only recorded in the audit log: nil is not a refusal.
+	PeerUID *int `json:"-"`
+}
+
+// ExecContainerReply is the wire reply of ExecContainer. Like
+// ConnectContainerTerminalReply, the connection does not travel in the JSON
+// body: the server codec sends Conn's descriptor as SCM_RIGHTS with the
+// reply bytes and closes the daemon's copy of that end. Err is set, and no
+// descriptor is sent, when a gate fails.
+type ExecContainerReply struct {
+	Err *APIError
+
+	// Conn is the caller's end of the session's socket pair. Never
+	// serialized; consumed by the server codec when writing the reply.
+	Conn *net.UnixConn `json:"-"`
+}
+
+// takePassedConn hands Conn to the server codec and clears it so the reply
+// owns the descriptor exactly once.
+func (r *ExecContainerReply) takePassedConn() *net.UnixConn {
+	c := r.Conn
+	r.Conn = nil
+	return c
+}
+
 // ---- Log ----
 
 // LogContainerArgs identifies the target container for a log request.

@@ -148,6 +148,12 @@ func (c *stopKillFakeClient) TaskMetrics(string, string) (*apitypes.Metric, erro
 	return nil, nil
 }
 
+func (c *stopKillFakeClient) ExecTask(
+	string, string, ctr.ExecSpec, io.Reader, io.Writer, io.Writer,
+) (ctr.ExecProcess, error) {
+	return nil, errors.New("unexpected call to ExecTask")
+}
+
 func (c *stopKillFakeClient) ContainerProcessUID(string, containerd.Container) (uint32, error) {
 	return 0, nil
 }

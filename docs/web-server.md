@@ -1030,7 +1030,7 @@ At startup the server prints `Listening on http://<host:port>`,
 and the command that prints the password.
 
 Host and Origin are checked by one policy on every route: static assets, API
-GETs, JSON mutations, and the attach WebSocket.
+GETs, JSON mutations, and the attach and exec WebSockets.
 
 - **With `--url`**, a request's Host must be the `--url` host and port, and any
   Origin it sends must be the `--url` origin. Anything else, including a request
@@ -1041,7 +1041,7 @@ GETs, JSON mutations, and the attach WebSocket.
   bind), any Host and any Origin are accepted. A request carrying more than one
   Origin is still rejected.
 
-Every `/api/` route, the attach WebSocket included, needs the [sign-in](#sign-in):
+Every `/api/` route, the attach and exec WebSockets included, needs the [sign-in](#sign-in):
 a `kukeon_session` cookie from `POST /api/login`, or the password as an
 `Authorization: Bearer <password>` header. A request without either gets
 `401 unauthenticated`; there is no flag to turn this off, and loopback binds are
@@ -1637,3 +1637,87 @@ bytes emitted while disconnected are not replayed. The existing attach protocol
 does not guarantee that a terminal process survives a network disconnect,
 browser reload, tab close, or server restart. Reloading or closing the browser
 tab closes its WebSockets and discards the in-memory terminal workspace.
+
+### Exec in a container
+
+**Exec**, next to the container selector of a cell's terminal, runs a new
+process in the selected container: the web counterpart of
+[`kuke exec`](site/cli/kuke-exec.md). It is offered for every container in the
+selector, attachable or not, and is disabled, with the reason in its tooltip,
+while the cell is not running. The Exec panel takes the place of the terminal
+or log view until you close it; an attached terminal stays attached behind it.
+
+The panel has an identity selector and two modes:
+
+- **Run as** chooses **Container user** (the default: the container's own
+  user) or **root** (uid 0, gid 0). Choosing root opens a confirmation, once
+  per panel. Until you confirm, the selector stays on Container user and
+  nothing is sent.
+- **Run command** takes one line and runs it as `sh -c <line>`, without stdin
+  or a terminal. The result shows stdout, stderr and the exit code separately.
+- **Terminal** opens an interactive shell (`bash` when the image has it, `sh`
+  otherwise) as the selected identity. It resizes with the panel. When the
+  shell ends the panel shows **Process exited with code N**; **New shell**
+  starts another process, since an ended one cannot be reconnected to.
+  Changing the identity replaces the shell with a new one.
+
+Closing the panel, selecting another container, closing the browser tab or
+reloading the page closes the shell's connection, and kukeond kills the
+process. Escape closes the panel, except inside the terminal, where it reaches
+the shell. Changes made through Exec are lost when the cell is recreated.
+
+| Route                                        | Behavior                                |
+| -------------------------------------------- | --------------------------------------- |
+| `POST …/cells/{cell}/containers/{name}/exec` | Runs one command and returns its output |
+| `GET …/containers/{name}/exec/terminal`      | WebSocket to an interactive shell       |
+
+Both live under `/api/realms/{realm}/spaces/{space}/stacks/{stack}`, run the
+same cell liveness check as the attach route, and need the sign-in.
+
+The run-command request is a JSON body, sent as `application/json`:
+
+```json
+{ "command": "id -u", "identity": "root", "confirmRoot": true }
+```
+
+`identity` is `container` (the default) or `root`. The response:
+
+```json
+{
+  "stdout": "0\n",
+  "stderr": "",
+  "exitCode": 0,
+  "truncated": false,
+  "timedOut": false
+}
+```
+
+| Limit        | Value          | When it is exceeded                                                              |
+| ------------ | -------------- | -------------------------------------------------------------------------------- |
+| Output       | 1 MiB a stream | The rest is dropped and `truncated` is `true`; the command still runs to its end |
+| Time         | 60 seconds     | The process is killed, `timedOut` is `true` and `exitCode` is `-1`               |
+| Request body | 64 KiB         | `400 invalid_request`                                                            |
+
+The terminal route takes `?identity=container|root`, `&confirmRoot=1` for root,
+and optional `&cols=` and `&rows=` for the initial size (80 by 24 otherwise).
+It speaks the attach route's message protocol: binary frames are terminal
+bytes; text frames are JSON, `{"type":"ready"}` once the shell has started,
+`{"type":"error","message":"…"}`, `{"type":"resize","cols":N,"rows":N}` from the
+browser, and `{"type":"exit","code":N}` from the server before it closes.
+
+**Root needs the confirmation on the server too.** A request for `root`
+without `confirmRoot` (`true` in the body, `1` in the query) is refused with
+`400 root_not_confirmed` before kukeond is contacted, and the terminal route
+refuses it before the WebSocket upgrade. kukeond itself has no separate
+permission for root: the kukeond socket is the only gate, and it logs every
+exec with the identity it ran as.
+
+| Status | Code                 | Meaning                                                                  |
+| ------ | -------------------- | ------------------------------------------------------------------------ |
+| 400    | `root_not_confirmed` | `identity` is `root` without the confirmation                            |
+| 400    | `invalid_request`    | Empty command, unknown identity, or a body that is not one JSON document |
+| 404    | `not_found`          | The cell or the container does not exist                                 |
+| 409    | `not_running`        | The cell, or the container's task, is not running                        |
+| 500    | `exec_failed`        | The command could not be started                                         |
+| 501    | `daemon_outdated`    | kukeond predates exec                                                    |
+| 502    | `exec_session_lost`  | The connection to kukeond ended before the exit status arrived           |

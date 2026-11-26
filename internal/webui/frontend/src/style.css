@@ -852,3 +852,36 @@ a.rail-agent-glyph:hover, a.rail-agent-glyph[aria-current="page"] { background: 
 .cell-grid-heading { align-items: center; }
 .cell-grid-heading .rollup-dot { align-self: center; }
 .grid-controls { grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 280px)); padding: 0 0 12px; }
+/* Exec panel (#1432): takes the place of the terminal or log of its container while it is open. */
+.exec-panel { display: flex; flex-direction: column; min-height: 360px; }
+.exec-panel-header { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+.exec-panel-header h2 { margin: 0; font-size: var(--font-lg); font-weight: 600; }
+.exec-identity { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; min-width: 0; margin: 0; padding: 0; border: 0; font-size: var(--font-md); }
+.exec-identity legend { float: left; padding: 0; color: var(--muted); font-size: var(--font-sm); }
+.exec-identity label { display: inline-flex; align-items: center; gap: 6px; }
+.exec-identity input { width: auto; margin: 0; }
+.exec-tabs { display: flex; gap: 4px; margin-left: auto; }
+.exec-tab { min-height: var(--target-min); padding: 4px 10px; border-color: transparent; background: transparent; color: var(--muted); font-size: var(--font-sm); }
+.exec-tab[aria-selected="true"] { border-color: var(--line); background: var(--selected); color: var(--text); font-weight: 600; }
+.exec-tab:focus-visible { outline: 2px solid transparent; box-shadow: var(--focus-ring); }
+.exec-run { display: grid; align-content: start; gap: 12px; padding: 16px; }
+.exec-run[hidden], .exec-terminal[hidden] { display: none; }
+.exec-run-form { display: grid; gap: 6px; }
+.exec-run-form label { font-weight: 550; }
+.exec-hint { color: var(--muted); font-size: var(--font-sm); font-weight: 400; }
+.exec-run-line { display: flex; gap: 8px; }
+.exec-run-line input { flex: 1; min-width: 0; }
+.exec-run .error { margin: 0; }
+.exec-result { display: grid; gap: 6px; }
+.exec-result p { margin: 0; }
+.exec-result h3 { margin: 6px 0 0; color: var(--muted); font-size: var(--font-sm); font-weight: 600; }
+.exec-output { max-height: 260px; margin: 0; padding: 10px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--code); font-size: var(--font-md); white-space: pre-wrap; overflow-wrap: anywhere; }
+.exec-output:focus-visible { outline: 2px solid transparent; box-shadow: var(--focus-ring); }
+.exec-empty { color: var(--muted); }
+.exec-terminal { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.exec-terminal-status { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 40px; padding: 4px 16px; }
+.exec-terminal-status p { margin: 0; color: var(--muted); font-size: var(--font-sm); }
+.exec-panel.is-expanded { flex: 1; min-height: 0; }
+.exec-panel.is-expanded .exec-run { overflow: auto; }
+.exec-panel.is-expanded .terminal-session:not([hidden]) { display: flex; flex: 1; min-height: 0; }
+.exec-panel.is-expanded .terminal-screen { height: 100%; min-height: 0; flex: 1; }

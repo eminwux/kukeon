@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -104,6 +105,53 @@ func ResolveTerminalTarget(
 		}
 	}
 	return terminalContainerDoc(container, t), nil
+}
+
+// ResolveExecTarget turns t into the ContainerDoc `kuke exec` runs a
+// process in (issue #1432). The cell-level liveness guard is the one
+// ResolveTerminalTarget applies, so a missing or stopped cell fails with the
+// same message as `kuke attach`. With no --container the cell's only
+// non-root container is picked, Attachable or not (ErrExecNoCandidate /
+// ErrExecAmbiguous otherwise); a named container may be any container of
+// the cell, the root one included. Whether the container exists and its
+// task is running is decided by the daemon on ExecContainer;
+// WrapExecError gives those refusals their operator-facing wording.
+func ResolveExecTarget(
+	ctx context.Context,
+	client kukeonv1.Client,
+	t TerminalTarget,
+) (v1beta1.ContainerDoc, error) {
+	cellGet, err := client.GetCell(ctx, terminalCellDoc(t))
+	if err != nil {
+		return v1beta1.ContainerDoc{}, err
+	}
+	if err = GuardCellTaskLiveness(cellGet, t.Cell, t.Realm, t.Space, t.Stack); err != nil {
+		return v1beta1.ContainerDoc{}, err
+	}
+
+	container := t.Container
+	if container == "" {
+		container, err = PickContainerWith(ctx, client, t.Realm, t.Space, t.Stack, t.Cell,
+			func(spec v1beta1.ContainerSpec) bool { return !spec.Root },
+			PickErrors{NoCandidate: errdefs.ErrExecNoCandidate, Ambiguous: errdefs.ErrExecAmbiguous})
+		if err != nil {
+			return v1beta1.ContainerDoc{}, err
+		}
+	}
+	return terminalContainerDoc(container, t), nil
+}
+
+// WrapExecError adds the container and cell to the daemon's not-found
+// refusal of ExecContainer, keeping the sentinel in the chain. A refusal
+// that already names the container is left alone, so the two are not said
+// twice. Other errors pass through unchanged (ErrExecTaskNotRunning already
+// names both).
+func WrapExecError(err error, doc v1beta1.ContainerDoc) error {
+	if !errors.Is(err, errdefs.ErrContainerNotFound) ||
+		strings.Contains(err.Error(), strconv.Quote(doc.Metadata.Name)) {
+		return err
+	}
+	return fmt.Errorf("container %q not found in cell %q: %w", doc.Metadata.Name, doc.Spec.CellID, err)
 }
 
 // WrapTerminalConnectError adds the container and cell to the daemon's

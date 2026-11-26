@@ -632,6 +632,38 @@ func (c *UnixClient) ConnectContainerTerminal(
 	ctx context.Context,
 	doc v1beta1.ContainerDoc,
 ) (*net.UnixConn, error) {
+	conn, err := c.dialDedicated(ctx)
+	if err != nil {
+		return nil, err
+	}
+	reply := &ConnectContainerTerminalReply{}
+	return callReceivingConn(ctx, conn, MethodConnectContainerTerminal,
+		&ConnectContainerTerminalArgs{Doc: doc}, reply,
+		func() *APIError { return reply.Err })
+}
+
+// ExecContainer implements Client. Like ConnectContainerTerminal it opens
+// its own connection for the call, so the passed descriptor can only belong
+// to this reply. The returned connection is the caller's end of the exec
+// session's socket pair, owned by the caller.
+func (c *UnixClient) ExecContainer(
+	ctx context.Context,
+	doc v1beta1.ContainerDoc,
+	req ExecRequest,
+) (*net.UnixConn, error) {
+	conn, err := c.dialDedicated(ctx)
+	if err != nil {
+		return nil, err
+	}
+	reply := &ExecContainerReply{}
+	return callReceivingConn(ctx, conn, MethodExecContainer,
+		&ExecContainerArgs{Doc: doc, Request: req}, reply,
+		func() *APIError { return reply.Err })
+}
+
+// dialDedicated opens a connection to kukeond for a single call whose reply
+// passes a descriptor back.
+func (c *UnixClient) dialDedicated(ctx context.Context) (*net.UnixConn, error) {
 	d := net.Dialer{Timeout: c.dialTimeout}
 	raw, err := d.DialContext(ctx, "unix", c.sockPath)
 	if err != nil {
@@ -642,10 +674,7 @@ func (c *UnixClient) ConnectContainerTerminal(
 		_ = raw.Close()
 		return nil, fmt.Errorf("dial kukeond at %s: got %T, want a unix socket", c.sockPath, raw)
 	}
-	reply := &ConnectContainerTerminalReply{}
-	return callReceivingConn(ctx, conn, MethodConnectContainerTerminal,
-		&ConnectContainerTerminalArgs{Doc: doc}, reply,
-		func() *APIError { return reply.Err })
+	return conn, nil
 }
 
 // AttachContainer implements Client.

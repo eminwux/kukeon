@@ -789,6 +789,42 @@ go run ./hack/attach-smoke --log "${ATTACH_LOG}" -- \
         --stack "${ATTACH_SMOKE_STACK}" --container "${ATTACH_SMOKE_CONTAINER}"
 echo "kuke attach exited cleanly (see ${ATTACH_LOG} for the full transcript)"
 
+# `kuke exec` smoke (issue #1432) against the same cell: a new process in
+# the running work container through kukeond's ExecContainer RPC, the
+# SCM_RIGHTS-passed session socket and the stdio FIFOs under the run path.
+# The unit tests fake containerd; this is where the real shim answers. No
+# --container: the cell has one non-root container, so the picker is
+# exercised too. The checks cover the default identity, root, an explicit
+# uid:gid, a user name (resolved by kukeond from the container's rootfs),
+# exit-code propagation, and stdin reaching the process with its
+# end-of-file.
+step "kuke exec smoke against the attach-smoke cell"
+kuke_exec() {
+    sudo --preserve-env="${PRESERVE_ENV_WORKLOAD}" ./kuke exec "${ATTACH_SMOKE_CELL}" \
+        --realm "${ATTACH_SMOKE_REALM}" --space "${ATTACH_SMOKE_SPACE}" \
+        --stack "${ATTACH_SMOKE_STACK}" "$@"
+}
+EXEC_UID="$(kuke_exec -- id -u)"
+[ -n "${EXEC_UID}" ] \
+    || { printf 'kuke exec -- id -u printed nothing\n' >&2; exit 1; }
+EXEC_ROOT_UID="$(kuke_exec --root -- id -u)"
+[ "${EXEC_ROOT_UID}" = "0" ] \
+    || { printf 'kuke exec --root -- id -u printed %s, want 0\n' "${EXEC_ROOT_UID}" >&2; exit 1; }
+EXEC_GID="$(kuke_exec -u 1234:5678 -- id -g)"
+[ "${EXEC_GID}" = "5678" ] \
+    || { printf 'kuke exec -u 1234:5678 -- id -g printed %s, want 5678\n' "${EXEC_GID}" >&2; exit 1; }
+EXEC_NOBODY_UID="$(kuke_exec -u nobody -- id -u)"
+[ "${EXEC_NOBODY_UID}" = "65534" ] \
+    || { printf 'kuke exec -u nobody -- id -u printed %s, want 65534\n' "${EXEC_NOBODY_UID}" >&2; exit 1; }
+EXEC_RC=0
+kuke_exec -- sh -c 'exit 7' || EXEC_RC=$?
+[ "${EXEC_RC}" -eq 7 ] \
+    || { printf "kuke exec -- sh -c 'exit 7' exited %s, want 7\n" "${EXEC_RC}" >&2; exit 1; }
+EXEC_ECHO="$(echo hi | kuke_exec -i -- cat)"
+[ "${EXEC_ECHO}" = "hi" ] \
+    || { printf 'echo hi | kuke exec -i -- cat printed %s, want hi\n' "${EXEC_ECHO}" >&2; exit 1; }
+echo "kuke exec: container uid ${EXEC_UID}, root uid ${EXEC_ROOT_UID}, -u 1234:5678 gid ${EXEC_GID}, -u nobody uid ${EXEC_NOBODY_UID}, exit code ${EXEC_RC}, stdin echoed"
+
 # Issue #547 AC#5: when the script runs nested, the existing smoke above
 # only validates the nested daemon's disposable cell. The contract the AC
 # adds is that the parent host's pre-existing attach paths must still be

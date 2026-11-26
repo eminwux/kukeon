@@ -316,3 +316,9 @@ func (b *Exec) ListContainerdNamespaces() ([]string, error) {
 func (b *Exec) RunPath() string {
 	return b.opts.RunPath
 }
+
+// Logger returns the controller's logger, for the in-process client's audit
+// entries (`kuke exec`, issue #1432).
+func (b *Exec) Logger() *slog.Logger {
+	return b.logger
+}

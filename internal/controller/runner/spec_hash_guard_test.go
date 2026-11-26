@@ -176,6 +176,12 @@ func (c *specHashFakeClient) TaskMetrics(string, string) (*apitypes.Metric, erro
 	return nil, nil //nolint:nilnil
 }
 
+func (c *specHashFakeClient) ExecTask(
+	string, string, ctr.ExecSpec, io.Reader, io.Writer, io.Writer,
+) (ctr.ExecProcess, error) {
+	return nil, errors.New("unexpected call to ExecTask")
+}
+
 func (c *specHashFakeClient) ContainerProcessUID(string, containerd.Container) (uint32, error) {
 	return 0, nil
 }

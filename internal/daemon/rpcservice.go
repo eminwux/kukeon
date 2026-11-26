@@ -376,6 +376,31 @@ func (s *KukeonV1Service) ConnectContainerTerminal(
 	return nil
 }
 
+// ExecContainer starts a process in the target container through the
+// in-process client and hands the caller its end of the session's socket
+// pair: reply.Conn is sent as SCM_RIGHTS by the server codec, which closes
+// the daemon's copy of that end once the reply is written (issue #1432).
+// The session runs on s.ctx, so it outlives this call. The caller uid the
+// codec read from the socket is only recorded in the audit log: a
+// connection whose peer is unknown is not refused (unlike StageGitFetch).
+func (s *KukeonV1Service) ExecContainer(
+	args *kukeonv1.ExecContainerArgs,
+	reply *kukeonv1.ExecContainerReply,
+) error {
+	ctx := s.ctx
+	if args.PeerUID != nil {
+		ctx = kukeonv1.WithPeerUID(ctx, *args.PeerUID)
+	}
+	conn, err := s.core.ExecContainer(ctx, args.Doc, args.Request)
+	if err != nil {
+		reply.Err = kukeonv1.ToAPIError(err)
+		s.logger.DebugContext(s.ctx, "ExecContainer returned error", "error", err)
+		return nil
+	}
+	reply.Conn = conn
+	return nil
+}
+
 // LogContainer returns the host path of the per-container output stream
 // (sbsh capture or runtime-shim log). Bytes never traverse this RPC; a
 // caller that cannot open the host path reads through ReadContainerLog.

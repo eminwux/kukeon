@@ -92,6 +92,7 @@ func (t *Terminal) Serve(conn net.Conn) {
 //   - ConnectContainerTerminal calls ConnectFn (nil means accept); on
 //     accept it returns a socketpair end served by Terminal.
 //   - AttachContainer calls AttachContainerFn (an error if unset).
+//   - ExecContainer calls ExecContainerFn (an error if unset).
 type Client struct {
 	kukeonv1.FakeClient
 
@@ -101,6 +102,9 @@ type Client struct {
 	ListContainersFn  func(realm, space, stack, cell string) ([]v1beta1.ContainerSpec, error)
 	ConnectFn         func(doc v1beta1.ContainerDoc) error
 	AttachContainerFn func(doc v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error)
+	// ExecContainerFn backs ExecContainer (an error if unset). It returns
+	// the caller's end of the session; SocketPair makes one.
+	ExecContainerFn func(doc v1beta1.ContainerDoc, req kukeonv1.ExecRequest) (*net.UnixConn, error)
 
 	mu       sync.Mutex
 	connects []v1beta1.ContainerDoc
@@ -162,7 +166,7 @@ func (c *Client) ConnectContainerTerminal(_ context.Context, doc v1beta1.Contain
 			return nil, err
 		}
 	}
-	conn, peer, err := socketPair()
+	conn, peer, err := SocketPair()
 	if err != nil {
 		return nil, err
 	}
@@ -184,6 +188,18 @@ func (c *Client) AttachContainer(
 	return c.AttachContainerFn(doc)
 }
 
+// ExecContainer implements kukeonv1.Client.
+func (c *Client) ExecContainer(
+	_ context.Context,
+	doc v1beta1.ContainerDoc,
+	req kukeonv1.ExecRequest,
+) (*net.UnixConn, error) {
+	if c.ExecContainerFn == nil {
+		return nil, errors.New("unexpected ExecContainer call")
+	}
+	return c.ExecContainerFn(doc, req)
+}
+
 // Close implements kukeonv1.Client and releases the served peer ends.
 func (c *Client) Close() error {
 	c.mu.Lock()
@@ -195,9 +211,9 @@ func (c *Client) Close() error {
 	return nil
 }
 
-// socketPair returns both ends of a connected unix stream socketpair, the
-// shape of connection ConnectContainerTerminal hands back.
-func socketPair() (*net.UnixConn, *net.UnixConn, error) {
+// SocketPair returns both ends of a connected unix stream socketpair, the
+// shape of connection ConnectContainerTerminal and ExecContainer hand back.
+func SocketPair() (*net.UnixConn, *net.UnixConn, error) {
 	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
 	if err != nil {
 		return nil, nil, fmt.Errorf("socketpair: %w", err)

@@ -67,6 +67,8 @@ var kindToSentinel = map[string]error{
 	"AttachTaskNotRunning":    errdefs.ErrAttachTaskNotRunning,
 	"AttachStaleSocket":       errdefs.ErrAttachStaleSocket,
 	"AttachPermissionDenied":  errdefs.ErrAttachPermissionDenied,
+	"ExecTaskNotRunning":      errdefs.ErrExecTaskNotRunning,
+	"ExecInvalidRequest":      errdefs.ErrExecInvalidRequest,
 	"ImageNotFound":           errdefs.ErrImageNotFound,
 	"ConfigNotFound":          errdefs.ErrConfigNotFound,
 	"ConfigExists":            errdefs.ErrConfigExists,

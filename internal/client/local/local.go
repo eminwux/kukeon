@@ -1456,6 +1456,21 @@ func (c *Client) LogContainer(_ context.Context, doc v1beta1.ContainerDoc) (kuke
 // on task liveness (#852); LogContainer ignores Status since reading a
 // per-container log file does not require a live task.
 func (c *Client) resolveAttachable(doc v1beta1.ContainerDoc) (intmodel.Container, error) {
+	container, err := c.resolveContainer(doc)
+	if err != nil {
+		return intmodel.Container{}, err
+	}
+	if !container.Spec.Attachable {
+		return intmodel.Container{}, errdefs.ErrAttachNotSupported
+	}
+	return container, nil
+}
+
+// resolveContainer normalizes doc and returns the container's spec with its
+// freshly-queried status: ErrConversionFailed for a malformed doc,
+// ErrContainerNotFound when the cell spec has no such container. The lookup
+// the attach gates and ExecContainer share.
+func (c *Client) resolveContainer(doc v1beta1.ContainerDoc) (intmodel.Container, error) {
 	internal, _, err := apischeme.NormalizeContainer(doc)
 	if err != nil {
 		return intmodel.Container{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
@@ -1466,9 +1481,6 @@ func (c *Client) resolveAttachable(doc v1beta1.ContainerDoc) (intmodel.Container
 	}
 	if !res.ContainerExists {
 		return intmodel.Container{}, errdefs.ErrContainerNotFound
-	}
-	if !res.Container.Spec.Attachable {
-		return intmodel.Container{}, errdefs.ErrAttachNotSupported
 	}
 	return res.Container, nil
 }

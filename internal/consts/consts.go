@@ -161,6 +161,14 @@ const (
 	// the budget on the per-container short id, not the directory.
 	KukeonSocketSymlinkSubdir = "s"
 
+	// KukeonExecFIFOSubdir is the basename of the per-RunPath directory that
+	// holds the stdio FIFOs of `kuke exec` processes (issue #1432). kukeond
+	// creates them and the runtime shim on the host opens them by path, so
+	// the directory has to exist at the same path inside and outside the
+	// kukeond cell — which the run path does and containerd's default
+	// /run/containerd/fifo does not.
+	KukeonExecFIFOSubdir = "exec-fifo"
+
 	// KukeonLockSubdir is the basename of the per-RunPath directory that
 	// holds cross-process lock files (issue #1469). The per-space lock that
 	// serializes EnsureSpace against DeleteSpace must also hold between the

@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,10 +29,17 @@ import (
 	"testing"
 
 	"github.com/eminwux/kukeon/cmd/kuke"
+	execcmd "github.com/eminwux/kukeon/cmd/kuke/exec"
 	healthcmd "github.com/eminwux/kukeon/cmd/kuke/health"
 	"github.com/eminwux/kukeon/cmd/types"
+	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/execstream"
 	"github.com/eminwux/kukeon/internal/logging"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
+	"golang.org/x/sys/unix"
 )
 
 func TestExecRoot(t *testing.T) {
@@ -95,6 +103,20 @@ func TestExecRoot(t *testing.T) {
 				return cmd
 			},
 			wantReturn: healthcmd.ExitFindings,
+		},
+		{
+			name: "exec exit error exits with the process's code",
+			setupCmd: func() *cobra.Command {
+				cmd := &cobra.Command{
+					Use: "test",
+					RunE: func(_ *cobra.Command, _ []string) error {
+						return execcmd.ExitError{Code: 7}
+					},
+				}
+				cmd.SetArgs([]string{})
+				return cmd
+			},
+			wantReturn: 7,
 		},
 		{
 			name: "wrapped child exit code is a plain failure",
@@ -525,6 +547,98 @@ func TestMainExecutableNameResolution(t *testing.T) {
 				if factory == nil {
 					t.Error("factory should not be nil when found")
 				}
+			}
+		})
+	}
+}
+
+// execExitClient is the kukeond a `kuke exec` run through execRoot talks to:
+// a live cell with one container, and an exec session that writes to stderr
+// and reports exitCode (or fails with execErr before any session).
+type execExitClient struct {
+	kukeonv1.FakeClient
+
+	exitCode int
+	execErr  error
+}
+
+func (c *execExitClient) Close() error { return nil }
+
+func (c *execExitClient) GetCell(context.Context, v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+	return kukeonv1.GetCellResult{
+		Cell:                     v1beta1.CellDoc{Status: v1beta1.CellStatus{State: v1beta1.CellStateReady}},
+		MetadataExists:           true,
+		RootContainerTaskRunning: true,
+	}, nil
+}
+
+func (c *execExitClient) ExecContainer(
+	context.Context, v1beta1.ContainerDoc, kukeonv1.ExecRequest,
+) (*net.UnixConn, error) {
+	if c.execErr != nil {
+		return nil, c.execErr
+	}
+	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
+	if err != nil {
+		return nil, err
+	}
+	var ends [2]*net.UnixConn
+	for i, fd := range fds {
+		f := os.NewFile(uintptr(fd), "pair")
+		conn, connErr := net.FileConn(f)
+		_ = f.Close()
+		if connErr != nil {
+			return nil, connErr
+		}
+		ends[i] = conn.(*net.UnixConn)
+	}
+	go func() {
+		defer func() { _ = ends[1].Close() }()
+		w := execstream.NewWriter(ends[1])
+		_ = w.WriteData(execstream.TypeStderr, []byte("sh: boom\n"))
+		_ = w.Exit(execstream.Exit{Code: c.exitCode})
+	}()
+	return ends[0], nil
+}
+
+// TestExecRoot_KukeExecExitCode runs the real `kuke exec` command under
+// execRoot: the process's exit code becomes kuke's and kuke adds nothing to
+// stderr for it, while a failure of kuke itself exits 1 with its error
+// printed (issue #1432).
+func TestExecRoot_KukeExecExitCode(t *testing.T) {
+	cases := []struct {
+		name       string
+		client     *execExitClient
+		wantReturn int
+		wantStderr string
+	}{
+		{"process exits 7", &execExitClient{exitCode: 7}, 7, "sh: boom\n"},
+		{"process exits 0", &execExitClient{}, 0, "sh: boom\n"},
+		{
+			"kuke itself fails", &execExitClient{execErr: errdefs.ErrExecTaskNotRunning}, 1,
+			"Error: " + errdefs.ErrExecTaskNotRunning.Error() + "\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+			root := &cobra.Command{Use: "kuke"}
+			root.AddCommand(execcmd.NewExecCmd())
+			var stdout, stderr bytes.Buffer
+			root.SetOut(&stdout)
+			root.SetErr(&stderr)
+			root.SetArgs([]string{"exec", "c1", "-c", "work", "--", "sh", "-c", "exit 7"})
+			root.SetContext(context.WithValue(context.Background(),
+				execcmd.MockControllerKey{}, kukeonv1.Client(tc.client)))
+
+			if got := execRoot(root); got != tc.wantReturn {
+				t.Errorf("execRoot() = %d, want %d", got, tc.wantReturn)
+			}
+			if stderr.String() != tc.wantStderr {
+				t.Errorf("stderr = %q, want %q", stderr.String(), tc.wantStderr)
+			}
+			if stdout.Len() != 0 {
+				t.Errorf("stdout = %q, want nothing", stdout.String())
 			}
 		})
 	}
