@@ -231,6 +231,14 @@ func TestCreateRefusals(t *testing.T) {
 			newFake("claude"), agent.Request{Harness: "claude", Realm: "default", Stack: "s"}, errdefs.ErrConfig,
 		},
 		"unsafe scope": {newFake("claude"), agent.Request{Harness: "claude", Realm: "../x"}, errdefs.ErrConfig},
+		"unsafe space": {
+			newFake("claude"), agent.Request{Harness: "claude", Realm: "default", Space: "a/b"}, errdefs.ErrConfig,
+		},
+		"unsafe stack": {
+			newFake("claude"),
+			agent.Request{Harness: "claude", Realm: "default", Space: "s", Stack: ".."},
+			errdefs.ErrConfig,
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := agent.Create(t.Context(), tc.fake, tc.req, agent.Options{}); !errors.Is(err, tc.want) {

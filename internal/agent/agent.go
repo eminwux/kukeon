@@ -288,20 +288,42 @@ func targetScope(template v1beta1.CellConfigMetadata, req Request) (v1beta1.Cell
 		return v1beta1.CellConfigMetadata{}, fmt.Errorf(
 			"%w: a scope needs a realm, and a stack needs a space", errdefs.ErrConfig)
 	}
-	for _, s := range []struct{ kind, value string }{
-		{"realm", req.Realm}, {"space", req.Space}, {"stack", req.Stack},
-	} {
-		if s.value == "" {
-			continue
+	// Each coordinate is guarded inline (not through a loop or helper) so the
+	// filepath.IsLocal check visibly dominates the returned values for static
+	// path-injection analysis, as in the web server's configLookup. An
+	// optional coordinate is copied only once checked, so its unset path
+	// carries the empty literal.
+	var realm, space, stack string
+	if !filepath.IsLocal(req.Realm) || strings.ContainsAny(req.Realm, `/\`) {
+		return v1beta1.CellConfigMetadata{}, unsafeScope("realm", req.Realm)
+	}
+	if err := naming.ValidateHierarchyName("realm", req.Realm); err != nil {
+		return v1beta1.CellConfigMetadata{}, fmt.Errorf("%w: %w", errdefs.ErrConfig, err)
+	}
+	realm = req.Realm
+	if req.Space != "" {
+		if !filepath.IsLocal(req.Space) || strings.ContainsAny(req.Space, `/\`) {
+			return v1beta1.CellConfigMetadata{}, unsafeScope("space", req.Space)
 		}
-		if !filepath.IsLocal(s.value) || strings.ContainsAny(s.value, `/\`) {
-			return v1beta1.CellConfigMetadata{}, fmt.Errorf("%w: unsafe %s %q", errdefs.ErrConfig, s.kind, s.value)
-		}
-		if err := naming.ValidateHierarchyName(s.kind, s.value); err != nil {
+		if err := naming.ValidateHierarchyName("space", req.Space); err != nil {
 			return v1beta1.CellConfigMetadata{}, fmt.Errorf("%w: %w", errdefs.ErrConfig, err)
 		}
+		space = req.Space
 	}
-	return v1beta1.CellConfigMetadata{Realm: req.Realm, Space: req.Space, Stack: req.Stack}, nil
+	if req.Stack != "" {
+		if !filepath.IsLocal(req.Stack) || strings.ContainsAny(req.Stack, `/\`) {
+			return v1beta1.CellConfigMetadata{}, unsafeScope("stack", req.Stack)
+		}
+		if err := naming.ValidateHierarchyName("stack", req.Stack); err != nil {
+			return v1beta1.CellConfigMetadata{}, fmt.Errorf("%w: %w", errdefs.ErrConfig, err)
+		}
+		stack = req.Stack
+	}
+	return v1beta1.CellConfigMetadata{Realm: realm, Space: space, Stack: stack}, nil
+}
+
+func unsafeScope(kind, value string) error {
+	return fmt.Errorf("%w: unsafe %s %q", errdefs.ErrConfig, kind, value)
 }
 
 // CreateCell creates the first cell of a stored agent Config, stopped, with
