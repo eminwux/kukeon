@@ -185,6 +185,11 @@ func NewConfig(
 	}
 	delete(annotations, v1beta1.AnnotationDisplayName)
 	annotations[v1beta1.AnnotationAgentTemplate] = template.Metadata.Name
+	if team := template.Metadata.Labels[v1beta1.LabelTeam]; team != "" {
+		annotations[v1beta1.AnnotationAgentTeam] = team
+	} else {
+		delete(annotations, v1beta1.AnnotationAgentTeam)
+	}
 	if displayName != "" {
 		annotations[v1beta1.AnnotationDisplayName] = displayName
 	}

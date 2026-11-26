@@ -741,8 +741,10 @@ The copy is named `<template>-<6 hex>` and keeps the template's spec as it is,
 so every agent of a harness mounts the template's state volume and shares its
 login. It keeps the labels `kukeon.io/role` and `kukeon.io/harness`, drops
 `kukeon.io/team` and `kukeon.io/template`, and records its template in the
-annotation `kukeon.io/agent-template`. Without a team label, applying a team
-never prunes it. The first cell gets a generated name.
+annotation `kukeon.io/agent-template`, and the template's team in
+`kukeon.io/agent-team`: the copy runs that team's role, so it may share the
+template's login identity. Without a team label, applying a team never prunes
+it. The first cell gets a generated name.
 
 ```
 $ sudo kuke create agent --harness claude --name "Reviewer"

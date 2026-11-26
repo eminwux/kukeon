@@ -53,7 +53,8 @@ The command does three things:
 
 1. It copies the template into a Config of its own, named
    `<template>-<6 hex>`. The copy has the template's spec unchanged, the
-   annotation `kukeon.io/agent-template` naming the template, and, with
+   annotations `kukeon.io/agent-template` and `kukeon.io/agent-team` naming
+   the template and its team, and, with
    `--name`, the display name in `kukeon.io/display-name`. It has no
    `kukeon.io/team` label, so applying a team never removes it.
 2. It creates the Config's first cell, with a generated name.

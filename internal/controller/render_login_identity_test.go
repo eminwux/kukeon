@@ -254,6 +254,39 @@ func TestPreview_OneRolePerLoginIdentity(t *testing.T) {
 		})
 	}
 
+	// A New agent copy (#1692) has no team label; its kukeon.io/agent-team
+	// annotation makes it its template's role, so it shares the template's
+	// login identity. Without the annotation it is another role.
+	for name, tc := range map[string]struct {
+		annotations map[string]string
+		refused     bool
+	}{
+		"a New agent copy of the template": {map[string]string{ext.AnnotationAgentTeam: "kukeon"}, false},
+		"a copy of another team's role":    {map[string]string{ext.AnnotationAgentTeam: "web"}, true},
+		"a teamless config of the role":    {nil, true},
+	} {
+		t.Run("a config binding it: "+name, func(t *testing.T) {
+			template := other("kukeon-dev", "dev")
+			copied := own
+			copied.Metadata.Name = "kukeon-dev-1a2b3c"
+			copied.Metadata.Labels = map[string]string{ext.LabelRole: "dev"}
+			copied.Metadata.Annotations = tc.annotations
+			ctrl := newLoginController(t, &connectorFixture{configs: []ext.CellConfigDoc{template}}, copied)
+			req := previewRequest()
+			req.Draft = &copied
+			_, err := ctrl.PreviewCellFromConfig(req)
+			if !tc.refused {
+				if err != nil {
+					t.Fatalf("PreviewCellFromConfig: %v", err)
+				}
+				return
+			}
+			if !errors.Is(err, errdefs.ErrVolumeIdentity) || !strings.Contains(err.Error(), "role kukeon/dev") {
+				t.Fatalf("error = %v, want ErrVolumeIdentity naming role kukeon/dev", err)
+			}
+		})
+	}
+
 	// The role that already uses the identity is not locked out by another
 	// role's stored Config: its own cells still render.
 	t.Run("the first role keeps rendering", func(t *testing.T) {

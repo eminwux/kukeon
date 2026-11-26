@@ -43,11 +43,12 @@ A Config is scopable at realm, space, or stack — never cell. A Config material
 
 Well-known keys of a Config's metadata (issue #1692):
 
-| Key                        | Kind       | Set by                         | Meaning                                                                                                                                            |
-| -------------------------- | ---------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `kukeon.io/template`       | label      | composition of a template team | `"true"` on an agent template, a Config the system `default` team composes; New agent copies it. A template is not run itself.                     |
-| `kukeon.io/agent-template` | annotation | New agent                      | The name of the agent template a Config was copied from.                                                                                           |
-| `kukeon.io/display-name`   | annotation | New agent, rename              | The name a person gave the agent, apart from the generated Config name. Left out of the config revision, so a rename never marks a cell OutOfSync. |
+| Key                        | Kind       | Set by                         | Meaning                                                                                                                                                                              |
+| -------------------------- | ---------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `kukeon.io/template`       | label      | composition of a template team | `"true"` on an agent template, a Config the system `default` team composes; New agent copies it. A template is not run itself.                                                       |
+| `kukeon.io/agent-template` | annotation | New agent                      | The name of the agent template a Config was copied from.                                                                                                                             |
+| `kukeon.io/agent-team`     | annotation | New agent                      | The team of that template. A copy has no `kukeon.io/team` label, so no team prunes it; this names the role it runs (`<team>/<role>`), so it may share the template's login identity. |
+| `kukeon.io/display-name`   | annotation | New agent, rename              | The name a person gave the agent, apart from the generated Config name. Left out of the config revision, so a rename never marks a cell OutOfSync.                                   |
 
 A cell may carry `kukeon.io/display-name` too, set by renaming that instance; like every cell annotation it is never compared.
 

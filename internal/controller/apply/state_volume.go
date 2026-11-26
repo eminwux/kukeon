@@ -59,14 +59,20 @@ func StateVolumeRef(values map[string]string) *ext.VolumeRef {
 	return &ext.VolumeRef{Name: name, Realm: scope[0], Space: scope[1], Stack: scope[2]}
 }
 
-// RoleName names the team role a set of Config labels belongs to, as
-// `<team>/<role>`, or just the role outside a team. Empty without a role.
-func RoleName(labels map[string]string) string {
+// RoleName names the team role a Config's labels and annotations belong to,
+// as `<team>/<role>`, or just the role outside a team. Empty without a role.
+// A New agent copy has no kukeon.io/team label but runs its template's role:
+// its kukeon.io/agent-team annotation names the team (issue #1692).
+func RoleName(labels, annotations map[string]string) string {
 	role := strings.TrimSpace(labels[ext.LabelRole])
 	if role == "" {
 		return ""
 	}
-	if team := strings.TrimSpace(labels[ext.LabelTeam]); team != "" {
+	team := strings.TrimSpace(labels[ext.LabelTeam])
+	if team == "" {
+		team = strings.TrimSpace(annotations[ext.AnnotationAgentTeam])
+	}
+	if team != "" {
 		return team + "/" + role
 	}
 	return role
@@ -86,7 +92,7 @@ type CellKey struct {
 // volume with each other, and one that cannot be read is skipped. self is the
 // cell being rendered, whose own pick does not count; zero when there is none.
 func OtherRoleOnStateVolume(r runner.Runner, ref ext.VolumeRef, own ext.CellConfigMetadata, self CellKey) string {
-	ownRole := RoleName(own.Labels)
+	ownRole := RoleName(own.Labels, own.Annotations)
 	if ownRole == "" || !safeVolumeRef(ref) {
 		return ""
 	}
@@ -123,7 +129,7 @@ func otherConfigRole(r runner.Runner, ref ext.VolumeRef, own ext.CellConfigMetad
 		if !ok {
 			continue
 		}
-		role := RoleName(doc.Metadata.Labels)
+		role := RoleName(doc.Metadata.Labels, doc.Metadata.Annotations)
 		if role == "" || role == ownRole {
 			continue
 		}
@@ -160,7 +166,7 @@ func otherCellRole(r runner.Runner, ref ext.VolumeRef, ownRole string, self Cell
 		if !ok {
 			continue
 		}
-		if role := RoleName(doc.Metadata.Labels); role != "" && role != ownRole {
+		if role := RoleName(doc.Metadata.Labels, doc.Metadata.Annotations); role != "" && role != ownRole {
 			return role
 		}
 	}
@@ -202,7 +208,7 @@ func readConfig(r runner.Runner, md intmodel.CellConfigMetadata) (ext.CellConfig
 // — keeps the role that already uses the identity working.
 func validateLoginIdentityRole(r runner.Runner, cfgDoc ext.CellConfigDoc, bpDoc ext.CellBlueprintDoc) error {
 	ref := StateVolumeRef(cfgDoc.Spec.Values)
-	if ref == nil || RoleName(cfgDoc.Metadata.Labels) == "" {
+	if ref == nil || RoleName(cfgDoc.Metadata.Labels, cfgDoc.Metadata.Annotations) == "" {
 		return nil
 	}
 	keepsLogin := slices.ContainsFunc(bpDoc.Spec.Components, func(comp ext.BlueprintComponent) bool {
@@ -216,7 +222,12 @@ func validateLoginIdentityRole(r runner.Runner, cfgDoc ext.CellConfigDoc, bpDoc 
 		return fmt.Errorf(
 			"%w: config %q: volume %q is the login identity of role %s; role %s cannot share it "+
 				"(the harness keeps role content in its state directory)",
-			errdefs.ErrVolumeIdentity, cfgDoc.Metadata.Name, ref.Name, other, RoleName(cfgDoc.Metadata.Labels))
+			errdefs.ErrVolumeIdentity,
+			cfgDoc.Metadata.Name,
+			ref.Name,
+			other,
+			RoleName(cfgDoc.Metadata.Labels, cfgDoc.Metadata.Annotations),
+		)
 	}
 	return nil
 }

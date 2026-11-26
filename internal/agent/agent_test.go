@@ -137,6 +137,7 @@ func TestCreateCopiesTheTemplate(t *testing.T) {
 	}
 	wantAnnotations := map[string]string{
 		v1beta1.AnnotationDisplayName: "Reviewer", v1beta1.AnnotationAgentTemplate: "default-agent-claude",
+		v1beta1.AnnotationAgentTeam: "default",
 	}
 	if !reflect.DeepEqual(cfg.Metadata.Annotations, wantAnnotations) {
 		t.Fatalf("annotations = %v, want %v", cfg.Metadata.Annotations, wantAnnotations)

@@ -618,7 +618,7 @@ kuke run --from-config default-agent-claude-<6hex>         # another instance of
 
 **Invariants.**
 
-- The templates are CellConfigs in `default/default/default` labelled `kukeon.io/team: default` and `kukeon.io/template: "true"`. A copy is named `<template>-<6 hex>`, keeps the template's spec unchanged (so every agent of a harness mounts the same state volume), keeps `kukeon.io/role` and `kukeon.io/harness`, drops `kukeon.io/team` and `kukeon.io/template`, and carries the annotation `kukeon.io/agent-template: <template>` and, with `--name`, `kukeon.io/display-name`.
+- The templates are CellConfigs in `default/default/default` labelled `kukeon.io/team: default` and `kukeon.io/template: "true"`. A copy is named `<template>-<6 hex>`, keeps the template's spec unchanged (so every agent of a harness mounts the same state volume), keeps `kukeon.io/role` and `kukeon.io/harness`, drops `kukeon.io/team` and `kukeon.io/template`, and carries the annotations `kukeon.io/agent-template: <template>` and `kukeon.io/agent-team: <template's team>` (so the copy is the template's role and may share its login identity) and, with `--name`, `kukeon.io/display-name`.
 - `--harness` is required and is `claude` or `codex`; anything else exits non-zero before contacting the daemon. A display name is at most 63 characters with no control characters.
 - A missing template exits non-zero naming it and stores nothing.
 - Exactly one cell is created (generated name) and started. When creating or starting it fails, the Config is kept, its name is printed, and the error names the failed step; `kuke run --from-config <config>` or `kuke start <cell>` finishes the job.

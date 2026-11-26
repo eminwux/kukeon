@@ -55,7 +55,9 @@ default-agent-codex, which kuke team init stores with the default team. The
 copy is a CellConfig of its own, named <template>-<6 hex>, with the template's
 spec unchanged: every agent of a harness uses the same state volume, and so
 the same login. It carries the labels kukeon.io/role and kukeon.io/harness and
-the annotation kukeon.io/agent-template; --name stores the agent's display
+the annotations kukeon.io/agent-template and kukeon.io/agent-team (the
+template's team, whose role the copy runs, so it shares the template's login
+identity); --name stores the agent's display
 name as kukeon.io/display-name. It has no kukeon.io/team label, so applying a
 team never removes it.
 

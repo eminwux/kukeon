@@ -88,7 +88,10 @@ spec:
   template's state volume (`default-agent-<harness>-state`) and shares one
   login. It keeps the `kukeon.io/role` and `kukeon.io/harness` labels, drops
   `kukeon.io/team` and `kukeon.io/template`, and records its template in the
-  annotation `kukeon.io/agent-template`.
+  annotation `kukeon.io/agent-template` and the template's team in
+  `kukeon.io/agent-team`. That annotation keeps the copy the role
+  `default/agent`, so it may share the template's login identity, which one
+  role only may use.
 - **Display names.** The name a person gives an agent is stored in the
   annotation `kukeon.io/display-name` on its Config, and the name of one of its
   instances on that cell. It is not a label: Config labels are copied onto

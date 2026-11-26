@@ -201,6 +201,11 @@ const (
 	// AnnotationAgentTemplate records, on a CellConfig New agent created,
 	// the name of the agent template it was copied from (issue #1692).
 	AnnotationAgentTemplate = "kukeon.io/agent-template"
+	// AnnotationAgentTeam records, on a CellConfig New agent created, the team
+	// of its template. The copy has no kukeon.io/team label, so applying that
+	// team never prunes it, yet it runs the team's role: it shares the
+	// template's login identity as one role (issue #1692).
+	AnnotationAgentTeam = "kukeon.io/agent-team"
 )
 
 // MaxDisplayNameLength is the most characters (runes) a display name may
