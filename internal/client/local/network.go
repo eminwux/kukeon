@@ -197,7 +197,6 @@ func cellNetworkDetail(
 			Root:        c.ID == detail.RootContainer,
 			HostNetwork: c.HostNetwork,
 			HostPID:     c.HostPID,
-			Ports:       append([]string(nil), c.Ports...),
 		})
 	}
 	return detail
@@ -225,9 +224,6 @@ func containerNetworkDetail(
 		HostPID:             c.HostPID,
 		CNIConfigPath:       spaceConfigPath,
 		CNIConfigPathSource: kukeonv1.NetworkSourceSpace,
-		Ports:               append([]string(nil), c.Ports...),
-		Networks:            append([]string(nil), c.Networks...),
-		NetworksAliases:     append([]string(nil), c.NetworksAliases...),
 	}
 	// The runner fills an empty container cniConfigPath with the space's, so
 	// a value equal to the space path is still inherited.

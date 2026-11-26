@@ -137,11 +137,10 @@ func TestNewBlueprintCmd_EmitsImageTODO(t *testing.T) {
 func TestNewBlueprintCmd_EmitsOptionalCommentMarkers(t *testing.T) {
 	out := runScaffold(t, []string{"web"}, nil)
 
-	// AC: comment markers for parameters, ports, volumes (AC says "volumeMounts"
+	// AC: comment markers for parameters, volumes (AC says "volumeMounts"
 	// but the model field is `volumes`), repos, secrets.
 	wantMarkers := []string{
 		"# parameters:",
-		"# ports:",
 		"# volumes:",
 		"# repos:",
 		"# secrets:",

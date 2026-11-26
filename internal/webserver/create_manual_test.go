@@ -101,11 +101,9 @@ func TestManualCellAcceptsCompleteContainerSpecification(t *testing.T) {
 					"serve",
 					"--http",
 				}, WorkingDir: "/srv/app", Env: []string{"MODE=prod", "TOKEN=secret-value"},
-				Ports: []string{"8080/tcp"},
 				Volumes: []v1beta1.VolumeMount{
 					{Kind: v1beta1.VolumeKindBind, Source: "/srv/data", Target: "/data", ReadOnly: true},
 				},
-				Networks: []string{"frontend"}, NetworksAliases: []string{"app-alias"},
 				Privileged: false, HostNetwork: false, HostPID: true, HostCgroup: true,
 				User: "1000:1000", ReadOnlyRootFilesystem: true,
 				Capabilities: &v1beta1.ContainerCapabilities{Drop: []string{"ALL"}, Add: []string{"NET_BIND_SERVICE"}},
@@ -205,6 +203,24 @@ func TestManualCellAPIRejectsRuntimeFieldsAndRedactsSecrets(t *testing.T) {
 	response := postCreateRaw(t, handler, "/api/cells/manual/preview", bad, "http://localhost:5129")
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("runtime status was accepted: %d %s", response.Code, response.Body.String())
+	}
+}
+
+// TestManualCellRejectsRemovedContainerFields pins that the strict request
+// decoder refuses ports, networks and networksAliases, so the embedded
+// frontend must not send them.
+func TestManualCellRejectsRemovedContainerFields(t *testing.T) {
+	handler := testCreateHandler(t, &creationClient{})
+	for _, field := range []string{`"ports":["80"]`, `"networks":["a"]`, `"networksAliases":["b"]`} {
+		body := `{"name":"cell","realm":"realm","space":"space","stack":"stack","spec":{"containers":[{"id":"app","image":"example/app:latest",` + field + `}]}}`
+		response := postCreateRaw(t, handler, "/api/cells/manual/preview", body, "http://localhost:5129")
+		if response.Code != http.StatusBadRequest {
+			t.Errorf("%s was accepted: %d %s", field, response.Code, response.Body.String())
+		}
+	}
+	accepted := `{"name":"cell","realm":"realm","space":"space","stack":"stack","spec":{"containers":[{"id":"app","image":"example/app:latest"}]}}`
+	if response := postCreateRaw(t, handler, "/api/cells/manual/preview", accepted, "http://localhost:5129"); response.Code != http.StatusOK {
+		t.Fatalf("the same request without the removed keys was refused: %d %s", response.Code, response.Body.String())
 	}
 }
 

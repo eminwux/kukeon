@@ -699,12 +699,10 @@ func TestContainerRoundTripV1Beta1(t *testing.T) {
 			Command: "sh",
 			Args:    []string{"-c", "echo hello"},
 			Env:     []string{"ENV_VAR=value"},
-			Ports:   []string{"8080:80"},
 			Volumes: []ext.VolumeMount{
 				{Source: "/host/src", Target: "/container/dst"},
 				{Source: "/host/ro", Target: "/container/ro", ReadOnly: true},
 			},
-			Networks: []string{"network0"},
 		},
 		Status: ext.ContainerStatus{
 			State: ext.ContainerStatePending,

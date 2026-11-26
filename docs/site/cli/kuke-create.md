@@ -137,7 +137,7 @@ sudo kuke create cell --clone prod \
 kuke create blueprint [NAME] [--realm <r>] [--space <s>] [--stack <t>]
 ```
 
-Scaffold a `kind: CellBlueprint` starter YAML to stdout. Emits a syntactically-valid Blueprint document with a single placeholder container, the operator's `--realm`/`--space`/`--stack` as scope, and inline `# TODO` markers on the required `image:` field plus comment markers for optional sections (parameters, ports, volumes, repos, secrets) so operators know what they can add.
+Scaffold a `kind: CellBlueprint` starter YAML to stdout. Emits a syntactically-valid Blueprint document with a single placeholder container, the operator's `--realm`/`--space`/`--stack` as scope, and inline `# TODO` markers on the required `image:` field plus comment markers for optional sections (parameters, volumes, repos, secrets) so operators know what they can add.
 
 No daemon call — pure stdout emission.
 

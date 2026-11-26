@@ -1403,11 +1403,10 @@ type SpaceNetworkDetail struct {
 
 // ContainerNetworkSummary is one container's network-relevant spec fields.
 type ContainerNetworkSummary struct {
-	ID          string   `json:"id"`
-	Root        bool     `json:"root"`
-	HostNetwork bool     `json:"hostNetwork"`
-	HostPID     bool     `json:"hostPID"`
-	Ports       []string `json:"ports,omitempty"`
+	ID          string `json:"id"`
+	Root        bool   `json:"root"`
+	HostNetwork bool   `json:"hostNetwork"`
+	HostPID     bool   `json:"hostPID"`
 }
 
 // CellNetworkDetail is a cell's bridge, IPv4 and network mode. HostNetwork
@@ -1422,19 +1421,14 @@ type CellNetworkDetail struct {
 	Containers    []ContainerNetworkSummary `json:"containers,omitempty"`
 }
 
-// ContainerNetworkDetail is a container's declared network spec. Ports,
-// Networks and NetworksAliases are stored but not applied at runtime yet
-// (#1002).
+// ContainerNetworkDetail is a container's declared network spec.
 type ContainerNetworkDetail struct {
-	ID                  string   `json:"id"`
-	Root                bool     `json:"root"`
-	HostNetwork         bool     `json:"hostNetwork"`
-	HostPID             bool     `json:"hostPID"`
-	CNIConfigPath       string   `json:"cniConfigPath"`
-	CNIConfigPathSource string   `json:"cniConfigPathSource"`
-	Ports               []string `json:"ports,omitempty"`
-	Networks            []string `json:"networks,omitempty"`
-	NetworksAliases     []string `json:"networksAliases,omitempty"`
+	ID                  string `json:"id"`
+	Root                bool   `json:"root"`
+	HostNetwork         bool   `json:"hostNetwork"`
+	HostPID             bool   `json:"hostPID"`
+	CNIConfigPath       string `json:"cniConfigPath"`
+	CNIConfigPathSource string `json:"cniConfigPathSource"`
 }
 
 // GetNetworkDetailResult combines what a resource declares about its

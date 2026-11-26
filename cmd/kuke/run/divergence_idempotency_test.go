@@ -60,7 +60,7 @@ func TestDivergedFields_MaterializePersistMaterializeIsIdempotent(t *testing.T) 
 			cfg:  minimalConfigForDivergence(),
 		},
 		{
-			name: "rich container fields (env, ports, volumes, networks, git, repos, secrets)",
+			name: "rich container fields (env, volumes, git, repos, secrets)",
 			bp:   richBlueprintForDivergence(),
 			cfg:  richConfigForDivergence(),
 		},
@@ -238,7 +238,6 @@ func richBlueprintForDivergence() v1beta1.CellBlueprintDoc {
 						Attachable: true,
 						Args:       []string{"--port", "8080"},
 						Env:        []string{"FOO=bar", "BAZ=qux"},
-						Ports:      []string{"8080/tcp"},
 						Volumes: []v1beta1.VolumeMount{
 							{Source: "/host/data", Target: "/data", ReadOnly: true, Mode: 0o644},
 							// Cross-scope volumeRef mount: a pointer field that
@@ -252,10 +251,8 @@ func richBlueprintForDivergence() v1beta1.CellBlueprintDoc {
 								Ensure: true,
 							},
 						},
-						Networks:        []string{"default"},
-						NetworksAliases: []string{"web"},
-						RestartPolicy:   "on-failure",
-						Repos:           []v1beta1.ContainerRepo{{Name: "src", Target: "/srv", Required: true}},
+						RestartPolicy: "on-failure",
+						Repos:         []v1beta1.ContainerRepo{{Name: "src", Target: "/srv", Required: true}},
 						Secrets: []v1beta1.BlueprintSecretSlot{
 							{Name: "token", Mode: v1beta1.BlueprintSecretModeEnv, EnvName: "TOKEN", Required: true},
 						},

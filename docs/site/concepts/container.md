@@ -38,13 +38,10 @@ spec:
     - "exec nginx -g 'daemon off;'"
   env:
     - "NGINX_HOST=example.com"
-  ports: []
   volumes:
     - source: /srv/html
       target: /usr/share/nginx/html
       readOnly: true
-  networks: []
-  networksAliases: []
   privileged: false
   restartPolicy: ""
 ```

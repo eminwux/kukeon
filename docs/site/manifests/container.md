@@ -22,13 +22,10 @@ spec:
     - "exec nginx -g 'daemon off;'"
   env:
     - "NGINX_HOST=example.com"
-  ports: []
   volumes:
     - source: /srv/html
       target: /usr/share/nginx/html
       readOnly: true
-  networks: []
-  networksAliases: []
   privileged: false
   repos:
     - name: app
@@ -75,10 +72,7 @@ See [Concepts → Container](../concepts/container.md) for what a container is.
 | `command`               | string                     | no       | Command to run. If omitted, the image's `ENTRYPOINT` is used.                                                                                                                                                                       |
 | `args`                  | array of string            | no       | Arguments. Combined with `command`.                                                                                                                                                                                                 |
 | `env`                   | array of string            | no       | `KEY=VALUE` environment variables                                                                                                                                                                                                   |
-| `ports`                 | array of string            | no       | Reserved — port mapping semantics are not finalized                                                                                                                                                                                 |
 | `volumes`               | array of `VolumeMount`     | no       | Bind-mount host paths into the container (see [VolumeMount](#volumemount))                                                                                                                                                          |
-| `networks`              | array of string            | no       | Additional CNI networks to join beyond the cell's default                                                                                                                                                                           |
-| `networksAliases`       | array of string            | no       | DNS aliases for the container within its CNI networks                                                                                                                                                                               |
 | `privileged`            | bool                       | no       | Run privileged (full capabilities, **all** host devices, open device cgroup). For just one or two devices prefer the least-privilege [`devices`](#devices) field instead.                                                           |
 | `devices`               | array of string            | no       | Per-device host passthrough — grant only the named device nodes (e.g. `/dev/kvm`) instead of all of `/dev` (see [devices](#devices))                                                                                                |
 | `hostCgroup`            | bool                       | no       | Opt the container into its parent's cgroup namespace (see [Host cgroup mode](#host-cgroup-mode))                                                                                                                                    |
@@ -90,9 +84,6 @@ See [Concepts → Container](../concepts/container.md) for what a container is.
 | `restartBackoffSeconds` | int                        | no       | Minimum seconds between reconciler-driven restarts of this container. Unset uses the built-in `30s` default; `0` disables the floor. Requires a restarting policy (`always`/`on-failure`). See [Restart on exit](#restart-on-exit). |
 | `restartMaxRetries`     | int                        | no       | `on-failure` retry cap before the container is left terminal. Unset uses the built-in `5` default; must be ≥ 1. Requires `restartPolicy: on-failure`. See [Restart on exit](#restart-on-exit).                                      |
 | `tty`                   | `ContainerTty`             | no       | Shell-UX config for the kuketty wrapper (prompt, init scripts, logging) — requires `attachable: true` (see [ContainerTty](#containertty))                                                                                           |
-
-!!! warning "Fields marked reserved"
-`ports` is accepted by the schema today but its semantics are still being designed. Values round-trip (you can read back what you applied), but the controller does not act on them. See [GitHub Issues](https://github.com/eminwux/kukeon/issues) for the backlog.
 
 ### Root container
 

@@ -449,7 +449,7 @@ func reconcileCell(r runner.Runner, desired intmodel.Cell) (ReconcileResult, err
 
 	// Check for breaking changes (root container spec change). Only
 	// Breaking-on-root edits route through RecreateCell — Compatible-on-root
-	// fields (env, ports, volumes, securityOpts, secrets, repos) toggle
+	// fields (env, volumes, securityOpts, secrets, repos) toggle
 	// `RootContainerChanged` so the diff surfaces them under
 	// `rootContainer.<field>`, but they can be re-evaluated at start or
 	// rebuilt from spec by UpdateCell and must not force a kill-and-recreate.

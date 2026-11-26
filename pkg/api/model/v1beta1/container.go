@@ -45,13 +45,10 @@ type ContainerSpec struct {
 	// WorkingDir sets the cwd of the spawned container process — OCI
 	// process.cwd, Docker WORKDIR, K8s Container.workingDir. Empty falls
 	// back to the image's WORKDIR (no behavior change for existing specs).
-	WorkingDir      string        `json:"workingDir,omitempty"             yaml:"workingDir,omitempty"`
-	Env             []string      `json:"env"                              yaml:"env"`
-	Ports           []string      `json:"ports"                            yaml:"ports"`
-	Volumes         []VolumeMount `json:"volumes"                          yaml:"volumes"`
-	Networks        []string      `json:"networks"                         yaml:"networks"`
-	NetworksAliases []string      `json:"networksAliases"                  yaml:"networksAliases"`
-	Privileged      bool          `json:"privileged"                       yaml:"privileged"`
+	WorkingDir string        `json:"workingDir,omitempty"             yaml:"workingDir,omitempty"`
+	Env        []string      `json:"env"                              yaml:"env"`
+	Volumes    []VolumeMount `json:"volumes"                          yaml:"volumes"`
+	Privileged bool          `json:"privileged"                       yaml:"privileged"`
 	// HostNetwork opts the container into the host's network namespace.
 	// When true, the runner omits the network LinuxNamespace from the OCI
 	// spec (containerd's WithHostNamespace) and does not invoke CNI attach,
@@ -713,26 +710,23 @@ func NewContainerDoc(from *ContainerDoc) *ContainerDoc {
 				Labels: map[string]string{},
 			},
 			Spec: ContainerSpec{
-				ID:              "",
-				ContainerdID:    "",
-				RealmID:         "",
-				SpaceID:         "",
-				StackID:         "",
-				CellID:          "",
-				Root:            false,
-				Image:           "",
-				Command:         "",
-				Args:            []string{},
-				Env:             []string{},
-				Ports:           []string{},
-				Volumes:         []VolumeMount{},
-				Networks:        []string{},
-				NetworksAliases: []string{},
-				Privileged:      false,
-				HostNetwork:     false,
-				HostPID:         false,
-				CNIConfigPath:   "",
-				RestartPolicy:   "",
+				ID:            "",
+				ContainerdID:  "",
+				RealmID:       "",
+				SpaceID:       "",
+				StackID:       "",
+				CellID:        "",
+				Root:          false,
+				Image:         "",
+				Command:       "",
+				Args:          []string{},
+				Env:           []string{},
+				Volumes:       []VolumeMount{},
+				Privileged:    false,
+				HostNetwork:   false,
+				HostPID:       false,
+				CNIConfigPath: "",
+				RestartPolicy: "",
 			},
 			Status: ContainerStatus{
 				Name:         "",
@@ -762,10 +756,7 @@ func NewContainerDoc(from *ContainerDoc) *ContainerDoc {
 
 	out.Spec.Args = cloneSlice(out.Spec.Args)
 	out.Spec.Env = cloneSlice(out.Spec.Env)
-	out.Spec.Ports = cloneSlice(out.Spec.Ports)
 	out.Spec.Volumes = cloneVolumeMounts(out.Spec.Volumes)
-	out.Spec.Networks = cloneSlice(out.Spec.Networks)
-	out.Spec.NetworksAliases = cloneSlice(out.Spec.NetworksAliases)
 	out.Spec.SecurityOpts = cloneSlice(out.Spec.SecurityOpts)
 	out.Spec.Devices = cloneSlice(out.Spec.Devices)
 	out.Spec.Secrets = cloneSecrets(out.Spec.Secrets)

@@ -354,7 +354,7 @@ func (b *Exec) recoverCell(internalCell intmodel.Cell) (intmodel.Cell, error) {
 //   - Compatible / Additive diff → in-place apply with the root overlay
 //     preserved: runner.StartCell restarts the cell on its existing
 //     containerd snapshot (issue #867), then runner.UpdateCell persists the
-//     compatible fields (env/ports/volumes, spec.autoDelete, spec.tty) and
+//     compatible fields (env/volumes, spec.autoDelete, spec.tty) and
 //     stop-remove-recreate-starts any non-root child whose image/command/args
 //     changed. UpdateCell cannot run on a stopped cell — non-root children
 //     join the root's pid/net/ipc namespaces — so the StartCell-then-UpdateCell

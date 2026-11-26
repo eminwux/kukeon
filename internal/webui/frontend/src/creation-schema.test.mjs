@@ -7,7 +7,7 @@ const keys = fields => fields.flatMap(field => [field.key, ...(field.fields ? ke
 test("manual schema covers every authorable ContainerSpec field", () => {
   const authored = new Set(containerFields.map(field => field.key));
   const expected = [
-    "id", "root", "image", "command", "args", "workingDir", "env", "ports", "volumes", "networks", "networksAliases",
+    "id", "root", "image", "command", "args", "workingDir", "env", "volumes",
     "privileged", "hostNetwork", "hostPID", "hostCgroup", "user", "readOnlyRootFilesystem", "capabilities", "securityOpts",
     "devices", "tmpfs", "resources", "secrets", "repos", "git", "cniConfigPath", "restartPolicy", "restartBackoffSeconds",
     "restartMaxRetries", "attachable", "tty",

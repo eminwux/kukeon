@@ -626,7 +626,7 @@ func DiffContainer(desired, actual intmodel.Container) DiffResult {
 // forces a cell recreate. Issues #485, #990.
 //
 // which needs a per-field diff branch. Splitting into smaller helpers per
-// field group (env/ports/volumes, privileged/user/readonly,
+// field group (env/volumes, privileged/user/readonly,
 // capabilities/securityOpts/tmpfs/resources) would obscure the spec-vs-spec
 // shape readers reach for when adding a new field.
 //
@@ -656,13 +656,6 @@ func diffContainerSpec(desired, actual *intmodel.ContainerSpec, rootContainer bo
 	// land on the next cell start without a recreate.
 	if !slicesEqual(desired.Env, actual.Env) {
 		recordSpecFieldChange(&result, rootContainer, false, "env", "environment variables changed")
-	}
-
-	// ports — Compatible on root and non-root. Ports are documentary
-	// metadata in kukeon (no port-publishing layer); no OCI spec field
-	// is baked from them at create time.
-	if !slicesEqual(desired.Ports, actual.Ports) {
-		recordSpecFieldChange(&result, rootContainer, false, "ports", "ports changed")
 	}
 
 	// volumes — Breaking on root (OCI Mounts table is baked into the
@@ -762,24 +755,6 @@ func diffContainerSpec(desired, actual *intmodel.ContainerSpec, rootContainer bo
 	if desired.WorkingDir != actual.WorkingDir {
 		recordSpecFieldChange(&result, rootContainer, true, "workingDir",
 			fmt.Sprintf("workingDir changed from %q to %q", actual.WorkingDir, desired.WorkingDir))
-	}
-
-	if !slicesEqual(desired.Networks, actual.Networks) {
-		result.HasChanges = true
-		if result.ChangeType == ChangeTypeNone {
-			result.ChangeType = ChangeTypeCompatible
-		}
-		result.ChangedFields = append(result.ChangedFields, "networks")
-		result.Details["networks"] = "networks changed"
-	}
-
-	if !slicesEqual(desired.NetworksAliases, actual.NetworksAliases) {
-		result.HasChanges = true
-		if result.ChangeType == ChangeTypeNone {
-			result.ChangeType = ChangeTypeCompatible
-		}
-		result.ChangedFields = append(result.ChangedFields, "networksAliases")
-		result.Details["networksAliases"] = "networksAliases changed"
 	}
 
 	// Host-namespace toggles change the parent cell's OCI namespace shape —

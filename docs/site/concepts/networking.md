@@ -52,7 +52,7 @@ Inside a cell, only the root container has a network namespace — every other c
 - Each cell has exactly one IP on the space's bridge.
 - `localhost` inside any container in the cell reaches every port bound by any container in the cell.
 - Two cells in the same space can reach each other at the IP layer.
-- Two cells in different spaces cannot reach each other unless a container explicitly joins both networks.
+- A cell reaches a cell in another space when its own space's [egress policy](../manifests/space.md#specnetworkegress-object-optional) admits the destination. A space with no policy admits everything; a `default: deny` space needs a `cidr` rule for the other space's subnet.
 
 ## Inspecting network state
 

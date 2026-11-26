@@ -698,14 +698,13 @@ itself. Refresh re-reads every runtime value.
   egress allow rules (host or CIDR, with ports).
 - **Cell**: network mode, bridge, the root container's IPv4 (also the
   overview's **IP address** row, from the same request), the network
-  namespace owner, and a per-container summary of host network, host PID, and
-  declared ports. A cell is in **Host** mode when any of its containers sets
-  `hostNetwork`, the same rule the runner uses to put the root container (and
-  so the whole cell) on the host network.
-- **Container**: `hostNetwork`, `hostPID`, the CNI config path, shared
+  namespace owner, and a per-container summary of host network and host PID.
+  A cell is in **Host** mode when any of its containers sets `hostNetwork`,
+  the same rule the runner uses to put the root container (and so the whole
+  cell) on the host network.
+- **Container**: `hostNetwork`, `hostPID`, the CNI config path, and shared
   namespaces (the root container owns the cell's network namespace and the
-  other containers join it), and declared `ports`, `networks`, and
-  `networksAliases`.
+  other containers join it).
 
 Every parameter renders, even when it is unset:
 
@@ -721,13 +720,10 @@ Every parameter renders, even when it is unset:
 | **Not assigned (no CNI attachment cached)**     | The root container runs, but no CNI result is cached for it                                           |
 | **Host network (no CNI attachment)**            | The cell shares the host network namespace and is not attached to the space bridge                    |
 | **No (default)**                                | `hostNetwork` or `hostPID` is false or unset                                                          |
-| **Not set**                                     | A declared list (`ports`, `networks`, `networksAliases`) is empty                                     |
 
-Set `ports`, `networks`, and `networksAliases` values carry the note
-**Declared — not applied at runtime yet**: they are stored and diffed, but the
-runtime does not consume them yet (#1002). The section is read-only; edit
-egress rules and network settings through the resource documents. Permission
-and daemon failures use the same notices as other resource views.
+The section is read-only; edit egress rules and network settings through the
+resource documents. Permission and daemon failures use the same notices as
+other resource views.
 
 ## Images
 

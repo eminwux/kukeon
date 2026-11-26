@@ -47,7 +47,7 @@ func NewBlueprintCmd() *cobra.Command {
 Emits a syntactically-valid CellBlueprint document with a single placeholder
 container, the operator's --realm/--space/--stack as scope, and inline
 ` + "`# TODO`" + ` markers on the required ` + "`image:`" + ` field plus comment markers for
-optional sections (parameters, ports, volumes, repos, secrets) so operators
+optional sections (parameters, volumes, repos, secrets) so operators
 know what they can add.
 
 Operator workflow:
@@ -151,7 +151,6 @@ func emitBlueprintYAML(out io.Writer, name, realm, space, stack string) error {
 	b.WriteString("        # command: <entrypoint override>\n")
 	b.WriteString("        # args: []\n")
 	b.WriteString("        # env: [\"KEY=value\"]\n")
-	b.WriteString("        # ports: [\"8080/tcp\"]\n")
 	b.WriteString("        # volumes:\n")
 	b.WriteString("        #   - source: <host-path-or-named-volume>\n")
 	b.WriteString("        #     target: /in/container\n")

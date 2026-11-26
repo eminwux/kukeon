@@ -4,19 +4,17 @@ export type SpaceNetwork = {
   networkName?: string; bridgeName?: string; subnetCIDR?: string; subnetSource?: string; parentCIDR?: string;
   configPath?: string; configPathSource?: string; cniNetworkExists?: boolean; egress?: NetworkEgress;
 };
-export type ContainerNetworkSummary = { id: string; root?: boolean; hostNetwork?: boolean; hostPID?: boolean; ports?: string[] };
+export type ContainerNetworkSummary = { id: string; root?: boolean; hostNetwork?: boolean; hostPID?: boolean };
 export type CellNetwork = {
   bridgeName?: string; hostNetwork?: boolean; ipv4?: string; ipv4State?: string; rootContainer?: string; containers?: ContainerNetworkSummary[];
 };
 export type ContainerNetwork = {
   id: string; root?: boolean; hostNetwork?: boolean; hostPID?: boolean; cniConfigPath?: string; cniConfigPathSource?: string;
-  ports?: string[]; networks?: string[]; networksAliases?: string[];
 };
 export const NOT_SET: string;
 export const NOT_ALLOCATED: string;
 export const NOT_RUNNING: string;
 export const ANY_PORT: string;
-export const NOT_APPLIED: string;
 export function formatFlag(value: boolean | undefined): string;
 export function formatEgressDefault(egress: NetworkEgress | undefined): string;
 export function formatRuleTarget(rule: NetworkEgressRule | undefined): { kind: string; value: string };
@@ -30,4 +28,3 @@ export function formatIPv4(cell: CellNetwork | undefined): string;
 export function formatContainerCNIPath(container: ContainerNetwork | undefined): string;
 export function summarizeCellNetwork(cell: CellNetwork | undefined): string;
 export function summarizeContainerNetwork(container: ContainerNetwork | undefined): string;
-export function formatDeclaredList(values: string[] | undefined): { text: string; notApplied: boolean };
