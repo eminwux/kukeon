@@ -305,8 +305,12 @@ func writeAPIError(w http.ResponseWriter, err error) {
 	writeJSON(w, status, map[string]any{"error": fields})
 }
 
+// codeUnavailable is the API error code of a failure no route maps to a more
+// specific one: the daemon could not serve the request.
+const codeUnavailable = "unavailable"
+
 func apiErrorStatus(err error) (int, string) {
-	status, code := http.StatusServiceUnavailable, "unavailable"
+	status, code := http.StatusServiceUnavailable, codeUnavailable
 	if connectorStatus, connectorCode, ok := connectorErrorStatus(err); ok {
 		return connectorStatus, connectorCode
 	}

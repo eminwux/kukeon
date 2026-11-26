@@ -132,10 +132,7 @@ func (r *Exec) WriteConfig(config intmodel.CellConfig) (bool, error) {
 		return false, fmt.Errorf("%w: %w", errdefs.ErrWriteConfig, err)
 	}
 
-	action := "updated"
-	if created {
-		action = "created"
-	}
+	action := writeAction(created)
 	r.logger.InfoContext(r.ctx, "config "+action,
 		"name", md.Name,
 		"realm", md.Realm,

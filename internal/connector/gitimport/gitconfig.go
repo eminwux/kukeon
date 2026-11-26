@@ -26,6 +26,9 @@ import (
 	"github.com/eminwux/kukeon/internal/errdefs"
 )
 
+// gitTrue is how Git prints a boolean setting that is on.
+const gitTrue = "true"
+
 var (
 	// ErrMissing marks an optional global Git key that is not configured.
 	ErrMissing = errors.New("global Git key is absent")
@@ -102,7 +105,7 @@ func discover(ctx context.Context, reader GitReader) (settings, []string, error)
 			return settings{}, nil, fmt.Errorf("discover global Git key %s: %w", key, err)
 		}
 		value = strings.TrimSpace(value)
-		if boolean && value != "true" && value != "false" {
+		if boolean && value != gitTrue && value != "false" {
 			return settings{}, nil, fmt.Errorf(
 				"%w: discover global Git key %s: expected a Git boolean", errdefs.ErrGitImport, key)
 		}
@@ -128,7 +131,7 @@ func gitSettings(values map[string]string) (settings, []string) {
 			"global git user.name/user.email is incomplete; the identity carries no author or committer.")
 	}
 	for _, entry := range []struct{ key, selection string }{{"commit.gpgsign", "commits"}, {"tag.gpgsign", "tags"}} {
-		if values[entry.key] != "true" {
+		if values[entry.key] != gitTrue {
 			continue
 		}
 		if out.signingKey != "" {

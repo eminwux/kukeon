@@ -69,6 +69,21 @@ type secretWriteResult struct {
 	Action string `json:"action"`
 }
 
+// The actions a secret write reports.
+const (
+	secretActionCreated = "created"
+	secretActionUpdated = "updated"
+)
+
+// secretWriteAction names what a secret write did: created, or updated when
+// a stored value was replaced.
+func secretWriteAction(created bool) string {
+	if created {
+		return secretActionCreated
+	}
+	return secretActionUpdated
+}
+
 func registerCatalogSecretRoute(mux *http.ServeMux, dial Dial) {
 	mux.HandleFunc("POST /api/catalog/secrets/{name}", resourceRoute(dial, writeCatalogSecret))
 }
@@ -113,10 +128,7 @@ func writeCatalogSecret(ctx context.Context, c kukeonv1.Client, r *http.Request)
 	if err != nil {
 		return nil, redactCreationError(err, material)
 	}
-	action := "updated"
-	if created.Created {
-		action = "created"
-	}
+	action := secretWriteAction(created.Created)
 	return secretWriteResult{Name: name, Scope: scope, Type: secretType, Action: action}, nil
 }
 

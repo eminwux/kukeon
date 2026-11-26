@@ -70,10 +70,7 @@ func (r *Exec) WriteBlueprint(blueprint intmodel.CellBlueprint) (bool, error) {
 		return false, fmt.Errorf("%w: %w", errdefs.ErrWriteBlueprint, err)
 	}
 
-	action := "updated"
-	if created {
-		action = "created"
-	}
+	action := writeAction(created)
 	r.logger.InfoContext(r.ctx, "blueprint "+action,
 		"name", md.Name,
 		"realm", md.Realm,
@@ -260,6 +257,14 @@ func (r *Exec) DeleteBlueprint(blueprint intmodel.CellBlueprint) error {
 		"stack", md.Stack,
 	)
 	return nil
+}
+
+// writeAction names what a document write did, for its log line.
+func writeAction(created bool) string {
+	if created {
+		return "created"
+	}
+	return "updated"
 }
 
 // atomicWriteFileMode writes data to path via a temp file in the same

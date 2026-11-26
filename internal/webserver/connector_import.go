@@ -143,10 +143,7 @@ func (a connectorAPI) importGit(ctx context.Context, c kukeonv1.Client, r *http.
 		if createErr != nil {
 			return nil, redactCreationError(createErr, importMaterial(doc))
 		}
-		action := "updated"
-		if created.Created {
-			action = "created"
-		}
+		action := secretWriteAction(created.Created)
 		out.Secrets = append(out.Secrets, gitImportSecret{
 			Name: doc.Metadata.Name, Realm: doc.Metadata.Realm, Action: action,
 		})

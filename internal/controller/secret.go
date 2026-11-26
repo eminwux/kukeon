@@ -70,7 +70,7 @@ func (b *Exec) CreateSecret(secret intmodel.Secret) (CreateSecretResult, error) 
 	if err != nil {
 		return res, err
 	}
-	res.Created = reconcile.Action == "created"
+	res.Created = reconcile.Action == actionCreated
 	res.Secret = secret
 	return res, nil
 }

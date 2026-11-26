@@ -62,6 +62,10 @@ import (
 // sync with ctr.AttachableMetadataPath.
 const defaultConfigPath = "/.kukeon/kuketty/metadata.json"
 
+// defaultLogLevel is the level kuketty logs at when the ContainerDoc carries
+// none. The daemon normally stamps a level; this covers a malformed doc.
+const defaultLogLevel = "info"
+
 // exitCodeUsage is returned when invocation is malformed (e.g. unknown flag,
 // missing config file argument). 64 is the BSD EX_USAGE convention; matches
 // sbsh's convention so an operator who replaced sbsh with kuketty in a
@@ -363,7 +367,7 @@ func openTerminalLogger(logfile, loglevel string) (*slog.Logger, func(), error) 
 		return slog.New(slog.NewTextHandler(io.Discard, nil)), func() {}, nil
 	}
 	if loglevel == "" {
-		loglevel = "info"
+		loglevel = defaultLogLevel
 	}
 	fl, err := sbshlogging.NewFileLogger(logfile, loglevel)
 	if err != nil {

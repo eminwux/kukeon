@@ -61,6 +61,10 @@ func (l *cellOperationLocks) tryAcquire(scope cellScope) (func(), bool) {
 	}, true
 }
 
+// actionPurge is the cell lifecycle action that takes purge options and
+// reports what the purge removed.
+const actionPurge = "purge"
+
 func registerCellLifecycleRoutes(mux *http.ServeMux, dial Dial) {
 	locks := &cellOperationLocks{}
 	for _, action := range []string{"start", "stop", "restart", "kill", "delete", "purge"} {
@@ -72,7 +76,7 @@ func registerCellLifecycleRoutes(mux *http.ServeMux, dial Dial) {
 func cellLifecycleRoute(dial Dial, locks *cellOperationLocks, action string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		force, cascade := false, false
-		if action == "purge" {
+		if action == actionPurge {
 			var err error
 			force, cascade, err = decodePurgeCellOptions(w, r)
 			if err != nil {
@@ -132,7 +136,7 @@ func cellLifecycleRoute(dial Dial, locks *cellOperationLocks, action string) htt
 			response["containersDeleted"] = result.ContainersDeleted
 			response["cgroupDeleted"] = result.CgroupDeleted
 			response["metadataDeleted"] = result.MetadataDeleted
-		case "purge":
+		case actionPurge:
 			result, callErr := client.PurgeCell(ctx, doc, force, cascade)
 			if callErr != nil {
 				writeAPIError(w, callErr)

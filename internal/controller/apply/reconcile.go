@@ -463,7 +463,7 @@ func reconcileCell(r runner.Runner, desired intmodel.Cell) (ReconcileResult, err
 		if recreateErr != nil {
 			return result, fmt.Errorf("failed to recreate cell: %w", recreateErr)
 		}
-		result.Action = "updated"
+		result.Action = actionUpdated
 		result.Resource = recreated
 		result.Changes = []string{"root container recreated"}
 		result.Details = diff.RootContainerDetails
@@ -485,7 +485,7 @@ func reconcileCell(r runner.Runner, desired intmodel.Cell) (ReconcileResult, err
 		return result, fmt.Errorf("failed to update cell: %w", updateErr)
 	}
 
-	result.Action = "updated"
+	result.Action = actionUpdated
 	result.Resource = updated
 	result.Changes = appendContainerChangeSummaries(diff.ChangedFields, diff)
 	result.Details = diff.Details
@@ -645,7 +645,7 @@ func ReconcileContainer(r runner.Runner, desired intmodel.Container) (ReconcileR
 		return result, fmt.Errorf("failed to update container: %w", updateErr)
 	}
 
-	result.Action = "updated"
+	result.Action = actionUpdated
 	result.Changes = diff.ChangedFields
 	result.Details = diff.Details
 
