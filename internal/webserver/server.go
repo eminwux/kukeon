@@ -45,6 +45,10 @@ const (
 	creationTimeout  = 2 * time.Minute
 	lifecycleTimeout = 5 * time.Minute
 	writeTimeout     = lifecycleTimeout + headerTimeout
+
+	// codeInvalidRequest is the API error code of a request the server
+	// refuses as malformed, whichever route refuses it.
+	codeInvalidRequest = "invalid_request"
 )
 
 // Dial creates a request-owned client, closed after the RPC completes.
@@ -360,7 +364,7 @@ func apiErrorStatus(err error) (int, string) {
 		errors.Is(err, errdefs.ErrStackNameRequired),
 		errors.Is(err, errdefs.ErrCellNameRequired),
 		errors.Is(err, errdefs.ErrContainerNameRequired):
-		status, code = http.StatusBadRequest, "invalid_request"
+		status, code = http.StatusBadRequest, codeInvalidRequest
 	}
 	return status, code
 }

@@ -674,7 +674,7 @@ func teamErrorStatus(err error) (int, string, bool) {
 	case errors.Is(err, errdefs.ErrInvalidTeam),
 		errors.Is(err, errdefs.ErrInvalidSource),
 		errors.Is(err, errdefs.ErrTeamApplyOnly):
-		return http.StatusBadRequest, "invalid_request", true
+		return http.StatusBadRequest, codeInvalidRequest, true
 	case errors.Is(err, errTeamOperation):
 		return http.StatusUnprocessableEntity, "team_failed", true
 	}

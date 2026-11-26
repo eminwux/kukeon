@@ -426,7 +426,7 @@ func execErrorStatus(err error) (int, string, bool) {
 	case errors.Is(err, errdefs.ErrExecRootNotConfirmed):
 		return http.StatusBadRequest, "root_not_confirmed", true
 	case errors.Is(err, errdefs.ErrExecInvalidRequest):
-		return http.StatusBadRequest, "invalid_request", true
+		return http.StatusBadRequest, codeInvalidRequest, true
 	case errors.Is(err, errdefs.ErrExecTaskNotRunning):
 		return http.StatusConflict, "not_running", true
 	case errors.Is(err, errdefs.ErrExecSessionLost):
